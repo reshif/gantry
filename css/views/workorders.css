@@ -1,0 +1,66 @@
+/* Work orders view, classification card and route strip (also used by conversations). Tokens only. */
+.wo-toolbar { align-items: flex-end; }
+.wo-filters .input { min-width: 0; }
+.wo-filters .field { min-width: 110px; }
+.wo-filters .field:first-child { min-width: 180px; }
+.wo-count { display: flex; gap: 8px; align-items: center; }
+.wo-table .wo-title { min-width: 220px; max-width: 420px; }
+.wo-table td { white-space: nowrap; }
+.wo-table td.wo-title { white-space: normal; }
+.wo-r-killed .wo-id, .wo-r-killed .wo-title { text-decoration: line-through; color: var(--kill); }
+.wo-r-done { color: var(--ink-2); }
+.wo-ovr { display: inline-flex; margin-left: 4px; color: var(--wait); vertical-align: middle; }
+.wo-ovr .ic { width: 12px; height: 12px; }
+.wo-prio { font-family: var(--f-mono); }
+.wo-prio-P0 { background: var(--fail); color: var(--surface); border-color: var(--fail); font-weight: 700; }
+.wo-prio-P1 { border-color: var(--wait); color: var(--wait); background: var(--wait-soft); font-weight: 600; }
+.wo-intake-note { border-color: var(--accent); background: var(--accent-soft); }
+
+/* route strip */
+.int-route { list-style: none; display: flex; flex-wrap: wrap; align-items: stretch; gap: 3px; margin: 6px 0; }
+.int-rs { display: grid; grid-template-rows: auto auto; padding: 3px 7px; border: 1px solid var(--line-strong); background: var(--surface); min-width: 0; }
+.int-rs-no { font-size: 9.5px; color: var(--muted); }
+.int-rs-n { font-family: var(--f-display); font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1.1; }
+.int-rs.is-skip { border-style: dashed; background: transparent; color: var(--faint); }
+.int-rs.is-skip .int-rs-n { text-decoration: line-through; }
+.int-rg { display: grid; justify-items: center; align-content: center; gap: 2px; padding: 0 2px; }
+.int-rg-d { width: 10px; height: 10px; transform: rotate(45deg); background: var(--gate); border: 1.5px solid var(--gate); }
+.int-rg.gate-kind-auto .int-rg-d { background: var(--surface); }
+.int-rg.gate-kind-mixed .int-rg-d { background: linear-gradient(135deg, var(--gate) 50%, var(--surface) 50%); }
+.int-rg-l { font-size: 9px; color: var(--ink-2); }
+
+/* confidence meter */
+.int-conf { display: inline-flex; align-items: center; gap: 6px; }
+.int-conf-bar { width: 72px; height: 8px; border: 1px solid var(--line-strong); background: var(--sunk); display: inline-block; }
+.int-conf-bar > span { display: block; height: 100%; background: var(--done); }
+.int-conf-mid .int-conf-bar > span { background: var(--wait); }
+.int-conf-lo .int-conf-bar > span { background: var(--block); background-image: repeating-linear-gradient(-45deg, transparent 0 3px, var(--surface) 3px 5px); }
+
+/* classification card */
+.int-cls { display: grid; gap: var(--s2); }
+.int-cls-top { display: flex; flex-wrap: wrap; gap: var(--s5); align-items: flex-end; padding-bottom: var(--s3); border-bottom: 1px solid var(--line); }
+.int-cls-big .cls { font-size: var(--t-lg); padding: 3px 10px 3px 4px; }
+.int-cls-why { font-size: var(--t-base); }
+.int-alts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.int-rc-cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.int-rc-prev { border: 1px dashed var(--line-strong); padding: 8px 10px; background: var(--panel); }
+.int-guess { min-height: 20px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; color: var(--ink-2); }
+
+@media (max-width: 560px) {
+  .wo-filters .field, .wo-filters .field:first-child { min-width: calc(50% - var(--s3)); flex: 1 1 40%; }
+  .int-cls-top { gap: var(--s3); }
+  .int-rs { padding: 2px 5px; }
+  .int-rs-n { font-size: 12px; }
+}
+.wo-view > * { min-width: 0; }
+
+/* round three: shared data table, record link, custom stations in the route strip */
+.wo-table .wo-title { display: inline-block; min-width: 200px; max-width: 420px; white-space: normal; }
+.wo-id.is-killed, .wo-title.is-killed { text-decoration: line-through; color: var(--kill); }
+.wo-cls { display: inline-flex; align-items: center; white-space: nowrap; }
+.wo-acts { display: inline-flex; gap: 2px; }
+.int-rs.is-custom { border-style: dashed; border-color: var(--accent-line); }
+@media (max-width: 640px) { .wo-table .wo-title { min-width: 0; } }
+.wo-table .dtable td { white-space: normal; }
+.wo-table .dtable td .mono, .wo-table .dtable td .chip, .wo-table .dtable td .state { white-space: nowrap; }
+.wo-by { display: inline-block; min-width: 90px; }
