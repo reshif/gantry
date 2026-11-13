@@ -54,7 +54,7 @@ Seeding order (spec 4.3): the launcher does not clone. Call `POST /v1/runs` with
 
 ## Configuration
 
-Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_DEV_DEMO_ACCOUNTS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`. Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_DEMO_ACCOUNTS`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL`, `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`. Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
 
 ## Keycloak realm
 
@@ -63,3 +63,9 @@ Non-secret settings come from environment variables in `compose.yml`; override t
 ## Image sources
 
 Docker Hub rate-limits anonymous pulls; retry or set `KEYCLOAK_IMAGE` / `MINIO_IMAGE` to a mirror. MinIO's default is the Quay image `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`.
+
+### First sign-in and demo data
+
+A new install starts with an empty organisation: built-in roles, the default role matrix and security settings, and nobody signed in. Set `GANTRY_BOOTSTRAP_ADMIN_EMAIL` to the address of the first administrator; the first sign-in with that email (while the org has no Factory Admin) becomes Factory Admin. People are otherwise created on first sign-in with no roles until an admin grants some.
+
+`GANTRY_DEV_SEED=true` loads the legacy demo organisation (20 people, 12 projects, 23 repos, policies and freezes) once, on the first start of an organisation that does not exist yet. It is for development and demos; the demo IP allow-list is not loaded. Combine it with `GANTRY_DEV_DEMO_ACCOUNTS=true` to show the seeded Keycloak users on the sign-in screen (password `gantry-dev`).

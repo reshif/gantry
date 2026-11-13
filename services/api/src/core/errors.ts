@@ -1,0 +1,43 @@
+import { gantryError, httpStatusFor, refusalBody, type GantryError, type RuleRef } from "@gantry/domain";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import { ZodError } from "zod";
+
+type Kind = GantryError["kind"];
+
+/** Thrown from a handler or command body to stop with a refusal. The error handler maps it to 403/404/409/422 and a `{ok:false,msg,rule?,needs?}` body. */
+export class Refusal extends Error {
+  constructor(readonly error: GantryError) {
+    super(error.msg);
+  }
+}
+
+export const refuse = (kind: Kind, msg: string, extra: { rule?: RuleRef; needs?: string } = {}): Refusal => new Refusal(gantryError(kind, msg, extra));
+
+export const notFound = (msg: string): Refusal => refuse("not_found", msg);
+export const invalid = (msg: string): Refusal => refuse("invalid", msg);
+export const conflict = (msg: string): Refusal => refuse("conflict", msg);
+export const stale = (msg = "This changed since you loaded it. Reload and try again."): Refusal => refuse("stale", msg);
+
+export const statusFor = (e: GantryError): number => httpStatusFor(e.kind);
+export const bodyFor = (e: GantryError): Record<string, unknown> => refusalBody(e) as Record<string, unknown>;
+
+export function sendRefusal(reply: FastifyReply, e: GantryError): FastifyReply {
+  return reply.code(statusFor(e)).send(bodyFor(e));
+}
+
+const zodMsg = (e: ZodError): string => `Invalid request: ${e.issues.slice(0, 3).map((i) => `${i.path.join(".") || "body"} ${i.message}`).join("; ")}`;
+
+export function installErrorHandler(app: FastifyInstance): void {
+  app.setErrorHandler((e: unknown, req, reply) => {
+    if (e instanceof Refusal) return sendRefusal(reply, e.error);
+    if (e instanceof ZodError) return reply.code(422).send({ ok: false, msg: zodMsg(e) });
+    const fe = e as { statusCode?: number; code?: string; message?: string };
+    if (fe.statusCode && fe.statusCode >= 400 && fe.statusCode < 500) {
+      const msg = fe.statusCode === 429 ? "Too many requests. Slow down and retry shortly." : fe.statusCode === 413 ? "Request body is too large." : fe.statusCode === 415 ? "Unsupported content type." : "The request could not be read.";
+      return reply.code(fe.statusCode === 400 ? 422 : fe.statusCode).send({ ok: false, msg });
+    }
+    req.log.error({ err: e }, "unhandled error");
+    return reply.code(500).send({ ok: false, msg: "Something went wrong on our side.", requestId: req.id });
+  });
+  app.setNotFoundHandler((_req, reply) => reply.code(404).send({ ok: false, msg: "No such endpoint." }));
+}
