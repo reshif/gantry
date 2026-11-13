@@ -1,0 +1,11 @@
+# Keep the build context small: only what the gantry-migrate image needs.
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!packages/db/package.json
+!packages/db/tsconfig.json
+!packages/db/src
+!packages/db/migrations
+!packages/domain/package.json
+packages/db/src/**/*.test.ts

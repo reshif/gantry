@@ -1,0 +1,6 @@
+/* React shell additions only. The legacy CSS files in this folder are unchanged. */
+a.demo-acc { color: inherit; text-decoration: none; }
+.boot { min-height: 100vh; display: grid; place-items: center; color: var(--muted); font-size: var(--t-sm); }
+#root { display: contents; } /* legacy had #auth/#app directly under body */
+/* the legacy sign-in always had a long demo list; without it the two panes must still fill the viewport */
+.auth-wrap { min-height: 100vh; }

@@ -1,0 +1,600 @@
+/**
+ * Pure flow logic ported from legacy/js/flow.js and the pure parts of sim.js / policy.js:
+ * flow definition and routes per class, classification and the intake conversation, gate decisions
+ * (N of M, author cannot approve, risk tags force human), slots, queue order, submit guard and move rules.
+ */
+import { DEFAULT_CATALOG, ONBOARD_STAGES, RISK_TAG_RULES } from "./catalog.js";
+import { HOUR } from "./format.js";
+import { actorName, can, effectiveStop, findPerson, findProject, findRepo, rolesIn } from "./policy.js";
+import type { PolicyState } from "./policy.js";
+import type {
+  ApproverCondition, ApproverNeeds, ApproverRule, Bay, Brief, Catalog, Conversation, ConvMiss, ConvQuestion, Decision, DecisionRule, Gate, GateKind, GateInstance,
+  Person, Priority, Project, Repo, Station, WorkClass, WorkOrder,
+} from "./types.js";
+
+/** Everything the flow functions read: the permission inputs plus full projects, repos, work orders and catalogue. */
+export interface FlowState extends PolicyState {
+  projects: Project[];
+  repos: Repo[];
+  workOrders: WorkOrder[];
+  catalog: Catalog;
+}
+
+/* ------------------------------------------------------------------ catalogue lookups --- */
+
+const cat = (s: { catalog?: Partial<Catalog> } | Catalog): Catalog => {
+  const c = "catalog" in s ? (s.catalog as Partial<Catalog> | undefined) : (s as Catalog);
+  return { ...DEFAULT_CATALOG, ...(c ?? {}) };
+};
+
+export function stationIndex(c: Catalog, id: string): number {
+  return c.stations.findIndex((s) => s.id === id);
+}
+export function stationDef(c: Catalog, id: string): Station | null {
+  return c.stations.find((s) => s.id === id) ?? null;
+}
+export function gateDef(c: Catalog, id: string): Gate | undefined {
+  return c.gates.find((g) => g.id === id);
+}
+export function gateAfter(c: Catalog, stationId: string): Gate | null {
+  return c.gates.find((g) => g.after === stationId) ?? null;
+}
+export function bayDef(c: Catalog, id: string): Bay | undefined {
+  return c.bays.find((b) => b.id === id);
+}
+/** Station a work order is at (its `station` is an index into the catalogue). */
+export function stationOf(c: Catalog, wo: Pick<WorkOrder, "station">): Station {
+  return c.stations[wo.station] as Station;
+}
+export function classOf(c: Catalog, project: Project | null | undefined, clsId: string): WorkClass {
+  const list = project?.flow?.classes ?? c.classes;
+  return (list.find((x) => x.id === clsId) ?? c.classes.find((x) => x.id === clsId) ?? c.classes[0]) as WorkClass;
+}
+/** Classes enabled in a project. */
+export function classesOf(c: Catalog, project: Project | null | undefined): WorkClass[] {
+  const list = project?.flow?.classes ?? c.classes.filter((x) => !x.custom);
+  return list.filter((x) => x.enabled !== false);
+}
+
+const defaultOrder = (c: Catalog) => c.stations.filter((s) => !s.custom).map((s) => s.id);
+
+export interface FlowStation extends Station {
+  enabled: boolean;
+  wip: number;
+  index: number;
+}
+export interface FlowGate extends Gate {
+  enabled: boolean;
+  mode: GateKind;
+}
+export interface FlowDefinition {
+  stations: FlowStation[];
+  active: FlowStation[];
+  gates: FlowGate[];
+  bays: Bay[];
+  classes: WorkClass[];
+}
+
+/** Project flow as ordered definitions (legacy G.flowOf). */
+export function flowOf(c: Catalog, project: Project | null | undefined): FlowDefinition {
+  const f = project?.flow;
+  const order = f?.order ?? defaultOrder(c);
+  const stations: FlowStation[] = [];
+  for (const id of order) {
+    const d = stationDef(c, id);
+    if (!d) continue;
+    const cfg = f?.stations[id] ?? { enabled: true, wip: 5 };
+    stations.push({ ...d, enabled: id === "intake" ? true : !!cfg.enabled, wip: cfg.wip, index: stationIndex(c, id) });
+  }
+  const gates: FlowGate[] = [];
+  for (const st of stations) {
+    const g = gateAfter(c, st.id);
+    if (!g) continue;
+    const cfg = f?.gates[g.id] ?? { enabled: true, mode: g.kind };
+    gates.push({ ...g, enabled: g.id === "G0G1" ? true : !!cfg.enabled && st.enabled, mode: cfg.mode || g.kind });
+  }
+  const bayIds = f?.bays ?? c.bays.filter((b) => !b.custom).map((b) => b.id);
+  const bays = bayIds.map((id) => bayDef(c, id)).filter((b): b is Bay => !!b);
+  return { stations, active: stations.filter((s) => s.enabled), gates, bays, classes: classesOf(c, project) };
+}
+
+/** Ordered station ids a class travels in a project (follows project.flow.order and station toggles). */
+export function route(c: Catalog, project: Project | null | undefined, clsId: string): string[] {
+  const cl = classOf(c, project, clsId);
+  const order = project?.flow?.order ?? defaultOrder(c);
+  const out: string[] = [];
+  for (const sid of order) {
+    const cfg = project?.flow?.stations[sid];
+    const on = sid === "intake" || !project || !project.flow || (cfg && cfg.enabled && !cfg.absent);
+    if (on && !cl.skips.includes(sid)) out.push(sid);
+    if (cl.endsAfter && sid === cl.endsAfter) break;
+  }
+  return out;
+}
+
+/** Gates a class must pass, in order. */
+export function routeGates(c: Catalog, project: Project | null | undefined, clsId: string): string[] {
+  const cl = classOf(c, project, clsId);
+  const out: string[] = [];
+  for (const sid of route(c, project, clsId)) {
+    const g = gateAfter(c, sid);
+    if (!g) continue;
+    const cfg = project?.flow?.gates[g.id];
+    if (project?.flow && (!cfg || cfg.absent || (!cfg.enabled && g.id !== "G0G1"))) continue;
+    if (g.id === "G6" && cl.endsAfter) continue;
+    if (cl.gates && cl.gates.length && g.id !== "G0G1" && !cl.gates.includes(g.id) && g.kind !== "auto") continue;
+    out.push(g.id);
+  }
+  return out;
+}
+
+export function nextStationId(c: Catalog, project: Project | null | undefined, wo: Pick<WorkOrder, "cls" | "station">): string | null {
+  const r = route(c, project, wo.cls);
+  const cur = stationOf(c, wo).id;
+  const i = r.indexOf(cur);
+  return i >= 0 && i < r.length - 1 ? (r[i + 1] as string) : null;
+}
+
+/** The gate a work order waits behind at its current station, if its class passes it. */
+export function gateForWO(c: Catalog, project: Project | null | undefined, wo: Pick<WorkOrder, "cls" | "station">): Gate | null {
+  const g = gateAfter(c, stationOf(c, wo).id);
+  if (!g) return null;
+  return routeGates(c, project, wo.cls).includes(g.id) ? g : null;
+}
+
+/** Effective gate mode in a project: project.flow.gates[id].mode overrides the default kind. */
+export function gateKind(c: Catalog, project: Project | null | undefined, gateId: string): GateKind {
+  const g = gateDef(c, gateId);
+  if (!g) return "human";
+  const cfg = project?.flow?.gates[gateId];
+  return cfg?.mode || g.kind;
+}
+
+/* ------------------------------------------------------------------ classification ------ */
+
+const KW: ReadonlyArray<readonly [string, RegExp, string]> = [
+  ["hotfix", /\b(outage|prod(uction)? (is )?down|sev ?1|hotfix|main is red|urgent|p0)\b/i, "mentions an outage or urgent production fix"],
+  ["security", /\b(cve|vulnerab|xss|injection|secret|auth(z|orization)? (gap|bypass)|patch .* parser)\b/i, "mentions a vulnerability or security fix"],
+  ["spike", /\b(investigate|spike|explore|evaluate|research|feasibility)\b/i, "asks a question rather than a change"],
+  ["epic", /\b(epic|centre|center|redesign|overhaul|migrate all|new service|multi-)\b/i, "is large enough to split into several work orders"],
+  ["docs", /\b(docs?|readme|runbook|documentation)\b/i, "only changes documentation"],
+  ["chore", /\b(bump|upgrade|dependency|dependencies|renovate|pin|tag all)\b/i, "is routine maintenance or a dependency change"],
+  ["refactor", /\b(refactor|clean ?up|extract|rename|restructure)\b/i, "restructures code without changing behaviour"],
+  ["bug", /\b(fix|bug|error|crash|broken|wrong|regression|incorrect|fails?)\b/i, "describes broken behaviour"],
+  ["feature", /\b(add|support|new|expose|show|enable|allow)\b/i, "adds new behaviour"],
+];
+
+export interface Classification {
+  cls: string;
+  confidence: number;
+  rationale: string;
+  alternatives: string[];
+}
+
+/** Local keyword classifier (legacy G.classify). Project classes with classifier hints win when a hint matches. */
+export function classify(c: Catalog, text: string, requested: string | null | undefined, project?: Project | null): Classification {
+  const custom = project ? classesOf(c, project).filter((x) => x.hints && x.hints.length) : [];
+  const ch = custom.find((x) => (x.hints as string[]).some((w) => new RegExp("\\b" + String(w).replace(/[^a-z0-9 -]/gi, "") + "\\b", "i").test(text)));
+  if (ch) return { cls: ch.id, confidence: 0.88, rationale: "The request matches classifier hints for " + ch.name + " (" + (ch.hints as string[]).join(", ") + ").", alternatives: [] };
+  const hits = KW.filter((k) => k[1].test(text));
+  const top = hits[0] ?? (["feature", null, "has no strong signal; defaulting to Feature"] as const);
+  const conf = hits.length === 0 ? 0.52 : hits.length === 1 ? 0.91 : Math.max(0.6, 0.86 - (hits.length - 2) * 0.07);
+  let rationale = "The request " + top[2] + ".";
+  if (hits.length > 1) rationale += " Also matched " + hits.slice(1, 3).map((h) => c.classes.find((x) => x.id === h[0])?.name ?? h[0]).join(", ") + ".";
+  const out: Classification = { cls: top[0], confidence: +conf.toFixed(2), rationale, alternatives: hits.slice(1, 3).map((h) => h[0]) };
+  if (requested && requested !== top[0]) out.rationale += " Submitter requested " + (c.classes.find((x) => x.id === requested)?.name ?? requested) + ".";
+  return out;
+}
+
+/* ------------------------------------------------------------------ intake conversation - */
+
+type WoText = Pick<WorkOrder, "title" | "description" | "cls">;
+
+/** What the brief is missing for its class (legacy `misses`). */
+export function intakeMisses(wo: WoText): ConvMiss[] {
+  const d = (wo.title + " " + wo.description).toLowerCase();
+  const out: ConvMiss[] = [];
+  if (["hotfix", "feature", "refactor", "epic", "security"].includes(wo.cls) && !/rollback|revert|flag/.test(d)) out.push({ id: "rollback", text: "No rollback plan", resolved: false });
+  if (["feature", "epic"].includes(wo.cls) && !/v\d|version|release/.test(d)) out.push({ id: "version", text: "Unclear target version", resolved: false });
+  if (!["spike", "docs"].includes(wo.cls) && !/test/.test(d)) out.push({ id: "testdata", text: "Missing test data or test strategy", resolved: false });
+  if (wo.cls === "bug" && !/repro|steps/.test(d)) out.push({ id: "repro", text: "No reproduction steps", resolved: false });
+  return out;
+}
+
+const AC: Record<string, string[]> = {
+  feature: ["New behaviour covered by tests", "Metric and alert added", "Both of those"],
+  bug: ["Regression test fails before and passes after", "Error rate back to baseline", "Both of those"],
+  hotfix: ["Error rate back to baseline within 30 min", "Regression test added", "Both of those"],
+  security: ["Vulnerability no longer reproducible", "Scanner shows clean", "Both of those"],
+  epic: ["Each child has its own acceptance criteria", "Feature flag controls rollout"],
+  chore: ["Build and tests green on the new version", "No API changes"],
+  refactor: ["Behaviour identical, all tests green", "Benchmark within 5%"],
+  docs: ["Reviewed by the owning team", "Linked from the README"],
+  spike: ["A one-page report answers the question", "Report includes a recommendation"],
+};
+
+export function convQuestions(wo: Pick<WorkOrder, "cls" | "title" | "repo"> & { conv: Pick<Conversation, "misses"> }): ConvQuestion[] {
+  const repo = wo.repo;
+  const qs: ConvQuestion[] = [];
+  if (wo.cls === "spike") qs.push({ id: "question", field: "scope", text: "What question should the report answer?", chips: ["Is it feasible on our stack?", "What would it cost to run?", "Which option should we pick?"] });
+  else qs.push({ id: "scope", field: "scope", text: "I read this as: " + wo.title + ". What is in scope?", chips: ["Only " + repo, repo + " and its direct clients", "Suggest a scope for me"] });
+  qs.push({ id: "ac", field: "ac", text: "How will we know it is done?", chips: AC[wo.cls] ?? (AC.feature as string[]) });
+  for (const m of wo.conv.misses) {
+    if (m.id === "rollback") qs.push({ id: "rollback", field: "rollback", text: "I could not find a rollback plan. How do we undo this if it goes wrong?", chips: ["Revert the PR", "Turn the feature flag off", "Needs a migration rollback"] });
+    if (m.id === "version") qs.push({ id: "version", field: "version", text: "Which release should this land in?", chips: ["Next patch release", "Next minor release", "Internal only, no release"] });
+    if (m.id === "testdata") qs.push({ id: "testdata", field: "testdata", text: "What test data can the agents use?", chips: ["Fixtures already in the repo", "Generate synthetic data", "I will attach a sample"] });
+    if (m.id === "repro") qs.push({ id: "repro", field: "repro", text: "How do we reproduce it?", chips: ["Steps are in the linked issue", "Happens on every request with JPY", "I will describe them"] });
+  }
+  if (wo.cls === "epic") qs.push({ id: "children", field: "children", text: "I propose splitting this into 3 child work orders: data model, API, and UI. Create them after Plan?", chips: ["Yes, create all 3", "Only data model and API", "Do not split"] });
+  qs.push({ id: "extra", field: "extra", text: "Anything else the factory should know?", chips: ["No, that is everything"] });
+  return qs;
+}
+
+const FIELD_LABEL: Record<string, string> = { scope: "Scope", ac: "Acceptance", rollback: "Rollback", version: "Target release", testdata: "Test data", repro: "Reproduction", children: "Split", extra: "Note" };
+const fieldLabel = (f: string) => FIELD_LABEL[f] ?? f;
+
+/** The brief derived from the conversation so far (legacy G.buildBrief). */
+export function buildBrief(c: Catalog, project: Project | null | undefined, wo: Pick<WorkOrder, "cls" | "title" | "conv">): Brief {
+  const a = wo.conv.answers;
+  const cls = c.classes.find((x) => x.id === wo.cls);
+  const rt = project ? route(c, project, wo.cls) : [];
+  const b: Brief = {
+    goal: wo.title,
+    scopeIn: a.scope ? [a.scope] : a.question ? [a.question] : [],
+    scopeOut: wo.cls === "spike" ? ["Code changes"] : ["UI changes unless stated", "Data backfills unless stated"],
+    ac: a.ac ? [a.ac] : [],
+    risks: wo.conv.misses.filter((m) => !m.resolved).map((m) => m.text),
+    open: wo.conv.done ? [] : wo.conv.questions.slice(wo.conv.qi).map((q) => q.text),
+    decisions: wo.conv.decisions.map((d) => d.text),
+    estimate: (cls ? cls.est : "M") + (wo.cls === "epic" ? " (split)" : ""),
+    route: rt,
+    children: wo.cls === "epic" && a.children && !/do not/i.test(a.children) ? (/only/i.test(a.children) ? ["Data model", "API"] : ["Data model", "API", "UI"]) : [],
+  };
+  if (a.rollback) b.risks.push("Rollback: " + a.rollback);
+  return b;
+}
+
+/** Start the intake conversation for a work order. */
+export function startConversation(
+  c: Catalog,
+  project: Project | null | undefined,
+  wo: Pick<WorkOrder, "cls" | "title" | "description" | "repo" | "createdAt" | "clsConfidence" | "clsRationale">,
+  awaiting?: string | null,
+): { conv: Conversation; brief: Brief } {
+  const misses = intakeMisses(wo);
+  const cls = c.classes.find((x) => x.id === wo.cls);
+  const conv: Conversation = { messages: [], qi: 0, answers: {}, misses, decisions: [], awaiting: awaiting || "submitter", done: false, raised: [], questions: [] };
+  conv.messages.push({ from: "ag-classifier", at: wo.createdAt, text: "Classified as " + (cls ? cls.name : wo.cls) + " (confidence " + Math.round(wo.clsConfidence * 100) + "%). " + wo.clsRationale });
+  const qs = convQuestions({ cls: wo.cls, title: wo.title, repo: wo.repo, conv: { misses } });
+  conv.questions = qs;
+  conv.messages.push({ from: "ag-intake", at: wo.createdAt + 1000, text: "Hi, I am the Intake Clerk. A few questions so the brief is complete." + (misses.length ? " I noticed: " + misses.map((m) => m.text.toLowerCase()).join("; ") + "." : "") });
+  const q0 = qs[0] as ConvQuestion;
+  conv.messages.push({ from: "ag-intake", at: wo.createdAt + 2000, text: q0.text, qid: q0.id, chips: q0.chips });
+  return { conv, brief: buildBrief(c, project, { cls: wo.cls, title: wo.title, conv }) };
+}
+
+export type AnswerOutcome = { returned: true } | { note: true } | { next: boolean };
+
+/** Record an answer. Returns a new conversation; the input is not modified. */
+export function answerConversation(
+  c: Catalog,
+  project: Project | null | undefined,
+  wo: Pick<WorkOrder, "cls" | "title" | "conv">,
+  text: string,
+  by: string,
+  at: number,
+): { conv: Conversation; brief: Brief; outcome: AnswerOutcome } {
+  const conv: Conversation = structuredClone(wo.conv);
+  const done = (outcome: AnswerOutcome) => ({ conv, brief: buildBrief(c, project, { cls: wo.cls, title: wo.title, conv }), outcome });
+  const rq = conv.raised.find((x) => !x.answered);
+  if (rq) {
+    rq.answered = true;
+    rq.answer = text;
+    conv.messages.push({ from: by, at, text });
+    conv.decisions.push({ text: rq.station + " question: " + text, by, at });
+    const st = stationDef(c, rq.station);
+    conv.messages.push({ from: st?.agent ?? "ag-intake", at: at + 500, text: "Thanks. Returning the work order to " + (st ? st.name : rq.station) + "." });
+    return done({ returned: true });
+  }
+  if (conv.done) {
+    conv.messages.push({ from: by, at, text });
+    return done({ note: true });
+  }
+  const q = conv.questions[conv.qi] as ConvQuestion;
+  conv.messages.push({ from: by, at, text });
+  conv.answers[q.id] = text;
+  const m = conv.misses.find((x) => x.id === q.id);
+  if (m) m.resolved = true;
+  if (q.id !== "extra" || !/^no\b/i.test(text)) conv.decisions.push({ text: fieldLabel(q.field) + ": " + text, by, at });
+  conv.qi++;
+  if (conv.qi < conv.questions.length) {
+    const n = conv.questions[conv.qi] as ConvQuestion;
+    conv.messages.push({ from: "ag-intake", at: at + 600, text: n.text, qid: n.id, chips: n.chips });
+  } else {
+    conv.done = true;
+    conv.messages.push({ from: "ag-intake", at: at + 600, text: "The brief is ready. Confirm it to pass G0+G1 and start the route, or decline it to the Declined bay." });
+  }
+  return done({ next: !conv.done });
+}
+
+export interface NewWorkOrderInput {
+  /** Allocated by the caller (database sequence). */
+  id: string;
+  project: string;
+  repo: string;
+  title: string;
+  description?: string;
+  attachments?: unknown[];
+  requestedCls?: string | null;
+  forceCls?: string;
+  priority?: Priority;
+  source?: string;
+  requestedBy: string;
+  createdAt: number;
+  awaiting?: string | null;
+  paths?: string[];
+  parent?: string | null;
+  risk?: string;
+}
+
+/** Build a work order at Intake with its classification, gates and conversation (legacy G.buildWO, with the clock and id supplied). */
+export function buildWorkOrder(c: Catalog, project: Project, o: NewWorkOrderInput): WorkOrder {
+  const cl = classify(c, o.title + " " + (o.description || ""), o.requestedCls, project);
+  const cls = o.forceCls || (o.requestedCls && cl.confidence < 0.8 ? o.requestedCls : cl.cls);
+  const classDef = classOf(c, project, cls);
+  const created = o.createdAt;
+  const gates: Record<string, GateInstance> = {};
+  for (const g of routeGates(c, project, cls)) gates[g] = { status: "pending", approvals: [], rejections: [], checks: [] };
+  const g0 = gates.G0G1;
+  if (g0) g0.status = "waiting";
+  const base = {
+    cls, title: o.title, description: o.description || "", repo: o.repo, createdAt: created, clsConfidence: cl.confidence, clsRationale: cl.rationale,
+  };
+  const { conv, brief } = startConversation(c, project, base, o.awaiting);
+  return {
+    id: o.id, project: o.project, repo: o.repo, title: o.title, description: o.description || "", attachments: o.attachments || [],
+    cls, clsConfidence: cl.confidence, clsRationale: cl.rationale, clsSuggested: cl.cls, clsOverridden: null, requestedCls: o.requestedCls || null,
+    priority: o.priority || classDef.priority, source: o.source || "console", requestedBy: o.requestedBy, createdAt: created,
+    station: 0, state: "waiting", bay: null, bayReason: "", bayFrom: null, progress: 100, slot: null,
+    history: [{ station: "intake", agent: "ag-intake", model: "claude-haiku-5-5", startedAt: created, endedAt: null, tokens: 4200, cost: 0.02, outcome: null, note: "" }],
+    gates, log: [{ at: created, who: o.requestedBy, text: "Submitted from " + (o.source || "console") + "." }],
+    diff: { plus: 0, minus: 0, files: 0 }, tests: { passed: 0, failed: 0, added: 0 }, pr: null,
+    blockReason: null, failReason: null, doneAt: null, killed: null, parent: o.parent || null, children: [], risk: o.risk || (project.regulated ? "high" : "normal"),
+    paths: o.paths || [], slaDue: created + classOf(c, project, cls).slaH * HOUR, conv, brief,
+  };
+}
+
+/* ------------------------------------------------------------------ risk tags ----------- */
+
+/** Risk tags computed from changed file paths (spec 9.5). */
+export function riskTagsFor(paths: readonly string[]): string[] {
+  const tags = new Set<string>();
+  for (const p of paths) for (const r of RISK_TAG_RULES) if (r.test.test(p)) tags.add(r.tag);
+  return [...tags];
+}
+
+/** Risk tags on a work order: from its changed files (or declared paths) plus a `high` risk level. Any tag forces a human vote. */
+export function riskTagsOf(wo: Pick<WorkOrder, "files" | "paths" | "risk">): string[] {
+  const paths = wo.files && wo.files.length ? wo.files.map((f) => f.path) : wo.paths;
+  const tags = riskTagsFor(paths);
+  if (wo.risk === "high" && !tags.includes("high-risk")) tags.push("high-risk");
+  return tags;
+}
+export function forcesHuman(wo: Pick<WorkOrder, "files" | "paths" | "risk">): boolean {
+  return riskTagsOf(wo).length > 0;
+}
+
+/* ------------------------------------------------------------------ approver rules ------ */
+
+const NO_RULE: ApproverRule = { roles: [], people: [], required: 1, sod: false, conditions: [], escalateH: 0, fallback: null };
+
+/** Conditions of the gate's approver rule that apply to this work order. */
+export function conditionsFor(project: Project, wo: Pick<WorkOrder, "cls" | "risk" | "paths" | "repo" | "title" | "files">, gateId: string): ApproverCondition[] {
+  const rule = project.approvers[gateId];
+  if (!rule) return [];
+  const tags = riskTagsOf({ files: wo.files, paths: wo.paths, risk: wo.risk });
+  return rule.conditions.filter((cd) => {
+    if (cd.when.type === "class") return wo.cls === cd.when.value;
+    if (cd.when.type === "risk") return wo.risk === cd.when.value || tags.includes(cd.when.value);
+    if (cd.when.type === "path") {
+      return (wo.paths || []).some((p) => p.indexOf(cd.when.value) === 0) || (wo.repo === "payments-api" && cd.when.value === "/payments" && /settlement|refund|charge/i.test(wo.title));
+    }
+    return false;
+  });
+}
+
+function satisfies(person: Person, project: Project, needs: ApproverNeeds): boolean {
+  const roles = rolesIn(person, project.id);
+  const ok = needs.people.includes(person.id) || needs.roles.some((r) => roles.includes(r));
+  return ok && (!needs.oncall || person.oncall);
+}
+
+export interface GateProgress {
+  have: number;
+  need: number;
+  unmet: ApproverCondition[];
+  conds: ApproverCondition[];
+  /** Every approval so far came from the requester (I4: never the sole approver). */
+  onlyRequester: boolean;
+  passes: boolean;
+}
+
+/** N of M: approvals so far against the rule, unmet conditions, and I4. G0+G1 is the submitter's own confirmation, so I4 does not apply to it. */
+export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk" | "paths" | "repo" | "title" | "files" | "gates" | "requestedBy">, gateId: string, people: Person[]): GateProgress {
+  const rule = project.approvers[gateId] ?? { ...NO_RULE };
+  const st = wo.gates[gateId] ?? { approvals: [] };
+  const conds = conditionsFor(project, wo, gateId);
+  const unmet = conds.filter((cd) => !st.approvals.some((a) => {
+    const pp = people.find((x) => x.id === a.by);
+    return !!pp && satisfies(pp, project, cd.needs);
+  }));
+  const need = Math.max(1, rule.required || 1);
+  const onlyRequester = gateId !== "G0G1" && st.approvals.length > 0 && st.approvals.every((a) => a.by === wo.requestedBy);
+  return { have: st.approvals.length, need, unmet, conds, onlyRequester, passes: st.approvals.length >= need && !unmet.length && !onlyRequester };
+}
+
+function deny(reason: string, needs?: string, rule?: string): Decision {
+  const r: DecisionRule = { kind: "approver", id: rule || "APPROVERS", name: "Approver rules" };
+  return { allowed: false, reason, needs: needs || "", rule: r };
+}
+
+/** May this person approve this gate on this work order right now? Adds approver rules on top of can(). */
+export function gateDecision(state: FlowState, personId: string | null | undefined, wo: WorkOrder, gateId: string, now: number): Decision {
+  const c = cat(state);
+  const person = findPerson(state, personId);
+  const project = state.projects.find((p) => p.id === wo.project) as Project;
+  const g = gateDef(c, gateId);
+  if (!person) return deny("Not signed in.");
+  if (!g) return deny("Unknown gate.");
+  if (gateKind(c, project, gateId) === "auto") return deny(g.label + " is automatic in " + project.name + "; it passes when its checks pass.", "Automatic gate", "AUTO");
+  const st = wo.gates[gateId];
+  if (!st || st.status !== "waiting") return deny(wo.id + " is not waiting at " + g.label + ".", "", "STATE");
+  const stop = effectiveStop(state, { project: project.id, repo: wo.repo, wo });
+  if (stop) return deny(stop.reason, stop.mode === "halt" ? "Resume first" : "Restore first", stop.mode === "halt" ? "HALT" : "KILL");
+
+  if (gateId === "G0G1") {
+    const d0 = can(state, personId, "brief.confirm", { project: project.id, time: now });
+    if (!d0.allowed) return d0;
+    const roles0 = rolesIn(person, project.id);
+    const senior = roles0.some((r) => ["line_lead", "project_admin", "factory_admin"].includes(r));
+    if (!senior && wo.requestedBy !== personId) return deny("Engineers may confirm only briefs they submitted. " + actorName(state, wo.requestedBy) + " submitted this one.", "Submitter, Line Lead or Project Admin", "APR-G0G1");
+    if (!wo.conv.done) return deny("The intake conversation still has open questions.", "Answer the open questions first", "APR-G0G1");
+    return { allowed: true, reason: wo.requestedBy === personId ? "You submitted this work order." : "Line Leads and Project Admins may confirm any brief.", rule: { kind: "approver", id: "APR-G0G1", name: "Brief confirmation" }, needs: "" };
+  }
+
+  const base = can(state, personId, g.action || "gate.approve", { project: project.id, repo: wo.repo, time: now });
+  if (!base.allowed) return base;
+  const rule = project.approvers[gateId] ?? { ...NO_RULE };
+  if (st.approvals.some((a) => a.by === personId)) return deny("You already approved " + g.label + " on " + wo.id + ".", "Another approver", "APR-" + gateId);
+  if (rule.sod && wo.requestedBy === personId) return deny("Separation of duties on " + g.label + ": the author of " + wo.id + " cannot approve it.", "Someone other than the author", "APR-" + gateId);
+  const roles = rolesIn(person, project.id);
+  const aprRule: DecisionRule = { kind: "approver", id: "APR-" + gateId, name: g.label + " approvers" };
+  if (roles.includes("factory_admin")) {
+    return { allowed: true, reason: "Factory Admin may approve any gate (break-glass, flagged in audit).", rule: aprRule, needs: "" };
+  }
+  const byRole = rule.roles.some((r) => roles.includes(r));
+  const byName = rule.people.includes(personId as string);
+  const delegateFor = state.people.find((x) => x.away && x.away.delegate === personId && x.away.to > now && (rule.people.includes(x.id) || rule.roles.some((r) => rolesIn(x, project.id).includes(r))));
+  const conds = conditionsFor(project, wo, gateId);
+  const byCond = conds.find((cd) => satisfies(person, project, cd.needs));
+  if (!byRole && !byName && !delegateFor && !byCond) {
+    const cn = conds.filter((cd) => cd.needs.oncall && cd.needs.roles.some((r) => roles.includes(r)));
+    const roleList = (rs: string[]) => rs.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ");
+    if (cn.length && !person.oncall) return deny((cn[0] as ApproverCondition).text + "; " + person.name + " is not on call.", "On-call " + roleList((cn[0] as ApproverCondition).needs.roles), "APR-" + gateId);
+    return deny(
+      "Approver rule for " + g.label + " on " + project.name + " lists " + (rule.roles.length ? roleList(rule.roles) : "no roles") + (rule.people.length ? " and " + rule.people.map((p) => actorName(state, p)).join(", ") : "") + ".",
+      "Needs " + (rule.roles.length ? roleList(rule.roles) : rule.people.map((p) => actorName(state, p)).join(", ")),
+      "APR-" + gateId,
+    );
+  }
+  /* I4: with separation of duties off the requester may vote, but never alone. Their vote is accepted; the gate needs someone else too (see gateProgress). */
+  const why = byName ? "Named approver for " + g.label + "." : byRole ? "Approver rule allows " + rule.roles.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ") + "." : delegateFor ? "Delegate for " + delegateFor.name + " while they are away." : "Meets condition: " + (byCond as ApproverCondition).text + ".";
+  return { allowed: true, reason: why + (base.rule.kind === "policy" ? " " + base.reason : ""), rule: aprRule, needs: "" };
+}
+
+/* ------------------------------------------------------------------ slots, queue -------- */
+
+/** Work orders holding a coding slot in a project. */
+export function slotsUsed(workOrders: readonly WorkOrder[], projectId: string): WorkOrder[] {
+  return workOrders.filter((w) => w.project === projectId && w.slot && w.state !== "done" && w.state !== "killed");
+}
+
+/** Lowest free coding slot (1-based) or null. */
+export function freeSlot(workOrders: readonly WorkOrder[], project: Pick<Project, "id" | "flow">): number | null {
+  const used = slotsUsed(workOrders, project.id).map((w) => w.slot);
+  for (let i = 1; i <= project.flow.slots; i++) if (!used.includes(i)) return i;
+  return null;
+}
+
+const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+
+/** Deterministic queue order (spec 9.6): priority, then age (longest in the bay first), then id. Returns a new array. */
+export function queueOrder(wos: readonly WorkOrder[]): WorkOrder[] {
+  return wos.slice().sort((a, b) =>
+    (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9)
+    || (a.bayAt ?? a.createdAt) - (b.bayAt ?? b.createdAt)
+    || a.createdAt - b.createdAt
+    || a.id.localeCompare(b.id));
+}
+
+/** The queued work orders of a project in dispatch order. */
+export function queuedFor(workOrders: readonly WorkOrder[], projectId: string): WorkOrder[] {
+  return queueOrder(workOrders.filter((w) => w.project === projectId && w.bay === "queue" && !w.heldByKill));
+}
+
+/* ------------------------------------------------------------------ submit guard -------- */
+
+/** Why a submission to (project, repo) is refused, or null (legacy G.submitGuard). */
+export function submitGuard(state: FlowState, projectId: string, repoId: string | null | undefined): string | null {
+  const project = findProject(state, projectId);
+  if (!project) return "Pick a project.";
+  const stop = effectiveStop(state, { project: projectId, repo: repoId ?? null });
+  if (stop) return "Submissions are refused. " + stop.reason;
+  const repo = findRepo(state, repoId) as Repo | undefined;
+  if (!repo || repo.project !== projectId) return "Pick a repo in " + project.name + ".";
+  if (repo.onboarding.stage !== "ready" && !repo.onboarding.exception) {
+    const stages = [...ONBOARD_STAGES, { id: "failed", name: "Failed" }, { id: "person", name: "Needs a person" }];
+    return repo.name + " is not ready: onboarding is at '" + (stages.find((x) => x.id === repo.onboarding.stage)?.name ?? repo.onboarding.stage) + "'. Finish onboarding first (#onboarding).";
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ moves --------------- */
+
+export interface MoveCheck {
+  allowed: boolean;
+  reason: string;
+  kind?: "park" | "unpark" | "back" | "approve";
+}
+
+/**
+ * Dry-run of a move to a station or bay (legacy G.moveCheck; spec 9.4 `move` with `dry_run`).
+ * `principalId` is the person who would perform it.
+ */
+export function moveCheck(state: FlowState, principalId: string | null | undefined, wo: WorkOrder, target: string, now: number): MoveCheck {
+  const c = cat(state);
+  const project = state.projects.find((p) => p.id === wo.project) as Project;
+  const why = (d: Decision) => (d.needs ? d.needs + ". " : "") + d.reason;
+  /* scope stops first; a killed work order itself is reported by the state check below */
+  const stop = effectiveStop(state, { project: wo.project, repo: wo.repo });
+  if (stop) return { allowed: false, reason: stop.reason };
+  if (wo.state === "killed" || wo.state === "done") return { allowed: false, reason: wo.id + " is " + wo.state + "." };
+  const bay = bayDef(c, target);
+  if (bay) {
+    if (project.flow.bays && !project.flow.bays.includes(target)) return { allowed: false, reason: bay.name + " is not a bay in " + project.name + "." };
+    if (wo.bay === target) return { allowed: false, reason: "Already in " + bay.name + "." };
+    const perm = target === "declined" ? "wo.decline" : "wo.park";
+    const d = can(state, principalId, perm, { project: wo.project, time: now });
+    if (!d.allowed) return { allowed: false, reason: why(d) };
+    if (target === "queue" && stationOf(c, wo).id !== "build" && nextStationId(c, project, wo) !== "build") return { allowed: false, reason: "Only work about to build can wait in the Queue." };
+    return { allowed: true, kind: "park", reason: "Moves to " + bay.name + " with a reason." };
+  }
+  const r = route(c, project, wo.cls);
+  const stName = (id: string) => stationDef(c, id)?.name ?? id;
+  if (!r.includes(target)) {
+    const cfg = project.flow.stations[target];
+    return { allowed: false, reason: stName(target) + " is not on the " + (classOf(c, project, wo.cls).name) + " route" + (cfg && cfg.enabled ? "" : " (station is off or absent in this project)") + "." };
+  }
+  const cur = stationOf(c, wo).id;
+  if (wo.bay) {
+    if (target !== (wo.bayFrom || cur)) return { allowed: false, reason: "From " + (bayDef(c, wo.bay)?.name ?? wo.bay) + " it can only return to " + stName(wo.bayFrom || cur) + "." };
+    const du = can(state, principalId, "wo.park", { project: wo.project, time: now });
+    return du.allowed ? { allowed: true, kind: "unpark", reason: "Returns to " + stName(target) + "." } : { allowed: false, reason: why(du) };
+  }
+  const ci = r.indexOf(cur);
+  const ti = r.indexOf(target);
+  if (ti === ci) return { allowed: false, reason: "Already at " + stName(target) + "." };
+  if (ti < ci) {
+    const db = can(state, principalId, "wo.sendback", { project: wo.project, time: now });
+    return db.allowed ? { allowed: true, kind: "back", reason: "Sends back to " + stName(target) + "." } : { allowed: false, reason: why(db) };
+  }
+  if (ti > ci + 1) return { allowed: false, reason: "Work moves one station at a time; " + stName(r[ci + 1] as string) + " comes first." };
+  const g = gateForWO(c, project, wo);
+  if (wo.state === "running") return { allowed: false, reason: "Still running at " + stName(cur) + "; it moves when the station finishes" + (g ? " and " + g.label + " passes" : "") + "." };
+  if (!g) return { allowed: false, reason: "It moves automatically when the station finishes." };
+  if (gateKind(c, project, g.id) === "auto") return { allowed: false, reason: g.label + " is automatic in this project; it passes when its checks pass." };
+  const dg = gateDecision(state, principalId, wo, g.id, now);
+  if (!dg.allowed) return { allowed: false, reason: g.label + ": " + why(dg) };
+  return { allowed: true, kind: "approve", reason: "Approves " + g.label + " " + g.name + "." };
+}
+

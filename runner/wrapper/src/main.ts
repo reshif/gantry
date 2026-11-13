@@ -1,0 +1,132 @@
+import { pathToFileURL } from "node:url";
+import type { Adapter, AdapterOutcome } from "./adapter.js";
+import { createClaudeAdapter } from "./adapters/claude.js";
+import { stubAdapter } from "./adapters/stub.js";
+import { EdgeClient, type Checkpoint, type RunResult } from "./edge.js";
+import { readEnv, type RunEnv } from "./env.js";
+import type { RunSpec } from "./spec.js";
+
+export interface WrapperDeps {
+  env: RunEnv;
+  edge: EdgeClient;
+  adapters?: Record<RunSpec["adapter"], Adapter>;
+  log?: (msg: string) => void;
+  /** Signals to listen for. Defaults to the process; tests pass their own. */
+  onSignal?: (handler: (reason: string) => void) => () => void;
+}
+
+/** Exit codes: 0 result delivered (any status), 70 spec unavailable/invalid, 71 refused by the edge, 72 result undeliverable. */
+export const EXIT = { delivered: 0, noSpec: 70, refused: 71, undelivered: 72 } as const;
+
+function defaultSignals(handler: (reason: string) => void): () => void {
+  const term = () => handler("interrupt");
+  process.on("SIGTERM", term);
+  process.on("SIGINT", term);
+  return () => {
+    process.off("SIGTERM", term);
+    process.off("SIGINT", term);
+  };
+}
+
+/**
+ * One run: fetch spec, start heartbeats, run the adapter, post the result.
+ * The heartbeat keeps going until the result is delivered. A refusal from the edge (run stopped or superseded) aborts the
+ * adapter at once; the wrapper never depends on being asked nicely (spec 4.4).
+ */
+export async function runWrapper(deps: WrapperDeps): Promise<number> {
+  const { env, edge } = deps;
+  const log = deps.log ?? ((m: string) => console.error(`[wrapper] ${m}`));
+  const adapters = deps.adapters ?? { stub: stubAdapter, claude: createClaudeAdapter(process.env.GANTRY_CLAUDE_BIN ? { bin: process.env.GANTRY_CLAUDE_BIN } : {}) };
+
+  const specRes = await edge.getSpec();
+  if (!specRes.ok) {
+    log(`cannot get run spec: ${specRes.error.msg}`);
+    return specRes.error.kind === "refused" ? EXIT.refused : EXIT.noSpec;
+  }
+  const spec = specRes.value;
+  const adapter = adapters[spec.adapter];
+
+  const ac = new AbortController();
+  const abort = (reason: string) => {
+    if (!ac.signal.aborted) ac.abort(reason);
+  };
+  const unsignal = (deps.onSignal ?? defaultSignals)(abort);
+
+  let turn = 0;
+  let seq = 0;
+  let phase: "starting" | "working" | "finishing" = "starting";
+  let refused = false;
+  const beat = async () => {
+    const r = await edge.heartbeat({ seq: ++seq, phase, ...(turn > 0 ? { turn } : {}) });
+    if (!r.ok && r.error.kind === "refused") {
+      refused = true;
+      log(`heartbeat refused (${r.error.msg}); stopping`);
+      abort("refused");
+    }
+  };
+  await beat();
+  const hb = setInterval(() => void beat(), spec.heartbeatSeconds * 1000);
+  const wall = setTimeout(() => abort("wall_clock"), spec.limits.wallClockSeconds * 1000);
+  phase = "working";
+
+  const checkpoint = async (cp: Checkpoint) => {
+    const r = await edge.checkpoint(cp);
+    if (!r.ok) {
+      log(`checkpoint ${cp.name} failed: ${r.error.msg}`);
+      if (r.error.kind === "refused") {
+        refused = true;
+        abort("refused");
+      }
+    }
+  };
+
+  let outcome: AdapterOutcome;
+  try {
+    outcome = await adapter.run({ spec, env, signal: ac.signal, setTurn: (t) => (turn = t), checkpoint });
+  } catch (e) {
+    outcome = { status: "failed", usage: [], error: { code: "adapter_crash", msg: e instanceof Error ? e.message : String(e) } };
+  }
+  phase = "finishing";
+  clearTimeout(wall);
+
+  if (outcome.status === "interrupted" && ac.signal.reason === "wall_clock") {
+    outcome = { ...outcome, status: "failed", error: { code: "wall_clock", msg: `wall-clock limit ${spec.limits.wallClockSeconds}s reached` } };
+  }
+
+  let code: number = EXIT.delivered;
+  if (refused) {
+    // The edge no longer accepts this token: nothing more can be delivered.
+    code = EXIT.refused;
+  } else {
+    const result: RunResult = { status: outcome.status, usage: outcome.usage, adapter: adapter.name, capabilities: adapter.capabilities };
+    if (outcome.output !== undefined) result.output = outcome.output;
+    if (outcome.error) result.error = outcome.error;
+    const posted = await edge.result(result);
+    if (!posted.ok) {
+      log(`result not delivered: ${posted.error.msg}`);
+      code = posted.error.kind === "refused" ? EXIT.refused : EXIT.undelivered;
+    }
+  }
+  clearInterval(hb);
+  unsignal();
+  return code;
+}
+
+async function main(): Promise<number> {
+  const env = readEnv();
+  if (!env.ok) {
+    console.error(`[wrapper] bad environment: ${env.error}`);
+    return 2;
+  }
+  return runWrapper({ env: env.value, edge: new EdgeClient(env.value) });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().then(
+    (c) => process.exit(c),
+    (e) => {
+      console.error("[wrapper] fatal:", e instanceof Error ? e.message : e);
+      process.exit(1);
+    },
+  );
+}

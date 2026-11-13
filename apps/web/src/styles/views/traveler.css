@@ -1,0 +1,101 @@
+/* Traveler drawer and work-order dialogs. Builds on the round-one .trv timeline in views.css. Tokens only. */
+.trv-drawer .drawer-head { align-items: flex-start; }
+.trv-headmain { min-width: 0; }
+.trv-drawer .tb-drawer { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.trv-drawer.is-killed .drawer-head { border-bottom-color: var(--kill); background: repeating-linear-gradient(-45deg, var(--kill-soft) 0 8px, transparent 8px 16px); }
+.trv-drawer.is-killed .big-id, .trv-drawer.is-killed .drawer-title { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--kill); }
+
+.trv-killed { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--kill); color: var(--surface); border-radius: 2px; font-size: var(--t-md);
+  background-image: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.14) 0 10px, transparent 10px 20px); }
+.trv-killed strong { font-family: var(--f-display); font-size: 17px; letter-spacing: 0.1em; }
+.trv-killed .ic { width: 20px; height: 20px; flex: none; }
+
+.trv-actions { display: grid; gap: 6px; }
+.trv-actions-2 .btn { font-size: var(--t-sm); }
+
+/* journey timeline additions */
+.trv-row.trv-skip { opacity: 0.5; }
+.trv-row.trv-skip::before { border-style: dashed; background: transparent; }
+.trv-row.trv-cur { background: var(--accent-soft); margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
+.trv-row.trv-cur::before { left: 85px; }
+.trv-visit { display: grid; gap: 3px; }
+.trv-visit.is-old { opacity: 0.7; padding-bottom: 4px; border-bottom: 1px dotted var(--line); }
+.trv-skills { line-height: 1.35; }
+.trv-gate { align-items: flex-start; color: var(--ink-2); padding: 6px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 2px; margin-top: 2px; }
+.trv-gate strong { font-weight: 600; font-size: var(--t-sm); }
+.trv-gate .checklist { margin-top: 4px; }
+.trv-gd { width: 10px; height: 10px; flex: none; margin-top: 4px; transform: rotate(45deg); border: 2px solid var(--done); background: var(--surface); }
+.trv-gate-waiting { border-color: var(--gate); background: var(--gate-soft); }
+.trv-gate-waiting .trv-gd { background: var(--gate); border-color: var(--gate); }
+.trv-gate-failed { border-color: var(--fail); background: var(--fail-soft); }
+.trv-gate-failed .trv-gd { border: 3px double var(--fail); }
+.trv-gate-passed .trv-gd { background: var(--done); border-color: var(--done); }
+.trv-gate-skipped .trv-gd { border-style: dashed; border-color: var(--line-strong); }
+.trv-baynote { margin-bottom: 8px; }
+
+/* brief */
+.trv-brief { display: grid; gap: 12px; }
+.trv-sec .sub-h { margin-bottom: 4px; }
+.trv-2col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.trv-ul { font-size: var(--t-md); }
+.trv-route { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.trv-route-st { font-size: var(--t-xs); padding: 1px 6px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 2px; }
+.trv-route-sep { width: 12px; height: 12px; color: var(--faint); }
+.trv-hist { display: grid; gap: 8px; }
+.trv-conv { display: grid; gap: 10px; }
+
+/* new work order dialog */
+.nwo-repo { min-width: 0; }
+.nwo-preview { padding: 8px 10px; border: 1px dashed var(--line-strong); background: var(--panel); display: grid; gap: 4px; }
+.nwo-cls-preview { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+@media (max-width: 560px) {
+  .trv-drawer .tb-drawer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trv-2col { grid-template-columns: minmax(0, 1fr); }
+  .trv::before { left: 61px; }
+  .trv-row { grid-template-columns: 52px 1fr; gap: 20px; }
+  .trv-row::before { left: 57px; }
+  .trv-row.trv-cur::before { left: 65px; }
+}
+
+/* integration pass: keep long station names inside the label column and clear of the rail */
+.trv-drawer .trv-row { grid-template-columns: 86px 1fr; gap: 24px; }
+.trv-drawer .trv::before { left: 97px; }
+.trv-drawer .trv-row::before { left: 93px; }
+.trv-drawer .trv-row.trv-cur::before { left: 101px; }
+.trv-drawer .trv-name { font-size: 14px; line-height: 1.1; overflow-wrap: break-word; }
+.trv-drawer .trv-no { min-width: 0; }
+
+/* ---------- round three: journey scrubber, decision modes, trust, after release ---------- */
+.trv-scrub { display: grid; gap: 6px; padding: 8px 10px 10px; margin-bottom: 10px; border: 1px solid var(--line-strong); background: var(--panel); }
+.trv-scrub.is-on { border: 2px solid var(--accent); background: var(--surface); }
+.trv-sc-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; }
+.trv-sc-t { display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-display); font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; }
+.trv-scrub.is-on .trv-sc-t { color: var(--accent); }
+.trv-sc-t .ic { width: 15px; height: 15px; }
+.trv-sc-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.trv-sc-track { display: grid; gap: 2px; }
+.trv-sc-range { width: 100%; margin: 0; accent-color: var(--accent); }
+.trv-sc-range:focus-visible { outline: none; box-shadow: var(--focus); }
+.trv-sc-ticks { position: relative; height: 10px; margin: 0 8px; border-top: 1px solid var(--line); }
+.trv-sc-tick { position: absolute; top: 2px; width: 2px; height: 6px; margin-left: -1px; background: var(--line-strong); }
+.trv-sc-tick.is-past { background: var(--ink-2); }
+.trv-sc-tick.tk-gate-decision, .trv-sc-tick.tk-trust-auto { width: 6px; height: 6px; margin-left: -3px; transform: rotate(45deg); }
+.trv-sc-tick.tk-gate-decision.is-past { background: var(--gate); }
+.trv-sc-tick.tk-trust-auto { background: var(--surface); border: 1.5px solid var(--done); }
+.trv-sc-tick.tk-release { background: var(--done); height: 8px; width: 3px; }
+.trv-sc-tick.tk-kill { background: var(--kill); height: 8px; width: 3px; }
+.trv-sc-text { display: grid; gap: 1px; font-size: var(--t-sm); }
+.trv-sc-text .mono { font-size: var(--t-xs); color: var(--muted); }
+.trv-row.trv-scrub-at { box-shadow: inset 4px 0 0 var(--accent); background: var(--accent-soft); }
+.trv-future { opacity: 0.45; }
+.trv-mode { display: inline-block; margin-left: 6px; padding: 0 5px; font-size: 10px; font-weight: 600; border-radius: 2px; vertical-align: 1px; }
+.trv-mode-trust { color: var(--done); border: 1px solid var(--done); background: var(--done-soft); }
+.trv-mode-human { color: var(--ink-2); border: 1px dashed var(--line-strong); }
+.trv-mode-auto { color: var(--muted); border: 1px solid var(--line); }
+.trv-lv { display: inline-block; margin-left: 6px; padding: 0 4px; font-family: var(--f-mono); font-size: 10px; border: 1px solid var(--line-strong); border-radius: 2px; background: var(--sunk); white-space: nowrap; }
+.trv-lv-3, .trv-lv-4 { border-color: var(--done); color: var(--done); background: var(--done-soft); }
+.trv-lv-2 { border-color: var(--run); }
+.trv-dec-trust .ic { color: var(--done); }
+.trv-after { margin-top: 12px; display: grid; gap: 6px; }
+.trv-after .checklist li { flex-wrap: wrap; }

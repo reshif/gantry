@@ -1,0 +1,6 @@
+*
+!tsconfig.base.json
+!runner/wrapper/package.json
+!runner/wrapper/package-lock.json
+!runner/wrapper/tsconfig.json
+!runner/wrapper/src

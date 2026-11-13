@@ -1,0 +1,127 @@
+/**
+ * Query keys, named after the legacy G.store slices so the SSE `change` event ({"keys":["workOrders","audit"]})
+ * maps straight onto TanStack Query invalidation: every key starts with its slice name, and
+ * invalidating ["workOrders"] refreshes the list, the detail and anything keyed under it.
+ */
+import type { QueryClient } from "@tanstack/react-query";
+
+export type KeyPart = string | number | boolean | null | undefined | Record<string, unknown>;
+
+/** Slices whose reads also depend on another slice. Invalidating the key refreshes its dependents too. */
+export const DEPENDENTS: Readonly<Record<string, readonly string[]>> = {
+  workOrders: ["floor", "home", "conversations", "record", "changes", "events", "workload"],
+  projects: ["floor", "home", "me", "repos", "notifications"],
+  repos: ["home"],
+  people: ["me", "home", "workload"],
+  matrix: ["me", "home"],
+  policies: ["home", "me"],
+  freezes: ["home", "policies"],
+  factory: ["me", "home", "floor"],
+  session: ["me", "sessions"],
+  sessions: ["me"],
+  trust: ["home"],
+  learning: ["home"],
+  integrationInstances: ["home"],
+  integrations: ["integrationInstances"],
+  audit: [],
+};
+
+/** Slices that change what a `can()` decision answers. */
+export const CAN_SLICES: readonly string[] = ["matrix", "policies", "people", "factory", "freezes", "session", "projects"];
+
+/** The distinct top-level query keys to invalidate for a list of changed slices. */
+export function expandSlices(slices: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const s of slices) {
+    out.add(s);
+    for (const d of DEPENDENTS[s] ?? []) out.add(d);
+  }
+  return [...out];
+}
+
+export function affectsCan(slices: readonly string[]): boolean {
+  return slices.some((s) => CAN_SLICES.includes(s));
+}
+
+let client: QueryClient | null = null;
+const canListeners = new Set<() => void>();
+
+export function bindQueryClient(qc: QueryClient | null): void {
+  client = qc;
+}
+export function getQueryClient(): QueryClient | null {
+  return client;
+}
+/** Subscribed to by the can() cache so a matrix/policy/people change clears cached decisions. */
+export function onCanInvalidated(fn: () => void): () => void {
+  canListeners.add(fn);
+  return () => {
+    canListeners.delete(fn);
+  };
+}
+
+/** Invalidate the queries behind the given slices (and the can() cache when a decision input changed). */
+export function invalidateSlices(slices: readonly string[]): void {
+  if (affectsCan(slices)) for (const fn of [...canListeners]) fn();
+  if (!client) return;
+  for (const key of expandSlices(slices)) void client.invalidateQueries({ queryKey: [key] });
+}
+
+/** Key builders. Every key's first element is the slice name. */
+export const qk = {
+  me: () => ["me"] as const,
+  sessions: () => ["sessions"] as const,
+  security: () => ["security"] as const,
+  signins: () => ["signins"] as const,
+  home: () => ["home"] as const,
+  activity: (project?: string) => ["activity", project ?? null] as const,
+  projects: () => ["projects"] as const,
+  project: (id: string) => ["projects", "one", id] as const,
+  savedViews: () => ["savedViews"] as const,
+  templates: () => ["templates"] as const,
+  floor: (project: string, at?: number | string) => ["floor", project, at ?? null] as const,
+  events: (project: string, q: object) => ["events", project, q] as const,
+  workOrders: (project: string, q?: object) => ["workOrders", "list", project, q ?? null] as const,
+  workOrder: (id: string) => ["workOrders", "one", id] as const,
+  conversations: (q?: object) => ["conversations", q ?? null] as const,
+  record: (id: string) => ["record", id] as const,
+  recordMd: (id: string) => ["record", id, "md"] as const,
+  changes: (id: string) => ["changes", id] as const,
+  killImpact: (scope: string, id: string | null) => ["stops", "impact", scope, id] as const,
+  repos: (project: string) => ["repos", project] as const,
+  guidelines: () => ["guidelines"] as const,
+  agents: () => ["agents"] as const,
+  agentEffective: (id: string, q: object) => ["agents", "effective", id, q] as const,
+  skills: () => ["skills"] as const,
+  vendors: () => ["vendors"] as const,
+  routing: () => ["routing"] as const,
+  routingResolve: (q: object) => ["routing", "resolve", q] as const,
+  scorecards: () => ["scorecards"] as const,
+  suiteRuns: (suite: string) => ["evalRuns", suite] as const,
+  evalsFactory: () => ["evalExtra"] as const,
+  trustCells: () => ["trust"] as const,
+  learningFindings: () => ["learning", "findings"] as const,
+  learningProposals: () => ["learning", "proposals"] as const,
+  integrationTypes: () => ["integrationTypes"] as const,
+  integrations: () => ["integrationInstances"] as const,
+  routes: (project: string) => ["notifications", project] as const,
+  deliveries: (q?: object) => ["deliveries", q ?? null] as const,
+  cardTemplates: () => ["cardTemplates"] as const,
+  mcpServers: () => ["mcp"] as const,
+  mcpAccess: (q: object) => ["mcp", "access", q] as const,
+  mcpCalls: (q?: object) => ["mcpUsage", q ?? null] as const,
+  apiKeys: () => ["apiKeys"] as const,
+  apiConfig: () => ["apiConfig"] as const,
+  apiRequests: (q?: object) => ["requestLog", q ?? null] as const,
+  triggers: () => ["triggers"] as const,
+  triggerRuns: (id: string) => ["triggers", "runs", id] as const,
+  people: () => ["people"] as const,
+  effectivePermissions: (id: string) => ["people", "effective", id] as const,
+  matrix: () => ["matrix"] as const,
+  policies: () => ["policies"] as const,
+  freezes: () => ["freezes"] as const,
+  audit: (filters: object) => ["audit", "list", filters] as const,
+  auditEntry: (seq: number | string) => ["audit", "entry", seq] as const,
+  auditVerify: () => ["audit", "verify"] as const,
+  workload: (scope?: string) => ["workload", scope ?? null] as const,
+};

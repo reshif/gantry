@@ -1,0 +1,362 @@
+# Gantry local platform (spec section 3). Run from anywhere:
+#   deploy/secrets/generate.sh
+#   export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+#   docker compose -f deploy/compose.yml up -d --build
+# Build contexts are the repository root; Dockerfile paths follow docs/BUILD.md.
+name: gantry
+
+# ---- hardening applied to every Gantry container (spec 3.6) -------------------------------------------------------
+x-hardened: &hardened
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  user: "10001:10001"
+  restart: unless-stopped
+
+# Non-secret configuration shared by the services that talk to the database and object storage.
+x-data-env: &data-env
+  GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
+  GANTRY_PUBLIC_URL: https://localhost
+  DATABASE_HOST: postgres
+  DATABASE_NAME: gantry
+  S3_ENDPOINT: http://minio:9000
+  S3_BUCKET: gantry
+  S3_ACCESS_KEY: gantry
+
+x-http-check: &http-check
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 20s
+
+services:
+  # ---- ingress: the only published port, bound to loopback ------------------------------------------------------
+  ingress:
+    <<: *hardened
+    image: caddy:2-alpine
+    # Caddy listens unprivileged on 8443 inside the container; the host side is 127.0.0.1:443 only.
+    ports:
+      - "127.0.0.1:443:8443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    # Caddy writes its local CA and config under XDG_*; both are on the writable volume or tmpfs.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /config:rw,noexec,nosuid,nodev,size=8m,uid=10001,gid=10001
+    healthcheck:
+      <<: *http-check
+      test: ["CMD", "wget", "--no-check-certificate", "-q", "-O", "/dev/null", "https://localhost:8443/healthz"]
+    networks: [front, control]
+    depends_on:
+      volume-init: { condition: service_completed_successfully }
+      gantry-web: { condition: service_healthy }
+      gantry-api: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      mailpit: { condition: service_started }
+
+  gantry-web:
+    <<: *hardened
+    build: { context: .., dockerfile: apps/web/Dockerfile }
+    image: gantry-web:dev
+    healthcheck:
+      <<: *http-check
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+    networks: [control]
+
+  gantry-api:
+    <<: *hardened
+    build: { context: .., dockerfile: services/api/Dockerfile }
+    image: gantry-api:dev
+    environment:
+      <<: *data-env
+      OIDC_ISSUER: https://localhost/idp/realms/gantry
+      # Server-side calls reach Keycloak directly; the issuer above is what tokens carry and browsers use.
+      OIDC_INTERNAL_URL: http://keycloak:8081/idp/realms/gantry
+      OIDC_CLIENT_ID: gantry-web
+      EDGE_URL: http://gantry-edge:8443
+      GITHUB_BROKER_URL: http://gantry-github:9200
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-true}
+    secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret]
+    depends_on:
+      gantry-migrate: { condition: service_completed_successfully }
+      minio: { condition: service_healthy }
+    healthcheck:
+      <<: *http-check
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8000/healthz"]
+    networks: [control]
+
+  gantry-worker:
+    <<: *hardened
+    build: { context: .., dockerfile: services/worker/Dockerfile }
+    image: gantry-worker:dev
+    environment:
+      <<: *data-env
+      EDGE_URL: http://gantry-edge:8443
+      GITHUB_BROKER_URL: http://gantry-github:9200
+      LAUNCHER_URL: http://gantry-launcher:9100
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+    secrets: [db_password, data_key, github_token, launcher_token, minio_root_password]
+    depends_on:
+      gantry-migrate: { condition: service_completed_successfully }
+      gantry-launcher: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    # No HTTP port: the image's own HEALTHCHECK applies (see the worker Dockerfile).
+    networks: [control, launch]
+
+  # One-shot: applies migrations as gantry_owner and sets the app role's password, then exits.
+  gantry-migrate:
+    <<: *hardened
+    build: { context: .., dockerfile: packages/db/Dockerfile }
+    image: gantry-migrate:dev
+    restart: "no"
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_NAME: gantry
+    secrets: [db_password, db_owner_password]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [control]
+
+  gantry-launcher:
+    <<: *hardened
+    build: { context: .., dockerfile: services/launcher/Dockerfile }
+    image: gantry-launcher:dev
+    # The Docker socket is group-owned by the host's docker group. Set DOCKER_GID to `stat -c %g /var/run/docker.sock`.
+    group_add: ["${DOCKER_GID:-999}"]
+    environment:
+      LAUNCHER_PORT: "9100"
+      RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=gantry-runner:dev}
+      # Dedicated pool for run networks (/28 each). Keep it clear of every other network on this host. See deploy/README.md.
+      RUN_SUBNET_POOL: ${RUN_SUBNET_POOL:-10.213.0.0/16}
+      RUN_SUBNET_PREFIX: "28"
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-32}
+      EDGE_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-gantry}
+      EDGE_COMPOSE_SERVICE: gantry-edge
+      EDGE_URL: http://gantry-edge:8443
+      RUNNER_PROXY_URL: http://gantry-edge:8444
+    secrets: [launcher_token]
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    healthcheck:
+      <<: *http-check
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9100/healthz"]
+    networks: [launch]
+
+  gantry-edge:
+    <<: *hardened
+    build: { context: .., dockerfile: services/edge/Dockerfile }
+    image: gantry-edge:dev
+    environment:
+      GANTRY_API_URL: http://gantry-api:8000
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: gantry
+      S3_ACCESS_KEY: gantry
+      GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
+    secrets: [data_key, edge_token, vendor_keys.json, minio_root_password]
+    depends_on:
+      gantry-api: { condition: service_healthy }
+    healthcheck:
+      <<: *http-check
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8443/healthz"]
+    # Run networks are attached to this container at runtime by the launcher.
+    networks: [control, egress]
+
+  gantry-github:
+    <<: *hardened
+    build: { context: .., dockerfile: services/github/Dockerfile }
+    image: gantry-github:dev
+    environment:
+      GANTRY_API_URL: http://gantry-api:8000
+      GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
+    secrets: [data_key, github_token, github_app.pem, github_app.json]
+    depends_on:
+      gantry-api: { condition: service_healthy }
+    healthcheck:
+      <<: *http-check
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9200/healthz"]
+    networks: [control, egress]
+
+  # ---- pulled images --------------------------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # uid 70 is the image's postgres user; a new pgdata volume inherits that ownership from the image.
+    user: "70:70"
+    environment:
+      POSTGRES_USER: gantry_owner
+      POSTGRES_DB: gantry
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_owner_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+    secrets: [db_password, db_owner_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /var/run/postgresql:rw,nosuid,nodev,size=1m,uid=70,gid=70,mode=0775
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "gantry_owner", "-d", "gantry"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [control]
+
+  minio:
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: gantry
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+      MINIO_BROWSER: "off"
+      HOME: /tmp
+    secrets: [minio_root_password]
+    volumes:
+      - objdata:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    depends_on:
+      volume-init: { condition: service_completed_successfully }
+    networks: [control]
+
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.4}
+    restart: unless-stopped
+    # start-dev rebuilds Quarkus augmentation at boot, so the root filesystem stays writable for this one container.
+    # A production deployment builds an optimized image and sets read_only.
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:0"
+    # Secrets are read from their files inside the container at start, never passed through compose environment.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/keycloak_admin_password)"
+        export GANTRY_OIDC_CLIENT_SECRET="$$(cat /run/secrets/oidc_client_secret)"
+        exec /opt/keycloak/bin/kc.sh "$$@"
+      - kc
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8081"
+      KC_HTTP_RELATIVE_PATH: /idp
+      KC_HOSTNAME: https://localhost/idp
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    secrets: [keycloak_admin_password, oidc_client_secret]
+    volumes:
+      - ./keycloak/realm-gantry.json:/opt/keycloak/data/import/realm-gantry.json:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /idp/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '"status": "UP"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks: [control]
+
+  mailpit:
+    image: axllent/mailpit:v1.33.1
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    environment:
+      MP_WEBROOT: /mail
+      MP_SMTP_BIND_ADDR: 0.0.0.0:1025
+      MP_UI_BIND_ADDR: 0.0.0.0:8025
+      MP_DATABASE: /tmp/mailpit.db
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [control]
+
+  # One-shot: named volumes are created root-owned when the image has no such directory, so hand them to uid 10001.
+  volume-init:
+    image: caddy:2-alpine
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    command: ["sh", "-c", "chown 10001:10001 /vol/objdata /vol/caddydata"]
+    volumes:
+      - objdata:/vol/objdata
+      - caddydata:/vol/caddydata
+    networks: [control]
+
+  # Build-only: `docker compose -f deploy/compose.yml build gantry-runner` produces the image the launcher starts runs from.
+  # It is never started by compose; the launcher creates runner containers on demand.
+  gantry-runner:
+    profiles: [runner-image]
+    build: { context: .., dockerfile: runner/Dockerfile }
+    image: gantry-runner:dev
+    networks: [control]
+
+networks:
+  front:
+    driver: bridge
+  control:
+    driver: bridge
+    internal: true
+  launch:
+    driver: bridge
+    internal: true
+  egress:
+    driver: bridge
+
+volumes:
+  pgdata:
+  objdata:
+  caddydata:
+
+secrets:
+  db_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/db_password" }
+  db_owner_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/db_owner_password" }
+  session_key: { file: "${GANTRY_SECRETS_DIR:-./secrets}/session_key" }
+  data_key: { file: "${GANTRY_SECRETS_DIR:-./secrets}/data_key" }
+  edge_token: { file: "${GANTRY_SECRETS_DIR:-./secrets}/edge_token" }
+  github_token: { file: "${GANTRY_SECRETS_DIR:-./secrets}/github_token" }
+  launcher_token: { file: "${GANTRY_SECRETS_DIR:-./secrets}/launcher_token" }
+  vendor_keys.json: { file: "${GANTRY_SECRETS_DIR:-./secrets}/vendor_keys.json" }
+  github_app.pem: { file: "${GANTRY_SECRETS_DIR:-./secrets}/github_app.pem" }
+  github_app.json: { file: "${GANTRY_SECRETS_DIR:-./secrets}/github_app.json" }
+  minio_root_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/minio_root_password" }
+  keycloak_admin_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/keycloak_admin_password" }
+  oidc_client_secret: { file: "${GANTRY_SECRETS_DIR:-./secrets}/oidc_client_secret" }

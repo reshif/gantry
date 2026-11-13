@@ -1,0 +1,1372 @@
+/**
+ * Typed shapes of every legacy `G.store` slice. Field names are the legacy field names exactly:
+ * the React port and the API both use them. Timestamps are epoch milliseconds.
+ */
+export type Id = string;
+export type Ms = number;
+
+/* ------------------------------------------------------------------ catalogue ---------- */
+
+export interface Station {
+  id: string;
+  no: string;
+  name: string;
+  agent: Id;
+  purpose: string;
+  custom?: boolean;
+  project?: Id;
+}
+
+export type GateKind = "human" | "auto" | "mixed";
+
+export interface Gate {
+  id: string;
+  label: string;
+  name: string;
+  after: string;
+  kind: GateKind;
+  purpose: string;
+  checks: string[];
+  action?: string;
+  custom?: boolean;
+  project?: Id;
+}
+
+export interface Bay {
+  id: string;
+  name: string;
+  desc: string;
+  custom?: boolean;
+  project?: Id;
+}
+
+export type Priority = "P0" | "P1" | "P2" | "P3";
+export type Estimate = "S" | "M" | "L";
+
+export interface WorkClass {
+  id: string;
+  name: string;
+  skips: string[];
+  priority: Priority;
+  slaH: number;
+  est: Estimate;
+  splits?: boolean;
+  endsAfter?: string;
+  /* project-level and custom classes */
+  enabled?: boolean;
+  token?: string;
+  shape?: string;
+  hints?: string[];
+  gates?: string[];
+  custom?: boolean;
+  project?: Id;
+}
+
+export type RoleLevel = "factory" | "project";
+export interface Role {
+  id: string;
+  name: string;
+  level: RoleLevel;
+  custom?: boolean;
+  base?: string | null;
+  desc?: string;
+}
+
+export type ActionScope = "project" | "factory";
+export interface Action {
+  id: string;
+  name: string;
+  scope: ActionScope;
+  group: string;
+}
+
+/** The pieces of the catalogue that are not fixed: built-ins plus custom entries added per project. */
+export interface Catalog {
+  stations: Station[];
+  gates: Gate[];
+  bays: Bay[];
+  classes: WorkClass[];
+  roles: Role[];
+  actions: Action[];
+}
+
+export type WoStateId = "running" | "waiting" | "blocked" | "failed" | "parked" | "killed" | "done";
+export interface WoStateInfo {
+  label: string;
+  glyph: string;
+}
+
+export interface Template {
+  id: Id;
+  name: string;
+  desc: string;
+  stationsOff: string[];
+  gatesOff: string[];
+  slots: number;
+  classesSkip: Record<string, string[]>;
+  mcp: Id[];
+  approverPreset: "standard" | "light" | "strict";
+  notify: "standard" | "light" | "strict";
+  builtIn: boolean;
+  order?: string[];
+  bays?: string[];
+}
+
+/** Role -> action -> granted. */
+export type Matrix = Record<string, Record<string, boolean>>;
+
+/* ------------------------------------------------------------------ org, people, teams --- */
+
+export interface Org {
+  id: Id;
+  name: string;
+  plant: string;
+  tz: string;
+}
+
+export interface KillInfo {
+  by: Id;
+  at: Ms;
+  reason: string;
+  scope?: string;
+  mode?: "hold" | "cancel";
+}
+
+export interface FactoryState {
+  killed: KillInfo | null;
+}
+
+export interface Team {
+  id: Id;
+  name: string;
+  desc: string;
+}
+
+export interface RoleGrant {
+  role: string;
+  /** "factory" or a project id. */
+  scope: string;
+}
+
+export interface Away {
+  from: Ms;
+  to: Ms;
+  delegate: Id | null;
+}
+
+export type PersonStatus = "active" | "invited" | "deactivated" | (string & {});
+export interface Person {
+  id: Id;
+  name: string;
+  title: string;
+  email: string;
+  teams: Id[];
+  roles: RoleGrant[];
+  status: PersonStatus;
+  oncall: boolean;
+  github: string;
+  away: Away | null;
+  mfa?: boolean;
+  invitedBy?: Id;
+  invitedAt?: Ms;
+}
+
+/* ------------------------------------------------------------------ projects & flow ----- */
+
+export type ProjectStatus = "active" | "onboarding" | "new" | "archived";
+
+export interface StationConfig {
+  enabled: boolean;
+  wip: number;
+  absent?: boolean;
+}
+export interface GateConfig {
+  enabled: boolean;
+  mode: GateKind;
+  absent?: boolean;
+}
+export interface ProjectFlow {
+  stations: Record<string, StationConfig>;
+  gates: Record<string, GateConfig>;
+  slots: number;
+  classes: WorkClass[];
+  order: string[];
+  bays: string[];
+}
+
+export type ConditionType = "class" | "risk" | "path";
+export interface ApproverNeeds {
+  roles: string[];
+  people: Id[];
+  oncall: boolean;
+}
+export interface ApproverCondition {
+  id: string;
+  when: { type: ConditionType; value: string };
+  needs: ApproverNeeds;
+  text: string;
+}
+export interface ApproverRule {
+  roles: string[];
+  people: Id[];
+  required: number;
+  sod: boolean;
+  conditions: ApproverCondition[];
+  escalateH: number;
+  fallback: Id | null;
+  note?: string;
+}
+
+export type Channel = "slack" | "email" | "paging" | "teams" | "webhook" | (string & {});
+export interface Destination {
+  channel: Channel;
+  target: string;
+  integration?: Id | null;
+  override?: string | null;
+}
+export interface RouteCondition {
+  classes: string[];
+  priority: string[];
+  hours: "any" | "business";
+}
+export interface NotificationRoute {
+  id: string;
+  event: string;
+  dest: Destination[];
+  template: string;
+  cond: RouteCondition;
+  enabled: boolean;
+  fields: { title: boolean; repo: boolean; class: boolean; priority: boolean; approvers: boolean; link: boolean };
+}
+
+export interface ProjectBudget {
+  monthly: number;
+  mtd: number;
+  alertAt: number;
+}
+
+export interface GuidelineItem {
+  id: string;
+  text: string;
+  required: boolean;
+}
+export interface GuidelineVersion {
+  v: number;
+  at: Ms;
+  by: Id;
+  note: string;
+}
+export interface ProjectGuidelines {
+  items: GuidelineItem[];
+  notes: string;
+  version: number;
+  history: GuidelineVersion[];
+}
+export interface OrgGuidelines {
+  version: number;
+  by: Id;
+  at: Ms;
+  items: GuidelineItem[];
+  may: string;
+  mayNot: string;
+  history: GuidelineVersion[];
+}
+
+export interface HaltInfo {
+  by: Id;
+  at: Ms;
+  reason: string;
+}
+
+export interface Project {
+  id: Id;
+  name: string;
+  key: string;
+  status: ProjectStatus;
+  teams: Id[];
+  owner: Id;
+  template: Id;
+  regulated: boolean;
+  desc: string;
+  flow: ProjectFlow;
+  approvers: Record<string, ApproverRule>;
+  notifications: NotificationRoute[];
+  mcp: Id[];
+  budget: ProjectBudget;
+  created: Ms;
+  halted: HaltInfo | null;
+  killed: KillInfo | null;
+  overlay: string;
+  guidelines?: ProjectGuidelines;
+  [extra: string]: unknown;
+}
+
+/* ------------------------------------------------------------------ repos & onboarding -- */
+
+export type OnboardStage = "connected" | "assessed" | "pr_opened" | "pr_checks" | "pr_merged" | "verified" | "ready" | "failed" | "person";
+export type Severity = "high" | "medium" | "low";
+
+export interface OnboardFinding {
+  id: string;
+  check: string;
+  ok: boolean;
+  sev: Severity;
+  fix: string;
+  file: string | null;
+  manual?: boolean;
+}
+export interface OnboardPrFile {
+  path: string;
+  plus: number;
+  minus: number;
+  finding: string;
+}
+export interface OnboardPr {
+  number: number;
+  title: string;
+  branch: string;
+  files: OnboardPrFile[];
+  checks: "pending" | "running" | "green" | "red";
+  state: "open" | "merged" | "closed";
+  reviewers: Id[];
+  mergedBy: Id | null;
+}
+export interface TimelineEntry {
+  at: Ms;
+  who: Id;
+  text: string;
+}
+export interface RepoOnboarding {
+  stage: OnboardStage;
+  findings: OnboardFinding[];
+  pr: OnboardPr | null;
+  timeline: TimelineEntry[];
+  exception: { by: Id; at: Ms; reason: string } | null;
+  startedAt: Ms;
+  readyAt?: Ms;
+  blocker?: string;
+}
+export interface RepoConfig {
+  defaultBranch: string;
+  branchPrefix: string;
+  merge: "squash" | "merge" | "rebase";
+  tagging: string;
+  requiredChecks: string[];
+  protectedPaths: string[];
+}
+export interface NotifyOverride {
+  id: string;
+  event: string;
+  dest: Destination[];
+  template: string;
+  mode: "also" | "instead";
+}
+export interface Repo {
+  id: Id;
+  /** "owner/name" */
+  name: string;
+  project: Id;
+  team: Id;
+  tags: string[];
+  lang: string;
+  halted: HaltInfo | null;
+  config: RepoConfig;
+  mcp: Id[];
+  notifyOverrides: NotifyOverride[];
+  triggers: boolean;
+  guidelines: string;
+  onboarding: RepoOnboarding;
+  source?: Id;
+  freeze?: boolean;
+}
+
+/* ------------------------------------------------------------------ work orders --------- */
+
+export type GateStatus = "pending" | "waiting" | "passed" | "failed";
+export interface Approval {
+  by: Id;
+  at: Ms;
+  via: string;
+}
+export interface Rejection {
+  by: Id;
+  at: Ms;
+  reason: string;
+}
+export interface GateCheck {
+  name: string;
+  ok: boolean;
+  warn?: boolean;
+  note?: string;
+}
+export interface GateDecisionRecord {
+  mode: "human" | "auto" | "trust" | "hold" | "cancel" | (string & {});
+  by?: Id;
+  at: Ms;
+  via?: string;
+  trust: number | null;
+  reason?: string;
+}
+export interface GateInstance {
+  status: GateStatus;
+  approvals: Approval[];
+  rejections: Rejection[];
+  checks: GateCheck[];
+  waitingSince?: Ms;
+  decision?: GateDecisionRecord;
+  trustNote?: string | null;
+}
+
+export interface HistorySkill {
+  id: Id;
+  name: string;
+  v: string;
+}
+export interface Artefact {
+  kind: string;
+  title: string;
+  body: string;
+}
+export interface HistoryEntry {
+  station: string;
+  agent: Id;
+  model: string;
+  startedAt: Ms;
+  endedAt: Ms | null;
+  tokens: number;
+  cost: number;
+  outcome: string | null;
+  note: string;
+  agentVersion?: string;
+  skills?: HistorySkill[];
+  summary?: string;
+  artefacts?: Artefact[];
+}
+
+export interface LogEntry {
+  at: Ms;
+  who: Id;
+  text: string;
+}
+export interface Diff {
+  plus: number;
+  minus: number;
+  files: number;
+}
+export interface Tests {
+  passed: number;
+  failed: number;
+  added: number;
+}
+export interface PullRequest {
+  number: number;
+  branch: string;
+  checks: "pending" | "green" | "red";
+  state: "open" | "merged" | "draft" | "closed";
+  tag: string | null;
+  title?: string;
+  body?: string;
+  reviewers?: Id[];
+  mergeStrategy?: "squash" | "merge" | "rebase";
+  mergedAt?: Ms;
+  mergedBy?: Id;
+  releaseNotes?: string;
+  releasedAt?: Ms;
+}
+export interface WoKill {
+  by: Id;
+  at: Ms;
+  reason: string;
+  scope: string;
+  mode?: "hold" | "cancel";
+  prev: { state: string; station: number; bay: string | null; bayFrom: string | null };
+}
+
+export interface ConvMessage {
+  from: Id;
+  at: Ms;
+  text: string;
+  qid?: string;
+  chips?: string[];
+}
+export interface ConvQuestion {
+  id: string;
+  field: string;
+  text: string;
+  chips: string[];
+}
+export interface ConvMiss {
+  id: string;
+  text: string;
+  resolved: boolean;
+}
+export interface ConvDecision {
+  text: string;
+  by: Id;
+  at: Ms;
+}
+export interface ConvRaised {
+  station: string;
+  text: string;
+  at: Ms;
+  answered: boolean;
+  answer?: string;
+}
+export interface Conversation {
+  messages: ConvMessage[];
+  qi: number;
+  answers: Record<string, string>;
+  misses: ConvMiss[];
+  decisions: ConvDecision[];
+  awaiting: string;
+  done: boolean;
+  raised: ConvRaised[];
+  questions: ConvQuestion[];
+}
+
+export interface Brief {
+  goal: string;
+  scopeIn: string[];
+  scopeOut: string[];
+  ac: string[];
+  risks: string[];
+  open: string[];
+  decisions: string[];
+  estimate: string;
+  route: string[];
+  children: string[];
+}
+export interface BriefVersion {
+  v: number;
+  at: Ms;
+  by: Id;
+  note: string;
+  brief: Brief;
+}
+
+export interface WoRequest {
+  title: string;
+  text: string;
+  source: string;
+  by: Id;
+  via: string | null;
+  at: Ms;
+  attachments: unknown[];
+  requestedCls: string | null;
+}
+
+export interface Commit {
+  hash: string;
+  message: string;
+  agent: Id;
+  station: string;
+  at: Ms;
+  files: string[];
+  step: string;
+}
+export type OutcomeKind = "healthy" | "revert" | "incident";
+export interface Outcome {
+  kind: OutcomeKind;
+  at: Ms;
+  text: string;
+  severity?: "low" | "medium" | "high";
+  by?: Id;
+}
+export interface ReviewComment {
+  by: Id;
+  at: Ms;
+  file: string;
+  line: number;
+  text: string;
+  resolved: boolean;
+  resolution: string;
+}
+export interface WoCheck {
+  name: string;
+  status: string;
+  at: Ms;
+}
+export interface Sendback {
+  from: string;
+  to: string;
+  note: string;
+  at: Ms;
+  by: Id;
+}
+export interface CriterionTest {
+  name: string;
+  result: string;
+  ms: number;
+}
+export interface Criterion {
+  id: string;
+  text: string;
+  status: string;
+  tests: CriterionTest[];
+}
+export interface PlanStep {
+  id: string;
+  text: string;
+  files: string[];
+  ac: string[];
+}
+export interface DiffLine {
+  t: " " | "+" | "-";
+  s: string;
+}
+export interface WoFile {
+  path: string;
+  from: string | null;
+  status: "added" | "modified" | "deleted" | "renamed";
+  plus: number;
+  minus: number;
+  step: string;
+  ac: string[];
+  protected: boolean;
+  preview: DiffLine[];
+  state: "planned" | "committed" | "merged";
+}
+export interface Guardrail {
+  maxDiff: number;
+  size: number;
+  over: boolean;
+  protectedTouched: string[];
+}
+
+export type WorkOrderState = WoStateId;
+export type WoBayId = string;
+
+export interface WorkOrder {
+  id: Id;
+  project: Id;
+  repo: Id;
+  title: string;
+  description: string;
+  attachments: unknown[];
+  cls: string;
+  clsConfidence: number;
+  clsRationale: string;
+  clsSuggested: string;
+  clsOverridden: { by: Id; at: Ms; from: string; reason: string } | null;
+  requestedCls: string | null;
+  priority: Priority;
+  source: string;
+  requestedBy: Id;
+  createdAt: Ms;
+  /** Index into the catalogue's station list (position). */
+  station: number;
+  state: WorkOrderState;
+  bay: WoBayId | null;
+  bayReason: string;
+  bayFrom: string | null;
+  bayAt?: Ms;
+  progress: number;
+  /** Coding slot number (1-based) held at Build, else null. */
+  slot: number | null;
+  history: HistoryEntry[];
+  gates: Record<string, GateInstance>;
+  log: LogEntry[];
+  diff: Diff;
+  tests: Tests;
+  pr: PullRequest | null;
+  blockReason: string | null;
+  failReason: string | null;
+  doneAt: Ms | null;
+  killed: WoKill | null;
+  parent: Id | null;
+  children: Id[];
+  risk: "normal" | "high" | (string & {});
+  paths: string[];
+  slaDue: Ms;
+  conv: Conversation;
+  brief: Brief;
+  /* lifecycle record (G.lc) */
+  request?: WoRequest;
+  briefVersions?: BriefVersion[];
+  commits?: Commit[];
+  outcomes?: Outcome[];
+  reviewComments?: ReviewComment[];
+  checks?: WoCheck[];
+  sendbacks?: Sendback[];
+  bayTime?: unknown[];
+  criteria?: Criterion[];
+  plan?: PlanStep[];
+  files?: WoFile[];
+  guardrail?: Guardrail;
+  security?: { scanner: string; findings: number; severity: string; note: string };
+  coverage?: { before: number; after: number; changedLines: number };
+  split?: boolean;
+  heldByKill?: boolean;
+  outcomeOverride?: Outcome;
+  submittedBy?: Id;
+  sourceIntegration?: Id;
+}
+
+/* ------------------------------------------------------------------ agents, skills ------ */
+
+export type Autonomy = "auto" | "gate" | "suggest";
+export interface AgentTools {
+  readRepo: boolean;
+  writeBranch: boolean;
+  runTests: boolean;
+  openPR: boolean;
+  merge: boolean;
+  postSlack: boolean;
+  sendEmail: boolean;
+  readSecrets: boolean;
+}
+export interface AgentVersion {
+  v: string;
+  at: Ms;
+  note: string;
+  diff: string;
+  suiteScore: number;
+  live: boolean;
+  rc: boolean;
+  snapshot: unknown;
+}
+export interface Agent {
+  id: Id;
+  name: string;
+  station: string | null;
+  model: string;
+  fallbacks: string[];
+  version: string;
+  status: string;
+  autonomy: Autonomy;
+  tools: AgentTools;
+  skills: Id[];
+  mcp: Id[];
+  stations: string[];
+  projects: "all" | Id[];
+  budget: number;
+  guardrails: { paths: string[]; maxDiff: number };
+  suite: Id;
+  instructions: string;
+  overrides: Record<string, { model?: string; autonomy?: Autonomy }>;
+  versions: AgentVersion[];
+  spark: number[];
+  spend7d: number;
+  initials: string;
+  evalScore: number;
+}
+
+export interface SkillVersion {
+  v: string;
+  at: Ms;
+  by: Id;
+  note: string;
+}
+export interface Skill {
+  id: Id;
+  name: string;
+  desc: string;
+  when: string;
+  owner: Id;
+  body: string;
+  resources: string[];
+  version: string;
+  projects: "all" | Id[];
+  versions: SkillVersion[];
+  coverage: { suite: Id | null; cases: number; pass: number };
+}
+
+export interface AgentInstructions {
+  base: string;
+  baseVersion: number;
+}
+
+/* ------------------------------------------------------------------ vendors, models ----- */
+
+export interface Model {
+  id: Id;
+  name: string;
+  enabled: boolean;
+  context: number;
+  inPrice: number;
+  outPrice: number;
+}
+export type VendorHealth = "healthy" | "degraded" | "offline";
+export interface Vendor {
+  id: Id;
+  name: string;
+  product: string;
+  connected: boolean;
+  health: VendorHealth;
+  latency: number;
+  mtd: number;
+  budget: number;
+  keyMask: string;
+  region: string;
+  endpoint: string;
+  residency: string;
+  models: Model[];
+}
+export interface RoutingRule {
+  id: string;
+  tag: string;
+  use: Id;
+  region: string;
+  alt: string;
+  note: string;
+}
+export interface Routing {
+  defaultModel: Id;
+  overrides: Record<string, Id>;
+  fallback: Id[];
+  rules: RoutingRule[];
+}
+
+/* ------------------------------------------------------------------ evals --------------- */
+
+export interface EvalCase {
+  id: string;
+  name: string;
+}
+export interface Suite {
+  id: Id;
+  name: string;
+  station: string;
+  threshold: number;
+  agent: Id;
+  cases: EvalCase[];
+}
+export interface EvalResult {
+  caseId: string;
+  pass: boolean;
+  reason: string;
+  ms: number;
+}
+export interface EvalRun {
+  id: string;
+  suite: Id;
+  agent: Id;
+  version: string;
+  model: string;
+  at: Ms;
+  score: number;
+  results: EvalResult[];
+  by: Id;
+  cost: number;
+}
+export interface Scorecard {
+  taskSuccess: number;
+  firstPass: number;
+  testPass: number;
+  rework: number;
+  costPerWO: number;
+  minutesPerStation: number;
+  gateRejections: number;
+  overrideRate: number;
+  trend: { success: number[]; cost: number[] };
+}
+export interface ClassStats {
+  count: number;
+  success: number;
+  cycleH: number;
+  rework: number;
+}
+export interface EvalExtra {
+  heat: Record<Id, Record<Id, number | null>>;
+  confusion: Record<string, Record<string, number>>;
+  perClass: Record<string, ClassStats>;
+  overrideRate: number;
+  onboarding: { attempts: number; ready: number; successRate: number; medianDays: number; p90Days: number; failedReasons: Array<[string, number]> };
+  gateRejections: Array<[string, number]>;
+  humanOverride: Record<string, number>;
+}
+
+/* ------------------------------------------------------------------ MCP ----------------- */
+
+export interface McpTool {
+  name: string;
+  write: boolean;
+  allowed: boolean;
+}
+export type McpHealth = "healthy" | "degraded" | "failing" | "offline" | (string & {});
+export interface McpServer {
+  id: Id;
+  name: string;
+  transport: "http" | "stdio" | (string & {});
+  url: string;
+  auth: string;
+  authMask: string;
+  health: McpHealth;
+  sensitivity: string;
+  writeGate: boolean;
+  tools: McpTool[];
+  projects: "all" | Id[];
+  repos: "all" | Id[];
+  agents: "all" | Id[];
+  stations: "all" | string[];
+  classes?: "all" | string[] | null;
+}
+export interface McpUsage {
+  at: Ms;
+  server: Id;
+  tool: string;
+  agent: Id;
+  project: Id;
+  outcome: "ok" | "error" | "gated" | "denied" | (string & {});
+  ms: number;
+}
+
+/* ------------------------------------------------------------------ integrations -------- */
+
+export interface IntegrationField {
+  key: string;
+  label: string;
+  type: "text" | "url" | "secret" | "bool" | "select" | (string & {});
+  required: boolean;
+  placeholder?: string;
+  options?: string[];
+}
+export interface IntegrationType {
+  id: Id;
+  name: string;
+  category: string;
+  icon: string;
+  auth: string;
+  payload: string;
+  builtIn: boolean;
+  source?: boolean;
+  destination?: boolean;
+  targetLabel?: string;
+  fields: IntegrationField[];
+  events: string[];
+  actions: string[];
+  custom?: boolean;
+  createdBy?: Id;
+  createdAt?: Ms;
+}
+export interface IntegrationInstance {
+  id: Id;
+  type: Id;
+  name: string;
+  config: Record<string, string | boolean | undefined>;
+  secretMask: string;
+  status: "healthy" | "failing" | "offline" | (string & {});
+  connected: boolean;
+  projects: "all" | Id[];
+  lastSync: Ms;
+  createdBy: Id;
+  createdAt: Ms;
+  available?: Array<{ repo: string; lang: string }>;
+  targetId?: string;
+}
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  secretMask: string;
+  status: string;
+}
+/** Legacy per-channel connection summary (`state.integrations`). */
+export interface ChannelConnection {
+  connected: boolean;
+  lastSync: Ms;
+  status: string;
+  [extra: string]: unknown;
+}
+export type Integrations = Record<string, ChannelConnection>;
+
+export interface Delivery {
+  id: string;
+  at: Ms;
+  project: Id | null;
+  event: string;
+  channel: Channel;
+  target: string;
+  integration?: Id | null;
+  status: "delivered" | "failed" | (string & {});
+  attempts: number;
+  error: string;
+  wo?: Id;
+  route?: string;
+  override?: string | null;
+  repo?: Id | null;
+}
+export interface CardTemplate {
+  id: string;
+  name: string;
+  actions: string[];
+}
+
+/* ------------------------------------------------------------------ api keys, triggers -- */
+
+export interface ApiKey {
+  id: Id;
+  name: string;
+  prefix: string;
+  project: Id;
+  actions: string[];
+  created: Ms;
+  lastUsed: Ms | null;
+  revoked: boolean;
+  by: Id;
+}
+export interface ApiConfig {
+  rateLimit: number;
+  burst: number;
+  idempotencyHours: number;
+  webhookSigning: string;
+}
+export interface RequestLogEntry {
+  at: Ms;
+  key: Id;
+  method: string;
+  path: string;
+  status: number;
+  ms: number;
+}
+export interface TriggerRun {
+  at: Ms;
+  outcome: "created" | "deduped" | (string & {});
+  wo: Id;
+  source: string;
+}
+export type TriggerType = "issue" | "comment" | "schedule" | "ci" | (string & {});
+export interface Trigger {
+  id: Id;
+  project: Id;
+  type: TriggerType;
+  name: string;
+  enabled: boolean;
+  label?: string;
+  labelMap?: Record<string, string>;
+  command?: string;
+  schedule?: string;
+  cls?: string;
+  who: string;
+  reply: string;
+  dedupe: boolean;
+  repos: string;
+  runs: TriggerRun[];
+  source?: string;
+}
+
+/* ------------------------------------------------------------------ access -------------- */
+
+export interface PolicyWhere {
+  projects?: Id[];
+  freeze?: boolean;
+  regulated?: boolean;
+}
+export interface PolicyWhen {
+  /** 0 = Sunday ... 6 = Saturday, IST. */
+  days: number[];
+  from: string;
+  to: string;
+}
+export type PolicyEffect = "allow" | "deny";
+export interface Policy {
+  id: string;
+  name: string;
+  effect: PolicyEffect;
+  enabled: boolean;
+  /** Role ids, or "*" (anyone) / "agents". */
+  roles: string[];
+  actions: string[];
+  where: PolicyWhere;
+  when: PolicyWhen | null;
+  oncallOnly: boolean;
+  extend?: boolean;
+}
+export interface Freeze {
+  id: string;
+  name: string;
+  repos: "all" | Id[];
+  from: Ms;
+  to: Ms;
+  by: Id;
+}
+
+export interface SsoSettings {
+  provider: string;
+  domain: string;
+  enforced: boolean;
+  entity: string;
+}
+export interface SecuritySettings {
+  sso: SsoSettings;
+  mfa: { policy: string; methods: string[] };
+  sessionHours: number;
+  idleMin: number;
+  domains: string[];
+  ipAllow: string[];
+  restoreFactoryNeedsTwo: boolean;
+  githubLogin: boolean;
+}
+export interface Session {
+  id: Id;
+  person: Id;
+  method: string;
+  device: string;
+  ip: string;
+  started: Ms;
+  lastSeen: Ms;
+  revoked: boolean;
+  current?: boolean;
+  restored?: boolean;
+  at?: Ms;
+}
+export interface SignIn {
+  at: Ms;
+  person: Id | null;
+  email: string;
+  method: string;
+  outcome: "success" | "failure" | (string & {});
+  reason: string;
+  ip: string;
+  device: string;
+}
+
+/* ------------------------------------------------------------------ audit, events ------- */
+
+export type AuditCategory = "auth" | "access" | "flow" | "onboarding" | "approvals" | "config" | "integrations" | "api" | "agents" | "kill";
+export type AuditOutcome = "ok" | "warn" | "denied" | "failed" | "regression" | "blocked" | (string & {});
+export interface AuditEntry {
+  id: number;
+  at: Ms;
+  actor: Id;
+  action: string;
+  target: string;
+  where: string;
+  project: Id | null;
+  category: AuditCategory | (string & {});
+  outcome: AuditOutcome;
+  via: string;
+  before: string | null;
+  after: string | null;
+  entity: { type: string; id: string } | null;
+}
+
+export interface EventEntry {
+  id: number;
+  at: Ms;
+  type: string;
+  project?: Id;
+  wo?: Id;
+  repo?: Id;
+  station?: string;
+  gate?: string;
+  bay?: string | null;
+  scope?: string;
+  by?: Id | null;
+  mode?: string;
+  trust?: number | null;
+  from?: number | string | null;
+  to?: number | string | null;
+  cell?: string;
+  text?: string;
+}
+
+/* ------------------------------------------------------------------ trust, learning ----- */
+
+export interface TrustLevelDef {
+  level: number;
+  code: string;
+  name: string;
+  desc: string;
+}
+export interface TrustCriteria {
+  cleanRuns: number;
+  evalMin: number;
+  reworkMax: number;
+  incidentsMax: number;
+  windowD: number;
+}
+export interface TrustCeiling {
+  id: string;
+  text: string;
+  when: { regulated?: boolean; cls?: string; project?: Id; gate?: string };
+  max: number;
+  enabled: boolean;
+}
+export interface TrustHistoryEntry {
+  at: Ms;
+  from: number | null;
+  to: number;
+  by: Id;
+  kind: "seed" | "grant" | "demote" | (string & {});
+  reason: string;
+  cause?: { type: string; wo?: Id } | null;
+}
+export interface TrustCell {
+  id: string;
+  agent: Id;
+  cls: string;
+  project: Id;
+  repo: Id | null;
+  level: number;
+  since: Ms;
+  cleanRuns: number;
+  history: TrustHistoryEntry[];
+}
+export interface TrustProposal {
+  id: string;
+  cell: string;
+  from: number;
+  to: number;
+  at: Ms;
+  status: "pending" | "accepted" | "declined" | "withdrawn" | (string & {});
+  by: Id | null;
+  decidedAt: Ms | null;
+  reason: string;
+  evidence: { cleanRuns: number; evalScore: number; note: string };
+  savedPerWeek: number;
+  manual?: boolean;
+}
+export interface Trust {
+  sampleRate: number;
+  criteria: Record<string, TrustCriteria>;
+  ceilings: TrustCeiling[];
+  cells: TrustCell[];
+  proposals: TrustProposal[];
+  nextProposal: number;
+  seededAt: Ms;
+}
+
+export type LearningSignal = "rejection" | "override" | "revert" | "miss" | "sendback" | "incident";
+export interface LearningFinding {
+  id: string;
+  title: string;
+  signal: LearningSignal;
+  agent: Id;
+  project: Id | null;
+  evidence: string[];
+  count: number;
+  firstAt: Ms;
+  lastAt: Ms;
+  status: "open" | "addressed" | (string & {});
+}
+export interface LearningProposal {
+  id: string;
+  finding: string;
+  kind: "skill" | "eval" | "guideline" | "guardrail" | "approver" | "route" | (string & {});
+  title: string;
+  owner: Id;
+  status: "proposed" | "accepted" | "verified" | "declined" | (string & {});
+  at: Ms;
+  expected: string;
+  change: Record<string, unknown>;
+  history: Array<{ at: Ms; by: Id; text: string }>;
+  reason?: string;
+}
+export interface Learning {
+  findings: LearningFinding[];
+  proposals: LearningProposal[];
+  next: { finding: number; proposal: number };
+}
+
+/* ------------------------------------------------------------------ console, prefs ------ */
+
+export interface ConsoleState {
+  messages: unknown[];
+  pinned: Id[];
+}
+export interface BoardFilters {
+  cls: string;
+  repo: string;
+  assignee: string;
+  prio: string;
+}
+export interface Prefs {
+  project: Id;
+  theme: string;
+  paused: boolean;
+  floorView: string;
+  boardSwim: string;
+  boardFilters: BoardFilters;
+  collapsedBays: boolean;
+  activeClass: string | null;
+  navCollapsed: Record<string, boolean>;
+  navRail: boolean;
+  palettePinned: string[];
+  paletteRecent: string[];
+  record: unknown;
+  replay: unknown;
+  portfolio?: unknown;
+}
+export interface WoTrackEntry {
+  state: WorkOrderState;
+  bay: string | null;
+}
+
+/* ------------------------------------------------------------------ the whole tree ------ */
+
+/** The legacy `G.store` state tree. The API serves each slice under its own name. */
+export interface GantryState {
+  org: Org;
+  factory: FactoryState;
+  teams: Team[];
+  people: Person[];
+  projects: Project[];
+  repos: Repo[];
+  agents: Agent[];
+  skills: Skill[];
+  mcp: McpServer[];
+  mcpUsage: McpUsage[];
+  vendors: Vendor[];
+  routing: Routing;
+  templates: Template[];
+  workOrders: WorkOrder[];
+  nextWO: number;
+  nextPR: number;
+  integrations: Integrations;
+  deliveries: Delivery[];
+  nextDelivery: number;
+  apiKeys: ApiKey[];
+  apiConfig: ApiConfig;
+  requestLog: RequestLogEntry[];
+  triggers: Trigger[];
+  matrix: Matrix;
+  policies: Policy[];
+  freezes: Freeze[];
+  security: SecuritySettings;
+  sessions: Session[];
+  signins: SignIn[];
+  guidelines: OrgGuidelines;
+  instructions: AgentInstructions;
+  suites: Suite[];
+  evalRuns: EvalRun[];
+  nextRun: number;
+  scorecards: Record<Id, Scorecard>;
+  evalExtra: EvalExtra;
+  audit: AuditEntry[];
+  nextAudit: number;
+  console: ConsoleState;
+  session: Session | null;
+  prefs: Prefs;
+  integrationTypes: IntegrationType[];
+  integrationInstances: IntegrationInstance[];
+  cardTemplates: CardTemplate[];
+  trust: Trust;
+  learning: Learning;
+  events: EventEntry[];
+  nextEvent: number;
+  woTrack: Record<Id, WoTrackEntry>;
+}
+
+/** What `devSeed()` returns: the state tree plus the catalogue entries the seed added. */
+export interface DevSeed {
+  state: GantryState;
+  catalog: Catalog;
+  integrationCategories: Array<{ id: string; name: string }>;
+  notifyEvents: Array<{ id: string; name: string }>;
+}
+
+/* ------------------------------------------------------------------ decisions ----------- */
+
+export type RuleKind = "matrix" | "policy" | "policy-missing" | "approver" | "stop" | "invariant" | (string & {});
+export interface DecisionRule {
+  kind: RuleKind;
+  id: string;
+  name?: string;
+  freeze?: string;
+}
+export interface Decision {
+  allowed: boolean;
+  reason: string;
+  rule: DecisionRule;
+  needs: string;
+}
