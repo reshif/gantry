@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+deploy/secrets/*
+!deploy/secrets/README.md
+!deploy/secrets/generate.sh
+.DS_Store
