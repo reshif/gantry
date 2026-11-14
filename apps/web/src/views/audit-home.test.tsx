@@ -1,0 +1,258 @@
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_CATALOG } from "@gantry/domain";
+import { canBatcher } from "../api/can";
+import { bindQueryClient } from "../api/keys";
+import { setCsrfToken } from "../api/client";
+import { OverlayProvider } from "../ui/Overlay";
+import AuditView from "./audit";
+import HomeView from "./home";
+
+type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
+
+const person = (id: string, name: string, roles: Array<{ role: string; scope: string }>) => ({ id, name, title: "", email: `${id}@acme.dev`, teams: [], roles, status: "active", oncall: false, github: "", away: null, version: 1 });
+const ASHA = person("p-asha", "Asha Raman", [{ role: "factory_admin", scope: "factory" }]);
+const SAM = person("p-sam", "Sam Whitfield", [{ role: "auditor", scope: "factory" }]);
+const TOMAS = person("p-tomas", "Tomas Eriksen", [{ role: "engineer", scope: "payments" }]);
+const me = (p: ReturnType<typeof person>) => ({ person: p, session: { id: "s1", person: p.id, method: "sso", started: 1, lastSeen: 1, revoked: false }, csrf: "c", org: { id: "acme", name: "Acme", plant: "P", tz: "IST" }, projects: [], factory: { killed: null }, config: {} });
+
+const row = (seq: number, over: Record<string, unknown> = {}) => ({
+  id: seq, seq, at: 1_700_000_000_000 + seq * 60_000, actor: "p-asha", actorKind: "human", actorName: "Asha Raman", action: "role.add", target: "Compliance Officer", where: "factory", project: null, category: "access",
+  outcome: "ok", via: "web", channel: "web", before: null, after: null, entity: { type: "role", id: "compliance" }, digest: `${seq}`.padStart(64, "a"), prev: `${seq - 1}`.padStart(64, "b"), ...over,
+});
+const SUMMARY = { entries: 3, denied: 1, changes: 1, head: "c".repeat(64), categories: { access: 2, config: 1 }, topics: { trust: 0, learning: 0, catalogue: 2, record: 0 }, facets: { outcomes: ["denied", "ok"], channels: ["web"], actors: [{ id: "p-asha", name: "Asha Raman" }] } };
+
+interface Call { method: string; path: string; query: URLSearchParams }
+function setup(who: ReturnType<typeof person>, extra: Record<string, Handler> = {}, denied: string[] = []) {
+  const calls: Call[] = [];
+  const base: Record<string, Handler> = {
+    "GET /api/v1/me": () => ({ body: me(who) }),
+    "GET /api/v1/people": () => ({ body: [ASHA, SAM, TOMAS] }),
+    "GET /api/v1/agents": () => ({ body: [] }),
+    "GET /api/v1/projects": () => ({ body: [] }),
+    "GET /api/v1/catalog": () => ({ body: DEFAULT_CATALOG }),
+    "GET /api/v1/teams": () => ({ body: [] }),
+    "GET /api/v1/templates": () => ({ body: [] }),
+    "GET /api/v1/saved-views": () => ({ body: [] }),
+    "GET /api/v1/activity": () => ({ body: { items: [row(3, { action: "kill.project", category: "kill", target: "Payments killed", outcome: "ok" })], next: null } }),
+    ...extra,
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const u = new URL(url, "http://x");
+      const method = init?.method ?? "GET";
+      calls.push({ method, path: u.pathname, query: u.searchParams });
+      if (u.pathname === "/api/v1/can") {
+        const checks = (JSON.parse(String(init?.body)) as { checks: Array<{ action: string }> }).checks;
+        return new Response(JSON.stringify({ results: checks.map((c) => (denied.includes(c.action) ? { allowed: false, reason: "No role holds it.", needs: "Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
+      }
+      const h = base[`${method} ${u.pathname}`];
+      const r = h ? h(url, init) : { status: 404, body: { ok: false, msg: `no mock ${method} ${u.pathname}` } };
+      return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
+    }),
+  );
+  return calls;
+}
+
+function mount(node: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
+  bindQueryClient(qc);
+  return render(<QueryClientProvider client={qc}><OverlayProvider>{node}</OverlayProvider></QueryClientProvider>);
+}
+
+beforeEach(() => {
+  setCsrfToken("c");
+  canBatcher.clear();
+  window.location.hash = "";
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("Audit", () => {
+  const page = (items: unknown[], next: string | null = null, total = items.length) => ({ items, next, total, summary: SUMMARY });
+
+  it("lists the ledger with counts, outcome chips and digests, and asks the server for filters", async () => {
+    const calls = setup(SAM, {
+      "GET /api/v1/audit": () => ({ body: page([row(3, { outcome: "denied", action: "policy.edit.denied", target: "action policy.edit" }), row(2, { before: "a", after: "b", category: "config", action: "station.add" }), row(1)]) }),
+    });
+    mount(<AuditView />);
+    expect(await screen.findByText("policy.edit.denied")).toBeTruthy();
+    expect(screen.getByText("Head digest").nextElementSibling?.textContent).toBe("cccccccc");
+    expect(screen.getByText("Denied").nextElementSibling?.textContent).toBe("1");
+    expect(document.querySelectorAll("tr.aud-row")).toHaveLength(3);
+    expect(document.querySelector(".o-row-denied .outcome")?.textContent).toBe("denied");
+    expect(document.querySelectorAll(".aud-has-diff")).toHaveLength(1);
+    expect(document.getElementById("aud-cat-access")?.textContent).toContain("2");
+    // Clicking a category narrows server-side.
+    fireEvent.click(document.getElementById("aud-cat-config")!);
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("category") === "config")).toBe(true));
+    // Auditors get the verify button; the note about a limited view is absent.
+    expect(document.getElementById("aud-verify")).toBeTruthy();
+    expect(document.querySelector(".lock-note")).toBeNull();
+  });
+
+  it("debounces the search into the q filter and shows a clear button", async () => {
+    const calls = setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }) });
+    mount(<AuditView />);
+    await screen.findByText("role.add");
+    fireEvent.change(document.getElementById("aud-q")!, { target: { value: "slack" } });
+    await waitFor(() => expect(calls.some((c) => c.query.get("q") === "slack")).toBe(true));
+    expect(document.getElementById("aud-clear")).toBeTruthy();
+  });
+
+  it("pages with the cursor", async () => {
+    const calls = setup(SAM, {
+      "GET /api/v1/audit": (url) => ({ body: new URL(url, "http://x").searchParams.get("cursor") ? page([row(1)], null, 2) : page([row(2)], "2", 2) }),
+    });
+    mount(<AuditView />);
+    await screen.findByText("Compliance Officer");
+    fireEvent.click(document.getElementById("aud-more")!);
+    await waitFor(() => expect(document.querySelectorAll("tr.aud-row")).toHaveLength(2));
+    expect(calls.filter((c) => c.path === "/api/v1/audit").pop()?.query.get("cursor")).toBe("2");
+    expect(document.getElementById("aud-more")).toBeNull();
+  });
+
+  it("opens the detail drawer with the field diff, chain digests and history", async () => {
+    setup(SAM, {
+      "GET /api/v1/audit": () => ({ body: page([row(2, { before: '{"a":1}', after: '{"a":2}', category: "config", action: "project.config" })]) }),
+      "GET /api/v1/audit/2": () => ({
+        body: {
+          ...row(2, { before: '{"a":1}', after: '{"a":2}', category: "config", action: "project.config" }), rule: "MATRIX", onBehalfOf: null, topic: null, workOrder: null, session: { id: "sess-1", method: "sso", ip: "1.2.3.4", userAgent: "x", startedAt: 1 },
+          request: { id: "req-9", command: "req-9", idempotencyKey: null }, sourceIp: "203.0.113.5", diff: [{ field: "a", before: 1, after: 2, changed: true }], history: [row(1, { action: "role.edit" })],
+        },
+      }),
+    });
+    mount(<AuditView />);
+    fireEvent.click(await screen.findByLabelText("Open audit entry 2: project.config"));
+    const drawer = await waitFor(() => { const d = document.querySelector(".aud-drawer"); if (!d || !d.textContent?.includes("Chain")) throw new Error("not yet"); return d as HTMLElement; });
+    expect(within(drawer).getByText("1 of 1 fields changed")).toBeTruthy();
+    expect(within(drawer).getByText("203.0.113.5")).toBeTruthy();
+    expect(within(drawer).getByText("req-9")).toBeTruthy();
+    expect(drawer.querySelector(".digest")?.textContent).toBe("2".padStart(64, "a"));
+    expect(within(drawer).getByText("role.edit")).toBeTruthy();
+    expect(within(drawer).getByText("Open Access")).toBeTruthy();
+  });
+
+  it("tells a person without audit.view that they see their own projects only, and hides verify", async () => {
+    setup(TOMAS, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }) }, ["audit.view"]);
+    mount(<AuditView />);
+    await screen.findByText("role.add");
+    await waitFor(() => expect(document.querySelector(".lock-note")?.textContent).toContain("audit.view"));
+    expect(document.getElementById("aud-verify")).toBeNull();
+  });
+
+  it("shows an empty state, and verify reports the result", async () => {
+    setup(ASHA, {
+      "GET /api/v1/audit": () => ({ body: { items: [], next: null, total: 0, summary: { ...SUMMARY, entries: 0, denied: 0, changes: 0, categories: {} } } }),
+      "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 12, msg: "Chain intact: 12 entries verified." } }),
+    });
+    mount(<AuditView />);
+    expect(await screen.findByText("The ledger is empty")).toBeTruthy();
+    fireEvent.click(document.getElementById("aud-verify")!);
+    expect(await screen.findByText("Chain intact: 12 entries verified.")).toBeTruthy();
+  });
+});
+
+describe("Home", () => {
+  const MINE = { workOrders: [], projects: [], factoryRole: true };
+  const FIG = { projects: { active: 0, archived: 0 }, inFlight: 0, running: 0, inBays: 0, shippedToday: 0, shippedWeek: 0, gatesWaiting: 0, oldestWaitMs: 0, lateGates: 0, stops: [], killedWorkOrders: 0, spent: 0, budget: 0, agentSuccess: null, agentSuccessTrend: [] };
+  const factory = (over: Record<string, unknown> = {}) => ({
+    mode: "factory", approvals: [], conversations: [], badges: {}, mine: MINE, figures: FIG, attention: [],
+    control: { killed: null, restoreApprovals: [], restoreNeeds: 2, admins: [{ id: "p-asha", name: "Asha Raman" }], impact: { projects: 0, workOrders: 0, running: 0, prs: 0 } },
+    human: { waiting: [], gates: { count: 0, oldestMs: 0, sole: 0 }, trust: { proposals: [], demotions: [] }, learning: [] },
+    onboarding: { stages: [{ id: "connected", name: "Connected", count: 0 }, { id: "ready", name: "Ready", count: 0 }], stuck: [], open: [], total: 0, ready: 0 },
+    spend: { projects: [], vendors: [] }, ...over,
+  });
+
+  it("an empty factory shows real empty states, never sample data", async () => {
+    setup(ASHA, { "GET /api/v1/home": () => ({ body: factory() }) });
+    mount(<HomeView />);
+    expect(await screen.findByRole("heading", { name: "Acme factory" })).toBeTruthy();
+    expect(screen.getByText("Nothing needs attention")).toBeTruthy();
+    expect(screen.getByText("Factory running. 0 projects, 0 work orders in flight, 0 waiting on approvers.")).toBeTruthy();
+    expect(document.getElementById("hm-kpi-success")?.textContent).toContain("no scored runs yet");
+    expect(screen.getByText("Nobody has approvals waiting.")).toBeTruthy();
+    expect(screen.getByText("No learning proposals waiting for review.")).toBeTruthy();
+    expect(screen.getByText("No repos are connected yet.")).toBeTruthy();
+    expect(document.getElementById("hm-kill")).toBeTruthy();
+    expect(screen.getByText("No projects yet")).toBeTruthy();
+  });
+
+  it("renders the attention queue by severity and a critical callout from the API", async () => {
+    setup(ASHA, {
+      "GET /api/v1/home": () => ({
+        body: factory({
+          figures: { ...FIG, inFlight: 4, running: 2, gatesWaiting: 1, oldestWaitMs: 3_600_000, lateGates: 1, stops: ["Payments halted"] },
+          attention: [
+            { id: "hm-att-wo-WO-1", sev: 0, icon: "shield", title: "WO-1 on security hold", where: "Payments", sub: "Secret in diff", act: { label: "Traveler", route: "traveler", wo: "WO-1", project: "payments" } },
+            { id: "hm-att-sla-WO-2-G2", sev: 1, icon: "clock", title: "G2 past SLA on WO-2", where: "Payments", sub: "Waiting 30 h", act: { label: "Traveler", route: "traveler", wo: "WO-2", project: "payments" } },
+          ],
+        }),
+      }),
+    });
+    mount(<HomeView />);
+    expect(await screen.findByText("1 critical: WO-1 on security hold.")).toBeTruthy();
+    expect(screen.getByText("Factory running. 0 projects, 4 work orders in flight, 1 waiting on approvers, 2 items need attention.")).toBeTruthy();
+    const items = document.querySelectorAll(".hm-att-item");
+    expect(items).toHaveLength(2);
+    expect(items[0]?.className).toContain("hm-sev-crit");
+    expect(document.getElementById("hm-kpi-gates")?.textContent).toContain("1 past SLA");
+    expect(document.getElementById("hm-kpi-stops")?.textContent).toContain("Payments halted");
+  });
+
+  it("shows a killed factory with its restore steps and who can approve next", async () => {
+    setup(ASHA, {
+      "GET /api/v1/home": () => ({
+        body: factory({ control: { killed: { by: "p-asha", at: Date.now() - 60_000, reason: "Leaked token", mode: "hold" }, restoreApprovals: [{ by: "p-asha", at: Date.now() }], restoreNeeds: 2, admins: [{ id: "p-asha", name: "Asha Raman" }, { id: "p-omar", name: "Omar Haddad" }], impact: { projects: 0, workOrders: 0, running: 0, prs: 0 } } }),
+      }),
+    });
+    mount(<HomeView />);
+    expect(await screen.findByText("Factory killed")).toBeTruthy();
+    expect(screen.getByText("Leaked token")).toBeTruthy();
+    expect(screen.getByText("Restore approvals 1 of 2")).toBeTruthy();
+    expect(screen.getByText("Can approve next: Omar Haddad.")).toBeTruthy();
+    const btn = document.getElementById("hm-restore")!;
+    expect(btn.textContent).toContain("Approve restore (2 of 2)");
+    // The same admin already approved, so the button is locked with the reason.
+    await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBe("true"));
+  });
+
+  it("people without a factory role get My work, with their approvals and questions from the API", async () => {
+    const calls = setup(TOMAS, {
+      "GET /api/v1/home": () => ({
+        body: {
+          mode: "mine", badges: {},
+          approvals: [{ wo: "WO-9", title: "Fix rounding", gate: "G3d", gateLabel: "G3d", gateName: "Design review", project: "payments", projectName: "Payments", have: 0, need: 1 }, { repo: "r1", repoName: "pay-api", pr: 7, project: "payments", projectName: "Payments" }],
+          conversations: [{ wo: "WO-10", title: "Add export", project: "payments", question: "Which format?" }],
+          mine: { workOrders: [{ id: "WO-10", title: "Add export", project: "payments", projectName: "Payments", state: "waiting", bay: null, bayName: null, station: "Intake", cls: "feature", doneAt: null }], projects: [], factoryRole: false },
+        },
+      }),
+      "POST /api/v1/gate-instances/WO-9%3AG3d/approve": () => ({ body: { ok: true, msg: "G3d approved on WO-9." } }),
+    });
+    mount(<HomeView />);
+    expect(await screen.findByRole("heading", { name: "My work" })).toBeTruthy();
+    expect(document.getElementById("hm-my-k1")?.textContent).toContain("2");
+    expect(screen.getByText("Which format?")).toBeTruthy();
+    expect(screen.getByText("Merge onboarding PR pay-api#7")).toBeTruthy();
+    expect(document.getElementById("hm-tok-WO-10")?.className).toContain("tok-waiting");
+    expect(document.getElementById("hm-to-factory")).toBeNull();
+    fireEvent.click(document.getElementById("hm-my-ok-WO-9-G3d")!);
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/approve"))).toBe(true));
+    expect(await screen.findByText("G3d approved on WO-9.")).toBeTruthy();
+    expect(screen.getByText("No projects yet")).toBeTruthy();
+  });
+
+  it("a Factory Admin can switch to My work and back", async () => {
+    setup(ASHA, { "GET /api/v1/home": () => ({ body: factory() }) });
+    mount(<HomeView />);
+    fireEvent.click(await screen.findByText("My work"));
+    expect(await screen.findByRole("heading", { name: "My work" })).toBeTruthy();
+    expect(screen.getByText("No approvals waiting")).toBeTruthy();
+    fireEvent.click(document.getElementById("hm-to-factory")!);
+    expect(await screen.findByRole("heading", { name: "Acme factory" })).toBeTruthy();
+  });
+});

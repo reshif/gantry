@@ -141,14 +141,14 @@ export const ops = {
   setGateMode: (projectId: string, gateId: string, mode: string, v?: Versioned) =>
     run(["projects"], patch(api(`projects/${enc(projectId)}/config`), { gate: gateId, mode }, opts(v))),
   addStation: (projectId: string, def: Obj, afterId?: string, v?: Versioned) =>
-    run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/stations`), { def, after: afterId ?? null }, opts(v))),
+    run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/stations`), { def, after: afterId ?? null }, opts(v, create))),
   removeStation: (projectId: string, stationId: string, v?: Versioned) =>
     run(["projects", "floor"], del(api(`projects/${enc(projectId)}/flow/stations/${enc(stationId)}`), undefined, opts(v))),
   moveStation: (projectId: string, stationId: string, dir: number, v?: Versioned) =>
     run(["projects", "floor"], patch(api(`projects/${enc(projectId)}/flow/stations/${enc(stationId)}`), { move: dir }, opts(v))),
-  addGate: (projectId: string, def: Obj, v?: Versioned) => run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/gates`), { def }, opts(v))),
-  addBay: (projectId: string, def: Obj, v?: Versioned) => run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/bays`), { def }, opts(v))),
-  addClass: (projectId: string, def: Obj, v?: Versioned) => run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/classes`), { def }, opts(v))),
+  addGate: (projectId: string, def: Obj, v?: Versioned) => run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/gates`), { def }, opts(v, create))),
+  addBay: (projectId: string, def: Obj, v?: Versioned) => run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/bays`), { def }, opts(v, create))),
+  addClass: (projectId: string, def: Obj, v?: Versioned) => run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/classes`), { def }, opts(v, create))),
   updateClass: (projectId: string, clsId: string, patchBody: Obj, v?: Versioned) =>
     run(["projects", "floor"], patch(api(`projects/${enc(projectId)}/flow/classes/${enc(clsId)}`), patchBody, opts(v))),
   setMemberRole: (personId: string, projectId: string, role: string, add: boolean) =>
@@ -266,8 +266,8 @@ export const ops = {
   /** The access simulator: the same decision function as enforcement. Changes nothing. */
   simulateAccess: (q: { person: string; action: string; project?: string; repo?: string; time?: number }) => post(api("access/simulate"), q),
   saveSavedView: (view: Obj) => run(["savedViews"], post(api("saved-views"), view, create)),
-  updateSavedView: (id: string, patchBody: Obj) => run(["savedViews"], patch(api(`saved-views/${enc(id)}`), patchBody)),
-  deleteSavedView: (id: string) => run(["savedViews"], del(api(`saved-views/${enc(id)}`))),
+  updateSavedView: (id: string, patchBody: Obj, v?: Versioned) => run(["savedViews"], patch(api(`saved-views/${enc(id)}`), patchBody, opts(v))),
+  deleteSavedView: (id: string, v?: Versioned) => run(["savedViews"], del(api(`saved-views/${enc(id)}`), undefined, opts(v))),
 
   /* ===== console ===== */
   /** The console endpoint, non-streaming form: the whole answer and any proposed confirm cards. */
@@ -277,6 +277,11 @@ export const ops = {
 export type Ops = typeof ops;
 
 /** GET /auth/login target for a sign-in method (spec 14.1). `loginHint` is the email of a demo account. */
+/** Fresh sign-in for a step-up (spec 14.1), coming back to the same screen: the hash route travels as `return_to`. */
+export function stepUpUrl(hash: string = typeof window === "undefined" ? "" : window.location.hash): string {
+  return `/auth/login?step_up=1&return_to=${encodeURIComponent(`/${hash}`)}`;
+}
+
 export function loginUrl(method: "sso" | "github", loginHint?: string): string {
   const sp = new URLSearchParams();
   if (loginHint) sp.set("login_hint", loginHint);

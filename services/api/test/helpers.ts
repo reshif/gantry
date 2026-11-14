@@ -83,10 +83,10 @@ export interface TestApp {
   session(personId: string, o?: { authAgeSec?: number; ip?: string }): Promise<{ cookie: string; csrf: string; id: string; headers: Record<string, string> }>;
 }
 
-export async function startApp(o: { config?: Partial<Config>; build?: Partial<BuildOptions>; seed?: boolean; seedNow?: number } = {}): Promise<TestApp> {
+export async function startApp(o: { config?: Partial<Config>; build?: Partial<BuildOptions>; seed?: boolean; seedNow?: number; /** Load the dev seed's audit history into the ledger (off by default so tests count only their own events). */ seedAudit?: boolean } = {}): Promise<TestApp> {
   const db = await createTestDb();
   const config = testConfig({ devSeed: o.seed !== false, ...o.config });
-  const { orgId } = await bootstrapOrg(db.app, config, undefined, { seedNow: o.seedNow });
+  const { orgId } = await bootstrapOrg(db.app, config, undefined, { seedNow: o.seedNow, seedAudit: o.seedAudit ?? false });
   const app = await buildApp({ pool: db.app, config, orgId, logger: false, ...o.build });
   return {
     app, db, orgId, config,

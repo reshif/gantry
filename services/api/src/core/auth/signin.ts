@@ -83,7 +83,8 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     await tx.query(`update people set idp_subject = coalesce(idp_subject, $3), status = case when status = 'invited' then 'active' else status end, last_seen_at = now(), updated_at = now() where org_id = $1 and id = $2`, [orgId, person.id, claims.sub]);
 
     // Bootstrap Factory Admin: the configured email, signing in to an org that has no Factory Admin yet.
-    if (g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail) {
+    // Only a provider-verified address counts: an IdP that omits email_verified must not hand out the factory.
+    if (g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true) {
       const has = await tx.query(`select 1 from role_assignments where org_id = $1 and role_id = 'factory_admin' and scope_type = 'factory' and revoked_at is null limit 1`, [orgId]);
       if (!has.rowCount) {
         await tx.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type, granted_by) values ($1,$2,$3,'factory_admin','factory','system')`, [orgId, `ra-boot-${person.id}`, person.id]);

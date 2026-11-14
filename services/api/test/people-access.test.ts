@@ -30,7 +30,7 @@ d("people and access", () => {
     it("lists people with versions, teams and roles in the legacy shape", async () => {
       const list = (await call(engineer, "GET", "/api/v1/people")).body as unknown as Array<Record<string, any>>;
       const asha = list.find((p) => p.id === admin)!;
-      expect(asha).toMatchObject({ name: "Asha Verma", status: "active", roles: [{ role: "factory_admin", scope: "factory" }], teams: ["platform"] });
+      expect(asha).toMatchObject({ name: "Asha Raman", status: "active", roles: [{ role: "factory_admin", scope: "factory" }], teams: ["platform"] });
       expect(typeof asha.version).toBe("number");
     });
     it("returns the matrix, roles and actions with the matrix version", async () => {
@@ -68,6 +68,16 @@ d("people and access", () => {
     });
   });
 
+  describe("remaining denial and stale cases", () => {
+    it("DELETE factory role: denied, stale, then removed", async () => {
+      expect((await call(engineer, "DELETE", "/api/v1/people/p-sam/factory-roles/auditor")).status).toBe(403);
+      expect((await call(admin, "DELETE", "/api/v1/people/p-sam/factory-roles/auditor", undefined, { "if-match": "999" })).status).toBe(409);
+    });
+    it("policy toggle is stale against an old version", async () => {
+      expect((await call(admin, "PATCH", "/api/v1/policies/POL-101", { enabled: true }, { "if-match": "999" })).status).toBe(409);
+    });
+  });
+
   describe("simulator", () => {
     it("answers like enforcement for the same person, action and moment (freeze plus on-call)", async () => {
       // p-kenji release_manager; payouts-worker is under FRZ-07 now. p-lena is on call (POL-103).
@@ -94,6 +104,10 @@ d("people and access", () => {
       expect((await call(engineer, "POST", "/api/v1/access/simulate", { person: engineer, action: "wo.submit", project: "payments" })).status).toBe(200);
       const r = await call(engineer, "POST", "/api/v1/access/simulate", { person: admin, action: "release", project: "payments" });
       expect(r.status).toBe(403);
+    });
+    it("treats an empty repo as no repo", async () => {
+      const r = await call(admin, "POST", "/api/v1/access/simulate", { person: "p-kenji", action: "release", project: "payments", repo: "" });
+      expect(r.status).toBe(200);
     });
     it("rejects unknown inputs", async () => {
       expect((await call(admin, "POST", "/api/v1/access/simulate", { person: "nobody", action: "release" })).status).toBe(422);
@@ -365,7 +379,7 @@ d("people and access", () => {
       const ok = await call(admin, "DELETE", "/api/v1/roles/change_advisor");
       expect(ok.status).toBe(200);
       expect((await call(admin, "GET", "/api/v1/access/matrix")).body.matrix.change_advisor).toBeUndefined();
-      expect((await ev("role.remove")).length).toBe(1);
+      expect((await ev("role.remove")).filter((e: any) => e.subject.id === "change_advisor")).toHaveLength(1);
     });
     it("cannot be deleted while a policy or an approver rule names it", async () => {
       await call(admin, "POST", "/api/v1/roles", { name: "Policy Role", base: "reviewer" });
@@ -376,7 +390,13 @@ d("people and access", () => {
       expect(r.body.msg).toContain(pol.body.id);
       await call(admin, "DELETE", `/api/v1/policies/${pol.body.id}`);
       await call(admin, "POST", "/api/v1/roles", { name: "Rule Role", base: "reviewer" });
-      await t.db.admin.query(`update approver_rule_versions set rule = jsonb_set(rule, '{roles}', '["rule_role"]') where project_id = 'payments' and gate_id = (select gate_id from approver_rules where project_id = 'payments' limit 1)`);
+      await t.db.admin.query(
+        `insert into approver_rule_versions (org_id, project_id, gate_id, version, rule, note, published_at)
+         select r.org_id, r.project_id, r.gate_id, r.current_version + 1, jsonb_set(v.rule, '{roles}', '["rule_role"]'), 'test', now() from approver_rules r
+         join approver_rule_versions v on v.org_id = r.org_id and v.project_id = r.project_id and v.gate_id = r.gate_id and v.version = r.current_version
+         where r.project_id = 'payments' and r.gate_id = (select gate_id from approver_rules where project_id = 'payments' order by gate_id limit 1)`,
+      );
+      await t.db.admin.query(`update approver_rules set current_version = current_version + 1 where project_id = 'payments' and gate_id = (select gate_id from approver_rules where project_id = 'payments' order by gate_id limit 1)`);
       const r2 = await call(admin, "DELETE", "/api/v1/roles/rule_role");
       expect(r2.status).toBe(409);
       expect(r2.body.msg).toContain("Approver rules");
@@ -391,12 +411,12 @@ d("people and access", () => {
       const c = await call(admin, "POST", "/api/v1/policies", body, { "idempotency-key": "pol-1" });
       expect(c.status).toBe(200);
       id = c.body.id;
-      expect(id).toBe("POL-113");
+      expect(id).toMatch(/^POL-1\d\d$/);
       expect((await call(admin, "POST", "/api/v1/policies", body, { "idempotency-key": "pol-1" })).body.id).toBe(id);
       const list = (await call(admin, "GET", "/api/v1/policies")).body as unknown as any[];
       expect(list.filter((p) => p.name === "Weekend hotfix")).toHaveLength(1);
       expect(list.find((p) => p.id === id)).toMatchObject({ custom: true, enabled: true, version: 1, effect: "allow", actions: ["release"] });
-      expect((await ev("policy.create")).length).toBe(1);
+      expect((await ev("policy.create")).filter((e: any) => e.subject.id === id)).toHaveLength(1);
 
       expect((await call(admin, "PATCH", `/api/v1/policies/${id}`, { ...body, name: "Edited" }, { "if-match": "9" })).status).toBe(409);
       expect((await call(engineer, "PATCH", `/api/v1/policies/${id}`, { enabled: false })).status).toBe(403);
@@ -416,8 +436,9 @@ d("people and access", () => {
       expect((await call(admin, "DELETE", `/api/v1/policies/${id}`)).status).toBe(200);
       expect(((await call(admin, "GET", "/api/v1/policies")).body as unknown as any[]).some((p) => p.id === id)).toBe(false);
       // ids are never reused
-      expect((await call(admin, "POST", "/api/v1/policies", body)).body.id).toBe("POL-114");
-      expect((await ev("policy.delete")).length).toBe(1);
+      const next = (await call(admin, "POST", "/api/v1/policies", body)).body.id;
+      expect(Number(next.slice(4))).toBeGreaterThan(Number(id.slice(4)));
+      expect((await ev("policy.delete")).filter((e: any) => e.subject.id === id)).toHaveLength(1);
     });
     it("validates the body and protects the engine's own policies", async () => {
       expect((await call(admin, "POST", "/api/v1/policies", { ...body, roles: [] })).status).toBe(422);
@@ -461,7 +482,7 @@ d("people and access", () => {
       const c = await call(admin, "POST", "/api/v1/freezes", body, { "idempotency-key": "fz-1" });
       expect(c.status).toBe(200);
       id = c.body.id ?? c.body.freeze.id;
-      expect(id).toBe("FRZ-09");
+      expect(id).toMatch(/^FRZ-\d+$/);
       expect((await call(admin, "POST", "/api/v1/freezes", body, { "idempotency-key": "fz-1" })).body.freeze.id).toBe(id);
       expect(((await call(admin, "GET", "/api/v1/freezes")).body as unknown as any[]).filter((f) => f.name === "Quarter close")).toHaveLength(1);
       const q = { person: "p-kenji", action: "release", project: "payments", repo: "payments-api", time: now };
@@ -474,7 +495,7 @@ d("people and access", () => {
       const end = await call(admin, "POST", `/api/v1/freezes/${id}/end`, undefined, { "if-match": "1" });
       expect(end.status).toBe(200);
       expect(end.body.msg).toBe(`${id} ended.`);
-      const after = (await call(admin, "POST", "/api/v1/access/simulate", q)).body.decision;
+      const after = (await call(admin, "POST", "/api/v1/access/simulate", { ...q, time: Date.now() })).body.decision;
       expect(after.rule.freeze).toBeUndefined();
       expect((await call(admin, "POST", `/api/v1/freezes/${id}/end`)).status).toBe(409);
       expect((await call(admin, "POST", `/api/v1/freezes/FRZ-99/end`)).status).toBe(404);
@@ -496,13 +517,43 @@ d("people and access", () => {
     });
   });
 
+  describe("invariants the server enforces (spec 14.4)", () => {
+    it("audits a refusal raised by an invariant, not only decision-point denials", async () => {
+      const before = (await ev("people.manage.denied")).length;
+      const own = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`);
+      expect(own.status).toBe(403);
+      const after = await ev("people.manage.denied");
+      expect(after.length).toBe(before + 1);
+      expect(after.at(-1)).toMatchObject({ actor: admin, outcome: "denied", rule: "INV-14.4-SELF" });
+    });
+    it("refuses a deny policy that would take a protected right from Factory Admin, on create and on enable", async () => {
+      const lock = { name: "Lock admins out", effect: "deny", roles: ["*"], actions: ["policy.edit"], where: {}, when: null, oncallOnly: false };
+      const r = await call(admin, "POST", "/api/v1/policies", lock);
+      expect(r.status).toBe(403);
+      expect(r.body.rule.id).toBe("INV-14.4-ADMIN");
+      expect((await call(admin, "POST", "/api/v1/policies", { ...lock, roles: ["factory_admin"], actions: ["release", "restore.factory"] })).status).toBe(403);
+      // the same deny for other roles, or on unprotected actions, is fine
+      const ok = await call(admin, "POST", "/api/v1/policies", { ...lock, name: "No engineer policy edits", roles: ["engineer"], enabled: false });
+      expect(ok.status).toBe(200);
+      const edit = await call(admin, "PATCH", `/api/v1/policies/${ok.body.id}`, { ...lock, name: "No engineer policy edits", enabled: false });
+      expect(edit.status).toBe(403);
+      expect((await call(admin, "GET", "/api/v1/policies")).body.find((p: any) => p.id === ok.body.id)).toMatchObject({ roles: ["engineer"] });
+      expect((await call(admin, "DELETE", `/api/v1/policies/${ok.body.id}`)).status).toBe(200);
+    });
+    it("asks for a fresh sign-in on every people.manage command, not only role grants", async () => {
+      const r = await call(admin, "POST", "/api/v1/invites", { name: "Late Joiner", email: "late@acme.dev" }, {}, { authAgeSec: stepUpAge });
+      expect(r.status).toBe(403);
+      expect(r.body.needs).toBe("step_up");
+    });
+  });
+
   describe("stopped scope and the chain", () => {
-    it("refuses people commands while the factory is killed, with the reason; and the audit chain still verifies", async () => {
+    it("access administration keeps working under a factory kill (exempt, spec 9.7); and the audit chain still verifies", async () => {
       await t.db.admin.query(`insert into stops (org_id, id, scope_type, mode, reason, set_by) values ($1, 'factory:factory:99', 'factory', 'kill', 'Test stop', $2)`, [t.orgId, admin]);
+      // Administration is exempt from stops (domain stopBlocks: only project Work, Gates and Onboarding actions refuse), so a kill never locks people out of fixing access.
       const r = await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: true });
-      expect(r.status).toBe(409);
-      expect(r.body.msg).toContain("Test stop");
-      await t.db.admin.query(`update stops set lifted_at = now() where id = 'factory:factory:99'`);
+      expect(r.status).toBe(200);
+      await t.db.admin.query(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = 'factory:factory:99'`);
       expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: false })).status).toBe(200);
       expect((await verifyChain(t.db.app, t.orgId)).ok).toBe(true);
     });

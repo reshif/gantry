@@ -23,7 +23,7 @@ export const DEPENDENTS: Readonly<Record<string, readonly string[]>> = {
   learning: ["home"],
   integrationInstances: ["home"],
   integrations: ["integrationInstances"],
-  audit: [],
+  audit: ["activity"],
 };
 
 /** Slices that change what a `can()` decision answers. */

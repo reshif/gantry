@@ -1,6 +1,6 @@
-import { policyText, type Policy } from "@gantry/domain";
+import { PROTECTED_RIGHTS, policyText, type Policy } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
-import { conflict, invalid, notFound } from "../../core/errors.js";
+import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import type { CommandResult } from "../../core/command.js";
 import { lockOrgConfig, stateIn } from "./config.js";
 import type { PolicyInput } from "./schemas.js";
@@ -34,8 +34,23 @@ function validate(st: Awaited<ReturnType<typeof stateIn>>, body: PolicyInput): v
   for (const a of body.actions) if (!actions.has(a)) throw invalid(`There is no action ${a}.`);
   const projects = new Set(st.projects.map((p) => p.id));
   for (const p of body.where.projects ?? []) if (!projects.has(p)) throw invalid(`There is no project ${p}.`);
+  checkLockout(body);
   if (body.when && !body.when.days.length) throw invalid("Pick at least one day.");
   if (body.when && body.when.to !== "24:00" && body.when.from >= body.when.to) throw invalid("'To' must be after 'From'.");
+}
+
+/**
+ * Spec 14.4 (I8, I9): a Factory Admin cannot lose the rights to edit policy, manage roles, people or security, or restore the factory.
+ * A deny policy that reaches Factory Admin (named, or every role) on one of those rights would take it away, possibly with no way
+ * back (the policy could not then be edited), so it is refused whatever its where and when.
+ */
+function checkLockout(p: Pick<PolicyInput, "effect" | "roles" | "actions">): void {
+  if (p.effect !== "deny" || !p.roles.some((r) => r === "*" || r === "factory_admin")) return;
+  const hit = p.actions.filter((a) => (PROTECTED_RIGHTS as readonly string[]).includes(a));
+  if (!hit.length) return;
+  throw refuse("denied", `A deny policy cannot take ${hit.join(", ")} away from Factory Admin, or nobody could undo it.`, {
+    rule: { kind: "invariant", id: "INV-14.4-ADMIN", name: "Factory Admin rights" }, needs: "Leave Factory Admin out of the policy or drop those actions",
+  });
 }
 
 const bodyOf = (p: PolicyInput, extra: { id: string; enabled: boolean; custom: boolean }): Record<string, unknown> => {
@@ -96,6 +111,7 @@ export async function updatePolicy(tx: Tx, orgId: string, by: string, id: string
 export async function setPolicyEnabled(tx: Tx, orgId: string, by: string, id: string, on: boolean): Promise<CommandResult<{ id: string; version: number }>> {
   await lockOrgConfig(tx, orgId);
   const { policy, version } = await load(tx, orgId, id);
+  if (on) checkLockout(policy as unknown as PolicyInput);
   if (policy.enabled === on) return { msg: `${id} is already ${on ? "enabled" : "disabled"}.`, events: [], extra: { id, version }, changes: ["policies"], project: null };
   const next = version + 1;
   const { version: _v, ...body } = policy as Policy & { version?: number };

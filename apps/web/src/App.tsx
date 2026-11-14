@@ -53,11 +53,13 @@ function Root() {
 }
 
 export default function App() {
-  const client = useMemo(() => {
-    const c = makeQueryClient();
-    bindQueryClient(c);
-    return c;
-  }, []);
+  const client = useMemo(() => makeQueryClient(), []);
+  // Bind in an effect, not in useMemo: React StrictMode (dev) runs the memo twice and keeps one result, so binding there can leave
+  // ops.invalidateSlices pointing at a client the UI does not use and no screen refreshes after a change.
+  useEffect(() => {
+    bindQueryClient(client);
+    return () => bindQueryClient(null);
+  }, [client]);
   useEffect(() => {
     setUnauthorizedHandler(() => invalidateSlices(["session"]));
     return () => setUnauthorizedHandler(null);

@@ -31,7 +31,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
   it("people round-trip, including roles, teams, away, on-call and legacy extras", async () => {
     const got = (await readPeople(t.db.app, t.orgId)) as unknown as Array<Record<string, unknown>>;
     // `mfa` is a boolean column: absent in the seed reads back as false.
-    const norm = (ps: Array<Record<string, any>>) => ps.map((p) => ({ mfa: false, ...p, teams: [...p.teams].sort() }));
+    const norm = (ps: Array<Record<string, any>>) => ps.map(({ version: _v, ...p }) => ({ mfa: false, ...p, teams: [...p.teams].sort() }));
     expect(norm(got)).toEqual(norm(S.people as never));
     expect(got.map((p) => p.id)).toEqual(S.people.map((p) => p.id)); // seed order kept
   });
@@ -40,8 +40,8 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
     expect(await readTeams(t.db.app, t.orgId)).toEqual(S.teams);
     expect((await readTemplates(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(S.templates);
     expect((await readMatrix(t.db.app, t.orgId)).value).toEqual(seed.state.matrix);
-    expect(await readPolicies(t.db.app, t.orgId)).toEqual(S.policies);
-    expect(await readFreezes(t.db.app, t.orgId)).toEqual(S.freezes);
+    expect((await readPolicies(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(S.policies);
+    expect((await readFreezes(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(S.freezes);
   });
 
   it("projects round-trip: flow, approvers, notifications, budget, teams, extras", async () => {
@@ -67,7 +67,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
     expect(cat.bays).toEqual(seed.catalog.bays);
     expect(cat.classes).toEqual(seed.catalog.classes);
     expect(cat.actions).toEqual(seed.catalog.actions);
-    expect(await readRoles(t.db.app, t.orgId)).toEqual(seed.catalog.roles);
+    expect((await readRoles(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(seed.catalog.roles);
     const sec = await readSecurity(t.db.app, t.orgId);
     expect(sec.value).toEqual({ ...(seed.state.security as object), ipAllow: [] });
   });

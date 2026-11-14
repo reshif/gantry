@@ -1,7 +1,7 @@
 import type { ApproverRule, Catalog, Decision, Project, ProjectFlow } from "@gantry/domain";
 import type { Queryable, Tx } from "@gantry/db";
 import type { FastifyRequest } from "fastify";
-import { auditDenial, type CommandSpec } from "../../core/command.js";
+import type { CommandSpec } from "../../core/command.js";
 import { refuseDecision } from "../../core/decide.js";
 import { notFound, stale } from "../../core/errors.js";
 import { readCatalog, readProjects } from "../../core/read/index.js";
@@ -45,7 +45,7 @@ export async function lockProject(tx: Tx, orgId: string, id: string, ifMatch: nu
  * `edit` (flow, config, classes): refused in an archived or killed project and while the factory is killed.
  * `light` (approvers, members): refused only in an archived project, so access can still be revoked during an incident.
  */
-export async function refuseIfStopped(req: FastifyRequest, spec: Pick<CommandSpec, "action" | "scope">, tx: Tx, orgId: string, projectId: string, level: "edit" | "light" = "edit"): Promise<void> {
+export async function refuseIfStopped(_req: FastifyRequest, _spec: Pick<CommandSpec, "action" | "scope">, tx: Tx, orgId: string, projectId: string, level: "edit" | "light" = "edit"): Promise<void> {
   const p = (await tx.query<{ name: string; status: string }>(`select name, status from projects where org_id = $1 and id = $2`, [orgId, projectId])).rows[0];
   if (!p) throw notFound("No such project.");
   let reason: string | null = p.status === "archived" ? `${p.name} is archived and read-only. Unarchive it to change it.` : null;
@@ -59,8 +59,8 @@ export async function refuseIfStopped(req: FastifyRequest, spec: Pick<CommandSpe
     if (s) reason = `${s.scope_type === "factory" ? "The factory" : p.name} is killed: ${s.reason || "no reason given"}. Restore it to change its configuration.`;
   }
   if (!reason) return;
+  // The command pipeline audits this refusal as a denial (in its own transaction) when it reaches it.
   const d: Decision = { allowed: false, reason, rule: { kind: "stop", id: "STOP", name: "Stop state" }, needs: "" };
-  await auditDenial(req, spec, d).catch((err: unknown) => req.log.error({ err }, "could not audit denial"));
   throw refuseDecision(d);
 }
 

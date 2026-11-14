@@ -3,6 +3,7 @@ import { seedDevOrg, withTx, type SeedState } from "@gantry/db";
 import type pg from "pg";
 import type { Config } from "./config.js";
 import { DEFAULT_SECURITY } from "./read/index.js";
+import { seedDemoAudit } from "../areas/audit/seed.js";
 
 export interface BootResult {
   orgId: string;
@@ -15,7 +16,7 @@ export interface BootResult {
  * seed is loaded first, and only if the organisation does not exist yet. Without it the org starts empty: just the roles,
  * matrix and settings, and a Factory Admin appears when GANTRY_BOOTSTRAP_ADMIN_EMAIL signs in for the first time.
  */
-export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug" | "orgName" | "devSeed">, log?: { info(o: object, m?: string): void }, opts: { seedNow?: number } = {}): Promise<BootResult> {
+export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug" | "orgName" | "devSeed">, log?: { info(o: object, m?: string): void }, opts: { seedNow?: number; /** Dev seed only: also load the seed's audit history into the ledger (default true). */ seedAudit?: boolean } = {}): Promise<BootResult> {
   let seeded = false;
   if (config.devSeed) {
     const seed = devSeed(opts.seedNow);
@@ -51,6 +52,7 @@ export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug"
     );
     return id;
   });
+  if (seeded && opts.seedAudit !== false) await seedDemoAudit(pool, orgId, devSeed(opts.seedNow));
   return { orgId, seeded };
 }
 

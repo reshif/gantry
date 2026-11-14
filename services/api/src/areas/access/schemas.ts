@@ -52,6 +52,6 @@ export const SimulateBody = z.object({
   person: id,
   action: id,
   project: id.nullish(),
-  repo: id.nullish(),
+  repo: z.string().max(100).nullish(),
   time: z.number().finite().optional(),
 });

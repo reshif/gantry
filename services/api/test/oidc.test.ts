@@ -176,6 +176,11 @@ d("OIDC sign-in against a local issuer", () => {
     expect(ok.r.headers.location).toBe("/api/x#record");
     const evil = await signInFlow(t, issuer, { ...asha, auth_time: now() }, { query: "?return_to=%2F%2Fevil.example" });
     expect(evil.r.headers.location).toBe("/");
+    // browsers drop tabs and newlines and read "\\" as "/": each of these would land on evil.example
+    for (const q of ["%2F%09%2Fevil.example", "%2F%0A%2Fevil.example", "%2F%5Cevil.example", "%2Fok%5C..%5C%5Cevil.example"]) {
+      const r = await signInFlow(t, issuer, { ...asha, auth_time: now() }, { query: `?return_to=${q}` });
+      expect(r.r.headers.location).toBe("/");
+    }
   });
 
   it("GitHub method: refused with a clear auth_error when not configured; uses kc_idp_hint when configured", async () => {
@@ -257,6 +262,12 @@ d("an empty org: bootstrap admin", () => {
     expect(await n("roles")).toBeGreaterThanOrEqual(9);
     expect(await n("role_matrix_versions")).toBe(1);
     expect(await n("security_settings")).toBe(1);
+  });
+
+  it("does not make the bootstrap email Factory Admin unless the provider verified it", async () => {
+    const unverified = await signInFlow(t, issuer, { sub: "boss-1", email: "boss@corp.example", name: "The Boss", auth_time: now() });
+    const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie: `__Host-gantry_session=${unverified.session!.value}` } })).json();
+    expect(me.person.roles).toEqual([]);
   });
 
   it("the first sign-in with the bootstrap email becomes Factory Admin; others get nothing", async () => {

@@ -6,6 +6,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { api, ApiError, get, getText, setCsrfToken } from "./client";
 import { qk } from "./keys";
+import { usePrefs } from "../lib/prefs";
 import type {
   AccessMatrixData, Agent, AgentInstructions, ApiConfig, ApiKey, AuditEntry, AuditFilters, CardTemplate, Conversation, Delivery,
   EvalExtra, EvalRun, EventEntry, FloorData, Freeze, HomeData, IntegrationInstance, IntegrationType, KillImpact, LearningFinding,
@@ -47,9 +48,11 @@ export function useMe(): Me | null {
   return q.data?.status === "in" ? q.data.me : null;
 }
 
-export const useSessions = () => useQuery({ queryKey: qk.sessions(), queryFn: () => get<Session[]>(api("sessions")) });
+/** `all`: everyone's sessions (Security screen); the server returns only the caller's own without security.manage. */
+export const useSessions = (o: { all?: boolean } = {}) =>
+  useQuery({ queryKey: o.all ? [...qk.sessions(), "all"] : qk.sessions(), queryFn: () => get<Session[]>(api("sessions"), o.all ? { all: "1" } : undefined) });
 export const useSecurity = () => useQuery({ queryKey: qk.security(), queryFn: () => get<SecuritySettings>(api("security")) });
-export const useSignins = (q: { cursor?: string; limit?: number } = {}) =>
+export const useSignins = (q: { cursor?: string; limit?: number; all?: "1" } = {}) =>
   useQuery({ queryKey: [...qk.signins(), q], queryFn: () => get<SignIn[] | Page<SignIn>>(api("signins"), q) });
 
 /* ---------- home, projects, configuration ---------- */
@@ -173,7 +176,10 @@ export const useWorkload = (scope?: string) => useQuery({ queryKey: qk.workload(
 /** Nav badges for the left nav, from GET /home. Empty until home loads. */
 export function useNavBadges(): Record<string, NavBadge> {
   const home = useHome();
-  return home.data?.badges ?? {};
+  const project = usePrefs().project;
+  // Floor, work-order and onboarding badges follow the selected project; the API gives them per project.
+  const byProject = (home.data?.projectBadges ?? {}) as Record<string, Record<string, NavBadge>>;
+  return { ...(home.data?.badges ?? {}), ...(project ? byProject[project] ?? {} : {}) };
 }
 
 export type { Me };

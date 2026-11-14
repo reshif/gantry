@@ -39,7 +39,9 @@ interface OidcState {
 }
 
 /** Only same-site relative paths may be returned to (no open redirect). */
-const safeReturn = (v: string | undefined): string => (v && /^\/(?![/\\])[^\r\n]*$/.test(v) ? v : "/");
+// Browsers strip tabs and newlines from URLs and treat "\\" like "/", so "/\t/evil.example" would become "//evil.example": refuse every
+// control character and backslash anywhere, not only a second leading slash.
+const safeReturn = (v: string | undefined): string => (v && /^\/(?![/\\])[^\u0000-\u001f\u007f\\]*$/.test(v) ? v : "/");
 
 const SecurityPatch = z.object({ path: z.string().min(1).max(100), value: z.unknown() });
 const SecuritySchema = z.object({

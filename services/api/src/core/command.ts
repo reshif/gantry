@@ -1,4 +1,4 @@
-import { auditCategoryFor, type Decision } from "@gantry/domain";
+import { auditCategoryFor, needsStepUp, type Decision } from "@gantry/domain";
 import {
   appendEvent, enqueue, enqueueOutbox, idempotency, withTx,
   type EventCategory, type EventChannel, type EventOutcome, type EventSubject, type Tx,
@@ -98,10 +98,17 @@ const VIA: readonly string[] = ["web", "console", "slack", "teams"];
 
 /** A denial found inside the transaction: the transaction rolls back, the denial is audited in its own, and the caller gets 403 or 409. */
 class Denied extends Error {
-  constructor(readonly decision: Decision) {
+  constructor(readonly decision: Decision, readonly refusal?: Refusal) {
     super(decision.reason);
   }
 }
+
+/** A permission or stop refusal raised by a command body (an invariant such as the last Factory Admin, a stopped project): audited like a decision-point denial. */
+const bodyDenial = (e: Refusal): Denied => {
+  const er = e.error;
+  const rule = er.rule ?? { kind: er.kind === "stopped" ? "stop" : "invariant", id: er.kind === "stopped" ? "STOP" : "INVARIANT", name: er.kind === "stopped" ? "Stop state" : "Invariant" };
+  return new Denied({ allowed: false, reason: er.msg, rule, needs: er.needs ?? "" }, e);
+};
 
 export function parseIfMatch(req: FastifyRequest): number | null {
   const h = req.headers["if-match"];
@@ -171,7 +178,9 @@ export async function command<X extends object = Record<string, never>>(
           ? { allowed: true, reason: `Authenticated service ${principal.id}.`, rule: { kind: "service", id: principal.id, name: `Service ${principal.id}` }, needs: "" }
           : spec.action === null ? SELF : decideFor(st, principal, spec.action, spec.scope ?? {});
       if (!decision.allowed) throw new Denied(decision);
-      if (spec.stepUp !== undefined && !stepUpSatisfied(req, spec.stepUp)) {
+      // Spec 14.1: kill, restore, policy, role, security, people and key operations need a fresh sign-in, whether or not the route asked.
+      const stepUp = spec.stepUp ?? (principal.kind === "person" && spec.action && needsStepUp(spec.action) ? 300 : undefined);
+      if (stepUp !== undefined && !stepUpSatisfied(req, stepUp)) {
         throw new Denied({ allowed: false, reason: "Sign in again to confirm this change.", rule: { kind: "step-up", id: "STEP-UP", name: "Fresh sign-in required" }, needs: "step_up" });
       }
       if (spec.ifMatch && ifMatch !== null) {
@@ -180,7 +189,13 @@ export async function command<X extends object = Record<string, never>>(
         if (cur !== ifMatch) throw refuse("stale", "This changed since you loaded it. Reload and try again.");
       }
       const actor = actorFor(req, decision, ifMatch, idemHeader);
-      const r = await fn(tx, actor);
+      let r: CommandResult<X>;
+      try {
+        r = await fn(tx, actor);
+      } catch (e) {
+        if (e instanceof Refusal && (e.error.kind === "denied" || e.error.kind === "stopped")) throw bodyDenial(e);
+        throw e;
+      }
       if (spec.reduced && (r.jobs?.length || r.outbox?.length)) throw new Error("reduced commands (stop controls) must not enqueue jobs or outbox rows");
       const ids: string[] = [];
       for (const e of r.events) {
@@ -210,7 +225,7 @@ export async function command<X extends object = Record<string, never>>(
   } catch (e) {
     if (e instanceof Denied) {
       await auditDenial(req, spec, e.decision).catch((err: unknown) => req.log.error({ err }, "could not audit denial"));
-      throw refuseDecision(e.decision);
+      throw e.refusal ?? refuseDecision(e.decision);
     }
     throw e;
   }

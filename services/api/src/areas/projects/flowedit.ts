@@ -242,6 +242,9 @@ export function replaceClasses(d: FlowDraft, next: WorkClass[], openByClass: Rec
   for (const c of next) {
     if (ids.has(c.id)) throw invalid(`Class ${c.id} appears twice.`);
     ids.add(c.id);
+    // Only a route that changed is checked: a built-in class may already end early (Spike skips Close).
+    const cur = d.flow.classes.find((x) => x.id === c.id);
+    if (cur && JSON.stringify(cur.skips) === JSON.stringify(c.skips)) continue;
     if (c.skips.some((s) => s === "intake" || s === "close")) throw invalid("Intake and Close can't be skipped.");
     if (c.skips.some((s) => !present(d, s))) throw invalid(`${c.name} skips a station that is not in this flow.`);
   }
