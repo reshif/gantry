@@ -1,0 +1,157 @@
+/**
+ * Display-only permission cache (spec 15.1). `useCan(action, ctx)` answers from a per-session
+ * cache; misses are collected in a microtask and sent as one POST /api/v1/can. The server decides
+ * every command; this only lets controls render disabled with a reason. The cache is cleared when
+ * matrix, policies, people (and the other decision inputs) change, and when the session changes.
+ */
+import { useSyncExternalStore } from "react";
+import { api, post } from "./client";
+import { onCanInvalidated } from "./keys";
+import type { CanCheck, CanResult } from "./types";
+
+export interface CanContext {
+  project?: string | null | undefined;
+  repo?: string | null | undefined;
+  time?: number | undefined;
+}
+
+/** Before the server answers a control stays usable-looking but unresolved. */
+export const PENDING: CanResult = { allowed: true, reason: "", needs: "" };
+
+export function canKey(session: string, check: CanCheck): string {
+  return JSON.stringify([session, check.action, check.project ?? null, check.repo ?? null, check.time ?? null]);
+}
+
+type Sender = (checks: CanCheck[]) => Promise<CanResult[] | null>;
+
+async function defaultSender(checks: CanCheck[]): Promise<CanResult[] | null> {
+  const r = await post<{ results: CanResult[] }>(api("can"), { checks });
+  return r.ok && Array.isArray(r.results) ? r.results : null;
+}
+
+export class CanBatcher {
+  private cache = new Map<string, CanResult>();
+  private pending = new Map<string, CanCheck>();
+  private inflight = new Set<string>();
+  private listeners = new Set<() => void>();
+  private scheduled = false;
+  private epoch = 0;
+  private session = "";
+  private version = 0;
+  batches = 0;
+
+  constructor(private send: Sender = defaultSender) {}
+
+  setSession(id: string | null): void {
+    const next = id ?? "";
+    if (next === this.session) return;
+    this.session = next;
+    this.reset(); // silent: called during render, and every consumer re-renders with the new session anyway
+  }
+
+  /** Drop cached decisions; subscribers re-request what they still show. */
+  clear(): void {
+    this.reset();
+    this.emit();
+  }
+
+  private reset(): void {
+    this.epoch++;
+    this.cache.clear();
+    this.pending.clear();
+    this.inflight.clear();
+  }
+
+  /** Cached answer, or null after queueing the check for the next microtask batch. */
+  peek(check: CanCheck): CanResult | null {
+    const key = canKey(this.session, check);
+    const hit = this.cache.get(key);
+    if (hit) return hit;
+    if (!this.inflight.has(key) && !this.pending.has(key)) {
+      this.pending.set(key, check);
+      this.schedule();
+    }
+    return null;
+  }
+
+  get(check: CanCheck): CanResult | null {
+    return this.cache.get(canKey(this.session, check)) ?? null;
+  }
+
+  subscribe = (fn: () => void): (() => void) => {
+    this.listeners.add(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
+  };
+  snapshot = (): number => this.version;
+
+  private emit(): void {
+    this.version++;
+    for (const fn of [...this.listeners]) fn();
+  }
+
+  private schedule(): void {
+    if (this.scheduled) return;
+    this.scheduled = true;
+    queueMicrotask(() => void this.flush());
+  }
+
+  private async flush(): Promise<void> {
+    this.scheduled = false;
+    if (!this.pending.size) return;
+    const entries = [...this.pending.entries()];
+    this.pending.clear();
+    const epoch = this.epoch;
+    for (const [k] of entries) this.inflight.add(k);
+    this.batches++;
+    const results = await this.send(entries.map(([, c]) => c));
+    if (epoch !== this.epoch) return; // invalidated while in flight: the answers are stale
+    for (const [k] of entries) this.inflight.delete(k);
+    if (results && results.length === entries.length) {
+      entries.forEach(([k], i) => {
+        const r = results[i];
+        if (r) this.cache.set(k, r);
+      });
+    } else {
+      // The server did not answer: show locked rather than guess "allowed" for a control.
+      for (const [k] of entries) this.cache.set(k, { allowed: false, reason: "Permissions could not be checked. Try again.", needs: "" });
+      setTimeout(() => {
+        if (epoch === this.epoch) for (const [k] of entries) this.cache.delete(k);
+      }, 5000);
+    }
+    this.emit();
+  }
+}
+
+export const canBatcher = new CanBatcher();
+onCanInvalidated(() => canBatcher.clear());
+
+/** Decision for one action. Returns PENDING-allowed shape until the batch answers, with `pending: true`. */
+export function useCan(action: string, ctx: CanContext = {}): CanResult & { pending: boolean } {
+  useSyncExternalStore(canBatcher.subscribe, canBatcher.snapshot);
+  const check: CanCheck = { action };
+  if (ctx.project) check.project = ctx.project;
+  if (ctx.repo) check.repo = ctx.repo;
+  if (ctx.time !== undefined) check.time = ctx.time;
+  const r = canBatcher.peek(check);
+  return r ? { ...r, pending: false } : { ...PENDING, pending: true };
+}
+
+/** Several checks at once (e.g. a toolbar). Results are in the order asked. */
+export function useCanMany(checks: Array<{ action: string } & CanContext>): Array<CanResult & { pending: boolean }> {
+  useSyncExternalStore(canBatcher.subscribe, canBatcher.snapshot);
+  return checks.map((c) => {
+    const check: CanCheck = { action: c.action };
+    if (c.project) check.project = c.project;
+    if (c.repo) check.repo = c.repo;
+    if (c.time !== undefined) check.time = c.time;
+    const r = canBatcher.peek(check);
+    return r ? { ...r, pending: false } : { ...PENDING, pending: true };
+  });
+}
+
+/** Keeps the cache keyed to the signed-in session. Mount once under the shell. */
+export function useCanSession(sessionId: string | null): void {
+  canBatcher.setSession(sessionId); // idempotent; must run before children call useCan in the same render
+}

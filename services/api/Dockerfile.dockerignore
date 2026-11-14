@@ -1,0 +1,15 @@
+# Keep the build context small: only what the gantry-api image needs.
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!packages/db/package.json
+!packages/db/tsconfig.json
+!packages/db/src
+!packages/domain/package.json
+!packages/domain/tsconfig.json
+!packages/domain/src
+!services/api/package.json
+!services/api/tsconfig.json
+!services/api/src
+**/*.test.ts

@@ -1,0 +1,36 @@
+# gantry-launcher: start-run / stop-run / list-runs over the Docker socket. Build context: repository root.
+#   docker build -f services/launcher/Dockerfile -t gantry-launcher:dev .
+# Behind a TLS-intercepting proxy, add: --secret id=cacert,src=/path/to/ca-bundle.crt (optional; used only for npm ci).
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY services/launcher/package.json services/launcher/
+COPY packages/domain/package.json packages/domain/
+RUN --mount=type=secret,id=cacert,required=false \
+    if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
+    npm ci -w @gantry/launcher --include-workspace-root --ignore-scripts
+COPY services/launcher/tsconfig.json services/launcher/
+COPY services/launcher/src services/launcher/src
+RUN npm run build -w @gantry/launcher
+
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY services/launcher/package.json services/launcher/
+COPY packages/domain/package.json packages/domain/
+RUN --mount=type=secret,id=cacert,required=false \
+    if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
+    npm ci -w @gantry/launcher --omit=dev --ignore-scripts && npm cache clean --force
+
+FROM node:22-alpine
+ENV NODE_ENV=production
+WORKDIR /app/services/launcher
+COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=build /app/services/launcher/dist ./dist
+COPY services/launcher/package.json ./package.json
+# The Docker socket is group-owned by the host's docker group: compose adds that gid with group_add.
+USER 10001:10001
+EXPOSE 9100
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:9100/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+CMD ["node", "dist/main.js"]

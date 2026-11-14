@@ -1,0 +1,8 @@
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!services/launcher/package.json
+!services/launcher/tsconfig.json
+!services/launcher/src
+!packages/domain/package.json

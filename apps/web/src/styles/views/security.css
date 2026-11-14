@@ -1,0 +1,38 @@
+/* Security. Tokens only. */
+.view-security > .tabs { margin-bottom: var(--s3); }
+.sec-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.sec-stack { display: grid; gap: var(--s4); align-content: start; }
+.view-security .toggle-row label { display: grid; gap: 1px; cursor: pointer; }
+.view-security .form-actions { justify-content: flex-start; flex-wrap: wrap; }
+.sec-idle-demo { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border: 1px dashed var(--line-strong); background: var(--panel);
+  background-image: repeating-linear-gradient(90deg, transparent 0 15px, var(--grid) 15px 16px); }
+.sec-list { list-style: none; display: grid; gap: 0; border-top: 1px solid var(--line); }
+.sec-list li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px dotted var(--line); }
+.sec-list li > .ic { color: var(--done); }
+.sec-list .mono { overflow-wrap: anywhere; }
+.sec-here { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-left: 3px solid; font-size: var(--t-sm); }
+.sec-here.is-ok { border-color: var(--done); background: var(--done-soft); }
+.sec-here.is-bad { border-color: var(--block); background: var(--block-soft); }
+.sec-here .ic { flex: none; margin-top: 1px; }
+.sec-toolbar { align-items: center; margin-bottom: var(--s3); }
+.sec-toolbar .field { min-width: 160px; }
+.sec-table td { vertical-align: middle; }
+.sec-st { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-sm); white-space: nowrap; }
+.sec-st .ic { width: 13px; height: 13px; }
+.sec-st.is-live { color: var(--done); }
+.sec-st.is-exp { color: var(--wait); }
+.sec-st.is-ended { color: var(--muted); }
+.sec-st.is-fail { color: var(--block); font-weight: 600; }
+.sec-ended td { color: var(--muted); }
+.sec-ended .who { opacity: 0.7; }
+
+.sec-fail td:first-child { box-shadow: inset 3px 0 0 var(--block); }
+.view-security .radio-card .rc-d { display: block; }
+
+@media (max-width: 1100px) { .sec-cols { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  .sec-list li { grid-template-columns: 16px minmax(0, 1fr) auto; }
+  .sec-list li > .muted { grid-column: 2; grid-row: 2; }
+  .sec-idle-demo .btn { width: 100%; justify-content: center; }
+}
+.sec-lock { display: grid; gap: 6px; margin-bottom: var(--s3); } .sec-lock .lock-note { margin: 0; }

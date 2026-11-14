@@ -1,0 +1,68 @@
+# Ingress for the local Gantry stack. The container listens on 8443; compose publishes it as 127.0.0.1:443 only.
+# `tls internal` issues a certificate from Caddy's local CA (root at /data/caddy/pki/authorities/local/root.crt in the
+# caddydata volume; see deploy/README.md for trusting it).
+{
+	admin off
+	auto_https disable_redirects
+	default_sni localhost
+	skip_install_trust
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://localhost:8443 {
+	tls internal
+
+	log {
+		output stdout
+		format json
+	}
+
+	# Headers every response gets. `?` keeps a header an upstream already set (Keycloak and Mailpit send their own).
+	header {
+		?Strict-Transport-Security "max-age=31536000"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "no-referrer"
+		?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		?Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+
+	# Liveness of the ingress itself.
+	handle /healthz {
+		respond "ok" 200
+	}
+
+	# API, sign-in callbacks and webhooks. Live updates are server-sent events, so never buffer the response.
+	@api path /api/* /auth/* /hooks/*
+	handle @api {
+		header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+		header Cache-Control "no-store"
+		reverse_proxy gantry-api:8000 {
+			flush_interval -1
+			transport http {
+				response_header_timeout 0
+				read_timeout 0
+			}
+		}
+	}
+
+	# Identity provider (Keycloak serves under /idp and sets its own CSP and frame headers).
+	handle /idp/* {
+		reverse_proxy keycloak:8081
+	}
+
+	# Mail catcher UI (development only; MP_WEBROOT=/mail).
+	handle /mail/* {
+		reverse_proxy mailpit:8025
+	}
+
+	# Everything else is the single-page app.
+	handle {
+		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		header X-Frame-Options "DENY"
+		encode zstd gzip
+		reverse_proxy gantry-web:8080
+	}
+}

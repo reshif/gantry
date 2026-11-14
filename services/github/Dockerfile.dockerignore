@@ -1,0 +1,10 @@
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!services/github/package.json
+!services/github/tsconfig.json
+!services/github/src
+!packages/domain/package.json
+!packages/domain/tsconfig.json
+!packages/domain/src

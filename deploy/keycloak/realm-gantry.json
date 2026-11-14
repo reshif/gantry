@@ -1,0 +1,449 @@
+{
+  "realm": "gantry",
+  "displayName": "Gantry",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "failureFactor": 10,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "accessCodeLifespan": 60,
+  "clients": [
+    {
+      "clientId": "gantry-web",
+      "name": "Gantry web",
+      "description": "Gantry API acting for the browser (confidential client, auth-code + PKCE)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "secret": "${GANTRY_OIDC_CLIENT_SECRET}",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "https://localhost",
+      "baseUrl": "/",
+      "redirectUris": [
+        "https://localhost/auth/callback"
+      ],
+      "webOrigins": [
+        "https://localhost"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://localhost/",
+        "access.token.lifespan": "300",
+        "client_credentials.use_refresh_token": "false"
+      },
+      "defaultClientScopes": [
+        "basic",
+        "acr",
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "gantry_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "gantry_id",
+            "claim.name": "gantry_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "gantry_title",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "gantry_title",
+            "claim.name": "gantry_title",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"email\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"firstName\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"lastName\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"gantry_id\",\"validations\":{\"length\":{\"max\":64}},\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}},{\"name\":\"gantry_title\",\"validations\":{\"length\":{\"max\":255}},\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}}]}"
+          ]
+        }
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "asha",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "asha@acme.dev",
+      "firstName": "Asha",
+      "lastName": "Raman",
+      "attributes": {
+        "gantry_id": [
+          "p-asha"
+        ],
+        "gantry_title": [
+          "Head of Engineering"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "daniel",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "daniel@acme.dev",
+      "firstName": "Daniel",
+      "lastName": "Okafor",
+      "attributes": {
+        "gantry_id": [
+          "p-daniel"
+        ],
+        "gantry_title": [
+          "Factory Manager"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "meera",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "meera@acme.dev",
+      "firstName": "Meera",
+      "lastName": "Iyer",
+      "attributes": {
+        "gantry_id": [
+          "p-meera"
+        ],
+        "gantry_title": [
+          "Engineering Lead, Payments"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "tomas",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "tomas@acme.dev",
+      "firstName": "Tomás",
+      "lastName": "Ferreira",
+      "attributes": {
+        "gantry_id": [
+          "p-tomas"
+        ],
+        "gantry_title": [
+          "Software Engineer"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "priya",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "priya@acme.dev",
+      "firstName": "Priya",
+      "lastName": "Nair",
+      "attributes": {
+        "gantry_id": [
+          "p-priya"
+        ],
+        "gantry_title": [
+          "Staff Engineer"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "kenji",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "kenji@acme.dev",
+      "firstName": "Kenji",
+      "lastName": "Watanabe",
+      "attributes": {
+        "gantry_id": [
+          "p-kenji"
+        ],
+        "gantry_title": [
+          "Release Manager"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "sam",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "sam@acme.dev",
+      "firstName": "Sam",
+      "lastName": "Whitfield",
+      "attributes": {
+        "gantry_id": [
+          "p-sam"
+        ],
+        "gantry_title": [
+          "Compliance Auditor"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "lena",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "lena@acme.dev",
+      "firstName": "Lena",
+      "lastName": "Fischer",
+      "attributes": {
+        "gantry_id": [
+          "p-lena"
+        ],
+        "gantry_title": [
+          "Engineering Lead, Platform"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "chloe",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "chloe@acme.dev",
+      "firstName": "Chloe",
+      "lastName": "Martin",
+      "attributes": {
+        "gantry_id": [
+          "p-chloe"
+        ],
+        "gantry_title": [
+          "Engineering Lead, Growth"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "arjun",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "arjun@acme.dev",
+      "firstName": "Arjun",
+      "lastName": "Mehta",
+      "attributes": {
+        "gantry_id": [
+          "p-arjun"
+        ],
+        "gantry_title": [
+          "Frontend Engineer"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "fatima",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "fatima@acme.dev",
+      "firstName": "Fatima",
+      "lastName": "Zahra",
+      "attributes": {
+        "gantry_id": [
+          "p-fatima"
+        ],
+        "gantry_title": [
+          "Senior Engineer"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "nikhil",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "nikhil@acme.dev",
+      "firstName": "Nikhil",
+      "lastName": "Rao",
+      "attributes": {
+        "gantry_id": [
+          "p-nikhil"
+        ],
+        "gantry_title": [
+          "Engineering Lead, Data"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "grace",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "grace@acme.dev",
+      "firstName": "Grace",
+      "lastName": "Liu",
+      "attributes": {
+        "gantry_id": [
+          "p-grace"
+        ],
+        "gantry_title": [
+          "Security Engineer"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "rui",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "rui@acme.dev",
+      "firstName": "Rui",
+      "lastName": "Costa",
+      "attributes": {
+        "gantry_id": [
+          "p-rui"
+        ],
+        "gantry_title": [
+          "Platform Engineer"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "omar",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "omar@acme.dev",
+      "firstName": "Omar",
+      "lastName": "Haddad",
+      "attributes": {
+        "gantry_id": [
+          "p-omar"
+        ],
+        "gantry_title": [
+          "VP Platform"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "gantry-dev",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

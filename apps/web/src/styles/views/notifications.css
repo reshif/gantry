@@ -1,0 +1,154 @@
+/* Notifications: routes, editor, card designer and previews. Tokens only.
+   Previews are drawn in Gantry's own tokens: they suggest each channel's card shape
+   without copying any product's chrome or marks. */
+
+.nt-split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--s4); align-items: start; }
+.nt-routes { display: grid; gap: var(--s4); }
+.nt-table td { vertical-align: top; }
+.nt-table tr.nt-off td:not(:first-child) { color: var(--muted); }
+.nt-table tr.nt-off .nt-ev { text-decoration-style: dotted; color: var(--muted); }
+.nt-ev { font-weight: 600; color: var(--ink); text-decoration: none; }
+.nt-ev:hover { color: var(--accent); }
+.nt-dests { list-style: none; display: grid; gap: 2px; }
+.nt-dests li { display: flex; align-items: center; gap: 5px; font-size: var(--t-sm); white-space: nowrap; }
+.nt-dests .ic { width: 13px; height: 13px; color: var(--muted); }
+.nt-dirty { margin-left: var(--s2); vertical-align: middle; }
+
+.nt-fs { border: 0; border-top: 1px solid var(--line); padding: var(--s3) 0 0; margin: 0; display: grid; gap: var(--s2); min-width: 0; }
+.nt-fs legend { padding-right: var(--s2); }
+.nt-destlist { list-style: none; display: grid; gap: var(--s2); }
+.nt-destrow { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(90px, 1fr) auto auto auto; gap: var(--s2); align-items: center; }
+.nt-destrow .chip { margin: 0; }
+.nt-destrow .chip .ic { width: 12px; height: 12px; }
+.nt-destrow > :nth-child(3):not(.chip) { grid-column: auto; }
+.nt-sub { font-family: var(--f-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+.nt-checks { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.nt-cond2 { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s4); align-items: end; }
+.nt-inline { display: flex; gap: var(--s3); flex-wrap: wrap; min-height: 32px; align-items: center; }
+.nt-actions { flex-wrap: wrap; }
+.nt-actions #nt-del { margin-right: auto; }
+
+/* ---------- designer ---------- */
+.nt-designer { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--s5); align-items: start; }
+.nt-fields { display: grid; gap: 2px; }
+.nt-fields .toggle-row { cursor: pointer; }
+.nt-fields .btn { margin-top: var(--s2); justify-self: start; }
+.nt-preview { display: grid; gap: var(--s3); min-width: 0; }
+.nt-preview .seg { justify-self: start; }
+.nt-stage {
+  padding: var(--s5); border: 1px solid var(--line); border-radius: var(--r1); min-width: 0; overflow: hidden;
+  background-color: var(--panel); background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 16px 16px;
+}
+
+/* shared frame for every channel preview */
+.np-frame { max-width: 620px; margin: 0 auto; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r2); box-shadow: var(--shadow-1); overflow: hidden; font-size: var(--t-md); color: var(--ink); }
+.np-chanbar { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+.np-chanbar > span:first-child { font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+.np-chanbar .ic { width: 14px; height: 14px; }
+.np-appav { width: 36px; height: 36px; flex: none; display: grid; place-items: center; background: var(--ink); color: var(--surface); border-radius: var(--r2); }
+.np-appav .logo, .np-appav svg { width: 22px; height: 22px; }
+.np-appav-sm { width: 22px; height: 22px; border-radius: var(--r1); }
+.np-appav-sm .logo, .np-appav-sm svg { width: 14px; height: 14px; }
+.np-act { display: inline-flex; align-items: center; padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: var(--r1); font-size: var(--t-sm); font-weight: 600; background: var(--surface); color: var(--ink); user-select: none; }
+.np-act-approve { background: var(--done); border-color: var(--done); color: var(--surface); }
+.np-act-reject { color: var(--block); border-color: var(--block); }
+.np-act-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.np-btns { display: flex; gap: var(--s2); flex-wrap: wrap; margin-top: var(--s3); }
+.np-link { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-line); word-break: break-all; }
+.np-note { display: flex; gap: 6px; align-items: flex-start; padding: 6px 12px; color: var(--ink-2); background: var(--wait-soft); border-top: 1px solid var(--line); }
+.np-note .ic { width: 13px; height: 13px; margin-top: 1px; color: var(--wait); }
+/* tone colours: one bar/band per event family, plus a shape cue in the text (the label) */
+.np-tone-accent { --np: var(--accent); } .np-tone-gate { --np: var(--gate); } .np-tone-done { --np: var(--done); } .np-tone-block { --np: var(--block); }
+.np-tone-kill { --np: var(--kill); } .np-tone-fail { --np: var(--fail); } .np-tone-wait { --np: var(--wait); }
+
+/* chat-style message with an attachment bar */
+.np-msg { display: flex; gap: var(--s3); padding: var(--s3) var(--s4) var(--s4); }
+.np-msg-main { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.np-msg-meta { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.np-appbadge { font-size: 9px; font-weight: 700; letter-spacing: 0.05em; padding: 0 4px; border-radius: 2px; background: var(--sunk); color: var(--muted); }
+.np-attach { display: flex; border-left: 4px solid var(--np); padding-left: var(--s3); margin-top: 2px; }
+.np-attach-body { min-width: 0; display: grid; gap: 6px; }
+.np-attach-body p { color: var(--ink-2); }
+.np-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px var(--s4); }
+.np-fields dt { font-weight: 700; font-size: var(--t-sm); }
+.np-fields dd { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.np-ctx { color: var(--muted); }
+
+/* adaptive-card style */
+.np-teams { background: var(--panel); }
+.np-tcard { margin: var(--s4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; box-shadow: var(--shadow-1); }
+.np-tcard-band { height: 4px; background: var(--np); }
+.np-tcard-head { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) var(--s4) 0; flex-wrap: wrap; }
+.np-tcard-head .mono { margin-left: auto; }
+.np-tcard-title { padding: var(--s2) var(--s4) 0; font-size: var(--t-lg); font-weight: 700; line-height: 1.3; }
+.np-tcard-sub { padding: 4px var(--s4) 0; color: var(--ink-2); }
+.np-facts { margin: var(--s3) var(--s4) 0; border-collapse: collapse; width: calc(100% - 2 * var(--s4)); }
+.np-facts th { text-align: left; font-weight: 600; padding: 3px var(--s3) 3px 0; white-space: nowrap; vertical-align: top; width: 1%; font-size: var(--t-sm); }
+.np-facts td { padding: 3px 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.np-tbtns { display: flex; border-top: 1px solid var(--line); margin-top: var(--s4); }
+.np-tbtns .np-act { flex: 1; justify-content: center; border: 0; border-right: 1px solid var(--line); border-radius: 0; padding: 9px 6px; color: var(--accent); background: transparent; }
+.np-tbtns .np-act:last-child { border-right: 0; }
+.np-tbtns .np-act-approve { color: var(--done); }
+.np-tbtns .np-act-reject { color: var(--block); }
+
+/* email */
+.np-mailhead { margin: 0; padding: var(--s2) var(--s4); border-bottom: 1px solid var(--line); background: var(--panel); display: grid; gap: 2px; }
+.np-mailhead > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--s2); font-size: var(--t-sm); }
+.np-mailhead dt { color: var(--muted); }
+.np-mailhead dd { margin: 0; overflow-wrap: anywhere; }
+.np-mailbody { padding: var(--s4) var(--s5) var(--s5); display: grid; gap: var(--s3); }
+.np-mailbrand { display: flex; align-items: center; gap: var(--s2); padding-bottom: var(--s2); border-bottom: 3px solid var(--np); font-family: var(--f-display); font-weight: 700; font-size: var(--t-lg); letter-spacing: 0.06em; }
+.np-mailbrand .logo, .np-mailbrand svg { width: 20px; height: 20px; }
+.np-mail-h { font-size: var(--t-xl); font-weight: 600; line-height: 1.25; }
+.np-mailbody > p { color: var(--ink-2); }
+.np-mailtable { border-collapse: collapse; width: 100%; font-size: var(--t-sm); }
+.np-mailtable th, .np-mailtable td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; }
+.np-mailtable th { background: var(--panel); width: 30%; font-weight: 600; }
+.np-mailtable td { overflow-wrap: anywhere; }
+.np-mailbody .np-btns { margin-top: 0; }
+.np-mailbody .np-act { padding: 8px 18px; }
+.np-mailfoot { color: var(--muted); border-top: 1px solid var(--line); padding-top: var(--s3); }
+
+/* webhook */
+.np-hook { background: var(--sunk); }
+.np-hook .np-chanbar .btn { padding-top: 2px; padding-bottom: 2px; }
+.np-pre { margin: 0; padding: var(--s3) var(--s4); font-size: var(--t-sm); line-height: 1.5; white-space: pre; overflow: auto; max-height: 380px; color: var(--ink); background: var(--surface); }
+.np-pre-head { background: var(--panel); color: var(--ink-2); border-bottom: 1px dashed var(--line-strong); max-height: none; }
+.np-pre:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* paging */
+.np-pagebody { padding: var(--s4); display: grid; gap: var(--s2); border-left: 6px solid var(--np); }
+.np-page-sev { font-size: var(--t-xs); letter-spacing: 0.08em; color: var(--np); font-weight: 600; }
+
+/* ---------- delivery log ---------- */
+.nt-dl td { white-space: nowrap; }
+.nt-dl td.nt-err { white-space: normal; min-width: 160px; color: var(--block); }
+.nt-dl .ic { width: 13px; height: 13px; vertical-align: -2px; color: var(--muted); }
+.nt-testtag { margin-left: 6px; }
+
+@media (max-width: 1180px) {
+  .nt-split { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .nt-designer { grid-template-columns: minmax(0, 1fr); }
+  .nt-destrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .nt-destrow > .btn, .nt-destrow > .chip { justify-self: start; }
+  .nt-cond2 { grid-template-columns: minmax(0, 1fr); }
+  .nt-stage { padding: var(--s2); }
+  .np-fields { grid-template-columns: minmax(0, 1fr); }
+  .np-msg { padding: var(--s3); }
+  .np-tcard { margin: var(--s2); }
+  .np-mailbody { padding: var(--s3); }
+}
+
+/* round three: instance-aware destinations, card templates */
+.nt-dest-inst { color: var(--ink-2); }
+.nt-dest-bad { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--block); }
+.nt-dests li { flex-wrap: wrap; white-space: normal; }
+.nt-ct-ops { display: inline-flex; gap: var(--s1); flex-wrap: wrap; justify-content: flex-end; }
+.nt-ev.is-sel { color: var(--accent); }
+.nt-ct-preview .nt-stage { padding: var(--s4); }
+@media (max-width: 640px) {
+  .nt-destrow { grid-template-columns: minmax(0, 1fr) auto; }
+  .nt-destrow > select, .nt-destrow > input { grid-column: 1 / -1; }
+}

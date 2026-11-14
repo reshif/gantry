@@ -1,0 +1,30 @@
+# TEST OVERRIDE ONLY (never part of deploy/compose.yml): the fake Slack Web API and fake MCP server for the M5 acceptance run, plus the sandbox-only
+# switches that let the API, worker and edge reach them. Use with the other test overrides:
+#   docker compose -p w4e2e -f deploy/compose.yml -f <sandbox override> -f services/github/test/e2e/compose.yml -f test/e2e/compose.doubles.yml up -d
+services:
+  fake-saas:
+    image: gantry-github:dev
+    entrypoint: ["node"]
+    command: ["/e2e/doubles.mjs"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "10001:10001"
+    sysctls: { net.ipv4.ip_unprivileged_port_start: "0" }
+    environment: { PORT: "80" }
+    volumes: ["../test/e2e:/e2e:ro"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:80/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      control: { aliases: [fake-slack, fake-mcp] }
+  gantry-api:
+    environment: { GANTRY_SLACK_API: "http://fake-slack/api", GANTRY_MCP_ALLOW_HTTP: "true" }
+  gantry-worker:
+    environment: { GANTRY_SLACK_API: "http://fake-slack/api", WORKER_CANARY_WAIT_MS: "20000" }
+  gantry-edge:
+    environment: { EDGE_ALLOW_PRIVATE_UPSTREAMS: "true" }
+  fake-github:
+    environment: { FAKE_GITHUB_ALIASES: "acme/billing-core" }

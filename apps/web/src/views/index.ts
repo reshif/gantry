@@ -1,0 +1,29 @@
+/** Lazy view registry. Each route id maps to src/views/<id>.tsx, whose default export is the screen. */
+import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+
+export const VIEWS: Record<string, LazyExoticComponent<ComponentType>> = {
+  home: lazy(() => import("./home")),
+  projects: lazy(() => import("./projects")),
+  console: lazy(() => import("./console")),
+  floor: lazy(() => import("./floor")),
+  "work-orders": lazy(() => import("./work-orders")),
+  conversations: lazy(() => import("./conversations")),
+  onboarding: lazy(() => import("./onboarding")),
+  "project-config": lazy(() => import("./project-config")),
+  record: lazy(() => import("./record")),
+  agents: lazy(() => import("./agents")),
+  skills: lazy(() => import("./skills")),
+  models: lazy(() => import("./models")),
+  evals: lazy(() => import("./evals")),
+  trust: lazy(() => import("./trust")),
+  learning: lazy(() => import("./learning")),
+  integrations: lazy(() => import("./integrations")),
+  notifications: lazy(() => import("./notifications")),
+  mcp: lazy(() => import("./mcp")),
+  api: lazy(() => import("./api")),
+  people: lazy(() => import("./people")),
+  workload: lazy(() => import("./workload")),
+  access: lazy(() => import("./access")),
+  security: lazy(() => import("./security")),
+  audit: lazy(() => import("./audit")),
+};

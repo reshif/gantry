@@ -1,0 +1,118 @@
+/* Gantry design tokens. Light palette in bare :root, dark redefined twice
+   (system preference unless forced light, and explicit data-theme="dark"). */
+:root {
+  color-scheme: light;
+  --f-display: "Barlow Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* type scale */
+  --t-xs: 11px; --t-sm: 12px; --t-md: 13px; --t-base: 14px; --t-lg: 16px;
+  --t-xl: 20px; --t-2xl: 28px; --t-3xl: 40px;
+
+  /* spacing */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --r1: 3px; --r2: 5px;
+
+  /* neutrals, biased toward the cobalt accent */
+  --bg: #e9edf2;
+  --surface: #ffffff;
+  --panel: #f5f7fa;
+  --sunk: #e2e7ee;
+  --ink: #121a24;
+  --ink-2: #364352;
+  --muted: #5f6c7b;
+  --faint: #8b97a5;
+  --line: #d3dae3;
+  --line-strong: #a9b4c1;
+  --grid: rgba(43, 84, 201, 0.07);
+
+  --accent: #2b54c9;
+  --accent-hover: #2246ad;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2e9fa;
+  --accent-line: #9fb3ea;
+
+  /* semantic states: each also has a distinct glyph */
+  --run: #0a7480;      --run-soft: #dcf0f1;
+  --wait: #9c5a00;     --wait-soft: #fbeed6;
+  --block: #bf2f28;    --block-soft: #fbe2df;
+  --fail: #a02b6b;     --fail-soft: #f6e0ec;
+  --done: #2c7638;     --done-soft: #dff0e1;
+  --halt-stripe: rgba(191, 47, 40, 0.10);
+
+  /* work classes: categorical, each chip also carries its name */
+  --cls-feature: #2b54c9; --cls-bug: #b2462c; --cls-hotfix: #c2185b; --cls-epic: #6b3fa0; --cls-chore: #5f6c7b;
+  --cls-refactor: #00796b; --cls-security: #a31515; --cls-docs: #4e7a1e; --cls-spike: #8a6100;
+  --kill: #7a0d0d; --kill-soft: #f3d9d9; --gate: #b26a00; --gate-soft: #fdecc8;
+  --shadow-1: 0 1px 2px rgba(18, 26, 36, 0.08);
+  --shadow-2: 0 10px 30px rgba(18, 26, 36, 0.18), 0 2px 6px rgba(18, 26, 36, 0.10);
+  --scrim: rgba(14, 20, 28, 0.42);
+  --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0d1218;
+    --surface: #141b23;
+    --panel: #18212b;
+    --sunk: #0f151c;
+    --ink: #e4e9ef;
+    --ink-2: #b9c3ce;
+    --muted: #8a97a6;
+    --faint: #66737f;
+    --line: #26313d;
+    --line-strong: #3a4756;
+    --grid: rgba(125, 155, 255, 0.06);
+    --accent: #7f9cff;
+    --accent-hover: #9bb2ff;
+    --accent-ink: #0a1022;
+    --accent-soft: #1b2645;
+    --accent-line: #3d518c;
+    --run: #4cc4cb;   --run-soft: #10302f;
+    --wait: #e6a94a;  --wait-soft: #33260f;
+    --block: #ff6f62; --block-soft: #3a1714;
+    --fail: #ea7bb8;  --fail-soft: #3a1529;
+    --done: #6cc77a;  --done-soft: #142e19;
+    --halt-stripe: rgba(255, 111, 98, 0.10);
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+    --cls-feature: #8fa8ff; --cls-bug: #f08a6c; --cls-hotfix: #f06292; --cls-epic: #b794f4; --cls-chore: #9aa6b4;
+    --cls-refactor: #4dd0c1; --cls-security: #ff7a7a; --cls-docs: #9ccc65; --cls-spike: #e6b44a;
+    --kill: #ff5a5a; --kill-soft: #3d0f12; --gate: #f0a63a; --gate-soft: #3a2a0c;
+    --scrim: rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1218;
+  --surface: #141b23;
+  --panel: #18212b;
+  --sunk: #0f151c;
+  --ink: #e4e9ef;
+  --ink-2: #b9c3ce;
+  --muted: #8a97a6;
+  --faint: #66737f;
+  --line: #26313d;
+  --line-strong: #3a4756;
+  --grid: rgba(125, 155, 255, 0.06);
+  --accent: #7f9cff;
+  --accent-hover: #9bb2ff;
+  --accent-ink: #0a1022;
+  --accent-soft: #1b2645;
+  --accent-line: #3d518c;
+  --run: #4cc4cb;   --run-soft: #10302f;
+  --wait: #e6a94a;  --wait-soft: #33260f;
+  --block: #ff6f62; --block-soft: #3a1714;
+  --fail: #ea7bb8;  --fail-soft: #3a1529;
+  --done: #6cc77a;  --done-soft: #142e19;
+  --halt-stripe: rgba(255, 111, 98, 0.10);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --cls-feature: #8fa8ff; --cls-bug: #f08a6c; --cls-hotfix: #f06292; --cls-epic: #b794f4; --cls-chore: #9aa6b4;
+  --cls-refactor: #4dd0c1; --cls-security: #ff7a7a; --cls-docs: #9ccc65; --cls-spike: #e6b44a;
+  --kill: #ff5a5a; --kill-soft: #3d0f12; --gate: #f0a63a; --gate-soft: #3a2a0c;
+  --scrim: rgba(0, 0, 0, 0.55);
+}

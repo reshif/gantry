@@ -1,0 +1,78 @@
+/**
+ * How a gate is named, explained and locked. Pure; the API refuses what `gateLock` locks and the console shows the same reason.
+ * Gate ids and codes (`G0G1`, "G0+G1") are stable: they are stored in flows, rules, decisions and audit history.
+ * What people read first is the gate's name; the code is secondary.
+ */
+import type { ApproverRule, Catalog, Gate, GateKind, Project } from "./types.js";
+
+/** Gates whose code joins two legacy checks. They are ONE gate with ONE decision, not two approvals. */
+export const COMBINED_GATES: Readonly<Record<string, string>> = {
+  G0G1: "One gate. The old G0 (brief) and G1 (class and route) are confirmed together in a single decision, so one confirmation passes it.",
+  G3G3s: "One gate. The old G3 (plan) and G3s (security) are judged together: a person approves the plan while the security checks run automatically.",
+};
+
+/** Gates that may not be turned off in any project, with the reason shown to people and in refusals. */
+export const ALWAYS_ON_GATES: Readonly<Record<string, string>> = {
+  G0G1: "Every work order starts with a person confirming the brief, class and route.",
+  G3G3s: "It carries the security checks. Changes to CI, dependencies, code-owner files, auth paths, migrations and Gantry config always need a human gate (spec section 3).",
+  G4: "The required checks must pass before review, and the Gantry check on the pull request only passes when every gate has passed (spec section 11).",
+  G5: "No agent merges on its own authority: a merge needs a human review (invariant I1).",
+};
+
+export const REGULATED_LOCK = "Regulated projects keep every gate on.";
+
+export interface GateLock {
+  locked: boolean;
+  reason: string;
+}
+
+export function gateLock(gate: Pick<Gate, "id">, project?: Pick<Project, "regulated"> | { regulated?: boolean } | null): GateLock {
+  const always = ALWAYS_ON_GATES[gate.id];
+  if (always) return { locked: true, reason: always };
+  if (project?.regulated) return { locked: true, reason: REGULATED_LOCK };
+  return { locked: false, reason: "" };
+}
+
+export const gateKindText = (kind: GateKind): string => (kind === "human" ? "person" : kind === "auto" ? "automatic" : "person + automatic");
+
+/** "Brief confirmed · G0+G1". */
+export const gateTitle = (g: Pick<Gate, "name" | "label">): string => `${g.name} · ${g.label}`;
+
+const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+/**
+ * How many approvals a gate needs and from whom, read from the project's approver rule.
+ * `roleName` and `personName` turn ids into words; the default shows the ids.
+ */
+export function approvalText(
+  gate: Pick<Gate, "id">,
+  mode: GateKind,
+  rule: ApproverRule | undefined | null,
+  roleName: (id: string) => string = (x) => x,
+  personName: (id: string) => string = (x) => x,
+): string {
+  if (mode === "auto") return "No approvals: passes when its checks pass";
+  const who = rule ? [...rule.roles.map(roleName), ...rule.people.map(personName)] : [];
+  if (gate.id === "G0G1") {
+    const others = rule ? rule.roles.filter((r) => r !== "engineer").map(roleName) : [];
+    return `1 approval: the submitter${others.length ? `, or ${others.join(" / ")}` : ""}`;
+  }
+  const n = rule ? Math.max(1, rule.required) : 1;
+  const from = who.length ? who.join(" / ") : "a Factory Admin (no rule set)";
+  return `${mode === "mixed" ? "Checks, then " : ""}${plural(n, "approval")}: ${from}`;
+}
+
+/** The gate in a sentence for a tooltip: name, code, kind, purpose and the "+" note. */
+export function gateExplain(g: Gate, mode: GateKind = g.kind): string {
+  return [`${gateTitle(g)} (${gateKindText(mode)}).`, g.purpose, COMBINED_GATES[g.id]].filter(Boolean).join(" ");
+}
+
+/** What the cell under a gate diamond means. */
+export function gateStateText(state: string, count = 0): string {
+  return state === "waiting" ? `${plural(count, "work order")} waiting for approval` : state === "failing" ? `${count} failing its checks` : state === "off" ? "turned off in this project" : "nothing waiting";
+}
+
+export const gateOf = (c: Pick<Catalog, "gates">, id: string): Gate | undefined => c.gates.find((g) => g.id === id);
+
+/** Explain a gate state the way the floor shows it: "nothing waiting" etc. */
+export const gateOffNote = "Turned off: new work orders skip it and pass straight through. Work orders already in flight keep the flow they started with.";

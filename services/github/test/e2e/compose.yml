@@ -1,0 +1,38 @@
+# TEST OVERRIDE ONLY (never merged into deploy/compose.yml by default). Adds a fake GitHub API + git server as a separate container so the
+# end-to-end run can exercise gantry-github, the worker and the API without a GitHub App key:
+#   docker compose -p w3e2e -f deploy/compose.yml -f services/github/test/e2e/compose.yml up -d
+# The secrets github_app.json must carry "baseUrl": "http://fake-github:8090/api/v3" and an RSA PEM in github_app.pem.
+services:
+  fake-github:
+    image: gantry-github:dev
+    entrypoint: ["node"]
+    command: ["/test/e2e/fake-server.mjs"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,uid=10001,gid=10001
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    environment:
+      FAKE_GITHUB_PORT: "8090"
+      FAKE_GITHUB_REPO: acme/payments-api
+    volumes:
+      - ../services/github/test:/test:ro
+      - ${E2E_TLS_DIR:?set E2E_TLS_DIR to a directory with ca.crt, tls.crt, tls.key, bundle.crt}:/certs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('https').get('https://127.0.0.1:8090/healthz',{rejectUnauthorized:false},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [control]
+  gantry-github:
+    environment:
+      GITHUB_POLL_INTERVAL_MS: "5000"
+      NODE_EXTRA_CA_CERTS: /certs/ca.crt
+    volumes:
+      - ${E2E_TLS_DIR}:/certs:ro
+      # git (libcurl) trusts the system bundle only; this is the image's bundle plus the test CA.
+      - ${E2E_TLS_DIR}/bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
+    depends_on:
+      fake-github: { condition: service_healthy }

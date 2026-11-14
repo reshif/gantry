@@ -1,0 +1,17 @@
+# w4api- progress (API keys, public API, triggers)
+## Status
+- [ ] started: reading code
+- [x] migration written (apikeys_triggers_runtime). next: core pieces
+PG: docker run -d --name w4api-pg -e POSTGRES_PASSWORD=pw -p 55503:5432 --tmpfs /var/lib/postgresql/data mirror.gcr.io/library/postgres:17-alpine -c fsync=off -c max_connections=300
+Tests: GANTRY_TEST_DATABASE_URL=postgres://postgres:pw@127.0.0.1:55503/postgres npx vitest run <file> (cd services/api | services/worker | apps/web). Rebuild dist (npx tsc -p . in packages/domain, packages/db, services/api) before worker typechecks.
+- [x] migration 0023_apikeys_triggers_runtime.sql; areas/apikeys/{config,schemas,store,commands,gate}.ts; routes/apikeys.ts; edits: core/app.ts (gate+log hook), context.ts (apiSettings), decide.ts (key-only actions), command.ts (storedOmit, idempotency ttl), db idempotency ttlHours, workorders.ts (key onBehalfOf/class), intake.ts (key answers), domain ApiKey/ApiConfig types. api typechecks.
+- next: apikeys test (services/api/test/apikeys.test.ts), then triggers area (areas/triggers/*), routes/triggers.ts, jobs-contract trigger.evaluate/trigger.tick, worker handlers, github hook, web
+- [x] services/api/test/apikeys.test.ts (13) passes. next: triggers area (areas/triggers/*), routes/triggers.ts, jobs-contract trigger.evaluate/trigger.tick (+worker handlers, scheduler), github processing hook, triggers test; then web views/api.tsx (+api/ subfolder) + tests, real run + screenshots, wave4-apikeys-triggers.md
+- [x] areas/triggers/{schedule,store,run,schemas,commands}.ts + routes/triggers.ts written (typecheck clean, untested). next: github inputs + jobs + worker (trigger.evaluate, trigger.tick), triggers test
+- [x] sources.ts/jobs.ts/index.ts (triggers), jobs-contract trigger.evaluate+trigger.tick, worker handlers+scheduler+observer, github deliveries offer hook. next: triggers.test.ts (api), worker test, then web
+- [x] api tests: apikeys (13) + triggers (17) pass. next: run api full regression in background (log /tmp/claude-0/w4api-api.log), worker test for trigger handlers/scheduler, then WEB: views/api.tsx + api/ subfolder, tests, screenshots
+- [x] worker test/triggers.test.ts (4) pass. api full regression running (/tmp/claude-0/w4api-api.log). next: WEB
+- [x] web: views/api.tsx + views/api/{kit,Keys,Reference,Playground,Log,Limits,Triggers}.tsx written, typecheck clean; ops.ts/queries.ts/keys.ts/types.ts minimal edits (setApiConfig/saveTrigger versions, simulate/release/decline ops, useTriggerProposals). next: web tests (mock fetch) apps/web/src/views/api.test.tsx, then real run + screenshots, regressions, notes
+- [x] web test src/views/api.test.tsx (16) pass; api gate switched to route-declared config.apiKey (workorders/triggers/session routes, command.test test route). next: web full regression + typecheck all, real run (api local + vite?) + screenshots, notes doc wave4-apikeys-triggers.md, cleanup docker
+- [x] live run done (real api + worker + vite + Playwright; screenshots /tmp/claude-0/w4api-react-*.png vs w4api-legacy-*.png; curl with a real key: submit/replay/read/record/answer/403/401). harness removed. UI nits fixed. next: final regressions (api, worker, db, domain, web), wave4-apikeys-triggers.md, remove docker w4api-pg
+- ALL DONE. api 396, worker 82, db 55, domain 106, web api 16. notes: docs/build-notes/wave4-apikeys-triggers.md. w4api-pg removed; harness removed.
