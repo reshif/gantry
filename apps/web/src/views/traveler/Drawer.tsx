@@ -1,0 +1,148 @@
+/**
+ * Traveler: the routing sheet that rides with every work order (right-hand drawer), ported from legacy/js/views/traveler.js.
+ * Open it with useOpenTraveler(). Position, gates with progress, approve and reject, moves, send back, park, reassign, retry, history.
+ */
+import { fmt } from "@gantry/domain";
+import { Btn, Empty, StateChip, Tabs } from "../../ui/primitives";
+import { Icon } from "../../ui/Icon";
+import { useActors } from "../../ui/actors";
+import { useProject } from "../../api/queries";
+import { ClassChip, classOf, useCatalog } from "../projects/kit";
+import { ConversationThread } from "../conversations/Thread";
+import { Lifecycle } from "../record/Lifecycle";
+import { useOpenRecordRoute } from "../record/nav";
+import { Actions } from "./Actions";
+import { Journey } from "./Journey";
+import { ArtefactsTab, BriefTab, HistoryTab } from "./Tabs";
+import { bayLabel, stName, stNo, useTravelerWo } from "./model";
+import { setTravelerTab, useTravelerTab } from "./state";
+import { useRepoName } from "./repo";
+
+const tb = (k: string, v: string) => (
+  <div key={k}>
+    <dt>{k}</dt>
+    <dd>{v}</dd>
+  </div>
+);
+
+export default function TravelerDrawer({ woId, onClose }: { woId: string; onClose?: () => void }) {
+  const q = useTravelerWo(woId);
+  const wo = q.data;
+  const project = useProject(wo?.project).data ?? null;
+  const cat = useCatalog();
+  const tab = useTravelerTab();
+  const actor = useActors();
+  const openRecord = useOpenRecordRoute();
+  const repoName = useRepoName(wo?.project, wo?.repo);
+  const close = () => onClose?.();
+  if (!wo || !project || !cat) {
+    return (
+      <div className="drawer-inner trv-drawer">
+        <div className="drawer-head">
+          <div className="trv-headmain">
+            <div className="kicker">Traveler · routing sheet</div>
+            <div className="drawer-id"><span className="mono big-id">{woId}</span></div>
+          </div>
+          <div className="trv-headtools">
+            <button type="button" className="icon-btn drawer-close" id="trv-close" aria-label="Close traveler" onClick={close}><Icon name="x" /></button>
+          </div>
+        </div>
+        <div className="drawer-scroll">
+          {q.isLoading ? <p className="muted small" role="status">Loading…</p> : <Empty title={`No work order ${woId}`} text="It may have been removed, or it belongs to a project you cannot see." />}
+        </div>
+      </div>
+    );
+  }
+  const st = cat.stations[wo.state === "done" ? cat.stations.length - 1 : wo.station];
+  const stop = wo.stop;
+  const halt = stop?.mode === "halt" ? stop : null;
+  const tot = wo.history.reduce((t, e) => ({ tokens: t.tokens + e.tokens, cost: t.cost + e.cost }), { tokens: 0, cost: 0 });
+  const where = wo.state === "done" ? (wo.split ? "Split into children" : `Shipped ${fmt.stamp(wo.doneAt ?? 0)}`) : wo.bay ? bayLabel(cat, wo.bay) : `${stNo(cat, st?.id)} ${stName(cat, st?.id)}`;
+  const tabs = [
+    { id: "journey", label: "Journey" },
+    { id: "lifecycle", label: "Lifecycle" },
+    { id: "conversation", label: "Conversation", count: wo.conv.messages.length },
+    { id: "brief", label: "Brief" },
+    { id: "artefacts", label: "Artefacts" },
+    { id: "history", label: "History" },
+  ];
+  const body =
+    tab === "lifecycle" ? <Lifecycle woId={wo.id} compact /> : tab === "conversation" ? <TravelerConversation woId={wo.id} /> : tab === "brief" ? <BriefTab wo={wo} cat={cat} /> : tab === "artefacts" ? <ArtefactsTab wo={wo} project={project} /> : tab === "history" ? <HistoryTab wo={wo} /> : <Journey wo={wo} project={project} cat={cat} />;
+  const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;
+  return (
+    <div className={`drawer-inner trv-drawer${wo.state === "killed" ? " is-killed" : ""}`}>
+      <div className="drawer-head">
+        <div className="trv-headmain">
+          <div className="kicker">{`Traveler · routing sheet · ${project.name}`}</div>
+          <div className="drawer-id">
+            <span className="mono big-id">{wo.id}</span>
+            <StateChip state={wo.state} />
+            <ClassChip cls={classOf(cat, project, wo.cls)} />
+            <span className={`chip prio-${wo.priority}`}>{wo.priority}</span>
+            {heldByKill ? <span className="chip chip-block">{`held by ${typeof heldByKill === "string" ? heldByKill : wo.stop?.scope ?? ""} kill`}</span> : null}
+          </div>
+          <h2 className="drawer-title">{wo.title}</h2>
+        </div>
+        <div className="trv-headtools">
+          <Btn label="Open full record" small icon="record" id="trv-open-record" onClick={() => { close(); openRecord(wo.id, wo.project); }} />
+          <button type="button" className="icon-btn drawer-close" id="trv-close" aria-label="Close traveler" onClick={close}>
+            <Icon name="x" />
+          </button>
+        </div>
+      </div>
+      <div className="drawer-scroll">
+        {wo.killed ? (
+          <div className="trv-killed" role="alert">
+            <Icon name="st-kill" />
+            <div>
+              <strong>KILLED</strong>
+              <span>{` · ${wo.killed.scope} kill by ${actor(wo.killed.by).name}, ${fmt.stamp(wo.killed.at)}: ${wo.killed.reason}${wo.pr ? `. PR #${wo.pr.number} left as ${wo.pr.state}.` : "."}`}</span>
+            </div>
+          </div>
+        ) : null}
+        {!wo.killed && stop ? (
+          <div className="trv-killed" role="alert">
+            <Icon name="st-kill" />
+            <div>
+              <strong>STOPPED</strong>
+              <span>{` · ${stop.reason}${heldByKill ? " This work order is held in place and resumes on restore." : ""}`}</span>
+            </div>
+          </div>
+        ) : null}
+        {halt ? (
+          <div className="halt-banner">
+            <Icon name="halt" />
+            <span>{halt.reason}</span>
+          </div>
+        ) : null}
+        {wo.blockReason ? <div className="callout callout-block"><Icon name="st-block" /><span>{wo.blockReason}</span></div> : null}
+        {wo.failReason ? <div className="callout callout-fail"><Icon name="st-fail" /><span>{wo.failReason}</span></div> : null}
+        <dl className="titleblock tb-drawer">
+          {tb("Repo", repoName)}
+          {tb("Where", where)}
+          {tb("Class", `${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} · ${Math.round(wo.clsConfidence * 100)}%${wo.clsOverridden ? " (overridden)" : ""}`)}
+          {tb("Source", wo.source)}
+          {tb("Requested by", actor(wo.requestedBy).name)}
+          {tb("Created", fmt.stamp(wo.createdAt))}
+          {tb("SLA due", wo.slaDue ? fmt.stamp(wo.slaDue) : "none")}
+          {tb("PR", wo.pr ? `#${wo.pr.number} ${wo.pr.state}` : "not yet")}
+          {tb("Coding slot", wo.slot ? `${wo.slot} of ${project.flow.slots}` : "none")}
+          {tb("Tokens", fmt.k(tot.tokens))}
+          {tb("Spend", fmt.money(tot.cost))}
+          {tb("Risk", wo.risk || "normal")}
+        </dl>
+        {wo.description ? <p className="drawer-desc">{wo.description}</p> : null}
+        <Actions wo={wo} />
+        <Tabs idPrefix="trv-tab" items={tabs} active={tab} onChange={(t) => { setTravelerTab(t as typeof tab); setTimeout(() => document.getElementById(`trv-tab-${t}`)?.focus(), 0); }} />
+        <div className="drawer-tabbody" id="trv-tab-panel" role="tabpanel" aria-labelledby={`trv-tab-${tab}`}>
+          {body}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The traveler's Conversation tab: the thread without the confirm and decline buttons (they are in the header). */
+function TravelerConversation({ woId }: { woId: string }) {
+  return <ConversationThread woId={woId} idPrefix="trv-conv" noActions />;
+}

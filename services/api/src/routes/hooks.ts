@@ -6,7 +6,10 @@
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4).
  */
 import type { FastifyPluginAsync } from "fastify";
+import { githubHookRoutes } from "../areas/github/hooks.js";
 
-export const hookRoutes: FastifyPluginAsync = async (_app) => {
+export const hookRoutes: FastifyPluginAsync = async (app) => {
+  // POST /hooks/github: areas/github/hooks.ts (own encapsulated plugin: raw-body parser for the signature).
+  await app.register(githubHookRoutes);
   // Endpoints are registered here.
 };

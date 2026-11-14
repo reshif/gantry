@@ -1,0 +1,140 @@
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useOpenTraveler } from "../shell/useTraveler";
+import { mockApi, mount, resetApp } from "./floor/testkit";
+import { allow, deny, posts, readsFor, travelerOf, waitingWo } from "./traveler/testkit";
+
+beforeEach(() => resetApp());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+const W = waitingWo;
+const gate = Object.entries(W.gates).find(([, g]) => g.status === "waiting")?.[0] ?? "G2";
+
+function Opener({ tab }: { tab?: string }) {
+  const open = useOpenTraveler();
+  return <button type="button" id="open-trv" onClick={() => open(W.id, tab)}>open</button>;
+}
+async function show(extra: Parameters<typeof mockApi>[0] = {}, o: Parameters<typeof mockApi>[1] = {}, tab?: string) {
+  const calls = mockApi({ ...readsFor(W), ...extra }, o);
+  mount(<Opener tab={tab} />);
+  await new Promise((r) => setTimeout(r, 30)); // the hash reset of resetApp closes a drawer opened in the same tick
+  fireEvent.click(screen.getByText("open"));
+  await screen.findByRole("heading", { name: W.title }, { timeout: 4000 });
+  return calls;
+}
+
+describe("Traveler drawer", () => {
+  it("shows the position, the waiting gate with its progress and the title block", async () => {
+    await show();
+    expect(await screen.findByText("Traveler · routing sheet · Payments Platform")).toBeTruthy();
+    expect(await screen.findByText(/waiting \(0 of 1\)/)).toBeTruthy();
+    expect(screen.getByText("Coding slot")).toBeTruthy();
+  });
+
+  it("approves the waiting gate with the work order version in If-Match", async () => {
+    const calls = await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`]: () => ({ body: { ok: true, msg: "Approved." } }) });
+    const btn = await screen.findByRole("button", { name: /Approve/ });
+    expect(btn.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(btn);
+    await waitFor(() => expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`)).toHaveLength(1));
+    expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`)[0]!.headers["if-match"]).toBe("7");
+    expect(await screen.findByText("Approved.")).toBeTruthy();
+  });
+
+  it("locks Approve with the reason from the decision point and sends nothing when clicked", async () => {
+    const calls = await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, {}, { approve: deny("No role held in Payments includes 'Approve gates'.", "Needs Line Lead") }) }) });
+    const btn = await screen.findByRole("button", { name: /Approve/ });
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+    expect(btn.getAttribute("data-reason")).toContain("Needs Line Lead");
+    fireEvent.click(btn);
+    expect(calls.filter((c) => c.method === "POST" && c.path.includes("/approve"))).toHaveLength(0);
+  });
+
+  it("shows a stale refusal from the server instead of pretending it worked", async () => {
+    await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`]: () => ({ status: 409, body: { ok: false, msg: `${W.id} changed since you opened it. Reload and try again.` } }) });
+    fireEvent.click(await screen.findByRole("button", { name: /Approve/ }));
+    expect(await screen.findByText(/changed since you opened it/)).toBeTruthy();
+  });
+
+  it("refuses moves while a stop covers the work order and says why", async () => {
+    await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, { stop: { id: "project:payments:1", scope: "project", mode: "halt", reason: "Andon: flaky CI" } }, { approve: null }) }) });
+    expect((await screen.findAllByText(/Andon: flaky CI/)).length).toBeGreaterThan(0);
+    const park = screen.getByRole("button", { name: /Move to bay/ });
+    expect(park.getAttribute("aria-disabled")).toBe("true");
+    expect(park.getAttribute("data-reason")).toContain("Andon: flaky CI");
+  });
+
+  it("rejects a gate with a reason of at least five characters", async () => {
+    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/reject`;
+    const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Rejected." } }) });
+    fireEvent.click(await screen.findByRole("button", { name: /Reject/ }));
+    const ta = await screen.findByPlaceholderText("What must change before this passes?");
+    fireEvent.change(ta, { target: { value: "no" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Reject" }).at(-1) as HTMLElement);
+    expect(posts(calls, path)).toHaveLength(0);
+    fireEvent.change(ta, { target: { value: "The plan misses the rollback." } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Reject" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
+    expect(posts(calls, path)[0]!.body).toMatchObject({ reason: "The plan misses the rollback." });
+  });
+
+  it("sends the work order back to an earlier station with the note", async () => {
+    const path = `/api/v1/work-orders/${W.id}/send-back`;
+    const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Sent back." } }) });
+    fireEvent.click(await screen.findByRole("button", { name: /Send back/ }));
+    fireEvent.change(await screen.findByLabelText("Note for the agent"), { target: { value: "Cover the retry case" } });
+    fireEvent.click(document.getElementById("sb-submit") as HTMLElement);
+    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
+    expect(posts(calls, path)[0]!.body).toMatchObject({ note: "Cover the retry case" });
+    expect(typeof posts(calls, path)[0]!.body?.toStation).toBe("string");
+  });
+
+  it("moves to a bay with a reason and returns from it", async () => {
+    const path = `/api/v1/work-orders/${W.id}/park`;
+    const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Moved." } }) });
+    fireEvent.click(await screen.findByRole("button", { name: /Move to bay/ }));
+    fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Waiting for the vendor" } });
+    fireEvent.click(document.getElementById("park-submit") as HTMLElement);
+    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
+    expect(posts(calls, path)[0]!.body).toMatchObject({ reason: "Waiting for the vendor" });
+    cleanup();
+    vi.unstubAllGlobals();
+    const parked = travelerOf({ ...W, bay: "hold", bayFrom: "spec", bayReason: "Waiting", state: "parked" } as typeof W, {}, { approve: null });
+    const c2 = mockApi({ ...readsFor(W, parked), [`POST /api/v1/work-orders/${W.id}/unpark`]: () => ({ body: { ok: true, msg: "Back at Spec." } }) });
+    mount(<Opener />);
+    fireEvent.click(screen.getByText("open"));
+    fireEvent.click(await screen.findByRole("button", { name: /Return to/ }));
+    fireEvent.change(await screen.findByPlaceholderText("What changed?"), { target: { value: "Vendor replied" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Return to belt" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(posts(c2, `/api/v1/work-orders/${W.id}/unpark`)).toHaveLength(1));
+  });
+
+  it("retries a failed work order", async () => {
+    const failed = travelerOf({ ...W, state: "failed", failReason: "Spec did not compile" } as typeof W, {}, { approve: null });
+    const calls = mockApi({ ...readsFor(W, failed), [`POST /api/v1/work-orders/${W.id}/retry`]: () => ({ body: { ok: true, msg: "Running again." } }) });
+    mount(<Opener />);
+    fireEvent.click(screen.getByText("open"));
+    expect(await screen.findByText("Spec did not compile")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /Retry/ }));
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/retry`)).toHaveLength(1));
+  });
+
+  it("switches tabs and opens a requested tab", async () => {
+    await show({}, {}, "brief");
+    expect(await screen.findByText("Estimate and route")).toBeTruthy();
+    fireEvent.click(document.getElementById("trv-tab-history") as HTMLElement);
+    expect(await screen.findByText("Audit ledger")).toBeTruthy();
+    expect(screen.getByText("Floor log")).toBeTruthy();
+  });
+
+  it("explains a work order the viewer cannot see", async () => {
+    mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }) });
+    mount(<Opener />);
+    fireEvent.click(screen.getByText("open"));
+    expect(await screen.findByText(`No work order ${W.id}`)).toBeTruthy();
+  });
+});
+void allow;

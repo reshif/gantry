@@ -45,3 +45,11 @@ export async function replaceConversation(fx: Fx, woId: string, conv: Conversati
 export async function closeConversation(fx: Fx, woId: string): Promise<void> {
   await fx.tx.query(`update conversations set status = 'closed', updated_at = now() where org_id = $1 and id = $2`, [fx.orgId, convIdOf(woId)]);
 }
+
+/** Appends one message after the existing ones (confirm-brief, answers returned to a station). */
+export async function appendMessage(fx: Fx, woId: string, from: string, text: string, extra: { qid?: string; chips?: string[] } = {}): Promise<void> {
+  await fx.tx.query(
+    `insert into messages (org_id, id, conversation_id, author, author_kind, kind, body, data) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
+    [fx.orgId, newMessageId(woId), convIdOf(woId), from, authorKind(from), extra.qid ? "question" : "text", text, JSON.stringify({ at: fx.now.getTime(), ...(extra.qid ? { qid: extra.qid } : {}), ...(extra.chips ? { chips: extra.chips } : {}) })],
+  );
+}

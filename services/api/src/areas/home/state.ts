@@ -25,7 +25,7 @@ export async function loadHomeWorkOrders(db: Queryable, orgId: string, catalog: 
   const [wos, gates, votes, convs] = await Promise.all([
     db.query<WoRow>(
       `select id, project_id, repo_id, title, class, priority, source, position, state, submitter, risk, sla_due_at, closed_at, created_at, data from work_orders
-       where org_id = $1 and (state not in ${OPEN} or closed_at >= $2) order by created_at`,
+       where org_id = $1 and (state not in ${OPEN} or state = 'killed' or closed_at >= $2) order by created_at`,
       [orgId, since],
     ),
     db.query<{ id: string; wo_id: string; gate_id: string; opened_at: Date }>(`select id, wo_id, gate_id, opened_at from gate_instances where org_id = $1 and status = 'open'`, [orgId]),
@@ -61,7 +61,7 @@ export async function loadHomeWorkOrders(db: Queryable, orgId: string, catalog: 
       station: Math.max(0, stationIds.indexOf(r.position)), state: r.state, bay: bayIds.has(r.position) ? r.position : null, bayReason: typeof d.bayReason === "string" ? d.bayReason : "",
       blockReason: typeof d.blockReason === "string" ? d.blockReason : null, failReason: typeof d.failReason === "string" ? d.failReason : null,
       doneAt: ms(r.closed_at) ?? null, risk: r.risk ?? "normal", paths: Array.isArray(d.paths) ? d.paths : [], slaDue: ms(r.sla_due_at) ?? 0,
-      history: Array.isArray(d.history) ? d.history : [], gates: g, killed: null,
+      history: Array.isArray(d.history) ? d.history : [], gates: g, killed: (d.killed as WorkOrder["killed"]) ?? null, ...(d.heldByKill ? { heldByKill: true } : {}), split: d.split === true,
       conv: { messages: [], qi: 0, answers: {}, misses: [], decisions: [], awaiting: "", questions: [], ...(typeof d.conv === "object" && d.conv ? (d.conv as object) : {}), raised, done: !conv },
       waitingSince: since || created,
     } as unknown as HomeWorkOrder;

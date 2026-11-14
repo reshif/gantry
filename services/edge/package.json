@@ -3,12 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run --passWithNoTests",
+    "start": "node dist/main.js"
   },
-  "dependencies": { "@gantry/domain": "*", "fastify": "^5.6.1", "@aws-sdk/client-s3": "^3.920.0", "zod": "^4.1.12", "undici": "^7.16.0" },
-  "devDependencies": {  }
+  "dependencies": {
+    "@gantry/domain": "*",
+    "fastify": "^5.6.1",
+    "@aws-sdk/client-s3": "^3.920.0",
+    "zod": "^4.1.12",
+    "undici": "^7.16.0"
+  },
+  "devDependencies": {}
 }

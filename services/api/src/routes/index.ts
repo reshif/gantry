@@ -11,6 +11,7 @@ import { homeRoutes } from "./home.js";
 import { hookRoutes } from "./hooks.js";
 import { integrationRoutes } from "./integrations.js";
 import { internalRoutes } from "./internal.js";
+import { internalGithubRoutes } from "./internal-github.js";
 import { learningRoutes } from "./learning.js";
 import { mcpRoutes } from "./mcp.js";
 import { modelRoutes } from "./models.js";
@@ -31,7 +32,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   for (const plugin of [
     sessionRoutes, catalogRoutes, homeRoutes, projectRoutes, peopleRoutes, accessRoutes, auditRoutes, floorRoutes, workOrderRoutes, stopRoutes, onboardingRoutes,
     agentRoutes, skillRoutes, modelRoutes, evalRoutes, trustRoutes, learningRoutes, integrationRoutes, notificationRoutes, mcpRoutes, apiKeyRoutes, triggerRoutes,
-    workloadRoutes, consoleRoutes, hookRoutes, internalRoutes,
+    workloadRoutes, consoleRoutes, hookRoutes, internalRoutes, internalGithubRoutes,
   ]) {
     await app.register(plugin);
   }

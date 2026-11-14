@@ -54,6 +54,7 @@ const ResultBody = z.looseObject({
 });
 const McpBody = z.object({ token: Token, server: z.string().min(1).max(200), tool: z.string().min(1).max(300), argsHash: z.string().regex(/^[0-9a-f]{64}$/).optional(), definitionHash: z.string().min(1).max(200).optional() });
 const EgressBody = z.object({ token: Token });
+const EgressDeniedBody = z.object({ runId: z.string().min(1).max(200).optional(), token: z.string().max(700).optional(), caller: z.enum(["run", "system"]), host: z.string().min(1).max(300), port: z.number().int().min(0).max(65535), reason: z.string().max(500) });
 
 const subject = (id: string) => ({ type: "run", id });
 const evBase = (c: RunCtx | null, id: string): Pick<EventSpec, "subject" | "projectId" | "woId" | "category"> => ({ subject: subject(id), projectId: c?.projectId ?? null, woId: c?.woId ?? null, category: "flow" });
@@ -321,6 +322,29 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     if (d) throw refusalFor(d);
     const servers = (await mcpServersInScope(g.pool, c)).map((s) => s.id);
     return { ok: true, projectId: c.projectId, hosts: await runEgressHosts(g.pool, c, servers) };
+  });
+
+  // Spec 5.3: refused outbound connections are logged. The edge reports each refusal (deduplicated per minute) so it lands in the audit ledger.
+  app.post("/internal/v1/egress/denied", async (req) => {
+    const b = EgressDeniedBody.parse(req.body);
+    return command(req, svc("egress.denied"), async (tx): Promise<CommandResult<Record<string, unknown>>> => {
+      const c = b.runId ? await loadRunCtx(tx, req.gx.orgId, b.runId) : null;
+      return {
+        msg: "Recorded.",
+        events: [{
+          type: "egress.denied",
+          category: "integrations",
+          outcome: "denied",
+          subject: c ? subject(c.runId) : { type: "egress", id: b.caller },
+          projectId: c?.projectId ?? null,
+          woId: c?.woId ?? null,
+          after: { caller: b.caller, host: b.host, port: b.port, reason: b.reason, ...(c ? { run: c.runId, station: c.station } : {}) },
+        }],
+        extra: {},
+        changes: ["audit"],
+        ...(c ? { project: c.projectId } : {}),
+      };
+    });
   });
 
   // The worker's delivery allow-list (spec 12.2).

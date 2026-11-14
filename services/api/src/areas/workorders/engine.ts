@@ -10,16 +10,16 @@
  */
 import {
   gateAfter, gateDef, gateKind, gateProgress, nextStationId, riskTagsOf, route, routeGates, stationDef,
-  type Catalog, type EventCategory as _Unused, type Person, type Project, type WorkOrder,
+  type Catalog, type Person, type Project, type WorkOrder,
 } from "@gantry/domain";
 import { appendEvent, cancel, enqueue, schedule, type EventCategory, type EventChannel, type Tx } from "@gantry/db";
 import type { EventSpec } from "../../core/command.js";
 import { readCatalog } from "../../core/read/index.js";
 import { job, type BuiltJob } from "../../core/jobs-contract.js";
+import { revokeRunTokens } from "../internal/tokens.js";
 import { ms } from "../../core/read/rows.js";
 import { readProject } from "../projects/store.js";
 import { bayOf, buildWorkOrders, loadFlowDocs, pinnedProject, saveWo, stationIdOf, type Data, type Wo } from "./model.js";
-void (null as unknown as _Unused);
 
 export interface Fx {
   tx: Tx;
@@ -314,7 +314,6 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
     w.position = "intake";
     w.state = "waiting";
     await releaseSlot(fx, w);
-    openHistory(fx, w, "intake");
     await openHistory(fx, w, "intake");
     const wasOpen = await openInstanceOf(fx.tx, fx.orgId, w.id, "G0G1");
     if (!wasOpen) await openInstance(fx.tx, fx.orgId, w, "G0G1", { station: "intake", flowVersion: w.flowVersion, now: fx.now });
@@ -405,8 +404,8 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
   const kind = gateKind(fx.catalog, project, gateId);
   const sid = stationIdOf(fx.catalog, w);
   const tags = riskTagsOf({ files: (w.data.files as WorkOrder["files"]) ?? [], paths: (w.data.paths as string[]) ?? [], risk: w.risk ?? "normal" });
-  const checks = o.checks ?? (Array.isArray((w.data.gateChecks ?? {})[gateId]) ? (w.data.gateChecks[gateId] as Array<{ name: string; ok: boolean }>) : g.checks.map((c) => ({ name: c, ok: true })));
-  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0, checks }, now: fx.now });
+  const checks: Array<{ name: string; ok: boolean; warn?: boolean; note?: string }> = o.checks ?? (Array.isArray((w.data.gateChecks ?? {})[gateId]) ? (w.data.gateChecks[gateId] as Array<{ name: string; ok: boolean }>) : g.checks.map((c) => ({ name: c, ok: true })));
+  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0, checks, required: Math.max(1, Number(project.approvers[gateId]?.required) || 1) }, now: fx.now });
   if (kind === "auto" || kind === "mixed") {
     (w.data.gateChecks ??= {})[gateId] = checks;
     const failed = checks.some((c) => !c.ok && !c.warn);
@@ -525,3 +524,25 @@ export function progressFor(project: Project, wo: WorkOrder, gateId: string, peo
 }
 
 export { bayOf, stationIdOf };
+
+/* ----------------------------------------------------------------------------------- shared helpers for the commands */
+
+/** Cancels the work order's live attempts (send-back, park, decline, stop). The run tokens are revoked in the same transaction, so the edge refuses the run on its next call and the reaper removes the sandbox. */
+export async function cancelAttempts(fx: Fx, w: Pick<Wo, "id">, reason: string): Promise<number> {
+  const r = await fx.tx.query(
+    `update attempts set state = 'cancelled', outcome = $4, ended_at = $3, updated_at = now(), version = version + 1 where org_id = $1 and wo_id = $2 and state in ('queued','running')`,
+    [fx.orgId, w.id, fx.now, reason],
+  );
+  if (r.rowCount) {
+    await revokeRunTokens(fx.tx, { orgId: fx.orgId, woId: w.id, reason });
+    fx.changes.add("floor");
+  }
+  return r.rowCount ?? 0;
+}
+
+export async function enterBay(fx: Fx, w: Wo, bay: string, reason: string): Promise<void> {
+  await fx.tx.query(`insert into bay_stays (org_id, id, wo_id, bay, reason, entered_by, entered_at) values ($1,$2,$3,$4,$5,$6,$7)`, [fx.orgId, `BS-${w.id}-${fx.now.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`, w.id, bay, reason, fx.actor, fx.now]);
+}
+export async function leaveBay(fx: Fx, w: Pick<Wo, "id">): Promise<void> {
+  await fx.tx.query(`update bay_stays set left_at = $3, updated_at = now() where org_id = $1 and wo_id = $2 and left_at is null`, [fx.orgId, w.id, fx.now]);
+}

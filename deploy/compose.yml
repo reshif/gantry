@@ -109,6 +109,8 @@ services:
       LAUNCHER_URL: http://gantry-launcher:9100
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
+      # Slack, Teams and webhook delivery go out through the edge allow-list (a no-credentials system caller, outside the run subnet).
+      HTTPS_PROXY: http://gantry-edge:8444
     secrets: [db_password, data_key, github_token, launcher_token, minio_root_password]
     depends_on:
       gantry-migrate: { condition: service_completed_successfully }
@@ -179,10 +181,15 @@ services:
     <<: *hardened
     build: { context: .., dockerfile: services/github/Dockerfile }
     image: gantry-github:dev
+    # The broker seeds and reads ws-<id> volumes through the Docker API (services/github/src/workspace.ts); the socket is root-equivalent (spec 5.5).
+    group_add: ["${DOCKER_GID:-999}"]
     environment:
       GANTRY_API_URL: http://gantry-api:8000
       GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
+      GITHUB_HELPER_IMAGE: gantry-github:dev
     secrets: [data_key, github_token, github_app.pem, github_app.json]
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     depends_on:
       gantry-api: { condition: service_healthy }
     healthcheck:

@@ -3,6 +3,7 @@ import { Component, Suspense, useCallback, useEffect, useRef, useState, type Err
 import type { Me } from "../api/types";
 import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
+import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { pickProject, resolveRoute, routeDef } from "../lib/routes";
 import { useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
@@ -39,6 +40,7 @@ export function Shell({ me }: { me: Me }) {
   const loc = useHash();
   const ctx = useRouteCtx();
   useCanSession(me.session.id);
+  useRegisterNewWorkOrder();
   const [navOpen, setNavOpen] = useState(false);
   const main = useRef<HTMLElement>(null);
 

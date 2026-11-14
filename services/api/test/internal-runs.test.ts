@@ -376,6 +376,16 @@ d("internal runs API", () => {
       expect(h).toContain("hooks.partner.example");
       expect(h).toContain("hooks.slack.com");
     });
+    it("records refused outbound connections in the audit ledger (service token only)", async () => {
+      const r = await makeRun();
+      const res = await call("POST", "/internal/v1/egress/denied", { runId: r.runId, caller: "run", host: "evil.example.com", port: 443, reason: "Host evil.example.com is not on the allow-list." });
+      expect(res.statusCode).toBe(200);
+      const ev = (await events("egress.denied")).find((e) => e.after?.host === "evil.example.com");
+      expect(ev).toMatchObject({ outcome: "denied", project_id: "payments", wo_id: r.woId });
+      expect((await call("POST", "/internal/v1/egress/denied", { caller: "system", host: "x.example.com", port: 443, reason: "no" })).statusCode).toBe(200);
+      expect((await call("POST", "/internal/v1/egress/denied", { caller: "system", host: "x.example.com", port: 443, reason: "no" }, {})).statusCode).toBe(401);
+      expect((await call("POST", "/internal/v1/egress/denied", { caller: "bogus", host: "x", port: 1, reason: "" })).statusCode).toBe(422);
+    });
     it("returns a decrypted vendor key only to the edge", async () => {
       expect((await call("GET", "/internal/v1/vendors/w3-anthropic/key")).json()).toEqual({ ok: true, key: "sk-ant-real-secret-123456789" });
       expect((await call("GET", "/internal/v1/vendors/w3-anthropic/key", undefined, { authorization: "Bearer github-token-for-tests" })).statusCode).toBe(403);

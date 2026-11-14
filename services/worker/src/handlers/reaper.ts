@@ -1,0 +1,90 @@
+import { applyStationResult, expireLeases, pendingStops, revokeRunTokens, job as buildJob } from "@gantry/api/core";
+import { enqueue, withTx, type Job } from "@gantry/db";
+import type { Deps } from "../deps.js";
+import { errMsg } from "../errors.js";
+import type { HandlerCtx } from "../runner.js";
+
+export interface SweepReport {
+  stopsRequeued: number;
+  leasesExpired: number;
+  orphansRemoved: string[];
+  watchdog: string[];
+}
+
+/** Removes every launcher resource without a live attempt lease (spec 4.6). A run whose attempt is queued or running, within its lease plus a grace, is live. */
+export async function reapOrphans(deps: Deps, orgId: string): Promise<string[]> {
+  const live = await deps.launcher.list();
+  const removed: string[] = [];
+  const graceMs = deps.cfg.reaperGraceMs;
+  for (const r of live) {
+    const row = (await deps.pool.query<{ state: string; attempt_state: string; lease_until: Date | null; created_at: Date }>(
+      `select r.state, a.state as attempt_state, a.lease_until, r.created_at from runs r join attempts a on a.org_id = r.org_id and a.id = r.attempt_id where r.org_id = $1 and r.id = $2`,
+      [orgId, r.runId],
+    )).rows[0];
+    const now = deps.now().getTime();
+    let orphan: boolean;
+    if (!row) orphan = true;
+    else if (!["queued", "running"].includes(row.attempt_state) || ["stopped", "reaped", "succeeded", "failed"].includes(row.state)) orphan = true;
+    else orphan = row.lease_until !== null && row.lease_until.getTime() + graceMs < now;
+    // Another organisation's run is not ours to remove: a run row that exists in no org at all is.
+    if (!row && (await deps.pool.query(`select 1 from runs where id = $1 and org_id <> $2 limit 1`, [r.runId, orgId])).rowCount) continue;
+    if (!orphan) continue;
+    try {
+      await deps.launcher.stop(r.runId, { keepWorkspace: false });
+      removed.push(r.runId);
+      if (row) await deps.pool.query(`update runs set state = case when state in ('starting','running') then 'reaped' else state end, ended_at = coalesce(ended_at, now()), updated_at = now() where org_id = $1 and id = $2`, [orgId, r.runId]);
+    } catch (e) {
+      deps.log.warn({ run: r.runId, err: errMsg(e) }, "reaper could not remove a run; it is retried on the next sweep");
+    }
+  }
+  return removed;
+}
+
+/**
+ * Wall-clock watchdog (spec 10.5): time per run is enforced here, outside the runner. A run past its limit is torn down and its attempt fails,
+ * which the flow engine counts toward the bounded retry (F9).
+ */
+export async function wallClockWatchdog(deps: Deps, orgId: string): Promise<string[]> {
+  const { rows } = await deps.pool.query<{ id: string; attempt_id: string; fencing: string; limit_s: string }>(
+    `select r.id, r.attempt_id, a.fencing::text as fencing, (r.data->>'wallClockSeconds') as limit_s from runs r join attempts a on a.org_id = r.org_id and a.id = r.attempt_id
+      where r.org_id = $1 and r.state in ('starting','running') and a.state in ('queued','running') and r.data ? 'wallClockSeconds'
+        and r.started_at + ((r.data->>'wallClockSeconds')::int * interval '1 second') < $2 limit 50`,
+    [orgId, deps.now()],
+  );
+  const out: string[] = [];
+  for (const r of rows) {
+    try {
+      await deps.launcher.stop(r.id, { keepWorkspace: false });
+      await withTx(deps.pool, async (tx) => {
+        await revokeRunTokens(tx, { orgId, runIds: [r.id], reason: "wall-clock limit" });
+        await tx.query(`update runs set state = 'stopped', ended_at = now(), updated_at = now(), data = data || '{"endedBy":"wall-clock watchdog"}'::jsonb where org_id = $1 and id = $2`, [orgId, r.id]);
+        const msg = `The run exceeded its wall-clock limit of ${r.limit_s} seconds and was stopped.`;
+        await applyStationResult(tx, r.attempt_id, Number(r.fencing), { status: "failed", summary: msg, error: { code: "wall_clock_exceeded", msg } });
+      });
+      out.push(r.id);
+    } catch (e) {
+      deps.log.warn({ run: r.id, err: errMsg(e) }, "watchdog could not stop a run; retried on the next pass");
+    }
+  }
+  return out;
+}
+
+/**
+ * reaper.sweep (every minute): re-enqueues stop enforcement that was lost (the stop is committed but its job never ran), expires lapsed leases
+ * (F9: bounded retry, then "Needs a person"), enforces wall-clock limits, and removes orphaned runners, networks and volumes.
+ */
+export async function reaperSweep(job: Job, ctx: HandlerCtx): Promise<SweepReport> {
+  const { deps } = ctx;
+  const org = job.orgId;
+  const report: SweepReport = { stopsRequeued: 0, leasesExpired: 0, orphansRemoved: [], watchdog: [] };
+  for (const s of await pendingStops(deps.pool)) {
+    if (s.orgId !== org) continue;
+    const j = buildJob("stop.enforce", { stopId: s.id, scope: s.scope, targetId: s.target, mode: s.mode }, { dedupeKey: `stop.enforce:${s.id}:sweep` });
+    await enqueue(deps.pool, { orgId: org, kind: j.kind, queue: j.queue, payload: j.payload, ...(j.dedupeKey ? { dedupeKey: j.dedupeKey } : {}) });
+    report.stopsRequeued++;
+  }
+  report.leasesExpired = (await withTx(deps.pool, (tx) => expireLeases(tx, { now: deps.now() }))).length;
+  report.watchdog = await wallClockWatchdog(deps, org);
+  report.orphansRemoved = await reapOrphans(deps, org);
+  return report;
+}

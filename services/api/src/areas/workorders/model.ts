@@ -45,6 +45,8 @@ export interface Wo {
   version: number;
   createdAt: Date;
   data: Data;
+  /** Fingerprint of what was last read or written, so a second save of an unchanged row is a no-op (the version bumps once per command). */
+  snap?: string;
 }
 
 interface WoDb {
@@ -54,10 +56,17 @@ interface WoDb {
 
 export const WO_COLS = `id, project_id, repo_id, title, class, priority, source, position, state, flow_version, assignee, submitter, parent_id, risk, sla_due_at, closed_at, version, created_at, data`;
 
-export const toWo = (r: WoDb): Wo => ({
+const snapOf = (w: Wo): string => JSON.stringify([w.title, w.cls, w.priority, w.position, w.state, w.assignee, w.risk, w.slaDueAt, w.closedAt, w.repo, w.parentId, w.data]);
+
+export const toWo = (r: WoDb): Wo => withSnap({
   id: r.id, project: r.project_id, repo: r.repo_id, title: r.title, cls: r.class, priority: r.priority, source: r.source, position: r.position, state: r.state, flowVersion: r.flow_version,
   assignee: r.assignee, submitter: r.submitter, parentId: r.parent_id, risk: r.risk, slaDueAt: r.sla_due_at, closedAt: r.closed_at, version: r.version, createdAt: r.created_at, data: { ...obj(r.data) },
 });
+
+function withSnap(w: Wo): Wo {
+  w.snap = snapOf(w);
+  return w;
+}
 
 /** Locks the row for the rest of the transaction (F2: commands on one work order are serialised) and checks `If-Match` against the locked row. */
 export async function lockWo(tx: Tx, orgId: string, id: string, ifMatch: number | null = null): Promise<Wo> {
@@ -78,12 +87,14 @@ export const woVersion = (orgId: string, id: string) => async (tx: Tx): Promise<
 
 /** Writes the row back and bumps the version. The row must be locked by the caller. */
 export async function saveWo(tx: Tx, orgId: string, w: Wo): Promise<void> {
+  if (w.snap === snapOf(w)) return;
   const r = await tx.query<{ version: number }>(
     `update work_orders set title = $3, class = $4, priority = $5, position = $6, state = $7, assignee = $8, risk = $9, sla_due_at = $10, closed_at = $11, repo_id = $12, parent_id = $13,
        data = $14::jsonb, version = version + 1, updated_at = now() where org_id = $1 and id = $2 returning version`,
     [orgId, w.id, w.title, w.cls, w.priority, w.position, w.state, w.assignee, w.risk, w.slaDueAt, w.closedAt, w.repo, w.parentId, JSON.stringify(w.data)],
   );
   w.version = r.rows[0]!.version;
+  w.snap = snapOf(w);
 }
 
 /* ------------------------------------------------------------------------- derived position helpers */
@@ -154,9 +165,13 @@ export async function buildWorkOrders(db: Queryable, orgId: string, catalog: Cat
   if (!rows.length) return [];
   const wos = rows.map(toWo);
   const ids = wos.map((w) => w.id);
-  const q = <T extends Record<string, unknown>>(sql: string) => db.query<T>(sql, [orgId, ids]).then((r) => r.rows);
+  // A transaction client runs one query at a time: serialise there, run concurrently on a pool.
+  const isTx = "release" in db;
+  let chain: Promise<unknown> = Promise.resolve();
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => (isTx ? ((chain = chain.then(fn, fn)) as Promise<T>) : fn());
+  const q = <T extends Record<string, unknown>>(sql: string) => serial(() => db.query<T>(sql, [orgId, ids]).then((r) => r.rows));
   const [flows, gis, votes, decs, convs, msgs, slots, prs, reqs, bvs, commits, checks, outcomes] = await Promise.all([
-    loadFlowDocs(db, orgId, wos),
+    serial(() => loadFlowDocs(db, orgId, wos)),
     q<{ id: string; wo_id: string; gate_id: string; status: string; closed_reason: string | null; opened_at: Date; closed_at: Date | null; basis: Data }>(
       `select id, wo_id, gate_id, status, closed_reason, opened_at, closed_at, basis from gate_instances where org_id = $1 and wo_id = any($2::text[]) order by opened_at, id`),
     q<{ gate_instance_id: string; wo_id: string; voter: string; vote: string; comment: string; at: Date; via: string }>(

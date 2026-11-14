@@ -62,6 +62,14 @@ export function networkOptions(cfg: LauncherConfig, input: StartRunInput, subnet
   };
 }
 
+/** The edge's forward proxy identifies a run by Basic credentials `run:<runToken>` in the proxy URL (services/edge/src/proxy.ts). */
+export function proxyUrlFor(proxyUrl: string, runToken: string): string {
+  const u = new URL(proxyUrl);
+  u.username = "run";
+  u.password = runToken;
+  return u.toString().replace(/\/$/, "");
+}
+
 /**
  * The fixed runner template (spec 4.1). Nothing here comes from the caller except the id, the image chosen from
  * the allow-list, the labels and the per-run token. There is deliberately no parameter for anything else.
@@ -78,7 +86,7 @@ export function runnerContainerOptions(cfg: LauncherConfig, input: StartRunInput
     WorkingDir: WORKSPACE_PATH,
     Env: [
       `EDGE_URL=${cfg.runnerEnv.edgeUrl}`,
-      `HTTPS_PROXY=${cfg.runnerEnv.proxyUrl}`,
+      `HTTPS_PROXY=${proxyUrlFor(cfg.runnerEnv.proxyUrl, input.runToken)}`,
       `GANTRY_RUN_TOKEN=${input.runToken}`,
       `GANTRY_RUN_ID=${input.runId}`,
     ],

@@ -1,0 +1,8 @@
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!services/edge/package.json
+!services/edge/tsconfig.json
+!services/edge/src
+!packages/domain/package.json

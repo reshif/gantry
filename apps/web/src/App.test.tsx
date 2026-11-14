@@ -97,7 +97,7 @@ describe("signed in", () => {
     expect(Array.from(nav.querySelectorAll(".nav-group-name")).map((e) => e.textContent)).toEqual(["Overview", "Project · Payments Platform", "Agents", "Connect", "Govern"]);
     expect(within(nav).getByText("Access")).toBeTruthy();
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
-    expect(await screen.findByText("Ported in a later wave")).toBeTruthy();
+    expect(await screen.findByText("The floor could not be loaded")).toBeTruthy();
     expect(within(nav).getByText("Floor").closest("a")?.getAttribute("aria-current")).toBe("page");
     await waitFor(() => expect(within(nav).getByTitle("3 conversations waiting for you").textContent).toBe("3"));
     expect(document.title).toBe("Floor · Gantry Software Factory");

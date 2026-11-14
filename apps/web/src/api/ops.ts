@@ -74,8 +74,9 @@ export const ops = {
   setSecurity: (path: string, value: unknown, v?: Versioned) => run(["security"], patch(api("security"), { path, value }, opts(v))),
 
   /* ===== work orders, intake, conversations ===== */
-  submitWO: (o: SubmitWorkOrder, via?: Via) =>
-    run(["workOrders", "conversations"], post(api(`projects/${enc(o.project)}/work-orders`), { ...o, via }, create)),
+  /** `key` is the Idempotency-Key: reuse it when a submit is retried so the work order is created once. */
+  submitWO: (o: SubmitWorkOrder, via?: Via, key?: string) =>
+    run(["workOrders", "conversations"], post(api(`projects/${enc(o.project)}/work-orders`), { ...o, via }, key ? { idempotent: key } : create)),
   answer: (woId: string, text: string, via?: Via) => run(["workOrders", "conversations"], post(api(`work-orders/${enc(woId)}/messages`), { text, via })),
   raiseQuestionAtIntake: (woId: string, text: string) =>
     run(["workOrders", "conversations"], post(api(`work-orders/${enc(woId)}/messages`), { text, kind: "question" })),
