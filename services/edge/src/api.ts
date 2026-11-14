@@ -41,6 +41,23 @@ export interface Route {
   vendor: string;
   baseUrl: string;
   modelId: string;
+  /** The id the vendor's API expects for this model. The request's model is rewritten to it when it differs. */
+  upstreamModel?: string;
+  /** The vendor needs no key (an on-prem endpoint without a token). */
+  keyless?: boolean;
+  /** The primary route is itself a different model than the run pinned (the project opted in to cross-model fallback). */
+  crossModel?: boolean;
+  /** Tried in order when the vendor fails before any byte reached the run (spec 10.4 Fallback). */
+  alternates?: Alternate[];
+}
+export interface Alternate {
+  vendor: string;
+  baseUrl: string;
+  modelId: string;
+  upstreamModel: string;
+  keyless?: boolean;
+  /** A different model than the one the run pinned. */
+  crossModel: boolean;
 }
 
 export type Authorization = { allow: true; route: Route } | { allow: false; code: string; reason: string } | { allow: "unavailable"; reason: string };

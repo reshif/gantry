@@ -12,7 +12,7 @@ import type {
   EvalExtra, EvalRun, EventEntry, FloorData, Freeze, HomeData, IntegrationInstance, IntegrationType, KillImpact, LearningFinding,
   LearningProposal, McpServer, McpUsage, Me, Page, Person, Policy, Project, PublicConfig, RecordBundle, Repo, RequestLogEntry,
   Routing, SavedView, Scorecard, SecuritySettings, Session, SignIn, Skill, Template, Trigger, TriggerProposal, TriggerRun, Trust, Vendor,
-  WorkOrder, Workload, OrgGuidelines, NavBadge,
+  WorkOrder, Workload, OrgGuidelines, NavBadge, LearningSignalRow, LearningSettings, Suite,
 } from "./types";
 import type { NotificationRoute } from "@gantry/domain";
 
@@ -127,15 +127,28 @@ export const useInstructions = () => useQuery({ queryKey: ["instructions"], quer
 export const useSkills = () => useQuery({ queryKey: qk.skills(), queryFn: () => get<Skill[]>(api("skills")) });
 export const useVendors = () => useQuery({ queryKey: qk.vendors(), queryFn: () => get<Vendor[]>(api("vendors")) });
 export const useRouting = () => useQuery({ queryKey: qk.routing(), queryFn: () => get<Routing>(api("routing")) });
-export const useRoutingResolve = (q: { station?: string; repo?: string }, enabled = true) =>
-  useQuery({ queryKey: qk.routingResolve(q), queryFn: () => get<unknown>(api("routing/resolve"), q), enabled });
+export interface PriceVersion { version: number; effectiveFrom: string; publishedAt: string; publishedBy: string | null; note: string; prices: Record<string, { in: number; out: number; cacheRead?: number; cacheWrite?: number }> }
+export const usePrices = () => useQuery({ queryKey: qk.prices(), queryFn: () => get<{ current: number | null; versions: PriceVersion[] }>(api("prices")) });
+export interface BudgetRow { project: string; monthly: number; alertAt: number; perWorkOrder: number; spent: number; version: number }
+export const useBudgets = () => useQuery({ queryKey: qk.budgets(), queryFn: () => get<BudgetRow[]>(api("budgets")) });
+export interface RouteAnswer { model: string | null; vendor: string | null; wanted: string | null; layer: string; steps: string[]; blocked: string | null; crossModel: boolean; sameModelFallback: boolean; rule: { id: string; tag: string } | null }
+export const useRoutingResolve = (q: { station?: string; repo?: string; project?: string; class?: string }, enabled = true) =>
+  useQuery({ queryKey: qk.routingResolve(q), queryFn: () => get<RouteAnswer>(api("routing/resolve"), q), enabled });
 export const useScorecards = () => useQuery({ queryKey: qk.scorecards(), queryFn: () => get<Record<string, Scorecard>>(api("evals/scorecards")) });
 export const useSuiteRuns = (suiteId: string | null | undefined) =>
   useQuery({ queryKey: qk.suiteRuns(suiteId ?? ""), queryFn: () => get<EvalRun[]>(api(`suites/${encodeURIComponent(suiteId ?? "")}/runs`)), enabled: !!suiteId });
 export const useEvalsFactory = () => useQuery({ queryKey: qk.evalsFactory(), queryFn: () => get<EvalExtra>(api("evals/factory")) });
-export const useTrustCells = () => useQuery({ queryKey: qk.trustCells(), queryFn: () => get<Trust>(api("trust/cells")) });
+/** The trust ladder the viewer can see. With a project, that project's cells that do not exist yet come too (marked `virtual`). */
+export const useTrustCells = (project?: string | null) =>
+  useQuery({ queryKey: qk.trustCells(project), queryFn: () => get<Trust>(api("trust/cells"), project ? { project } : undefined) });
+/** Eval suites with their cases. */
+export const useSuites = () => useQuery({ queryKey: qk.suites(), queryFn: () => get<Suite[]>(api("suites")) });
+/** The recent runs of every suite, in one request (the Evals screen would otherwise ask once per suite). */
+export const useAllSuiteRuns = () => useQuery({ queryKey: qk.suiteRuns("*"), queryFn: () => get<EvalRun[]>(api("evals/runs")) });
 export const useLearningFindings = () => useQuery({ queryKey: qk.learningFindings(), queryFn: () => get<LearningFinding[]>(api("learning/findings")) });
 export const useLearningProposals = () => useQuery({ queryKey: qk.learningProposals(), queryFn: () => get<LearningProposal[]>(api("learning/proposals")) });
+export const useLearningSignals = (days = 30) => useQuery({ queryKey: qk.learningSignals(days), queryFn: () => get<LearningSignalRow[]>(api("learning/signals"), { days }) });
+export const useLearningSettings = () => useQuery({ queryKey: qk.learningSettings(), queryFn: () => get<LearningSettings>(api("learning/settings")) });
 
 /* ---------- integrations, notifications, MCP, keys, triggers ---------- */
 
@@ -180,7 +193,7 @@ export const useAuditEntry = (seq: number | string | null | undefined) =>
 /** Walks the hash chain server-side. Not cached long: a verification is a statement about now. */
 export const useAuditVerify = (enabled = false) =>
   useQuery({ queryKey: qk.auditVerify(), queryFn: () => get<{ ok: boolean; checked: number; [k: string]: unknown }>(api("audit/verify")), enabled, staleTime: 0 });
-export const useWorkload = (scope?: string) => useQuery({ queryKey: qk.workload(scope), queryFn: () => get<Workload>(api("workload"), { scope }) });
+export const useWorkload = (scope?: string, days?: number) => useQuery({ queryKey: qk.workload(scope, days), queryFn: () => get<Workload>(api("workload"), { scope, days }), placeholderData: (prev) => prev });
 
 /** Nav badges for the left nav, from GET /home. Empty until home loads. */
 export function useNavBadges(): Record<string, NavBadge> {

@@ -39,8 +39,12 @@ const jsonUrlHosts = (v: unknown, out: Set<string>): void => {
   else if (v && typeof v === "object") for (const x of Object.values(v)) jsonUrlHosts(x, out);
 };
 
-/** Outbound allow-list for one run's project: model endpoints, GitHub, package registries, in-scope MCP servers, plus configured extras. */
-export async function runEgressHosts(db: Queryable, c: RunCtx, mcpServerIds: string[]): Promise<string[]> {
+/**
+ * Outbound allow-list for one run's project: model endpoints, GitHub, package registries, plus configured extras.
+ * MCP servers are deliberately not on it (spec 12.4): a run reaches them only through the edge's MCP gateway, which checks scope, the definition hash and
+ * the write pre-authorisation on every call and logs it. A direct route through the proxy would skip all of that for a server without its own auth.
+ */
+export async function runEgressHosts(db: Queryable, c: RunCtx): Promise<string[]> {
   const out = new Set<string>(DEFAULT_RUN_HOSTS);
   const org = await orgEgress(db, c.orgId);
   for (const h of org.hosts) out.add(h);
@@ -51,12 +55,6 @@ export async function runEgressHosts(db: Queryable, c: RunCtx, mcpServerIds: str
   for (const r of (await db.query<{ endpoint: string }>(`select endpoint from vendors where org_id = $1 and connected and endpoint <> ''`, [c.orgId])).rows) {
     const h = hostOf(r.endpoint);
     if (h) out.add(h);
-  }
-  if (mcpServerIds.length) {
-    for (const r of (await db.query<{ url: string }>(`select url from mcp_servers where org_id = $1 and id = any($2) and enabled`, [c.orgId, mcpServerIds])).rows) {
-      const h = hostOf(r.url);
-      if (h) out.add(h);
-    }
   }
   return [...out].sort();
 }

@@ -53,7 +53,7 @@ export async function portfolioMetrics(db: Queryable, orgId: string, projects: P
       `select w.project_id, count(*) as n,
               coalesce(sum(extract(epoch from (w.closed_at - w.created_at)) * 1000), 0) as lead_ms,
               coalesce(sum((select coalesce(sum(extract(epoch from (a.ended_at - a.started_at)) * 1000), 0) from attempts a where a.org_id = w.org_id and a.wo_id = w.id and a.started_at is not null and a.ended_at is not null)), 0) as act_ms
-       from work_orders w where w.org_id = $1 and w.state = 'done' and w.closed_at >= $2 group by w.project_id`,
+       from work_orders w where w.org_id = $1 and w.source <> 'eval' and w.state = 'done' and w.closed_at >= $2 group by w.project_id`,
       [orgId, since],
     ),
     db.query<{ project_id: string; class: string; n: string }>(`select project_id, class, count(*) as n from work_orders where org_id = $1 and state not in ('done','killed','declined') group by project_id, class`, [orgId]),

@@ -42,7 +42,7 @@ export interface ApiData {
   last24h: number;
   limited24h: number;
   insts: IntegrationInstance[];
-  typeOf: (id: string) => { id: string; name: string; category: string; source?: boolean | undefined } | undefined;
+  typeOf: (id: string) => { id: string; name: string; category: string; source?: boolean | undefined; custom?: boolean | undefined } | undefined;
   loading: boolean;
 }
 
@@ -93,6 +93,8 @@ export function kindsFor(src: string, d: ApiData): string[] {
   const i = d.insts.find((x) => x.id === src);
   const t = i && d.typeOf(i.type);
   if (!t) return ["issue"];
+  // A custom connection's signed webhook says which kind of event it sends (spec 12.1).
+  if (t.custom) return ["issue", "comment", "ci"];
   if (t.category === "source") return ["issue", "comment", "ci"];
   if (t.category === "ci") return ["ci"];
   return ["issue"];
@@ -112,3 +114,9 @@ export function srcOptions(pid: string, cur: string | null | undefined, kind: st
   return list;
 }
 export const BASE = typeof window !== "undefined" && window.location?.origin && window.location.origin !== "null" ? window.location.origin : "https://gantry.example";
+
+/** Where a custom connection's trigger events are posted (spec 12.1), or null for a connection that is not a custom trigger source. */
+export function hookUrl(src: string | undefined, d: ApiData): string | null {
+  const i = d.insts.find((x) => x.id === src);
+  return i && d.typeOf(i.type)?.custom ? `${BASE}/hooks/trigger/${i.id}` : null;
+}

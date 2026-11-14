@@ -9,10 +9,12 @@ COPY services/github/package.json services/github/
 COPY packages/domain/package.json packages/domain/
 RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
-    npm ci -w @gantry/github --include-workspace-root --ignore-scripts
+    npm ci -w @gantry/github -w @gantry/domain --include-workspace-root --ignore-scripts
+COPY packages/domain/tsconfig.json packages/domain/
+COPY packages/domain/src packages/domain/src
 COPY services/github/tsconfig.json services/github/
 COPY services/github/src services/github/src
-RUN npm run build -w @gantry/github
+RUN npm run build -w @gantry/domain && npm run build -w @gantry/github
 
 FROM node:22-alpine AS deps
 WORKDIR /app
@@ -21,7 +23,7 @@ COPY services/github/package.json services/github/
 COPY packages/domain/package.json packages/domain/
 RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
-    npm ci -w @gantry/github --omit=dev --ignore-scripts && npm cache clean --force
+    npm ci -w @gantry/github -w @gantry/domain --omit=dev --ignore-scripts && npm cache clean --force
 
 FROM node:22-alpine
 ENV NODE_ENV=production
@@ -33,8 +35,10 @@ RUN --mount=type=secret,id=cacert,required=false \
 # The workspace helper (this same image, never started) mounts a run's empty ws-<id> volume first; Docker copies this directory's owner onto a new
 # volume, so /workspace must belong to the runner's uid or the runner could not create files at the repository root.
 RUN mkdir -p /workspace && chown 10001:10001 /workspace
-WORKDIR /app/services/github
 COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=build /app/packages/domain/dist /app/packages/domain/dist
+COPY packages/domain/package.json /app/packages/domain/package.json
+WORKDIR /app/services/github
 COPY --from=build /app/services/github/dist ./dist
 COPY services/github/package.json ./package.json
 USER 10001:10001

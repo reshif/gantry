@@ -11,10 +11,12 @@ import type { FastifyPluginAsync } from "fastify";
 import { runRoutes } from "../areas/internal/runs.js";
 import { vendorKeyRoutes } from "../areas/internal/keys.js";
 import { mcpGatewayRoutes } from "../areas/mcp/internal.js";
+import { serviceCallRoutes } from "../areas/internal/service-calls.js";
 
 export const internalRoutes: FastifyPluginAsync = async (app) => {
   // Runs part (edge): areas/internal. The GitHub broker endpoints (fence-check, github/events) register below.
   await app.register(runRoutes);
   await app.register(vendorKeyRoutes);
   await app.register(mcpGatewayRoutes);
+  await app.register(serviceCallRoutes);
 };

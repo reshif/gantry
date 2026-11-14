@@ -29,3 +29,8 @@ export { notifyEventFor, isMandatoryEvent } from "../areas/notifications/events.
 export * from "../areas/triggers/index.js";
 // Agents (wave 4): the four-layer instruction composition pinned on a run at dispatch (spec 10.2), shared by the API's run spec and the worker.
 export { pinRunConfig, type RunPin, type InstructionPin } from "../areas/agents/compose.js";
+// Evals and trust (wave 4): the eval runtime the worker drives (cases through the same runtime as work, graded by deterministic checks) and the trust evaluation job.
+export { progressEval, gradeEvalAttempt, failEvalAttempt, sweepEvals, cancelEvalRun, type EvalResultInput } from "../areas/evals/engine.js";
+export { evaluateAllTrust } from "../areas/trust/record.js";
+// Learning (wave 4): the findings refresh the worker runs on a schedule (spec 13.4).
+export { refreshFindings as refreshLearningFindings, type RefreshResult as LearningRefreshResult } from "../areas/learning/findings.js";

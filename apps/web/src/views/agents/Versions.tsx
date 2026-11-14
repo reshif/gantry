@@ -8,6 +8,7 @@ import { Icon } from "../../ui/Icon";
 import { useOutcome } from "../govern/data";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
+import { evalsFocus } from "../evals/kit";
 import { liveVersion, nextVersion, rerender, same, ui, type AgentRow, type AgentVersionRow } from "./kit";
 
 export function RollbackDialog({ a, ver, live, perm, close }: { a: AgentRow; ver: AgentVersionRow; live: AgentVersionRow | undefined; perm: Decision; close: () => void }) {
@@ -75,11 +76,11 @@ export function VersionsTab({ a, dirty, perm }: { a: AgentRow; dirty: boolean; p
                     <span className="muted small">{fmt.istDate(ver.at)}</span><span className="small">{ver.note}</span>
                   </div>
                   <div className="mono small ag-diff"><span className="muted">Diff: </span>{ver.diff || "no summary"}{deltas.length ? <span className="muted">{` · differs from current in ${deltas.join(", ")}`}</span> : null}</div>
-                  <div className={`elig ${el.ok ? "pos" : "neg"}`}><Icon name={el.ok ? "check" : "lock"} /><span>{el.text}</span></div>
+                  <div className={`elig ${el.ok ? "pos" : "neg"}`}><Icon name={el.ok ? "check" : "lock"} /><span>{el.text}</span>{el.runs ? <span className="muted small">{` · ${el.runs} run${el.runs > 1 ? "s" : ""}`}</span> : null}</div>
                   <div className="ag-ver-actions">
                     {!ver.rc ? null : <Btn label={`Promote ${ver.v}`} small kind={el.ok ? "primary" : undefined} icon="rocket" id={`ag-promote-${vid}`} guard={promoteGuard} onClick={() => { void ops.promoteAgent(a.id, ver.v, { ifMatch: a.rev }).then((r) => out(r)); }} />}
                     {ver.live || ver.rc ? null : <Btn label={`Roll back to ${ver.v}`} small icon="undo" id={`ag-rollback-${vid}`} guard={perm} onClick={() => ui_.open((close) => <RollbackDialog a={a} ver={ver} live={live} perm={perm} close={close} />)} />}
-                    <Btn label="Run suite" small kind="ghost" icon="eval" id={`ag-runsuite-${vid}`} onClick={() => navigate("evals")} />
+                    <Btn label="Run suite" small kind="ghost" icon="eval" id={`ag-runsuite-${vid}`} onClick={() => { evalsFocus({ agent: a.id, suite: a.suite, version: ver.v }); navigate("evals"); }} />
                   </div>
                 </div>
               </li>

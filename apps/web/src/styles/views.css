@@ -263,6 +263,21 @@
 .rule-top { display: flex; gap: 8px; align-items: center; }
 .rule-text { font-size: var(--t-md); }
 .rule-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; align-items: end; padding: 10px; border: 1px dashed var(--line-strong); }
+/* Models: station qualification, per-project policy, cross-model switch, price and budget forms (w4mdl-) */
+.md-qual { display: grid; gap: 6px; padding: 0 16px 10px; }
+.md-qual-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.md-qual-chips .chip { white-space: nowrap; }
+.chip-ok { border-color: var(--done); background: var(--done-soft); color: var(--done); }
+.md-qual-form { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.md-cross { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
+.md-policy { display: grid; gap: 10px; }
+.md-policy-set { border: 1px solid var(--line); padding: 6px 10px 8px; display: flex; flex-wrap: wrap; gap: 4px 16px; min-width: 0; }
+.md-policy-set legend { padding: 0 4px; color: var(--ink-2); }
+.md-policy-set .check { display: inline-flex; gap: 6px; align-items: center; }
+.md-price-form { margin-top: 12px; }
+.md-bd-edit { display: inline-flex; gap: 8px; align-items: center; }
+.md-bd-edit .input { width: 110px; }
+.md-prices, .md-budgets { margin-top: var(--s4); }
 
 /* ================= EVALS ================= */
 .chart-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); }

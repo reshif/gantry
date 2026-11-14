@@ -240,9 +240,9 @@ export function Who({ id }: { id: string | null | undefined }) {
 
 /* ---------- layout pieces ---------- */
 
-export function Empty({ title, text, action }: { title: ReactNode; text?: ReactNode; action?: ReactNode }) {
+export function Empty({ title, text, action, id }: { title: ReactNode; text?: ReactNode; action?: ReactNode; /** Legacy G.emptyState id, kept for fidelity and tests. */ id?: string }) {
   return (
-    <div className="empty">
+    <div className="empty" id={id}>
       <div className="empty-title">{title}</div>
       {text != null ? <p>{text}</p> : null}
       {action ?? null}

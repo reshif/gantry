@@ -9,6 +9,8 @@ import type { WorkerConfig } from "./config.js";
 import { realSleep, type Deps } from "./deps.js";
 import { errMsg } from "./errors.js";
 import { attemptDispatch } from "./handlers/dispatch.js";
+import { evalDispatch, trustEvaluate } from "./handlers/evals.js";
+import { learningRefresh } from "./handlers/learning.js";
 import { mergeRequest } from "./handlers/merge.js";
 import { chainVerify, flowTimer, githubEvent, githubReconcile, triggerEvaluate, triggerTick } from "./handlers/misc.js";
 import { onboardingAssess, onboardingMerge, onboardingOpenPr, onboardingSync, onboardingVerify } from "./handlers/onboarding.js";
@@ -35,6 +37,9 @@ export const HANDLERS: Handlers = {
   "trigger.tick": triggerTick,
   "chain.verify": chainVerify,
   "reaper.sweep": reaperSweep,
+  "eval.dispatch": evalDispatch,
+  "trust.evaluate": trustEvaluate,
+  "learning.refresh": learningRefresh,
   "onboarding.assess": onboardingAssess,
   "onboarding.open_pr": onboardingOpenPr,
   "onboarding.merge": onboardingMerge,

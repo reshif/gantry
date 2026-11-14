@@ -40,7 +40,7 @@ export interface World {
 
 export async function startWorld(o: { cfg?: Partial<WorkerConfig>; smtp?: boolean; deps?: Partial<Deps> } = {}): Promise<World> {
   const db = await createTestDb();
-  const { orgId } = await bootstrapOrg(db.app, { orgSlug: "acme", orgName: "Acme Test", devSeed: true }, undefined, { seedAudit: false });
+  const { orgId } = await bootstrapOrg(db.app, { orgSlug: "acme", orgName: "Acme Test", devSeed: true }, undefined, { seedAudit: false, seedEvals: false });
   const launcher = await new FakeLauncher().start();
   const broker = await new FakeBroker().start();
   const smtp = await new FakeSmtp().start();

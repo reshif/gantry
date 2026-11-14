@@ -63,3 +63,5 @@
 .ln-askbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r2); }
 .ln-stream { flex: 1 1 200px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 90px; overflow-y: auto; }
 .ln-stream:empty { display: none; }
+.ln-sig-regression { color: var(--fail); border-color: var(--fail); }
+.ln-card.is-rolled_back { border-left-color: var(--faint); }

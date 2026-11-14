@@ -60,6 +60,15 @@ export interface SeedState {
   /** The factory onboarding guidelines (spec 8.6) with their version history. Every version becomes an immutable guideline_versions row; only the newest carries its body (older bodies are not in the legacy data). */
   guidelines?: { version: number; by?: string; at?: number; items: unknown[]; may?: string; mayNot?: string; history?: { v: number; at?: number; by?: string; note?: string }[] };
   freezes?: { id: string; name?: string; reason?: string; project?: string; repos?: "all" | string[]; by?: string; from?: number; to?: number }[];
+  /** Eval suites with their golden cases, a run history and the trust ladder (dev demo data only: a new install starts with none of it). */
+  suites?: { id: string; name: string; station?: string; agent?: string; threshold?: number; cases?: { id: string; name: string }[] }[];
+  evalRuns?: { id: string; suite: string; agent: string; version: string; model: string; at: number; score: number; by?: string; results?: { caseId: string; pass: boolean; reason?: string; ms?: number }[] }[];
+  trust?: {
+    sampleRate?: number;
+    criteria?: Record<string, { cleanRuns: number; evalMin: number; reworkMax: number; incidentsMax: number; windowD: number }>;
+    ceilings?: { id: string; text: string; when?: Record<string, unknown>; max: number; enabled?: boolean }[];
+    cells?: { id: string; agent: string; cls: string; project: string; repo?: string | null; level: number; since?: number; history?: { at: number; from: number | null; to: number; by?: string; kind?: string; reason?: string; cause?: unknown }[] }[];
+  };
   /** Factory-wide kill, if any (becomes an active factory stop). */
   factory?: { killed?: { by: string; at: number; reason: string; mode?: string } | null };
   /** Ordered catalogue (built-in plus custom stations, gates, bays, classes and actions). Stored in orgs.settings.catalog. */
@@ -221,6 +230,39 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
       );
     }
     for (const [i, sk] of (a.skills ?? []).entries()) await q(`insert into agent_skills (org_id, agent_id, skill_id, position) values ($1,$2,$3,$4)`, [org, a.id, sk, i + 1]);
+  }
+
+  // Eval suites and cases, past runs, and the trust ladder: dev demo data. Runs are marked seeded and cells start from the legacy levels; no proposal or evidence is invented.
+  for (const [si, su] of (state.suites ?? []).entries()) {
+    await q(`insert into suites (org_id, id, name, station, agent_id, data, created_at) values ($1,$2,$3,$4,$5,$6::jsonb, now() + ($7 || ' milliseconds')::interval)`, [org, su.id, su.name, su.station ?? null, su.agent ?? null, j({ threshold: su.threshold ?? 0.85 }), String(si)]);
+    for (const [i, c] of (su.cases ?? []).entries()) {
+      await q(`insert into eval_cases (org_id, id, suite_id, name, body, golden, created_at) values ($1,$2,$3,$4,$5::jsonb,false, now() + ($6 || ' milliseconds')::interval)`, [org, c.id, su.id, c.name, j({ by: "system", task: c.name, checks: "", repo: null, commit: null, rules: [] }), String(i)]);
+    }
+  }
+  for (const r of state.evalRuns ?? []) {
+    const data = { agent: r.agent, version: r.version, model: r.model, vendor: null, override: false, repeats: 1, items: [], cases: {}, cap: 2, seeded: true };
+    await q(`insert into eval_runs (org_id, id, suite_id, status, score, started_by, started_at, finished_at, data) values ($1,$2,$3,'completed',$4,$5,$6,$6,$7::jsonb)`, [org, r.id, r.suite, r.score, r.by ?? "system", at(r.at), j(data)]);
+    for (const x of r.results ?? []) {
+      if (!(await q(`select 1 from eval_cases where org_id = $1 and id = $2`, [org, x.caseId])).rowCount) continue;
+      await q(`insert into eval_results (org_id, id, run_id, case_id, passed, score, detail) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`, [org, `ER-${r.id}-${x.caseId}`, r.id, x.caseId, x.pass, x.pass ? 1 : 0, j({ reason: x.reason ?? "", ms: x.ms ?? 0, repeats: 1, passes: x.pass ? 1 : 0, graded: 1, checks: [], errors: [] })]);
+    }
+  }
+  if (state.trust) {
+    const t = state.trust;
+    await q(`insert into trust_criteria_versions (org_id, version, body, note, published_at, published_by) values ($1,1,$2::jsonb,'Seeded', now(), 'system')`, [org, j({ criteria: t.criteria ?? {}, sampleRate: t.sampleRate ?? 5, soakDays: 14 })]);
+    for (const c of t.ceilings ?? []) {
+      await q(`insert into trust_ceilings (org_id, id, scope_type, scope_id, max_level, reason, set_by, enabled, data) values ($1,$2,'rule','',$3,$4,'system',$5,$6::jsonb)`, [org, c.id, `L${c.max}`, c.text, c.enabled ?? true, j({ when: c.when ?? {} })]);
+    }
+    for (const c of t.cells ?? []) {
+      const station = (state.agents ?? []).find((a) => a.id === c.agent)?.station ?? "";
+      await q(`insert into trust_cells (org_id, id, project_id, repo_id, station, class, agent_id, level, data) values ($1,$2,$3,$4,$5,$6,$7,$8,'{}'::jsonb)`, [org, c.id, c.project, c.repo ?? null, station, c.cls, c.agent, `L${c.level}`]);
+      const hist = c.history?.length ? c.history : [{ at: c.since ?? Date.now(), from: null, to: c.level, by: "system", kind: "seed", reason: "Default for new cells" }];
+      for (const [i, h] of hist.entries()) {
+        await q(`insert into trust_grants (org_id, id, cell_id, level, granted_by, evidence, valid_from, revoked_at) values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`, [
+          org, `TG-${c.id}-${i + 1}`, c.id, `L${h.to}`, h.by ?? "system", j({ kind: h.kind ?? "grant", from: h.from, reason: h.reason ?? "", ...(h.cause ? { cause: h.cause } : {}) }), at(h.at), i < hist.length - 1 ? at(hist[i + 1]!.at) : null,
+        ]);
+      }
+    }
   }
 
   for (const v of state.vendors ?? []) {

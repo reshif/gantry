@@ -68,7 +68,7 @@ d("triggers in the worker (spec 11.7)", () => {
     expect((await w.jobs("trigger.tick"))).toHaveLength(1);
     expect((await w.q(`select next_run_at > now() as later from triggers where id = 'TR-2'`))[0].later).toBe(true);
     await w.drain();
-    expect((await w.jobs("trigger.tick"))[0].status).toBe("done");
+    expect((await w.jobs("trigger.tick"))[0]?.status).toBe("done");
     const wo = (await w.q(`select * from work_orders where title = 'Weekly dependency updates'`))[0];
     expect(wo).toMatchObject({ source: "schedule", submitter: "p-asha" });
     expect((await w.q(`select * from events where type = 'wo.submit' and wo_id = $1`, [wo.id]))[0]).toMatchObject({ actor: "trigger:TR-2", channel: "schedule" });

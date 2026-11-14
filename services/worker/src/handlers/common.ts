@@ -87,6 +87,9 @@ const SHA = /^[0-9a-f]{40}$/;
  * else the commit recorded for the repository (repo_config.data.baseSha / repos.data.baseSha, written by onboarding and reconciliation).
  */
 export async function resolveSeedCommit(db: Queryable, orgId: string, woId: string, repoId: string): Promise<string> {
+  // An eval case is pinned to the snapshot it was written against (spec 13.2), not to whatever the repository's head is now.
+  const pinned = (await db.query<{ c: string | null }>(`select data->'eval'->>'commit' as c from work_orders where org_id = $1 and id = $2 and source = 'eval'`, [orgId, woId])).rows[0]?.c;
+  if (pinned && SHA.test(pinned)) return pinned;
   const pr = (await db.query<{ head_sha: string | null }>(`select head_sha from pull_requests where org_id = $1 and wo_id = $2 and state = 'open' and head_sha is not null order by number desc limit 1`, [orgId, woId])).rows[0];
   if (pr?.head_sha && SHA.test(pr.head_sha)) return pr.head_sha;
   const c = (await db.query<{ sha: string }>(`select sha from commits where org_id = $1 and wo_id = $2 order by committed_at desc nulls last, created_at desc limit 1`, [orgId, woId])).rows[0];

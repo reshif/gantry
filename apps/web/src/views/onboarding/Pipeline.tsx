@@ -100,7 +100,7 @@ export function Pipeline({ project, repos, open }: { project: string; repos: Rep
           </table>
         </div>
       ) : (
-        <Empty title={repos.length ? "No repos match" : "No repos yet"} text={repos.length ? "Pick another filter." : "Connect a repo the GitHub App is installed on to start onboarding."} action={repos.length ? <Btn id="onb-filter-clear" label="Show all" onClick={() => setFilter("all")} /> : undefined} />
+        <Empty id="onb-empty" title={repos.length ? "No repos match" : "No repos yet"} text={repos.length ? "Pick another filter." : "Connect a repo the GitHub App is installed on to start onboarding."} action={repos.length ? <Btn id="onb-filter-clear" label="Show all" onClick={() => setFilter("all")} /> : undefined} />
       )}
       <p className="footnote">Gantry reads each repo through the GitHub App, checks the onboarding PR's CI every minute, and moves repos on by itself. A person must approve and merge each onboarding PR.</p>
     </div>

@@ -41,9 +41,17 @@ export const JOB_SCHEMAS = {
   "trigger.evaluate": z.object({
     kind: z.enum(["issue", "comment", "ci"]), repo: z.string().min(1).max(300), title: z.string().max(2000).optional(), body: z.string().max(20000).optional(), labels: z.array(z.string().max(200)).max(100).optional(),
     author: z.string().max(200).optional(), comment: z.string().max(20000).optional(), ref: z.string().max(300).optional(), url: z.string().max(1000).optional(), check: z.string().max(300).optional(), dedupeKey: z.string().min(1).max(300),
+    /** A custom connection's signed webhook (spec 12.1): only that connection's triggers see the event, and the stored delivery is marked processed. */
+    source: z.string().min(1).max(100).optional(), delivery: z.string().min(1).max(200).optional(),
   }),
   /** 'github' queue: a schedule trigger came due (`due` is the instant it was scheduled for; it is also the run's dedupe key). */
   "trigger.tick": z.object({ triggerId: id, due: z.string().min(1).max(40) }),
+  /** 'flow' queue, behind every work-order job: start the next cases of an eval run within the suite's own concurrency cap, and finish the run when none remain (spec 13.2). */
+  "eval.dispatch": z.object({ runId: id }),
+  /** 'system' queue: look at every trust cell that may have crossed a criterion by the passing of time (the soak period), and propose promotions (spec 13.3). */
+  "trust.evaluate": z.object({}),
+  /** 'system' queue: regroup the signals of the last 30 days into findings (spec 13.4). Records evidence only; it drafts and applies nothing. */
+  "learning.refresh": z.object({}),
   /** 'system' queue. */
   "chain.verify": z.object({}),
   "reaper.sweep": z.object({}),
@@ -56,7 +64,7 @@ export type JobPayloadInput<K extends JobKind> = z.input<(typeof JOB_SCHEMAS)[K]
 
 export const JOB_QUEUE: { [K in JobKind]: Queue } = {
   "attempt.dispatch": "flow", "run.result": "flow", publish: "flow", "merge.request": "flow", "flow.timer": "flow",
-  "stop.enforce": "stop", "github.reconcile": "github", "github.event": "github", "trigger.evaluate": "github", "trigger.tick": "github", "chain.verify": "system", "reaper.sweep": "system",
+  "eval.dispatch": "flow", "trust.evaluate": "system", "learning.refresh": "system", "stop.enforce": "stop", "github.reconcile": "github", "github.event": "github", "trigger.evaluate": "github", "trigger.tick": "github", "chain.verify": "system", "reaper.sweep": "system",
   "onboarding.assess": "github", "onboarding.open_pr": "github", "onboarding.merge": "github", "onboarding.verify": "github", "onboarding.sync": "github",
 };
 

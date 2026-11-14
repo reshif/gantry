@@ -2,6 +2,7 @@ import { DAYS, fmt, istTime, istToday, type Person, type Project, type Repo, typ
 import { Btn, Field, Panel, Select } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
+import { ExplainDenial } from "../console/ExplainDenial";
 
 export interface Sim {
   person: string;
@@ -151,6 +152,7 @@ export function Simulator({ people, projects, repos, actions, sim, setSim, evalu
               </div>
               <p>{rd.reason}</p>
               {rd.needs && !rd.allowed ? <p className="small"><strong>To allow it: </strong>{`${rd.needs}.`}</p> : null}
+              {!rd.allowed ? <ExplainDenial id="acc-sim-explain" person={r.sim.person} action={r.sim.action} project={ract.scope === "project" ? r.sim.project : null} repo={ract.scope === "project" ? r.sim.repo || null : null} time={r.t} /> : null}
             </div>
             <details className="acc-why" open>
               <summary>How the engine got there</summary>

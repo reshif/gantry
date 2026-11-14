@@ -110,3 +110,8 @@
 .ev-reg-link { font-size: var(--t-sm); }
 .ev-tl { display: grid; gap: 6px; }
 .ev-tl .sub-h { margin: 4px 0 0; }
+
+/* the count behind the live scorecard, and a score with its task count and range */
+.ev-n { margin: 8px 0 0; }
+.ev-scoren { display: inline-flex; gap: 2px; align-items: baseline; }
+.ev-range { margin: 4px 0 8px; }

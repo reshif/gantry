@@ -19,6 +19,7 @@ import { job, type BuiltJob } from "../../core/jobs-contract.js";
 import { revokeRunTokens } from "../internal/tokens.js";
 import { ms } from "../../core/read/rows.js";
 import { readProject } from "../projects/store.js";
+import { afterFinish as trustAfterFinish, demoteForBreach, trustDecision, trustInForce } from "../trust/record.js";
 import { bayOf, buildWorkOrders, loadFlowDocs, pinnedProject, saveWo, stationIdOf, type Data, type Wo } from "./model.js";
 
 export interface Fx {
@@ -422,6 +423,8 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
         w.state = "parked";
         await releaseSlot(fx, w);
         ev(fx, w, "wo.bay", { bay: "sechold", from: null, station: sid, text: String(w.data.bayReason) });
+        // Spec 13.3: a security finding drops the cell that produced this work to L1 at once.
+        await demoteForBreach(fx.tx, fx.orgId, { woId: w.id, kind: "security", gateId, text: String(w.data.bayReason) }, fx.now, (e) => fx.events.push(e));
       } else {
         w.state = "failed";
         w.data.failReason = `${g.label}: required check '${checks.find((c) => !c.ok)?.name ?? g.name}' failed on ${w.repo ?? "the repo"}.`;
@@ -440,6 +443,25 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
       closeEntry(w, fx, "passed");
       return advance(fx, w, "system", project);
     }
+  }
+  // Spec 13.3: a cell that has earned L2 or L3 (those levels are switched off in a new install) lets this gate pass without a person, except where a person always decides.
+  if (kind === "human" || kind === "mixed") {
+    const gr = (w.data.guardrail ?? {}) as { over?: boolean; protectedTouched?: unknown[] };
+    const t = await trustDecision(fx.tx, fx.orgId, fx.catalog, { woId: w.id, gateId, instance, cls: w.cls, project: w.project, repo: w.repo, source: w.source, data: w.data, riskTags: tags, guardrailBreach: !!gr.over || (gr.protectedTouched?.length ?? 0) > 0, now: fx.now });
+    if (t.auto) {
+      await closeInstance(fx, instance, "decision");
+      await fx.tx.query(
+        `insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, trust_grant_id, trust_level, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7,$8,$9::jsonb,$10)`,
+        [fx.orgId, `GD-${instance}`, instance, w.id, `TRUST-${gateId}`, w.flowVersion, t.grantId, `L${t.level}`, JSON.stringify({ mode: "trust", checks, trustLevelNum: t.level, trustCell: t.cellId, sampled: false, reason: t.reason }), fx.now],
+      );
+      note(w, fx, "system", `${g.label} ${g.name} passed under trust (L${t.level}).`);
+      ev(fx, w, "gate.decision", { gate: gateId, mode: "trust", trust: t.level, instance }, { category: "approvals" });
+      ev(fx, w, "trust.auto", { gate: gateId, trust: t.level, text: t.reason, cell: t.cellId }, { category: "approvals" });
+      fx.changes.add("trust");
+      closeEntry(w, fx, "passed");
+      return advance(fx, w, "system", project);
+    }
+    if (t.level >= 2) await fx.tx.query(`update gate_instances set basis = basis || $3::jsonb where org_id = $1 and id = $2`, [fx.orgId, instance, JSON.stringify({ trustNote: t.reason, ...(t.sampled ? { sampled: true } : {}) })]);
   }
   w.state = "waiting";
   w.data.blockReason = null;
@@ -462,6 +484,9 @@ export async function finish(fx: Fx, w: Wo, by: string): Promise<void> {
   note(w, fx, by, "Released and confirmed.");
   await saveWo(fx.tx, fx.orgId, w);
   ev(fx, w, "release", { text: w.title, mode: "human" }, { category: "approvals" });
+  // Spec 13.3: the finished work order is evidence for the cells it went through; two failures in the last ten reviewed runs demote, and met criteria are proposed.
+  await trustAfterFinish(fx.tx, fx.orgId, w.id, fx.now, (e) => fx.events.push(e));
+  fx.changes.add("trust");
   if (w.parentId) await completeParentIfDone(fx, w.parentId, by);
   await dispatchQueued(fx, w.project);
 }
@@ -500,21 +525,23 @@ export async function recordDecision(fx: Fx, w: Wo, inst: { id: string; opened_a
       [fx.orgId, by.personId, w.project],
     )
   ).rows[0];
-  const lvl = (await fx.tx.query<{ level: string }>(`select level from trust_cells where org_id = $1 and station = $2 and (project_id is null or project_id = $3) and (class is null or class = $4) order by (project_id is null), (class is null) limit 1`, [fx.orgId, inst.station ?? "", w.project, w.cls])).rows[0];
+  // Spec 13.1: the trust level in force at the decision, and the grant it came from (a cell capped by a ceiling, or held at L1 while levels above L1 are off, runs lower than it was granted).
+  const lvl = await trustInForce(fx.tx, fx.orgId, fx.catalog, { gateId, cls: w.cls, project: w.project, repo: w.repo ?? null });
   const votes = (await fx.tx.query<{ voter: string; vote: string; at: Date }>(`select voter, vote, at from gate_votes where org_id = $1 and gate_instance_id = $2 order by at, id`, [fx.orgId, inst.id])).rows;
   const pr = (await fx.tx.query<{ head_sha: string | null }>(`select head_sha from pull_requests where org_id = $1 and wo_id = $2 order by number desc limit 1`, [fx.orgId, w.id])).rows[0];
   const policies = Object.fromEntries((await fx.tx.query<{ id: string; v: number | null }>(`select id, current_version as v from policies where org_id = $1 and enabled and deleted_at is null`, [fx.orgId])).rows.map((r) => [r.id, r.v]));
   await fx.tx.query(
-    `insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, decided_by, rule, flow_version, gate_rule_version, policy_version, trust_level, role_assignment_id, tuple_id, agent_version, skill_versions, instruction_hash, model_id, commit_sha, detail, at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20)`,
+    `insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, decided_by, rule, flow_version, gate_rule_version, policy_version, trust_level, role_assignment_id, tuple_id, agent_version, skill_versions, instruction_hash, model_id, commit_sha, detail, at, trust_grant_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21)`,
     [
-      fx.orgId, `GD-${inst.id}`, inst.id, w.id, decision, by.personId, `APR-${gateId}`, inst.flow_version, inst.rule_version, inst.policy_version, lvl?.level ?? "L1", ra?.id ?? null, tuple?.id ?? null, tuple?.agent_version ?? null,
+      fx.orgId, `GD-${inst.id}`, inst.id, w.id, decision, by.personId, `APR-${gateId}`, inst.flow_version, inst.rule_version, inst.policy_version, `L${lvl.effective}`, ra?.id ?? null, tuple?.id ?? null, tuple?.agent_version ?? null,
       tuple ? JSON.stringify(tuple.skill_versions) : null, tuple?.instruction_hash ?? null, tuple?.model_id ?? null, inst.head_sha ?? pr?.head_sha ?? null,
       JSON.stringify({
         mode: "human", channel: by.channel, via: by.via, reason: o.reason ?? "", reasonCode: decision === "approved" ? "approved" : "rejected", timeToDecideMs: fx.now.getTime() - (ms(inst.opened_at) ?? fx.now.getTime()),
-        voters: votes.map((v) => ({ by: v.voter, vote: v.vote, at: ms(v.at) })), approvals: o.approvals ?? votes.filter((v) => v.vote === "approve").length, riskTags: inst.basis.riskTags ?? [], samplingReason: inst.basis.forcedHuman ? "risk-triggered" : "gated", artefactEdited: null, reviewSurface: null, policies,
+        voters: votes.map((v) => ({ by: v.voter, vote: v.vote, at: ms(v.at) })), approvals: o.approvals ?? votes.filter((v) => v.vote === "approve").length, riskTags: inst.basis.riskTags ?? [], samplingReason: inst.basis.forcedHuman ? "risk-triggered" : inst.basis.sampled ? "sampled" : "gated", artefactEdited: null, reviewSurface: null, policies, trustLevelNum: lvl.effective, trustGranted: lvl.granted, trustCell: lvl.cellId,
       }),
       fx.now,
+      lvl.grantId,
     ],
   );
 }

@@ -31,6 +31,12 @@ const [t, v1] = req.get("X-Gantry-Signature").split(",").map((p) => p.split("=")
 const mac = crypto.createHmac("sha256", process.env.GANTRY_WEBHOOK_SECRET).update(\`\${t}.\${rawBody}\`).digest("hex");
 const ok = mac.length === v1.length && crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(v1)) && Math.abs(Date.now() / 1000 - Number(t)) < 300;`;
 
+const HOOK = `# A custom connection that is a trigger source posts events here (signed like Gantry's own webhooks, five-minute window).
+BODY='{"id":"JIRA-77","kind":"issue","repo":"payments-api","title":"Settlement report is empty on Mondays","labels":["gantry"],"author":"tomas-acme"}'
+T=$(date +%s); SIG=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$CONNECTION_SECRET" -hex | sed 's/^.* //')
+curl -X POST ${BASE}/hooks/trigger/<connection id> \\
+  -H "Content-Type: application/json" -H "X-Gantry-Signature: t=$T,v1=$SIG" -d "$BODY"`;
+
 export function RefTab({ d }: { d: ApiData }) {
   const cfg = d.cfg;
   return (
@@ -56,6 +62,7 @@ export function RefTab({ d }: { d: ApiData }) {
           </div>
         </section>
       ))}
+      <Panel title="Sending events from a custom source"><CodeBlock id="api-ref-hook" text={HOOK} label="POST /hooks/trigger/{connection}: kind is issue, comment or ci; id makes a replay harmless" /></Panel>
       <Panel title="Verifying webhook signatures"><CodeBlock id="api-ref-sig" text={SIG} label={`Signature check (${cfg?.webhookSigning ?? "HMAC-SHA256"})`} /></Panel>
     </div>
   );

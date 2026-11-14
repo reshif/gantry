@@ -32,6 +32,10 @@ const UsageBody = z.object({
   outcome: z.enum(["ok", "error", "refused"]).default("ok"),
   /** Object-storage reference to the captured trace: sha256/<hash>. */
   traceRef: z.string().regex(/^sha256\/[0-9a-f]{64}$/).optional(),
+  /** Spec 10.4 Fallback: the call went to the same model on another vendor, or to a different model (which needs the project's opt-in). Flagged on the run. */
+  fallback: z.enum(["same_model", "cross_model"]).optional(),
+  /** The model the run pinned, when a fallback served a different one. */
+  wanted: z.string().min(1).max(200).optional(),
 });
 const HeartbeatBody = z.looseObject({ token: Token, seq: z.number().int().nonnegative().optional(), phase: z.enum(["starting", "working", "finishing"]).optional(), turn: z.number().int().nonnegative().optional() });
 const CheckpointBody = z.looseObject({
@@ -139,6 +143,11 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       const events: EventSpec[] = [];
       const jobs: ReturnType<typeof job>[] = [];
       let halted: string | null = null;
+      if (b.fallback) {
+        const fb = { kind: b.fallback, model: b.model, vendor: b.vendor ?? null, ...(b.wanted ? { wanted: b.wanted } : {}), requestId: b.requestId ?? null };
+        await tx.query(`update runs set data = jsonb_set(data, '{fallbacks}', coalesce(data->'fallbacks', '[]'::jsonb) || $3::jsonb) where org_id = $1 and id = $2`, [c.orgId, id, JSON.stringify([fb])]);
+        events.push({ type: "model.fallback", ...evBase(c, id), category: "agents", outcome: b.fallback === "cross_model" ? "regression" : "ok", after: fb });
+      }
       const br = await budgetBreach(tx, c);
       if (br && !(await activeStopsFor(tx, c)).some((s) => s.scopeType === "wo" || s.scopeType === "factory" || s.scopeType === "project")) {
         const n = Number((await tx.query<{ n: string }>(`select count(*)::text as n from stops where org_id = $1 and scope_type = 'wo' and wo_id = $2`, [c.orgId, c.woId])).rows[0]!.n) + 1;
@@ -326,8 +335,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     if (!c || !tok) throw refuse("denied", "The run token is not valid for this run.");
     const d = await guardRun(g.pool, c, tok, { mode: "model" });
     if (d) throw refusalFor(d);
-    const servers = (await mcpServersInScope(g.pool, c)).map((s) => s.id);
-    return { ok: true, projectId: c.projectId, hosts: await runEgressHosts(g.pool, c, servers) };
+    return { ok: true, projectId: c.projectId, hosts: await runEgressHosts(g.pool, c) };
   });
 
   // Spec 5.3: refused outbound connections are logged. The edge reports each refusal (deduplicated per minute) so it lands in the audit ledger.

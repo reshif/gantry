@@ -55,6 +55,8 @@ export interface Eligibility {
   threshold: number | null;
   /** What is missing, for the "needs" line of a refusal. */
   needs: string;
+  /** How many runs of the suite name this version (any outcome). */
+  runs: number;
 }
 
 /**
@@ -64,20 +66,25 @@ export interface Eligibility {
 export async function eligibility(db: Queryable, orgId: string, a: { id: string; data: Record<string, unknown> }, v: { version: number; body: Record<string, unknown> }): Promise<Eligibility> {
   const suiteId = typeof a.data.suite === "string" ? a.data.suite : "";
   const suite = suiteId ? (await db.query<{ id: string; threshold: string | null }>(`select id, data->>'threshold' as threshold from suites where org_id = $1 and id = $2`, [orgId, suiteId])).rows[0] : undefined;
-  if (!suite) return { ok: false, text: "No suite", score: null, suite: null, threshold: null, needs: "A station eval suite for this agent" };
+  if (!suite) return { ok: false, text: "No suite", score: null, suite: null, threshold: null, needs: "A station eval suite for this agent", runs: 0 };
   const threshold = suite.threshold !== null && !Number.isNaN(Number(suite.threshold)) ? Number(suite.threshold) : 0.85;
   const label = labelOf(v);
+  const runs = Number((await db.query<{ n: string }>(
+    `select count(*)::text as n from eval_runs r where r.org_id = $1 and r.suite_id = $2
+        and coalesce(r.data->>'override', 'false') = 'false' and ((r.data->>'agent' = $4 and r.data->>'version' = $3) or exists (select 1 from agent_version_tuples t where t.org_id = r.org_id and t.id = r.tuple_id and t.agent_id = $4 and t.agent_version = $5))`,
+    [orgId, suite.id, label, a.id, v.version],
+  )).rows[0]?.n ?? 0);
   const run = (await db.query<{ id: string; score: string }>(
     `select r.id, r.score from eval_runs r
       where r.org_id = $1 and r.suite_id = $2 and r.status = 'completed' and r.score is not null
-        and (r.data->>'version' = $3 or exists (select 1 from agent_version_tuples t where t.org_id = r.org_id and t.id = r.tuple_id and t.agent_id = $4 and t.agent_version = $5))
+        and coalesce(r.data->>'override', 'false') = 'false' and ((r.data->>'agent' = $4 and r.data->>'version' = $3) or exists (select 1 from agent_version_tuples t where t.org_id = r.org_id and t.id = r.tuple_id and t.agent_id = $4 and t.agent_version = $5))
       order by r.started_at desc limit 1`,
     [orgId, suite.id, label, a.id, v.version],
   )).rows[0];
-  if (!run) return { ok: false, text: `No run of ${suite.id} yet`, score: null, suite: suite.id, threshold, needs: `A passing run of ${suite.id}` };
+  if (!run) return { ok: false, text: `No run of ${suite.id} yet`, score: null, suite: suite.id, threshold, needs: `A passing run of ${suite.id}`, runs };
   const score = Number(run.score);
   const ok = score >= threshold;
-  return { ok, text: `${ok ? "Eligible" : "Blocked"}: ${fmt.pct(score)} vs ${fmt.pct(threshold)} on ${suite.id}`, score, run: run.id, suite: suite.id, threshold, needs: ok ? "" : `${suite.id} at ${fmt.pct(threshold)} or better` };
+  return { ok, text: `${ok ? "Eligible" : "Blocked"}: ${fmt.pct(score)} vs ${fmt.pct(threshold)} on ${suite.id}`, score, run: run.id, suite: suite.id, threshold, needs: ok ? "" : `${suite.id} at ${fmt.pct(threshold)} or better`, runs };
 }
 
 const DAY = 86_400_000;
@@ -85,6 +92,8 @@ const DAY = 86_400_000;
 interface Extras {
   spend: Map<string, number>;
   spark: Map<string, number[]>;
+  /** Attempts running now, by the agent whose version tuple they were dispatched with. */
+  running: Map<string, number>;
 }
 
 /** Spend over seven days (usage metering) and the daily share of attempts that succeeded (attempts through version tuples). */
@@ -107,7 +116,9 @@ async function extras(db: Queryable, orgId: string, now: Date): Promise<Extras> 
     const avg = tot[1] ? tot[0] / tot[1] : 0;
     spark.set(agent, Array.from({ length: 7 }, (_, i) => { const d = days.get(6 - i); return d ? d[0] / d[1] : avg; }));
   }
-  return { spend, spark };
+  const running = new Map<string, number>();
+  for (const r of (await db.query<{ agent_id: string; n: string }>(`select t.agent_id, count(*)::text as n from attempts a join agent_version_tuples t on t.org_id = a.org_id and t.id = a.tuple_id where a.org_id = $1 and a.state = 'running' group by t.agent_id`, [orgId])).rows) running.set(r.agent_id, Number(r.n));
+  return { spend, spark, running };
 }
 
 export interface AgentOut extends Agent {
@@ -115,6 +126,8 @@ export interface AgentOut extends Agent {
   rev: number;
   suiteName: string | null;
   threshold: number | null;
+  /** Work orders being worked by this agent right now. */
+  running: number;
   versions: Array<AgentVersion & { eligibility: Omit<Eligibility, "needs"> & { needs: string } }>;
 }
 
@@ -142,7 +155,8 @@ export async function readAgents(db: Queryable, orgId: string, id?: string, now 
       const isLive = v.version === a.live_version;
       const { rc } = toVersion(v, isLive, promoted);
       const el = await eligibility(db, orgId, a, v);
-      const snap = Object.fromEntries(VERSIONED_KEYS.filter((k) => k in v.body).map((k) => [k, v.body[k]]));
+      const snap: Record<string, unknown> = Object.fromEntries(VERSIONED_KEYS.filter((k) => k in v.body).map((k) => [k, v.body[k]]));
+      if ("tools" in snap) snap.tools = cfgOf({ tools: snap.tools }).tools;
       versions.push({
         v: labelOf(v),
         at: (v.published_at ?? v.created_at).getTime(),
@@ -152,7 +166,7 @@ export async function readAgents(db: Queryable, orgId: string, id?: string, now 
         live: isLive,
         rc,
         snapshot: Object.keys(snap).length ? JSON.stringify(snap) : null,
-        eligibility: { ok: el.ok, text: el.text, score: el.score, ...(el.run ? { run: el.run } : {}), suite: el.suite, threshold: el.threshold, needs: el.needs },
+        eligibility: { ok: el.ok, text: el.text, score: el.score, ...(el.run ? { run: el.run } : {}), suite: el.suite, threshold: el.threshold, needs: el.needs, runs: el.runs },
       });
     }
     const liveV = versions.find((v) => v.live);
@@ -160,7 +174,7 @@ export async function readAgents(db: Queryable, orgId: string, id?: string, now 
       id: a.id, name: a.name, station: a.station, model: cfg.model, fallbacks: cfg.fallbacks, version: liveV?.v ?? "", status: a.status, autonomy: cfg.autonomy, tools: cfg.tools,
       skills: skills.filter((s) => s.agent_id === a.id).map((s) => s.skill_id), mcp: cfg.mcp, stations: cfg.stations, projects: cfg.projects, budget: cfg.budget, guardrails: cfg.guardrails,
       suite: cfg.suite, instructions: cfg.instructions, overrides: cfg.overrides, versions, spark: ex.spark.get(a.id) ?? [], spend7d: ex.spend.get(a.id) ?? 0, initials: initialsOf(a.name),
-      evalScore: liveV?.suiteScore ?? 0, rev: a.version, suiteName: suite?.name ?? null, threshold: suite ? (suite.threshold !== null && !Number.isNaN(Number(suite.threshold)) ? Number(suite.threshold) : 0.85) : null,
+      evalScore: liveV?.suiteScore ?? 0, running: ex.running.get(a.id) ?? 0, rev: a.version, suiteName: suite?.name ?? null, threshold: suite ? (suite.threshold !== null && !Number.isNaN(Number(suite.threshold)) ? Number(suite.threshold) : 0.85) : null,
     });
   }
   return out;

@@ -4,3 +4,6 @@ alter table agent_skills add column position int not null default 0;
 update agent_skills k set position = o.n
   from (select org_id, agent_id, skill_id, row_number() over (partition by org_id, agent_id order by created_at, skill_id) as n from agent_skills) o
  where k.org_id = o.org_id and k.agent_id = o.agent_id and k.skill_id = o.skill_id;
+-- Rows inserted in one transaction keep the order they were inserted in (the rosters list agents and skills by creation).
+alter table agents alter column created_at set default clock_timestamp();
+alter table skills alter column created_at set default clock_timestamp();

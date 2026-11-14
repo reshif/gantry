@@ -177,7 +177,7 @@ export const trust = {
   },
 
   /** Does a cell meet the criteria for the next level? */
-  meets(state: InsightState, cell: TrustCell, opts: { strict?: boolean; now?: number } = {}): TrustMeets {
+  meets(state: InsightState, cell: TrustCell, opts: { strict?: boolean; now?: number; soakDays?: number } = {}): TrustMeets {
     const next = cell.level + 1;
     if (next > 4) return { ok: false, next: null, missing: ["Already at the top level."] };
     const crit = state.trust.criteria[String(next)];

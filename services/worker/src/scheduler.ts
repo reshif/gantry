@@ -64,6 +64,10 @@ export class Scheduler {
         withTx(deps.pool, (tx) => ensureRecurring(tx, { orgId, queue, kind, payload, everyMs, scope, now })).then((c) => { if (c) n++; });
       await make("system", "reaper.sweep", {}, deps.cfg.reaperEveryMs, "org");
       await make("system", "chain.verify", {}, deps.cfg.verifyEveryMs, "org");
+      // Spec 13.3: a soak period ends with no event to carry it, so cells are looked at once a day for promotions the passing of time made possible.
+      await make("system", "trust.evaluate", {}, 24 * 3600_000, "org");
+      // Spec 13.4: findings are regrouped from the live records every few hours. Evidence only; proposals stay behind their own switch.
+      await make("system", "learning.refresh", {}, 6 * 3600_000, "org");
       // Schedule triggers that came due (spec 11.7): compare-and-set on next_run_at, so any number of workers make one tick per run.
       try {
         n += await withTx(deps.pool, (tx) => enqueueDueSchedules(tx, orgId, now));

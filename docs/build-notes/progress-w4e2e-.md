@@ -1,0 +1,12 @@
+# w4e2e progress
+- [ ] 1 build/typecheck/test (Postgres container w4e2e-pg on 55433)
+- [x] 1 build/typecheck/tests green (fixed worker evals.test.ts TS). pg: w4e2e-pg:55433. Stack files /tmp/claude-0/w4e2e (copied from w3e2e, project w4e2e). next: rebuild images (rebuild.sh), compose up
+- fixed services/github/Dockerfile (builds+ships @gantry/domain); fake-server.mjs gained /_fake/set + aliases + merge ff; edge EDGE_ALLOW_PRIVATE_UPSTREAMS env (sandbox only); test/e2e/doubles.mjs + compose.doubles.yml
+- [x] 2 stack up: bash /tmp/claude-0/w4e2e/up.sh (dc.sh = compose wrapper; env.sh). images rebuilt (fixed nodemailer lock dedupe, github dockerfile domain). next: smoke, acceptance scripts test/e2e/m5m6.mjs
+- [x] M5 onboarding section passes (node test/e2e/m5.mjs onboarding; resets fake github). next: chat/replay/mcp/apikey/trigger sections in m5.mjs, then m6.mjs, screens walk
+- [x] M5 chat+replay (slack) pass. next: apikey, trigger (dry-run+custom hook replay), mcp sections
+- [x] M5 all sections pass (apikey, trigger, mcp, chat, onboarding). next: M6 (m6.mjs) + journey for workload, screens walk, isolation tests
+- [x] M6 budget + model sections pass (m6.mjs). next: learning, trust, workload, console; then screens walk; isolation/T12; teardown
+- [x] M6 sections all pass individually (budget, model, learning, trust, workload?, console). next: full-run m5+m6 once at the end?, screens walk (w4e2e-screen-<id>.png), smoke+isolation, teardown
+- [x] walk (23 admin + 8 engineer screens, 0 findings), isolation T5-T8, stops, t12-all (131 routes, 0 executed), smoke 46/46 rerun. next: final workspace test rerun, teardown, report
+- [x] torn down (compose w4e2e, runners, volumes, networks, w4e2e-pg). DONE

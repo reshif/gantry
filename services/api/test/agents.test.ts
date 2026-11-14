@@ -28,8 +28,8 @@ d("agents, skills and instructions (spec 8.7, 10.2, 13.2)", () => {
   const suite = async (id: string, threshold = 0.85, agentId = "ag-build") =>
     q(`insert into suites (org_id, id, name, station, agent_id, data) values ($1,$2,$2,'build',$3,$4::jsonb) on conflict (org_id, id) do update set data = excluded.data`, [t.orgId, id, agentId, JSON.stringify({ threshold })]);
   let runN = 0;
-  const evalRun = (suiteId: string, version: string, score: number, status = "completed") =>
-    q(`insert into eval_runs (org_id, id, suite_id, status, score, data) values ($1,$2,$3,$4,$5,$6::jsonb)`, [t.orgId, `RUN-${++runN}`, suiteId, status, score, JSON.stringify({ agent: "ag-build", version })]);
+  const evalRun = (suiteId: string, version: string, score: number, status = "completed", agentId = "ag-build") =>
+    q(`insert into eval_runs (org_id, id, suite_id, status, score, data) values ($1,$2,$3,$4,$5,$6::jsonb)`, [t.orgId, `RUN-${++runN}`, suiteId, status, score, JSON.stringify({ agent: agentId, version })]);
 
   describe("reads", () => {
     it("returns the legacy shapes from the seeded data", async () => {
@@ -179,6 +179,8 @@ d("agents, skills and instructions (spec 8.7, 10.2, 13.2)", () => {
       await evalRun("SUITE-BUILD", "2.6.1", 0.95);
       await evalRun("SUITE-BUILD", "2.8.0-rc1", 0.99, "failed");
       await evalRun("SUITE-BUILD", "2.8.0-rc1", 0.7);
+      // a passing run of another agent's version with the same label does not count either (labels are per agent)
+      await evalRun("SUITE-BUILD", "2.8.0-rc1", 0.99, "completed", "ag-review");
       const low = await w.call(ADMIN, "POST", "/api/v1/agents/ag-build/versions/2.8.0-rc1/promote");
       expect(low.status).toBe(403);
       expect(low.body.msg).toBe("Blocked: Blocked: 70% vs 85% on SUITE-BUILD.");

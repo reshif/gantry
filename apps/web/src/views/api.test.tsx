@@ -159,6 +159,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
     expect(curl).toContain("-H \"Authorization: Bearer $GANTRY_KEY\"");
     expect(curl).toContain("Idempotency-Key");
     expect(screen.getByText("60/min")).toBeTruthy();
+    expect((await byId("api-ref-hook")).closest(".api-code")!.querySelector("pre")!.textContent).toContain("/hooks/trigger/<connection id>");
     expect((await byId("api-ref-sig")).closest(".api-code")!.querySelector("pre")!.textContent).toContain("X-Gantry-Signature");
   });
 

@@ -18,10 +18,11 @@ export interface VersionElig {
   suite: string | null;
   threshold: number | null;
   needs: string;
+  runs?: number;
 }
 export type AgentVersionRow = AgentVersion & { eligibility: VersionElig };
 /** An agent as GET /agents returns it: the legacy shape plus the version to send as If-Match, its suite's name and threshold, and each version's promotion eligibility. */
-export type AgentRow = Omit<Agent, "versions"> & { rev: number; suiteName: string | null; threshold: number | null; versions: AgentVersionRow[] };
+export type AgentRow = Omit<Agent, "versions"> & { rev: number; suiteName: string | null; threshold: number | null; running?: number; versions: AgentVersionRow[] };
 
 export type Tools = Record<string, boolean>;
 export const TOOLS: Array<[string, string, string]> = [
@@ -49,7 +50,7 @@ export const TEMPLATES: Template[] = [
 ];
 export const EDIT_KEYS = ["name", "model", "fallbacks", "autonomy", "tools", "skills", "mcp", "stations", "projects", "budget", "guardrails", "instructions", "overrides", "suite"] as const;
 export type EditKey = (typeof EDIT_KEYS)[number];
-export type Draft = Pick<AgentRow, EditKey>;
+export type Draft = Omit<Pick<AgentRow, EditKey>, "tools"> & { tools: Tools };
 
 export const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o)) as T;
 export const same = (x: unknown, y: unknown): boolean => JSON.stringify(x) === JSON.stringify(y);

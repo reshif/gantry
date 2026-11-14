@@ -74,6 +74,8 @@ const Env = z.object({
   EDGE_PROXY_PORT: z.coerce.number().int().default(8444),
   EDGE_VENDOR_CONCURRENCY: z.coerce.number().int().positive().default(16),
   EDGE_RUN_SUBNET: z.string().default("10.213.0.0/16"),
+  /** Sandbox and test stacks only: lets the proxy and the MCP gateway reach private addresses (fake Slack and MCP servers in the compose network). Never set in a real install. */
+  EDGE_ALLOW_PRIVATE_UPSTREAMS: z.enum(["true", "false"]).default("false"),
 });
 
 export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<EdgeConfig> {
@@ -97,7 +99,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     tunnelCheckMs: 3_000,
     runSubnet: e.EDGE_RUN_SUBNET,
     allowedPorts: [80, 443],
-    blockPrivateAddresses: true,
+    blockPrivateAddresses: e.EDGE_ALLOW_PRIVATE_UPSTREAMS !== "true",
     maxBodyBytes: 32 * 1024 * 1024,
     maxTraceBytes: 16 * 1024 * 1024,
   };

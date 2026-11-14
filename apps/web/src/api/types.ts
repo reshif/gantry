@@ -195,8 +195,112 @@ export interface AccessMatrixData {
   version?: number;
 }
 
+/** GET /workload: figures computed on the server from the work order records (spec 13.5), scoped to the projects the viewer sees. */
+export interface WorkloadWo {
+  id: string;
+  title: string;
+  project: string;
+  cls: string;
+}
+export interface WorkloadAct {
+  kind: "approve" | "confirm" | "answer";
+  at: number;
+  wo: string;
+  gate?: string;
+  waitMin: number | null;
+}
+export interface WorkloadRow {
+  person: string;
+  name: string;
+  team: string | null;
+  waiting: number;
+  glass: number;
+  approvals: number;
+  perDay: number;
+  answered: number;
+  waitN: number;
+  medianResponseMin: number | null;
+  afterHours: number;
+  n: number;
+  sole: number;
+  minutes: number;
+  away: { from: number; to: number; delegate: string | null } | null;
+  oncall: boolean;
+  waitingGates: Array<{ wo: WorkloadWo; gate: string; since: number; eligible: number }>;
+  recent: WorkloadAct[];
+}
+export interface WorkloadTeam {
+  team: string;
+  name: string;
+  people: number;
+  waiting: number;
+  approvals: number;
+  answered: number;
+  minutes: number;
+  waitN: number;
+  medianResponseMin: number | null;
+  afterHours: number;
+  n: number;
+  sole: number;
+}
+export interface WorkloadMinutes {
+  key: string;
+  minutes: number;
+  workOrders: number;
+  perWO: number;
+}
+export interface WorkloadBottleneck {
+  project: string;
+  gate: string;
+  decisions: number;
+  medianWaitMin: number | null;
+  open: number;
+  oldestMin: number;
+  station: string | null;
+  minEligible: number | null;
+}
+export interface WorkloadSuggestion {
+  key: string;
+  kind: "approver" | "trust" | "delegate";
+  icon: string;
+  weight: number;
+  text: string;
+  action: { id: string; label: string; type: "config" | "delegate" | "person" | "trust"; project?: string; gate?: string | null; person?: string; cell?: string; cls?: string | null; proposal?: string | null };
+}
 export interface Workload {
-  [k: string]: unknown;
+  at: number;
+  days: number;
+  scope: string;
+  minN: number;
+  projects: Array<{ id: string; name: string }>;
+  factoryWide: boolean;
+  ids: string[];
+  totals: { gatesWaiting: number; soleGates: number; noneGates: number; timedN: number; medianWaitMin: number | null; acts: number; afterHours: number; minutes: number };
+  rows: WorkloadRow[];
+  teams: WorkloadTeam[];
+  byCls: WorkloadMinutes[];
+  byProject: WorkloadMinutes[];
+  bottlenecks: WorkloadBottleneck[];
+  needsPerson: Array<{ id: string; title: string; project: string; bayReason: string | null }>;
+  suggestions: WorkloadSuggestion[];
+}
+
+/** GET /learning/signals: one row per signal, newest first. A regression has no work order; its eval run is in `ref`. */
+export interface LearningSignalRow {
+  signal: string;
+  wo: string;
+  project: string | null;
+  agent: string | null;
+  gate?: string;
+  text: string;
+  at: number;
+  ref?: string;
+}
+/** GET /learning/settings. */
+export interface LearningSettings {
+  proposalsOn: boolean;
+  /** People other than the viewer who could decide a proposal: the drafter does not accept where this is above zero. */
+  otherDeciders: number;
 }
 
 export interface SavedView {

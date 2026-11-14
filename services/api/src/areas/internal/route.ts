@@ -1,48 +1,75 @@
 import type { Queryable } from "@gantry/db";
 import type { RunCtx } from "./context.js";
+import { loadFacts, repoTagsFor } from "../models/facts.js";
+import { resolveModel, type Pick } from "../models/resolve.js";
 
 export interface ModelRoute {
   vendor: string;
   baseUrl: string;
   modelId: string;
+  /** The id the vendor's API expects. The edge rewrites the request's model with it only when it differs from the model the run asked for. */
+  upstreamModel: string;
+  /** Tried by the edge, in order, when this vendor errors before any byte reached the run (a turn boundary). */
+  alternates?: ModelAlternate[];
+  /** The primary route is itself a different model than the one the run pinned (cross-model fallback, opted in): the edge reports usage as flagged. */
+  crossModel?: boolean;
+  /** A custom or on-prem endpoint vendor with no stored key (an on-prem server without a token): the edge sends no key. */
+  keyless?: boolean;
+}
+export interface ModelAlternate {
+  vendor: string;
+  baseUrl: string;
+  modelId: string;
+  upstreamModel: string;
+  /** A different model than the one the run asked for. Spec 10.4: flagged on the run. */
+  crossModel: boolean;
+  keyless?: boolean;
 }
 
-export type RouteResult = { ok: true; route: ModelRoute } | { ok: false; reason: string };
+export type RouteResult = { ok: true; route: ModelRoute; flags: { sameModel: boolean; crossModel: boolean; wanted: string | null } } | { ok: false; reason: string };
 
 export const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 
-/** Latest published routing version's default model (spec 10.4: default, then project, station, class; overrides are keyed by station or class). */
-async function routedModel(db: Queryable, c: RunCtx): Promise<string | null> {
-  const { rows } = await db.query<{ body: { defaultModel?: string; overrides?: Record<string, string> } }>(
-    `select body from routing_versions where org_id = $1 and published_at is not null order by version desc limit 1`,
-    [c.orgId],
-  );
-  const b = rows[0]?.body;
-  if (!b) return null;
-  return b.overrides?.[c.station] ?? b.overrides?.[c.woClass] ?? b.defaultModel ?? null;
-}
-
 /**
- * The vendor route for one call. Agents pin an exact model id (spec 10.4 Model identity), so a call for any other model is refused.
- * The route is filtered by the project's allowed vendors (project config extra.allowedVendors, when set), and the model and vendor must be enabled and connected.
- * Fallback to the same model on another vendor is not modelled yet: a model belongs to one vendor row.
+ * The vendor route for one call (spec 10.4). Agents pin an exact model id, so a call for any other model is refused. Routing (default, project,
+ * station, class), the project's allowed vendors, regions and retention modes, the repo's residency rule and custom-vendor qualification are
+ * applied by the shared resolver. Fallback is only to the same model on another allowed vendor, unless the factory switch and the project's opt-in allow a different model.
  */
 export async function resolveRoute(db: Queryable, c: RunCtx, requested: string | undefined): Promise<RouteResult> {
-  const pinned = c.runModel ?? c.tupleModel ?? (await routedModel(db, c));
-  if (!pinned) return { ok: false, reason: "No model is pinned for this run and routing has no default." };
-  if (requested && requested !== pinned) return { ok: false, reason: `This run is pinned to model ${pinned}; ${requested} is not allowed.` };
-  const { rows } = await db.query<{ model_enabled: boolean; vendor_id: string; connected: boolean; endpoint: string; product: string; name: string }>(
-    `select m.enabled as model_enabled, v.id as vendor_id, v.connected, v.endpoint, v.product, v.name
-       from models m join vendors v on v.org_id = m.org_id and v.id = m.vendor_id where m.org_id = $1 and m.id = $2`,
-    [c.orgId, pinned],
-  );
-  const m = rows[0];
-  if (!m) return { ok: false, reason: `Model ${pinned} is not registered.` };
-  if (!m.model_enabled) return { ok: false, reason: `Model ${pinned} is disabled.` };
-  if (!m.connected) return { ok: false, reason: `Vendor ${m.name} is not connected.` };
-  const extra = (c.projectConfig.extra ?? {}) as { allowedVendors?: unknown };
-  if (Array.isArray(extra.allowedVendors) && !extra.allowedVendors.includes(m.vendor_id)) return { ok: false, reason: `Vendor ${m.name} is not allowed for this project.` };
-  const baseUrl = m.endpoint || (/anthropic|claude/i.test(`${m.vendor_id} ${m.product}`) ? ANTHROPIC_BASE_URL : "");
-  if (!baseUrl) return { ok: false, reason: `Vendor ${m.name} has no endpoint.` };
-  return { ok: true, route: { vendor: m.vendor_id, baseUrl: baseUrl.replace(/\/+$/, ""), modelId: pinned } };
+  const pinned = c.runModel ?? c.tupleModel ?? null;
+  if (requested && pinned && requested !== pinned) return { ok: false, reason: `This run is pinned to model ${pinned}; ${requested} is not allowed.` };
+  const [facts, repo] = await Promise.all([loadFacts(db, c.orgId), repoTagsFor(db, c.orgId, c.repoId)]);
+  const extra = (c.projectConfig.extra ?? {}) as { allowedVendors?: unknown; crossModelFallback?: unknown };
+  const res = resolveModel({
+    ...facts,
+    station: c.station,
+    woClass: c.woClass,
+    project: c.projectId,
+    repoTags: repo?.tags,
+    pinned,
+    projectAllowedVendors: Array.isArray(extra.allowedVendors) ? extra.allowedVendors.filter((x): x is string => typeof x === "string") : undefined,
+    projectCrossModel: extra.crossModelFallback === true,
+  });
+  if (!pinned && !res.wanted) return { ok: false, reason: "No model is pinned for this run and routing has no default." };
+  if (requested && !pinned && requested !== res.wanted) return { ok: false, reason: `Routing sends this run to ${res.wanted}; ${requested} is not allowed.` };
+  if (!res.pick) return { ok: false, reason: res.blocked ?? "No model is available." };
+  const vendors = new Map(facts.vendors.map((v) => [v.id, v]));
+  const keyless = (p: Pick): boolean => {
+    const v = vendors.get(p.vendor)!;
+    return !v.hasSecret && v.endpoint !== "" && (v.custom || v.id === "local");
+  };
+  const baseOf = (p: Pick): string => {
+    const v = vendors.get(p.vendor)!;
+    return (v.endpoint || (/anthropic|claude/i.test(`${v.id} ${v.product}`) ? ANTHROPIC_BASE_URL : "")).replace(/\/+$/, "");
+  };
+  const base = baseOf(res.pick);
+  if (!base) return { ok: false, reason: `Vendor ${vendors.get(res.pick.vendor)!.name} has no endpoint.` };
+  const alternates: ModelAlternate[] = res.alternates
+    .map((p) => ({ vendor: p.vendor, baseUrl: baseOf(p), modelId: p.model, upstreamModel: p.upstream, crossModel: p.crossModel, ...(keyless(p) ? { keyless: true } : {}) }))
+    .filter((p) => p.baseUrl !== "");
+  return {
+    ok: true,
+    route: { vendor: res.pick.vendor, baseUrl: base, modelId: res.pick.model, upstreamModel: res.pick.upstream, ...(res.pick.crossModel ? { crossModel: true } : {}), ...(keyless(res.pick) ? { keyless: true } : {}), ...(alternates.length ? { alternates } : {}) },
+    flags: { sameModel: res.pick.sameModel, crossModel: res.pick.crossModel, wanted: res.wanted },
+  };
 }

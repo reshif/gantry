@@ -1,53 +1,12 @@
 import type { Queryable } from "@gantry/db";
 import type { RunCtx } from "./context.js";
 
-/** Dollars per million tokens, as stored in price_versions.body. Cache prices default to Anthropic's ratios of the input price. */
-export interface Price {
-  in: number;
-  out: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-}
+import { costMicros, priceBookAt, type Price, type PriceBook, type Usage } from "../models/prices.js";
 
-export interface Usage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-}
+export { costMicros, type Price, type PriceBook, type Usage };
 
-export interface PriceBook {
-  version: number | null;
-  prices: Record<string, Price>;
-}
-
-const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
-
-/** The price version in force: the latest published one. */
-export async function currentPrices(db: Queryable, orgId: string): Promise<PriceBook> {
-  const { rows } = await db.query<{ version: number; body: Record<string, unknown> }>(
-    `select version, body from price_versions where org_id = $1 and published_at is not null order by version desc limit 1`,
-    [orgId],
-  );
-  const r = rows[0];
-  if (!r) return { version: null, prices: {} };
-  const prices: Record<string, Price> = {};
-  for (const [id, p] of Object.entries(r.body ?? {})) {
-    if (p && typeof p === "object") {
-      const o = p as Record<string, unknown>;
-      prices[id] = { in: num(o.in ?? o.input), out: num(o.out ?? o.output), ...(o.cacheRead !== undefined ? { cacheRead: num(o.cacheRead) } : {}), ...(o.cacheWrite !== undefined ? { cacheWrite: num(o.cacheWrite) } : {}) };
-    }
-  }
-  return { version: r.version, prices };
-}
-
-/** Cost in micro-dollars. $/M tokens equals micro-dollars per token, so no scaling is needed. Unknown model = 0 (flagged by the caller). */
-export function costMicros(price: Price | undefined, u: Usage): number {
-  if (!price) return 0;
-  const cr = price.cacheRead ?? price.in * 0.1;
-  const cw = price.cacheWrite ?? price.in * 1.25;
-  return Math.round(u.inputTokens * price.in + u.outputTokens * price.out + u.cacheReadTokens * cr + u.cacheWriteTokens * cw);
-}
+/** The price version in force now: the published version with the latest effective date not after this moment (spec 10.4 Prices). */
+export const currentPrices = (db: Queryable, orgId: string): Promise<PriceBook> => priceBookAt(db, orgId);
 
 export interface Limits {
   /** Monthly project cap in micro-dollars; null = none configured (a limit of 0 means "not set"). */
@@ -67,12 +26,13 @@ const toMicros = (usd: unknown): number | null => {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.round(n * 1_000_000) : null;
 };
 
-/** Spec 10.4 Budget: project monthly budget, work-order cap (work order data.budgetUsd, else project config extra.woBudgetUsd), per-run cap (agent budget). */
+/** Spec 10.4 Budget: project monthly budget, work-order cap (the work order's own data.budgetUsd, else the project's budgets.wo_limit_micros, else config extra.woBudgetUsd), per-run cap (agent budget). */
 export async function loadLimits(db: Queryable, c: RunCtx): Promise<Limits> {
-  const b = await db.query<{ m: string }>(`select monthly_limit_micros::text as m from budgets where org_id = $1 and project_id = $2`, [c.orgId, c.projectId]);
+  const b = await db.query<{ m: string; w: string }>(`select monthly_limit_micros::text as m, wo_limit_micros::text as w from budgets where org_id = $1 and project_id = $2`, [c.orgId, c.projectId]);
   const projectMicros = b.rows[0] && Number(b.rows[0].m) > 0 ? Number(b.rows[0].m) : null;
+  const projectWoMicros = b.rows[0] && Number(b.rows[0].w) > 0 ? Number(b.rows[0].w) : null;
   const extra = (c.projectConfig.extra ?? {}) as Record<string, unknown>;
-  const woMicros = toMicros(c.woData.budgetUsd) ?? toMicros(extra.woBudgetUsd);
+  const woMicros = toMicros(c.woData.budgetUsd) ?? projectWoMicros ?? toMicros(extra.woBudgetUsd);
   const runMicros = toMicros((await agentConfig(db, c)).budgetUsd);
   return { projectMicros, woMicros, runMicros };
 }

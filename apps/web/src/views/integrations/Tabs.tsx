@@ -128,7 +128,7 @@ export function CatalogueTab({ nav, openType, onAdd, goBuild }: { nav: Nav; open
             );
           })}
         </div>
-      ) : <Empty title="No type matches" text="Try another word or category, or build a custom integration." action={<Btn label="Build custom integration" small id="int-cat-build" onClick={goBuild} />} />}
+      ) : <Empty id="int-cat-empty" title="No type matches" text="Try another word or category, or build a custom integration." action={<Btn label="Build custom integration" small id="int-cat-build" onClick={goBuild} />} />}
     </div>
   );
 }

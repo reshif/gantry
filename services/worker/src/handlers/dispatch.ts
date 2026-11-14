@@ -5,6 +5,7 @@ import type { Deps } from "../deps.js";
 import { errMsg, PermanentError, TransientError } from "../errors.js";
 import type { HandlerCtx } from "../runner.js";
 import { coveringStops, loadAttempt, resolveSeedCommit, runIdFor, volumeFor, type AttemptInfo } from "./common.js";
+import { failEvalCase } from "./evals.js";
 import { teardownRun } from "./teardown.js";
 
 const sha = (s: string): string => createHash("sha256").update(s).digest("hex");
@@ -23,7 +24,11 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
   const agentId = typeof a.attemptData.agent === "string" ? a.attemptData.agent : "";
   const none: Pinned = { tupleId: null, model: null, adapter: "stub", wallClockSeconds: 3600, record: null };
   if (!agentId) return none;
-  const ag = (await tx.query<{ live_version: number | null; data: Record<string, unknown> }>(`select live_version, data from agents where org_id = $1 and id = $2`, [a.orgId, agentId])).rows[0];
+  const found = (await tx.query<{ live_version: number | null; data: Record<string, unknown> }>(`select live_version, data from agents where org_id = $1 and id = $2`, [a.orgId, agentId])).rows[0];
+  // An eval case runs the version (and model) the person picked for the run, which need not be the live one (spec 13.2); real work always runs the live version.
+  const evalVersion = a.attemptData.eval && Number.isInteger(a.attemptData.agentVersion) ? Number(a.attemptData.agentVersion) : null;
+  const evalModel = a.attemptData.eval && typeof a.attemptData.model === "string" && a.attemptData.model !== "" ? a.attemptData.model : null;
+  const ag = found ? { ...found, live_version: evalVersion ?? found.live_version } : found;
   if (!ag || ag.live_version === null) return none;
   const v = (await tx.query<{ body: Record<string, unknown>; harness_version: string; instruction_hash: string | null; model_id: string | null }>(
     `select body, harness_version, instruction_hash, model_id from agent_versions where org_id = $1 and agent_id = $2 and version = $3`, [a.orgId, agentId, ag.live_version],
@@ -42,7 +47,7 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
     skillVersions = {};
     for (const s of skills) if (s.version !== null) skillVersions[s.skill_id] = s.version;
   }
-  const model = run?.modelOverride || v.model_id || (typeof v.body.model === "string" ? v.body.model : null);
+  const model = evalModel || run?.modelOverride || v.model_id || (typeof v.body.model === "string" ? v.body.model : null);
   const instruction = run?.composed.hash ?? v.instruction_hash ?? sha(typeof v.body.instructions === "string" ? v.body.instructions : "");
   const id = `tup-${sha([agentId, ag.live_version, instruction, v.harness_version, model ?? "", JSON.stringify(skillVersions)].join("\0")).slice(0, 20)}`;
   await tx.query(
@@ -87,6 +92,8 @@ async function markStarted(deps: Deps, a: AttemptInfo, runId: string, startupLea
 /** The attempt cannot be started and will not be: record a failed station result so the flow engine retries it (bounded) or parks the work order. */
 async function failDispatch(deps: Deps, a: AttemptInfo, runId: string, code: string, msg: string): Promise<unknown> {
   await teardownRun(deps, a.orgId, runId, "failed", { by: "dispatch failed" }).catch((e) => deps.log.warn({ run: runId, err: errMsg(e) }, "teardown after failed dispatch"));
+  // An eval case that cannot start ends with an error on its item; it never touches the flow.
+  if (a.woData.eval) return failEvalCase(deps, a, code, msg);
   const out = await withTx(deps.pool, (tx) => applyStationResult(tx, a.attemptId, a.fencing, { status: "failed", summary: msg, error: { code, msg } }));
   return { failed: code, applied: out.applied };
 }

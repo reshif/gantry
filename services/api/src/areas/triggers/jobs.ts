@@ -12,16 +12,19 @@ export async function evaluateEvent(tx: Tx, orgId: string, p: JobPayload<"trigge
   const out: EvalSummary = { triggers: 0, outcomes: {} };
   const repo = await resolveRepo(tx, orgId, p.repo);
   if (!repo) return out;
+  // A GitHub event is offered to every trigger whose source connection is on; a custom connection's webhook only to that connection's triggers.
   const { rows } = await tx.query<TriggerRow>(
     `select ${COLS.split(", ").map((c) => `t.${c}`).join(", ")} from triggers t where t.org_id = $1 and t.project_id = $2 and t.kind = $3 and t.enabled
+        and ($4::text is null or t.config ->> 'source' = $4)
         and exists (select 1 from integration_instances i where i.org_id = t.org_id and i.id = t.config ->> 'source' and i.enabled) order by t.created_at, t.id`,
-    [orgId, repo.project_id, p.kind],
+    [orgId, repo.project_id, p.kind, p.source ?? null],
   );
   const input: TriggerInput = {
     kind: p.kind, repo: repo.id, title: p.title, body: p.body, labels: p.labels, author: p.author, comment: p.comment, ref: p.ref, url: p.url, check: p.check, dedupeKey: p.dedupeKey,
   };
   const now = o.now ?? new Date();
   const ctx: RunCtx = { orgId, now, requestId: o.requestId ?? `trigger-${p.dedupeKey}`.slice(0, 100), ip: null, channel: channelFor(p.kind) };
+  if (p.source && p.delivery) await tx.query(`update inbound_deliveries set status = 'processed', processed_at = now(), updated_at = now() where org_id = $1 and source = $2 and delivery_id = $3`, [orgId, `trigger:${p.source}`, p.delivery]);
   for (const row of rows) {
     out.triggers++;
     const r = await evaluateTrigger(tx, ctx, row, input);

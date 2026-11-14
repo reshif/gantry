@@ -228,7 +228,7 @@ export async function computeHome(o: HomeOptions) {
     db.query<{ id: string; cell_id: string; proposed_level: string; evidence: unknown }>(`select id, cell_id, proposed_level, evidence from trust_proposals where org_id = $1 and status = 'open' order by created_at desc`, [orgId]),
     db.query<{ cell_id: string; at: Date; reason: string | null }>(
       `select g.cell_id, g.revoked_at as at, g.evidence->>'reason' as reason from trust_grants g where g.org_id = $1 and g.revoked_at >= $2 order by g.revoked_at desc`, [orgId, new Date(now - 7 * DAY)]),
-    db.query<{ id: string; kind: string; change: unknown; decided_by: string | null }>(`select id, kind, change, decided_by from proposals where org_id = $1 and status = 'open' order by created_at desc`, [orgId]),
+    db.query<{ id: string; kind: string; title: string; change: unknown; decided_by: string | null }>(`select id, kind, title, change, decided_by from proposals where org_id = $1 and status = 'open' order by created_at desc`, [orgId]),
     db.query<{ repo: string; name: string; project: string; stage: string }>(`select r.id as repo, r.name, r.project_id as project, r.onboarding_stage as stage from repos r join projects p on p.org_id = r.org_id and p.id = r.project_id where r.org_id = $1 and p.status <> 'archived' order by r.name`, [orgId]),
     Promise.resolve(st.people),
     db.query<{ n: string }>(`select count(*) as n from pull_requests where org_id = $1 and state = 'open'`, [orgId]),
@@ -276,7 +276,7 @@ export async function computeHome(o: HomeOptions) {
       trust: {
         proposals: trustP.rows.map((r) => ({ id: r.id, cell: r.cell_id, to: r.proposed_level })), demotions: trustD.rows.map((r) => ({ cell: r.cell_id, at: ms(r.at) ?? 0, reason: r.reason })),
       },
-      learning: learn.rows.map((r) => ({ id: r.id, kind: r.kind, title: String(obj(r.change).title ?? obj(r.change).summary ?? r.kind) })),
+      learning: learn.rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title || String(obj(r.change).title ?? obj(r.change).summary ?? r.kind) })),
     },
     onboarding: { stages, stuck, open: openRepos, total: onb.rows.length, ready: onb.rows.length - openRepos.length },
     spend: {

@@ -18,7 +18,7 @@ import { useOpenTraveler } from "../../shell/useTraveler";
 import { usePrefs } from "../../lib/prefs";
 import { useCatalog } from "../projects/kit";
 import { useOutcome } from "../govern/data";
-import { TTYPES, dec, kindsFor, srcName, srcOptions, srcState, useCanAny, whoOptions, type ApiData } from "./kit";
+import { TTYPES, dec, hookUrl, kindsFor, srcName, srcOptions, srcState, useCanAny, whoOptions, type ApiData } from "./kit";
 
 interface SimResult { outcome: string; msg: string; wo: string; created: boolean; notes: string[]; at: number }
 const outcomeClass = (o: string): string => (o === "created" ? "ok" : o === "refused" ? "denied" : "warn");
@@ -223,7 +223,7 @@ function Detail({ t, d, res, setRes }: { t: Trigger; d: ApiData; res: SimResult 
             <Toggle id="api-tr-enabled" checked={t.enabled} onChange={(v) => void toggle(v)} decision={perm} label="Trigger enabled" />
           </div>
           <Field label="Name" htmlFor="api-tr-name">{inp("api-tr-name", "name")}</Field>
-          <Field label="Source" htmlFor="api-tr-source" hint={srcState(x.source, d) === "healthy" ? "Events arrive from this connection." : `${srcName(x.source, d)} is ${srcState(x.source, d)}: events from it will not arrive.`}>
+          <Field label="Source" htmlFor="api-tr-source" hint={srcState(x.source, d) !== "healthy" ? `${srcName(x.source, d)} is ${srcState(x.source, d)}: events from it will not arrive.` : hookUrl(x.source, d) ? <>Events arrive when the system posts a signed JSON event to <span className="mono">{hookUrl(x.source, d)}</span> (header X-Gantry-Signature, signed with the connection's secret).</> : "Events arrive from this connection."}>
             <Select id="api-tr-source" options={srcOptions(t.project, x.source, t.type, d)} value={x.source} onChange={(v) => set("source", v)} disabled={ro} />
           </Field>
           {t.type === "issue" ? (

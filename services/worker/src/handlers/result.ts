@@ -6,6 +6,7 @@ import { errMsg, PermanentError } from "../errors.js";
 import { recordEvent } from "../alerts.js";
 import type { HandlerCtx } from "../runner.js";
 import { loadAttempt, runIdFor, volumeFor, type AttemptInfo } from "./common.js";
+import { gradeEvalCase } from "./evals.js";
 import { teardownRun } from "./teardown.js";
 
 interface StoredResult {
@@ -71,6 +72,12 @@ export async function runResult(job: Job, ctx: HandlerCtx): Promise<unknown> {
   if (!sr) throw new PermanentError(`No stored result for run ${runId}.`, "no_result");
 
   const cur = await attemptIsCurrent(deps.pool, job.orgId, attemptId, fencing);
+  // Spec 13.2: an eval case's result is graded and recorded, never published to a repository and never applied through the flow.
+  if (a.woData.eval) {
+    const graded = cur.current ? await gradeEvalCase(deps, a, { status: sr.outcome, output: sr.body.output ?? null, error: sr.body.error ?? null }) : { superseded: cur.reason };
+    await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" ? "succeeded" : "failed");
+    return graded;
+  }
   let outcome: unknown = { superseded: cur.reason };
   if (cur.current) {
     const output = sr.body.output ?? null;

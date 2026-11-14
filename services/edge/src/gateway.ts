@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ApiClient, authorizeCall, type Route } from "./api.js";
+import { ApiClient, authorizeCall, type Alternate, type Route } from "./api.js";
 import type { EdgeConfig } from "./config.js";
 import { VendorLimiter } from "./limiter.js";
 import { scanJson, scanText, type Finding } from "./secrets-scan.js";
@@ -9,6 +9,7 @@ import { NoObjectStore, TraceIncrements, type ObjectStore } from "./trace.js";
 import { SseUsage, usageFromJson, type Usage } from "./usage.js";
 import { VendorKeys } from "./vendor-keys.js";
 import { registerMcpRoutes, type McpMetrics } from "./mcp/routes.js";
+import { registerServiceRoutes, type ServiceMetrics } from "./service-gateway.js";
 
 export interface GatewayDeps {
   cfg: EdgeConfig;
@@ -27,6 +28,8 @@ export interface GatewayMetrics {
   /** Model calls whose trace could not be stored (degraded: the call went ahead, usage carries no trace reference). */
   traceDropped: number;
   usageReportFailures: number;
+  /** Calls served by another vendor after the routed one failed. */
+  fallbacks: number;
 }
 
 const RUN_TOKEN_RE = /^grt\.([A-Za-z0-9_-]{1,400})\.[A-Za-z0-9_-]{20,128}$/;
@@ -74,6 +77,8 @@ export interface Gateway {
   keys: VendorKeys;
   limiter: VendorLimiter;
   mcp: McpMetrics;
+  /** Model calls that belong to no run (the console), spec 12.6. */
+  service: ServiceMetrics;
   api: ApiClient;
   store: ObjectStore;
   /** Resolves when every model call's post-response work (trace, usage report) has finished. Used on shutdown and in tests. */
@@ -89,7 +94,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
   const keys = deps.keys ?? new VendorKeys(cfg.vendorKeys, api);
   const limiter = deps.limiter ?? new VendorLimiter(cfg.vendorConcurrency, cfg.queueWaitMs);
   const traces = new TraceIncrements();
-  const metrics: GatewayMetrics = { calls: 0, refused: 0, traceStored: 0, traceDropped: 0, usageReportFailures: 0 };
+  const metrics: GatewayMetrics = { calls: 0, refused: 0, traceStored: 0, traceDropped: 0, usageReportFailures: 0, fallbacks: 0 };
   const app = Fastify({
     logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.authorization", "req.headers['x-api-key']", "req.headers['proxy-authorization']"] },
     bodyLimit: cfg.maxBodyBytes,
@@ -137,32 +142,37 @@ export function buildGateway(deps: GatewayDeps): Gateway {
       req.log.warn({ runId, code: auth.code }, "model call refused");
       return modelError(reply, d.status, d.type, auth.reason, { "x-gantry-denial": auth.code });
     }
-    const route: Route = auth.route;
+    const primary: Route = auth.route;
+    let route: Route = primary;
+    // Spec 10.4 Fallback: alternates are the same model on another allowed vendor (and, only when the project opted in, a different model).
+    // They are tried at a turn boundary: only when the vendor failed before a single byte reached the run.
+    const alternates: Alternate[] = primary.alternates ?? [];
+    // A model the vendor knows under another id (the same model on Bedrock, say) is called with that id.
+    const bodyFor = (rt: { upstreamModel?: string }): Uint8Array<ArrayBuffer> => (rt.upstreamModel && body.model !== rt.upstreamModel ? new Uint8Array(Buffer.from(JSON.stringify({ ...body, model: rt.upstreamModel }))) : new Uint8Array(raw));
+    const callTo = (rt: Route | Alternate, key: string | null, signal: AbortSignal): { url: string; init: RequestInit } => {
+      const url = upstreamUrl(rt.baseUrl, countOnly ? "/v1/messages/count_tokens" : "/v1/messages");
+      const headers: Record<string, string> = { "content-type": "application/json", "accept-encoding": "identity", "anthropic-version": String(req.headers["anthropic-version"] ?? "2023-06-01") };
+      if (key) {
+        headers["x-api-key"] = key;
+        if (!/(^|\.)api\.anthropic\.com$/.test(new URL(url).hostname)) headers.authorization = `Bearer ${key}`;
+      }
+      if (typeof req.headers["anthropic-beta"] === "string") headers["anthropic-beta"] = req.headers["anthropic-beta"];
+      if (typeof req.headers.accept === "string") headers.accept = req.headers.accept;
+      return { url, init: { method: "POST", headers, body: bodyFor(rt), signal } };
+    };
 
     const key = await keys.get(route.vendor);
-    if (!key) {
+    if (!key && !primary.keyless) {
       metrics.refused++;
       return modelError(reply, 503, "api_error", `No API key is configured for vendor ${route.vendor}.`);
     }
-    const slot = await limiter.acquire(route.vendor);
+    let slot = await limiter.acquire(route.vendor);
     if (!slot.ok) {
       metrics.refused++;
       return modelError(reply, 429, "rate_limit_error", `Vendor ${route.vendor} is ${slot.reason === "cooldown" ? "rate limiting" : "busy"}; retry later.`, { "retry-after": String(slot.retryAfterSeconds) });
     }
 
     metrics.calls++;
-    const path = countOnly ? "/v1/messages/count_tokens" : "/v1/messages";
-    const url = upstreamUrl(route.baseUrl, path);
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      "x-api-key": key,
-      "accept-encoding": "identity",
-      "anthropic-version": String(req.headers["anthropic-version"] ?? "2023-06-01"),
-    };
-    if (!/(^|\.)api\.anthropic\.com$/.test(new URL(url).hostname)) headers.authorization = `Bearer ${key}`;
-    if (typeof req.headers["anthropic-beta"] === "string") headers["anthropic-beta"] = req.headers["anthropic-beta"];
-    if (typeof req.headers.accept === "string") headers.accept = req.headers.accept;
-
     const started = Date.now();
     const ac = new AbortController();
     const onClose = (): void => {
@@ -179,14 +189,52 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     let captured = 0;
     let truncated = false;
     let vendorRequestId: string | undefined;
+    let fallback: "same_model" | "cross_model" | undefined = primary.crossModel ? "cross_model" : undefined;
+    const retryable = (st: number): boolean => st === 429 || st === 500 || st === 502 || st === 503 || st === 504 || st === 529;
     reply.hijack();
     try {
-      const res = await f(url, { method: "POST", headers, body: new Uint8Array(raw), signal: ac.signal });
-      status = res.status;
-      if (res.status === 429 || res.status === 529 || res.status === 503) {
-        const ra = Number(res.headers.get("retry-after"));
-        limiter.pause(route.vendor, Number.isFinite(ra) && ra > 0 ? ra : res.status === 429 ? 5 : 2);
+      const pause = (vendor: string, res: Response): void => {
+        if (res.status === 429 || res.status === 529 || res.status === 503) {
+          const ra = Number(res.headers.get("retry-after"));
+          limiter.pause(vendor, Number.isFinite(ra) && ra > 0 ? ra : res.status === 429 ? 5 : 2);
+        }
+      };
+      let res: Response | undefined;
+      let failure: unknown;
+      try {
+        const c = callTo(route, key, ac.signal);
+        res = await f(c.url, c.init);
+        pause(route.vendor, res);
+      } catch (e) {
+        failure = e;
       }
+      for (const alt of alternates) {
+        if (ac.signal.aborted || (res && !retryable(res.status))) break;
+        const altKey = await keys.get(alt.vendor);
+        if (!altKey && !alt.keyless) continue;
+        const altSlot = await limiter.acquire(alt.vendor);
+        if (!altSlot.ok) continue;
+        try {
+          const c = callTo(alt, altKey, ac.signal);
+          const altRes = await f(c.url, c.init);
+          pause(alt.vendor, altRes);
+          // The first vendor's answer is dropped unread: nothing of it reached the run.
+          if (res) await res.body?.cancel().catch(() => undefined);
+          slot.release();
+          slot = altSlot;
+          res = altRes;
+          failure = undefined;
+          route = { vendor: alt.vendor, baseUrl: alt.baseUrl, modelId: alt.modelId, upstreamModel: alt.upstreamModel };
+          fallback = alt.crossModel || fallback === "cross_model" ? "cross_model" : "same_model";
+          req.log.warn({ runId, from: primary.vendor, to: alt.vendor, model: alt.modelId, crossModel: alt.crossModel }, "vendor failed: fell back");
+          metrics.fallbacks++;
+        } catch (e) {
+          altSlot.release();
+          failure ??= e;
+        }
+      }
+      if (!res) throw failure ?? new Error("no response");
+      status = res.status;
       vendorRequestId = res.headers.get("request-id") ?? res.headers.get("x-request-id") ?? undefined;
       const out: Record<string, string> = {};
       for (const h of PASS_RESPONSE_HEADERS) {
@@ -251,6 +299,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
       cacheWriteTokens: usage.cacheWriteTokens,
       latencyMs: Date.now() - started,
       outcome,
+      ...(fallback ? { fallback, wanted: primary.modelId } : {}),
       ...(traceRef ? { traceRef } : {}),
     });
     if (rep.kind !== "ok") {
@@ -382,5 +431,8 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     return relay(reply, await api.call("POST", `/internal/v1/runs/${encodeURIComponent(a.runId)}/result`, { ...(s.value as Record<string, unknown>), token: a.token }));
   });
 
-  return { app, metrics, mcp, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
+  // Model calls for the console and "explain why not" (spec 12.6): the API calls with the edge token, the key stays here.
+  const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f, track });
+
+  return { app, metrics, mcp, service, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
 }

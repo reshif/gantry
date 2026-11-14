@@ -1,8 +1,9 @@
-import { applyStationResult, expireLeases, pendingStops, revokeRunTokens, job as buildJob } from "@gantry/api/core";
+import { applyStationResult, expireLeases, failEvalAttempt, pendingStops, revokeRunTokens, job as buildJob } from "@gantry/api/core";
 import { enqueue, withTx, type Job } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg } from "../errors.js";
 import type { HandlerCtx } from "../runner.js";
+import { enqueueJobs, evalSweep } from "./evals.js";
 
 export interface SweepReport {
   stopsRequeued: number;
@@ -59,7 +60,12 @@ export async function wallClockWatchdog(deps: Deps, orgId: string): Promise<stri
         await revokeRunTokens(tx, { orgId, runIds: [r.id], reason: "wall-clock limit" });
         await tx.query(`update runs set state = 'stopped', ended_at = now(), updated_at = now(), data = data || '{"endedBy":"wall-clock watchdog"}'::jsonb where org_id = $1 and id = $2`, [orgId, r.id]);
         const msg = `The run exceeded its wall-clock limit of ${r.limit_s} seconds and was stopped.`;
-        await applyStationResult(tx, r.attempt_id, Number(r.fencing), { status: "failed", summary: msg, error: { code: "wall_clock_exceeded", msg } });
+        // An eval case ends with an error on its item; real work goes through the flow engine.
+        const isEval = (await tx.query(`select 1 from attempts a join work_orders w on w.org_id = a.org_id and w.id = a.wo_id where a.org_id = $1 and a.id = $2 and w.source = 'eval'`, [orgId, r.attempt_id])).rowCount;
+        if (isEval) {
+          const f = await failEvalAttempt(tx, orgId, r.attempt_id, { code: "wall_clock_exceeded", msg }, deps.now());
+          await enqueueJobs(tx, orgId, f.jobs);
+        } else await applyStationResult(tx, r.attempt_id, Number(r.fencing), { status: "failed", summary: msg, error: { code: "wall_clock_exceeded", msg } });
       });
       out.push(r.id);
     } catch (e) {
@@ -84,6 +90,8 @@ export async function reaperSweep(job: Job, ctx: HandlerCtx): Promise<SweepRepor
     report.stopsRequeued++;
   }
   report.leasesExpired = (await withTx(deps.pool, (tx) => expireLeases(tx, { now: deps.now() }))).length;
+  // Eval cases that lost their lease or sat behind a stop end with an error, so an eval run is never stuck (spec 13.2).
+  report.leasesExpired += await evalSweep(deps, org);
   report.watchdog = await wallClockWatchdog(deps, org);
   report.orphansRemoved = await reapOrphans(deps, org);
   return report;

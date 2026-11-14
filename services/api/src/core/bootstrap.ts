@@ -16,11 +16,13 @@ export interface BootResult {
  * seed is loaded first, and only if the organisation does not exist yet. Without it the org starts empty: just the roles,
  * matrix and settings, and a Factory Admin appears when GANTRY_BOOTSTRAP_ADMIN_EMAIL signs in for the first time.
  */
-export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug" | "orgName" | "devSeed">, log?: { info(o: object, m?: string): void }, opts: { seedNow?: number; /** Dev seed only: also load the seed's audit history into the ledger (default true). */ seedAudit?: boolean } = {}): Promise<BootResult> {
+export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug" | "orgName" | "devSeed">, log?: { info(o: object, m?: string): void }, opts: { seedNow?: number; /** Dev seed only: also load the seed's audit history into the ledger (default true). */ seedAudit?: boolean; /** Dev seed only: also load the demo eval suites, their run history and the trust ladder (default true). */ seedEvals?: boolean } = {}): Promise<BootResult> {
   let seeded = false;
   if (config.devSeed) {
     const seed = devSeed(opts.seedNow);
-    const state = toSeedState(seed, config.orgSlug);
+    const full = toSeedState(seed, config.orgSlug);
+    const { suites: _suites, evalRuns: _runs, trust: _trust, ...withoutEvals } = full;
+    const state: SeedState = opts.seedEvals === false ? withoutEvals : full;
     const r = await withTx(pool, (tx) => seedDevOrg(tx, state));
     seeded = r.created;
     log?.info({ created: r.created }, "dev seed");

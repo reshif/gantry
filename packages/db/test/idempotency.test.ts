@@ -68,4 +68,19 @@ describe.skipIf(!TEST_URL)("idempotency keys", () => {
     ).rejects.toThrow("later failure");
     expect(await run("k5", { a: 2 }, c)).toMatchObject({ replayed: false });
   });
+
+  it("the window is configurable: a key is remembered for ttlHours, and one past its window is taken over, even with a different body", async () => {
+    const c = { n: 0 };
+    const win = (key: string, body: unknown, hours: number) =>
+      withTx(db.app, (tx) => idempotent(tx, { orgId: db.orgId, scope: "key:k:POST /x", key, body, ttlHours: hours }, async () => { c.n += 1; return { status: 200, response: { n: c.n } }; }));
+    expect(await win("w1", { a: 1 }, 2)).toMatchObject({ replayed: false });
+    const row = (await db.admin.query(`select extract(epoch from (expires_at - created_at)) / 3600 as h from idempotency_keys where key = 'w1'`)).rows[0];
+    expect(Math.round(Number(row.h))).toBe(2);
+    expect(await win("w1", { a: 1 }, 2)).toMatchObject({ replayed: true });
+    expect(await win("w1", { a: 2 }, 2)).toEqual({ conflict: true });
+    await db.admin.query(`update idempotency_keys set expires_at = now() - interval '1 minute' where key = 'w1'`);
+    expect(await win("w1", { a: 2 }, 2)).toMatchObject({ replayed: false, response: { n: 2 } });
+    expect(await win("w1", { a: 2 }, 2)).toMatchObject({ replayed: true, response: { n: 2 } });
+    expect(c.n).toBe(2);
+  });
 });

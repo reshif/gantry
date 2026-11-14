@@ -11,6 +11,7 @@ import { useMe, usePeople, useSecurity, useSessions, useSignins } from "../api/q
 import { Btn, Field, LockNote, Panel, Segmented, Select, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
+import { ExplainDenial } from "./console/ExplainDenial";
 import { lockd, nextVersion, useOutcome, versionOf } from "./govern/data";
 import { inCidr, parseCidr } from "./security/cidr";
 
@@ -46,7 +47,7 @@ export default function SecurityView() {
         sub="How people get in and how long they stay. Every change here is audited under auth."
         meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", sec.mfa.policy === "all" ? "everyone" : sec.mfa.policy === "admins" ? "admins" : "off"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", String(active)], ["Failed sign-ins 24 h", String(fails)]]}
       />
-      {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /></div> : null}
+      {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /><ExplainDenial id="sec-explain" action="security.manage" /></div> : null}
       <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in and sessions" }, { id: "network", label: "Domains and network" }, { id: "sessions", label: "Active sessions", count: active }, { id: "history", label: "Sign-in history", count: signins.length }]} />
       <div id="sec-tab-panel" role="tabpanel">
         {tab === "network" ? (

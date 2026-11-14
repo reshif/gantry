@@ -234,11 +234,14 @@ export async function streamCommand(
   body: unknown,
   onChunk: (text: string) => void,
   signal?: AbortSignal,
+  /** A create: send an Idempotency-Key (a retry then returns the first result as JSON instead of streaming again). */
+  idempotent?: boolean | string,
 ): Promise<ApiResult> {
   let res: Response;
   try {
     const o: RequestOptions = { method: "POST", body, headers: { Accept: "text/event-stream, text/plain, application/json" } };
     if (signal) o.signal = signal;
+    if (idempotent) o.idempotent = idempotent;
     res = await send(path, o);
   } catch {
     return { ok: false, msg: "Could not reach Gantry. Check your connection and try again.", status: 0 };

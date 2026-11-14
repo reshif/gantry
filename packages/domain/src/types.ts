@@ -758,7 +758,7 @@ export interface Agent {
   guardrails: { paths: string[]; maxDiff: number };
   suite: Id;
   instructions: string;
-  overrides: Record<string, { model?: string; autonomy?: Autonomy }>;
+  overrides: Record<string, { model?: string; autonomy?: Autonomy; budget?: number }>;
   versions: AgentVersion[];
   spark: number[];
   spend7d: number;
@@ -800,6 +800,16 @@ export interface Model {
   context: number;
   inPrice: number;
   outPrice: number;
+  /** The vendor serving this model (set by the API reads). */
+  vendor?: Id;
+  tier?: string;
+  /** Added by a person rather than shipped in the catalogue. */
+  custom?: boolean;
+  /** Models with the same canonical id are the same model on different vendors (same-model fallback, spec 10.4). */
+  canonical?: string;
+  /** Cache prices per million tokens when set; the default ratios of the input price apply otherwise. */
+  cacheRead?: number;
+  cacheWrite?: number;
 }
 export type VendorHealth = "healthy" | "degraded" | "offline";
 export interface Vendor {
@@ -816,6 +826,13 @@ export interface Vendor {
   endpoint: string;
   residency: string;
   models: Model[];
+  /** A vendor added by a person: base URL and key. Not qualified for a station until that station's suite passed on it (spec 10.4). */
+  custom?: boolean;
+  /** Data-retention mode the vendor offers: zero, 30d or standard. */
+  retention?: string;
+  /** Stations whose eval suite passed on this vendor. Only meaningful for custom vendors. */
+  qualified?: Record<string, { suite: string; run: string; at: string }>;
+  version?: number;
 }
 export interface RoutingRule {
   id: string;
@@ -825,18 +842,60 @@ export interface RoutingRule {
   alt: string;
   note: string;
 }
+/** Routing policy of one project (spec 10.4): its own default and overrides, and the vendors, regions and retention modes it allows. */
+export interface ProjectRouting {
+  defaultModel?: Id;
+  overrides?: Record<string, Id>;
+  classOverrides?: Record<string, Id>;
+  allowedVendors?: Id[];
+  allowedRegions?: string[];
+  allowedRetention?: string[];
+  /** The project opts in to falling back to a different model. Needs the factory switch as well. */
+  crossModelFallback?: boolean;
+}
 export interface Routing {
   defaultModel: Id;
+  /** Station id -> model. */
   overrides: Record<string, Id>;
   fallback: Id[];
   rules: RoutingRule[];
+  /** Work-order class -> model. */
+  classOverrides?: Record<string, Id>;
+  projects?: Record<string, ProjectRouting>;
+  /** Factory switch for falling back to a different model. Off in a new install. */
+  crossModelFallback?: boolean;
+  /** The routing version this is (read only). */
+  version?: number;
 }
 
 /* ------------------------------------------------------------------ evals --------------- */
 
+/** A deterministic or advisory check recorded for an eval result. */
+export interface EvalCheck {
+  kind: string;
+  label: string;
+  /** null for an advisory check: it never counts (spec 13.2). */
+  pass: boolean | null;
+  advisory?: boolean;
+  detail?: string;
+}
 export interface EvalCase {
   id: string;
   name: string;
+  by?: Id;
+  added?: Ms;
+  /** What the agent is asked to do. */
+  task?: string;
+  /** The snapshot the task is pinned to. */
+  repo?: Id | null;
+  commit?: string | null;
+  golden?: boolean;
+  /** The person's own words on what a passing answer must do (advisory; never given to the agent). */
+  checks?: string;
+  /** The deterministic checks that decide the case. */
+  rules?: Array<{ kind: string; [k: string]: unknown }>;
+  skill?: string;
+  cls?: string;
 }
 export interface Suite {
   id: Id;
@@ -845,12 +904,22 @@ export interface Suite {
   threshold: number;
   agent: Id;
   cases: EvalCase[];
+  /** The run in progress, if any. */
+  running?: string | null;
+  version?: number;
 }
 export interface EvalResult {
   caseId: string;
   pass: boolean;
   reason: string;
   ms: number;
+  /** When a task was run more than once: how many runs, and how many passed. */
+  repeats?: number;
+  passes?: number;
+  /** Model-graded opinions: advisory only. */
+  advisory?: EvalCheck[];
+  /** Runs that ended without a graded result (never started, lost, stopped). */
+  errors?: string[];
 }
 export interface EvalRun {
   id: string;
@@ -863,6 +932,21 @@ export interface EvalRun {
   results: EvalResult[];
   by: Id;
   cost: number;
+  /** queued, running, completed, failed or cancelled. */
+  status?: string;
+  /** Tasks graded, tasks passed and the 95% range of the pass share (spec 13.2: a score is reported with its task count and a range). */
+  count?: number;
+  passed?: number;
+  range?: [number, number];
+  repeats?: number;
+  /** Items finished out of items planned, while a run is going. */
+  done?: number;
+  total?: number;
+  finishedAt?: Ms | null;
+  /** Run on a model other than the version's pinned one: says how that model does, and does not qualify the version. */
+  override?: boolean;
+  vendor?: string | null;
+  seeded?: boolean;
 }
 export interface Scorecard {
   taskSuccess: number;
@@ -873,7 +957,10 @@ export interface Scorecard {
   minutesPerStation: number;
   gateRejections: number;
   overrideRate: number;
-  trend: { success: number[]; cost: number[] };
+  /** `n` is finished attempts per week: a week with none has no point to draw. */
+  trend: { success: number[]; cost: number[]; n?: number[] };
+  /** What the figures rest on: attempts, gate decisions and test results in the last 7 days, and the work orders behind them. */
+  counts?: { attempts: number; decisions: number; workOrders: number; tests?: number };
 }
 export interface ClassStats {
   count: number;
@@ -889,6 +976,9 @@ export interface EvalExtra {
   onboarding: { attempts: number; ready: number; successRate: number; medianDays: number; p90Days: number; failedReasons: Array<[string, number]> };
   gateRejections: Array<[string, number]>;
   humanOverride: Record<string, number>;
+  /** Repos by onboarding stage. */
+  onboardingStages?: Record<string, number>;
+  counts?: { workOrders: number; classified: number; decisions: number; attempts: number };
 }
 
 /* ------------------------------------------------------------------ MCP ----------------- */
@@ -1292,6 +1382,8 @@ export interface TrustCeiling {
   when: { regulated?: boolean; cls?: string; project?: Id; gate?: string };
   max: number;
   enabled: boolean;
+  /** For If-Match. */
+  version?: number;
 }
 export interface TrustHistoryEntry {
   at: Ms;
@@ -1312,6 +1404,17 @@ export interface TrustCell {
   since: Ms;
   cleanRuns: number;
   history: TrustHistoryEntry[];
+  /** Computed by the server (GET /trust/cells), so the screen shows counts and criteria without re-deriving them. */
+  rev?: number;
+  virtual?: boolean;
+  gate?: string | null;
+  evidence?: { runs: number; cleanRuns: number; evalScore: number; rework: number; incidents: number; incidentWos: string[] };
+  meets?: { ok: boolean; next: number | null; missing: string[] };
+  ceiling?: { max: number; ids: string[] };
+  /** What the cell runs at: the grant capped by ceilings, and by L1 while levels above L1 are switched off. */
+  effective?: number;
+  projection?: number;
+  pending?: string | null;
 }
 export interface TrustProposal {
   id: string;
@@ -1335,9 +1438,19 @@ export interface Trust {
   proposals: TrustProposal[];
   nextProposal: number;
   seededAt: Ms;
+  /** Runtime switch (spec 15.3): off in a new install. While off, nothing above L1 acts and levels above L1 cannot be granted. */
+  levelsAboveL1?: boolean;
+  criteriaVersion?: number;
+  /** Below this many reviewed runs a rate is "insufficient data". */
+  minRuns?: number;
+  soakDays?: number;
+  /** L4 is not grantable in this version. */
+  maxGrantable?: number;
+  /** Per project: gate decisions in the last 7 days and how many ran under trust. */
+  coverage?: Record<string, { total: number; auto: number }>;
 }
 
-export type LearningSignal = "rejection" | "override" | "revert" | "miss" | "sendback" | "incident";
+export type LearningSignal = "rejection" | "override" | "revert" | "miss" | "sendback" | "incident" | "regression";
 export interface LearningFinding {
   id: string;
   title: string;
@@ -1349,6 +1462,7 @@ export interface LearningFinding {
   firstAt: Ms;
   lastAt: Ms;
   status: "open" | "addressed" | (string & {});
+  rev?: number;
 }
 export interface LearningProposal {
   id: string;
@@ -1362,6 +1476,16 @@ export interface LearningProposal {
   change: Record<string, unknown>;
   history: Array<{ at: Ms; by: Id; text: string }>;
   reason?: string;
+  rev?: number;
+  /** Declared before the change (spec 13.4): at most `target` signals of the finding's kind in `windowDays` after it is applied. */
+  metric?: { signal: string; project: string | null; agent: string | null; target: number };
+  windowDays?: number;
+  baseline?: { count: number; from: Ms; to: Ms } | null;
+  appliedAt?: Ms | null;
+  appliedBy?: Id | null;
+  /** How the change is undone (available: false when it cannot be, with the reason in the summary). */
+  rollback?: { summary: string; available: boolean } | null;
+  verification?: { measured: number; target: number; baseline: number | null; at: Ms; by: Id } | null;
 }
 export interface Learning {
   findings: LearningFinding[];

@@ -124,10 +124,10 @@ d("scheduler, reaper and verifier", () => {
     expect(nRepos).toBeGreaterThanOrEqual(1);
     const s2 = new Scheduler({ ...w.deps, workerId: "b" });
     const [a, b] = await Promise.all([w.worker.scheduler.tick(), s2.tick()]);
-    // Two recurring jobs per org, a reconcile per repo with a GitHub name, and (spec 11.3) an onboarding sync for the one Ready repo that has a GitHub identity of its own.
-    expect(a + b).toBe(2 + nRepos + 1);
+    // Four recurring jobs per org (reaper, chain verify, the daily trust look and the findings refresh), a reconcile per repo with a GitHub name, and (spec 11.3) an onboarding sync for the one Ready repo that has a GitHub identity of its own.
+    expect(a + b).toBe(4 + nRepos + 1);
     const kinds = (await w.q(`select kind, count(*)::int as n from jobs group by kind order by kind`)).map((j) => `${j.kind}:${j.n}`);
-    expect(kinds).toEqual(["chain.verify:1", `github.reconcile:${nRepos}`, "onboarding.sync:1", "reaper.sweep:1"]);
+    expect(kinds).toEqual(["chain.verify:1", `github.reconcile:${nRepos}`, "learning.refresh:1", "onboarding.sync:1", "reaper.sweep:1", "trust.evaluate:1"]);
     expect(await w.worker.scheduler.tick()).toBe(0);
     // Even after the jobs have run, the same interval does not enqueue again.
     await w.worker.runner.drain();

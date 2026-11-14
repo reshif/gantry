@@ -10,6 +10,7 @@ import { ops } from "../api/ops";
 import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate } from "../lib/router";
+import { ExplainDenial } from "./console/ExplainDenial";
 import { Avatar, Btn, LockNote, Panel, Select, Toggle, ViewHead, Empty, type Decision } from "../ui/primitives";
 import { Icon, Logo } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -421,6 +422,7 @@ function CellDetail({ p, eff, cell, decision }: { p: Person; eff: EffectivePermi
       <p>{d.reason}</p>
       {d.needs && !d.allowed ? <p className="small"><strong>To allow it: </strong>{`${d.needs}.`}</p> : null}
       <div className="row gap-sm">
+        <ExplainDenial id="ppl-cell-explain" person={p.id} action={a.id} project={pr.id} time={Date.now()} />
         {canSim.allowed ? <Btn label="Open in the simulator" small kind="ghost" icon="play" id="ppl-cell-sim" onClick={() => { sessionStorageSet("gantry.accessSim", JSON.stringify({ person: p.id, action: a.id, project: pr.id })); navigate("access"); }} /> : null}
       </div>
     </div>

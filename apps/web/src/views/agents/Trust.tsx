@@ -15,7 +15,7 @@ export function TrustTab({ a, projects }: { a: AgentRow; projects: Project[] }) 
   if (!gate) {
     return (
       <div className="cfg"><section className="cfg-sec ag-wide"><h3 className="cfg-h">Trust by class</h3>
-        <Empty title="Not judged at a gate" text={`${a.name} does not staff the station before a human gate, so it has no trust level. Its work is checked by the agents and people after it.`} />
+        <Empty id="ag-trust-none" title="Not judged at a gate" text={`${a.name} does not staff the station before a human gate, so it has no trust level. Its work is checked by the agents and people after it.`} />
       </section></div>
     );
   }
@@ -34,7 +34,7 @@ export function TrustTab({ a, projects }: { a: AgentRow; projects: Project[] }) 
       <th scope="row">{p.name}{p.regulated ? <span className="tag">regulated</span> : null}</th>
       <td>
         <span className="ag-trust-cells">
-          {flowOf(p).classes.map((k) => {
+          {flowOf(cat!, p).classes.map((k) => {
             const c = cells.find((x) => x.project === p.id && x.cls === k.id && !x.repo);
             if (!c) return null;
             const ceil = trust.ceiling(state, c.project, c.cls, gate.id);
@@ -65,7 +65,7 @@ export function TrustTab({ a, projects }: { a: AgentRow; projects: Project[] }) 
         </dl>
         {rows.length ? (
           <div className="table-scroll"><table className="table table-compact ag-trust"><thead><tr><th scope="col">Project</th><th scope="col">Level by class</th></tr></thead><tbody>{rows}</tbody></table></div>
-        ) : <Empty title="No trust cells yet" text="Cells appear once this agent has worked on a project you can see." />}
+        ) : <Empty id="ag-trust-empty" title="No trust cells yet" text="Cells appear once this agent has worked on a project you can see." />}
         {dem.length ? (
           <div>
             <h3 className="sub-h">Recent demotions</h3>

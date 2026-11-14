@@ -103,6 +103,8 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
   }
   const orgId = found.org_id;
   const w = await lockWo(tx, orgId, found.wo_id);
+  // An eval case's carrier is not work: its result is graded by the evals area (spec 13.2) and must never move through the flow.
+  if (w.source === "eval") return { applied: false, code: "unknown", reason: "That attempt belongs to an eval run." };
   const cur = await attemptIsCurrent(tx, orgId, attemptId, fencing);
   const fx = await fxFor(tx, orgId, o.actor ?? "system", now);
   if (!cur.current) {
@@ -167,7 +169,7 @@ async function interruptions(tx: Tx, orgId: string, woId: string, station: strin
 export async function expireLeases(tx: Tx, o: { now?: Date; limit?: number } = {}): Promise<string[]> {
   const now = o.now ?? new Date();
   const { rows } = await tx.query<{ org_id: string; id: string; wo_id: string; station: string }>(
-    `select org_id, id, wo_id, station from attempts where state = 'running' and lease_until < $1 order by lease_until limit $2 for update skip locked`, [now, o.limit ?? 50],
+    `select org_id, id, wo_id, station from attempts where state = 'running' and lease_until < $1 and not exists (select 1 from work_orders w where w.org_id = attempts.org_id and w.id = attempts.wo_id and w.source = 'eval') order by lease_until limit $2 for update skip locked`, [now, o.limit ?? 50],
   );
   const handled: string[] = [];
   for (const a of rows) {

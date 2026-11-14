@@ -117,3 +117,7 @@
 .tr-sample { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .tr-lvl-cards { grid-template-columns: minmax(0, 1fr); }
 .tr-lvl-cards .rc-t { display: inline-flex; gap: 8px; align-items: center; }
+
+/* the runtime switch for levels above L1 (off in a new install) */
+.tr-switch { display: flex; gap: 14px; align-items: flex-start; }
+.tr-switch p { margin: 4px 0 0; }

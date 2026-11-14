@@ -191,24 +191,42 @@ export const ops = {
   removeModel: (modelId: string) => run(["vendors", "routing"], del(api(`models/${enc(modelId)}`))),
   setModelEnabled: (modelId: string, on: boolean) => run(["vendors", "routing"], patch(api(`models/${enc(modelId)}`), { enabled: on })),
   setRouting: (next: Obj, label?: string, v?: Versioned) => run(["routing"], put(api("routing"), { routing: next, label }, opts(v))),
-  runSuite: (agentId: string, suiteId: string, version: number | string, model?: string) =>
-    run(["evalRuns", "scorecards", "evalExtra", "agents"], post(api(`suites/${enc(suiteId)}/runs`), { agent: agentId, version, model }, create)),
-  addEvalCase: (suiteId: string, c: Obj) => run(["suites", "evalRuns"], post(api(`suites/${enc(suiteId)}/cases`), c, create)),
+  /** Records that a custom vendor passed a station's suite (the server checks the eval run). */
+  qualifyVendor: (vendorId: string, station: string, v?: Versioned) => run(["vendors", "routing"], post(api(`vendors/${enc(vendorId)}/qualify`), { station }, opts(v))),
+  /** prices: model id -> USD per million tokens. effectiveFrom is an ISO timestamp, now or later. */
+  publishPrices: (prices: Record<string, { in: number; out: number; cacheRead?: number; cacheWrite?: number }>, effectiveFrom?: string, note?: string) =>
+    run(["vendors"], post(api("prices"), { prices, ...(effectiveFrom ? { effectiveFrom } : {}), ...(note ? { note } : {}) }, create)),
+  /** The default cost cap for each work order of a project, in USD (0 = none). The monthly budget is set in project config. */
+  setWoBudget: (project: string, perWorkOrder: number) => run(["vendors", "projects"], put(api(`budgets/${enc(project)}`), { perWorkOrder })),
+  /** Starts a real run of the suite through the production runtime (sandboxes, no write access to real repos). `repeats` runs each task that many times. */
+  runSuite: (agentId: string, suiteId: string, version: number | string, model?: string, repeats?: number) =>
+    run(["evalRuns", "suites", "scorecards", "evalExtra", "agents"], post(api(`suites/${enc(suiteId)}/runs`), { agent: agentId, version, ...(model ? { model } : {}), ...(repeats && repeats > 1 ? { repeats } : {}) }, create)),
+  cancelEvalRun: (suiteId: string, runId: string) => run(["evalRuns", "suites"], post(api(`suites/${enc(suiteId)}/runs/${enc(runId)}/cancel`))),
+  addEvalCase: (suiteId: string, c: Obj) => run(["suites", "evalRuns", "skills"], post(api(`suites/${enc(suiteId)}/cases`), c, create)),
 
   /* ===== trust, learning ===== */
-  grantTrust: (target: string | Obj, level: number, reason: string) => run(["trust"], post(api("trust/grants"), { target, level, reason })),
+  /** A cell id, or `{ agent, cls, project, repo? }` to create the cell. `v` is the cell's `rev` (0 or absent for a cell that does not exist yet). */
+  grantTrust: (target: string | Obj, level: number, reason: string, v?: Versioned) => run(["trust"], post(api("trust/grants"), { target, level, reason }, opts(v))),
   decideTrustProposal: (proposalId: string, accept: boolean, reason?: string) =>
     run(["trust"], post(api(`trust/proposals/${enc(proposalId)}/decide`), { accept, reason })),
-  demoteTrust: (cellId: string, to: number, reason: string) => run(["trust"], post(api(`trust/cells/${enc(cellId)}/demote`), { to, reason })),
-  setTrustCriteria: (level: number | string, patchBody: Obj) => run(["trust"], put(api("trust/criteria"), { level, patch: patchBody })),
-  saveCeiling: (c: Obj) => run(["trust"], post(api("trust/ceilings"), c)),
-  removeCeiling: (id: string) => run(["trust"], del(api(`trust/ceilings/${enc(id)}`))),
-  setSampleRate: (n: number) => run(["trust"], put(api("trust/sample-rate"), { n })),
-  acceptLearning: (proposalId: string, note?: string) => run(["learning"], post(api(`learning/proposals/${enc(proposalId)}/accept`), { note })),
+  demoteTrust: (cellId: string, to: number, reason: string, v?: Versioned) => run(["trust"], post(api(`trust/cells/${enc(cellId)}/demote`), { to, reason }, opts(v))),
+  /** `v` is the criteria version (Trust.criteriaVersion): a change publishes the next version. */
+  setTrustCriteria: (level: number | string, patchBody: Obj, v?: Versioned) => run(["trust"], put(api("trust/criteria"), { level, patch: patchBody }, opts(v))),
+  saveCeiling: (c: Obj, v?: Versioned) => run(["trust"], post(api("trust/ceilings"), c, c.id ? opts(v) : { ...create, ...opts(v) })),
+  removeCeiling: (id: string, v?: Versioned) => run(["trust"], del(api(`trust/ceilings/${enc(id)}`), undefined, opts(v))),
+  setSampleRate: (n: number, v?: Versioned) => run(["trust"], put(api("trust/sample-rate"), { n }, opts(v))),
+  /** A post-release outcome on a shipped work order, with who or what it is attributed to. An attributed revert or incident lowers the agent's trust cells to L1. */
+  recordOutcome: (woId: string, o: Obj) => run(["trust", "workOrders", "learning"], post(api(`work-orders/${enc(woId)}/outcomes`), o, create)),
+  /** The runtime switch for trust levels above L1 (off in a new install). Turning it on needs a reason. */
+  setTrustSwitch: (on: boolean, reason?: string) => run(["trust"], put(api("trust/switch"), { on, ...(reason ? { reason } : {}) })),
+  acceptLearning: (proposalId: string, note?: string) => run(["learning", "skills", "agents", "suites", "projects", "guidelines"], post(api(`learning/proposals/${enc(proposalId)}/accept`), { note })),
   declineLearning: (proposalId: string, reason: string) => run(["learning"], post(api(`learning/proposals/${enc(proposalId)}/decline`), { reason })),
   verifyLearning: (proposalId: string) => run(["learning"], post(api(`learning/proposals/${enc(proposalId)}/verify`))),
   draftLearning: (findingId: string, o: Obj = {}) => run(["learning"], post(api("learning/proposals"), { finding: findingId, ...o }, create)),
   refreshFindings: () => run(["learning"], post(api("learning/findings/refresh"))),
+  rollbackLearning: (proposalId: string, reason: string) => run(["learning", "skills", "agents", "suites", "projects", "guidelines"], post(api(`learning/proposals/${enc(proposalId)}/rollback`), { reason })),
+  /** Learning proposals are off in a new install (spec 15.3). Turning them on needs a reason. */
+  setLearningSwitch: (on: boolean, reason?: string) => run(["learning"], put(api("learning/switch"), { on, ...(reason ? { reason } : {}) })),
 
   /* ===== integrations, notifications, MCP, keys, triggers ===== */
   addIntegrationType: (def: Obj) => run(["integrationTypes"], post(api("integration-types"), def, create)),
