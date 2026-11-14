@@ -30,6 +30,9 @@ ARG INSTALL_GIT=true
 RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export SSL_CERT_FILE=/run/secrets/cacert; fi; \
     if [ "$INSTALL_GIT" = true ]; then apk add --no-cache git; fi
+# The workspace helper (this same image, never started) mounts a run's empty ws-<id> volume first; Docker copies this directory's owner onto a new
+# volume, so /workspace must belong to the runner's uid or the runner could not create files at the repository root.
+RUN mkdir -p /workspace && chown 10001:10001 /workspace
 WORKDIR /app/services/github
 COPY --from=deps /app/node_modules /app/node_modules
 COPY --from=build /app/services/github/dist ./dist

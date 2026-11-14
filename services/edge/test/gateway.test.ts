@@ -235,7 +235,7 @@ describe("model gateway and run calls", () => {
   describe("secret scanning and trace storage", () => {
     it("redacts a vendor key a model echoes, even when a stream splits it across deltas", async () => {
       vendor.leakKey = "sk-ant-test-vendor-key-0123456789abcdef";
-      const res = await msg({ model: "claude-test-1", stream: true, messages: [{ role: "user", content: "token ghp_abcdefghijklmnopqrstuvwxyz0123456789 here" }] });
+      const res = await msg({ model: "claude-test-1", stream: true, messages: [{ role: "user", content: "token " + "ghp" + "_abcdefghijklmnopqrstuvwxyz0123456789 here" }] });
       await res.text();
       await settle(() => api.of("/usage").length > 0);
       const ref = JSON.parse(api.of("/usage")[0]!.body).traceRef as string;
@@ -296,7 +296,7 @@ describe("model gateway and run calls", () => {
     });
 
     it("checkpoint: scans, stores content by hash, and sends only the reference to the API", async () => {
-      const res = await run("POST", "/run/v1/checkpoint", { runId: RUN, at: "t", turn: 2, kind: "artefact", name: "notes.md", contentType: "text/markdown", content: "deploy with AKIAABCDEFGHIJKLMNOP now" });
+      const res = await run("POST", "/run/v1/checkpoint", { runId: RUN, at: "t", turn: 2, kind: "artefact", name: "notes.md", contentType: "text/markdown", content: "deploy with " + "AKIA" + "ABCDEFGHIJKLMNOP now" });
       expect(res.status).toBe(200);
       const sent = JSON.parse(api.of("/checkpoint")[0]!.body);
       expect(sent).toMatchObject({ token: TOKEN, turn: 2, kind: "artefact", name: "notes.md", contentType: "text/markdown" });

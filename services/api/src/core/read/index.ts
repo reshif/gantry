@@ -54,8 +54,8 @@ export async function readActiveStops(db: Queryable, orgId: string): Promise<Act
   }));
 }
 
-const killInfo = (s: ActiveStop): KillInfo => ({ by: s.by, at: s.at, reason: s.reason, scope: s.scope === "wo" ? "workorder" : s.scope, mode: s.inFlight ?? "hold" });
-const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reason: s.reason });
+export const killInfo = (s: ActiveStop): KillInfo => ({ by: s.by, at: s.at, reason: s.reason, scope: s.scope === "wo" ? "workorder" : s.scope, mode: s.inFlight ?? "hold" });
+export const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reason: s.reason });
 
 /* ---------------------------------------------------------------- people --- */
 

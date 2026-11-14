@@ -59,6 +59,16 @@ export const githubHookRoutes: FastifyPluginAsync = async (app) => {
 
     const hash = sha256(raw);
     const fresh = await withTx(g.pool, async (tx) => {
+      // Spec 5.3 replay protection: the signature covers the body, not the delivery id. The same signed body under another delivery id is a replay
+      // (GitHub's own redelivery reuses the id, and distinct events never share a body byte for byte).
+      const seen = await tx.query<{ delivery_id: string }>(`select delivery_id from inbound_deliveries where org_id = $1 and source = 'github' and payload_hash = $2 limit 1`, [g.orgId, hash]);
+      if (seen.rows[0] && seen.rows[0].delivery_id !== delivery) {
+        await appendEvent(tx, {
+          orgId: g.orgId, type: "github.hook.denied", category: "integrations", actor: "github-hook", channel: "github", subject: { type: "delivery", id: delivery }, outcome: "denied", rule: "HOOK-REPLAY",
+          after: { reason: `Replay of delivery ${seen.rows[0].delivery_id} under a new delivery id.`, event, delivery, payloadHash: hash }, requestId: req.id, sourceIp: req.ip || null,
+        });
+        return false;
+      }
       const ins = await tx.query(
         `insert into inbound_deliveries (org_id, id, source, delivery_id, event_type, payload_hash) values ($1,$2,'github',$3,$4,$5) on conflict (org_id, source, delivery_id) do nothing`,
         [g.orgId, `gh-${delivery}`, delivery, event, hash],

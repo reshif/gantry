@@ -106,11 +106,31 @@ d("internal runs API", () => {
       expect(denied).toMatchObject({ allow: false, code: "stopped" });
       expect(denied.reason).toMatch(/Halted at wo scope/);
       await q(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = $1`, [id]);
-      expect((await authorize(r)).json().allow).toBe(true);
+      // Spec 4.4 / F3: the stop took a higher fencing number, so the old run stays superseded after the lift (even if the worker never
+      // enforced the halt); the resume's fresh attempt is the one that works.
+      expect((await authorize(r)).json()).toMatchObject({ allow: false, code: "superseded" });
+      expect((await call("POST", `/internal/v1/runs/${r.runId}/heartbeat`, { token: r.token, seq: 1 })).statusCode).toBe(409);
+      const fresh = await makeRun();
+      expect((await authorize(fresh)).json().allow).toBe(true);
       // project and factory scopes cover the run too
       const p = await setStop("project", "payments", "kill");
-      expect((await authorize(r)).json()).toMatchObject({ allow: false, code: "stopped" });
+      expect((await authorize(fresh)).json()).toMatchObject({ allow: false, code: "stopped" });
       await q(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = $1`, [p]);
+      expect((await authorize(fresh)).json()).toMatchObject({ allow: false, code: "superseded" });
+    });
+    it("a halt still lets the run save state, but a stop on the parent epic covers the child's run", async () => {
+      const r = await makeRun();
+      const id = await setStop("wo", r.woId, "halt");
+      expect((await authorize(r)).json()).toMatchObject({ allow: false, code: "stopped" });
+      expect((await call("POST", `/internal/v1/runs/${r.runId}/heartbeat`, { token: r.token, seq: 1 })).statusCode).toBe(200);
+      await q(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = $1`, [id]);
+      const child = await makeRun();
+      await q(`insert into work_orders (org_id, id, project_id, title, class, position, state, flow_version, data) values ($1,$2,'payments','Epic','epic','build','running',1,'{}'::jsonb)`, [t.orgId, `EPIC-w3-${n}`]);
+      await q(`update work_orders set parent_id = $2 where id = $1`, [child.woId, `EPIC-w3-${n}`]);
+      expect((await authorize(child)).json().allow).toBe(true);
+      const k = await setStop("wo", `EPIC-w3-${n}`, "kill");
+      expect((await authorize(child)).json()).toMatchObject({ allow: false, code: "stopped" });
+      await q(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = $1`, [k]);
     });
     it("denies a superseded attempt (stale fencing) and a revoked token", async () => {
       const r = await makeRun();

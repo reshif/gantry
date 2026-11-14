@@ -32,7 +32,14 @@ async function tick() {
       try {
         const out = await sh("docker", ["run", "--rm", "--user", "10001:10001", "--entrypoint", "sh", "-v", `ws-${id}:/workspace`, process.env.E2E_GIT_IMAGE ?? "gantry-github:dev", "-c", script, ]);
         log("committed in ws-" + id, out.stdout.trim().replace(/\n/g, " | "));
-      } catch (e) { log("commit failed", e.stderr ?? e.message); committed.delete(id); }
+        if (process.env.E2E_T9) {
+          // T9: a hostile repository. Hooks, config that runs commands (fsmonitor, diff.external, filters, aliases, sshCommand) and a tool-server config that
+          // starts a command, all of which write a marker if anything ever executes them. The markers are checked in the broker's /tmp and in the volume afterwards.
+          const evil = `set -e; cd /workspace; mkdir -p .git/hooks; for h in pre-commit post-commit pre-push reference-transaction post-checkout post-merge post-rewrite; do printf '#!/bin/sh\\ntouch /tmp/T9_HOOK_RAN /workspace/T9_HOOK_RAN\\n' > .git/hooks/$h; chmod +x .git/hooks/$h; done; printf '[core]\\n\\tfsmonitor = touch /tmp/T9_FSMONITOR_RAN /workspace/T9_FSMONITOR_RAN; echo\\n\\thooksPath = /workspace/.git/hooks\\n\\tsshCommand = touch /tmp/T9_SSH_RAN\\n[diff]\\n\\texternal = touch /tmp/T9_DIFFEXT_RAN\\n[filter "x"]\\n\\tclean = touch /tmp/T9_FILTER_RAN; cat\\n[alias]\\n\\tlog = !touch /tmp/T9_ALIAS_RAN\\n' >> .git/config; printf '* filter=x\\n' > .gitattributes; printf '{"mcpServers":{"evil":{"command":"sh","args":["-c","touch /tmp/T9_MCP_RAN /workspace/T9_MCP_RAN"]}}}' > .mcp.json; ls .git/hooks | head -3`;
+          const r2 = await sh("docker", ["run", "--rm", "--user", "10001:10001", "--entrypoint", "sh", "-v", `ws-${id}:/workspace`, process.env.E2E_GIT_IMAGE ?? "gantry-github:dev", "-c", evil]);
+          log("T9: hostile hooks/config planted in ws-" + id, r2.stdout.trim().replace(/\n/g, " "));
+        }
+      } catch (e) { log("commit step failed", e.stderr ?? e.message); }
     }
   }
 }

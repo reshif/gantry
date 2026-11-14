@@ -21,7 +21,7 @@ export interface ReconcileResult {
   stop?: { id: string; scope: ScopeType; mode: "halt" | "kill"; inFlight: string | null };
 }
 
-interface StopDb { org_id: string; id: string; scope_type: ScopeType; project_id: string | null; repo_id: string | null; wo_id: string | null; mode: "halt" | "kill"; reason: string; in_flight: string | null; set_by: string; lifted_at: Date | null; lifted_by: string | null; version: number; enforced_at: Date | null; reconciled_version: number }
+interface StopDb { fencing: string; org_id: string; id: string; scope_type: ScopeType; project_id: string | null; repo_id: string | null; wo_id: string | null; mode: "halt" | "kill"; reason: string; in_flight: string | null; set_by: string; lifted_at: Date | null; lifted_by: string | null; version: number; enforced_at: Date | null; reconciled_version: number }
 
 /** Active stops that were never enforced, and lifted stops never reconciled: the reaper re-enqueues `stop.enforce` for these. */
 export async function pendingStops(db: Queryable, o: { olderThanMs?: number; limit?: number } = {}): Promise<Array<{ orgId: string; id: string; scope: ScopeType; target: string | null; mode: "halt" | "kill" }>> {
@@ -116,24 +116,26 @@ async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<v
     w.state = (prev.state === "running" || prev.state === "waiting" || prev.state === "parked" ? prev.state : "running") as Wo["state"];
     w.position = prev.position;
     note(w, fx, fx.actor, `Restored after kill: ${s.reason}`);
-    await resume(fx, w, prev.station, catalog, true);
+    await resume(fx, w, prev.station, catalog, true, s);
     ev(fx, w, "wo.state", { from: "killed", to: w.state, station: prev.station, text: "restored" }, { category: "kill" });
     return;
   }
   if (s.mode === "kill" && heldThisScope) {
     delete w.data.heldByKill;
     note(w, fx, fx.actor, `Released after ${s.scope_type} restore; re-validated.`);
-    await resume(fx, w, stationIdOf(catalog, w), catalog, true);
+    await resume(fx, w, stationIdOf(catalog, w), catalog, true, s);
     return;
   }
-  if (s.mode === "halt") await resume(fx, w, stationIdOf(catalog, w), catalog, false);
+  if (s.mode === "halt") await resume(fx, w, stationIdOf(catalog, w), catalog, false, s);
 }
 
 /** Back to work: running work gets a fresh attempt at its station, a work order that was waiting at a gate gets its instance reopened, parked work stays in its bay. */
-async function resume(fx: Fx, w: Wo, sid: string, catalog: Catalog, afterKill: boolean): Promise<void> {
+async function resume(fx: Fx, w: Wo, sid: string, catalog: Catalog, afterKill: boolean, s: Pick<StopDb, "fencing">): Promise<void> {
   if (w.position !== sid && !catalog.bays.some((b) => b.id === w.position)) w.position = sid;
   if (catalog.bays.some((b) => b.id === w.position)) return; // in a bay: the bay's own rules apply (the queue is dispatched by the caller)
-  const live = (await fx.tx.query(`select 1 from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running')`, [fx.orgId, w.id])).rowCount;
+  // An attempt older than the stop is superseded by it (F3) even when the stop was lifted before it was enforced: it does not count as live,
+  // and the fresh attempt started below replaces it.
+  const live = (await fx.tx.query(`select 1 from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running') and fencing > $3`, [fx.orgId, w.id, s.fencing])).rowCount;
   if (live) return;
   const g = gateAfter(catalog, sid);
   const reopen = (w.data.stopClosedGates as string[] | undefined) ?? [];

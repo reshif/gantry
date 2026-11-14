@@ -67,6 +67,21 @@ describe("Traveler drawer", () => {
     expect(park.getAttribute("data-reason")).toContain("Andon: flaky CI");
   });
 
+  it("lets a permitted person restore a killed work order: its own kill is not a reason to lock Restore", async () => {
+    const killed = { ...W, state: "killed" } as typeof W;
+    await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(killed, { stop: { id: `workorder:${W.id}`, scope: "wo", mode: "kill", reason: "Stop it" } }, { approve: null }) }) });
+    const btn = await screen.findByRole("button", { name: new RegExp(`Restore ${W.id}`) });
+    expect(btn.getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("locks Restore on a killed work order while a wider stop (the project) covers it", async () => {
+    const killed = { ...W, state: "killed" } as typeof W;
+    await show({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(killed, { stop: { id: "project:payments", scope: "project", mode: "kill", reason: "Plant down" } }, { approve: null }) }) });
+    const btn = await screen.findByRole("button", { name: new RegExp(`Restore ${W.id}`) });
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+    expect(btn.getAttribute("data-reason")).toContain("Restore the project first.");
+  });
+
   it("rejects a gate with a reason of at least five characters", async () => {
     const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/reject`;
     const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Rejected." } }) });

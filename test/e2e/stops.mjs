@@ -78,7 +78,9 @@ async function measure(label, runIds, t0) {
     await sleep(200);
   }
   for (const r of runIds) {
+    for (let k = 0; k < 120 && sh("docker", ["network", "ls", "-q", "--filter", `name=run-${r}`]); k++) await sleep(500);
     out[r].networkGone = !sh("docker", ["network", "ls", "-q", "--filter", `name=run-${r}`]);
+    out[r].networkGoneMs = Date.now() - t0;
     out[r].lastProbe = P[r].rows.at(-1)?.[1];
     P[r].stop();
   }
@@ -86,6 +88,7 @@ async function measure(label, runIds, t0) {
   log("MEASURED", label, JSON.stringify(out));
 }
 const P = {};
+async function openWo(wo) { await page.goto("https://localhost/#work-orders"); await page.waitForTimeout(2200); await page.getByText(wo, { exact: true }).first().click(); await page.waitForTimeout(1500); }
 
 // ---- two work orders at Plan, both with a long-running stub ---------------------------------------------------------
 const woA = await submit("Bump the dependency for halt test A");
@@ -99,7 +102,8 @@ await page.goto("https://localhost/#floor"); await page.waitForTimeout(2200);
 await shot(page, "two-runs-up");
 
 // ---- HALT the project mid-run ------------------------------------------------------------------------------------------
-await page.getByRole("button", { name: /Andon/ }).first().click();
+await page.locator("#floor-andon").click();
+await page.getByText("Halt Payments Platform", { exact: false }).first().click();
 await page.waitForSelector("#rsn-text");
 await page.fill("#rsn-text", "End-to-end halt test: pulling the andon cord mid-run");
 await shot(page, "halt-dialog");
@@ -115,10 +119,10 @@ log("after halt: attempts", JSON.stringify(q(`select id,state,outcome from attem
 log("stops", JSON.stringify(q(`select id,mode,scope_type,enforced_at is not null from stops where lifted_at is null`)));
 
 // ---- RESUME ------------------------------------------------------------------------------------------------------------
-const resumeBtn = page.getByRole("button", { name: /Resume/ }).first();
-await resumeBtn.waitFor({ timeout: 10000 });
+await page.locator("#floor-andon").click();
+await page.waitForTimeout(600);
 await shot(page, "before-resume");
-await resumeBtn.click();
+await page.getByText(/Resume/).first().click();
 await page.waitForTimeout(1500);
 log("resumed; waiting for fresh runs");
 const runA2 = await untilRunning(woA), runB2 = await untilRunning(woB);
@@ -130,8 +134,7 @@ await shot(page, "resumed-runs-up");
 // ---- KILL work order B mid-run -----------------------------------------------------------------------------------------
 P[runB2] = probe(runB2); P[runA2] = probe(runA2);
 await sleep(1500);
-await page.locator(`[data-wo="${woB}"]`).first().click();
-await page.waitForTimeout(1500);
+await openWo(woB);
 await page.locator("#trv-kill").click();
 await page.waitForSelector("#kill-reason");
 await page.fill("#kill-reason", "End-to-end kill test: stop this work order now");
@@ -148,8 +151,8 @@ P[runA2].stop();
 results.killOtherWorkOrderUnaffected = !!sh("docker", ["ps", "-q", "--filter", `name=gantry-runner-${runA2}`]);
 
 // ---- RESTORE B -----------------------------------------------------------------------------------------------------------
-await page.locator(`[data-wo="${woB}"]`).first().click({ timeout: 5000 }).catch(() => {});
-await page.waitForTimeout(1200);
+await page.keyboard.press("Escape"); await page.waitForTimeout(500);
+await openWo(woB);
 const rest = page.getByRole("button", { name: /Restore/ }).first();
 if (await rest.count()) {
   await rest.click();

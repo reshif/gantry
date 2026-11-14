@@ -168,6 +168,8 @@ services:
       S3_BUCKET: gantry
       S3_ACCESS_KEY: gantry
       GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
+      # Must match the launcher's RUN_SUBNET_POOL: a caller from this range must present its run token to the proxy.
+      EDGE_RUN_SUBNET: ${RUN_SUBNET_POOL:-10.213.0.0/16}
     secrets: [data_key, edge_token, vendor_keys.json, minio_root_password]
     depends_on:
       gantry-api: { condition: service_healthy }

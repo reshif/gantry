@@ -86,6 +86,36 @@ d("flow engine: guarantees F1 to F6", () => {
     expect(await w.apply(att)).toMatchObject({ applied: false });
   });
 
+  it("F5/F9: a Build run that loses its lease for the last time parks the work order and its slot goes to the queue at once", async () => {
+    const proj = "identity";
+    await w.q(`update slots set state = 'free', wo_id = null where project_id = $1`, [proj]);
+    const limit = Number((await w.q(`select (f.doc->>'slots')::int n from flow_versions f join projects p on p.org_id = f.org_id and p.id = f.project_id and p.current_flow_version = f.version where f.project_id = $1`, [proj]))[0]?.n ?? 0);
+    expect(limit).toBeGreaterThan(0);
+    const repo = (await w.q(`select id from repos where project_id = $1 limit 1`, [proj]))[0]?.id ?? null;
+    const ids = Array.from({ length: limit + 1 }, (_, i) => `WO-915${i}`);
+    for (const id of ids) await w.insertWo(id, { project: proj, repo, position: "plan", state: "waiting" });
+    for (const id of ids)
+      await w.tx(async (tx) => {
+        const fx = await w.fxIn(tx);
+        const wo = await lockWo(tx, t.orgId, id);
+        await enterStation(fx, wo, "build");
+        await saveWo(tx, t.orgId, wo);
+      });
+    const queued = ids[limit]!;
+    expect((await w.q(`select position from work_orders where id = $1`, [queued]))[0].position).toBe("queue");
+    const first = ids[0]!;
+    // two earlier lost runs at Build, then the live one's lease lapses
+    for (const v of [91, 92]) await w.q(`insert into attempts (org_id, id, wo_id, station, visit, state, outcome) values ($1,$2,$3,'build',$4,'failed','lease_expired')`, [t.orgId, `ATT-${first}-old-${v}`, first, v]);
+    const att = (await w.liveAttempt(first))!;
+    await w.q(`update attempts set state = 'running', lease_until = now() - interval '1 minute' where id = $1`, [att.id]);
+    const { expireLeases } = await import("../src/areas/workorders/station.js");
+    expect(await w.tx((tx) => expireLeases(tx))).toContain(att.id);
+    expect((await w.q(`select position from work_orders where id = $1`, [first]))[0].position).toBe("person");
+    expect((await w.q(`select 1 from slots where wo_id = $1 and state = 'held'`, [first])).length).toBe(0);
+    expect((await w.q(`select position from work_orders where id = $1`, [queued]))[0].position).toBe("build");
+    expect((await w.q(`select count(*)::int n from slots where project_id = $1 and state = 'held'`, [proj]))[0].n).toBeLessThanOrEqual(limit);
+  });
+
   it("F5: the coding slot limit holds under concurrent dispatch and is released on send-back and kill", async () => {
     const proj = "payments";
     const limit = Number((await w.q(`select (doc->>'slots')::int n from flow_versions where project_id = $1 and version = 1`, [proj]))[0].n);

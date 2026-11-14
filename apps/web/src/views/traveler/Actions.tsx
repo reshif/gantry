@@ -146,7 +146,7 @@ export function Actions({ wo }: { wo: TWo }) {
     );
   row2.push(
     wo.state === "killed" ? (
-      <Btn key="kill" label={`Restore ${wo.id}`} icon="power" id="trv-restore" guard={stop ? no(`${stopWhy} Restore the ${stop.scope} first.`) : restoreD.pending ? null : restoreD} onClick={() => stops.restore("workorder", wo.id)} />
+      <Btn key="kill" label={`Restore ${wo.id}`} icon="power" id="trv-restore" guard={stop && stop.scope !== "wo" && stop.scope !== "workorder" ? no(`${stopWhy} Restore the ${stop.scope} first.`) : restoreD.pending ? null : restoreD} onClick={() => stops.restore("workorder", wo.id)} />
     ) : (
       <Btn key="kill" label="Kill work order" kind="danger" icon="st-kill" id="trv-kill" guard={wo.state === "done" ? no(closedWhy) : killD.pending ? null : killD} onClick={() => stops.kill("workorder", wo.id)} />
     ),

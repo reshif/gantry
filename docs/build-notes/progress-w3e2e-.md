@@ -10,3 +10,8 @@
 - [x] 3 journey PASS on clean stack (WO-1001 chore): screenshots /tmp/claude-0/w3e2e-j-*.png, log /tmp/claude-0/w3e2e/j.log. 46/46 smoke.sh PASS (log smoke.log).
 - [ ] 4 halt/kill: node test/e2e/stops.mjs s (delays.json long); [ ] 5 isolation T5-T9,T12; [ ] 6 teardown
 - also fixed: web conversations.tsx keeps pending openConversation until the WO is in the list (selection jumped to another WO).
+- [x] 4 halt/kill measured on stack (logs /tmp/claude-0/w3e2e/s.log; shots w3e2e-s-*.png). Fixes: traveler Restore button locked itself for a killed WO (Actions.tsx).
+- [ ] 5 T5-T9 (in-runner probes), T12 (route sweep), [ ] 6 teardown
+- [x] 5 T1-T4,T10 (smoke.sh, 46/46), T5-T8 (test/e2e/isolation.mjs against a launcher-created runner), T9 broker side (journey with E2E_T9=1), T12 (test/e2e/t12-sweep.mjs). T9 runner side not runnable (stub adapter, no git in the runner image).
+- [x] 6 torn down (compose project w3e2e, runner containers/volumes/networks, w3e2e-pg, extra pulled images). gantry-github:dev locally is the sandbox variant (git copied from alpine/git, services/github/test/e2e/Dockerfile).
+- E2E scripts read /tmp/claude-0/w3e2e/{psql.sh,routes.json,delays.json}: recreate psql.sh (docker exec postgres psql as gantry_owner) to rerun.

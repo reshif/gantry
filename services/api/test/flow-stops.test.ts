@@ -74,6 +74,20 @@ d("stop controls", () => {
     expect((await w.submit("p-tomas", { title: "Accepted after resume" })).status).toBe(200);
   });
 
+  it("a halt lifted before it was enforced still replaces the old attempt with a fresh one on resume", async () => {
+    const id = await w.atStation("research", "Lifted before enforcement");
+    const att = (await w.liveAttempt(id))!;
+    const h = await stop("p-meera", { scope: "workorder", id, mode: "halt", reason: "Quick pause" });
+    expect(h.status, JSON.stringify(h.body)).toBe(200);
+    // resumed before the worker ran stop.enforce for the halt
+    expect((await lift("p-meera", `workorder:${id}`)).status).toBe(200);
+    expect((await reconcile(String(h.body.stop))).action).toBe("resumed");
+    const fresh = (await w.liveAttempt(id))!;
+    expect(fresh.id).not.toBe(att.id);
+    expect((await w.q(`select state from attempts where id = $1`, [att.id]))[0].state).toBe("superseded");
+    expect(await w.apply(att)).toMatchObject({ applied: false });
+  });
+
   it("the most severe scope wins; lifting an outer stop never lifts an inner one; the factory restore needs two admins", async () => {
     expect((await stop("p-meera", { scope: "project", id: "payments", mode: "halt", reason: "Holding the line" })).status).toBe(200);
     const stale = await stop("p-asha", { scope: "factory", mode: "kill", reason: "Credential leak suspected", confirmText: "KILL FACTORY" }, { authAgeSec: 4000 });
@@ -192,6 +206,24 @@ d("stop controls", () => {
     expect(ok.body.enforcement).toBe("queued");
     expect((await w.q(`select kind, queue, payload from jobs where kind = 'stop.enforce' and payload->>'stopId' = $1`, [String(ok.body.stop)]))[0]).toMatchObject({ queue: "stop", payload: { mode: "halt", scope: "project", targetId: "payments" } });
     await lift("p-meera", "project:payments");
+  });
+
+  it("I7 / spec 8.5: halt and kill still work when the flow engine's tables are unavailable", async () => {
+    const broken = ["work_orders", "attempts", "runs", "slots", "gate_instances", "gate_votes", "conversations", "station_results", "flow_versions", "approver_rules", "notification_routes", "budgets", "repo_config", "jobs", "timers", "outbox"];
+    for (const tb of broken) await t.db.admin.query(`alter table ${tb} rename to ${tb}_broken`);
+    const name = (await w.q(`select name from projects where id = 'payments'`))[0].name as string;
+    let h, k, r;
+    try {
+      h = await stop("p-meera", { scope: "project", id: "payments", mode: "halt", reason: "Flow engine is down" });
+      k = await stop("p-asha", { scope: "project", id: "payments", mode: "kill", reason: "Flow engine is down", inFlight: "hold", confirmText: name });
+      r = await lift("p-meera", "project:payments");
+    } finally {
+      for (const tb of broken) await t.db.admin.query(`alter table ${tb}_broken rename to ${tb}`);
+    }
+    expect(h.status, JSON.stringify(h.body)).toBe(200);
+    expect(k.status, JSON.stringify(k.body)).toBe(200);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await restore("p-asha", "project:payments")).status).toBe(200);
   });
 
   it("impact counts what a kill would touch", async () => {

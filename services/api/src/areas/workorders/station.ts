@@ -188,6 +188,9 @@ export async function expireLeases(tx: Tx, o: { now?: Date; limit?: number } = {
     }
     await saveWo(tx, a.org_id, w);
     await flushFx(fx);
+    // F5: parking a Build work order freed its coding slot; the queue takes it now rather than at the next unrelated command.
+    await dispatchQueued(fx, w.project);
+    await flushFx(fx);
     handled.push(a.id);
   }
   return handled;

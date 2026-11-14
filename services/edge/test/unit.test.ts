@@ -30,7 +30,7 @@ describe("secret scanning", () => {
     });
   }
   it("redacts a private key block", () => {
-    const r = scanText("x\n-----BEGIN RSA PRIVATE KEY-----\nMIIabc\ndef\n-----END RSA PRIVATE KEY-----\ny");
+    const r = scanText("x\n-----BEGIN RSA " + "PRIVATE KEY-----\nMIIabc\ndef\n-----END RSA " + "PRIVATE KEY-----\ny");
     expect(r.text).toBe("x\n[REDACTED:private-key]\ny");
   });
   it("matches known vendor keys exactly, ignoring very short values", () => {

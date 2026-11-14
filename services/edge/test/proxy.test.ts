@@ -82,6 +82,9 @@ describe("forward proxy", () => {
   it("knows private and run-subnet addresses", () => {
     for (const a of ["127.0.0.1", "10.1.2.3", "172.20.0.1", "192.168.1.1", "169.254.169.254", "::1", "fd00::1", "::ffff:10.0.0.1"]) expect(isPrivateAddress(a), a).toBe(true);
     for (const a of ["8.8.8.8", "140.82.112.3"]) expect(isPrivateAddress(a), a).toBe(false);
+    // IPv6 spellings that embed or alias a private IPv4 address (DNS rebinding of an allowed name to an AAAA record).
+    for (const a of ["::ffff:7f00:1", "0:0:0:0:0:ffff:a9fe:a9fe", "::127.0.0.1", "64:ff9b::a9fe:a9fe", "64:ff9b::10.0.0.1", "2002:7f00:1::", "fe80::1%eth0", "fec0::1", "ff02::1", "::", "not-an-ip"]) expect(isPrivateAddress(a), a).toBe(true);
+    for (const a of ["2606:4700::1111", "::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::1"]) expect(isPrivateAddress(a), a).toBe(false);
     expect(inCidr("10.213.4.9", "10.213.0.0/16")).toBe(true);
     expect(inCidr("::ffff:10.213.4.9", "10.213.0.0/16")).toBe(true);
     expect(inCidr("10.214.4.9", "10.213.0.0/16")).toBe(false);

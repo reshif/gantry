@@ -6,7 +6,7 @@ import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
 const TAG = process.argv[2] ?? "j";
 const PSQL = "/tmp/claude-0/w3e2e/psql.sh";
 const q = (sql) => execFileSync(PSQL, ["-tA", "-F", "|", "-c", sql], { encoding: "utf8" }).trim().split("\n").filter(Boolean).map((l) => l.split("|"));
-const sh = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8" }).trim();
+const sh = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }).trim();
 const fakeState = () => JSON.parse(sh("docker", ["exec", "w3e2e-fake-github-1", "node", "-e", "require('https').get('https://127.0.0.1:8090/_fake/state',{rejectUnauthorized:false},r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>console.log(b))})"]));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 23), ...a);
 let n = 0;
@@ -86,8 +86,8 @@ for (let guard = 0; guard < 40; guard++) {
   for (const user of CANDIDATES) {
     const s = await session(user);
     const p = s.page;
-    await p.goto("https://localhost/#floor"); await p.waitForTimeout(2200);
-    await p.locator(`[data-wo="${woId}"]`).first().click();
+    await p.goto("https://localhost/#work-orders"); await p.waitForTimeout(2200);
+    await p.getByText(woId, { exact: true }).first().click();
     await p.waitForTimeout(1500);
     const dis = await p.locator("#trv-approve").getAttribute("aria-disabled").catch(() => "missing");
     if (dis === "true" || dis === "missing") { await s.ctx.close(); continue; }
@@ -117,7 +117,8 @@ const fs = fakeState();
 log("fake github pulls:", JSON.stringify(fs.pulls.map((p) => ({ n: p.number, state: p.state, merged: p.merged_at, head: p.head.ref }))));
 await page.goto("https://localhost/#floor"); await page.waitForTimeout(2000);
 await shot(page, "floor-final");
-await page.locator(`[data-wo="${woId}"]`).first().click().catch(() => {});
+await page.goto("https://localhost/#work-orders"); await page.waitForTimeout(1800);
+await page.getByText(woId, { exact: true }).first().click().catch(() => {});
 await page.waitForTimeout(1500);
 await shot(page, "traveler-final");
 await browser.close();

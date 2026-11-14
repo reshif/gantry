@@ -18,7 +18,7 @@ export interface FenceDenied { allow: false; code: FenceCode; reason: string; wo
 export type FenceResult = FenceOk | FenceDenied;
 
 interface Row {
-  wo_id: string; project_id: string; repo_id: string | null; wo_state: string; repo_name: string | null; github_full_name: string | null; branch_prefix: string | null;
+  wo_id: string; project_id: string; repo_id: string | null; parent_id: string | null; wo_state: string; repo_name: string | null; github_full_name: string | null; branch_prefix: string | null;
   attempt_id?: string; fencing?: string; attempt_state?: string;
 }
 
@@ -30,15 +30,15 @@ const sameRepo = (r: Row, given: string): boolean => {
 async function stopFor(db: Queryable, orgId: string, r: Row): Promise<string | null> {
   const { rows } = await db.query<{ scope_type: string; mode: string; reason: string }>(
     `select scope_type, mode, reason from stops where org_id = $1 and lifted_at is null
-        and (scope_type = 'factory' or (scope_type = 'project' and project_id = $2) or (scope_type = 'repo' and repo_id = $3) or (scope_type = 'wo' and wo_id = $4))
+        and (scope_type = 'factory' or (scope_type = 'project' and project_id = $2) or (scope_type = 'repo' and repo_id = $3) or (scope_type = 'wo' and (wo_id = $4 or wo_id = $5)))
       order by (mode = 'kill') desc, set_at limit 1`,
-    [orgId, r.project_id, r.repo_id, r.wo_id],
+    [orgId, r.project_id, r.repo_id, r.wo_id, r.parent_id],
   );
   const s = rows[0];
   return s ? `${s.mode === "kill" ? "Killed" : "Halted"} at ${s.scope_type} scope${s.reason ? `: ${s.reason}` : "."}` : null;
 }
 
-const SELECT = `select w.id as wo_id, w.project_id, w.repo_id, w.state as wo_state, r.name as repo_name, r.github_full_name, c.branch_prefix`;
+const SELECT = `select w.id as wo_id, w.project_id, w.repo_id, w.parent_id, w.state as wo_state, r.name as repo_name, r.github_full_name, c.branch_prefix`;
 const JOIN = `from work_orders w left join repos r on r.org_id = w.org_id and r.id = w.repo_id left join repo_config c on c.org_id = r.org_id and c.repo_id = r.id`;
 
 function finish(r: Row, attemptId: string | null, stopMsg: string | null, purpose: FencePurpose, repo: string | undefined): FenceResult {
@@ -61,7 +61,18 @@ export async function fenceAttempt(db: Queryable, orgId: string, attemptId: stri
   const deny = (code: FenceCode, reason: string): FenceDenied => ({ allow: false, code, reason, woId: r.wo_id, projectId: r.project_id });
   if (String(r.fencing) !== String(fencing)) return deny("superseded", "This attempt was superseded by a newer one (fencing number changed).");
   if (!["running", "succeeded"].includes(r.attempt_state ?? "")) return deny("superseded", `The attempt is ${r.attempt_state}, not current.`);
-  return finish(r, attemptId, await stopFor(db, orgId, r), purpose, repo);
+  // Spec 4.4 step 2: a live attempt is superseded by any stop in its scope set after it began, even one lifted since (the engine's attemptIsCurrent rule).
+  // A succeeded attempt finished before such a stop, so its re-publish is judged by the stops in force only.
+  const stopMsg = await stopFor(db, orgId, r);
+  if (r.attempt_state === "running" && !stopMsg) {
+    const sup = await db.query(
+      `select 1 from stops where org_id = $1 and fencing > $2
+          and (scope_type = 'factory' or (scope_type = 'project' and project_id = $3) or (scope_type = 'repo' and repo_id = $4) or (scope_type = 'wo' and (wo_id = $5 or wo_id = $6))) limit 1`,
+      [orgId, r.fencing, r.project_id, r.repo_id, r.wo_id, r.parent_id],
+    );
+    if (sup.rowCount) return deny("superseded", "A stop superseded this attempt (fencing number).");
+  }
+  return finish(r, attemptId, stopMsg, purpose, repo);
 }
 
 /** The work-order route, for gate, merge and stop-enforcement writes. */

@@ -40,7 +40,7 @@ function ipv4ToInt(ip: string): number | null {
 }
 
 export function inCidr(addr: string, cidr: string): boolean {
-  const a = ipv4ToInt(addr.replace(/^::ffff:/, ""));
+  const a = ipv4ToInt(addr.replace(/^::ffff:/i, ""));
   const [base, bitsS] = cidr.split("/");
   const b = ipv4ToInt(base ?? "");
   const bits = Number(bitsS);
@@ -51,15 +51,61 @@ export function inCidr(addr: string, cidr: string): boolean {
 
 const PRIVATE_V4 = ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/3"];
 
-/** Loopback, link-local, private, multicast: addresses an allow-listed name must never lead to. */
-export function isPrivateAddress(addr: string): boolean {
-  const a = addr.replace(/^::ffff:/, "");
-  if (net.isIPv4(a)) return PRIVATE_V4.some((c) => inCidr(a, c));
-  if (net.isIPv6(a)) {
-    const l = a.toLowerCase();
-    return l === "::1" || l === "::" || l.startsWith("fe80:") || l.startsWith("fc") || l.startsWith("fd") || l.startsWith("ff");
+/** Expands an IPv6 literal to its 16 bytes (null when it is not one). Handles `::` and a trailing dotted IPv4 part. */
+function ipv6Bytes(addr: string): number[] | null {
+  let a = addr.toLowerCase();
+  const pct = a.indexOf("%");
+  if (pct >= 0) a = a.slice(0, pct);
+  if (!net.isIPv6(a)) return null;
+  let tail: number[] = [];
+  const lastColon = a.lastIndexOf(":");
+  const last = a.slice(lastColon + 1);
+  if (last.includes(".")) {
+    const v4 = ipv4ToInt(last);
+    if (v4 === null) return null;
+    tail = [(v4 >>> 24) & 255, (v4 >>> 16) & 255, (v4 >>> 8) & 255, v4 & 255];
+    a = a.slice(0, lastColon + 1) + (a.endsWith("::" + last) ? "" : "0");
+    if (a.endsWith(":0")) a = a.slice(0, -2);
   }
-  return true;
+  const groupsWanted = 8 - tail.length / 2;
+  const [head, rest] = a.includes("::") ? a.split("::") as [string, string] : [a, null];
+  const h = head ? head.split(":").filter((x) => x !== "") : [];
+  const r = rest !== null && rest !== undefined ? rest.split(":").filter((x) => x !== "") : [];
+  const fill = rest === null ? 0 : groupsWanted - h.length - r.length;
+  const groups = [...h, ...Array(Math.max(0, fill)).fill("0"), ...r];
+  if (groups.length !== groupsWanted) return null;
+  const out: number[] = [];
+  for (const g of groups) {
+    const n = parseInt(g, 16);
+    if (!Number.isFinite(n) || n < 0 || n > 0xffff) return null;
+    out.push((n >>> 8) & 255, n & 255);
+  }
+  return [...out, ...tail];
+}
+
+const v4Of = (b: number[], at: number): string => `${b[at]}.${b[at + 1]}.${b[at + 2]}.${b[at + 3]}`;
+
+/**
+ * Loopback, link-local, private, multicast, reserved: addresses an allow-listed name must never lead to. IPv6 forms that embed an IPv4
+ * address (mapped ::ffff:0:0/96 in any spelling, compatible ::/96, NAT64 64:ff9b::/96, 6to4 2002::/16) are judged by that IPv4 address.
+ */
+export function isPrivateAddress(addr: string): boolean {
+  const a = addr.replace(/^::ffff:(?=\d+\.)/i, "");
+  if (net.isIPv4(a)) return PRIVATE_V4.some((c) => inCidr(a, c));
+  const b = ipv6Bytes(a);
+  if (!b) return true;
+  const zero = (from: number, to: number): boolean => b.slice(from, to).every((x) => x === 0);
+  if (zero(0, 10) && b[10] === 0xff && b[11] === 0xff) return isPrivateAddress(v4Of(b, 12)); // mapped
+  if (zero(0, 12)) return true; // ::, ::1 and the deprecated IPv4-compatible block
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) return isPrivateAddress(v4Of(b, 12)); // NAT64
+  if (b[0] === 0x20 && b[1] === 0x02) return isPrivateAddress(v4Of(b, 2)); // 6to4
+  if ((b[0]! & 0xfe) === 0xfc) return true; // fc00::/7 unique local
+  if (b[0] === 0xfe && (b[1]! & 0xc0) === 0x80) return true; // fe80::/10 link-local
+  if (b[0] === 0xfe && (b[1]! & 0xc0) === 0xc0) return true; // fec0::/10 site-local (deprecated)
+  if (b[0] === 0xff) return true; // multicast
+  if (b[0] === 0x01 && b[1] === 0x00 && zero(2, 8)) return true; // 100::/64 discard
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return true; // documentation
+  return false;
 }
 
 type Caller = { kind: "run"; runId: string; token: string } | { kind: "system" } | { kind: "none" };

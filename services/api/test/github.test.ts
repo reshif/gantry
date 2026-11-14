@@ -69,6 +69,12 @@ d("github broker internal API and hooks", () => {
       expect((await post(`/internal/v1/work-orders/${a.woId}/fence-check`, { purpose: "check_pass" })).json().allow).toBe(false);
       expect((await post(`/internal/v1/work-orders/${a.woId}/fence-check`, { purpose: "check_fail" })).json().allow).toBe(true);
       expect((await post(`/internal/v1/work-orders/${a.woId}/fence-check`, { purpose: "draft" })).json().allow).toBe(true);
+      // Spec 4.4 step 2: once lifted, the stop's higher fencing number still supersedes the attempt that was running under it.
+      await q(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = $1`, [`wo:${a.woId}:gh`]);
+      expect((await fence(a.attemptId, { fencing: a.fencing })).json()).toMatchObject({ allow: false, code: "superseded" });
+      // An attempt that started after the stop publishes normally.
+      const b = await makeAttempt();
+      expect((await fence(b.attemptId, { fencing: b.fencing })).json().allow).toBe(true);
     });
     it("refuses a repo that is not the work order's, unknown attempts, wrong callers and bad bodies", async () => {
       const a = await makeAttempt();
@@ -210,6 +216,12 @@ d("github broker internal API and hooks", () => {
       expect(again.statusCode).toBe(202);
       expect(again.json().duplicate).toBe(true);
       expect((await q(`select count(*)::int as n from jobs where kind = 'github.event' and payload->>'deliveryId' = $1`, [delivery]))[0].n).toBe(1);
+      // The same signed body under a fresh delivery id (the id is not signed) is a replay too: acknowledged, audited, not stored or processed.
+      const forged = await hook(payload(52, "feature/x"), { delivery: "delivery-bbbb-forged" });
+      expect(forged.statusCode).toBe(202);
+      expect(forged.json().duplicate).toBe(true);
+      expect(await q(`select 1 from inbound_deliveries where delivery_id = 'delivery-bbbb-forged'`)).toHaveLength(0);
+      expect((await events("github.hook.denied")).at(-1)).toMatchObject({ outcome: "denied", rule: "HOOK-REPLAY" });
     });
     it("refuses a wrong or missing signature and audits the denial", async () => {
       const before = (await events("github.hook.denied")).length;
