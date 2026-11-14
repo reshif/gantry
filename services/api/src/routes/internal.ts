@@ -8,7 +8,11 @@
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4).
  */
 import type { FastifyPluginAsync } from "fastify";
+import { runRoutes } from "../areas/internal/runs.js";
+import { vendorKeyRoutes } from "../areas/internal/keys.js";
 
-export const internalRoutes: FastifyPluginAsync = async (_app) => {
-  // Endpoints are registered here.
+export const internalRoutes: FastifyPluginAsync = async (app) => {
+  // Runs part (edge): areas/internal. The GitHub broker endpoints (fence-check, github/events) register below.
+  await app.register(runRoutes);
+  await app.register(vendorKeyRoutes);
 };

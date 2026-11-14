@@ -99,7 +99,7 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     global: true,
     max: o.rateLimitMax ?? 600,
     timeWindow: "1 minute",
-    allowList: (req) => req.url === "/healthz" || req.url.startsWith("/api/v1/stream"),
+    allowList: (req) => req.url === "/healthz" || req.url.startsWith("/api/v1/stream") || req.url.startsWith("/internal/v1/"),
     keyGenerator: (req) => req.ip,
   });
 

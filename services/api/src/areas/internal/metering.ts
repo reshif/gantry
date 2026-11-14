@@ -1,0 +1,123 @@
+import type { Queryable } from "@gantry/db";
+import type { RunCtx } from "./context.js";
+
+/** Dollars per million tokens, as stored in price_versions.body. Cache prices default to Anthropic's ratios of the input price. */
+export interface Price {
+  in: number;
+  out: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
+
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+export interface PriceBook {
+  version: number | null;
+  prices: Record<string, Price>;
+}
+
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+
+/** The price version in force: the latest published one. */
+export async function currentPrices(db: Queryable, orgId: string): Promise<PriceBook> {
+  const { rows } = await db.query<{ version: number; body: Record<string, unknown> }>(
+    `select version, body from price_versions where org_id = $1 and published_at is not null order by version desc limit 1`,
+    [orgId],
+  );
+  const r = rows[0];
+  if (!r) return { version: null, prices: {} };
+  const prices: Record<string, Price> = {};
+  for (const [id, p] of Object.entries(r.body ?? {})) {
+    if (p && typeof p === "object") {
+      const o = p as Record<string, unknown>;
+      prices[id] = { in: num(o.in ?? o.input), out: num(o.out ?? o.output), ...(o.cacheRead !== undefined ? { cacheRead: num(o.cacheRead) } : {}), ...(o.cacheWrite !== undefined ? { cacheWrite: num(o.cacheWrite) } : {}) };
+    }
+  }
+  return { version: r.version, prices };
+}
+
+/** Cost in micro-dollars. $/M tokens equals micro-dollars per token, so no scaling is needed. Unknown model = 0 (flagged by the caller). */
+export function costMicros(price: Price | undefined, u: Usage): number {
+  if (!price) return 0;
+  const cr = price.cacheRead ?? price.in * 0.1;
+  const cw = price.cacheWrite ?? price.in * 1.25;
+  return Math.round(u.inputTokens * price.in + u.outputTokens * price.out + u.cacheReadTokens * cr + u.cacheWriteTokens * cw);
+}
+
+export interface Limits {
+  /** Monthly project cap in micro-dollars; null = none configured (a limit of 0 means "not set"). */
+  projectMicros: number | null;
+  woMicros: number | null;
+  runMicros: number | null;
+}
+
+export interface Breach {
+  scope: "project" | "wo" | "run";
+  spentMicros: number;
+  limitMicros: number;
+}
+
+const toMicros = (usd: unknown): number | null => {
+  const n = typeof usd === "string" ? Number(usd) : usd;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.round(n * 1_000_000) : null;
+};
+
+/** Spec 10.4 Budget: project monthly budget, work-order cap (work order data.budgetUsd, else project config extra.woBudgetUsd), per-run cap (agent budget). */
+export async function loadLimits(db: Queryable, c: RunCtx): Promise<Limits> {
+  const b = await db.query<{ m: string }>(`select monthly_limit_micros::text as m from budgets where org_id = $1 and project_id = $2`, [c.orgId, c.projectId]);
+  const projectMicros = b.rows[0] && Number(b.rows[0].m) > 0 ? Number(b.rows[0].m) : null;
+  const extra = (c.projectConfig.extra ?? {}) as Record<string, unknown>;
+  const woMicros = toMicros(c.woData.budgetUsd) ?? toMicros(extra.woBudgetUsd);
+  const runMicros = toMicros((await agentConfig(db, c)).budgetUsd);
+  return { projectMicros, woMicros, runMicros };
+}
+
+export interface Spent {
+  project: number;
+  wo: number;
+  run: number;
+}
+
+export async function loadSpent(db: Queryable, c: RunCtx): Promise<Spent> {
+  const { rows } = await db.query<{ project: string; wo: string; run: string }>(
+    `select (select coalesce(sum(cost_micros),0) from usage_meter where org_id = $1 and project_id = $2 and at >= date_trunc('month', now() at time zone 'UTC') at time zone 'UTC')::text as project,
+            (select coalesce(sum(cost_micros),0) from run_usage where org_id = $1 and wo_id = $3)::text as wo,
+            (select coalesce(sum(cost_micros),0) from run_usage where org_id = $1 and run_id = $4)::text as run`,
+    [c.orgId, c.projectId, c.woId, c.runId],
+  );
+  const r = rows[0]!;
+  return { project: Number(r.project), wo: Number(r.wo), run: Number(r.run) };
+}
+
+/** The first exhausted budget, or null. Spent at or above the limit counts as exhausted. */
+export async function budgetBreach(db: Queryable, c: RunCtx): Promise<Breach | null> {
+  const [lim, spent] = await Promise.all([loadLimits(db, c), loadSpent(db, c)]);
+  if (lim.projectMicros !== null && spent.project >= lim.projectMicros) return { scope: "project", spentMicros: spent.project, limitMicros: lim.projectMicros };
+  if (lim.woMicros !== null && spent.wo >= lim.woMicros) return { scope: "wo", spentMicros: spent.wo, limitMicros: lim.woMicros };
+  if (lim.runMicros !== null && spent.run >= lim.runMicros) return { scope: "run", spentMicros: spent.run, limitMicros: lim.runMicros };
+  return null;
+}
+
+export interface AgentConfig {
+  instructions: string;
+  budgetUsd: unknown;
+  body: Record<string, unknown>;
+  data: Record<string, unknown>;
+}
+
+/** The pinned agent version's body (prompt, tools, limits) and the agent's own data. Empty when the attempt has no tuple. */
+export async function agentConfig(db: Queryable, c: RunCtx): Promise<AgentConfig> {
+  if (!c.agentId) return { instructions: "", budgetUsd: undefined, body: {}, data: {} };
+  const { rows } = await db.query<{ body: Record<string, unknown> | null; data: Record<string, unknown> | null }>(
+    `select v.body, a.data from agents a left join agent_versions v on v.org_id = a.org_id and v.agent_id = a.id and v.version = $3 where a.org_id = $1 and a.id = $2`,
+    [c.orgId, c.agentId, c.agentVersion],
+  );
+  const body = rows[0]?.body ?? {};
+  const data = rows[0]?.data ?? {};
+  return { instructions: typeof body.instructions === "string" ? body.instructions : "", budgetUsd: body.budget ?? data.budget, body, data };
+}

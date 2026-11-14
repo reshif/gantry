@@ -13,3 +13,5 @@ export { generateApiKey, hashApiKey } from "./auth/apikeys.js";
 export { csrfFor, listSessions } from "./auth/sessions.js";
 export * from "./read/index.js";
 export { loadPolicyState, loadFlowState, type FlowLoadOptions } from "./read/state.js";
+export * from "./jobs-contract.js";
+export { issueRunToken, revokeRunTokens, runIdOfToken, type IssuedRunToken, type RevokeTarget } from "../areas/internal/tokens.js";
