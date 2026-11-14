@@ -1,6 +1,6 @@
 /** Project config: Flow tab and its dialogs (legacy project-config.js flowTab, stationDialog, gateDialog, bayDialog). */
 import { useState, type ReactNode } from "react";
-import { flowOf, type Catalog, type Project, type WorkClass } from "@gantry/domain";
+import { approvalText, flowOf, gateExplain, gateKindText, gateLock, type Catalog, type Project, type WorkClass } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useAgents, useTemplates } from "../../api/queries";
@@ -327,27 +327,35 @@ export function FlowTab({ p, cat, s, set }: PcProps) {
                 {f.gates.map((g) => {
                   const on = p.flow.gates[g.id]!.enabled;
                   const gs = gateState(p, g.id);
+                  const lock = gateLock(g, p);
                   const mode = g.mode;
                   const opts = KINDS.filter((o) => (g.id === "G0G1" ? o.value === "human" : g.id === "G6" ? o.value !== "auto" : true));
                   return (
                     <tr key={g.id} className={`${on ? "" : "is-disabled"}${g.custom ? " is-custom" : ""}`.trim() || undefined}>
                       <td><GateDiamond cat={cat} gateId={g.id} state={gs.state} count={gs.waiting || gs.failing} size="sm" /></td>
                       <th scope="row">
-                        <span className="mono">{g.label}</span>{` ${g.name}`}
+                        <span title={gateExplain(g, g.mode)}>{g.name}</span>{" "}<span className="mono muted small">{g.label}</span>
                         {g.custom ? <span className="tag pcf-tag-custom">custom</span> : null}
                         <div className="muted small">{`after ${cat.stations.find((x) => x.id === g.after)?.name ?? g.after}`}</div>
                       </th>
                       <td className="small">
                         <div>
                           <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.label} mode`} disabled={!d.allowed || g.id === "G0G1"} options={opts} value={mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }))} />
+                          <div className="muted small">{`${gateKindText(mode)} · ${approvalText(g, mode, p.approvers[g.id], (r) => cat.roles.find((x) => x.id === r)?.name ?? r)}`}</div>
                           {mode !== "human" && (g.checks ?? []).length ? <div className="muted small">{g.checks.join(", ")}</div> : null}
                         </div>
                       </td>
                       <td>
-                        {g.id === "G0G1" ? (
-                          <span data-tip="The brief confirmation gate cannot be turned off." tabIndex={0} className="muted small"><Icon name="lock" /> always on</span>
+                        {lock.locked ? (
+                          <span data-tip={lock.reason} title={lock.reason} tabIndex={0} className="muted small" id={`pcf-gate-lock-${g.id}`}><Icon name="lock" /> always on<span className="sr">{`. ${lock.reason}`}</span></span>
                         ) : (
-                          <Toggle id={`pcf-gate-${g.id}`} checked={on} decision={d} label={`${g.label} on`} onChange={async (v) => res(await ops.setProject(p.id, `flow.gates.${g.id}.enabled`, v, { ifMatch: p.version }), `${g.label}${v ? " turned on." : " turned off."}`)} />
+                          <Toggle id={`pcf-gate-${g.id}`} checked={on} decision={d} label={`${g.name} on`} onChange={async (v) => {
+                            if (!v && g.id !== "G1f") {
+                              const ok = await ui.confirm({ title: `Turn off ${g.name}?`, kicker: `Flow · ${p.name}`, ok: "Turn off", body: `${g.name} (${g.label}) is skipped for new work orders. Work orders already in flight keep the flow they started with. This needs a recent sign-in and is audited.` });
+                              if (!ok) return;
+                            }
+                            res(await ops.setProject(p.id, `flow.gates.${g.id}.enabled`, v, { ifMatch: p.version }), `${g.name}${v ? " turned on." : " turned off."}`);
+                          }} />
                         )}
                       </td>
                       <td>{mode === "auto" ? <span className="muted small">no approvers</span> : <Btn small kind="ghost" id={`pcf-gate-ap-${g.id}`} label="Approvers" onClick={() => set({ tab: "approvers", gate: g.id })} />}</td>

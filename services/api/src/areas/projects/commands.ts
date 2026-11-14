@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { isFactoryAdminPerson, type ApproverRule, type Project, type ProjectFlow, type Template, type WorkClass } from "@gantry/domain";
+import { gateLock, isFactoryAdminPerson, type ApproverRule, type Project, type ProjectFlow, type Template, type WorkClass } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
@@ -64,6 +64,10 @@ export async function createProject(tx: Tx, a: Actor, body: NewProjectBody): Pro
   const catalog = await readCatalog(tx, org);
   if (body.approvers) checkRuleRefs(body.approvers as Record<string, ApproverRule>, await ruleContext(tx, org, null, catalog.roles));
 
+  if (tpl.approverPreset === "strict") {
+    const bad = (tpl.gatesOff ?? []).filter((g) => gateLock({ id: g }, { regulated: true }).locked);
+    if (bad.length) throw invalid(`A regulated project keeps every gate on, so ${tpl.name} cannot be used with ${bad.join(", ")} off.`);
+  }
   const flow = flowFrom(catalog, tpl);
   const approvers: Record<string, ApproverRule> = (body.approvers as Record<string, ApproverRule> | null | undefined) ?? approversPreset(tpl.approverPreset, catalog);
   const draft = draftOf(id, flow, approvers, catalog);
@@ -209,10 +213,15 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       after = edit.value;
       break;
     }
-    case "gate-enabled":
-      before = setEnabled(draft, "gates", edit.id, edit.value).before;
+    case "gate-enabled": {
+      const r = setEnabled(draft, "gates", edit.id, edit.value, { regulated: !!row.regulated });
+      before = r.before;
       after = edit.value;
-      break;
+      const flowVersion = await persistDraft(tx, org, draft, a.id, path);
+      const gd = draft.catalog.gates.find((g) => g.id === edit.id)!;
+      const inflight = edit.value ? 0 : await openWorkOrders(tx, org, projectId, {});
+      return done("project.config", before, after, `${gd.name} (${gd.label}) turned ${edit.value ? "on" : "off"}.${edit.value ? "" : ` New work orders skip it${inflight ? `; ${inflight} open work order${inflight > 1 ? "s keep" : " keeps"} the flow ${inflight > 1 ? "they" : "it"} started with` : ""}.`}`, "config", flowVersion);
+    }
     case "station-wip":
       before = setWip(draft, edit.id, edit.value).before;
       after = edit.value;
@@ -236,10 +245,10 @@ export async function changeGateMode(tx: Tx, a: Actor, projectId: string, gateId
   await lockProject(tx, a.orgId, projectId, a.ifMatch);
   const { draft, project } = await loadDraft(tx, a.orgId, projectId);
   const r = setGateMode(draft, gateId, mode);
-  const flowVersion = await persistDraft(tx, a.orgId, draft, a.id, `${r.gate.label} mode`);
+  const flowVersion = await persistDraft(tx, a.orgId, draft, a.id, `${r.gate.name} (${r.gate.label}) mode`);
   const version = Number((await tx.query(`select version from projects where org_id = $1 and id = $2`, [a.orgId, projectId])).rows[0].version);
   return {
-    msg: `${r.gate.label} is now ${modeText(mode)} on ${project.name}.`,
+    msg: `${r.gate.name} (${r.gate.label}) is now ${modeText(mode)} on ${project.name}.`,
     events: [evt("flow.gate", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, r.before, mode)],
     extra: { version, flowVersion }, changes: ["projects"], project: projectId,
   };
@@ -350,7 +359,8 @@ export async function setMemberRole(tx: Tx, a: Actor, projectId: string, personI
   const role = (await readRoles(tx, org)).find((r) => r.id === roleId);
   if (!role || role.level !== "project") throw invalid("Pick a project-level role.");
   if (person.status === "deactivated") throw invalid(`${person.name} is deactivated.`);
-  const had = person.roles.filter((g) => g.scope === projectId).map((g) => g.role);
+  // Own grants only: a role the person holds through a team is changed on the team (People & teams).
+  const had = person.roles.filter((g) => g.scope === projectId && !g.via).map((g) => g.role);
   const has = had.includes(roleId);
   const cur = Number((await tx.query(`select version from people where org_id = $1 and id = $2`, [org, personId])).rows[0].version);
   if (has === add) return { msg: `${person.name} ${add ? "already has" : "does not have"} ${role.name} on ${project.name}.`, events: [], extra: { version: cur }, changes: ["people"], project: projectId };

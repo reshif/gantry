@@ -43,7 +43,7 @@ export async function readSuites(db: Queryable, orgId: string): Promise<SuiteOut
     db.query<{ suite_id: string; id: string }>(`select suite_id, id from eval_runs where org_id = $1 and status in ('queued','running')`, [orgId]),
   ]);
   return suites.rows.map((s) => ({
-    id: s.id, name: s.name, station: s.station ?? "", threshold: num(s.data.threshold), agent: s.agent_id ?? "", version: s.version,
+    id: s.id, name: s.name, station: s.station ?? "", threshold: num(s.data.threshold), agent: s.agent_id ?? "", version: s.version, ...(s.data.builtin === true ? { builtin: true } : {}),
     cases: cases.rows.filter((c) => c.suite_id === s.id).map(caseOut), running: running.rows.find((r) => r.suite_id === s.id)?.id ?? null,
   }));
 }

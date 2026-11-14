@@ -121,7 +121,7 @@ d("MCP registry (spec 8.8, 12.4)", () => {
   });
 
   it("lists servers in the legacy shape, with no secret", async () => {
-    const r = await w.call(NOBODY, "GET", "/api/v1/mcp/servers");
+    const r = await w.call(ADMIN, "GET", "/api/v1/mcp/servers");
     expect(r.status).toBe(200);
     const list = r.body as unknown as any[];
     expect(list).toHaveLength(1);
@@ -156,7 +156,7 @@ d("MCP registry (spec 8.8, 12.4)", () => {
   it("access-check applies project, project config, repo, agent, station, class, tool allow and write pre-authorisation, in that order", async () => {
     await w.q(`update mcp_scopes set projects = '["payments"]', repos = '"all"', agents = '["ag-build"]', stations = '["build"]', classes = '["feature"]' where server_id = $1`, [id]);
     await w.q(`update projects set config = jsonb_set(config, '{mcp}', '[]') where id = 'payments'`);
-    const chk = (o: Record<string, string> = {}) => w.call(NOBODY, "GET", `/api/v1/mcp/access-check?${new URLSearchParams({ server: id, tool: "search", agent: "ag-build", project: "payments", station: "build", ...o })}`).then((r) => r.body as any);
+    const chk = (o: Record<string, string> = {}) => w.call(ADMIN, "GET", `/api/v1/mcp/access-check?${new URLSearchParams({ server: id, tool: "search", agent: "ag-build", project: "payments", station: "build", ...o })}`).then((r) => r.body as any);
     expect(await chk()).toMatchObject({ allowed: false, rule: "project config" });
     await w.q(`update projects set config = jsonb_set(config, '{mcp}', $1::jsonb) where id = 'payments'`, [JSON.stringify([id])]);
     expect(await chk()).toMatchObject({ allowed: true, rule: "scope" });
@@ -170,7 +170,7 @@ d("MCP registry (spec 8.8, 12.4)", () => {
     await w.q(`update mcp_tools set allowed = false where server_id = $1 and name = 'search'`, [id]);
     expect(await chk()).toMatchObject({ allowed: false, rule: "tool deny" });
     await w.q(`update mcp_tools set allowed = true where server_id = $1 and name = 'search'`, [id]);
-    expect((await w.call(NOBODY, "GET", "/api/v1/mcp/access-check?server=x")).status).toBe(422);
+    expect((await w.call(ADMIN, "GET", "/api/v1/mcp/access-check?server=x")).status).toBe(422);
   });
 
   it("rediscovery: a new tool arrives denied; a changed definition disables the server until an admin re-approves it", async () => {
@@ -192,7 +192,7 @@ d("MCP registry (spec 8.8, 12.4)", () => {
     expect((await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: true })).status).toBe(409);
     // and the access check says why
     const q = new URLSearchParams({ server: id, tool: "search", agent: "ag-build", project: "payments", station: "build" });
-    expect((await w.call(NOBODY, "GET", `/api/v1/mcp/access-check?${q}`)).body).toMatchObject({ allowed: false, rule: "server disabled" });
+    expect((await w.call(ADMIN, "GET", `/api/v1/mcp/access-check?${q}`)).body).toMatchObject({ allowed: false, rule: "server disabled" });
     // it changed AGAIN before the admin approved: the approval is refused
     edge.tools[0]!.description = "yet another change";
     expect((await w.call(ADMIN, "POST", `/api/v1/mcp/servers/${id}/approve`, {})).status).toBe(409);
@@ -247,13 +247,13 @@ d("MCP registry (spec 8.8, 12.4)", () => {
     for (const [tool, outcome, agent, ms] of [["search", "ok", "ag-build", 31], ["update_page", "denied", "ag-build", 0], ["search", "error", "ag-review", 90]] as const) {
       await w.q(`insert into mcp_calls (org_id, server_id, tool, run_id, project_id, wo_id, agent_id, station, args_hash, outcome, latency_ms) values ($1,$2,$3,'run-x','payments','WO-9',$4,'build',$5,$6,$7)`, [o, id, tool, agent, "a".repeat(64), outcome, ms]);
     }
-    const all = (await w.call(NOBODY, "GET", "/api/v1/mcp/calls")).body as unknown as any[];
+    const all = (await w.call(ADMIN, "GET", "/api/v1/mcp/calls")).body as unknown as any[];
     expect(all.map((x) => x.outcome)).toEqual(["error", "denied", "ok"]);
     expect(all[0]).toMatchObject({ server: id, tool: "search", agent: "ag-review", project: "payments", ms: 90, wo: "WO-9", argsHash: "a".repeat(64) });
     expect(typeof all[0].at).toBe("number");
-    expect(((await w.call(NOBODY, "GET", `/api/v1/mcp/calls?outcome=denied`)).body as unknown as any[]).map((x) => x.tool)).toEqual(["update_page"]);
-    expect(((await w.call(NOBODY, "GET", `/api/v1/mcp/calls?agent=ag-build&limit=1`)).body as unknown as any[])).toHaveLength(1);
-    expect((await w.call(NOBODY, "GET", "/api/v1/mcp/calls?limit=0")).status).toBe(422);
+    expect(((await w.call(ADMIN, "GET", `/api/v1/mcp/calls?outcome=denied`)).body as unknown as any[]).map((x) => x.tool)).toEqual(["update_page"]);
+    expect(((await w.call(ADMIN, "GET", `/api/v1/mcp/calls?agent=ag-build&limit=1`)).body as unknown as any[])).toHaveLength(1);
+    expect((await w.call(ADMIN, "GET", "/api/v1/mcp/calls?limit=0")).status).toBe(422);
   });
 
   it("grants: an approver pre-authorises write tools for the work order's live attempt; a read tool, a missing attempt and a non-approver are refused", async () => {

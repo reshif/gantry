@@ -15,6 +15,10 @@ export interface RuleRef {
   id: string;
   name?: string;
   freeze?: string;
+  /** Step-up refusals: window (seconds), how long ago the person signed in, and the action. */
+  windowSec?: number;
+  signedInSecAgo?: number | null;
+  action?: string | null;
 }
 
 /**

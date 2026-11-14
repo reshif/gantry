@@ -1,19 +1,23 @@
 /**
- * Demo accounts for the sign-in screen. Shown only when the API says demoAccounts is on
- * (GANTRY_DEV_DEMO_ACCOUNTS, backed by seeded Keycloak users). The server may send its own list in
- * `config.demoAccountList`; this is the fallback matching the dev seed (email = id without "p-" + @acme.dev).
+ * Demo accounts for the sign-in screen. Shown only when the API says demoAccounts is on (GANTRY_DEV_DEMO_ACCOUNTS, backed by the
+ * local identity provider's users). The server sends `config.demoAccountList`, built from the live org: each account's roles are what
+ * that person actually holds (own grants and team grants), or "No roles yet".
+ *
+ * This fallback is used only when the server sends no list. It names the identity provider's users (email = id without "p-" + @acme.dev)
+ * and claims nothing about their permissions, because those depend on what has been granted in People & teams.
  */
 import type { DemoAccount } from "../api/types";
 
-export const DEMO_ACCOUNTS: readonly DemoAccount[] = [
-  { id: "p-asha", name: "Asha Raman", email: "asha@acme.dev", role: "Factory Admin", note: "Sees and controls everything. MFA step." },
-  { id: "p-daniel", name: "Daniel Okafor", email: "daniel@acme.dev", role: "Project Admin", note: "Payments Platform and Storefront. MFA step." },
-  { id: "p-meera", name: "Meera Iyer", email: "meera@acme.dev", role: "Line Lead", note: "Payments Platform. Away; Priya is her delegate." },
-  { id: "p-tomas", name: "Tomás Ferreira", email: "tomas@acme.dev", role: "Engineer", note: "Payments Platform only." },
-  { id: "p-fatima", name: "Fatima Zahra", email: "fatima@acme.dev", role: "Reviewer", note: "Storefront (also Engineer there)." },
-  { id: "p-kenji", name: "Kenji Watanabe", email: "kenji@acme.dev", role: "Release Manager", note: "Payments, Storefront, Risk." },
-  { id: "p-sam", name: "Sam Whitfield", email: "sam@acme.dev", role: "Auditor", note: "Read-only across the factory." },
-  { id: "p-priya", name: "Priya Nair", email: "priya@acme.dev", role: "Two teams, two roles", note: "Reviewer on Payments, Line Lead on Risk." },
-  { id: "p-lena", name: "Lena Fischer", email: "lena@acme.dev", role: "Project Admin, on call", note: "Identity (new project). MFA step." },
-  { id: "p-omar", name: "Omar Haddad", email: "omar@acme.dev", role: "Factory Admin (second)", note: "Second approver for a factory restore. MFA step." },
+const USERS: ReadonlyArray<readonly [string, string]> = [
+  ["asha", "Asha Raman"], ["daniel", "Daniel Okafor"], ["meera", "Meera Iyer"], ["tomas", "Tomás Ferreira"], ["priya", "Priya Nair"],
+  ["kenji", "Kenji Watanabe"], ["sam", "Sam Whitfield"], ["lena", "Lena Fischer"], ["chloe", "Chloe Martin"], ["arjun", "Arjun Mehta"],
+  ["fatima", "Fatima Zahra"], ["nikhil", "Nikhil Rao"], ["grace", "Grace Liu"], ["rui", "Rui Costa"], ["omar", "Omar Haddad"],
 ];
+
+export const DEMO_ACCOUNTS: readonly DemoAccount[] = USERS.map(([id, name]) => ({
+  id: `p-${id}`,
+  name,
+  email: `${id}@acme.dev`,
+  role: "Demo account",
+  note: "Access is whatever has been granted in People & teams; it is listed after sign-in.",
+}));

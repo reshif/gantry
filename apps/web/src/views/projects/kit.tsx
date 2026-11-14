@@ -5,10 +5,9 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { flowOf, route as routeOf, routeGates as routeGatesOf, type Bay, type Catalog, type Gate, type Project, type Role, type Station, type WorkClass } from "@gantry/domain";
+import { flowOf, gateExplain, gateStateText, gateTitle, route as routeOf, routeGates as routeGatesOf, type Bay, type Catalog, type Gate, type Project, type Role, type Station, type WorkClass } from "@gantry/domain";
 import { api } from "../../api/client";
 import { get } from "../../api/client";
-import { stepUpUrl } from "../../api/ops";
 import { Icon } from "../../ui/Icon";
 import { Empty } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
@@ -96,7 +95,7 @@ export function gateState(p: PView, gateId: string): { state: "clear" | "waiting
 export function GateDiamond({ cat, gateId, state, count, size, onClick }: { cat: Catalog; gateId: string; state: string; count: number; size?: "sm" | "md"; onClick?: () => void }) {
   const g = cat.gates.find((x) => x.id === gateId);
   if (!g) return null;
-  const label = `${g.label} ${g.name}: ${state === "waiting" ? `${count} waiting on approvers` : state === "failing" ? `${count} failing` : state === "off" ? "off in this project" : "clear"}`;
+  const label = `${gateTitle(g)}: ${gateStateText(state, count)}. ${gateExplain(g)}`;
   const inner = (
     <>
       <span className="gate-shape" aria-hidden="true">
@@ -173,7 +172,7 @@ export function MiniBelt({ cat, project, counts, cls, labels, stationsOff, gates
       const gOff = gatesOff ? gatesOff.includes(g.id) : !!proj && !!gcfg && !gcfg.enabled && g.id !== "G0G1";
       const waiting = project && "metrics" in (project as PView) ? ((project as PView).metrics?.byGate[g.id] ?? 0) : 0;
       const state = gOff ? "off" : waiting ? "waiting" : "clear";
-      nodes.push(<span key={`g-${g.id}`} className={`mgate gate-${state}`} title={g.label + (waiting ? `: ${waiting} waiting` : "")} />);
+      nodes.push(<span key={`g-${g.id}`} className={`mgate gate-${state}`} title={`${g.name} · ${g.label}` + (gOff ? ": off, skipped" : "") + (waiting ? `: ${waiting} waiting` : "")} />);
     }
   });
   return (
@@ -262,12 +261,6 @@ export function Crumbs({ items }: { items: Array<{ label: string; href?: string 
 export function useRes(): <T extends { ok: boolean; msg: string; needs?: string }>(r: T, label?: string) => T {
   const ui = useUI();
   return (r, label) => {
-    if (!r.ok && r.needs === "step_up") {
-      // role grants need a fresh sign-in (spec 14.1): back to this screen afterwards
-      ui.toast("Sign in again to confirm this change.", "warn");
-      setTimeout(() => window.location.assign(stepUpUrl()), 700);
-      return r;
-    }
     ui.toast(r.ok && label ? label : r.msg, r.ok ? "ok" : "error");
     return r;
   };

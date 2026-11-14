@@ -157,7 +157,7 @@ const ROUTE_GATE_FALLBACK = (c: Catalog, p: Project, cls: string): string[] => {
 export async function buildWorkOrders(db: Queryable, orgId: string, catalog: Catalog, projects: Project[], opts: LoadOpts = {}): Promise<WorkOrder[]> {
   const params: unknown[] = [orgId];
   // Eval carrier work orders (source 'eval') only carry an eval case through the runtime: they are never work.
-  const where = ["org_id = $1", "source <> 'eval'"];
+  const where = ["org_id = $1", "source not in ('eval','onboarding')"];
   if (opts.ids) where.push(`id = any($${params.push(opts.ids)}::text[])`);
   if (opts.project) where.push(`project_id = $${params.push(opts.project)}`);
   if (opts.parent) where.push(`parent_id = $${params.push(opts.parent)}`);

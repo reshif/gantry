@@ -6,6 +6,7 @@
  * policies and so on, plus demo work orders, audit and events. No simulated runtime behaviour is attached.
  * Production orgs never call this.
  */
+import { ACTIONS, defaultMatrix } from "./catalog.js";
 import { DAY } from "./format.js";
 import { SEED_ANCHOR, SEED_JSON } from "./seed.data.js";
 import type { DevSeed } from "./types.js";
@@ -44,5 +45,15 @@ export function devSeed(now: number = Date.now()): DevSeed {
   const data = JSON.parse(SEED_JSON) as DevSeed & { anchor: number };
   const delta = now - SEED_ANCHOR;
   if (delta !== 0) shift(data.state, delta);
+  // The frozen legacy seed predates actions added to the built-in catalogue (the Read rights of default deny): carry them, with their
+  // built-in defaults, so the demo org has them. Existing cells are never changed.
+  const known = new Set(data.catalog.actions.map((a) => a.id));
+  const added = ACTIONS.filter((a) => !known.has(a.id));
+  if (added.length) {
+    data.catalog.actions.push(...added.map((a) => ({ ...a })));
+    const defaults = defaultMatrix();
+    const m = (data.state as { matrix?: Record<string, Record<string, boolean>> }).matrix;
+    if (m) for (const role of Object.keys(m)) for (const a of added) if (defaults[role]?.[a.id] !== undefined) m[role]![a.id] = defaults[role]![a.id]!;
+  }
   return { state: data.state, catalog: data.catalog, integrationCategories: data.integrationCategories, notifyEvents: data.notifyEvents };
 }

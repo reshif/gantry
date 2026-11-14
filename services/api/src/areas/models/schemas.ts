@@ -56,7 +56,22 @@ export const AddModelBody = z
   })
   .strict();
 
-export const ModelPatchBody = z.object({ enabled: z.boolean(), via }).strict();
+export const ModelPatchBody = z
+  .object({ enabled: z.boolean().optional(), context: z.coerce.number().int().min(1000).max(100_000_000).optional(), via })
+  .strict()
+  .refine((b) => b.enabled !== undefined || b.context !== undefined, "Nothing to change.");
+
+export const AddVendorFromTemplateBody = z
+  .object({
+    template: id,
+    name: z.string().trim().max(80).optional(),
+    /** The template's fields by key. Secrets are sealed and never returned. */
+    fields: z.record(z.string().max(100), z.string().max(8192)),
+    retention: z.enum(RETENTION).optional(),
+    via,
+  })
+  .strict();
+export const DiscoverBody = z.object({ via }).strict();
 
 const rec = z.record(id, id);
 const ProjectRoutingSchema = z

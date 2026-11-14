@@ -6,7 +6,11 @@ export const MessageBody = z.object({
   /** The project the person is looking at (context only; the tools still filter to what they may see). */
   project: z.string().min(1).max(100).nullish(),
   via: z.literal("console").optional(),
+  /** The model chosen in the console header for this message; checked on every message. Absent: the person's saved choice, else the routing default. */
+  model: z.string().min(1).max(200).nullish(),
 });
+export const ModelBody = z.object({ model: z.string().min(1).max(200).nullable() });
+export const StatusQuery = z.object({ project: z.string().min(1).max(100).optional() });
 export const ThreadId = z.object({ id: z.string().min(1).max(60) });
 export const PinnedBody = z.object({ pinned: z.array(z.string().regex(/^WO-\d{3,6}$/)).max(50) });
 export const ProposalParams = z.object({ id: z.string().min(1).max(60), pid: z.string().min(1).max(40) });

@@ -6,4 +6,5 @@ coverage/
 deploy/secrets/*
 !deploy/secrets/README.md
 !deploy/secrets/generate.sh
+!deploy/secrets/create-github-app.mjs
 .DS_Store

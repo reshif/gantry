@@ -33,3 +33,10 @@
 .md-id { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .md-id .md-rm { margin-left: auto; }
 .view-models .vendor td:first-child { min-width: 150px; }
+
+/* Vendor template picker (spec 10.4 Vendor templates). */
+.vt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--s3, 0.75rem); }
+.vt-card { display: flex; flex-direction: column; gap: 0.25rem; text-align: left; padding: 0.75rem 0.9rem; border: 1px solid var(--line, currentColor); border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.vt-card:hover:not(:disabled), .vt-card:focus-visible { border-color: var(--accent, currentColor); }
+.vt-card:disabled { opacity: 0.55; cursor: not-allowed; }
+.vt-name { font-weight: 600; }

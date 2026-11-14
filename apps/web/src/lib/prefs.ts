@@ -13,6 +13,9 @@ export type Theme = "system" | "light" | "dark";
 export interface Prefs {
   theme: Theme;
   project: string | null;
+  /** Projects the person starred in the switcher, and the last few entered (most recent first). */
+  pinnedProjects: string[];
+  recentProjects: string[];
   floorView: string;
   boardSwim: string;
   navCollapsed: Record<string, boolean>;
@@ -30,12 +33,14 @@ export interface Prefs {
   activeClass: string | null;
 }
 
-const PERSISTED = ["theme", "project", "floorView", "boardSwim", "navCollapsed", "navRail", "palettePinned", "paletteRecent", "portfolio"] as const;
+const PERSISTED = ["theme", "project", "pinnedProjects", "recentProjects", "floorView", "boardSwim", "navCollapsed", "navRail", "palettePinned", "paletteRecent", "portfolio"] as const;
 
 export function defaultPrefs(): Prefs {
   return {
     theme: "system",
     project: null,
+    pinnedProjects: [],
+    recentProjects: [],
     floorView: "belt",
     boardSwim: "none",
     navCollapsed: {},
@@ -71,6 +76,8 @@ export function parsePrefs(raw: string | null): Prefs {
   const s = v as Record<string, unknown>;
   if (isTheme(s.theme)) out.theme = s.theme;
   if (typeof s.project === "string" && s.project) out.project = s.project;
+  if (isStrArray(s.pinnedProjects)) out.pinnedProjects = s.pinnedProjects;
+  if (isStrArray(s.recentProjects)) out.recentProjects = s.recentProjects;
   if (typeof s.floorView === "string") out.floorView = s.floorView;
   if (typeof s.boardSwim === "string") out.boardSwim = s.boardSwim;
   if (isRecordOfBool(s.navCollapsed)) out.navCollapsed = s.navCollapsed;
@@ -128,7 +135,9 @@ export const usePrefs = (): Prefs => useSyncExternalStore(subscribe, getPrefs);
 /* view state helpers (legacy ops.openRecord / ops.setReplay) */
 export const openRecord = (woId: string | null): void => updatePrefs({ record: woId });
 export const setReplay = (o: Prefs["replay"]): void => updatePrefs((p) => ({ replay: o ? { ...(p.replay ?? {}), ...o } : null }));
-export const setProject = (id: string): void => updatePrefs({ project: id });
+export const setProject = (id: string): void => updatePrefs((p) => ({ project: id, recentProjects: [id, ...p.recentProjects.filter((x) => x !== id)].slice(0, 6) }));
+export const togglePinnedProject = (id: string): void =>
+  updatePrefs((p) => ({ pinnedProjects: p.pinnedProjects.includes(id) ? p.pinnedProjects.filter((x) => x !== id) : [id, ...p.pinnedProjects].slice(0, 12) }));
 
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement;

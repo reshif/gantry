@@ -1,5 +1,7 @@
 import type { Queryable } from "@gantry/db";
 import type { RunCtx } from "./context.js";
+import { vendorTemplate } from "@gantry/domain";
+import { discoveryHosts } from "../models/discovery.js";
 import { ANTHROPIC_BASE_URL } from "./route.js";
 
 /** The GitHub host and the common package registries (spec 5.3 Outbound allow-list). Admins add more per org and per project. */
@@ -59,11 +61,31 @@ export async function runEgressHosts(db: Queryable, c: RunCtx): Promise<string[]
   return [...out].sort();
 }
 
+/**
+ * Hosts a model discovery is about to call (spec 10.4 Vendor templates), for a few minutes: the vendor does not exist yet when its credentials are
+ * first checked, so its host cannot come from the vendors table. Registered only for a caller the decision point let through (`model.edit`).
+ */
+const pendingHosts = new Map<string, number>();
+const PENDING_TTL_MS = 5 * 60_000;
+export function allowDiscoveryHosts(hosts: string[], now = Date.now()): void {
+  for (const h of hosts) pendingHosts.set(h.toLowerCase(), now + PENDING_TTL_MS);
+}
+
 /** The worker's outbound allow-list (chat and webhook delivery, spec 12.2): the enabled integration instances' own URLs plus the chat vendors' hosts. */
 export async function systemEgressHosts(db: Queryable, orgId: string): Promise<string[]> {
   const out = new Set<string>(DEFAULT_SYSTEM_HOSTS);
   for (const h of (await orgEgress(db, orgId)).system) out.add(h);
   const { rows } = await db.query<{ config: unknown }>(`select config from integration_instances where org_id = $1 and enabled`, [orgId]);
   for (const r of rows) jsonUrlHosts(r.config, out);
+  // Connected vendors whose models are discovered through the proxy: the endpoint and the template's own discovery hosts.
+  const vs = await db.query<{ endpoint: string; region: string; config: { template?: string; fields?: Record<string, string> } }>(`select endpoint, region, config from vendors where org_id = $1 and connected`, [orgId]);
+  for (const v of vs.rows) {
+    const h = hostOf(v.endpoint);
+    if (h) out.add(h);
+    const t = v.config?.template ? vendorTemplate(v.config.template) : undefined;
+    if (t) for (const x of discoveryHosts(t, { ...(v.config.fields ?? {}), ...(v.region ? { region: v.region } : {}) })) out.add(x);
+  }
+  const now = Date.now();
+  for (const [h, until] of pendingHosts) if (until > now) out.add(h); else pendingHosts.delete(h);
   return [...out].sort();
 }

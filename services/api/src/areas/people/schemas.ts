@@ -10,8 +10,25 @@ export const InviteBody = z.object({
 });
 
 export const TeamsBody = z.object({ teams: z.array(id).max(50) });
+const teamName = z.string().trim().min(2, "Enter a team name of at least 2 characters.").max(80);
+const teamDesc = z.string().trim().max(300);
+export const CreateTeamBody = z.object({
+  name: teamName,
+  /** Optional explicit id; derived from the name otherwise. */
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/, "Use lower-case letters, digits and hyphens for the id.").optional(),
+  desc: teamDesc.default(""),
+});
+export const UpdateTeamBody = z.object({ name: teamName.optional(), desc: teamDesc.optional() }).refine((b) => b.name !== undefined || b.desc !== undefined, "Change the name or the description.");
 export const OncallBody = z.object({ on: z.boolean() });
 export const AwayBody = z.object({
   away: z.object({ from: z.number().finite().optional(), to: z.number().finite(), delegate: id }).nullable(),
   project: id.nullish(),
+});
+
+export const TeamGrantBody = z.object({
+  role: id,
+  /** "factory" or a project id. */
+  scope: id,
+  /** Epoch ms; the grant lapses then. Omit for no expiry. */
+  expiresAt: z.number().int().positive().nullish(),
 });

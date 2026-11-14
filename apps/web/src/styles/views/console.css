@@ -62,7 +62,10 @@
 }
 
 /* round three: Claude mode, streaming, entity chips */
-.con-mode-line { display: flex; gap: 6px; align-items: center; color: var(--muted); margin: calc(-1 * var(--s2)) 0 var(--s2); }
+.con-mode-line { display: flex; gap: 6px; align-items: center; color: var(--muted); margin: var(--s2) 0; }
+.con-mode-line a { color: var(--accent); }
+.con-model { display: inline-flex; align-items: center; gap: 6px; }
+.con-model select { max-width: 280px; font-family: var(--f-mono); font-size: var(--t-xs); }
 .con-mode-line .ic { width: 12px; height: 12px; }
 .view-console .msg-text { white-space: pre-wrap; }
 .view-console .msg-text.is-thinking { color: var(--muted); font-style: italic; }
@@ -88,3 +91,12 @@
 .view-console .ccard .table-scroll { max-width: 100%; overflow-x: auto; }
 .view-console .thread { overflow-x: hidden; }
 .view-console .ccard > *, .view-console .msg > * { min-width: 0; }
+
+/* Markdown in answers (views/console/Markdown.tsx): block elements carry their own spacing, so the transcript's pre-wrap is turned off for them. */
+.view-console .msg-text.is-md, .view-console .msg-text:has(> p, > ul, > ol, > pre) { white-space: normal; }
+.view-console .msg-text p { margin: 0 0 8px; }
+.view-console .msg-text ul, .view-console .msg-text ol { margin: 0 0 8px; padding-left: 20px; }
+.view-console .msg-text > :last-child { margin-bottom: 0; }
+.view-console .msg-text code { font-family: var(--mono, monospace); font-size: 0.92em; padding: 0 4px; border-radius: 4px; background: var(--surface-2, rgba(127,127,127,.15)); }
+.view-console .msg-text pre.md-code { margin: 0 0 8px; padding: 8px 10px; overflow-x: auto; white-space: pre; border-radius: 6px; background: var(--surface-2, rgba(127,127,127,.15)); }
+.view-console .msg-text pre.md-code code { padding: 0; background: none; }

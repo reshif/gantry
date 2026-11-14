@@ -521,7 +521,7 @@ export async function recordDecision(fx: Fx, w: Wo, inst: { id: string; opened_a
   ).rows[0];
   const ra = (
     await fx.tx.query<{ id: string; role_id: string }>(
-      `select id, role_id from role_assignments where org_id = $1 and person_id = $2 and revoked_at is null and (expires_at is null or expires_at > now()) and (project_id = $3 or project_id is null) order by (project_id is null), created_at limit 1`,
+      `select id, role_id from effective_role_assignments where org_id = $1 and person_id = $2 and revoked_at is null and (expires_at is null or expires_at > now()) and (project_id = $3 or project_id is null) order by (project_id is null), created_at limit 1`,
       [fx.orgId, by.personId, w.project],
     )
   ).rows[0];

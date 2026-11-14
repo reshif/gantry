@@ -34,7 +34,7 @@ const SORTS: Record<NonNullable<ListQuery["sort"]>, string> = {
 /** One page of a project's work orders in the legacy shape. Filters and sort run in SQL; `next` is an opaque cursor for the following page. */
 export async function listWorkOrders(db: Queryable, orgId: string, projectId: string, q: ListQuery): Promise<{ items: WorkOrder[]; next: string | null; total: number }> {
   const params: unknown[] = [orgId, projectId];
-  const where = ["org_id = $1", "project_id = $2", "source <> 'eval'"];
+  const where = ["org_id = $1", "project_id = $2", "source not in ('eval','onboarding')"];
   if (q.q) where.push(`(id ilike $${params.push(`%${q.q.replace(/[%_]/g, "\\$&")}%`)} or title ilike $${params.length})`);
   if (q.cls && q.cls !== "all") where.push(`class = $${params.push(q.cls)}`);
   if (q.where && q.where !== "all") where.push(`position = $${params.push(q.where)}`);

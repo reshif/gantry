@@ -6,6 +6,8 @@ import { useCan } from "../../api/can";
 import { useAgents, useGuidelines, useSkills, useVendors } from "../../api/queries";
 import { Avatar, Btn, Empty, Field, LockNote, Panel, Toggle } from "../../ui/primitives";
 import { useActors } from "../../ui/actors";
+import { Icon } from "../../ui/Icon";
+import { agentUnavailable } from "./kit";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 import { updatePrefs } from "../../lib/prefs";
@@ -66,7 +68,7 @@ function ProjectGuidelines({ project }: { project: Project }) {
         )}
         <Btn label="Add item" small icon="plus" id="onb-pg-add" guard={dec} onClick={() => upd({ items: [...state.items, { id: newId("pg"), text: "", required: true }] })} />
         <Field label="Notes for the agent" htmlFor="onb-pg-notes">
-          <textarea id="onb-pg-notes" className="input" rows={2} disabled={locked} placeholder="Anything the Onboarding agent must know about this project" value={state.notes} onChange={(e) => upd({ notes: e.target.value })} />
+          <textarea id="onb-pg-notes" className="input" rows={2} disabled={locked} placeholder="Anything the Onboarding Agent (and a reviewer) must know about this project" value={state.notes} onChange={(e) => upd({ notes: e.target.value })} />
         </Field>
         <Field label="Change note (audited)" htmlFor="onb-pg-note">
           <input id="onb-pg-note" className="input" value={state.note} disabled={locked} placeholder="What changed and why" onChange={(e) => upd({ note: e.target.value })} />
@@ -104,7 +106,7 @@ function FactoryGuidelines({ g }: { g: OrgGuidelines }) {
     <Panel cls="onb-gl-panel" title={<span>{"Onboarding guidelines "}<span className="mono small muted">{`v${g.version}`}</span></span>}>
       <div className="onb-gl">
         <LockNote decision={dec} what="The onboarding guidelines" />
-        <p className="muted small">{`What Ready means. The Onboarding agent checks every required item and the PR may only touch what is allowed below. ${g.version ? `Last saved by ${actors(g.by).name}, ${fmt.stamp(g.at)}.` : "Not saved yet: these are the built-in defaults."}`}</p>
+        <p className="muted small">{`What Ready means. Gantry checks every required item and the PR may only touch what is allowed below. ${g.version ? `Last saved by ${actors(g.by).name}, ${fmt.stamp(g.at)}.` : "Not saved yet: these are the built-in defaults."}`}</p>
         <ol className="onb-gl-items">
           {d.items.map((it, i) => (
             <ItemRow key={it.id} it={it} i={i} prefix="gl" label="Guideline" locked={locked} dec={dec} set={(p) => upd({ items: d.items.map((x, k) => (k === i ? { ...x, ...p } : x)) })} remove={() => upd({ items: d.items.filter((_, k) => k !== i) })} />
@@ -130,10 +132,12 @@ export function AgentTab({ project }: { project: Project }) {
   const a = (useAgents().data ?? []).find((x) => x.id === "ag-onboard");
   const skillList = useSkills().data;
   const vendors = useVendors().data;
+  const off = agentUnavailable(a, vendors);
   const modelName = (id: string): string => (Array.isArray(vendors) ? vendors : []).flatMap((v) => v.models).find((m) => m.id === id)?.name ?? id;
   const skills = a ? a.skills.map((id) => (Array.isArray(skillList) ? skillList : []).find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s) : [];
   const agentPanel = a ? (
     <Panel title="Onboarding agent">
+      {off ? <div className="callout callout-warn" id="onb-agent-off"><Icon name="alert" /><div><strong>Onboarding runs rule-based until a model vendor is connected. </strong>{`${off} Findings and the pull request are still produced, from fixed rules, and say so.`}</div></div> : <div className="callout callout-ok" id="onb-agent-on"><Icon name="agent" /><div>{`The agent runs on top of what Gantry observes (model ${modelName(a.model)}). It adds notes, a risk judgement and an AGENTS.md draft; it never changes a finding, adds a file, or merges.`}</div></div>}
       <div className="onb-agent">
         <div className="onb-agent-id">
           <Avatar id={a.id} size="lg" />

@@ -163,15 +163,13 @@ describe("People", () => {
     expect(await screen.findByText(/changed since you loaded it/)).toBeTruthy();
   });
 
-  it("sends a step-up refusal to a fresh sign-in", async () => {
-    const assign = vi.fn();
-    Object.defineProperty(window, "location", { configurable: true, value: { ...window.location, assign, hash: "#people", search: "" } });
+  it("a step-up refusal nobody resolved is shown as its message (the shell's prompt handles the rest)", async () => {
     setup({ "PUT /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ status: 403, body: { ok: false, msg: "Sign in again to confirm this change.", needs: "step_up" } }) });
     mount(<PeopleView />);
     fireEvent.click(await byId("ppl-mem-platform-p-tomas"));
     const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "factory_admin" } });
-    await waitFor(() => expect(assign).toHaveBeenCalledWith(`/auth/login?step_up=1&return_to=${encodeURIComponent("/#people")}`), { timeout: 3000 });
+    expect(await screen.findByText(/Sign in again to confirm this change/)).toBeTruthy();
   });
 });
 

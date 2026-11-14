@@ -1,4 +1,4 @@
-import type { ApproverRule, Bay, Catalog, Gate, GateKind, ProjectFlow, Station, WorkClass } from "@gantry/domain";
+import { gateLock, type ApproverRule, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type Station, type WorkClass } from "@gantry/domain";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 
 /**
@@ -201,7 +201,7 @@ export function setGateMode(d: FlowDraft, gateId: string, mode: string): { befor
   const g = gate(d, gateId);
   if (!g || !gateLive(d, gateId)) throw invalid("Unknown project or gate.");
   if (!MODES.includes(mode as GateKind)) throw invalid("Mode is auto, human or mixed.");
-  if (gateId === "G0G1" && mode !== "human") throw invalid("G0+G1 is always confirmed by a person.");
+  if (gateId === "G0G1" && mode !== "human") throw invalid("Brief confirmed (G0+G1) is always confirmed by a person.");
   if (gateId === "G6" && mode === "auto") throw invalid("Release confirmation always needs a person.");
   const cfg = d.flow.gates[gateId]!;
   const before = cfg.mode || g.kind;
@@ -216,12 +216,15 @@ export function setGateMode(d: FlowDraft, gateId: string, mode: string): { befor
 }
 
 /** A station or gate toggled on or off. Intake and G0+G1 are always on. */
-export function setEnabled(d: FlowDraft, kind: "stations" | "gates", id: string, on: boolean): { name: string; before: boolean } {
+export function setEnabled(d: FlowDraft, kind: "stations" | "gates", id: string, on: boolean, o: { regulated?: boolean } = {}): { name: string; before: boolean } {
   const cfg = d.flow[kind][id];
   const def = kind === "stations" ? station(d, id) : gate(d, id);
   if (!cfg || cfg.absent || !def) throw invalid(`This project has no ${kind === "stations" ? "station" : "gate"} ${id}.`);
   if (kind === "stations" && id === "intake" && !on) throw conflict("Intake is always on: every work order starts there.");
-  if (kind === "gates" && id === "G0G1" && !on) throw conflict("The brief confirmation gate cannot be turned off.");
+  if (kind === "gates" && !on) {
+    const lock = gateLock(def as Gate, o);
+    if (lock.locked) throw conflict(`${(def as Gate).name} (${(def as Gate).label}) cannot be turned off. ${lock.reason}`);
+  }
   const before = cfg.enabled;
   cfg.enabled = on;
   return { name: kind === "stations" ? (def as Station).name : (def as Gate).label, before };

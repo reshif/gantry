@@ -17,7 +17,10 @@ export interface TestResult {
 }
 
 export interface OpsEnv {
+  /** Outbound traffic to third parties: through the egress proxy. */
   http: OutboundHttp;
+  /** Calls to Gantry's own services on the control network (the GitHub broker): direct, never through the egress proxy, which refuses them. */
+  internalHttp: OutboundHttp;
   now: () => number;
   /** Slack API base (tests point it at a double). */
   slackBase: string;
@@ -95,7 +98,7 @@ export async function testConnector(env: OpsEnv, c: Candidate): Promise<TestResu
       }
       case "github": {
         if (!env.broker.url) return fail("The GitHub broker is not configured for this install.");
-        const res = await env.http.request({ method: "GET", url: `${env.broker.url}/v1/installation/repos`, headers: { authorization: `Bearer ${env.broker.token ?? ""}` }, timeoutMs: 20_000 }).catch((e: unknown) => ({ status: 0, body: String((e as Error).message) }));
+        const res = await env.internalHttp.request({ method: "GET", url: `${env.broker.url}/v1/installation/repos`, headers: { authorization: `Bearer ${env.broker.token ?? ""}` }, timeoutMs: 20_000 }).catch((e: unknown) => ({ status: 0, body: String((e as Error).message) }));
         let body: { repos?: unknown[]; msg?: string } = {};
         try {
           body = JSON.parse(res.body) as typeof body;

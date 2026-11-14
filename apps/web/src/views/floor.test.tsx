@@ -36,6 +36,37 @@ describe("Floor: belt", () => {
     expect(screen.getByText("Coding slots").nextElementSibling?.textContent).toBe("2/2");
   });
 
+  it("names each gate first, with its code, kind and how many approvals it needs and from whom", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByText("Payments Platform");
+    const g1 = document.querySelector('[data-gate="G0G1"]') as HTMLElement;
+    expect(g1.querySelector(".fl-gate-name")?.textContent).toBe("Brief confirmed");
+    expect(g1.querySelector(".gate-label")?.textContent).toBe("G0+G1");
+    const tip = g1.querySelector("button.gate")?.getAttribute("aria-label") ?? "";
+    expect(tip).toMatch(/Brief confirmed · G0\+G1/);
+    expect(tip).toMatch(/1 approval: the submitter/);
+    expect(tip).toMatch(/One gate\./);
+    expect(tip).toMatch(/person/);
+    expect(g1.querySelector(".fl-gate-cap")?.textContent).toMatch(/nothing waiting|waiting/);
+    expect(g1.querySelector(".fl-gate-cap")?.textContent).not.toMatch(/clear/);
+    const auto = document.querySelector('[data-gate="G4"] button.gate')?.getAttribute("aria-label") ?? "";
+    expect(auto).toMatch(/automatic/);
+    expect(auto).toMatch(/No approvals/);
+  });
+
+  it("shows a gate that is turned off as skipped, never hides it", async () => {
+    const off = { ...PAYMENTS, version: 1, flow: { ...PAYMENTS.flow, gates: { ...PAYMENTS.flow.gates, G3d: { ...PAYMENTS.flow.gates.G3d, enabled: false } } } };
+    mockApi({ "GET /api/v1/projects": () => ({ body: [off] }), "GET /api/v1/projects/payments": () => ({ body: off }), "GET /api/v1/projects/payments/floor": () => ({ body: { ...floorRead(), project: off } }) });
+    mount(<FloorView />);
+    await screen.findByText("Payments Platform");
+    const g = document.querySelector('[data-gate="G3d"]') as HTMLElement;
+    expect(g).toBeTruthy();
+    expect(g.classList.contains("fl-gate-off")).toBe(true);
+    expect(g.querySelector(".fl-gate-cap")?.textContent).toMatch(/off · skipped/);
+    expect(g.querySelector("button.gate")?.getAttribute("aria-label")).toMatch(/turned off in this project/);
+  });
+
   it("pins a class route and marks the stations it bypasses", async () => {
     mockApi();
     mount(<FloorView />);
@@ -103,7 +134,7 @@ describe("Floor: board", () => {
     fireEvent.click(document.querySelector("label[for=floor-view-board]") as HTMLElement);
     expect(document.querySelectorAll(".fl-col[data-drop]").length).toBe(9 + 5);
     const card = document.querySelector('[data-wo="WO-2400"].fl-card') as HTMLElement;
-    expect(card.querySelector(".fl-gt")?.textContent).toMatch(/G3\+G3s waiting/);
+    expect(card.querySelector(".fl-gt")?.textContent).toMatch(/Plan and security waiting/);
     const all = document.querySelectorAll(".fl-card").length;
     fireEvent.change(document.getElementById("floor-f-cls") as HTMLElement, { target: { value: "bug" } });
     expect(document.querySelectorAll(".fl-card").length).toBeLessThan(all);

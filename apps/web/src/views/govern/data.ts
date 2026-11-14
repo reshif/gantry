@@ -9,7 +9,6 @@ import { policyText, type Catalog, type Policy, type PolicyState, type Repo, typ
 import { api, get, type ApiResult } from "../../api/client";
 import { useAccessMatrix, useMe, usePeople, usePolicies } from "../../api/queries";
 import { qk } from "../../api/keys";
-import { stepUpUrl } from "../../api/ops";
 import { useUI } from "../../ui/overlay-context";
 
 export const useTeams = () => useQuery({ queryKey: ["teams"] as const, queryFn: () => get<Team[]>(api("teams")) });
@@ -50,16 +49,13 @@ export function usePolicyWording() {
   };
 }
 
-/** Called with a command's result: toasts the message, and sends the person to a fresh sign-in when the server asks for one (spec 14.1). */
+/** Called with a command's result: toasts the message(a step-up refusal is handled centrally by the API client, so only a cancelled one reaches here). */
 export function useOutcome(): <T extends object>(r: ApiResult<T>, okMsg?: string) => ApiResult<T> {
   const ui = useUI();
   return useCallback(
     (r, okMsg) => {
       if (r.ok) {
         ui.toast(okMsg ?? r.msg, "ok");
-      } else if (r.needs === "step_up") {
-        ui.toast("Sign in again to confirm this change.", "warn");
-        setTimeout(() => window.location.assign(stepUpUrl()), 700);
       } else {
         ui.toast(r.msg, "error");
       }

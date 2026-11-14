@@ -90,6 +90,74 @@ describe("Kill dialog", () => {
   });
 });
 
+describe("Step-up and the notify list", () => {
+  const stepUp = { status: 403, body: { ok: false, msg: "Sign in again to confirm this change.", needs: "step_up", rule: { kind: "step-up", id: "STEP-UP", windowSec: 300, signedInSecAgo: 2520, action: "kill.factory" } } };
+  beforeEach(() => window.sessionStorage.clear());
+
+  it("explains the step-up refusal, keeps the draft across Sign in again, and restores it in the reopened dialog", async () => {
+    const calls = await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 1, workOrders: 0, running: 0, slots: 0, prs: 0 } }), "POST /api/v1/stops": () => stepUp });
+    act(() => actions?.kill("factory", null));
+    await screen.findByText("Kill the whole factory");
+    fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Credential leak suspected" } });
+    fireEvent.click(screen.getByLabelText("Cancel in-flight work"));
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "KILL FACTORY" } });
+    fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
+    const note = await screen.findByText(/For safety, a kill needs a sign-in within the last 5 min\. You signed in 42 min ago\./);
+    expect(note).toBeTruthy();
+    expect(screen.queryByText("Sign in again to confirm this change.")).toBeNull();
+    fireEvent.click(document.getElementById("stepup-go") as HTMLElement);
+    const saved = JSON.parse(window.sessionStorage.getItem("gantry.stepup.draft") ?? "null");
+    expect(saved).toMatchObject({ kind: "kill", scope: "factory", values: { reason: "Credential leak suspected", mode: "cancel", confirm: "KILL FACTORY" } });
+    expect(posts(calls, "/api/v1/stops")).toHaveLength(1);
+    // back from the sign-in: the same dialog, same typed values, nothing sent until the final click
+    cleanup();
+    await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 1, workOrders: 0, running: 0, slots: 0, prs: 0 } }), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Factory killed." } }) });
+    act(() => actions?.kill("factory", null));
+    await screen.findByText("Kill the whole factory");
+    expect((document.getElementById("kill-reason") as HTMLTextAreaElement).value).toBe("Credential leak suspected");
+    expect((document.getElementById("kill-confirm") as HTMLInputElement).value).toBe("KILL FACTORY");
+    expect((screen.getByLabelText("Cancel in-flight work") as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
+    expect(await screen.findByText("Factory killed.")).toBeTruthy();
+    expect(window.sessionStorage.getItem("gantry.stepup.draft")).toBeNull();
+  });
+
+  it("clears the draft when the dialog is cancelled", async () => {
+    window.sessionStorage.setItem("gantry.stepup.draft", JSON.stringify({ kind: "kill", scope: "factory", id: null, values: { reason: "x y z w v" }, at: Date.now() }));
+    await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 1, workOrders: 0, running: 0, slots: 0, prs: 0 } }) });
+    act(() => actions?.kill("factory", null));
+    await screen.findByText("Kill the whole factory");
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(window.sessionStorage.getItem("gantry.stepup.draft")).toBeNull();
+  });
+
+  it("restore shows the same prompt", async () => {
+    await start({ "POST /api/v1/stops/factory%3A/restore": () => stepUp }, { me: { factory: { killed: { by: "p-asha", at: Date.now() - 60_000, reason: "Runaway", mode: "hold", restoreApprovals: [] } } } });
+    act(() => actions?.restore("factory", null));
+    await screen.findByText("Restore the factory");
+    fireEvent.change(document.getElementById("rsn-text") as HTMLElement, { target: { value: "Credentials rotated" } });
+    fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
+    expect(await screen.findByText(/For safety, a restore needs a sign-in/)).toBeTruthy();
+    expect(document.getElementById("stepup-go")).toBeTruthy();
+  });
+
+  it("lists only destinations that will be delivered; the rest are greyed with a link to Integrations", async () => {
+    await start({
+      "GET /api/v1/stops/impact": () => ({ body: { workOrders: 0, running: 0, slots: 0, prs: 0 } }),
+      "GET /api/v1/projects/payments/routes/preview": () => ({ body: { event: "kill", items: [{ channel: "slack", target: "#incidents", deliverable: false, reason: "no slack connection is open to this project" }, { channel: "email", target: "project admins", deliverable: true, reason: "" }] } }),
+    });
+    act(() => actions?.kill("project", "payments"));
+    await screen.findByText("Kill Payments Platform");
+    await waitFor(() => expect(document.querySelectorAll("#notify-list li").length).toBe(2));
+    const [first, second] = [...document.querySelectorAll("#notify-list li")];
+    expect(first?.getAttribute("data-deliverable")).toBe("yes");
+    expect(first?.textContent).toBe("email project admins");
+    expect(second?.getAttribute("data-deliverable")).toBe("no");
+    expect(second?.textContent).toMatch(/not configured/);
+    expect(second?.querySelector("a")?.getAttribute("href")).toBe("#/integrations");
+  });
+});
+
 describe("Restore dialog", () => {
   const killed = { by: "p-asha", at: Date.now() - 60_000, reason: "Runaway agent spend", mode: "hold", restoreApprovals: [] };
   it("quotes who killed it, needs a reason and reports that a second admin is still needed", async () => {

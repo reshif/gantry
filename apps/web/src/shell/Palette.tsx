@@ -5,7 +5,7 @@ import { useCanMany } from "../api/can";
 import { ops } from "../api/ops";
 import { canSeeRoute, ROUTES } from "../lib/routes";
 import { hasCommand, runCommand } from "../lib/commands";
-import { navigate, openRecordRoute } from "../lib/router";
+import { navigate, navigateProject, openRecordRoute } from "../lib/router";
 import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { Dialog } from "../ui/Overlay";
 import { Icon } from "../ui/Icon";
@@ -50,8 +50,8 @@ export function usePaletteItems(projectId: string | null): Item[] {
     const items: Item[] = [];
     const stop = makeStopActions(ui, me);
     const guard = (i: number): Decision | undefined => (checks[i]?.pending ? undefined : checks[i]);
-    for (const r of ROUTES) if (r.nav !== false && canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, kind: "View", label: r.title, hint: `#${r.id}`, run: () => navigate(r.id) });
-    for (const p of me.projects) items.push({ key: `project:${p.id}`, kind: "Project", label: p.name, hint: `switch to ${p.key}`, run: () => { setProject(p.id); navigate("floor"); } });
+    for (const r of ROUTES) if (r.nav !== false && canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, kind: "View", label: r.title, hint: r.project ? (cp?.name ?? "project") : "factory", run: () => r.project && cp ? navigateProject(cp.id, r.id) : navigate(r.id) });
+    for (const p of me.projects) items.push({ key: `project:${p.id}`, kind: "Project", label: p.name, hint: `enter ${p.key}`, run: () => { setProject(p.id); navigateProject(p.id); } });
     const woList = Array.isArray(wos) ? wos : (wos?.items ?? []);
     for (const w of woList) {
       items.push({ key: `wo:${w.id}`, kind: "Work order", label: `${w.id} ${w.title}`, hint: `${w.repo} · ${w.state}`, run: () => openTraveler(w.id) });

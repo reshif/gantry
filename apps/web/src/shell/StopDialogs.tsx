@@ -4,7 +4,7 @@
  * Every result comes from the API: a refusal is shown inline, never swallowed.
  */
 import { useQueries } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
@@ -15,38 +15,68 @@ import { Dialog } from "../ui/Overlay";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { Field, LockNote, Segmented } from "../ui/primitives";
+import { StepUpNotice, clearStepUpDraft, draftFor, isStepUp, registerStepUpDraft } from "../ui/stepup";
+import type { CommandRefusal } from "../api/client";
 
 type Scope = "factory" | "project" | "workorder";
 
-interface KillRoute {
-  enabled?: boolean;
-  event?: string;
-  dest?: Array<{ channel: string; target: string }>;
+interface PreviewItem {
+  channel: string;
+  target: string;
+  deliverable: boolean;
+  reason: string;
 }
 
-/** Notification routes for the kill event of the projects a kill touches. A project whose routes cannot be read adds none. */
-function useKillRoutes(projectIds: string[]): string[] {
+/** What the event would really reach, per project (GET .../routes/preview resolves each destination against the connected integrations, as the notifier does). */
+function useNotifyPreview(event: "kill" | "restore", projectIds: string[]): PreviewItem[] {
   const qs = useQueries({
     queries: projectIds.map((id) => ({
-      queryKey: ["notifications", "kill-routes", id],
-      queryFn: () => get<KillRoute[] | { items: KillRoute[] }>(api(`projects/${encodeURIComponent(id)}/routes`)),
+      queryKey: ["notifications", "preview", event, id],
+      queryFn: () => get<{ items: PreviewItem[] }>(api(`projects/${encodeURIComponent(id)}/routes/preview`), { event }),
       retry: false,
       staleTime: 30_000,
     })),
   });
-  const out: string[] = [];
+  const out = new Map<string, PreviewItem>();
   for (const q of qs) {
-    const d = q.data;
-    const rows = Array.isArray(d) ? d : (d?.items ?? []);
-    for (const r of rows) {
-      if (!r.enabled || r.event !== "kill") continue;
-      for (const x of r.dest ?? []) {
-        const s = `${x.channel} ${x.target}`;
-        if (!out.includes(s)) out.push(s);
-      }
+    for (const x of q.data?.items ?? []) {
+      const k = `${x.channel} ${x.target}`;
+      const prev = out.get(k);
+      if (!prev || (!prev.deliverable && x.deliverable)) out.set(k, x);
     }
   }
-  return out;
+  return [...out.values()].sort((a, b) => Number(b.deliverable) - Number(a.deliverable));
+}
+
+const missing = (x: PreviewItem): string => (/^no |removed/.test(x.reason) ? "not configured" : x.reason || "not configured");
+
+function NotifyList({ items }: { items: PreviewItem[] }) {
+  const live = items.filter((x) => x.deliverable);
+  return (
+    <div className="field" id="notify-list">
+      <div className="field-label">Who gets notified</div>
+      {items.length ? (
+        <ul className="plain-list mono small">
+          {items.map((x) => (
+            <li key={`${x.channel} ${x.target}`} className={x.deliverable ? "" : "muted notify-off"} data-deliverable={x.deliverable ? "yes" : "no"}>
+              {x.channel} {x.target}
+              {x.deliverable ? null : (
+                <>
+                  {" "}
+                  <span className="small">
+                    {missing(x)} · <a href="#/integrations">set up in Integrations</a>
+                  </span>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted small">No notification routes are set for this event. Add one in Notifications.</p>
+      )}
+      {items.length && !live.length ? <p className="muted small">Nothing here is connected yet, so nobody will be told automatically. The event is still recorded in the audit log.</p> : null}
+    </div>
+  );
 }
 
 const Impact = ({ label, value }: { label: string; value: number | undefined }) => (
@@ -64,11 +94,19 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   const project = me?.projects.find((p) => p.id === projectId) ?? null;
   const d = useCan(`kill.${scope}`, projectId ? { project: projectId } : {});
   const imp = useKillImpact(scope, id, d.allowed && !d.pending && (scope === "factory" || !!id));
-  const routes = useKillRoutes(scope === "factory" ? (me?.projects ?? []).map((p) => p.id) : projectId ? [projectId] : []);
-  const [reason, setReason] = useState("");
-  const [mode, setMode] = useState<"hold" | "cancel">("hold");
-  const [confirm, setConfirm] = useState("");
+  const routes = useNotifyPreview("kill", scope === "factory" ? (me?.projects ?? []).map((p) => p.id) : projectId ? [projectId] : []);
+  // a step-up round trip leaves what was typed in sessionStorage
+  const saved = draftFor("kill", scope, id);
+  const [reason, setReason] = useState(typeof saved?.reason === "string" ? saved.reason : "");
+  const [mode, setMode] = useState<"hold" | "cancel">(saved?.mode === "cancel" ? "cancel" : "hold");
+  const [confirm, setConfirm] = useState(typeof saved?.confirm === "string" ? saved.confirm : "");
   const [err, setErr] = useState("");
+  const [step, setStep] = useState<CommandRefusal | null>(null);
+  useEffect(() => registerStepUpDraft(() => ({ kind: "kill", scope, id, values: { reason, mode, confirm } })), [scope, id, reason, mode, confirm]);
+  const close = () => {
+    clearStepUpDraft();
+    onClose();
+  };
   const [busy, setBusy] = useState(false);
   if (!me) return null;
   const phrase = scope === "factory" ? "KILL FACTORY" : scope === "project" ? (project?.name ?? "") : null;
@@ -88,11 +126,14 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
     const r = await ops.kill(scope as StopScope, scope === "factory" ? null : id, { reason: reason.trim(), mode, confirmText: phrase ? confirm : null });
     setBusy(false);
     if (!r.ok) {
-      setErr(r.msg);
+      if (isStepUp(r)) {
+        setErr("");
+        setStep(r);
+      } else setErr(r.msg);
       return;
     }
     ui.toast(r.msg, "warn");
-    onClose();
+    close();
   };
   return (
     <Dialog
@@ -100,7 +141,7 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
       kicker={`Kill switch · ${scope}`}
       wide
       sub={`A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused${scope === "workorder" ? " for this work order." : " until someone restores it."}`}
-      onClose={onClose}
+      onClose={close}
       body={
         <div className="form-grid">
           <LockNote decision={d.pending ? null : d} what="This kill switch" />
@@ -123,23 +164,13 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
           ) : (
             <p className="muted small">The work order moves to Killed; its open PR becomes a draft. It stays killed unless someone permitted restores it.</p>
           )}
-          <div className="field">
-            <div className="field-label">Who gets notified</div>
-            {routes.length ? (
-              <ul className="plain-list mono small">
-                {routes.map((x) => (
-                  <li key={x}>{x}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted small">No kill routes configured. Add one in Notifications.</p>
-            )}
-          </div>
+          <NotifyList items={routes} />
           {phrase ? (
             <Field label={`Type ${phrase} to confirm`} htmlFor="kill-confirm">
               <input id="kill-confirm" className="input mono" autoComplete="off" placeholder={phrase} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
             </Field>
           ) : null}
+          {step ? <StepUpNotice result={step} what="a kill" draft={{ kind: "kill", scope, id, values: { reason, mode, confirm } }} /> : null}
           <div className="form-err" role="alert">
             {err}
           </div>
@@ -161,8 +192,16 @@ export function RestoreDialog({ scope, id, onClose }: { scope: Scope; id: string
   const projectId = scope === "project" ? id : scope === "workorder" ? (wo?.project ?? null) : null;
   const project = me?.projects.find((p) => p.id === projectId) ?? null;
   const d = useCan(`restore.${scope}`, projectId ? { project: projectId } : {});
-  const [reason, setReason] = useState("");
+  const routes = useNotifyPreview("restore", scope === "factory" ? (me?.projects ?? []).map((p) => p.id) : projectId ? [projectId] : []);
+  const saved = draftFor("restore", scope, id);
+  const [reason, setReason] = useState(typeof saved?.reason === "string" ? saved.reason : "");
   const [err, setErr] = useState("");
+  const [step, setStep] = useState<CommandRefusal | null>(null);
+  useEffect(() => registerStepUpDraft(() => ({ kind: "restore", scope, id, values: { reason } })), [scope, id, reason]);
+  const close = () => {
+    clearStepUpDraft();
+    onClose();
+  };
   const [busy, setBusy] = useState(false);
   if (!me) return null;
   const k = scope === "factory" ? me.factory.killed : scope === "project" ? project?.killed : wo?.killed;
@@ -177,24 +216,30 @@ export function RestoreDialog({ scope, id, onClose }: { scope: Scope; id: string
     const r = await ops.restore(scope as StopScope, scope === "factory" ? null : id, reason.trim());
     setBusy(false);
     if (!r.ok) {
-      setErr(r.msg);
+      if (isStepUp(r)) {
+        setErr("");
+        setStep(r);
+      } else setErr(r.msg);
       return;
     }
     ui.toast(r.msg, "ok");
-    onClose();
+    close();
   };
   return (
     <Dialog
       title={`Restore ${label}`}
       kicker="Kill switch · restore"
       sub={`${k ? `Killed by ${actor(k.by).name} at ${fmt.stamp(k.at)}: ${k.reason}. ` : ""}${scope === "factory" ? "Restoring the factory needs two Factory Admins." : ""}`}
-      onClose={onClose}
+      onClose={close}
       body={
         <div className="form-grid">
           <LockNote decision={d.pending ? null : d} what="Restoring" />
           <Field label="Reason" htmlFor="rsn-text">
             <textarea id="rsn-text" className="input" rows={3} placeholder="Why is it safe to restore?" value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
+          <NotifyList items={routes} />
+          <p className="muted small">Restoring always needs a fresh sign-in, and restoring the whole factory needs two Factory Admins when that is set in Security.</p>
+          {step ? <StepUpNotice result={step} what="a restore" draft={{ kind: "restore", scope, id, values: { reason } }} /> : null}
           <div className="form-err" role="alert">
             {err}
           </div>

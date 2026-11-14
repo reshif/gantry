@@ -13,7 +13,7 @@ import { evalDispatch, trustEvaluate } from "./handlers/evals.js";
 import { learningRefresh } from "./handlers/learning.js";
 import { mergeRequest } from "./handlers/merge.js";
 import { chainVerify, flowTimer, githubEvent, githubReconcile, triggerEvaluate, triggerTick } from "./handlers/misc.js";
-import { onboardingAssess, onboardingMerge, onboardingOpenPr, onboardingSync, onboardingVerify } from "./handlers/onboarding.js";
+import { onboardingAgentCollect, onboardingAssess, onboardingMerge, onboardingOpenPr, onboardingSync, onboardingVerify } from "./handlers/onboarding.js";
 import { reaperSweep } from "./handlers/reaper.js";
 import { publishJob, runResult } from "./handlers/result.js";
 import { stopEnforce } from "./handlers/stop.js";
@@ -45,6 +45,7 @@ export const HANDLERS: Handlers = {
   "onboarding.merge": onboardingMerge,
   "onboarding.verify": onboardingVerify,
   "onboarding.sync": onboardingSync,
+  "onboarding.agent_collect": onboardingAgentCollect,
 };
 
 export function buildDeps(pool: pg.Pool, cfg: WorkerConfig, log: Logger, over: Partial<Deps> = {}): Deps {

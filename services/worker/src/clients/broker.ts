@@ -30,6 +30,8 @@ export type PublishOutcome =
 export interface PullState {
   pullRequest: { number: number; state: "open" | "closed" | "merged"; draft: boolean; headSha: string | null; mergeCommitSha?: string | null; mergedAt?: string | null };
   checks: unknown[];
+  /** Commit statuses reported on the head (older CI reporting); 0 when none. */
+  statusCount?: number;
   mergeable: boolean | null;
   mergeableState: string | null;
 }

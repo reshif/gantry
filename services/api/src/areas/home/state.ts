@@ -25,7 +25,7 @@ export async function loadHomeWorkOrders(db: Queryable, orgId: string, catalog: 
   const [wos, gates, votes, convs] = await Promise.all([
     db.query<WoRow>(
       `select id, project_id, repo_id, title, class, priority, source, position, state, submitter, risk, sla_due_at, closed_at, created_at, data from work_orders
-       where org_id = $1 and source <> 'eval' and (state not in ${OPEN} or state = 'killed' or closed_at >= $2) order by created_at`,
+       where org_id = $1 and source not in ('eval','onboarding') and (state not in ${OPEN} or state = 'killed' or closed_at >= $2) order by created_at`,
       [orgId, since],
     ),
     db.query<{ id: string; wo_id: string; gate_id: string; opened_at: Date }>(`select id, wo_id, gate_id, opened_at from gate_instances where org_id = $1 and status = 'open'`, [orgId]),

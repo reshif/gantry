@@ -191,7 +191,7 @@ describe("Projects: templates and wizard", () => {
     fireEvent.click(await byId("prj-wz-next"));
     expect((await screen.findByRole("alert")).textContent).toMatch(/Name the project/);
     fireEvent.change(await byId("prj-wz-name"), { target: { value: "Orders Hub" } });
-    fireEvent.click(document.getElementById("prj-wz-team-growth")!);
+    fireEvent.change(await byId("prj-wz-team-add"), { target: { value: "growth" } });
     fireEvent.click(await byId("prj-wz-next"));
     fireEvent.change(await byId("prj-wz-repo-add"), { target: { value: "bad name" } });
     fireEvent.click(await byId("prj-wz-repo-go"));
@@ -220,7 +220,7 @@ describe("Projects: templates and wizard", () => {
     fireEvent.click(await byId("prj-new"));
     fireEvent.click(await byId("prj-wz-next"));
     fireEvent.change(await byId("prj-wz-name"), { target: { value: "Payments" } });
-    fireEvent.click(document.getElementById("prj-wz-team-growth")!);
+    fireEvent.change(await byId("prj-wz-team-add"), { target: { value: "growth" } });
     fireEvent.click(await byId("prj-wz-next"));
     expect((await screen.findByRole("alert")).textContent).toMatch(/already exists/);
     expect(calls.some((c) => c.method === "POST" && c.path !== "/api/v1/can")).toBe(false);
@@ -250,6 +250,36 @@ describe("Project config", () => {
     expect(add.getAttribute("data-reason")).toMatch(/No role holds flow.edit/);
     expect(document.querySelector(".lock-note")?.textContent).toMatch(/Read-only for you: flow settings/);
     expect((await byId("pcf-gmode-G3d")).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("flow tab: gates read by name with the code beside, their kind and approvals; locked gates say why and cannot be switched", async () => {
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-flow"));
+    const row = (await byId("pcf-gmode-G0G1")).closest("tr") as HTMLElement;
+    expect(row.querySelector("th")?.textContent).toMatch(/Brief confirmed\s*G0\+G1/);
+    expect(row.textContent).toMatch(/person · 1 approval: the submitter, or Line Lead/);
+    const auto = (await byId("pcf-gmode-G4")).closest("tr") as HTMLElement;
+    expect(auto.textContent).toMatch(/automatic · No approvals/);
+    for (const id of ["G0G1", "G3G3s", "G4", "G5"]) {
+      expect(document.getElementById(`pcf-gate-${id}`), id).toBeNull();
+      expect(document.getElementById(`pcf-gate-lock-${id}`)?.textContent, id).toMatch(/always on/);
+    }
+    expect(document.getElementById("pcf-gate-lock-G5")?.getAttribute("title")).toMatch(/No agent merges on its own authority/);
+    // a gate that may be turned off asks first, then sends the audited, versioned change
+    fireEvent.click(await byId("pcf-gate-G3d"));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn off" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "flow.gates.G3d.enabled", value: false }));
+    expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toBe("7");
+  });
+
+  it("flow tab: a regulated project keeps every gate on, with the reason", async () => {
+    withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, regulated: true }, RISK] }) });
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-flow"));
+    await byId("pcf-gmode-G3d");
+    expect(document.getElementById("pcf-gate-G3d")).toBeNull();
+    expect(document.getElementById("pcf-gate-lock-G3d")?.getAttribute("title")).toMatch(/Regulated projects keep every gate on/);
   });
 
   it("flow tab: toggles a station, sets WIP and slots, changes a gate mode, and moves a station", async () => {

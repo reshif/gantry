@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
@@ -9,6 +11,7 @@ import { OverlayProvider } from "../ui/Overlay";
 import ConsoleView, { resetConsoleLocal } from "./console";
 import { ExplainDenial } from "./console/ExplainDenial";
 import { SseReader } from "./console/api";
+import { Markdown } from "./console/Markdown";
 import { plan } from "./console/slash";
 
 type Out = { status?: number; body: unknown } | { sse: string; status?: number } | { open: (signal: AbortSignal | undefined) => ReadableStream<Uint8Array> };
@@ -22,6 +25,8 @@ const PAYMENTS = project("payments", "Payments Platform");
 const RISK = project("risk", "Risk and Compliance");
 
 const STATUS = { configured: true, vendor: "anthropic", model: "claude-test-1", actionsEnabled: false, version: 0, retentionDays: 90, tools: [] };
+const KINDS: Array<[string, string, string]> = [["submit", "propose_submit_work_order", "submit a work order"], ["approve_gate", "propose_approve_gate", "approve a gate"], ["halt", "propose_halt", "halt a repo line or project"], ["kill", "propose_kill", "kill a work order, project or the factory"]];
+const rights = (allowed: (k: string) => boolean) => KINDS.map(([kind, tool, does]) => ({ kind, tool, does, right: `console.propose.${kind}`, name: `Console: propose ${kind}`, allowed: allowed(kind), reason: allowed(kind) ? "Role matrix: Factory Admin on the factory may do it." : "No role held includes it.", needs: allowed(kind) ? "" : `Ask a Factory Admin to give you 'Console: propose ${kind}'.` }));
 const NO_MODEL = { configured: false, code: "no_model_configured", reason: "No model is configured, so the console cannot answer questions yet. Ask a Factory Admin to connect a model vendor and set a default model in Models.", actionsEnabled: false, version: 0, retentionDays: 90, tools: [] };
 
 const sse = (...evs: Array<[string, unknown]>): string => evs.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
@@ -221,14 +226,6 @@ describe("Console (legacy console.js on the real API)", () => {
       expect(document.querySelector("[id^='con-ex-appr-']")).toBeNull();
     });
 
-    it("an action command says actions are off and calls nothing", async () => {
-      const calls = setup();
-      mount();
-      await ask("/halt payments duplicate refunds");
-      await waitFor(() => expect(text()).toContain("Console actions are switched off for this factory"));
-      expect(calls.some((c) => c.path.startsWith("/api/v1/console/tools/"))).toBe(false);
-    });
-
     it("unknown or incomplete commands answer with help, and /help lists the commands", async () => {
       setup();
       mount();
@@ -252,13 +249,13 @@ describe("Console (legacy console.js on the real API)", () => {
   });
 
   describe("confirm cards (actions on)", () => {
-    const ON = { "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: true, version: 1 } }) };
+    const ON = { "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: true, canUse: true, isFactoryAdmin: true, proposals: rights(() => true) } }) };
     const tool = (name: string, p: object) => ({ [`POST /api/v1/console/tools/${name}`]: () => ({ body: { ok: true, tool: name, result: { proposed: "PROP-1" }, proposals: [p], cited: [] } }) });
 
     it("a halt asks for a reason, then calls the ordinary endpoint with via console and an Idempotency-Key", async () => {
       const calls = setup({ ...ON, ...tool("propose_halt", proposal()), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform halted." } }) });
       mount();
-      await waitFor(() => expect(document.getElementById("con-actions")).toBeTruthy());
+      await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
       await ask("/halt payments duplicate refunds");
       const ok = await firstOf("[id^='con-cf-ok-']");
       expect(calls.find((c) => c.path === "/api/v1/console/tools/propose_halt")!.body.input).toEqual({ scope: "project", id: "payments", reason: "duplicate refunds" });
@@ -282,7 +279,7 @@ describe("Console (legacy console.js on the real API)", () => {
     it("a kill needs the typed phrase and carries the in-flight choice", async () => {
       const calls = setup({ ...ON, ...tool("propose_kill", proposal({ kind: "kill", title: "Kill Payments Platform", phrase: "Payments Platform", danger: true, call: { method: "POST", path: "/api/v1/stops", body: { scope: "project", id: "payments", mode: "kill", reason: "bad deploy", inFlight: "hold", confirmText: "", via: "console" }, idempotent: true }, perm: { action: "kill.project", project: "payments" } })), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Killed." } }) });
       mount();
-      await waitFor(() => expect(document.getElementById("con-actions")).toBeTruthy());
+      await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
       await ask("/kill payments bad deploy");
       const card = await waitFor(() => { const c = document.querySelector<HTMLElement>(".ccard-confirm.is-danger"); if (!c) throw new Error("no card"); return c; });
       const ok = card.querySelector<HTMLElement>("[id^='con-cf-ok-']")!;
@@ -303,7 +300,7 @@ describe("Console (legacy console.js on the real API)", () => {
         "POST /api/v1/console/explain": () => ({ body: { ok: true, mode: "trace", explanation: null, note: "No model is configured, so this is the policy engine's own trace.", person: "Asha", action: "line.halt (Halt)", decision: { allowed: false, reason: "x", rule: { id: "MATRIX" }, needs: "" }, trace: ["Roles in scope: none.", "Deciding rule: MATRIX Role matrix."] } }),
       });
       mount();
-      await waitFor(() => expect(document.getElementById("con-actions")).toBeTruthy());
+      await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
       await ask("/halt payments dup");
       const perm = await waitFor(() => { const e = document.querySelector(".perm.neg"); if (!e) throw new Error("no perm"); return e; });
       expect(perm.textContent).toContain("You can't do this: Needs Line Lead. Only a Line Lead may halt this line.");
@@ -336,7 +333,7 @@ describe("Console (legacy console.js on the real API)", () => {
     it("a refusal from the endpoint ends the card as failed and says why", async () => {
       setup({ ...ON, ...tool("propose_halt", proposal()), "POST /api/v1/stops": () => ({ status: 403, body: { ok: false, msg: "Payments Platform is halted already." } }) });
       mount();
-      await waitFor(() => expect(document.getElementById("con-actions")).toBeTruthy());
+      await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
       await ask("/halt payments dup refunds");
       fireEvent.click(await firstOf("[id^='con-cf-ok-']"));
       await waitFor(() => expect(document.querySelector(".ccard-confirm.is-failed")).toBeTruthy());
@@ -356,30 +353,35 @@ describe("Console (legacy console.js on the real API)", () => {
       expect(document.querySelector(".mini-log")!.textContent).toContain("Payments Platform");
     });
 
-    it("the actions switch is locked with the reason without the right, and turning it on asks for a reason and sends the version", async () => {
-      const calls = setup({ "PUT /api/v1/console/settings": () => ({ body: { ok: true, msg: "Console actions are on.", actionsEnabled: true, version: 1 } }) }, ["security.manage"]);
+    it("the panel lists what the console can do for you with a check or lock and the reason; no global toggle; admins get the manage link", async () => {
+      setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: true, canUse: true, isFactoryAdmin: true, proposals: rights((k) => k !== "kill") } }) });
       const r = mount();
-      const sw = await byId("con-actions");
-      await waitFor(() => expect(sw.getAttribute("aria-disabled")).toBe("true"));
-      fireEvent.click(sw);
-      expect(calls.some((c) => c.method === "PUT")).toBe(false);
+      await waitFor(() => expect(document.getElementById("con-right-halt")).toBeTruthy());
+      expect(document.getElementById("con-actions")).toBeNull();
+      expect(document.getElementById("con-right-halt")!.className).toBe("ok");
+      const kill = document.getElementById("con-right-kill")!;
+      expect(kill.className).toBe("no");
+      expect(kill.getAttribute("data-tip")).toBe("No role held includes it.");
+      expect(kill.textContent).toContain("Ask a Factory Admin to give you 'Console: propose kill'");
+      expect(document.getElementById("con-manage-perms")).toBeTruthy();
       r.unmount();
       cleanup();
       canBatcher.clear();
-      const calls2 = setup({ "PUT /api/v1/console/settings": () => ({ body: { ok: true, msg: "Console actions are on.", actionsEnabled: true, version: 1 } }) });
+      // An Engineer: nothing allowed, read-only message, no admin link.
+      setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: false, canUse: true, isFactoryAdmin: false, proposals: rights(() => false) } }) });
       mount();
-      const sw2 = await byId("con-actions");
-      await waitFor(() => expect(sw2.getAttribute("aria-disabled")).not.toBe("true"));
-      fireEvent.click(sw2);
-      const dlg = await waitFor(() => { const d = document.querySelector<HTMLElement>("[role='dialog']"); if (!d) throw new Error("no dialog"); return d; });
-      expect(dlg.textContent).toContain("Turn console actions on");
-      const ta = dlg.querySelector<HTMLElement>("input, textarea")!;
-      type(ta, "pilot with the admins");
-      fireEvent.click(within(dlg).getByText("Turn on"));
-      await waitFor(() => expect(calls2.some((c) => c.method === "PUT" && c.path === "/api/v1/console/settings")).toBe(true));
-      const put = calls2.find((c) => c.method === "PUT")!;
-      expect(put.body).toEqual({ actionsEnabled: true, reason: "pilot with the admins" });
-      expect(put.headers["if-match"]).toBe("0");
+      await waitFor(() => expect(document.getElementById("con-readonly")).toBeTruthy());
+      expect(document.querySelectorAll("#con-rights li.ok").length).toBe(0);
+      expect(document.getElementById("con-manage-perms")).toBeNull();
+    });
+
+    it("a slash action the person has no console right for says which right is missing and calls nothing", async () => {
+      const calls = setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: false, canUse: true, proposals: rights(() => false) } }) });
+      mount();
+      await waitFor(() => expect(document.getElementById("con-right-halt")).toBeTruthy());
+      await ask("/halt payments duplicate refunds");
+      await waitFor(() => expect(text()).toContain("Console: propose halt"));
+      expect(calls.some((c) => c.path.startsWith("/api/v1/console/tools/propose_"))).toBe(false);
     });
 
     it("clears the saved conversation", async () => {
@@ -437,5 +439,140 @@ describe("slash parsing and the stream reader", () => {
     const r = new SseReader();
     expect(r.push('event: text\ndata: {"delta":"he')).toEqual([]);
     expect(r.push('llo"}\n\nevent: x\ndata: {not json}\n\nevent: done\ndata: {"messageId":"m"}\n\n')).toEqual([{ event: "text", data: { delta: "hello" } }, { event: "done", data: { messageId: "m" } }]);
+  });
+});
+
+describe("Console model picker", () => {
+  const M = (id: string, name: string, vendor: string, vendorName: string, tier: string, inPrice: number, outPrice: number) => ({ id, name, vendor, vendorName, tier, canonical: id, inPrice, outPrice, context: 200000 });
+  const MODELS = [M("claude-sonnet-5-5", "Claude Sonnet 5.5", "anthropic", "Anthropic", "standard", 3, 15), M("claude-haiku-5-5", "Claude Haiku 5.5", "anthropic", "Anthropic", "fast", 1, 5), M("bedrock-claude-opus-5-5", "Claude Opus 5.5 (Bedrock)", "bedrock", "Amazon Bedrock", "frontier", 5, 25)];
+  const WITH = { ...STATUS, models: MODELS, choice: null, defaultModel: "claude-sonnet-5-5", effectiveModel: "claude-sonnet-5-5", canManageModels: true };
+
+  it("lists the callable models grouped by vendor with tier and price, defaulting to the routing default", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: WITH }) });
+    mount();
+    const sel = (await byId("con-model")) as HTMLSelectElement;
+    expect(document.getElementById("con-mode")).toBeNull();
+    expect([...sel.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Anthropic", "Amazon Bedrock"]);
+    expect(sel.value).toBe("claude-sonnet-5-5");
+    const opts = [...sel.options].map((o) => o.textContent);
+    expect(opts[0]).toContain("default");
+    expect(opts[1]).toContain("fast");
+    expect(opts[2]).toContain("frontier");
+    expect(opts[2]).toContain("5/25");
+  });
+
+  it("saves the person's choice on the server, and choosing the default clears it", async () => {
+    const calls = setup({ "GET /api/v1/console/status": () => ({ body: WITH }), "PUT /api/v1/console/model": () => ({ body: { ok: true, msg: "Saved." } }) });
+    mount();
+    const sel = (await byId("con-model")) as HTMLSelectElement;
+    fireEvent.change(sel, { target: { value: "claude-haiku-5-5" } });
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT" && c.path === "/api/v1/console/model")!.body).toEqual({ model: "claude-haiku-5-5" }));
+    fireEvent.change(sel, { target: { value: "claude-sonnet-5-5" } });
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT" && c.path === "/api/v1/console/model").at(-1)!.body).toEqual({ model: null }));
+  });
+
+  it("shows the saved choice when there is one", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: { ...WITH, choice: "claude-haiku-5-5", effectiveModel: "claude-haiku-5-5" } }) });
+    mount();
+    expect(((await byId("con-model")) as HTMLSelectElement).value).toBe("claude-haiku-5-5");
+  });
+
+  it("with nothing callable, a Factory Admin is offered Connect a model vendor", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: { ...NO_MODEL, models: [], canManageModels: true } }) });
+    mount();
+    const link = await byId("con-connect-vendor");
+    expect(link.textContent).toBe("Connect a model vendor");
+    expect(document.getElementById("con-mode")!.textContent).toBe("No model");
+    fireEvent.click(link);
+    expect(window.location.hash).toContain("models");
+  });
+
+  it("with nothing callable, anyone else is told to ask a Factory Admin", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: { ...NO_MODEL, models: [], canManageModels: false } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("con-mode-reason")!.textContent).toContain("Ask a Factory Admin"));
+    expect(document.getElementById("con-connect-vendor")).toBeNull();
+  });
+
+  it("the status line sits below the header rule: no negative margin pulls it into the heading", () => {
+    const css = readFileSync(resolve(__dirname, "../styles/views/console.css"), "utf8");
+    const rule = /\.con-mode-line \{[^}]*\}/.exec(css)![0];
+    expect(rule).not.toMatch(/margin:[^;]*calc\(-/);
+  });
+});
+
+describe("Console transcript: no duplicates, finalised answers, retry", () => {
+  const thread = (messages: unknown[]) => ({ body: { id: "ct-1", title: "x", pinned: [], createdAt: 0, updatedAt: 0, expiresAt: 0, retentionDays: 90, messages } });
+  const userMsg = (id: string, t: string, at = Date.now()) => ({ id, threadId: "ct-1", role: "user", text: t, at, data: {} });
+  const answer = (id: string, t: string, at = Date.now() + 5) => ({ id, threadId: "ct-1", role: "assistant", text: t, at, data: { mode: "model", cited: [], proposals: [] } });
+
+  it("shows the question once when the saved copy arrives mid-stream, and the saved answer replaces the partial one", async () => {
+    const enc = new TextEncoder();
+    let ctl!: ReadableStreamDefaultController<Uint8Array>;
+    let saved = false;
+    const full = "First paragraph.\n\n**Slow gates:** none.\n\n- one\n- two";
+    setup({
+      "POST /api/v1/console/messages": () => ({ open: () => new ReadableStream({ start(c) { ctl = c; c.enqueue(enc.encode(sse(["thread", { threadId: "ct-1", messageId: "cm-1", created: true }], ["text", { delta: "First paragraph." }]))); } }) }),
+      "GET /api/v1/console/threads/ct-1": () => thread(saved ? [userMsg("cm-1", "get going"), answer("cm-2", full)] : [userMsg("cm-1", "get going")]),
+    });
+    mount();
+    await ask("get going");
+    await waitFor(() => expect(text()).toContain("First paragraph."));
+    await waitFor(() => expect(document.querySelectorAll(".msg-user").length).toBe(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.querySelectorAll(".msg-user").length).toBe(1);
+    expect(text()).toContain("Model · streaming");
+    saved = true;
+    ctl.enqueue(enc.encode(sse(["done", { messageId: "cm-2", text: full, mode: "model", model: "claude-test-1", cited: [], proposals: [] }])));
+    ctl.close();
+    await waitFor(() => expect(document.querySelector("#con-msg-text-cm-2 strong")?.textContent).toBe("Slow gates:"));
+    expect(text()).not.toContain("streaming");
+    expect(text()).not.toContain("**");
+    expect(document.querySelectorAll("#con-msg-text-cm-2 li").length).toBe(2);
+    expect(document.querySelectorAll(".msg-user").length).toBe(1);
+    expect(document.querySelectorAll(".msg-factory").length).toBe(1);
+  });
+
+  it("a failed answer offers Retry, which asks again without showing the question twice", async () => {
+    let posts = 0;
+    const errText = "The model did not answer: The model vendor could not be reached.";
+    setup({
+      "POST /api/v1/console/messages": () => (++posts === 1
+        ? { sse: sse(["thread", { threadId: "ct-1", messageId: "cm-1", created: true }], ["error", { code: "api_error", msg: errText, messageId: "cm-2" }]) }
+        : { sse: sse(["thread", { threadId: "ct-1", messageId: "cm-3", created: false }], ["done", { messageId: "cm-4", text: "All good.", mode: "model", cited: [], proposals: [] }]) }),
+      "GET /api/v1/console/threads/ct-1": () => thread(posts < 2
+        ? [userMsg("cm-1", "check the pr", 1000), { id: "cm-2", threadId: "ct-1", role: "system", text: errText, at: 1001, data: { kind: "api_error" } }]
+        : [userMsg("cm-1", "check the pr", 1000), { id: "cm-2", threadId: "ct-1", role: "system", text: errText, at: 1001, data: { kind: "api_error" } }, userMsg("cm-3", "check the pr", Date.now()), answer("cm-4", "All good.", Date.now() + 5)]),
+    });
+    mount();
+    await ask("check the pr");
+    fireEvent.click(await byId("con-retry"));
+    await waitFor(() => expect(text()).toContain("All good."));
+    expect(posts).toBe(2);
+    expect(document.querySelectorAll(".msg-user").length).toBe(1);
+    expect(text()).not.toContain("could not be reached");
+    expect(document.getElementById("con-retry")).toBeNull();
+  });
+});
+
+describe("Markdown (assistant text is untrusted)", () => {
+  const html = (t: string) => { const d = document.createElement("div"); document.body.appendChild(d); const r = render(<Markdown text={t} />, { container: d }); return r.container; };
+  it("renders bold, italic, inline code, code blocks and lists", () => {
+    const c = html("**b** and *i* and `c`\n\n- a\n- b\n\n1. x\n2. y\n\n```\nconst a = 1;\n```");
+    expect(c.querySelector("strong")!.textContent).toBe("b");
+    expect(c.querySelector("em")!.textContent).toBe("i");
+    expect(c.querySelector("p code")!.textContent).toBe("c");
+    expect(c.querySelectorAll("ul li").length).toBe(2);
+    expect(c.querySelectorAll("ol li").length).toBe(2);
+    expect(c.querySelector("pre code")!.textContent).toBe("const a = 1;");
+  });
+  it("allows http(s) and hash links only, with rel=noopener, and never injects HTML", () => {
+    const c = html("[ok](https://x.dev/a) [bad](javascript:alert(1)) [in](#floor) <img src=x onerror=alert(1)> <script>alert(1)</script>");
+    const links = [...c.querySelectorAll("a")];
+    expect(links.map((a) => a.getAttribute("href"))).toEqual(["https://x.dev/a", "#floor"]);
+    expect(links[0]!.getAttribute("rel")).toContain("noopener");
+    expect(c.querySelector("img")).toBeNull();
+    expect(c.querySelector("script")).toBeNull();
+    expect(c.textContent).toContain("<img src=x onerror=alert(1)>");
   });
 });

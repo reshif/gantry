@@ -164,14 +164,20 @@ function defaultMessage(status: number): string {
   }
 }
 
-/**
- * Run a command. Resolves to `{ ok: true, msg, ...extra }` or a refusal value. Never rejects
- * (except for programmer errors such as an unserialisable body).
- */
-export async function command<T extends object = Record<string, unknown>>(
-  path: string,
-  opts: RequestOptions = {},
-): Promise<ApiResult<T>> {
+/* ---------- step-up (spec 14.1) ---------- */
+
+/** What the step-up prompt shows and what it resolves to. `error` is set when the sign-in itself failed (e.g. a different person). */
+export type StepUpOutcome = { ok: true } | { ok: false; error?: string };
+export type StepUpHandler = (refusal: CommandRefusal) => Promise<StepUpOutcome>;
+
+let stepUpHandler: StepUpHandler | null = null;
+/** Mounted once by the shell: every command refused with `needs: "step_up"` is routed through it (see ui/stepup.tsx). */
+export function setStepUpHandler(fn: StepUpHandler | null): void {
+  stepUpHandler = fn;
+}
+
+/** One attempt: send, read, shape. `key` is the idempotency key reused if the attempt is repeated. */
+async function attempt<T extends object>(path: string, opts: RequestOptions): Promise<ApiResult<T>> {
   let res: Response;
   try {
     res = await send(path, { method: "POST", ...opts });
@@ -189,6 +195,34 @@ export async function command<T extends object = Record<string, unknown>>(
     return { ...rest, ok: true, msg: typeof msg === "string" ? msg : "", status: res.status } as ApiResult<T>;
   }
   return refusalFrom(res.status, body, defaultMessage(res.status));
+}
+
+const isStepUpRefusal = (r: ApiResult<object>): r is CommandRefusal => !r.ok && r.needs === "step_up";
+
+/**
+ * Run a command. Resolves to `{ ok: true, msg, ...extra }` or a refusal value. Never rejects
+ * (except for programmer errors such as an unserialisable body).
+ *
+ * A step-up refusal (the server stopped before running anything) is handled here for every caller: the prompt asks the person to sign
+ * in again, and on success the same request is sent once more (same body, If-Match and Idempotency-Key). Cancel, failure or a second
+ * step-up refusal resolves to the refusal, so callers need no step-up code.
+ */
+export async function command<T extends object = Record<string, unknown>>(
+  path: string,
+  opts: RequestOptions = {},
+): Promise<ApiResult<T>> {
+  // Fix the key up front so a repeat is the same request, never a second create.
+  const first: RequestOptions = opts.idempotent === true ? { ...opts, idempotent: newKey() } : opts;
+  const r = await attempt<T>(path, first);
+  if (!isStepUpRefusal(r) || !stepUpHandler) return r;
+  let out: StepUpOutcome;
+  try {
+    out = await stepUpHandler(r);
+  } catch {
+    return r;
+  }
+  if (!out.ok) return out.error ? { ...r, msg: out.error } : r;
+  return attempt<T>(path, first);
 }
 
 /** GET returning the parsed JSON body. Throws ApiError on any non-2xx so queries can retry. */

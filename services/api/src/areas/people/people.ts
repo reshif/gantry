@@ -23,7 +23,7 @@ const bump = (tx: Tx, orgId: string, id: string): Promise<{ rows: Array<{ versio
 
 const versionOf = (p: Person): number => (p as Person & { version?: number }).version ?? 1;
 
-const factoryRolesOf = (p: Person): string => p.roles.filter((g) => g.scope === "factory").map((g) => g.role).join(",") || "none";
+const factoryRolesOf = (p: Person): string => p.roles.filter((g) => g.scope === "factory" && !g.via).map((g) => g.role).join(",") || "none";
 
 /** Invite: a person row in status `invited` (the policy engine grants nothing until they sign in), their teams and roles, an invites row, and an email through the outbox. */
 export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by: string, body: z.infer<typeof InviteBody>): Promise<CommandResult<{ person: Person; version: number }>> {
@@ -93,16 +93,17 @@ export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id:
   if (!role || role.level !== "factory") throw invalid("Pick a factory-level role (Factory Admin, Auditor or a custom factory role).");
   const p = st.people.find((x) => x.id === id);
   if (!p) throw notFound("No such person.");
-  const has = p.roles.some((g) => g.role === roleId && g.scope === "factory");
+  // Only the person's own grant can be granted or removed here; a role held through a team changes with the team (teams.ts).
+  const has = p.roles.some((g) => g.role === roleId && g.scope === "factory" && !g.via);
   const before = factoryRolesOf(p);
   if (has === add) return { msg: `${p.name} ${add ? "already is" : "is not"} ${role.name}.`, events: [], extra: { version: versionOf(p) }, changes: ["people"], project: null };
-  const nextRoles = add ? [...p.roles, { role: roleId, scope: "factory" }] : p.roles.filter((g) => !(g.role === roleId && g.scope === "factory"));
+  const nextRoles = add ? [...p.roles, { role: roleId, scope: "factory" }] : p.roles.filter((g) => !(g.role === roleId && g.scope === "factory" && !g.via));
   const checked = checkRoleChange(st.people, { actorId, targetId: id, nextRoles });
   if (!checked.ok) throw new Refusal(checked.error);
   if (add) await tx.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type, granted_by) values ($1,$2,$3,$4,'factory',$5)`, [orgId, `ra-${randomBytes(6).toString("hex")}`, id, roleId, actorId]);
   else await tx.query(`update role_assignments set revoked_at = now(), updated_at = now() where org_id = $1 and person_id = $2 and role_id = $3 and scope_type = 'factory' and revoked_at is null`, [orgId, id, roleId]);
   const v = (await bump(tx, orgId, id)).rows[0]!.version;
-  const after = nextRoles.filter((g) => g.scope === "factory").map((g) => g.role).join(",") || "none";
+  const after = nextRoles.filter((g) => g.scope === "factory" && !g.via).map((g) => g.role).join(",") || "none";
   return {
     msg: `${add ? "Granted" : "Removed"} ${role.name}${add ? " to " : " from "}${p.name}.`,
     events: [{ type: add ? "role.grant" : "role.revoke", category: "access", subject: { type: "person", id }, before, after, projectId: null }],

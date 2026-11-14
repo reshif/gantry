@@ -46,13 +46,13 @@ d("people and access", () => {
 
   describe("reads", () => {
     it("lists people with versions, teams and roles in the legacy shape", async () => {
-      const list = (await call(engineer, "GET", "/api/v1/people")).body as unknown as Array<Record<string, any>>;
+      const list = (await call(admin, "GET", "/api/v1/people")).body as unknown as Array<Record<string, any>>;
       const asha = list.find((p) => p.id === admin)!;
       expect(asha).toMatchObject({ name: "Asha Raman", status: "active", roles: [{ role: "factory_admin", scope: "factory" }], teams: ["platform"] });
       expect(typeof asha.version).toBe("number");
     });
     it("returns the matrix, roles and actions with the matrix version", async () => {
-      const r = await call(engineer, "GET", "/api/v1/access/matrix");
+      const r = await call(admin, "GET", "/api/v1/access/matrix");
       expect(r.status).toBe(200);
       expect(r.body.version).toBe(1);
       expect(r.body.matrix.factory_admin["policy.edit"]).toBe(true);
@@ -60,9 +60,9 @@ d("people and access", () => {
       expect(r.body.actions.length).toBeGreaterThan(20);
     });
     it("returns policies and freezes with versions", async () => {
-      const pols = (await call(engineer, "GET", "/api/v1/policies")).body as unknown as any[];
+      const pols = (await call(admin, "GET", "/api/v1/policies")).body as unknown as any[];
       expect(pols.find((p) => p.id === "POL-101")).toMatchObject({ enabled: true, version: 1 });
-      const fr = (await call(engineer, "GET", "/api/v1/freezes")).body as unknown as any[];
+      const fr = (await call(admin, "GET", "/api/v1/freezes")).body as unknown as any[];
       expect(fr.map((f) => f.id)).toContain("FRZ-08");
     });
     it("needs a signed-in person", async () => {
@@ -80,9 +80,10 @@ d("people and access", () => {
       expect(r.body.rules["MATRIX"]).toBeTruthy();
       expect((await call(admin, "GET", "/api/v1/people/nobody/effective-permissions")).status).toBe(404);
     });
-    it("limits effective-permission projects to what the viewer can see", async () => {
+    it("is itself a right: an Engineer (no people.view) cannot read anyone's effective permissions (default deny)", async () => {
       const r = await call(engineer, "GET", "/api/v1/people/p-tomas/effective-permissions");
-      expect(r.body.projects.map((p: any) => p.id)).toEqual(["payments"]);
+      expect(r.status).toBe(403);
+      expect(r.body.msg).toMatch(/Tom/);
     });
   });
 

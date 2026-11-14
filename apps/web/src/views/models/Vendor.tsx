@@ -70,12 +70,13 @@ export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; v
               const isDefault = routing.defaultModel === m.id;
               const lock = !perm.allowed ? perm
                 : !v.connected ? no(`Connect ${v.name} first.`)
+                : !m.enabled && m.invocable === false ? no("The model gateway speaks the Anthropic Messages API only, so this vendor's models cannot be switched on yet.")
                 : m.enabled && isDefault ? no("This is the factory default model. Pick another default first.")
                 : m.enabled && primaries.length ? no(`Primary model of ${primaries.map((a) => a.name).join(", ")}. Change those agents first.`) : null;
               return (
                 <tr key={m.id} className={m.enabled && v.connected ? "" : "md-off"}>
                   <td>
-                    <div>{m.name}{isDefault ? <Chip text="factory default" cls="chip-accent md-def" /> : null}</div>
+                    <div>{m.name}{isDefault ? <Chip text="factory default" cls="chip-accent md-def" /> : null}{m.needsPrice ? <Chip text="needs a price" cls="chip-warn" /> : null}{m.invocable === false ? <Chip text="gateway cannot call it yet" cls="chip-warn" /> : null}</div>
                     <div className="mono muted small md-id">
                       {m.id}
                       <Btn small kind="ghost" icon="x" id={`md-rm-${m.id}`} aria={`Remove ${m.name}`} cls="md-rm" guard={removeGuard(m.id, users)} onClick={() => ui.open((close) => <RemoveModelDialog v={v} m={m} close={close} />)} />
@@ -85,7 +86,7 @@ export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; v
                     <Toggle id={`mt-${m.id}`} checked={m.enabled} label={`Enable ${m.name}`} decision={lock} onChange={(on) => void (async () => { const r = await ops.setModelEnabled(m.id, on); ui.toast(r.msg, r.ok ? "ok" : "error"); })()} />
                   </td>
                   <td className="num mono">{fmt.k(m.context || 0)}</td>
-                  <td className="num mono">{m.inPrice || m.outPrice ? `$${m.inPrice} / $${m.outPrice}` : "self-hosted"}</td>
+                  <td className="num mono">{m.inPrice || m.outPrice ? `$${m.inPrice} / $${m.outPrice}` : m.needsPrice ? "enter a price" : "self-hosted"}</td>
                   <td>
                     {users.length ? (
                       <span className="md-users">{users.map((a) => <span key={a.id} className={`chip${a.model === m.id ? " chip-accent" : ""}`}>{a.name + (a.model === m.id ? "" : " (fallback)")}</span>)}</span>
@@ -100,6 +101,7 @@ export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; v
       <div className="panel-actions md-actions">
         <Btn label={v.connected ? "Update key or settings" : `Connect ${v.name}`} kind={v.connected ? undefined : "primary"} icon="key" id={`vendor-connect-${v.id}`} guard={perm} onClick={() => ui.open((close) => <ConnectDialog v={v} close={close} />)} />
         <Btn label="Add model" icon="plus" id={`vendor-addmodel-${v.id}`} guard={perm} onClick={() => ui.open((close) => <AddModelDialog v={v} vendors={vendors} close={close} />)} />
+        {v.connected && (v.template || v.custom || v.id === "anthropic") ? <Btn label="Refresh models" icon="refresh" id={`vendor-refresh-${v.id}`} guard={perm} onClick={() => void (async () => { const r = await ops.discoverVendorModels(v.id); ui.toast(r.msg, r.ok ? "ok" : "error"); })()} /> : null}
         {v.connected ? <Btn label="Disconnect" kind="ghost" id={`vendor-disc-${v.id}`} guard={perm} onClick={() => ui.open((close) => <DisconnectDialog v={v} routing={routing} agents={agents} close={close} />)} /> : null}
       </div>
     </section>

@@ -140,12 +140,27 @@ export interface Team {
   id: Id;
   name: string;
   desc: string;
+  /** Roles the team holds; its members inherit them while they are members (spec 8.9). Present on `GET /teams`. */
+  roles?: TeamGrant[];
+}
+
+/** One live role grant held by a team. */
+export interface TeamGrant {
+  id: string;
+  role: string;
+  /** "factory" or a project id. */
+  scope: string;
+  grantedBy: string | null;
+  /** Epoch ms; null = no expiry. */
+  expiresAt: Ms | null;
 }
 
 export interface RoleGrant {
   role: string;
   /** "factory" or a project id. */
   scope: string;
+  /** Set when the person holds the role through a team (the team id) rather than a grant of their own. */
+  via?: Id;
 }
 
 export interface Away {
@@ -318,25 +333,56 @@ export interface OnboardFinding {
   required?: boolean;
   /** What the assessment read to decide. Never a secret value. */
   detail?: string;
+  /** Where the finding comes from. `observed`: Gantry read it from the repository (always the case for ok, severity and required). `agent`: an explanation or suggestion the Onboarding Agent added on top of an observed finding. Absent on older data (read as observed). */
+  source?: "observed" | "agent";
+  /** The Onboarding Agent's own explanation of the finding; shown beside the observed detail, never in place of it. */
+  note?: string;
 }
 export interface OnboardPrFile {
   path: string;
   plus: number;
   minus: number;
   finding: string;
+  /** `agent` when the Onboarding Agent drafted the content of this file; `observed` when Gantry wrote it from the repository's own files. */
+  source?: "observed" | "agent";
+}
+/** Who made an assessment or drafted a pull request: the rule-based path, or a real run of the Onboarding Agent. */
+export interface OnboardAssessor {
+  mode: "rule-based" | "agent";
+  /** Why the agent did not run or its output was not used (only when mode is rule-based). */
+  reason?: string;
+  /** The agent run (a hidden carrier attempt) and what it ran as: only when mode is agent. */
+  runId?: string;
+  agent?: string;
+  version?: number;
+  model?: string;
+  instructionsHash?: string;
+  skills?: Record<string, number>;
+  costUsd?: number;
+  tokens?: number;
+  /** The agent's overall risk judgement and summary (assessment only). */
+  risk?: { level: "low" | "medium" | "high"; reason: string };
+  summary?: string;
+  /** Commands the agent found for unusual layouts. Suggestions, not observed facts. */
+  commands?: Partial<Record<"test" | "lint" | "build" | "install", string>>;
+  forPeople?: string[];
+  guidelineSuggestions?: string[];
 }
 export interface OnboardPr {
   number: number;
   title: string;
   branch: string;
   files: OnboardPrFile[];
-  checks: "pending" | "running" | "green" | "red";
+  /** `none`: nothing (no check run, no commit status) reported within the grace period after the head was pushed: the repo has no CI. */
+  checks: "pending" | "running" | "green" | "red" | "none";
   state: "open" | "merged" | "closed";
   reviewers: Id[];
   mergedBy: Id | null;
   /** The pull request on GitHub and its head commit (what a merge is requested for). */
   url?: string;
   headSha?: string;
+  /** When Gantry first saw this head commit (epoch ms): the grace period for "no CI" counts from it. */
+  headAt?: number;
 }
 export interface TimelineEntry {
   at: Ms;
@@ -356,8 +402,13 @@ export interface RepoOnboarding {
   busy?: "assessing" | "opening_pr" | "updating_pr" | "merging" | "verifying" | null;
   /** The last live verification (spec 11.3 "Verified means"): each check with its result. */
   verification?: { at: Ms; ok: boolean; trigger: "merge" | "manual" | "schedule"; unknown: boolean; checks: Array<{ id: string; label: string; ok: boolean; unknown?: boolean; detail: string; /** Set when this result is carried over from an earlier verification because the latest one did not run that check (the canary runs once a day). */ at?: number }> } | null;
-  /** The adapter the assessment ran with (stub: deterministic, reads the repo's facts; a model name when a key is configured). */
+  /** The adapter the assessment ran with: `rule-based` (deterministic, reads the repo's facts, no model) or `agent` (the Onboarding Agent ran on top of the observed facts). */
   adapter?: string;
+  /** Who assessed (see OnboardAssessor) and who drafted the pull request. */
+  assessor?: OnboardAssessor;
+  drafter?: OnboardAssessor;
+  /** A later assessment found the open onboarding PR out of date: it needs an update (approved in the session). */
+  prNeedsUpdate?: boolean;
   /** Guideline versions the assessment was made against. */
   guidelines?: { org: number; project: number };
 }
@@ -764,6 +815,8 @@ export interface Agent {
   spend7d: number;
   initials: string;
   evalScore: number;
+  /** Loaded with the built-in starter kit. */
+  builtin?: boolean;
 }
 
 export interface SkillVersion {
@@ -784,6 +837,8 @@ export interface Skill {
   projects: "all" | Id[];
   versions: SkillVersion[];
   coverage: { suite: Id | null; cases: number; pass: number };
+  /** Loaded with the built-in starter kit. */
+  builtin?: boolean;
 }
 
 export interface AgentInstructions {
@@ -810,6 +865,12 @@ export interface Model {
   /** Cache prices per million tokens when set; the default ratios of the input price apply otherwise. */
   cacheRead?: number;
   cacheWrite?: number;
+  /** Found by listing the vendor's models (spec 10.4 Vendor templates), not typed in. */
+  discovered?: boolean;
+  /** Discovered, but the catalogue had no price for it: enter one before switching it on. */
+  needsPrice?: boolean;
+  /** False when the gateway cannot call this model's vendor yet; it cannot be switched on. */
+  invocable?: boolean;
 }
 export type VendorHealth = "healthy" | "degraded" | "offline";
 export interface Vendor {
@@ -833,6 +894,10 @@ export interface Vendor {
   /** Stations whose eval suite passed on this vendor. Only meaningful for custom vendors. */
   qualified?: Record<string, { suite: string; run: string; at: string }>;
   version?: number;
+  /** The template the vendor was added from (anthropic, bedrock, ...); its models can be listed again. */
+  template?: string;
+  /** When its models were last listed from the vendor's API (ISO). */
+  discoveredAt?: string;
 }
 export interface RoutingRule {
   id: string;
@@ -907,6 +972,8 @@ export interface Suite {
   /** The run in progress, if any. */
   running?: string | null;
   version?: number;
+  /** Loaded with the built-in starter kit. */
+  builtin?: boolean;
 }
 export interface EvalResult {
   caseId: string;
@@ -1295,6 +1362,10 @@ export interface SecuritySettings {
   domains: string[];
   ipAllow: string[];
   restoreFactoryNeedsTwo: boolean;
+  /** Kill needs a sign-in within the step-up window (default on). Restore always does. */
+  killNeedsStepUp?: boolean;
+  /** Minutes a sign-in counts as fresh for step-up operations (spec 14.1). Default 15, allowed 5 to 60. */
+  stepUpWindowMinutes?: number;
   githubLogin: boolean;
 }
 export interface Session {
@@ -1598,6 +1669,10 @@ export interface DecisionRule {
   id: string;
   name?: string;
   freeze?: string;
+  /** Step-up refusals: the sign-in window in seconds and how long ago the person signed in. */
+  windowSec?: number;
+  signedInSecAgo?: number | null;
+  action?: string | null;
 }
 export interface Decision {
   allowed: boolean;

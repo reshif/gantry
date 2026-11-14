@@ -4,7 +4,7 @@
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fmt, type Person, type Project, type Role } from "@gantry/domain";
+import { fmt, type Person, type Project, type Role, type Team } from "@gantry/domain";
 import { api, get } from "../api/client";
 import { ops } from "../api/ops";
 import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
@@ -17,6 +17,8 @@ import { useUI } from "../ui/overlay-context";
 import { useActors } from "../ui/actors";
 import { lockd, useAllRepos, useOutcome, useTeams } from "./govern/data";
 import { useInviteDialog } from "./people/InviteDialog";
+import { useTeamDialogs } from "./people/TeamDialog";
+import { TeamRoles } from "./people/TeamRoles";
 import { HistoryList } from "./people/History";
 import type { EffectivePermissions } from "./people/types";
 
@@ -31,6 +33,7 @@ export default function PeopleView() {
   const { repos } = useAllRepos();
   const roles = matrix?.roles ?? [];
   const perm = dec(useCan("people.manage"));
+  const view = dec(useCan("people.view"));
   const [sel, setSel] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const viewerId = me?.person.id ?? "";
@@ -40,8 +43,11 @@ export default function PeopleView() {
   const admins = people.filter((p) => p.status === "active" && p.roles.some((g) => g.role === "factory_admin"));
   const sec = useQuery({ queryKey: ["security"], queryFn: () => get<{ domains: string[] }>(api("security")), retry: false });
   const invite = useInviteDialog({ perm, teams, projects: projects as Project[], roles, domains: sec.data?.domains ?? [], onDone: setSel });
+  const teamDlg = useTeamDialogs(perm);
 
   if (!me) return null;
+  // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
+  if (!view.allowed) return <div className="view view-people"><ViewHead kicker="Govern · People & teams" title="People & teams" sub="" /><Empty id="people-no-access" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
   const invited = people.filter((p) => p.status === "invited").length;
   const org = me.org;
 
@@ -52,12 +58,15 @@ export default function PeopleView() {
         title="People & teams"
         sub="Teams group people. Roles are granted on the factory or on one project, so a person can be an Engineer here and a Reviewer there."
         meta={[["People", String(people.length)], ["Teams", String(teams.length)], ["Factory Admins", String(admins.length)], ["Custom roles", String(roles.filter((r) => r.custom).length)], ["Invites pending", String(invited)]]}
-        actions={<Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} />}
+        actions={<><Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} /><Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /></>}
       />
-      <LockNote decision={perm} what="Invites, teams and factory roles" />
+      <LockNote decision={perm} what="Invites, teams and roles" />
+      <p className="ppl-defaults muted small" id="ppl-defaults">
+        <Icon name="shield" /> <strong>Default for new people: no access until granted.</strong> Give access to a team (every member inherits it while they are in it) or to one person. A person's effective roles are their own grants plus their teams' grants.
+      </p>
       <div className="people-grid">
         <Panel title="Organisation" cls="ppl-tree">
-          <OrgTree people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} sel={selected?.id ?? null} onSel={setSel} q={q} setQ={setQ} perm={perm} invite={invite} orgName={org?.name ?? ""} plant={org?.plant ?? ""} />
+          <OrgTree people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} sel={selected?.id ?? null} onSel={setSel} q={q} setQ={setQ} perm={perm} invite={invite} teamDlg={teamDlg} orgName={org?.name ?? ""} plant={org?.plant ?? ""} />
         </Panel>
         {selected ? <MemberDetail key={selected.id} p={selected} teams={teams} projects={projects as Project[]} roles={roles} perm={perm} admins={admins} viewerId={viewerId} roleName={roleName} /> : <Empty title="No people yet" />}
       </div>
@@ -67,13 +76,13 @@ export default function PeopleView() {
 
 /* ---------- org tree ---------- */
 
-function grantLabel(g: { role: string; scope: string }, roleName: (id: string) => string, projects: Project[]): string {
-  return `${roleName(g.role)} · ${g.scope === "factory" ? "Factory" : projects.find((p) => p.id === g.scope)?.name ?? g.scope}`;
+function grantLabel(g: { role: string; scope: string; via?: string | undefined }, roleName: (id: string) => string, projects: Project[], teamName?: (id: string) => string): string {
+  return `${roleName(g.role)} · ${g.scope === "factory" ? "Factory" : projects.find((p) => p.id === g.scope)?.name ?? g.scope}${g.via ? ` (via ${teamName ? teamName(g.via) : g.via})` : ""}`;
 }
 
-function Member({ p, teamId, sel, onSel, roleName, projects }: { p: Person; teamId: string; sel: string | null; onSel: (id: string) => void; roleName: (id: string) => string; projects: Project[] }) {
-  const fr = p.roles.find((x) => x.scope === "factory");
-  const summary = p.roles.length ? p.roles.map((g) => grantLabel(g, roleName, projects)).join(", ") : "No roles yet";
+function Member({ p, teamId, sel, onSel, roleName, projects, teamName }: { p: Person; teamId: string; sel: string | null; onSel: (id: string) => void; roleName: (id: string) => string; projects: Project[]; teamName: (id: string) => string }) {
+  const fr = p.roles.find((x) => x.scope === "factory" && !x.via);
+  const summary = p.roles.length ? p.roles.map((g) => grantLabel(g, roleName, projects, teamName)).join(", ") : "No roles yet";
   return (
     <li>
       <button
@@ -101,15 +110,16 @@ function Member({ p, teamId, sel, onSel, roleName, projects }: { p: Person; team
   );
 }
 
-function OrgTree({ people, teams, projects, repos, roles, sel, onSel, q, setQ, perm, invite, orgName, plant }: {
-  people: Person[]; teams: Array<{ id: string; name: string; desc: string }>; projects: Project[]; repos: Array<{ team: string }>; roles: Role[]; sel: string | null;
-  onSel: (id: string) => void; q: string; setQ: (v: string) => void; perm: Decision; invite: (p: { team?: string }) => void; orgName: string; plant: string;
+function OrgTree({ people, teams, projects, repos, roles, sel, onSel, q, setQ, perm, invite, teamDlg, orgName, plant }: {
+  people: Person[]; teams: Team[]; projects: Project[]; repos: Array<{ team: string }>; roles: Role[]; sel: string | null;
+  onSel: (id: string) => void; q: string; setQ: (v: string) => void; perm: Decision; invite: (p: { team?: string }) => void; teamDlg: ReturnType<typeof useTeamDialogs>; orgName: string; plant: string;
 }) {
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
   const matches = (p: Person) => {
     const s = q.trim().toLowerCase();
     return !s || `${p.name} ${p.email} ${p.title} ${p.roles.map((g) => grantLabel(g, roleName, projects)).join(" ")}`.toLowerCase().includes(s);
   };
+  const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
   const noTeam = people.filter((p) => !p.teams?.length).filter(matches);
   return (
     <div className="org-tree">
@@ -140,9 +150,16 @@ function OrgTree({ people, teams, projects, repos, roles, sel, onSel, q, setQ, p
                 <span className="kicker ppl-owns">Repos</span>
                 <span className="mono small">{owns.length}</span>
               </div>
-              <ul className="members">{shown.map((p) => <Member key={p.id} p={p} teamId={t.id} sel={sel} onSel={onSel} roleName={roleName} projects={projects} />)}</ul>
+              <TeamRoles team={t} roles={roles} projects={projects} perm={perm} members={members.length} />
+              <ul className="members">{shown.map((p) => <Member key={p.id} p={p} teamId={t.id} sel={sel} onSel={onSel} roleName={roleName} projects={projects} teamName={teamName} />)}</ul>
               <div className="team-actions">
                 <Btn label={`Invite to ${t.name}`} small kind="ghost" icon="plus" id={`ppl-inv-${t.id}`} guard={perm} onClick={() => invite({ team: t.id })} />
+                <Btn label="Edit" small kind="ghost" icon="tag" id={`ppl-team-edit-${t.id}`} guard={perm} onClick={() => teamDlg.edit(t)} />
+                <Btn
+                  label="Delete" small kind="ghost" icon="x" id={`ppl-team-del-${t.id}`}
+                  guard={projs.length || owns.length ? { allowed: false, reason: `${t.name} owns ${projs.length} project${projs.length === 1 ? "" : "s"} and ${owns.length} repo${owns.length === 1 ? "" : "s"}. Move them to another team first.` } : perm}
+                  onClick={() => void teamDlg.remove(t, members.length)}
+                />
               </div>
             </li>
           );
@@ -150,7 +167,7 @@ function OrgTree({ people, teams, projects, repos, roles, sel, onSel, q, setQ, p
         {noTeam.length ? (
           <li className="team">
             <div className="team-head"><h3 className="team-name">No team</h3></div>
-            <ul className="members">{noTeam.map((p) => <Member key={p.id} p={p} teamId="none" sel={sel} onSel={onSel} roleName={roleName} projects={projects} />)}</ul>
+            <ul className="members">{noTeam.map((p) => <Member key={p.id} p={p} teamId="none" sel={sel} onSel={onSel} roleName={roleName} projects={projects} teamName={teamName} />)}</ul>
           </li>
         ) : null}
       </ul>
@@ -200,7 +217,11 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const eff = useQuery({ queryKey: ["people", "effective", p.id], queryFn: () => get<EffectivePermissions>(api(`people/${encodeURIComponent(p.id)}/effective-permissions`)) });
   const away = p.away && p.away.to > Date.now() ? p.away : null;
   const visible = projects.filter((x) => x.status !== "archived");
-  const frRole = p.roles.find((g) => g.scope === "factory")?.role ?? "";
+  const frRole = p.roles.find((g) => g.scope === "factory" && !g.via)?.role ?? "";
+  const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
+  const direct = p.roles.filter((g) => !g.via);
+  const inherited = p.roles.filter((g) => g.via);
+  const scopeName = (s: string) => (s === "factory" ? "Factory" : projects.find((x) => x.id === s)?.name ?? s);
   const factoryRoles = roles.filter((r) => r.level === "factory");
   const projectRoles = roles.filter((r) => r.level !== "factory");
 
@@ -247,6 +268,20 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         </div>
       </div>
 
+      <h3 className="sub-h">Roles held</h3>
+      <div className="ppl-pad ppl-held" id="ppl-held">
+        <div>
+          <span className="kicker">Direct</span>
+          {direct.length ? <ul className="ppl-held-list">{direct.map((g) => <li key={`${g.role}-${g.scope}`} className="chip">{`${roleName(g.role)} · ${scopeName(g.scope)}`}</li>)}</ul> : <span className="muted small">None granted to {p.name} personally.</span>}
+        </div>
+        <div>
+          <span className="kicker">Inherited from teams</span>
+          {inherited.length ? (
+            <ul className="ppl-held-list">{inherited.map((g) => <li key={`${g.role}-${g.scope}-${g.via}`} className="chip chip-accent">{`${roleName(g.role)} · ${scopeName(g.scope)} · via ${teamName(g.via!)}`}</li>)}</ul>
+          ) : <span className="muted small">None. Roles held by {p.name}'s teams would show here; change them on the team.</span>}
+        </div>
+      </div>
+
       <h3 className="sub-h">Factory role</h3>
       <div className="ppl-pad">
         <div className="ppl-frole-row">
@@ -277,7 +312,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
           </thead>
           <tbody>
             {visible.map((pr) => (
-              <ProjectRoleRow key={pr.id} p={p} project={pr} roles={projectRoles} viewerId={viewerId} />
+              <ProjectRoleRow key={pr.id} p={p} project={pr} roles={projectRoles} viewerId={viewerId} teamName={teamName} />
             ))}
           </tbody>
         </table>
@@ -288,7 +323,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         <span className="mono muted small">{`${fmt.ist(Date.now())} IST`}</span>
         <Select id="ppl-eff-proj" aria-label="Project for effective permissions" value={effProject} onChange={setEffProject} options={[{ value: "all", label: "All projects" }, ...visible.map((x) => ({ value: x.id, label: x.name }))]} />
       </div>
-      <p className="muted small ppl-pad">Roles, scope, release windows, on-call rules and freezes combined, as the policy engine decides them right now. Hover or focus a cell for the deciding rule. P-numbers mark cells decided by a policy.</p>
+      <p className="muted small ppl-pad">Roles, scope, release windows, on-call rules and freezes combined, as the policy engine decides them right now. Hover or focus a cell for the deciding rule and where the role comes from. P-numbers mark cells decided by a policy; T marks cells allowed only through a team.</p>
       {eff.isPending ? <p className="muted small ppl-pad">Loading permissions.</p> : eff.isError || !eff.data ? <p className="muted small ppl-pad">Permissions could not be loaded.</p> : (
         <>
           <EffTable p={p} eff={eff.data} project={effProject} cell={cell} onPick={setCell} />
@@ -299,9 +334,9 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
               const d = eff.data.factory[a.id];
               const ok = !!d?.allowed;
               return (
-                <li key={a.id} className={ok ? "ok" : "no"} data-tip={d?.reason} tabIndex={0}>
+                <li key={a.id} className={ok ? "ok" : "no"} data-tip={d?.reason + (ok && d?.sources?.length ? ` Role ${sourceText(d.sources, eff.data.teams)}.` : "")} tabIndex={0}>
                   <Icon name={ok ? "check" : "lock"} />
-                  <span>{a.name}</span>
+                  <span>{a.name}{ok && d?.sources?.length && !d.sources.includes("direct") ? <span className="muted small">{` · ${sourceText(d.sources, eff.data.teams)}`}</span> : null}</span>
                 </li>
               );
             })}
@@ -314,10 +349,11 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   );
 }
 
-function ProjectRoleRow({ p, project, roles, viewerId }: { p: Person; project: Project; roles: Role[]; viewerId: string }) {
+function ProjectRoleRow({ p, project, roles, viewerId, teamName }: { p: Person; project: Project; roles: Role[]; viewerId: string; teamName: (id: string) => string }) {
   const outcome = useOutcome();
   const perm = dec(useCan("project.members", { project: project.id }));
-  const held = p.roles.filter((g) => g.scope === project.id).map((g) => g.role);
+  const held = p.roles.filter((g) => g.scope === project.id && !g.via).map((g) => g.role);
+  const viaTeams = (role: string) => [...new Set(p.roles.filter((g) => g.scope === project.id && g.role === role && g.via).map((g) => teamName(g.via!)))];
   return (
     <tr className={held.length ? "is-member" : ""}>
       <th scope="row"><span className="ppl-pname">{project.name}</span><span className="mono muted small">{(project as Project & { key?: string }).key}</span></th>
@@ -328,11 +364,19 @@ function ProjectRoleRow({ p, project, roles, viewerId }: { p: Person; project: P
         return (
           <td key={r.id} className={`ppl-rcell${on ? " is-on" : ""}`}>
             <Toggle id={`ppl-r-${project.id}-${r.id}`} checked={on} decision={guard} label={`${r.name} on ${project.name}`} onChange={async (v) => void outcome(await ops.setMemberRole(p.id, project.id, r.id, v))} />
+            {viaTeams(r.id).length ? <span className="ppl-via mono small" title={`Also held through ${viaTeams(r.id).join(", ")}. Change it on the team.`}>{`via ${viaTeams(r.id).join(", ")}`}</span> : null}
           </td>
         );
       })}
     </tr>
   );
+}
+
+/** "granted directly" / "via Payments" / "granted directly and via Payments": where the granting role comes from. */
+function sourceText(sources: string[] | undefined, teams: Record<string, string> | undefined): string {
+  if (!sources?.length) return "";
+  const parts = [...(sources.includes("direct") ? ["granted directly"] : []), ...sources.filter((s) => s !== "direct").map((s) => `via ${teams?.[s] ?? s}`)];
+  return parts.join(" and ");
 }
 
 /** The reason behind one cell: the simulator answers it (same can()). */
@@ -373,6 +417,7 @@ function EffTable({ p, eff, project, cell, onPick }: { p: Person; eff: Effective
                   const ok = c?.[0] === 1;
                   const ruleId = c?.[1] ?? "";
                   const viaPolicy = ok && eff.rules[ruleId]?.kind === "policy";
+                  const source = sourceText(c?.[2], eff.teams);
                   const isSel = cell?.action === a.id && cell.project === pr.id;
                   const pick = () => onPick({ action: a.id, project: pr.id });
                   return (
@@ -383,7 +428,7 @@ function EffTable({ p, eff, project, cell, onPick }: { p: Person; eff: Effective
                       role="button"
                       aria-pressed={isSel ? "true" : "false"}
                       id={`ppl-eff-${pr.id}-${a.id.replace(/\./g, "_")}`}
-                      data-tip={`${pr.name}: ${ok ? "Allowed" : "Denied"} by ${eff.rules[ruleId]?.name || ruleId} [${ruleId}]. Select to see why.`}
+                      data-tip={`${pr.name}: ${ok ? "Allowed" : "Denied"} by ${eff.rules[ruleId]?.name || ruleId} [${ruleId}].${source ? ` Role ${source}.` : ""} Select to see why.`}
                       onClick={pick}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
@@ -394,7 +439,8 @@ function EffTable({ p, eff, project, cell, onPick }: { p: Person; eff: Effective
                     >
                       <Icon name={ok ? "check" : "x"} />
                       {viaPolicy ? <span className="eff-pol mono">{ruleId.replace("POL-", "P")}</span> : null}
-                      <span className="sr">{ok ? "allowed" : "denied"}</span>
+                      <span className="sr">{ok ? "allowed" : "denied"}{source ? `, ${source}` : ""}</span>
+                      {ok && source && !c?.[2]?.includes("direct") ? <span className="eff-src mono" aria-hidden="true">T</span> : null}
                     </td>
                   );
                 })}

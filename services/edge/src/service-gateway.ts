@@ -12,11 +12,11 @@ import type { VendorKeys } from "./vendor-keys.js";
  * edge token is not accepted on /model). The API decides the route (`/internal/v1/service-calls/authorize`) and meters the call
  * (`/usage`); the edge holds the key, the vendor concurrency slot and the stream.
  *
- *   POST /service/v1/messages   a Messages API body; `x-gantry-purpose: console|explain`. `model` is ignored: routing picks it.
+ *   POST /service/v1/messages   a Messages API body; `x-gantry-purpose: console|explain|onboarding`. `model` is ignored: routing picks it, or the API's validated choice in `x-gantry-model-pick` (+ `x-gantry-project`) does.
  *   GET  /service/v1/ready      { ready, reason?, vendor?, model? }: can a call be made right now (a route exists and its key is present)
  */
 
-const PURPOSES = new Set(["console", "explain"]);
+const PURPOSES = new Set(["console", "explain", "onboarding"]);
 
 const fail = (reply: FastifyReply, status: number, type: string, message: string, extra: Record<string, string> = {}): FastifyReply => {
   for (const [k, v] of Object.entries(extra)) reply.header(k, v);
@@ -57,8 +57,8 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
     return !!m && sameToken(m[1]!, cfg.edgeToken);
   };
 
-  const authorize = async (purpose: string): Promise<{ ok: true; route: Route } | { ok: false; status: number; code: string; reason: string }> => {
-    const r = await api.call("POST", "/internal/v1/service-calls/authorize", { purpose });
+  const authorize = async (purpose: string, pick: { model?: string; project?: string } = {}): Promise<{ ok: true; route: Route } | { ok: false; status: number; code: string; reason: string }> => {
+    const r = await api.call("POST", "/internal/v1/service-calls/authorize", { purpose, ...(pick.model ? { model: pick.model } : {}), ...(pick.project ? { project: pick.project } : {}) });
     if (r.kind === "unavailable") return { ok: false, status: 503, code: "api_error", reason: "Gantry could not resolve a model route right now." };
     if (r.kind === "refused") return { ok: false, status: r.status === 409 ? 409 : 422, code: "no_model_configured", reason: String(r.body.msg ?? "No model is configured.") };
     if (r.body.allow === true) {
@@ -71,7 +71,8 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
 
   app.get("/service/v1/ready", async (req, reply) => {
     if (!isCaller(req)) return reply.code(401).send({ ok: false, msg: "The edge token is required." });
-    const a = await authorize("console");
+    const q = (req.query ?? {}) as { purpose?: string; model?: string; project?: string };
+    const a = await authorize(q.purpose === "onboarding" ? "onboarding" : "console", q.purpose === "onboarding" ? {} : { ...(q.model ? { model: String(q.model) } : {}), ...(q.project ? { project: String(q.project) } : {}) });
     if (!a.ok) return { ready: false, code: a.code, reason: a.reason };
     const key = await keys.get(a.route.vendor);
     if (!key && !a.route.keyless) return { ready: false, code: "no_key", reason: `Vendor ${a.route.vendor} is connected but no API key is stored for it.`, vendor: a.route.vendor, model: a.route.modelId };
@@ -84,7 +85,7 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
       return fail(reply, 401, "authentication_error", "The edge token is required.");
     }
     const purpose = String(req.headers["x-gantry-purpose"] ?? "");
-    if (!PURPOSES.has(purpose)) return fail(reply, 400, "invalid_request_error", "x-gantry-purpose must be console or explain.");
+    if (!PURPOSES.has(purpose)) return fail(reply, 400, "invalid_request_error", "x-gantry-purpose must be console, explain or onboarding.");
     let body: Record<string, unknown>;
     try {
       const j: unknown = JSON.parse((Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)).toString("utf8"));
@@ -93,7 +94,8 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
     } catch {
       return fail(reply, 400, "invalid_request_error", "The request body must be a JSON object.");
     }
-    const auth = await authorize(purpose);
+    const h = (n: string): string | undefined => (typeof req.headers[n] === "string" && req.headers[n] ? (req.headers[n] as string) : undefined);
+    const auth = await authorize(purpose, { ...(h("x-gantry-model-pick") ? { model: h("x-gantry-model-pick")! } : {}), ...(h("x-gantry-project") ? { project: h("x-gantry-project")! } : {}) });
     if (!auth.ok) {
       metrics.refused++;
       return fail(reply, auth.status, auth.code, auth.reason);
@@ -130,7 +132,14 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
     let vendorRequestId: string | undefined;
     reply.hijack();
     try {
-      const res = await f(url, { method: "POST", headers, body: JSON.stringify({ ...body, model: route.upstreamModel ?? route.modelId }), signal: ac.signal });
+      const payload = JSON.stringify({ ...body, model: route.upstreamModel ?? route.modelId });
+      // One retry for a connection-level failure (nothing has reached the caller yet: headers are only written after a response arrives). Never after a timeout or abort.
+      const res = await f(url, { method: "POST", headers, body: payload, signal: ac.signal }).catch(async (e: unknown) => {
+        if (ac.signal.aborted) throw e;
+        req.log.warn({ purpose, err: e instanceof Error ? e.message : String(e) }, "service model call failed, retrying once");
+        await new Promise((r) => setTimeout(r, 400));
+        return f(url, { method: "POST", headers, body: payload, signal: ac.signal });
+      });
       if (res.status === 429 || res.status === 529 || res.status === 503) {
         const ra = Number(res.headers.get("retry-after"));
         limiter.pause(route.vendor, Number.isFinite(ra) && ra > 0 ? ra : res.status === 429 ? 5 : 2);
@@ -167,7 +176,7 @@ export function registerServiceRoutes(d: ServiceGatewayDeps): ServiceMetrics {
       req.log.warn({ purpose, err: e instanceof Error ? e.message : String(e) }, "service model call failed");
       if (!reply.raw.headersSent) {
         reply.raw.writeHead(502, { "content-type": "application/json", "cache-control": "no-store" });
-        reply.raw.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "The model vendor could not be reached." } }));
+        reply.raw.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "The model vendor could not be reached. This is usually temporary: try again." } }));
         status = 502;
       } else reply.raw.destroy();
     } finally {

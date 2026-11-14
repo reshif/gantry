@@ -1,10 +1,12 @@
 /**
- * Repo onboarding logic that needs no IO (spec 11.3): what the broker reads from a repository (`RepoFacts`), how the onboarding agent turns those facts into
- * findings and into the files an onboarding pull request adds, how a CODEOWNERS file is judged, and how the live checks of "Verified means" are put together.
+ * Repo onboarding logic that needs no IO (spec 11.3): what the broker reads from a repository (`RepoFacts`), how those facts become findings and the files an
+ * onboarding pull request adds (the rule-based path, which is also the source of truth the Onboarding Agent works on top of: see onboarding-agent.ts), how a CODEOWNERS
+ * file is judged, and how the live checks of "Verified means" are put together.
  * The broker reads, the worker calls these functions, the API stores the outcome. Nothing here guesses: a finding is a fact about the repository.
  */
 import { z } from "zod";
 import type { GuidelineItem, OnboardFinding, Severity } from "./types.js";
+import { authorLine, type AgentsDraft, type Authorship } from "./onboarding-agent.js";
 
 /* ------------------------------------------------------------------ facts ---- */
 
@@ -316,6 +318,8 @@ export interface PlannedFile {
   minus: number;
   /** The added lines, for the preview in the pull request tab (at most 400). */
   added: string[];
+  /** `agent` when the Onboarding Agent drafted this content, otherwise `observed` (written by rule from the repository's own files). */
+  source?: "observed" | "agent";
 }
 
 export interface PlanContext {
@@ -362,17 +366,21 @@ export function yamlScalar(v: string): string {
   return /^[A-Za-z0-9_./@:+-]+$/.test(v) && !/^(true|false|null|yes|no|on|off|~|\d+)$/i.test(v) ? v : JSON.stringify(v);
 }
 
-export function agentsMd(f: RepoFacts, c: PlanContext): string {
+export function agentsMd(f: RepoFacts, c: PlanContext, draft?: { by: Authorship; body: AgentsDraft }): string {
   const test = detectTestCommand(f);
+  const a = draft?.body;
   const org = c.org_guidelines.items.filter((i) => i.required);
   const adv = c.org_guidelines.items.filter((i) => !i.required);
   const proj = c.project_guidelines.items;
   const lines = [
-    "# AGENTS.md", "", "Instructions for coding agents that work in this repository for Gantry. Written by Gantry's onboarding agent; edit it like any other file.", "",
+    "# AGENTS.md", "", `Instructions for coding agents that work in this repository for Gantry. ${authorLine(draft?.by, "file")}`, "",
     "## Test command", "", test ? `Run \`${test.command}\` before opening a PR.` : "No test command has been detected. A person must add one here.", "",
+    ...(a?.commands.length ? ["## Commands", "", "Drafted by the onboarding agent from the repository's files and not run by Gantry; check them before relying on them.", "", ...a.commands.map((x) => `- ${x.label}: \`${x.command}\``), ""] : []),
     "## Conventions", "", `- Branches start with ${c.branchPrefix}. The default branch is ${c.defaultBranch}; merges use the ${c.merge} method.`, `- Never push to ${c.defaultBranch}. Every change goes through a pull request and the project's gates.`,
     ...(c.requiredChecks.length ? [`- Required checks: ${c.requiredChecks.join(", ")}.`] : []),
     ...(c.protectedPaths.length ? [`- Protected paths need an extra approval: ${c.protectedPaths.join(", ")}.`] : []), "",
+    ...(a?.conventions.length ? ["## Repository conventions", "", ...a.conventions.map((x) => `- ${x}`), ""] : []),
+    ...(a?.notes ? ["## Notes", "", a.notes, ""] : []),
     ...(org.length ? ["## Guidelines", "", ...org.map((i) => `- ${i.text}`), ""] : []),
     ...(adv.length ? ["## Advisory guidelines", "", ...adv.map((i) => `- ${i.text}`), ""] : []),
     ...(proj.length || c.project_guidelines.notes ? ["## Project rules", "", ...proj.map((i) => `- ${i.text}${i.required ? "" : " (advisory)"}`), ...(c.project_guidelines.notes ? ["", c.project_guidelines.notes] : []), ""] : []),
@@ -411,15 +419,18 @@ export function lineDelta(before: string, after: string): { plus: number; minus:
 }
 
 /** What the onboarding pull request adds (spec 11.3): only files, never application code, dependencies or branch rules. */
-export function planPr(f: RepoFacts, findings: AssessedFinding[], c: PlanContext): PlannedFile[] {
+export function planPr(f: RepoFacts, findings: AssessedFinding[], c: PlanContext, draft?: { by: Authorship; agentsMd?: AgentsDraft }): PlannedFile[] {
   const gap = (id: string): AssessedFinding | undefined => findings.find((x) => x.id === id && !x.ok && x.file);
   const out: PlannedFile[] = [];
-  const add = (path: string, finding: string, content: string): void => {
+  const add = (path: string, finding: string, content: string, source: "observed" | "agent" = "observed"): void => {
     const before = f.contents[path];
-    out.push({ path, finding, mode: before === undefined && !f.files.includes(path) ? "create" : "update", content, ...lineDelta(before ?? "", content) });
+    out.push({ path, finding, mode: before === undefined && !f.files.includes(path) ? "create" : "update", content, source, ...lineDelta(before ?? "", content) });
   };
   const eco = ecosystems(f)[0]!;
-  if (gap("agents")) add("AGENTS.md", "agents", agentsMd(f, c));
+  if (gap("agents")) {
+    const drafted = draft?.agentsMd ? { by: draft.by, body: draft.agentsMd } : undefined;
+    add("AGENTS.md", "agents", agentsMd(f, c, drafted), drafted ? "agent" : "observed");
+  }
   if (gap("owners")) {
     const o = judgeCodeowners(f);
     const handle = `@${c.org}/${c.team}`;
@@ -452,14 +463,16 @@ export function planPr(f: RepoFacts, findings: AssessedFinding[], c: PlanContext
 
 export const PR_TITLE = (repo: string): string => `Prepare ${repo} for Gantry`;
 
-export function prBody(files: PlannedFile[], findings: AssessedFinding[], adapter: string): string {
+export function prBody(files: PlannedFile[], findings: AssessedFinding[], by: Authorship, extra: { guidelineSuggestions?: string[]; forPeople?: string[] } = {}): string {
   const why = (id: string): string => findings.find((x) => x.id === id)?.check ?? id;
   const gaps = findings.filter((x) => !x.ok && (x.manual || !x.file));
+  const mine = (extra.forPeople ?? []).filter((x) => !gaps.some((g) => x.includes(g.check)));
   return [
-    "Opened by Gantry's onboarding agent. It adds only what a pull request can add: no application code, no dependency changes and no branch rules.", "",
-    "## Files", "", ...files.map((p) => `- \`${p.path}\` (${p.mode === "create" ? "new" : "edited"}, +${p.plus} -${p.minus}): ${why(p.finding)}`), "",
-    ...(gaps.length ? ["## Still open", "", "These cannot be fixed by a pull request and need a person with access:", "", ...gaps.map((x) => `- ${x.check}: ${x.fix || x.detail}`), ""] : []),
-    `Assessment adapter: ${adapter}.`, "",
+    authorLine(by, "pr"), "It adds only what a pull request can add: no application code, no dependency changes and no branch rules. A person reviews and merges it; Gantry never merges it on its own.", "",
+    "## Files", "", ...files.map((p) => `- \`${p.path}\` (${p.mode === "create" ? "new" : "edited"}, +${p.plus} -${p.minus}, ${p.source === "agent" ? "drafted by the agent" : "written by rule from the repository's files"}): ${why(p.finding)}`), "",
+    ...(gaps.length ? ["## Still open", "", "These cannot be fixed by a pull request and need a person with access:", "", ...gaps.map((x) => `- ${x.check}: ${x.fix || x.detail}`), ...mine.map((x) => `- ${x} (suggested by the agent)`), ""] : mine.length ? ["## Still open", "", ...mine.map((x) => `- ${x} (suggested by the agent)`), ""] : []),
+    ...(extra.guidelineSuggestions?.length ? ["## Suggestions for the guidelines", "", "Not applied by this pull request; for a person to consider.", "", ...extra.guidelineSuggestions.map((x) => `- ${x}`), ""] : []),
+    `Assessment: ${by.mode === "agent" ? "Onboarding Agent on top of rule-based facts" : "rule-based"}.`, "",
   ].join("\n");
 }
 
@@ -598,18 +611,19 @@ export const DEFAULT_ORG_GUIDELINES: { items: GuidelineItem[]; may: string; mayN
 /* ------------------------------------------------------------------ pull request checks ---- */
 
 export interface ObservedCheck { name: string; status: string; conclusion: string | null; app?: string | null }
-export type PrChecks = "pending" | "running" | "green" | "red";
+export type PrChecks = "pending" | "running" | "green" | "red" | "none";
 
 const PASSED = new Set(["success", "neutral", "skipped"]);
 const FAILED = new Set(["failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale"]);
 
 /**
  * The state of CI on a pull request head (spec 11.3 "PR checks"). `required` are the repo's required checks; with none configured every check that is not Gantry's own
- * gate counts. A required check that has not reported yet keeps the state at `running` once anything has reported, and `pending` while nothing has.
+ * gate counts. A required check that has not reported yet keeps the state at `running` once anything has reported, and `pending` while nothing has (`none` once the grace period has passed with nothing reported).
  */
-export function prChecksState(required: string[], observed: ObservedCheck[], gateCheckName = "Gantry gates"): PrChecks {
+export function prChecksState(required: string[], observed: ObservedCheck[], gateCheckName = "Gantry gates", o: { noneAfterGrace?: boolean } = {}): PrChecks {
   const seen = observed.filter((c) => c.name !== gateCheckName);
-  if (!seen.length) return "pending";
+  // Nothing at all reported (no check run, no commit status) and the grace period is over: the repo has no CI. Not "pending" forever.
+  if (!seen.length) return o.noneAfterGrace ? "none" : "pending";
   const counted = required.length ? seen.filter((c) => required.includes(c.name)) : seen;
   if (counted.some((c) => c.status === "completed" && c.conclusion && FAILED.has(c.conclusion))) return "red";
   const missing = required.filter((r) => !seen.some((c) => c.name === r));

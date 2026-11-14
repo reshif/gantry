@@ -35,7 +35,6 @@ export function StatusCluster() {
   const prefs = usePrefs();
   if (!s) return null;
   const stateText = s.factory === "replay" ? "Replay" : s.factory === "killed" ? "Killed" : "Running";
-  const winOpen = s.windows.filter((w) => w.open).length;
   return (
     <button
       ref={btn}
@@ -50,20 +49,8 @@ export function StatusCluster() {
       <span className="sc-state">
         <span className="sc-dot" aria-hidden="true" />
         <span className="sc-label">{stateText}</span>
+        {s.activeFreezes.length ? <Icon name="lock" /> : null}
       </span>
-      <span className="sc-clock mono" id="status-clock">
-        {s.clock}
-        <span className="sc-tz"> IST</span>
-      </span>
-      <span className="sc-shift">{s.shift}</span>
-      {s.activeFreezes.length ? (
-        <span className="sc-freeze">
-          <Icon name="lock" />
-          <span className="sc-long">{`${s.activeFreezes.length} freeze`}</span>
-        </span>
-      ) : (
-        <span className="sc-win sc-long">{`${winOpen} windows open`}</span>
-      )}
     </button>
   );
 }
@@ -75,7 +62,7 @@ function StatusPopover({ s, replayAt, close }: { s: StatusInfo; replayAt: number
     <div className="status-pop">
       <div className="pop-head">
         <strong>{`Factory ${s.factory === "replay" ? "in replay" : s.factory}`}</strong>
-        <span className="muted small">{`${s.date} ${s.clock} IST · ${s.shift}`}</span>
+        <span className="muted small">{`${s.date} ${s.clock} IST · ${s.shift} · ${s.windows.filter((w) => w.open).length} windows open${s.activeFreezes.length ? ` · ${s.activeFreezes.length} freeze active` : ""}`}</span>
       </div>
       {s.factory === "replay" ? (
         <div className="sp-row">

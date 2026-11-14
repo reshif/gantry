@@ -2,6 +2,7 @@
  * Rules the engine itself enforces on configuration: spec 5.1 (I1-I9) and 14.4.
  * Each check returns a Result so the command pipeline can refuse with a typed error.
  */
+import { CONSOLE_RIGHTS } from "./catalog.js";
 import { err, gantryError, ok } from "./result.js";
 import type { GantryError, Result, RuleRef } from "./result.js";
 import type { Matrix, Person, RoleGrant } from "./types.js";
@@ -63,6 +64,20 @@ export function checkRoleChange(people: Person[], change: { actorId: string; tar
   return ok(true);
 }
 
+/**
+ * A team's role grant (spec 8.9). The role must exist and its level must match the scope (factory role on the factory, project role on a
+ * project that exists). Factory Admin is never granted through a team: team membership changes without a role operation, so the
+ * last-admin and own-admin rules (14.4) could not be enforced when someone joins or leaves. Factory Admin stays a named-person grant.
+ */
+export function checkTeamGrant(roles: Array<{ id: string; name: string; level: "factory" | "project" }>, projectIds: string[], grant: { role: string; scope: string }): Result<true, GantryError> {
+  const r = roles.find((x) => x.id === grant.role);
+  if (!r) return err(gantryError("invalid", "There is no role " + grant.role + "."));
+  if (r.id === "factory_admin") return err(gantryError("denied", "Factory Admin cannot be granted to a team. Grant it to named people so the last-admin rules apply.", { rule: rule("INV-TEAM-ADMIN", "Factory Admin is personal"), needs: "Grant Factory Admin to a person" }));
+  if ((grant.scope === "factory") !== (r.level === "factory")) return err(gantryError("invalid", r.name + " is a " + r.level + " role and cannot be granted " + (grant.scope === "factory" ? "on the factory" : "on a project") + "."));
+  if (grant.scope !== "factory" && !projectIds.includes(grant.scope)) return err(gantryError("invalid", "There is no project " + grant.scope + "."));
+  return ok(true);
+}
+
 /** Deactivate or delete a person: the same last-admin and own-admin rules apply (spec 14.4). */
 export function checkPersonRemoval(people: Person[], change: { actorId: string; targetId: string }): Result<true, GantryError> {
   return checkRoleChange(people, { ...change, nextRoles: [] });
@@ -98,6 +113,9 @@ export function lockedOutRights(matrix: Matrix, people: Person[]): string[] {
 export function checkMatrixEdit(matrix: Matrix, people: Person[], edit: { role: string; action: string; value: boolean }): Result<true, GantryError> {
   if (edit.role === "factory_admin" && !edit.value && (PROTECTED_RIGHTS as readonly string[]).includes(edit.action)) {
     return err(gantryError("denied", "Factory Admin cannot lose the right to " + edit.action + ".", { rule: rule("INV-14.4-ADMIN", "Factory Admin rights"), needs: "Keep it on Factory Admin" }));
+  }
+  if (edit.role === "factory_admin" && !edit.value && CONSOLE_RIGHTS.includes(edit.action)) {
+    return err(gantryError("denied", "Factory Admin always keeps every console right (" + edit.action + ").", { rule: rule("INV-CONSOLE-ADMIN", "Factory Admin console rights"), needs: "Keep it on Factory Admin" }));
   }
   const next: Matrix = { ...matrix, [edit.role]: { ...(matrix[edit.role] ?? {}), [edit.action]: edit.value } };
   const before = new Set(lockedOutRights(matrix, people));

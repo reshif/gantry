@@ -75,10 +75,13 @@ export async function removeRole(tx: Tx, orgId: string, by: string, roleId: stri
     [orgId, roleId],
   );
   if (rules.rows.length) throw conflict(`Approver rules in ${[...new Set(rules.rows.map((r) => r.project_id))].join(", ")} use ${cur.name}. Change them first.`);
+  const teamsHolding = await tx.query<{ n: string }>(`select distinct t.name as n from team_role_assignments a join teams t on t.org_id = a.org_id and t.id = a.team_id where a.org_id = $1 and a.role_id = $2 and a.revoked_at is null`, [orgId, roleId]);
+  if (teamsHolding.rows.length) throw conflict(`${teamsHolding.rows.map((t) => t.n).join(", ")} ${teamsHolding.rows.length === 1 ? "holds" : "hold"} ${cur.name}. Remove it from ${teamsHolding.rows.length === 1 ? "the team" : "the teams"} first.`);
   const pols = (await readPolicies(tx, orgId)).filter((p) => p.roles.includes(roleId));
   if (pols.length) throw conflict(`${pols.map((p) => p.id).join(", ")} ${pols.length === 1 ? "names" : "name"} ${cur.name}. Change ${pols.length === 1 ? "it" : "them"} first.`);
   // Only revoked or expired grants can remain (nobody holds it now); their history lives in the audit log.
   await tx.query(`delete from role_assignments where org_id = $1 and role_id = $2`, [orgId, roleId]);
+  await tx.query(`delete from team_role_assignments where org_id = $1 and role_id = $2`, [orgId, roleId]);
   const m = await readMatrix(tx, orgId);
   const next: Matrix = { ...m.value };
   delete next[roleId];

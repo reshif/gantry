@@ -1,6 +1,6 @@
 /** The repo drawer (legacy onboarding.js drawer): status, stepper, callouts, actions and the Findings, Pull request, Timeline, Settings and History tabs. */
 import { useState } from "react";
-import { fmt } from "@gantry/domain";
+import { assessorLabel, fmt, type OnboardAssessor } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useGuidelines, useProjects, useRepos } from "../../api/queries";
@@ -10,12 +10,11 @@ import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { HistoryList } from "../project-config/history";
 import { SettingsDialog } from "./Settings";
-import { BUSY, StatusChip, Steps, gaps, instLabel, needsMerge, stageName, useIntegrationsFor, usePrFiles, useTeamName, type RepoV } from "./kit";
+import { busyText, StatusChip, fixable, Steps, gaps, instLabel, needsMerge, stageName, useIntegrationsFor, usePrFiles, useTeamName, type RepoV } from "./kit";
 
 const tabMemory: Record<string, string> = {};
 export const rememberTab = (repoId: string, tab: string): void => { tabMemory[repoId] = tab; };
 
-const fixable = (r: RepoV): boolean => r.onboarding.findings.some((f) => !f.ok && !!f.file && !f.manual);
 
 function SevMark({ sev }: { sev: string }) {
   return (
@@ -24,6 +23,34 @@ function SevMark({ sev }: { sev: string }) {
       {sev}
     </span>
   );
+}
+
+/** Who made an assessment or drafted a pull request, in words: the rule-based path, or a real run of the Onboarding Agent with what it ran as and what it cost. */
+function Authored({ who, what, id }: { who: OnboardAssessor | undefined; what: "Assessed" | "Drafted"; id: string }) {
+  const rule = !who || who.mode !== "agent";
+  const skills = who?.skills ? Object.entries(who.skills).map(([k, v]) => `${k} v${v}`).join(", ") : "";
+  return (
+    <div className={`callout${rule ? "" : " callout-ok"}`} id={id}>
+      <Icon name={rule ? "tool" : "agent"} />
+      <div>
+        <strong>{`${what} by: ${assessorLabel(who)}`}</strong>
+        {rule ? (
+          <span className="muted">{who?.reason ? ` ${who.reason} Every finding below was read from the repository by fixed rules.` : " Every finding below was read from the repository by fixed rules; no model was used."}</span>
+        ) : (
+          <>
+            <div className="small muted">{`${skills ? `Skills ${skills}. ` : ""}${who?.runId ? `Run ${who.runId}` : ""}${who?.costUsd !== undefined ? ` · ${fmt.money(who.costUsd)}` : ""}${who?.tokens ? ` · ${who.tokens.toLocaleString("en-US")} tokens` : ""}.`}</div>
+            <div className="small muted">Facts are observed by Gantry; the agent adds notes and drafts. Where they differ, the observed result stands.</div>
+            {who?.risk ? <div className="small">{`Risk judged ${who.risk.level}: ${who.risk.reason}`}</div> : null}
+            {who?.summary ? <div className="small">{who.summary}</div> : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Source({ source }: { source?: "observed" | "agent" }) {
+  return source === "agent" ? <span className="chip chip-accent onb-src" title="Drafted by the Onboarding Agent">Agent</span> : <span className="chip onb-src" title="Written by Gantry from the repository's own files">Observed</span>;
 }
 
 function FindingsTab({ r }: { r: RepoV }) {
@@ -35,8 +62,12 @@ function FindingsTab({ r }: { r: RepoV }) {
   const stamp = (t: number) => fmt.stamp(t);
   return (
     <div>
+      {f.length ? <Authored who={o.assessor} what="Assessed" id="onb-assessor" /> : null}
+      {o.assessor?.mode === "agent" && o.assessor.commands && Object.keys(o.assessor.commands).length ? (
+        <p className="small" id="onb-agent-commands">{`Commands the agent found (suggestions, not verified): ${Object.entries(o.assessor.commands).map(([k, v]) => `${k}: ${v}`).join(" · ")}`}</p>
+      ) : null}
       {!f.length ? (
-        <Empty title="Not assessed yet" text="The Onboarding agent lists findings once the assessment finishes." />
+        <Empty title="Not assessed yet" text="Gantry lists findings once the assessment finishes." />
       ) : (
         <ul className="onb-findings">
           {list.map((x) => {
@@ -47,6 +78,7 @@ function FindingsTab({ r }: { r: RepoV }) {
                 <div className="onb-f-main">
                   <div className="onb-f-t">
                     <strong>{x.check}</strong>
+                    <Source source="observed" />
                     {x.ok ? <span className="muted small">passes</span> : <SevMark sev={x.sev} />}
                     {!x.ok && x.required === false ? <span className="muted small"> · advisory</span> : null}
                   </div>
@@ -57,6 +89,7 @@ function FindingsTab({ r }: { r: RepoV }) {
                     </div>
                   )}
                   {x.detail ? <div className="muted small">{x.detail}</div> : null}
+                  {x.note ? <div className="small onb-note"><Source source="agent" />{` ${x.note}`}</div> : null}
                   {x.ok ? null : <div className="muted small">{x.manual ? "Cannot be fixed by the PR. Needs a person with access." : inPR ? "Fixed in the onboarding PR." : x.file ? "Will be fixed in the onboarding PR." : "Documented in AGENTS.md by the PR."}</div>}
                 </div>
               </li>
@@ -90,13 +123,14 @@ function PrTab({ r }: { r: RepoV }) {
   const actor = useActors();
   const g = useGuidelines().data;
   const files = usePrFiles(r.id, !!pr, `${pr?.number}:${pr?.headSha}`);
-  if (!pr) return <Empty title="No PR yet" text={r.onboarding.stage === "person" ? "A person must fix the blocker before the agent can open a PR." : "The Onboarding agent opens a PR after the assessment."} />;
+  if (!pr) return <Empty title="No PR yet" text={r.onboarding.stage === "person" ? "A person must fix the blocker before Gantry can open a PR." : "Gantry opens a PR after the assessment."} />;
   const plus = pr.files.reduce((s, f) => s + f.plus, 0);
   const minus = pr.files.reduce((s, f) => s + f.minus, 0);
   const checks = r.config.requiredChecks.map((c) => ({ name: c, st: pr.state === "merged" || pr.checks === "green" ? "ok" : pr.checks === "red" ? "bad" : pr.checks === "running" ? "warn" : "pending" }));
   const added = (path: string): string[] => files.data?.files.find((x) => x.path === path)?.added ?? [];
   return (
     <div className="onb-pr">
+      <Authored who={r.onboarding.drafter} what="Drafted" id="onb-drafter" />
       <div className="onb-pr-head">
         <span className="mono strong">{`#${pr.number}`}</span>
         <strong>{pr.title}</strong>
@@ -130,6 +164,7 @@ function PrTab({ r }: { r: RepoV }) {
               <details id={`onb-file-${f.path.replace(/[^a-z0-9]/gi, "-")}`}>
                 <summary>
                   <span className="mono">{f.path}</span>
+                  <Source source={f.source} />
                   <span className="mono small"><span className="pos">{`+${f.plus}`}</span>{" "}<span className="neg">{`−${f.minus}`}</span></span>
                 </summary>
                 <pre className="onb-diff mono">
@@ -201,7 +236,7 @@ export function RepoDrawer({ repoId, projectId, close }: { repoId: string; proje
   if (!r || !project) return <div className="drawer-inner onb-drawer"><div className="drawer-scroll"><Empty title="No such repo" text="It may have been removed." /></div></div>;
   const o = r.onboarding;
   const prOpen = !!o.pr && o.pr.state === "open";
-  const busy = o.busy ? BUSY[o.busy] ?? "Working" : null;
+  const busy = o.busy ? busyText(r) ?? "Working" : null;
   const active = tab || (o.pr && o.stage !== "ready" ? "pr" : "findings");
   const go = (t: string) => { rememberTab(repoId, t); setTab(t); };
   const run = async (fn: () => Promise<{ ok: boolean; msg: string }>) => {
@@ -223,7 +258,7 @@ export function RepoDrawer({ repoId, projectId, close }: { repoId: string; proje
     canVerify ? <Btn key="verify" label={o.stage === "ready" ? "Re-check now" : "Verify now"} kind={o.stage === "ready" ? undefined : "primary"} icon="check" small id="onb-act-verify" guard={manage} disabledReason={manage.allowed ? busy : null} onClick={() => void run(() => ops.verifyNow(r.id))} /> : null,
     o.pr ? (
       <Btn key="changes" label="Request changes" small icon="undo" id="onb-act-changes" guard={manage} disabledReason={manage.allowed ? (!prOpen ? "The PR is already merged" : busy) : null}
-        onClick={() => ui.reasonDialog({ title: `Request changes on ${r.name}#${o.pr!.number}`, kicker: "Onboarding PR", label: "What should the agent change?", ok: "Request changes", min: 5, placeholder: "For example: keep CODEOWNERS to the /internal directory only.", onOk: async (v) => { const x = await ops.requestChanges(r.id, v); if (x.ok) ui.toast(x.msg, "ok"); return x; } })} />
+        onClick={() => ui.reasonDialog({ title: `Request changes on ${r.name}#${o.pr!.number}`, kicker: "Onboarding PR", label: "What should be changed?", ok: "Request changes", min: 5, placeholder: "For example: keep CODEOWNERS to the /internal directory only.", onOk: async (v) => { const x = await ops.requestChanges(r.id, v); if (x.ok) ui.toast(x.msg, "ok"); return x; } })} />
     ) : null,
     <Btn key="exc" label="Mark exception" small icon="shield" id="onb-act-exception" guard={exc} disabledReason={exc.allowed && o.stage === "ready" ? (o.exception ? "Already ready by exception" : "Already ready") : null}
       onClick={() => ui.reasonDialog({ title: `Mark ${r.name} ready by exception`, kicker: "Onboarding exception", label: "Why is it safe to accept work without finishing onboarding?", ok: "Mark ready", kind: "danger", min: 10, sub: "The repo becomes Ready now. Open gaps stay listed on the repo and the exception is written to the audit ledger.", onOk: async (v) => { const x = await ops.markException(r.id, v); if (x.ok) ui.toast(x.msg, "warn"); return x; } })} />,
@@ -248,7 +283,7 @@ export function RepoDrawer({ repoId, projectId, close }: { repoId: string; proje
         {o.stage === "failed" ? <div className="callout callout-fail"><Icon name="st-fail" /><div><strong>Onboarding failed. </strong>{o.blocker || "Re-run the assessment after fixing the cause."}</div></div> : null}
         {o.exception ? <div className="callout callout-warn"><Icon name="shield" /><div><strong>Ready by exception. </strong>{o.exception.reason}<span className="muted">{` · ${fmt.stamp(o.exception.at)}`}</span></div></div> : null}
         {r.halted && /readiness/i.test(r.halted.reason ?? "") ? <div className="callout callout-warn" id="onb-halt"><Icon name="alert" /><div><strong>Halted: readiness was lost. </strong>{`Agents on this repo are stopped until it is verified again. ${r.halted.reason}`}</div></div> : null}
-        {auto && o.stage !== "ready" && !busy ? <div className="callout"><Icon name="clock" /><div>The Onboarding agent moves this repo to the next stage on its own. Gantry checks GitHub every minute.</div></div> : null}
+        {auto && o.stage !== "ready" && !busy ? <div className="callout"><Icon name="clock" /><div>Gantry moves this repo to the next stage on its own. It checks GitHub every minute.</div></div> : null}
         {needsMerge(r) ? <div className="callout callout-warn"><Icon name="st-wait" /><div>{`Checks are green. A person with merge rights on this project must approve and merge PR #${o.pr!.number}.`}</div></div> : null}
         <div className="onb-acts">{acts}</div>
         <LockNote decision={!manage.allowed ? manage : null} what="Onboarding actions on this repo" />

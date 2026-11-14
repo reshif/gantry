@@ -104,7 +104,7 @@ export function DisconnectDialog({ v, routing, agents, close }: { v: Vendor; rou
   );
 }
 
-export function AddVendorDialog({ close, onAdded }: { close: () => void; onAdded: (id: string) => void }) {
+export function ManualVendorDialog({ close, onAdded }: { close: () => void; onAdded: (id: string) => void }) {
   const ui = useUI();
   const perm = dec(useCan("model.edit"));
   const [name, setName] = useState("");
@@ -125,7 +125,7 @@ export function AddVendorDialog({ close, onAdded }: { close: () => void; onAdded
     if (id) onAdded(id);
   };
   return (
-    <Dialog title="Add a model vendor" kicker="Models · vendor" wide onClose={close}
+    <Dialog title="Add a vendor by hand" kicker="Models · vendor" wide onClose={close}
       sub="Any service that speaks the Anthropic or OpenAI-style messages API can be added. The key is sealed. A custom vendor is not qualified for any station until that station's eval suite has passed on it."
       actions={[{ label: "Cancel" }, { label: "Add vendor", kind: "primary", submit: true, id: "va-ok", guard: perm, onClick: () => void submit() }]}
       body={(

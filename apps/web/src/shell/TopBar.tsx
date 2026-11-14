@@ -1,4 +1,4 @@
-/** Top bar (legacy renderTop): brand, project switcher, palette button, status cluster, inbox, user menu. */
+/** Top bar: brand, environment badge, breadcrumb, palette button, status cluster, inbox, user menu. */
 import { useRef } from "react";
 import { ROLES } from "@gantry/domain";
 import { useHome, useSessions } from "../api/queries";
@@ -6,15 +6,17 @@ import { ops } from "../api/ops";
 import type { Me } from "../api/types";
 import { applyTheme, setProject, updatePrefs, usePrefs, type Theme } from "../lib/prefs";
 import { Icon, Logo } from "../ui/Icon";
-import { Avatar, Btn, Chip, Select, Table } from "../ui/primitives";
+import { Avatar, Btn, Chip, Table } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { StatusCluster } from "./StatusCluster";
 import { useOpenTraveler } from "./useTraveler";
 import { navigate } from "../lib/router";
+import { isProjectRoute } from "../lib/routes";
 
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform || "");
 
-export function TopBar({ me, projectId, onOpenNav, onOpenPalette }: { me: Me; projectId: string | null; onOpenNav: () => void; onOpenPalette: () => void }) {
+export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }: { me: Me; crumb: string[]; project: Me["projects"][number] | null; current: string; onOpenNav: () => void; onOpenPalette: () => void }) {
   const ui = useUI();
   const prefs = usePrefs();
   const home = useHome().data;
@@ -22,8 +24,7 @@ export function TopBar({ me, projectId, onOpenNav, onOpenPalette }: { me: Me; pr
   const userRef = useRef<HTMLButtonElement>(null);
   const n = (home?.approvals.length ?? 0) + (home?.conversations.length ?? 0);
   const v = me.person;
-  const projects = me.projects;
-
+  
   const signOut = async (what?: string) => {
     ui.closeAllDialogs();
     ui.drawer.close();
@@ -40,6 +41,7 @@ export function TopBar({ me, projectId, onOpenNav, onOpenPalette }: { me: Me; pr
     if (!userRef.current) return;
     const theme = prefs.theme;
     ui.menu(userRef.current, `${v.name} · ${v.email}`, [
+      ...(me.config.demoAccounts ? [{ label: "Environment: local stack · demo accounts on", icon: "info" }, { sep: true }] : []),
       { label: "Profile", icon: "user", onClick: () => ui.dialog({ title: v.name, kicker: "Profile", body: <ProfileBody me={me} /> }) },
       { label: "My roles per project", icon: "lock", onClick: () => ui.dialog({ title: "My roles", kicker: "Access", sub: "Roles are granted at factory level or per project. Projects where you hold no role are hidden from you.", body: <RolesBody me={me} /> }) },
       { label: "My sessions", icon: "key", onClick: () => ui.dialog({ title: "My sessions", kicker: "Security", body: <SessionsBody me={me} /> }) },
@@ -60,41 +62,23 @@ export function TopBar({ me, projectId, onOpenNav, onOpenPalette }: { me: Me; pr
 
   return (
     <header className="topbar" id="topbar">
-      <button type="button" className="icon-btn nav-toggle" aria-label="Open navigation" onClick={onOpenNav}>
+      <button type="button" className="icon-btn nav-toggle" aria-label="Toggle navigation" aria-controls="nav" onClick={onOpenNav}>
         <Icon name="menu" />
       </button>
       <a href="#home" className="brand">
         <Logo />
         <span className="brand-name">Gantry</span>
+        {me.config.demoAccounts ? <span className="dev-dot" role="img" aria-label="Non-production: local stack, demo accounts on" title="Non-production: local stack, demo accounts on" /> : null}
       </a>
-      {me.config.demoAccounts ? (
-        <span className="demo-chip" tabIndex={0} data-tip="Development sign-in is on: seeded demo accounts can sign in. Do not use this configuration outside a local stack.">
-          <span className="demo-long">Demo accounts on · local stack</span>
-          <span className="demo-short">Demo</span>
-        </span>
-      ) : null}
-      <div className="proj-switch">
-        <label htmlFor="project-switch" className="viewing-l">
-          Project
-        </label>
-        {projects.length ? (
-          <Select
-            id="project-switch"
-            aria-label="Current project"
-            value={projectId}
-            options={projects.map((p) => ({ value: p.id, label: p.name + (p.killed ? " · killed" : p.halted ? " · halted" : p.status !== "active" ? ` · ${p.status}` : "") }))}
-            onChange={(id) => {
-              setProject(id);
-              ui.toast(`Project: ${projects.find((p) => p.id === id)?.name ?? id}.`);
-            }}
-          />
-        ) : (
-          <span className="muted small">No projects</span>
-        )}
-      </div>
+      <ProjectSwitcher me={me} project={project} current={current} />
+      <nav className={`crumb${isProjectRoute(current) ? "" : " crumb-factory"}`} id="crumb" aria-label="Breadcrumb">
+        {crumb.map((c, i) => (
+          <span key={i} className={i === crumb.length - 1 ? "crumb-cur" : "crumb-part"} aria-current={i === crumb.length - 1 ? "page" : undefined}>{c}</span>
+        ))}
+      </nav>
       <button type="button" className="palette-btn" id="palette-btn" onClick={onOpenPalette} aria-label="Open command palette">
         <Icon name="search" />
-        <span className="palette-label">Jump to or run…</span>
+        <span className="palette-label">Search</span>
         <kbd>{isMac() ? "⌘K" : "Ctrl K"}</kbd>
       </button>
       <div className="top-right">
@@ -103,9 +87,8 @@ export function TopBar({ me, projectId, onOpenNav, onOpenPalette }: { me: Me; pr
           <Icon name="bell" />
           {n ? <span className="inbox-count mono">{String(n)}</span> : null}
         </button>
-        <button ref={userRef} type="button" className="user-btn" id="user-menu" aria-haspopup="menu" aria-label={`Account menu for ${v.name}`} onClick={openUserMenu}>
+        <button ref={userRef} type="button" className="user-btn" id="user-menu" aria-haspopup="menu" aria-label={`Account menu for ${v.name}`} aria-expanded="false" title={v.name} onClick={openUserMenu}>
           <Avatar id={v.id} size="sm" />
-          <span className="user-name">{v.name.split(" ")[0]}</span>
           <Icon name="down" />
         </button>
       </div>
@@ -219,9 +202,9 @@ function InboxBody({ name, close }: { name: string; close: () => void }) {
         <ul className="inbox">
           {ap.map((a, i) =>
             a.repo
-              ? item(`r${i}`, "rocket", `Merge onboarding PR ${a.repoName ?? a.repo}#${a.pr ?? ""}`, "Checks green", () => {
+              ? item(`r${i}`, "rocket", a.note ? `Onboarding ${a.repoName ?? a.repo}` : `Merge onboarding PR ${a.repoName ?? a.repo}#${a.pr ?? ""}`, a.note ?? "Checks green", () => {
                   if (a.project) setProject(a.project);
-                  navigate("onboarding");
+                  navigate("onboarding", a.repo);
                 })
               : item(`a${i}`, "st-wait", `${a.wo} · ${a.gateLabel ?? a.gate ?? ""} ${a.gateName ?? ""}`.trim(), `${a.title ?? ""} · ${a.projectName ?? a.project ?? ""}`, () => a.wo && openTraveler(a.wo)),
           )}

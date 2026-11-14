@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { DEFAULT_CATALOG } from "@gantry/domain";
+import { DEFAULT_CATALOG, VENDOR_TEMPLATES } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
 import { bindQueryClient } from "../api/keys";
@@ -26,6 +26,7 @@ const VENDORS = [
     models: [model("local-coder", "coder-34b", "local", { enabled: false, inPrice: 0, outPrice: 0 })] },
   { id: "mistral-eu", name: "Mistral EU", product: "Custom vendor · OpenAI-compatible", connected: true, health: "healthy", latency: 0, mtd: 0, budget: 0, keyMask: "sk-••••••••ab12", region: "eu-west-1", endpoint: "https://llm.example.com/v1", residency: "", retention: "zero", custom: true, qualified: { build: { suite: "S", run: "R", at: "x" } }, version: 5, models: [] },
 ];
+const TEMPLATES = VENDOR_TEMPLATES;
 const ROUTING = { defaultModel: "claude-opus-5-5", overrides: { intake: "claude-haiku-5-5" }, fallback: ["claude-opus-5-5", "claude-sonnet-5-5"], rules: [{ id: "RR-1", tag: "regulated", use: "bedrock", region: "eu-central-1", alt: "local", note: "Regulated repos stay in the EU." }], version: 4 };
 const AGENTS = [{ id: "ag-build", name: "Build agent", station: "build", model: "claude-sonnet-5-5", fallbacks: ["claude-opus-5-5"], initials: "B" }];
 const REPOS = [{ id: "payments-api", name: "acme/payments-api", project: "payments", tags: ["pci"] }, { id: "risk-engine", name: "acme/risk-engine", project: "risk", tags: [] }];
@@ -46,6 +47,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     "GET /api/v1/agents": () => ({ body: AGENTS }),
     "GET /api/v1/catalog": () => ({ body: DEFAULT_CATALOG }),
     "GET /api/v1/vendors": () => ({ body: VENDORS }),
+    "GET /api/v1/vendor-templates": () => ({ body: TEMPLATES }),
     "GET /api/v1/routing": () => ({ body: ROUTING }),
     "GET /api/v1/prices": () => ({ body: PRICES }),
     "GET /api/v1/budgets": () => ({ body: BUDGETS }),
@@ -192,6 +194,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
     });
     mount();
     fireEvent.click(await byId("md-add-vendor"));
+    fireEvent.click(await byId("va-manual"));
     fireEvent.click(await byId("va-ok"));
     await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toBe("Name the vendor."));
     type(await byId("va-name"), "Acme gateway");
@@ -416,5 +419,54 @@ describe("permissions", () => {
     expect((await byId("rt-fb-rm-0")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
     expect(document.body.textContent).toContain("Read-only for you: routing.");
     expect(writes(calls)).toHaveLength(0);
+  });
+});
+
+describe("vendor templates and model discovery", () => {
+  it("picks Bedrock, shows only its fields, connects, then lists the discovered models with switches", async () => {
+    const calls = setup({
+      "POST /api/v1/vendors/from-template": () => ok({ msg: "AWS Bedrock connected.", vendor: { id: "aws-bedrock", name: "AWS Bedrock", template: "bedrock" }, discovery: { found: 2, models: [{ id: "bedrock-sonnet", name: "Claude Sonnet 4.5", enabled: false, priced: true }, { id: "bedrock-x", name: "Mystery", enabled: false, priced: false }], warnings: ["Inference profiles were not listed: denied"] } }),
+      "PATCH /api/v1/models/bedrock-sonnet": () => ok({ msg: "on" }),
+    });
+    mount();
+    fireEvent.click(await byId("md-add-vendor"));
+    for (const id of ["anthropic", "bedrock", "openai", "azure-openai", "gemini", "vertex", "openai-compatible"]) await byId(`vt-pick-${id}`);
+    fireEvent.click(await byId("vt-pick-bedrock"));
+    await byId("vt-f-region");
+    expect(document.getElementById("vt-f-apiKey")).toBeNull();
+    fireEvent.click(await byId("vt-submit"));
+    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toBe("Access key id is required."));
+    expect(writes(calls)).toHaveLength(0);
+    type(await byId("vt-f-region"), "eu-west-1");
+    type(await byId("vt-f-accessKeyId"), "AKIAABCDEFGHIJKLMNOP");
+    type(await byId("vt-f-secretAccessKey"), "s".repeat(40));
+    fireEvent.click(await byId("vt-submit"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/vendors/from-template", body: { template: "bedrock", fields: { region: "eu-west-1", accessKeyId: "AKIAABCDEFGHIJKLMNOP" }, retention: "standard" } });
+    expect(writes(calls)[0]!.headers["idempotency-key"]).toBeTruthy();
+    await byId("vt-found");
+    expect(document.body.textContent).toContain("Inference profiles were not listed");
+    expect(document.body.textContent).toContain("Claude Sonnet 4.5");
+    expect(document.body.textContent).toContain("needs a price");
+    expect((await byId("vt-m-bedrock-x")).getAttribute("data-reason")).toBeTruthy();
+  });
+
+  it("shows the server's reason when the credentials are refused and keeps the form", async () => {
+    setup({ "POST /api/v1/vendors/from-template": () => ({ status: 422, body: { ok: false, msg: "Anthropic rejected the credentials (HTTP 401). Check the key and its permissions." } }) });
+    mount();
+    fireEvent.click(await byId("md-add-vendor"));
+    fireEvent.click(await byId("vt-pick-anthropic"));
+    type(await byId("vt-f-apiKey"), "sk-ant-" + "x".repeat(20));
+    fireEvent.click(await byId("vt-submit"));
+    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/rejected the credentials/));
+    expect(document.getElementById("vt-f-apiKey")).not.toBeNull();
+  });
+
+  it("Refresh models on a vendor posts discover and toasts the result", async () => {
+    const calls = setup({ "POST /api/v1/vendors/anthropic/discover": () => ok({ msg: "Anthropic: found 3 models, 1 new." }) });
+    mount();
+    fireEvent.click(await byId("vendor-refresh-anthropic"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/vendors/anthropic/discover" });
   });
 });

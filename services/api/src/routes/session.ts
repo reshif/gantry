@@ -36,6 +36,8 @@ interface OidcState {
   method: "sso" | "github";
   stepUp: boolean;
   returnTo: string;
+  /** Opened in a small window by the app: the callback answers by redirecting to the app's step-up result page, which tells the opener. */
+  popup?: boolean;
 }
 
 /** Only same-site relative paths may be returned to (no open redirect). */
@@ -52,6 +54,8 @@ const SecuritySchema = z.object({
   domains: z.array(z.string().max(200)).max(100),
   ipAllow: z.array(z.string().max(100)).max(200),
   restoreFactoryNeedsTwo: z.boolean(),
+  killNeedsStepUp: z.boolean(),
+  stepUpWindowMinutes: z.number().int().min(5).max(60).optional(),
   githubLogin: z.boolean(),
 });
 
@@ -80,12 +84,15 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
   const redirectUri = `${g.config.publicUrl}/auth/callback`;
   const cookieOpts = { path: "/auth", httpOnly: true, sameSite: "lax" as const, secure: g.config.cookieSecure };
   const authRate = { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } };
+  /** Popup step-up: the app serves a tiny result page (the API's CSP forbids inline script) that posts to its opener and closes. */
+  const popupDone = (reply: import("fastify").FastifyReply, ok: boolean, error?: string) =>
+    reply.redirect(`/?step_up_popup=${ok ? "ok" : "error"}${error ? `&msg=${encodeURIComponent(error)}` : ""}`, 302);
   const toApp = (reply: import("fastify").FastifyReply, to: string, error?: string) => reply.redirect(error ? `/?auth_error=${encodeURIComponent(error)}` : to, 302);
 
   /* ------------------------------------------------------------ sign-in */
 
   app.get("/auth/login", authRate, async (req, reply) => {
-    const q = z.object({ method: z.enum(["sso", "github"]).optional(), login_hint: z.string().max(254).optional(), step_up: z.string().optional(), return_to: z.string().max(500).optional() }).safeParse(req.query);
+    const q = z.object({ method: z.enum(["sso", "github"]).optional(), login_hint: z.string().max(254).optional(), step_up: z.string().optional(), popup: z.string().optional(), return_to: z.string().max(500).optional() }).safeParse(req.query);
     if (!q.success) return toApp(reply, "/", "The sign-in link is not valid.");
     const method = q.data.method ?? "sso";
     const meta = { ip: req.ip, userAgent: String(req.headers["user-agent"] ?? ""), requestId: req.id, method };
@@ -108,7 +115,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       req.log.error({ err: e }, "OIDC discovery failed");
       return toApp(reply, "/", "The identity provider is not reachable. Try again shortly.");
     }
-    const st: OidcState = { state, nonce, verifier, method, stepUp: q.data.step_up === "1", returnTo: safeReturn(q.data.return_to) };
+    const st: OidcState = { state, nonce, verifier, method, stepUp: q.data.step_up === "1", returnTo: safeReturn(q.data.return_to), ...(q.data.popup === "1" && q.data.step_up === "1" ? { popup: true } : {}) };
     reply.setCookie(OIDC_COOKIE, seal(st, oidcKey, "oidc-state"), { ...cookieOpts, maxAge: 600 });
     return reply.redirect(url.toString(), 302);
   });
@@ -136,11 +143,11 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       const s = await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, tok, (await g.security.get()).value.idleMin);
       if (s) existing = { id: s.id, personId: s.personId };
     }
-    const r = await signIn(g, claims, { ...meta, existingSession: existing });
-    if (!r.ok) return toApp(reply, "/", r.msg);
+    const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp });
+    if (!r.ok) return st.popup ? popupDone(reply, false, r.msg) : toApp(reply, "/", r.msg);
     if (r.token && r.expiresAt) reply.setCookie(g.config.sessionCookie, r.token, { path: "/", httpOnly: true, sameSite: "lax", secure: g.config.cookieSecure, expires: r.expiresAt });
     await withTx(g.pool, (tx) => publishChange(tx, { org: g.orgId, keys: ["signins", "sessions", ...(r.provisioned ? ["people"] : [])] })).catch(() => undefined);
-    return toApp(reply, st.returnTo);
+    return st.popup ? popupDone(reply, true) : toApp(reply, st.returnTo);
   });
 
   app.post("/auth/logout", authRate, async (req, reply) => {
@@ -248,7 +255,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       req,
       {
         action: "security.manage",
-        stepUp: 300,
+        stepUp: true,
         ifMatchRequired: true,
         ifMatch: async (tx) => (await readSecurity(tx, g.orgId)).version,
       },

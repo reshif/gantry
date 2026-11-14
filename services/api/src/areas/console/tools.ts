@@ -7,7 +7,7 @@
  *
  * Action tools never execute. They return a proposal: the ordinary endpoint to call, its body, the permission it needs and what the decision point
  * says about it right now. The frontend renders it as a confirm card; confirming calls that endpoint under the person's own authority, so the
- * decision point, audit, stop checks and idempotency are the endpoint's own. Proposals exist only while the console's action switch is on.
+ * decision point, audit, stop checks and idempotency are the endpoint's own. A kind of proposal is offered only to a person who holds its console right (console.propose.*).
  */
 import { can, policyTrace, visibleProjects } from "@gantry/domain";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -45,7 +45,10 @@ export interface ToolCtx {
   app: FastifyInstance;
   req: FastifyRequest;
   person: { id: string; name: string };
-  actionsEnabled: boolean;
+  /** Names of the propose tools this person may be offered (their console rights); empty: read-only console. */
+  proposeTools: ReadonlySet<string>;
+  /** Why a tool is not offered (names the missing right); set by the caller. */
+  denyText?: (tool: string) => string;
   proposals: Proposal[];
   cited: Cited[];
   used: string[];
@@ -594,14 +597,14 @@ export const ALL_TOOLS: readonly ToolDef[] = [...READ, ...PROPOSE];
 export const READ_TOOLS: readonly ToolDef[] = READ;
 export const toolByName = (name: string): ToolDef | undefined => ALL_TOOLS.find((t) => t.name === name);
 
-/** The tools the model is offered: the read tools always, the propose tools only while the action switch is on. */
-export const offered = (actionsEnabled: boolean): ToolDef[] => (actionsEnabled ? [...ALL_TOOLS] : [...READ_TOOLS]);
+/** The tools the model is offered: the read tools always, a propose tool only when the person holds its console right. */
+export const offered = (proposeTools: ReadonlySet<string>): ToolDef[] => [...READ_TOOLS, ...ALL_TOOLS.filter((t) => t.kind === "propose" && proposeTools.has(t.name))];
 
 /** Runs a tool and returns what the model sees: JSON text. A tool never throws into the loop. */
 export async function execute(ctx: ToolCtx, name: string, input: unknown): Promise<{ text: string; ok: boolean }> {
   const t = toolByName(name);
   if (!t) return { text: JSON.stringify({ error: `No such tool ${name}.` }), ok: false };
-  if (t.kind === "propose" && !ctx.actionsEnabled) return { text: JSON.stringify({ error: "Console actions are switched off for this factory. Say which screen the person can use instead." }), ok: false };
+  if (t.kind === "propose" && !ctx.proposeTools.has(name)) return { text: JSON.stringify({ error: ctx.denyText?.(name) ?? "The console may not propose this for this person. Say which screen they can use instead." }), ok: false };
   ctx.used.push(name);
   try {
     const out = await t.run(ctx, obj(input));

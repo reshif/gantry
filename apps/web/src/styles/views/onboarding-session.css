@@ -1,0 +1,51 @@
+/* The onboarding session: conversation, cards and the lifecycle side panel. */
+.osx-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0 12px; }
+.osx-title { margin: 0; font-size: var(--t-lg); }
+.osx-spacer { flex: 1; }
+.osx-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .osx-grid { grid-template-columns: minmax(0, 1fr); } .osx-side { order: -1; } }
+.osx-main { display: flex; flex-direction: column; border: 1px solid var(--line-strong); background: var(--surface); min-width: 0; }
+.osx-thread { display: flex; flex-direction: column; gap: 12px; padding: 14px; max-height: 68vh; overflow-y: auto; }
+.osx-msg { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
+.osx-msg.is-user { align-self: flex-end; background: var(--sunk); padding: 8px 12px; border: 1px solid var(--line); max-width: 85%; }
+.osx-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.osx-event { margin: 0; color: var(--ink-2); border-left: 2px solid var(--line-strong); padding-left: 8px; overflow-wrap: anywhere; }
+.osx-progress { margin: 0; display: flex; align-items: center; gap: 6px; }
+.osx-card { border: 1px solid var(--line-strong); background: var(--surface); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.osx-card-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.osx-proposal { border-left: 3px solid var(--accent, var(--ink)); }
+.osx-proposal.is-approved { border-left-color: var(--ok, var(--ink)); }
+.osx-proposal.is-discarded, .osx-proposal.is-superseded, .osx-proposal.is-changes { opacity: 0.7; border-left-color: var(--line-strong); }
+.osx-status { margin-left: auto; font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); }
+.osx-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.osx-file { display: flex; gap: 10px; align-items: center; width: 100%; background: none; border: 1px solid var(--line); padding: 4px 8px; text-align: left; cursor: pointer; color: inherit; }
+.osx-file:disabled { cursor: default; }
+.osx-plus { color: var(--ok, inherit); }
+.osx-minus { color: var(--block, inherit); }
+.osx-diff { margin: 0; padding: 8px; background: var(--sunk); border: 1px solid var(--line); overflow: auto; max-height: 260px; font-size: var(--t-xs); }
+.osx-actions, .osx-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.osx-ask { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.osx-ask textarea, .osx-composer textarea { width: 100%; resize: vertical; }
+.osx-composer { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; padding: 10px 14px; border-top: 1px solid var(--line-strong); }
+.osx-composer textarea { flex: 1; min-width: 200px; }
+.osx-reason { flex-basis: 100%; margin: 0; }
+.osx-findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.osx-findings li { display: flex; gap: 8px; }
+.osx-findings .is-gap .osx-f-ic { color: var(--block, inherit); }
+.osx-side { border: 1px solid var(--line-strong); background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.osx-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.osx-steps li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--t-sm); }
+.osx-steps li.is-done { color: var(--ink-2); }
+.osx-steps li.is-current { color: var(--ink); font-weight: 600; }
+.osx-dot { width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.osx-dot .ic { width: 10px; height: 10px; }
+.is-done .osx-dot { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.is-current .osx-dot { border-color: var(--ink); background: var(--accent-soft, var(--sunk)); }
+.osx-next { border: 1px solid var(--line-strong); background: var(--sunk); padding: 8px 10px; }
+.osx-next p { margin: 2px 0 0; }
+.osx-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; }
+.osx-facts dt { color: var(--muted); }
+.osx-facts dd { margin: 0; overflow-wrap: anywhere; }
+.osx-pending { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.osx-waiting { margin: 0; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px dashed var(--line-strong); background: var(--sunk); color: var(--ink-2); }
+.osx-msg.is-update { border-left: 2px solid var(--line-strong); padding-left: 8px; }

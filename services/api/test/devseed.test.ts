@@ -37,7 +37,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
   });
 
   it("teams, templates, matrix, policies, freezes round-trip", async () => {
-    expect(await readTeams(t.db.app, t.orgId)).toEqual(S.teams);
+    expect((await readTeams(t.db.app, t.orgId)).map(({ roles: _r, ...x }) => x)).toEqual(S.teams); // roles: the team grants, none seeded
     expect((await readTemplates(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(S.templates);
     expect((await readMatrix(t.db.app, t.orgId)).value).toEqual(seed.state.matrix);
     expect((await readPolicies(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(S.policies);
@@ -69,7 +69,7 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
     expect(cat.actions).toEqual(seed.catalog.actions);
     expect((await readRoles(t.db.app, t.orgId)).map((x) => strip(x, "version"))).toEqual(seed.catalog.roles);
     const sec = await readSecurity(t.db.app, t.orgId);
-    expect(sec.value).toEqual({ ...(seed.state.security as object), ipAllow: [] });
+    expect(sec.value).toEqual({ killNeedsStepUp: true, stepUpWindowMinutes: 15, ...(seed.state.security as object), ipAllow: [] });
   });
 
   it("the loaded policy state decides exactly like the in-memory seed", async () => {

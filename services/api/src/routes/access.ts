@@ -21,7 +21,7 @@ import { FreezeBody, MatrixBody, PolicyBody, PolicyPatch, RoleCreate, RolePatch,
 import { runSimulation } from "../areas/access/simulate.js";
 
 const Id = z.object({ id: z.string().min(1).max(100) });
-const STEP_UP = 300;
+const STEP_UP = true as const;
 
 export const accessRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;

@@ -9,6 +9,8 @@ export class FakeEdge {
   server = http.createServer((req, res) => void this.handle(req, res));
   url = "";
   ready: { ready: boolean; code?: string; reason?: string; vendor?: string; model?: string } = { ready: true, vendor: "anthropic", model: "claude-test-1" };
+  /** Every /ready request URL (with its query: the chosen model and project). */
+  readyUrls: string[] = [];
   script: Turn[] = [];
   calls: Array<{ url: string; headers: http.IncomingHttpHeaders; body: Record<string, unknown> }> = [];
   /** Consulted when the script is empty (the live harness answers by what was asked). */
@@ -25,6 +27,7 @@ export class FakeEdge {
   reset(): void {
     this.script = [];
     this.calls = [];
+    this.readyUrls = [];
     this.ready = { ready: true, vendor: "anthropic", model: "claude-test-1" };
   }
 
@@ -36,7 +39,8 @@ export class FakeEdge {
       res.writeHead(401, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ ok: false }));
     }
-    if (req.url === "/service/v1/ready") {
+    if ((req.url ?? "").split("?")[0] === "/service/v1/ready") {
+      this.readyUrls.push(req.url ?? "");
       res.writeHead(200, { "content-type": "application/json" });
       return void res.end(JSON.stringify(this.ready));
     }

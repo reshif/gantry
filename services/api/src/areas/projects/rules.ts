@@ -14,7 +14,7 @@ export async function ruleContext(db: Queryable, orgId: string, projectId: strin
   const p = await db.query<{ id: string; status: string }>(`select id, status from people where org_id = $1`, [orgId]);
   const m = projectId
     ? await db.query<{ person_id: string; role_id: string }>(
-        `select person_id, role_id from role_assignments where org_id = $1 and project_id = $2 and revoked_at is null and (expires_at is null or expires_at > now())`,
+        `select person_id, role_id from effective_role_assignments where org_id = $1 and project_id = $2 and revoked_at is null and (expires_at is null or expires_at > now())`,
         [orgId, projectId],
       )
     : { rows: [] as { person_id: string; role_id: string }[] };

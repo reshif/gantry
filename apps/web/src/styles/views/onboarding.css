@@ -35,7 +35,7 @@
 .onb-st-exception { color: var(--wait); border-color: var(--wait); border-style: dashed; background: var(--wait-soft); }
 .onb-st-person { color: var(--block); border-color: var(--block); background: var(--block-soft); }
 .onb-st-failed { color: var(--fail); border-color: var(--fail); background: var(--fail-soft); border-width: 2px; }
-.onb-st-merge { color: var(--gate); border-color: var(--gate); background: var(--gate-soft); }
+.onb-st-merge, .onb-st-openpr { color: var(--gate); border-color: var(--gate); background: var(--gate-soft); }
 .onb-st-progress { color: var(--run); border-color: var(--run); background: var(--run-soft); }
 
 .onb-acts { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--s3) 0; }

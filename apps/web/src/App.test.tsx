@@ -74,7 +74,31 @@ describe("signed out", () => {
     render(<App />);
     const link = (await screen.findByText("Asha Raman")).closest("a");
     expect(link?.getAttribute("href")).toBe("/auth/login?login_hint=asha%40acme.dev");
-    expect(document.querySelectorAll("a.demo-acc")).toHaveLength(10);
+    expect(document.querySelectorAll("a.demo-acc")).toHaveLength(15);
+  });
+
+  it("lists the server's demo accounts with their real roles, and says nothing about MFA", async () => {
+    const list = [
+      { id: "p-asha", name: "Asha Raman", email: "asha@acme.dev", role: "Factory Admin", note: "Sensitive actions ask for a fresh sign-in." },
+      { id: "p-tomas", name: "Tomás Ferreira", email: "tomas@acme.dev", role: "Engineer on Payments; Reviewer on Storefront (via QA)", note: "Teams: QA." },
+      { id: "p-grace", name: "Grace Liu", email: "grace@acme.dev", role: "No roles yet", note: "Not in the organisation yet." },
+    ];
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Sign in.", config: { demoAccounts: true, demoAccountList: list } } }) });
+    render(<App />);
+    await screen.findByText("Asha Raman");
+    expect(document.querySelectorAll("a.demo-acc")).toHaveLength(3);
+    expect(document.getElementById("demo-p-tomas")?.textContent).toContain("Reviewer on Storefront (via QA)");
+    expect(document.getElementById("demo-p-grace")?.textContent).toContain("No roles yet");
+    expect(document.querySelector(".auth-demo")?.textContent).not.toMatch(/MFA/);
+  });
+
+  it("the fallback list (server sent none) claims no permissions and no MFA", async () => {
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Sign in.", config: { demoAccounts: true } } }) });
+    render(<App />);
+    await screen.findByText("Asha Raman");
+    const text = document.querySelector(".auth-demo")?.textContent ?? "";
+    expect(text).not.toMatch(/MFA|Factory Admin|Engineer/);
+    expect(text).toContain("People & teams");
   });
 
   it("SSO and GitHub buttons go to /auth/login with the method", async () => {
@@ -94,13 +118,14 @@ describe("signed in", () => {
     window.location.hash = "#floor";
     render(<App />);
     const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(Array.from(nav.querySelectorAll(".nav-group-name")).map((e) => e.textContent)).toEqual(["Overview", "Project · Payments Platform", "Agents", "Connect", "Govern"]);
+    expect(Array.from(nav.querySelectorAll(".nav-group-name")).map((e) => e.textContent)).toEqual(["Overview", "Project", "Agents", "Connect", "Govern"]);
     expect(within(nav).getByText("Access")).toBeTruthy();
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
     expect(await screen.findByText("The floor could not be loaded")).toBeTruthy();
     expect(within(nav).getByText("Floor").closest("a")?.getAttribute("aria-current")).toBe("page");
     await waitFor(() => expect(within(nav).getByTitle("3 conversations waiting for you").textContent).toBe("3"));
-    expect(document.title).toBe("Floor · Gantry Software Factory");
+    expect(document.title).toBe("Floor · Payments Platform · Gantry Software Factory");
+    expect(window.location.hash).toBe("#/p/payments/floor");
     expect(FakeES.instances[0]?.url).toBe("/api/v1/stream");
   });
 
@@ -126,22 +151,155 @@ describe("signed in", () => {
     expect(document.getElementById("sysbanner")?.hasAttribute("hidden")).toBe(false);
   });
 
-  it("collapses a nav group and persists the preference", async () => {
-    mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
+  const homeApi = () => mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
+  const headers = (nav: HTMLElement) => Array.from(nav.querySelectorAll<HTMLButtonElement>(".nav-group-btn"));
+
+  it("starts with every nav group collapsed, opens one at a time and collapses after a link", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#home";
     render(<App />);
-    const btn = await screen.findByRole("button", { name: /Agents/ });
-    fireEvent.click(btn);
-    expect(btn.getAttribute("aria-expanded")).toBe("false");
-    expect(JSON.parse(localStorage.getItem("gantry.prefs") ?? "{}").navCollapsed).toEqual({ Agents: true });
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    expect(headers(nav).every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
+    const [overview, , agents] = headers(nav) as [HTMLButtonElement, HTMLButtonElement, HTMLButtonElement];
+    fireEvent.click(agents);
+    expect(agents.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(overview);
+    expect(overview.getAttribute("aria-expanded")).toBe("true");
+    expect(agents.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(overview);
+    expect(overview.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(agents);
+    fireEvent.click(within(nav).getByText("Skills"));
+    await waitFor(() => expect(window.location.hash).toBe("#skills"));
+    expect(headers(nav).every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
   });
 
-  it("switches the project from the top bar", async () => {
-    mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
+  it("marks the group of the current page and moves between headers with arrow keys", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#/p/payments/floor";
     render(<App />);
-    const sel = (await screen.findByLabelText("Current project")) as HTMLSelectElement;
-    fireEvent.change(sel, { target: { value: "risk" } });
-    expect(getPrefs().project).toBe("risk");
-    expect(await screen.findByText("Project: risk.")).toBeTruthy();
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const hs = headers(nav);
+    await waitFor(() => expect(headers(nav).filter((h) => h.dataset.activeGroup === "true").map((h) => h.id)).toEqual(["navg-project-btn"]));
+    expect(hs.every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
+    hs[0]!.focus();
+    fireEvent.keyDown(hs[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(hs[1]);
+    fireEvent.keyDown(hs[1]!, { key: "End" });
+    expect(document.activeElement).toBe(hs[hs.length - 1]);
+  });
+
+  it("puts the one project switcher in the top bar after the logo, none in the sidebar", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#home";
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const top = document.querySelector("#topbar") as HTMLElement;
+    expect(top.querySelector("select")).toBeNull();
+    expect(screen.queryByLabelText("Current project")).toBeNull();
+    expect(document.querySelectorAll("#project-switcher").length).toBe(1);
+    expect(nav.querySelector("#project-switcher")).toBeNull();
+    const sw = top.querySelector("#project-switcher") as HTMLElement;
+    expect(sw).toBeTruthy();
+    expect(top.querySelector(".brand")?.compareDocumentPosition(sw)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(within(nav).queryByText("All projects")).toBeNull();
+    expect(nav.querySelector("#navg-project-btn")?.textContent).not.toContain("Payments");
+    act(() => { window.location.hash = "#/p/payments/floor"; });
+    await waitFor(() => expect(top.querySelector("#project-switcher")?.textContent).toContain("Payments Platform"));
+    expect(document.querySelector("#crumb")?.textContent).toBe("Floor"); // page path only, no project name
+  });
+
+  it("keeps the top bar calm: no demo pill, compact status, avatar-only user, Search field", async () => {
+    mockApi({ "/api/v1/me": () => ({ body: meBody({ demo: true }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
+    window.location.hash = "#home";
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Main" });
+    const top = document.querySelector("#topbar") as HTMLElement;
+    expect(top.textContent).not.toContain("Demo accounts on");
+    expect(top.querySelector(".dev-dot")).toBeTruthy();
+    expect(top.querySelector("#status-cluster")?.textContent).toBe("Running");
+    expect(top.querySelector(".user-name")).toBeNull();
+    expect(top.querySelector(".palette-label")?.textContent).toBe("Search");
+  });
+
+  it("icon rail shows only the five group buttons; a group opens a flyout of its items; one toggle", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#/p/payments/floor";
+    updatePrefs({ navRail: true });
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    expect(nav.querySelector("#nav-rail-toggle")).toBeNull();
+    expect(nav.querySelectorAll("a.nav-link").length).toBe(0);
+    const hs = Array.from(nav.querySelectorAll<HTMLButtonElement>(".nav-group-btn"));
+    expect(hs.map((h) => h.getAttribute("aria-label"))).toEqual(["Overview", "Project", "Agents", "Connect", "Govern"]);
+    expect(hs.filter((h) => h.dataset.activeGroup === "true").map((h) => h.id)).toEqual(["navg-project-btn"]);
+    expect(hs.every((h) => h.getAttribute("aria-haspopup") === "menu")).toBe(true);
+    fireEvent.click(hs[2]!);
+    expect(hs[2]!.getAttribute("aria-expanded")).toBe("true");
+    const menu = await screen.findByRole("menu", { name: "Agents" });
+    expect(within(menu).getAllByRole("menuitem").map((e) => e.textContent)).toContain("Skills");
+    // the single toggle is the top-bar menu button
+    fireEvent.click(screen.getByLabelText("Toggle navigation"));
+    expect(getPrefs().navRail).toBe(false);
+  });
+
+  it("disables the PROJECT group and asks to choose a project when none is selected", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#home";
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    expect(document.querySelector("#project-switcher")?.textContent).toBe("Choose a project");
+    const h = nav.querySelector("#navg-project-btn") as HTMLButtonElement;
+    expect(h.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(h);
+    expect(h.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("switches project from the sidebar switcher and keeps the page", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#/p/payments/work-orders";
+    render(<App />);
+    const sw = await waitFor(() => {
+      const el = document.querySelector<HTMLButtonElement>("#project-switcher");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    fireEvent.click(sw);
+    expect((await screen.findByText("All projects (portfolio)")).getAttribute("href")).toBe("#projects");
+    const search = await screen.findByLabelText("Find a project");
+    fireEvent.change(search, { target: { value: "ris" } });
+    const link = await screen.findByRole("link", { name: "risk" });
+    expect(link.getAttribute("href")).toBe("#/p/risk/work-orders");
+    fireEvent.click(link);
+    act(() => { window.location.hash = "#/p/risk/work-orders"; });
+    await waitFor(() => expect(getPrefs().project).toBe("risk"));
+  });
+
+  it("shows a clear no-access page for a project the person cannot see", async () => {
+    homeApi();
+    window.location.hash = "#/p/secret/floor";
+    render(<App />);
+    expect(await screen.findByText("You do not have access to this project")).toBeTruthy();
+  });
+
+  it("redirects legacy hashes to the project form and lands single-project people on their Floor", async () => {
+    mockApi({ "/api/v1/me": () => ({ body: meBody({ roles: [{ role: "engineer", scope: "payments" }], projects: [project("payments")] }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
+    window.location.hash = "";
+    render(<App />);
+    await waitFor(() => expect(window.location.hash).toBe("#/p/payments/floor"));
+  });
+
+  it("shows only a no-access landing for a person with no grants", async () => {
+    mockApi({ "/api/v1/me": () => ({ body: meBody({ roles: [], projects: [] }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
+    window.location.hash = "#home";
+    render(<App />);
+    expect(await screen.findByText("No access yet")).toBeTruthy();
   });
 
   it("opens the command palette with Ctrl+K and runs a view", async () => {

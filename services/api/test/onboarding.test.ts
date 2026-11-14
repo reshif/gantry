@@ -72,7 +72,7 @@ d("repo onboarding", () => {
   /** The worker's assessment, as `onboarding.assess` would apply it. */
   async function assessed(r: { id: string; runId: string }) {
     const f = assess(facts(), actx);
-    const out = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), adapter: "stub", result: { kind: "ok", findings: f, language: "TypeScript", defaultBranch: "main", headSha: SHA("a") } }));
+    const out = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), result: { kind: "ok", findings: f, language: "TypeScript", defaultBranch: "main", headSha: SHA("a") } }));
     expect(out.applied, JSON.stringify(out)).toBe(true);
     return f;
   }
@@ -211,7 +211,7 @@ d("repo onboarding", () => {
       const r = await connect();
       const findings = await assessed(r);
       let dd = await doc(r.id);
-      expect(dd).toMatchObject({ stage: "assessed", busy: null, adapter: "stub" });
+      expect(dd).toMatchObject({ stage: "assessed", busy: null, adapter: "rule-based", assessor: { mode: "rule-based" } });
       expect(dd.findings).toHaveLength(findings.length);
       expect(dd.findings.find((f: any) => f.id === "ci")).toMatchObject({ ok: false, required: true });
       expect((await q(`select count(*)::int as n from onboarding_findings where org_id = $1 and run_id = $2`, [t.orgId, r.runId]))[0].n).toBe(findings.length);
@@ -318,27 +318,29 @@ d("repo onboarding", () => {
       const re = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`);
       expect(re.status, JSON.stringify(re.body)).toBe(200);
       let dd = await doc(r.id);
-      expect(dd).toMatchObject({ stage: "connected", busy: "assessing", pr: { number: 7, state: "open" } });
+      // the open PR keeps its place in the lifecycle: a re-assessment never regresses the stage
+      expect(dd).toMatchObject({ stage: "pr_opened", busy: "assessing", pr: { number: 7, state: "open" } });
       expect(dd.runId).not.toBe(r.runId);
       expect((await q(`select status from onboarding_runs where org_id = $1 and id = $2`, [t.orgId, r.runId]))[0].status).toBe("cancelled");
-      const late = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), adapter: "stub", result: { kind: "failed", msg: "late" } }));
+      const late = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), result: { kind: "failed", msg: "late" } }));
       expect(late).toMatchObject({ applied: false });
       expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`)).status).toBe(409); // the assessment is already running
       dd = await doc(r.id);
-      const ok = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: dd.runId, now: new Date(), adapter: "stub", result: { kind: "ok", findings: assess(facts(), actx), language: "TypeScript", defaultBranch: "main", headSha: SHA("a") } }));
+      const ok = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: dd.runId, now: new Date(), result: { kind: "ok", findings: assess(facts(), actx), language: "TypeScript", defaultBranch: "main", headSha: SHA("a") } }));
       expect(ok.applied).toBe(true);
+      expect(await doc(r.id)).toMatchObject({ stage: "pr_opened", prNeedsUpdate: true });
     });
 
     it("an app that is not installed needs a person; a failure fails the repo; both can be retried with a new assessment", async () => {
       const r = await connect();
-      await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), adapter: "stub", result: { kind: "blocked", code: "not_installed", msg: "The Gantry GitHub App is not installed on acme/x." } }));
+      await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), result: { kind: "blocked", code: "not_installed", msg: "The Gantry GitHub App is not installed on acme/x." } }));
       expect(await doc(r.id)).toMatchObject({ stage: "person", busy: null, blocker: expect.stringMatching(/not installed/) });
       expect((await q(`select status from onboarding_runs where org_id = $1 and id = $2`, [t.orgId, r.runId]))[0].status).toBe("needs_person");
       expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/open-pr`)).status).toBe(409);
       const re = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`);
       expect(re.status).toBe(200);
       const run2 = (await doc(r.id)).runId;
-      await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: run2, now: new Date(), adapter: "stub", result: { kind: "failed", msg: "GitHub is down" } }));
+      await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: run2, now: new Date(), result: { kind: "failed", msg: "GitHub is down" } }));
       expect(await doc(r.id)).toMatchObject({ stage: "failed", blocker: "GitHub is down" });
       expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`)).status).toBe(200);
     });
@@ -357,7 +359,7 @@ d("repo onboarding", () => {
     it("a fully compliant repo has nothing for a pull request to add and goes straight to verification", async () => {
       const r = await connect();
       const f = facts({ files: ["package.json", "package-lock.json", "AGENTS.md", "CODEOWNERS", ".gantry/factory.yml", ".github/workflows/ci.yml", ".eslintrc.json", ".nvmrc"], contents: { "AGENTS.md": "# a", CODEOWNERS: "* @acme/platform\n", ".gantry/factory.yml": "repo: acme/x\nmcp: []\n", "package.json": JSON.stringify({ scripts: { test: "vitest" } }) } });
-      await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), adapter: "stub", result: { kind: "ok", findings: assess(f, { ...actx, guidelines: [] }), language: "TypeScript", defaultBranch: "main", headSha: SHA("a") } }));
+      await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), result: { kind: "ok", findings: assess(f, { ...actx, guidelines: [] }), language: "TypeScript", defaultBranch: "main", headSha: SHA("a") } }));
       const open = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/open-pr`);
       expect(open.status).toBe(409);
       expect(open.body.msg).toMatch(/Nothing to add/);
@@ -410,7 +412,7 @@ d("repo onboarding", () => {
       expect(ev.after).toMatchObject({ stage: "ready", exception: true });
       expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception`, { reason: "again, for good measure" })).status).toBe(409);
       // a late job of the old run does nothing to a repo that was accepted
-      const late = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), adapter: "stub", result: { kind: "failed", msg: "late" } }));
+      const late = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: r.runId, now: new Date(), result: { kind: "failed", msg: "late" } }));
       expect(late.applied).toBe(false);
       expect((await doc(r.id)).stage).toBe("ready");
     });

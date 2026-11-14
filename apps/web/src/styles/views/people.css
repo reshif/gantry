@@ -56,3 +56,16 @@
 .ppl-cell { margin: var(--s2) 16px; }
 .ppl-cell p { margin: 0; }
 .ppl-cell > .row { flex-wrap: wrap; align-items: flex-start; }
+
+/* Team roles and inherited roles. */
+.ppl-defaults { display: flex; gap: 6px; align-items: baseline; margin: 0 0 12px; }
+.team-roles { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.team-grants { display: contents; list-style: none; margin: 0; padding: 0; }
+.team-grant { display: inline-flex; gap: 6px; align-items: center; }
+.chip-x { background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--muted); font: inherit; line-height: 1; }
+.chip-x:hover, .chip-x:focus-visible { color: var(--text); }
+.chip-x[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.ppl-held { display: grid; gap: 8px; }
+.ppl-held-list { display: flex; gap: 4px; flex-wrap: wrap; list-style: none; margin: 4px 0 0; padding: 0; }
+.ppl-via { display: block; color: var(--accent); }
+.eff-src { font-size: 9px; color: var(--accent); margin-left: 2px; }

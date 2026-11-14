@@ -98,7 +98,7 @@ export function ConnectWizard({ project, repos, close, onDone }: { project: Proj
         <Field label="Repo" htmlFor="onb-w-name" hint={available ? "Or type any repo the App is installed on." : `Type the repo as ${org || "org"}/name. The App must be installed on it.`}>
           <input id="onb-w-name" className="input mono" value={d.name} autoComplete="off" placeholder={`${org || "org"}/repo-name`} onChange={(e) => set({ name: e.target.value })} />
         </Field>
-        <p className="muted small">{`It joins ${project.name}. The Onboarding agent assesses it as soon as it is connected.`}</p>
+        <p className="muted small">{`It joins ${project.name}. Gantry assesses it as soon as it is connected.`}</p>
       </div>
     );
   } else if (step === 1) sec = <SecOwnership d={d} set={set} project={project} />;

@@ -5,6 +5,7 @@
  *   GET/POST /api/v1/card-templates, DELETE .../{id}, POST /api/v1/card-templates/preview
  * The producer that turns committed events into outbox rows is areas/notifications/producer.ts, registered here for the API process.
  */
+import { z } from "zod";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { visibleProjects } from "@gantry/domain";
 import { command, decide, policyState, refuse, type CommandSpec } from "../core/index.js";
@@ -13,6 +14,8 @@ import { createRoute, deleteRoute, removeCardTemplate, retryDelivery, saveCardTe
 import { registerNotificationProducer } from "../areas/notifications/producer.js";
 import { CardTemplateBody, DeliveryQuery, PreviewBody, ProjectParam, RouteBody, RouteParam, RoutePatch, TestBody } from "../areas/notifications/schemas.js";
 import { readCardTemplates, readDeliveries, readRoutes } from "../areas/notifications/store.js";
+import { isMandatoryEvent } from "../areas/notifications/events.js";
+import { loadInstances, resolveDest } from "../areas/notifications/routing.js";
 import { refuseIfStopped } from "../areas/projects/store.js";
 import { IdParam } from "../areas/integrations/schemas.js";
 
@@ -37,6 +40,28 @@ export const notificationRoutes: FastifyPluginAsync = async (app) => {
     const { id } = ProjectParam.parse(req.params);
     await visible(req, id);
     return readRoutes(g.pool, g.orgId, id);
+  });
+
+  /** What an event would really reach: each enabled route destination resolved against the connected integration instances, as the notifier does. */
+  app.get("/api/v1/projects/:id/routes/preview", async (req) => {
+    const { id } = ProjectParam.parse(req.params);
+    const { event } = z.object({ event: z.string().min(1).max(60) }).parse(req.query);
+    await visible(req, id);
+    const [routes, insts] = await Promise.all([readRoutes(g.pool, g.orgId, id), loadInstances(g.pool, g.orgId)]);
+    const mandatory = isMandatoryEvent(event);
+    const seen = new Set<string>();
+    const items: Array<{ channel: string; target: string; deliverable: boolean; reason: string; integration: string | null }> = [];
+    for (const r of routes) {
+      if (r.event !== event || (!r.enabled && !mandatory)) continue;
+      for (const d of r.dest) {
+        const k = `${d.channel}\u0000${d.target}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const res = resolveDest(insts, d, id, mandatory);
+        items.push({ channel: d.channel, target: d.target, deliverable: res.ok, reason: res.ok ? "" : res.error, integration: res.inst?.id ?? null });
+      }
+    }
+    return { event, items };
   });
 
   app.post("/api/v1/projects/:id/routes", async (req) => {

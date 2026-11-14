@@ -19,17 +19,33 @@ export interface Proposal {
   result?: string;
 }
 
+export interface ConsoleModel { id: string; name: string; vendor: string; vendorName: string; tier: string; canonical: string; inPrice: number; outPrice: number; context: number }
+
 export interface ConsoleStatus {
   configured: boolean;
   vendor?: string;
   model?: string;
   code?: string;
   reason?: string;
+  /** Enabled models the gateway can call, the person's saved choice (null: the routing default), the routing default and the one in effect. Absent on an older API. */
+  models?: ConsoleModel[];
+  choice?: string | null;
+  defaultModel?: string | null;
+  effectiveModel?: string | null;
+  canManageModels?: boolean;
+  /** True when the console may propose anything for this person (kept for older clients; the per-kind rights below are what matter). */
   actionsEnabled: boolean;
-  version: number;
+  /** May this person use the console at all (console.use), and with what reason. */
+  canUse?: boolean;
+  use?: ConsoleRightInfo;
+  isFactoryAdmin?: boolean;
+  /** One entry per kind of proposal: may the console offer it to this person (console.propose.<kind>), and why or why not. */
+  proposals?: Array<ConsoleRightInfo & { kind: string; tool: string; right: string; does: string }>;
   retentionDays: number;
   tools: Array<{ name: string; kind: "read" | "propose"; description: string }>;
 }
+
+export interface ConsoleRightInfo { name: string; allowed: boolean; reason: string; needs: string }
 
 export interface ThreadMessage {
   id: string;

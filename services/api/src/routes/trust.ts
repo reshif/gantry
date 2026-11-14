@@ -110,7 +110,7 @@ export const trustRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/work-orders/:id/outcomes", async (req) => {
     const { id } = IdParam.parse(req.params);
     const b = OutcomeBody.parse(req.body);
-    const w = (await g.pool.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2 and source <> 'eval'`, [g.orgId, id])).rows[0];
+    const w = (await g.pool.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2 and source not in ('eval','onboarding')`, [g.orgId, id])).rows[0];
     if (!w) throw refuse("not_found", "No such work order.");
     return command(req, { action: "outcome.record", scope: { project: w.project_id, wo: id }, idempotent: true }, (tx, a) => recordOutcomeTrust(tx, a, id, b));
   });

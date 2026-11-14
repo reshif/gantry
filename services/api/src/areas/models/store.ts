@@ -114,12 +114,14 @@ export async function readVendors(db: Queryable, orgId: string): Promise<Vendor[
         inPrice: p ? p.in : Number(m.data.inPrice ?? 0), outPrice: p ? p.out : Number(m.data.outPrice ?? 0),
         ...(typeof m.data.tier === "string" ? { tier: m.data.tier } : {}), ...(m.data.custom === true ? { custom: true } : {}), canonical: canonicalOf(m.id, m.data.canonical),
         ...(p?.cacheRead !== undefined ? { cacheRead: p.cacheRead } : {}), ...(p?.cacheWrite !== undefined ? { cacheWrite: p.cacheWrite } : {}),
+        ...(m.data.discovered === true ? { discovered: true } : {}), ...(m.data.discovered === true && !p ? { needsPrice: true } : {}), ...(m.data.invocable === false ? { invocable: false } : {}),
       };
     });
     return {
       id: v.id, name: v.name, product: v.product, connected: v.connected, health: state, latency: v.connected && hr?.p50 ? Math.round(Number(hr.p50)) : 0,
       mtd: mtd.get(v.id) ?? 0, budget: v.monthly_budget_micros ? Number(v.monthly_budget_micros) / 1_000_000 : 0, keyMask: v.secret_mask ?? "", region: v.region, endpoint: v.endpoint,
       residency: v.residency, models, retention: str(v.config.retention, "standard"), ...(v.config.custom === true ? { custom: true } : {}), qualified: qualifiedOf(v.config), version: v.version,
+      ...(typeof v.config.template === "string" ? { template: v.config.template } : {}), ...(typeof v.config.discoveredAt === "string" ? { discoveredAt: v.config.discoveredAt } : {}),
     };
   });
 }

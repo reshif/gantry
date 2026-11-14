@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error plain JS dev tool
 import { loadLegacy } from "../scripts/legacy-eval.mjs";
-import { answerConversation, buildWorkOrder, can, classify, completeness, flowOf, freeSlot, gateDecision, gateProgress, moveCheck, route, routeGates, simulate, slotsUsed, submitGuard, summaryText, policyTrace, trust, workload, istTime } from "./index.js";
+import { CONSOLE_RIGHTS, READ_ACTIONS, answerConversation, buildWorkOrder, can, classify, completeness, flowOf, freeSlot, gateDecision, gateProgress, moveCheck, route, routeGates, simulate, slotsUsed, submitGuard, summaryText, policyTrace, trust, workload, istTime } from "./index.js";
 import { NOW, seedState } from "./testkit.js";
 import type { WorkOrder } from "./types.js";
 
@@ -18,14 +18,26 @@ const times = [NOW, istTime("2026-11-20", "22:00"), istTime("2026-11-18", "11:00
 describe("can() equals legacy G.can", () => {
   it("is identical for every person, action, project and time", () => {
     let n = 0;
+    let diverged = 0;
     const projects: Array<string | null> = [null, ...S.projects.map((p) => p.id)];
     for (const person of S.people) {
       for (const act of S.catalog.actions) {
+        if (CONSOLE_RIGHTS.includes(act.id)) continue; // console rights (spec 12.6) are newer than the legacy engine: no legacy answer
+        if ((READ_ACTIONS as readonly string[]).includes(act.id)) continue; // rights added after the legacy engine (Read rights) have no legacy answer
         for (const project of projects) {
           for (const time of times) {
             const ctx = { project, time };
             const a = can(S, person.id, act.id, ctx);
             const b = G.can(person.id, act.id, ctx);
+            // Intentional divergence from the legacy engine: a factory-scoped action needs a factory-level grant (a project role never
+            // reaches beyond its project). The legacy allowed audit.view / eval.run to Project Admins and Line Leads factory-wide.
+            const projectOnly = act.scope === "factory" && !person.roles.some((g) => g.scope === "factory");
+            if (projectOnly && b.allowed && !a.allowed) {
+              expect(a.reason, `${person.id} ${act.id}`).toContain("needs a factory-level role");
+              expect(["audit.view", "eval.run"]).toContain(act.id);
+              diverged++;
+              continue;
+            }
             expect(a, `${person.id} ${act.id} ${project} ${time}`).toEqual(b);
             n++;
           }
@@ -33,6 +45,7 @@ describe("can() equals legacy G.can", () => {
       }
     }
     expect(n).toBeGreaterThan(30000);
+    expect(diverged).toBeGreaterThan(0);
   });
 
   it("is identical with a repo in the context (freezes)", () => {

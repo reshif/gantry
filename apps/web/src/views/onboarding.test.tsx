@@ -57,7 +57,7 @@ function api(repos: Array<Repo & { version: number }>, extra: Record<string, (c:
 }
 const posts = (calls: Call[], method: string, path: string) => calls.filter((c) => c.method === method && c.path === path);
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-const open = async (repoId: string) => { fireEvent.click(await byId(`onb-row-${repoId}`)); return byId("onb-act-rerun"); };
+const open = async (repoId: string) => { fireEvent.click(await byId(`onb-detail-${repoId}`)); return byId("onb-act-rerun"); };
 const locked = (id: string): string | null => { const e = document.getElementById(id)!; return e.getAttribute("aria-disabled") === "true" ? e.getAttribute("data-reason") : null; };
 
 describe("Onboarding: pipeline", () => {
@@ -67,7 +67,7 @@ describe("Onboarding: pipeline", () => {
     expect(await screen.findByText("Onboarding")).toBeTruthy();
     expect(document.querySelector(".vhead .kicker")?.textContent).toBe("Project · Storefront");
     const meta = Array.from(document.querySelectorAll(".titleblock div")).map((d) => d.textContent);
-    expect(meta).toEqual(["Repos4", "Ready1 / 4", "In progress3", "Needs action2"]);
+    expect(meta).toEqual(["Repos4", "Ready1 / 4", "In progress1", "Needs action2"]); // the buckets do not overlap
     const strip = Array.from(document.querySelectorAll(".onb-strip li")).map((li) => li.querySelector(".onb-strip-n")?.textContent);
     expect(strip).toEqual(["1", "0", "0", "1", "0", "0", "1", "1"]); // connected, ..., PR checks, ..., Ready, off belt
     expect(document.querySelectorAll("tr.row-link")).toHaveLength(4);
@@ -76,6 +76,23 @@ describe("Onboarding: pipeline", () => {
     expect(document.querySelector("#onb-row-search-indexer .onb-st-person")?.textContent).toMatch(/Needs a person/);
     expect(document.querySelector("#onb-row-mobile-app .onb-st-merge")?.textContent).toMatch(/Waiting for merge/);
     expect(document.querySelector(".footnote")?.textContent).not.toMatch(/simulat/i);
+  });
+
+  it("an assessed repo with fixable gaps and no PR is waiting for a person to open the PR, not in progress", async () => {
+    const assessed = repo("notifications", (r) => {
+      r.onboarding.stage = "assessed";
+      r.onboarding.pr = null;
+      r.onboarding.busy = null;
+      r.onboarding.findings = [{ ...(find("web-storefront").onboarding.findings[0] ?? {}), ok: false, file: "AGENTS.md", manual: false } as Repo["onboarding"]["findings"][number]];
+    });
+    const running = repo("notifications", (r) => { r.id = "notif-busy"; r.name = "acme/notif-busy"; r.onboarding.stage = "assessed"; r.onboarding.pr = null; r.onboarding.busy = "opening_pr"; r.onboarding.findings = assessed.onboarding.findings; });
+    api([assessed, running]);
+    mount(<OnboardingView />);
+    await byId("onb-row-notifications");
+    expect(document.querySelector("#onb-row-notifications .onb-st-openpr")?.textContent).toMatch(/Open the PR/);
+    expect(document.querySelector("#onb-row-notif-busy .onb-st-progress")?.textContent).toMatch(/In progress/);
+    const meta = Array.from(document.querySelectorAll(".titleblock div")).map((d) => d.textContent);
+    expect(meta).toEqual(["Repos2", "Ready0 / 2", "In progress1", "Needs action1"]);
   });
 
   it("filters repos, and an empty project says what to do", async () => {
@@ -321,8 +338,9 @@ describe("Onboarding: settings and the connect wizard", () => {
     expect(connect.body).toMatchObject({ name: "acme/new-service", team: expect.any(String) });
     expect(connect.headers["idempotency-key"]).toBeTruthy();
     expect(posts(calls, "PATCH", "/api/v1/repos/new-service/config")[0]!.headers["if-match"]).toBe("2");
-    // the new repo's drawer opens at its timeline
-    expect(await screen.findByText(/Onboarding · Storefront/)).toBeTruthy();
+    // the new repo's onboarding session opens
+    await waitFor(() => expect(window.location.hash).toMatch(/onboarding\/new-service$/));
+    window.location.hash = "";
   });
 
   it("falls back to typing the repo when GitHub cannot be asked, and shows the server's refusal", async () => {
@@ -413,3 +431,120 @@ describe("Onboarding: the agent and its guidelines", () => {
 });
 
 void DEFAULT_CATALOG;
+
+describe("Onboarding: who did the work, said honestly", () => {
+  const assessedRepo = (patch: (r: Repo & { version: number }) => void) => repo("mobile-app", (r) => { r.onboarding.stage = "assessed"; r.onboarding.pr = null; r.onboarding.busy = null; r.onboarding.findings = [
+    { id: "ci", check: "CI runs tests", ok: false, sev: "high", fix: "Add a workflow", file: ".github/workflows/gantry-ci.yml", required: true, detail: "No workflow" },
+    { id: "test", check: "Test command", ok: true, sev: "high", fix: "", file: null, required: true, detail: "npm test (package.json scripts.test)" },
+  ]; patch(r); });
+  const agentAssessor = { mode: "agent" as const, agent: "ag-onboard", version: 2, model: "claude-sonnet-5-5", runId: "r-abc123", skills: { "sk-assess": 1, "sk-onboardpr": 1 }, costUsd: 0.12, tokens: 9000, risk: { level: "medium" as const, reason: "No CI and no owners." }, summary: "Two gaps." };
+
+  it("a rule-based assessment says so, with the reason, and every finding is badged as observed; older data with no record reads the same way", async () => {
+    const r = assessedRepo((x) => { x.onboarding.adapter = "rule-based"; x.onboarding.assessor = { mode: "rule-based", reason: "No connected vendor serves claude-sonnet-5-5." }; });
+    api([r]);
+    mount(<OnboardingView />);
+    await open("mobile-app");
+    fireEvent.click(await byId("onb-dtab-findings"));
+    const a = await byId("onb-assessor");
+    expect(a.textContent).toContain("Assessed by: rule-based (no agent)");
+    expect(a.textContent).toContain("No connected vendor serves claude-sonnet-5-5.");
+    expect(a.textContent).not.toMatch(/Onboarding Agent v/);
+    expect(document.querySelectorAll(".onb-findings .onb-src").length).toBe(r.onboarding.findings.length);
+    expect(Array.from(document.querySelectorAll(".onb-findings .onb-src")).every((e) => e.textContent === "Observed")).toBe(true);
+    cleanup();
+    const old = assessedRepo((x) => { delete x.onboarding.assessor; x.onboarding.adapter = "stub"; });
+    api([old]);
+    mount(<OnboardingView />);
+    await open("mobile-app");
+    fireEvent.click(await byId("onb-dtab-findings"));
+    expect((await byId("onb-assessor")).textContent).toContain("Assessed by: rule-based (no agent)");
+  });
+
+  it("an agent assessment names the agent, version, model, skills, run and cost, shows the agent's notes under an Agent badge, and keeps the observed result", async () => {
+    const r = assessedRepo((x) => {
+      x.onboarding.adapter = "agent";
+      x.onboarding.assessor = agentAssessor;
+      x.onboarding.findings = x.onboarding.findings.map((f, i) => ({ ...f, source: "observed" as const, ...(i === 0 ? { note: "There is no workflow, so nothing runs on pull requests." } : {}) }));
+    });
+    api([r]);
+    mount(<OnboardingView />);
+    await open("mobile-app");
+    fireEvent.click(await byId("onb-dtab-findings"));
+    const a = await byId("onb-assessor");
+    expect(a.textContent).toContain("Assessed by: Onboarding Agent v2 · model claude-sonnet-5-5");
+    expect(a.textContent).toContain("sk-assess v1, sk-onboardpr v1");
+    expect(a.textContent).toContain("Run r-abc123");
+    expect(a.textContent).toContain("$0.12");
+    expect(a.textContent).toContain("Risk judged medium: No CI and no owners.");
+    expect(a.textContent).toMatch(/observed result stands/);
+    const notes = document.querySelectorAll(".onb-note");
+    expect(notes.length).toBe(1);
+    expect(notes[0]!.textContent).toContain("Agent");
+    expect(notes[0]!.textContent).toContain("nothing runs on pull requests");
+  });
+
+  it("the pull request tab says who drafted it and badges each file as agent-drafted or observed", async () => {
+    const r = repo("mobile-app", (x) => {
+      x.onboarding.drafter = { ...agentAssessor, guidelineSuggestions: [] };
+      x.onboarding.pr!.files = [{ path: "AGENTS.md", plus: 12, minus: 0, finding: "agents", source: "agent" }, { path: "CODEOWNERS", plus: 4, minus: 0, finding: "owners", source: "observed" }];
+    });
+    api([r]);
+    mount(<OnboardingView />);
+    await open("mobile-app");
+    fireEvent.click(await byId("onb-dtab-pr"));
+    expect((await byId("onb-drafter")).textContent).toContain("Drafted by: Onboarding Agent v2 · model claude-sonnet-5-5");
+    expect(document.getElementById("onb-file-AGENTS-md")!.querySelector(".onb-src")!.textContent).toBe("Agent");
+    expect(document.getElementById("onb-file-CODEOWNERS")!.querySelector(".onb-src")!.textContent).toBe("Observed");
+    cleanup();
+    const rb = repo("mobile-app", (x) => { x.onboarding.drafter = { mode: "rule-based", reason: "The plan has no file an agent may draft." }; });
+    api([rb]);
+    mount(<OnboardingView />);
+    await open("mobile-app");
+    fireEvent.click(await byId("onb-dtab-pr"));
+    expect((await byId("onb-drafter")).textContent).toContain("Drafted by: rule-based (no agent)");
+  });
+
+  it("names the agent in the busy line only while a run of it exists", async () => {
+    const plain = repo("mobile-app", (x) => { x.onboarding.busy = "assessing"; x.onboarding.timeline = [{ at: NOW - 1000, who: "p-daniel", text: "Asked for a new assessment." }]; });
+    api([plain]);
+    mount(<OnboardingView />);
+    await open("mobile-app").catch(() => undefined);
+    expect((await byId("onb-busy")).textContent).toBe("Gantry is assessing the repo.");
+    cleanup();
+    const run = repo("mobile-app", (x) => { x.onboarding.busy = "assessing"; x.onboarding.timeline = [{ at: NOW - 1000, who: "ag-onboard", text: "Started the Onboarding Agent v2 (model claude-sonnet-5-5) to review the observed findings. Gantry's own observations stay the source of truth." }]; });
+    api([run]);
+    mount(<OnboardingView />);
+    fireEvent.click(await byId("onb-detail-mobile-app"));
+    expect((await byId("onb-busy")).textContent).toMatch(/The Onboarding Agent is working on this repo\. Run: Onboarding Agent v2 \(model claude-sonnet-5-5\)/);
+  });
+});
+
+describe("Onboarding: the agent tab says when the agent cannot run", () => {
+  const agent = SEED.agents.find((a) => a.id === "ag-onboard")!;
+  const vendor = (connected: boolean, enabled = true) => ({ id: "anthropic", name: "Anthropic", connected, models: [{ id: agent.model, name: "Sonnet", enabled, canonical: agent.model }] });
+  const tab = async (vendors: unknown, a = agent) => {
+    api([find("web-storefront")], { "GET /api/v1/agents": () => ({ body: [a] }), "GET /api/v1/vendors": () => ({ body: vendors }) });
+    mount(<OnboardingView />);
+    fireEvent.click(await byId("onb-tab-agent"));
+    await byId("onb-gl-save");
+  };
+
+  it("shows the banner, with the reason, when no connected vendor serves the model; the agent's real instructions and skills are listed", async () => {
+    await tab([vendor(false)]);
+    const b = await byId("onb-agent-off");
+    expect(b.textContent).toContain("Onboarding runs rule-based until a model vendor is connected.");
+    expect(b.textContent).toContain(`No connected vendor serves ${agent.model}.`);
+    expect(document.getElementById("onb-agent-on")).toBeNull();
+    expect(document.querySelector(".onb-instr")!.textContent).toBe(agent.instructions);
+    expect(document.querySelectorAll(".onb-skills li").length).toBe(agent.skills.length);
+  });
+
+  it("shows no banner once a connected vendor serves the model, and a paused agent is reported as paused", async () => {
+    await tab([vendor(true)]);
+    expect((await byId("onb-agent-on")).textContent).toMatch(/never changes a finding, adds a file, or merges/);
+    expect(document.getElementById("onb-agent-off")).toBeNull();
+    cleanup();
+    await tab([vendor(true)], { ...agent, status: "paused" });
+    expect((await byId("onb-agent-off")).textContent).toContain("The Onboarding Agent is paused.");
+  });
+});

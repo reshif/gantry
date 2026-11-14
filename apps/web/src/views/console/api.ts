@@ -4,18 +4,19 @@ import { api, command, del, get, put, streamCommand, post, type ApiResult } from
 import type { Cited, ConsoleStatus, ExplainResult, Proposal, Thread, ThreadSummary, ToolResult } from "./types";
 
 export const ck = {
-  status: () => ["console", "status"] as const,
+  status: (project?: string | null) => (project ? (["console", "status", project] as const) : (["console", "status"] as const)),
   threads: () => ["console", "threads"] as const,
   thread: (id: string | null) => ["console", "thread", id] as const,
 };
 
-export const useConsoleStatus = () => useQuery({ queryKey: ck.status(), queryFn: () => get<ConsoleStatus>(api("console/status")), staleTime: 15_000 });
+export const useConsoleStatus = (project?: string | null) => useQuery({ queryKey: ck.status(project), queryFn: () => get<ConsoleStatus>(api(`console/status${project ? `?project=${encodeURIComponent(project)}` : ""}`)), staleTime: 15_000 });
+/** The person's own model choice; null goes back to the routing default. */
+export const setConsoleModel = (model: string | null) => put<{ ok: boolean; msg: string }>(api("console/model"), { model });
 export const useThreads = () => useQuery({ queryKey: ck.threads(), queryFn: () => get<{ items: ThreadSummary[]; retentionDays: number }>(api("console/threads")) });
 export const useThread = (id: string | null) => useQuery({ queryKey: ck.thread(id), queryFn: () => get<Thread>(api(`console/threads/${encodeURIComponent(id!)}`)), enabled: !!id });
 
 export const callTool = (name: string, input: Record<string, unknown> = {}): Promise<ApiResult<ToolResult>> => post<ToolResult>(api(`console/tools/${encodeURIComponent(name)}`), { input });
 export const explain = (o: { person?: string; action: string; project?: string | null; repo?: string | null; time?: number }): Promise<ApiResult<ExplainResult>> => post<ExplainResult>(api("console/explain"), o);
-export const setActions = (on: boolean, version: number, reason?: string) => put<{ actionsEnabled: boolean; version: number }>(api("console/settings"), { actionsEnabled: on, ...(reason ? { reason } : {}) }, { ifMatch: version });
 export const clearThread = (id: string) => del(api(`console/threads/${encodeURIComponent(id)}`));
 export const savePinned = (id: string, pinned: string[]) => put(api(`console/threads/${encodeURIComponent(id)}/pinned`), { pinned });
 export const saveProposal = (messageId: string, p: Proposal, status: "done" | "failed" | "dismissed", result: string) =>

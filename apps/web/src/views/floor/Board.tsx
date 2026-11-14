@@ -1,6 +1,6 @@
 /** Board and list views of the floor, with the shared filter bar (legacy floor.js board, list and filterBar). */
 import { useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
-import { WO_STATES, bayDef, classesOf, flowOf, fmt, woTotals } from "@gantry/domain";
+import { WO_STATES, bayDef, classesOf, flowOf, fmt, gateTitle, woTotals } from "@gantry/domain";
 import { Avatar, Btn, Empty, Field, Select, StateChip } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
@@ -264,9 +264,9 @@ export function Board() {
             </span>
           ) : null}
           {g && gcfg && !gcfg.absent && (gcfg.enabled || g.id === "G0G1") ? (
-            <span className="fl-col-gate mono" title={g.name}>
+            <span className="fl-col-gate" title={gateTitle(g)}>
               <Icon name="diamond" />
-              {g.label}
+              {g.name}
             </span>
           ) : null}
         </div>

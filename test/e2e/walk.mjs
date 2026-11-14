@@ -13,7 +13,7 @@ for (const user of users) {
   page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text().slice(0, 200)}`); });
   page.on("response", (r) => { const u = r.url(); if (u.includes("/api/v1/") && r.status() >= 400 && !u.endsWith("/can")) api.push(`${r.status()} ${r.request().method()} ${u.replace("https://localhost", "")}`); });
   await page.goto("https://localhost/#home"); await sleep(2500);
-  const ids = await page.$$eval("#nav a.nav-link", (as) => as.map((a) => a.getAttribute("href").slice(1)));
+  const ids = await page.$$eval("#nav a.nav-link", (as) => as.map((a) => a.getAttribute("href").slice(1).replace(/^\/p\/[^/]+\//, "")));
   log(`${user}: nav has ${ids.length} screens: ${ids.join(", ")}`);
   for (const id of ids) {
     errors.length = 0; api.length = 0;

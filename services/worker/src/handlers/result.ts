@@ -1,5 +1,5 @@
-import { applyStationResult, attemptIsCurrent, parseJob, type StationResult } from "@gantry/api/core";
-import { withTx, type Job, type Queryable } from "@gantry/db";
+import { applyStationResult, attemptIsCurrent, endCarrierAttempt, isCarrier, parseJob, type StationResult } from "@gantry/api/core";
+import { enqueue, withTx, type Job, type Queryable } from "@gantry/db";
 import type { PublishOutcome } from "../clients/broker.js";
 import type { Deps } from "../deps.js";
 import { errMsg, PermanentError } from "../errors.js";
@@ -77,6 +77,18 @@ export async function runResult(job: Job, ctx: HandlerCtx): Promise<unknown> {
     const graded = cur.current ? await gradeEvalCase(deps, a, { status: sr.outcome, output: sr.body.output ?? null, error: sr.body.error ?? null }) : { superseded: cur.reason };
     await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" ? "succeeded" : "failed");
     return graded;
+  }
+  // An onboarding agent step: its result stays in station_results for the collector to validate; nothing is published and the flow engine never hears of it.
+  if (isCarrier(a.woData)) {
+    const ended = cur.current
+      ? await withTx(deps.pool, async (tx) => {
+          const j = await endCarrierAttempt(tx, job.orgId, attemptId, sr.outcome === "succeeded" ? { code: "succeeded", msg: "The agent delivered its result.", delivered: true } : { code: sr.body.error?.code ?? sr.outcome, msg: sr.body.error?.msg ?? sr.summary ?? `The run ${sr.outcome}.` }, deps.now());
+          if (j) await enqueue(tx, { orgId: job.orgId, kind: j.kind, queue: j.queue, payload: j.payload, ...(j.dedupeKey ? { dedupeKey: j.dedupeKey } : {}) });
+          return j !== null;
+        })
+      : false;
+    await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" ? "succeeded" : "failed");
+    return { onboarding: true, collected: ended, ...(cur.current ? {} : { superseded: cur.reason }) };
   }
   let outcome: unknown = { superseded: cur.reason };
   if (cur.current) {

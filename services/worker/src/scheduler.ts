@@ -81,7 +81,7 @@ export class Scheduler {
       // Onboarding (spec 11.3): the pull request's checks and merge every minute, the readiness re-check of a Ready repo on its own schedule. Only repos with a GitHub identity
       // of their own are looked at; a repo that was never connected through GitHub (demo data) has nothing to re-check.
       const onboarding = await deps.pool.query<{ id: string; onboarding_stage: string }>(
-        `select id, onboarding_stage from repos where org_id = $1 and github_full_name is not null and onboarding_stage in ('pr_opened','pr_checks','pr_merged','ready') order by id`, [orgId],
+        `select id, onboarding_stage from repos where org_id = $1 and github_full_name is not null and (onboarding_stage in ('pr_opened','pr_checks','pr_merged','ready') or (onboarding_stage = 'assessed' and data->'onboarding'->'pr'->>'state' = 'open')) order by id`, [orgId],
       );
       for (const r of onboarding.rows) await make("github", "onboarding.sync", { repoId: r.id }, r.onboarding_stage === "ready" ? (deps.cfg.readinessEveryMs ?? 6 * 3600_000) : 60_000, `onboarding:${r.id}:${r.onboarding_stage === "ready" ? "ready" : "pr"}`);
     }

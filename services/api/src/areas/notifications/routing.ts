@@ -99,12 +99,12 @@ export async function resolveRecipients(db: Queryable, orgId: string, target: st
       const roles = [...new Set(rule.flatMap((r) => r.rule.roles ?? []))];
       const people = [...new Set(rule.flatMap((r) => r.rule.people ?? []))];
       for (const r of (await db.query<{ email: string }>(
-        `select distinct p.email from people p where p.org_id = $1 and p.status = 'active' and (p.id = any($3) or exists (select 1 from role_assignments ra where ra.org_id = p.org_id and ra.person_id = p.id and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id = any($2) and (ra.project_id is null or ra.project_id = $4)))`,
+        `select distinct p.email from people p where p.org_id = $1 and p.status = 'active' and (p.id = any($3) or exists (select 1 from effective_role_assignments ra where ra.org_id = p.org_id and ra.person_id = p.id and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id = any($2) and (ra.project_id is null or ra.project_id = $4)))`,
         [orgId, roles, people, ctx.project],
       )).rows) if (r.email) out.add(r.email.toLowerCase());
     } else if (kw === "project admins" || kw === "project admin") {
       for (const r of (await db.query<{ email: string }>(
-        `select distinct p.email from people p join role_assignments ra on ra.org_id = p.org_id and ra.person_id = p.id where p.org_id = $1 and p.status = 'active' and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id in ('project_admin','factory_admin') and (ra.project_id is null or ra.project_id = $2)`,
+        `select distinct p.email from people p join effective_role_assignments ra on ra.org_id = p.org_id and ra.person_id = p.id where p.org_id = $1 and p.status = 'active' and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id in ('project_admin','factory_admin') and (ra.project_id is null or ra.project_id = $2)`,
         [orgId, ctx.project],
       )).rows) if (r.email) out.add(r.email.toLowerCase());
     }

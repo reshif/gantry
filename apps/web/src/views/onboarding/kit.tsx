@@ -31,12 +31,19 @@ export function stageIndex(r: RepoV): number {
 export const isStopped = (r: RepoV): boolean => r.onboarding.stage === "person" || r.onboarding.stage === "failed";
 export const needsMerge = (r: RepoV): boolean => {
   const o = r.onboarding;
-  return !!o.pr && o.pr.state === "open" && o.pr.checks === "green" && o.stage === "pr_checks";
+  return !!o.pr && o.pr.state === "open" && (o.pr.checks === "green" || o.pr.checks === "none") && o.stage === "pr_checks";
 };
 export const gaps = (r: RepoV) => r.onboarding.findings.filter((f) => !f.ok);
+/** Gaps an onboarding PR can fix (a file to add or change, not a manual step). */
+export const fixable = (r: RepoV): boolean => r.onboarding.findings.some((f) => !f.ok && !!f.file && !f.manual);
+/** Assessed, nothing running, no PR yet, and the PR has something to add: nothing moves until a person opens the onboarding PR. */
+export const needsPr = (r: RepoV): boolean => {
+  const o = r.onboarding;
+  return ["assessed", "failed"].includes(o.stage) && !o.busy && (!o.pr || o.pr.state === "closed") && fixable(r);
+};
 
 export interface Status {
-  id: "ready" | "exception" | "person" | "failed" | "merge" | "progress";
+  id: "ready" | "exception" | "person" | "failed" | "merge" | "openpr" | "progress";
   label: string;
   glyph: string;
 }
@@ -46,6 +53,7 @@ export function status(r: RepoV): Status {
   if (o.stage === "person") return { id: "person", label: "Needs a person", glyph: "human" };
   if (o.stage === "failed") return { id: "failed", label: "Failed", glyph: "st-fail" };
   if (needsMerge(r)) return { id: "merge", label: "Waiting for merge", glyph: "st-wait" };
+  if (o.stage === "assessed" && needsPr(r)) return { id: "openpr", label: "Open the PR", glyph: "branch" };
   return { id: "progress", label: "In progress", glyph: "st-run" };
 }
 
@@ -59,11 +67,11 @@ export function StatusChip({ r }: { r: RepoV }) {
   );
 }
 
-/** What the worker is doing for the repo right now, in words. */
+/** What the worker is doing for the repo right now, in words. The agent is named only while a run of it exists (see `busyText`). */
 export const BUSY: Record<string, string> = {
-  assessing: "The Onboarding agent is assessing the repo.",
-  opening_pr: "The Onboarding agent is opening the pull request.",
-  updating_pr: "The Onboarding agent is updating the pull request.",
+  assessing: "Gantry is assessing the repo.",
+  opening_pr: "Gantry is opening the pull request.",
+  updating_pr: "Gantry is updating the pull request.",
   merging: "GitHub is being asked to merge the pull request.",
   verifying: "Gantry is running the live checks against GitHub.",
 };
@@ -191,4 +199,27 @@ export function patchFrom(d: Draft): Record<string, unknown> {
       requiredChecks: d.requiredChecks.split(",").map((s) => s.trim()).filter(Boolean), protectedPaths: d.protectedPaths.split("\n").map((s) => s.trim()).filter(Boolean),
     },
   };
+}
+
+/** The busy line for a repo: when the timeline says an Onboarding Agent run was started for this step, the agent is named; otherwise it is Gantry's rule-based work. */
+export function busyText(r: RepoV): string | null {
+  const b = r.onboarding.busy;
+  if (!b) return null;
+  const last = r.onboarding.timeline.at(-1);
+  if ((b === "assessing" || b === "opening_pr") && last?.who === "ag-onboard" && /^Started the Onboarding Agent/.test(last.text)) return `The Onboarding Agent is working on this repo. ${last.text.replace(/^Started the /, "Run: ")}`;
+  return BUSY[b] ?? null;
+}
+
+/**
+ * Whether the Onboarding Agent can run now, judged from what the screen knows: it is active and the model it pins (or the same canonical model) is enabled on a connected vendor.
+ * The server decides for real (the same routing the edge applies); this only explains. Null when usable, otherwise the reason.
+ */
+export function agentUnavailable(a: { status: string; model: string } | undefined, vendors: unknown): string | null {
+  if (!a) return "The Onboarding Agent is not set up.";
+  if (a.status !== "active") return `The Onboarding Agent is ${a.status}.`;
+  const list = Array.isArray(vendors) ? (vendors as Array<{ connected: boolean; models: Array<{ id: string; enabled: boolean; canonical?: string }> }>) : [];
+  const all = list.flatMap((v) => v.models.map((m) => ({ ...m, connected: v.connected })));
+  const want = all.find((m) => m.id === a.model);
+  const canon = want?.canonical ?? a.model;
+  return all.some((m) => m.connected && m.enabled && (m.id === a.model || (m.canonical ?? m.id) === canon)) ? null : `No connected vendor serves ${a.model}.`;
 }

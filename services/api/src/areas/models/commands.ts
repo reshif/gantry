@@ -3,12 +3,13 @@
  * event in one transaction, a denial audited. Keys are sealed with the data key under AAD `vendor:<id>` and never returned or put in an event.
  */
 import { encrypt, fingerprint, mask, type Tx } from "@gantry/db";
-import type { Routing } from "@gantry/domain";
+import { vendorTemplate, type Routing } from "@gantry/domain";
 import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { readCatalog } from "../../core/read/index.js";
 import { slug } from "../agents/config.js";
+import { ensureDefaultModel } from "./default.js";
 import { publishPriceVersion, type Price } from "./prices.js";
 import type { AddModelBody, AddVendorBody, BudgetBody, PricesBody, RoutingSchema, VendorPatch } from "./schemas.js";
 import { loadRouting, modelRows, qualifiedOf, vendorRows, type VendorRow } from "./store.js";
@@ -101,6 +102,7 @@ export async function setVendor(tx: Tx, a: Actor, dataKey: Buffer | null, vendor
 
   let keyChanged = false;
   const newKey = patch.key?.trim();
+  if (newKey && typeof v.config.template === "string" && (vendorTemplate(v.config.template)?.fields.filter((f) => f.type === "secret").length ?? 0) > 1) throw invalid(`${v.name} has several credentials (${v.config.template}); they cannot be replaced by one key. Add it again from its template.`);
   if (newKey) {
     if (!local && newKey.length < 8) throw invalid("Enter the full key (at least 8 characters).");
     set("secret_enc", sealKey(dataKey, v.id, newKey));
@@ -133,6 +135,7 @@ export async function setVendor(tx: Tx, a: Actor, dataKey: Buffer | null, vendor
   if (!sets.length) throw invalid("Nothing to change.");
   sets.push("version = version + 1", "updated_at = now()");
   await tx.query(`update vendors set ${sets.join(", ")} where org_id = $${args.length + 1} and id = $${args.length + 2}`, [...args, a.orgId, v.id]);
+  if (verb === "vendor.connect" || keyChanged) await ensureDefaultModel(tx, a.orgId, verb);
   const msg = verb === "vendor.connect" ? `${v.name} connected.` : verb === "vendor.disconnect" ? `${v.name} disconnected.` : `${v.name} updated.`;
   return {
     msg,
@@ -176,6 +179,7 @@ export async function addModel(tx: Tx, a: Actor, b: z.infer<typeof AddModelBody>
   await tx.query(`insert into models (org_id, id, vendor_id, name, enabled, context_tokens, data) values ($1,$2,$3,$4,true,$5,$6::jsonb)`, [a.orgId, id, v.id, d.name.trim(), d.context ?? 128000, json(data)]);
   const price: Price = { in: d.inPrice, out: d.outPrice, ...(d.cacheRead !== undefined ? { cacheRead: d.cacheRead } : {}), ...(d.cacheWrite !== undefined ? { cacheWrite: d.cacheWrite } : {}) };
   const pv = await publishPriceVersion(tx, a.orgId, { [id]: price }, { by: a.personId ?? a.id, note: `Added ${d.name.trim()}` });
+  await ensureDefaultModel(tx, a.orgId, "model.add");
   return {
     msg: `${d.name.trim()} added to ${v.name}.`,
     events: [{ type: "model.add", category: cat, subject: subject("model", id), after: { vendor: v.id, name: d.name.trim(), ...price, context: d.context ?? 128000, tier: data.tier, priceVersion: pv } }],
@@ -206,8 +210,19 @@ export async function setModelEnabled(tx: Tx, a: Actor, modelId: string, on: boo
     const prim = (await agentsUsing(tx, a.orgId, modelId)).filter((u) => u.primary);
     if (prim.length) throw conflict(`Primary model of ${prim.map((u) => u.name).join(", ")}. Change those agents first.`);
   }
+  if (on && m.data.invocable === false) throw conflict(`${m.name} is on a vendor the gateway cannot call yet (it speaks the Anthropic Messages API only), so it cannot be switched on.`);
   await tx.query(`update models set enabled = $3, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, modelId, on]);
+  if (on) await ensureDefaultModel(tx, a.orgId, "model.toggle");
   return { msg: `${m.name} ${on ? "enabled" : "disabled"}.`, events: [{ type: "model.toggle", category: cat, subject: subject("model", modelId), before: !on, after: on }], changes: ["vendors", "routing"] };
+}
+
+/** A person's correction of a discovered or custom model's context window. */
+export async function setModelContext(tx: Tx, a: Actor, modelId: string, context: number): Promise<Cmd> {
+  const m = (await modelRows(tx, a.orgId, modelId, true))[0];
+  if (!m) throw notFound("No such model.");
+  if (m.context_tokens === context) return { msg: `${m.name} already has that context window.`, events: [], changes: [] };
+  await tx.query(`update models set context_tokens = $3, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, modelId, context]);
+  return { msg: `${m.name} context window set to ${context.toLocaleString("en-US")} tokens.`, events: [{ type: "model.edit", category: cat, subject: subject("model", modelId), before: m.context_tokens, after: context }], changes: ["vendors"] };
 }
 
 type RoutingIn = z.infer<typeof RoutingSchema>;

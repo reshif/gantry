@@ -14,7 +14,7 @@ import type {
   Routing, SavedView, Scorecard, SecuritySettings, Session, SignIn, Skill, Template, Trigger, TriggerProposal, TriggerRun, Trust, Vendor,
   WorkOrder, Workload, OrgGuidelines, NavBadge, LearningSignalRow, LearningSettings, Suite,
 } from "./types";
-import type { NotificationRoute } from "@gantry/domain";
+import type { NotificationRoute, VendorTemplate } from "@gantry/domain";
 
 /* ---------- session ---------- */
 
@@ -126,6 +126,7 @@ export const useAgentEffective = (id: string | null | undefined, q: { project?: 
 export const useInstructions = () => useQuery({ queryKey: ["instructions"], queryFn: () => get<AgentInstructions>(api("instructions/base")) });
 export const useSkills = () => useQuery({ queryKey: qk.skills(), queryFn: () => get<Skill[]>(api("skills")) });
 export const useVendors = () => useQuery({ queryKey: qk.vendors(), queryFn: () => get<Vendor[]>(api("vendors")) });
+export const useVendorTemplates = () => useQuery({ queryKey: ["vendor-templates"], queryFn: () => get<VendorTemplate[]>(api("vendor-templates")), staleTime: 3_600_000 });
 export const useRouting = () => useQuery({ queryKey: qk.routing(), queryFn: () => get<Routing>(api("routing")) });
 export interface PriceVersion { version: number; effectiveFrom: string; publishedAt: string; publishedBy: string | null; note: string; prices: Record<string, { in: number; out: number; cacheRead?: number; cacheWrite?: number }> }
 export const usePrices = () => useQuery({ queryKey: qk.prices(), queryFn: () => get<{ current: number | null; versions: PriceVersion[] }>(api("prices")) });

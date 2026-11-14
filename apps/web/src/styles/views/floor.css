@@ -90,6 +90,7 @@
 .fl-gate .gate:focus-visible { outline: none; }
 .fl-gate .gate:focus-visible .gate-shape { box-shadow: var(--focus); }
 .fl-gate-cap { display: grid; justify-items: center; font-size: 9.5px; line-height: 1.2; color: var(--ink-2); background: var(--panel); padding: 0 2px; white-space: nowrap; }
+.fl-gate-name { font-weight: 600; color: var(--ink); max-width: 11em; overflow: hidden; text-overflow: ellipsis; }
 .fl-gate-need { color: var(--muted); }
 .fl-gate-waiting .fl-gate-cap { color: var(--wait); font-weight: 600; }
 .fl-gate-failing .fl-gate-cap { color: var(--fail); font-weight: 600; }

@@ -1,6 +1,6 @@
 /** Station and gate detail drawers of the floor (legacy floor.js openStation / openGate). They always show the live floor. */
 import { useState, type ReactNode } from "react";
-import { fmt, gateDef, gateKind, type Gate } from "@gantry/domain";
+import { COMBINED_GATES, approvalText, fmt, gateDef, gateKind, gateKindText, gateLock, gateOffNote, type Gate } from "@gantry/domain";
 import { useAgents, useMcpServers, useSkills, useWorkOrder } from "../../api/queries";
 import { ops } from "../../api/ops";
 import type { WorkOrder } from "../../api/types";
@@ -39,8 +39,10 @@ function ApproverSummary({ gid }: { gid: string }) {
   const g = gateDef(ctx.cat, gid) as Gate;
   const rule = ctx.project.approvers[gid];
   const kind = gateKind(ctx.cat, ctx.project, gid);
-  if (kind === "auto") return <p className="small">{`Automatic. Passes when its checks pass: ${g.checks.join(", ")}.`}</p>;
-  if (gid === "G0G1") return <p className="small">The submitter confirms the brief. Line Leads and Project Admins may confirm any brief.</p>;
+  const roleName = (r: string): string => ctx.cat.roles.find((x) => x.id === r)?.name ?? r;
+  const line = <p className="small"><strong>{approvalText(g, kind, rule, roleName, (id) => actor(id).name)}</strong></p>;
+  if (kind === "auto") return <>{line}<p className="small">{`Passes when its checks pass: ${g.checks.join(", ")}.`}</p></>;
+  if (gid === "G0G1") return <>{line}<p className="small">The submitter confirms the brief. Line Leads and Project Admins may confirm any brief.</p></>;
   if (!rule) return <p className="small muted">No approver rule set. Factory Admins can approve (break-glass).</p>;
   const names = [...rule.roles.map((r) => ctx.cat.roles.find((x) => x.id === r)?.name ?? r), ...rule.people.map((p) => actor(p).name)];
   return (
@@ -146,7 +148,7 @@ export function GateDrawer({ gid, close, onStation }: { gid: string; close: () =
             <span className="mono big-id">{g.label}</span>
           </>
         }
-        chip={<Chip text={kind === "auto" ? "automatic" : kind === "mixed" ? "checks + human" : "human"} />}
+        chip={<Chip text={gateKindText(kind)} />}
         title={g.name}
         close={close}
         label="Close gate details"
@@ -155,15 +157,17 @@ export function GateDrawer({ gid, close, onStation }: { gid: string; close: () =
         {off ? (
           <div className="callout">
             <Icon name="alert" />
-            <span>{`${g.label} is off in ${p.name}. Work passes straight through.`}</span>
+            <span>{`${g.name} (${g.label}) is off in ${p.name}. ${gateOffNote}`}</span>
           </div>
         ) : null}
         <p className="drawer-desc">{g.purpose}</p>
-        <h3 className="sub-h">Approvers</h3>
+        {COMBINED_GATES[gid] ? <p className="small muted">{`${g.label}: ${COMBINED_GATES[gid]}`}</p> : null}
+        {gateLock(g, p).locked ? <p className="small muted"><Icon name="lock" />{` Always on. ${gateLock(g, p).reason}`}</p> : null}
+        <h3 className="sub-h">Approvals needed</h3>
         <ApproverSummary gid={gid} />
         {kind !== "auto" && gid !== "G0G1" ? (
           <div className="fl-trust">
-            <h3 className="sub-h">{`Trust in force at ${g.label}`}</h3>
+            <h3 className="sub-h">{`Trust in force at ${g.name}`}</h3>
             <p className="small muted">Trust levels per work class decide whether a person approves here or the gate passes on its checks. They are set on the Trust ladder.</p>
             <TrustLink id="floor-gate-trust-link" />
           </div>
@@ -183,7 +187,7 @@ export function GateDrawer({ gid, close, onStation }: { gid: string; close: () =
             })}
           </ul>
         ) : (
-          <p className="muted small">{`Nothing is waiting at ${g.label}.`}</p>
+          <p className="muted small">{`Nothing is waiting at ${g.name} (${g.label}).`}</p>
         )}
         {failing.length ? <h3 className="sub-h">{`Failing (${failing.length})`}</h3> : null}
         {failing.length ? (
@@ -299,7 +303,7 @@ export function StationDrawer({ sid, close, onGate }: { sid: string; close: () =
           {kv("Average time", fmt.dur(avg))}
           {kv("WIP limit", String(conf?.wip ?? 0))}
           {kv("In progress", String(here.length))}
-          {sid === "build" ? kv("Coding slots", `${ctx.floor.slots.used} of ${p.flow.slots} busy`) : kv("Gate after", g ? g.label : "none")}
+          {sid === "build" ? kv("Coding slots", `${ctx.floor.slots.used} of ${p.flow.slots} busy`) : kv("Gate after", g ? `${g.name} · ${g.label}` : "none")}
           {kv("MCP servers", String(mcps.length))}
         </dl>
         <div className="fl-trust">

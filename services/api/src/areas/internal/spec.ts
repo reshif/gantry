@@ -100,7 +100,9 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
   const adapter = c.runData.adapter === "stub" || c.runData.adapter === "claude" ? c.runData.adapter : model ? "claude" : "stub";
   if (adapter === "claude" && !model) return { error: "The claude adapter needs a pinned model." };
   const inst = await composeInstructions(db, c);
-  const mcp = await mcpServersInScope(db, c);
+  // An onboarding agent step (a hidden carrier) reads the seeded repository and answers: read-only tools, no MCP servers, whatever the agent version's own settings say.
+  const carrier = typeof c.woData.onboarding === "object" && c.woData.onboarding !== null;
+  const mcp = carrier ? [] : await mcpServersInScope(db, c);
   const lim = (agent.body.limits ?? agent.data.limits ?? {}) as { turns?: unknown; wallClockSeconds?: unknown };
   const pos = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : undefined);
   const costUsd = typeof agent.budgetUsd === "number" && agent.budgetUsd > 0 ? agent.budgetUsd : undefined;
@@ -114,7 +116,7 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
     instructionsHash: inst.hash,
     skills: await skillsFor(db, c),
     mcpServers: Object.fromEntries(mcp.map((s) => [mcpKey(s, mcp), { type: "http" as const, url: `${edgeUrl.replace(/\/+$/, "")}/mcp/v1/${encodeURIComponent(s.id)}` }])),
-    toolAllowList: toolAllowList(agent.body, agent.data),
+    toolAllowList: carrier ? READ_TOOLS : toolAllowList(agent.body, agent.data),
     limits: { turns: pos(lim.turns) ?? 40, ...(costUsd ? { costUsd } : {}), wallClockSeconds: pos(lim.wallClockSeconds) ?? 3600 },
     heartbeatSeconds: HEARTBEAT_SECONDS,
     leaseSeconds: LEASE_SECONDS,

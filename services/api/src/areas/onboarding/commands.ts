@@ -82,7 +82,7 @@ export async function connectRepo(tx: Tx, a: Actor, projectId: string, b: z.infe
   await saveDoc(tx, a.orgId, row, doc);
   await syncProjectStatus(tx, a.orgId, projectId);
   return {
-    msg: `${name} connected. The Onboarding agent will assess it.`,
+    msg: `${name} connected. Gantry will assess it.`,
     events: [ev("repo.connect", row, { after: { name, project: projectId, team, source: b.source ?? "github-app" } })],
     extra: { repo: await readOne(tx, a.orgId, id) },
     jobs: [job("onboarding.assess", { repoId: id, runId }, { dedupeKey: `onboarding.assess:${runId}` })],
@@ -152,11 +152,13 @@ export async function rerunAssessment(tx: Tx, a: Actor, repoId: string): Promise
   if (prev) await finishRun(tx, a.orgId, prev, "cancelled", { blocker: null });
   const runId = await startRun(tx, a.orgId, repo.id, a.id, { guidelines: { org: g.org.version, project: g.project?.version ?? 0 } });
   doc.runId = runId;
-  doc.stage = "connected";
+  if (doc.pr && doc.pr.state !== "open") doc.pr = null;
+  // An open onboarding PR keeps its place in the lifecycle: a re-assessment never takes a repo back to an earlier stage.
+  const keep = doc.pr?.state === "open" && (doc.stage === "pr_opened" || doc.stage === "pr_checks");
+  if (!keep) doc.stage = "connected";
   doc.busy = "assessing";
   delete doc.blocker;
-  if (doc.pr && doc.pr.state !== "open") doc.pr = null;
-  stamp(doc, a.personId ?? a.id, "Asked for a new assessment.", a.now);
+  stamp(doc, a.personId ?? a.id, keep ? `Asked for a new assessment; PR #${doc.pr!.number} stays open at '${doc.stage}'.` : "Asked for a new assessment.", a.now);
   await saveDoc(tx, a.orgId, repo, doc);
   return {
     msg: `Assessment re-run for ${repo.name}.`, events: [ev("onboarding.assess", repo, { after: { run: runId, requestedBy: a.id } })],
@@ -173,11 +175,11 @@ export async function openOnboardingPr(tx: Tx, a: Actor, repoId: string): Promis
   if (!fixableGaps(doc.findings).length) throw conflict("Nothing to add: the repo already has everything a pull request can add. Verify it instead.");
   doc.busy = "opening_pr";
   delete doc.blocker;
-  stamp(doc, a.personId ?? a.id, "Asked the Onboarding agent to open the pull request.", a.now);
+  stamp(doc, a.personId ?? a.id, "Asked Gantry to open the pull request.", a.now);
   await saveDoc(tx, a.orgId, repo, doc);
   const runId = doc.runId ?? "";
   return {
-    msg: `The Onboarding agent is opening the PR on ${repo.name}.`, events: [ev("onboarding.pr.requested", repo, { after: { run: runId, requestedBy: a.id } })],
+    msg: `Gantry is opening the PR on ${repo.name}.`, events: [ev("onboarding.pr.requested", repo, { after: { run: runId, requestedBy: a.id } })],
     jobs: [job("onboarding.open_pr", { repoId: repo.id, runId, by: a.personId }, { dedupeKey: `onboarding.open_pr:${runId}:${a.requestId}` })], changes: ["repos", "audit"], project: repo.project_id,
   };
 }
@@ -194,7 +196,7 @@ export async function requestChanges(tx: Tx, a: Actor, repoId: string, text: str
   await saveDoc(tx, a.orgId, repo, doc);
   const runId = doc.runId ?? "";
   return {
-    msg: "Change requested. The Onboarding agent will update the pull request.", events: [ev("onboarding.changes", repo, { after: { pr: doc.pr.number, text } })],
+    msg: "Change requested. Gantry will update the pull request.", events: [ev("onboarding.changes", repo, { after: { pr: doc.pr.number, text } })],
     jobs: [job("onboarding.open_pr", { repoId: repo.id, runId, by: a.personId, request: text }, { dedupeKey: `onboarding.open_pr:${runId}:${a.requestId}` })], changes: ["repos", "audit"], project: repo.project_id,
   };
 }
@@ -207,7 +209,8 @@ export async function mergeOnboardingPr(tx: Tx, a: Actor, repoId: string): Promi
   const pr = doc.pr;
   if (!pr) throw conflict("No onboarding PR yet.");
   if (pr.state !== "open") throw conflict("The PR is already merged.");
-  if (pr.checks !== "green" || doc.stage !== "pr_checks") throw conflict("Checks are not green yet.");
+  // A repo with no CI (nothing reported within the grace period) can still have its onboarding PR merged by a person; it will not reach Ready without CI.
+  if ((pr.checks !== "green" && pr.checks !== "none") || doc.stage !== "pr_checks") throw conflict("Checks are not green yet.");
   if (!pr.headSha) throw conflict("The head commit of the PR is not known yet. Wait for the next check.");
   doc.busy = "merging";
   stamp(doc, a.personId ?? a.id, `Approved PR #${pr.number} for merge at ${pr.headSha.slice(0, 7)}.`, a.now);

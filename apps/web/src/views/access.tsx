@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useAccessMatrix, useFreezes, useMe, usePeople, usePolicies, useProjects } from "../api/queries";
-import { Btn, LockNote, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Btn, Empty, LockNote, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { useOutcome, useAllRepos } from "./govern/data";
 import { FreezeList, useFreezeDialog } from "./access/Freezes";
 import { MatrixTable } from "./access/Matrix";
@@ -28,6 +28,7 @@ export default function AccessView() {
   const { repos } = useAllRepos();
   const perm = dec(useCan("policy.edit"));
   const rperm = dec(useCan("role.edit"));
+  const view = dec(useCan("policy.view"));
   const roles = m?.roles ?? [];
   const actions = m?.actions ?? [];
   const matrix = m?.matrix ?? {};
@@ -102,6 +103,7 @@ export default function AccessView() {
   });
 
   if (!me) return null;
+  if (!view.allowed) return <div className="view view-access"><ViewHead kicker="Govern · Access" title="Access" sub="" /><Empty id="access-no-access" title="No access to the access policy" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin to give you a role that can see policy.`} /></div>;
   const now = Date.now();
   const activeFz = freezes.filter((f) => now >= f.from && now < f.to).length;
   const custom = roles.filter((r) => r.custom).length;

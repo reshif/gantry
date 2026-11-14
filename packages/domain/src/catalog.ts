@@ -336,12 +336,69 @@ export const ROLES: readonly Role[] = [
   }
 ];
 
+/**
+ * Console rights (spec 12.6, 14.3). Two layers: these say whether the CONSOLE may offer you a kind of action (a confirm card); the
+ * confirm click still needs the underlying right (wo.submit on that project, kill.factory with step-up, ...). Project-scoped on purpose:
+ * most people hold project roles only, and a project-scoped right with no project in question counts a grant held anywhere. Read tools
+ * always filter by the person's own read rights, so `console.use` adds no read access.
+ */
+export const CONSOLE_PROPOSALS: ReadonlyArray<{ kind: string; tool: string; id: string; name: string; does: string }> = [
+  { kind: "submit", tool: "propose_submit_work_order", id: "console.propose.submit", name: "Console: propose work order submissions", does: "submit a work order" },
+  { kind: "approve_gate", tool: "propose_approve_gate", id: "console.propose.approve_gate", name: "Console: propose gate approvals", does: "approve a gate" },
+  { kind: "halt", tool: "propose_halt", id: "console.propose.halt", name: "Console: propose halts (andon)", does: "halt a repo line or project" },
+  { kind: "resume", tool: "propose_resume", id: "console.propose.resume", name: "Console: propose resumes", does: "resume a halted line or project" },
+  { kind: "kill", tool: "propose_kill", id: "console.propose.kill", name: "Console: propose kill switches", does: "kill a work order, project or the factory" },
+  { kind: "restore", tool: "propose_restore", id: "console.propose.restore", name: "Console: propose restores", does: "restore after a kill" },
+  { kind: "park", tool: "propose_park", id: "console.propose.park", name: "Console: propose moving work orders to a bay", does: "park a work order in a bay" },
+  { kind: "trust_change", tool: "propose_trust_change", id: "console.propose.trust_change", name: "Console: propose trust level changes", does: "change an agent's trust level" },
+  { kind: "onboard_repo", tool: "propose_onboard_repo", id: "console.propose.onboard_repo", name: "Console: propose onboarding a repo", does: "connect a repo for onboarding" },
+];
+export const CONSOLE_USE = "console.use";
+/** Every console right: Factory Admin always holds all of them (the matrix cell cannot be switched off, and can() grants them even if it is damaged). */
+export const CONSOLE_RIGHTS: readonly string[] = [CONSOLE_USE, ...CONSOLE_PROPOSALS.map((c) => c.id)];
+function CONSOLE_ACTIONS_LIST(): Action[] {
+  return [
+    { id: CONSOLE_USE, name: "Console: ask and read", scope: "project", group: "Console" },
+    ...CONSOLE_PROPOSALS.map((c): Action => ({ id: c.id, name: c.name, scope: "project", group: "Console" })),
+  ];
+}
+
 export const ACTIONS: readonly Action[] = [
   {
     id: "project.view",
     name: "See the project",
     scope: "project",
     group: "Work"
+  },
+  {
+    id: "people.view",
+    name: "See people and teams",
+    scope: "factory",
+    group: "Read"
+  },
+  {
+    id: "policy.view",
+    name: "See access policy, roles and freezes",
+    scope: "factory",
+    group: "Read"
+  },
+  {
+    id: "agents.view",
+    name: "See agents, skills, evals and triggers",
+    scope: "factory",
+    group: "Read"
+  },
+  {
+    id: "models.view",
+    name: "See models, vendors and prices",
+    scope: "factory",
+    group: "Read"
+  },
+  {
+    id: "integrations.view",
+    name: "See integrations and MCP servers",
+    scope: "factory",
+    group: "Read"
   },
   {
     id: "wo.submit",
@@ -648,7 +705,8 @@ export const ACTIONS: readonly Action[] = [
     name: "Accept learning proposals",
     scope: "factory",
     group: "Factory"
-  }
+  },
+  ...CONSOLE_ACTIONS_LIST()
 ];
 
 export const WO_STATES: Record<WoStateId, WoStateInfo> = {
@@ -1526,6 +1584,9 @@ export const DEFAULT_CATALOG: Catalog = {
   actions: ACTIONS.map((a) => ({ ...a })),
 };
 
+/** Read rights beyond project.view: who may see people, policy, agents, models, integrations (spec 14.3, default deny). */
+export const READ_ACTIONS = ["people.view", "policy.view", "agents.view", "models.view", "integrations.view"] as const;
+
 /** The default role-by-action matrix (legacy `matrix()`), built over the given actions. */
 export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
   const only = (list: string[]): Record<string, boolean> => {
@@ -1533,17 +1594,22 @@ export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
     for (const a of actions) x[a.id] = list.includes(a.id);
     return x;
   };
-  const projectActions = actions.filter((a) => a.scope === "project").map((a) => a.id);
+  // Console propose rights are never a default of anyone but Factory Admin: a Factory Admin grants them to the roles and teams they choose.
+  const projectActions = actions.filter((a) => a.scope === "project" && !a.id.startsWith("console.")).map((a) => a.id);
   return {
     factory_admin: only(actions.map((a) => a.id)),
-    auditor: only(["project.view", "audit.view"]),
-    project_admin: only(projectActions.concat(["eval.run", "audit.view"])),
-    line_lead: only(["project.view", "wo.submit", "wo.answer", "brief.confirm", "wo.classify", "wo.decline", "wo.move", "wo.park", "wo.sendback", "wo.reassign", "gate.approve", "line.halt", "line.resume", "kill.workorder", "onboarding.manage", "eval.run", "outcome.record"]),
-    engineer: only(["project.view", "wo.submit", "wo.answer", "brief.confirm", "wo.park", "wo.sendback", "line.halt", "onboarding.manage"]),
-    reviewer: only(["project.view", "wo.answer", "gate.approve", "wo.sendback", "line.halt"]),
-    approver: only(["project.view", "wo.answer", "gate.approve"]),
-    release_manager: only(["project.view", "wo.answer", "gate.approve", "release", "line.halt", "line.resume", "onboarding.merge", "outcome.record"]),
-    viewer: only(["project.view"]),
+    // Default deny (spec 14.3): reading anything beyond a project one holds is itself a right. The "Read" actions are factory-scoped (they need
+    // a factory-level role such as Auditor or a custom one); a person with no grants reads nothing but their own profile.
+    auditor: only(["project.view", "audit.view", ...READ_ACTIONS, CONSOLE_USE]),
+    // Console (spec 12.6): everyone who can see a project may ASK the console (read-only: its read tools still filter by their own rights);
+    // only Factory Admin may have it propose changes, until a Factory Admin grants a console.propose.* right to a role or team.
+    project_admin: only(projectActions.concat(["eval.run", "audit.view"]).concat([CONSOLE_USE])),
+    line_lead: only(["project.view", "wo.submit", "wo.answer", "brief.confirm", "wo.classify", "wo.decline", "wo.move", "wo.park", "wo.sendback", "wo.reassign", "gate.approve", "line.halt", "line.resume", "kill.workorder", "onboarding.manage", "eval.run", "outcome.record", CONSOLE_USE]),
+    engineer: only(["project.view", "wo.submit", "wo.answer", "brief.confirm", "wo.park", "wo.sendback", "line.halt", "onboarding.manage", CONSOLE_USE]),
+    reviewer: only(["project.view", "wo.answer", "gate.approve", "wo.sendback", "line.halt", CONSOLE_USE]),
+    approver: only(["project.view", "wo.answer", "gate.approve", CONSOLE_USE]),
+    release_manager: only(["project.view", "wo.answer", "gate.approve", "release", "line.halt", "line.resume", "onboarding.merge", "outcome.record", CONSOLE_USE]),
+    viewer: only(["project.view", CONSOLE_USE]),
   };
 }
 

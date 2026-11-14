@@ -16,7 +16,7 @@ import { useUI } from "../ui/overlay-context";
 import { useCatalog } from "./projects/kit";
 import { useAllRepos } from "./govern/data";
 import { Callout } from "./models/Callout";
-import { AddVendorDialog } from "./models/Dialogs";
+import { AddVendorDialog } from "./models/Templates";
 import { BudgetsPanel, PricesPanel } from "./models/Prices";
 import { RoutingPanel } from "./models/Routing";
 import { VendorPanel } from "./models/Vendor";

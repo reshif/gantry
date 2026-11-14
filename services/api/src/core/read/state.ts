@@ -12,8 +12,9 @@ export async function loadPolicyState(db: Queryable, orgId: string): Promise<Pol
   const org = await readOrg(db, orgId);
   // Only the columns the decision point uses: the full project read joins flow versions, approver rules and budgets, and the stop path
   // (spec 8.5, I7) must not fail because the flow engine's tables do.
-  const [people, matrix, policies, freezes, projects, repos, catalog] = await reads(db, [
+  const [people, matrix, policies, freezes, projects, repos, catalog, teams] = await reads(db, [
     () => readPeople(db, orgId), () => readMatrix(db, orgId), () => readPolicies(db, orgId), () => readFreezes(db, orgId), () => policyProjects(db, orgId).then((r) => foldProjects(r, stops)), () => policyRepos(db, orgId).then((r) => foldRepos(r, stops)), () => readCatalog(db, orgId, org),
+    () => db.query<{ id: string; name: string }>(`select id, name from teams where org_id = $1 order by created_at, id`, [orgId]).then((r) => r.rows),
   ]);
   const f = stops.find((s) => s.scope === "factory" && s.mode === "kill");
   return {
@@ -22,6 +23,7 @@ export async function loadPolicyState(db: Queryable, orgId: string): Promise<Pol
     repos,
     stops: { factory: f ? { by: f.by, at: f.at, reason: f.reason, scope: "factory", mode: f.inFlight ?? "hold" } : null },
     catalog,
+    teams,
     activeStops: stops,
   };
 }

@@ -81,8 +81,10 @@ export function proxiedHttp(o: { proxy: string | null; ca?: string | null }): Ou
           (async () => {
             const socket = proxy ? await tunnel(proxy, u.hostname, port, timeoutMs) : undefined;
             send(https.request({
-              host: u.hostname, port, path: `${u.pathname}${u.search}`, method: r.method, headers: { ...headers, host: u.host }, timeout: timeoutMs, agent: false, servername: u.hostname, ...(o.ca ? { ca: o.ca } : {}),
-              ...(socket ? { createConnection: () => tlsConnect({ socket, servername: u.hostname, ...(o.ca ? { ca: o.ca } : {}) }) } : {}),
+              host: u.hostname, port, path: `${u.pathname}${u.search}`, method: r.method, headers: { ...headers, host: u.host }, timeout: timeoutMs, servername: u.hostname, ...(o.ca ? { ca: o.ca } : {}),
+              // Node uses `createConnection` only when there is no agent: `agent: false` makes a fresh agent that dials (and resolves) the host
+              // itself, which bypasses the tunnel and fails on the internal network. So: no agent with a tunnel, a throwaway agent without one.
+              ...(socket ? { createConnection: () => tlsConnect({ socket, servername: u.hostname, ...(o.ca ? { ca: o.ca } : {}) }) } : { agent: false }),
             }));
           })().catch(fail);
         } else if (proxy) {

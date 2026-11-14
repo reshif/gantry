@@ -1,4 +1,5 @@
 import { verifyChain } from "@gantry/db";
+import { routeGates } from "@gantry/domain";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { withVersion } from "./versions.js";
@@ -239,7 +240,7 @@ d("projects", () => {
       const url = "/api/v1/projects/checkout-next/config";
       const r = await call(admin, "PATCH", url, { gate: "G3d", mode: "mixed" });
       expect(r.status).toBe(200);
-      expect(r.body.msg).toBe("G3d is now checks, then a person on Checkout Next.");
+      expect(r.body.msg).toBe("Design review (G3d) is now checks, then a person on Checkout Next.");
       expect((await proj("checkout-next")).flow.gates.G3d.mode).toBe("mixed");
       expect((await call(admin, "PATCH", url, { gate: "G0G1", mode: "auto" })).status).toBe(422);
       expect((await call(admin, "PATCH", url, { gate: "G6", mode: "auto" })).status).toBe(422);
@@ -401,6 +402,93 @@ d("projects", () => {
       expect(b.status).toBe(200);
       expect(b.headers["idempotent-replayed"]).toBe("true");
       expect((await proj("checkout-next")).flow.bays.filter((x: string) => x === "idem-bay").length).toBe(1);
+    });
+  });
+
+  describe("turning gates on and off", () => {
+    const toggle = (who: string, id: string, gate: string, on: boolean, extra: Record<string, string> = {}) =>
+      call(who, "PATCH", `/api/v1/projects/${id}/config`, { path: `flow.gates.${gate}.enabled`, value: on }, extra);
+    let id = "";
+    beforeAll(async () => {
+      const r = await create("Gate switches");
+      expect(r.status).toBe(200);
+      id = (r.body.project as { id: string }).id;
+    });
+
+    it("refuses the gates that must stay on, with the reason, and changes nothing", async () => {
+      const before = (await proj(id)).flow.gates;
+      for (const [g, why] of [["G0G1", /confirming the brief/], ["G3G3s", /security checks/], ["G4", /required checks/], ["G5", /No agent merges on its own authority/]] as const) {
+        const r = await toggle(admin, id, g, false);
+        expect(r.status, g).toBe(409);
+        expect(r.body.ok).toBe(false);
+        expect(String(r.body.msg)).toMatch(/cannot be turned off/);
+        expect(String(r.body.msg)).toMatch(why);
+      }
+      expect((await proj(id)).flow.gates).toEqual(before);
+    });
+
+    it("is denied without project.config, needs If-Match, and a fresh sign-in to turn a gate off", async () => {
+      await denied(engineer, "PATCH", `/api/v1/projects/${id}/config`, "project.config", { path: "flow.gates.G3d.enabled", value: false });
+      await stale(admin, "PATCH", `/api/v1/projects/${id}/config`, { path: "flow.gates.G3d.enabled", value: false });
+      const old = await t.session(admin, { authAgeSec: 3600 });
+      const v = (await proj(id)).version;
+      const r = await t.app.inject({ method: "PATCH", url: `/api/v1/projects/${id}/config`, headers: { ...old.headers, "if-match": String(v) }, payload: { path: "flow.gates.G3d.enabled", value: false } });
+      expect(r.statusCode).toBe(403);
+      expect(r.json().needs).toBe("step_up");
+      expect((await proj(id)).flow.gates.G3d.enabled).toBe(true);
+      // turning a gate back ON does not need the fresh sign-in
+      const on = await t.app.inject({ method: "PATCH", url: `/api/v1/projects/${id}/config`, headers: { ...old.headers, "if-match": String(v) }, payload: { path: "flow.gates.G3d.enabled", value: true } });
+      expect(on.statusCode).toBe(200);
+    });
+
+    it("turns a gate off for new work only, audits before and after, and the route of a new work order skips it", async () => {
+      await insertWo(id, "WO-GATE-1", "design", "feature", "running");
+      const p0 = await proj(id);
+      const cat = (await call(admin, "GET", "/api/v1/catalog")).body as any;
+      expect(routeGates(cat, p0 as any, "feature")).toContain("G3d");
+      const r = await toggle(admin, id, "G3d", false);
+      expect(r.status).toBe(200);
+      expect(r.body.msg).toMatch(/Design review \(G3d\) turned off\. New work orders skip it; 1 open work order keeps the flow it started with\./);
+      expect(r.body.flowVersion).toBeGreaterThan(1);
+      const p1 = await proj(id);
+      expect(p1.flow.gates.G3d.enabled).toBe(false);
+      expect(routeGates(cat, p1 as any, "feature")).not.toContain("G3d");
+      expect(routeGates(cat, p1 as any, "feature")).toEqual(expect.arrayContaining(["G0G1", "G5"]));
+      // the work order already in flight stays on the flow version it was submitted under
+      const wo = (await t.db.admin.query(`select flow_version, (select current_flow_version from projects where id = $1) as cur from work_orders where id = 'WO-GATE-1'`, [id])).rows[0];
+      expect(wo.flow_version).toBeLessThan(wo.cur);
+      const e = (await events("project.config")).filter((x) => x.project_id === id && x.subject?.path === "flow.gates.G3d.enabled").at(-1);
+      expect(e).toBeTruthy();
+      expect(e.before).toBe(true);
+      expect(e.after).toBe(false);
+      // and back on
+      expect((await toggle(admin, id, "G3d", true)).status).toBe(200);
+      expect(routeGates(cat, (await proj(id)) as any, "feature")).toContain("G3d");
+    });
+
+    it("a regulated project keeps every gate on", async () => {
+      await t.db.admin.query(`update projects set regulated = true where id = $1`, [id]);
+      const r = await toggle(admin, id, "G2", false);
+      expect(r.status).toBe(409);
+      expect(String(r.body.msg)).toMatch(/Regulated projects keep every gate on/);
+      await t.db.admin.query(`update projects set regulated = false where id = $1`, [id]);
+    });
+
+    it("templates and the wizard follow the same rules", async () => {
+      const tpl = await call(admin, "POST", "/api/v1/templates", { fromTemplate: "tpl-backend", name: "Gate rules" });
+      expect(tpl.status).toBe(200);
+      const tid = ((tpl.body as any).template?.id ?? (tpl.body as any).id) as string;
+      for (const g of ["G4", "G5", "G3G3s", "G0G1"]) {
+        const r = await call(admin, "PATCH", `/api/v1/templates/${tid}`, { gatesOff: [g] });
+        expect(r.status, g).toBe(422);
+        expect(String(r.body.msg)).toMatch(/is always on/);
+      }
+      expect((await call(admin, "PATCH", `/api/v1/templates/${tid}`, { gatesOff: ["G3d"] })).status).toBe(200);
+      // a regulated (strict) template cannot start a project with a gate off
+      await call(admin, "PATCH", `/api/v1/templates/${tid}`, { approverPreset: "strict" });
+      const bad = await call(admin, "POST", "/api/v1/projects", { name: "Strict with gate off", templateId: tid, teams: ["payments"] });
+      expect(bad.status).toBe(422);
+      expect(String(bad.body.msg)).toMatch(/regulated project keeps every gate on/);
     });
   });
 

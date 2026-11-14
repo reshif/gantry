@@ -3,7 +3,7 @@
  * the class override dialog and the classification card shown once after a submission.
  */
 import { useState } from "react";
-import { classify, classesOf, flowOf, route as routeOf, routeGates as routeGatesOf, type Catalog, type Project, type WorkOrder } from "@gantry/domain";
+import { gateExplain, classify, classesOf, flowOf, route as routeOf, routeGates as routeGatesOf, type Catalog, type Project, type WorkOrder } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useWorkOrder } from "../../api/queries";
@@ -41,9 +41,9 @@ export function RouteStrip({ cat, project, cls }: { cat: Catalog; project: Proje
         ];
         if (g && gates.includes(g.id)) {
           out.push(
-            <li key={g.id} className={`int-rg gate-kind-${g.kind}`} title={`${g.label} ${g.name} (${g.kind})`}>
+            <li key={g.id} className={`int-rg gate-kind-${g.kind}`} title={gateExplain(g)}>
               <span className="int-rg-d" aria-hidden="true" />
-              <span className="mono int-rg-l">{g.label}</span>
+              <span className="int-rg-l" title={g.label}>{g.name}</span>
             </li>,
           );
         }

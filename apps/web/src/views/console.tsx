@@ -13,17 +13,20 @@ import { useAudit, useMe, useProjects, useWorkOrders } from "../api/queries";
 import { setProject, usePrefs } from "../lib/prefs";
 import { navigate } from "../lib/router";
 import { Icon } from "../ui/Icon";
-import { Avatar, Btn, Field, Panel, Select, StateChip, Toggle, ViewHead } from "../ui/primitives";
+import { Avatar, Btn, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { useOpenTraveler } from "../shell/useTraveler";
-import { callTool, ck, clearThread, savePinned, sendMessage, setActions, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
+import { callTool, ck, clearThread, savePinned, sendMessage, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
 import { ResultCard, unmark, type CardCtx } from "./console/Cards";
 import { EntityChip } from "./console/Chips";
 import { ProposalCard } from "./console/Confirm";
+import { Markdown } from "./console/Markdown";
+import { ModelPicker } from "./console/ModelPicker";
 import { plan as planSlash, SLASH } from "./console/slash";
 import type { Card, Cited, Msg, Proposal, ThreadMessage } from "./console/types";
 
 let seq = 1;
+const localIds = (l: Msg[]): Set<string> => new Set(l.map((m) => m.id));
 const nextId = (p: string): string => `${p}${Date.now().toString(36)}${seq++}`;
 /** The client-side answers to slash commands, per person: they are not part of the saved thread (the model's conversation is). */
 const localCache = new Map<string, Msg[]>();
@@ -56,7 +59,7 @@ export default function ConsoleView() {
   const ui = useUI();
   const qc = useQueryClient();
   const prefs = usePrefs();
-  const status = useConsoleStatus();
+  const status = useConsoleStatus(prefs.project);
   const threads = useThreads();
   const projects = useProjects().data ?? [];
   const openTraveler = useOpenTraveler();
@@ -68,6 +71,8 @@ export default function ConsoleView() {
   const [local, setLocalState] = useState<Msg[]>(() => localCache.get(meId) ?? []);
   const [tail, setTail] = useState<Msg[]>([]);
   const [streaming, setStreaming] = useState(false);
+  /** Questions asked again with Retry: their earlier saved copy and error are hidden so the question shows once. */
+  const [redo, setRedo] = useState<Array<{ text: string; cut: number }>>([]);
   const [draft, setDraft] = useState("");
   const [slashIdx, setSlashIdx] = useState(0);
   const ac = useRef<AbortController | null>(null);
@@ -87,6 +92,7 @@ export default function ConsoleView() {
   const cur = visible.find((p) => p.id === prefs.project) ?? visible[0] ?? null;
   const st = status.data;
   const actionsOn = !!st?.actionsEnabled;
+  const proposalFor = (tool: string) => st?.proposals?.find((x) => x.tool === tool);
   const roles = useMemo(() => (me?.person.roles ?? []).filter((g) => g.scope === "factory" || g.scope === cur?.id).map((g) => g.role), [me, cur?.id]);
   const woQ = useMemo(() => ({ limit: 40 }), []);
   const wos = useWorkOrdersLite(cur?.id ?? null, woQ);
@@ -94,14 +100,39 @@ export default function ConsoleView() {
   const doneWo = wos.filter((w) => w.state === "done").slice(-1)[0]?.id ?? null;
   const suggestions = [...new Set(suggestionsFor(roles, cur?.name ?? "my projects", cur?.id ?? null, stuck, doneWo))];
 
-  const serverMsgs = useMemo(() => (thread.data?.messages ?? []).map((m) => fromServer(m, meId)), [thread.data, meId]);
+  const serverMsgs = useMemo(() => {
+    const all = thread.data?.messages ?? [];
+    const hidden = new Set<string>();
+    for (const r of redo) {
+      const i = all.map((m) => m.role === "user" && m.text === r.text && m.at < r.cut).lastIndexOf(true);
+      if (i < 0) continue;
+      hidden.add(all[i]!.id);
+      for (let j = i + 1; j < all.length && all[j]!.role === "system"; j++) hidden.add(all[j]!.id);
+    }
+    return all.filter((m) => !hidden.has(m.id)).map((m) => fromServer(m, meId));
+  }, [thread.data, meId, redo]);
   const pinned = thread.data?.pinned ?? [];
 
   const msgs = useMemo(() => {
-    const all = [...serverMsgs, ...local, ...tail].sort((a, b) => a.at - b.at);
+    // The optimistic rows (question + live answer) give way to the saved ones as soon as the server has them: a refetch mid-stream
+    // (the SSE `change` the save publishes) must not show the question twice, and the saved answer replaces the streamed one.
+    let rows = tail;
+    const tu = tail.find((m) => m.role === "user");
+    if (tu) {
+      const su = serverMsgs.find((m) => m.role === "user" && (tu.serverId ? m.id === tu.serverId : m.text === tu.text && m.at >= tu.at - 10_000));
+      if (su) {
+        const answered = serverMsgs.some((m) => m.role === "factory" && m.at >= su.at && m.id !== su.id);
+        rows = answered ? [] : tail.filter((m) => m.role !== "user").map((m) => ({ ...m, at: Math.max(m.at, su.at + 1) }));
+      }
+    }
+    const all = [...serverMsgs, ...local, ...rows].sort((a, b) => a.at - b.at);
     if (all.length) return all;
     return [{ id: "m0", role: "factory", at: 0, mode: "pending", cards: [{ type: "suggest" }], text: `Ask about your projects in plain language, or use a slash command. ${st?.configured ? `Questions are answered by ${st.model} using tools over the live factory.` : "No model is configured, so questions cannot be answered yet; slash commands read live data directly."} Anything that changes state shows a confirm card and runs only when you click it. Questions without a project use your current project, ${cur?.name ?? "none"}.` } satisfies Msg];
   }, [serverMsgs, local, tail, st, cur]);
+
+  const lastMsg = msgs[msgs.length - 1];
+  const prevMsg = msgs[msgs.length - 2];
+  const retryable = !streaming && lastMsg?.role === "factory" && lastMsg.mode === "error" && prevMsg?.role === "user" && !prevMsg.text.startsWith("/") && !localIds(local).has(prevMsg.id) ? { text: prevMsg.text, errId: lastMsg.id } : null;
 
   useEffect(() => {
     const el = log.current;
@@ -121,7 +152,7 @@ export default function ConsoleView() {
     setLocal((x) => [...x, msg]);
     return msg;
   };
-  const cardCtx = (mid: string): CardCtx => ({ send: (t) => void send(t), draft: toDraft, mid, pinned, pin, suggestions, actionsEnabled: actionsOn });
+  const cardCtx = (mid: string): CardCtx => ({ send: (t) => void send(t), draft: toDraft, mid, pinned, pin, suggestions, actionsEnabled: st?.proposals ? !!proposalFor("propose_approve_gate")?.allowed : actionsOn });
 
   /* ---------- slash commands: tools, directly ---------- */
   const runSlash = async (text: string): Promise<void> => {
@@ -129,8 +160,9 @@ export default function ConsoleView() {
     const p = planSlash(text, visible, cur ? { id: cur.id, name: cur.name, key: cur.key } : null, Date.now());
     if (p.kind === "help") { addLocal({ role: "factory", mode: "slash", text: "Slash commands and plain sentences both work. Anything that changes state shows a confirm card first.", cards: [{ type: "help" }] }); return; }
     if (p.kind === "reply") { addLocal({ role: "factory", mode: "slash", text: p.text }); return; }
-    if (p.action && !actionsOn) {
-      addLocal({ role: "factory", mode: "slash", text: "Console actions are switched off for this factory, so the console cannot propose changes. Use the screen for this, or turn actions on in the panel at the right (needs the Security right)." });
+    const right = p.action ? proposalFor(p.tool) : undefined;
+    if (p.action && st && st.proposals && (!right || !right.allowed)) {
+      addLocal({ role: "factory", mode: "slash", text: `The console may not propose that for you: it needs '${right?.name ?? "a console right"}'. Ask a Factory Admin to give it to you (Govern > Access, Console group), or use the screen.` });
       return;
     }
     const r = await callTool(p.tool, p.input);
@@ -158,7 +190,7 @@ export default function ConsoleView() {
     let tid = threadId;
     const patchLive = (f: (m: Msg) => Msg): void => setTail((t) => t.map((m) => (m.id === lid ? f(m) : m)));
     const onEvent = (e: StreamEvent): void => {
-      if (e.event === "thread") { tid = e.data.threadId; setFresh(false); setThreadId(tid); }
+      if (e.event === "thread") { tid = e.data.threadId; setFresh(false); setThreadId(tid); if (e.data.messageId) setTail((t) => t.map((m) => (m.id === uid ? { ...m, serverId: e.data.messageId } : m))); }
       else if (e.event === "text") patchLive((m) => ({ ...m, text: m.text + e.data.delta }));
       else if (e.event === "proposal") patchLive((m) => ({ ...m, cards: [...(m.cards ?? []), { type: "proposal", proposal: e.data.proposal }], serverId: e.data.messageId }));
       else if (e.event === "unavailable" || e.event === "error") patchLive((m) => ({ ...m, text: e.data.msg, mode: e.event === "error" ? "error" : "none", streaming: false }));
@@ -166,15 +198,29 @@ export default function ConsoleView() {
     };
     const r = await sendMessage({ text, ...(threadId ? { threadId } : {}), ...(cur ? { project: cur.id } : {}) }, onEvent, ctl.signal);
     ac.current = null;
-    setStreaming(false);
-    if (!r.ok && !ctl.signal.aborted) {
-      // Refused before any answer (not permitted, stale thread): say so, nothing was saved.
-      patchLive((m) => ({ ...m, text: r.msg, mode: "error", streaming: false }));
-      if (r.status === 404) { setThreadId(null); setFresh(true); }
-      return;
+    try {
+      if (!r.ok && !ctl.signal.aborted) {
+        if (r.status === 404) { setThreadId(null); setFresh(true); }
+        // Interrupted mid-answer: the server may still finish and save it, so look before showing an error.
+        if (tid && r.status !== 404) await Promise.all([qc.refetchQueries({ queryKey: ck.thread(tid) }), qc.invalidateQueries({ queryKey: ck.threads() })]);
+        patchLive((m) => ({ ...m, text: r.msg, mode: "error", streaming: false }));
+        return;
+      }
+      if (tid) await Promise.all([qc.refetchQueries({ queryKey: ck.thread(tid) }), qc.invalidateQueries({ queryKey: ck.threads() })]);
+      // The saved answer (the merge above) replaces the streamed one. If the stream ended without one, never leave a partial row marked streaming.
+      patchLive((m) => (m.streaming ? { ...m, streaming: false, mode: m.text ? "model" : "error", text: m.text || "The answer ended without a reply. Try again.", note: m.text ? "The answer was cut short." : undefined } as Msg : m));
+      // The tail is kept: the merge hides it once the saved question and answer are in the thread, and shows it (with Retry) if they never arrive.
+    } finally {
+      // Only now (after the saved thread is loaded) can Retry be offered: it needs to know which saved rows it replaces.
+      setStreaming(false);
     }
-    if (tid) await Promise.all([qc.refetchQueries({ queryKey: ck.thread(tid) }), qc.invalidateQueries({ queryKey: ck.threads() })]);
+  };
+
+  const retry = (): void => {
+    if (!retryable) return;
+    setRedo((x) => [...x, { text: retryable.text, cut: Date.now() }]);
     setTail([]);
+    void askModel(retryable.text);
   };
 
   const send = async (raw: string): Promise<void> => {
@@ -213,31 +259,22 @@ export default function ConsoleView() {
 
   /* ---------- context panel ---------- */
   const caps = useCanMany(CAPS.map(([action]) => ({ action, project: cur?.id ?? null })));
-  const switchGuard = useCan("security.manage");
   const mine = useAudit({ channel: "console", actor: meId, limit: 30 });
   // The ledger also records that questions were asked and answered (console.*); this list is the changes confirmed from here.
   const recent = (Array.isArray(mine.data) ? mine.data : mine.data?.items ?? []).filter((a) => !a.action.startsWith("console.")).slice(0, 6);
-  const toggleActions = (on: boolean): void => {
-    if (!st) return;
-    const apply = async (reason?: string): Promise<{ ok: boolean; msg?: string }> => {
-      const r = await setActions(on, st.version, reason);
-      if (r.ok) { ui.toast(r.msg, "ok"); await qc.invalidateQueries({ queryKey: ck.status() }); }
-      return r.ok ? { ok: true } : { ok: false, msg: r.msg };
-    };
-    if (on) ui.reasonDialog({ title: "Turn console actions on", sub: "The console may then propose changes as confirm cards. Each one still waits for the person's click and runs under their own permissions.", label: "Reason", min: 4, ok: "Turn on", onOk: (reason) => apply(reason) });
-    else void apply();
-  };
   if (!me) return null;
 
-  const modeLine = status.isLoading ? "Checking whether a model is configured." : st?.configured ? `Answers come from ${st.model} (${st.vendor}) using tools over the live factory. ${actionsOn ? "It may propose actions; each waits for your click." : "It is read-only: console actions are off."}` : (st?.reason ?? "The console could not check its model.");
+  const hasModels = (st?.models?.length ?? 0) > 0;
+  const noModels = !!st && st.models !== undefined && !hasModels;
+  const modeLine = status.isLoading ? "Checking whether a model is configured." : st?.configured ? `Answers come from ${st.model} (${st.vendor}) using tools over the live factory. ${actionsOn ? "It may propose the actions your console rights allow; each waits for your click." : "It is read-only for you: you hold no console rights to propose changes."}` : noModels ? (st?.canManageModels ? "No model can be called yet." : "No model can be called yet. Ask a Factory Admin to connect a model vendor in Models.") : (st?.reason ?? "The console could not check its model.");
   const label = st?.configured ? "Model" : status.isLoading ? "Checking" : "No model";
   const cls = st?.configured ? "ready" : status.isLoading ? "checking" : "absent";
 
   return (
     <div className="view view-console">
       <ViewHead kicker="Overview · Console" title="Console" sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you."
-        actions={<span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id="con-mode" role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>} />
-      <p className="con-mode-line small" id="con-mode-reason"><Icon name={st?.configured ? "check" : "dots"} /><span>{modeLine}</span></p>
+        actions={hasModels && st ? <ModelPicker st={st} busy={streaming} /> : <span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id="con-mode" role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>} />
+      <p className="con-mode-line small" id="con-mode-reason"><Icon name={st?.configured ? "check" : "dots"} /><span>{modeLine}</span>{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>
       <div className="console-grid">
         <section className="console-main" aria-label="Conversation">
           <div className="thread" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
@@ -248,11 +285,12 @@ export default function ConsoleView() {
                   <span className="msg-name">{m.role === "user" ? me.person.name : "Gantry"}</span>
                   {m.at ? <span className="mono muted small">{fmt.ist(m.at)}</span> : null}
                 </div>
-                {m.streaming ? <div className={`msg-text${m.text ? "" : " is-thinking"}`} id={`con-msg-text-${m.id}`}>{m.text || "Thinking…"}</div> : m.text ? <div className="msg-text" id={`con-msg-text-${m.id}`}>{m.text}</div> : null}
+                {m.streaming ? <div className={`msg-text${m.text ? "" : " is-thinking"}`} id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div className={`msg-text${m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? " is-md" : ""}`} id={`con-msg-text-${m.id}`}>{m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
                 {m.role === "factory" && m.mode !== "pending" ? (
                   <div className="msg-meta">
                     <span className={`msg-mode is-${m.mode}`}>{m.mode === "model" ? `${st?.model ?? "Model"}${m.stopped ? " · stopped" : ""}` : m.mode === "slash" ? "Slash command · live data" : m.mode === "none" ? "No model configured" : "Model did not answer"}</span>
                     {m.note ? <span className="msg-note">{m.note}</span> : null}
+                    {retryable && retryable.errId === m.id ? <Btn label="Retry" small kind="ghost" icon="send" id="con-retry" onClick={retry} /> : null}
                   </div>
                 ) : m.streaming ? <div className="msg-meta"><span className="msg-mode is-pending">Model · streaming</span></div> : null}
                 {m.cited?.length ? <div className="chips msg-chips" aria-label="Used in this answer"><span className="kicker">Used</span>{m.cited.map((e) => <EntityChip key={`${e.type}:${e.id}`} e={e} />)}</div> : null}
@@ -294,11 +332,13 @@ export default function ConsoleView() {
           <Panel title="Your console actions">
             {recent.length ? <ul className="mini-log con-log">{recent.map((a) => <li key={a.id}><span className="mono muted">{fmt.ist(a.at)}</span><span>{`${a.action} · ${unmark(a.target)}`}</span><span className={`outcome o-${a.outcome}`}>{a.outcome}</span></li>)}</ul> : <p className="muted small">Actions you confirm here are written to the audit ledger with via console.</p>}
           </Panel>
-          <Panel title="Console actions">
-            <div className="row gap-sm" id="con-actions-row">
-              <Toggle id="con-actions" checked={actionsOn} label="Let the console propose actions" decision={switchGuard} onChange={toggleActions} />
-              <span className="small muted">{actionsOn ? "On: the model may propose changes as confirm cards." : "Off: the console is read-only. Turn on to let it propose changes."}</span>
-            </div>
+          <Panel title="What the console can do for you">
+            <ul className="caps" id="con-rights">
+              {(st?.proposals ?? []).map((p) => <li key={p.kind} id={`con-right-${p.kind}`} className={p.allowed ? "ok" : "no"} tabIndex={0} data-tip={p.reason}><Icon name={p.allowed ? "check" : "lock"} /><span>{`Propose: ${p.does}`}</span><span className="small muted">{p.allowed ? "allowed" : p.needs || p.reason}</span></li>)}
+            </ul>
+            {st && st.proposals && !st.proposals.some((p) => p.allowed) ? <p className="muted small" id="con-readonly">Your console is read-only: it can answer questions but not propose changes. Ask a Factory Admin for a console right.</p> : null}
+            <p className="muted small">Confirming a card also needs the underlying right (for example submit work orders on that project).</p>
+            {st?.isFactoryAdmin ? <a href="#access" id="con-manage-perms" onClick={(e) => { e.preventDefault(); navigate("access"); }}>Manage console permissions: Govern, Access (Console group)</a> : null}
           </Panel>
           <Btn label="Clear conversation" small kind="ghost" icon="x" id="con-clear" disabledReason={threadId || local.length ? null : "There is nothing to clear."} onClick={() => void clear()} />
           <p className="footnote">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Work order, issue and repository text is passed as untrusted data. Slash commands read the same tools directly and never need a model. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>

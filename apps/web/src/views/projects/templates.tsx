@@ -5,7 +5,7 @@ import { useCan } from "../../api/can";
 import { useTemplates } from "../../api/queries";
 import { Btn, Field, LockNote } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
-import type { Catalog, Project, WorkClass } from "@gantry/domain";
+import { gateExplain, gateLock, type Catalog, type Project, type WorkClass } from "@gantry/domain";
 import { MiniBelt, RouteMatrix, useCatalog, useRes, type PView } from "./kit";
 import { catalogWithCustom, tplCustom, tplCustomCount, tplCustomText, tplFlowProject, customText, type Tpl, type TplCustom } from "./templates-kit";
 
@@ -112,7 +112,7 @@ export function TemplatesTab({ projects, current, onUse }: { projects: PView[]; 
               <TplBelt cat={cat} t={t} />
               <dl className="prj-tpl-facts small">
                 <div><dt>Stations off</dt><dd>{so.length ? so.map((s) => cat.stations.find((x) => x.id === s)?.name ?? s).join(", ") : "none"}</dd></div>
-                <div><dt>Gates off</dt><dd>{go.length ? go.map((g) => cat.gates.find((x) => x.id === g)?.label ?? g).join(", ") : "none"}</dd></div>
+                <div><dt>Gates off</dt><dd>{go.length ? go.map((g) => { const x = cat.gates.find((y) => y.id === g); return x ? `${x.name} · ${x.label}` : g; }).join(", ") : "none"}</dd></div>
                 {tplCustomCount(t) ? <div className="prj-tpl-custom"><dt>Custom entries</dt><dd>{tplCustomText(t)}</dd></div> : null}
                 <div><dt>Slots</dt><dd>{String(t.slots)}</dd></div>
                 <div><dt>Approvers</dt><dd>{t.approverPreset}</dd></div>
@@ -195,9 +195,10 @@ function TemplateEditor({ t, cat, close }: { t: Tpl; cat: Catalog; close: () => 
             {cat.gates.filter((g) => !g.custom).map((g) => {
               const id = `prj-te-g-${g.id}`;
               return (
-                <label key={g.id} className="check" htmlFor={id}>
-                  <input type="checkbox" id={id} checked={!dr.gatesOff.includes(g.id)} disabled={g.id === "G0G1"} onChange={(e) => upd({ gatesOff: e.target.checked ? dr.gatesOff.filter((x) => x !== g.id) : [...dr.gatesOff, g.id] })} />
-                  {`${g.label} ${g.name}`}
+                <label key={g.id} className="check" htmlFor={id} title={gateLock(g).locked ? `Always on. ${gateLock(g).reason}` : gateExplain(g)}>
+                  <input type="checkbox" id={id} checked={!dr.gatesOff.includes(g.id)} disabled={gateLock(g).locked} onChange={(e) => upd({ gatesOff: e.target.checked ? dr.gatesOff.filter((x) => x !== g.id) : [...dr.gatesOff, g.id] })} />
+                  {`${g.name} · ${g.label}`}
+                  {gateLock(g).locked ? <span className="muted small">{" (always on)"}</span> : null}
                 </label>
               );
             })}

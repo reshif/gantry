@@ -148,7 +148,9 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const ifMatch = projectVersion(g.orgId, id);
     if ("gate" in body) return inProject(req, { action: "project.config", scope, ifMatchRequired: true, ifMatch }, id, "edit", (tx, a) => changeGateMode(tx, a, id, body.gate, body.mode));
     const edit = parseConfigEdit(body.path, body.value);
-    return inProject(req, { action: actionFor(edit), scope, ifMatchRequired: true, ifMatch }, id, "edit", (tx, a) => setConfig(tx, a, id, edit, body.path));
+    // Turning a gate off removes a check on future work: it needs a fresh sign-in on top of project.config (spec 14.1).
+    const stepUp = edit.kind === "gate-enabled" && !edit.value ? { stepUp: true as const } : {};
+    return inProject(req, { action: actionFor(edit), scope, ifMatchRequired: true, ifMatch, ...stepUp }, id, "edit", (tx, a) => setConfig(tx, a, id, edit, body.path));
   });
 
   /* --------------------------------------------------------------------- flow */
@@ -217,7 +219,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       handler: async (req) => {
         const { id, person, role } = Member.parse(req.params);
         // Role grants are role operations: a fresh sign-in (spec 14.1), like factory-role grants.
-        return inProject(req, { action: "project.members", scope: { project: id }, stepUp: 300, ifMatch: personVersion(person) }, id, "light", (tx, a) => setMemberRole(tx, a, id, person, role, add));
+        return inProject(req, { action: "project.members", scope: { project: id }, stepUp: true, ifMatch: personVersion(person) }, id, "light", (tx, a) => setMemberRole(tx, a, id, person, role, add));
       },
     });
   }

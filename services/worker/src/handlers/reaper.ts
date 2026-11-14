@@ -1,4 +1,4 @@
-import { applyStationResult, expireLeases, failEvalAttempt, pendingStops, revokeRunTokens, job as buildJob } from "@gantry/api/core";
+import { applyStationResult, endCarrierAttempt, expireLeases, failEvalAttempt, pendingStops, revokeRunTokens, job as buildJob } from "@gantry/api/core";
 import { enqueue, withTx, type Job } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg } from "../errors.js";
@@ -62,7 +62,11 @@ export async function wallClockWatchdog(deps: Deps, orgId: string): Promise<stri
         const msg = `The run exceeded its wall-clock limit of ${r.limit_s} seconds and was stopped.`;
         // An eval case ends with an error on its item; real work goes through the flow engine.
         const isEval = (await tx.query(`select 1 from attempts a join work_orders w on w.org_id = a.org_id and w.id = a.wo_id where a.org_id = $1 and a.id = $2 and w.source = 'eval'`, [orgId, r.attempt_id])).rowCount;
-        if (isEval) {
+        const isCarrierWo = (await tx.query(`select 1 from attempts a join work_orders w on w.org_id = a.org_id and w.id = a.wo_id where a.org_id = $1 and a.id = $2 and w.source = 'onboarding'`, [orgId, r.attempt_id])).rowCount;
+        if (isCarrierWo) {
+          const j = await endCarrierAttempt(tx, orgId, r.attempt_id, { code: "wall_clock_exceeded", msg }, deps.now());
+          if (j) await enqueue(tx, { orgId, kind: j.kind, queue: j.queue, payload: j.payload, ...(j.dedupeKey ? { dedupeKey: j.dedupeKey } : {}) });
+        } else if (isEval) {
           const f = await failEvalAttempt(tx, orgId, r.attempt_id, { code: "wall_clock_exceeded", msg }, deps.now());
           await enqueueJobs(tx, orgId, f.jobs);
         } else await applyStationResult(tx, r.attempt_id, Number(r.fencing), { status: "failed", summary: msg, error: { code: "wall_clock_exceeded", msg } });

@@ -18,12 +18,15 @@ export const resetConsoleEdge = (): void => void (override = null);
 const base = (): string => (override?.baseUrl ?? process.env.EDGE_URL ?? "http://gantry-edge:8443").replace(/\/+$/, "");
 const f = (): typeof fetch => override?.fetch ?? fetch;
 
+/** The person's chosen model (and the project it is asked about), validated by the caller; the API's route resolver validates it again at authorize. */
+export interface ModelPick { model?: string | undefined; project?: string | undefined }
 export type Readiness = { ready: true; vendor: string; model: string } | { ready: false; code: string; reason: string; vendor?: string; model?: string };
 
 /** Can a model call be made right now: a route exists (routing default, connected vendor) and the edge holds its key. */
-export async function readiness(edgeToken: string): Promise<Readiness> {
+export async function readiness(edgeToken: string, purpose: "console" | "onboarding" = "console", pick: ModelPick = {}): Promise<Readiness> {
   try {
-    const res = await f()(`${base()}/service/v1/ready`, { headers: { authorization: `Bearer ${edgeToken}` }, signal: AbortSignal.timeout(5000) });
+    const qs = new URLSearchParams({ ...(purpose === "onboarding" ? { purpose } : {}), ...(pick.model ? { model: pick.model } : {}), ...(pick.project ? { project: pick.project } : {}) }).toString();
+    const res = await f()(`${base()}/service/v1/ready${qs ? `?${qs}` : ""}`, { headers: { authorization: `Bearer ${edgeToken}` }, signal: AbortSignal.timeout(5000) });
     const b = (await res.json().catch(() => ({}))) as { ready?: boolean; vendor?: string; model?: string; code?: string; reason?: string };
     if (res.status === 200 && b.ready === true && b.vendor && b.model) return { ready: true, vendor: b.vendor, model: b.model };
     if (res.status === 401 || res.status === 403) return { ready: false, code: "edge_refused", reason: "The edge refused the API's token." };
@@ -121,14 +124,20 @@ async function stream(res: Response, onText: (d: string) => void): Promise<Strea
   return out;
 }
 
-async function call(edgeToken: string, purpose: "console" | "explain", body: Record<string, unknown>, signal: AbortSignal, onText: (d: string) => void): Promise<Streamed> {
+async function call(edgeToken: string, purpose: "console" | "explain" | "onboarding", body: Record<string, unknown>, signal: AbortSignal, onText: (d: string) => void, pick: ModelPick = {}): Promise<Streamed> {
+  const attempt = (): Promise<Response> => f()(`${base()}/service/v1/messages`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${edgeToken}`, "content-type": "application/json", "x-gantry-purpose": purpose, ...(pick.model ? { "x-gantry-model-pick": pick.model } : {}), ...(pick.project ? { "x-gantry-project": pick.project } : {}) },
+    body: JSON.stringify({ ...body, stream: true }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+  });
   let res: Response;
   try {
-    res = await f()(`${base()}/service/v1/messages`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${edgeToken}`, "content-type": "application/json", "x-gantry-purpose": purpose },
-      body: JSON.stringify({ ...body, stream: true }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+    // One retry for a connection-level failure before any answer bytes exist (an edge restart, a dropped connection).
+    res = await attempt().catch(async (e: unknown) => {
+      if (signal.aborted) throw e;
+      await new Promise((r) => setTimeout(r, 400));
+      return attempt();
     });
   } catch (e) {
     if (signal.aborted) throw e;
@@ -142,17 +151,20 @@ async function call(edgeToken: string, purpose: "console" | "explain", body: Rec
   return stream(res, onText);
 }
 
-export const systemPrompt = (o: { person: string; roles: string[]; projects: string[]; current: string | null; actionsEnabled: boolean; now: Date }): string =>
+export const systemPrompt = (o: { person: string; roles: string[]; projects: string[]; current: string | null; /** What this person's console rights let it propose (tool names with plain words), and what it may not. */ may: Array<{ tool: string; does: string }>; mayNot: Array<{ does: string; right: string }>; canUse?: boolean; now: Date }): string =>
   [
     "You are the Gantry console, answering people who run a software factory of AI coding agents. Answer questions about projects, work orders, gates, onboarding, permissions, trust, workload, evals and the audit ledger by calling the read tools; do not guess numbers or ids.",
-    o.actionsEnabled
-      ? "When the person asks you to change something (submit a work order, approve a gate, halt, resume, kill, restore, park, change trust, onboard a repo), call the matching propose_* tool once: the page shows a confirm card and runs nothing until they click it, so say it is waiting for their confirmation. Never claim an action happened."
-      : "You cannot change anything: console actions are switched off for this factory. If asked to change something, say so and name the screen where the person can do it themselves.",
+    o.may.length
+      ? `You may propose these changes for this person by calling the matching tool once (${o.may.map((m) => `${m.tool}: ${m.does}`).join("; ")}): the page shows a confirm card and runs nothing until they click it, so say it is waiting for their confirmation. Never claim an action happened.`
+      : "You cannot change anything for this person: their console is read-only. If asked to change something, say so and name the screen where they can do it themselves.",
+    o.mayNot.length
+      ? `You may NOT propose these for this person: ${o.mayNot.map((m) => `${m.does} (needs the right '${m.right}')`).join("; ")}. If asked for one, do not call any tool; say which right is missing and that a Factory Admin can give it in Govern > Access (Console group). Never suggest working around it.`
+      : "",
     "If a tool says something is not visible, say you cannot see it; never reveal projects the tools do not return. Mention work orders by id (WO-1234), projects by name, gates by id. For 'why was this denied', call explain_denial and report the deciding rule and what would change the answer; the trace is authoritative.",
     UNTRUSTED_NOTE,
     "Keep answers under 150 words unless asked for detail. Plain sentences, no headings, no emoji.",
     `Today is ${o.now.toISOString()}. The person asking is ${o.person} (${o.roles.join(", ") || "no roles"}). Projects they can see: ${o.projects.join(", ") || "none"}.${o.current ? ` Their current project is ${o.current}.` : ""}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 
 export interface RunOptions {
   edgeToken: string;
@@ -160,10 +172,17 @@ export interface RunOptions {
   /** Earlier turns, oldest first. */
   history: Array<{ role: "user" | "assistant"; text: string }>;
   question: string;
-  ctx: ToolCtx;
+  /** The console's per-person model choice (validated by the caller); absent means routing decides. */
+  pick?: ModelPick;
+  ctx?: ToolCtx;
   signal: AbortSignal;
   onText(delta: string): void;
   onTool(e: { name: string; ok: boolean }): void;
+  /** Another caller of this loop (the onboarding session): its own purpose (the edge routes and meters by it), tool set and bounds. Absent: the console's. */
+  purpose?: "console" | "onboarding";
+  toolset?: { defs: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>; execute(name: string, input: unknown): Promise<{ text: string; ok: boolean }> };
+  maxTokens?: number;
+  maxSteps?: number;
 }
 export interface RunResult { text: string; usage: Usage; model: string | null; stopped: boolean; truncated: boolean }
 
@@ -171,17 +190,17 @@ const MAX_STEPS = 6;
 
 /** The bounded tool loop. Throws ModelUnavailable when no model can answer; an aborted call returns what was said so far, marked stopped. */
 export async function runConversation(o: RunOptions): Promise<RunResult> {
-  const tools = offered(o.ctx.actionsEnabled).map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
+  const tools = (o.toolset?.defs ?? offered(o.ctx?.proposeTools ?? new Set<string>())).map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
   const messages: Msg[] = [...o.history.map((h) => ({ role: h.role, content: h.text })), { role: "user", content: o.question }];
   const usage: Usage = { inputTokens: 0, outputTokens: 0, calls: 0 };
   let model: string | null = null;
   let text = "";
   try {
-    for (let step = 0; step < MAX_STEPS; step++) {
-      const r = await call(o.edgeToken, "console", { max_tokens: 1500, system: o.system, messages, tools }, o.signal, (d) => {
+    for (let step = 0; step < (o.maxSteps ?? MAX_STEPS); step++) {
+      const r = await call(o.edgeToken, o.purpose ?? "console", { max_tokens: o.maxTokens ?? 1500, system: o.system, messages, tools }, o.signal, (d) => {
         text += d;
         o.onText(d);
-      });
+      }, o.pick);
       usage.inputTokens += r.usage.inputTokens;
       usage.outputTokens += r.usage.outputTokens;
       usage.calls++;
@@ -191,7 +210,7 @@ export async function runConversation(o: RunOptions): Promise<RunResult> {
       messages.push({ role: "assistant", content: r.content });
       const results: Block[] = [];
       for (const u of uses) {
-        const out = await execute(o.ctx, u.name, u.input);
+        const out = o.toolset ? await o.toolset.execute(u.name, u.input) : await execute(o.ctx!, u.name, u.input);
         o.onTool({ name: u.name, ok: out.ok });
         results.push({ type: "tool_result", tool_use_id: u.id, content: out.text, ...(out.ok ? {} : { is_error: true }) });
       }

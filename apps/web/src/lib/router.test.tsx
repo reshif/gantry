@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { formatHash, parseHash, useHash, navigate } from "./router";
+import { formatHash, parseHash, useHash, navigate, navigateProject } from "./router";
+import { updatePrefs } from "./prefs";
 import { resolveRoute, canSeeRoute, pickProject, ROUTES } from "./routes";
 import type { Me } from "../api/types";
 
@@ -11,11 +12,25 @@ const meWith = (roles: Array<{ role: string; scope: string }>, projects = ["paym
 
 describe("hash parsing", () => {
   it("parses ids and params like legacy hashes", () => {
-    expect(parseHash("#home")).toEqual({ id: "home", param: null });
-    expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042" });
-    expect(parseHash("#/floor")).toEqual({ id: "floor", param: null });
-    expect(parseHash("")).toEqual({ id: "", param: null });
-    expect(parseHash("#record/a%2Fb")).toEqual({ id: "record", param: "a/b" });
+    expect(parseHash("#home")).toEqual({ id: "home", param: null, project: null });
+    expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042", project: null });
+    expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null });
+    expect(parseHash("")).toEqual({ id: "", param: null, project: null });
+    expect(parseHash("#record/a%2Fb")).toEqual({ id: "record", param: "a/b", project: null });
+  });
+  it("parses and formats project routes", () => {
+    expect(parseHash("#/p/payments/floor")).toEqual({ id: "floor", param: null, project: "payments" });
+    expect(parseHash("#/p/pay%20x/record/WO-1")).toEqual({ id: "record", param: "WO-1", project: "pay x" });
+    expect(formatHash("record", "WO-1", "payments")).toBe("#/p/payments/record/WO-1");
+  });
+  it("navigate puts the remembered project into project routes only", () => {
+    updatePrefs({ project: "risk" });
+    navigate("floor");
+    expect(window.location.hash).toBe("#/p/risk/floor");
+    navigate("agents");
+    expect(window.location.hash).toBe("#agents");
+    navigateProject("payments", "work-orders");
+    expect(window.location.hash).toBe("#/p/payments/work-orders");
   });
   it("formats hashes without a slash prefix", () => {
     expect(formatHash("floor")).toBe("#floor");

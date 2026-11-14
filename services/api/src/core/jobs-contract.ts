@@ -37,6 +37,8 @@ export const JOB_SCHEMAS = {
   "onboarding.merge": z.object({ repoId: id, runId: id, prNumber: z.number().int().positive(), headSha: z.string().regex(/^[0-9a-f]{40}$/), by: id }),
   "onboarding.verify": z.object({ repoId: id, runId: id.nullable().default(null), trigger: z.enum(["merge", "manual", "schedule"]), by: id.nullable().default(null) }),
   "onboarding.sync": z.object({ repoId: id }),
+  /** 'github' queue: look at an Onboarding Agent step (a hidden carrier attempt): merge its validated result onto the deterministic one, or fall back to it and record why. Re-enqueues itself (`tick`) while the run is going. */
+  "onboarding.agent_collect": z.object({ repoId: id, runId: id, step: z.enum(["assess", "open_pr"]), attemptId: id, tick: z.number().int().nonnegative().default(0) }),
   /** 'github' queue: an event from a source (a labelled issue, a pull request comment, a failing default-branch build) offered to the project's triggers (spec 11.7). Text fields are untrusted. */
   "trigger.evaluate": z.object({
     kind: z.enum(["issue", "comment", "ci"]), repo: z.string().min(1).max(300), title: z.string().max(2000).optional(), body: z.string().max(20000).optional(), labels: z.array(z.string().max(200)).max(100).optional(),
@@ -65,7 +67,7 @@ export type JobPayloadInput<K extends JobKind> = z.input<(typeof JOB_SCHEMAS)[K]
 export const JOB_QUEUE: { [K in JobKind]: Queue } = {
   "attempt.dispatch": "flow", "run.result": "flow", publish: "flow", "merge.request": "flow", "flow.timer": "flow",
   "eval.dispatch": "flow", "trust.evaluate": "system", "learning.refresh": "system", "stop.enforce": "stop", "github.reconcile": "github", "github.event": "github", "trigger.evaluate": "github", "trigger.tick": "github", "chain.verify": "system", "reaper.sweep": "system",
-  "onboarding.assess": "github", "onboarding.open_pr": "github", "onboarding.merge": "github", "onboarding.verify": "github", "onboarding.sync": "github",
+  "onboarding.assess": "github", "onboarding.open_pr": "github", "onboarding.merge": "github", "onboarding.verify": "github", "onboarding.sync": "github", "onboarding.agent_collect": "github",
 };
 
 /** Outbox destinations (spec 6.2): delivered by the worker; chat and webhooks go through the edge forward proxy. */

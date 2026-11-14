@@ -1,14 +1,14 @@
 /** New project wizard (legacy projects.js openWizard): template, name and owner, repos, approvers, notifications, review. */
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fmt, route as domainRoute, type ApproverRule, type Catalog } from "@gantry/domain";
+import { fmt, gateExplain, route as domainRoute, type ApproverRule, type Catalog } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { ops } from "../../api/ops";
 import { getQueryClient } from "../../api/keys";
 import { useCan } from "../../api/can";
 import { useMe, usePeople, useTemplates } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
-import { Btn, Field, LockNote, Segmented, Select, Toggle } from "../../ui/primitives";
+import { Btn, Field, IconBtn, LockNote, Segmented, Select, Toggle } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { evName, goProject, roleName, useCatalog, useTeams, type PView } from "./kit";
 import { TplBelt } from "./templates";
@@ -149,20 +149,19 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
           <Field label="Owner" htmlFor="prj-wz-owner" hint="Becomes Project Admin unless they hold a factory role."><Select id="prj-wz-owner" options={active.map((x) => ({ value: x.id, label: `${x.name} · ${x.title}` }))} value={wz.owner} onChange={(v) => upd({ owner: v })} /></Field>
           <Field label="Monthly budget (USD)" htmlFor="prj-wz-budget"><input id="prj-wz-budget" type="number" min={100} className="input mono" value={String(wz.budget)} onChange={(e) => upd({ budget: parseInt(e.target.value, 10) || 0 })} /></Field>
         </div>
-        <div className="field">
-          <div className="field-label">Owning teams</div>
-          <div className="check-grid">
-            {teams.map((t) => {
-              const id = `prj-wz-team-${t.id}`;
-              return (
-                <label key={t.id} className="check" htmlFor={id}>
-                  <input type="checkbox" id={id} checked={wz.teams.includes(t.id)} onChange={(e) => upd({ teams: e.target.checked ? [...wz.teams, t.id] : wz.teams.filter((x) => x !== t.id) })} />
-                  {t.name}
-                </label>
-              );
-            })}
-          </div>
-        </div>
+        <Field label="Owning teams" htmlFor="prj-wz-team-add" hint="A project can have more than one owning team.">
+          <Select id="prj-wz-team-add" options={[{ value: "", label: "Add an owning team" }, ...teams.filter((t) => !wz.teams.includes(t.id)).map((t) => ({ value: t.id, label: t.name }))]} value="" onChange={(v) => { if (v) { upd({ teams: [...wz.teams, v] }); focus("prj-wz-team-add"); } }} />
+          {wz.teams.length ? (
+            <div className="chips prj-wz-teams">
+              {wz.teams.map((id) => (
+                <span key={id} className="chip">
+                  {teams.find((t) => t.id === id)?.name ?? id}
+                  <IconBtn icon="x" id={`prj-wz-team-rm-${id}`} label={`Remove ${teams.find((t) => t.id === id)?.name ?? id}`} onClick={() => upd({ teams: wz.teams.filter((x) => x !== id) })} />
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </Field>
       </div>
     );
   } else if (step === "repos") {
@@ -221,7 +220,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
                 if (!r) return null;
                 return (
                   <tr key={g.id}>
-                    <td className="mono">{g.label}</td>
+                    <td title={gateExplain(g)}>{g.name}<span className="mono muted small">{` ${g.label}`}</span></td>
                     <td className="small">{r.roles.map((x) => roleName(cat, x)).join(", ")}</td>
                     <td className="num mono">{String(r.required)}</td>
                     <td>{r.sod ? "no" : "yes"}</td>
@@ -232,6 +231,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
             </tbody>
           </table>
         </div>
+        {T.approverPreset === "strict" && T.gatesOff.length ? <p className="small" role="alert">{`${T.name} turns ${T.gatesOff.map((x) => fc.gates.find((g) => g.id === x)?.name ?? x).join(", ")} off, but regulated projects keep every gate on. The server will refuse it; pick another template.`}</p> : null}
         <p className="small muted">Named approvers, N of M and conditions can be edited per gate in Project config after creation.</p>
       </div>
     );

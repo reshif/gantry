@@ -4,10 +4,11 @@ import { command, type CommandResult } from "../../core/command.js";
 import { requireEdge } from "./edge-only.js";
 import { costMicros, currentPrices } from "./metering.js";
 import { resolveServiceRoute } from "../console/route.js";
+import { resolveOnboardingRoute } from "../onboarding/route.js";
 
 const nonneg = z.number().int().nonnegative().max(2 ** 53 - 1);
-const Purpose = z.enum(["console", "explain"]);
-const AuthorizeBody = z.object({ purpose: Purpose });
+const Purpose = z.enum(["console", "explain", "onboarding"]);
+const AuthorizeBody = z.object({ purpose: Purpose, model: z.string().min(1).max(200).optional(), project: z.string().min(1).max(100).optional() });
 const UsageBody = z.object({
   purpose: Purpose,
   requestId: z.string().min(1).max(200).optional(),
@@ -27,10 +28,11 @@ const UsageBody = z.object({
  */
 export const serviceCallRoutes: FastifyPluginAsync = async (app) => {
   app.post("/internal/v1/service-calls/authorize", async (req) => {
-    AuthorizeBody.parse(req.body);
+    const ab = AuthorizeBody.parse(req.body);
     await requireEdge(req, "service-call.authorize");
     const g = req.server.gantry;
-    const r = await resolveServiceRoute(g.pool, g.orgId);
+    // The onboarding session runs on the Onboarding Agent's pinned model, not on the console's default.
+    const r = ab.purpose === "onboarding" ? await resolveOnboardingRoute(g.pool, g.orgId) : await resolveServiceRoute(g.pool, g.orgId, { model: ab.model, project: ab.project });
     if (!r.ok) return { ok: true, msg: r.reason, allow: false, code: "route", reason: r.reason };
     return { ok: true, msg: "Allowed.", allow: true, reason: "ok", route: r.route };
   });
@@ -43,9 +45,9 @@ export const serviceCallRoutes: FastifyPluginAsync = async (app) => {
       const cost = costMicros(book.prices[b.model], { inputTokens: b.inputTokens, outputTokens: b.outputTokens, cacheReadTokens: b.cacheReadTokens, cacheWriteTokens: b.cacheWriteTokens });
       // station = the purpose, so spend by the console is visible next to the stations' and counts toward the vendor's health.
       const r = await tx.query(
-        `insert into usage_meter (org_id, request_id, station, vendor_id, model_id, input_tokens, output_tokens, cached_tokens, cache_write_tokens, cost_micros, price_version, latency_ms, outcome)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [req.gx.orgId, b.requestId ?? null, b.purpose, b.vendor ?? null, b.model, b.inputTokens, b.outputTokens, b.cacheReadTokens, b.cacheWriteTokens, cost, book.version, b.latencyMs ?? null, b.outcome],
+        `insert into usage_meter (org_id, request_id, station, vendor_id, model_id, input_tokens, output_tokens, cached_tokens, cache_write_tokens, cost_micros, price_version, latency_ms, outcome, agent_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [req.gx.orgId, b.requestId ?? null, b.purpose, b.vendor ?? null, b.model, b.inputTokens, b.outputTokens, b.cacheReadTokens, b.cacheWriteTokens, cost, book.version, b.latencyMs ?? null, b.outcome, b.purpose === "onboarding" ? "ag-onboard" : null],
       );
       return { msg: "Usage recorded.", events: [], extra: { costMicros: cost, priceVersion: book.version, rows: r.rowCount ?? 0 }, changes: ["models"] };
     });

@@ -1,6 +1,6 @@
 /** The belt of the floor: serpentine conveyor of stations with gates, the bays and the shipped strip (legacy floor.js belt). */
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { DAY, flowOf, gateDef, gateKind, route as routeOf, routeGates as routeGatesOf, fmt, type Gate } from "@gantry/domain";
+import { DAY, approvalText, flowOf, gateDef, gateExplain, gateKind, gateKindText, gateStateText, gateTitle, route as routeOf, routeGates as routeGatesOf, fmt, type Gate } from "@gantry/domain";
 import { useAgents, useMcpServers, useMe } from "../../api/queries";
 import { Btn } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
@@ -41,11 +41,14 @@ export function GateNode({ gid, onOpen, gates }: { gid: string; onOpen: (gid: st
   const gs = gateStateOf(ctx, gid);
   const rule = ctx.project.approvers[gid];
   const count = gs.state === "failing" ? gs.failing : gs.waiting;
-  const cap = gs.state === "off" ? "off" : gs.state === "failing" ? `${gs.failing} failing` : gs.state === "waiting" ? `${gs.waiting} waiting` : "clear";
-  const need = gateKind(ctx.cat, ctx.project, gid) !== "auto" && gs.state !== "off" ? (gid === "G0G1" ? "submitter" : `needs ${rule ? rule.required : 1}`) : null;
+  const mode = gateKind(ctx.cat, ctx.project, gid);
+  const cap = gs.state === "off" ? "off · skipped" : gs.state === "failing" ? `${gs.failing} failing` : gs.state === "waiting" ? `${gs.waiting} waiting` : "nothing waiting";
+  const roleName = (r: string): string => ctx.cat.roles.find((x) => x.id === r)?.name ?? r;
+  const approval = approvalText(g, mode, rule, roleName);
+  const need = mode !== "auto" && gs.state !== "off" ? (gid === "G0G1" ? "1 approval" : `${rule ? Math.max(1, rule.required) : 1} approval${rule && rule.required > 1 ? "s" : ""}`) : null;
   const tr = gs.state !== "off" ? gateTrustSummary(ctx, gid) : null;
-  const base = `${g.label} ${g.name}: ${gs.state === "waiting" ? `${count} waiting on approvers` : gs.state === "failing" ? `${count} failing` : gs.state === "off" ? "off in this project" : "clear"}`;
-  const label = tr ? `${base}. ${tr.tip}` : base;
+  const base = `${gateTitle(g)}: ${gateStateText(gs.state, count)}. ${gateKindText(mode)}. ${gs.state === "off" ? "" : `${approval}. `}${gateExplain(g, mode)}`;
+  const label = tr ? `${base} ${tr.tip}` : base;
   return (
     <div className={`fl-gate fl-gate-${gs.state}${tr && tr.mode === "trust" ? " is-trusted" : ""}${gates && !gates.includes(gid) ? " is-offroute" : ""}`} data-gate={gid} style={{ "--o": L.order[gid] } as CSSProperties}>
       <button type="button" id={`floor-gate-${gid}`} className={`gate gate-${gs.state} gate-md gate-kind-${g.kind}`} aria-label={label} data-tip={label} onClick={() => onOpen(gid)}>
@@ -55,8 +58,9 @@ export function GateNode({ gid, onOpen, gates }: { gid: string; onOpen: (gid: st
         <span className="gate-label mono">{g.label}</span>
       </button>
       <span className="fl-gate-cap mono">
+        <span className="fl-gate-name">{g.name}</span>
         {cap}
-        {need ? <span className="fl-gate-need">{need}</span> : null}
+        {need ? <span className="fl-gate-need" title={approval}>{need}</span> : null}
         {tr ? (
           <span className={`fl-gate-tr is-${tr.mode}`} aria-hidden="true">
             <Icon name={tr.mode === "trust" ? "trust" : "human"} />
@@ -93,10 +97,10 @@ function Staffing({ sid }: { sid: string }) {
         {String(n)}
       </span>
       {human && g ? (
-        <span className="fl-glyph is-human" title={`A person approves ${g.label}`}>
+        <span className="fl-glyph is-human" title={gateExplain(g, gateKind(ctx.cat, ctx.project, g.id))}>
           <Icon name="human" />
-          <span className="sr">Human gate </span>
-          {g.label}
+          <span className="sr">{`${gateKindText(gateKind(ctx.cat, ctx.project, g.id))} gate, `}</span>
+          {g.name}
         </span>
       ) : null}
     </div>

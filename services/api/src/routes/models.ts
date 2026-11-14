@@ -1,19 +1,25 @@
 /**
  * Vendors, models, routing, prices and budgets (spec 8.7 Models, 10.4, 10.5). Owns:
  *   GET/POST /api/v1/vendors, PATCH /api/v1/vendors/{id}, POST /api/v1/vendors/{id}/qualify
+ *   GET /api/v1/vendor-templates, POST /api/v1/vendors/from-template, POST /api/v1/vendors/{id}/discover
  *   POST/DELETE /api/v1/models, PATCH /api/v1/models/{id}
  *   GET/PUT /api/v1/routing, GET /api/v1/routing/resolve?station=&repo=&project=&class=
  *   GET/POST /api/v1/prices, GET /api/v1/prices/quote
  *   GET /api/v1/budgets, PUT /api/v1/budgets/{project}
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4). Only `model.edit` changes vendors, models, routing and prices.
  */
-import { visibleProjects } from "@gantry/domain";
+import { validateTemplateValues, vendorTemplate, VENDOR_TEMPLATES, visibleProjects } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { command, policyState, refuse } from "../core/index.js";
-import { addModel, addVendor, publishPrices, qualifyVendor, removeModel, setModelEnabled, setRouting, setVendor, setWoBudget } from "../areas/models/commands.js";
+import { slug } from "../areas/agents/config.js";
+import { command, decide, policyState, refuse } from "../core/index.js";
+import { addModel, addVendor, publishPrices, qualifyVendor, removeModel, setModelContext, setModelEnabled, setRouting, setVendor, setWoBudget } from "../areas/models/commands.js";
 import { resolveFor } from "../areas/models/facts.js";
 import { costMicros, listPriceVersions, priceBookAt } from "../areas/models/prices.js";
-import { AddModelBody, AddVendorBody, BudgetBody, IdParam, ModelPatchBody, PricesBody, ProjectParam, QualifyBody, QuoteQuery, ResolveQuery, SetRoutingBody, SetVendorBody } from "../areas/models/schemas.js";
+import { discoverModels, discoveryHosts, type DiscoverResult } from "../areas/models/discovery.js";
+import { addVendorFromTemplate, recordDiscoveryFailure, refreshVendorModels, splitValues, templateOf, valuesOf } from "../areas/models/templates.js";
+import { allowDiscoveryHosts } from "../areas/internal/egress.js";
+import { opsEnv } from "../areas/integrations/runtime.js";
+import { AddModelBody, AddVendorBody, AddVendorFromTemplateBody, DiscoverBody, BudgetBody, IdParam, ModelPatchBody, PricesBody, ProjectParam, QualifyBody, QuoteQuery, ResolveQuery, SetRoutingBody, SetVendorBody } from "../areas/models/schemas.js";
 import { loadRouting, readVendors, vendorRows } from "../areas/models/store.js";
 import { refuseIfFactoryKilled } from "../areas/integrations/stop.js";
 
@@ -33,6 +39,12 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
   app.get("/api/v1/vendors", async (req) => {
     requirePerson(req);
     return readVendors(g.pool, g.orgId);
+  });
+
+  /** The vendor templates: what to enter for each, and whether agents can call the vendor. Nothing secret. */
+  app.get("/api/v1/vendor-templates", async (req) => {
+    requirePerson(req);
+    return VENDOR_TEMPLATES;
   });
 
   app.get("/api/v1/routing", async (req) => {
@@ -109,6 +121,65 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
+  /**
+   * Discovery is a network call, so it runs before the transaction and only for a caller the decision point allows. It goes through the egress
+   * proxy (system allow-list) with the credentials in hand; the edge is not involved, because the API already holds the sealed keys and the edge
+   * has no way to be handed unsaved ones. A failure is audited and comes back as a 422 with the reason; nothing is stored.
+   */
+  const discover = async (req: import("fastify").FastifyRequest, t: NonNullable<ReturnType<typeof vendorTemplate>>, values: Record<string, string>): Promise<DiscoverResult | null> => {
+    if (!(await decide(req, "model.edit", {})).allowed) return null;
+    allowDiscoveryHosts(discoveryHosts(t, values));
+    const http = opsEnv(app).http;
+    let r = await discoverModels(http, t, values);
+    // The edge caches the system allow-list for a few seconds; a host added a moment ago may need one more try.
+    if (!r.ok && /allow-list/.test(r.msg)) {
+      await new Promise((res) => setTimeout(res, 5_500));
+      r = await discoverModels(http, t, values);
+    }
+    return r;
+  };
+
+  app.post("/api/v1/vendors/from-template", async (req) => {
+    const b = AddVendorFromTemplateBody.parse(req.body);
+    const t = vendorTemplate(b.template);
+    if (!t) throw refuse("not_found", "No such vendor template.");
+    const bad = validateTemplateValues(t, b.fields);
+    if (bad) throw refuse("invalid", bad);
+    const { plain, secrets } = splitValues(t, b.fields);
+    const vname = b.name?.trim() || t.name;
+    if ((await vendorRows(g.pool, g.orgId, slug(vname, 40)))[0]) throw refuse("conflict", `${vname} exists. Open its card to refresh its models, or give this one another name.`);
+    const r = await discover(req, t, { ...plain, ...secrets, ...(b.fields.endpoint ? { endpoint: b.fields.endpoint.trim() } : {}) });
+    if (r && !r.ok) {
+      await command(req, spec(), async (_tx, a) => recordDiscoveryFailure(a, null, b.name?.trim() || t.name, r.msg));
+      throw refuse("invalid", r.msg);
+    }
+    return command(req, spec(true), async (tx, a) => {
+      await refuseIfFactoryKilled(tx, a.orgId, "vendors");
+      return addVendorFromTemplate(tx, a, g.config.secrets.dataKey, b, r?.ok ? r.models : [], r?.ok ? r.warnings : []);
+    });
+  });
+
+  app.post("/api/v1/vendors/:id/discover", async (req) => {
+    const { id } = IdParam.parse(req.params);
+    DiscoverBody.parse(req.body ?? {});
+    const v = (await vendorRows(g.pool, g.orgId, id))[0];
+    if (!v) throw refuse("not_found", "No such vendor.");
+    const t = templateOf(v);
+    if (!t) throw refuse("invalid", `${v.name} was not added from a template, so its models cannot be listed automatically.`);
+    const enc = (await g.pool.query<{ secret_enc: string | null }>(`select secret_enc from vendors where org_id = $1 and id = $2`, [g.orgId, id])).rows[0]?.secret_enc ?? null;
+    const values = valuesOf(v, t, enc, g.config.secrets.dataKey);
+    if (!values) throw refuse("invalid", `${v.name}'s stored credentials could not be read. Add the vendor again.`);
+    const r = await discover(req, t, values);
+    if (r && !r.ok) {
+      await command(req, spec(), async (_tx, a) => recordDiscoveryFailure(a, { type: "vendor", id }, v.name, r.msg));
+      throw refuse("invalid", r.msg);
+    }
+    return command(req, { ...spec(), ifMatch: vendorRev(id) }, async (tx, a) => {
+      await refuseIfFactoryKilled(tx, a.orgId, "models");
+      return refreshVendorModels(tx, a, id, r?.ok ? r.models : [], r?.ok ? r.warnings : []);
+    });
+  });
+
   app.post("/api/v1/vendors/:id/qualify", async (req) => {
     const { id } = IdParam.parse(req.params);
     const b = QualifyBody.parse(req.body);
@@ -139,7 +210,13 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
     const b = ModelPatchBody.parse(req.body);
     return command(req, spec(), async (tx, a) => {
       await refuseIfFactoryKilled(tx, a.orgId, "models");
-      return setModelEnabled(tx, a, id, b.enabled);
+      if (b.context !== undefined) {
+        const c = await setModelContext(tx, a, id, b.context);
+        if (b.enabled === undefined) return c;
+        const e = await setModelEnabled(tx, a, id, b.enabled);
+        return { ...e, events: [...c.events, ...e.events], msg: `${c.msg} ${e.msg}` };
+      }
+      return setModelEnabled(tx, a, id, b.enabled!);
     });
   });
 

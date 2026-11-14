@@ -24,7 +24,8 @@ const bareFacts = () => goodFacts({ files: ["package.json", "package-lock.json",
 d("onboarding jobs (spec 11.3)", () => {
   let w: World;
   let n = 0;
-  beforeEach(async () => { w = await startWorld(); });
+  // The dev-seeded world has a promoted Onboarding Agent on a connected vendor; these tests are about the rule-based path, so the agent is paused (the agent tests below turn it back on).
+  beforeEach(async () => { w = await startWorld(); await w.q(`update agents set status = 'paused' where org_id = $1 and id = 'ag-onboard'`, [w.orgId]); });
   afterEach(async () => { await w.close(); });
 
   const doc = async (id: string) => (await w.q(`select data->'onboarding' as d, onboarding_stage as stage, readiness_state, readiness_failures from repos where org_id = $1 and id = $2`, [w.orgId, id]))[0];
@@ -54,7 +55,7 @@ d("onboarding jobs (spec 11.3)", () => {
       expect(call.body).toEqual({ repo: r.full });
       const x = await doc(r.id);
       expect(x.stage).toBe("assessed");
-      expect(x.d).toMatchObject({ busy: null, adapter: "stub" });
+      expect(x.d).toMatchObject({ busy: null, adapter: "rule-based", assessor: { mode: "rule-based", reason: "The Onboarding Agent is paused." } });
       const byId = Object.fromEntries(x.d.findings.map((f: any) => [f.id, f]));
       expect(byId.ci).toMatchObject({ ok: false, file: ".github/workflows/gantry-ci.yml", required: true });
       expect(byId.test).toMatchObject({ ok: true, detail: "npm test (package.json scripts.test)" });
@@ -63,7 +64,7 @@ d("onboarding jobs (spec 11.3)", () => {
       expect((await w.q(`select count(*)::int as n from onboarding_findings where org_id = $1 and run_id = $2`, [w.orgId, r.runId]))[0].n).toBe(x.d.findings.length);
       expect((await w.q(`select data->>'baseSha' as sha, default_branch from repo_config where org_id = $1 and repo_id = $2`, [w.orgId, r.id]))[0]).toEqual({ sha: SHA("a"), default_branch: "main" });
       expect((await w.q(`select lang from repos where org_id = $1 and id = $2`, [w.orgId, r.id]))[0].lang).toBe("TypeScript");
-      expect((await w.q(`select type, actor, channel from events where type = 'onboarding.assess' and subject->>'id' = $1`, [r.id]))[0]).toMatchObject({ actor: "ag-onboard", channel: "system" });
+      expect((await w.q(`select type, actor, channel from events where type = 'onboarding.assess' and subject->>'id' = $1`, [r.id]))[0]).toMatchObject({ actor: "system", channel: "system" });
     });
 
     it("an app that is not installed is a blocker for a person, not a failure to retry", async () => {
@@ -125,13 +126,36 @@ d("onboarding jobs (spec 11.3)", () => {
       expect(pr.files.find((f: any) => f.path === "AGENTS.md").content).toContain("Run `npm test` before opening a PR.");
       expect(pr.files.find((f: any) => f.path === ".gantry/factory.yml").content).toContain("  - mcp-issues");
       expect(pr.files.find((f: any) => f.path === "CODEOWNERS").content).toContain("* @acme/platform");
-      expect(pr.body).toContain("Assessment adapter: stub.");
+      expect(pr.body).toContain("Assessment: rule-based.");
+      expect(pr.body).toContain("no AI agent was involved");
+      expect(pr.body).not.toMatch(/onboarding agent/i);
+      expect(pr.files.find((f: any) => f.path === "AGENTS.md").content).toContain("rule-based, no AI agent involved");
       expect(pr.comment).toBeUndefined();
       const x = await doc(r.id);
       expect(x.stage).toBe("pr_opened");
       expect(x.d).toMatchObject({ busy: null, pr: { number: 12, state: "open", checks: "pending", headSha: SHA("d"), url: "http://gh/pull/12" } });
       expect(x.d.pr.files.map((f: any) => f.path).sort()).toEqual(paths);
       expect((await w.q(`select number, state from onboarding_prs where repo_id = $1`, [r.id]))[0]).toEqual({ number: 12, state: "open" });
+    });
+
+    it("a plan approved in the onboarding session is used as approved: the stored agent draft (re-validated) or the rule-based files, with no second agent run", async () => {
+      const r = await repo({ stage: "assessed", busy: "opening_pr" });
+      w.broker.inspectFacts = bareFacts();
+      const draft = { result: { agentsMd: { commands: [{ label: "Test", command: "make check" }], conventions: ["Small PRs"], notes: "" }, guidelineSuggestions: [], forPeople: [], plannedFiles: [{ path: "AGENTS.md", purpose: "", closes: "agents" }] }, drafter: { mode: "agent", agent: "ag-onboard", version: 1, model: "claude-test-1" } };
+      await w.q(`update onboarding_runs set data = data || $3::jsonb where org_id = $1 and id = $2`, [w.orgId, r.runId, JSON.stringify({ sessionApproved: { by: "p-lena", mode: "agent" }, agentDraft: draft })]);
+      await w.enqueue("onboarding.open_pr", { repoId: r.id, runId: r.runId, by: "p-lena" });
+      await w.drain();
+      const pr = w.broker.calls.find((c) => c.op === "onboarding-pr")!.body!;
+      expect(pr.files.find((f: any) => f.path === "AGENTS.md").content).toContain("make check");
+      expect(pr.body).toMatch(/Onboarding Agent/);
+      expect((await w.q(`select count(*)::int as n from work_orders where org_id = $1 and source = 'onboarding' and repo_id = $2`, [w.orgId, r.id]))[0].n).toBe(0);
+      expect((await doc(r.id)).d.drafter).toMatchObject({ mode: "agent", agent: "ag-onboard" });
+
+      const b = await repo({ stage: "assessed", busy: "opening_pr" });
+      await w.q(`update onboarding_runs set data = data || $3::jsonb where org_id = $1 and id = $2`, [w.orgId, b.runId, JSON.stringify({ sessionApproved: { by: "p-lena", mode: "rule-based" } })]);
+      await w.enqueue("onboarding.open_pr", { repoId: b.id, runId: b.runId, by: "p-lena" });
+      await w.drain();
+      expect((await doc(b.id)).d.drafter).toMatchObject({ mode: "rule-based", reason: "Approved in the onboarding session as proposed." });
     });
 
     it("a change request is passed on as a comment, and the files are replanned", async () => {
@@ -352,6 +376,17 @@ d("onboarding jobs (spec 11.3)", () => {
       expect(synced).not.toContain(demo.id);
       // seeded demo repos (no github_full_name) are never re-checked
       expect((await w.q(`select count(*)::int as n from jobs where kind = 'onboarding.sync' and payload->>'repoId' = 'payments-api'`))[0].n).toBe(0);
+    });
+
+    it("a repo left at 'assessed' with its pull request open (the old regression) is synced and put back where the PR is", async () => {
+      const pr = { number: 5, title: "t", branch: "gantry/onboarding", files: [], checks: "pending", state: "open", reviewers: [], mergedBy: null, headSha: SHA("d") };
+      const r = await repo({ stage: "assessed", busy: null, pr });
+      await w.worker.scheduler.tick();
+      expect((await w.jobs("onboarding.sync")).map((j) => j.payload.repoId)).toContain(r.id);
+      w.broker.prs.set(5, { number: 5, state: "open", head: SHA("d"), draft: false, mergeSha: null, checks: [] });
+      await w.drain();
+      expect((await doc(r.id)).stage).toBe("pr_opened");
+      expect((await doc(r.id)).d.stage).toBe("pr_opened");
     });
 
     it("sync of a Ready repo asks for a scheduled verification once per interval", async () => {

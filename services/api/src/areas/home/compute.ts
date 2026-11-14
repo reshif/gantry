@@ -1,3 +1,4 @@
+import { involved } from "../onboarding/session/updates.js";
 import { ONBOARD_STAGES, fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { decideFor, readSecurity, type ActiveStop, type PolicyStateLoaded, type Principal } from "../../core/index.js";
@@ -112,13 +113,27 @@ async function myApprovals(db: Queryable, orgId: string, st: Flow, st0: PolicySt
     }
   }
   const prs = await db.query<{ repo_id: string; number: number | null; project_id: string; repo: string }>(
-    `select o.repo_id, o.number, r.project_id, r.name as repo from onboarding_prs o join repos r on r.org_id = o.org_id and r.id = o.repo_id where o.org_id = $1 and o.state = 'open' and o.checks = 'green'`,
+    `select o.repo_id, o.number, r.project_id, r.name as repo from onboarding_prs o join repos r on r.org_id = o.org_id and r.id = o.repo_id where o.org_id = $1 and o.state = 'open' and o.checks in ('green','none')`,
     [orgId],
   );
   for (const r of prs.rows) {
     if (!vis.has(r.project_id) || !decideFor(st0, principal, "onboarding.merge", { project: r.project_id }).allowed) continue;
     const p = st.projects.find((x) => x.id === r.project_id);
     out.push({ repo: r.repo_id, repoName: r.repo, pr: r.number ?? 0, project: r.project_id, projectName: p?.name ?? r.project_id });
+  }
+  // Onboarding session updates (checks finished, merged, verified, ...) for the people involved in the session, until they open it.
+  const ups = await db.query<{ repo_id: string; project_id: string; repo: string; body: string }>(
+    `select distinct on (m.repo_id) m.repo_id, r.project_id, r.name as repo, m.body
+       from onboarding_messages m join repos r on r.org_id = m.org_id and r.id = m.repo_id
+      where m.org_id = $1 and m.data->>'kind' = 'update' and m.created_at > now() - interval '7 days'
+        and m.created_at > coalesce((select s.seen_at from onboarding_session_seen s where s.org_id = m.org_id and s.repo_id = m.repo_id and s.person_id = $2), '-infinity'::timestamptz)
+      order by m.repo_id, m.created_at desc`,
+    [orgId, me.id],
+  );
+  for (const u of ups.rows) {
+    if (!vis.has(u.project_id) || !(await involved(db, orgId, u.repo_id, u.project_id)).includes(me.id)) continue;
+    const p = st.projects.find((x) => x.id === u.project_id);
+    out.push({ repo: u.repo_id, repoName: u.repo, pr: 0, project: u.project_id, projectName: p?.name ?? u.project_id, note: u.body.slice(0, 160) });
   }
   return out;
 }

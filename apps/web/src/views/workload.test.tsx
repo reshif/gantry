@@ -163,7 +163,7 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     setup();
     mount();
     fireEvent.click(await byId("wl-sg-sole-p-priya"));
-    expect(window.location.hash).toBe("#project-config");
+    expect(window.location.hash).toMatch(/^#(\/p\/[^/]+\/)?project-config$/);
     fireEvent.click(await byId("wl-sg-tp-TP-1"));
     expect(window.location.hash).toBe("#trust");
     fireEvent.click(await byId("wl-sg-ah-p-priya"));
@@ -239,7 +239,7 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     expect(document.getElementById("wl-np-WO-1050")?.textContent).toBe("WO-1050");
     expect(document.body.textContent).toContain("Waiting on a decision");
     fireEvent.click(document.getElementById("wl-bn-cfg-risk-G5")!);
-    expect(window.location.hash).toBe("#project-config");
+    expect(window.location.hash).toMatch(/^#(\/p\/[^/]+\/)?project-config$/);
     fireEvent.click(await byId("wl-tab-minutes"));
     const cls = await byId("wl-min-cls");
     expect(cls.querySelector("tr[data-key='bug']")?.textContent).toContain("insufficient data");

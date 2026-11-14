@@ -12,6 +12,8 @@ export interface SignInRequest {
   method: "sso" | "github";
   /** Session the browser already holds when this sign-in is a step-up. */
   existingSession?: { id: string; personId: string } | null;
+  /** A step-up must refresh the held session and must never switch it to another person. */
+  stepUpOnly?: boolean;
 }
 
 export type SignInResult =
@@ -24,6 +26,7 @@ const DENY = {
   domain_not_allowed: "Your email domain is not allowed to sign in.",
   ip_not_allowed: "Sign-in is not allowed from this network address.",
   account_inactive: "This account is deactivated or suspended.",
+  different_person: "That sign-in was a different person, so the change was cancelled. Sign in again as yourself.",
   identity_mismatch: "This account is linked to a different identity at the provider.",
 } as const;
 
@@ -96,6 +99,7 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
 
     const authTime = claims.authTime ? new Date(claims.authTime * 1000) : new Date();
     const ex = r.existingSession;
+    if (r.stepUpOnly && ex && ex.personId !== person.id) return deny("different_person", person.id);
     if (ex && ex.personId === person.id) {
       await refreshAuthTime(tx, orgId, ex.id, authTime);
       await record("ok", null, person.id, ex.id, "auth.stepup", { authTime: authTime.toISOString() });

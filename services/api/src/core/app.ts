@@ -4,6 +4,8 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { visibleProjects } from "@gantry/domain";
 import type pg from "pg";
+import { demoAccountList as demoAccountList_, type DemoAccountOut } from "../areas/access/demo.js";
+import { enforceReadGate } from "./read-gates.js";
 import { ApiSettingsCache } from "../areas/apikeys/config.js";
 import { gateApiKey, logApiRequest, noteRejectedKey } from "../areas/apikeys/gate.js";
 import { authenticateApiKey } from "./auth/apikeys.js";
@@ -39,11 +41,15 @@ const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
 const REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/;
 
 /** Public pieces of config the sign-in screen needs before anyone is signed in. */
-export async function publicConfig(app: FastifyInstance): Promise<{ demoAccounts: boolean; githubLogin: boolean; orgName?: string }> {
+export async function publicConfig(app: FastifyInstance): Promise<{ demoAccounts: boolean; githubLogin: boolean; orgName?: string; demoAccountList?: DemoAccountOut[] }> {
   const g = app.gantry;
   const sec = await g.security.get();
   const org = await readOrg(g.pool, g.orgId).catch(() => null);
-  return { demoAccounts: g.config.demoAccounts, githubLogin: !!sec.value.githubLogin && !!g.oidc.githubIdp, ...(org ? { orgName: org.name } : {}) };
+  // Demo accounts are described from the live org (who exists, what they hold), never from a fixed text. Only sent when demo sign-in is on.
+  const demoAccountList = g.config.demoAccounts
+    ? await loadPolicyState(g.pool, g.orgId).then((st) => demoAccountList_(st, { bootstrapEmail: g.config.bootstrapAdminEmail })).catch(() => undefined)
+    : undefined;
+  return { demoAccounts: g.config.demoAccounts, githubLogin: !!sec.value.githubLogin && !!g.oidc.githubIdp, ...(org ? { orgName: org.name } : {}), ...(demoAccountList ? { demoAccountList } : {}) };
 }
 
 /**
@@ -109,7 +115,10 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     req.gx = { orgId, principal: null, session: null, ip: req.ip, requestId: req.id, channel: "web", reply };
     const path = req.url.split("?")[0] ?? "";
     if (path.startsWith("/internal/v1/")) return authInternal(req, reply);
-    if (path.startsWith("/api/v1/")) return authApi(app, req, reply);
+    if (path.startsWith("/api/v1/")) {
+      await authApi(app, req, reply);
+      if (!reply.sent) await enforceReadGate(req, reply);
+    }
   });
 
   app.addHook("onResponse", logApiRequest);

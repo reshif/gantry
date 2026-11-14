@@ -67,11 +67,11 @@ function ApprovalRow({ a }: { a: Approval }) {
   };
   return (
     <li className="hm-my-row">
-      <span className="gate gate-waiting gate-sm" aria-label={`${a.gateLabel} ${a.gateName}: waiting on approvers`}>
+      <span className="gate gate-waiting gate-sm" aria-label={`${a.gateName} (${a.gateLabel}): waiting on approvers`}>
         <span className="gate-shape" aria-hidden="true"><span className="gate-count">{String(a.need !== undefined ? Math.max(1, a.need - (a.have ?? 0)) : 1)}</span></span>
       </span>
       <div className="hm-my-main">
-        <div><span className="mono">{wo}</span>{" · " + a.gateLabel + " " + a.gateName}</div>
+        <div><span className="mono">{wo}</span>{" · " + a.gateName + " · " + a.gateLabel + (a.need !== undefined ? ` · ${a.have ?? 0} of ${a.need} approval${a.need === 1 ? "" : "s"}` : "")}</div>
         <div className="muted small">{`${a.title} · ${a.projectName}${a.need !== undefined ? ` · ${a.have ?? 0} of ${a.need} approvals` : ""}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`}</div>
       </div>
       <div className="hm-my-acts">

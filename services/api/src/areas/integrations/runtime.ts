@@ -3,12 +3,13 @@
  * Read from the environment on first use; tests replace parts with `configureRuntime`.
  */
 import type { FastifyInstance } from "fastify";
-import { httpFromEnv, type OutboundHttp } from "../notifications/http.js";
+import { httpFromEnv, proxiedHttp, type OutboundHttp } from "../notifications/http.js";
 import { defaultSlackBase, type OpsEnv } from "./ops.js";
 
 interface Overrides { http?: OutboundHttp; slackBase?: string; smtp?: OpsEnv["smtp"]; now?: () => number }
 let overrides: Overrides = {};
 let cachedHttp: OutboundHttp | null = null;
+let cachedDirect: OutboundHttp | null = null;
 
 export function configureRuntime(o: Overrides): void {
   overrides = o;
@@ -20,6 +21,8 @@ export function opsEnv(app: FastifyInstance, env: NodeJS.ProcessEnv = process.en
   cachedHttp ??= httpFromEnv(env);
   return {
     http: overrides.http ?? cachedHttp,
+    // A test double for `http` also serves internal calls; otherwise the broker is reached directly on the control network.
+    internalHttp: overrides.http ?? (cachedDirect ??= proxiedHttp({ proxy: null })),
     now: overrides.now ?? Date.now,
     slackBase: overrides.slackBase ?? defaultSlackBase(env),
     broker: { url: g.config.brokerUrl, token: g.config.secrets.githubToken ?? null },

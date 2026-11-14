@@ -70,7 +70,7 @@ function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] })
                 <tr key={sk.id} className={`row-link${ui.sel === sk.id ? " is-selected" : ""}`} tabIndex={0} id={`sk-row-${sk.id}`} aria-current={ui.sel === sk.id ? "true" : undefined}
                   onClick={() => open(sk.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(sk.id); } }}>
                   <td>
-                    <div><strong>{sk.name}</strong></div><div className="small muted sk-desc">{sk.desc}</div>
+                    <div><strong>{sk.name}</strong>{sk.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</div><div className="small muted sk-desc">{sk.desc}</div>
                     <div className="small sk-meta">{`${actor(sk.owner).name.replace(" (agent)", "")} · `}{sk.projects === "all" ? "all projects" : sk.projects.length ? `${sk.projects.length} project${sk.projects.length > 1 ? "s" : ""}` : <span className="warn-text">no projects</span>}</div>
                   </td>
                   <td className="mono">{`v${sk.version}`}</td>
@@ -238,7 +238,7 @@ function Detail({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
   return (
     <section className="panel sk-detail" id="sk-detail" aria-label={sk.name}>
       <div className="sk-head">
-        <div className="sk-head-main"><div className="kicker">{`Skill · ${sk.id}`}</div><h2 className="sk-title">{sk.name}</h2><p className="small">{sk.desc}</p></div>
+        <div className="sk-head-main"><div className="kicker">{`Skill · ${sk.id}${sk.builtin ? " · built-in" : ""}`}</div><h2 className="sk-title">{sk.name}</h2><p className="small">{sk.desc}</p></div>
         <dl className="titleblock sk-tb">
           <div><dt>Version</dt><dd className="mono">{`v${sk.version}`}</dd></div>
           <div><dt>Owner</dt><dd>{actor(sk.owner).name.replace(" (agent)", "")}</dd></div>

@@ -101,7 +101,7 @@ export interface NavBadge {
 export interface HomeData {
   figures?: Record<string, unknown>;
   attention?: unknown[];
-  approvals: Array<{ wo?: string; title?: string; gate?: string; gateLabel?: string; gateName?: string; project?: string; projectName?: string; repo?: string; repoName?: string; pr?: number }>;
+  approvals: Array<{ wo?: string; title?: string; gate?: string; gateLabel?: string; gateName?: string; project?: string; projectName?: string; repo?: string; repoName?: string; pr?: number; note?: string }>;
   conversations: Array<{ wo: string; title: string; project: string }>;
   badges?: Record<string, NavBadge>;
   factory?: FactoryState;

@@ -68,7 +68,7 @@ export async function readSkills(db: Queryable, orgId: string, id?: string): Pro
       id: s.id, name: s.name, desc: s.description, when: str(b.when) || str(s.data.when), owner: str(s.data.owner), body: str(b.body), resources: strs(b.resources).length ? strs(b.resources) : strs(s.data.resources),
       version: live ? skillLabel(live) : "", projects: s.projects === "all" || !Array.isArray(s.projects) ? "all" : strs(s.projects),
       versions: mine.map((v) => ({ v: skillLabel(v), at: (v.published_at ?? v.created_at).getTime(), by: v.published_by ?? "", note: v.note })),
-      coverage: cov.get(s.id) ?? { suite: null, cases: 0, pass: 0 }, rev: s.version,
+      coverage: cov.get(s.id) ?? { suite: null, cases: 0, pass: 0 }, ...(s.data.builtin === true ? { builtin: true } : {}), rev: s.version,
     };
   });
 }

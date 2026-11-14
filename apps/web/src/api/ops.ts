@@ -187,6 +187,10 @@ export const ops = {
   setSkillProjects: (skillId: string, projects: string[] | "all") => run(["skills"], put(api(`skills/${enc(skillId)}/projects`), { projects })),
   addVendor: (def: Obj) => run(["vendors", "routing"], post(api("vendors"), def, create)),
   setVendor: (vendorId: string, patchBody: Obj, action?: string) => run(["vendors", "routing"], patch(api(`vendors/${enc(vendorId)}`), { patch: patchBody, action })),
+  /** Adds a vendor from a template (spec 10.4): the server lists its models with the credentials and stores them with the vendor. */
+  addVendorFromTemplate: (def: { template: string; name?: string; fields: Record<string, string>; retention?: string }) => run(["vendors", "routing"], post(api("vendors/from-template"), def, create)),
+  /** Lists the vendor's models again and adds the new ones; switches and prices already set are kept. */
+  discoverVendorModels: (vendorId: string) => run(["vendors", "routing"], post(api(`vendors/${enc(vendorId)}/discover`), {})),
   addModel: (vendorId: string, def: Obj) => run(["vendors"], post(api("models"), { vendor: vendorId, def }, create)),
   removeModel: (modelId: string) => run(["vendors", "routing"], del(api(`models/${enc(modelId)}`))),
   setModelEnabled: (modelId: string, on: boolean) => run(["vendors", "routing"], patch(api(`models/${enc(modelId)}`), { enabled: on })),
@@ -288,6 +292,12 @@ export const ops = {
   setFactoryRole: (personId: string, roleId: string, add: boolean) =>
     run(["people", "me"], (add ? put : del)(api(`people/${enc(personId)}/factory-roles/${enc(roleId)}`))),
   setTeams: (personId: string, teams: string[]) => run(["people"], put(api(`people/${enc(personId)}/teams`), { teams })),
+  createTeam: (o: { name: string; desc?: string; id?: string }) => run(["teams", "people"], post(api("teams"), o, create)),
+  updateTeam: (teamId: string, o: { name?: string; desc?: string }) => run(["teams", "people", "projects"], patch(api(`teams/${enc(teamId)}`), o)),
+  deleteTeam: (teamId: string) => run(["teams", "people"], del(api(`teams/${enc(teamId)}`))),
+  /** Team role grants (spec 8.9): members inherit them. `scope` is "factory" or a project id. */
+  addTeamRole: (teamId: string, g: { role: string; scope: string; expiresAt?: number | null }) => run(["teams", "people", "me", "matrix"], post(api(`teams/${enc(teamId)}/roles`), g)),
+  removeTeamRole: (teamId: string, grantId: string) => run(["teams", "people", "me", "matrix"], del(api(`teams/${enc(teamId)}/roles/${enc(grantId)}`))),
   setOncall: (personId: string, on: boolean) => run(["people", "me"], put(api(`people/${enc(personId)}/oncall`), { on })),
   setMatrix: (roleId: string, actionId: string, on: boolean, v?: Versioned) =>
     run(["matrix"], put(api(`access/matrix/${enc(roleId)}/${enc(actionId)}`), { on }, opts(v))),

@@ -182,9 +182,23 @@ function SessionPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) 
             <Select id="sec-idle" value={String(sec.idleMin)} disabled={!perm.allowed} options={idle.map((x) => ({ value: String(x), label: `${x} minutes` }))} onChange={(v) => void set("idleMin", Number(v), `Idle timeout set to ${v} minutes.`)} />
           </Field>
         </div>
+        <div className="form-row">
+          <Field label="Fresh sign-in window" htmlFor="sec-stepup-window" hint="Kill, restore, policy, role, security and key changes need a sign-in within this time. Changing it needs a fresh sign-in and is audited.">
+            <Select id="sec-stepup-window" value={String(sec.stepUpWindowMinutes ?? 15)} disabled={!perm.allowed} options={[5, 10, 15, 30, 60].map((x) => ({ value: String(x), label: `${x} minutes` }))} onChange={(v) => void set("stepUpWindowMinutes", Number(v), `A sign-in now counts as fresh for ${v} minutes.`)} />
+          </Field>
+        </div>
         <div className="toggle-row">
           <label htmlFor="sec-two"><span className="strong">Factory restore needs two Factory Admins</span><span className="muted small">After a factory kill, two different Factory Admins must approve the restore.</span></label>
           <Toggle id="sec-two" checked={sec.restoreFactoryNeedsTwo} decision={perm} onChange={(v) => void set("restoreFactoryNeedsTwo", v, v ? "Factory restore needs two Factory Admins." : "One Factory Admin can restore the factory.")} />
+        </div>
+        <div className="toggle-row">
+          <label htmlFor="sec-kill-stepup">
+            <span className="strong">Require a fresh sign-in to kill</span>
+            <span className="muted small">
+              A kill is a hard stop, so by default it needs a sign-in within the fresh sign-in window above (15 minutes by default). That stops a stolen or left-open session from halting the factory. Turn it off if you want a kill to work in an emergency from any signed-in session. Restoring always needs a fresh sign-in (and, for the factory, two Factory Admins), and changing this setting needs a fresh sign-in too. Every change is audited.
+            </span>
+          </label>
+          <Toggle id="sec-kill-stepup" checked={sec.killNeedsStepUp !== false} decision={perm} onChange={(v) => void set("killNeedsStepUp", v, v ? "Kill needs a fresh sign-in." : "Kill no longer needs a fresh sign-in. Restore still does.")} />
         </div>
       </div>
     </Panel>

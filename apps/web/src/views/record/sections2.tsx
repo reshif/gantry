@@ -1,6 +1,6 @@
 /** Record sections 6 to 11: changes, verification, merge and release, approvals, after release, full timeline. */
 import { useMemo, useState } from "react";
-import { fmt, flowOf, gateDef, routeGates } from "@gantry/domain";
+import { fmt, flowOf, gateDef, gateExplain, gateKindText, routeGates, type Gate } from "@gantry/domain";
 import { Icon } from "../../ui/Icon";
 import { Btn, Segmented } from "../../ui/primitives";
 import { useOpenTraveler } from "../../shell/useTraveler";
@@ -433,7 +433,9 @@ export function Approvals({ c }: { c: Ctx }) {
             <li key={gid} className={`rec-gate rec-gate-${g.status}${mode ? ` rec-gmode-${mode}` : ""}`}>
               <div className="rec-gate-head">
                 <GateDiamond cat={cat} gateId={gid} state={g.status === "waiting" ? "waiting" : (g.status as string) === "failed" || (g.status as string) === "rejected" ? "failing" : g.status === "passed" ? "clear" : "off"} count={1} size="sm" />
-                <strong>{`${gd.label} ${gd.name}`}</strong>
+                <strong title={"purpose" in gd ? gateExplain(gd as Gate) : undefined}>{gd.name || gd.label}</strong>
+                {gd.name ? <span className="mono muted small">{gd.label}</span> : null}
+                {"kind" in gd ? <span className="chip">{gateKindText((gd as Gate).kind)}</span> : null}
                 {gd.custom ? <span className="chip">custom gate</span> : null}
                 <span className="chip rec-gst">{g.status}</span>
                 {mode ? (

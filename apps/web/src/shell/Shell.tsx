@@ -1,15 +1,17 @@
 /** The signed-in app shell (legacy app.js): top bar, kill banner, left nav, main view and global keys. */
-import { Component, Suspense, useCallback, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import type { Me } from "../api/types";
 import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
-import { pickProject, resolveRoute, routeDef } from "../lib/routes";
-import { useHash } from "../lib/router";
-import { updatePrefs, usePrefs } from "../lib/prefs";
+import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
+import { formatHash, replaceHash, useHash } from "../lib/router";
+import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { Empty } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
-import { Nav, useRouteCtx } from "./Nav";
+import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
+import { makeStopActions } from "./stopActions";
+import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
@@ -40,19 +42,44 @@ export function Shell({ me }: { me: Me }) {
   const loc = useHash();
   const ctx = useRouteCtx();
   useCanSession(me.session.id);
+  // back from a step-up sign-in: reopen the kill/restore dialog the person left, with their draft
+  useResumeStepUp((d) => makeStopActions(ui, me)[d.kind](d.scope as "factory" | "project" | "workorder", d.id), true);
+  useInstallStepUp();
   useRegisterNewWorkOrder();
   const [navOpen, setNavOpen] = useState(false);
   const main = useRef<HTMLElement>(null);
 
-  const { id: routeId, denied } = resolveRoute(loc.id, me, ctx);
+  const access = useRouteAccess(me);
+  // empty hash: the landing rule. Legacy hashes (#floor) gain the project: `prefs.project` is only a default.
+  const landing = loc.id === "" ? landingFor(me) : null;
+  const wanted = landing?.id ?? loc.id;
+  const resolved = resolveRoute(wanted, me, ctx);
+  const permDenied = resolved.denied === null && wanted !== "home" && routeDef(wanted) && access.denied(wanted) ? routeDef(wanted)! : null;
+  const routeId = permDenied ? "home" : resolved.id;
+  const denied = permDenied ?? resolved.denied;
   const def = routeDef(routeId);
-  const projectId = pickProject(me, prefs.project);
-  const project = me.projects.find((p) => p.id === projectId) ?? null;
+  const scoped = isProjectRoute(routeId);
+  const urlProject = scoped ? (loc.project ?? landing?.project ?? pickProject(me, prefs.project)) : null;
+  const project = me.projects.find((p) => p.id === urlProject) ?? null;
+  const projectId = scoped ? (project?.id ?? null) : (pickProject(me, prefs.project) ?? null);
+  const noProjectAccess = scoped && !!loc.project && !project;
 
-  // keep the stored project one the person can see (legacy syncAuth)
-  useEffect(() => {
-    if (projectId && projectId !== prefs.project) updatePrefs({ project: projectId });
-  }, [projectId, prefs.project]);
+  // redirect (replace, no dead back step) to the canonical form of the URL
+  useLayoutEffect(() => {
+    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id));
+    else if (loc.id === "" && landing) replaceHash(formatHash(landing.id, null, landing.project));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoped, loc.project, loc.param, loc.id, project?.id, routeId]);
+
+  // the URL wins: entering a project makes it the remembered one (views read it through prefs)
+  const [synced, setSynced] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (scoped && loc.project && project) {
+      if (prefs.project !== project.id || !prefs.recentProjects.includes(project.id)) setProject(project.id);
+      setSynced(project.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoped, loc.project, project?.id]);
 
   // a route the person cannot see falls back to home with a notice
   const warned = useRef<string | null>(null);
@@ -73,8 +100,8 @@ export function Shell({ me }: { me: Me }) {
   }, [routeId, loc.param]);
 
   useEffect(() => {
-    document.title = `${def?.title ?? "Home"} · Gantry Software Factory`;
-  }, [def]);
+    document.title = `${def?.title ?? "Home"}${scoped && project ? ` · ${project.name}` : ""} · Gantry Software Factory`;
+  }, [def, scoped, project]);
 
   const openPalette = useCallback(() => {
     ui.open((close) => <PaletteDialog projectId={projectId} onClose={close} />);
@@ -91,20 +118,40 @@ export function Shell({ me }: { me: Me }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [openPalette, navOpen]);
 
+  const toggleNav = () => {
+    let wide = true;
+    try { wide = window.matchMedia("(min-width: 861px)").matches; } catch { /* assume desktop */ }
+    if (wide) updatePrefs({ navRail: !prefs.navRail });
+    else setNavOpen((o) => !o);
+  };
   const View = VIEWS[routeId] ?? VIEWS.home;
+  const noAccess = hasNoAccess(me);
+  const crumb = scoped ? [def?.title ?? ""] : [...(def && !["Overview"].includes(def.group) ? [def.group] : []), def?.title ?? "Home"];
+  const switcherProject = scoped ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
+  const ready = !scoped || (!!project && synced === project.id);
   const killed = !!me.factory.killed;
   return (
     <div id="app" className={`shell${prefs.navRail ? " nav-rail" : ""}${navOpen ? " nav-open" : ""}`}>
-      <TopBar me={me} projectId={projectId} onOpenNav={() => setNavOpen(true)} onOpenPalette={openPalette} />
+      <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
       <div className="sysbanner" id="sysbanner" hidden={!killed}>
         {killed ? <StopBanner projectId={null} /> : null}
       </div>
-      <Nav me={me} current={routeId} projectName={project?.name ?? null} onNavigate={() => setNavOpen(false)} />
+      <Nav me={me} current={routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
       <div className="nav-scrim" id="nav-scrim" hidden={!navOpen} onClick={() => setNavOpen(false)} />
       <main className="main" id="main" tabIndex={-1} ref={main}>
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
         <ViewBoundary key={`${routeId}/${loc.param ?? ""}`}>
-          <Suspense fallback={null}>{View ? <View /> : null}</Suspense>
+          {noAccess ? (
+            <div className="view">
+              <Empty id="no-access" title="No access yet" text="Ask a Factory Admin or Project Admin to give you a role. Until then only your own profile is available." />
+            </div>
+          ) : noProjectAccess ? (
+            <div className="view">
+              <Empty id="no-project-access" title="You do not have access to this project" text="It may not exist, or you hold no role on it. Projects you cannot see are hidden from you." action={<p><a href="#projects" className="linkish">Back to all projects</a></p>} />
+            </div>
+          ) : ready ? (
+            <Suspense fallback={null}>{View ? <View /> : null}</Suspense>
+          ) : null}
         </ViewBoundary>
       </main>
     </div>

@@ -34,7 +34,7 @@ async function openInstanceFor(fx: Fx, w: Wo, gateId: string, n: number | null) 
 async function insertVote(fx: Fx, w: Wo, instId: string, voter: string, vote: "approve" | "reject", comment: string, via: string): Promise<void> {
   const role = (
     await fx.tx.query<{ role_id: string; id: string }>(
-      `select id, role_id from role_assignments where org_id = $1 and person_id = $2 and revoked_at is null and (expires_at is null or expires_at > now()) and (project_id = $3 or project_id is null) order by (project_id is null), created_at limit 1`,
+      `select id, role_id from effective_role_assignments where org_id = $1 and person_id = $2 and revoked_at is null and (expires_at is null or expires_at > now()) and (project_id = $3 or project_id is null) order by (project_id is null), created_at limit 1`,
       [fx.orgId, voter, w.project],
     )
   ).rows[0];

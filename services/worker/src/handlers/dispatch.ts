@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { applyStationResult, attemptIsCurrent, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
+import { applyStationResult, attemptIsCurrent, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
 import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg, PermanentError, TransientError } from "../errors.js";
@@ -94,6 +94,15 @@ async function failDispatch(deps: Deps, a: AttemptInfo, runId: string, code: str
   await teardownRun(deps, a.orgId, runId, "failed", { by: "dispatch failed" }).catch((e) => deps.log.warn({ run: runId, err: errMsg(e) }, "teardown after failed dispatch"));
   // An eval case that cannot start ends with an error on its item; it never touches the flow.
   if (a.woData.eval) return failEvalCase(deps, a, code, msg);
+  // An onboarding agent step ends with the reason; the collector falls back to the rule-based result and records it.
+  if (isCarrier(a.woData)) {
+    const end = await withTx(deps.pool, async (tx) => {
+      const j = await endCarrierAttempt(tx, a.orgId, a.attemptId, { code, msg }, deps.now());
+      if (j) await enqueue(tx, { orgId: a.orgId, kind: j.kind, queue: j.queue, payload: j.payload, ...(j.dedupeKey ? { dedupeKey: j.dedupeKey } : {}) });
+      return j !== null;
+    });
+    return { onboarding: true, failed: code, ended: end };
+  }
   const out = await withTx(deps.pool, (tx) => applyStationResult(tx, a.attemptId, a.fencing, { status: "failed", summary: msg, error: { code, msg } }));
   return { failed: code, applied: out.applied };
 }

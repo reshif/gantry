@@ -148,11 +148,11 @@ export function gateText(ctx: FloorCtxValue, w: WorkOrder): { t: string; c: stri
   const g = gateForWO(ctx.cat, ctx.project, w);
   if (w.state === "waiting" && g) {
     const { have, need } = gateHaveNeed(ctx, w, g.id);
-    return { t: `${g.label} waiting${g.id === "G0G1" ? "" : ` ${have}/${need}`}`, c: "wait" };
+    return { t: `${g.name} waiting${g.id === "G0G1" ? "" : ` ${have}/${need}`}`, c: "wait" };
   }
-  if (w.state === "failed") return { t: `${g ? g.label : "check"} failing`, c: "fail" };
+  if (w.state === "failed") return { t: `${g ? g.name : "check"} failing`, c: "fail" };
   if (w.state === "blocked") return { t: "Blocked", c: "block" };
-  return g ? { t: `next ${g.label}`, c: "" } : { t: "no gate next", c: "" };
+  return g ? { t: `next: ${g.name}`, c: "" } : { t: "no gate next", c: "" };
 }
 
 export const repoName = (repos: Repo[], id: string): string => repos.find((r) => r.id === id)?.name ?? id;
@@ -171,7 +171,7 @@ export function WoToken({ w, compact, idPrefix = "tok-", halted, onOpen }: { w: 
   const time = st === "done" ? "done" : st === "killed" ? "killed" : fmt.dur(Math.max(0, ctx.now - (w.bay ? (w.bayAt ?? e?.startedAt ?? w.createdAt) : (e?.startedAt ?? w.createdAt))));
   const g = gateForWO(ctx.cat, ctx.project, w);
   const note =
-    st === "running" ? null : st === "waiting" && g ? `waiting at ${g.label}` : st === "parked" ? bayName(ctx.cat, w.bay ?? "") : st === "killed" ? "Killed" : st === "blocked" ? "Blocked" : st === "failed" ? "Check failed" : st === "done" ? (w.split ? "Split" : "Shipped") : "";
+    st === "running" ? null : st === "waiting" && g ? `waiting at ${g.name}` : st === "parked" ? bayName(ctx.cat, w.bay ?? "") : st === "killed" ? "Killed" : st === "blocked" ? "Blocked" : st === "failed" ? "Check failed" : st === "done" ? (w.split ? "Split" : "Shipped") : "";
   const cls = classOf(ctx.cat, ctx.project, w.cls);
   return (
     <button

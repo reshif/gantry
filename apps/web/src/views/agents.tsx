@@ -10,7 +10,7 @@ import { useCan } from "../api/can";
 import { useAgents, usePolicies, useProjects } from "../api/queries";
 import { ops } from "../api/ops";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Avatar, Btn, Empty, LockNote, Panel, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Avatar, Btn, Chip, Empty, LockNote, Panel, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Icon } from "../ui/Icon";
 import { Spark } from "../ui/charts";
 import { useUI } from "../ui/overlay-context";
@@ -45,7 +45,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
             return (
               <tr key={a.id} className={`row-link${ui.sel === a.id ? " is-selected" : ""}`} tabIndex={0} id={`ag-row-${a.id}`} aria-current={ui.sel === a.id ? "true" : undefined}
                 onClick={() => select(a.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(a.id); } }}>
-                <td><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong></span></td>
+                <td><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong>{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
                 <td><span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span></td>
                 <td className="nowrap">
                   <span className="mono muted">{station ? `${station.no} ` : ""}</span>{station ? station.name : "Off-belt"}
@@ -112,7 +112,7 @@ function Detail({ a, agents, projects }: { a: AgentRow; agents: AgentRow[]; proj
       <div className="ad-head">
         <Avatar id={a.id} size="lg" />
         <div className="ad-main">
-          <div className="kicker">{`Agent · ${st.label(a.station, projects)}`}</div>
+          <div className="kicker">{`Agent · ${st.label(a.station, projects)}${a.builtin ? " · built-in" : ""}`}</div>
           <h2 className="ad-title">{a.name}</h2>
           <div className="ad-meta mono">{`${a.version} · ${a.model} · ${running} work order${running === 1 ? "" : "s"} now · ${a.suite ? `${a.suite} ${fmt.pct(a.evalScore)}` : ""}`}</div>
         </div>

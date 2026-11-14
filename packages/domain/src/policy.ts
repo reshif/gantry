@@ -8,9 +8,9 @@
  *   4. Conditional allow policies (release windows): if any exist for the action, one must match.
  * Gate approvals add approver rules on top: gateDecision() in flow.ts. Times are IST.
  */
-import { DEFAULT_CATALOG } from "./catalog.js";
+import { CONSOLE_RIGHTS, DEFAULT_CATALOG } from "./catalog.js";
 import { DAY, DAYS, HOUR, MIN, fmt, hm, ist, istTime, istToday } from "./format.js";
-import type { Action, Catalog, Decision, DecisionRule, Freeze, KillInfo, Matrix, Person, Policy, PolicyWhen, Project, Repo, Role, WorkOrder } from "./types.js";
+import type { Action, Catalog, Decision, DecisionRule, Freeze, KillInfo, Matrix, Person, Policy, PolicyWhen, Project, Repo, Role, Team, WorkOrder } from "./types.js";
 
 /* ------------------------------------------------------------------ state --------------- */
 
@@ -26,6 +26,8 @@ export interface PolicyState {
   stops?: { factory: KillInfo | null };
   /** Role and action definitions, including custom ones. Defaults to the built-in catalogue. */
   catalog?: Pick<Catalog, "roles" | "actions">;
+  /** Team names, to say "via Payments" in reasons. Optional: the id is used when absent. */
+  teams?: Array<Pick<Team, "id" | "name">>;
 }
 
 export interface PolicyContext {
@@ -80,7 +82,22 @@ export function actorName(state: PolicyState & { agents?: Array<{ id: string; na
 /** Roles a person holds in a project (factory grants always apply). */
 export function rolesIn(person: Person | undefined | null, projectId: string | null): string[] {
   if (!person) return [];
-  return person.roles.filter((g) => g.scope === "factory" || g.scope === projectId).map((g) => g.role);
+  return [...new Set(person.roles.filter((g) => g.scope === "factory" || g.scope === projectId).map((g) => g.role))];
+}
+
+/** "direct" or "via <team>" for a grant: the SOURCE of a permission. Direct grants and team grants both count (spec 8.9). */
+export function grantSource(state: Pick<PolicyState, "teams">, g: { via?: string }): string {
+  if (!g.via) return "direct";
+  return "via " + (state.teams?.find((t) => t.id === g.via)?.name ?? g.via);
+}
+
+/**
+ * Where a person's permission to do `action` comes from: the distinct sources ("direct", team ids) of the grants in scope whose role
+ * the matrix lets do it. Empty when no role grants it (an allow by an extend policy has no role source).
+ */
+export function permissionSources(state: Pick<PolicyState, "matrix">, person: Person, action: string, projectId: string | null, scoped: boolean): string[] {
+  const grants = person.roles.filter((g) => g.scope === "factory" || (scoped && (!projectId || g.scope === projectId))).filter((g) => state.matrix[g.role]?.[action]);
+  return [...new Set(grants.map((g) => g.via ?? "direct"))];
 }
 export function isFactoryAdmin(state: PolicyState, personId: string): boolean {
   const p = findPerson(state, personId);
@@ -226,8 +243,11 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   if (person.status !== "active") return { allowed: false, reason: person.name + " has not accepted the invite yet.", rule: MATRIX_RULE, needs: "Accepted invite" };
 
   const scoped = act?.scope === "project";
-  const grants = person.roles.filter((g) => g.scope === "factory" || !scoped || !projectId || g.scope === projectId);
-  const granting = grants.filter((g) => matrix[g.role]?.[action]);
+  /* A factory-scoped action (audit.view, eval.run, people.manage ...) needs a factory-level grant: a role held on one project never reaches beyond it. */
+  const factoryOnly = act?.scope === "factory";
+  const grants = person.roles.filter((g) => g.scope === "factory" || (!factoryOnly && (!scoped || !projectId || g.scope === projectId)));
+  // Own grants first: when both a direct grant and a team grant allow it, the reason names the direct one.
+  const granting = grants.filter((g) => matrix[g.role]?.[action]).sort((a, b) => Number(!!a.via) - Number(!!b.via));
   const heldRoles = grants.map((g) => g.role);
   const t = ist(time);
 
@@ -246,12 +266,18 @@ export function can(state: PolicyState, personId: string | null | undefined, act
     if (ADMIN_ALWAYS.has(action) && person.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) {
       return { allowed: true, reason: "Factory Admin can always halt, kill and restore.", rule: { kind: "invariant", id: "I7", name: "Stop commands always work" }, needs: "" };
     }
+    /* Console rights: a Factory Admin always holds all of them, even if the matrix is damaged (the matrix cell is locked on too) */
+    if (CONSOLE_RIGHTS.includes(action) && person.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) {
+      return { allowed: true, reason: "Factory Admin always has every console right.", rule: { kind: "invariant", id: "I-CONSOLE", name: "Factory Admin console rights" }, needs: "" };
+    }
     let rolesWith = rolesOf(state).filter((r) => matrix[r.id]?.[action] && r.id !== "factory_admin").map((r) => r.id);
     if (!rolesWith.length) rolesWith = ["factory_admin"];
     const needs = "Needs " + roleNames(state, rolesWith.slice(0, 2)) + (scoped && project ? " on " + project.name : "");
     const outOfScope = person.roles.some((g) => matrix[g.role]?.[action]);
     let reason = outOfScope
-      ? person.name + "'s roles that allow this do not cover " + (project ? project.name : "this scope") + "."
+      ? factoryOnly
+        ? person.name + "'s roles that allow this are held on single projects; '" + (act ? act.name : action) + "' needs a factory-level role."
+        : person.name + "'s roles that allow this do not cover " + (project ? project.name : "this scope") + "."
       : "No role held by " + person.name + (scoped && project ? " in " + project.name : "") + " includes '" + (act ? act.name : action) + "'.";
     if (ext.length && ext.some((q) => q.oncallOnly && q.roles.some((r) => heldRoles.includes(r))) && !person.oncall) reason += " " + (ext[0] as Policy).id + " would allow it while on call.";
     return { allowed: false, reason, rule: MATRIX_RULE, needs };
@@ -286,9 +312,9 @@ export function can(state: PolicyState, personId: string | null | undefined, act
     const w = why as { q: Policy; text: string };
     return { allowed: false, reason: w.text, rule: { kind: "policy", id: w.q.id, name: w.q.name }, needs: "Allowed " + policyText.when(w.q.when) + (w.q.oncallOnly ? " while on call" : "") };
   }
-  const g0 = granting[0] as { role: string; scope: string };
+  const g0 = granting[0] as { role: string; scope: string; via?: string };
   const scopeName = g0.scope === "factory" ? "the factory" : findProject(state, g0.scope)?.name ?? g0.scope;
-  return { allowed: true, reason: "Role matrix: " + roleName(state, g0.role) + " on " + scopeName + " may " + (act ? act.name.toLowerCase() : action) + ".", rule: MATRIX_RULE, needs: "" };
+  return { allowed: true, reason: "Role matrix: " + roleName(state, g0.role) + " on " + scopeName + (g0.via ? " (" + grantSource(state, g0) + ")" : "") + " may " + (act ? act.name.toLowerCase() : action) + ".", rule: MATRIX_RULE, needs: "" };
 }
 
 /** Batch form behind `POST /api/v1/can`. */
@@ -323,15 +349,15 @@ export function policyTrace(state: PolicyState, personId: string, action: string
   const scoped = act.scope === "project";
   const pid = ctx.project || null;
   const time = ctx.time ?? Date.now();
-  const grants = p.roles.filter((g) => g.scope === "factory" || !scoped || !pid || g.scope === pid);
+  const grants = p.roles.filter((g) => g.scope === "factory" || (act.scope !== "factory" && (!scoped || !pid || g.scope === pid)));
   const granting = grants.filter((g) => m[g.role]?.[act.id]);
   const pols = state.policies.filter((q) => q.actions.includes(act.id));
   const repo = ctx.repo ? findRepo(state, ctx.repo) : undefined;
   const frz = repo ? activeFreeze(state, repo.id, time) : null;
   const d = can(state, personId, action, ctx);
   const out: string[] = [];
-  out.push("Roles in scope: " + (grants.length ? grants.map((g) => roleName(state, g.role) + (g.scope === "factory" ? " (factory)" : "")).join(", ") : "none") + ".");
-  out.push("Role matrix grants " + act.id + ": " + (granting.length ? "yes, via " + granting.map((g) => roleName(state, g.role)).join(", ") : "no") + ".");
+  out.push("Roles in scope: " + (grants.length ? grants.map((g) => roleName(state, g.role) + (g.scope === "factory" ? " (factory)" : "") + (g.via ? " (" + grantSource(state, g) + ")" : "")).join(", ") : "none") + ".");
+  out.push("Role matrix grants " + act.id + ": " + (granting.length ? "yes, via " + granting.map((g) => roleName(state, g.role) + (g.via ? " (" + grantSource(state, g) + ")" : "")).join(", ") : "no") + ".");
   if (repo) out.push("Freeze on " + repo.name + ": " + (frz ? frz.id + " " + frz.name + " until " + fmt.stamp(frz.to) : "none at that time") + ".");
   out.push("Policies on this action: " + (pols.length ? pols.map((q) => q.id + (q.enabled ? "" : " (off)")).join(", ") : "none, so the matrix decides") + ".");
   out.push("Deciding rule: " + d.rule.id + " " + (d.rule.name || "") + ". " + d.reason);

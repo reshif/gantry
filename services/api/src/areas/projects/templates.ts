@@ -1,4 +1,4 @@
-import type { Project, Template, WorkClass } from "@gantry/domain";
+import { gateLock, type Project, type Template, type WorkClass } from "@gantry/domain";
 import { Refusal, invalid } from "../../core/errors.js";
 import { addBay, addClass, addGate, addStation, type FlowDraft } from "./flowedit.js";
 
@@ -106,7 +106,13 @@ export function checkTemplatePatch(
   if (p.stationsOff?.includes("intake")) throw invalid("Intake is always on.");
   const badG = (p.gatesOff ?? []).filter((id) => !c.gates.some((g) => g.id === id && !g.custom));
   if (badG.length) throw invalid(`Unknown or custom gates: ${badG.join(", ")}.`);
-  if (p.gatesOff?.includes("G0G1")) throw invalid("G0+G1 is always on.");
+  for (const id of p.gatesOff ?? []) {
+    const lock = gateLock({ id });
+    if (lock.locked) {
+      const g = c.gates.find((x) => x.id === id) as { name?: string; label?: string } | undefined;
+      throw invalid(`${g?.name ?? id} (${g?.label ?? id}) is always on. ${lock.reason}`);
+    }
+  }
   for (const [cls, skips] of Object.entries(p.classesSkip ?? {})) {
     if (!c.classes.some((x) => x.id === cls && !x.custom)) throw invalid(`Unknown or custom class ${cls}.`);
     if (skips.some((s) => s === "intake" || s === "close" || !st(s))) throw invalid(`${cls} can only skip built-in stations other than Intake and Close.`);

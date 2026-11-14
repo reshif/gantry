@@ -77,7 +77,9 @@ export function createOidcAdapter(cfg: Config["oidc"], opts: { allowInsecure?: b
         nonce: p.nonce,
       };
       if (p.loginHint) params.login_hint = p.loginHint;
-      if (p.stepUp) params.prompt = "login";
+      // A named account (demo card, invite link) must not be satisfied by whoever already holds the identity provider's SSO session:
+      // without prompt=login, Keycloak ignores login_hint and silently signs the previous person back in.
+      if (p.stepUp || p.loginHint) params.prompt = "login";
       if (p.idpHint) params.kc_idp_hint = p.idpHint;
       return client.buildAuthorizationUrl(c, params);
     },

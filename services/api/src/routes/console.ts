@@ -1,10 +1,10 @@
 /**
  * Console (spec 8.9 Console row, 12.6). Owns:
  *   POST /api/v1/console/messages        streams the answer (SSE); read tools run server-side with the person's permissions; proposed actions come back as confirm cards
- *   GET  /api/v1/console/status          is a model configured, are action proposals on, retention
- *   PUT  /api/v1/console/settings        the runtime switch for action proposals (off in a new install)
+ *   GET  /api/v1/console/status          is a model configured, what the console may do for THIS person (console rights), retention
+ *   PUT  /api/v1/console/settings        retired: the factory-wide switch is replaced by console rights in the role matrix (Govern > Access); always refused with a pointer
  *   GET  /api/v1/console/threads[/{id}], DELETE /api/v1/console/threads/{id}, PUT .../threads/{id}/pinned, PUT /api/v1/console/messages/{id}/proposals/{pid}
- *   POST /api/v1/console/tools/{name}    runs one tool directly (slash commands, tests); read tools always, propose tools only while actions are on
+ *   POST /api/v1/console/tools/{name}    runs one tool directly (slash commands, tests); read tools always, propose tools only for a person who holds the kind's console right
  *   POST /api/v1/console/explain         "why not": the policy engine's own trace, plus a model's plain-language explanation when a model is configured
  *
  * The model is called through the edge (`/service/v1/messages`); a confirm card calls the ordinary endpoint itself, so the decision point, audit,
@@ -12,10 +12,12 @@
  */
 import { visibleProjects } from "@gantry/domain";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
-import { command, policyState, refuse } from "../core/index.js";
-import { readConsoleSettings, THREAD_RETENTION_DAYS, writeConsoleSettings } from "../areas/console/config.js";
+import { command, decide, policyState, refuse } from "../core/index.js";
+import { THREAD_RETENTION_DAYS } from "../areas/console/config.js";
+import { allowedTools, consoleRights, missingRightText, type ConsoleRights } from "../areas/console/rights.js";
 import { completeOnce, ModelUnavailable, readiness, runConversation, systemPrompt, type Readiness } from "../areas/console/model.js";
-import { ExplainBody, MessageBody, PinnedBody, ProposalBody, ProposalParams, SettingsBody, ThreadId, ToolBody, ToolParams } from "../areas/console/schemas.js";
+import { consoleModel, setModelPref } from "../areas/console/route.js";
+import { ExplainBody, MessageBody, ModelBody, StatusQuery, PinnedBody, ProposalBody, ProposalParams, SettingsBody, ThreadId, ToolBody, ToolParams } from "../areas/console/schemas.js";
 import { addMessage, deleteThread, ensureThread, getThread, listThreads, newMessageId, purgeExpired, setPinned, setProposalStatus } from "../areas/console/threads.js";
 import { ALL_TOOLS, execute, mentioned, offered, toolByName, type ToolCtx } from "../areas/console/tools.js";
 
@@ -24,6 +26,9 @@ const requirePerson = (req: FastifyRequest): { id: string; name: string } => {
   if (p?.kind !== "person") throw refuse("denied", "The console is for signed-in people.");
   return { id: p.id, name: p.name };
 };
+
+/** The model to pin for a call: the explicit or saved choice; with neither, the routing (default and the console station's override) decides, unless there is no default at all. */
+const modelFor = (explicit: string | null | undefined, m: { choice: string | null; default: string | null; effective: string | null }): string | null => explicit ?? m.choice ?? (m.default ? null : m.effective);
 
 export const NO_MODEL_TEXT = "No model is configured, so the console cannot answer questions yet. Ask a Factory Admin to connect a model vendor and set a default model in Models. Slash commands still work: they read live data directly.";
 
@@ -36,36 +41,57 @@ const humanReason = (r: Extract<Readiness, { ready: false }>): string => {
 export const consoleRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
 
-  const makeCtx = (req: FastifyRequest, who: { id: string; name: string }, actionsEnabled: boolean): ToolCtx => ({
-    app: app as FastifyInstance, req, person: who, actionsEnabled, proposals: [], cited: [], used: [], next: 1, now: () => Date.now(), seenWo: new Set<string>(),
+  const makeCtx = (req: FastifyRequest, who: { id: string; name: string }, rights: ConsoleRights | null): ToolCtx => ({
+    app: app as FastifyInstance, req, person: who, proposeTools: rights ? allowedTools(rights) : new Set<string>(), ...(rights ? { denyText: (tool: string) => missingRightText(rights, tool) } : {}), proposals: [], cited: [], used: [], next: 1, now: () => Date.now(), seenWo: new Set<string>(),
   });
 
   /* ------------------------------------------------------------------ status and switch */
 
+  /** Projects the person may see, for the project-scoped routing policy of the model they pick. Unknown or hidden projects count as none. */
+  const scopeProject = async (req: FastifyRequest, who: { id: string }, project: string | null | undefined): Promise<string | undefined> => {
+    if (!project) return undefined;
+    const st = await policyState(req);
+    return visibleProjects(st, who.id).some((p) => p.id === project) ? project : undefined;
+  };
+
   app.get("/api/v1/console/status", async (req) => {
-    requirePerson(req);
-    const [ready, s] = await Promise.all([readiness(g.config.secrets.edgeToken), readConsoleSettings(g.pool, g.orgId)]);
+    const who = requirePerson(req);
+    const q = StatusQuery.parse(req.query);
+    const project = await scopeProject(req, who, q.project);
+    const m = await consoleModel(g.pool, g.orgId, who.id, project);
+    const [ready, rights, admin] = await Promise.all([readiness(g.config.secrets.edgeToken, "console", { ...(modelFor(null, m) ? { model: modelFor(null, m)! } : {}), ...(project ? { project } : {}) }), consoleRights(req, who.id), decide(req, "model.edit", {})]);
     return {
       configured: ready.ready,
       ...(ready.ready ? { vendor: ready.vendor, model: ready.model } : { code: ready.code, reason: humanReason(ready) }),
-      actionsEnabled: s.actionsEnabled, version: s.version, retentionDays: THREAD_RETENTION_DAYS,
+      // The picker: enabled models the gateway can call (grouped by vendor in the page), the person's saved choice and the routing default.
+      models: m.options, choice: m.choice, defaultModel: m.default, effectiveModel: m.effective, canManageModels: admin.allowed,
+      // What the console may do for this person: the console rights from the role matrix (direct or via a team), each with the reason.
+      canUse: rights.use.allowed, use: rights.use, isFactoryAdmin: rights.admin,
+      proposals: rights.proposals.map((p) => ({ kind: p.kind, tool: p.tool, right: p.id, name: p.name, does: p.does, allowed: rights.use.allowed && p.allowed, reason: p.reason, needs: p.needs })),
+      // Kept for older clients: true when the console may propose anything for this person.
+      actionsEnabled: rights.use.allowed && rights.proposals.some((p) => p.allowed), retentionDays: THREAD_RETENTION_DAYS,
       tools: ALL_TOOLS.map((t) => ({ name: t.name, kind: t.kind, description: t.description })),
     };
   });
 
-  app.put("/api/v1/console/settings", async (req) => {
-    const b = SettingsBody.parse(req.body);
-    return command(req, { action: "security.manage", scope: {}, ifMatch: async (tx) => (await readConsoleSettings(tx, g.orgId)).version }, async (tx, a) => {
-      const cur = await readConsoleSettings(tx, a.orgId);
-      if (b.actionsEnabled === cur.actionsEnabled) throw refuse("conflict", `Console actions are already ${b.actionsEnabled ? "on" : "off"}.`);
-      if (b.actionsEnabled && (b.reason ?? "").length < 4) throw refuse("invalid", "Give a reason for turning console actions on.");
-      const version = await writeConsoleSettings(tx, a.orgId, { actionsEnabled: b.actionsEnabled });
-      return {
-        msg: b.actionsEnabled ? "Console actions are on: the console may propose actions, and each one still waits for the person's confirmation." : "Console actions are off: the console is read-only again.",
-        events: [{ type: "console.settings", category: "config", subject: { type: "console", id: "settings" }, projectId: null, before: { actionsEnabled: cur.actionsEnabled }, after: { actionsEnabled: b.actionsEnabled, ...(b.reason ? { reason: b.reason } : {}) } }],
-        extra: { actionsEnabled: b.actionsEnabled, version }, changes: ["console"], project: null,
-      };
+  /** The person's own model choice (null: back to the routing default). Anyone who may use the console may pick any model the gateway can call. */
+  app.put("/api/v1/console/model", async (req) => {
+    const who = requirePerson(req);
+    const b = ModelBody.parse(req.body);
+    return command(req, { action: null }, async (tx, a) => {
+      if (b.model) {
+        const m = await consoleModel(tx, a.orgId, who.id);
+        if (!m.options.some((o) => o.id === b.model)) throw refuse("invalid", `${b.model} is not available to the console: it must be enabled, on a connected vendor the gateway can call.`);
+      }
+      await setModelPref(tx, a.orgId, who.id, b.model);
+      return { msg: b.model ? `The console will answer with ${b.model}.` : "The console will use the factory default model.", events: [{ type: "console.model", category: "access", subject: { type: "console", id: "model" }, projectId: null, after: { model: b.model } }], changes: ["console"], project: null };
     });
+  });
+
+  /** Retired. Console actions are no longer one factory-wide switch: they are rights in the role matrix, per role and team (default deny). */
+  app.put("/api/v1/console/settings", async (req) => {
+    SettingsBody.parse(req.body);
+    throw refuse("conflict", "The factory-wide console switch is retired. What the console may do is now decided per person by console rights (Console group in Govern > Access): Factory Admin always has all of them; give console.propose.* rights to the roles or teams you choose.", { needs: "Edit console rights in Govern > Access" });
   });
 
   /* ------------------------------------------------------------------ threads */
@@ -120,9 +146,10 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     const { input } = ToolBody.parse(req.body ?? {});
     const t = toolByName(name);
     if (!t) throw refuse("not_found", `No such tool ${name}.`);
-    const s = await readConsoleSettings(g.pool, g.orgId);
-    if (t.kind === "propose" && !s.actionsEnabled) throw refuse("conflict", "Console actions are switched off for this factory. Turn them on in the console's settings, or use the screen.", { needs: "console actions on" });
-    const ctx = makeCtx(req, who, s.actionsEnabled);
+    const rights = await consoleRights(req, who.id);
+    if (!rights.use.allowed) throw refuse("denied", `The console is not available to you. ${rights.use.needs}`, { needs: rights.use.needs });
+    if (t.kind === "propose" && !allowedTools(rights).has(name)) throw refuse("denied", missingRightText(rights, name).replace(/ Tell them: /, " "), { needs: rights.proposals.find((p) => p.tool === name)?.needs ?? "" });
+    const ctx = makeCtx(req, who, rights);
     const out = await execute(ctx, name, input);
     return { ok: out.ok, tool: name, result: JSON.parse(out.text) as unknown, proposals: ctx.proposals, cited: mentioned(out.text, ctx) };
   });
@@ -132,7 +159,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/console/explain", async (req) => {
     const who = requirePerson(req);
     const b = ExplainBody.parse(req.body);
-    const ctx = makeCtx(req, who, false);
+    const ctx = makeCtx(req, who, null);
     const r = (await toolByName("explain_denial")!.run(ctx, { action: b.action, ...(b.person ? { person: b.person } : {}), ...(b.project ? { project: b.project } : {}), ...(b.repo ? { repo: b.repo } : {}), ...(b.time ? { at: b.time } : {}) })) as Record<string, unknown>;
     if (typeof r.error === "string") throw refuse("invalid", r.error);
     const ready = await readiness(g.config.secrets.edgeToken);
@@ -156,7 +183,13 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/console/messages", async (req, reply: FastifyReply) => {
     const who = requirePerson(req);
     const b = MessageBody.parse(req.body);
-    const settings = await readConsoleSettings(g.pool, g.orgId);
+    const rights = await consoleRights(req, who.id);
+    if (!rights.use.allowed) throw refuse("denied", `The console is not available to you. ${rights.use.needs}`, { needs: rights.use.needs });
+    // The model is validated on every message: an explicit choice must still be enabled, callable and allowed by the project's routing policy.
+    const mProject = await scopeProject(req, who, b.project);
+    const mc = await consoleModel(g.pool, g.orgId, who.id, mProject);
+    if (b.model && !mc.options.some((o) => o.id === b.model)) throw refuse("invalid", `${b.model} is not available to the console right now (disabled, not callable, or not allowed for this project). Pick another model.`);
+    const pick = { ...(modelFor(b.model, mc) ? { model: modelFor(b.model, mc)! } : {}), ...(mProject ? { project: mProject } : {}) };
 
     // 1. The question is saved first (state and event in one transaction, idempotent on Idempotency-Key).
     const saved = await command(req, { action: null, idempotent: true }, async (tx, a) => {
@@ -197,7 +230,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     };
 
     try {
-      const ready = await readiness(g.config.secrets.edgeToken);
+      const ready = await readiness(g.config.secrets.edgeToken, "console", pick);
       if (!ready.ready) {
         const text = humanReason(ready);
         const id = await persist("system", text, { kind: "no_model", code: ready.code }, { mode: "none", code: ready.code });
@@ -209,7 +242,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
       const me = st.people.find((p) => p.id === who.id);
       const vis = visibleProjects(st, who.id).filter((p) => p.status !== "archived");
       const current = b.project ? vis.find((p) => p.id === b.project) : undefined;
-      const ctx = makeCtx(req, who, settings.actionsEnabled);
+      const ctx = makeCtx(req, who, rights);
       const prior = (await getThread(g.pool, g.orgId, who.id, threadId))?.messages ?? [];
       // The new question is the last message; earlier turns are context (text only, tool results are not replayed).
       const history = prior.slice(0, -1).filter((m) => (m.role === "user" || m.role === "assistant") && m.text).slice(-8).map((m) => ({ role: m.role as "user" | "assistant", text: m.text.slice(0, 600) }));
@@ -220,12 +253,12 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
         if (last && last.role === h.role) last.text += `\n${h.text}`;
         else merged.push({ ...h });
       }
-      const system = systemPrompt({ person: who.name, roles: (me?.roles ?? []).map((r) => `${r.role} @ ${r.scope}`), projects: vis.map((p) => `${p.id} (${p.name})`), current: current ? `${current.id} (${current.name})` : null, actionsEnabled: settings.actionsEnabled, now: new Date() });
+      const system = systemPrompt({ person: who.name, roles: (me?.roles ?? []).map((r) => `${r.role} @ ${r.scope}`), projects: vis.map((p) => `${p.id} (${p.name})`), current: current ? `${current.id} (${current.name})` : null, may: rights.proposals.filter((p) => p.allowed).map((p) => ({ tool: p.tool, does: p.does })), mayNot: rights.proposals.filter((p) => !p.allowed).map((p) => ({ does: p.does, right: p.name })), now: new Date() });
       // A trailing user turn in history would be followed by the new question: fold them into one message so roles alternate.
       let question = b.text;
       if (merged.length && merged[merged.length - 1]!.role === "user") question = `${merged.pop()!.text}\n\n${b.text}`;
       const r = await runConversation({
-        edgeToken: g.config.secrets.edgeToken, system, history: merged, question, ctx, signal: ac.signal,
+        edgeToken: g.config.secrets.edgeToken, system, history: merged, question, ctx, signal: ac.signal, pick,
         onText: (delta) => send("text", { delta }),
         onTool: (t) => send("tool", t),
       });

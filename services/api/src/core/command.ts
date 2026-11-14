@@ -8,6 +8,7 @@ import { publishChange } from "./changes.js";
 import { decideFor, refuseDecision, stepUpSatisfied, type Scope } from "./decide.js";
 import { Refusal, refuse } from "./errors.js";
 import { readApiSettings } from "../areas/apikeys/config.js";
+import { readSecurity } from "./read/index.js";
 import { loadPolicyState } from "./read/state.js";
 import { loadStopSnapshot, refreshStopSnapshot } from "./stop-snapshot.js";
 
@@ -69,8 +70,8 @@ export interface CommandSpec {
   idempotent?: boolean;
   /** Fields of the response that are not kept for replays (a secret shown once): a replay returns the rest. */
   storedOmit?: string[];
-  /** Require a sign-in no older than this many seconds (spec 14.1). */
-  stepUp?: number;
+  /** Require a sign-in no older than the org's step-up window (security setting `stepUpWindowMinutes`, spec 14.1). A number is a stricter per-command cap in seconds. */
+  stepUp?: true | number;
   /** /internal/v1 handlers: the edge or GitHub broker authenticated with its service token, so the matrix does not apply (the body still checks stop state and budgets). Without this flag a service principal is refused. */
   service?: boolean;
   /** Stop endpoints (spec 8.5): no jobs or outbox, and a smaller default change set. */
@@ -211,9 +212,19 @@ export async function command<X extends object = Record<string, never>>(
       }
       if (!decision.allowed) throw new Denied(decision);
       // Spec 14.1: kill, restore, policy, role, security, people and key operations need a fresh sign-in, whether or not the route asked.
-      const stepUp = spec.stepUp ?? (principal.kind === "person" && spec.action && needsStepUp(spec.action) ? 300 : undefined);
+      let stepUp: number | undefined;
+      if (spec.stepUp !== undefined || (principal.kind === "person" && spec.action && needsStepUp(spec.action))) {
+        const sec = await readSecurity(tx, g.orgId).then((s) => s.value).catch(() => null);
+        // Kill's step-up is a security setting (default on). Unreadable settings keep the strict default. Restore is not configurable.
+        const exempt = spec.stepUp === undefined && spec.action?.startsWith("kill.") && sec?.killNeedsStepUp === false;
+        if (!exempt) {
+          const win = (sec?.stepUpWindowMinutes ?? 15) * 60;
+          stepUp = typeof spec.stepUp === "number" ? Math.min(win, spec.stepUp) : win;
+        }
+      }
       if (stepUp !== undefined && !stepUpSatisfied(req, stepUp)) {
-        throw new Denied({ allowed: false, reason: "Sign in again to confirm this change.", rule: { kind: "step-up", id: "STEP-UP", name: "Fresh sign-in required" }, needs: "step_up" });
+        const since = req.gx.session?.authTime ? Math.max(0, Math.round((Date.now() - req.gx.session.authTime) / 1000)) : null;
+        throw new Denied({ allowed: false, reason: "Sign in again to confirm this change.", rule: { kind: "step-up", id: "STEP-UP", name: "Fresh sign-in required", windowSec: stepUp, signedInSecAgo: since, action: spec.action ?? null }, needs: "step_up" });
       }
       if (spec.ifMatch && (ifMatch !== null || spec.ifMatchRequired)) {
         const cur = await spec.ifMatch(tx);

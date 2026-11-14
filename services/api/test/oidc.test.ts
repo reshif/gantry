@@ -59,7 +59,10 @@ d("OIDC sign-in against a local issuer", () => {
     expect(u.searchParams.get("login_hint")).toBe("asha@acme.dev");
     expect(u.searchParams.get("client_id")).toBe("gantry-web");
     expect(u.searchParams.get("redirect_uri")).toBe("https://gantry.test/auth/callback");
-    expect(u.searchParams.get("prompt")).toBeNull();
+    // A named account forces the login form, so another person's SSO session at the provider cannot stand in for it.
+    expect(u.searchParams.get("prompt")).toBe("login");
+    const plain = new URL(String((await t.app.inject("/auth/login")).headers.location));
+    expect(plain.searchParams.get("prompt")).toBeNull(); // a plain sign-in may reuse the provider's session
     const c = r.cookies.find((x) => x.name === "gantry_oidc")!;
     expect(c).toMatchObject({ httpOnly: true, sameSite: "Lax", secure: true });
     expect(c.value).not.toContain(u.searchParams.get("state")!); // sealed, not readable
@@ -224,6 +227,53 @@ d("OIDC sign-in against a local issuer", () => {
     expect((await t.db.admin.query(`select 1 from events where type = 'auth.stepup'`)).rowCount).toBe(1);
     const ok = await patch();
     expect(ok.statusCode).toBe(200);
+  });
+
+  it("step-up window is the security setting: 15 min by default, and a shorter or longer one is honoured with window and age in the refusal", async () => {
+    const first = await signInFlow(t, issuer, { ...asha, auth_time: now() - 600 }); // 10 min ago
+    const cookie = `__Host-gantry_session=${first.session!.value}`;
+    const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).json();
+    const hdr = { cookie, "x-csrf-token": me.csrf };
+    const patch = async (path: string, value: unknown) => {
+      const cur = (await t.app.inject({ url: "/api/v1/security", headers: { cookie } })).json();
+      return t.app.inject({ method: "PATCH", url: "/api/v1/security", headers: { ...hdr, "if-match": String(cur.version) }, payload: { path, value } });
+    };
+    expect((await patch("idleMin", 26)).statusCode).toBe(200); // 10 min is inside the default 15
+    await setSecurity(t, { stepUpWindowMinutes: 5 });
+    const r = await patch("idleMin", 27);
+    expect(r.statusCode).toBe(403);
+    expect(r.json().rule).toMatchObject({ kind: "step-up", windowSec: 300 });
+    expect(r.json().rule.signedInSecAgo).toBeGreaterThanOrEqual(600);
+    await setSecurity(t, { stepUpWindowMinutes: 60 });
+    expect((await patch("idleMin", 27)).statusCode).toBe(200);
+    expect((await patch("stepUpWindowMinutes", 3)).statusCode).toBe(422); // allowed 5 to 60
+    expect((await patch("stepUpWindowMinutes", 30)).statusCode).toBe(200);
+    await setSecurity(t, { stepUpWindowMinutes: 15 });
+  });
+
+  it("popup step-up: the callback sends the popup to the app's result page, keeps the session and refreshes auth_time", async () => {
+    const first = await signInFlow(t, issuer, { ...asha, auth_time: now() - 7200 });
+    const cookie = `__Host-gantry_session=${first.session!.value}`;
+    const step = await signInFlow(t, issuer, { ...asha, auth_time: now() }, { query: "?step_up=1&popup=1", cookie });
+    expect(step.r.headers.location).toBe("/?step_up_popup=ok");
+    expect(step.session).toBeUndefined();
+    const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).json();
+    const cur = (await t.app.inject({ url: "/api/v1/security", headers: { cookie } })).json();
+    const ok = await t.app.inject({ method: "PATCH", url: "/api/v1/security", headers: { cookie, "x-csrf-token": me.csrf, "if-match": String(cur.version) }, payload: { path: "idleMin", value: 30 } });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it("popup is only honoured for a step-up; a different person's step-up is refused and does not switch the session", async () => {
+    const first = await signInFlow(t, issuer, { ...asha, auth_time: now() - 7200 });
+    const cookie = `__Host-gantry_session=${first.session!.value}`;
+    const other = await signInFlow(t, issuer, { sub: "kc-daniel", email: "daniel@acme.dev", email_verified: true, name: "Daniel", gantry_id: "p-daniel", auth_time: now() }, { query: "?step_up=1&popup=1", cookie });
+    expect(String(other.r.headers.location)).toMatch(/^\/\?step_up_popup=error&msg=/);
+    expect(decodeURIComponent(String(other.r.headers.location))).toMatch(/different person/);
+    expect(other.session).toBeUndefined();
+    const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).json();
+    expect(me.person.id).toBe("p-asha");
+    const plain = await signInFlow(t, issuer, { ...asha, auth_time: now() }, { query: "?popup=1" });
+    expect(plain.r.headers.location).toBe("/");
   });
 
   it("logout needs the CSRF token, revokes the session, clears the cookie and records the event", async () => {

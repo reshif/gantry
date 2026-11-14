@@ -1,4 +1,4 @@
-import { can, simulate, visibleProjects, type Catalog, type Decision, type PolicyState, type SimulationResult } from "@gantry/domain";
+import { can, findPerson, permissionSources, simulate, visibleProjects, type Catalog, type Decision, type PolicyState, type SimulationResult } from "@gantry/domain";
 
 export interface SimulateQuestion {
   person: string;
@@ -26,12 +26,19 @@ export interface EffectivePermissions {
   at: number;
   projects: Array<{ id: string; name: string }>;
   actions: Array<{ id: string; name: string; group: string; scope: "project" | "factory" }>;
-  /** Project-scoped actions: `cells[actionId][projectId] = [allowed (1 or 0), deciding rule id]`. The reason for one cell comes from the simulator. */
-  cells: Record<string, Record<string, [0 | 1, string]>>;
+  /**
+   * Project-scoped actions: `cells[actionId][projectId] = [allowed (1 or 0), deciding rule id, sources]`. `sources` lists where the role that grants
+   * it comes from: "direct" and/or team ids (names in `teams`); empty when no role grants it. The reason for one cell comes from the simulator.
+   */
+  cells: Record<string, Record<string, [0 | 1, string, string[]]>>;
+  /** Team names for the ids that appear as sources. */
+  teams: Record<string, string>;
+  /** The person's roles with their source: `via` is the team id for an inherited role. */
+  grants: Array<{ role: string; roleName: string; scope: string; via: string | null }>;
   /** Deciding rules seen in `cells`, so a cell carries only the id. */
   rules: Record<string, { kind: string; name: string }>;
   /** Factory-scoped actions with the full decision (there are few). */
-  factory: Record<string, Pick<Decision, "allowed" | "reason" | "rule" | "needs">>;
+  factory: Record<string, Pick<Decision, "allowed" | "reason" | "rule" | "needs"> & { sources: string[] }>;
 }
 
 /**
@@ -44,16 +51,23 @@ export function effectivePermissions(st: PolicyState & { catalog: Catalog }, vie
   const rules: EffectivePermissions["rules"] = {};
   const cells: EffectivePermissions["cells"] = {};
   const factory: EffectivePermissions["factory"] = {};
+  const person = findPerson(st, personId)!;
+  const used = new Set<string>(person.roles.flatMap((g) => (g.via ? [g.via] : [])));
+  const src = (action: string, project: string | null, scoped: boolean): string[] => {
+    const s = permissionSources(st, person, action, project, scoped);
+    for (const x of s) if (x !== "direct") used.add(x);
+    return s;
+  };
   for (const a of actions) {
     if (a.scope === "factory") {
       const d = can(st, personId, a.id, { time: at });
-      factory[a.id] = { allowed: d.allowed, reason: d.reason, rule: d.rule, needs: d.needs };
+      factory[a.id] = { allowed: d.allowed, reason: d.reason, rule: d.rule, needs: d.needs, sources: d.allowed ? src(a.id, null, false) : [] };
       continue;
     }
-    const row: Record<string, [0 | 1, string]> = {};
+    const row: Record<string, [0 | 1, string, string[]]> = {};
     for (const p of visible) {
       const d = can(st, personId, a.id, { project: p.id, time: at });
-      row[p.id] = [d.allowed ? 1 : 0, d.rule.id];
+      row[p.id] = [d.allowed ? 1 : 0, d.rule.id, d.allowed ? src(a.id, p.id, true) : []];
       rules[d.rule.id] ??= { kind: d.rule.kind, name: d.rule.name ?? "" };
     }
     cells[a.id] = row;
@@ -64,6 +78,8 @@ export function effectivePermissions(st: PolicyState & { catalog: Catalog }, vie
     projects: visible.map((p) => ({ id: p.id, name: p.name })),
     actions: actions.map((a) => ({ id: a.id, name: a.name, group: a.group, scope: a.scope })),
     cells,
+    teams: Object.fromEntries([...used].map((id) => [id, st.teams?.find((t) => t.id === id)?.name ?? id])),
+    grants: person.roles.map((g) => ({ role: g.role, roleName: st.catalog.roles.find((r) => r.id === g.role)?.name ?? g.role, scope: g.scope, via: g.via ?? null })),
     rules,
     factory,
   };

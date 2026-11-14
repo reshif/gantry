@@ -153,7 +153,7 @@ export async function setTrustSwitch(tx: Tx, a: Actor, on: boolean, reason: stri
  * drops the agent's cells for that class and project to L1 at once. A follow-up is only a record here.
  */
 export async function recordOutcomeTrust(tx: Tx, a: Actor, woId: string, b: z.infer<typeof OutcomeBody>): Promise<Cmd> {
-  const w = (await tx.query<{ id: string; state: string; project_id: string; class: string }>(`select id, state, project_id, class from work_orders where org_id = $1 and id = $2 and source <> 'eval' for update`, [a.orgId, woId])).rows[0];
+  const w = (await tx.query<{ id: string; state: string; project_id: string; class: string }>(`select id, state, project_id, class from work_orders where org_id = $1 and id = $2 and source not in ('eval','onboarding') for update`, [a.orgId, woId])).rows[0];
   if (!w) throw notFound("No such work order.");
   if (w.state !== "done") throw conflict(`${woId} has not shipped, so there is no post-release outcome to record.`);
   const att = typeof b.attribution === "string" ? { kind: b.attribution, station: b.station ?? null, agent: null as string | null } : { kind: b.attribution && (b.attribution.agent || b.attribution.station) ? "agent" : null, station: b.attribution?.station ?? b.station ?? null, agent: b.attribution?.agent ?? null };

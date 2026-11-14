@@ -62,8 +62,8 @@ export const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reas
 export async function readPeople(db: Queryable, orgId: string): Promise<Person[]> {
   const { rows } = await db.query(
     `select p.id, p.name, p.title, p.email, p.github_login, p.status, p.mfa, p.oncall, p.away, p.data, p.version,
-       coalesce((select jsonb_agg(jsonb_build_object('role', ra.role_id, 'scope', coalesce(ra.project_id, 'factory')) order by ra.created_at, ra.id)
-                 from role_assignments ra where ra.org_id = p.org_id and ra.person_id = p.id and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now())), '[]'::jsonb) as roles,
+       coalesce((select jsonb_agg(jsonb_build_object('role', ra.role_id, 'scope', coalesce(ra.project_id, 'factory')) || case when ra.via_team is null then '{}'::jsonb else jsonb_build_object('via', ra.via_team) end order by (ra.via_team is not null), ra.created_at, ra.id)
+                 from effective_role_assignments ra where ra.org_id = p.org_id and ra.person_id = p.id and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now())), '[]'::jsonb) as roles,
        coalesce((select array_agg(tm.team_id order by tm.created_at, tm.team_id) from team_members tm where tm.org_id = p.org_id and tm.person_id = p.id), '{}') as teams
      from people p where p.org_id = $1 order by p.created_at, p.id`,
     [orgId],
@@ -77,7 +77,17 @@ export async function readPeople(db: Queryable, orgId: string): Promise<Person[]
 
 export async function readTeams(db: Queryable, orgId: string): Promise<Team[]> {
   const { rows } = await db.query(`select id, name, description, data from teams where org_id = $1 order by created_at, id`, [orgId]);
-  return rows.map((r) => ({ ...obj(r.data), id: r.id, name: r.name, desc: r.description }) as Team);
+  const grants = await db.query(
+    `select id, team_id, role_id, project_id, granted_by, expires_at from team_role_assignments where org_id = $1 and revoked_at is null and (expires_at is null or expires_at > now()) order by created_at, id`,
+    [orgId],
+  );
+  return rows.map(
+    (r) =>
+      ({
+        ...obj(r.data), id: r.id, name: r.name, desc: r.description,
+        roles: grants.rows.filter((g) => g.team_id === r.id).map((g) => ({ id: g.id, role: g.role_id, scope: g.project_id ?? "factory", grantedBy: g.granted_by ?? null, expiresAt: g.expires_at ? new Date(g.expires_at).getTime() : null })),
+      }) as Team,
+  );
 }
 
 /* ---------------------------------------------------------------- projects -- */
@@ -235,6 +245,8 @@ export const DEFAULT_SECURITY: SecuritySettings = {
   domains: [],
   ipAllow: [],
   restoreFactoryNeedsTwo: true,
+  killNeedsStepUp: true,
+  stepUpWindowMinutes: 15,
   githubLogin: false,
 };
 

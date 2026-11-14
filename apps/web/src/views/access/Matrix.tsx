@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Action, Matrix, Person, Role } from "@gantry/domain";
+import { CONSOLE_RIGHTS, type Action, type Matrix, type Person, type Role } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { Segmented, Toggle, type Decision } from "../../ui/primitives";
@@ -8,7 +8,7 @@ import { lockd, useOutcome } from "../govern/data";
 import type { Evaluated } from "./Simulator";
 
 /** Rights that stay on so nobody is locked out (spec 14.4). The server refuses the same edits. */
-const LOCKED_ON = new Set(["factory_admin:policy.edit", "factory_admin:people.manage", "factory_admin:security.manage", "factory_admin:audit.view", "factory_admin:restore.factory", "auditor:audit.view"]);
+const LOCKED_ON = new Set(["factory_admin:policy.edit", "factory_admin:people.manage", "factory_admin:security.manage", "factory_admin:audit.view", "factory_admin:restore.factory", "auditor:audit.view", ...CONSOLE_RIGHTS.map((c) => `factory_admin:${c}`)]);
 
 export function MatrixTable({ matrix, version, roles, actions, hl, evaluated, people, newRole }: {
   matrix: Matrix; version: number | undefined; roles: Role[]; actions: Action[]; hl: string | null; evaluated: Evaluated | null; people: Person[]; newRole: string | null;
@@ -47,7 +47,7 @@ export function MatrixTable({ matrix, version, roles, actions, hl, evaluated, pe
           <tbody>
             {shown.flatMap((g) => [
               <tr key={`g-${g}`} className={`mx-grp${g === "Stops" ? " mx-grp-stop" : ""}`}>
-                <th scope="rowgroup" colSpan={roles.length + 1}>{g === "Stops" ? <span><Icon name="st-kill" /> Stops: kill switches and restore</span> : g}</th>
+                <th scope="rowgroup" colSpan={roles.length + 1}>{g === "Stops" ? <span><Icon name="st-kill" /> Stops: kill switches and restore</span> : g === "Console" ? <span>Console: what the console may offer a person (a confirm card also needs the underlying right; Factory Admin always has all)</span> : g}</th>
               </tr>,
               ...actions.filter((a) => a.group === g).map((a) => (
                 <tr key={a.id} className={`${hlAction === a.id ? "is-hl" : ""}${a.group === "Stops" ? " mx-stop" : ""}`} id={`acc-mx-row-${a.id.replace(".", "_")}`}>

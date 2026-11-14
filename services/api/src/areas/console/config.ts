@@ -1,4 +1,4 @@
-/** Console settings (spec 12.6, 15.3): the runtime switch for action proposals. Off in a new install. Stored in orgs.settings.console. */
+/** Legacy console settings (spec 12.6): the old factory-wide "actions" switch, retired in favour of console rights in the role matrix. The stored value is ignored. */
 import type { Queryable, Tx } from "@gantry/db";
 import { obj } from "../../core/read/rows.js";
 

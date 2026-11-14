@@ -5,14 +5,19 @@
  */
 import { appendEvent, enqueue, type EventInput, type Queryable, type Tx } from "@gantry/db";
 import {
-  READINESS_CHECKS, readinessLost, readinessUnknown, prChecksState, type AssessedFinding, type ObservedCheck, type PlannedFile, type ReadinessResult,
+  READINESS_CHECKS, ONBOARD_AGENT, assessorLabel, readinessLost, readinessUnknown, prChecksState, type AssessedFinding, type ObservedCheck, type OnboardAssessor, type PlannedFile, type ReadinessResult,
 } from "@gantry/domain";
 import { publishChange } from "../../core/changes.js";
 import { job, type BuiltJob } from "../../core/jobs-contract.js";
 import { apiStopId } from "../stops/targets.js";
+import { postUpdate } from "./session/updates.js";
 import { currentRunId, docOf, finishRun, lockRepo, readinessHalt, saveDoc, stamp, storeFindings, type Doc, type RepoRow } from "./state.js";
 
-const AGENT = "ag-onboard";
+/** The actor of an entry or event that an Onboarding Agent run produced: only ever used when a run actually happened. Everything else Gantry does by rule is `system`. */
+const AGENT = ONBOARD_AGENT;
+const SYSTEM = "system";
+const RULE_BASED: OnboardAssessor = { mode: "rule-based" };
+const actorOf = (a: OnboardAssessor | undefined): string => (a?.mode === "agent" ? AGENT : SYSTEM);
 export interface Applied { applied: boolean; reason?: string }
 const skipped = (reason: string): Applied => ({ applied: false, reason });
 
@@ -20,13 +25,17 @@ const skipped = (reason: string): Applied => ({ applied: false, reason });
 export const READINESS_STRIKES = 2;
 
 async function sysEvent(tx: Tx, orgId: string, r: Pick<RepoRow, "id" | "project_id">, type: string, o: Partial<EventInput> = {}): Promise<void> {
-  await appendEvent(tx, { orgId, type, category: "onboarding", actor: o.actor ?? AGENT, channel: o.channel ?? "system", subject: { type: "repo", id: r.id }, projectId: r.project_id, outcome: "ok", ...o });
+  await appendEvent(tx, { orgId, type, category: "onboarding", actor: o.actor ?? SYSTEM, channel: o.channel ?? "system", subject: { type: "repo", id: r.id }, projectId: r.project_id, outcome: "ok", ...o });
 }
 
 const finish = async (tx: Tx, orgId: string, r: RepoRow, doc: Doc, keys: string[] = []): Promise<void> => {
   await saveDoc(tx, orgId, r, doc);
   await publishChange(tx, { org: orgId, keys: ["repos", "projects", "audit", ...keys], project: r.project_id });
 };
+
+/** One system post into the repo's onboarding session thread (idempotent per `key`), see session/updates.ts. */
+const note = (tx: Tx, orgId: string, r: RepoRow, doc: Doc, now: Date, key: string, event: string, text: string, o: { followUp?: boolean; number?: number | null } = {}): Promise<boolean> =>
+  postUpdate(tx, orgId, r, { key, event, text, now, runId: doc.runId ?? null, ...(o.number !== undefined ? { number: o.number } : {}), ...(o.followUp ? { followUp: true } : {}) });
 
 /** The repo, locked, and its document, when `runId` is still the run the repo is on. */
 async function current(tx: Tx, orgId: string, repoId: string, runId: string | null, now: Date): Promise<{ repo: RepoRow; doc: Doc } | Applied> {
@@ -47,47 +56,67 @@ export type AssessmentResult =
   | { kind: "blocked"; code: string; msg: string }
   | { kind: "failed"; msg: string };
 
-export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string; runId: string; now: Date; adapter: string; result: AssessmentResult }): Promise<Applied> {
+export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string; runId: string; now: Date; adapter?: string; assessor?: OnboardAssessor; result: AssessmentResult }): Promise<Applied> {
   const c = await current(tx, orgId, o.repoId, o.runId, o.now);
   if (isApplied(c)) return c;
   const { repo, doc } = c;
   if (doc.busy !== "assessing") return skipped("This repo is not waiting for an assessment.");
   doc.busy = null;
-  doc.adapter = o.adapter;
+  const assessor = o.assessor ?? RULE_BASED;
+  const adapter = assessor.mode;
+  const who = actorOf(assessor);
+  doc.adapter = adapter;
+  doc.assessor = assessor;
   const r = o.result;
   if (r.kind === "ok") {
     const gaps = r.findings.filter((f) => !f.ok);
-    doc.findings = r.findings.map((f) => ({ id: f.id, check: f.check, ok: f.ok, sev: f.sev, fix: f.fix, file: f.file, ...(f.manual ? { manual: true } : {}), required: f.required, detail: f.detail }));
-    doc.stage = "assessed";
+    doc.findings = r.findings.map((f) => ({ id: f.id, check: f.check, ok: f.ok, sev: f.sev, fix: f.fix, file: f.file, ...(f.manual ? { manual: true } : {}), required: f.required, detail: f.detail, source: f.source ?? "observed", ...(f.note ? { note: f.note } : {}) }));
+    // With an open onboarding PR the repo stays where the PR is; the PR is marked for an update instead of the stage regressing.
+    const openPr = doc.pr?.state === "open" && (doc.stage === "pr_opened" || doc.stage === "pr_checks");
+    if (!openPr) doc.stage = "assessed";
+    else doc.prNeedsUpdate = true;
     delete doc.blocker;
-    stamp(doc, AGENT, `Assessment finished: ${r.findings.length} findings, ${gaps.length} gap${gaps.length === 1 ? "" : "s"}.`, o.now);
+    stamp(doc, who, `Assessment finished (${assessorLabel(assessor)}${assessor.mode === "rule-based" && assessor.reason ? `: ${assessor.reason}` : ""}): ${r.findings.length} findings, ${gaps.length} gap${gaps.length === 1 ? "" : "s"}${assessor.risk ? `; risk ${assessor.risk.level}` : ""}.`, o.now);
     await storeFindings(tx, orgId, o.runId, doc.findings);
-    await finishRun(tx, orgId, o.runId, "succeeded", { data: { adapter: o.adapter, headSha: r.headSha, defaultBranch: r.defaultBranch, language: r.language } });
+    await finishRun(tx, orgId, o.runId, "succeeded", { data: { adapter, assessor, headSha: r.headSha, defaultBranch: r.defaultBranch, language: r.language } });
     // The base commit workspaces are seeded from, and the default branch GitHub reports, are facts: they replace what was guessed at connect.
     await tx.query(
       `insert into repo_config (org_id, repo_id, default_branch, data) values ($1,$2,$3,$4::jsonb)
        on conflict (org_id, repo_id) do update set default_branch = excluded.default_branch, data = repo_config.data || excluded.data, updated_at = now()`,
       [orgId, repo.id, r.defaultBranch, JSON.stringify({ baseSha: r.headSha })],
     );
-    if (repo.default_branch && repo.default_branch !== r.defaultBranch) stamp(doc, AGENT, `The default branch on GitHub is ${r.defaultBranch}, not ${repo.default_branch}. Settings updated.`, o.now);
-    await sysEvent(tx, orgId, repo, "onboarding.assess", { after: { run: o.runId, findings: r.findings.length, gaps: gaps.length, adapter: o.adapter, headSha: r.headSha }, occurredAt: o.now });
+    if (repo.default_branch && repo.default_branch !== r.defaultBranch) stamp(doc, SYSTEM, `The default branch on GitHub is ${r.defaultBranch}, not ${repo.default_branch}. Settings updated.`, o.now);
+    await sysEvent(tx, orgId, repo, "onboarding.assess", { actor: who, after: { run: o.runId, findings: r.findings.length, gaps: gaps.length, adapter, assessor, headSha: r.headSha }, occurredAt: o.now });
     await saveDoc(tx, orgId, repo, doc, r.language ? { lang: r.language } : {});
-    await publishChange(tx, { org: orgId, keys: ["repos", "projects", "audit"], project: repo.project_id });
+    await note(tx, orgId, repo, doc, o.now, `${o.runId}:assessed`, "assessed", `Assessment finished (${assessorLabel(assessor)}): ${r.findings.length} checks, ${gaps.length} gap${gaps.length === 1 ? "" : "s"}${assessor.risk ? `; risk ${assessor.risk.level}` : ""}.${doc.prNeedsUpdate ? ` PR #${doc.pr!.number} is open and may need an update.` : ""}`, { followUp: true });
+    await publishChange(tx, { org: orgId, keys: ["repos", "projects", "audit", "home"], project: repo.project_id });
     return { applied: true };
   }
   if (r.kind === "blocked") {
     doc.stage = "person";
     doc.blocker = r.msg;
-    stamp(doc, AGENT, `Needs a person: ${r.msg}`, o.now);
-    await finishRun(tx, orgId, o.runId, "needs_person", { blocker: r.msg, data: { code: r.code, adapter: o.adapter } });
+    stamp(doc, SYSTEM, `Needs a person: ${r.msg}`, o.now);
+    await finishRun(tx, orgId, o.runId, "needs_person", { blocker: r.msg, data: { code: r.code, adapter } });
     await sysEvent(tx, orgId, repo, "onboarding.assess", { outcome: "failed", after: { run: o.runId, blocked: r.code, msg: r.msg }, occurredAt: o.now });
   } else {
     doc.stage = "failed";
     doc.blocker = r.msg;
-    stamp(doc, AGENT, `The assessment failed: ${r.msg}`, o.now);
-    await finishRun(tx, orgId, o.runId, "failed", { blocker: r.msg, data: { adapter: o.adapter } });
+    stamp(doc, SYSTEM, `The assessment failed: ${r.msg}`, o.now);
+    await finishRun(tx, orgId, o.runId, "failed", { blocker: r.msg, data: { adapter } });
     await sysEvent(tx, orgId, repo, "onboarding.assess", { outcome: "failed", after: { run: o.runId, error: r.msg }, occurredAt: o.now });
   }
+  await note(tx, orgId, repo, doc, o.now, `${o.runId}:${r.kind}`, "assess.stopped", r.kind === "blocked" ? `Assessment needs a person: ${r.msg}` : `The assessment failed: ${r.msg}`);
+  await finish(tx, orgId, repo, doc, ["home"]);
+  return { applied: true };
+}
+
+/** The Onboarding Agent's run was started for this repo (`step`): the timeline and the audit say which version and model, before anything is decided. Only called when a run really exists. */
+export async function applyAgentStarted(tx: Tx, orgId: string, o: { repoId: string; runId: string; now: Date; step: "assess" | "open_pr"; attemptId: string; agent: { version: number; model: string; instructionsHash: string | null } }): Promise<Applied> {
+  const c = await current(tx, orgId, o.repoId, o.runId, o.now);
+  if (isApplied(c)) return c;
+  const { repo, doc } = c;
+  stamp(doc, AGENT, `Started the Onboarding Agent v${o.agent.version} (model ${o.agent.model}) to ${o.step === "assess" ? "review the observed findings" : "draft AGENTS.md"}. Gantry's own observations stay the source of truth.`, o.now);
+  await sysEvent(tx, orgId, repo, "onboarding.agent.started", { actor: AGENT, after: { run: o.runId, step: o.step, attempt: o.attemptId, version: o.agent.version, model: o.agent.model, instructionsHash: o.agent.instructionsHash }, occurredAt: o.now });
   await finish(tx, orgId, repo, doc);
   return { applied: true };
 }
@@ -98,40 +127,46 @@ export interface OpenedPr { number: number; url: string; headSha: string; branch
 
 async function reviewersOf(db: Queryable, orgId: string, projectId: string): Promise<string[]> {
   const { rows } = await db.query<{ person_id: string }>(
-    `select distinct person_id from role_assignments where org_id = $1 and project_id = $2 and role_id in ('project_admin','release_manager') and revoked_at is null and (expires_at is null or expires_at > now()) order by person_id`,
+    `select distinct person_id from effective_role_assignments where org_id = $1 and project_id = $2 and role_id in ('project_admin','release_manager') and revoked_at is null and (expires_at is null or expires_at > now()) order by person_id`,
     [orgId, projectId],
   );
   return rows.map((r) => r.person_id);
 }
 
-export async function applyPrOpened(tx: Tx, orgId: string, o: { repoId: string; runId: string; now: Date; pr: OpenedPr; files: PlannedFile[]; request: string | null; by: string | null }): Promise<Applied> {
+export async function applyPrOpened(tx: Tx, orgId: string, o: { repoId: string; runId: string; now: Date; pr: OpenedPr; files: PlannedFile[]; request: string | null; by: string | null; drafter?: OnboardAssessor }): Promise<Applied> {
   const c = await current(tx, orgId, o.repoId, o.runId, o.now);
   if (isApplied(c)) return c;
   const { repo, doc } = c;
   if (doc.busy !== "opening_pr" && doc.busy !== "updating_pr") return skipped("This repo is not waiting for its pull request.");
   const update = !!doc.pr && doc.pr.number === o.pr.number;
   doc.busy = null;
+  delete doc.prNeedsUpdate;
   doc.stage = "pr_opened";
   delete doc.blocker;
+  const drafter = o.drafter ?? RULE_BASED;
+  doc.drafter = drafter;
   doc.pr = {
-    number: o.pr.number, title: o.pr.title, branch: o.pr.branch, files: o.files.map((f) => ({ path: f.path, plus: f.plus, minus: f.minus, finding: f.finding })), checks: "pending", state: "open",
+    number: o.pr.number, title: o.pr.title, branch: o.pr.branch, files: o.files.map((f) => ({ path: f.path, plus: f.plus, minus: f.minus, finding: f.finding, source: f.source ?? "observed" })), checks: "pending", state: "open",
     reviewers: await reviewersOf(tx, orgId, repo.project_id), mergedBy: null, url: o.pr.url, headSha: o.pr.headSha,
   };
-  stamp(doc, AGENT, update
+  stamp(doc, SYSTEM, update
     ? (o.pr.changed ? `Pushed an update to PR #${o.pr.number}${o.request ? " for the requested change" : ""}.` : `PR #${o.pr.number} already held these files; nothing was pushed.`)
-    : `Opened PR #${o.pr.number} with ${o.files.length} files.`, o.now);
+    : `Opened PR #${o.pr.number} with ${o.files.length} files (${drafter.mode === "agent" ? `AGENTS.md drafted by ${assessorLabel(drafter)}` : `rule-based${drafter.reason ? `: ${drafter.reason}` : ""}`}).`, o.now);
   await tx.query(
     `insert into onboarding_prs (org_id, id, run_id, repo_id, number, title, branch, state, checks, files, reviewers, head_sha, url) values ($1,$2,$3,$4,$5,$6,$7,'open','pending',$8::jsonb,$9,$10,$11)
      on conflict (org_id, id) do update set number = excluded.number, title = excluded.title, branch = excluded.branch, state = 'open', checks = 'pending', files = excluded.files, reviewers = excluded.reviewers, head_sha = excluded.head_sha, url = excluded.url, updated_at = now()`,
     // The table keeps what the pull request tab previews (the added lines of each file); the document the repo list reads does not carry them.
-    [orgId, `${doc.runId ?? o.runId}:pr`, doc.runId ?? o.runId, repo.id, o.pr.number, o.pr.title, o.pr.branch, JSON.stringify(o.files.map((f) => ({ path: f.path, plus: f.plus, minus: f.minus, finding: f.finding, mode: f.mode, added: f.added }))), doc.pr.reviewers, o.pr.headSha, o.pr.url],
+    [orgId, `${doc.runId ?? o.runId}:pr`, doc.runId ?? o.runId, repo.id, o.pr.number, o.pr.title, o.pr.branch, JSON.stringify(o.files.map((f) => ({ path: f.path, plus: f.plus, minus: f.minus, finding: f.finding, mode: f.mode, added: f.added, source: f.source ?? "observed" }))), doc.pr.reviewers, o.pr.headSha, o.pr.url],
   );
   await sysEvent(tx, orgId, repo, update ? "onboarding.pr.updated" : "onboarding.pr", {
-    after: { number: o.pr.number, url: o.pr.url, headSha: o.pr.headSha, files: o.files.map((f) => f.path), ...(o.request ? { request: o.request } : {}) }, occurredAt: o.now,
+    after: { number: o.pr.number, url: o.pr.url, headSha: o.pr.headSha, files: o.files.map((f) => f.path), drafter, ...(o.request ? { request: o.request } : {}) }, occurredAt: o.now,
+    ...(drafter.mode === "agent" ? { actor: AGENT } : {}),
     ...(o.by ? { onBehalfOf: o.by } : {}),
   });
+  doc.pr.headAt = o.now.getTime();
   await enqueue(tx, { orgId, ...job("onboarding.sync", { repoId: repo.id }, { dedupeKey: `onboarding.sync:${repo.id}:${o.pr.headSha}`, runAt: new Date(o.now.getTime() + 15_000) }) });
-  await finish(tx, orgId, repo, doc);
+  await note(tx, orgId, repo, doc, o.now, `pr:${o.pr.number}:${o.pr.headSha}`, "pr", `${update ? (o.pr.changed ? `Updated PR #${o.pr.number}` : `PR #${o.pr.number} already held these files`) : `Opened PR #${o.pr.number}`} with ${o.files.length} file${o.files.length === 1 ? "" : "s"}. Gantry watches its checks and will post here when they finish.`, { number: o.pr.number });
+  await finish(tx, orgId, repo, doc, ["home"]);
   return { applied: true };
 }
 
@@ -147,14 +182,14 @@ export async function applyPrFailed(tx: Tx, orgId: string, o: { repoId: string; 
   if (wasUpdate) {
     // The pull request is still open; the change was not made.
     doc.stage = doc.pr?.checks === "green" ? "pr_checks" : "pr_opened";
-    stamp(doc, AGENT, `Could not update the pull request: ${o.msg}`, o.now);
+    stamp(doc, SYSTEM, `Could not update the pull request: ${o.msg}`, o.now);
   } else if (soft) {
     doc.stage = "assessed";
-    stamp(doc, AGENT, o.code === "nothing_to_add" ? `Nothing to add: ${o.msg}` : `The pull request was not opened: ${o.msg}`, o.now);
+    stamp(doc, SYSTEM, o.code === "nothing_to_add" ? `Nothing to add: ${o.msg}` : `The pull request was not opened: ${o.msg}`, o.now);
   } else {
     doc.stage = "failed";
     doc.blocker = o.msg;
-    stamp(doc, AGENT, `Could not open the pull request: ${o.msg}`, o.now);
+    stamp(doc, SYSTEM, `Could not open the pull request: ${o.msg}`, o.now);
   }
   await sysEvent(tx, orgId, repo, "onboarding.pr", { outcome: "failed", after: { code: o.code, msg: o.msg }, occurredAt: o.now });
   await finish(tx, orgId, repo, doc);
@@ -167,13 +202,15 @@ export interface PrObservation {
   headSha: string | null;
   mergedBy?: string | null;
   checks: ObservedCheck[];
+  /** Commit statuses reported on the head (0 when none). */
+  statuses?: number;
 }
 
 /**
  * Brings the pull request's state up to date with GitHub: CI results (`pending`, `running`, `green`, `red`), a head commit that moved, a merge done on GitHub,
  * a close. A merge seen here (not asked for by Gantry) moves the repo on and starts verification. Returns whether anything changed.
  */
-export async function applyPrObservation(tx: Tx, orgId: string, o: { repoId: string; now: Date; gateCheckName: string; obs: PrObservation }): Promise<Applied & { changed?: boolean }> {
+export async function applyPrObservation(tx: Tx, orgId: string, o: { repoId: string; now: Date; gateCheckName: string; noCiGraceMs?: number; obs: PrObservation }): Promise<Applied & { changed?: boolean }> {
   const c = await current(tx, orgId, o.repoId, null, o.now);
   if (isApplied(c)) return c;
   const { repo, doc } = c;
@@ -182,7 +219,8 @@ export async function applyPrObservation(tx: Tx, orgId: string, o: { repoId: str
   if (["merging"].includes(doc.busy ?? "") && o.obs.state === "open") return skipped("A merge is being requested.");
   let changed = false;
   const required = repo.required_checks ?? [];
-  if (o.obs.headSha && pr.headSha !== o.obs.headSha) { pr.headSha = o.obs.headSha; changed = true; }
+  if (o.obs.headSha && pr.headSha !== o.obs.headSha) { pr.headSha = o.obs.headSha; pr.headAt = o.now.getTime(); changed = true; }
+  if (pr.headAt === undefined) { pr.headAt = o.now.getTime(); changed = true; }
   if (o.obs.state === "merged") {
     pr.state = "merged";
     pr.mergedBy = o.obs.mergedBy ? `github:${o.obs.mergedBy}` : null;
@@ -193,7 +231,8 @@ export async function applyPrObservation(tx: Tx, orgId: string, o: { repoId: str
     await tx.query(`update onboarding_prs set state = 'merged', merged_by = $3, merged_at = $4, checks = 'green', updated_at = now() where org_id = $1 and repo_id = $2 and number = $5`, [orgId, repo.id, pr.mergedBy, o.now, pr.number]);
     await sysEvent(tx, orgId, repo, "onboarding.merged", { after: { number: pr.number, by: pr.mergedBy, via: "github" }, occurredAt: o.now });
     await enqueue(tx, { orgId, ...job("onboarding.verify", { repoId: repo.id, runId: doc.runId ?? null, trigger: "merge" }, { dedupeKey: `onboarding.verify:${repo.id}:merge:${pr.number}` }) });
-    await finish(tx, orgId, repo, doc);
+    await note(tx, orgId, repo, doc, o.now, `merged:${pr.number}`, "merged", `PR #${pr.number} was merged${o.obs.mergedBy ? ` by ${o.obs.mergedBy}` : ""} on GitHub. Gantry is verifying the repository live and will post the result here.`, { number: pr.number });
+    await finish(tx, orgId, repo, doc, ["home"]);
     return { applied: true, changed: true };
   }
   if (o.obs.state === "closed") {
@@ -203,23 +242,36 @@ export async function applyPrObservation(tx: Tx, orgId: string, o: { repoId: str
     stamp(doc, "system", `PR #${pr.number} was closed without merging. Open a new one when ready.`, o.now);
     await tx.query(`update onboarding_prs set state = 'closed', updated_at = now() where org_id = $1 and repo_id = $2 and number = $3`, [orgId, repo.id, pr.number]);
     await sysEvent(tx, orgId, repo, "onboarding.pr.closed", { after: { number: pr.number }, occurredAt: o.now });
+    const closed = pr.number;
     doc.pr = null;
-    await finish(tx, orgId, repo, doc);
+    await note(tx, orgId, repo, doc, o.now, `closed:${closed}`, "closed", `PR #${closed} was closed without merging. The agent can propose a new one.`, { followUp: true, number: closed });
+    await finish(tx, orgId, repo, doc, ["home"]);
     return { applied: true, changed: true };
   }
-  const next = prChecksState(required, o.obs.checks, o.gateCheckName);
+  // Nothing reported at all (no check run, no commit status) for longer than the grace period after the head appeared: the repo has no CI. It is not "pending" forever.
+  const graced = o.now.getTime() - (pr.headAt ?? o.now.getTime()) >= (o.noCiGraceMs ?? 10 * 60_000) && (o.obs.statuses ?? 0) === 0;
+  const next = (o.obs.statuses ?? 0) > 0 && !o.obs.checks.length ? "running" : prChecksState(required, o.obs.checks, o.gateCheckName, { noneAfterGrace: graced });
   if (next !== pr.checks) {
-    stamp(doc, "ci", `Checks on PR #${pr.number}: ${next === "green" ? "all passed" : next === "red" ? "a check failed" : next === "running" ? "running" : "waiting to start"}.`, o.now);
+    stamp(doc, "ci", `Checks on PR #${pr.number}: ${next === "green" ? "all passed" : next === "red" ? "a check failed" : next === "running" ? "running" : next === "none" ? "none reported (this repo has no CI)" : "waiting to start"}.`, o.now);
     pr.checks = next;
     changed = true;
+    const sha = (pr.headSha ?? "").slice(0, 7);
+    const text = next === "green" ? `Checks on PR #${pr.number} all passed at ${sha}. It is ready for a person to approve and merge.`
+      : next === "red" ? `A check failed on PR #${pr.number} at ${sha}${o.obs.checks.filter((c) => c.status === "completed" && c.conclusion && !["success", "neutral", "skipped"].includes(c.conclusion)).length ? `: ${o.obs.checks.filter((c) => c.status === "completed" && c.conclusion && !["success", "neutral", "skipped"].includes(c.conclusion)).map((c) => `${c.name} (${c.conclusion})`).join(", ")}` : ""}.`
+      : next === "none" ? `No CI ran on PR #${pr.number}: no check run and no commit status was reported on ${sha} after ${Math.round((o.noCiGraceMs ?? 600_000) / 60_000)} minutes. This repo has no CI. A person may still merge the onboarding PR, but the repo will not reach Ready until CI exists (verification needs CI to report a check on the canary).`
+      : null;
+    if (text) await note(tx, orgId, repo, doc, o.now, `checks:${doc.runId ?? ""}:${pr.number}:${pr.headSha ?? ""}:${next}`, `checks.${next}`, text, { followUp: true, number: pr.number });
   }
   const stage = next === "pending" ? "pr_opened" : "pr_checks";
+  // A repo an earlier build left at 'assessed' with its PR open (a re-assessment used to regress the stage) is put back where its PR is.
+  if (doc.stage === "assessed" && !doc.busy) { doc.stage = stage; changed = true; }
   if (doc.stage === "pr_opened" || doc.stage === "pr_checks") {
     if (doc.stage !== stage) { doc.stage = stage; changed = true; }
   }
-  if (!changed) return { applied: true, changed: false };
+  // The poll itself is recorded (the session says "checked 1 minute ago"); it does not change the repo, so no version bump and no event.
+  if (!changed) { await tx.query(`update onboarding_prs set updated_at = now() where org_id = $1 and repo_id = $2 and number = $3`, [orgId, repo.id, pr.number]); return { applied: true, changed: false }; }
   await tx.query(`update onboarding_prs set checks = $3, head_sha = $4, updated_at = now() where org_id = $1 and repo_id = $2 and number = $5`, [orgId, repo.id, pr.checks, pr.headSha ?? null, pr.number]);
-  await finish(tx, orgId, repo, doc);
+  await finish(tx, orgId, repo, doc, ["home"]);
   return { applied: true, changed: true };
 }
 
@@ -237,7 +289,8 @@ export async function applyMerged(tx: Tx, orgId: string, o: { repoId: string; ru
   await tx.query(`update onboarding_prs set state = 'merged', merged_by = $3, merged_at = $4, updated_at = now() where org_id = $1 and repo_id = $2 and number = $5`, [orgId, repo.id, o.by, o.now, o.prNumber]);
   await sysEvent(tx, orgId, repo, "onboarding.merged", { actor: o.by, channel: "github", after: { number: o.prNumber, mergeSha: o.mergeSha }, occurredAt: o.now });
   await enqueue(tx, { orgId, ...job("onboarding.verify", { repoId: repo.id, runId: doc.runId ?? null, trigger: "merge" }, { dedupeKey: `onboarding.verify:${repo.id}:merge:${o.prNumber}` }) });
-  await finish(tx, orgId, repo, doc);
+  await note(tx, orgId, repo, doc, o.now, `merged:${o.prNumber}`, "merged", `PR #${o.prNumber} was approved and merged. Gantry is verifying the repository live and will post the result here.`, { number: o.prNumber });
+  await finish(tx, orgId, repo, doc, ["home"]);
   return { applied: true };
 }
 
@@ -257,7 +310,8 @@ export async function applyMergeRefused(tx: Tx, orgId: string, o: { repoId: stri
     stamp(doc, "system", `GitHub did not merge PR #${o.prNumber}: ${o.msg} Approve and merge again once it is allowed.`, o.now);
   }
   await sysEvent(tx, orgId, repo, "onboarding.merge", { outcome: "failed", after: { number: o.prNumber, code: o.code, msg: o.msg }, occurredAt: o.now });
-  await finish(tx, orgId, repo, doc);
+  await note(tx, orgId, repo, doc, o.now, `refused:${o.prNumber}:${o.code}:${o.headSha ?? ""}`, "merge.refused", o.code === "head_moved" ? `The head of PR #${o.prNumber} moved after the merge was approved. Waiting for checks on the new commit.` : `GitHub did not merge PR #${o.prNumber}: ${o.msg}`, { followUp: true, number: o.prNumber });
+  await finish(tx, orgId, repo, doc, ["home"]);
   return { applied: true };
 }
 
@@ -303,27 +357,29 @@ export async function applyVerification(tx: Tx, orgId: string, o: VerificationIn
       doc.stage = "ready";
       doc.readyAt = o.now.getTime();
       delete doc.blocker;
-      stamp(doc, AGENT, `Verified: ${o.results.length} live checks passed.`, o.now);
-      stamp(doc, AGENT, "Ready. Work orders can be submitted.", new Date(o.now.getTime() + 1));
+      stamp(doc, SYSTEM, `Verified: ${o.results.length} live checks passed.`, o.now);
+      stamp(doc, SYSTEM, "Ready. Work orders can be submitted.", new Date(o.now.getTime() + 1));
       if (doc.runId) await finishRun(tx, orgId, doc.runId, "succeeded", { data: { verified: true } });
       const lifted = await liftReadinessHalt(tx, orgId, repo.id, "system", o.now, "Readiness regained");
       await sysEvent(tx, orgId, repo, "onboarding.verify", { after: { ok: true, trigger: o.trigger, checks: o.results.length }, occurredAt: o.now, ...(o.by ? { onBehalfOf: o.by } : {}) });
       await sysEvent(tx, orgId, repo, "onboarding.ready", { after: { trigger: o.trigger }, occurredAt: o.now });
       if (lifted) { await appendEvent(tx, lifted.eventInput); await enqueue(tx, { orgId, ...lifted.job }); }
-      await finish(tx, orgId, repo, doc, lifted ? ["stops"] : []);
+      await note(tx, orgId, repo, doc, o.now, `ver:${id}`, "verified", `Verified: ${o.results.length} live checks passed. ${repo.name} is Ready: work orders can be submitted.`);
+      await finish(tx, orgId, repo, doc, lifted ? ["stops", "home"] : ["home"]);
       return { applied: true, outcome: "ready" };
     }
     if (lost) {
       const msg = `Verification failed. ${failedLabels(o.results)} Fix it in GitHub, then verify again, or mark an exception.`;
       doc.stage = "person";
       doc.blocker = msg;
-      stamp(doc, AGENT, `Needs a person: ${msg}`, o.now);
+      stamp(doc, SYSTEM, `Needs a person: ${msg}`, o.now);
       if (doc.runId) await finishRun(tx, orgId, doc.runId, "needs_person", { blocker: msg });
       await sysEvent(tx, orgId, repo, "onboarding.verify", { outcome: "failed", after: { ok: false, trigger: o.trigger, failed: o.results.filter((x) => !x.ok && !x.unknown).map((x) => x.id) }, occurredAt: o.now });
-      await finish(tx, orgId, repo, doc);
+      await note(tx, orgId, repo, doc, o.now, `ver:${id}`, "verify.failed", `Verification failed. ${failedLabels(o.results)}`, { followUp: true });
+      await finish(tx, orgId, repo, doc, ["home"]);
       return { applied: true, outcome: "failed" };
     }
-    stamp(doc, AGENT, `Verification could not finish: ${o.results.filter((x) => x.unknown).map((x) => x.detail).slice(0, 2).join(" ")} It will be tried again.`, o.now);
+    stamp(doc, SYSTEM, `Verification could not finish: ${o.results.filter((x) => x.unknown).map((x) => x.detail).slice(0, 2).join(" ")} It will be tried again.`, o.now);
     await sysEvent(tx, orgId, repo, "onboarding.verify", { outcome: "failed", after: { ok: false, unavailable: true, trigger: o.trigger }, occurredAt: o.now });
     await finish(tx, orgId, repo, doc);
     return { applied: true, outcome: "unknown" };
@@ -331,13 +387,13 @@ export async function applyVerification(tx: Tx, orgId: string, o: VerificationIn
 
   // Ready already: this is the re-check.
   if (!lost) {
-    if (o.trigger === "manual") stamp(doc, AGENT, unknown ? "Re-checked readiness; GitHub could not confirm every check." : `Re-checked readiness: ${o.results.length} live checks passed.`, o.now);
+    if (o.trigger === "manual") stamp(doc, SYSTEM, unknown ? "Re-checked readiness; GitHub could not confirm every check." : `Re-checked readiness: ${o.results.length} live checks passed.`, o.now);
     await sysEvent(tx, orgId, repo, "onboarding.verify", { after: { ok: !unknown, trigger: o.trigger, ...(unknown ? { unavailable: true } : {}) }, occurredAt: o.now, ...(o.by ? { onBehalfOf: o.by } : {}) });
     await finish(tx, orgId, repo, doc);
     return { applied: true, outcome: unknown ? "unknown" : "held" };
   }
   if (o.trigger === "schedule" && failures < READINESS_STRIKES) {
-    stamp(doc, AGENT, `Readiness check failed (${failures} of ${READINESS_STRIKES}): ${failedLabels(o.results)}`, o.now);
+    stamp(doc, SYSTEM, `Readiness check failed (${failures} of ${READINESS_STRIKES}): ${failedLabels(o.results)}`, o.now);
     await sysEvent(tx, orgId, repo, "onboarding.verify", { outcome: "failed", after: { ok: false, trigger: o.trigger, strike: failures, failed: o.results.filter((x) => !x.ok && !x.unknown).map((x) => x.id) }, occurredAt: o.now });
     await finish(tx, orgId, repo, doc);
     return { applied: true, outcome: "strike" };
@@ -346,7 +402,7 @@ export async function applyVerification(tx: Tx, orgId: string, o: VerificationIn
   doc.stage = "person";
   doc.blocker = msg;
   delete doc.readyAt;
-  stamp(doc, AGENT, `Needs a person: ${msg}`, o.now);
+  stamp(doc, SYSTEM, `Needs a person: ${msg}`, o.now);
   const halt = await raiseReadinessHalt(tx, orgId, repo, msg, o.now);
   await sysEvent(tx, orgId, repo, "onboarding.readiness.lost", { outcome: "regression", after: { failed: o.results.filter((x) => !x.ok && !x.unknown).map((x) => ({ id: x.id, detail: x.detail })), halted: !!halt, trigger: o.trigger }, occurredAt: o.now });
   if (halt) { await appendEvent(tx, halt.eventInput); await enqueue(tx, { orgId, ...halt.job }); }

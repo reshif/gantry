@@ -7,7 +7,7 @@ import { STAGES, StatusChip, Steps, gaps, isStopped, needsMerge, stageName, stat
 
 type Filter = "all" | "attention" | "progress" | "ready";
 
-export function Pipeline({ project, repos, open }: { project: string; repos: RepoV[]; open: (repoId: string, tab?: string) => void }) {
+export function Pipeline({ project, repos, open, details }: { project: string; repos: RepoV[]; open: (repoId: string) => void; details: (repoId: string, tab?: string) => void }) {
   const [filter, setFilter] = useState<Filter>("all");
   const teamName = useTeamName();
   const { all } = useIntegrationsFor(project);
@@ -16,7 +16,7 @@ export function Pipeline({ project, repos, open }: { project: string; repos: Rep
   const stopped = repos.filter(isStopped).length;
   const list = repos.filter((r) => {
     const s = status(r).id;
-    return filter === "all" || (filter === "attention" ? s === "person" || s === "failed" || s === "merge" : filter === "ready" ? s === "ready" || s === "exception" : s === "progress" || s === "merge");
+    return filter === "all" || (filter === "attention" ? s === "person" || s === "failed" || s === "merge" || s === "openpr" : filter === "ready" ? s === "ready" || s === "exception" : s === "progress" || s === "merge");
   });
   const waiting = repos.filter(needsMerge);
   const sourceName = (r: RepoV): string => (r.source ? all.find((x) => x.inst.id === r.source)?.inst.name ?? "source control" : "GitHub App");
@@ -45,7 +45,7 @@ export function Pipeline({ project, repos, open }: { project: string; repos: Rep
             {waiting.map((r, i) => (
               <span key={r.id}>
                 {i ? ", " : ""}
-                <button type="button" className="linkish mono" id={`onb-wait-${r.id}`} onClick={() => open(r.id, "pr")}>{`${r.name}#${r.onboarding.pr!.number}`}</button>
+                <button type="button" className="linkish mono" id={`onb-wait-${r.id}`} onClick={() => open(r.id)}>{`${r.name}#${r.onboarding.pr!.number}`}</button>
               </span>
             ))}
           </div>
@@ -70,10 +70,11 @@ export function Pipeline({ project, repos, open }: { project: string; repos: Rep
                 const o = r.onboarding;
                 const go = () => open(r.id);
                 return (
-                  <tr key={r.id} className="row-link" tabIndex={0} id={`onb-row-${r.id}`} aria-label={`Open onboarding detail for ${r.name}`} onClick={go} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }}>
+                  <tr key={r.id} className="row-link" tabIndex={0} id={`onb-row-${r.id}`} aria-label={`Open the onboarding session for ${r.name}`} onClick={go} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }}>
                     <td>
                       <div className="onb-repo">
                         <span className="mono strong">{r.name}</span>
+                        <button type="button" className="linkish small" id={`onb-detail-${r.id}`} onClick={(e) => { e.stopPropagation(); details(r.id); }}>Details</button>
                         <span className="muted small">{`${r.lang || "Language not read yet"} · ${teamName(r.team)} · ${sourceName(r)}${r.tags.length ? ` · ${r.tags.join(", ")}` : ""}`}</span>
                       </div>
                     </td>

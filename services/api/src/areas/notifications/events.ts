@@ -61,6 +61,7 @@ export function notifyEventFor(e: EventLike): NotifyMapping | null {
       return ok ? mk("released") : null;
     case "onboarding.pr":
     case "onboarding.pr.updated":
+    case "onboarding.session.update":
     case "onboarding.merged":
       return mk("onboarding.pr");
     case "delivery.failed":

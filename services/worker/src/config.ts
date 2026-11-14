@@ -41,11 +41,16 @@ export interface WorkerConfig {
   /** Onboarding and readiness (spec 11.3). */
   /** Name of the Gantry gate check, which is not counted as CI on an onboarding pull request. */
   gateCheckName?: string;
+  /** How long after a pull request head was first seen with nothing reported (no check run, no commit status) before the repo is recorded as having no CI. */
+  noCiGraceMs?: number;
   /** Runner variants and the ecosystems each carries, for the "runner can build and test the repo without Docker" check. */
   runnerToolchains?: Record<string, string[]>;
   /** How often a Ready repo's readiness is re-checked, and how often that re-check includes the canary (a branch and a draft pull request). */
   readinessEveryMs?: number;
   canaryEveryMs?: number;
+  /** How long an Onboarding Agent step may run before it is stopped and onboarding falls back to the rule-based result (default 15 minutes), and how often it is looked at (default 10 s). */
+  onboardingAgentDeadlineMs?: number;
+  onboardingCollectEveryMs?: number;
   /** How long a verification waits for CI to report a check on the canary. */
   canaryWaitMs?: number;
 }

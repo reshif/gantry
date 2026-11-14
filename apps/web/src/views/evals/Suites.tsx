@@ -7,7 +7,7 @@ import { fmt, type Suite } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useActors } from "../../ui/actors";
-import { Btn, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
@@ -240,7 +240,7 @@ export function SuitesTab({ d }: { d: EvalsData }) {
                 const ag = agentOf(d, su.agent);
                 return (
                   <tr key={su.id} className={`row-link${evalsUi.suite === su.id ? " is-selected" : ""}`} tabIndex={0} id={`ev-su-${su.id}`} {...rowKeys(() => { evalsUi.suite = su.id; evalsUi.run = null; evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; rerender(); })}>
-                    <td><div className="mono strong ev-suid">{su.id}</div><div className="small muted">{ag ? ag.name : su.name}</div></td>
+                    <td><div className="mono strong ev-suid">{su.id}</div><div className="small muted">{ag ? ag.name : su.name}{su.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</div></td>
                     <td className="num mono">{su.cases.length}</td>
                     <td className="num mono">{fmt.pct(su.threshold)}</td>
                     <td className={`num mono ${last ? (last.score >= su.threshold ? "pos" : "neg") : "muted"}`}>{last ? `${last.score >= su.threshold ? "" : "▼ "}${fmt.pct(last.score)}` : "–"}{last ? <span className="muted small">{` n=${last.count ?? 0}`}</span> : null}</td>
