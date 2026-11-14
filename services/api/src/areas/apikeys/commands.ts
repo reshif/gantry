@@ -12,14 +12,13 @@ type Cmd = CommandResult<Record<string, unknown>>;
 const DAY = 86_400_000;
 
 /** A new key on one project. `extra.secret` is the only time the full key is visible; the response is not stored for idempotent replays (see `storedOmit`). */
-export async function createKey(tx: Tx, a: Actor, b: { name: string; project: string; actions?: string[] | undefined; expiresInDays?: number | null | undefined }): Promise<Cmd> {
+export async function createKey(tx: Tx, a: Actor, b: { name: string; project: string; actions?: string[] | undefined; expiresInDays?: number | undefined }): Promise<Cmd> {
   const p = (await tx.query<{ id: string; name: string; status: string }>(`select id, name, status from projects where org_id = $1 and id = $2`, [a.orgId, b.project])).rows[0];
   if (!p) throw notFound("No such project.");
   if (p.status === "archived") throw conflict(`${p.name} is archived and read-only.`);
   const actions = [...new Set(b.actions?.length ? b.actions : ["wo.submit", "wo.read"])].filter((x) => (KEY_ACTIONS as readonly string[]).includes(x));
   if (!actions.length) throw invalid("Pick at least one scope.");
-  const days = b.expiresInDays === undefined ? 90 : b.expiresInDays;
-  const expires = days === null ? null : new Date(a.now.getTime() + days * DAY);
+  const expires = new Date(a.now.getTime() + (b.expiresInDays ?? 90) * DAY);
   const { key, prefix, hash } = generateApiKey();
   const id = `key-${randomBytes(5).toString("hex")}`;
   await tx.query(

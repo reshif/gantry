@@ -92,6 +92,8 @@ d("SSE stream over LISTEN/NOTIFY", () => {
     await t.app.inject({ method: "POST", url: "/api/v1/test/touch/payments", headers: a.s.headers });
     expect(await until(() => changes(tomas.stream.messages).length >= 1)).toBe(true);
     expect(changes(tomas.stream.messages)[0]!.project).toBe("payments");
+    // the two streams get the same NOTIFY independently: wait for the admin's copy too instead of assuming it arrived first
+    expect(await until(() => changes(a.stream.messages).length >= 2)).toBe(true);
     expect(changes(a.stream.messages)).toHaveLength(2);
     a.stream.close();
     tomas.stream.close();

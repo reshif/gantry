@@ -204,6 +204,9 @@ d("API keys, public API and request log (spec 8.8, 8.10, 12.5)", () => {
     await q(`update api_keys set expires_at = now() - interval '1 minute' where id = $1`, [e.body.key.id]);
     expect((await asKey(e.body.secret, "GET", "/api/v1/projects/payments/work-orders")).status).toBe(401);
     expect((await w.call(ADMIN, "GET", "/api/v1/api-keys")).body.find((k: any) => k.id === e.body.key.id)).toMatchObject({ expired: true });
+    // spec 12.5: every key expires; a key without an expiry cannot be created
+    expect((await mk({ name: "Forever", expiresInDays: null }, idem())).status).toBe(422);
+    expect((await mk({ name: "Default" }, idem())).body.key.expires).toBeGreaterThan(Date.now() + 89 * 86_400_000);
   });
 
   it("API settings: read, save with a version, refuse a stale save and a person without the right; the idempotency window is honoured", async () => {

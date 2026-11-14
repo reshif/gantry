@@ -66,14 +66,15 @@ export const chatLinkRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/chat-links", async (req) => {
     const b = LinkBody.parse(req.body ?? {});
     me(req);
-    return command(req, { action: null, idempotent: true }, async (tx, a) => {
+    // The one-time code is shown once: it is kept out of the stored idempotent reply and out of the message.
+    return command(req, { action: null, idempotent: true, storedOmit: ["code", "command"] }, async (tx, a) => {
       const integration = b.integration ?? (await tx.query<{ id: string }>(`select id from integration_instances where org_id = $1 and type_id = $2 and enabled order by created_at limit 1`, [a.orgId, b.channel])).rows[0]?.id;
       if (!integration) throw conflict("Slack is not switched on for this install, so there is nothing to link yet.");
       const code = newCode();
       const expires = new Date(a.now.getTime() + LINK_TTL_MS);
       await tx.query(`insert into chat_link_requests (org_id, id, person_id, channel, integration_id, code_hash, expires_at) values ($1,$2,$3,$4,$5,$6,$7)`, [a.orgId, `clr-${randomBytes(6).toString("hex")}`, a.personId, b.channel, integration, hashCode(code), expires]);
       return {
-        msg: `Send /gantry link ${code} in ${b.channel === "slack" ? "Slack" : b.channel} within 10 minutes.`, changes: [], project: null,
+        msg: `Send the link command in ${b.channel === "slack" ? "Slack" : b.channel} within 10 minutes.`, changes: [], project: null,
         events: [{ type: "chat.link.requested", category: "integrations", subject: { type: "person", id: a.personId! }, projectId: null, after: { channel: b.channel, integration, expiresAt: expires.toISOString() } }],
         extra: { code, expiresAt: expires.getTime(), channel: b.channel, command: `/gantry link ${code}` },
       };

@@ -11,8 +11,8 @@ export const CreateKeyBody = z.looseObject({
   name: z.string().trim().min(1, "Name the key.").max(100),
   project: z.string().min(1).max(100),
   actions: z.array(z.enum(KEY_ACTIONS)).min(1, "Pick at least one scope.").max(KEY_ACTIONS.length).optional(),
-  /** Days until the key stops working; null for no expiry (spec 12.5: keys expire, so the default is 90). */
-  expiresInDays: z.number().int().min(1).max(730).nullable().optional(),
+  /** Days until the key stops working (spec 12.5: every key expires; the default is 90, at most two years). */
+  expiresInDays: z.number().int().min(1).max(730).optional(),
 });
 export const ConfigBody = z.looseObject({
   rateLimit: z.number().int().min(1).max(6000).optional(),

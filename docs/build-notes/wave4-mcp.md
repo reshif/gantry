@@ -39,6 +39,6 @@ Dropped from the legacy screen, on purpose: stdio servers (run on the runner, ou
 - `GET /api/v1/agents` returned 404 in the live run (another area), so the Agents scope and the access check's agent list were empty there; the unit tests cover them and the API test covers the access check. The screen reads the list as soon as the endpoint exists.
 - A call left `allowed` (the edge died between authorize and result) stays "running" in the log. A reaper in the worker could close such rows after the run ends.
 - No engine step grants write tools yet: `POST /mcp/grants` is the gate approver's way to pre-authorise the live attempt, and a retried attempt starts with none. Wiring it into the station gate approval UI is left to the flow screens.
-- The runner's egress allow-list still includes in-scope MCP server hosts (wave 3 `runEgressHosts`). The runner only needs the edge, so this could be dropped.
+- Fixed in the wave 4 review: the runner's egress allow-list no longer includes MCP server hosts (`runEgressHosts`). A run reaches MCP servers only through the gateway, so scope, the definition hash and the write pre-authorisation cannot be skipped by calling a server without its own auth directly through the proxy.
 - Upstream sessions are opened per call (initialize, list, call, close). Pooling would cut the round trips.
 - Not verified: a real third-party MCP server, OAuth-protected servers, servers behind the real egress network, the Claude CLI as the client (the SDK client was used), and the full compose stack.

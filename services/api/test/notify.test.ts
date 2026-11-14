@@ -354,10 +354,12 @@ d("Slack callbacks (spec 12.3): signature, replay, linking and in-chat approval"
   });
 
   it("linking is a recorded step: a one-time code from the browser, sent from Slack, ties the chat user to exactly one person", async () => {
-    const a = await w.call("p-priya", "POST", "/api/v1/chat-links", { channel: "slack" });
+    const a = await w.call("p-priya", "POST", "/api/v1/chat-links", { channel: "slack" }, { "idempotency-key": "link-1" });
     expect(a.status, JSON.stringify(a.body)).toBe(200);
     expect(a.body.code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     expect(JSON.stringify(await w.q(`select * from chat_link_requests`))).not.toContain(a.body.code); // only the hash is stored
+    expect(JSON.stringify(await w.q(`select response from idempotency_keys`))).not.toContain(a.body.code); // nor kept in the stored reply
+    expect(JSON.stringify(await w.q(`select after from events where type = 'chat.link.requested'`))).not.toContain(a.body.code);
     const wrong = await slash("U-priya", "link ZZZZ-ZZZZ");
     expect(JSON.parse(wrong.body).text).toMatch(/not valid/i);
     const ok = await slash("U-priya", `link ${a.body.code}`);
