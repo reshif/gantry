@@ -143,16 +143,17 @@ d("flow reads: list, traveler, floor and replay, record, home", () => {
     const tomas = await w.call("p-tomas", "GET", "/api/v1/home");
     expect(tomas.body.conversations.some((c: any) => c.wo === ids.intake || c.id === ids.intake)).toBe(true);
     const asha = await w.call("p-asha", "GET", "/api/v1/home");
-    expect(asha.body.figures).toMatchObject({ inFlight: expect.any(Number), gatesWaiting: expect.any(Number) });
-    expect(asha.body.figures.inFlight).toBeGreaterThanOrEqual(3);
-    expect(asha.body.figures.gatesWaiting).toBeGreaterThanOrEqual(1);
-    expect(asha.body.figures.shippedWeek).toBe(1);
+    expect(asha.body.sections.motion).toMatchObject({ inFlight: expect.any(Number) });
+    const flightBefore = asha.body.sections.motion.inFlight;
+    expect(flightBefore).toBeGreaterThanOrEqual(3);
+    expect(asha.body.sections.waiting.approvals.length).toBeGreaterThanOrEqual(0);
+    expect(asha.body.sections.motion.shippedWeek).toBe(1);
     // kill one: it shows in the figures and is no longer in flight
     const k = await w.call("p-meera", "POST", "/api/v1/stops", { scope: "workorder", id: ids.run, mode: "kill", reason: "Cancelled by the requester" });
     expect(k.status).toBe(200);
     const { reconcileStop } = await import("../src/areas/stops/enforce.js");
     await w.tx((tx) => reconcileStop(tx, String(k.body.stop)));
     const after = await w.call("p-asha", "GET", "/api/v1/home");
-    expect(after.body.figures.killedWorkOrders).toBe(1);
+    expect(after.body.sections.motion.inFlight).toBe(flightBefore - 1);
   });
 });

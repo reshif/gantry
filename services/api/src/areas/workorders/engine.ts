@@ -512,7 +512,7 @@ export interface Voter { personId: string; via: string; channel: string }
 
 /** The pinned versions in force when a gate is decided (spec 7.1, 9.5), stored with the decision. */
 export async function recordDecision(fx: Fx, w: Wo, inst: { id: string; opened_at: Date; basis: Data; flow_version: number; rule_version: number | null; policy_version: number | null; head_sha: string | null; station: string | null },
-  gateId: string, decision: "approved" | "rejected", by: Voter, o: { reason?: string; approvals?: number } = {}): Promise<void> {
+  gateId: string, decision: "approved" | "rejected", by: Voter, o: { reason?: string; approvals?: number; override?: boolean } = {}): Promise<void> {
   const tuple = (
     await fx.tx.query<{ id: string; agent_version: number; skill_versions: unknown; instruction_hash: string; model_id: string }>(
       `select t.id, t.agent_version, t.skill_versions, t.instruction_hash, t.model_id from attempts a join agent_version_tuples t on t.org_id = a.org_id and t.id = a.tuple_id where a.org_id = $1 and a.wo_id = $2 and a.station = $3 order by a.visit desc limit 1`,
@@ -539,6 +539,7 @@ export async function recordDecision(fx: Fx, w: Wo, inst: { id: string; opened_a
       JSON.stringify({
         mode: "human", channel: by.channel, via: by.via, reason: o.reason ?? "", reasonCode: decision === "approved" ? "approved" : "rejected", timeToDecideMs: fx.now.getTime() - (ms(inst.opened_at) ?? fx.now.getTime()),
         voters: votes.map((v) => ({ by: v.voter, vote: v.vote, at: ms(v.at) })), approvals: o.approvals ?? votes.filter((v) => v.vote === "approve").length, riskTags: inst.basis.riskTags ?? [], samplingReason: inst.basis.forcedHuman ? "risk-triggered" : inst.basis.sampled ? "sampled" : "gated", artefactEdited: null, reviewSurface: null, policies, trustLevelNum: lvl.effective, trustGranted: lvl.granted, trustCell: lvl.cellId,
+        ...(o.override ? { override: true, overrideBy: "factory_admin" } : {}),
       }),
       fx.now,
       lvl.grantId,

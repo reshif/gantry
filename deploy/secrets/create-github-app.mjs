@@ -19,10 +19,14 @@
 //   --webhook-url <url>    Public URL that reaches POST /hooks/github. Omitted: the App gets no webhook (GitHub refuses
 //                          localhost URLs); gantry-github polls instead (spec 11.6). Add one later in the App settings.
 //   --force                Overwrite non-placeholder github_app.pem / github_app.json
+//   --check                Do not create anything: sign in as the EXISTING App (github_app.pem/.json), compare the
+//                          permissions it has and its installation has accepted with what Gantry needs, and print the
+//                          exact settings pages to fix any gap. GitHub has no API to change an App's permissions, so
+//                          that step is manual: App settings → Permissions & events, then accept on the installation.
 //
 // Secrets directory: $GANTRY_SECRETS_DIR, else this script's directory. Nothing is sent anywhere except GitHub.
 import { createServer } from "node:http";
-import { randomBytes } from "node:crypto";
+import { createSign, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, renameSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,14 +45,32 @@ const jsonPath = join(dir, "github_app.json");
 const base = `http://localhost:${port}`;
 const state = randomBytes(16).toString("hex");
 
+// What Gantry needs (spec 11.1). Used for new Apps and by --check. Never requested: Administration write, Secrets,
+// organisation administration. Workflows write lets an onboarding pull request add a CI workflow; the broker asks for it
+// per token, for that pull request alone.
+const REQUIRED_PERMISSIONS = {
+  metadata: "read",
+  contents: "write",
+  pull_requests: "write",
+  issues: "write",
+  checks: "write",
+  actions: "read",
+  statuses: "read",
+  administration: "read",
+  workflows: "write",
+};
+
+if (args.check) {
+  await checkExistingApp();
+  process.exit(0);
+}
+
 if (!args.force) {
   const realPem = existsSync(pemPath) && readFileSync(pemPath, "utf8").includes("BEGIN");
   const realJson = existsSync(jsonPath) && !readFileSync(jsonPath, "utf8").includes("_placeholder");
   if (realPem || realJson) die(`${realPem ? pemPath : jsonPath} already holds real credentials. Re-run with --force to replace them.`);
 }
 
-// Spec 11.1: Metadata read; Contents, Pull requests, Issues, Checks write; Actions, Commit statuses, Administration read.
-// Never requested: Administration write, Secrets, organisation administration. Workflows write is added by hand only if needed.
 const manifest = {
   name,
   url: "https://localhost",
@@ -59,16 +81,7 @@ const manifest = {
   setup_on_update: false,
   // GitHub rejects a hook URL it cannot reach (even inactive), so without --webhook-url the App has no webhook at all.
   ...(args["webhook-url"] ? { hook_attributes: { url: args["webhook-url"], active: true } } : {}),
-  default_permissions: {
-    metadata: "read",
-    contents: "write",
-    pull_requests: "write",
-    issues: "write",
-    checks: "write",
-    actions: "read",
-    statuses: "read",
-    administration: "read",
-  },
+  default_permissions: REQUIRED_PERMISSIONS,
   // Events handled by services/api/src/areas/github and areas/triggers. GitHub requires a hook URL for any subscribed event,
   // so without --webhook-url the App subscribes to none and gantry-github polls (spec 11.6).
   ...(args["webhook-url"] ? { default_events: ["pull_request", "pull_request_review", "check_run", "check_suite", "issues", "issue_comment", "workflow_run"] } : {}),
@@ -177,12 +190,60 @@ function openBrowser(u) {
   try { spawn(cmd, [u], { stdio: "ignore", detached: true }).on("error", () => {}).unref(); } catch { /* print-only fallback */ }
 }
 
+/** --check: compare the existing App's permissions (and what its installation accepted) with REQUIRED_PERMISSIONS. */
+async function checkExistingApp() {
+  if (!existsSync(pemPath) || !readFileSync(pemPath, "utf8").includes("BEGIN")) die(`No App private key at ${pemPath}. Create the App first (run without --check).`);
+  if (!existsSync(jsonPath)) die(`No ${jsonPath}. Create the App first (run without --check).`);
+  const settings = JSON.parse(readFileSync(jsonPath, "utf8"));
+  if (!settings.appId) die(`${jsonPath} has no appId.`);
+  const api = (settings.baseUrl ?? apiUrl).replace(/\/+$/, "");
+  const web = api === "https://api.github.com" ? "https://github.com" : api.replace(/\/api\/v3$/, "");
+  const jwt = appJwt(settings.appId, readFileSync(pemPath, "utf8"));
+  const gh = async (path) => {
+    const r = await fetch(`${api}${path}`, { headers: { Authorization: `Bearer ${jwt}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "gantry-setup" } });
+    if (!r.ok) die(`GitHub answered ${r.status} for ${path}: ${(await r.text()).slice(0, 300)}`);
+    return r.json();
+  };
+  const app = await gh("/app");
+  const inst = settings.installationId ? await gh(`/app/installations/${settings.installationId}`) : null;
+  const rank = { read: 1, write: 2, admin: 3 };
+  const short = (have) => Object.entries(REQUIRED_PERMISSIONS).filter(([k, need]) => (rank[have?.[k]] ?? 0) < rank[need]).map(([k, need]) => `${k}: ${need} (has ${have?.[k] ?? "none"})`);
+  const appGap = short(app.permissions);
+  const instGap = inst ? short(inst.permissions) : [];
+  const ownerIsOrg = app.owner?.type === "Organization";
+  const appUrl = ownerIsOrg ? `${web}/organizations/${app.owner.login}/settings/apps/${app.slug}/permissions` : `${web}/settings/apps/${app.slug}/permissions`;
+  const instUrl = inst ? (inst.account?.type === "Organization" ? `${web}/organizations/${inst.account.login}/settings/installations/${inst.id}` : `${web}/settings/installations/${inst.id}`) : null;
+  log(`App ${app.slug} (id ${app.id}), owned by ${app.owner?.type ?? "?"} ${app.owner?.login ?? "?"}${inst ? `; installation ${inst.id} on ${inst.account?.type} ${inst.account?.login}` : "; no installationId in github_app.json"}`);
+  if (inst && inst.account?.type !== "Organization") log("Note: installed on a User account. Gantry's verification expects an organisation (spec 11.3); the Onboarding Agent can propose 'Ready by exception'.");
+  if (!appGap.length && !instGap.length) { log("All required permissions are granted and accepted. Nothing to do."); return; }
+  if (appGap.length) {
+    log(`The App itself is missing: ${appGap.join(", ")}`);
+    log(`  1. Open ${appUrl}`);
+    log(`  2. Under Repository permissions set: ${appGap.map((g) => g.split(" (")[0]).join(", ")} → Save changes.`);
+  }
+  if (inst && (appGap.length || instGap.length)) {
+    log(`The installation must accept the new permissions${instGap.length ? ` (it currently lacks: ${instGap.join(", ")})` : ""}:`);
+    log(`  ${appGap.length ? "3" : "1"}. Open ${instUrl} and accept the "Review request" banner (or Configure → Review).`);
+  }
+  log("Then re-run: node deploy/secrets/create-github-app.mjs --check   (no Gantry restart is needed; tokens are minted per operation)");
+}
+
+/** A 9-minute App JWT (RS256), as GitHub requires for /app endpoints. */
+function appJwt(appId, pem) {
+  const b64 = (o) => Buffer.from(typeof o === "string" ? o : JSON.stringify(o)).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const body = `${b64({ alg: "RS256", typ: "JWT" })}.${b64({ iat: now - 60, exp: now + 540, iss: String(appId) })}`;
+  const sig = createSign("RSA-SHA256").update(body).sign(pem).toString("base64url");
+  return `${body}.${sig}`;
+}
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h" || a === "--help") { console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\nimport ")[0].replace(/^#!.*\n/, "").replace(/^\/\/ ?/gm, "")); process.exit(0); }
     if (a === "--force") { out.force = true; continue; }
+    if (a === "--check") { out.check = true; continue; }
     if (!a.startsWith("--") || i + 1 >= argv.length) die(`unknown or incomplete option: ${a}`);
     out[a.slice(2)] = argv[++i];
   }

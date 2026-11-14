@@ -11,8 +11,8 @@ import {
 } from "@gantry/api/core";
 import { enqueue, withTx, type Job } from "@gantry/db";
 import {
-  AGENT_DRAFTABLE, ONBOARD_AGENT, PR_TITLE, RESULT_FORMAT, RepoFacts, assess, assessorOf, authorshipOf, judgeCanary, judgeGuidelines, judgeOwners, judgeProtections, judgeRunner, mergeAssessment, planPr, prBody,
-  validateAssessment, validateDraft, type AgentResult, type AssessContext, type AssessedFinding, type OnboardAssessor, type PlanContext, type PlannedFile, type ReadinessResult,
+  ONBOARD_AGENT, PR_TITLE, RESULT_FORMAT, RepoFacts, assess, assessorOf, authorshipOf, judgeCanary, judgeGuidelines, judgeOwners, judgeProtections, judgeRunner, mergeAssessment, planPr, prBody, resolveDraft, lacksWorkflowPermission, WORKFLOW_PERMISSION_FIX, workflowPermissionMessage,
+  validateAssessment, type AgentResult, type SensitiveFlag, type AssessContext, type AssessedFinding, type OnboardAssessor, type PlanContext, type PlannedFile, type ReadinessResult,
 } from "@gantry/domain";
 import type { CanaryResult } from "../clients/broker.js";
 import type { Deps } from "../deps.js";
@@ -92,10 +92,10 @@ async function agentGate(deps: Deps, orgId: string, l: Loaded): Promise<{ usable
   }
 }
 
-/** The diff cap of the Onboarding Agent's guardrails (lines it may add), 300 when none is set. */
+/** The diff cap of the Onboarding Agent's guardrails (lines it may add), 1500 when none is set. */
 async function agentMaxDiff(deps: Deps, orgId: string): Promise<number> {
   const n = Number((await deps.pool.query<{ n: string | null }>(`select data->'guardrails'->>'maxDiff' as n from agents where org_id = $1 and id = $2`, [orgId, ONBOARD_AGENT])).rows[0]?.n);
-  return Number.isInteger(n) && n > 0 ? n : 300;
+  return Number.isInteger(n) && n > 0 ? n : 1500;
 }
 
 type BuiltJobs = Awaited<ReturnType<typeof startAgentStep>>["jobs"];
@@ -160,20 +160,23 @@ export async function onboardingAssess(j: Job, ctx: HandlerCtx): Promise<unknown
 type OpenParams = { repoId: string; runId: string; by: string | null; request: string | null };
 
 /** Opens (or updates) the pull request with the given files. `draft` is the agent's validated draft, when there is one; its AGENTS.md content replaces the rule-based file's. */
-async function finishPr(deps: Deps, l: Loaded, orgId: string, p: OpenParams, o: { facts: RepoFacts; findings: AssessedFinding[]; plan: PlannedFile[]; drafter: OnboardAssessor; draft?: AgentResult }): Promise<unknown> {
+async function finishPr(deps: Deps, l: Loaded, orgId: string, p: OpenParams, o: { facts: RepoFacts; findings: AssessedFinding[]; plan: PlannedFile[]; drafter: OnboardAssessor; draft?: AgentResult; authored?: PlannedFile[] | null; sensitive?: SensitiveFlag[] }): Promise<unknown> {
   const by = authorshipOf(o.drafter);
-  const files = o.draft?.agentsMd ? planPr(o.facts, o.findings, l.planCtx, { by, agentsMd: o.draft.agentsMd }) : o.plan;
-  const branch = `${l.planCtx.branchPrefix}onboarding`;
+  const files = o.authored ?? (o.draft?.agentsMd ? planPr(o.facts, o.findings, l.planCtx, { by, agentsMd: o.draft.agentsMd }) : o.plan);
+  // The App cannot push a workflow file without the `workflows` permission: say so with the exact steps instead of letting GitHub reject the push.
+  if (o.authored && files.some((f) => f.path.startsWith(".github/workflows/")) && lacksWorkflowPermission(o.facts)) return failPr(deps, l, orgId, p, "workflow_permission", `${workflowPermissionMessage} ${WORKFLOW_PERMISSION_FIX}`);
+  // A follow-up pull request after the first one was merged gets its own branch: the merged branch's tip is behind the default branch.
+  const branch = l.doc.pr?.state === "open" && l.doc.pr.branch ? l.doc.pr.branch : `${l.planCtx.branchPrefix}onboarding${l.doc.pr?.state === "merged" ? `-after-${l.doc.pr.number}` : ""}`;
   const request = p.request;
   const out = await deps.broker.openOnboardingPr({
-    repo: l.full, branch, title: PR_TITLE(l.full), body: prBody(files, o.findings, by, { guidelineSuggestions: o.drafter.guidelineSuggestions ?? [], forPeople: o.drafter.forPeople ?? [] }),
+    repo: l.full, branch, title: PR_TITLE(l.full), body: prBody(files, o.findings, by, { guidelineSuggestions: o.drafter.guidelineSuggestions ?? [], forPeople: o.drafter.forPeople ?? [], ...(o.sensitive?.length ? { sensitive: o.sensitive } : {}) }),
     files: files.map((f) => ({ path: f.path, content: f.content })),
     ...(request ? { comment: `Change requested${p.by ? ` by ${p.by}` : ""}: ${request}\n\nGantry regenerates the files from the repository and the guidelines as they are now${o.drafter.mode === "agent" ? ", keeping the Onboarding Agent's earlier AGENTS.md draft" : " (rule-based)"}; it does not interpret free text. A person should apply this request by hand on the branch.` } : {}),
   });
   if (!out.ok) return failPr(deps, l, orgId, p, out.code, out.msg);
   const applied = await withTx(deps.pool, async (tx) => {
     // The agent's validated draft is kept with the run, so a later change request regenerates the pull request with it instead of silently replacing it.
-    if (o.drafter.mode === "agent" && o.draft) await tx.query(`update onboarding_runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [orgId, p.runId, JSON.stringify({ agentDraft: { result: { agentsMd: o.draft.agentsMd, guidelineSuggestions: o.draft.guidelineSuggestions, forPeople: o.draft.forPeople, plannedFiles: o.draft.plannedFiles }, drafter: o.drafter } })]);
+    if (o.drafter.mode === "agent" && o.draft) await tx.query(`update onboarding_runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [orgId, p.runId, JSON.stringify({ agentDraft: { result: { files: o.draft.files, agentsMd: o.draft.agentsMd, guidelineSuggestions: o.draft.guidelineSuggestions, forPeople: o.draft.forPeople, plannedFiles: o.draft.plannedFiles }, drafter: o.drafter } })]);
     return applyPrOpened(tx, orgId, { repoId: l.repo.id, runId: p.runId, now: deps.now(), pr: { ...out.pr, title: PR_TITLE(l.full) }, files, request, by: p.by, drafter: o.drafter });
   });
   return { ...applied, number: out.pr.number, changed: out.pr.changed, drafter: o.drafter.mode };
@@ -196,38 +199,36 @@ export async function onboardingOpenPr(j: Job, ctx: HandlerCtx): Promise<unknown
     if (!got.ok) return fail(got.code, got.msg);
     const findings = assess(got.facts, l.assessCtx);
     const plan = planPr(got.facts, findings, l.planCtx);
-    if (!plan.length && !p.value.request) return fail("nothing_to_add", "the repo already has everything a pull request can add. Verify it instead.");
     const common = { facts: got.facts, findings, plan };
     const limits = { protectedPaths: l.planCtx.protectedPaths, maxDiff: await agentMaxDiff(deps, j.orgId) };
-    if (!p.value.request) {
-      // A plan a person approved in the onboarding session is used as approved: its agent draft (validated again against the plan as it is now) or the rule-based files. No second agent run is started.
-      const run = (await deps.pool.query<{ s: unknown; d: { result?: unknown; drafter?: OnboardAssessor } | null }>(`select data->'sessionApproved' as s, data->'agentDraft' as d from onboarding_runs where org_id = $1 and id = $2`, [j.orgId, p.value.runId])).rows[0];
-      if (run?.s) {
-        if (run.d?.result && run.d.drafter?.mode === "agent") {
-          const v = validateDraft(run.d.result, plan, limits);
-          return v.ok ? finishPr(deps, l, j.orgId, p.value, { ...common, drafter: run.d.drafter, draft: v.value }) : finishPr(deps, l, j.orgId, p.value, { ...common, drafter: { mode: "rule-based", reason: v.reason } });
-        }
-        return finishPr(deps, l, j.orgId, p.value, { ...common, drafter: { mode: "rule-based", reason: "Approved in the onboarding session as proposed." } });
+    const row = (await deps.pool.query<{ s: { confirmedSensitive?: boolean } | null; d: { result?: unknown; drafter?: OnboardAssessor } | null }>(`select data->'sessionApproved' as s, data->'agentDraft' as d from onboarding_runs where org_id = $1 and id = $2`, [j.orgId, p.value.runId])).rows[0];
+    // An agent draft (a plan a person approved in the onboarding session, or the one kept for a change request) is validated again against the repository as it is now: the same rails,
+    // and the sensitive parts must have been confirmed by the person who approved.
+    const useDraft = async (draft: { result?: unknown; drafter?: OnboardAssessor } | null | undefined, fallbackReason: string): Promise<unknown> => {
+      if (draft?.result && draft.drafter?.mode === "agent") {
+        const v = resolveDraft(draft.result, { facts: got.facts, findings, ctx: l.planCtx, plan, maxDiff: limits.maxDiff, by: authorshipOf(draft.drafter), confirmed: row?.s?.confirmedSensitive === true });
+        if (v.ok) return finishPr(deps, l, j.orgId, p.value, { ...common, drafter: draft.drafter, draft: v.value.value, authored: v.value.files, sensitive: v.value.sensitive });
+        // What a person approved is never silently replaced by something else: say why it cannot be opened now.
+        if (!p.value.request && row?.s && draft.result && (draft.result as { files?: unknown[] }).files?.length) return fail("draft_invalid", `The approved proposal can no longer be opened: ${v.reason} Ask the agent for a new proposal.`);
+        return finishPr(deps, l, j.orgId, p.value, { ...common, drafter: { mode: "rule-based", reason: v.reason } });
       }
+      return finishPr(deps, l, j.orgId, p.value, { ...common, drafter: { mode: "rule-based", reason: fallbackReason } });
+    };
+    if (!p.value.request && row?.s) {
+      // A plan a person approved in the onboarding session is used as approved: no second agent run is started.
+      if (!plan.length && !(row.d?.result && row.d.drafter?.mode === "agent")) return fail("nothing_to_add", "the repo already has everything a pull request can add. Verify it instead.");
+      return useDraft(row.d, "Approved in the onboarding session as proposed.");
     }
-    if (p.value.request) {
-      // A change request regenerates the files; an agent draft made earlier for this run is kept (re-validated against the plan as it is now).
-      const prev = (await deps.pool.query<{ d: { result?: unknown; drafter?: OnboardAssessor } | null }>(`select data->'agentDraft' as d from onboarding_runs where org_id = $1 and id = $2`, [j.orgId, p.value.runId])).rows[0]?.d;
-      if (prev?.result && prev.drafter?.mode === "agent") {
-        const v = validateDraft(prev.result, plan, limits);
-        return v.ok ? finishPr(deps, l, j.orgId, p.value, { ...common, drafter: prev.drafter, draft: v.value }) : finishPr(deps, l, j.orgId, p.value, { ...common, drafter: { mode: "rule-based", reason: v.reason } });
-      }
-      return finishPr(deps, l, j.orgId, p.value, { ...common, drafter: { mode: "rule-based", reason: "No agent draft exists for this run." } });
-    }
-    if (!plan.some((f) => (AGENT_DRAFTABLE as readonly string[]).includes(f.path))) return finishPr(deps, l, j.orgId, p.value, { ...common, drafter: { mode: "rule-based", reason: "The plan has no file an agent may draft." } });
+    if (!plan.length && !p.value.request) return fail("nothing_to_add", "the repo already has everything a pull request can add. Verify it instead.");
+    if (p.value.request) return useDraft(row?.d, "No agent draft exists for this run.");
     const gate = await agentGate(deps, j.orgId, l);
     if (!gate.usable) return finishPr(deps, l, j.orgId, p.value, { ...common, drafter: { mode: "rule-based", reason: gate.reason } });
     const attemptId = await startStep(deps, l, j.orgId, {
       runId: p.value.runId, step: "open_pr", key: j.id, commit: got.facts.headSha, pin: gate.pin, carry: { by: p.value.by, request: null },
       input: {
-        title: `Draft the onboarding pull request for ${l.full}`, class: "chore", task: "draft_pr", repo: l.full, defaultBranch: l.planCtx.defaultBranch, headSha: got.facts.headSha,
-        goal: "Draft the repository-specific content of AGENTS.md for the plan below (your workspace holds the repository, read-only). You may name only paths in the plan.",
-        plan: plan.map((f) => ({ path: f.path, mode: f.mode, closes: f.finding })), protectedPaths: l.planCtx.protectedPaths, maxLines: limits.maxDiff,
+        title: `Author the onboarding pull request for ${l.full}`, class: "chore", task: "draft_pr", repo: l.full, defaultBranch: l.planCtx.defaultBranch, headSha: got.facts.headSha,
+        goal: "Author the onboarding pull request for this repository (your workspace holds it, read-only): the complete set of files it needs to be ready, each with its full text, in `files`. The plan below is only what Gantry's fixed rules suggest; you may add, drop or change files (a new repository needs a project scaffold, a smoke test and CI). Rails: no secrets, no binaries, no lockfiles, no edits to existing application code, no branch-rule files. This run has no person to confirm sensitive parts, so a draft with workflow files or dependency manifests is not used here: the onboarding session is where those are proposed.",
+        suggestedPlan: plan.map((f) => ({ path: f.path, mode: f.mode, closes: f.finding })), protectedPaths: l.planCtx.protectedPaths, maxLines: limits.maxDiff,
         findings: findings.filter((f) => !f.ok).map(gapView), resultFormat: RESULT_FORMAT,
       },
     });
@@ -322,12 +323,11 @@ export async function onboardingAgentCollect(j: Job, ctx: HandlerCtx): Promise<u
     if (!got.ok) return failPr(deps, l, j.orgId, params, got.code, got.msg);
     const findings = assess(got.facts, l.assessCtx);
     const plan = planPr(got.facts, findings, l.planCtx);
-    if (!plan.length) return failPr(deps, l, j.orgId, params, "nothing_to_add", "the repo already has everything a pull request can add. Verify it instead.");
     const common = { facts: got.facts, findings, plan };
-    if (failure) return finishPr(deps, l, j.orgId, params, { ...common, drafter: fellBack(failure) });
-    const v = validateDraft(output, plan, { protectedPaths: l.planCtx.protectedPaths, maxDiff: await agentMaxDiff(deps, j.orgId) });
-    if (!v.ok) return finishPr(deps, l, j.orgId, params, { ...common, drafter: fellBack(v.reason) });
-    return finishPr(deps, l, j.orgId, params, { ...common, drafter: assessorOf(v.value, rec), draft: v.value });
+    if (failure) return plan.length ? finishPr(deps, l, j.orgId, params, { ...common, drafter: fellBack(failure) }) : failPr(deps, l, j.orgId, params, "nothing_to_add", "the repo already has everything a pull request can add. Verify it instead.");
+    const v = resolveDraft(output, { facts: got.facts, findings, ctx: l.planCtx, plan, maxDiff: await agentMaxDiff(deps, j.orgId), by: authorshipOf({ mode: "agent", ...(rec.version !== undefined ? { version: rec.version } : {}), ...(rec.model ? { model: rec.model } : {}) } as OnboardAssessor), confirmed: false });
+    if (!v.ok) return plan.length ? finishPr(deps, l, j.orgId, params, { ...common, drafter: fellBack(v.reason) }) : failPr(deps, l, j.orgId, params, "nothing_to_add", `${v.reason}`);
+    return finishPr(deps, l, j.orgId, params, { ...common, drafter: assessorOf(v.value.value, rec), draft: v.value.value, authored: v.value.files, sensitive: v.value.sensitive });
   }, (msg) => failPr(deps, l, j.orgId, params, "github", msg));
 }
 

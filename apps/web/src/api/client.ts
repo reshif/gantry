@@ -199,6 +199,15 @@ async function attempt<T extends object>(path: string, opts: RequestOptions): Pr
 
 const isStepUpRefusal = (r: ApiResult<object>): r is CommandRefusal => !r.ok && r.needs === "step_up";
 
+/** Asks the person for a reason when the server refuses with `needs: "override_reason"` (Factory Admin break-glass). Resolves null on cancel. */
+export type ReasonHandler = (refusal: CommandRefusal) => Promise<string | null>;
+let reasonHandler: ReasonHandler | null = null;
+/** Mounted once by the shell (see ui/override.tsx). */
+export function setReasonHandler(fn: ReasonHandler | null): void {
+  reasonHandler = fn;
+}
+const isReasonRefusal = (r: ApiResult<object>): r is CommandRefusal => !r.ok && r.needs === "override_reason";
+
 /**
  * Run a command. Resolves to `{ ok: true, msg, ...extra }` or a refusal value. Never rejects
  * (except for programmer errors such as an unserialisable body).
@@ -213,6 +222,22 @@ export async function command<T extends object = Record<string, unknown>>(
 ): Promise<ApiResult<T>> {
   // Fix the key up front so a repeat is the same request, never a second create.
   const first: RequestOptions = opts.idempotent === true ? { ...opts, idempotent: newKey() } : opts;
+  const r = await withStepUp<T>(path, first);
+  // A Factory Admin override asks for a reason, then sends the same request once more with `reason` added (and a fresh key: it is a
+  // different request, and the refused one ran nothing). Cancel resolves to the refusal.
+  if (!isReasonRefusal(r) || !reasonHandler) return r;
+  let reason: string | null;
+  try {
+    reason = await reasonHandler(r);
+  } catch {
+    return r;
+  }
+  if (!reason) return r;
+  const body = { ...((first.body && typeof first.body === "object" ? first.body : {}) as Record<string, unknown>), reason };
+  return withStepUp<T>(path, { ...first, body, ...(opts.idempotent === true ? { idempotent: newKey() } : {}) });
+}
+
+async function withStepUp<T extends object>(path: string, first: RequestOptions): Promise<ApiResult<T>> {
   const r = await attempt<T>(path, first);
   if (!isStepUpRefusal(r) || !stepUpHandler) return r;
   let out: StepUpOutcome;

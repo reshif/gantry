@@ -3,11 +3,12 @@
  *
  * Read tools return what Gantry OBSERVED (`source: "observed"`): the deterministic assessment and the broker's look at the repository. Text that comes from the repository
  * is wrapped by `mark()` as untrusted. What a person says in the thread is their claim, not an observation. The only things the agent can "do" are cards: a question, or a
- * proposal. A proposal is built from the repository as it is now with the domain's own planner and validated by the same contract as the worker's agent step (allowed paths,
- * diff cap, no secrets); it writes nothing. Writing happens only when a person with the right clicks Approve, through the ordinary onboarding commands.
+ * proposal. The agent AUTHORS the pull request (any files it thinks the repository needs); the domain's rails review it (no secrets, unsafe paths, binaries, lockfiles, existing
+ * application code or branch rules; the diff cap) and mark the sensitive parts (workflows, dependency manifests, ...) for explicit confirmation on the card. The rule-based planner
+ * is a suggestion and the fallback, never a cap. A proposal writes nothing. Writing happens only when a person with the right clicks Approve, through the ordinary onboarding commands.
  */
 import {
-  AGENT_DRAFTABLE, ONBOARD_AGENT, assess, authorshipOf, detectTestCommand, ecosystems, needsDocker, planPr, validateDraft,
+  ONBOARD_AGENT, assess, authorshipOf, detectTestCommand, ecosystems, needsDocker, planPr, resolveDraft, lacksWorkflowPermission,
   type AssessedFinding, type OnboardAssessor, type PlanContext, type RepoFacts, type SessionCard,
 } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
@@ -99,7 +100,12 @@ export const SESSION_TOOLS: SessionTool[] = [
       const f = r.facts;
       ctx.cards.push({ kind: "progress", text: `Read the repository: ${f.files.length} files on ${f.defaultBranch}`, detail: `${f.language ?? "language unknown"}${f.truncated ? "; the tree was truncated" : ""}` });
       const test = detectTestCommand(f);
+      const pcx = await planContext(ctx.db, ctx.orgId, ctx.repo, ctx.full);
+      const suggested = planPr(f, assess(f, { guidelines: pcx.org_guidelines.items, mcp: pcx.mcp, requiredChecks: pcx.requiredChecks }), pcx);
       return {
+        suggestedByRules: { note: "What Gantry's fixed rules would write. A suggestion only: you may propose more, fewer or different files.", files: suggested.map((p) => ({ path: p.path, mode: p.mode, closes: p.finding })) },
+        appWorkflowPermission: f.protection?.installation ? (lacksWorkflowPermission(f) ? "missing" : "granted") : "unknown",
+        accountType: f.protection?.installation?.targetType ?? "unknown",
         source: OBSERVED, repo: f.repo, defaultBranch: f.defaultBranch, headSha: f.headSha, language: f.language, languages: f.languages, ecosystems: ecosystems(f), fileCount: f.files.length, truncated: f.truncated,
         empty: f.files.length === 0,
         files: mark(f.files.slice(0, 200).join("\n"), 6000),
@@ -137,10 +143,11 @@ export const SESSION_TOOLS: SessionTool[] = [
   },
   {
     name: "propose_pull_request",
-    description: "Propose the onboarding pull request (or an update to the open one) for the person to approve. Optionally pass your own AGENTS.md content: agentsMd { commands: [{label, command}], conventions: [string], notes } read from the repository. The files are planned by Gantry from the repository as it is now; you may draft only AGENTS.md. Nothing is written until the person approves.",
+    description: "Propose the onboarding pull request (or an update to the open one) for the person to approve. YOU author it: pass `files`, the complete set of files the repository needs to be ready, each with its full text (for a new Python project with uv for example: pyproject.toml, .python-version, a package and a smoke test, a Makefile, .github/workflows/ci.yml, AGENTS.md, CODEOWNERS, .gantry/factory.yml, lint config). Base them on what you read (inspect_repository, read_file) and on what the person asked. Gantry's fixed rules only suggest a plan (inspect_repository shows it); you are not limited to it. Rails: no secrets (reference them as ${{ secrets.NAME }}), no binaries, no lockfiles (a package tool generates them: say CI or a person runs the tool), no edits to existing application code, no branch-rule files, no `curl | sh`, a diff under the cap. Workflow files, dependency manifests, owners and the like are allowed but shown to the person as parts they must confirm. You may also pass agentsMd { commands, conventions, notes } and Gantry renders AGENTS.md from it. If the call is refused you get every reason: fix the files and call again. Nothing is written until the person approves.",
     input_schema: {
       type: "object",
       properties: {
+        files: { type: "array", items: { type: "object", properties: { path: { type: "string" }, content: { type: "string", description: "The full text of the file." }, purpose: { type: "string", description: "One sentence: why this file." } }, required: ["path", "content"] } },
         agentsMd: { type: "object", properties: { commands: { type: "array", items: { type: "object", properties: { label: { type: "string" }, command: { type: "string" } }, required: ["label", "command"] } }, conventions: { type: "array", items: { type: "string" } }, notes: { type: "string" } } },
         guidelineSuggestions: { type: "array", items: { type: "string" } },
         summary: { type: "string", description: "Two sentences on what the pull request does and why." },
@@ -152,39 +159,77 @@ export const SESSION_TOOLS: SessionTool[] = [
       if (d.busy) return { error: `Gantry is busy (${d.busy}). Wait for it to finish.` };
       if (!updating && !["assessed", "failed"].includes(d.stage)) return { error: `A pull request is proposed after the assessment; the repo is at '${d.stage}'.` };
       if (!d.findings.length) return { error: "There are no findings yet." };
-      const got = await factsOf(ctx, false);
+      const got = await factsOf(ctx, true);
       if (!got.ok) return { error: got.error };
       const facts = got.facts;
       const pc = await planContext(ctx.db, ctx.orgId, ctx.repo, ctx.full);
       const g = await guidelinesFor(ctx.db, ctx.orgId, ctx.repo.project_id);
       const findings: AssessedFinding[] = assess(facts, { guidelines: g.org.items, mcp: pc.mcp, requiredChecks: pc.requiredChecks });
       const plan = planPr(facts, findings, pc);
-      if (!plan.length) return { error: "Nothing to add: the repository already has everything a pull request can add. Suggest verifying instead." };
+      const authoring = Array.isArray(i.files) && i.files.length > 0;
+      if (!plan.length && !authoring && !i.agentsMd) return { error: "The fixed rules have nothing to add. If the repository needs files (a project scaffold, CI, tests), author them with `files`; otherwise suggest verifying." };
       let files = plan;
       let draft: { result: unknown; drafter: OnboardAssessor } | null = null;
       let mode: "agent" | "rule-based" = "rule-based";
       let rejected: string | null = null;
-      if (i.agentsMd && ctx.agent) {
-        const raw = { agentsMd: i.agentsMd, guidelineSuggestions: i.guidelineSuggestions ?? [], summary: str(i.summary, 800) ?? "", plannedFiles: [{ path: "AGENTS.md", purpose: "repository-specific commands and conventions", closes: "agents" }] };
-        const v = validateDraft(raw, plan, { protectedPaths: pc.protectedPaths, maxDiff: ctx.maxDiff });
-        if (v.ok && v.value.agentsMd) {
-          const drafter: OnboardAssessor = { mode: "agent", agent: ONBOARD_AGENT, version: ctx.agent.version, model: ctx.agent.model, ...(v.value.guidelineSuggestions.length ? { guidelineSuggestions: v.value.guidelineSuggestions } : {}) };
-          files = planPr(facts, findings, pc, { by: authorshipOf(drafter), agentsMd: v.value.agentsMd });
-          draft = { result: { agentsMd: v.value.agentsMd, guidelineSuggestions: v.value.guidelineSuggestions, forPeople: v.value.forPeople, plannedFiles: v.value.plannedFiles }, drafter };
+      let sensitive: Extract<SessionCard, { kind: "proposal" }>["sensitive"] = [];
+      let blockers: Extract<SessionCard, { kind: "proposal" }>["blockers"] = [];
+      if ((authoring || i.agentsMd) && ctx.agent) {
+        const drafter: OnboardAssessor = { mode: "agent", agent: ONBOARD_AGENT, version: ctx.agent.version, model: ctx.agent.model };
+        const raw = {
+          files: authoring ? i.files : [], agentsMd: i.agentsMd, guidelineSuggestions: i.guidelineSuggestions ?? [], summary: str(i.summary, 800) ?? "",
+          plannedFiles: authoring ? (i.files as { path?: unknown; purpose?: unknown }[]).filter((x) => x && typeof x.path === "string").map((x) => ({ path: String(x.path).slice(0, 300), purpose: typeof x.purpose === "string" ? x.purpose.slice(0, 300) : "", closes: "" })).slice(0, 60) : [{ path: "AGENTS.md", purpose: "repository-specific commands and conventions", closes: "agents" }],
+        };
+        // The files are reviewed as authored; the sensitive parts are confirmed on the card at approval (the worker re-checks that).
+        const v = resolveDraft(raw, { facts, findings, ctx: pc, plan, maxDiff: ctx.maxDiff, by: authorshipOf(drafter), confirmed: true });
+        if (v.ok) {
+          const gs = v.value.value.guidelineSuggestions;
+          drafter.guidelineSuggestions = gs.length ? gs : undefined;
+          if (!drafter.guidelineSuggestions) delete drafter.guidelineSuggestions;
+          files = v.value.files ?? planPr(facts, findings, pc, { by: authorshipOf(drafter), ...(v.value.value.agentsMd ? { agentsMd: v.value.value.agentsMd } : {}) });
+          sensitive = v.value.sensitive;
+          blockers = v.value.blockers;
+          draft = { result: { files: v.value.value.files, agentsMd: v.value.value.agentsMd, guidelineSuggestions: gs, forPeople: v.value.value.forPeople, plannedFiles: v.value.value.plannedFiles }, drafter };
           mode = "agent";
-        } else if (!v.ok) rejected = v.reason;
+        } else rejected = v.reason;
       }
+      if (rejected && authoring) return { error: rejected, note: "Nothing was proposed. Fix the files and call propose_pull_request again; do not ask the person to fix it.", suggestedByRules: plan.map((p) => p.path) };
+      if (!files.length) return { error: "Nothing to propose." };
+      const notIncluded = mode === "agent" && authoring ? plan.filter((p) => !files.some((f) => f.path === p.path)).map((p) => p.path) : [];
       const id = `P-${ctx.next++}`;
       const card: SessionCard = {
         kind: "proposal", id, what: updating ? "update_pr" : "open_pr", status: "pending", mode, runId: d.runId ?? "", headSha: facts.headSha,
         title: updating ? `Update onboarding PR #${d.pr!.number}` : "Proposed onboarding PR",
-        summary: str(i.summary, 600) ?? `${files.length} file${files.length === 1 ? "" : "s"} that close the gaps Gantry observed. ${mode === "agent" ? "AGENTS.md drafted by the Onboarding Agent from the repository." : "Written by rule from the repository's own files."}`,
-        files: files.map((f) => ({ path: f.path, mode: f.mode, finding: f.finding, plus: f.plus, minus: f.minus, source: f.source ?? "observed", added: f.added.slice(0, 60) })),
+        summary: str(i.summary, 600) ?? `${files.length} file${files.length === 1 ? "" : "s"}. ${mode === "agent" ? "Authored by the Onboarding Agent from the repository and your request; Gantry checked it against its safety rails." : "Written by rule from the repository's own files."}`,
+        files: files.map((f) => ({ path: f.path, mode: f.mode, finding: f.finding, plus: f.plus, minus: f.minus, source: f.source ?? "observed", added: f.added.slice(0, 120), ...(f.purpose ? { purpose: f.purpose } : {}) })),
+        ...(sensitive && sensitive.length ? { sensitive } : {}), ...(blockers && blockers.length ? { blockers } : {}), diffCap: ctx.maxDiff,
         ...(updating ? { prNumber: d.pr!.number } : {}),
       };
       ctx.cards.push(card);
       if (draft) ctx.drafts[id] = draft;
-      return { proposed: id, files: files.map((f) => ({ path: f.path, plus: f.plus, minus: f.minus })), mode, ...(rejected ? { draftRejected: rejected, note: "Your draft was not used; the rule-based AGENTS.md is in the proposal." } : {}), note: "Shown to the person as a card with the diff. It has not been written anywhere. Say that you are waiting for their approval." };
+      return {
+        proposed: id, files: files.map((f) => ({ path: f.path, plus: f.plus, minus: f.minus })), mode,
+        ...(sensitive && sensitive.length ? { needsConfirmation: sensitive.filter((x) => x.id !== "guideline").map((x) => `${x.label}: ${x.paths.join(", ")}`) } : {}),
+        ...(blockers && blockers.length ? { blocked: blockers.map((b) => ({ message: b.message, steps: b.fix })), note: "Tell the person exactly this: the App needs the Workflows permission before this can be opened, with the steps." } : {}),
+        ...(notIncluded.length ? { notIncludedFromRuleSuggestion: notIncluded } : {}),
+        ...(rejected ? { draftRejected: rejected } : {}),
+        note: `${rejected ? "Your AGENTS.md draft was not used; the rule-based AGENTS.md is in the proposal. " : ""}Shown to the person as a card with the diff and the parts they must confirm. It has not been written anywhere. Say that you are waiting for their approval.`,
+      };
+    },
+  },
+  {
+    name: "propose_exception",
+    description: "Propose marking the repository 'ready by exception' when verification cannot pass for a reason that is not a safety problem (for example the App is installed on a personal account, not an organisation, so the organisation-level check cannot be met; or an organisation ruleset the person cannot set). Give the concrete reason in your words. A person with the right approves; the exception is recorded with the reason in the audit trail. Offer it together with the alternative (move to an organisation, or the exact steps to meet the check).",
+    input_schema: { type: "object", properties: { reason: { type: "string", description: "At least 10 characters: what is not met and why accepting it is reasonable." } }, required: ["reason"] },
+    async run(ctx, i) {
+      const reason = str(i.reason, 1000);
+      if (!reason || reason.length < 10) return { error: "Give a reason of at least 10 characters." };
+      const d = ctx.doc;
+      if (d.stage === "ready") return { error: "The repository is already ready." };
+      if (d.busy) return { error: `Gantry is busy (${d.busy}). Wait for it to finish.` };
+      const id = `P-${ctx.next++}`;
+      ctx.cards.push({ kind: "proposal", id, what: "exception", status: "pending", mode: ctx.agent ? "agent" : "rule-based", runId: d.runId ?? "", title: "Mark ready by exception", summary: `Accepts the gaps that remain and records this reason: ${reason}`, reason, files: [] });
+      return { proposed: id, note: "Shown to the person as a card. Nothing was recorded. Say what you wait on and offer the alternative." };
     },
   },
   {
@@ -218,4 +263,3 @@ export async function executeSessionTool(ctx: SessionCtx, name: string, input: u
   }
 }
 
-export const DRAFTABLE = AGENT_DRAFTABLE;

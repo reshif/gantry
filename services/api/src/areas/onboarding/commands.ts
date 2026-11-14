@@ -166,13 +166,14 @@ export async function rerunAssessment(tx: Tx, a: Actor, repoId: string): Promise
   };
 }
 
-export async function openOnboardingPr(tx: Tx, a: Actor, repoId: string): Promise<Out> {
+/** `authored`: a person approved a pull request the agent authored, which may add files the fixed rules would not (so the rules finding nothing to add is not a reason to refuse). */
+export async function openOnboardingPr(tx: Tx, a: Actor, repoId: string, o: { authored?: boolean } = {}): Promise<Out> {
   const { repo, doc } = await openRepo(tx, a, repoId);
   guard(doc);
   if (doc.pr && doc.pr.state === "open") throw conflict(`${repo.name} already has an open onboarding PR (#${doc.pr.number}).`);
   if (!["assessed", "failed"].includes(doc.stage)) throw conflict(`An onboarding PR is opened after the assessment; ${repo.name} is at '${doc.stage}'.`);
   if (!doc.findings.length) throw conflict("There are no findings yet. Re-run the assessment first.");
-  if (!fixableGaps(doc.findings).length) throw conflict("Nothing to add: the repo already has everything a pull request can add. Verify it instead.");
+  if (!o.authored && !fixableGaps(doc.findings).length) throw conflict("Nothing to add: the repo already has everything a pull request can add. Verify it instead.");
   doc.busy = "opening_pr";
   delete doc.blocker;
   stamp(doc, a.personId ?? a.id, "Asked Gantry to open the pull request.", a.now);

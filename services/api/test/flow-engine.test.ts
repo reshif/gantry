@@ -225,6 +225,27 @@ d("flow engine: guarantees F1 to F6", () => {
       expect(other.body.passed).toBe(true);
     });
 
+    it("Factory Admin override: on their own work order (SoD) and below N of M, the vote asks for a reason, then passes the gate and is audited; nobody else overrides", async () => {
+      const { id, gate } = await atGate("FA override", "p-asha", rule({ sod: true, required: 2 }));
+      const other = await vote("p-priya", id, gate);
+      expect(other.body).toMatchObject({ passed: false, have: 1, need: 2 }); // an ordinary approver is one vote, no override
+      const bare = await vote("p-asha", id, gate);
+      expect(bare.status).toBe(403);
+      expect(bare.body.needs).toBe("override_reason");
+      expect(bare.body.msg).toMatch(/override/i);
+      expect((await w.q(`select count(*)::int n from gate_votes where gate_instance_id = $1 and voter = 'p-asha'`, [`${id}:${gate}:1`]))[0].n).toBe(0); // nothing recorded
+      const ok = await vote("p-asha", id, gate, "approve", { reason: "Urgent fix; second approver unavailable today." });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body.passed).toBe(true);
+      const dec = (await w.q(`select * from gate_decisions where gate_instance_id = $1`, [`${id}:${gate}:1`]))[0];
+      expect(dec.decision).toBe("approved");
+      expect(dec.detail).toMatchObject({ override: true, reason: "Urgent fix; second approver unavailable today." });
+      const ov = await w.events("gate.override");
+      expect(ov.at(-1)?.actor).toBe("p-asha");
+      expect(ov.at(-1)?.after).toMatchObject({ gate, author: true });
+      expect((await w.get(id)).gates[gate].status).not.toBe("waiting");
+    });
+
     it("separation of duties: the author cannot approve; a stale instance id is refused; a reject reworks the station", async () => {
       const { id, gate } = await atGate("SoD and stale", "p-meera", rule({ sod: true, required: 1, roles: ["line_lead", "reviewer"] }));
       const own = await vote("p-meera", id, gate);

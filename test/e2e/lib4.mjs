@@ -1,7 +1,9 @@
 // TEST ONLY: shared helpers for the wave 4 end-to-end scripts (Playwright through https://localhost and Keycloak, API calls as the signed-in person).
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // the local ingress uses a private CA; this is a test client
 import { execFileSync } from "node:child_process";
-import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
+import { existsSync } from "node:fs";
+const PW = [process.env.PLAYWRIGHT_INDEX, "/opt/node22/lib/node_modules/playwright/index.mjs", "/home/reshif/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs"].find((p) => p && existsSync(p));
+const { chromium } = await import(PW);
 
 export const DIR = process.env.E2E_DIR ?? "/tmp/claude-0/w4e2e";
 export const PROJECT = process.env.E2E_PROJECT ?? "w4e2e";
@@ -17,7 +19,7 @@ export function check(name, ok, detail = "") { results.push({ name, ok: !!ok, de
 export const summary = () => { const f = results.filter((r) => !r.ok); console.log(`\n${results.length - f.length}/${results.length} passed${f.length ? "; FAILED: " + f.map((r) => r.name).join("; ") : ""}`); };
 
 let browser;
-export async function launch() { browser ??= await chromium.launch({ executablePath: "/usr/bin/google-chrome", args: ["--no-sandbox"] }); return browser; }
+export async function launch() { browser ??= await chromium.launch({ ...(existsSync("/usr/bin/google-chrome") ? { executablePath: "/usr/bin/google-chrome" } : {}), args: ["--no-sandbox"] }); return browser; }
 export async function close() { await browser?.close(); browser = undefined; }
 
 /** Signs in through Keycloak as a seeded person and returns { ctx, page, api }. api(method, path, body, headers) calls https://localhost with the session cookie and CSRF token. */
@@ -28,10 +30,12 @@ export async function session(user) {
   await page.goto("https://localhost/", { waitUntil: "networkidle" });
   if (await page.getByText(PEOPLE[user], { exact: true }).count()) await page.getByText(PEOPLE[user], { exact: true }).first().click();
   else { await page.getByText("Continue with SSO").first().click(); await page.waitForSelector("#username, input[name=username]"); await page.fill("#username, input[name=username]", user); }
-  await page.waitForSelector("input[name=password], #password");
-  await page.fill("input[name=password], #password", "gantry-dev");
-  await page.click("#kc-login, input[type=submit], button[type=submit]");
-  await page.waitForSelector("text=Jump to or run", { timeout: 30000 });
+  const next = await Promise.race([page.waitForSelector("input[name=password], #password", { timeout: 15000 }).then(() => "kc"), page.waitForSelector("#nav a.nav-link", { state: "attached", timeout: 15000 }).then(() => "in")]).catch(() => "in");
+  if (next === "kc") {
+    await page.fill("input[name=password], #password", "gantry-dev");
+    await page.click("#kc-login, input[type=submit], button[type=submit]");
+  }
+  await page.waitForSelector("#nav a.nav-link", { state: "attached", timeout: 30000 });
   const me = await (await ctx.request.get("https://localhost/api/v1/me")).json();
   const csrf = me.csrf ?? me.session?.csrf;
   const api = async (method, path, body, headers = {}) => {

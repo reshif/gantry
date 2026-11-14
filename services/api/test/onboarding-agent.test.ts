@@ -17,7 +17,9 @@ const GOOD: Record<string, unknown> = {
   "ONB-01": { findings: [{ id: "owners", ok: false, note: "No CODEOWNERS." }, { id: "agents", ok: false, note: "No AGENTS.md." }, { id: "ci", ok: false, note: "No workflow." }, { id: "deps", ok: true, note: "" }], risk: { level: "medium", reason: "No CI or owners." }, summary: "Gaps." },
   "ONB-02": { findings: [{ id: "ci", ok: true, note: "" }, { id: "test", ok: true, note: "" }, { id: "agents", ok: true, note: "" }], risk: { level: "low", reason: "Everything required is met." }, summary: "Ready." },
   "ONB-03": { findings: [{ id: "secrets", ok: false, note: "A committed .env file." }], risk: { level: "high", reason: "A secret is committed in .env." }, forPeople: ["Rotate the key that was in .env and remove the file."], summary: "Secret." },
-  "ONB-04": { plannedFiles: [{ path: "AGENTS.md", purpose: "commands", closes: "agents" }], agentsMd: { commands: [{ label: "Test", command: "vitest run" }], conventions: [], notes: "" }, forPeople: ["Turn on branch protection (ruleset) on the default branch."], summary: "Drafted." },
+  // Changed deliberately: ONB-04 and ONB-08 now grade the files the agent authors (the full set), not an AGENTS.md-only draft.
+  "ONB-04": { files: [{ path: "AGENTS.md", content: "# AGENTS.md\n\nTest: `vitest run`\n", purpose: "commands", closes: "agents" }, { path: "CODEOWNERS", content: "* @acme/platform\n", purpose: "owners", closes: "owners" }], forPeople: ["Turn on branch protection (ruleset) on the default branch."], summary: "Authored." },
+  "ONB-08": { files: [{ path: "pyproject.toml", content: "[project]\nname = \"app\"\nversion = \"0.1.0\"\n", purpose: "uv project" }, { path: "tests/test_smoke.py", content: "def test_smoke():\n    assert True\n", purpose: "smoke test" }, { path: ".github/workflows/ci.yml", content: "name: ci\njobs:\n  test:\n    name: ci/test\n    runs-on: ubuntu-latest\n    steps:\n      - run: uv sync\n", purpose: "CI" }, { path: "AGENTS.md", content: "# AGENTS.md\n", purpose: "commands" }], forPeople: ["Run uv lock and commit uv.lock: a tool generates the lockfile."], summary: "Scaffold." },
   "ONB-05": { findings: [{ id: "test", ok: false, note: "No test script and no tests directory." }], commands: {}, risk: { level: "medium", reason: "Nothing verifies changes." }, summary: "No tests." },
   "ONB-06": { findings: [{ id: "test", ok: false, note: "The root has no test script." }], commands: { test: "pnpm test:all" }, risk: { level: "low", reason: "CI runs the aggregate." }, summary: "Monorepo." },
   "ONB-07": { findings: [{ id: "test", ok: false, note: "Tests are in qa/ and run by make." }], commands: { test: "make check", lint: "ruff check ." }, risk: { level: "medium", reason: "No CI." }, summary: "Makefile." },
@@ -25,8 +27,8 @@ const GOOD: Record<string, unknown> = {
 
 describe("the built-in Onboarding Agent suite matches the contract that is validated", () => {
   const suite = STARTER_KIT.agents.find((a) => a.id === "ag-onboard")!.suite;
-  it("has the seven cases, including a monorepo and a test layout outside the usual place", () => {
-    expect(suite.cases.map((c) => c.id)).toEqual(["ONB-01", "ONB-02", "ONB-03", "ONB-04", "ONB-05", "ONB-06", "ONB-07"]);
+  it("has the eight cases, including a monorepo and a test layout outside the usual place", () => {
+    expect(suite.cases.map((c) => c.id)).toEqual(["ONB-01", "ONB-02", "ONB-03", "ONB-04", "ONB-05", "ONB-06", "ONB-07", "ONB-08"]);
     expect(suite.cases.find((c) => c.id === "ONB-06")!.name).toMatch(/monorepo/i);
     expect(suite.cases.find((c) => c.id === "ONB-07")!.name).toMatch(/outside the usual place/i);
   });

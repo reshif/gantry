@@ -1,10 +1,11 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkOrder } from "@gantry/domain";
+import { useOpenTraveler } from "../shell/useTraveler";
 import ConversationsView from "./conversations";
 import { updatePrefs } from "../lib/prefs";
 import { mockApi, mount, resetApp } from "./floor/testkit";
-import { deny, intakeWo, posts, readsFor, travelerOf } from "./traveler/testkit";
+import { intakeWo, posts, readsFor, travelerOf } from "./traveler/testkit";
+import type { WoSession, WoSessionRow } from "./conversations/session-api";
 
 beforeEach(() => {
   resetApp();
@@ -15,131 +16,138 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** An intake conversation with a pending question, chips and a brief that is not complete yet. */
-const W = {
-  ...intakeWo,
-  conv: {
-    ...intakeWo.conv,
-    done: false,
-    qi: 0,
-    raised: [],
-    questions: [{ id: "scope", field: "scope", text: "What is in scope?", chips: ["Only the API", "API and clients"] }, { id: "ac", field: "ac", text: "How do we know it is done?", chips: [] }],
-    messages: [{ from: "ag-intake", at: intakeWo.createdAt, text: "What is in scope?", qid: "scope", chips: ["Only the API", "API and clients"] }],
-  },
-  gates: { ...intakeWo.gates, G0G1: { ...intakeWo.gates.G0G1!, status: "waiting" as const } },
-} as WorkOrder;
-const READY = { ...W, conv: { ...W.conv, done: true, qi: 2 } } as WorkOrder;
+const W = intakeWo;
+const BRIEF = { goal: "Accept an Idempotency-Key header on refund requests.", scopeIn: ["POST /refunds"], scopeOut: [], ac: ["A repeated key returns the first refund"], risks: [], open: [], decisions: [], estimate: "2 days" };
 
-async function show(wo: WorkOrder = W, o: Parameters<typeof mockApi>[1] = {}, t = travelerOf(wo, {}, { approve: { gate: "G0G1" } }), extra: Parameters<typeof mockApi>[0] = {}) {
-  const calls = mockApi({ ...readsFor(wo, t), "GET /api/v1/conversations": (c) => ({ body: { items: c.query.get("awaitingMe") ? [wo] : [wo], next: null, total: 1 } }), ...extra }, o);
+const row = (over: Partial<WoSessionRow> = {}): WoSessionRow => ({
+  id: W.id, project: "payments", title: W.title, cls: W.cls, station: "intake", stationName: "Intake", state: "waiting", bay: null, gate: "G0G1", agent: "ag-intake", agentName: "Intake Clerk", waitingOn: "you",
+  latest: { text: "I read the request. Which endpoint is this for?", at: Date.now() - 60_000, by: "ag-intake", role: "assistant" }, unread: true, closed: false, started: true, requestedBy: "p-tomas", createdAt: Date.now() - 3_600_000, ...over,
+});
+
+const session = (over: Partial<WoSession> = {}): WoSession => ({
+  woId: W.id, project: "payments", repo: W.repo,
+  wo: { id: W.id, title: W.title, description: "", cls: W.cls, clsName: "Feature", confidence: 0.9, rationale: "", priority: "P2", station: "intake", stationName: "Intake", state: "waiting", bay: null, gate: { id: "G0G1", label: "G0+G1", name: "Brief confirmed" }, requestedBy: "p-tomas", closed: false },
+  messages: [
+    { id: "wm-1", role: "assistant", author: "ag-intake", text: "I read the request and the repo. Which endpoint is this for?", at: Date.now() - 60_000, data: { mode: "agent", agent: "Intake Clerk", cards: [{ kind: "question", id: "Q-1", question: "Which endpoint is this for?", options: ["POST /refunds", "Another"] }] } },
+  ],
+  agent: { mode: "agent", name: "Intake Clerk", id: "ag-intake", model: "claude-haiku-5-5", vendor: "anthropic", version: 1, station: "intake" },
+  budget: { spentUsd: 0.02, limitUsd: 0.5 }, costUsd: 0.02, can: { talk: true, talkWhy: "", confirm: true, confirmWhy: "" },
+  steps: [{ id: "intake", name: "Intake", state: "current" }, { id: "plan", name: "Plan", state: "todo" }],
+  next: { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }, waiting: null, pending: [],
+  brief: { ...BRIEF, goal: "", scopeIn: [], ac: [], route: [], children: [] } as never, briefConfirmed: false, briefOpen: true, ruleQuestion: null, ruleReady: false, busy: false, ...over,
+});
+const withProposal = (): WoSession => session({
+  messages: [{ id: "wm-2", role: "assistant", author: "ag-intake", text: "I drafted the brief; it waits for your approval.", at: Date.now(), data: { mode: "agent", agent: "Intake Clerk", cards: [{
+    kind: "proposal", id: "P-1", what: "brief", status: "pending", mode: "agent", title: "Proposed brief", summary: "Idempotency for refunds.", brief: BRIEF, changes: [{ field: "goal", label: "Goal", before: [], after: [BRIEF.goal], added: [BRIEF.goal], removed: [] }], base: "x", cls: { id: "feature", name: "Feature", confidence: 0.9 }, route: ["Intake", "Plan"],
+  }] } }],
+  pending: [{ mid: "wm-2", id: "P-1", what: "brief", title: "Proposed brief" }], next: { actor: "you", text: "Review the proposal below." },
+});
+
+function showList(rows: WoSessionRow[]) {
+  const calls = mockApi({ ...readsFor(W), "GET /api/v1/work-order-sessions": () => ({ body: { items: rows } }) });
   mount(<ConversationsView />);
-  await screen.findByRole("region", { name: `Conversation ${wo.id}` }, { timeout: 4000 });
+  return calls;
+}
+async function showSession(s: WoSession, extra: Parameters<typeof mockApi>[0] = {}) {
+  window.location.hash = `#/p/payments/conversations/${W.id}`;
+  const calls = mockApi({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ body: s }), [`POST /api/v1/work-orders/${W.id}/session/seen`]: () => ({ body: { ok: true, msg: "Seen." } }), ...extra });
+  mount(<ConversationsView />);
+  await screen.findByRole("region", { name: `Conversation ${W.id}` }, { timeout: 4000 });
   return calls;
 }
 
-describe("Conversations", () => {
-  it("lists the project's conversations with their status and shows the thread, class and live brief", async () => {
-    await show();
-    expect((await screen.findAllByText(W.id)).length).toBeGreaterThan(0);
-    expect(screen.getByText("Question 1 of 2", { selector: ".conv-item-foot span" })).toBeTruthy();
-    expect(screen.getByText("Brief · built live")).toBeTruthy();
-    expect(screen.getByText("Class")).toBeTruthy();
+describe("Conversations list", () => {
+  it("lists work-order sessions with who waits on whom and the latest message; it has no forms; a row opens that work order's session", async () => {
+    showList([row(), row({ id: "WO-9", title: "Other", waitingOn: "agent", unread: false, latest: null, started: false })]);
+    expect(await screen.findByText("Waiting on you")).toBeTruthy();
+    expect(screen.getByText(/Which endpoint is this for\?/)).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
+    expect(screen.queryAllByRole("textbox")).toHaveLength(0);
+    expect(document.querySelectorAll("textarea, form, input").length).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(W.id) }));
+    await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/conversations/${W.id}`));
   });
 
-  it("answers with a quick-reply chip and with free text on Enter", async () => {
-    const path = `/api/v1/work-orders/${W.id}/messages`;
-    const calls = await show(W, {}, undefined, { [`POST ${path}`]: () => ({ body: { ok: true, msg: "Answer recorded." } }) });
-    fireEvent.click(await screen.findByRole("button", { name: "Only the API" }));
-    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
-    expect(posts(calls, path)[0]!.body).toMatchObject({ text: "Only the API" });
-    const box = screen.getByLabelText("Reply");
-    fireEvent.change(box, { target: { value: "It must stay compatible." } });
+  it("an older deep link (the openConversation preference) lands on the session", async () => {
+    updatePrefs({ openConversation: W.id });
+    showList([row()]);
+    await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/conversations/${W.id}`));
+  });
+});
+
+describe("Work-order session", () => {
+  it("makes it obvious the dialogue is open: the agent waits for you, the composer is always there, a suggested answer is one click", async () => {
+    const calls = await showSession(session(), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
+    expect(await screen.findByText("Intake Clerk is waiting for you")).toBeTruthy();
+    expect(screen.getByLabelText("Message to Intake Clerk")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Traveler" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "The belt" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "POST /refunds" }));
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
+    expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)[0]!.body).toMatchObject({ kind: "message", text: "POST /refunds" });
+    // Free text on Enter.
+    const box = screen.getByLabelText("Message to Intake Clerk");
+    fireEvent.change(box, { target: { value: "gimme a brief" } });
     fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(2));
+    expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)[1]!.body).toMatchObject({ text: "gimme a brief" });
+  });
+
+  it("shows the agent's brief proposal with what changes; Approve runs the decision; Ask for changes continues the dialogue", async () => {
+    const path = `/api/v1/work-orders/${W.id}/session/proposals/wm-2/P-1`;
+    const calls = await showSession(withProposal(), { [`POST ${path}`]: () => ({ body: { ok: true, msg: "Brief confirmed." } }), [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
+    expect((await screen.findAllByText("Proposed brief")).length).toBeGreaterThan(0);
+    expect(screen.getByText(`+ ${BRIEF.goal}`)).toBeTruthy();
+    expect(screen.getByText("Waiting for you")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Approve and confirm the brief" }));
+    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
+    expect(posts(calls, path)[0]!.body).toEqual({ decision: "approve" });
+    fireEvent.click(screen.getByRole("button", { name: "Ask for changes" }));
+    fireEvent.change(await screen.findByLabelText("What should change?"), { target: { value: "Also cover retries." } });
+    fireEvent.click(document.getElementById("wos-changes-send-P-1")!);
     await waitFor(() => expect(posts(calls, path)).toHaveLength(2));
-    expect(posts(calls, path)[1]!.body).toMatchObject({ text: "It must stay compatible." });
-    // an empty reply is not sent
-    fireEvent.keyDown(box, { key: "Enter" });
-    expect(posts(calls, path)).toHaveLength(2);
+    expect(posts(calls, path)[1]!.body).toEqual({ decision: "changes", text: "Also cover retries." });
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`).some((c) => (c.body as { kind?: string }).kind === "continue")).toBe(true));
   });
 
-  it("locks the reply and the chips with the reason when the viewer may not answer", async () => {
-    const t = travelerOf({ ...W, requestedBy: "someone-else" } as WorkOrder, {}, { can: { answer: deny("No role holds it.", "Needs Engineer") } });
-    const calls = await show({ ...W, requestedBy: "someone-else" } as WorkOrder, {}, t);
-    expect(((await screen.findByLabelText("Reply")) as HTMLTextAreaElement).disabled).toBe(true);
-    const chip = await screen.findByRole("button", { name: "Only the API" });
-    expect(chip.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(chip);
-    expect(calls.filter((c) => c.method === "POST" && c.path !== "/api/v1/can")).toHaveLength(0);
+  it("someone who may not confirm briefs sees Approve locked with the reason", async () => {
+    const s = withProposal();
+    s.can = { talk: true, talkWhy: "", confirm: false, confirmWhy: "Needs the right to confirm briefs." };
+    await showSession(s);
+    const btn = await screen.findByRole("button", { name: "Approve and confirm the brief" });
+    expect((btn as HTMLButtonElement).disabled || btn.getAttribute("aria-disabled") === "true").toBe(true);
   });
 
-  it("adds a follow-up question with up to three suggested answers", async () => {
-    const path = `/api/v1/work-orders/${W.id}/messages`;
-    const calls = await show(W, {}, undefined, { [`POST ${path}`]: () => ({ body: { ok: true, msg: "Follow-up added." } }) });
-    fireEvent.click(await screen.findByRole("button", { name: /Add a follow-up question/ }));
-    fireEvent.click(document.getElementById(`conv-fu-ask-${W.id}`) as HTMLElement);
-    expect(posts(calls, path)).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText("Follow-up question"), { target: { value: "Who signs off?" } });
-    fireEvent.change(screen.getByLabelText("Suggested answers"), { target: { value: "Nobody; Security; On-call; Extra" } });
-    fireEvent.click(document.getElementById(`conv-fu-ask-${W.id}`) as HTMLElement);
-    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
-    expect(posts(calls, path)[0]!.body).toMatchObject({ kind: "followup", text: "Who signs off?", chips: ["Nobody", "Security", "On-call"] });
+  it("without a usable model it says 'Rule-based (no agent)', shows the scripted question with its chips, and still lets you answer", async () => {
+    const s = session({ agent: { mode: "rule-based", name: "Intake Clerk", id: "ag-intake", reason: "No model is configured.", label: "Rule-based (no agent)", station: "intake" }, messages: [], ruleQuestion: { id: "scope", text: "What is in scope?", chips: ["Only the API"] } });
+    const calls = await showSession(s, { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Answer recorded.", mode: "rule-based" } }) });
+    expect((await screen.findAllByText("Rule-based (no agent)")).length).toBeGreaterThan(0);
+    expect(screen.getByText("What is in scope?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Only the API" }));
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
+    expect((screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement).disabled).toBe(false);
   });
 
-  it("raises a question to a person with a reason of at least five characters", async () => {
-    const path = `/api/v1/work-orders/${W.id}/messages`;
-    const calls = await show(W, {}, undefined, { [`POST ${path}`]: () => ({ body: { ok: true, msg: "Question raised." } }) });
-    fireEvent.click(await screen.findByRole("button", { name: "Raise a question" }));
-    const ta = await screen.findByPlaceholderText("What do you need a person to decide?");
-    fireEvent.change(ta, { target: { value: "hm" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Raise question" }).at(-1) as HTMLElement);
-    expect(posts(calls, path)).toHaveLength(0);
-    fireEvent.change(ta, { target: { value: "Which team owns the ledger?" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Raise question" }).at(-1) as HTMLElement);
-    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
-    expect(posts(calls, path)[0]!.body).toMatchObject({ kind: "question", text: "Which team owns the ledger?" });
+  it("the agent starts the dialogue by itself when the session has none yet", async () => {
+    const calls = await showSession(session({ messages: [] }), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`).some((c) => (c.body as { kind?: string }).kind === "open")).toBe(true));
   });
+});
 
-  it("confirms the brief once it is complete, with the version in If-Match, and not before", async () => {
-    const path = `/api/v1/work-orders/${W.id}/confirm-brief`;
-    const calls = await show(READY, {}, undefined, { [`POST ${path}`]: () => ({ body: { ok: true, msg: "Brief confirmed." } }) });
-    const btn = await screen.findByRole("button", { name: "Confirm brief" });
-    expect(btn.getAttribute("aria-disabled")).toBeNull();
+describe("Open conversation from the traveler", () => {
+  function Opener() {
+    const open = useOpenTraveler();
+    return <button type="button" id="open-trv" onClick={() => open(W.id)}>open</button>;
+  }
+  it("shows a prominent button with the waiting indicator and lands on the work order's session", async () => {
+    mockApi({ ...readsFor(W, travelerOf(W)), "GET /api/v1/work-order-sessions": () => ({ body: { items: [row()] } }) });
+    mount(<Opener />);
+    await new Promise((r) => setTimeout(r, 30));
+    fireEvent.click(screen.getByText("open"));
+    const btn = await screen.findByRole("button", { name: "Open conversation" }, { timeout: 4000 });
+    expect(await screen.findByText("Intake Clerk is waiting for you")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Unread messages" })).toBeTruthy();
     fireEvent.click(btn);
-    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
-    expect(posts(calls, path)[0]!.headers["if-match"]).toBe("7");
-    cleanup();
-    vi.unstubAllGlobals();
-    await show(W);
-    const early = await screen.findByRole("button", { name: "Confirm brief" });
-    expect(early.getAttribute("aria-disabled")).toBe("true");
-    expect(early.getAttribute("data-reason")).toContain("Answer the 2 open questions first");
-  });
-
-  it("declines with a reason and shows a stale refusal", async () => {
-    const path = `/api/v1/work-orders/${W.id}/decline`;
-    const calls = await show(W, {}, undefined, { [`POST ${path}`]: () => ({ status: 409, body: { ok: false, msg: `${W.id} changed since you opened it.` } }) });
-    fireEvent.click(await screen.findByRole("button", { name: "Decline" }));
-    const ta = await screen.findByPlaceholderText("For example: duplicate of WO-2398.");
-    fireEvent.change(ta, { target: { value: "Duplicate of WO-2398." } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Decline work order" }).at(-1) as HTMLElement);
-    await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
-    expect(await screen.findByText(/changed since you opened it/)).toBeTruthy();
-  });
-
-  it("locks every action while a stop covers the work order", async () => {
-    const t = travelerOf(READY, { stop: { id: "project:payments:1", scope: "project", mode: "kill", reason: "Kill: bad release" } }, { approve: { gate: "G0G1" } });
-    const calls = await show(READY, {}, t);
-    for (const name of ["Confirm brief", "Decline", "Raise a question", "Send"]) {
-      const b = await screen.findByRole("button", { name });
-      expect(b.getAttribute("aria-disabled")).toBe("true");
-      expect(b.getAttribute("data-reason")).toContain("Kill: bad release");
-    }
-    expect(calls.filter((c) => c.method === "POST" && c.path !== "/api/v1/can")).toHaveLength(0);
-  });
-
-  it("opens the class override from the thread", async () => {
-    await show();
-    fireEvent.click(await screen.findByRole("button", { name: "Change class" }));
-    expect(await screen.findByText(new RegExp(`Change the class of ${W.id}`))).toBeTruthy();
+    await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/conversations/${W.id}`));
   });
 });

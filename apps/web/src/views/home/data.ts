@@ -10,6 +10,8 @@ export interface AttentionItem {
   where: string;
   sub: string;
   act: { label: string; route: string; project?: string; tab?: string; wo?: string };
+  /** A killed scope: Restore is offered to people who may, with approvals so far. */
+  restore?: { scope: "factory" | "project"; id: string | null; approvals?: Array<{ by: string; at: number }>; needs?: number };
 }
 
 export interface Approval {
@@ -26,6 +28,14 @@ export interface Approval {
   repo?: string;
   repoName?: string;
   pr?: number;
+  note?: string;
+}
+
+export interface Conversation {
+  wo: string;
+  title: string;
+  project: string;
+  question: string | null;
 }
 
 export interface MineWo {
@@ -41,63 +51,60 @@ export interface MineWo {
   doneAt: number | null;
 }
 
-export interface RepoStage {
-  repo: string;
-  name: string;
-  project: string;
-  stage: string;
+export interface SetupStep {
+  id: "github" | "vendor" | "project" | "repo" | "work-order";
+  label: string;
+  state: "done" | "active" | "todo";
+  detail: string;
+  route: string;
+  project: string | null;
 }
 
-/** GET /api/v1/home. The factory sections are present only for people with a factory-wide role. */
-export interface HomeFull extends Omit<HomeData, "approvals" | "attention" | "figures"> {
-  mode: "factory" | "mine";
-  approvals: Approval[];
-  conversations: Array<{ wo: string; title: string; project: string; question: string | null }>;
-  mine: { workOrders: MineWo[]; projects: Array<{ id: string; roles: Array<{ id: string; name: string }> }>; factoryRole: boolean };
+export interface EvalHealth {
+  scored: number;
+  passing: number;
+  unscored: number;
+  failing: Array<{ agent: string; name: string; version: string; suite: string; score: number; threshold: number }>;
+}
+
+/** `home.sections`: built by the API by the caller's rights. A section that is absent is one the person may not see: the page renders what is present and never checks roles. */
+export interface HomeSections {
+  access?: "none";
+  setup?: { done: number; total: number; steps: SetupStep[] };
   attention?: AttentionItem[];
-  figures?: {
-    projects: { active: number; archived: number };
+  waiting?: { approvals: Approval[]; conversations: Conversation[] };
+  approvers?: { count: number; oldestMs: number; late: number; byProject: Array<{ id: string; name: string; count: number; oldestMs: number }> };
+  motion?: {
     inFlight: number;
     running: number;
     inBays: number;
+    byStation: Record<string, number>;
     shippedToday: number;
     shippedWeek: number;
-    gatesWaiting: number;
-    oldestWaitMs: number;
-    lateGates: number;
-    stops: string[];
-    killedWorkOrders: number;
-    spent: number;
-    budget: number;
-    agentSuccess: number | null;
-    agentSuccessTrend: number[];
+    shippedPrevWeek: number;
+    recentDone: Array<{ id: string; title: string; project: string; projectName: string; doneAt: number | null }>;
+    mine: MineWo[];
   };
-  control?: {
-    killed: { by: string; at: number; reason: string; mode: "hold" | "cancel" } | null;
-    restoreApprovals: Array<{ by: string; at: number }>;
-    restoreNeeds: number;
-    admins: Array<{ id: string; name: string }>;
-    impact: { projects: number; workOrders: number; running: number; prs: number };
+  projects?: Array<{ id: string; roles: Array<{ id: string; name: string }>; repos: Array<{ id: string; name: string; stage: string; blocker: string }> }>;
+  health?: {
+    spend: { spent: number; budget: number; projects: Array<{ id: string; label: string; v: number; b: number; alert: number }> };
+    evals: EvalHealth | null;
+    audit: boolean;
   };
-  human?: {
-    waiting: Array<{ person: string; name: string; waiting: number; sole: number }>;
-    gates: { count: number; oldestMs: number; sole: number };
-    trust: { proposals: Array<{ id: string; cell: string; to: string }>; demotions: Array<{ cell: string; at: number; reason: string | null }> };
-    learning: Array<{ id: string; kind: string; title: string }>;
-  };
-  onboarding?: { stages: Array<{ id: string; name: string; count: number }>; stuck: RepoStage[]; open: RepoStage[]; total: number; ready: number };
-  spend?: { projects: Array<{ id: string; label: string; v: number; b: number; alert: number }>; vendors: Array<{ id: string; label: string; v: number; b: number }> };
 }
 
-/** Where an attention item's button goes (legacy: scroll to the control panel, or open a project screen or a traveler). */
+/** GET /api/v1/home. The bell and the sidebar badges read `approvals`, `conversations`, `badges` and `projectBadges`; the page reads `sections`. */
+export interface HomeFull extends Omit<HomeData, "approvals" | "conversations" | "attention" | "figures"> {
+  approvals: Approval[];
+  conversations: Conversation[];
+  sections: HomeSections;
+}
+
+/** Where an attention item's button goes: a project screen or a traveler. */
 export function goAttention(a: AttentionItem["act"], openTraveler: (id: string) => void): void {
-  if (a.route === "home" && a.tab === "control") {
-    document.getElementById("hm-ctl")?.scrollIntoView({ block: "start" });
-    return;
-  }
   if (a.project) setProject(a.project);
   if (a.route === "traveler" && a.wo) openTraveler(a.wo);
   else navigate(a.route);
 }
 
-export const STAGE_NAME: Record<string, string> = { connected: "Connected", assessed: "Assessed", pr_opened: "PR opened", pr_checks: "PR checks", pr_merged: "PR merged", verified: "Verified", ready: "Ready", failed: "Failed", person: "Needs a person" };
+export const STAGE_NAME: Record<string, string> = { connected: "Connected", assessed: "Assessed", pr_opened: "PR opened", pr_checks: "PR checks", pr_merged: "PR merged", verified: "Verified", ready: "Ready", failed: "Verification failed", person: "Needs a person" };

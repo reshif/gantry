@@ -115,3 +115,9 @@
 /* round three: source-control instance picker */
 .onb-src { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
 .onb-src .rc-d { overflow-wrap: anywhere; }
+
+/* Agent-authored pull request: parts a person confirms, and what must change outside the files. */
+.osx-sensitive { border: 1px solid var(--warn, #b7791f); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.osx-sensitive ul { margin: 4px 0 6px 16px; }
+.osx-blocker { border: 1px solid var(--danger, #c53030); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.osx-purpose { display: block; margin: 0 0 4px 8px; }

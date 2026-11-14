@@ -59,12 +59,12 @@ function markLastEntry(w: Wo, outcome: string, text = ""): void {
  * Approve the open instance of a gate. G0+G1 is the brief confirmation: one confirmation passes it. Other gates pass when N of M is met by distinct approvers
  * under the rule in force now, and never below the number the instance was opened with (tightening applies at once, loosening never approves waiting work, spec 9.3).
  */
-export async function approveGate(tx: import("@gantry/db").Tx, actor: Actor, woId: string, gateId: string, n: number | null, o: { via?: string } = {}): Promise<CmdResult> {
+export async function approveGate(tx: import("@gantry/db").Tx, actor: Actor, woId: string, gateId: string, n: number | null, o: { via?: string; reason?: string } = {}): Promise<CmdResult> {
   const { fx, w } = await begin(tx, actor, woId, "gate.approve");
-  return approveInner(fx, actor, w, gateId, n, o.via);
+  return approveInner(fx, actor, w, gateId, n, o.via, o.reason);
 }
 
-export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, n: number | null, via?: string): Promise<CmdResult> {
+export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, n: number | null, via?: string, overrideReason?: string): Promise<CmdResult> {
   const g = gateDef(fx.catalog, gateId);
   if (!g) throw invalid(`Unknown gate ${gateId}.`);
   if (bayOf(fx.catalog, w)) throw refuse("conflict", `${w.id} is parked in a bay; return it to the belt first.`);
@@ -79,8 +79,23 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   const project = after.st.projects.find((p) => p.id === w.project)!;
   const prog = gateProgress(project, after.wo, gateId, after.st.people);
   const need = Math.max(prog.need, Number(inst.basis.required) || 0);
-  const passes = gateId === "G0G1" ? true : prog.passes && prog.have >= need;
+  const ruled = gateId === "G0G1" ? true : prog.passes && prog.have >= need;
+  // Factory Admin break-glass: a vote the rule would not let pass the gate (author under separation of duties, N of M not reached,
+  // requester alone) passes it as an override, with a reason, flagged in the audit. Nobody else can override.
+  const isAdmin = (after.st.people.find((p) => p.id === by)?.roles ?? []).some((r) => r.role === "factory_admin" && r.scope === "factory");
+  // Bypassing separation of duties is always an override, even when the count would be met with the author's vote.
+  const sodBypass = isAdmin && gateId !== "G0G1" && !!project.approvers[gateId]?.sod && wo.requestedBy === by;
+  const override = isAdmin && (!ruled || sodBypass);
+  if (override && (!overrideReason || overrideReason.trim().length < 5)) {
+    throw refuse("denied", `As Factory Admin you can override ${g.label} (it needs ${need} approval${need === 1 ? "" : "s"}${prog.onlyRequester || wo.requestedBy === by ? ", and you are the author" : ""}). Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "approver", id: "APR-" + gateId, name: "Factory Admin override" } });
+  }
+  const passes = (ruled && !sodBypass) || override;
   const voter = { personId: by, via: via ?? actor.channel, channel: actor.channel };
+  if (override) {
+    const why = overrideReason!.trim();
+    note(w, fx, by, `${g.label} passed by Factory Admin override (${prog.have} of ${need} approvals): ${why}`);
+    ev(fx, w, "gate.override", { gate: gateId, by, text: why, have: prog.have, need, author: wo.requestedBy === by, instance: inst.id }, { category: "approvals" });
+  }
   if (!passes) {
     const unmet = prog.unmet.length ? `; still needs: ${prog.unmet.map((c) => c.text).join("; ")}` : prog.onlyRequester ? "; the requester cannot be the only approver" : "";
     note(w, fx, by, `${g.label} approval ${prog.have} of ${need}.`);
@@ -88,7 +103,7 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
     await saveWo(fx.tx, fx.orgId, w);
     return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${unmet}).`, w.project, { passed: false, have: prog.have, need, instance: inst.id, version: w.version });
   }
-  await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have });
+  await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, ...(override ? { override: true, reason: overrideReason!.trim() } : {}) });
   await closeInstance(fx, inst.id, "decision");
   note(w, fx, by, `${g.label} ${g.name} approved${via && via !== "web" ? ` via ${via}` : ""}.`);
   ev(fx, w, "gate.decision", { gate: gateId, mode: "human", by, trust: null, instance: inst.id }, { category: "approvals" });

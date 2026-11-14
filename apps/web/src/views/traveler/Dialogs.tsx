@@ -6,6 +6,8 @@ import { Dialog } from "../../ui/Overlay";
 import { Field, LockNote, Select } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { useCatalog } from "../projects/kit";
+import { navigate } from "../../lib/router";
+import { updatePrefs } from "../../lib/prefs";
 import { dec, no, openEntry, stName, useTravelerWo, type TDecision } from "./model";
 
 const Err = ({ text }: { text: string }) => (
@@ -87,9 +89,15 @@ export function ReassignDialog({ woId, onClose }: { woId: string; onClose: () =>
   let agents = all.filter((a) => (a.stations || []).includes(st?.id ?? "") && (a.projects === "all" || (a.projects || []).includes(wo.project)));
   const curAgent = all.find((a) => a.id === cur);
   if (curAgent && !agents.some((a) => a.id === cur)) agents = [curAgent, ...agents];
-  const sel = pick ?? cur;
+  const others = agents.filter((a) => a.id !== cur);
+  // A different agent is preselected; with none allowed there is nothing to submit, and the dialog says where to allow one.
+  const sel = pick ?? others[0]?.id ?? cur;
+  const noOthers = !roster.isError && roster.isSuccess && others.length === 0;
   const listed = agents.length ? agents.map((a) => ({ value: a.id, label: `${a.name} ${a.version} · ${a.model}${a.status && a.status !== "active" ? ` (${a.status})` : ""}${a.id === cur ? " (current)" : ""}` })) : cur ? [{ value: cur, label: `${cur} (current)` }] : [];
-  const d = dec(wo, "reassign");
+  const d0 = dec(wo, "reassign");
+  const stationName = st?.name ?? "this station";
+  const d = noOthers && d0.allowed ? no(`No other agent is allowed to staff ${stationName} in this project.`) : d0;
+  const goAgents = (agent?: string) => { onClose(); if (agent) updatePrefs({ agent }); navigate("agents", agent ?? null); };
   const submit = async () => {
     if (busy) return;
     if (sel === cur) {
@@ -115,9 +123,19 @@ export function ReassignDialog({ woId, onClose }: { woId: string; onClose: () =>
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Reassigning agents" />
-          <Field label="Agent" htmlFor="ra-agent" hint={roster.isError ? "The agent list could not be loaded." : agents.length < 2 ? "Only one agent may staff this station here. Allow more on the Agents screen." : null}>
+          <Field label="Agent" htmlFor="ra-agent" hint={roster.isError ? "The agent list could not be loaded." : null}>
             <Select id="ra-agent" options={listed} value={sel} onChange={setPick} />
           </Field>
+          {noOthers ? (
+            <div className="callout callout-warn small" id="ra-none" role="status">
+              <p>{`Nobody else can take ${stationName} here: ${cur ? (curAgent?.name ?? cur) : "the current agent"} is the only agent allowed to staff it in this project, so there is nothing to reassign to.`}</p>
+              <p>To allow another agent, open it on the Agents screen and add this station and this project under Stations and Projects.</p>
+              <div className="osx-actions">
+                {cur ? <button type="button" className="btn btn-sm" id="ra-open-agent" onClick={() => goAgents(cur)}>{`Open ${curAgent?.name ?? "the agent"} on Agents`}</button> : null}
+                <button type="button" className="btn btn-sm" id="ra-create-agent" onClick={() => goAgents()}>Create an agent for this station</button>
+              </div>
+            </div>
+          ) : null}
           <Err text={err} />
         </div>
       }

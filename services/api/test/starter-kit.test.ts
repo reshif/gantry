@@ -141,6 +141,27 @@ d("starter kit in an empty organisation", () => {
     expect(a).toMatchObject({ name: "Our Spec Writer", instructions: "Our own words.", status: "paused", budget: 9 });
     expect((await q(`select count(*)::int n from eval_cases where suite_id = 'SUITE-SPEC'`))[0].n).toBe(STARTER_KIT.agents.find((x) => x.id === "ag-spec")!.suite.cases.length - 1);
   });
+
+  it("an org still on the first built-in Onboarding Agent (it could only draft AGENTS.md) gets the authoring instructions as version 2; an edited one is left alone; running it twice changes nothing more", async () => {
+    const { upgradeOnboardingAgent } = await import("../src/areas/agents/starter-kit.js");
+    const { sha256 } = await import("../src/areas/agents/config.js");
+    const kit = STARTER_KIT.agents.find((a) => a.id === "ag-onboard")!;
+    const old = "You may draft only AGENTS.md. (the first kit's instructions)";
+    await q(`update agents set data = jsonb_set(jsonb_set(data, '{instructions}', to_jsonb($2::text)), '{guardrails}', '{"paths":[".github/workflows/**"],"maxDiff":300}'::jsonb) where org_id = $1 and id = 'ag-onboard'`, [t.orgId, old]);
+    // Published versions are immutable; the test plays the first kit's v1 by bypassing that trigger on one connection.
+    const c0 = await t.db.admin.connect();
+    try { await c0.query("set session_replication_role = replica"); await c0.query(`update agent_versions set instruction_hash = $2 where org_id = $1 and agent_id = 'ag-onboard' and version = 1`, [t.orgId, sha256(old)]); } finally { await c0.query("reset session_replication_role"); c0.release(); }
+    const up = () => t.db.admin.connect().then(async (c) => { try { return await upgradeOnboardingAgent(c as never, t.orgId); } finally { c.release(); } });
+    expect(await up()).toBe(true);
+    const a = (await q(`select live_version, data from agents where org_id = $1 and id = 'ag-onboard'`, [t.orgId]))[0];
+    expect(a.live_version).toBe(2);
+    expect(a.data.instructions).toBe(kit.instructions);
+    expect(a.data.guardrails).toEqual({ paths: [], maxDiff: 1500 });
+    expect((await q(`select version, note from agent_versions where org_id = $1 and agent_id = 'ag-onboard' order by version`, [t.orgId])).map((r) => r.version)).toEqual([1, 2]);
+    expect((await q(`select live_version from skills where org_id = $1 and id = 'sk-onboardpr'`, [t.orgId]))[0].live_version).toBe(2);
+    expect(await up()).toBe(false);
+  });
+
 });
 
 d("starter kit in a seeded organisation", () => {

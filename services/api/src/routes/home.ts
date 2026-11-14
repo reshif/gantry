@@ -1,7 +1,7 @@
 /**
  * Home and activity (spec 8.3). Owns:
- *   GET /api/v1/home       figures, attention queue, my approvals, my conversations, nav badges
- *   GET /api/v1/activity   the latest ledger entries the viewer may see (the home "Live activity" panel)
+ *   GET /api/v1/home       `sections` (built by the caller's rights), my approvals, my conversations, nav badges
+ *   GET /api/v1/activity   the latest ledger entries the viewer may see (no longer read by Home)
  *
  * Reads only: nothing here changes state, so there is no command pipeline to go through.
  */

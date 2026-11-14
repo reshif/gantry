@@ -71,6 +71,21 @@ describe("stream parsing", () => {
     expect(extractStructuredOutput('{"c":3}')).toEqual({ c: 3 });
     expect(extractStructuredOutput("no json")).toBeUndefined();
   });
+  it("reads a result whose string values contain Markdown code fences (a design note with a ```python example)", () => {
+    const result = {
+      goal: "Report devices with no secrets group",
+      designNotes: "### Interfaces\n`report.py`:\n```python\ndef find(devices):\n    return [d for d in devices if not d.secrets_group]\n```\nThen `jobs.py` wraps it.\n```\nplain fence\n```",
+      risks: ["Braces { and } and \"quotes\" inside strings must not end the object"],
+    };
+    const text = `I've designed the job. Summary first.\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
+    expect(extractStructuredOutput(text)).toEqual(result);
+    // A fence after the JSON (prose with a code sample) does not hide the object either.
+    expect(extractStructuredOutput(`${text}\n\nExample:\n\`\`\`python\nprint(1)\n\`\`\``)).toEqual(result);
+  });
+  it("falls back to the last balanced object when the fence is missing or unlabeled", () => {
+    expect(extractStructuredOutput('Done.\n```\n{"a":{"b":"x}y"}}\n```')).toEqual({ a: { b: "x}y" } });
+    expect(extractStructuredOutput('prose {not json} then {"ok":true}')).toEqual({ ok: true });
+  });
   it("ignores non-JSON lines", () => {
     expect(parseStreamLine("garbage")).toBeUndefined();
     expect(parseStreamLine('{"type":"assistant"}')?.type).toBe("assistant");

@@ -10,10 +10,11 @@
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4): the decision point, audit of success and denial, state and event in one
  * transaction, `If-Match` against the locked row, idempotent creates. Reads return the legacy shapes.
  */
-import { visibleProjects } from "@gantry/domain";
+import { gateApprovers, visibleProjects } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { command, policyState, refuse, type CommandSpec } from "../core/index.js";
+import { command, decide, policyState, refuse, type CommandSpec } from "../core/index.js";
+import { loadFlow, stateWithPinned } from "../areas/workorders/model.js";
 import { actionForGate, approveGate, parseGateId, rejectGate } from "../areas/workorders/gates.js";
 import { addFollowup, decline, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
 import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
@@ -110,6 +111,21 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     return { items, next: null, total: items.length };
   });
 
+  /** Who may approve this gate (spec 9.3): the rule in plain words, the progress, the people it reaches, whether it can pass as configured. Default deny: project.view. */
+  app.get("/api/v1/work-orders/:id/gates/:gate/approvers", async (req) => {
+    const { id, gate } = z.object({ id: z.string().min(1).max(100), gate: z.string().min(1).max(40) }).parse(req.params);
+    const s = await scopeOf(req, id);
+    if (!(await decide(req, "project.view", { project: s.project })).allowed) throw refuse("not_found", "No such work order.");
+    const row = (await readWoRow(g.pool, req.gx.orgId, id))!;
+    const st = await stateWithPinned(g.pool, req.gx.orgId, await loadFlow(g.pool, req.gx.orgId, { ids: [id] }), row);
+    const wo = st.workOrders[0];
+    const r = wo ? gateApprovers(st, wo, gate, Date.now()) : null;
+    if (!r) throw refuse("not_found", "No such gate.");
+    const who = req.gx.principal?.kind === "person" ? req.gx.principal.id : null;
+    const [edit, grant] = await Promise.all([decide(req, "approvers.edit", { project: s.project }), decide(req, "project.members", { project: s.project })]);
+    return { ...r, viewerCanOverride: !!who && r.overrides.some((o) => o.id === who), can: { editRule: edit.allowed, editWhy: edit.allowed ? "" : edit.reason, grantRole: grant.allowed, grantWhy: grant.allowed ? "" : grant.reason } };
+  });
+
   app.get("/api/v1/work-orders/:id/record", { config: { apiKey: "wo.read" } }, async (req) => {
     const { id } = Id.parse(req.params);
     await scopeOf(req, id);
@@ -190,8 +206,8 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/gate-instances/:id/approve", async (req) => {
     const { id } = Id.parse(req.params);
     const gi = parseGateId(id);
-    const via = z.looseObject({ via: Via }).parse(req.body ?? {}).via;
-    return command(req, spec(gi.woId, await gateAction(req, gi.gateId, "approve"), await scopeOf(req, gi.woId)), (tx, a) => approveGate(tx, a, gi.woId, gi.gateId, gi.n, via ? { via } : {}));
+    const body = z.looseObject({ via: Via, reason: z.string().trim().max(1000).optional() }).parse(req.body ?? {});
+    return command(req, spec(gi.woId, await gateAction(req, gi.gateId, "approve"), await scopeOf(req, gi.woId)), (tx, a) => approveGate(tx, a, gi.woId, gi.gateId, gi.n, { ...(body.via ? { via: body.via } : {}), ...(body.reason ? { reason: body.reason } : {}) }));
   });
   app.post("/api/v1/gate-instances/:id/reject", async (req) => {
     const { id } = Id.parse(req.params);

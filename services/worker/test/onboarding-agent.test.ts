@@ -203,12 +203,12 @@ d("onboarding agent steps", () => {
       guidelineSuggestions: ["Require a lockfile check in CI."], forPeople: ["Turn on branch protection."], summary: "Drafted AGENTS.md.", ...over,
     });
 
-    it("starts the agent for AGENTS.md only; its validated draft goes into the pull request, which says who drafted it", async () => {
+    it("starts the agent with the rule plan as a suggestion; its validated AGENTS.md draft goes into the pull request, which says who drafted it", async () => {
       const r = await assessedRepo();
       expect(w.broker.calls.filter((c) => c.op === "onboarding-pr")).toHaveLength(0);
       const c = (await carrier(r.id))!;
       expect(c.data.input).toMatchObject({ task: "draft_pr", protectedPaths: [".github/workflows/**"] });
-      expect(c.data.input.plan.map((f: any) => f.path)).toContain("AGENTS.md");
+      expect(c.data.input.suggestedPlan.map((f: any) => f.path)).toContain("AGENTS.md");
       await deliver(c, "succeeded", { output: goodDraft() });
       const pr = w.broker.calls.find((k) => k.op === "onboarding-pr")!.body!;
       const agentsMd = pr.files.find((f: any) => f.path === "AGENTS.md").content as string;
@@ -216,7 +216,7 @@ d("onboarding agent steps", () => {
       expect(agentsMd).toContain("- Type check: `npx tsc --noEmit`");
       expect(agentsMd).toContain("Source is in src/; tests sit beside it.");
       expect(agentsMd).toContain("Run `npm test` before opening a PR.");
-      // Files the agent may not draft are the rules' own.
+      // Files the agent did not author come from the rule-based plan (an AGENTS.md-only draft is the legacy shape).
       expect(pr.files.find((f: any) => f.path === "CODEOWNERS").content).toContain("* @acme/platform");
       expect(pr.files.find((f: any) => f.path === "CODEOWNERS").content).not.toMatch(/Onboarding Agent|drafted/i);
       expect(pr.body).toMatch(/Drafted by Gantry's Onboarding Agent v\d+ \(model claude-sonnet-5-5\)/);
@@ -231,20 +231,78 @@ d("onboarding agent steps", () => {
       expect((await w.q(`select actor from events where type = 'onboarding.pr' and subject->>'id' = $1`, [r.id]))[0].actor).toBe("ag-onboard");
     });
 
-    it("the agent cannot add a file: a path outside the plan, a protected path, or a file it may not draft discards its draft and opens the rule-based pull request", async () => {
-      for (const path of [".github/workflows/evil.yml", "src/index.ts", "CODEOWNERS"]) {
+    // Changed deliberately: the agent is no longer confined to AGENTS.md and the rule plan. It authors files; the rails refuse unsafe ones and send sensitive ones to the session for confirmation.
+    it("the agent authors files: a safe scaffold is opened exactly as authored (no rule-plan files are added)", async () => {
+      const r = await assessedRepo();
+      const files = [{ path: "docs/DEVELOPING.md", content: "# Developing\n\nRun npm test.\n", purpose: "how to work here" }, { path: "AGENTS.md", content: "# AGENTS.md\n\nTest: `npm test`\n" }];
+      await deliver((await carrier(r.id))!, "succeeded", { output: goodDraft({ files, plannedFiles: [] }) });
+      const pr = w.broker.calls.filter((k) => k.op === "onboarding-pr").at(-1)!.body!;
+      expect(pr.files.map((f: any) => f.path).sort()).toEqual(["AGENTS.md", "docs/DEVELOPING.md"]);
+      expect(pr.body).toMatch(/chose these files/);
+      const x = await doc(r.id);
+      expect(x.d.drafter).toMatchObject({ mode: "agent" });
+      expect(x.d.pr.files.every((f: any) => f.source === "agent")).toBe(true);
+    });
+
+    it("the rails: existing application code, a secret, a traversal path, or workflow files nobody confirmed discard the draft and open the rule-based pull request", async () => {
+      const cases: [string, Record<string, unknown>, RegExp][] = [
+        ["existing code", { path: "src/index.ts", content: "export {};\n" }, /existing application code/],
+        ["a secret", { path: "docs/a.md", content: "key AKIAABCDEFGHIJKLMNOP\n" }, /credential/],
+        ["traversal", { path: "../x.md", content: "x\n" }, /not a safe repository path/],
+        ["an unconfirmed workflow", { path: ".github/workflows/evil.yml", content: "on: push\n" }, /a person must confirm/],
+      ];
+      for (const [name, file, why] of cases) {
         const r = await assessedRepo();
-        await deliver((await carrier(r.id))!, "succeeded", { output: goodDraft({ plannedFiles: [{ path, purpose: "x", closes: "agents" }] }) });
+        await deliver((await carrier(r.id))!, "succeeded", { output: goodDraft({ files: [file] }) });
         const pr = w.broker.calls.filter((k) => k.op === "onboarding-pr").at(-1)!.body!;
-        expect(pr.files.map((f: any) => f.path).sort()).toEqual([".gantry/factory.yml", ".github/workflows/gantry-ci.yml", ".tool-versions", "AGENTS.md", "CODEOWNERS"]);
-        expect(pr.files.find((f: any) => f.path === "AGENTS.md").content).not.toContain("npx tsc --noEmit");
+        expect(pr.files.map((f: any) => f.path).sort(), name).toEqual([".gantry/factory.yml", ".github/workflows/gantry-ci.yml", ".tool-versions", "AGENTS.md", "CODEOWNERS"]);
         expect(pr.files.find((f: any) => f.path === "AGENTS.md").content).toContain("rule-based, no AI agent involved");
-        expect(pr.body).toContain("no AI agent was involved");
         const x = await doc(r.id);
-        expect(x.d.drafter).toMatchObject({ mode: "rule-based" });
-        expect(x.d.drafter.reason).toMatch(/not in the plan|protected path|may draft only/);
+        expect(x.d.drafter, name).toMatchObject({ mode: "rule-based" });
+        expect(x.d.drafter.reason, name).toMatch(why);
         expect(x.d.pr.files.every((f: any) => f.source === "observed")).toBe(true);
       }
+    });
+
+    describe("a plan approved in the onboarding session", () => {
+      const uv = [
+        { path: "pyproject.toml", content: "[project]\nname = \"x\"\nversion = \"0.1.0\"\n", purpose: "uv project" },
+        { path: ".github/workflows/ci.yml", content: "name: ci\non: [pull_request]\njobs:\n  test:\n    name: ci/test\n    runs-on: ubuntu-latest\n    steps:\n      - run: uv sync\n", purpose: "CI" },
+        { path: "AGENTS.md", content: "# AGENTS.md\n", purpose: "commands" },
+      ];
+      async function approved(confirmed: boolean, files: unknown[] = uv, facts: Record<string, unknown> = {}) {
+        const r = await repo({ stage: "assessed", busy: "opening_pr" });
+        w.broker.inspectFacts = { ...bareFacts(), files: ["README.md"], contents: {}, ...facts } as never;
+        await w.q(`update onboarding_runs set data = data || $3::jsonb where org_id = $1 and id = $2`, [w.orgId, r.runId, JSON.stringify({ sessionApproved: { by: "p-lena", confirmedSensitive: confirmed }, agentDraft: { result: { files, summary: "s" }, drafter: { mode: "agent", agent: "ag-onboard", version: 2, model: "m" } } })]);
+        await w.enqueue("onboarding.open_pr", { repoId: r.id, runId: r.runId, by: "p-lena" });
+        await w.drain();
+        return r;
+      }
+
+      it("the broker receives exactly the validated files once the sensitive parts were confirmed, and the body lists what was confirmed", async () => {
+        const r = await approved(true);
+        const pr = w.broker.calls.filter((k) => k.op === "onboarding-pr").at(-1)!.body!;
+        expect(pr.files).toEqual(uv.map((f) => ({ path: f.path, content: f.content })));
+        expect(pr.body).toMatch(/Confirmed by a person before this was opened/);
+        expect((await doc(r.id)).stage).toBe("pr_opened");
+      });
+
+      it("without the confirmation nothing is opened, and what was approved is not silently replaced by the rule-based plan", async () => {
+        const before = w.broker.calls.filter((k) => k.op === "onboarding-pr").length;
+        const r = await approved(false);
+        expect(w.broker.calls.filter((k) => k.op === "onboarding-pr").length).toBe(before);
+        const x = await doc(r.id);
+        expect(x.d.blocker ?? x.d.timeline.map((t: any) => t.text).join(" ")).toMatch(/a person must confirm/);
+      });
+
+      it("an App without the workflows permission is told so with the exact steps, before anything reaches GitHub", async () => {
+        const before = w.broker.calls.filter((k) => k.op === "onboarding-pr").length;
+        const inst = { id: 1, permissions: { contents: "write", metadata: "read" }, repositorySelection: "selected", targetType: "User" };
+        const r = await approved(true, uv, { protection: { defaultBranch: "main", installation: inst, rulesets: [], branchProtection: null, requiresGantryCheck: false, gantryCheckPinned: false, appOnBypassList: false } });
+        expect(w.broker.calls.filter((k) => k.op === "onboarding-pr").length).toBe(before);
+        const x = await doc(r.id);
+        expect(JSON.stringify(x.d)).toMatch(/not allowed to write workflow files.*Workflows to Read and write/);
+      });
     });
 
     it("a draft that adds more than the diff cap, or a command that is not safe to write into a file, is not used", async () => {

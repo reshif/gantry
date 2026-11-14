@@ -7,7 +7,6 @@ import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import AuditView from "./audit";
-import HomeView from "./home";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
 
@@ -154,105 +153,5 @@ describe("Audit", () => {
     expect(await screen.findByText("The ledger is empty")).toBeTruthy();
     fireEvent.click(document.getElementById("aud-verify")!);
     expect(await screen.findByText("Chain intact: 12 entries verified.")).toBeTruthy();
-  });
-});
-
-describe("Home", () => {
-  const MINE = { workOrders: [], projects: [], factoryRole: true };
-  const FIG = { projects: { active: 0, archived: 0 }, inFlight: 0, running: 0, inBays: 0, shippedToday: 0, shippedWeek: 0, gatesWaiting: 0, oldestWaitMs: 0, lateGates: 0, stops: [], killedWorkOrders: 0, spent: 0, budget: 0, agentSuccess: null, agentSuccessTrend: [] };
-  const factory = (over: Record<string, unknown> = {}) => ({
-    mode: "factory", approvals: [], conversations: [], badges: {}, mine: MINE, figures: FIG, attention: [],
-    control: { killed: null, restoreApprovals: [], restoreNeeds: 2, admins: [{ id: "p-asha", name: "Asha Raman" }], impact: { projects: 0, workOrders: 0, running: 0, prs: 0 } },
-    human: { waiting: [], gates: { count: 0, oldestMs: 0, sole: 0 }, trust: { proposals: [], demotions: [] }, learning: [] },
-    onboarding: { stages: [{ id: "connected", name: "Connected", count: 0 }, { id: "ready", name: "Ready", count: 0 }], stuck: [], open: [], total: 0, ready: 0 },
-    spend: { projects: [], vendors: [] }, ...over,
-  });
-
-  it("an empty factory shows real empty states, never sample data", async () => {
-    setup(ASHA, { "GET /api/v1/home": () => ({ body: factory() }) });
-    mount(<HomeView />);
-    expect(await screen.findByRole("heading", { name: "Acme factory" })).toBeTruthy();
-    expect(screen.getByText("Nothing needs attention")).toBeTruthy();
-    expect(screen.getByText("Factory running. 0 projects, 0 work orders in flight, 0 waiting on approvers.")).toBeTruthy();
-    expect(document.getElementById("hm-kpi-success")?.textContent).toContain("no scored runs yet");
-    expect(screen.getByText("Nobody has approvals waiting.")).toBeTruthy();
-    expect(screen.getByText("No learning proposals waiting for review.")).toBeTruthy();
-    expect(screen.getByText("No repos are connected yet.")).toBeTruthy();
-    expect(document.getElementById("hm-kill")).toBeTruthy();
-    expect(screen.getByText("No projects yet")).toBeTruthy();
-  });
-
-  it("renders the attention queue by severity and a critical callout from the API", async () => {
-    setup(ASHA, {
-      "GET /api/v1/home": () => ({
-        body: factory({
-          figures: { ...FIG, inFlight: 4, running: 2, gatesWaiting: 1, oldestWaitMs: 3_600_000, lateGates: 1, stops: ["Payments halted"] },
-          attention: [
-            { id: "hm-att-wo-WO-1", sev: 0, icon: "shield", title: "WO-1 on security hold", where: "Payments", sub: "Secret in diff", act: { label: "Traveler", route: "traveler", wo: "WO-1", project: "payments" } },
-            { id: "hm-att-sla-WO-2-G2", sev: 1, icon: "clock", title: "G2 past SLA on WO-2", where: "Payments", sub: "Waiting 30 h", act: { label: "Traveler", route: "traveler", wo: "WO-2", project: "payments" } },
-          ],
-        }),
-      }),
-    });
-    mount(<HomeView />);
-    expect(await screen.findByText("1 critical: WO-1 on security hold.")).toBeTruthy();
-    expect(screen.getByText("Factory running. 0 projects, 4 work orders in flight, 1 waiting on approvers, 2 items need attention.")).toBeTruthy();
-    const items = document.querySelectorAll(".hm-att-item");
-    expect(items).toHaveLength(2);
-    expect(items[0]?.className).toContain("hm-sev-crit");
-    expect(document.getElementById("hm-kpi-gates")?.textContent).toContain("1 past SLA");
-    expect(document.getElementById("hm-kpi-stops")?.textContent).toContain("Payments halted");
-  });
-
-  it("shows a killed factory with its restore steps and who can approve next", async () => {
-    setup(ASHA, {
-      "GET /api/v1/home": () => ({
-        body: factory({ control: { killed: { by: "p-asha", at: Date.now() - 60_000, reason: "Leaked token", mode: "hold" }, restoreApprovals: [{ by: "p-asha", at: Date.now() }], restoreNeeds: 2, admins: [{ id: "p-asha", name: "Asha Raman" }, { id: "p-omar", name: "Omar Haddad" }], impact: { projects: 0, workOrders: 0, running: 0, prs: 0 } } }),
-      }),
-    });
-    mount(<HomeView />);
-    expect(await screen.findByText("Factory killed")).toBeTruthy();
-    expect(screen.getByText("Leaked token")).toBeTruthy();
-    expect(screen.getByText("Restore approvals 1 of 2")).toBeTruthy();
-    expect(screen.getByText("Can approve next: Omar Haddad.")).toBeTruthy();
-    const btn = document.getElementById("hm-restore")!;
-    expect(btn.textContent).toContain("Approve restore (2 of 2)");
-    // The same admin already approved, so the button is locked with the reason.
-    await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBe("true"));
-  });
-
-  it("people without a factory role get My work, with their approvals and questions from the API", async () => {
-    const calls = setup(TOMAS, {
-      "GET /api/v1/home": () => ({
-        body: {
-          mode: "mine", badges: {},
-          approvals: [{ wo: "WO-9", title: "Fix rounding", gate: "G3d", gateLabel: "G3d", gateName: "Design review", project: "payments", projectName: "Payments", have: 0, need: 1 }, { repo: "r1", repoName: "pay-api", pr: 7, project: "payments", projectName: "Payments" }],
-          conversations: [{ wo: "WO-10", title: "Add export", project: "payments", question: "Which format?" }],
-          mine: { workOrders: [{ id: "WO-10", title: "Add export", project: "payments", projectName: "Payments", state: "waiting", bay: null, bayName: null, station: "Intake", cls: "feature", doneAt: null }], projects: [], factoryRole: false },
-        },
-      }),
-      "POST /api/v1/gate-instances/WO-9%3AG3d/approve": () => ({ body: { ok: true, msg: "G3d approved on WO-9." } }),
-    });
-    mount(<HomeView />);
-    expect(await screen.findByRole("heading", { name: "My work" })).toBeTruthy();
-    expect(document.getElementById("hm-my-k1")?.textContent).toContain("2");
-    expect(screen.getByText("Which format?")).toBeTruthy();
-    expect(screen.getByText("Merge onboarding PR pay-api#7")).toBeTruthy();
-    expect(document.getElementById("hm-tok-WO-10")?.className).toContain("tok-waiting");
-    expect(document.getElementById("hm-to-factory")).toBeNull();
-    fireEvent.click(document.getElementById("hm-my-ok-WO-9-G3d")!);
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/approve"))).toBe(true));
-    expect(await screen.findByText("G3d approved on WO-9.")).toBeTruthy();
-    expect(screen.getByText("No projects yet")).toBeTruthy();
-  });
-
-  it("a Factory Admin can switch to My work and back", async () => {
-    setup(ASHA, { "GET /api/v1/home": () => ({ body: factory() }) });
-    mount(<HomeView />);
-    fireEvent.click(await screen.findByText("My work"));
-    expect(await screen.findByRole("heading", { name: "My work" })).toBeTruthy();
-    expect(screen.getByText("No approvals waiting")).toBeTruthy();
-    fireEvent.click(document.getElementById("hm-to-factory")!);
-    expect(await screen.findByRole("heading", { name: "Acme factory" })).toBeTruthy();
   });
 });

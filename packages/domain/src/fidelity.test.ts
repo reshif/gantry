@@ -82,7 +82,17 @@ describe("gateDecision equals legacy", () => {
       for (const gate of Object.keys(wo.gates)) {
         const lw = G.find.wo(wo.id);
         for (const person of S.people) {
-          expect(gateDecision(S, person.id, wo, gate, NOW), `${wo.id} ${gate} ${person.id}`).toEqual(G.gateDecision(person.id, lw, gate));
+          const mine = gateDecision(S, person.id, wo, gate, NOW);
+          const legacy = G.gateDecision(person.id, lw, gate);
+          // Deliberate divergence (user decision 2026-11-14): a Factory Admin may decide any gate, including their own work order under
+          // separation of duties; the API turns a vote the rule would not pass into an audited override with a reason. The legacy
+          // prototype denied the author and used other wording, so for Factory Admins only the outcome on non-SoD cases is compared.
+          if (person.roles.some((r) => r.role === "factory_admin" && r.scope === "factory") && gate !== "G0G1" && mine.allowed) {
+            if (legacy.allowed) expect(mine.rule, `${wo.id} ${gate} ${person.id}`).toEqual(legacy.rule);
+            else expect(legacy.reason, `${wo.id} ${gate} ${person.id}`).toMatch(/Separation of duties|already approved/);
+          } else {
+            expect(mine, `${wo.id} ${gate} ${person.id}`).toEqual(legacy);
+          }
           n++;
         }
       }

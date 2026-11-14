@@ -63,3 +63,45 @@ export async function loadStarterKit(db: Queryable, orgId: string): Promise<stri
   for (const a of STARTER_KIT.agents) if (await loadAgent(db, orgId, a, skills)) loaded.push(a.id);
   return loaded;
 }
+
+const UPGRADE_NOTE = "Starter kit 1.1.0: the Onboarding Agent authors the whole onboarding pull request";
+
+/**
+ * Brings an org's built-in Onboarding Agent from the first kit's instructions (it could only draft AGENTS.md) to the current ones (it authors the pull request), as a NEW version
+ * (the old one stays in the history and can be restored). Only an agent still on its untouched built-in version 1 is upgraded: an agent a person edited, versioned or replaced is left alone.
+ * The skill that carries the drafting instructions moves the same way, the diff cap moves from the old default (300) to the scaffold default, and the eval cases are brought along.
+ */
+export async function upgradeOnboardingAgent(db: Queryable, orgId: string): Promise<boolean> {
+  const kit = STARTER_KIT.agents.find((a) => a.id === "ag-onboard");
+  if (!kit) return false;
+  const row = (await db.query<{ live_version: number | null; data: Record<string, unknown>; version: number }>(`select live_version, data, version from agents where org_id = $1 and id = $2 for update`, [orgId, kit.id])).rows[0];
+  if (!row || row.live_version !== 1 || row.data.builtin !== true) return false;
+  const v1 = (await db.query<{ instruction_hash: string; body: Record<string, unknown> }>(`select instruction_hash, body from agent_versions where org_id = $1 and agent_id = $2 and version = 1`, [orgId, kit.id])).rows[0];
+  const count = Number((await db.query<{ n: string }>(`select count(*)::text as n from agent_versions where org_id = $1 and agent_id = $2`, [orgId, kit.id])).rows[0]?.n ?? "0");
+  const cur = typeof row.data.instructions === "string" ? row.data.instructions : "";
+  if (!v1 || count !== 1 || v1.instruction_hash !== sha256(cur) || sha256(cur) === sha256(kit.instructions)) return false;
+  const gr = (row.data.guardrails ?? {}) as { paths?: string[]; maxDiff?: number };
+  const guardrails = { paths: gr.paths ?? [], maxDiff: gr.maxDiff === 300 || !gr.maxDiff ? kit.guardrails.maxDiff : gr.maxDiff };
+  if (JSON.stringify(gr.paths ?? []) !== "[]" && (gr.paths ?? []).length && (gr.paths ?? []).every((p) => /^\.github\/workflows|^\.gantry|CODEOWNERS|^\.github/.test(p))) guardrails.paths = [];
+  const cfg = cfgOf({ ...row.data, instructions: kit.instructions, guardrails });
+  const promoted = Array.isArray(row.data.promoted) ? (row.data.promoted as number[]) : [1];
+  await db.query(
+    `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by) values ($1,$2,2,$3::jsonb,'',$4,$5,$6,now(),'system')`,
+    [orgId, kit.id, json({ label: "1.1.0", rc: false, diff: "instructions, guardrails", builtin: true, ...snapshotOf(cfg, kit.skills) }), sha256(cfg.instructions), cfg.model, UPGRADE_NOTE],
+  );
+  await db.query(`update agents set live_version = 2, data = $3::jsonb, version = version + 1 where org_id = $1 and id = $2`, [orgId, kit.id, json({ ...row.data, instructions: cfg.instructions, guardrails: cfg.guardrails, promoted: [...promoted, 2] })]);
+  const skill = STARTER_KIT.skills.find((s) => s.id === "sk-onboardpr");
+  const sk = skill ? (await db.query<{ live_version: number; data: Record<string, unknown> }>(`select live_version, data from skills where org_id = $1 and id = $2`, [orgId, skill.id])).rows[0] : undefined;
+  if (skill && sk && sk.live_version === 1 && sk.data.builtin === true) {
+    await db.query(
+      `insert into skill_versions (org_id, skill_id, version, body, content_hash, note, published_at, published_by) values ($1,$2,2,$3::jsonb,$4,$5,now(),'system') on conflict do nothing`,
+      [orgId, skill.id, json({ label: "1.1.0", name: skill.name, desc: skill.desc, when: skill.when, body: skill.body, resources: [] }), sha256(skill.body), UPGRADE_NOTE],
+    );
+    await db.query(`update skills set live_version = 2, name = $3, description = $4 where org_id = $1 and id = $2`, [orgId, skill.id, skill.name, skill.desc]);
+  }
+  for (const c of kit.suite.cases.filter((x) => x.id === "ONB-04" || x.id === "ONB-08")) {
+    const body = { by: "system", task: c.task, checks: c.checks, repo: null, commit: null, project: null, ...(c.cls ? { cls: c.cls } : {}), ...(c.skill ? { skill: c.skill } : {}), rules: c.rules, builtin: true };
+    await db.query(`insert into eval_cases (org_id, id, suite_id, name, body, golden) values ($1,$2,$3,$4,$5::jsonb,false) on conflict (org_id, id) do update set name = excluded.name, body = excluded.body where eval_cases.body->>'builtin' = 'true'`, [orgId, c.id, kit.suite.id, c.name, json(body)]);
+  }
+  return true;
+}

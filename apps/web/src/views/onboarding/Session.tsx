@@ -11,6 +11,7 @@ import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { decide, markSeen, sendTurn, useSession, type Session, type SessionMessage } from "./session-api";
 import { stageName, type RepoV } from "./kit";
+import { QuestionCard } from "../session/kit";
 
 type Proposal = Extract<SessionCard, { kind: "proposal" }>;
 const ACTORS: Record<string, string> = { system: "Gantry", "ag-onboard": "Onboarding Agent", ci: "CI" };
@@ -58,12 +59,16 @@ function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Se
   const [asking, setAsking] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   const pending = c.status === "pending";
+  const sensitive = (c.sensitive ?? []).filter((x) => x.id !== "guideline");
+  const guideline = (c.sensitive ?? []).find((x) => x.id === "guideline");
+  const blocked = (c.blockers ?? []).length > 0;
   const mayApprove = c.what === "merge" ? s.can.merge : s.can.talk;
   const why = c.what === "merge" ? "You do not have the right to merge onboarding pull requests. Ask someone who does, or merge it on GitHub." : s.can.talkWhy;
   const run = async (d: "approve" | "changes" | "discard") => {
     setBusy(true);
-    const r = await decide(s.repoId, m.id, c.id, d, d === "changes" ? text : undefined);
+    const r = await decide(s.repoId, m.id, c.id, d, d === "changes" ? text : undefined, d === "approve" && sensitive.length > 0 ? confirmed : undefined);
     setBusy(false);
     ui.toast(r.msg, r.ok ? "ok" : "error");
     if (r.ok && d === "changes") { setAsking(false); setText(""); send({ kind: "continue" }); }
@@ -78,6 +83,15 @@ function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Se
         <span className={`osx-status st-${c.status}`}>{label[c.status]}{c.decidedBy && c.status !== "superseded" ? <> · <Who id={c.decidedBy} /></> : null}</span>
       </header>
       <p className="small">{c.summary}</p>
+      {sensitive.length ? (
+        <div className="osx-sensitive" role="group" aria-label="Parts to confirm">
+          <strong className="small">Needs your explicit confirmation</strong>
+          <ul className="small">{sensitive.map((x) => <li key={x.id}><strong>{x.label}</strong>{x.paths.length ? <> <span className="mono">{x.paths.join(", ")}</span></> : null}: {x.reason}</li>)}</ul>
+          {guideline ? <p className="muted small">{guideline.reason}</p> : null}
+          {pending ? <label className="small"><input type="checkbox" id={`osx-confirm-${c.id}`} checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> {`I have read these and confirm: ${sensitive.map((x) => x.label.toLowerCase()).join(", ")}.`}</label> : null}
+        </div>
+      ) : null}
+      {(c.blockers ?? []).map((b) => <div key={b.id} className="osx-blocker small" role="alert"><strong>{b.message}</strong><p>{b.fix}</p></div>)}
       {c.files.length ? (
         <ul className="osx-files">
           {c.files.map((f) => (
@@ -89,16 +103,17 @@ function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Se
                 <span className="mono small osx-minus">{`-${f.minus}`}</span>
                 <Source source={f.source} />
               </button>
+              {f.purpose ? <span className="muted small osx-purpose">{f.purpose}</span> : null}
               {open === f.path ? <pre className="osx-diff" aria-label={`Added lines of ${f.path}`}>{f.added.map((l) => `+ ${l}`).join("\n")}</pre> : null}
             </li>
           ))}
         </ul>
       ) : null}
-      {c.files.length ? <p className="muted small">{`${c.files.length} file${c.files.length === 1 ? "" : "s"}, +${total.plus} -${total.minus}. Nothing is written to GitHub until a person approves.`}</p> : null}
+      {c.files.length ? <p className="muted small">{`${c.files.length} file${c.files.length === 1 ? "" : "s"}, +${total.plus} -${total.minus}${c.diffCap ? ` (cap ${c.diffCap} lines)` : ""}. Nothing is written to GitHub until a person approves.`}</p> : null}
       {pending ? (
         <div className="osx-actions">
-          <Btn kind="primary" id={`osx-approve-${c.id}`} label={c.what === "merge" ? "Approve and merge" : c.what === "update_pr" ? "Approve and update the PR" : "Approve and open the PR"} disabled={busy || !mayApprove} disabledReason={mayApprove ? undefined : why} onClick={() => void run("approve")} />
-          {c.what !== "merge" ? <Btn id={`osx-changes-${c.id}`} label="Ask for changes" disabled={busy || !s.can.talk} onClick={() => setAsking(!asking)} /> : null}
+          <Btn kind="primary" id={`osx-approve-${c.id}`} label={c.what === "merge" ? "Approve and merge" : c.what === "exception" ? "Approve the exception" : c.what === "update_pr" ? "Approve and update the PR" : "Approve and open the PR"} disabled={busy || !mayApprove || (sensitive.length > 0 && !confirmed)} disabledReason={!mayApprove ? why : sensitive.length > 0 && !confirmed ? "Confirm the parts listed above first." : undefined} onClick={() => void run("approve")} />
+          {c.what !== "merge" && c.what !== "exception" ? <Btn id={`osx-changes-${c.id}`} label="Ask for changes" disabled={busy || !s.can.talk} onClick={() => setAsking(!asking)} /> : null}
           <Btn id={`osx-discard-${c.id}`} label="Discard" disabled={busy || !s.can.talk} onClick={() => void run("discard")} />
         </div>
       ) : null}
@@ -113,21 +128,12 @@ function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Se
   );
 }
 
-function QuestionCard({ c, answer, last }: { c: Extract<SessionCard, { kind: "question" }>; answer: (t: string) => void; last: boolean }) {
-  return (
-    <article className="osx-card osx-question" aria-label="Question from the agent">
-      <strong>{c.question}</strong>
-      {c.options.length && last ? <div className="osx-options">{c.options.map((o) => <Btn key={o} small label={o} onClick={() => answer(o)} />)}</div> : null}
-    </article>
-  );
-}
-
 function Cards({ m, s, send, last }: { m: SessionMessage; s: Session; send: (b: { kind: "message" | "continue"; text?: string }) => void; last: boolean }) {
   return (
     <>
       {(m.data.cards ?? []).map((c, i) =>
         c.kind === "progress" ? <p key={i} className="osx-progress small"><Icon name="check" /> {c.text}{c.detail ? <span className="muted">{` · ${c.detail}`}</span> : null}</p>
-        : c.kind === "question" ? <QuestionCard key={i} c={c} last={last} answer={(t) => send({ kind: "message", text: t })} />
+        : c.kind === "question" ? <QuestionCard key={i} question={c.question} options={c.options} answered={c.answered} last={last} answer={(t) => send({ kind: "message", text: t })} />
         : <ProposalCard key={i} m={m} c={c} s={s} send={send} />)}
     </>
   );

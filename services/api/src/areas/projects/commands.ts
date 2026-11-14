@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { gateLock, isFactoryAdminPerson, type ApproverRule, type Project, type ProjectFlow, type Template, type WorkClass } from "@gantry/domain";
+import { gateLock, ruleWarning, isFactoryAdminPerson, type ApproverRule, type Project, type ProjectFlow, type Template, type WorkClass } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
@@ -342,9 +342,11 @@ export async function putApprovers(tx: Tx, a: Actor, projectId: string, gateId: 
   const before = project.approvers[gateId] ?? null;
   const ruleVersion = await publishRule(tx, a.orgId, projectId, gateId, rule, a.id);
   const version = await bumpProject(tx, a.orgId, projectId);
+  // Non-blocking: a rule that fewer people can satisfy than it requires saves, and says so.
+  const warning = ruleWarning((await readPeople(tx, a.orgId)) as never, project, rule, def.label);
   return {
-    msg: `Saved approvers.${gateId}.`, events: [evt("approvers.edit", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, jsonOf(before), jsonOf(rule))],
-    extra: { version, ruleVersion }, changes: ["projects"], project: projectId,
+    msg: `Saved approvers.${gateId}.${warning ? ` Warning: ${warning}` : ""}`, events: [evt("approvers.edit", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, jsonOf(before), jsonOf(rule))],
+    extra: { version, ruleVersion, ...(warning ? { warning } : {}) }, changes: ["projects"], project: projectId,
   };
 }
 

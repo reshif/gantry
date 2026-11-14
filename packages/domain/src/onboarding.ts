@@ -7,6 +7,7 @@
 import { z } from "zod";
 import type { GuidelineItem, OnboardFinding, Severity } from "./types.js";
 import { authorLine, type AgentsDraft, type Authorship } from "./onboarding-agent.js";
+import type { SensitiveFlag } from "./onboarding-scaffold.js";
 
 /* ------------------------------------------------------------------ facts ---- */
 
@@ -263,10 +264,10 @@ export function assess(f: RepoFacts, ctx: AssessContext): AssessedFinding[] {
       ? { id: "ci", check: "CI present", ok: true, sev: SEV.ci!, fix: "", file: null, detail: `${workflows.length} workflow file${workflows.length > 1 ? "s" : ""}: ${workflows.slice(0, 3).join(", ")}` }
       : fixableCi
         ? { id: "ci", check: "CI present", ok: false, sev: SEV.ci!, fix: "Add .github/workflows/gantry-ci.yml", file: ".github/workflows/gantry-ci.yml", detail: "No file under .github/workflows" }
-        : { id: "ci", check: "CI present", ok: false, sev: SEV.ci!, fix: "Add a CI workflow that builds and tests the repo; Gantry cannot write one for this stack", file: null, manual: true, detail: "No file under .github/workflows and no known template for this stack" },
+        : { id: "ci", check: "CI present", ok: false, sev: SEV.ci!, fix: "Add a CI workflow that builds and tests the repo. The Onboarding Agent can propose one in the onboarding PR (it needs your confirmation)", file: null, manual: true, detail: "No file under .github/workflows and no known template for this stack" },
     test
       ? { id: "test", check: "Test command", ok: true, sev: SEV.test!, fix: "", file: null, detail: `${test.command} (${test.source})` }
-      : { id: "test", check: "Test command", ok: false, sev: SEV.test!, fix: "Add a test script or Makefile test target so the command can be documented in AGENTS.md", file: null, manual: true, detail: "No test command found in the repo's manifests" },
+      : { id: "test", check: "Test command", ok: false, sev: SEV.test!, fix: "Add a test command (a test script or Makefile target). The Onboarding Agent can propose one with a smoke test", file: null, manual: true, detail: "No test command found in the repo's manifests" },
     prot && protOk
       ? { id: "protect", check: "Branch protection", ok: true, sev: SEV.protect!, fix: "", file: null, detail: `${prot.rulesets.filter((r) => r.enforcement === "active").length} active ruleset(s) on ${prot.defaultBranch}` }
       : { id: "protect", check: "Branch protection", ok: false, sev: SEV.protect!, fix: "Org owner must apply the Gantry ruleset on the default branch: pull request, 1 approval, code-owner review, CI checks and the Gantry check", file: null, manual: true, detail: prot ? "No active ruleset or branch protection requires a pull request, an approval and status checks" : "Protections could not be read" },
@@ -290,10 +291,10 @@ export function assess(f: RepoFacts, ctx: AssessContext): AssessedFinding[] {
       ? { id: "repro", check: "Build reproducibility", ok: true, sev: SEV.repro!, fix: "", file: null, detail: `Toolchain pinned in ${pin}` }
       : inferToolVersions(f).length
         ? { id: "repro", check: "Build reproducibility", ok: false, sev: SEV.repro!, fix: "Pin toolchain version", file: ".tool-versions", detail: "No toolchain pin; versions inferred from the manifests" }
-        : { id: "repro", check: "Build reproducibility", ok: false, sev: SEV.repro!, fix: "Pin the toolchain version (a .tool-versions file); Gantry cannot tell which version this repo builds with", file: null, manual: true, detail: "No toolchain pin and no version in the manifests" },
+        : { id: "repro", check: "Build reproducibility", ok: false, sev: SEV.repro!, fix: "Pin the toolchain version (.tool-versions or .python-version / .nvmrc). Tell the Onboarding Agent the version and it can propose the pin", file: null, manual: true, detail: "No toolchain pin and no version in the manifests" },
     manifest && lockOk
       ? { id: "deps", check: "Dependency manifest", ok: true, sev: SEV.deps!, fix: "", file: null, detail: `${manifest}${lock ? " with a lockfile" : ""}` }
-      : { id: "deps", check: "Dependency manifest", ok: false, sev: SEV.deps!, fix: manifest ? "Commit the lockfile. A pull request from Gantry may not change dependencies" : "Add a dependency manifest. A pull request from Gantry may not change dependencies", file: null, manual: true, detail: manifest ? `${manifest} has no lockfile` : "No manifest for any supported ecosystem" },
+      : { id: "deps", check: "Dependency manifest", ok: false, sev: SEV.deps!, fix: manifest ? "Commit the lockfile: a package tool generates it (for example `uv lock`, `npm install`), so a person or CI runs it and commits the result" : "Add a dependency manifest. For a new project the onboarding agent can propose one (it needs your confirmation)", file: null, manual: true, detail: manifest ? `${manifest} has no lockfile` : "No manifest for any supported ecosystem" },
     factory && !mcpMissing.length && /^repo:/m.test(factory)
       ? { id: "mcp", check: "MCP needs declared", ok: true, sev: SEV.mcp!, fix: "", file: null, detail: ctx.mcp.length ? `${ctx.mcp.length} server(s) declared in .gantry/factory.yml` : ".gantry/factory.yml present" }
       : { id: "mcp", check: "MCP needs declared", ok: false, sev: SEV.mcp!, fix: "Declare MCP servers in .gantry/factory.yml", file: ".gantry/factory.yml", detail: factory ? `Missing: ${mcpMissing.join(", ") || "repo entry"}` : "No .gantry/factory.yml" },
@@ -320,6 +321,8 @@ export interface PlannedFile {
   added: string[];
   /** `agent` when the Onboarding Agent drafted this content, otherwise `observed` (written by rule from the repository's own files). */
   source?: "observed" | "agent";
+  /** Why the agent included this file (agent-authored files only). */
+  purpose?: string;
 }
 
 export interface PlanContext {
@@ -463,13 +466,19 @@ export function planPr(f: RepoFacts, findings: AssessedFinding[], c: PlanContext
 
 export const PR_TITLE = (repo: string): string => `Prepare ${repo} for Gantry`;
 
-export function prBody(files: PlannedFile[], findings: AssessedFinding[], by: Authorship, extra: { guidelineSuggestions?: string[]; forPeople?: string[] } = {}): string {
+export function prBody(files: PlannedFile[], findings: AssessedFinding[], by: Authorship, extra: { guidelineSuggestions?: string[]; forPeople?: string[]; sensitive?: SensitiveFlag[] } = {}): string {
   const why = (id: string): string => findings.find((x) => x.id === id)?.check ?? id;
   const gaps = findings.filter((x) => !x.ok && (x.manual || !x.file));
   const mine = (extra.forPeople ?? []).filter((x) => !gaps.some((g) => x.includes(g.check)));
+  const authored = files.some((p) => p.purpose !== undefined || (p.source === "agent" && p.finding === "scaffold")) || (extra.sensitive?.length ?? 0) > 0;
+  const sens = extra.sensitive ?? [];
   return [
-    authorLine(by, "pr"), "It adds only what a pull request can add: no application code, no dependency changes and no branch rules. A person reviews and merges it; Gantry never merges it on its own.", "",
-    "## Files", "", ...files.map((p) => `- \`${p.path}\` (${p.mode === "create" ? "new" : "edited"}, +${p.plus} -${p.minus}, ${p.source === "agent" ? "drafted by the agent" : "written by rule from the repository's files"}): ${why(p.finding)}`), "",
+    authorLine(by, "pr"),
+    authored
+      ? "The agent chose these files from what Gantry observed and what the person asked for. Gantry checked them (no secrets, no binaries or lockfiles, no existing application code changed, no branch rules) and a person confirmed the sensitive parts listed below. A person reviews and merges it; Gantry never merges it on its own."
+      : "It adds only what a pull request can add: no application code, no dependency changes and no branch rules. A person reviews and merges it; Gantry never merges it on its own.", "",
+    "## Files", "", ...files.map((p) => `- \`${p.path}\` (${p.mode === "create" ? "new" : "edited"}, +${p.plus} -${p.minus}, ${p.source === "agent" ? "drafted by the agent" : "written by rule from the repository's files"}): ${p.purpose || why(p.finding)}`), "",
+    ...(sens.length ? ["## Confirmed by a person before this was opened", "", ...sens.map((x) => `- ${x.label}${x.paths.length ? ` (${x.paths.map((q) => `\`${q}\``).join(", ")})` : ""}: ${x.reason}`), ""] : []),
     ...(gaps.length ? ["## Still open", "", "These cannot be fixed by a pull request and need a person with access:", "", ...gaps.map((x) => `- ${x.check}: ${x.fix || x.detail}`), ...mine.map((x) => `- ${x} (suggested by the agent)`), ""] : mine.length ? ["## Still open", "", ...mine.map((x) => `- ${x} (suggested by the agent)`), ""] : []),
     ...(extra.guidelineSuggestions?.length ? ["## Suggestions for the guidelines", "", "Not applied by this pull request; for a person to consider.", "", ...extra.guidelineSuggestions.map((x) => `- ${x}`), ""] : []),
     `Assessment: ${by.mode === "agent" ? "Onboarding Agent on top of rule-based facts" : "rule-based"}.`, "",
@@ -523,7 +532,7 @@ export function judgeProtections(f: RepoFacts, requiredChecks: string[]): Readin
   const ruleOk = !!pr && !missingCi.length;
   const ruleWhy = !active.length ? "No active ruleset on the default branch." : !pr ? "No active ruleset requires a pull request with at least one approval and code-owner review." : `Required checks missing from the ruleset: ${missingCi.join(", ")}.`;
   return [
-    { id: "installation", label: L("installation"), ok: !!inst && inst.targetType === "Organization" && !lacking.length, detail: !inst ? "The installation could not be read." : inst.targetType !== "Organization" ? `The App is installed on a ${inst.targetType ?? "unknown"} account, not an organisation.` : lacking.length ? `Missing permissions: ${lacking.join(", ")}.` : "Installed at organisation level with the expected permissions." },
+    { id: "installation", label: L("installation"), ok: !!inst && inst.targetType === "Organization" && !lacking.length, detail: !inst ? "The installation could not be read." : inst.targetType !== "Organization" ? `The App is installed on a ${inst.targetType ?? "unknown"} account, not an organisation. Gantry expects an organisation-level install (spec 11.3), so that org owners control the App and the branch ruleset. For a personal repository this is not a safety problem: move the repository to an organisation and install the App there, or have a person with authority record "Ready by exception" with the reason (the Onboarding Agent can propose it).` : lacking.length ? `Missing permissions: ${lacking.join(", ")}.` : "Installed at organisation level with the expected permissions." },
     { id: "ruleset", label: L("ruleset"), ok: ruleOk, detail: ruleOk ? `Ruleset "${pr!.name}" is active.` : ruleWhy },
     { id: "gantry_check", label: L("gantry_check"), ok: p.requiresGantryCheck && p.gantryCheckPinned, detail: !p.requiresGantryCheck ? "No active ruleset requires the Gantry check." : !p.gantryCheckPinned ? "The Gantry check is required but not pinned to the Gantry App." : "The Gantry check is required and pinned." },
     { id: "bypass", label: L("bypass"), ok: !p.appOnBypassList, detail: p.appOnBypassList ? "The Gantry App is on a bypass list. Remove it: Gantry must never be able to bypass the rules." : "The App is on no bypass list." },
@@ -604,8 +613,8 @@ export const DEFAULT_ORG_GUIDELINES: { items: GuidelineItem[]; may: string; mayN
     { id: "gl-8", text: "Dependency manifest with a lockfile.", required: true },
     { id: "gl-9", text: "MCP servers the repo needs are declared in .gantry/factory.yml.", required: false },
   ],
-  may: "The onboarding PR may add or edit: AGENTS.md, .gantry/factory.yml, CODEOWNERS, CI workflow files, lint config.",
-  mayNot: "It may never change application code, dependency versions or branch protection settings.",
+  may: "Guidance for the onboarding agent: it may propose whatever a repository needs to be ready, for example a project manifest and a smoke test for a new repository, a CI workflow, AGENTS.md, CODEOWNERS, .gantry/factory.yml, lint config, tool versions.",
+  mayNot: "These need an explicit confirmation on the proposal: changes to existing application code or existing dependency versions, workflow files, ownership files. Branch protection and rulesets are GitHub settings; Gantry never changes them.",
 };
 
 /* ------------------------------------------------------------------ pull request checks ---- */

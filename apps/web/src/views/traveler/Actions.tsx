@@ -55,6 +55,7 @@ export function Actions({ wo }: { wo: TWo }) {
         onClick={() => void (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, undefined, ifm)).then((r) => res(r))}
       />,
     );
+    if (!dA.allowed) row1.push(<p key="approve-why" className="small muted trv-why" id="trv-approve-why" role="note">{`${dA.reason}${dA.needs ? ` Needs: ${dA.needs}.` : ""}`}</p>);
     const dR: TDecision = g.id === "G0G1" ? (stop ? no(stopWhy) : dec(wo, "decline")) : ap;
     row1.push(
       <Btn

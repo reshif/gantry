@@ -461,7 +461,7 @@ The demo-account list on the sign-in screen is a development-only feature flag b
 
 | Screen | Frontend op | Endpoint |
 | --- | --- | --- |
-| Home (admin and My work) | Reads | `GET /api/v1/home` (figures, attention queue, my approvals, my conversations), `GET /api/v1/activity` |
+| Home (one page for everyone) | Reads | `GET /api/v1/home`: `sections` built by the caller's rights, default deny (setup checklist, attention scoped to visible projects, waiting on you, in motion, projects, factory health with real eval health); plus `approvals`, `conversations`, `badges` for the bell and nav. Kill and restore live in the status chip and Ctrl K, not on Home |
 | Projects, portfolio | Reads, saved views | `GET /api/v1/projects`, `GET/POST/PATCH/DELETE /api/v1/saved-views` |
 | New project wizard | `createProject` | `POST /api/v1/projects` |
 | Templates | `saveTemplate`, `updateTemplate` | `GET/POST /api/v1/templates`, `PATCH /api/v1/templates/{id}` |
@@ -480,12 +480,16 @@ The demo-account list on the sign-in screen is a development-only feature flag b
 | New work order | `submitWO`, `G.submitGuard` | `POST /api/v1/projects/{id}/work-orders` (returns classification and route) |
 | Work orders table | Reads | `GET /api/v1/projects/{id}/work-orders` |
 | Traveler | Reads | `GET /api/v1/work-orders/{id}` |
-| Conversations | `answer`, `raiseQuestion` | `GET /api/v1/conversations`, `POST /api/v1/work-orders/{id}/messages` |
+| Conversations (list) | Reads | `GET /api/v1/work-order-sessions` (one row per work order: who waits on whom, latest message, station, unread; no forms) |
+| Work-order session | `session`, `sendTurn`, `decide` | `GET /api/v1/work-orders/{id}/session`, `POST .../session/messages` (streams the station agent's answer), `POST .../session/proposals/{mid}/{pid}` (approve, changes, discard), `POST .../session/seen` |
+| Intake (scripted fallback) | `answer`, `raiseQuestion` | `GET /api/v1/conversations`, `POST /api/v1/work-orders/{id}/messages` |
 | Intake | `reclassify`, `confirmBrief`, `decline` | `POST /api/v1/work-orders/{id}/reclassify`, `/confirm-brief`, `/decline` |
 | Gates | `approveGate`, `rejectGate`, `G.gateDecision`, `G.gateProgress` | `POST /api/v1/gate-instances/{id}/approve`, `/reject`; gate progress is part of the work order read |
 | Board and traveler moves | `moveTo`, `G.moveCheck`, `sendBack`, `park`, `unpark`, `reassign`, `retry` | `POST /api/v1/work-orders/{id}/move` (with `dry_run` for the move check), `/send-back`, `/park`, `/unpark`, `/reassign`, `/retry` |
 | Record and Lifecycle tab | `G.lc`, `setRecordSummary` | `GET /api/v1/work-orders/{id}/record`, `GET .../record.md`, `GET .../record/export` (bundle with hashes), `PUT .../record/summary` |
 | Record: changes | Reads | `GET /api/v1/work-orders/{id}/changes` (commits, files, patches by reference) |
+
+**The work-order session (8.4).** Each work order has one agent conversation for its whole life (`#/p/<project>/conversations/<WO>`; the traveler's "Open conversation", the Conversations list and the bell open it). The agent at the work order's CURRENT station talks (the Intake Clerk at Intake), on its own pinned model through routing (not a per-person choice), inside its own budget per work order. At Intake the agent is agent-led: it reads the request and, through read-only tools, the work order, the project, the repository's files (broker) and related work; asks only what it needs, in natural language, as question cards with suggested answers; and drafts the brief (goal, scope in and out, acceptance criteria, risks, open questions, estimate, with the class, confidence and rationale it read) as a PROPOSAL card showing the diff against the brief as it stands. Nothing the agent says dictates a fixed question list. Deterministic code supplies observed facts (labelled observed; request and repository text is untrusted), safety rails on a proposal (a real goal, at least one acceptance criterion, bounded lists, no credentials) and permission checks. Approve runs the ordinary command under the approving person's own rights: a brief proposal is the confirm-brief command at G0+G1 (`brief.confirm`), a reclassify proposal is `reclassify` (`wo.classify`), a decline proposal is `decline` (`wo.decline`); "Ask for changes" continues the dialogue; Discard changes nothing; a newer proposal replaces older pending ones, and a brief that moved since it was proposed refuses the approval. Reading needs `project.view`; talking needs the right to act on the work order (`wo.answer`, which the submitter always has). Free text always gets an answer. Past Intake the station agent answers questions read-only (where it is, what each station did, what waits on whom) and cannot propose. Station transitions, gate decisions, bays, merges and failed checks are posted once into the session from the event ledger (idempotent per event) and notify the people involved through the bell until they open it; a new class or a send-back to Intake asks the agent for a follow-up turn. A work order at Intake with no session is opened by the agent itself. With no usable model or budget the scripted intake questionnaire answers instead, labelled "Rule-based (no agent)", and its history is shown first in the session. The session shares its core (turn history, SSE streaming, cost, station-agent gate) with the onboarding session (11.3); its rows are `workorder_messages` and `workorder_session_seen`.
 
 ### 8.5 Stop controls
 
@@ -493,7 +497,7 @@ The demo-account list on the sign-in screen is a development-only feature flag b
 | --- | --- | --- |
 | Floor, Andon | `haltRepo`, `resumeRepo`, `haltProject`, `resumeProject` | `POST /api/v1/stops` with scope and mode `halt`; `DELETE /api/v1/stops/{id}` |
 | Kill dialog | `killImpact` | `GET /api/v1/stops/impact?scope=&id=` |
-| Home, floor, traveler, console | `kill` | `POST /api/v1/stops` with mode `kill`, in-flight handling, reason and confirmation text |
+| Status chip, Ctrl K, floor, traveler, console | `kill` | `POST /api/v1/stops` with mode `kill`, in-flight handling, reason and confirmation text |
 | Restore | `restore` | `POST /api/v1/stops/{id}/restore` (returns pending when a second approver is needed) |
 
 Stop endpoints are served by a code path that reads and writes only the `stops` table and the event log, so they work when other subsystems are failing.
@@ -727,7 +731,7 @@ Gantry connects to GitHub Enterprise as a GitHub App through `gantry-github`. Ga
 | Item | Rule |
 | --- | --- |
 | Identity | One GitHub App, installed at organisation level on selected repositories. No personal access tokens are stored. |
-| Repository permissions | Metadata read; Contents write; Pull requests write; Issues write; Checks write; Actions read; Commit statuses read; Administration read (to verify protections). Workflows write only if the onboarding pull request adds workflow files. |
+| Repository permissions | Metadata read; Contents write; Pull requests write; Issues write; Checks write; Actions read; Commit statuses read; Administration read (to verify protections). Workflows write only if the onboarding pull request adds workflow files: the broker asks for it per token, for that pull request alone, and the App must hold it in its settings (Permissions & events, Repository permissions, Workflows: Read and write, then accepted on the installation). When it does not, the onboarding session and the pull-request step say so with these exact steps instead of failing obscurely. |
 | Never requested | Administration write, Secrets, organisation administration |
 | Tokens | Minted per operation, scoped to one repository and the least permissions for that operation, short-lived, revoked on stop where GitHub allows |
 | Host | Base URLs are configuration, so GitHub's cloud and a self-hosted server both work. Features are checked against the server version reported. |
@@ -747,13 +751,15 @@ The exact permission names and token-scoping behaviour must be confirmed against
 | --- | --- |
 | Connected | App installation on the repo confirmed; owning team set |
 | Assessed | Gantry reads the repo with fixed rules and reports findings with severity: CI present, test command, lint config, code-owner file, agent guidelines file, dependency manifest, secrets scan, build needs, MCP needs. These observed findings are the source of truth. When the Onboarding Agent can run (below), it reads the repo on top of them and adds a note per finding, a risk judgement and the real test, lint and build commands of unusual layouts; otherwise the assessment is rule-based and says so |
-| Onboarding PR opened | A pull request adds what a pull request can add: guidelines file, Gantry config file, code-owner entries, CI workflow if missing |
+| Onboarding PR opened | A pull request adds the files the repository needs to be ready, **authored by the Onboarding Agent** (below): for an existing repo what is missing (guidelines file, Gantry config file, code-owner entries, CI workflow); for a new or empty repo a project scaffold (manifest, pinned tool version, a smoke test, a task runner, CI). With no usable model, Gantry's fixed rules write the same kind of pull request from their templates. |
 | PR checks | CI runs on the onboarding pull request |
 | PR merged | A permitted person approves and merges |
 | Verified | Live checks pass (table below) |
 | Ready | Work orders are accepted. Readiness is re-checked on a schedule; losing it raises a repo halt with cause `readiness`. |
 
-Settings that a pull request cannot change (branch rules) are listed as findings for an admin to apply.
+Settings that a pull request cannot change (branch rules) are listed as findings for an admin to apply; the agent gives the repository owner the exact GitHub steps and Gantry never sets rulesets itself.
+
+**Agent authors, rails validate, a person approves.** The fixed rules observe facts and suggest a plan; they never cap what the agent may propose. The agent proposes the complete file set (any paths, new or edited) from the observed facts and the conversation. Deterministic code only enforces safety rails on it. *Refused whole, with every reason returned so the agent can fix and propose again:* secrets and credential-like content or files, unsafe paths (absolute, `..`, `.git`), binaries, lockfiles (a package tool generates them; hashes cannot be authored, so the agent leaves them out, makes CI install without `--locked`, and tells a person to run the lock command), edits to existing application code, branch-rule files, unsafe shell (a download piped into a shell, secrets echoed, removing the root), and more than the diff cap (default 1500 lines, shown on the card). *Marked sensitive, allowed after an explicit confirmation on the card:* workflow files, dependency manifests (new or edited), the repository's protected paths, code-owner files, new source code in a repository that already has some, edits to files onboarding does not normally change, and privileged shell or workflow settings (sudo, `pull_request_target`, `write-all`). The organisation guideline's "may not" list is shown with them as the categories that need confirmation. The worker validates again against the repository as it is now, and opens exactly the files that were approved; a proposal that can no longer be opened is refused with the reason, never replaced by the rule-based plan. After the merge the agent re-reads the repository and proposes the next pull request (for example AGENTS.md with the now-real commands) until verification passes or a person records an exception.
 
 **The Onboarding Agent in onboarding.** The agent (`ag-onboard`, built-in) runs through the same runtime as every other agent: a hidden carrier work order per step (never on the floor, in a list or in a count), a sandbox seeded read-only at the commit Gantry observed, the edge gateway for model calls, metering, budget, wall-clock, and the kill and halt fences. It has read-only tools and no MCP servers. It is used only when it exists, is active, its live version was promoted through the eval gate, and the model it pins resolves, through the same routing the edge applies, to an enabled model on a connected vendor allowed for the project and repo, and no stop covers the repo. It does two things and nothing else: in the assessment, explain findings, judge risk and report commands; in the pull request, draft the repository-specific content of `AGENTS.md` and suggest guideline changes. It can never add, remove or change an observed finding (a disagreement is stated in the note and the observed result stands), add a file to the pull request, touch a protected path, exceed its diff cap, or merge; the human merge stays. Its answer is validated against the agent's result contract (unknown finding ids, paths outside the plan, unsafe commands and anything that looks like a credential reject the whole answer). On invalid output, a timeout, a failed or refused run, a budget, a kill or halt, or no usable model, onboarding uses the rule-based result and records why.
 
@@ -763,7 +769,7 @@ Everything states who did it. The assessment records adapter `rule-based` or `ag
 
 **Verified means all of these are true, checked live:**
 
-- The App is installed on the repo with the expected permissions, at organisation level.
+- The App is installed on the repo with the expected permissions, at organisation level. A repository on a personal account cannot meet this; that is not a safety problem, so the agent proposes either moving the repository to an organisation or marking it Ready by exception with a reason (an audited decision by a person who holds `onboarding.exception`).
 - The default-branch ruleset is active with the requirements in 11.2, and the Gantry check is pinned to the Gantry App.
 - The code-owner file is valid and covers the CI configuration, the code-owner file itself and the Gantry config.
 - A canary branch can be published and a draft pull request opened and closed.

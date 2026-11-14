@@ -53,15 +53,23 @@ export function nextStep(doc: Pick<RepoOnboarding, "stage" | "pr" | "findings" |
 }
 
 /** A file in a proposal: what it is, why, how big, and the added lines for the diff view. */
-export interface ProposalFile { path: string; mode: "create" | "update"; finding: string; plus: number; minus: number; source: "observed" | "agent"; added: string[] }
+export interface ProposalFile { path: string; mode: "create" | "update"; finding: string; plus: number; minus: number; source: "observed" | "agent"; added: string[]; purpose?: string }
 
 /** A card on an assistant message. Cards are data the page renders; nothing in them runs. */
 export type SessionCard =
   | { kind: "progress"; text: string; detail?: string }
   | { kind: "question"; id: string; question: string; options: string[]; answered?: string }
   | {
-      kind: "proposal"; id: string; what: "open_pr" | "update_pr" | "merge"; title: string; summary: string; mode: "agent" | "rule-based";
+      kind: "proposal"; id: string; what: "open_pr" | "update_pr" | "merge" | "exception"; title: string; summary: string; mode: "agent" | "rule-based";
       files: ProposalFile[]; runId: string; headSha?: string; prNumber?: number; status: "pending" | "approved" | "changes" | "discarded" | "superseded" | "failed"; decidedBy?: string; note?: string;
+      /** Parts of an agent-authored pull request a person must confirm explicitly (workflow files, dependency manifests, ...). Approval is refused until they are confirmed. */
+      sensitive?: { id: string; label: string; paths: string[]; reason: string }[];
+      /** Something outside the files that must change first (for example the App lacks the workflows permission), with the exact steps. */
+      blockers?: { id: string; message: string; fix: string }[];
+      /** The diff cap the files were checked against. */
+      diffCap?: number;
+      /** For an exception proposal: the reason that will be recorded. */
+      reason?: string;
     };
 
 export const SESSION_BUDGET_DEFAULT_USD = 1;

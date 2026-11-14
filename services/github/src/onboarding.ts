@@ -218,7 +218,14 @@ export async function openOnboardingPr(d: OpDeps, b: PrBody): Promise<PrOutcome>
       if (b.comment) await c.write(() => req("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", { owner, repo: name, issue_number: pr.number, body: b.comment }));
       return { ok: true as const, branch: b.branch, number: pr.number as number, url: String(pr.html_url ?? ""), headSha, created, changed: anyChange, files: changes.map((x) => ({ path: x.path, changed: x.changed })) };
     });
-  } catch (e) { throw gh(e); }
+  } catch (e) {
+    const err = gh(e);
+    // A workflow file needs the App's `workflows` permission, granted in the App's settings and accepted on the installation. Say that, with the steps, instead of GitHub's own wording.
+    if (op === "onboard_pr_workflows" && err.code === "github" && /permission|not accessible|workflow/i.test(err.message)) {
+      throw new BrokerError(409, "workflow_permission", "The Gantry GitHub App is not allowed to write workflow files (.github/workflows). In GitHub: the App's settings > Permissions & events > Repository permissions > Workflows: Read and write, save, then accept the new permission on the installation (Settings > Applications > Installed GitHub Apps > Configure). Then ask for the pull request again.", { githubMessage: err.message.slice(0, 300) });
+    }
+    throw err;
+  }
 }
 
 /* ------------------------------------------------------------------ merge ---- */

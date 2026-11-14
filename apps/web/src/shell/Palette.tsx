@@ -50,6 +50,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
     const items: Item[] = [];
     const stop = makeStopActions(ui, me);
     const guard = (i: number): Decision | undefined => (checks[i]?.pending ? undefined : checks[i]);
+    const allowedNow = (i: number): boolean => !checks[i]?.pending && !!checks[i]?.allowed;
     for (const r of ROUTES) if (r.nav !== false && canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, kind: "View", label: r.title, hint: r.project ? (cp?.name ?? "project") : "factory", run: () => r.project && cp ? navigateProject(cp.id, r.id) : navigate(r.id) });
     for (const p of me.projects) items.push({ key: `project:${p.id}`, kind: "Project", label: p.name, hint: `enter ${p.key}`, run: () => { setProject(p.id); navigateProject(p.id); } });
     const woList = Array.isArray(wos) ? wos : (wos?.items ?? []);
@@ -62,9 +63,10 @@ export function usePaletteItems(projectId: string | null): Item[] {
     if (hasCommand("newWorkOrder")) items.push({ kind: "Action", label: "Submit a work order", hint: "Intake", guard: guard(3), run: () => void runCommand("newWorkOrder") });
     if (cp) {
       items.push({ kind: "Action", label: `${cp.halted ? "Resume " : "Halt "}${cp.name}`, hint: "andon", guard: guard(0), run: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) });
-      items.push({ kind: "Action", label: `${cp.killed ? "Restore " : "Kill "}${cp.name}`, hint: "kill switch", guard: guard(1), run: () => (cp.killed ? stop.restore("project", cp.id) : stop.kill("project", cp.id)) });
+      // Kill and restore are offered only to people who hold the right (resolved by the server); the dialogs ask for the reason and step-up.
+      if (allowedNow(1)) items.push({ kind: "Action", label: `${cp.killed ? "Restore" : "Kill"} ${cp.name}…`, hint: "kill switch", guard: guard(1), run: () => (cp.killed ? stop.restore("project", cp.id) : stop.kill("project", cp.id)) });
     }
-    items.push({ kind: "Action", label: factoryKilled ? "Restore the factory" : "Kill the factory", hint: "kill switch", guard: guard(2), run: () => (factoryKilled ? stop.restore("factory", null) : stop.kill("factory", null)) });
+    if (allowedNow(2)) items.push({ kind: "Action", label: factoryKilled ? "Restore factory…" : "Kill factory…", hint: "kill switch", guard: guard(2), run: () => (factoryKilled ? stop.restore("factory", null) : stop.kill("factory", null)) });
     items.push({ kind: "Action", label: "Sign out", hint: me.person.name, run: () => void ops.signOut() });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -155,7 +155,8 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
     delete next[gid];
     set({ drafts: next });
     setErr("");
-    ui.toast(`${g.label} approver rule saved.`, "ok");
+    const warning = (x as { warning?: string }).warning;
+    ui.toast(warning ? `${g.label} approver rule saved, but: ${warning}` : `${g.label} approver rule saved.`, warning ? "warn" : "ok");
   };
   const sc = s.scen;
   const paths = sc.path ? [sc.path] : [];

@@ -2,7 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 export type Block = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: unknown };
-export interface Turn { blocks: Block[]; stop?: "end_turn" | "tool_use"; status?: number; error?: { type: string; message: string }; delayMs?: number }
+export interface Turn { blocks: Block[]; stop?: "end_turn" | "tool_use" | "max_tokens"; status?: number; error?: { type: string; message: string }; delayMs?: number }
 
 /** A test double for the edge's service gateway (`/service/v1/*`): answers from a script, in the Anthropic streaming format. Only for tests. */
 export class FakeEdge {

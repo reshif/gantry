@@ -84,6 +84,25 @@ describe("Onboarding session", () => {
     await waitFor(() => expect(calls.some((c) => c.path.endsWith("/session/messages") && c.body?.kind === "continue")).toBe(true));
   });
 
+  it("an agent-authored PR lists the sensitive parts and the diff cap; Approve stays disabled until they are confirmed, then sends confirmSensitive", async () => {
+    const s = clone(session()) as any;
+    const card = s.messages[0].data.cards.find((c: any) => c.kind === "proposal");
+    card.sensitive = [{ id: "workflow", label: "CI workflow", paths: [".github/workflows/ci.yml"], reason: "A workflow runs code on GitHub's runners." }, { id: "dependencies", label: "Dependency manifest", paths: ["pyproject.toml"], reason: "Adds a dependency manifest." }];
+    card.blockers = [{ id: "workflow_permission", message: "The Gantry GitHub App is not allowed to write workflow files.", fix: "Set Workflows to Read and write." }];
+    card.diffCap = 1500;
+    const calls = api(s, { "POST /api/v1/repos/mobile-app/onboarding/session/proposals/om-1/P-1": () => ok("Gantry is opening the PR.") });
+    mount(<OnboardingView />);
+    const approve = await byId("osx-approve-P-1");
+    expect(screen.getByText(/Needs your explicit confirmation/)).toBeTruthy();
+    expect(screen.getByText(/not allowed to write workflow files/)).toBeTruthy();
+    expect(screen.getByText(/cap 1500 lines/)).toBeTruthy();
+    expect((approve as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(await byId("osx-confirm-P-1"));
+    await waitFor(() => expect((document.getElementById("osx-approve-P-1") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(document.getElementById("osx-approve-P-1")!);
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/proposals/om-1/P-1") && c.body?.decision === "approve" && c.body?.confirmSensitive === true)).toBe(true));
+  });
+
   it("answering a question or typing sends a message", async () => {
     const calls = api(session(), { "POST /api/v1/repos/mobile-app/onboarding/session/messages": () => ok("Saved.") });
     mount(<OnboardingView />);

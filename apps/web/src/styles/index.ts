@@ -9,6 +9,7 @@ import "./views/workorders.css";
 import "./views/conversations.css";
 import "./views/onboarding.css";
 import "./views/onboarding-session.css";
+import "./views/wosession.css";
 import "./views/project-config.css";
 import "./views/projects.css";
 import "./views/people.css";

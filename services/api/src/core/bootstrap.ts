@@ -5,7 +5,7 @@ import type { Config } from "./config.js";
 import { DEFAULT_SECURITY } from "./read/index.js";
 import { seedDemoAudit } from "../areas/audit/seed.js";
 import { ensureDefaultModel } from "../areas/models/default.js";
-import { loadStarterKit } from "../areas/agents/starter-kit.js";
+import { loadStarterKit, upgradeOnboardingAgent } from "../areas/agents/starter-kit.js";
 
 export interface BootResult {
   orgId: string;
@@ -59,6 +59,7 @@ export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug"
     // The built-in starter kit: the agents the floor's stations name, their skills and eval suites. Inserted only when missing, never overwritten.
     const kit = await loadStarterKit(tx, id);
     if (kit.length) log?.info({ agents: kit }, "starter kit loaded");
+    if (await upgradeOnboardingAgent(tx, id)) log?.info({ agent: "ag-onboard" }, "onboarding agent upgraded to the authoring instructions (version 2)");
     await tx.query(
       `insert into role_matrix_versions (org_id, version, matrix, note, published_at, published_by)
        select $1, 1, $2::jsonb, 'Built-in defaults', now(), 'system' where not exists (select 1 from role_matrix_versions where org_id = $1)`,

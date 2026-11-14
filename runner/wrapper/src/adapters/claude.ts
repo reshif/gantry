@@ -137,23 +137,58 @@ export function parseStreamLine(line: string): StreamEvent | undefined {
 
 /** The last fenced ```json block that parses to a JSON object; failing that, the whole text if it is a JSON object. */
 export function extractStructuredOutput(text: string): Record<string, unknown> | undefined {
+  // The result is the last JSON object the agent wrote, usually in a ```json fence. The object's own string values may contain Markdown
+  // code fences (a design note with a ```python example), so a fence regex cannot find where it ends: it stopped at the first inner ``` and
+  // cut the JSON in half (WO-1001 Design, 2026-11-14). Instead, start at each '{' after a ```json marker (latest first), then anywhere
+  // (latest first), and take the balanced object that parses — string-aware, so braces and backticks inside strings do not count.
   const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-  const blocks = [...text.matchAll(/```json\s*\n([\s\S]*?)\n?```/g)];
-  for (let i = blocks.length - 1; i >= 0; i--) {
+  const parseAt = (start: number): Record<string, unknown> | undefined => {
+    const end = balancedEnd(text, start);
+    if (end < 0) return undefined;
     try {
-      const v: unknown = JSON.parse(blocks[i]?.[1] ?? "");
-      if (isObj(v)) return v;
+      const v: unknown = JSON.parse(text.slice(start, end + 1));
+      return isObj(v) ? v : undefined;
     } catch {
-      /* try the previous block */
+      return undefined;
+    }
+  };
+  const fenced = [...text.matchAll(/```json[^\S\n]*\n/gi)].map((m) => text.indexOf("{", (m.index ?? 0) + m[0].length)).filter((i) => i >= 0);
+  for (let i = fenced.length - 1; i >= 0; i--) {
+    const v = parseAt(fenced[i]!);
+    if (v) return v;
+  }
+  // No usable fence: the last top-level object in the text (scan forward, skipping over each object that parses, so an inner object
+  // never wins over the one that contains it).
+  let last: Record<string, unknown> | undefined;
+  for (let i = text.indexOf("{"); i >= 0; ) {
+    const v = parseAt(i);
+    if (v && Object.keys(v).length > 0) {
+      last = v;
+      i = text.indexOf("{", balancedEnd(text, i) + 1);
+    } else i = text.indexOf("{", i + 1);
+  }
+  return last;
+}
+
+/** Index of the '}' closing the object that starts at `start` ('{'), skipping string contents and escapes; -1 when unbalanced. */
+function balancedEnd(text: string, start: number): number {
+  let depth = 0;
+  let inStr = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (c === "\\") i++;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return i;
     }
   }
-  try {
-    const v: unknown = JSON.parse(text.trim());
-    if (isObj(v)) return v;
-  } catch {
-    /* not JSON */
-  }
-  return undefined;
+  return -1;
 }
 
 export function usageFromResult(ev: StreamEvent, fallbackModel: string): UsageEntry[] {

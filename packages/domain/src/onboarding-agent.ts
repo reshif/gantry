@@ -1,12 +1,14 @@
 /**
- * The Onboarding Agent's part in repository onboarding (spec 11.3), and the rules that keep it a helper and not an authority.
+ * The Onboarding Agent's part in repository onboarding (spec 11.3): agent authors, rails validate, a person approves.
  *
- * Gantry observes the repository deterministically (`inspect`, `assess`, `planPr`): those facts are the source of truth (spec 10.3: what the system observed wins over what an
- * agent says). The agent runs on top of them, in a sandbox with the repository's files, and may only
- *   - explain a finding (a `note`), say whether it reads the repository differently, judge the overall risk, and suggest test/lint/build commands for layouts the rules cannot read;
- *   - draft the content of AGENTS.md (commands, conventions, notes) and suggest guideline changes.
- * It can never add or remove a finding, change `ok`, severity or `required`, add a file to the pull request, touch a protected path, exceed the diff cap or merge. Its output is validated here;
- * anything outside the contract rejects the whole output and the caller falls back to the deterministic result, recording why.
+ * Gantry observes the repository deterministically (`inspect`, `assess`): those facts are the source of truth (spec 10.3: what the system observed wins over what an
+ * agent says). The agent runs on top of them and
+ *   - explains findings, judges the risk, and reports commands it read from the repository;
+ *   - AUTHORS the onboarding pull request: the complete file set it thinks the repository needs (any paths, new or edited: a project manifest, a smoke test, a CI workflow,
+ *     AGENTS.md, CODEOWNERS, lint config and so on), from the observed facts and the conversation. The rule-based planner is only a suggestion and the fallback.
+ * It can never add or remove a finding, change `ok`, severity or `required`, or merge. What it authors is checked by safety rails (see onboarding-scaffold.ts): secrets, unsafe
+ * paths, binaries, lockfiles, existing application code and branch rules are refused; workflow files, dependency manifests, protected paths and the like are marked for a person's
+ * explicit confirmation. Output outside the contract rejects the whole output and the caller falls back to the rule-based result, recording why.
  */
 import { z } from "zod";
 import type { OnboardAssessor } from "./types.js";
@@ -18,9 +20,6 @@ export const ONBOARD_AGENT = "ag-onboard";
 
 /** The ids of the checks the deterministic assessment makes: the only finding ids an agent may mention. */
 export const FINDING_IDS = ["ci", "test", "protect", "owners", "lint", "secrets", "agents", "repro", "deps", "mcp", "docker"] as const;
-
-/** The one file whose content an agent may draft. Every other file in the plan is written by Gantry from the repository's own files. */
-export const AGENT_DRAFTABLE = ["AGENTS.md"] as const;
 
 /* ------------------------------------------------------------------ safety of free text ---- */
 
@@ -52,7 +51,10 @@ export const AgentResult = z.object({
   })).max(40).default([]),
   commands: z.object({ test: command.optional(), lint: command.optional(), build: command.optional(), install: command.optional() }).default({}),
   risk: z.object({ level: z.enum(["low", "medium", "high"]), reason: prose(400) }).optional(),
-  plannedFiles: z.array(z.object({ path: z.string().max(300), purpose: prose(300).default(""), closes: z.string().max(40).default("") })).max(20).default([]),
+  /** A description of the files the agent authored (kept for the record; the content is in `files`). */
+  plannedFiles: z.array(z.object({ path: z.string().max(300), purpose: prose(300).default(""), closes: z.string().max(40).default("") })).max(60).default([]),
+  /** The files of the onboarding pull request, authored by the agent: any paths, full content. Reviewed by the rails in onboarding-scaffold.ts. */
+  files: z.array(z.object({ path: z.string().max(300), content: z.string().max(120_000), purpose: prose(300).default(""), closes: z.string().max(40).default("") })).max(60).default([]),
   agentsMd: z.object({
     commands: z.array(z.object({ label: oneLine(40), command })).max(8).default([]),
     conventions: z.array(oneLine(200)).max(12).default([]),
@@ -66,7 +68,7 @@ export type AgentResult = z.infer<typeof AgentResult>;
 
 /** The result format, restated in the run's input so a version of the agent whose own instructions are older still ends with the object that is validated. */
 export const RESULT_FORMAT =
-  'End with one JSON object and nothing else. Fields: findings (array of { "id": one of the finding ids you were given, "ok": boolean, "note": string }; empty for draft_pr), commands (object with any of "test","lint","build","install": a single-line command read from the repository), risk ({ "level": "low"|"medium"|"high", "reason": string }; required for assess), plannedFiles (array of { "path", "purpose", "closes" } for the files you drafted; draft_pr only, and only paths in the plan), agentsMd ({ "commands": [{ "label", "command" }], "conventions": [string], "notes": string }; draft_pr only), guidelineSuggestions (array of strings), forPeople (array of strings), summary (two sentences). Never include a secret value.';
+  'End with one JSON object and nothing else. Fields: findings (array of { "id": one of the finding ids you were given, "ok": boolean, "note": string }; empty for draft_pr), commands (object with any of "test","lint","build","install": a single-line command read from the repository), risk ({ "level": "low"|"medium"|"high", "reason": string }; required for assess), files (array of { "path", "content", "purpose", "closes" }: the COMPLETE file set of the onboarding pull request, full text of each file, any paths; draft_pr only), plannedFiles (optional array of { "path", "purpose", "closes" } describing them), agentsMd ({ "commands": [{ "label", "command" }], "conventions": [string], "notes": string }; draft_pr only), guidelineSuggestions (array of strings), forPeople (array of strings), summary (two sentences). Never include a secret value.';
 
 /** Every string the agent produced, for the secret scan. */
 function strings(v: unknown, out: string[] = []): string[] {
@@ -82,7 +84,9 @@ const bad = (reason: string): { ok: false; reason: string } => ({ ok: false, rea
 function parseResult(raw: unknown): Checked<AgentResult> {
   const p = AgentResult.safeParse(raw);
   if (!p.success) return bad(`The agent's result does not match the contract: ${p.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"} ${i.message}`).join("; ")}.`);
-  const hit = strings(p.data).find(looksSecret);
+  // File contents get the file-aware scan in the rails (a workflow legitimately holds long URLs and `${{ secrets.X }}` references); everything else the broad one.
+  const { files: _files, ...rest } = p.data;
+  const hit = strings(rest).find(looksSecret);
   if (hit) return bad("The agent's result contains something that looks like a credential, so none of it is used.");
   return { ok: true, value: p.data };
 }
@@ -121,18 +125,14 @@ export function isProtected(path: string, patterns: readonly string[]): boolean 
 
 export interface DraftLimits { protectedPaths: readonly string[]; maxDiff: number }
 
-/** The pull-request step's output: it may draft only AGENTS.md, only if the plan has it, and never beyond the plan, the protected paths or the diff cap. */
-export function validateDraft(raw: unknown, plan: readonly Pick<PlannedFile, "path">[], lim: DraftLimits): Checked<AgentResult> {
+/**
+ * The pull-request step's output, as far as the contract goes: it must contain something (files, an AGENTS.md draft or guideline suggestions), and what it adds must fit the diff cap.
+ * Which paths it may write is not decided here: the rails in onboarding-scaffold.ts review the authored files.
+ */
+export function validateDraft(raw: unknown, _plan: readonly Pick<PlannedFile, "path">[], lim: DraftLimits): Checked<AgentResult> {
   const r = parseResult(raw);
   if (!r.ok) return r;
-  const planned = new Set(plan.map((f) => f.path));
-  for (const f of r.value.plannedFiles) {
-    if (isProtected(f.path, lim.protectedPaths)) return bad(`The agent named a protected path (${f.path}), so its output is not used.`);
-    if (!planned.has(f.path)) return bad(`The agent named a file (${f.path}) that is not in the plan, so its output is not used.`);
-    if (!AGENT_DRAFTABLE.includes(f.path as (typeof AGENT_DRAFTABLE)[number])) return bad(`The agent may draft only ${AGENT_DRAFTABLE.join(", ")}; it named ${f.path}, so its output is not used.`);
-  }
-  if (r.value.agentsMd && !planned.has("AGENTS.md")) return bad("The agent drafted AGENTS.md, but the plan does not include it, so its output is not used.");
-  if (!r.value.agentsMd && !r.value.guidelineSuggestions.length) return bad("The agent drafted nothing.");
+  if (!r.value.files.length && !r.value.agentsMd && !r.value.guidelineSuggestions.length) return bad("The agent drafted nothing.");
   const added = (r.value.agentsMd?.commands.length ?? 0) + (r.value.agentsMd?.conventions.length ?? 0) + (r.value.agentsMd?.notes ? r.value.agentsMd.notes.split("\n").length : 0) + 8;
   if (added > lim.maxDiff) return bad(`The agent's draft adds more than the diff cap of ${lim.maxDiff} lines, so its output is not used.`);
   return r;

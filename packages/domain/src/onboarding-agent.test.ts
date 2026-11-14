@@ -70,12 +70,12 @@ describe("the Onboarding Agent's contract", () => {
     it("accepts a draft of AGENTS.md that is in the plan", () => {
       expect(validateDraft(draft(), plan(), lim)).toMatchObject({ ok: true });
     });
-    it("rejects a path outside the plan, a protected path, a file the agent may not draft, or AGENTS.md when the plan lacks it", () => {
+    // Changed deliberately: the agent is no longer limited to AGENTS.md or to the rule-based plan. Which paths it may write is judged by the rails (onboarding-scaffold.test.ts); the contract only needs
+    // the draft to contain something and to fit the diff cap.
+    it("does not limit the draft to AGENTS.md or to the plan: any named path passes the contract, the rails judge it", () => {
       const named = (path: string) => validateDraft(draft({ plannedFiles: [{ path, purpose: "", closes: "" }] }), plan(), lim);
-      expect(named("src/index.ts")).toMatchObject({ ok: false, reason: expect.stringContaining("not in the plan") });
-      expect(named(".github/workflows/x.yml")).toMatchObject({ ok: false, reason: expect.stringContaining("protected") });
-      expect(named("CODEOWNERS")).toMatchObject({ ok: false, reason: expect.stringContaining("only AGENTS.md") });
-      expect(validateDraft(draft(), plan().filter((f) => f.path !== "AGENTS.md"), lim)).toMatchObject({ ok: false });
+      for (const p of ["src/index.ts", ".github/workflows/x.yml", "CODEOWNERS", "pyproject.toml"]) expect(named(p), p).toMatchObject({ ok: true });
+      expect(validateDraft(draft(), plan().filter((f) => f.path !== "AGENTS.md"), lim)).toMatchObject({ ok: true });
     });
     it("rejects an unsafe command, a draft above the diff cap, an empty draft and a credential", () => {
       const cmd = (command: string) => validateDraft(draft({ agentsMd: { commands: [{ label: "x", command }], conventions: [], notes: "" } }), plan(), lim);

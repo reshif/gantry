@@ -1,8 +1,13 @@
 import { involved } from "../onboarding/session/updates.js";
-import { ONBOARD_STAGES, fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
+import { involvedInWo } from "../workorders/session/updates.js";
+import { fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { decideFor, readSecurity, type ActiveStop, type PolicyStateLoaded, type Principal } from "../../core/index.js";
 import { ms, num, obj } from "../../core/read/rows.js";
+import { agentRows, eligibility, labelOf, versionRows } from "../agents/store.js";
+import { callableModels } from "../models/default.js";
+import { loadFacts } from "../models/facts.js";
+import { modelRows } from "../models/store.js";
 import { inFlight, loadHomeState, waitingGates, type HomeWorkOrder } from "./state.js";
 
 /**
@@ -21,6 +26,8 @@ export interface AttentionItem {
   sub: string;
   /** Where the action button goes: a route id, and the project to select first. */
   act: { label: string; route: string; project?: string; tab?: string; wo?: string };
+  /** A killed scope: Home offers Restore (to people who may) and shows the approvals so far. */
+  restore?: { scope: "factory" | "project"; id: string | null; approvals?: Array<{ by: string; at: number }>; needs?: number };
 }
 
 type Flow = Awaited<ReturnType<typeof loadHomeState>>;
@@ -28,32 +35,85 @@ type Flow = Awaited<ReturnType<typeof loadHomeState>>;
 const DAY = 86_400_000;
 const unitOf = (k: unknown): number => num(k) / 1_000_000;
 
-async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveStop[], now: number): Promise<AttentionItem[]> {
+/** What the caller may see of the factory, resolved from the role matrix (stops do not hide a read: a killed factory still shows its problems). */
+interface Scope {
+  me: Person;
+  vis: Set<string>;
+  /** The matrix grants `action` on `project` (or factory-wide when no project), the way `can` picks grants. */
+  holds(action: string, project?: string): boolean;
+  /** Eval health, when the caller may read agents. */
+  evals: EvalHealth | null;
+  restore: { approvals: Array<{ by: string; at: number }>; needs: number };
+}
+
+export interface EvalHealth {
+  /** Live agent versions that have a completed run of their suite. */
+  scored: number;
+  passing: number;
+  /** Live agents with a suite but no completed run for the live version. */
+  unscored: number;
+  failing: Array<{ agent: string; name: string; version: string; suite: string; score: number; threshold: number }>;
+}
+
+/** Real eval health: each live agent version against its suite threshold (the promotion rule's own `eligibility`), from its latest completed run. */
+async function evalHealth(db: Queryable, orgId: string): Promise<EvalHealth | null> {
+  const [agents, versions] = await Promise.all([agentRows(db, orgId), versionRows(db, orgId)]);
+  const out: EvalHealth = { scored: 0, passing: 0, unscored: 0, failing: [] };
+  for (const a of agents) {
+    if (a.live_version === null || a.live_version === undefined || a.status !== "active") continue;
+    const v = versions.find((x) => x.agent_id === a.id && x.version === a.live_version);
+    if (!v) continue;
+    const e = await eligibility(db, orgId, a, v);
+    if (e.score === null || e.threshold === null) {
+      if (e.suite) out.unscored += 1;
+      continue;
+    }
+    out.scored += 1;
+    if (e.ok) out.passing += 1;
+    else out.failing.push({ agent: a.id, name: a.name, version: labelOf(v), suite: e.suite ?? "", score: e.score, threshold: e.threshold });
+  }
+  return out.scored ? out : null;
+}
+
+async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveStop[], now: number, sc: Scope): Promise<AttentionItem[]> {
   const items: AttentionItem[] = [];
   const add = (i: AttentionItem): number => items.push(i);
+  const seeProject = (id: string): boolean => sc.vis.has(id);
   const fk = stops.find((s) => s.scope === "factory" && s.mode === "kill");
-  if (fk) add({ id: "hm-att-factory", sev: 0, icon: "st-kill", title: "Factory killed", where: "Factory", sub: `${fk.reason} · ${fmt.ago(fk.at, now)}`, act: { label: "Control panel", route: "home", tab: "control" } });
+  if (fk) {
+    const have = sc.restore.approvals.length;
+    add({
+      id: "hm-att-factory", sev: 0, icon: "st-kill", title: "Factory killed", where: "Factory",
+      sub: `${fk.reason} · ${fmt.ago(fk.at, now)} · restore approvals ${have} of ${sc.restore.needs}`, act: { label: "Open Security", route: "security" },
+      restore: { scope: "factory", id: null, approvals: sc.restore.approvals, needs: sc.restore.needs },
+    });
+  }
   for (const p of st.projects) {
-    if (p.killed) add({ id: `hm-att-kill-${p.id}`, sev: 0, icon: "st-kill", title: `${p.name} killed`, where: p.name, sub: `${p.killed.reason} · ${fmt.ago(p.killed.at, now)}`, act: { label: "Danger zone", route: "project-config", project: p.id } });
+    if (!seeProject(p.id)) continue;
+    if (p.killed) add({ id: `hm-att-kill-${p.id}`, sev: 0, icon: "st-kill", title: `${p.name} killed`, where: p.name, sub: `${p.killed.reason} · ${fmt.ago(p.killed.at, now)}`, act: { label: "Open floor", route: "floor", project: p.id }, restore: { scope: "project", id: p.id } });
     if (p.halted) add({ id: `hm-att-halt-${p.id}`, sev: 1, icon: "halt", title: `${p.name} halted`, where: p.name, sub: p.halted.reason, act: { label: "Open floor", route: "floor", project: p.id } });
     const b = p.budget;
-    if (p.status !== "archived" && b.monthly && b.mtd / b.monthly >= b.alertAt) {
+    if (p.status !== "archived" && b.monthly && b.mtd / b.monthly >= b.alertAt && (sc.holds("project.config", p.id) || sc.holds("audit.view", p.id))) {
       add({ id: `hm-att-bud-${p.id}`, sev: b.mtd >= b.monthly ? 1 : 2, icon: "alert", title: `Budget at ${fmt.pct(b.mtd / b.monthly)}`, where: p.name, sub: `${fmt.money0(b.mtd)} of ${fmt.money0(b.monthly)} this month`, act: { label: "Budget", route: "project-config", project: p.id, tab: "budget" } });
     }
   }
   for (const r of st.repos) {
     const p = st.projects.find((x) => x.id === r.project);
-    if (!p) continue;
+    if (!p || !seeProject(p.id)) continue;
     if (r.halted) add({ id: `hm-att-rh-${r.id}`, sev: 1, icon: "halt", title: `${r.name} halted`, where: p.name, sub: r.halted.reason, act: { label: "Open floor", route: "floor", project: p.id } });
     const o = r.onboarding;
-    if (o && (o.stage === "failed" || o.stage === "person" || (o.pr && o.pr.checks === "red" && o.pr.state === "open"))) {
-      add({ id: `hm-att-onb-${r.id}`, sev: 1, icon: "rocket", title: `Onboarding PR ${o.stage === "person" ? "needs a person" : "failing"}`, where: `${p.name} · ${r.name}`, sub: o.blocker || "PR checks are red.", act: { label: "Onboarding", route: "onboarding", project: p.id } });
+    const onb = sc.holds("onboarding.manage", p.id) || sc.holds("onboarding.merge", p.id) || sc.holds("audit.view", p.id);
+    if (onb && o && (o.stage === "failed" || o.stage === "person" || (o.pr && o.pr.checks === "red" && o.pr.state === "open"))) {
+      const why = o.stage === "failed" ? "verification failed" : o.stage === "person" ? "needs a person" : "PR checks are red";
+      add({ id: `hm-att-onb-${r.id}`, sev: 1, icon: "rocket", title: `${r.name} onboarding needs you: ${why}`, where: p.name, sub: o.blocker || "Open the onboarding session to continue.", act: { label: "Open session", route: "onboarding", project: p.id } });
     }
   }
   const stationName = (w: HomeWorkOrder): string => st.catalog.stations[w.station]?.name ?? "";
   for (const w of st.workOrders) {
-    if (!inFlight(w)) continue;
+    if (!inFlight(w) || !seeProject(w.project)) continue;
     const p = st.projects.find((x) => x.id === w.project);
+    const oversee = w.requestedBy === sc.me.id || sc.holds("wo.move", w.project) || sc.holds("audit.view", w.project) || sc.holds("release", w.project);
+    if (!oversee) continue;
     const where = `${p?.name ?? w.project} · ${stationName(w)}`;
     const act = { label: "Traveler", route: "traveler", wo: w.id, project: w.project };
     if (w.state === "blocked") add({ id: `hm-att-wo-${w.id}`, sev: 1, icon: "st-block", title: `${w.id} blocked`, where, sub: w.blockReason || w.title, act });
@@ -61,38 +121,36 @@ async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveSt
     else if (w.bay === "sechold") add({ id: `hm-att-wo-${w.id}`, sev: 0, icon: "shield", title: `${w.id} on security hold`, where: p?.name ?? w.project, sub: w.bayReason || w.title, act });
     else if (w.bay === "person") add({ id: `hm-att-wo-${w.id}`, sev: 2, icon: "human", title: `${w.id} needs a person`, where: p?.name ?? w.project, sub: w.bayReason || w.title, act });
   }
-  for (const g of waitingGates(st.workOrders, st.projects, now).filter((x) => x.late)) {
+  for (const g of waitingGates(st.workOrders, st.projects, now).filter((x) => x.late && seeProject(x.wo.project))) {
+    if (!(sc.holds("audit.view", g.wo.project) || sc.holds("wo.move", g.wo.project) || canApprove(st, sc.me.id, g.wo, g.gate, now))) continue;
     const d = gateDef(st.catalog, g.gate);
     const p = st.projects.find((x) => x.id === g.wo.project);
     add({ id: `hm-att-sla-${g.wo.id}-${g.gate}`, sev: 1, icon: "clock", title: `${d?.label ?? g.gate} past SLA on ${g.wo.id}`, where: p?.name ?? g.wo.project, sub: `Waiting ${fmt.dur(g.age)}; escalates after ${g.slaH} h`, act: { label: "Traveler", route: "traveler", wo: g.wo.id, project: g.wo.project } });
   }
-  // Latest eval run per suite below its threshold.
-  const ev = await db.query<{ suite: string; name: string; agent_id: string | null; score: string; threshold: string | null; version: string | null }>(
-    `select distinct on (r.suite_id) r.suite_id as suite, s.name, s.agent_id, r.score, s.data->>'threshold' as threshold, r.data->>'version' as version
-       from eval_runs r join suites s on s.org_id = r.org_id and s.id = r.suite_id where r.org_id = $1 and r.status = 'completed' and r.score is not null order by r.suite_id, r.started_at desc`,
-    [orgId],
-  );
-  for (const r of ev.rows) {
-    const th = r.threshold === null ? NaN : Number(r.threshold);
-    if (Number.isNaN(th) || Number(r.score) >= th) continue;
-    add({ id: `hm-att-ev-${r.suite}`, sev: 2, icon: "eval", title: `Eval below threshold: ${r.agent_id ?? r.suite}${r.version ? ` ${r.version}` : ""}`, where: "Factory", sub: `${r.name} ${fmt.pct(Number(r.score))} vs ${fmt.pct(th)}`, act: { label: "Evals", route: "evals" } });
+  // A live agent version whose latest suite run is below the suite's threshold.
+  for (const f of sc.evals?.failing ?? []) {
+    add({ id: `hm-att-ev-${f.agent}`, sev: 2, icon: "eval", title: `Live ${f.name} ${f.version} is below its eval threshold`, where: "Factory", sub: `${f.suite} ${fmt.pct(f.score)} vs ${fmt.pct(f.threshold)}`, act: { label: "Evals", route: "evals" } });
   }
-  const vend = await db.query<{ id: string; name: string; connected: boolean; budget: string | null; mtd: string }>(
-    `select v.id, v.name, v.connected, v.monthly_budget_micros as budget,
-            coalesce((select sum(u.cost_micros) from usage_meter u where u.org_id = v.org_id and u.vendor_id = v.id and u.at >= date_trunc('month', now())), 0) as mtd
-       from vendors v where v.org_id = $1`,
-    [orgId],
-  );
-  for (const v of vend.rows) {
-    const b = unitOf(v.budget);
-    const mtd = unitOf(v.mtd);
-    if (b > 0 && mtd / b >= 0.85) add({ id: `hm-att-vb-${v.id}`, sev: 2, icon: "alert", title: `${v.name} spend at ${fmt.pct(mtd / b)}`, where: "Vendor", sub: `${fmt.money0(mtd)} of ${fmt.money0(b)}`, act: { label: "Models", route: "models" } });
+  if (sc.holds("models.view")) {
+    const vend = await db.query<{ id: string; name: string; connected: boolean; budget: string | null; mtd: string }>(
+      `select v.id, v.name, v.connected, v.monthly_budget_micros as budget,
+              coalesce((select sum(u.cost_micros) from usage_meter u where u.org_id = v.org_id and u.vendor_id = v.id and u.at >= date_trunc('month', now())), 0) as mtd
+         from vendors v where v.org_id = $1`,
+      [orgId],
+    );
+    for (const v of vend.rows) {
+      const b = unitOf(v.budget);
+      const mtd = unitOf(v.mtd);
+      if (b > 0 && mtd / b >= 0.85) add({ id: `hm-att-vb-${v.id}`, sev: 2, icon: "alert", title: `${v.name} spend at ${fmt.pct(mtd / b)}`, where: "Vendor", sub: `${fmt.money0(mtd)} of ${fmt.money0(b)}`, act: { label: "Models", route: "models" } });
+    }
   }
-  const ints = await db.query<{ id: string; name: string; health: string; type: string; tname: string | null }>(
-    `select i.id, i.name, i.health, i.type_id as type, t.name as tname from integration_instances i left join integration_types t on t.org_id = i.org_id and t.id = i.type_id where i.org_id = $1 and i.enabled and i.health in ('failing','offline')`,
-    [orgId],
-  );
-  for (const i of ints.rows) add({ id: `hm-att-int-${i.id}`, sev: i.health === "offline" ? 2 : 1, icon: "plug", title: `${i.name} ${i.health}`, where: `${i.tname ?? i.type} integration`, sub: i.health === "offline" ? "Not connected" : "Deliveries failing", act: { label: "Integrations", route: "integrations" } });
+  if (sc.holds("integrations.view")) {
+    const ints = await db.query<{ id: string; name: string; health: string; type: string; tname: string | null }>(
+      `select i.id, i.name, i.health, i.type_id as type, t.name as tname from integration_instances i left join integration_types t on t.org_id = i.org_id and t.id = i.type_id where i.org_id = $1 and i.enabled and i.health in ('failing','offline')`,
+      [orgId],
+    );
+    for (const i of ints.rows) add({ id: `hm-att-int-${i.id}`, sev: i.health === "offline" ? 2 : 1, icon: "plug", title: `${i.name} ${i.health}`, where: `${i.tname ?? i.type} integration`, sub: i.health === "offline" ? "Not connected" : "Deliveries failing", act: { label: "Integrations", route: "integrations" } });
+  }
   return items.sort((a, b) => a.sev - b.sev);
 }
 
@@ -159,6 +217,19 @@ async function myConversations(db: Queryable, orgId: string, st: Flow, st0: Poli
     const mine = toConfirm && !open && !raised ? canApprove(st, me.id, w, "G0G1", now) && (w.requestedBy === me.id || lead) : w.requestedBy === me.id || (raised && lead && decideFor(st0, principal, "wo.answer", { project: w.project, time: now }).allowed);
     if (mine) out.push({ wo: w.id, title: w.title, project: w.project, question: text.get(w.id) ?? null });
   }
+  // The work-order session: the agent asked or proposed, or Gantry posted an update (a station finished, a gate decided), and this person has not opened it since.
+  const ups = await db.query<{ wo_id: string; project_id: string; title: string; body: string }>(
+    `select distinct on (m.wo_id) m.wo_id, w.project_id, w.title, m.body
+       from workorder_messages m join work_orders w on w.org_id = m.org_id and w.id = m.wo_id
+      where m.org_id = $1 and m.role <> 'user' and m.created_at > now() - interval '7 days' and w.state not in ('done','killed') and w.position <> 'declined'
+        and m.created_at > coalesce((select s.seen_at from workorder_session_seen s where s.org_id = m.org_id and s.wo_id = m.wo_id and s.person_id = $2), '-infinity'::timestamptz)
+      order by m.wo_id, m.created_at desc`,
+    [orgId, me.id],
+  );
+  for (const u of ups.rows) {
+    if (!vis.has(u.project_id) || out.some((x) => x.wo === u.wo_id) || !(await involvedInWo(db, orgId, u.wo_id, u.project_id)).includes(me.id)) continue;
+    out.push({ wo: u.wo_id, title: u.title, project: u.project_id, question: u.body.slice(0, 160) });
+  }
   return out;
 }
 
@@ -168,6 +239,34 @@ export interface HomeOptions {
   principal: Principal;
   st0: PolicyStateLoaded;
   now?: number;
+}
+
+/** The five first-run steps, derived from data on every request (nothing is stored). Null once all are done, or for anyone who cannot do the setup. */
+async function setupSteps(db: Queryable, orgId: string, st: Flow, active: Project[]) {
+  const [gh, facts, rows, anyWo] = await Promise.all([
+    db.query<{ health: string }>(`select health from integration_instances where org_id = $1 and type_id = 'github' and enabled`, [orgId]),
+    loadFacts(db, orgId),
+    modelRows(db, orgId),
+    db.query<{ n: string }>(`select count(*)::text as n from (select 1 from work_orders where org_id = $1 and source not in ('eval','onboarding') limit 1) x`, [orgId]),
+  ]);
+  const github = gh.rows.some((r) => r.health !== "failing" && r.health !== "offline");
+  const ghBad = !github && gh.rows.length > 0;
+  const callable = callableModels(facts, rows);
+  const ready = (r: Repo): boolean => r.onboarding?.stage === "ready" || !!r.onboarding?.exception;
+  const repos = st.repos.filter((r) => active.some((p) => p.id === r.project));
+  const readyRepo = repos.some(ready);
+  const open = repos.find((r) => !ready(r));
+  const stageText: Record<string, string> = { failed: "verification failed", person: "needs a person", connected: "connected, assessing", assessed: "assessed", pr_opened: "PR opened", pr_checks: "PR checks running", pr_merged: "PR merged, verifying", verified: "verified" };
+  const steps = [
+    { id: "github", label: "Connect GitHub", done: github, detail: github ? "" : ghBad ? "The GitHub integration is failing or offline." : "Install the GitHub App so Gantry can read and open pull requests.", route: "integrations", project: null as string | null },
+    { id: "vendor", label: "Add a model vendor", done: callable.length > 0, detail: callable.length ? "" : "Anthropic is ready to call once its key is saved. Bedrock, OpenAI, Azure and Gemini can be discovered but cannot run agents yet.", route: "models", project: null },
+    { id: "project", label: "Create a project", done: active.length > 0, detail: active.length ? "" : "A project holds repos, approvers and a budget.", route: "projects", project: null },
+    { id: "repo", label: "Onboard a repo", done: readyRepo, detail: readyRepo ? "" : open ? `${open.name}: ${stageText[open.onboarding?.stage ?? ""] ?? "in progress"}` : "Connect a repo to the project and let the onboarding agent verify it.", route: "onboarding", project: (open ?? repos[0])?.project ?? active[0]?.id ?? null },
+    { id: "work-order", label: "Submit the first work order", done: num(anyWo.rows[0]?.n) > 0, detail: "Once a repo is Ready, submit work and watch it move down the belt.", route: "work-orders", project: active[0]?.id ?? null },
+  ];
+  const firstOpen = steps.findIndex((x) => !x.done);
+  if (firstOpen < 0) return null;
+  return { done: steps.filter((x) => x.done).length, total: steps.length, steps: steps.map((x, i) => ({ id: x.id, label: x.label, state: x.done ? "done" : i === firstOpen ? "active" : "todo", detail: x.done ? "" : x.detail, route: x.route, project: x.project })) };
 }
 
 export async function computeHome(o: HomeOptions) {
@@ -180,19 +279,14 @@ export async function computeHome(o: HomeOptions) {
   const stops = st0.activeStops;
   const [approvals, conversations] = await Promise.all([myApprovals(db, orgId, st, st0, principal, me, now), myConversations(db, orgId, st, st0, principal, me, now)]);
   const vis = visibleProjects(st, me.id);
+  const visIds = new Set(vis.map((p) => p.id));
   const projName = (id: string): string => st.projects.find((p) => p.id === id)?.name ?? id;
-  const mine = st.workOrders
-    .filter((w) => w.requestedBy === me.id && (inFlight(w) || (w.doneAt && w.doneAt > now - 7 * DAY) || w.state === "killed"))
-    .sort((a, b) => Number(inFlight(b)) - Number(inFlight(a)) || b.createdAt - a.createdAt)
-    .map((w) => ({
-      id: w.id, title: w.title, project: w.project, projectName: projName(w.project), state: w.state, bay: w.bay, cls: w.cls, priority: w.priority, doneAt: w.doneAt,
-      station: st.catalog.stations[w.station]?.name ?? "", stationId: st.catalog.stations[w.station]?.id ?? null, bayName: w.bay ? st.catalog.bays.find((b) => b.id === w.bay)?.name ?? w.bay : null,
-    }));
-  const myProjects = vis.map((p) => ({ id: p.id, roles: rolesIn(me, p.id).map((r) => ({ id: r, name: st.catalog.roles.find((x) => x.id === r)?.name ?? r })) }));
-  const out: Record<string, unknown> = {
-    mode: factoryRole ? "factory" : "mine", approvals, conversations, mine: { workOrders: mine, projects: myProjects, factoryRole },
-    badges: {} as Record<string, unknown>, projectBadges: {} as Record<string, Record<string, unknown>>,
+  const holds = (action: string, project?: string): boolean => {
+    const act = st.catalog.actions.find((a) => a.id === action);
+    const grants = me.roles.filter((g) => g.scope === "factory" || (act?.scope !== "factory" && (act?.scope !== "project" || !project || g.scope === project)));
+    return grants.some((g) => st.matrix[g.role]?.[action]);
   };
+  const out: Record<string, unknown> = { approvals, conversations, badges: {} as Record<string, unknown>, projectBadges: {} as Record<string, Record<string, unknown>> };
 
   // Nav badges. Floor, work-orders and onboarding badges follow the selected project, so they are given per project.
   const badges: Record<string, unknown> = {};
@@ -204,8 +298,8 @@ export async function computeHome(o: HomeOptions) {
   ]);
   const n = (r: { rows: Array<{ n: string }> }): number => num(r.rows[0]?.n);
   if (n(tp)) badges.trust = { n: n(tp), label: `${n(tp)} trust proposals pending` };
-  if (n(lp)) badges.learning = { n: n(lp), label: `${n(lp)} learning proposals to review` };
-  if (n(bad)) badges.integrations = { n: n(bad), kind: "is-warn", label: `${n(bad)} integrations failing or offline` };
+  if (n(lp) && (factoryRole || holds("learning.apply"))) badges.learning = { n: n(lp), label: `${n(lp)} learning proposals to review` };
+  if (n(bad) && holds("integrations.view")) badges.integrations = { n: n(bad), kind: "is-warn", label: `${n(bad)} integrations failing or offline` };
   out.badges = badges;
   const pb: Record<string, Record<string, unknown>> = {};
   for (const p of vis) {
@@ -218,88 +312,82 @@ export async function computeHome(o: HomeOptions) {
     if (Object.keys(b).length) pb[p.id] = b;
   }
   out.projectBadges = pb;
-  if (!factoryRole) return out;
 
-  // ---- factory overview ----
-  const active = st.projects.filter((p) => p.status !== "archived");
-  const live = st.workOrders.filter(inFlight);
-  const gates = waitingGates(st.workOrders, st.projects, now);
-  const dayStart = istTime(istToday(now, 0), "00:00");
-  const shipped = st.workOrders.filter((w) => w.state === "done" && !w.split && w.doneAt);
-  const stopNames: string[] = [];
+  // ---- Home sections: built by the caller's rights, never filtered in the browser. A section the person may not see is absent, not empty. ----
+  if (!vis.length && !factoryRole) {
+    out.sections = { access: "none" };
+    return out;
+  }
   const fk = stops.find((s) => s.scope === "factory" && s.mode === "kill");
-  if (fk) stopNames.push("factory");
-  for (const p of active) {
-    if (p.killed) stopNames.push(`${p.name} killed`);
-    if (p.halted) stopNames.push(`${p.name} halted`);
-  }
-  for (const r of st.repos) if (r.halted) stopNames.push(`${r.name} halted`);
-  const items = await attention(db, orgId, st, stops, now);
-  const [sec, restore, spendV, trustP, trustD, learn, onb, people, prs] = await Promise.all([
-    readSecurity(db, orgId),
-    fk ? db.query<{ approver: string; at: Date }>(`select approver, at from restore_approvals where org_id = $1 and stop_id = $2 order by at`, [orgId, fk.id]) : Promise.resolve({ rows: [] as Array<{ approver: string; at: Date }> }),
-    db.query<{ id: string; name: string; budget: string | null; mtd: string }>(
-      `select v.id, v.name, v.monthly_budget_micros as budget, coalesce((select sum(u.cost_micros) from usage_meter u where u.org_id = v.org_id and u.vendor_id = v.id and u.at >= date_trunc('month', now())), 0) as mtd from vendors v where v.org_id = $1 order by v.name`, [orgId]),
-    db.query<{ id: string; cell_id: string; proposed_level: string; evidence: unknown }>(`select id, cell_id, proposed_level, evidence from trust_proposals where org_id = $1 and status = 'open' order by created_at desc`, [orgId]),
-    db.query<{ cell_id: string; at: Date; reason: string | null }>(
-      `select g.cell_id, g.revoked_at as at, g.evidence->>'reason' as reason from trust_grants g where g.org_id = $1 and g.revoked_at >= $2 order by g.revoked_at desc`, [orgId, new Date(now - 7 * DAY)]),
-    db.query<{ id: string; kind: string; title: string; change: unknown; decided_by: string | null }>(`select id, kind, title, change, decided_by from proposals where org_id = $1 and status = 'open' order by created_at desc`, [orgId]),
-    db.query<{ repo: string; name: string; project: string; stage: string }>(`select r.id as repo, r.name, r.project_id as project, r.onboarding_stage as stage from repos r join projects p on p.org_id = r.org_id and p.id = r.project_id where r.org_id = $1 and p.status <> 'archived' order by r.name`, [orgId]),
-    Promise.resolve(st.people),
-    db.query<{ n: string }>(`select count(*) as n from pull_requests where org_id = $1 and state = 'open'`, [orgId]),
-  ]);
-  const stageOf = (r: { repo: string; stage: string }): string => st.repos.find((x) => x.id === r.repo)?.onboarding?.stage ?? r.stage;
-  const stages = ONBOARD_STAGES.map((s) => ({ id: s.id, name: s.name, count: onb.rows.filter((r) => stageOf(r) === s.id).length }));
-  const stuck = onb.rows.filter((r) => ["failed", "person"].includes(stageOf(r))).map((r) => ({ repo: r.repo, name: r.name, project: r.project, stage: stageOf(r) }));
-  const openRepos = onb.rows.filter((r) => stageOf(r) !== "ready").map((r) => ({ repo: r.repo, name: r.name, project: r.project, stage: stageOf(r) }));
-  // Human attention: gates each person may decide, and gates only one person (besides Factory Admins) may decide.
-  const deciders = people.filter((x) => x.status === "active" && !(x.roles.length === 1 && x.roles[0]!.role === "factory_admin"));
-  const perPerson = new Map<string, { waiting: number; sole: number }>();
-  let sole = 0;
-  for (const g of gates) {
-    const who = deciders.filter((x) => canApprove(st, x.id, g.wo, g.gate, now));
-    if (who.length <= 1) sole += 1;
-    for (const x of who) {
-      const c = perPerson.get(x.id) ?? { waiting: 0, sole: 0 };
-      c.waiting += 1;
-      if (who.length === 1) c.sole += 1;
-      perPerson.set(x.id, c);
-    }
-  }
-  const waitingPeople = [...perPerson.entries()].map(([id, c]) => ({ person: id, name: people.find((p) => p.id === id)?.name ?? id, ...c })).sort((a, b) => b.waiting - a.waiting);
-  const killedWo = st.workOrders.filter((w) => w.state === "killed").length;
-  const spent = active.reduce((a, p) => a + p.budget.mtd, 0);
-  const budget = active.reduce((a, p) => a + p.budget.monthly, 0);
-  const running = live.filter((w) => w.state === "running").length;
-  const f = st.projects;
-  Object.assign(out, {
-    figures: {
-      projects: { active: active.length, archived: f.length - active.length }, inFlight: live.length, running, inBays: live.filter((w) => w.bay).length,
-      shippedToday: shipped.filter((w) => (w.doneAt ?? 0) >= dayStart).length, shippedWeek: shipped.filter((w) => (w.doneAt ?? 0) >= now - 7 * DAY).length,
-      gatesWaiting: gates.length, oldestWaitMs: gates[0]?.age ?? 0, lateGates: gates.filter((g) => g.late).length, stops: stopNames, killedWorkOrders: killedWo,
-      spent, budget, agentSuccess: null as number | null, agentSuccessTrend: [] as number[],
-    },
-    attention: items,
-    control: {
-      killed: fk ? { by: fk.by, at: fk.at, reason: fk.reason, mode: fk.inFlight ?? "hold" } : null,
-      restoreApprovals: restore.rows.map((r) => ({ by: r.approver, at: ms(r.at) ?? 0 })), restoreNeeds: sec.value.restoreFactoryNeedsTwo ? 2 : 1,
-      admins: st.people.filter((p) => p.status === "active" && isFactoryAdmin(st, p.id)).map((p) => ({ id: p.id, name: p.name })),
-      impact: { projects: active.filter((p) => !p.killed).length, workOrders: live.length, running, prs: num(prs.rows[0]?.n) },
-    },
-    human: {
-      waiting: waitingPeople.slice(0, 4), gates: { count: gates.length, oldestMs: gates[0]?.age ?? 0, sole },
-      trust: {
-        proposals: trustP.rows.map((r) => ({ id: r.id, cell: r.cell_id, to: r.proposed_level })), demotions: trustD.rows.map((r) => ({ cell: r.cell_id, at: ms(r.at) ?? 0, reason: r.reason })),
-      },
-      learning: learn.rows.map((r) => ({ id: r.id, kind: r.kind, title: r.title || String(obj(r.change).title ?? obj(r.change).summary ?? r.kind) })),
-    },
-    onboarding: { stages, stuck, open: openRepos, total: onb.rows.length, ready: onb.rows.length - openRepos.length },
-    spend: {
-      projects: active.map((p) => ({ id: p.id, label: p.name, v: p.budget.mtd, b: p.budget.monthly, alert: p.budget.alertAt })),
-      vendors: spendV.rows.map((v) => ({ id: v.id, label: v.name, v: unitOf(v.mtd), b: unitOf(v.budget) })),
-    },
-    factory: { killed: fk ? { by: fk.by, at: fk.at, reason: fk.reason, mode: fk.inFlight ?? "hold" } : null },
+  const restore = fk ? await db.query<{ approver: string; at: Date }>(`select approver, at from restore_approvals where org_id = $1 and stop_id = $2 order by at`, [orgId, fk.id]) : { rows: [] as Array<{ approver: string; at: Date }> };
+  const sec = fk ? await readSecurity(db, orgId) : null;
+  const evals = holds("agents.view") ? await evalHealth(db, orgId) : null;
+  const scope: Scope = {
+    me, vis: visIds, holds, evals,
+    restore: { approvals: restore.rows.map((r) => ({ by: r.approver, at: ms(r.at) ?? 0 })), needs: sec?.value.restoreFactoryNeedsTwo ? 2 : 1 },
+  };
+  const items = await attention(db, orgId, st, stops, now, scope);
+  const visWos = (st.workOrders as HomeWorkOrder[]).filter((w) => visIds.has(w.project));
+  const live = visWos.filter(inFlight);
+  const gates = waitingGates(visWos, st.projects, now);
+  const dayStart = istTime(istToday(now, 0), "00:00");
+  const shipped = visWos.filter((w) => w.state === "done" && !w.split && w.doneAt);
+  const stationIds = st.catalog.stations.map((s) => s.id);
+  const byStation: Record<string, number> = {};
+  for (const w of live) if (!w.bay) byStation[stationIds[w.station] ?? ""] = (byStation[stationIds[w.station] ?? ""] ?? 0) + 1;
+  const prevWeek = await db.query<{ n: string }>(
+    `select count(*)::text as n from work_orders where org_id = $1 and state = 'done' and source not in ('eval','onboarding') and project_id = any($2::text[]) and closed_at >= $3 and closed_at < $4`,
+    [orgId, [...visIds], new Date(now - 14 * DAY), new Date(now - 7 * DAY)],
+  );
+  const shippedWeek = shipped.filter((w) => (w.doneAt ?? 0) >= now - 7 * DAY).length;
+  const mine = visWos
+    .filter((w) => w.requestedBy === me.id && (inFlight(w) || (w.doneAt && w.doneAt > now - 7 * DAY) || w.state === "killed"))
+    .sort((a, b) => Number(inFlight(b)) - Number(inFlight(a)) || b.createdAt - a.createdAt)
+    .map((w) => ({
+      id: w.id, title: w.title, project: w.project, projectName: projName(w.project), state: w.state, bay: w.bay, cls: w.cls, priority: w.priority, doneAt: w.doneAt,
+      station: st.catalog.stations[w.station]?.name ?? "", stationId: st.catalog.stations[w.station]?.id ?? null, bayName: w.bay ? st.catalog.bays.find((b) => b.id === w.bay)?.name ?? w.bay : null,
+    }));
+  const motion = {
+    inFlight: live.length, running: live.filter((w) => w.state === "running").length, inBays: live.filter((w) => w.bay).length, byStation,
+    shippedToday: shipped.filter((w) => (w.doneAt ?? 0) >= dayStart).length, shippedWeek, shippedPrevWeek: num(prevWeek.rows[0]?.n),
+    recentDone: shipped.sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)).slice(0, 5).map((w) => ({ id: w.id, title: w.title, project: w.project, projectName: projName(w.project), doneAt: w.doneAt })),
+    mine,
+  };
+  const myProjects = vis.map((p) => {
+    const rs = st.repos.filter((r) => r.project === p.id);
+    return {
+      id: p.id, roles: rolesIn(me, p.id).map((r) => ({ id: r, name: st.catalog.roles.find((x) => x.id === r)?.name ?? r })),
+      repos: rs.filter((r) => !(r.onboarding?.stage === "ready" || r.onboarding?.exception)).map((r) => ({ id: r.id, name: r.name, stage: r.onboarding?.stage ?? "connected", blocker: r.onboarding?.blocker ?? "" })),
+    };
   });
+  const active = st.projects.filter((p) => visIds.has(p.id) && p.status !== "archived");
+  const decides = ["gate.approve", "wo.answer", "brief.confirm", "onboarding.merge"].some((a) => holds(a));
+  const sections: Record<string, unknown> = { attention: items, motion, projects: myProjects };
+  if (decides || approvals.length || conversations.length) sections.waiting = { approvals, conversations };
+  // Read-only view of the human bottleneck for people who audit but do not decide (the Auditor).
+  if (holds("audit.view") && !holds("gate.approve")) {
+    const per = new Map<string, { count: number; oldestMs: number }>();
+    for (const g of gates) {
+      const c = per.get(g.wo.project) ?? { count: 0, oldestMs: 0 };
+      c.count += 1;
+      c.oldestMs = Math.max(c.oldestMs, g.age);
+      per.set(g.wo.project, c);
+    }
+    sections.approvers = { count: gates.length, oldestMs: gates[0]?.age ?? 0, late: gates.filter((g) => g.late).length, byProject: [...per.entries()].map(([id, c]) => ({ id, name: projName(id), ...c })) };
+  }
+  if (factoryRole && (holds("models.view") || holds("audit.view") || evals)) {
+    const spent = active.reduce((a, p) => a + p.budget.mtd, 0);
+    const budget = active.reduce((a, p) => a + p.budget.monthly, 0);
+    sections.health = {
+      spend: { spent, budget, projects: active.map((p) => ({ id: p.id, label: p.name, v: p.budget.mtd, b: p.budget.monthly, alert: p.budget.alertAt })) },
+      evals, audit: holds("audit.view"),
+    };
+  }
+  if (isFactoryAdmin(st, me.id)) {
+    const setup = await setupSteps(db, orgId, st, st.projects.filter((p) => p.status !== "archived"));
+    if (setup) sections.setup = setup;
+  }
+  out.sections = sections;
   return out;
 }
 

@@ -122,6 +122,22 @@ d("the onboarding session", () => {
       expect((await doc(r.id)).busy).toBe("opening_pr");
     });
 
+    it("a turn has room for a full scaffold proposal, and an answer cut off at the output limit says so instead of 'no text'", async () => {
+      const r = await assessed();
+      edge.script = [
+        { blocks: [{ type: "tool_use", id: "t1", name: "get_onboarding_state", input: {} }] },
+        { blocks: [], stop: "max_tokens" },
+      ];
+      const turn = await call(lena, "POST", url(r.id, "/messages"), { kind: "open" });
+      expect(turn.status).toBe(200);
+      expect(edge.calls[0]!.body.max_tokens).toBe(16_000);
+      const msg = (await call(lena, "GET", url(r.id))).body.messages.at(-1);
+      expect(msg).toMatchObject({ role: "assistant", author: "ag-onboard" });
+      expect(msg.text).toMatch(/cut off at the output limit/);
+      expect(msg.text).not.toMatch(/returned no text/);
+      expect(msg.data.truncated).toBe(true);
+    });
+
     it("an invalid draft (a secret) is refused by the contract: the proposal falls back to the rule-based file and says so", async () => {
       const r = await assessed();
       edge.script = [
@@ -300,6 +316,76 @@ d("the onboarding session", () => {
       expect((await updates(r.id)).map((u) => u.data.event)).toEqual(expect.arrayContaining(["assessed", "pr"]));
       await worker((tx) => applyPrObservation(tx, t.orgId, { repoId: r.id, now: new Date(), gateCheckName: "Gantry gates", obs: { state: "merged", headSha: SHA("b"), checks: [], mergedBy: "kenji" } }));
       expect((await updates(r.id)).filter((u) => u.data.event === "merged")).toHaveLength(1);
+    });
+  });
+  describe("the agent authors the pull request (agent authors, rails validate, a person approves)", () => {
+    const empty = (over: Record<string, unknown> = {}) => RepoFacts.parse({ repo: "me/nautobot-jobs", defaultBranch: "main", headSha: SHA("b"), language: null, files: ["README.md"], contents: { "README.md": "# nautobot-jobs\n" }, secrets: { scanned: 1, complete: true, hits: [] }, protection: null, ...over });
+    afterEach(() => configureSessionBroker(async () => ({ ok: true, facts: facts() })));
+    const uv = [
+      { path: "pyproject.toml", content: "[project]\nname = \"nautobot-jobs\"\nversion = \"0.1.0\"\n", purpose: "uv project" },
+      { path: "tests/test_smoke.py", content: "def test_smoke():\n    assert True\n", purpose: "smoke test" },
+      { path: ".github/workflows/ci.yml", content: "name: ci\non: [pull_request]\npermissions:\n  contents: read\njobs:\n  test:\n    name: ci/test\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: uv sync\n", purpose: "CI" },
+    ];
+    const propose = async (r: { id: string }, input: unknown) => {
+      edge.script = [{ blocks: [{ type: "tool_use", id: "t1", name: "propose_pull_request", input }] }, { blocks: [{ type: "text", text: "Done." }] }];
+      await call(lena, "POST", url(r.id, "/messages"), { text: "make this a Python uv project with a smoke test and CI" });
+      return (await call(lena, "GET", url(r.id))).body.messages.at(-1);
+    };
+
+    it("a full uv scaffold for an empty repo: the card flags the workflow and the manifest, approval needs the explicit confirmation, and the run holds exactly the validated files", async () => {
+      configureSessionBroker(async () => ({ ok: true, facts: empty() }));
+      const r = await assessed();
+      const msg = await propose(r, { files: uv, summary: "A uv project with a smoke test and CI." });
+      const card = msg.data.cards.find((c: any) => c.kind === "proposal");
+      expect(card).toMatchObject({ what: "open_pr", mode: "agent", status: "pending", diffCap: 1500 });
+      expect(card.files.map((f: any) => f.path)).toEqual(uv.map((f) => f.path));
+      expect(card.files.every((f: any) => f.source === "agent")).toBe(true);
+      expect(card.sensitive.map((x: any) => x.id)).toEqual(expect.arrayContaining(["workflow", "dependencies"]));
+      expect(card.blockers ?? []).toEqual([]);
+      const approve = (body: object) => call(lena, "POST", url(r.id, `/proposals/${msg.id}/${card.id}`), { decision: "approve", ...body });
+      const refused = await approve({});
+      expect(refused.status).toBe(422);
+      expect(JSON.stringify(refused.body)).toMatch(/Confirm the parts/);
+      expect((await doc(r.id)).busy ?? null).toBe(null);
+      const ok = await approve({ confirmSensitive: true });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect((await doc(r.id)).busy).toBe("opening_pr");
+      const run = (await q(`select data from onboarding_runs where id = $1`, [r.runId]))[0].data;
+      expect(run.sessionApproved).toMatchObject({ by: lena, confirmedSensitive: true });
+      expect(run.agentDraft.result.files.map((f: any) => f.path)).toEqual(uv.map((f) => f.path));
+    });
+
+    it("the rails refuse a secret, a traversal path and existing application code with every reason; no card is made", async () => {
+      configureSessionBroker(async () => ({ ok: true, facts: empty({ files: ["README.md", "src/app.py"] }) }));
+      const r = await assessed();
+      const msg = await propose(r, { files: [{ path: "src/app.py", content: "x = 1\n" }, { path: "../x", content: "x" }, { path: "docs/k.md", content: "AKIAABCDEFGHIJKLMNOP\n" }] });
+      expect(msg.data.cards.filter((c: any) => c.kind === "proposal")).toHaveLength(0);
+      const result = JSON.stringify(edge.calls[1]!.body.messages);
+      expect(result).toMatch(/existing application code/);
+      expect(result).toMatch(/not a safe repository path/);
+      expect(result).toMatch(/credential/);
+    });
+
+    it("a missing workflows permission is a blocker on the card with the exact steps", async () => {
+      const inst = { id: 1, permissions: { contents: "write", metadata: "read" }, repositorySelection: "selected", targetType: "User" };
+      configureSessionBroker(async () => ({ ok: true, facts: empty({ protection: { defaultBranch: "main", installation: inst, rulesets: [], branchProtection: null, requiresGantryCheck: false, gantryCheckPinned: false, appOnBypassList: false } }) }));
+      const r = await assessed();
+      const card = (await propose(r, { files: uv })).data.cards.find((c: any) => c.kind === "proposal");
+      expect(card.blockers[0]).toMatchObject({ id: "workflow_permission", fix: expect.stringContaining("Workflows to Read and write") });
+    });
+
+    it("a user-account install ends in a concrete proposal: marking the repo ready by exception, with the reason recorded", async () => {
+      const r = await assessed();
+      edge.script = [{ blocks: [{ type: "tool_use", id: "t1", name: "propose_exception", input: { reason: "The App is installed on a personal account, so the organisation-level check cannot be met; the owner accepts that." } }] }, { blocks: [{ type: "text", text: "Move to an organisation or accept the exception." }] }];
+      await call(lena, "POST", url(r.id, "/messages"), { text: "verification says user account" });
+      const msg = (await call(lena, "GET", url(r.id))).body.messages.at(-1);
+      const card = msg.data.cards.find((c: any) => c.kind === "proposal");
+      expect(card).toMatchObject({ what: "exception", status: "pending" });
+      const ok = await call(lena, "POST", url(r.id, `/proposals/${msg.id}/${card.id}`), { decision: "approve" });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      const x = await doc(r.id);
+      expect(x.stage).toBe("ready");
+      expect(x.exception.reason).toMatch(/personal account/);
     });
   });
 });

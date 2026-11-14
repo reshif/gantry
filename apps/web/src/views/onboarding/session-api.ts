@@ -53,8 +53,8 @@ export async function sendTurn(repoId: string, body: { kind: "message" | "open" 
   return r;
 }
 
-export async function decide(repoId: string, messageId: string, pid: string, decision: "approve" | "changes" | "discard", text?: string): Promise<ApiResult> {
-  const r = await post(api(`repos/${enc(repoId)}/onboarding/session/proposals/${enc(messageId)}/${enc(pid)}`), { decision, ...(text ? { text } : {}) });
+export async function decide(repoId: string, messageId: string, pid: string, decision: "approve" | "changes" | "discard", text?: string, confirmSensitive?: boolean): Promise<ApiResult> {
+  const r = await post(api(`repos/${enc(repoId)}/onboarding/session/proposals/${enc(messageId)}/${enc(pid)}`), { decision, ...(text ? { text } : {}), ...(confirmSensitive ? { confirmSensitive: true } : {}) });
   if (r.ok) invalidateSlices(["repos", "audit"]);
   return r;
 }

@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useMe, usePeople, useProjects } from "../api/queries";
-import { navigate } from "../lib/router";
+import { navigate, parseHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
 import { usePrefs } from "../lib/prefs";
 import { useActors } from "../ui/actors";
@@ -18,7 +18,12 @@ import { ClassesTab } from "./project-config/classes";
 import { ApproversTab } from "./project-config/approvers";
 import { BudgetTab, DangerTab, HistoryTab, McpTab, NotificationsTab } from "./project-config/misc";
 
-const fresh = (): CfgState => ({ tab: "overview", gate: "G5", flowCls: "feature", add: { person: "", role: "engineer" }, scen: { cls: "hotfix", risk: "normal", path: "" }, drafts: {}, text: {} });
+/** `#/p/<project>/project-config/approvers/G2` opens that gate's rule (the traveler's "Edit rule"). */
+const linked = (): { tab: string; gate: string } | null => {
+  const [tab, gate] = (parseHash(window.location.hash).param ?? "").split("/");
+  return tab && TABS.some((t) => t[0] === tab) ? { tab, gate: gate || "G5" } : null;
+};
+const fresh = (): CfgState => ({ tab: linked()?.tab ?? "overview", gate: linked()?.gate ?? "G5", flowCls: "feature", add: { person: "", role: "engineer" }, scen: { cls: "hotfix", risk: "normal", path: "" }, drafts: {}, text: {} });
 
 export default function ProjectConfigView() {
   const me = useMe();

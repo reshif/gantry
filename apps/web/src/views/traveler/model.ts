@@ -105,7 +105,7 @@ export function useTravelerCatalog(): Catalog | null {
   return useCatalog();
 }
 
-export const plural = (n: number, w: string, p?: string): string => `${n} ${n === 1 ? w : (p ?? `${w}s`)}`;
+export { plural } from "../../lib/plural";
 export const isClosed = (w: Pick<WorkOrder, "state">): boolean => w.state === "done" || w.state === "killed";
 /** Tab ids of the traveler. */
 export const TRAVELER_TABS = ["journey", "lifecycle", "conversation", "brief", "artefacts", "history"] as const;

@@ -1,12 +1,14 @@
 /** Factory state, IST clock and shift, release windows and freezes (legacy status cluster, without the simulation control). */
 import { useEffect, useRef, useState } from "react";
 import { fmt } from "@gantry/domain";
+import { useCan } from "../api/can";
 import { useFreezes, useMe, usePolicies } from "../api/queries";
 import { statusInfo, type StatusInfo } from "../lib/status";
 import { setReplay, usePrefs } from "../lib/prefs";
 import { Icon } from "../ui/Icon";
 import { Btn } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
+import { makeStopActions } from "./stopActions";
 
 export function useStatus(): StatusInfo | null {
   const me = useMe();
@@ -52,6 +54,40 @@ export function StatusCluster() {
         {s.activeFreezes.length ? <Icon name="lock" /> : null}
       </span>
     </button>
+  );
+}
+
+/**
+ * Kill and restore the factory: here and in the Ctrl K palette, nowhere on Home. Shown only to people who hold the right (no locked copy for anyone else);
+ * the dialogs and their step-up are the shared ones in StopDialogs.
+ */
+function FactoryStop({ close }: { close: () => void }) {
+  const me = useMe();
+  const ui = useUI();
+  const kill = useCan("kill.factory");
+  const restore = useCan("restore.factory");
+  if (!me) return null;
+  const killed = me.factory.killed as { restoreApprovals?: Array<{ by: string }> } | null;
+  const stop = makeStopActions(ui, me);
+  if (killed) {
+    if (restore.pending || !restore.allowed) return null;
+    const have = killed.restoreApprovals ?? [];
+    const already = have.some((a) => a.by === me.person.id);
+    return (
+      <div className="sp-stop" id="sp-stop">
+        <h3 className="sp-h">Restore the factory</h3>
+        <p className="small muted">{have.length ? `${have.length} restore ${have.length === 1 ? "approval" : "approvals"} so far.` : "No restore approval yet."}</p>
+        <Btn label={have.length ? "Approve restore…" : "Restore factory…"} kind="primary" icon="power" id="sp-restore" disabledReason={already ? "You approved this restore already. A second Factory Admin must approve." : null} onClick={() => { close(); stop.restore("factory", null); }} />
+      </div>
+    );
+  }
+  if (kill.pending || !kill.allowed) return null;
+  return (
+    <div className="sp-stop" id="sp-stop">
+      <h3 className="sp-h">Kill the factory</h3>
+      <p className="small muted">Stops every agent in every project and refuses new submissions. Needs a reason and a typed phrase.</p>
+      <Btn label="Kill factory…" kind="danger" icon="st-kill" id="sp-kill" onClick={() => { close(); stop.kill("factory", null); }} />
+    </div>
   );
 }
 
@@ -104,6 +140,7 @@ function StatusPopover({ s, replayAt, close }: { s: StatusInfo; replayAt: number
       ) : (
         <p className="muted small">No freezes active or scheduled.</p>
       )}
+      <FactoryStop close={close} />
       {canAccess ? (
         <a href="#access" className="small" onClick={close}>
           Manage windows and freezes in Access

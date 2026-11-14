@@ -245,41 +245,42 @@ d("audit, activity and home", () => {
       // The submitter is an engineer with no G2 right, and the gate has separation of duties.
       const e = await call(engineer, "/api/v1/home");
       expect(e.body.approvals).toEqual([]);
-      expect(e.body.mode).toBe("mine");
-      expect(e.body.mine.workOrders.map((w: any) => w.id)).toEqual(["WO-9001"]);
-      expect(e.body.mine.projects).toEqual([{ id: "payments", roles: [{ id: "engineer", name: expect.any(String) }] }]);
-      expect(e.body.figures).toBeUndefined();
+      expect(e.body.sections.motion.mine.map((w: any) => w.id)).toEqual(["WO-9001"]);
+      expect(e.body.sections.projects).toEqual([expect.objectContaining({ id: "payments", roles: [{ id: "engineer", name: expect.any(String) }] })]);
+      expect(e.body.sections.health).toBeUndefined();
       expect(e.body.projectBadges.payments).toBeUndefined();
       expect(r.body.projectBadges.payments["work-orders"]).toMatchObject({ n: 1 });
     });
-    it("gives the factory overview to Factory Admins and the Auditor, with real figures", async () => {
+    it("gives the factory sections to Factory Admins and the Auditor, with real figures", async () => {
       const r = await call(admin, "/api/v1/home");
-      expect(r.body.mode).toBe("factory");
-      expect(r.body.figures).toMatchObject({ inFlight: 2, running: 0, gatesWaiting: 1, lateGates: 1, shippedToday: 0, shippedWeek: 0 });
-      expect(r.body.figures.oldestWaitMs).toBeGreaterThan(29 * hour);
-      expect(r.body.figures.projects.active).toBeGreaterThan(5);
-      expect(r.body.attention.map((a: any) => a.id)).toEqual(expect.arrayContaining(["hm-att-wo-WO-9002", "hm-att-sla-WO-9001-G2"]));
-      const sevs = r.body.attention.map((a: any) => a.sev);
+      const s = r.body.sections;
+      expect(s.motion).toMatchObject({ inFlight: 2, running: 0, shippedToday: 0, shippedWeek: 0 });
+      expect(s.projects.length).toBeGreaterThan(5);
+      expect(s.attention.map((a: any) => a.id)).toEqual(expect.arrayContaining(["hm-att-wo-WO-9002", "hm-att-sla-WO-9001-G2"]));
+      const sevs = s.attention.map((a: any) => a.sev);
       expect([...sevs].sort()).toEqual(sevs);
-      expect(r.body.attention.find((a: any) => a.id === "hm-att-wo-WO-9002")).toMatchObject({ title: "WO-9002 blocked", sub: "Waiting on API key", act: { route: "traveler", wo: "WO-9002" } });
-      expect(r.body.control).toMatchObject({ killed: null, restoreNeeds: expect.any(Number), impact: { workOrders: 2 } });
-      expect(r.body.control.admins.map((a: any) => a.id)).toEqual(expect.arrayContaining(["p-asha", "p-omar"]));
-      expect(r.body.onboarding.stages.map((s: any) => s.id)).toContain("ready");
-      expect(r.body.onboarding.total).toBeGreaterThan(0);
-      expect(r.body.spend.projects.length).toBeGreaterThan(0);
-      expect(r.body.human.gates.count).toBe(1);
-      expect((await call(auditor, "/api/v1/home")).body.mode).toBe("factory");
+      expect(s.attention.find((a: any) => a.id === "hm-att-wo-WO-9002")).toMatchObject({ title: "WO-9002 blocked", sub: "Waiting on API key", act: { route: "traveler", wo: "WO-9002" } });
+      expect(s.health.spend.projects.length).toBeGreaterThan(0);
+      expect(s.waiting).toBeDefined();
+      expect(s.approvers).toBeUndefined();
+      // The dead fields are gone.
+      for (const k of ["human", "onboarding", "control", "figures", "mode", "mine", "spend"]) expect(r.body[k]).toBeUndefined();
+      // The Auditor reads the same factory, but only watches the approvers: no Waiting on you, no setup.
+      const a = (await call(auditor, "/api/v1/home")).body.sections;
+      expect(a.waiting).toBeUndefined();
+      expect(a.setup).toBeUndefined();
+      expect(a.approvers).toMatchObject({ count: 1, late: 1 });
+      expect(a.health).toBeDefined();
     });
-    it("reports a killed factory and its restore approvals", async () => {
+    it("reports a killed factory with its restore approvals as an attention item", async () => {
       const row = (await t.db.admin.query(`select id from stops where org_id = $1 and scope_type = 'factory' and lifted_at is null`, [t.orgId])).rows;
       expect(row).toEqual([]);
       await t.db.admin.query(`insert into stops (org_id, id, scope_type, mode, reason, in_flight, set_by, set_at) values ($1,'factory:factory:9','factory','kill','Test kill','hold','p-asha', now())`, [t.orgId]);
       await t.db.admin.query(`insert into restore_approvals (org_id, id, stop_id, approver) values ($1,'ra1','factory:factory:9','p-omar')`, [t.orgId]);
       const r = await call(admin, "/api/v1/home");
-      expect(r.body.attention[0]).toMatchObject({ id: "hm-att-factory", sev: 0, title: "Factory killed" });
-      expect(r.body.control.killed).toMatchObject({ by: "p-asha", reason: "Test kill", mode: "hold" });
-      expect(r.body.control.restoreApprovals).toEqual([{ by: "p-omar", at: expect.any(Number) }]);
-      expect(r.body.figures.stops).toContain("factory");
+      expect(r.body.sections.attention[0]).toMatchObject({ id: "hm-att-factory", sev: 0, title: "Factory killed", restore: { scope: "factory", approvals: [{ by: "p-omar", at: expect.any(Number) }], needs: expect.any(Number) } });
+      // Everyone sees that the factory is killed, with no more than the stop itself.
+      expect((await call(engineer, "/api/v1/home")).body.sections.attention[0]).toMatchObject({ id: "hm-att-factory" });
       // While killed nobody can approve the gate.
       expect((await call(lead, "/api/v1/home")).body.approvals).toEqual([]);
       await t.db.admin.query(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = 'factory:factory:9'`);
@@ -294,8 +295,10 @@ d("audit, activity and home", () => {
         const r = await e.app.inject({ method: "GET", url: "/api/v1/home", headers: s.headers });
         expect(r.statusCode).toBe(200);
         const b = r.json();
-        expect(b).toMatchObject({ mode: "factory", approvals: [], conversations: [], attention: [], badges: {}, figures: { inFlight: 0, gatesWaiting: 0, shippedToday: 0, shippedWeek: 0, spent: 0, budget: 0 } });
-        expect(b.onboarding).toMatchObject({ total: 0, ready: 0 });
+        expect(b).toMatchObject({ approvals: [], conversations: [], badges: {} });
+        expect(b.sections).toMatchObject({ attention: [], motion: { inFlight: 0, shippedToday: 0, shippedWeek: 0 }, health: { spend: { spent: 0, budget: 0 }, evals: null } });
+        // A new org: the setup checklist is the next step, with nothing done yet but the first step active.
+        expect(b.sections.setup.steps.map((x: any) => `${x.id}:${x.state}`)).toEqual(["github:active", "vendor:todo", "project:todo", "repo:todo", "work-order:todo"]);
         const a = await e.app.inject({ method: "GET", url: "/api/v1/audit", headers: s.headers });
         expect(a.json().items.every((x: any) => x.action !== "role.add" || true)).toBe(true);
       } finally {

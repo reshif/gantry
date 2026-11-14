@@ -10,6 +10,7 @@ import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { Empty } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
+import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
@@ -45,6 +46,7 @@ export function Shell({ me }: { me: Me }) {
   // back from a step-up sign-in: reopen the kill/restore dialog the person left, with their draft
   useResumeStepUp((d) => makeStopActions(ui, me)[d.kind](d.scope as "factory" | "project" | "workorder", d.id), true);
   useInstallStepUp();
+  useInstallOverrideReason();
   useRegisterNewWorkOrder();
   const [navOpen, setNavOpen] = useState(false);
   const main = useRef<HTMLElement>(null);

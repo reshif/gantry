@@ -14,8 +14,8 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { runConversation, ModelUnavailable, readiness } from "../areas/console/model.js";
 import { UNTRUSTED_NOTE } from "../areas/console/mark.js";
-import { costMicros, currentPrices } from "../areas/internal/metering.js";
-import { mergeOnboardingPr, openOnboardingPr, requestChanges } from "../areas/onboarding/commands.js";
+import { historyFrom, openSse, turnCostMicros } from "../areas/session/core.js";
+import { markException, mergeOnboardingPr, openOnboardingPr, requestChanges } from "../areas/onboarding/commands.js";
 import { onboardingAgentGate } from "../areas/onboarding/agent.js";
 import { brokerInspect } from "../areas/onboarding/session/broker.js";
 import { markSeen } from "../areas/onboarding/session/updates.js";
@@ -24,10 +24,13 @@ import { executeSessionTool, sessionToolDefs, type SessionCtx } from "../areas/o
 import { docOf, lockRepo, readRepoRow, type Doc, type RepoRow } from "../areas/onboarding/state.js";
 import { command, decide, policyState, refuse, type CommandResult } from "../core/index.js";
 
+/** Output room for one onboarding turn: enough for a full scaffold proposal (several whole files) in a single tool call. */
+export const ONBOARDING_MAX_TOKENS = 16_000;
+
 const Id = z.object({ id: z.string().min(1).max(100) });
 const ProposalParams = z.object({ id: z.string().min(1).max(100), mid: z.string().min(1).max(60), pid: z.string().min(1).max(40) });
 const MessageBody = z.object({ text: z.string().trim().max(6000).optional(), kind: z.enum(["message", "open", "continue"]).default("message") }).strict();
-const DecisionBody = z.object({ decision: z.enum(["approve", "changes", "discard"]), text: z.string().trim().max(2000).optional() }).strict();
+const DecisionBody = z.object({ decision: z.enum(["approve", "changes", "discard"]), text: z.string().trim().max(2000).optional(), /** The person confirms the sensitive parts listed on the card (workflow files, dependency manifests, ...). */ confirmSensitive: z.boolean().optional() }).strict();
 
 export const NO_AGENT_TEXT = "Connect a model vendor to talk to the Onboarding Agent. Until then Gantry works rule-based: it reads the repository, posts what it observed and proposes the same pull request for you to approve.";
 
@@ -38,7 +41,8 @@ export const followUps: { run: () => Promise<number> } = { run: async () => 0 };
 const system = (o: { repo: string; project: string; stage: string; person: string; canMerge: boolean; pinned: boolean }): string => [
   "You are the Onboarding Agent in Gantry, a factory of AI coding agents. You work with one person, in one conversation, to get one repository ready for the factory: read it, assess it, propose a pull request, watch its checks, and see it through to Ready.",
   "Rules. Facts about the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What the person tells you is their claim: use it, and say it is theirs. You never write to GitHub: you propose, as cards, and a person approves. Say plainly when something waits for their approval; never claim a change happened. Merging is always a person's decision.",
-  "Flow. Start with get_onboarding_state. If the repository was not read yet, call inspect_repository. Summarise what Gantry observed in a few plain sentences (gaps first, each with what it observed), then ask at most two targeted questions with ask_user only for facts you cannot read (how tests run, ownership, what to leave alone). When gaps a pull request can fix remain, call propose_pull_request (include your AGENTS.md draft from what you read: real commands and conventions only). If the pull request is open: report the checks; if red, explain from the facts and propose an update; if green, tell the person it is ready to merge and call propose_merge. If the repository is empty or blocked, say what the person must do. When Ready, say so.",
+  "You author the onboarding pull request. Gantry's fixed rules only suggest a plan (inspect_repository shows it) and observe facts; you decide what the repository needs and write the files yourself, with full content, through propose_pull_request `files`. You are not limited to the suggestion and must not refuse for lack of a template: a new or empty repository usually needs a project scaffold (a manifest such as pyproject.toml or package.json, a pinned tool version, a package with a smoke test, a task runner such as a Makefile, a CI workflow that runs the tests and the check name the repo requires, AGENTS.md with the real commands, CODEOWNERS, .gantry/factory.yml, lint config), and an existing repository needs only what is missing. Work from what you read and from what the person asks (\"a uv project with a smoke test and CI\"): ask at most two questions only for things you cannot decide (for example the Python version or the package name), otherwise choose sensible defaults and say them. Rails you cannot cross: no secrets (reference ${{ secrets.NAME }}), no binaries, no lockfiles (a package tool generates them: have CI run the tool, for uv use `uv sync` without --locked in CI, and tell the person to run `uv lock` and commit uv.lock), no edits to existing application code, no branch-rule files (rulesets are GitHub settings; give the owner the exact steps instead), no `curl | sh`. If a call is refused you get every reason: fix the files and call again yourself. Workflow files, dependency manifests and similar are allowed but the card shows them as parts the person must confirm; say so in one sentence.",
+  "Flow. Start with get_onboarding_state. If the repository was not read yet, call inspect_repository. Summarise what Gantry observed in a few plain sentences (gaps first, each with what it observed). When something is missing that a pull request can add, call propose_pull_request with your authored files (include AGENTS.md with real commands). If the pull request is open: report the checks; if red, explain from the facts and propose an update; if green, tell the person it is ready to merge and call propose_merge. After the merge Gantry re-reads and verifies by itself; if gaps remain (for example AGENTS.md now needs the real commands, or the lockfile), propose the next pull request. Never end with a dead end. If the card says the App lacks the Workflows permission, give the person the exact steps it lists. If verification fails because the App is installed on a personal account and not an organisation, explain that this rule is about organisation-level control and not a safety problem, and propose either moving the repository to an organisation or, with propose_exception, marking it ready by exception with a concrete reason. If the ruleset is missing, give the repository owner (for a personal repository, the person themselves) the exact GitHub steps (Settings, Rules, Rulesets: require a pull request with one approval, code-owner review and the CI check); Gantry never sets rulesets itself. Always finish with one concrete next step, not 'ask me later'.",
   UNTRUSTED_NOTE,
   "Waiting. Gantry watches the pull request, the assessment and the verification by itself. When something is still pending (checks, a merge, verification), say what you wait on and that Gantry will post in this thread and notify the person when it finishes; never ask them to ask you again, and never say you will report back yourself. When Gantry posts an update, summarise it and put up the next card. If no CI ever reported (checks \"none\"), say plainly that the repo has no CI, that a person may still merge the onboarding PR, and that Ready needs CI.",
   "Keep each answer under 130 words. Plain sentences, no headings, no emoji.",
@@ -83,7 +87,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
 
   const maxDiff = async (): Promise<number> => {
     const n = Number((await g.pool.query<{ n: string | null }>(`select data->'guardrails'->>'maxDiff' as n from agents where org_id = $1 and id = $2`, [g.orgId, ONBOARD_AGENT])).rows[0]?.n);
-    return Number.isInteger(n) && n > 0 ? n : 300;
+    return Number.isInteger(n) && n > 0 ? n : 1500;
   };
 
   /** Rule-based post: Gantry's own findings and the deterministic proposal, labelled. */
@@ -107,21 +111,11 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
   /** One turn of the Onboarding Agent: history, the tool loop (cards are sent as they appear), the cost, the saved answer. Throws ModelUnavailable. */
   async function agentTurn(o: { repo: RepoRow; doc: Doc; who: { id: string; name: string }; canMerge: boolean; diff: number; ag: Extract<Awaited<ReturnType<typeof agentState>>, { mode: "agent" }>; question: string; kind: "message" | "open" | "continue" | "followup"; send: (e: string, d: unknown) => void; signal: AbortSignal }): Promise<string> {
     const ctx = ctxFor(o.repo, o.doc, o.who, o.ag, o.canMerge, o.diff);
-    const prior = (await listMessages(g.pool, g.orgId, o.repo.id, 30)).filter((m) => (m.role === "user" || m.role === "assistant") && m.text);
-    const hist: Array<{ role: "user" | "assistant"; text: string }> = [];
-    for (const m of prior.slice(-12)) {
-      const last = hist[hist.length - 1];
-      const t = m.text.slice(0, 700);
-      if (last && last.role === m.role) last.text += `\n${t}`;
-      else hist.push({ role: m.role as "user" | "assistant", text: t });
-    }
-    while (hist.length && hist[0]!.role !== "user") hist.shift();
-    let question = o.question;
-    // The newest user message is the question; for open/continue/follow-up there is a short instruction instead.
-    if (o.kind === "message" && hist.length && hist[hist.length - 1]!.role === "user") hist.pop();
-    if (o.kind !== "message" && hist.length && hist[hist.length - 1]!.role === "user") question = `${hist.pop()!.text}\n\n${question}`;
+    const { hist, question } = historyFrom(await listMessages(g.pool, g.orgId, o.repo.id, 30), o.kind, o.question);
     const r = await runConversation({
-      edgeToken: g.config.secrets.edgeToken, purpose: "onboarding", maxTokens: 1800, maxSteps: 8,
+      // The agent authors whole files inside one propose_pull_request call (pyproject, CI workflow, AGENTS.md…), so a turn needs room
+      // for the full proposal: at 1,800 tokens the call was cut mid-tool-use and nothing came back. Cost stays bounded by the agent budget.
+      edgeToken: g.config.secrets.edgeToken, purpose: "onboarding", maxTokens: ONBOARDING_MAX_TOKENS, maxSteps: 8,
       system: system({ repo: o.repo.name, project: o.repo.project_id, stage: o.doc.stage, person: o.who.name, canMerge: o.canMerge, pinned: true }),
       history: hist, question, signal: o.signal,
       toolset: { defs: sessionToolDefs(), execute: async (name, input) => {
@@ -133,9 +127,10 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
       onText: (delta) => o.send("text", { delta }), onTool: (t) => o.send("tool", t),
     });
     const model = r.model ?? o.ag.model;
-    const book = await currentPrices(g.pool, g.orgId).catch(() => null);
-    const micros = book ? costMicros(book.prices[model], { inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 }) : 0;
-    const text = r.text || (r.stopped ? "" : "The model returned no text.");
+    const micros = await turnCostMicros(g.pool, g.orgId, model, r.usage);
+    const text = r.text || (r.stopped ? "" : r.truncated
+      ? "My answer was cut off at the output limit before I finished, so nothing was proposed. Ask me to continue, or to split the change into smaller proposals."
+      : "The model returned no text.");
     return persist(o.repo, o.doc.runId ?? null, "assistant", ONBOARD_AGENT, text, {
       mode: "agent", model, cards: ctx.cards, drafts: ctx.drafts, tools: ctx.used, usage: r.usage, costMicros: micros, ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}),
     }, o.who.id, { mode: "agent", model, version: o.ag.pin.version, tools: ctx.used, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costMicros: micros });
@@ -277,16 +272,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     /* The Onboarding Agent's turn: streamed. */
-    reply.hijack();
-    const raw = reply.raw;
-    raw.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no", "x-content-type-options": "nosniff" });
-    const send = (event: string, data: unknown): void => {
-      if (!raw.writableEnded && !raw.destroyed) raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    };
-    const ac = new AbortController();
-    raw.on("close", () => {
-      if (!raw.writableFinished) ac.abort();
-    });
+    const { send, ac, end } = openSse(reply);
     active.add(repo.id);
     try {
       let question = b.kind === "open" ? "(The person opened the onboarding session. Begin.)" : b.kind === "continue" ? "(The person asked for changes to your proposal; see their last message. Revise and propose again.)" : (b.text ?? "");
@@ -305,7 +291,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
       }
     } finally {
       active.delete(repo.id);
-      if (!raw.writableEnded) raw.end();
+      end();
     }
     return reply;
   });
@@ -332,7 +318,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
     const c0 = m0?.data.cards?.find((c): c is Extract<SessionCard, { kind: "proposal" }> => c.kind === "proposal" && c.id === pid);
     if (!m0 || !c0) throw refuse("not_found", "No such proposal.");
     // Merging needs the right to merge onboarding pull requests; everything else the right to manage onboarding.
-    const action = c0.what === "merge" && b.decision === "approve" ? "onboarding.merge" : "onboarding.manage";
+    const action = c0.what === "merge" && b.decision === "approve" ? "onboarding.merge" : c0.what === "exception" && b.decision === "approve" ? "onboarding.exception" : "onboarding.manage";
     return command(req, { action, scope: scopeOf(repo) }, async (tx, a): Promise<CommandResult<Record<string, unknown>>> => {
       const row = await lockRepo(tx, a.orgId, repo.id);
       const doc = docOf(row);
@@ -362,15 +348,19 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
       if (card.what === "merge") {
         if (!doc.pr || doc.pr.number !== card.prNumber || doc.pr.headSha !== card.headSha) throw refuse("conflict", "The pull request changed after this was proposed. Ask the agent for a new proposal.");
         out = await mergeOnboardingPr(tx, a, repo.id);
+      } else if (card.what === "exception") {
+        out = await markException(tx, a, repo.id, card.reason ?? "Accepted in the onboarding session.");
       } else {
+        const needs = (card.sensitive ?? []).filter((x) => x.id !== "guideline");
+        if (needs.length && !b.confirmSensitive) throw refuse("invalid", `Confirm the parts this pull request marks as sensitive (${needs.map((x) => x.label.toLowerCase()).join(", ")}) before approving.`);
         if (card.what === "update_pr" && doc.pr?.number !== card.prNumber) throw refuse("conflict", "The open pull request changed. Ask the agent for a new proposal.");
         // What the worker opens is exactly what was proposed: the validated draft (or the rule-based plan) is attached to the run; the client supplies nothing.
         const draft = m.data.drafts?.[pid];
-        const approved = { by: who.id, at: a.now.toISOString(), message: mid, proposal: pid, mode: card.mode };
+        const approved = { by: who.id, at: a.now.toISOString(), message: mid, proposal: pid, mode: card.mode, confirmedSensitive: needs.length > 0 };
         if (doc.runId) await tx.query(`update onboarding_runs set data = ((data - 'agentDraft') || $3::jsonb) where org_id = $1 and id = $2`, [a.orgId, doc.runId, JSON.stringify({ sessionApproved: approved, ...(draft ? { agentDraft: draft } : {}) })]);
         out = card.what === "update_pr"
           ? await requestChanges(tx, a, repo.id, "Approved in the onboarding session: update the pull request as proposed.")
-          : await openOnboardingPr(tx, a, repo.id);
+          : await openOnboardingPr(tx, a, repo.id, { authored: !!draft });
       }
       await finish("approved");
       return { ...out, events: [...out.events, ev("onboarding.session.approved", { files: card.files.map((f) => f.path), mode: card.mode })], changes: [...new Set([...(out.changes ?? []), "repos", "audit"])] };

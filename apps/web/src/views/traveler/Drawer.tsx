@@ -17,6 +17,10 @@ import { ArtefactsTab, BriefTab, HistoryTab } from "./Tabs";
 import { bayLabel, stName, stNo, useTravelerWo } from "./model";
 import { setTravelerTab, useTravelerTab } from "./state";
 import { useRepoName } from "./repo";
+import { ApproversPanel } from "./Approvers";
+import { navigate } from "../../lib/router";
+import { setProject } from "../../lib/prefs";
+import { useWoSessions } from "../conversations/session-api";
 
 const tb = (k: string, v: string) => (
   <div key={k}>
@@ -35,6 +39,8 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
   const openRecord = useOpenRecordRoute();
   const repoName = useRepoName(wo?.project, wo?.repo);
   const close = () => onClose?.();
+  const sessions = useWoSessions(wo?.project);
+  const row = sessions.data?.items.find((x) => x.id === woId);
   if (!wo || !project || !cat) {
     return (
       <div className="drawer-inner trv-drawer">
@@ -132,6 +138,18 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
           {tb("Risk", wo.risk || "normal")}
         </dl>
         {wo.description ? <p className="drawer-desc">{wo.description}</p> : null}
+        <div className={`wos-open-conv${row?.waitingOn === "you" ? " is-you" : ""}`} id="trv-conversation">
+          <Btn label="Open conversation" kind="primary" icon="chat" id="trv-open-conversation" onClick={() => { close(); setProject(wo.project); navigate("conversations", wo.id, wo.project); }} />
+          <span className="small" role="status">
+            {!row ? "Talk to the agent at this station about this work order."
+              : row.closed ? "Closed."
+              : row.waitingOn === "you" ? <strong>{`${row.agentName ?? "The agent"} is waiting for you`}</strong>
+              : row.waitingOn === "approver" ? "Waiting for an approver"
+              : `${row.agentName ?? "The agent"} is working`}
+            {row?.unread ? <span className="wos-unread" role="img" aria-label="Unread messages" /> : null}
+          </span>
+        </div>
+        {wo.allowed.approve && !wo.bay && wo.state === "waiting" && wo.allowed.approve.gate !== "G0G1" ? <ApproversPanel woId={wo.id} gate={wo.allowed.approve.gate} project={wo.project} onNavigate={close} /> : null}
         <Actions wo={wo} />
         <Tabs idPrefix="trv-tab" items={tabs} active={tab} onChange={(t) => { setTravelerTab(t as typeof tab); setTimeout(() => document.getElementById(`trv-tab-${t}`)?.focus(), 0); }} />
         <div className="drawer-tabbody" id="trv-tab-panel" role="tabpanel" aria-labelledby={`trv-tab-${tab}`}>
