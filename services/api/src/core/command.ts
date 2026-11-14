@@ -7,7 +7,9 @@ import type { FastifyRequest } from "fastify";
 import { publishChange } from "./changes.js";
 import { decideFor, refuseDecision, stepUpSatisfied, type Scope } from "./decide.js";
 import { Refusal, refuse } from "./errors.js";
+import { readApiSettings } from "../areas/apikeys/config.js";
 import { loadPolicyState } from "./read/state.js";
+import { loadStopSnapshot, refreshStopSnapshot } from "./stop-snapshot.js";
 
 export interface EventSpec {
   type: string;
@@ -61,8 +63,12 @@ export interface CommandSpec {
   scope?: Scope;
   /** Reads the entity's current version in the transaction (null = not found). With an `If-Match` header, a different value is a 409. */
   ifMatch?: (tx: Tx) => Promise<number | null>;
+  /** Versioned config endpoints: a request without `If-Match` is a 409 "version required" (so a blind overwrite is impossible). Needs `ifMatch`. */
+  ifMatchRequired?: boolean;
   /** Creates: the `Idempotency-Key` header makes a retry return the first result. */
   idempotent?: boolean;
+  /** Fields of the response that are not kept for replays (a secret shown once): a replay returns the rest. */
+  storedOmit?: string[];
   /** Require a sign-in no older than this many seconds (spec 14.1). */
   stepUp?: number;
   /** /internal/v1 handlers: the edge or GitHub broker authenticated with its service token, so the matrix does not apply (the body still checks stop state and budgets). Without this flag a service principal is refused. */
@@ -162,30 +168,57 @@ export async function command<X extends object = Record<string, never>>(
   const reply = req.gx.reply;
   const ifMatch = parseIfMatch(req);
   const idemHeader = spec.idempotent ? (req.headers["idempotency-key"] as string | undefined)?.trim() || null : null;
+  // Spec 5.3: creates from API keys and other non-browser callers must carry an Idempotency-Key, so a retried request cannot create twice. Browser sessions send one automatically.
+  if (spec.idempotent && !idemHeader && principal.kind === "apikey") throw refuse("invalid", "Creates through the API need an Idempotency-Key header, so a retry cannot create twice.", { needs: "Idempotency-Key" });
   if (idemHeader && (idemHeader.length > 200 || /[\r\n]/.test(idemHeader))) throw refuse("invalid", "Idempotency-Key is too long.");
   const route = `${principal.kind}:${principal.id}:${req.method} ${req.routeOptions?.url ?? req.url}`;
 
+  // The public API's idempotency window is a setting (spec 12.5); people get the 24 hours of the column default.
+  const ttlHours = idemHeader && principal.kind === "apikey" ? (await readApiSettings(g.pool, g.orgId).catch(() => null))?.value.idempotencyHours : undefined;
+  let loaded: Awaited<ReturnType<typeof loadPolicyState>> | null = null;
   try {
     const out = await withTx(g.pool, async (tx) => {
       if (idemHeader) {
-        const s = await idempotency.begin(tx, { orgId: g.orgId, scope: route, key: idemHeader, body: { body: req.body ?? null, params: req.params ?? null } });
+        const s = await idempotency.begin(tx, { orgId: g.orgId, scope: route, key: idemHeader, body: { body: req.body ?? null, params: req.params ?? null }, ...(ttlHours ? { ttlHours } : {}) });
         if (s.state === "conflict") throw refuse("conflict", "That Idempotency-Key was already used with a different request.");
         if (s.state === "replay") return { replay: true as const, status: s.status, body: s.response as Record<string, unknown> };
       }
-      const st = await loadPolicyState(tx, g.orgId);
-      const decision: Decision =
+      let st: Awaited<ReturnType<typeof loadPolicyState>>;
+      let fallback: { snapshotAt: string; cause: string } | null = null;
+      if (spec.reduced) {
+        // Spec 8.5, I7: a stop must work when policy data is unreadable. Try the normal load inside a savepoint; if it fails, decide from the last-known-good snapshot.
+        await tx.query("savepoint stop_policy");
+        try {
+          st = await loadPolicyState(tx, g.orgId);
+          await tx.query("release savepoint stop_policy");
+        } catch (err) {
+          await tx.query("rollback to savepoint stop_policy");
+          const snap = await loadStopSnapshot(tx, g.orgId).catch(() => null);
+          if (!snap) throw err;
+          st = snap.state;
+          fallback = { snapshotAt: snap.takenAt.toISOString(), cause: String((err as Error)?.message ?? err).slice(0, 200) };
+          req.log.error({ err, snapshotAt: fallback.snapshotAt }, "policy data unreadable; stop command decided from the last-known-good snapshot");
+        }
+      } else {
+        st = await loadPolicyState(tx, g.orgId);
+      }
+      let decision: Decision =
         spec.service && principal.kind === "service"
           ? { allowed: true, reason: `Authenticated service ${principal.id}.`, rule: { kind: "service", id: principal.id, name: `Service ${principal.id}` }, needs: "" }
           : spec.action === null ? SELF : decideFor(st, principal, spec.action, spec.scope ?? {});
+      if (fallback) {
+        decision = { ...decision, reason: `${decision.reason} (Decided from the policy snapshot of ${fallback.snapshotAt}: policy data was unreadable.)`, ...(decision.allowed ? { rule: { kind: "invariant", id: "I7-SNAPSHOT", name: "Stop path: last-known-good policy" } } : {}) };
+      }
       if (!decision.allowed) throw new Denied(decision);
       // Spec 14.1: kill, restore, policy, role, security, people and key operations need a fresh sign-in, whether or not the route asked.
       const stepUp = spec.stepUp ?? (principal.kind === "person" && spec.action && needsStepUp(spec.action) ? 300 : undefined);
       if (stepUp !== undefined && !stepUpSatisfied(req, stepUp)) {
         throw new Denied({ allowed: false, reason: "Sign in again to confirm this change.", rule: { kind: "step-up", id: "STEP-UP", name: "Fresh sign-in required" }, needs: "step_up" });
       }
-      if (spec.ifMatch && ifMatch !== null) {
+      if (spec.ifMatch && (ifMatch !== null || spec.ifMatchRequired)) {
         const cur = await spec.ifMatch(tx);
         if (cur === null) throw refuse("not_found", "That no longer exists.");
+        if (ifMatch === null) throw refuse("conflict", "Version required: send the version you loaded as If-Match, so this cannot overwrite a newer change.", { needs: "If-Match" });
         if (cur !== ifMatch) throw refuse("stale", "This changed since you loaded it. Reload and try again.");
       }
       const actor = actorFor(req, decision, ifMatch, idemHeader);
@@ -199,10 +232,11 @@ export async function command<X extends object = Record<string, never>>(
       if (spec.reduced && (r.jobs?.length || r.outbox?.length)) throw new Error("reduced commands (stop controls) must not enqueue jobs or outbox rows");
       const ids: string[] = [];
       for (const e of r.events) {
+        const after = fallback ? { ...(e.after && typeof e.after === "object" ? (e.after as object) : {}), policyFallback: fallback } : e.after;
         const a = await appendEvent(tx, {
           orgId: g.orgId, type: e.type, category: e.category ?? (auditCategoryFor(spec.action ?? "self") as EventCategory), actor: actor.id, onBehalfOf: e.onBehalfOf ?? (actor.via && actor.via !== "web" ? actor.personId : null),
           channel: actor.channel, subject: e.subject ?? null, projectId: e.projectId ?? spec.scope?.project ?? null, woId: e.woId ?? spec.scope?.wo ?? null, woVersion: e.woVersion ?? null,
-          outcome: e.outcome ?? "ok", rule: decision.rule.id, before: e.before, after: e.after, commandId: actor.requestId, idempotencyKey: idemHeader, sessionId: actor.sessionId, sourceIp: actor.ip, requestId: actor.requestId,
+          outcome: e.outcome ?? "ok", rule: decision.rule.id, before: e.before, after, commandId: actor.requestId, idempotencyKey: idemHeader, sessionId: actor.sessionId, sourceIp: actor.ip, requestId: actor.requestId,
           ...(e.occurredAt ? { occurredAt: e.occurredAt } : {}),
         });
         ids.push(a.id);
@@ -213,12 +247,17 @@ export async function command<X extends object = Record<string, never>>(
         if (!id) throw new Error("outbox rows need an event");
         await enqueueOutbox(tx, { orgId: g.orgId, eventId: id, destination: o.destination, ...(o.payload ? { payload: o.payload } : {}) });
       }
-      const body = { ok: true, msg: r.msg, ...(r.extra ?? {}) } as Record<string, unknown>;
-      if (idemHeader) await idempotency.storeResult(tx, { orgId: g.orgId, scope: route, key: idemHeader }, 200, body);
+      const body = { ok: true, msg: r.msg, ...(r.extra ?? {}), ...(fallback ? { policyFallback: true } : {}) } as Record<string, unknown>;
+      if (idemHeader) {
+        const kept = spec.storedOmit?.length ? Object.fromEntries(Object.entries(body).filter(([k]) => !spec.storedOmit!.includes(k))) : body;
+        await idempotency.storeResult(tx, { orgId: g.orgId, scope: route, key: idemHeader }, 200, kept);
+      }
       const project = r.project === undefined ? spec.scope?.project ?? undefined : r.project ?? undefined;
       await publishChange(tx, { org: g.orgId, keys: [...(r.changes ?? (spec.reduced ? ["stops", "factory", "projects", "repos"] : [])), "audit"], ...(project ? { project } : {}) });
+      if (!fallback) loaded = st;
       return { replay: false as const, status: 200, body };
     });
+    if (loaded) await refreshStopSnapshot(g.pool, g.orgId, loaded);
     if (out.replay) reply.header("idempotent-replayed", "true");
     reply.code(out.status);
     return out.body;

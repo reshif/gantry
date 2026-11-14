@@ -1,3 +1,4 @@
+import { enqueueDueSchedules } from "@gantry/api/core";
 import { enqueue, withTx, type Queryable } from "@gantry/db";
 import type { Deps } from "./deps.js";
 import { errMsg } from "./errors.js";
@@ -63,10 +64,22 @@ export class Scheduler {
         withTx(deps.pool, (tx) => ensureRecurring(tx, { orgId, queue, kind, payload, everyMs, scope, now })).then((c) => { if (c) n++; });
       await make("system", "reaper.sweep", {}, deps.cfg.reaperEveryMs, "org");
       await make("system", "chain.verify", {}, deps.cfg.verifyEveryMs, "org");
+      // Schedule triggers that came due (spec 11.7): compare-and-set on next_run_at, so any number of workers make one tick per run.
+      try {
+        n += await withTx(deps.pool, (tx) => enqueueDueSchedules(tx, orgId, now));
+      } catch (e) {
+        deps.log.error({ err: errMsg(e) }, "schedule triggers could not be enqueued");
+      }
       const repos = await deps.pool.query<{ id: string }>(
         `select id from repos where org_id = $1 and (github_full_name is not null or name like '%/%') order by id`, [orgId],
       );
       for (const r of repos.rows) await make("github", "github.reconcile", { repoId: r.id }, deps.cfg.reconcileEveryMs, r.id);
+      // Onboarding (spec 11.3): the pull request's checks and merge every minute, the readiness re-check of a Ready repo on its own schedule. Only repos with a GitHub identity
+      // of their own are looked at; a repo that was never connected through GitHub (demo data) has nothing to re-check.
+      const onboarding = await deps.pool.query<{ id: string; onboarding_stage: string }>(
+        `select id, onboarding_stage from repos where org_id = $1 and github_full_name is not null and onboarding_stage in ('pr_opened','pr_checks','pr_merged','ready') order by id`, [orgId],
+      );
+      for (const r of onboarding.rows) await make("github", "onboarding.sync", { repoId: r.id }, r.onboarding_stage === "ready" ? (deps.cfg.readinessEveryMs ?? 6 * 3600_000) : 60_000, `onboarding:${r.id}:${r.onboarding_stage === "ready" ? "ready" : "pr"}`);
     }
     return n;
   }

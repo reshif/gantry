@@ -1,0 +1,195 @@
+/**
+ * Instruction composition (spec 10.2). Four layers, in order: the factory base, the project overlay, the agent, and the repository's guidelines file at the
+ * pinned commit. The skills attached to the agent version follow, in order. The composition is pinned when a run is dispatched: the layer versions, the
+ * skill versions and the hash go on the attempt's version tuple and on the run, so the run spec, the preview and the audit trail all describe the same text.
+ */
+import type { Queryable } from "@gantry/db";
+import { cfgOf, sha256 } from "./config.js";
+
+export interface Layer {
+  key: "base" | "project" | "agent" | "repo";
+  name: string;
+  /** Published version of the layer; null for the agent layer (the agent version carries it) and for text with no version. */
+  version: number | null;
+  text: string;
+  hash: string;
+  /** The commit the repository's guidelines file was read at. */
+  commit?: string | null;
+}
+
+export interface SkillOut {
+  id: string;
+  name: string;
+  version: number;
+  label: string;
+  when: string;
+  content: string;
+  resources: string[];
+}
+
+/** What a run was dispatched with. Stored on `runs.data.instructionPin`. */
+export interface InstructionPin {
+  base: number | null;
+  project: number | null;
+  agentVersion: number | null;
+  /** The repo guidelines as read for this run, so a later edit does not change what the run was told. */
+  guidelines: { text: string; hash: string; commit: string | null } | null;
+}
+
+export interface Composed {
+  text: string;
+  hash: string;
+  layers: Layer[];
+}
+
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const bodyText = (b: unknown): string => (typeof b === "string" ? b : typeof obj(b).body === "string" ? (obj(b).body as string) : "");
+
+async function published(db: Queryable, orgId: string, scope: "base" | "project", scopeId: string, version: number | null): Promise<{ version: number; body: string } | null> {
+  const { rows } = await db.query<{ version: number; body: string }>(
+    `select version, body from instruction_versions where org_id = $1 and scope = $2 and scope_id = $3 and published_at is not null ${version === null ? "" : "and version = $4"} order by version desc limit 1`,
+    version === null ? [orgId, scope, scopeId] : [orgId, scope, scopeId, version],
+  );
+  return rows[0] ?? null;
+}
+
+const money = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+
+/** The agent layer: its instructions, what its per-project override changes, and its guardrails (legacy effectiveText). */
+export function agentLayerText(cfg: { instructions: string; guardrails: { paths: string[]; maxDiff: number }; overrides: Record<string, { model?: string; autonomy?: string; budget?: number }> }, project: { id: string; name: string } | null): string {
+  const parts = [cfg.instructions.trim()];
+  const ov = project ? cfg.overrides[project.id] : undefined;
+  if (ov && project && (ov.model || ov.autonomy || ov.budget)) {
+    parts.push(`On ${project.name}:${ov.model ? ` model ${ov.model}.` : ""}${ov.autonomy ? ` autonomy ${ov.autonomy}.` : ""}${ov.budget ? ` budget $${money(ov.budget)} per work order.` : ""}`);
+  }
+  if (cfg.guardrails.paths.length) parts.push(`Never modify: ${cfg.guardrails.paths.join(", ")}.${cfg.guardrails.maxDiff ? ` Keep diffs under ${cfg.guardrails.maxDiff} lines.` : ""}`);
+  return parts.filter((p) => p !== "").join("\n\n");
+}
+
+export const LAYER_NAMES: Record<Layer["key"], string> = { base: "Factory base", project: "Project overlay", agent: "Agent", repo: "Repository guidelines" };
+
+export function assemble(layers: Layer[]): Composed {
+  const used = layers.filter((l) => l.text.trim() !== "");
+  return {
+    text: used.map((l) => `## ${l.name}\n\n${l.text.trim()}`).join("\n\n"),
+    hash: sha256(used.map((l) => `${l.name}\0${l.text}`).join("\0\0")),
+    layers: used,
+  };
+}
+
+export interface ComposeInput {
+  orgId: string;
+  agentId: string | null;
+  /** The agent version whose text is the agent layer; the floor version when absent. */
+  agentVersion?: number | null;
+  projectId: string | null;
+  repoId: string | null;
+  pin?: InstructionPin | null;
+  /** Used when the agent has no stored configuration (a run whose agent was removed). */
+  fallbackAgentText?: string;
+  fallbackOverlay?: string;
+}
+
+export interface AgentBody {
+  version: number;
+  label: string;
+  body: Record<string, unknown>;
+  name: string;
+  data: Record<string, unknown>;
+}
+
+export async function loadAgentVersion(db: Queryable, orgId: string, agentId: string, version?: number | null): Promise<AgentBody | null> {
+  const { rows } = await db.query<{ name: string; data: Record<string, unknown>; live_version: number | null; v: number | null; body: Record<string, unknown> | null }>(
+    `select a.name, a.data, a.live_version, v.version as v, v.body from agents a
+       left join agent_versions v on v.org_id = a.org_id and v.agent_id = a.id and v.version = coalesce($3::int, a.live_version)
+      where a.org_id = $1 and a.id = $2`,
+    [orgId, agentId, version ?? null],
+  );
+  const r = rows[0];
+  if (!r || r.v === null || !r.body) return null;
+  const label = typeof r.body.label === "string" && r.body.label ? r.body.label : `${r.v}.0.0`;
+  return { version: r.v, label, body: r.body, name: r.name, data: r.data ?? {} };
+}
+
+/** The effective configuration of an agent version: its snapshot over the agent's stored defaults. */
+export function versionCfg(av: AgentBody): ReturnType<typeof cfgOf> {
+  return cfgOf({ ...av.data, ...av.body });
+}
+
+export async function projectInfo(db: Queryable, orgId: string, projectId: string | null): Promise<{ id: string; name: string; overlay: string } | null> {
+  if (!projectId) return null;
+  return (await db.query<{ id: string; name: string; overlay: string }>(`select id, name, overlay from projects where org_id = $1 and id = $2`, [orgId, projectId])).rows[0] ?? null;
+}
+
+/** The commit a repository's guidelines were last read at (recorded by onboarding and reconciliation). */
+export async function repoCommit(db: Queryable, orgId: string, repoId: string): Promise<string | null> {
+  const r = (await db.query<{ cfg: string | null; repo: string | null }>(`select (select data->>'baseSha' from repo_config where org_id = $1 and repo_id = $2) as cfg, (select data->>'baseSha' from repos where org_id = $1 and id = $2) as repo`, [orgId, repoId])).rows[0];
+  const v = r?.cfg ?? r?.repo ?? null;
+  return v && /^[0-9a-f]{40}$/.test(v) ? v : null;
+}
+
+/** The four layers. A pinned layer version is used as pinned; without a pin the latest published version is read. */
+export async function composeLayers(db: Queryable, i: ComposeInput, av: AgentBody | null): Promise<{ layers: Layer[]; pin: InstructionPin }> {
+  const baseRow = await published(db, i.orgId, "base", "", i.pin?.base ?? null);
+  const proj = await projectInfo(db, i.orgId, i.projectId);
+  const projRow = i.projectId ? await published(db, i.orgId, "project", i.projectId, i.pin?.project ?? null) : null;
+  const overlay = projRow?.body ?? proj?.overlay ?? i.fallbackOverlay ?? "";
+  const agentText = av ? agentLayerText(versionCfg(av), proj) : i.fallbackAgentText ?? "";
+  let guidelines: InstructionPin["guidelines"] = i.pin?.guidelines ?? null;
+  if (!guidelines && i.repoId) {
+    const text = (await db.query<{ guidelines: string }>(`select guidelines from repos where org_id = $1 and id = $2`, [i.orgId, i.repoId])).rows[0]?.guidelines ?? "";
+    guidelines = { text, hash: sha256(text), commit: await repoCommit(db, i.orgId, i.repoId) };
+  }
+  const layer = (key: Layer["key"], version: number | null, text: string, commit?: string | null): Layer => ({ key, name: LAYER_NAMES[key], version, text, hash: sha256(text), ...(commit !== undefined ? { commit } : {}) });
+  return {
+    layers: [layer("base", baseRow?.version ?? null, baseRow?.body ?? ""), layer("project", projRow?.version ?? null, overlay), layer("agent", av?.version ?? null, agentText), layer("repo", null, guidelines?.text ?? "", guidelines?.commit ?? null)],
+    pin: { base: baseRow?.version ?? null, project: projRow?.version ?? null, agentVersion: av?.version ?? null, guidelines },
+  };
+}
+
+/** The skills bundle in order: those attached to the agent version (its snapshot, or the current attachments for a version without one) and enabled on the project. */
+export async function resolveSkills(db: Queryable, o: { orgId: string; agentId: string; body: Record<string, unknown>; projectId: string | null; versions?: Record<string, unknown>; withContent?: boolean }): Promise<SkillOut[]> {
+  const attached = (await db.query<{ skill_id: string; pinned_version: number | null }>(`select skill_id, pinned_version from agent_skills where org_id = $1 and agent_id = $2 order by position, created_at, skill_id`, [o.orgId, o.agentId])).rows;
+  const pins = new Map(attached.map((r) => [r.skill_id, r.pinned_version]));
+  const ids = Array.isArray(o.body.skills) ? (o.body.skills as unknown[]).filter((x): x is string => typeof x === "string") : attached.map((r) => r.skill_id);
+  const out: SkillOut[] = [];
+  for (const id of ids) {
+    const s = (await db.query<{ name: string; projects: unknown; live_version: number | null; data: Record<string, unknown> }>(`select name, projects, live_version, data from skills where org_id = $1 and id = $2`, [o.orgId, id])).rows[0];
+    if (!s) continue;
+    if (Array.isArray(s.projects) && (!o.projectId || !s.projects.includes(o.projectId))) continue;
+    const tv = o.versions?.[id];
+    const version = typeof tv === "number" ? tv : pins.get(id) ?? s.live_version;
+    if (version === null || version === undefined) continue;
+    const v = (await db.query<{ body: unknown }>(`select body from skill_versions where org_id = $1 and skill_id = $2 and version = $3`, [o.orgId, id, version])).rows[0];
+    if (!v) continue;
+    const b = obj(v.body);
+    out.push({
+      id, name: s.name, version, label: typeof b.label === "string" ? b.label : `${version}`, when: typeof b.when === "string" ? b.when : typeof s.data.when === "string" ? s.data.when : "",
+      content: o.withContent === false ? "" : bodyText(v.body), resources: Array.isArray(b.resources) ? (b.resources as unknown[]).filter((x): x is string => typeof x === "string") : [],
+    });
+  }
+  return out;
+}
+
+export interface RunPin {
+  /** The model this project's override pins for the agent, if any (overrides are part of the version). */
+  modelOverride: string | null;
+  composed: Composed;
+  pin: InstructionPin;
+  skillVersions: Record<string, number>;
+  skills: SkillOut[];
+}
+
+/**
+ * Called when a run is dispatched (spec 10.2): composes the instructions for this agent version, project and repository, and returns what to record.
+ * `composed.hash` is the instruction hash of the version tuple, so it identifies the whole composition, not the agent text alone.
+ */
+export async function pinRunConfig(db: Queryable, o: { orgId: string; agentId: string; agentVersion: number; projectId: string; repoId: string | null; commit?: string | null }): Promise<RunPin | null> {
+  const av = await loadAgentVersion(db, o.orgId, o.agentId, o.agentVersion);
+  if (!av) return null;
+  const { layers, pin } = await composeLayers(db, { orgId: o.orgId, agentId: o.agentId, agentVersion: o.agentVersion, projectId: o.projectId, repoId: o.repoId }, av);
+  if (pin.guidelines && o.commit) pin.guidelines = { ...pin.guidelines, commit: o.commit };
+  const withCommit = layers.map((l) => (l.key === "repo" && o.commit ? { ...l, commit: o.commit } : l));
+  const skills = await resolveSkills(db, { orgId: o.orgId, agentId: o.agentId, body: av.body, projectId: o.projectId, withContent: false });
+  return { modelOverride: versionCfg(av).overrides[o.projectId]?.model ?? null, composed: assemble(withCommit), pin, skillVersions: Object.fromEntries(skills.map((s) => [s.id, s.version])), skills };
+}

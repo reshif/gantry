@@ -83,7 +83,7 @@ export async function readTeams(db: Queryable, orgId: string): Promise<Team[]> {
 /* ---------------------------------------------------------------- projects -- */
 
 export async function readProjects(db: Queryable, orgId: string, stops?: ActiveStop[]): Promise<Project[]> {
-  const [pr, teams, flows, rules, notes, budgets, st] = await reads(db, [
+  const [pr, teams, flows, rules, notes, budgets, gl, st] = await reads(db, [
     () => db.query(`select id, key, name, description, status, owner_id, template_id, regulated, overlay, config, created_at, version from projects where org_id = $1 order by position nulls last, created_at, id`, [orgId]),
     () => db.query(`select project_id, team_id from project_teams where org_id = $1 order by created_at, team_id`, [orgId]),
     () => db.query(`select f.project_id, f.doc, f.version from flow_versions f join projects p on p.org_id = f.org_id and p.id = f.project_id and p.current_flow_version = f.version where f.org_id = $1`, [orgId]),
@@ -94,6 +94,8 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
       ),
     () => db.query(`select id, project_id, event, destinations, template, conditions, fields, enabled from notification_routes where org_id = $1 and project_id is not null order by created_at, id`, [orgId]),
     () => db.query(`select project_id, monthly_limit_micros, alert_at from budgets where org_id = $1`, [orgId]),
+    // The project's onboarding guidelines (spec 8.6): every published version, newest last.
+    () => db.query(`select project_id, version, body, note, published_at, published_by from guideline_versions where org_id = $1 and scope = 'project' and published_at is not null order by project_id, version`, [orgId]),
     () => (stops ? Promise.resolve(stops) : readActiveStops(db, orgId)),
   ]);
   const stopList = st;
@@ -119,9 +121,23 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
       halted: halt ? haltInfo(halt) : null,
       killed: kill ? killInfo(kill) : null,
       overlay: r.overlay,
+      ...projectGuidelines(gl.rows.filter((x) => x.project_id === r.id)),
       version: r.version,
     } as unknown as Project;
   });
+}
+
+/** `{ guidelines }` from a project's guideline version rows, or nothing when it has none (seeded demo data may carry its own on the config). */
+function projectGuidelines(rows: Array<Record<string, any>>): { guidelines?: unknown } { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const last = rows.at(-1);
+  if (!last) return {};
+  const body = obj(last.body);
+  return {
+    guidelines: {
+      items: Array.isArray(body.items) ? body.items : [], notes: typeof body.notes === "string" ? body.notes : "", version: last.version,
+      history: rows.map((x) => ({ v: x.version, at: ms(x.published_at) ?? 0, by: x.published_by ?? "system", note: x.note })),
+    },
+  };
 }
 
 const emptyFlow = (): ProjectFlow => ({ stations: {}, gates: {}, slots: 0, classes: [], order: [], bays: [] });

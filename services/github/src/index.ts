@@ -8,3 +8,4 @@ export { publishWorkspace, PublishBody, type PublishResult } from "./publish.js"
 export { seedWorkspace, SeedBody, cloneBase } from "./seed.js";
 export { DockerWorkspaceStore, VOLUME_NAME, type WorkspaceStore } from "./workspace.js";
 export { BrokerError } from "./errors.js";
+export { inspectRepo, openOnboardingPr, mergeOnboardingPr, runCanary, listAvailable, scanText, type CanaryResult, type AvailableRepo } from "./onboarding.js";

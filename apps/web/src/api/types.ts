@@ -139,6 +139,7 @@ import type {
   Skill,
   Template,
   Trigger,
+  TriggerProposal,
   TriggerRun,
   Trust,
   Vendor,
@@ -155,7 +156,7 @@ export type {
   Agent, ApiConfig, ApiKey, AuditEntry, CardTemplate, Conversation, Delivery, EvalRun, EventEntry, Freeze,
   IntegrationInstance, IntegrationType, LearningFinding, LearningProposal, Matrix, McpServer, Policy, Repo,
   RequestLogEntry, Role, Action, Routing, Scorecard, SecuritySettings, SignIn, Skill, Template, Trigger,
-  TriggerRun, Trust, Vendor, WorkOrder, Team, OrgGuidelines, AgentInstructions, Suite, EvalExtra, McpUsage,
+  TriggerProposal, TriggerRun, Trust, Vendor, WorkOrder, Team, OrgGuidelines, AgentInstructions, Suite, EvalExtra, McpUsage,
 };
 
 /** GET /api/v1/projects/{id}/floor: flow version, positions, gates, slots, stop state. */
@@ -214,4 +215,28 @@ export interface KillImpact {
 
 export interface RecordBundle {
   [k: string]: unknown;
+}
+
+/* ---------- agents: server-composed reads (GET /agents/{id}/effective, /agents/suites) ---------- */
+
+export interface AgentEffective {
+  agent: string;
+  /** A version label, or "draft" for the saved working configuration. */
+  version: string;
+  live: boolean;
+  project: { id: string; name: string } | null;
+  repo: { id: string; name: string } | null;
+  text: string;
+  hash: string;
+  words: number;
+  tokens: number;
+  layers: Array<{ key: "base" | "project" | "agent" | "repo"; name: string; version: number | null; hash: string; text: string; commit?: string | null }>;
+  skills: Array<{ id: string; name: string; version: number; label: string; when: string; resources: string[] }>;
+}
+export interface AgentSuite {
+  id: string;
+  name: string;
+  station: string | null;
+  agent: string | null;
+  threshold: number;
 }

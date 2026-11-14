@@ -119,3 +119,48 @@ describe.skipIf(!TEST_URL)("events", () => {
     await expect(withTx(db.app, (tx) => appendEvent(tx, { ...ev(db.orgId, 7), channel: "fax" as never }))).rejects.toMatchObject({ code: "23514" });
   });
 });
+
+describe.skipIf(!TEST_URL)("event observers (spec 12.2: notifications are produced in the event's own transaction)", () => {
+  let db: TestDb;
+  beforeAll(async () => {
+    db = await createTestDb();
+  });
+  afterAll(async () => db.drop());
+
+  it("runs in the event's transaction: its writes commit and roll back with the event", async () => {
+    const { addEventObserver } = await import("../src/events.js");
+    const off = addEventObserver(async (tx, e, ap) => {
+      await tx.query(`insert into jobs (org_id, kind, queue, payload) values ($1, 'observed', 'system', $2::jsonb)`, [e.orgId, JSON.stringify({ event: ap.id })]);
+    });
+    try {
+      const ok = await withTx(db.app, (tx) => appendEvent(tx, ev(db.orgId, 1)));
+      expect((await db.admin.query(`select payload from jobs where kind = 'observed'`)).rows.map((r) => r.payload.event)).toEqual([ok.id]);
+      await expect(withTx(db.app, async (tx) => { await appendEvent(tx, ev(db.orgId, 2)); throw new Error("rolled back"); })).rejects.toThrow("rolled back");
+      expect((await db.admin.query(`select count(*)::int n from jobs where kind = 'observed'`)).rows[0].n).toBe(1);
+    } finally {
+      off();
+    }
+  });
+
+  it("an observer that fails never undoes the event, and the transaction stays usable", async () => {
+    const { addEventObserver, onObserverError } = await import("../src/events.js");
+    const seen: string[] = [];
+    onObserverError((e) => seen.push((e as Error).message));
+    const off = addEventObserver(async (tx) => {
+      await tx.query(`select * from table_that_does_not_exist`);
+    });
+    try {
+      const a = await withTx(db.app, async (tx) => {
+        const r = await appendEvent(tx, ev(db.orgId, 3));
+        await tx.query(`select 1`); // the failed statement was rolled back to its savepoint
+        return r;
+      });
+      expect(a.seq).toBeGreaterThan(0);
+      expect(seen.length).toBe(1);
+      expect((await verifyChain(db.app, db.orgId)).ok).toBe(true);
+    } finally {
+      off();
+      onObserverError(() => undefined);
+    }
+  });
+});

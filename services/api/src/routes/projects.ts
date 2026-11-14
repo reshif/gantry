@@ -107,7 +107,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const body = TemplatePatch.parse(req.body);
     return command(
       req,
-      { action: "template.edit", ifMatch: async (tx) => (await tx.query<{ version: number }>(`select version from templates where org_id = $1 and id = $2`, [g.orgId, id])).rows[0]?.version ?? null },
+      { action: "template.edit", ifMatchRequired: true, ifMatch: async (tx) => (await tx.query<{ version: number }>(`select version from templates where org_id = $1 and id = $2`, [g.orgId, id])).rows[0]?.version ?? null },
       (tx, a) => updateTemplate(tx, a, id, body),
     );
   });
@@ -146,14 +146,14 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const body = ConfigBody.parse(req.body);
     const scope = { project: id };
     const ifMatch = projectVersion(g.orgId, id);
-    if ("gate" in body) return inProject(req, { action: "project.config", scope, ifMatch }, id, "edit", (tx, a) => changeGateMode(tx, a, id, body.gate, body.mode));
+    if ("gate" in body) return inProject(req, { action: "project.config", scope, ifMatchRequired: true, ifMatch }, id, "edit", (tx, a) => changeGateMode(tx, a, id, body.gate, body.mode));
     const edit = parseConfigEdit(body.path, body.value);
-    return inProject(req, { action: actionFor(edit), scope, ifMatch }, id, "edit", (tx, a) => setConfig(tx, a, id, edit, body.path));
+    return inProject(req, { action: actionFor(edit), scope, ifMatchRequired: true, ifMatch }, id, "edit", (tx, a) => setConfig(tx, a, id, edit, body.path));
   });
 
   /* --------------------------------------------------------------------- flow */
 
-  const flowSpec = (id: string, action: "project.config" | "flow.edit" | "class.edit", idempotent = false) => ({ action, scope: { project: id }, ifMatch: projectVersion(g.orgId, id), ...(idempotent ? { idempotent: true } : {}) });
+  const flowSpec = (id: string, action: "project.config" | "flow.edit" | "class.edit", idempotent = false) => ({ action, scope: { project: id }, ifMatchRequired: true, ifMatch: projectVersion(g.orgId, id), ...(idempotent ? { idempotent: true } : {}) });
 
   app.post("/api/v1/projects/:id/flow/:kind", async (req) => {
     const { id } = Id.parse(req.params);
@@ -204,7 +204,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.put("/api/v1/projects/:id/approvers/:sub", async (req) => {
     const { id, sub } = IdSub.parse(req.params);
     const body = RuleBody.parse(req.body);
-    return inProject(req, { action: "approvers.edit", scope: { project: id }, ifMatch: projectVersion(g.orgId, id) }, id, "light", (tx, a) => putApprovers(tx, a, id, sub, body.value));
+    return inProject(req, { action: "approvers.edit", scope: { project: id }, ifMatchRequired: true, ifMatch: projectVersion(g.orgId, id) }, id, "light", (tx, a) => putApprovers(tx, a, id, sub, body.value));
   });
 
   /* ------------------------------------------------------------------ members */
@@ -227,11 +227,11 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/projects/:id/archive", async (req) => {
     const { id } = Id.parse(req.params);
     const body = ArchiveBody.parse(req.body ?? {});
-    return command(req, { action: "project.archive", scope: { project: id }, ifMatch: projectVersion(g.orgId, id) }, (tx, a) => archiveProject(tx, a, id, body));
+    return command(req, { action: "project.archive", scope: { project: id }, ifMatchRequired: true, ifMatch: projectVersion(g.orgId, id) }, (tx, a) => archiveProject(tx, a, id, body));
   });
 
   app.post("/api/v1/projects/:id/unarchive", async (req) => {
     const { id } = Id.parse(req.params);
-    return command(req, { action: "project.archive", scope: { project: id }, ifMatch: projectVersion(g.orgId, id) }, (tx, a) => unarchiveProject(tx, a, id));
+    return command(req, { action: "project.archive", scope: { project: id }, ifMatchRequired: true, ifMatch: projectVersion(g.orgId, id) }, (tx, a) => unarchiveProject(tx, a, id));
   });
 };

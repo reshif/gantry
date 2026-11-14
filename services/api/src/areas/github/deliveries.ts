@@ -4,6 +4,7 @@
  */
 import { appendEvent, type Tx } from "@gantry/db";
 import { publishChange } from "../../core/changes.js";
+import { offerWebhookToTriggers } from "../triggers/sources.js";
 import { applyFacts, findRepo } from "./store.js";
 import { GithubFacts, type PullRequestFact } from "./facts.js";
 
@@ -62,6 +63,8 @@ export async function processGithubDelivery(tx: Tx, orgId: string, deliveryId: s
   const blob = (await tx.query<{ content: Buffer }>(`select content from github_blobs where org_id = $1 and hash = $2`, [orgId, d.payload_hash])).rows[0];
   let payload: Json;
   try { payload = obj(JSON.parse(blob?.content.toString("utf8") ?? "")); } catch { await mark("failed"); return { status: "failed", reason: "stored payload is unreadable" }; }
+  // Events that carry no stored fact (a pull request comment, a workflow or suite that failed on the default branch) may be a trigger's source (spec 11.7).
+  await offerWebhookToTriggers(tx, orgId, d.event_type, payload);
   let m: ReturnType<typeof factsFromWebhook>;
   try { m = factsFromWebhook(d.event_type, payload); } catch (e) { await mark("failed"); return { status: "failed", reason: `unexpected payload shape: ${(e as Error).message.slice(0, 200)}` }; }
   if ("ignore" in m) { await mark("ignored"); return { status: "ignored", reason: m.ignore }; }

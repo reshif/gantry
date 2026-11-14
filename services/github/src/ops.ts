@@ -144,6 +144,11 @@ export const MergeBody = z.object({
 
 export async function mergePullRequest(d: OpDeps, b: z.infer<typeof MergeBody>): Promise<{ ok: true; merged: boolean; mergeSha: string | null; alreadyMerged: boolean }> {
   await fenced(d, b.woId, "merge", b.repo);
+  return mergeCore(d, b);
+}
+
+/** The merge itself, after the caller's fence (a work order for gate merges, the repository for onboarding). */
+export async function mergeCore(d: OpDeps, b: { repo: string; number: number; headSha: string; method: "squash" | "merge" | "rebase"; commitTitle?: string | undefined }): Promise<{ ok: true; merged: boolean; mergeSha: string | null; alreadyMerged: boolean }> {
   const { owner, name } = splitRepo(b.repo);
   try {
     const out = await d.app.withRepo(b.repo, "merge", async (c) => {
@@ -180,10 +185,12 @@ export interface ProtectionReport {
   serverVersion: string | null;
   installation: { id: number; permissions: Record<string, string>; repositorySelection: string | null; targetType: string | null } | null;
   branchProtection: { requiresPullRequest: boolean; approvals: number; codeOwners: boolean; requiredChecks: string[]; enforceAdmins: boolean } | null;
-  rulesets: { id: number; name: string; target: string; enforcement: string; ruleTypes: string[]; requiredChecks: string[]; approvals: number; codeOwners: boolean; bypassActors: { actorType: string; actorId: number | null }[] }[];
+  rulesets: { id: number; name: string; target: string; enforcement: string; ruleTypes: string[]; requiredChecks: string[]; pinnedChecks: string[]; approvals: number; codeOwners: boolean; bypassActors: { actorType: string; actorId: number | null }[] }[];
   /** Readiness fails if the App is on any bypass list (spec 11.2). */
   appOnBypassList: boolean;
   requiresGantryCheck: boolean;
+  /** An active ruleset requires the Gantry check and pins it to this App (`integration_id`), so no other app or status can satisfy it (spec 11.3). */
+  gantryCheckPinned: boolean;
 }
 
 export async function readProtections(d: OpDeps, repo: string): Promise<ProtectionReport> {
@@ -203,9 +210,9 @@ export async function readProtections(d: OpDeps, repo: string): Promise<Protecti
         const full = (await req("GET /repos/{owner}/{repo}/rulesets/{ruleset_id}", { owner, repo: name, ruleset_id: rs.id })).data;
         const rules = (full.rules ?? []) as { type: string; parameters?: Record<string, any> }[]; // eslint-disable-line @typescript-eslint/no-explicit-any
         const pr = rules.find((x) => x.type === "pull_request")?.parameters;
-        const checks = rules.find((x) => x.type === "required_status_checks")?.parameters?.required_status_checks as { context: string }[] | undefined;
+        const checks = rules.find((x) => x.type === "required_status_checks")?.parameters?.required_status_checks as { context: string; integration_id?: number }[] | undefined;
         rulesets.push({
-          id: full.id, name: full.name, target: full.target, enforcement: full.enforcement, ruleTypes: rules.map((x) => x.type), requiredChecks: (checks ?? []).map((x) => x.context),
+          id: full.id, name: full.name, target: full.target, enforcement: full.enforcement, ruleTypes: rules.map((x) => x.type), requiredChecks: (checks ?? []).map((x) => x.context), pinnedChecks: (checks ?? []).filter((x) => x.integration_id === d.appId).map((x) => x.context),
           approvals: Number(pr?.required_approving_review_count ?? 0), codeOwners: pr?.require_code_owner_review === true,
           bypassActors: ((full.bypass_actors ?? []) as { actor_type: string; actor_id: number | null }[]).map((a) => ({ actorType: a.actor_type, actorId: a.actor_id })),
         });
@@ -215,7 +222,7 @@ export async function readProtections(d: OpDeps, repo: string): Promise<Protecti
         || ((bp?.required_pull_request_reviews?.bypass_pull_request_allowances?.apps ?? []) as { id?: number; slug?: string }[]).some((a) => a.id === d.appId || a.slug === inst?.app_slug);
       const requiredChecks = new Set<string>([...(bp?.required_status_checks?.contexts ?? []), ...active.flatMap((r) => r.requiredChecks)]);
       return {
-        repo, defaultBranch, serverVersion, appOnBypassList, requiresGantryCheck: requiredChecks.has(d.cfg.gateCheckName), rulesets,
+        repo, defaultBranch, serverVersion, appOnBypassList, requiresGantryCheck: requiredChecks.has(d.cfg.gateCheckName), gantryCheckPinned: active.some((r) => r.pinnedChecks.includes(d.cfg.gateCheckName)), rulesets,
         installation: inst ? { id: installationId, permissions: (inst.permissions ?? {}) as Record<string, string>, repositorySelection: inst.repository_selection ?? null, targetType: inst.target_type ?? null } : null,
         branchProtection: bp ? { requiresPullRequest: !!bp.required_pull_request_reviews, approvals: Number(bp.required_pull_request_reviews?.required_approving_review_count ?? 0), codeOwners: bp.required_pull_request_reviews?.require_code_owner_reviews === true, requiredChecks: bp.required_status_checks?.contexts ?? [], enforceAdmins: bp.enforce_admins?.enabled === true } : null,
       };

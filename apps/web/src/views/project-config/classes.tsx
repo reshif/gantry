@@ -165,7 +165,7 @@ export function ClassesTab({ p, cat, set }: PcProps) {
                       <td>
                         <Toggle id={`pcf-cl-en-${c.id}`} checked={c.enabled !== false} label={`${c.name} enabled`}
                           decision={d.allowed && c.enabled !== false && inUse ? { allowed: false, reason: `${inUse} open work order${inUse > 1 ? "s use " : " uses "}${c.name}. Reclassify or finish them first.`, needs: "" } : d}
-                          onChange={async (v) => { res(await ops.updateClass(p.id, c.id, { enabled: v })); focusLater(`pcf-cl-en-${c.id}`); }} />
+                          onChange={async (v) => { res(await ops.updateClass(p.id, c.id, { enabled: v }, { ifMatch: p.version })); focusLater(`pcf-cl-en-${c.id}`); }} />
                       </td>
                       <td className="small">{skipped.length ? `skips ${skipped.join(", ")}` : "every station"}{c.endsAfter ? <div className="muted">{`ends after ${cat.stations.find((x) => x.id === c.endsAfter)?.name ?? c.endsAfter}`}</div> : null}</td>
                       <td className="small mono pcf-nowrap">{c.gates && c.gates.length ? c.gates.map((g) => cat.gates.find((x) => x.id === g)?.label ?? g).join(", ") : "all on route"}</td>

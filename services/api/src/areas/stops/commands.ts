@@ -5,7 +5,7 @@
  */
 import type { Tx } from "@gantry/db";
 import type { Actor, CommandResult } from "../../core/command.js";
-import { conflict, invalid } from "../../core/errors.js";
+import { Refusal, conflict, invalid } from "../../core/errors.js";
 import { readSecurity } from "../../core/read/index.js";
 import { apiStopId, scopeToApi, stopAction, type ScopeType, type StopTarget } from "./targets.js";
 
@@ -58,8 +58,16 @@ export async function setStop(tx: Tx, a: Actor, t: StopTarget, b: SetInput): Pro
   if (await activeStop(tx, a.orgId, t, b.mode)) throw conflict(`${label} is already ${b.mode === "halt" ? "halted" : "killed"}.`);
   if (b.mode === "halt" && (await activeStop(tx, a.orgId, t, "kill"))) throw conflict(`${label} is already killed.`);
   if (b.mode === "kill" && t.scope === "wo") {
-    const s = (await tx.query<{ state: string }>(`select state from work_orders where org_id = $1 and id = $2`, [a.orgId, t.wo])).rows[0];
-    if (s?.state === "killed") throw conflict(`${t.wo} is already killed.`);
+    // The target lookup already read this row; if the table has failed since, the kill still goes ahead (the active-stop check above is the authority).
+    await tx.query("savepoint wo_state");
+    try {
+      const s = (await tx.query<{ state: string }>(`select state from work_orders where org_id = $1 and id = $2`, [a.orgId, t.wo])).rows[0];
+      await tx.query("release savepoint wo_state");
+      if (s?.state === "killed") throw conflict(`${t.wo} is already killed.`);
+    } catch (e) {
+      if (e instanceof Refusal) throw e;
+      await tx.query("rollback to savepoint wo_state");
+    }
   }
   const n = Number((await tx.query(`select count(*)::int + 1 as n from stops where org_id = $1 and starts_with(id, $2)`, [a.orgId, `${t.scope}:${t.target ?? "factory"}:`])).rows[0].n);
   const id = `${t.scope}:${t.target ?? "factory"}:${n}`;

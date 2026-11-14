@@ -6,6 +6,7 @@ import type { Config } from "./config.js";
 import type { Hub } from "./stream.js";
 import type { OidcAdapter } from "./oidc.js";
 import type { SecurityCache } from "./security.js";
+import type { ApiSettingsCache } from "../areas/apikeys/config.js";
 import type { loadPolicyState } from "./read/state.js";
 
 /** Who is calling. People act through a session; API keys through a bearer; services through /internal/v1. */
@@ -45,6 +46,8 @@ export interface Gantry {
   hub: Hub;
   oidc: OidcAdapter;
   security: SecurityCache;
+  /** The public API settings (rate limit, idempotency window, triggers master switch), cached for a few seconds. */
+  apiSettings: ApiSettingsCache;
   /** SSE heartbeat interval in ms (15 s; tests shorten it). */
   heartbeatMs: number;
 }

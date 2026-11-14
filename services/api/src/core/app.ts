@@ -4,6 +4,8 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { visibleProjects } from "@gantry/domain";
 import type pg from "pg";
+import { ApiSettingsCache } from "../areas/apikeys/config.js";
+import { gateApiKey, logApiRequest, noteRejectedKey } from "../areas/apikeys/gate.js";
 import { authenticateApiKey } from "./auth/apikeys.js";
 import { authenticateService } from "./auth/service.js";
 import { csrfFor, findSession, revokeSessions, touchSession } from "./auth/sessions.js";
@@ -91,7 +93,7 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     },
   }, o.sweepMs);
   const oidc = o.oidc ?? createOidcAdapter(config.oidc);
-  const gantry: Gantry = { pool, config, orgId, hub, oidc, security, heartbeatMs: o.heartbeatMs ?? 15_000 };
+  const gantry: Gantry = { pool, config, orgId, hub, oidc, security, apiSettings: new ApiSettingsCache(pool, orgId), heartbeatMs: o.heartbeatMs ?? 15_000 };
   app.decorate("gantry", gantry);
   app.decorateRequest("gx", undefined as never);
 
@@ -109,6 +111,8 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     if (path.startsWith("/internal/v1/")) return authInternal(req, reply);
     if (path.startsWith("/api/v1/")) return authApi(app, req, reply);
   });
+
+  app.addHook("onResponse", logApiRequest);
 
   app.addHook("onSend", async (req, reply, payload) => {
     reply.header("x-request-id", req.id);
@@ -162,10 +166,13 @@ async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import(
   if (auth) {
     const m = /^Bearer (gk_\S+)$/.exec(auth);
     const key = m ? await authenticateApiKey(g.pool, g.orgId, m[1]!) : null;
-    if (!key) return unauth("The API key is not valid.");
+    if (!key) {
+      if (m) await noteRejectedKey(req, m[1]!);
+      return unauth("The API key is not valid.");
+    }
     req.gx.principal = { kind: "apikey", id: key.id, name: key.name, projectId: key.projectId, scopes: key.scopes };
     req.gx.channel = "api";
-    return;
+    return gateApiKey(req, reply);
   }
   const token = req.cookies[g.config.sessionCookie];
   if (!token) return unauth();

@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, symlink, writeFile, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { REPO, gitSync, makeRemote, startEnv, type Env } from "./harness.js";
@@ -170,6 +171,37 @@ describe("publish", () => {
     const r = await publish(w);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it("refuses to publish symlinks and submodules, and malformed objects, before anything is written to GitHub", async () => {
+    // a symlink
+    let w = await workspace();
+    await symlink("/etc/passwd", join(w.dir, "link"));
+    run(w.dir, "add", "-A"); run(w.dir, "commit", "-q", "-m", "Add a link");
+    env.gh.requests.length = 0;
+    let r = await publish(w);
+    expect(r.status, JSON.stringify(r.body)).toBe(422);
+    expect(r.body).toMatchObject({ code: "unsupported_entry", path: "link" });
+    expect(r.body.msg).toContain("symbolic link");
+    expect(env.gh.writes()).toHaveLength(0);
+    // a submodule (a gitlink entry)
+    w = await workspace();
+    run(w.dir, "update-index", "--add", "--cacheinfo", `160000,${base},vendor/lib`);
+    run(w.dir, "commit", "-q", "-m", "Add a submodule");
+    r = await publish(w);
+    expect(r.status, JSON.stringify(r.body)).toBe(422);
+    expect(r.body).toMatchObject({ code: "unsupported_entry", path: "vendor/lib" });
+    expect(r.body.msg).toContain("submodule");
+    expect(env.gh.writes()).toHaveLength(0);
+    // a commit object with no author or committer: git's own fsck rejects it
+    w = await workspace();
+    const tree = run(w.dir, "rev-parse", "HEAD^{tree}");
+    const bad = execFileSync("git", ["hash-object", "-t", "commit", "-w", "--literally", "--stdin"], { cwd: w.dir, input: `tree ${tree}\nparent ${base}\n\nno author here\n`, encoding: "utf8" }).trim();
+    run(w.dir, "update-ref", "HEAD", bad);
+    r = await publish(w);
+    expect(r.status, JSON.stringify(r.body)).toBe(422);
+    expect(r.body.code).toBe("fsck_failed");
+    expect(env.gh.writes()).toHaveLength(0);
   });
 
   it("refuses a superseded attempt before anything is written to GitHub", async () => {

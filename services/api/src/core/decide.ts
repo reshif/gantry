@@ -4,6 +4,7 @@ import type { FastifyRequest } from "fastify";
 import type { PolicyStateLoaded, Principal } from "./context.js";
 import { Refusal, refuse } from "./errors.js";
 import { loadPolicyState } from "./read/state.js";
+import { refreshStopSnapshot } from "./stop-snapshot.js";
 
 export interface Scope {
   project?: string | null;
@@ -18,7 +19,10 @@ export interface Scope {
 export function policyState(req: FastifyRequest, db?: Queryable): Promise<PolicyStateLoaded> {
   const g = req.server.gantry;
   if (db && db !== g.pool) return loadPolicyState(db, g.orgId);
-  req.gx.state ??= loadPolicyState(g.pool, g.orgId);
+  req.gx.state ??= loadPolicyState(g.pool, g.orgId).then(async (st) => {
+    await refreshStopSnapshot(g.pool, g.orgId, st);
+    return st;
+  });
   return req.gx.state;
 }
 
@@ -54,8 +58,11 @@ export function decideFor(st: PolicyStateLoaded, principal: Principal | null, ac
 const deny = (reason: string, id: string, name: string, kind = "apikey", needs = ""): Decision => ({ allowed: false, reason, rule: { kind, id, name }, needs });
 
 /** API keys carry explicit scopes (action ids) and may be bound to one project. Stops apply to them like to anyone. */
+/** Scopes that exist only for keys (spec 8.10): reading work orders and firing triggers are not rights a person holds through the matrix. */
+const KEY_ONLY_ACTIONS: ReadonlyArray<{ id: string; name: string }> = [{ id: "wo.read", name: "Read work orders" }, { id: "triggers.run", name: "Fire triggers" }];
+
 function decideApiKey(st: PolicyStateLoaded, p: Extract<Principal, { kind: "apikey" }>, action: string, scope: Scope): Decision {
-  const act = st.catalog.actions.find((a) => a.id === action);
+  const act = st.catalog.actions.find((a) => a.id === action) ?? KEY_ONLY_ACTIONS.find((a) => a.id === action);
   if (!act) return deny(`Unknown action ${action}.`, "APIKEY-ACTION", "API key", "invariant");
   if (!p.scopes.includes(action) && !p.scopes.includes("*")) return deny(`This API key is not scoped for ${act.name.toLowerCase()}.`, p.id, `API key ${p.name}`, "apikey", action);
   const repo = scope.repo ? st.repos.find((r) => r.id === scope.repo) : undefined;

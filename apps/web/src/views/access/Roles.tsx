@@ -4,7 +4,7 @@ import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { Btn, Chip, Field, LockNote, Segmented, Select, type Decision } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
-import { lockd, useOutcome } from "../govern/data";
+import { ifMatchOf, lockd, useOutcome } from "../govern/data";
 
 export function RoleForm({ existing, perm, roles, matrix, actions, registerSubmit, close, onCreated }: {
   existing: Role | null; perm: Decision; roles: Role[]; matrix: Matrix; actions: Action[]; registerSubmit: (fn: () => void) => void; close: () => void; onCreated: (id: string) => void;
@@ -19,7 +19,7 @@ export function RoleForm({ existing, perm, roles, matrix, actions, registerSubmi
   registerSubmit(() => {
     void (async () => {
       const r = existing
-        ? outcome(await ops.updateRole(existing.id, { name, desc }))
+        ? outcome(await ops.updateRole(existing.id, { name, desc }, ifMatchOf(existing)))
         : outcome(await ops.addRole({ name, level, base, desc }));
       if (!r.ok) return setErr(r.msg);
       close();
@@ -114,7 +114,7 @@ export function useRoleDialogs(args: { perm: Decision; roles: Role[]; matrix: Ma
       body: <LockNote decision={args.perm} what="Roles" />,
       actions: [
         { label: "Cancel" },
-        { label: "Remove role", kind: "danger", id: "acc-rr-go", guard: args.perm.allowed && holders.length ? lockd(`${holders.length} people still hold ${ro.name}.`) : args.perm, onClick: (close) => void ops.removeRole(ro.id).then((r) => { outcome(r); if (r.ok) close(); }) },
+        { label: "Remove role", kind: "danger", id: "acc-rr-go", guard: args.perm.allowed && holders.length ? lockd(`${holders.length} people still hold ${ro.name}.`) : args.perm, onClick: (close) => void ops.removeRole(ro.id, ifMatchOf(ro)).then((r) => { outcome(r); if (r.ok) close(); }) },
       ],
     });
   };

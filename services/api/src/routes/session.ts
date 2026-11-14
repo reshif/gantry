@@ -249,6 +249,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       {
         action: "security.manage",
         stepUp: 300,
+        ifMatchRequired: true,
         ifMatch: async (tx) => (await readSecurity(tx, g.orgId)).version,
       },
       async (tx, a) => {
@@ -283,7 +284,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
   const CanBody = z.object({
     checks: z.array(z.object({ action: z.string().min(1).max(100), project: z.string().max(100).nullish(), repo: z.string().max(100).nullish(), time: z.number().finite().optional() })).max(500),
   });
-  app.post("/api/v1/can", async (req) => {
+  app.post("/api/v1/can", { config: { apiKey: "any" } }, async (req) => {
     const { checks } = CanBody.parse(req.body);
     const st = await policyState(req);
     const now = Date.now();

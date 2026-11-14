@@ -17,6 +17,8 @@ export interface Config {
   host: string;
   port: number;
   secrets: { sessionKey: Buffer; dataKey: Buffer | null; edgeToken: string; githubToken: string };
+  /** gantry-github (GITHUB_BROKER_URL), for the few reads the API makes of GitHub through it: the repositories the App can see. Absent in tests that need none. */
+  brokerUrl?: string;
 }
 
 /** Key for sealing short-lived cookies and hashing tokens, derived from the session key. */
@@ -55,5 +57,6 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     host: env.HOST || "0.0.0.0",
     port: env.PORT ? Number(env.PORT) : 8000,
     secrets: { sessionKey: Buffer.from(sessionKey, "utf8"), dataKey, edgeToken, githubToken },
+    brokerUrl: (env.GITHUB_BROKER_URL || "http://gantry-github:9200").replace(/\/+$/, ""),
   };
 }

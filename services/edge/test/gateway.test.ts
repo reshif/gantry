@@ -327,8 +327,8 @@ describe("model gateway and run calls", () => {
       expect(sent.runId).toBeUndefined();
     });
 
-    it("MCP gateway is not built yet and says so", async () => {
-      expect((await fetch(`${base}/mcp/v1/x`, { method: "POST" })).status).toBe(501);
+    it("the MCP endpoint wants a run token (the gateway itself is covered in mcp.test.ts)", async () => {
+      expect((await fetch(`${base}/mcp/v1/x`, { method: "POST" })).status).toBe(401);
     });
 
     it("serves /healthz", async () => {

@@ -166,22 +166,25 @@ export const ops = {
   requestChanges: (repoId: string, text: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/request-changes`), { text })),
   markException: (repoId: string, reason: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/exception`), { reason })),
   verifyNow: (repoId: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/verify`))),
-  saveGuidelines: (patchBody: Obj, note: string, projectId?: string | null) =>
-    run(["guidelines", "projects"], put(api(projectId ? `projects/${enc(projectId)}/guidelines` : "guidelines"), { patch: patchBody, note })),
+  saveGuidelines: (patchBody: Obj, note: string, projectId?: string | null, v?: Versioned) =>
+    run(["guidelines", "projects"], put(api(projectId ? `projects/${enc(projectId)}/guidelines` : "guidelines"), { patch: patchBody, note }, opts(v))),
 
   /* ===== agents, skills, models, evals ===== */
-  createAgent: (o: Obj) => run(["agents"], post(api("agents"), o, create)),
+  createAgent: (o: Obj) => run(["agents", "suites"], post(api("agents"), o, create)),
+  /** `v.ifMatch` is the agent's `rev` from the last read. */
   saveAgent: (agentId: string, patchBody: Obj, note?: string, v?: Versioned) => run(["agents"], patch(api(`agents/${enc(agentId)}`), { patch: patchBody, note }, opts(v))),
-  newAgentVersion: (agentId: string, from: number | string, note?: string) => run(["agents"], post(api(`agents/${enc(agentId)}/versions`), { from, note })),
-  promoteAgent: (agentId: string, version: number | string) => run(["agents"], post(api(`agents/${enc(agentId)}/versions/${enc(String(version))}/promote`))),
-  rollbackAgent: (agentId: string, version: number | string) => run(["agents"], post(api(`agents/${enc(agentId)}/rollback`), { version })),
+  /** A candidate version snapshotting the saved configuration; `label` looks like 1.2.3 or 1.2.3-rc1. */
+  newAgentVersion: (agentId: string, label: string, note?: string, v?: Versioned) => run(["agents"], post(api(`agents/${enc(agentId)}/versions`), { label, note }, opts(v))),
+  promoteAgent: (agentId: string, version: number | string, v?: Versioned) => run(["agents"], post(api(`agents/${enc(agentId)}/versions/${enc(String(version))}/promote`), undefined, opts(v))),
+  rollbackAgent: (agentId: string, version: number | string, v?: Versioned) => run(["agents"], post(api(`agents/${enc(agentId)}/rollback`), { version }, opts(v))),
   attachSkill: (agentId: string, skillId: string, attach: boolean) =>
     run(["agents", "skills"], (attach ? put : del)(api(`agents/${enc(agentId)}/skills/${enc(skillId)}`))),
-  saveInstructions: (text: string) => run(["instructions", "agents"], put(api("instructions/base"), { text })),
+  /** `v.ifMatch` is the base version from GET /instructions/base. */
+  saveInstructions: (text: string, v?: Versioned) => run(["instructions", "agents"], put(api("instructions/base"), { text }, opts(v))),
   /** skillId null creates a skill. */
   saveSkill: (skillId: string | null, patchBody: Obj, note?: string, v?: Versioned) =>
     run(["skills"], skillId ? patch(api(`skills/${enc(skillId)}`), { patch: patchBody, note }, opts(v)) : post(api("skills"), { ...patchBody, note }, create)),
-  setSkillProjects: (skillId: string, projects: string[]) => run(["skills"], put(api(`skills/${enc(skillId)}/projects`), { projects })),
+  setSkillProjects: (skillId: string, projects: string[] | "all") => run(["skills"], put(api(`skills/${enc(skillId)}/projects`), { projects })),
   addVendor: (def: Obj) => run(["vendors", "routing"], post(api("vendors"), def, create)),
   setVendor: (vendorId: string, patchBody: Obj, action?: string) => run(["vendors", "routing"], patch(api(`vendors/${enc(vendorId)}`), { patch: patchBody, action })),
   addModel: (vendorId: string, def: Obj) => run(["vendors"], post(api("models"), { vendor: vendorId, def }, create)),
@@ -211,39 +214,55 @@ export const ops = {
   addIntegrationType: (def: Obj) => run(["integrationTypes"], post(api("integration-types"), def, create)),
   removeIntegrationType: (id: string) => run(["integrationTypes", "integrationInstances"], del(api(`integration-types/${enc(id)}`))),
   addIntegration: (o: Obj) => run(["integrationInstances"], post(api("integrations"), o, create)),
-  updateIntegration: (id: string, patchBody: Obj) => run(["integrationInstances"], patch(api(`integrations/${enc(id)}`), patchBody)),
+  updateIntegration: (id: string, patchBody: Obj, v?: Versioned) => run(["integrationInstances"], patch(api(`integrations/${enc(id)}`), patchBody, opts(v))),
   removeIntegration: (id: string) => run(["integrationInstances"], del(api(`integrations/${enc(id)}`))),
   testIntegrationInstance: (id: string) => run(["integrationInstances"], post(api(`integrations/${enc(id)}/test`))),
+  /** The Add dialog's connection test: settings that are not saved yet. Nothing is stored; the result's `test` has the lines. */
+  testIntegrationDraft: (type: string, body: Obj) => post(api(`integration-types/${enc(type)}/test`), body),
+  /** The recorded link step (spec 12.3): a one-time code the person sends from the chat app. */
+  requestChatLink: (channel = "slack", integration?: string) => run(["chatLinks"], post(api("chat-links"), { channel, ...(integration ? { integration } : {}) }, create)),
+  removeChatLink: (id: string) => run(["chatLinks"], del(api(`chat-links/${enc(id)}`))),
   /** Channel-level connection settings (slack, email, ...). */
   setIntegration: (channel: string, patchBody: Obj) => run(["integrations", "integrationInstances"], patch(api(`integrations/${enc(channel)}`), patchBody)),
   testIntegration: (channel: string) => run(["integrations", "integrationInstances"], post(api(`integrations/${enc(channel)}/test`))),
   /** routeId null creates a route. */
-  saveRoute: (projectId: string, routeId: string | null, route: Obj) =>
-    run(["notifications", "projects"], routeId ? patch(api(`projects/${enc(projectId)}/routes/${enc(routeId)}`), route) : post(api(`projects/${enc(projectId)}/routes`), route, create)),
-  deleteRoute: (projectId: string, routeId: string) => run(["notifications", "projects"], del(api(`projects/${enc(projectId)}/routes/${enc(routeId)}`))),
-  sendTest: (projectId: string, dest: string, target: string, event: string) =>
-    run(["deliveries"], post(api(`projects/${enc(projectId)}/routes/test`), { dest, target, event })),
+  saveRoute: (projectId: string, routeId: string | null, route: Obj, v?: Versioned) =>
+    run(["notifications", "projects"], routeId ? patch(api(`projects/${enc(projectId)}/routes/${enc(routeId)}`), route, opts(v)) : post(api(`projects/${enc(projectId)}/routes`), route, create)),
+  deleteRoute: (projectId: string, routeId: string, v?: Versioned) => run(["notifications", "projects"], del(api(`projects/${enc(projectId)}/routes/${enc(routeId)}`), undefined, opts(v))),
+  /** `dest` is a channel with `target`, or a destination object `{ channel, target, integration }` with the event as the second argument (legacy sendTest). */
+  sendTest: (projectId: string, dest: string | Obj, target: string, event?: string) =>
+    run(["deliveries"], post(api(`projects/${enc(projectId)}/routes/test`), typeof dest === "object" ? { dest, event: event ?? target } : { dest, target, event })),
   retryDelivery: (deliveryId: string) => run(["deliveries"], post(api(`deliveries/${enc(deliveryId)}/retry`))),
   saveCardTemplate: (tpl: Obj) => run(["cardTemplates"], post(api("card-templates"), tpl)),
-  removeCardTemplate: (id: string) => run(["cardTemplates"], del(api(`card-templates/${enc(id)}`))),
+  removeCardTemplate: (id: string, project?: string | null) => run(["cardTemplates"], del(api(`card-templates/${enc(id)}${project ? `?project=${enc(project)}` : ""}`))),
   /** Renders a card without saving it: a POST that changes nothing. */
   previewCardTemplate: (tpl: Obj) => post(api("card-templates/preview"), tpl),
-  discoverTools: (name: string, url: string) => post(api("mcp/discover"), { name, url }),
+  /** The edge connects to the server and lists its tools (spec 12.4). Saves nothing; the result carries `tools`. */
+  discoverTools: (o: Obj) => post(api("mcp/discover"), o),
   addMCP: (o: Obj) => run(["mcp"], post(api("mcp/servers"), o, create)),
-  updateMCP: (id: string, patchBody: Obj) => run(["mcp"], patch(api(`mcp/servers/${enc(id)}`), patchBody)),
-  removeMCP: (id: string) => run(["mcp"], del(api(`mcp/servers/${enc(id)}`))),
+  updateMCP: (id: string, patchBody: Obj, v?: Versioned) => run(["mcp"], patch(api(`mcp/servers/${enc(id)}`), patchBody, opts(v))),
+  removeMCP: (id: string, v?: Versioned) => run(["mcp"], del(api(`mcp/servers/${enc(id)}`), undefined, opts(v))),
+  /** Connects again and compares the tool definitions; a changed one disables the server until it is re-approved. */
+  rediscoverMCP: (id: string, v?: Versioned) => run(["mcp"], post(api(`mcp/servers/${enc(id)}/discover`), {}, opts(v))),
+  /** Accepts the changed tool definitions the server now reports and switches it back on. */
+  approveMCP: (id: string, v?: Versioned) => run(["mcp"], post(api(`mcp/servers/${enc(id)}/approve`), {}, opts(v))),
+  /** Pre-authorises write tools (`server/tool`) for the work order's live attempt. */
+  grantMcpWrites: (wo: string, tools: string[]) => run(["mcp"], post(api("mcp/grants"), { wo, tools }, create)),
   /** The secret is in the result's extras, once. */
   createKey: (o: Obj) => run(["apiKeys"], post(api("api-keys"), o, create)),
   revokeKey: (keyId: string) => run(["apiKeys"], del(api(`api-keys/${enc(keyId)}`))),
-  setApiConfig: (patchBody: Obj) => run(["apiConfig"], patch(api("api-config"), patchBody)),
+  setApiConfig: (patchBody: Obj, v?: Versioned) => run(["apiConfig"], patch(api("api-config"), patchBody, opts(v))),
   /** Public API try-it: submits with the key the person pastes, as an external client would. */
   apiSubmit: (apiKeySecret: string, projectId: string, body: Obj) =>
     run(["workOrders", "requestLog"], command(api(`projects/${enc(projectId)}/work-orders`), { method: "POST", body, idempotent: true, headers: { Authorization: `Bearer ${apiKeySecret}` } })),
   /** triggerId null creates a trigger. */
-  saveTrigger: (triggerId: string | null, patchBody: Obj) =>
-    run(["triggers"], triggerId ? patch(api(`triggers/${enc(triggerId)}`), patchBody) : post(api("triggers"), patchBody, create)),
-  /** Dry run: evaluates the trigger against an input and changes nothing. */
-  simulateTrigger: (triggerId: string, input: Obj) => post(api(`triggers/${enc(triggerId)}/dry-run`), input),
+  saveTrigger: (triggerId: string | null, patchBody: Obj, v?: Versioned) =>
+    run(["triggers"], triggerId ? patch(api(`triggers/${enc(triggerId)}`), patchBody, opts(v)) : post(api("triggers"), patchBody, create)),
+  /** "Simulate incoming": evaluates the trigger against a sample event and changes nothing, unless `create: true` asks for the work to be made for real. */
+  simulateTrigger: (triggerId: string, input: Obj) => run(input.create === true ? ["triggers", "workOrders"] : [], post(api(`triggers/${enc(triggerId)}/dry-run`), input, input.create === true ? create : {})),
+  /** A person who may submit to the project releases or declines a work order a trigger held (spec 11.7). */
+  releaseProposal: (proposalId: string, note?: string) => run(["triggers", "workOrders"], post(api(`trigger-proposals/${enc(proposalId)}/release`), { note: note ?? "" })),
+  declineProposal: (proposalId: string, reason: string) => run(["triggers"], post(api(`trigger-proposals/${enc(proposalId)}/decline`), { reason })),
 
   /* ===== people, access ===== */
   invite: (o: Obj) => run(["people"], post(api("invites"), o, create)),
@@ -255,15 +274,15 @@ export const ops = {
   setMatrix: (roleId: string, actionId: string, on: boolean, v?: Versioned) =>
     run(["matrix"], put(api(`access/matrix/${enc(roleId)}/${enc(actionId)}`), { on }, opts(v))),
   addRole: (def: Obj) => run(["matrix"], post(api("roles"), def, create)),
-  updateRole: (roleId: string, patchBody: Obj) => run(["matrix"], patch(api(`roles/${enc(roleId)}`), patchBody)),
-  removeRole: (roleId: string) => run(["matrix"], del(api(`roles/${enc(roleId)}`))),
+  updateRole: (roleId: string, patchBody: Obj, v?: Versioned) => run(["matrix"], patch(api(`roles/${enc(roleId)}`), patchBody, opts(v))),
+  removeRole: (roleId: string, v?: Versioned) => run(["matrix"], del(api(`roles/${enc(roleId)}`), undefined, opts(v))),
   /** policyId null creates a policy. */
   savePolicy: (policyId: string | null, data: Obj, v?: Versioned) =>
     run(["policies"], policyId ? patch(api(`policies/${enc(policyId)}`), data, opts(v)) : post(api("policies"), data, create)),
-  setPolicyEnabled: (policyId: string, on: boolean) => run(["policies"], patch(api(`policies/${enc(policyId)}`), { enabled: on })),
-  deletePolicy: (policyId: string) => run(["policies"], del(api(`policies/${enc(policyId)}`))),
+  setPolicyEnabled: (policyId: string, on: boolean, v?: Versioned) => run(["policies"], patch(api(`policies/${enc(policyId)}`), { enabled: on }, opts(v))),
+  deletePolicy: (policyId: string, v?: Versioned) => run(["policies"], del(api(`policies/${enc(policyId)}`), undefined, opts(v))),
   saveFreeze: (f: Obj) => run(["freezes"], post(api("freezes"), f, create)),
-  endFreeze: (freezeId: string) => run(["freezes"], post(api(`freezes/${enc(freezeId)}/end`))),
+  endFreeze: (freezeId: string, v?: Versioned) => run(["freezes"], post(api(`freezes/${enc(freezeId)}/end`), undefined, opts(v))),
   /** The access simulator: the same decision function as enforcement. Changes nothing. */
   simulateAccess: (q: { person: string; action: string; project?: string; repo?: string; time?: number }) => post(api("access/simulate"), q),
   saveSavedView: (view: Obj) => run(["savedViews"], post(api("saved-views"), view, create)),

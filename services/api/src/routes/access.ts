@@ -41,7 +41,7 @@ export const accessRoutes: FastifyPluginAsync = async (app) => {
   app.put("/api/v1/access/matrix/:role/:action", async (req) => {
     const { role, action } = z.object({ role: z.string().min(1).max(100), action: z.string().min(1).max(100) }).parse(req.params);
     const { on } = MatrixBody.parse(req.body);
-    return command(req, { action: "policy.edit", stepUp: STEP_UP, ifMatch: (tx) => matrixVersion(tx, g.orgId) }, (tx, a) => setMatrixCell(tx, a.orgId, a.id, role, action, on));
+    return command(req, { action: "policy.edit", stepUp: STEP_UP, ifMatchRequired: true, ifMatch: (tx) => matrixVersion(tx, g.orgId) }, (tx, a) => setMatrixCell(tx, a.orgId, a.id, role, action, on));
   });
 
   /* ---- roles ---- */
@@ -53,11 +53,11 @@ export const accessRoutes: FastifyPluginAsync = async (app) => {
   app.patch("/api/v1/roles/:id", async (req) => {
     const { id } = Id.parse(req.params);
     const body = RolePatch.parse(req.body);
-    return command(req, { action: "role.edit", stepUp: STEP_UP, ifMatch: (tx) => roleVersion(tx, g.orgId, id) }, (tx, a) => updateRole(tx, a.orgId, id, body));
+    return command(req, { action: "role.edit", stepUp: STEP_UP, ifMatchRequired: true, ifMatch: (tx) => roleVersion(tx, g.orgId, id) }, (tx, a) => updateRole(tx, a.orgId, id, body));
   });
   app.delete("/api/v1/roles/:id", async (req) => {
     const { id } = Id.parse(req.params);
-    return command(req, { action: "role.edit", stepUp: STEP_UP, ifMatch: (tx) => roleVersion(tx, g.orgId, id) }, (tx, a) => removeRole(tx, a.orgId, a.id, id));
+    return command(req, { action: "role.edit", stepUp: STEP_UP, ifMatchRequired: true, ifMatch: (tx) => roleVersion(tx, g.orgId, id) }, (tx, a) => removeRole(tx, a.orgId, a.id, id));
   });
 
   /* ---- policies ---- */
@@ -73,13 +73,13 @@ export const accessRoutes: FastifyPluginAsync = async (app) => {
   app.patch("/api/v1/policies/:id", async (req) => {
     const { id } = Id.parse(req.params);
     const body = PolicyPatch.parse(req.body);
-    return command(req, { action: "policy.edit", stepUp: STEP_UP, ifMatch: (tx) => policyVersion(tx, g.orgId, id) }, (tx, a) =>
+    return command(req, { action: "policy.edit", stepUp: STEP_UP, ifMatchRequired: true, ifMatch: (tx) => policyVersion(tx, g.orgId, id) }, (tx, a) =>
       "name" in body ? updatePolicy(tx, a.orgId, a.id, id, body) : setPolicyEnabled(tx, a.orgId, a.id, id, body.enabled),
     );
   });
   app.delete("/api/v1/policies/:id", async (req) => {
     const { id } = Id.parse(req.params);
-    return command(req, { action: "policy.edit", stepUp: STEP_UP, ifMatch: (tx) => policyVersion(tx, g.orgId, id) }, (tx, a) => deletePolicy(tx, a.orgId, id));
+    return command(req, { action: "policy.edit", stepUp: STEP_UP, ifMatchRequired: true, ifMatch: (tx) => policyVersion(tx, g.orgId, id) }, (tx, a) => deletePolicy(tx, a.orgId, id));
   });
 
   /* ---- freezes ---- */
@@ -94,7 +94,7 @@ export const accessRoutes: FastifyPluginAsync = async (app) => {
   });
   app.post("/api/v1/freezes/:id/end", async (req) => {
     const { id } = Id.parse(req.params);
-    return command(req, { action: "policy.edit", stepUp: STEP_UP, ifMatch: (tx) => freezeVersion(tx, g.orgId, id) }, (tx, a) => endFreeze(tx, a.orgId, id));
+    return command(req, { action: "policy.edit", stepUp: STEP_UP, ifMatchRequired: true, ifMatch: (tx) => freezeVersion(tx, g.orgId, id) }, (tx, a) => endFreeze(tx, a.orgId, id));
   });
 
   /* ---- simulator ---- */

@@ -11,7 +11,7 @@ import { useMe, usePeople, useSecurity, useSessions, useSignins } from "../api/q
 import { Btn, Field, LockNote, Panel, Segmented, Select, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
-import { lockd, useOutcome, versionOf } from "./govern/data";
+import { lockd, nextVersion, useOutcome, versionOf } from "./govern/data";
 import { inCidr, parseCidr } from "./security/cidr";
 
 const PROVIDERS = ["Okta", "Microsoft Entra ID", "Google Workspace", "OneLogin"];
@@ -81,9 +81,12 @@ function SsoPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
     if (!/^https:\/\/\S+$/.test(cur.entity.trim())) return setErr("The metadata URL must start with https://.");
     setErr("");
     let ok = true;
+    let ver = versionOf(sec);
     for (const k of ["provider", "domain", "entity"] as const) {
       if (cur[k].trim() !== sec.sso[k]) {
-        const r = await ops.setSecurity(`sso.${k}`, cur[k].trim());
+        const r = await ops.setSecurity(`sso.${k}`, cur[k].trim(), ver !== undefined ? { ifMatch: ver } : undefined);
+        // each save bumps the version; the next one must carry the new one
+        if (r.ok && ver !== undefined) ver = nextVersion(r, ver);
         if (!r.ok) {
           outcome(r);
           ok = false;

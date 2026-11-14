@@ -13,7 +13,7 @@ export function testWorkerConfig(over: Partial<WorkerConfig> = {}): WorkerConfig
     launcherUrl: "", launcherToken: "launcher-test-token", brokerUrl: "", brokerToken: "github-test-token", runnerVariant: "base",
     smtp: { host: "127.0.0.1", port: 0, from: "Gantry <gantry@test>", secure: false }, egressProxy: null, egressCa: null,
     s3: { endpoint: null, bucket: "gantry", accessKey: "gantry", secretKey: null, region: "us-east-1" }, heartbeatFile: `/tmp/gantry-worker-test-${randomUUID()}`,
-    concurrency: { flow: 4, stop: 4, github: 2, system: 2, timers: 2 }, jobLeaseMs: 30_000, pollMs: 50, terminationVerifyMs: 300, terminationPollMs: 20, reaperGraceMs: 0,
+    concurrency: { flow: 4, stop: 4, github: 2, system: 2, timers: 2 }, jobLeaseMs: 30_000, pollMs: 50, terminationVerifyMs: 300, terminationPollMs: 20, haltGraceMs: 0, reaperGraceMs: 0,
     reaperEveryMs: 60_000, reconcileEveryMs: 300_000, verifyEveryMs: 86_400_000, watchdogEveryMs: 100, startupLeaseMs: 180_000, publishLeaseMs: 900_000, maxDispatchDeferrals: 3, dataKey: null,
     ...over,
   };

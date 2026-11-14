@@ -5,7 +5,7 @@ import { useCan } from "../../api/can";
 import { Btn, Chip, Field, LockNote, Segmented, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
-import { lockd, useOutcome, usePolicyWording, versionOf } from "../govern/data";
+import { ifMatchOf, lockd, useOutcome, usePolicyWording, versionOf } from "../govern/data";
 
 /** Policies the engine owns: only enabling or disabling is allowed (matches the server's FIXED_POLICIES). */
 export const SPECIAL: Record<string, string> = {
@@ -173,7 +173,7 @@ export function PolicyCards({ policies, hl, people, onEdit, onSimulate }: { poli
               <span className="pc-effect"><Icon name={p.effect === "deny" ? "halt" : p.extend ? "plus" : "clock"} />{kind}</span>
               {isHl ? <Chip text="deciding rule" cls="chip-accent" /> : null}
               <span className="pc-toggle">
-                <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label={`Enable ${p.id}`} onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v))} />
+                <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label={`Enable ${p.id}`} onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v, ifMatchOf(p)))} />
               </span>
             </div>
             <h3 className="pc-name">{p.name}</h3>
@@ -187,7 +187,7 @@ export function PolicyCards({ policies, hl, people, onEdit, onSimulate }: { poli
             <div className="pc-actions">
               <Btn label="Edit" small kind="ghost" icon="page" id={`acc-pol-edit-${p.id}`} guard={!perm.allowed ? perm : SPECIAL[p.id] ? lockd(SPECIAL[p.id]!) : null} onClick={() => onEdit(p)} />
               <Btn label="Simulate" small kind="ghost" icon="play" id={`acc-pol-sim-${p.id}`} onClick={() => onSimulate(p, who)} />
-              {custom ? <Btn label="Delete" small kind="ghost" icon="x" id={`acc-pol-del-${p.id}`} guard={perm} onClick={async () => void outcome(await ops.deletePolicy(p.id))} /> : null}
+              {custom ? <Btn label="Delete" small kind="ghost" icon="x" id={`acc-pol-del-${p.id}`} guard={perm} onClick={async () => void outcome(await ops.deletePolicy(p.id, ifMatchOf(p)))} /> : null}
             </div>
           </li>
         );

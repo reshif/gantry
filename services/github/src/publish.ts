@@ -79,6 +79,20 @@ function parseNumstat(buf: Buffer): Map<string, { additions: number; deletions: 
   return out;
 }
 
+/** Packs the objects of `base..head` and indexes them in an empty repository with fsck on, so a malformed object is refused instead of read. */
+async function fsckNewObjects(d: PublishDeps, scratch: string, G: (args: string[], o?: { input?: Buffer | string; maxOutput?: number }) => Promise<Buffer>, base: string, head: string): Promise<void> {
+  try {
+    const list = await G(["rev-list", "--objects", "--no-object-names", `${base}..${head}`], { maxOutput: 64 * 1024 * 1024 });
+    const pack = await G(["pack-objects", "--stdout", "-q"], { input: list, maxOutput: d.cfg.maxWorkspaceBytes });
+    const chk = join(scratch, "fsck.git");
+    await git(["init", "--bare", "--quiet", "--template=", chk], { gitBin: d.cfg.gitBin });
+    await git([`--git-dir=${chk}`, "index-pack", "--stdin", "--fsck-objects"], { gitBin: d.cfg.gitBin, input: pack });
+  } catch (e) {
+    if (e instanceof GitError) throw new BrokerError(422, "fsck_failed", `The workspace holds malformed git objects (${(e.stderr || e.message).split("\n")[0]!.slice(0, 200)}); nothing was published.`);
+    throw e;
+  }
+}
+
 const withTrailer = (message: string, woId: string): string => (/^Gantry-Work-Order:/m.test(message) ? message : `${message.replace(/\s+$/, "")}\n\nGantry-Work-Order: ${woId}\n`);
 
 export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<PublishResult> {
@@ -113,6 +127,9 @@ export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<
     if (head === base) return { ok: true, branch: b.branch, headSha: null, noop: true, alreadyPublished: false, commits: [], pullRequest: null };
     try { await G(["merge-base", "--is-ancestor", base, head]); } catch { throw new BrokerError(422, "not_descended", "The workspace HEAD does not descend from the base commit."); }
 
+    // The workspace is untrusted: check the new objects (malformed commits, trees with odd entries, bad dates) before anything reads them.
+    await fsckNewObjects(d, scratch, G, base, head);
+
     const lines = (await GT(["rev-list", "--reverse", "--topo-order", "--parents", `${base}..${head}`])).split("\n").filter(Boolean);
     if (lines.length > d.cfg.maxCommitsPerPublish) throw new BrokerError(422, "too_many_commits", `${lines.length} new commits; the limit is ${d.cfg.maxCommitsPerPublish}.`);
     const commits: LocalCommit[] = [];
@@ -136,6 +153,12 @@ export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<
         changes, files: changes.map((c) => ({ path: c.path, status: STATUS_WORD[c.status], ...(stats.get(c.path) ?? { additions: 0, deletions: 0 }) })), patch, patchTruncated,
       });
       prev = sha;
+    }
+
+    // Symlinks and submodules are not published: a symlink could point anywhere once checked out, and a submodule pins code the broker never reviewed.
+    for (const lc of commits) {
+      const bad = lc.changes.find((ch) => ch.status !== "D" && (ch.newMode === "120000" || ch.newMode === "160000"));
+      if (bad) throw new BrokerError(422, "unsupported_entry", `${bad.path} is a ${bad.newMode === "120000" ? "symbolic link" : "submodule"} (commit ${lc.sha.slice(0, 7)}); symlinks and submodules are not published.`, { path: bad.path });
     }
 
     // 4 and 5. Publish through the API of GitHub with an installation token scoped to this one repository.
@@ -162,7 +185,6 @@ export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<
           const entries: { path: string; mode: string; type: "blob" | "commit"; sha: string | null }[] = [];
           for (const ch of lc.changes) {
             if (ch.status === "D") { entries.push({ path: ch.path, mode: "100644", type: "blob", sha: null }); continue; }
-            if (ch.newMode === "160000") { entries.push({ path: ch.path, mode: "160000", type: "commit", sha: ch.newSha }); continue; }
             let id = blobs.get(ch.newSha);
             if (!id) {
               const content = await G(["cat-file", "blob", ch.newSha], { maxOutput: 50 * 1024 * 1024 }).catch(() => { throw new BrokerError(422, "blob_too_large", `${ch.path} is larger than 50 MB or unreadable.`); });

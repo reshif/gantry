@@ -1,0 +1,15 @@
+# w4mcp progress
+- started; read docs. Plan: migration (mcp_scopes.classes, mcp_servers cols), areas/mcp (schemas, read, commands, discover), routes/mcp.ts, edge mcp gateway, api internal tool-list/credential endpoints, web mcp.tsx, tests.
+- installed @modelcontextprotocol/sdk as edge devDependency (done)
+- test DB: docker container w4mcp-pg on :55497; run tests with GANTRY_TEST_DATABASE_URL=postgres://postgres:pw@127.0.0.1:55497/postgres (cd services/api && npx vitest run test/mcp.test.ts)
+- migration 0022_mcp_registry.sql written (done)
+- API: areas/mcp/{scope,schemas,secret,edge-client,store,commands,access,internal}.ts + routes/mcp.ts + spec.ts/runs.ts edits done (compiles). NEXT: api tests (test/mcp.test.ts), fix internal-runs test (project must enable server), edge gateway (services/edge/src/mcp/*), web mcp.tsx
+- edge: src/mcp/{definition,sse,upstream,routes}.ts written, gateway.ts wired, compiles. NEXT: edge test test/mcp.test.ts (real SDK server in test/mcp-server.ts), api test test/mcp.test.ts, web mcp.tsx + tests, docs note
+- edge tests done (test/mcp.test.ts + test/mcp-server.ts, 85 pass). NEXT: api test/mcp.test.ts (admin endpoints), web mcp.tsx, final docs note wave4-mcp.md
+- api test/mcp.test.ts passing (15). NEXT: web mcp.tsx port + test, screenshots, full typecheck/test, wave4-mcp.md note
+- web: ops.ts/queries.ts/keys.ts edited for MCP (rediscoverMCP, approveMCP, grantMcpWrites, McpAccessDecision). NEXT: write apps/web/src/views/mcp.tsx (+ mcp/ subdir), mcp.test.tsx, screenshots
+- web: views/mcp.tsx + views/mcp/{kit,AddDialog,Detail,Usage}.tsx + mcp.test.tsx (12 pass). NEXT: local run + Playwright screenshots, typecheck/test all, wave4-mcp.md, cleanup docker w4mcp-pg
+- live run blocked: another engineer's migration 0023 has a syntax error (quotes stripped); waiting. harness: services/api/test/w4mcp-harness.test.ts (TEMP, delete at end), scripts /tmp/claude-0/w4mcp/{flow.mjs,shot1.mjs}, vite on :5197 (kill at end), publicUrl http://127.0.0.1:5197
+- API e2e test/mcp-e2e.test.ts (real API+edge+SDK server+SDK client) passes. spec.ts mcpKey sanitises server names. harness live run OK for add/discover/scope/tools/class/sens/recheck/enable/usage. NEXT: live approve/remove/limited-user, wave4-mcp.md, cleanup (delete test/w4mcp-harness.test.ts, kill vite 5197 + harness 8191, docker rm w4mcp-pg, drop stray DBs)
+- cleanup done: harness file deleted, vite+harness stopped, stray DBs dropped. NEXT: full test runs, wave4-mcp.md, docker rm w4mcp-pg
+- FINISHED. All tests pass for touched areas (api full: 2 failures in core.test/projects.test from the api-keys engineer's in-flight work, unrelated). Notes: docs/build-notes/wave4-mcp.md. w4mcp-pg removed.

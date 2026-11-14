@@ -7,4 +7,5 @@ export * from "./invariants.js";
 export * from "./flow.js";
 export * from "./lifecycle.js";
 export * from "./insight.js";
+export * from "./onboarding.js";
 export { devSeed, SEED_ANCHOR } from "./seed.js";

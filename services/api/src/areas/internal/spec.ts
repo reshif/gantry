@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import type { Queryable } from "@gantry/db";
 import { agentConfig } from "./metering.js";
 import type { RunCtx } from "./context.js";
+import { scopeVerdict, type ScopeRow } from "../mcp/scope.js";
+import { assemble, composeLayers, loadAgentVersion, resolveSkills, type InstructionPin } from "../agents/compose.js";
 
-const sha = (s: string): string => createHash("sha256").update(s).digest("hex");
 const HEARTBEAT_SECONDS = 15;
 /** The lease a heartbeat grants: six missed heartbeats (spec 4.3 step 5). */
 export const LEASE_SECONDS = HEARTBEAT_SECONDS * 6;
@@ -28,80 +28,52 @@ export function toolAllowList(body: Record<string, unknown>, data: Record<string
   return READ_TOOLS;
 }
 
-const bodyText = (b: unknown): string => (typeof b === "string" ? b : b && typeof b === "object" && typeof (b as { body?: unknown }).body === "string" ? (b as { body: string }).body : "");
-
-/** The latest published instruction version for a scope. */
-async function layer(db: Queryable, orgId: string, scope: "base" | "project" | "agent", scopeId: string): Promise<string | null> {
-  const { rows } = await db.query<{ body: string }>(
-    `select body from instruction_versions where org_id = $1 and scope = $2 and scope_id = $3 and published_at is not null order by version desc limit 1`,
-    [orgId, scope, scopeId],
-  );
-  return rows[0]?.body ?? null;
-}
-
 export interface ComposedInstructions {
   text: string;
   hash: string;
-  layers: { name: string; hash: string }[];
+  layers: { name: string; hash: string; version?: number | null }[];
 }
 
-/** Spec 10.2: factory base, project overlay, agent, repository guidelines. Layers with no content are left out. */
+/**
+ * Spec 10.2: factory base, project overlay, agent, repository guidelines (at the pinned commit). Layers with no content are left out.
+ * The run's own pin (written when it was dispatched) decides the layer versions and the guidelines text; a run with no pin reads the latest published ones.
+ */
 export async function composeInstructions(db: Queryable, c: RunCtx): Promise<ComposedInstructions> {
   const agent = await agentConfig(db, c);
-  const repo = c.repoId ? (await db.query<{ guidelines: string }>(`select guidelines from repos where org_id = $1 and id = $2`, [c.orgId, c.repoId])).rows[0]?.guidelines ?? "" : "";
-  const parts: [string, string][] = [
-    ["Factory base", (await layer(db, c.orgId, "base", "")) ?? ""],
-    ["Project overlay", (await layer(db, c.orgId, "project", c.projectId)) ?? c.overlay],
-    ["Agent", (c.agentId ? await layer(db, c.orgId, "agent", c.agentId) : null) ?? agent.instructions],
-    ["Repository guidelines", repo],
-  ];
-  const used = parts.filter(([, t]) => t.trim() !== "");
-  return {
-    text: used.map(([n, t]) => `## ${n}\n\n${t.trim()}`).join("\n\n"),
-    hash: sha(used.map(([n, t]) => `${n}\0${t}`).join("\0\0")),
-    layers: used.map(([name, t]) => ({ name, hash: sha(t) })),
-  };
+  const av = c.agentId ? await loadAgentVersion(db, c.orgId, c.agentId, c.agentVersion) : null;
+  const pin = c.runData.instructionPin && typeof c.runData.instructionPin === "object" ? (c.runData.instructionPin as InstructionPin) : null;
+  const { layers } = await composeLayers(db, { orgId: c.orgId, agentId: c.agentId, projectId: c.projectId, repoId: c.repoId, pin, fallbackAgentText: agent.instructions, fallbackOverlay: c.overlay }, av);
+  const out = assemble(layers);
+  return { text: out.text, hash: out.hash, layers: out.layers.map((l) => ({ name: l.name, hash: l.hash, version: l.version })) };
 }
 
 async function skillsFor(db: Queryable, c: RunCtx): Promise<{ name: string; content: string }[]> {
   if (!c.agentId) return [];
-  const { rows } = await db.query<{ skill_id: string; name: string; projects: unknown; live_version: number | null; pinned_version: number | null }>(
-    `select s.id as skill_id, s.name, s.projects, s.live_version, k.pinned_version from agent_skills k join skills s on s.org_id = k.org_id and s.id = k.skill_id
-      where k.org_id = $1 and k.agent_id = $2 order by k.created_at, s.id`,
-    [c.orgId, c.agentId],
-  );
-  const out: { name: string; content: string }[] = [];
-  for (const s of rows) {
-    if (Array.isArray(s.projects) && !s.projects.includes(c.projectId)) continue;
-    const tupleV = c.skillVersions[s.skill_id];
-    const version = typeof tupleV === "number" ? tupleV : s.pinned_version ?? s.live_version;
-    if (version === null || version === undefined) continue;
-    const v = await db.query<{ body: unknown }>(`select body from skill_versions where org_id = $1 and skill_id = $2 and version = $3`, [c.orgId, s.skill_id, version]);
-    if (v.rows[0]) out.push({ name: s.name, content: bodyText(v.rows[0].body) });
-  }
-  return out;
+  const av = await loadAgentVersion(db, c.orgId, c.agentId, c.agentVersion);
+  const skills = await resolveSkills(db, { orgId: c.orgId, agentId: c.agentId, body: av?.body ?? {}, projectId: c.projectId, versions: c.skillVersions });
+  return skills.map((s) => ({ name: s.name, content: s.content }));
 }
 
-const inScope = (v: unknown, id: string | null): boolean => v === "all" || (Array.isArray(v) && id !== null && v.includes(id));
-
-export interface McpScopeRow {
-  server_id: string;
-  projects: unknown;
-  repos: unknown;
-  agents: unknown;
-  stations: unknown;
-}
-
-/** Enabled MCP servers whose scope covers this run. An empty list in a scope means nobody; "all" means everyone. */
+/** Enabled MCP servers whose scope covers this run: project (and the project's own enable list), repo, agent, station and work class (spec 12.4). */
 export async function mcpServersInScope(db: Queryable, c: RunCtx): Promise<{ id: string; name: string }[]> {
-  const { rows } = await db.query<McpScopeRow & { name: string }>(
-    `select s.id as server_id, s.name, sc.projects, sc.repos, sc.agents, sc.stations from mcp_servers s join mcp_scopes sc on sc.org_id = s.org_id and sc.server_id = s.id
+  const { rows } = await db.query<ScopeRow & { server_id: string; name: string }>(
+    `select s.id as server_id, s.name, sc.projects, sc.repos, sc.agents, sc.stations, sc.classes from mcp_servers s join mcp_scopes sc on sc.org_id = s.org_id and sc.server_id = s.id
       where s.org_id = $1 and s.enabled order by s.id`,
     [c.orgId],
   );
+  const enabled = Array.isArray(c.projectConfig.mcp) ? (c.projectConfig.mcp as unknown[]).filter((x): x is string => typeof x === "string") : [];
   const seen = new Map<string, string>();
-  for (const r of rows) if (inScope(r.projects, c.projectId) && inScope(r.repos, c.repoId) && inScope(r.agents, c.agentId) && inScope(r.stations, c.station)) seen.set(r.server_id, r.name);
+  for (const r of rows) {
+    const v = scopeVerdict(r, { project: c.projectId, projectEnabled: enabled, serverId: r.server_id, repo: c.repoId, agent: c.agentId, station: c.station, cls: c.woClass }, { server: r.name });
+    if (!v) seen.set(r.server_id, r.name);
+  }
   return [...seen].map(([id, name]) => ({ id, name }));
+}
+
+/** The name a harness knows a server by. Tool names are `mcp__<name>__<tool>` and may hold only letters, digits, `_` and `-`, so a registry name like "Docs wiki" becomes `docs-wiki`; a clash falls back to the id. */
+export function mcpKey(s: { id: string; name: string }, all: Array<{ id: string; name: string }>): string {
+  const key = s.name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || s.id;
+  return all.some((o) => o.id !== s.id && o.name.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) === key) ? s.id : key;
 }
 
 export interface RunSpecOut {
@@ -141,7 +113,7 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
     instructions: inst.text,
     instructionsHash: inst.hash,
     skills: await skillsFor(db, c),
-    mcpServers: Object.fromEntries(mcp.map((s) => [s.name, { type: "http" as const, url: `${edgeUrl.replace(/\/+$/, "")}/mcp/v1/${encodeURIComponent(s.id)}` }])),
+    mcpServers: Object.fromEntries(mcp.map((s) => [mcpKey(s, mcp), { type: "http" as const, url: `${edgeUrl.replace(/\/+$/, "")}/mcp/v1/${encodeURIComponent(s.id)}` }])),
     toolAllowList: toolAllowList(agent.body, agent.data),
     limits: { turns: pos(lim.turns) ?? 40, ...(costUsd ? { costUsd } : {}), wallClockSeconds: pos(lim.wallClockSeconds) ?? 3600 },
     heartbeatSeconds: HEARTBEAT_SECONDS,

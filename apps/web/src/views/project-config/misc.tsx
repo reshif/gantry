@@ -43,7 +43,7 @@ export function NotificationsTab({ p }: PcProps) {
                     <td className="small">{[c.classes.length ? c.classes.join(", ") : "any class", c.priority.length ? c.priority.join(", ") : "any priority", c.hours === "business" ? "business hours" : "any time"].join(" · ")}</td>
                     <td>
                       <Toggle id={`pcf-nr-${rt.id}`} checked={rt.enabled} label={`${evName(rt.event)} route on`} decision={lockKill && d.allowed ? { allowed: false, reason: "Kill and restore notices must stay on.", needs: "" } : d}
-                        onChange={async (v) => { const arr = clone(routes); arr[i]!.enabled = v; res(await ops.setProject(p.id, "notifications", arr), `${evName(rt.event)} route ${v ? "on." : "off."}`); }} />
+                        onChange={async (v) => { const arr = clone(routes); arr[i]!.enabled = v; res(await ops.setProject(p.id, "notifications", arr, { ifMatch: p.version }), `${evName(rt.event)} route ${v ? "on." : "off."}`); }} />
                     </td>
                   </tr>
                 );
@@ -96,7 +96,7 @@ export function McpTab({ p }: PcProps) {
                     <td className="small">{s.sensitivity}</td>
                     <td className="num mono">{`${s.tools.length} (${s.tools.filter((t) => t.write).length} write)`}</td>
                     <td className="small">{s.projects === "all" ? "all projects" : `${s.projects.length} projects`}</td>
-                    <td><Toggle id={`pcf-mcp-${s.id}`} checked={on} label={`${s.name} enabled for ${p.name}`} decision={dec} onChange={async (v) => res(await ops.setProject(p.id, "mcp", v ? [...p.mcp, s.id] : p.mcp.filter((x) => x !== s.id)), `${s.name}${v ? " enabled for " : " disabled for "}${p.name}.`)} /></td>
+                    <td><Toggle id={`pcf-mcp-${s.id}`} checked={on} label={`${s.name} enabled for ${p.name}`} decision={dec} onChange={async (v) => res(await ops.setProject(p.id, "mcp", v ? [...p.mcp, s.id] : p.mcp.filter((x) => x !== s.id), { ifMatch: p.version }), `${s.name}${v ? " enabled for " : " disabled for "}${p.name}.`)} /></td>
                   </tr>
                 );
               })}
@@ -131,8 +131,8 @@ export function BudgetTab({ p, cat }: PcProps) {
           <Meter value={b.mtd} max={b.monthly} label="Budget used" warnAt={b.alertAt} />
           {ratio >= b.alertAt && b.monthly ? <div className="callout callout-warn small"><Icon name="alert" /><span>Past the alert line. Project admins are emailed by the budget route.</span></div> : null}
           <div className="form-row">
-            <Field label="Monthly budget (USD)" htmlFor="pcf-bud-monthly"><NumInput id="pcf-bud-monthly" value={b.monthly} min={100} max={100000} locked={!d.allowed} label="Monthly budget" onCommit={async (v) => res(await ops.setProject(p.id, "budget.monthly", v), `Monthly budget set to ${fmt.money0(v)}.`)} /></Field>
-            <Field label="Alert at" htmlFor="pcf-bud-alert"><Select id="pcf-bud-alert" disabled={!d.allowed} options={[0.5, 0.7, 0.8, 0.9, 1].map((x) => ({ value: String(x), label: fmt.pct(x) }))} value={String(b.alertAt)} onChange={async (v) => res(await ops.setProject(p.id, "budget.alertAt", parseFloat(v)), `Budget alert at ${fmt.pct(parseFloat(v))}.`)} /></Field>
+            <Field label="Monthly budget (USD)" htmlFor="pcf-bud-monthly"><NumInput id="pcf-bud-monthly" value={b.monthly} min={100} max={100000} locked={!d.allowed} label="Monthly budget" onCommit={async (v) => res(await ops.setProject(p.id, "budget.monthly", v, { ifMatch: p.version }), `Monthly budget set to ${fmt.money0(v)}.`)} /></Field>
+            <Field label="Alert at" htmlFor="pcf-bud-alert"><Select id="pcf-bud-alert" disabled={!d.allowed} options={[0.5, 0.7, 0.8, 0.9, 1].map((x) => ({ value: String(x), label: fmt.pct(x) }))} value={String(b.alertAt)} onChange={async (v) => res(await ops.setProject(p.id, "budget.alertAt", parseFloat(v), { ifMatch: p.version }), `Budget alert at ${fmt.pct(parseFloat(v))}.`)} /></Field>
           </div>
         </div>
       </Panel>

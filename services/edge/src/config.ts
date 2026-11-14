@@ -26,6 +26,8 @@ export interface EdgeConfig {
   vendorTimeoutMs: number;
   /** How long a project's outbound allow-list is cached (spec 5.3: fetched from the API, cached briefly; under the 10 s stop target of spec 4.4). */
   allowlistTtlMs: number;
+  /** How often established CONNECT tunnels of a run are re-checked against the API; a refused run has all its tunnels cut (spec 4.4: revoked token, stop). 0 turns the check off. */
+  tunnelCheckMs: number;
   /** Source addresses inside this CIDR are runners and must present their run token to the proxy; everything else is system (worker). */
   runSubnet: string;
   /** Ports the proxy will connect to. */
@@ -36,6 +38,8 @@ export interface EdgeConfig {
   maxBodyBytes: number;
   /** Largest response body kept for trace capture; a longer one is truncated in the trace (never in the stream). */
   maxTraceBytes: number;
+  /** How long one call to an MCP server may take, connecting included (spec 12.4). Default 30 s. */
+  mcpTimeoutMs?: number;
 }
 
 export class SecretError extends Error {}
@@ -90,6 +94,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     vendorTimeoutMs: 600_000,
     // Spec 4.4 step 2: a stopped run is refused within 10 s, so a cached allow-list must not outlive that.
     allowlistTtlMs: 5_000,
+    tunnelCheckMs: 3_000,
     runSubnet: e.EDGE_RUN_SUBNET,
     allowedPorts: [80, 443],
     blockPrivateAddresses: true,

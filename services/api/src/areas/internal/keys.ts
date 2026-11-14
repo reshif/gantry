@@ -1,6 +1,7 @@
 import { decrypt } from "@gantry/db";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { requireEdge } from "./edge-only.js";
 import { notFound, refuse } from "../../core/errors.js";
 
 /**
@@ -11,7 +12,7 @@ import { notFound, refuse } from "../../core/errors.js";
 export const vendorKeyRoutes: FastifyPluginAsync = async (app) => {
   app.get("/internal/v1/vendors/:id/key", async (req, reply) => {
     const { id } = z.object({ id: z.string().min(1).max(200) }).parse(req.params);
-    if (req.gx.principal?.kind !== "service" || req.gx.principal.id !== "edge") throw refuse("denied", "Only the edge reads vendor keys.");
+    await requireEdge(req, "vendor.key.read");
     const g = req.server.gantry;
     const key = g.config.secrets.dataKey;
     if (!key) throw refuse("invalid", "No data key is configured.");

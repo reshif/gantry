@@ -3,6 +3,7 @@
  *  - Nothing is ever run inside a workspace. Object data is copied out of it as plain files into a scratch bare repository the broker created itself,
  *    so the workspace's own `.git/config` (fsmonitor, sshCommand, hooks path, filters, includes) is never read.
  *  - System and global config are disabled, hooks are pointed at nothing, templates are empty, external diff and textconv are off.
+ *  - Objects that arrive by fetch are checked (fetch.fsckObjects, transfer.fsckObjects). Objects copied out of a workspace are checked by publish.ts before they are read.
  */
 import { spawn } from "node:child_process";
 
@@ -25,7 +26,7 @@ export interface GitOptions {
 const HARDENING = [
   "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.attributesFile=/dev/null", "-c", "core.sshCommand=false",
   "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "diff.external=", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
-  "-c", "core.symlinks=false", "-c", "credential.helper=", "-c", "safe.directory=*", "-c", "fetch.fsckObjects=false", "-c", "transfer.fsckObjects=false",
+  "-c", "core.symlinks=false", "-c", "credential.helper=", "-c", "safe.directory=*", "-c", "fetch.fsckObjects=true", "-c", "transfer.fsckObjects=true",
 ];
 
 export function git(args: string[], o: GitOptions): Promise<Buffer> {

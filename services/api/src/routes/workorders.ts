@@ -17,6 +17,7 @@ import { command, policyState, refuse, type CommandSpec } from "../core/index.js
 import { actionForGate, approveGate, parseGateId, rejectGate } from "../areas/workorders/gates.js";
 import { addFollowup, decline, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
 import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
+import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
 import { listConversations, listWorkOrders, readChanges, readRecord, readTraveler, recordBundle, recordMarkdown } from "../areas/workorders/reads.js";
 
@@ -32,6 +33,8 @@ const SubmitBody = z.looseObject({
   priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
   requestedCls: z.string().min(1).max(60).nullish(),
   cls: z.string().min(1).max(60).nullish(),
+  /** The public API's name for the class (spec 8.10 sample). */
+  class: z.string().min(1).max(60).nullish(),
   attachments: z.array(z.unknown()).max(20).optional(),
   source: z.string().min(1).max(40).optional(),
   paths: z.array(z.string().max(500)).max(500).optional(),
@@ -84,13 +87,13 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
 
   /* ----------------------------------------------------------------- reads */
 
-  app.get("/api/v1/projects/:id/work-orders", async (req) => {
+  app.get("/api/v1/projects/:id/work-orders", { config: { apiKey: "wo.read", apiKeyProject: "id" } }, async (req) => {
     const { id } = Id.parse(req.params);
     await mustSee(req, id);
     return listWorkOrders(g.pool, req.gx.orgId, id, ListQ.parse(req.query));
   });
 
-  app.get("/api/v1/work-orders/:id", async (req) => {
+  app.get("/api/v1/work-orders/:id", { config: { apiKey: "wo.read" } }, async (req) => {
     const { id } = Id.parse(req.params);
     await scopeOf(req, id);
     const v = await visible(req);
@@ -107,28 +110,28 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     return { items, next: null, total: items.length };
   });
 
-  app.get("/api/v1/work-orders/:id/record", async (req) => {
+  app.get("/api/v1/work-orders/:id/record", { config: { apiKey: "wo.read" } }, async (req) => {
     const { id } = Id.parse(req.params);
     await scopeOf(req, id);
     const r = await readRecord(g.pool, req.gx.orgId, id);
     if (!r) throw refuse("not_found", "No such work order.");
     return r;
   });
-  app.get("/api/v1/work-orders/:id/record.md", async (req, reply) => {
+  app.get("/api/v1/work-orders/:id/record.md", { config: { apiKey: "wo.read" } }, async (req, reply) => {
     const { id } = Id.parse(req.params);
     await scopeOf(req, id);
     const r = await readRecord(g.pool, req.gx.orgId, id);
     if (!r) throw refuse("not_found", "No such work order.");
     return reply.type("text/markdown; charset=utf-8").send(recordMarkdown(r));
   });
-  app.get("/api/v1/work-orders/:id/record/export", async (req, reply) => {
+  app.get("/api/v1/work-orders/:id/record/export", { config: { apiKey: "wo.read" } }, async (req, reply) => {
     const { id } = Id.parse(req.params);
     await scopeOf(req, id);
     const r = await readRecord(g.pool, req.gx.orgId, id);
     if (!r) throw refuse("not_found", "No such work order.");
     return reply.header("content-disposition", `attachment; filename="${id}-record.json"`).send(recordBundle(r));
   });
-  app.get("/api/v1/work-orders/:id/changes", async (req) => {
+  app.get("/api/v1/work-orders/:id/changes", { config: { apiKey: "wo.read" } }, async (req) => {
     const { id } = Id.parse(req.params);
     await scopeOf(req, id);
     return readChanges(g.pool, req.gx.orgId, id);
@@ -136,18 +139,22 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
 
   /* ----------------------------------------------------------------- commands */
 
-  app.post("/api/v1/projects/:id/work-orders", async (req) => {
+  app.post("/api/v1/projects/:id/work-orders", { config: { apiKey: "wo.submit", apiKeyProject: "id" } }, async (req) => {
     const { id } = Id.parse(req.params);
     const b = SubmitBody.parse(req.body);
-    return command(req, { action: "wo.submit", scope: { project: id, repo: b.repo }, idempotent: true }, (tx, a) =>
-      submitWO(tx, a, id, {
-        repo: b.repo, title: b.title, description: b.description ?? b.body ?? "", ...(b.priority ? { priority: b.priority } : {}), requestedCls: b.requestedCls ?? b.cls ?? null,
-        ...(b.attachments ? { attachments: b.attachments } : {}), ...(b.source ? { source: b.source } : {}), ...(b.paths ? { paths: b.paths } : {}), ...(b.onBehalfOf ? { onBehalfOf: b.onBehalfOf } : {}),
-      }),
-    );
+    const byKey = req.gx.principal?.kind === "apikey";
+    return command(req, { action: "wo.submit", scope: { project: id, repo: b.repo }, idempotent: true }, async (tx, a) => {
+      // A key cannot name who it acts for or what channel it came from: the work is recorded against the key and the person who created it (spec 12.5).
+      const creator = byKey ? await keyCreator(tx, a.orgId, req.gx.principal!.id) : null;
+      return submitWO(tx, a, id, {
+        repo: b.repo, title: b.title, description: b.description ?? b.body ?? "", ...(b.priority ? { priority: b.priority } : {}), requestedCls: b.requestedCls ?? b.cls ?? b.class ?? null,
+        ...(b.attachments ? { attachments: b.attachments } : {}), ...(!byKey && b.source ? { source: b.source } : {}), ...(b.paths ? { paths: b.paths } : {}),
+        ...(byKey ? (creator ? { onBehalfOf: creator } : {}) : b.onBehalfOf ? { onBehalfOf: b.onBehalfOf } : {}),
+      });
+    });
   });
 
-  app.post("/api/v1/work-orders/:id/messages", async (req) => {
+  app.post("/api/v1/work-orders/:id/messages", { config: { apiKey: "wo.answer" } }, async (req) => {
     const { id } = Id.parse(req.params);
     const b = MessageBody.parse(req.body);
     const s = await scopeOf(req, id);

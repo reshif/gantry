@@ -43,7 +43,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     "GET /api/v1/projects/payments/repos": () => ({ body: [{ id: "payments-api", name: "acme/payments-api", project: "payments", team: "platform" }] }),
     "GET /api/v1/access/matrix": () => ({ body: { matrix: { factory_admin: { release: true, "policy.edit": true }, engineer: { "wo.submit": true } }, roles: ROLES, actions: ACTIONS, version: 4 } }),
     "GET /api/v1/policies": () => ({ body: POLICIES }),
-    "GET /api/v1/freezes": () => ({ body: [{ id: "FRZ-01", name: "Quarter close", repos: "all", from: Date.now() - 1000, to: Date.now() + 3600000, by: "p-asha" }] }),
+    "GET /api/v1/freezes": () => ({ body: [{ id: "FRZ-01", name: "Quarter close", repos: "all", from: Date.now() - 1000, to: Date.now() + 3600000, by: "p-asha", version: 2 }] }),
     "GET /api/v1/security": () => ({ body: SEC }),
     "GET /api/v1/sessions": () => ({ body: [ME.session, { id: "s2", person: "p-tomas", method: "sso", device: "Firefox", ip: "10.1.1.1", started: Date.now() - 7200000, lastSeen: Date.now() - 60000, revoked: false }] }),
     "GET /api/v1/signins": () => ({ body: { items: [{ at: Date.now() - 5000, person: "p-asha", email: "p-asha@acme.dev", method: "sso", outcome: "success", reason: "", ip: "10.4.0.12", device: "Chrome" }, { at: Date.now() - 9000, person: null, email: "x@evil.io", method: "sso", outcome: "failure", reason: "domain not allowed", ip: "1.2.3.4", device: "curl" }], next: null } }),
@@ -242,9 +242,12 @@ describe("Access", () => {
     mount(<AccessView />);
     fireEvent.click(await screen.findByLabelText("Enable POL-101"));
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ enabled: false }));
+    // versioned config endpoints refuse a request without If-Match (409 "version required"), so every toggle sends the version it loaded
+    expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toMatch(/^\d+$/);
     fireEvent.click(await screen.findByRole("tab", { name: /Freezes/ }));
     fireEvent.click(await screen.findByText("End freeze now"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/freezes/FRZ-01/end")).toBe(true));
+    expect(calls.find((c) => c.path === "/api/v1/freezes/FRZ-01/end")?.headers["if-match"]).toBe("2");
   });
 
   it("locks everything when policy.edit and role.edit are denied", async () => {

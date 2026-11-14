@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import type pg from "pg";
+import { registerNotificationProducer, registerTriggerSources } from "@gantry/api/core";
 import type { Logger } from "pino";
 import { brokerClient } from "./clients/broker.js";
 import { launcherClient } from "./clients/launcher.js";
@@ -9,7 +10,8 @@ import { realSleep, type Deps } from "./deps.js";
 import { errMsg } from "./errors.js";
 import { attemptDispatch } from "./handlers/dispatch.js";
 import { mergeRequest } from "./handlers/merge.js";
-import { chainVerify, flowTimer, githubEvent, githubReconcile } from "./handlers/misc.js";
+import { chainVerify, flowTimer, githubEvent, githubReconcile, triggerEvaluate, triggerTick } from "./handlers/misc.js";
+import { onboardingAssess, onboardingMerge, onboardingOpenPr, onboardingSync, onboardingVerify } from "./handlers/onboarding.js";
 import { reaperSweep } from "./handlers/reaper.js";
 import { publishJob, runResult } from "./handlers/result.js";
 import { stopEnforce } from "./handlers/stop.js";
@@ -29,8 +31,15 @@ export const HANDLERS: Handlers = {
   "stop.enforce": stopEnforce,
   "github.reconcile": githubReconcile,
   "github.event": githubEvent,
+  "trigger.evaluate": triggerEvaluate,
+  "trigger.tick": triggerTick,
   "chain.verify": chainVerify,
   "reaper.sweep": reaperSweep,
+  "onboarding.assess": onboardingAssess,
+  "onboarding.open_pr": onboardingOpenPr,
+  "onboarding.merge": onboardingMerge,
+  "onboarding.verify": onboardingVerify,
+  "onboarding.sync": onboardingSync,
 };
 
 export function buildDeps(pool: pg.Pool, cfg: WorkerConfig, log: Logger, over: Partial<Deps> = {}): Deps {
@@ -54,6 +63,9 @@ export class Worker {
   private beat: NodeJS.Timeout | null = null;
 
   constructor(readonly deps: Deps) {
+    // Every event the worker's flow engine and handlers append produces its notifications in the same transaction (spec 12.2).
+    registerNotificationProducer({ publicUrl: process.env.GANTRY_PUBLIC_URL || "https://localhost", onError: (err, e) => deps.log.error({ err: errMsg(err), event: e.type }, "notification producer failed") });
+    registerTriggerSources();
     this.runner = new JobRunner(deps, HANDLERS, { queues: deps.cfg.concurrency });
     this.outbox = new OutboxDispatcher(deps);
     this.scheduler = new Scheduler(deps);

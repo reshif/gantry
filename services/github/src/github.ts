@@ -10,7 +10,7 @@ import { BrokerError } from "./errors.js";
 import { WriteLimiter } from "./ratelimit.js";
 
 export type Perm = "read" | "write";
-export type Permissions = Partial<Record<"metadata" | "contents" | "pull_requests" | "issues" | "checks" | "actions" | "statuses" | "administration", Perm>>;
+export type Permissions = Partial<Record<"metadata" | "contents" | "pull_requests" | "issues" | "checks" | "actions" | "statuses" | "administration" | "workflows", Perm>>;
 
 /**
  * The permission set per operation. The union is exactly the App's repository permissions in spec 11.1 (Metadata read; Contents write; Pull requests write;
@@ -26,10 +26,16 @@ export const OPERATIONS = {
   merge: { contents: "write", pull_requests: "write", metadata: "read" },
   read_state: { pull_requests: "read", checks: "read", statuses: "read", actions: "read", issues: "read", contents: "read", metadata: "read" },
   protections: { administration: "read", contents: "read", pull_requests: "read", metadata: "read" },
+  // Onboarding (spec 11.3). Workflows write is requested only for an onboarding pull request that adds a workflow file (spec 11.1).
+  onboard_read: { contents: "read", metadata: "read" },
+  onboard_pr: { contents: "write", pull_requests: "write", metadata: "read" },
+  onboard_pr_workflows: { contents: "write", pull_requests: "write", workflows: "write", metadata: "read" },
+  canary: { contents: "write", pull_requests: "write", checks: "read", statuses: "read", metadata: "read" },
+  list_repos: { metadata: "read" },
 } as const satisfies Record<string, Permissions>;
 export type Operation = keyof typeof OPERATIONS;
 /** Operations that change GitHub and so pass through the write limiter. */
-export const WRITE_OPERATIONS: readonly Operation[] = ["publish", "pull_request", "gate_check", "draft", "merge"];
+export const WRITE_OPERATIONS: readonly Operation[] = ["publish", "pull_request", "gate_check", "draft", "merge", "onboard_pr", "onboard_pr_workflows", "canary"];
 
 export const splitRepo = (full: string): { owner: string; name: string } => {
   const m = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(full);
@@ -101,6 +107,21 @@ export class GithubApp {
       return await fn({ octokit, owner, name, full, installationId, token, write: (w) => this.limiter.write(String(installationId), w) });
     } finally {
       // Revoked on completion where GitHub allows it; failure to revoke is not an error (the token expires in an hour).
+      await octokit.request("DELETE /installation/token").catch(() => undefined);
+    }
+  }
+  /** Like `withRepo` but for the whole installation (listing the repositories the App can see). Metadata only; the token is revoked afterwards. */
+  async withInstallation<T>(installationId: number, op: Operation, fn: (c: { octokit: Octokit; installationId: number }) => Promise<T>): Promise<T> {
+    const minted = await this.jwt.request("POST /app/installations/{installation_id}/access_tokens", {
+      installation_id: installationId, permissions: OPERATIONS[op] as Record<string, string>,
+    }).catch((e: unknown) => {
+      const a = toApiError(e);
+      throw new BrokerError(502, "token", `GitHub would not issue a ${op} token for installation ${installationId} (${a.status}): ${a.message}`);
+    });
+    const octokit = new this.Base({ auth: minted.data.token });
+    try {
+      return await fn({ octokit, installationId });
+    } finally {
       await octokit.request("DELETE /installation/token").catch(() => undefined);
     }
   }

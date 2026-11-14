@@ -24,6 +24,8 @@ export interface WorkspaceStore {
 
 export const VOLUME_NAME = /^ws-[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
 const MANAGED_BY = "gantry-launcher";
+/** Go's os.ModeSymlink, as Docker reports it in the path stat. */
+const MODE_SYMLINK = 0x08000000;
 /** What of `.git` the publisher reads. `objects/info` (alternates) is deliberately not among them. */
 const GIT_PARTS = ["objects", "refs", "HEAD", "packed-refs", "shallow"] as const;
 
@@ -61,10 +63,35 @@ export class DockerWorkspaceStore implements WorkspaceStore {
     });
   }
 
+  /**
+   * Docker resolves every path component of an archive request inside the helper's own root, so a workspace whose `.git` (or one of the parts below it) is a
+   * symlink would be read from wherever it points: the broker image's filesystem. Docker's path stat does not follow the last component, so each one is checked first.
+   */
+  private async assertPlain(c: Docker.Container, path: string): Promise<boolean> {
+    let stat: { mode?: number; linkTarget?: string } | null = null;
+    try {
+      const res = (await c.infoArchive({ path })) as unknown as { headers?: Record<string, string | string[] | undefined>; resume?: () => void };
+      res.resume?.();
+      const h = res.headers?.["x-docker-container-path-stat"];
+      if (typeof h === "string") stat = JSON.parse(Buffer.from(h, "base64").toString("utf8")) as { mode?: number; linkTarget?: string };
+    } catch (e) {
+      if ((e as { statusCode?: number }).statusCode === 404) return false;
+      throw new BrokerError(502, "docker", `Docker could not stat ${path}: ${(e as Error).message}`);
+    }
+    if (!stat) throw new BrokerError(502, "docker", `Docker did not describe ${path}.`);
+    if (((stat.mode ?? 0) & MODE_SYMLINK) !== 0 || stat.linkTarget) throw new BrokerError(422, "git_symlink", `${path.replace(/^\/workspace\//, "")} in the workspace is a symbolic link; it is not read.`);
+    return true;
+  }
+
   async copyGitData(volume: string, destGitDir: string, o: { maxBytes: number }): Promise<{ files: number; bytes: number }> {
     return this.withHelper(volume, true, async (c) => {
       let files = 0, bytes = 0;
+      if (!(await this.assertPlain(c, "/workspace/.git"))) throw new BrokerError(422, "no_git_data", "The workspace has no .git.");
       for (const part of GIT_PARTS) {
+        if (!(await this.assertPlain(c, `/workspace/.git/${part}`))) {
+          if (part !== "objects" && part !== "HEAD") continue;
+          throw new BrokerError(422, "no_git_data", `The workspace has no .git/${part}.`);
+        }
         let stream: NodeJS.ReadableStream;
         try {
           stream = (await c.getArchive({ path: `/workspace/.git/${part}` })) as NodeJS.ReadableStream;

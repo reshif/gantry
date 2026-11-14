@@ -1,7 +1,7 @@
 import http from "node:http";
 import net from "node:net";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildProxy, hostAllowed, inCidr, isPrivateAddress } from "../src/proxy.js";
 import { baseConfig, close, FakeApi, makeToken } from "./helpers.js";
 
@@ -126,6 +126,29 @@ describe("forward proxy", () => {
     const r = await connect(pxPort, `registry.npmjs.org:${echoPort}`, basic(TOKEN));
     expect(r.status).toBe(403);
     expect(r.body).toContain("Killed");
+  });
+
+  it("cuts an established CONNECT tunnel when the run is refused after it was opened (revoked token, stop)", async () => {
+    await startProxy(baseConfig({ apiUrl: api.url, allowedPorts: [echoPort, webPort], runSubnet: "10.213.0.0/16", tunnelCheckMs: 100 }));
+    const s = net.connect(pxPort, "127.0.0.1");
+    let buf = "";
+    let closed = false;
+    s.on("data", (d) => (buf += d.toString()));
+    s.on("close", () => (closed = true));
+    s.on("error", () => undefined);
+    await new Promise<void>((r) => s.on("connect", r));
+    s.write(`CONNECT registry.npmjs.org:${echoPort} HTTP/1.1\r\nHost: x\r\nProxy-Authorization: ${basic(TOKEN)}\r\n\r\n`);
+    await vi.waitFor(() => expect(buf).toContain("200 Connection Established"));
+    s.write("hello");
+    await vi.waitFor(() => expect(buf).toContain("echo:hello"));
+    // still allowed: the tunnel survives a re-check
+    await new Promise((r) => setTimeout(r, 350));
+    expect(closed).toBe(false);
+    // the run is stopped: the next re-check cuts it
+    api.override = (c) => (c.url.endsWith("/egress") ? [409, { ok: false, msg: "Killed at wo scope." }] : undefined);
+    await vi.waitFor(() => expect(closed).toBe(true), { timeout: 3000 });
+    expect(px.metrics.cut).toBe(1);
+    await startProxy();
   });
 
   it("fails closed with 503 when the API is down", async () => {

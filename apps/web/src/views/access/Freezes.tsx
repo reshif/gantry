@@ -6,7 +6,7 @@ import { Btn, Chip, Empty, Field, LockNote, Select, type Decision } from "../../
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
-import { useOutcome } from "../govern/data";
+import { ifMatchOf, useOutcome } from "../govern/data";
 
 export function FreezeForm({ perm, repos, projectName, registerSubmit, close }: { perm: Decision; repos: Repo[]; projectName: (id: string) => string; registerSubmit: (fn: () => void) => void; close: () => void }) {
   const outcome = useOutcome();
@@ -79,7 +79,7 @@ export function FreezeList({ freezes, repos, hlFreeze }: { freezes: Freeze[]; re
             <div className="strong">{f.name}</div>
             <div className="mono small">{`${fmt.stamp(f.from)} → ${fmt.stamp(f.to)}`}</div>
             <div className="small muted">{`Repos: ${f.repos === "all" ? "every repo" : f.repos.map((r) => repos.find((x) => x.id === r)?.name ?? r).join(", ")} · set by ${actors(f.by).name}`}</div>
-            {!past ? <Btn label={active ? "End freeze now" : "Cancel freeze"} small kind="ghost" id={`acc-fz-end-${f.id}`} guard={perm} onClick={async () => void outcome(await ops.endFreeze(f.id))} /> : null}
+            {!past ? <Btn label={active ? "End freeze now" : "Cancel freeze"} small kind="ghost" id={`acc-fz-end-${f.id}`} guard={perm} onClick={async () => void outcome(await ops.endFreeze(f.id, ifMatchOf(f)))} /> : null}
           </li>
         );
       })}

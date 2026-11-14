@@ -1,6 +1,7 @@
 import { verifyChain } from "@gantry/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
+import { withVersion } from "./versions.js";
 
 const d = TEST_URL ? describe : describe.skip;
 const admin = "p-asha";
@@ -19,7 +20,7 @@ d("projects", () => {
   type M = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   const call = async (who: string, method: M, url: string, payload?: unknown, extra: Record<string, string> = {}) => {
     const s = await t.session(who);
-    const r = await t.app.inject({ method, url, headers: { ...s.headers, ...extra }, ...(payload === undefined ? {} : { payload: payload as object }) });
+    const r = await t.app.inject({ method, url, headers: { ...s.headers, ...(await withVersion(t.db.admin, method, url, extra)) }, ...(payload === undefined ? {} : { payload: payload as object }) });
     return { status: r.statusCode, body: r.json() as Record<string, any>, headers: r.headers };
   };
   const proj = async (id: string, who = admin) => (await call(who, "GET", `/api/v1/projects/${id}`)).body as Record<string, any>;
@@ -48,6 +49,23 @@ d("projects", () => {
     expect(r.body.ok).toBe(false);
     expect(String(r.body.msg)).toMatch(/changed|reload/i);
   };
+
+  describe("If-Match is required on versioned config endpoints", () => {
+    it("a config write without If-Match is a 409 'version required', changes nothing, and an unknown project is still a 404", async () => {
+      const s = await t.session(admin);
+      const send = (method: M, url: string, payload?: unknown) => t.app.inject({ method, url, headers: s.headers, ...(payload === undefined ? {} : { payload: payload as object }) });
+      const before = (await proj("payments")).desc;
+      const r = await send("PATCH", "/api/v1/projects/payments/config", { path: "desc", value: "changed blind" });
+      expect(r.statusCode).toBe(409);
+      expect(r.json()).toMatchObject({ ok: false, msg: expect.stringMatching(/version required/i) });
+      expect((await proj("payments")).desc).toBe(before);
+      expect((await send("POST", "/api/v1/projects/payments/archive", { confirmText: "x" })).statusCode).toBe(409);
+      expect((await send("PATCH", "/api/v1/projects/nope/config", { path: "desc", value: "x" })).statusCode).toBe(404);
+      // with the version it goes through
+      const ok = await call(admin, "PATCH", "/api/v1/projects/payments/config", { path: "desc", value: before }, ifm((await proj("payments")).version));
+      expect(ok.status).toBe(200);
+    });
+  });
 
   describe("reads", () => {
     it("lists every project for a factory admin, with metrics and versions", async () => {

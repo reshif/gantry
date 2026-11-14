@@ -1,3 +1,4 @@
+import { requireEdge } from "./edge-only.js";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { Tx } from "@gantry/db";
@@ -60,14 +61,14 @@ const subject = (id: string) => ({ type: "run", id });
 const evBase = (c: RunCtx | null, id: string): Pick<EventSpec, "subject" | "projectId" | "woId" | "category"> => ({ subject: subject(id), projectId: c?.projectId ?? null, woId: c?.woId ?? null, category: "flow" });
 
 /** Maps a guard denial to a refusal: token problems are permission denials (403), stops are 409 with the stop reason, a superseded or ended run is stale (409). */
-function refusalFor(d: Denial): Refusal {
+export function refusalFor(d: Denial): Refusal {
   if (d.code === "stopped") return refuse("stopped", d.reason, { rule: { kind: "stop", id: "STOP", name: "Stop state" } });
   if (d.code === "superseded" || d.code === "ended" || d.code === "finished") return refuse("stale", d.reason);
   return refuse("denied", d.reason, { rule: { kind: "invariant", id: "RUN-TOKEN", name: "Run token" } });
 }
 
 /** Loads the run and checks the token under the given mode; refuses (and so audits, for 403/409-stop) when anything is off. */
-async function mustGuard(tx: Tx, orgId: string, id: string, token: string, mode: "model" | "progress", lock = false): Promise<{ c: RunCtx; tok: TokenRow }> {
+export async function mustGuard(tx: Tx, orgId: string, id: string, token: string, mode: "model" | "progress", lock = false): Promise<{ c: RunCtx; tok: TokenRow }> {
   const c = await loadRunCtx(tx, orgId, id, lock);
   const tok = c ? await findRunToken(tx, orgId, id, token) : null;
   if (!c || !tok) throw refuse("denied", "The run token is not valid for this run.", { rule: { kind: "invariant", id: "RUN-TOKEN", name: "Run token" } });
@@ -79,6 +80,8 @@ async function mustGuard(tx: Tx, orgId: string, id: string, token: string, mode:
 const svc = (action: string) => ({ action, service: true }) as const;
 
 export const runRoutes: FastifyPluginAsync = async (app) => {
+  // Every endpoint in this plugin belongs to the edge; the egress report and the system allow-list too.
+  app.addHook("preHandler", (req) => requireEdge(req, "internal.edge"));
   // ---------------------------------------------------------------- authorize
   app.post("/internal/v1/runs/:id/authorize", async (req) => {
     const id = runId(req);
@@ -254,10 +257,11 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     return command(req, svc("mcp.authorize"), async (tx): Promise<CommandResult<Record<string, unknown>>> => {
       const c = await loadRunCtx(tx, req.gx.orgId, id);
       const tok = c ? await findRunToken(tx, req.gx.orgId, id, b.token) : null;
-      const log = async (outcome: string, reason: string | null, ctx: RunCtx | null): Promise<void> => {
-        await tx.query(`insert into mcp_calls (org_id, server_id, tool, run_id, project_id, wo_id, agent_id, station, args_hash, outcome, reason) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [
+      const log = async (outcome: string, reason: string | null, ctx: RunCtx | null): Promise<number> => {
+        const ins = await tx.query<{ id: string }>(`insert into mcp_calls (org_id, server_id, tool, run_id, project_id, wo_id, agent_id, station, args_hash, outcome, reason) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`, [
           req.gx.orgId, b.server, b.tool, id, ctx?.projectId ?? null, ctx?.woId ?? null, ctx?.agentId ?? null, ctx?.station ?? null, b.argsHash ?? null, outcome, reason,
         ]);
+        return Number(ins.rows[0]!.id);
       };
       const deny = async (code: string, reason: string, ctx: RunCtx | null, extraEvents: EventSpec[] = []): Promise<CommandResult<Record<string, unknown>>> => {
         await log("denied", reason, ctx);
@@ -280,6 +284,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       if (b.definitionHash && b.definitionHash !== tool.definition_hash) {
         // Spec 12.4: a changed tool definition disables the server until an admin re-approves it.
         await tx.query(`update mcp_servers set enabled = false, disabled_reason = $3, version = version + 1 where org_id = $1 and id = $2`, [c.orgId, b.server, `Definition of ${b.tool} changed`]);
+        await tx.query(`update mcp_tools set pending_hash = $4, updated_at = now() where org_id = $1 and server_id = $2 and name = $3`, [c.orgId, b.server, b.tool, b.definitionHash]);
         return deny("definition", `The definition of ${b.tool} changed; ${srv.name} is disabled until an admin re-approves it.`, c, [
           { type: "mcp.server.disabled", ...evBase(c, id), category: "integrations", subject: { type: "mcp_server", id: b.server }, after: { reason: `Definition of ${b.tool} changed` } },
         ]);
@@ -290,8 +295,9 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         const grants = Array.isArray(c.attemptData.writeGrants) ? (c.attemptData.writeGrants as unknown[]) : [];
         if (!grants.some((x) => x === `${b.server}/${b.tool}` || x === `${b.server}/*`)) return deny("preauth", `${b.tool} is a write tool and this attempt has no pre-authorisation for it.`, c);
       }
-      await log("allowed", null, c);
-      return { msg: "Allowed.", events: [], extra: { allow: true, class: tool.tool_class, retry: tool.tool_class === "read" }, changes: ["mcp"], project: c.projectId };
+      const callId = await log("allowed", null, c);
+      // Spec 12.4: write calls are never retried automatically. Only a read call may be sent again after a transport failure.
+      return { msg: "Allowed.", events: [], extra: { allow: true, class: tool.tool_class, retry: tool.tool_class === "read", callId }, changes: ["mcp"], project: c.projectId };
     });
   });
 

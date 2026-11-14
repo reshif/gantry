@@ -226,6 +226,43 @@ d("stop controls", () => {
     expect((await restore("p-asha", "project:payments")).status).toBe(200);
   });
 
+  it("I7 / spec 8.5 break-glass: stops decide from the last-known-good snapshot when policy tables are unreadable, and say so", async () => {
+    // any successful policy load refreshes the snapshot
+    expect((await w.call("p-asha", "GET", "/api/v1/stops")).status).toBe(200);
+    expect((await w.q(`select count(*)::int as n from stop_policy_snapshot`))[0].n).toBe(1);
+    const broken = ["role_assignments", "role_matrix_versions", "policies", "freezes", "roles", "team_members", "projects", "repos"];
+    const name = (await w.q(`select name from projects where id = 'payments'`))[0].name as string;
+    for (const tb of broken) await t.db.admin.query(`alter table ${tb} rename to ${tb}_broken`);
+    let h, k, denied, r, wo;
+    try {
+      h = await stop("p-meera", { scope: "project", id: "payments", mode: "halt", reason: "Policy store is down" });
+      denied = await stop("p-rui", { scope: "project", id: "payments", mode: "kill", reason: "Policy store is down", confirmText: name });
+      k = await stop("p-asha", { scope: "project", id: "payments", mode: "kill", reason: "Policy store is down", inFlight: "hold", confirmText: name });
+      wo = await stop("p-asha", { scope: "workorder", id: "WO-9001", mode: "kill", reason: "Policy store is down" });
+      r = await lift("p-meera", "project:payments");
+    } finally {
+      for (const tb of broken) await t.db.admin.query(`alter table ${tb}_broken rename to ${tb}`);
+    }
+    expect(h.status, JSON.stringify(h.body)).toBe(200);
+    expect(h.body.policyFallback).toBe(true);
+    expect(denied.status).toBe(403);
+    expect(k.status, JSON.stringify(k.body)).toBe(200);
+    expect(wo.status, JSON.stringify(wo.body)).toBe(200);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.policyFallback).toBe(true);
+    const ev = (await w.q(`select rule, after from events where type = 'halt' order by seq desc limit 1`))[0];
+    expect(ev.rule).toBe("I7-SNAPSHOT");
+    expect(ev.after.policyFallback).toMatchObject({ snapshotAt: expect.any(String) });
+    expect((await w.events("kill.project.denied")).length).toBeGreaterThan(0);
+    // healthy again: normal decisions, no fallback marker
+    expect((await restore("p-asha", "project:payments")).status).toBe(200);
+    expect((await restore("p-asha", "workorder:WO-9001")).status).toBe(200);
+    const ok = await stop("p-meera", { scope: "project", id: "payments", mode: "halt", reason: "Back to normal now" });
+    expect(ok.status).toBe(200);
+    expect(ok.body.policyFallback).toBeUndefined();
+    expect((await lift("p-meera", "project:payments")).status).toBe(200);
+  });
+
   it("impact counts what a kill would touch", async () => {
     const r = await w.call("p-asha", "GET", "/api/v1/stops/impact?scope=project&id=payments");
     expect(r.status).toBe(200);

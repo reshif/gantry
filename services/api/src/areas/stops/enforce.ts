@@ -14,10 +14,15 @@ import { lockWo, saveWo, toWo, WO_COLS, type Wo } from "../workorders/model.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import type { ScopeType } from "./targets.js";
 
+/** Spec 4.5: how long a halted run may still checkpoint and report before teardown. Default 20 s (below the reaper's 30 s re-enqueue age). */
+export const HALT_GRACE_MS = 20_000;
+
 export interface ReconcileResult {
-  action: "enforced" | "resumed" | "restored" | "noop";
+  /** `enforcing`: a halt is in its checkpoint grace; run again at `retryAt` (the stop is not yet marked enforced and nothing is torn down). */
+  action: "enforced" | "enforcing" | "resumed" | "restored" | "noop";
   workOrders: number;
   attemptsCancelled: number;
+  retryAt?: Date;
   stop?: { id: string; scope: ScopeType; mode: "halt" | "kill"; inFlight: string | null };
 }
 
@@ -47,7 +52,7 @@ const stillCovered = async (tx: Tx, orgId: string, w: Wo, exceptId: string): Pro
     [orgId, exceptId, w.project, w.repo, w.id, w.parentId],
   )).rowCount! > 0;
 
-export async function reconcileStop(tx: Tx, stopId: string, o: { now?: Date; orgId?: string } = {}): Promise<ReconcileResult> {
+export async function reconcileStop(tx: Tx, stopId: string, o: { now?: Date; orgId?: string; haltGraceMs?: number } = {}): Promise<ReconcileResult> {
   const now = o.now ?? new Date();
   const { rows } = await tx.query<StopDb>(`select * from stops where id = $1 ${o.orgId ? "and org_id = $2" : ""} order by set_at desc limit 1 for update`, o.orgId ? [stopId, o.orgId] : [stopId]);
   const s = rows[0];
@@ -60,13 +65,15 @@ export async function reconcileStop(tx: Tx, stopId: string, o: { now?: Date; org
   const fx: Fx = { tx, orgId, now, actor, catalog, events: [], jobs: [], changes: new Set(["workOrders", "floor", "home", "stops", "audit"]) };
   let count = 0;
   let cancelled = 0;
+  let graceUntil: Date | null = null;
   const projects = new Set<string>();
   for (const id of await scopeWos(tx, s)) {
     const w = await lockWo(tx, orgId, id);
     projects.add(w.project);
     if (active) {
-      const r = await enforceOn(fx, w, s);
-      cancelled += r;
+      const r = await enforceOn(fx, w, s, o.haltGraceMs ?? HALT_GRACE_MS);
+      cancelled += r.cancelled;
+      if (r.graceUntil && (!graceUntil || r.graceUntil < graceUntil)) graceUntil = r.graceUntil;
     } else if (!(await stillCovered(tx, orgId, w, s.id))) {
       await restoreOne(fx, w, s, catalog);
     }
@@ -75,18 +82,42 @@ export async function reconcileStop(tx: Tx, stopId: string, o: { now?: Date; org
   }
   for (const p of projects) await dispatchQueued(fx, p);
   await flushFx(fx);
+  if (active && graceUntil) {
+    // Spec 4.5: the halt is committed and model calls are refused, but the runs may still checkpoint and report until the grace ends. Not enforced yet.
+    return { action: "enforcing", workOrders: count, attemptsCancelled: cancelled, retryAt: graceUntil, stop: { id: s.id, scope: s.scope_type, mode: s.mode, inFlight: s.in_flight } };
+  }
   if (active) await tx.query(`update stops set enforced_at = $3 where org_id = $1 and id = $2`, [orgId, s.id, now]);
   else await tx.query(`update stops set reconciled_version = version where org_id = $1 and id = $2`, [orgId, s.id]);
   return { action: active ? "enforced" : s.mode === "halt" ? "resumed" : "restored", workOrders: count, attemptsCancelled: cancelled, stop: { id: s.id, scope: s.scope_type, mode: s.mode, inFlight: s.in_flight } };
 }
 
-/** One work order under an active stop. A halt cancels the live attempt and keeps the slot; a kill also releases the slot and closes open gate instances (spec 9.5, 9.7). */
-async function enforceOn(fx: Fx, w: Wo, s: StopDb): Promise<number> {
-  const cancelled = await cancelAttempts(fx, w, s.mode === "halt" ? "halted" : "killed");
+/**
+ * One work order under an active stop. A kill cancels the live attempt at once, releases the slot and closes open gate instances (spec 9.5, 9.7).
+ * A halt (spec 4.5) first gives a live run a short grace: the edge already refuses new model calls (guardRun, mode model) but still accepts heartbeat, checkpoint
+ * and result (mode progress) while the attempt is live. The first pass stamps `haltGraceUntil` on the attempt and reports it; the pass after the grace cancels the
+ * attempt and revokes the token (teardown follows in the worker). Attempts with no started run have nothing to save and are cancelled at once.
+ */
+async function enforceOn(fx: Fx, w: Wo, s: StopDb, graceMs: number): Promise<{ cancelled: number; graceUntil?: Date }> {
   if (s.mode === "halt") {
-    if (cancelled) note(w, fx, fx.actor, `Halted (${s.scope_type}): agents stopped at the turn boundary. Work resumes from the last checkpoint.`);
-    return cancelled;
+    const live = (await fx.tx.query<{ id: string; grace: string | null; has_run: boolean }>(
+      `select a.id, a.data->>'haltGraceUntil' as grace, exists (select 1 from runs r where r.org_id = a.org_id and r.attempt_id = a.id and r.state in ('starting','running')) as has_run
+         from attempts a where a.org_id = $1 and a.wo_id = $2 and a.state in ('queued','running') for update`,
+      [fx.orgId, w.id],
+    )).rows;
+    const waiting = live.filter((a) => a.has_run && !(a.grace && new Date(a.grace) <= fx.now));
+    if (waiting.length && graceMs > 0) {
+      const until = new Date(Math.min(...waiting.map((a) => (a.grace ? new Date(a.grace).getTime() : fx.now.getTime() + graceMs))));
+      for (const a of waiting) {
+        if (!a.grace) await fx.tx.query(`update attempts set data = data || $3::jsonb where org_id = $1 and id = $2`, [fx.orgId, a.id, JSON.stringify({ haltGraceUntil: new Date(fx.now.getTime() + graceMs).toISOString() })]);
+      }
+      note(w, fx, fx.actor, `Halted (${s.scope_type}): new model calls are refused. The agent may checkpoint at the turn boundary for ${Math.round(graceMs / 1000)} s before it is stopped.`);
+      return { cancelled: 0, graceUntil: until };
+    }
+    const n = await cancelAttempts(fx, w, "halted");
+    if (n) note(w, fx, fx.actor, `Halted (${s.scope_type}): agents stopped at the turn boundary. Work resumes from the last checkpoint.`);
+    return { cancelled: n };
   }
+  const cancelled = await cancelAttempts(fx, w, "killed");
   const closed = (await fx.tx.query<{ id: string; gate_id: string }>(`select id, gate_id from gate_instances where org_id = $1 and wo_id = $2 and status = 'open' for update`, [fx.orgId, w.id])).rows;
   for (const g of closed) await closeInstance(fx, g.id, "kill");
   if (closed.length) w.data.stopClosedGates = closed.map((g) => g.gate_id);
@@ -102,7 +133,7 @@ async function enforceOn(fx: Fx, w: Wo, s: StopDb): Promise<number> {
     w.data.heldByKill = s.scope_type === "wo" ? "workorder" : s.scope_type;
     note(w, fx, fx.actor, `Held in place by ${s.scope_type} kill: ${s.reason}`);
   }
-  return cancelled;
+  return { cancelled };
 }
 
 /** One work order after its stop was lifted. */

@@ -1,4 +1,4 @@
-import { handleFlowTimer, parseJob, processGithubDelivery } from "@gantry/api/core";
+import { evaluateEvent, evaluateTick, handleFlowTimer, parseJob, processGithubDelivery } from "@gantry/api/core";
 import { verifyChain, withTx, type Job } from "@gantry/db";
 import { raiseAlert } from "../alerts.js";
 import { PermanentError } from "../errors.js";
@@ -40,4 +40,18 @@ export async function chainVerify(job: Job, ctx: HandlerCtx): Promise<unknown> {
     key: `chain.verify:${JSON.stringify(r.error)}:${deps.now().toISOString().slice(0, 10)}`,
   }));
   return { ok: false, break: r.error };
+}
+
+/** trigger.evaluate (spec 11.7): an event from a source is offered to the project's triggers. Replays of the same event make nothing new (per trigger, by the event's identity). */
+export async function triggerEvaluate(job: Job, ctx: HandlerCtx): Promise<unknown> {
+  const p = parseJob("trigger.evaluate", job.payload);
+  if (!p.ok) throw new PermanentError(p.error, "bad_payload");
+  return withTx(ctx.deps.pool, (tx) => evaluateEvent(tx, job.orgId, p.value, { now: ctx.deps.now() }));
+}
+
+/** trigger.tick: a schedule trigger came due. */
+export async function triggerTick(job: Job, ctx: HandlerCtx): Promise<unknown> {
+  const p = parseJob("trigger.tick", job.payload);
+  if (!p.ok) throw new PermanentError(p.error, "bad_payload");
+  return withTx(ctx.deps.pool, (tx) => evaluateTick(tx, job.orgId, p.value, { now: ctx.deps.now() }));
 }

@@ -51,6 +51,21 @@ export interface AppendedEvent {
 
 const json = (v: unknown) => (v === undefined || v === null ? null : JSON.stringify(v));
 
+/**
+ * Runs in the event's own transaction right after the row is inserted (spec 12.2: every notification is derived from a committed event, so the outbox rows
+ * commit or roll back with it). An observer's failure is rolled back to a savepoint and reported to `onObserverError`; it never undoes the event or the transition.
+ */
+export type EventObserver = (tx: Tx, event: EventInput, appended: AppendedEvent) => Promise<void>;
+const observers = new Set<EventObserver>();
+let observerError: (e: unknown, event: EventInput) => void = () => undefined;
+export function addEventObserver(fn: EventObserver): () => void {
+  observers.add(fn);
+  return () => observers.delete(fn);
+}
+export function onObserverError(fn: (e: unknown, event: EventInput) => void): void {
+  observerError = fn;
+}
+
 /** Appends in the caller's transaction, so the event commits or rolls back with the state it describes. */
 export async function appendEvent(tx: Tx, e: EventInput): Promise<AppendedEvent> {
   const { rows } = await tx.query<{ id: string; seq: string; hash: string; prev_hash: string; recorded_at: Date }>(
@@ -66,7 +81,18 @@ export async function appendEvent(tx: Tx, e: EventInput): Promise<AppendedEvent>
     ],
   );
   const r = rows[0]!;
-  return { id: r.id, seq: Number(r.seq), hash: r.hash, prevHash: r.prev_hash, recordedAt: r.recorded_at };
+  const appended = { id: r.id, seq: Number(r.seq), hash: r.hash, prevHash: r.prev_hash, recordedAt: r.recorded_at };
+  for (const ob of observers) {
+    await tx.query("savepoint event_observer");
+    try {
+      await ob(tx, e, appended);
+      await tx.query("release savepoint event_observer");
+    } catch (err) {
+      await tx.query("rollback to savepoint event_observer");
+      observerError(err, e);
+    }
+  }
+  return appended;
 }
 
 export type ChainBreak =

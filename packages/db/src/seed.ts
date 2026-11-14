@@ -29,10 +29,12 @@ export interface SeedRepo {
 }
 export interface SeedAgent {
   id: string; name: string; station?: string | null; status?: string; instructions?: string; model?: string; skills?: string[];
-  versions?: { v: string; at?: number; note?: string; rc?: boolean; live?: boolean }[];
+  fallbacks?: string[]; autonomy?: string; tools?: Record<string, boolean>; mcp?: string[]; stations?: string[]; projects?: "all" | string[]; budget?: number;
+  guardrails?: { paths: string[]; maxDiff: number }; suite?: string; overrides?: Record<string, unknown>;
+  versions?: { v: string; at?: number; note?: string; rc?: boolean; live?: boolean; diff?: string; suiteScore?: number }[];
 }
 export interface SeedSkill {
-  id: string; name: string; desc?: string; projects?: unknown; body?: string; versions?: { v: string; at?: number; by?: string; note?: string }[];
+  id: string; name: string; desc?: string; when?: string; owner?: string; resources?: string[]; projects?: unknown; body?: string; versions?: { v: string; at?: number; by?: string; note?: string }[];
 }
 export interface SeedVendor {
   id: string; name: string; product?: string; connected?: boolean; keyMask?: string; region?: string; endpoint?: string; residency?: string;
@@ -54,7 +56,9 @@ export interface SeedState {
   matrix?: Record<string, Record<string, boolean>>;
   routing?: unknown;
   security?: unknown;
-  instructions?: { base: string };
+  instructions?: { base: string; baseVersion?: number };
+  /** The factory onboarding guidelines (spec 8.6) with their version history. Every version becomes an immutable guideline_versions row; only the newest carries its body (older bodies are not in the legacy data). */
+  guidelines?: { version: number; by?: string; at?: number; items: unknown[]; may?: string; mayNot?: string; history?: { v: number; at?: number; by?: string; note?: string }[] };
   freezes?: { id: string; name?: string; reason?: string; project?: string; repos?: "all" | string[]; by?: string; from?: number; to?: number }[];
   /** Factory-wide kill, if any (becomes an active factory stop). */
   factory?: { killed?: { by: string; at: number; reason: string; mode?: string } | null };
@@ -173,12 +177,30 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
     );
   }
 
+  const versions = (g: { version: number; history?: { v: number; at?: number; by?: string; note?: string }[]; by?: string; at?: number }) =>
+    (g.history?.length ? g.history : [{ v: g.version, at: g.at, by: g.by, note: "Seeded" }]).map((h) => ({ ...h, latest: h.v === g.version }));
+  if (state.guidelines) {
+    const g = state.guidelines;
+    for (const h of versions(g)) {
+      await q(`insert into guideline_versions (org_id, scope, project_id, version, body, note, published_at, published_by) values ($1,'org',null,$2,$3::jsonb,$4,$5,$6)`,
+        [org, h.v, j(h.latest ? { items: g.items, may: g.may ?? "", mayNot: g.mayNot ?? "" } : { items: [], may: "", mayNot: "", unavailable: true }), h.note ?? "Seeded", at(h.at) ?? new Date(), h.by ?? "system"]);
+    }
+  }
+  for (const pr of state.projects ?? []) {
+    const g = pr.guidelines as { version: number; items: unknown[]; notes?: string; history?: { v: number; at?: number; by?: string; note?: string }[] } | undefined;
+    if (!g || typeof g !== "object") continue;
+    for (const h of versions(g)) {
+      await q(`insert into guideline_versions (org_id, scope, project_id, version, body, note, published_at, published_by) values ($1,'project',$2,$3,$4::jsonb,$5,$6,$7)`,
+        [org, pr.id, h.v, j(h.latest ? { items: g.items, notes: g.notes ?? "" } : { items: [], notes: "", unavailable: true }), h.note ?? "Seeded", at(h.at) ?? new Date(), h.by ?? "system"]);
+    }
+  }
+
   for (const s of state.skills ?? []) {
     const versions = s.versions?.length ? s.versions : [{ v: "1.0.0" }];
-    await q(`insert into skills (org_id, id, name, description, projects, live_version, data) values ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb)`, [org, s.id, s.name, s.desc ?? "", j(s.projects ?? "all"), versions.length, j({})]);
+    await q(`insert into skills (org_id, id, name, description, projects, live_version, data) values ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb)`, [org, s.id, s.name, s.desc ?? "", j(s.projects ?? "all"), versions.length, j({ when: s.when ?? "", owner: s.owner ?? null, resources: s.resources ?? [] })]);
     for (const [i, v] of versions.entries()) {
       await q(`insert into skill_versions (org_id, skill_id, version, body, content_hash, note, published_at, published_by) values ($1,$2,$3,$4::jsonb,$5,$6, coalesce($7::timestamptz, now()), $8)`,
-        [org, s.id, i + 1, j({ label: v.v, body: s.body ?? "" }), sha(s.body ?? ""), v.note ?? "", at(v.at), v.by ?? "system"]);
+        [org, s.id, i + 1, j({ label: v.v, name: s.name, desc: s.desc ?? "", when: s.when ?? "", body: s.body ?? "", resources: s.resources ?? [] }), sha(s.body ?? ""), v.note ?? "", at(v.at), v.by ?? "system"]);
     }
   }
 
@@ -186,15 +208,19 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
     const versions = a.versions?.length ? a.versions : [{ v: "1.0.0" }];
     const liveIdx = versions.findIndex((v) => "live" in v && v.live);
     const live = (liveIdx >= 0 ? liveIdx : versions.length - 1) + 1;
-    await q(`insert into agents (org_id, id, name, station, status, live_version) values ($1,$2,$3,$4,$5,$6)`, [org, a.id, a.name, a.station ?? null, a.status ?? "active", live]);
+    // The working configuration lives in agents.data; every version snapshots the versioned part of it (agents area).
+    const config = { model: a.model ?? "", fallbacks: a.fallbacks ?? [], autonomy: a.autonomy ?? "suggest", tools: a.tools ?? {}, mcp: a.mcp ?? [], stations: a.stations ?? [], projects: a.projects ?? "all", budget: a.budget ?? 0, guardrails: a.guardrails ?? { paths: [], maxDiff: 0 }, suite: a.suite ?? "", instructions: a.instructions ?? "", overrides: a.overrides ?? {} };
+    const promoted = versions.flatMap((v, i) => ("rc" in v && v.rc ? [] : [i + 1]));
+    await q(`insert into agents (org_id, id, name, station, status, live_version, data) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`, [org, a.id, a.name, a.station ?? null, a.status ?? "active", live, j({ ...config, promoted })]);
     for (const [i, v] of versions.entries()) {
+      const { stations: _s, projects: _p, suite: _u, ...snap } = config;
       await q(
         `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by)
          values ($1,$2,$3,$4::jsonb,'', $5, $6, $7, coalesce($8::timestamptz, now()), 'system')`,
-        [org, a.id, i + 1, j({ label: v.v, instructions: a.instructions ?? "", skills: a.skills ?? [], rc: "rc" in v ? !!v.rc : false }), sha(a.instructions ?? ""), a.model ?? null, v.note ?? "", at(v.at)],
+        [org, a.id, i + 1, j({ ...snap, skills: a.skills ?? [], label: v.v, diff: "diff" in v ? v.diff : "", suiteScore: "suiteScore" in v ? v.suiteScore : 0, rc: "rc" in v ? !!v.rc : false }), sha(a.instructions ?? ""), a.model ?? null, v.note ?? "", at(v.at)],
       );
     }
-    for (const sk of a.skills ?? []) await q(`insert into agent_skills (org_id, agent_id, skill_id) values ($1,$2,$3)`, [org, a.id, sk]);
+    for (const [i, sk] of (a.skills ?? []).entries()) await q(`insert into agent_skills (org_id, agent_id, skill_id, position) values ($1,$2,$3,$4)`, [org, a.id, sk, i + 1]);
   }
 
   for (const v of state.vendors ?? []) {
@@ -220,7 +246,7 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
   }
   if (state.security) await q(`insert into security_settings (org_id, version, body, note, published_at, published_by) values ($1,1,$2::jsonb,'Seeded', now(), 'system')`, [org, j(state.security)]);
   if (state.instructions) {
-    await q(`insert into instruction_versions (org_id, scope, scope_id, version, body, hash, note, published_at, published_by) values ($1,'base','',1,$2,$3,'Seeded', now(), 'system')`, [org, state.instructions.base, sha(state.instructions.base)]);
+    await q(`insert into instruction_versions (org_id, scope, scope_id, version, body, hash, note, published_at, published_by) values ($1,'base','',$4,$2,$3,'Seeded', now(), 'system')`, [org, state.instructions.base, sha(state.instructions.base), state.instructions.baseVersion ?? 1]);
   }
   const fk = state.factory?.killed;
   if (fk) {

@@ -22,6 +22,7 @@ export const DEPENDENTS: Readonly<Record<string, readonly string[]>> = {
   trust: ["home"],
   learning: ["home"],
   integrationInstances: ["home"],
+  mcp: ["mcpUsage"],
   integrations: ["integrationInstances"],
   audit: ["activity"],
 };
@@ -107,6 +108,7 @@ export const qk = {
   routes: (project: string) => ["notifications", project] as const,
   deliveries: (q?: object) => ["deliveries", q ?? null] as const,
   cardTemplates: () => ["cardTemplates"] as const,
+  chatLinks: () => ["chatLinks"] as const,
   mcpServers: () => ["mcp"] as const,
   mcpAccess: (q: object) => ["mcp", "access", q] as const,
   mcpCalls: (q?: object) => ["mcpUsage", q ?? null] as const,
@@ -115,6 +117,7 @@ export const qk = {
   apiRequests: (q?: object) => ["requestLog", q ?? null] as const,
   triggers: () => ["triggers"] as const,
   triggerRuns: (id: string) => ["triggers", "runs", id] as const,
+  triggerProposals: () => ["triggers", "proposals"] as const,
   people: () => ["people"] as const,
   effectivePermissions: (id: string) => ["people", "effective", id] as const,
   matrix: () => ["matrix"] as const,

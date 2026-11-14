@@ -19,6 +19,8 @@ export interface IdempotencyKey {
   scope: string;
   key: string;
   body: unknown;
+  /** How long the key is remembered (default 24 hours, the column default). A key older than this is treated as new again. */
+  ttlHours?: number;
 }
 
 export type IdempotencyState =
@@ -33,9 +35,12 @@ export type IdempotencyState =
  */
 export async function begin(tx: Tx, k: IdempotencyKey): Promise<IdempotencyState> {
   const hash = hashBody(k.body);
+  // A remembered key past its window is taken over by this request (the same statement, so two requests cannot both take it).
   const ins = await tx.query(
-    `insert into idempotency_keys (org_id, scope, key, request_hash) values ($1, $2, $3, $4) on conflict (org_id, scope, key) do nothing`,
-    [k.orgId, k.scope, k.key, hash],
+    `insert into idempotency_keys (org_id, scope, key, request_hash, expires_at) values ($1, $2, $3, $4, now() + make_interval(hours => $5::int))
+     on conflict (org_id, scope, key) do update set request_hash = excluded.request_hash, response_status = null, response = null, completed_at = null, expires_at = excluded.expires_at, updated_at = now()
+       where idempotency_keys.expires_at < now()`,
+    [k.orgId, k.scope, k.key, hash, k.ttlHours ?? 24],
   );
   if (ins.rowCount === 1) return { state: "new" };
   const { rows } = await tx.query<{ request_hash: string; response_status: number | null; response: unknown; completed_at: Date | null }>(

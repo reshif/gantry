@@ -19,6 +19,7 @@ export const baseConfig = (o: Partial<EdgeConfig> = {}): EdgeConfig => ({
   apiTimeoutMs: 1000,
   vendorTimeoutMs: 5000,
   allowlistTtlMs: 200,
+  tunnelCheckMs: 0,
   runSubnet: "10.213.0.0/16",
   allowedPorts: [80, 443],
   blockPrivateAddresses: false,

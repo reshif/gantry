@@ -63,7 +63,8 @@ export async function postMessage(tx: Tx, actor: Actor, woId: string, b: Message
   const { fx, w } = await begin(tx, actor, woId, b.kind === "question" ? "wo.park" : "wo.answer");
   const text = b.text.trim();
   if (!text) throw invalid("Write an answer.");
-  const by = person(actor, "The conversation is");
+  // An API key may answer intake questions (spec 8.10); the answer is recorded against the key.
+  const by = actor.kind === "apikey" && b.kind !== "question" ? actor.id : person(actor, "The conversation is");
   const { st, wo } = await flowFor(fx, w);
   const project = st.projects.find((p) => p.id === w.project)!;
   if (b.kind === "question") {

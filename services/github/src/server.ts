@@ -6,6 +6,7 @@ import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
 import type { GithubApp } from "./github.js";
 import { DraftBody, GateCheckBody, MergeBody, Poller, convertToDraft, listDeliveries, mergePullRequest, readPrState, readProtections, reconcileDeliveries, reconcileRepo, setGateCheck, type OpDeps } from "./ops.js";
+import { CanaryBody, InspectBody, OnboardMergeBody, PrBody, inspectRepo, listAvailable, mergeOnboardingPr, openOnboardingPr, runCanary } from "./onboarding.js";
 import { PublishBody, publishWorkspace } from "./publish.js";
 import { SeedBody, seedWorkspace, type SeedDeps } from "./seed.js";
 import type { WorkspaceStore } from "./workspace.js";
@@ -60,6 +61,12 @@ export async function buildServer(d: ServerDeps): Promise<{ server: FastifyInsta
   });
   server.post("/v1/pulls/draft", async (req) => convertToDraft(ops, DraftBody.parse(req.body)));
   server.post("/v1/pulls/merge", async (req) => mergePullRequest(ops, MergeBody.parse(req.body)));
+  // Repository onboarding and readiness (spec 11.3).
+  server.post("/v1/onboarding/inspect", async (req) => { const b = InspectBody.parse(req.body); return inspectRepo(ops, b.repo, { scan: b.scan }); });
+  server.post("/v1/onboarding/pr", async (req) => openOnboardingPr(ops, PrBody.parse(req.body)));
+  server.post("/v1/onboarding/merge", async (req) => mergeOnboardingPr(ops, OnboardMergeBody.parse(req.body)));
+  server.post("/v1/onboarding/canary", async (req) => runCanary(ops, CanaryBody.parse(req.body)));
+  server.get("/v1/installation/repos", async () => ({ ok: true, repos: await listAvailable(ops) }));
   server.get("/v1/protections", async (req) => ({ ok: true, ...(await readProtections(ops, z.object({ repo: Repo }).parse(req.query).repo)) }));
   server.get("/v1/deliveries", async (req) => ({ ok: true, deliveries: await listDeliveries(ops, z.coerce.number().int().min(1).max(100).default(50).parse((req.query as { limit?: string }).limit)) }));
   server.post("/v1/deliveries/reconcile", async () => ({ ok: true, ...(await reconcileDeliveries(ops)) }));

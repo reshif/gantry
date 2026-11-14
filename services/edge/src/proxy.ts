@@ -23,6 +23,8 @@ export interface ProxyDeps {
 export interface ProxyMetrics {
   allowed: number;
   denied: number;
+  /** CONNECT tunnels cut because their run was refused after they were established. */
+  cut: number;
 }
 
 /** Host patterns are exact names or `*.suffix` (subdomains only, not the bare suffix). */
@@ -127,9 +129,11 @@ interface AllowEntry {
 export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: ProxyMetrics } {
   const { cfg, logger } = deps;
   const api = deps.api ?? new ApiClient(cfg);
-  const metrics: ProxyMetrics = { allowed: 0, denied: 0 };
+  const metrics: ProxyMetrics = { allowed: 0, denied: 0, cut: 0 };
   const cache = new Map<string, AllowEntry>();
   const reported = new Map<string, number>();
+  /** Established CONNECT tunnels per run (spec 4.4): cut when the run's token is revoked or the run is stopped, instead of living until teardown or the idle timeout. */
+  const tunnels = new Map<string, { token: string; sockets: Set<net.Socket>; failures: number }>();
 
   const callerOf = (req: http.IncomingMessage): Caller | { kind: "bad" } => {
     const h = req.headers["proxy-authorization"];
@@ -249,6 +253,21 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
       clientSocket.destroy();
     });
     upstream.on("connect", () => {
+      const c = callerOf(req);
+      if (c.kind === "run") {
+        const t = tunnels.get(c.runId) ?? { token: c.token, sockets: new Set<net.Socket>(), failures: 0 };
+        t.token = c.token;
+        t.sockets.add(clientSocket);
+        t.sockets.add(upstream);
+        tunnels.set(c.runId, t);
+        const drop = (): void => {
+          t.sockets.delete(clientSocket);
+          t.sockets.delete(upstream);
+          if (t.sockets.size === 0 && tunnels.get(c.runId) === t) tunnels.delete(c.runId);
+        };
+        clientSocket.once("close", drop);
+        upstream.once("close", drop);
+      }
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head.length) upstream.write(head);
       upstream.pipe(clientSocket);
@@ -257,6 +276,31 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
     clientSocket.on("close", () => upstream.destroy());
     upstream.on("close", () => clientSocket.destroy());
   });
+
+  // Re-ask the API about every run that holds a tunnel. A clear refusal (revoked, stopped, superseded) cuts all of that run's tunnels at once; an unreachable API
+  // cuts them after three failed rounds in a row (the proxy fails closed for new connections at once, but a blip must not drop healthy long-lived tunnels).
+  const sweepTunnels = async (): Promise<void> => {
+    await Promise.all([...tunnels.entries()].map(async ([runId, t]) => {
+      const r = await api.call("POST", `/internal/v1/runs/${encodeURIComponent(runId)}/egress`, { token: t.token });
+      if (r.kind === "ok") { t.failures = 0; return; }
+      if (r.kind === "unavailable" && ++t.failures < 3) return;
+      const why = r.kind === "refused" ? String(r.body.msg ?? "Run refused.") : "Allow-list unavailable.";
+      logger.warn({ caller: `run:${runId}`, tunnels: t.sockets.size / 2, reason: why }, "egress tunnels cut");
+      metrics.cut += t.sockets.size / 2;
+      for (const s of t.sockets) s.destroy();
+      tunnels.delete(runId);
+    }));
+  };
+  if (cfg.tunnelCheckMs > 0) {
+    let busy = false;
+    const timer = setInterval(() => {
+      if (busy) return;
+      busy = true;
+      void sweepTunnels().catch(() => undefined).finally(() => { busy = false; });
+    }, cfg.tunnelCheckMs);
+    timer.unref();
+    server.on("close", () => clearInterval(timer));
+  }
 
   return { server, metrics };
 }

@@ -5,7 +5,7 @@ import type { Duplex } from "node:stream";
 import { TransientError } from "../errors.js";
 
 export interface HttpRequest {
-  method: "POST" | "GET";
+  method: "POST" | "GET" | "PUT";
   url: string;
   headers: Record<string, string>;
   body?: string;

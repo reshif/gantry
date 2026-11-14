@@ -1,6 +1,7 @@
 import { verifyChain } from "@gantry/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
+import { withVersion } from "./versions.js";
 
 const d = TEST_URL ? describe : describe.skip;
 const admin = "p-asha";
@@ -18,13 +19,30 @@ d("people and access", () => {
   type M = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   const call = async (who: string, method: M, url: string, payload?: unknown, extra: Record<string, string> = {}, o: { authAgeSec?: number } = {}) => {
     const s = await t.session(who, o);
-    const r = await t.app.inject({ method, url, headers: { ...s.headers, ...extra }, ...(payload === undefined ? {} : { payload: payload as object }) });
+    const r = await t.app.inject({ method, url, headers: { ...s.headers, ...(await withVersion(t.db.admin, method, url, extra)) }, ...(payload === undefined ? {} : { payload: payload as object }) });
     return { status: r.statusCode, body: r.json() as Record<string, any>, headers: r.headers };
   };
   const ev = async (type: string) => (await t.db.admin.query(`select * from events where type = $1 order by seq`, [type])).rows;
   const person = async (id: string) => (await call(admin, "GET", "/api/v1/people")).body as unknown as Array<Record<string, any>>;
   const find = async (id: string) => (await person(id)).find((p) => p.id === id)!;
   const stepUpAge = 3600;
+
+  describe("If-Match is required on versioned config endpoints", () => {
+    it("matrix, role, policy, freeze and security writes without If-Match are a 409 'version required'", async () => {
+      const s = await t.session(admin);
+      const send = (method: M, url: string, payload?: unknown) => t.app.inject({ method, url, headers: s.headers, ...(payload === undefined ? {} : { payload: payload as object }) });
+      for (const [m, url, body] of [
+        ["PUT", "/api/v1/access/matrix/engineer/release", { on: true }],
+        ["DELETE", "/api/v1/roles/release_manager", undefined],
+        ["PATCH", "/api/v1/security", { path: "githubLogin", value: false }],
+      ] as const) {
+        const r = await send(m, url, body);
+        expect(r.statusCode, url).toBe(409);
+        expect(r.json().msg, url).toMatch(/version required/i);
+      }
+      expect((await send("DELETE", "/api/v1/policies/POL-NOPE")).statusCode).toBe(404);
+    });
+  });
 
   describe("reads", () => {
     it("lists people with versions, teams and roles in the legacy shape", async () => {

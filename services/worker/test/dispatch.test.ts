@@ -33,6 +33,24 @@ d("attempt.dispatch and run.result", () => {
     expect(att.lease_until).not.toBeNull();
   });
 
+  it("pins the four-layer instruction composition, the skill versions and the version tuple on the run (spec 10.2)", async () => {
+    await w.q(`update repos set guidelines = 'Use pnpm.' where org_id = $1 and id = 'payments-api'`, [w.orgId]);
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"2".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    const { attemptId, runId } = await w.workOrderAt("WO-9010", { agent: "ag-build" });
+    await w.drain();
+    const run = (await w.q(`select data from runs where id = $1`, [runId]))[0].data;
+    const tuple = (await w.q(`select t.* from attempts a join agent_version_tuples t on t.id = a.tuple_id where a.id = $1`, [attemptId]))[0];
+    expect(tuple).toMatchObject({ agent_id: "ag-build", agent_version: 2 });
+    expect(tuple.skill_versions).toEqual({ "sk-testdesign": expect.any(Number) });
+    // the tuple's instruction hash is the hash of the whole composition, which the run records with its layer versions
+    expect(run.composed.hash).toBe(tuple.instruction_hash);
+    expect(run.composed.layers.map((l: { name: string }) => l.name)).toEqual(["Factory base", "Project overlay", "Agent", "Repository guidelines"]);
+    expect(run.composed.layers[0].version).toBe(4);
+    expect(run.composed.skills).toEqual([{ id: "sk-testdesign", version: tuple.skill_versions["sk-testdesign"] }]);
+    expect(run.composed.tupleId).toBe(tuple.id);
+    expect(run.instructionPin).toMatchObject({ base: 4, agentVersion: 2, guidelines: { text: "Use pnpm." } });
+  });
+
   it("is idempotent: a retry after a crash finds the running container and does not start a second one", async () => {
     const { runId } = await w.workOrderAt("WO-9002", { repo: null });
     await w.drain();

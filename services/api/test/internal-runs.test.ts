@@ -51,7 +51,23 @@ d("internal runs API", () => {
       const r = await makeRun();
       expect((await call("POST", `/internal/v1/runs/${r.runId}/authorize`, { token: r.token }, {})).statusCode).toBe(401);
       expect((await call("POST", `/internal/v1/runs/${r.runId}/authorize`, { token: r.token }, { authorization: "Bearer nope" })).statusCode).toBe(401);
-      expect((await call("POST", `/internal/v1/runs/${r.runId}/authorize`, { token: r.token }, { authorization: "Bearer github-token-for-tests" })).statusCode).toBe(200);
+    });
+    it("restricts run-scoped endpoints to the edge: the GitHub broker's token is refused with a valid run token, and the refusal is audited", async () => {
+      const r = await makeRun();
+      const GH = { authorization: "Bearer github-token-for-tests" };
+      const before = Number((await q(`select count(*)::int as n from events where type = 'internal.edge.denied'`))[0].n);
+      for (const [m, path, body] of [
+        ["POST", `/internal/v1/runs/${r.runId}/authorize`, { token: r.token }],
+        ["POST", `/internal/v1/runs/${r.runId}/heartbeat`, { token: r.token }],
+        ["POST", `/internal/v1/runs/${r.runId}/egress`, { token: r.token }],
+        ["GET", `/internal/v1/egress/system`, undefined],
+      ] as const) {
+        const x = await call(m, path, body, GH);
+        expect(x.statusCode, path).toBe(403);
+      }
+      expect((await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...GH, "x-run-token": r.token })).statusCode).toBe(403);
+      expect(Number((await q(`select count(*)::int as n from events where type = 'internal.edge.denied'`))[0].n)).toBe(before + 5);
+      expect((await call("POST", `/internal/v1/runs/${r.runId}/authorize`, { token: r.token })).statusCode).toBe(200);
     });
     it("validates bodies (422)", async () => {
       const r = await makeRun();
@@ -339,6 +355,8 @@ d("internal runs API", () => {
       await q(`insert into mcp_servers (org_id, id, name, url) values ($1,'w3-mcp','docs','https://mcp.example.net/sse')`, [o]);
       await q(`insert into mcp_tools (org_id, server_id, name, definition_hash, tool_class, allowed) values ($1,'w3-mcp','search','h1','read',true), ($1,'w3-mcp','delete','h2','write',true), ($1,'w3-mcp','hidden','h3','read',false)`, [o]);
       await q(`insert into mcp_scopes (org_id, id, server_id, projects, repos, agents, stations) values ($1,'sc-w3','w3-mcp','["payments"]','"all"','"all"','["build"]')`, [o]);
+      // Spec 12.4 and the legacy resolver: a project must also enable the server in its own config.
+      await q(`update projects set config = jsonb_set(config, '{mcp}', coalesce(config -> 'mcp', '[]'::jsonb) || '["w3-mcp"]'::jsonb) where org_id = $1 and id = 'payments'`, [o]);
     });
     it("allows an in-scope read tool, logs it with the argument hash, and lists the server in the run spec", async () => {
       const r = await makeRun();
@@ -347,6 +365,10 @@ d("internal runs API", () => {
       expect((await q(`select * from mcp_calls where run_id = $1`, [r.runId]))[0]).toMatchObject({ server_id: "w3-mcp", tool: "search", outcome: "allowed", args_hash: "e".repeat(64), wo_id: r.woId, station: "build" });
       const spec = (await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json();
       expect(spec.mcpServers).toEqual({ docs: { type: "http", url: "http://gantry-edge:8443/mcp/v1/w3-mcp" } });
+      // a registry name with spaces and capitals becomes a legal harness name
+      await q(`update mcp_servers set name = 'Docs wiki' where id = 'w3-mcp'`);
+      expect(Object.keys((await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json().mcpServers)).toEqual(["docs-wiki"]);
+      await q(`update mcp_servers set name = 'docs' where id = 'w3-mcp'`);
     });
     it("denies (and audits) out-of-scope projects, disallowed and unknown tools", async () => {
       const other = await makeRun({ project: "risk" });
@@ -368,12 +390,63 @@ d("internal runs API", () => {
       expect((await mcp(r, { definitionHash: "changed" })).json()).toMatchObject({ allow: false, code: "definition" });
       expect((await q(`select enabled, disabled_reason from mcp_servers where id = 'w3-mcp'`))[0]).toMatchObject({ enabled: false });
       expect((await mcp(r, {})).json()).toMatchObject({ allow: false, code: "server" });
+      expect((await q(`select pending_hash from mcp_tools where server_id = 'w3-mcp' and name = 'search'`))[0].pending_hash).toBe("changed");
       await q(`update mcp_servers set enabled = true where id = 'w3-mcp'`);
+      await q(`update mcp_tools set pending_hash = null where server_id = 'w3-mcp'`);
     });
     it("is refused under a stop", async () => {
       const r = await makeRun();
       await setStop("wo", r.woId, "halt");
       expect((await mcp(r, {})).json()).toMatchObject({ allow: false, code: "stopped" });
+    });
+    const MCPBASE = (r: Made, suffix: string) => `/internal/v1/runs/${r.runId}/${suffix}`;
+    it("a project that has not enabled the server in its config does not see it, and a class outside the class scope is refused", async () => {
+      const r = await makeRun();
+      await q(`update projects set config = jsonb_set(config, '{mcp}', '[]') where id = 'payments'`);
+      expect((await mcp(r, {})).json()).toMatchObject({ allow: false, code: "scope" });
+      await q(`update projects set config = jsonb_set(config, '{mcp}', '["w3-mcp"]') where id = 'payments'`);
+      await q(`update mcp_scopes set classes = '["bug"]' where server_id = 'w3-mcp'`);
+      expect((await mcp(r, {})).json()).toMatchObject({ allow: false, code: "scope" });
+      await q(`update mcp_scopes set classes = '["feature"]' where server_id = 'w3-mcp'`);
+      expect((await mcp(r, {})).json()).toMatchObject({ allow: true });
+      await q(`update mcp_scopes set classes = '"all"' where server_id = 'w3-mcp'`);
+    });
+    it("mcp-tools lists what the run may see (a write tool only with its pre-authorisation), mcp-connection releases the sealed credential, and only to the edge for an in-scope server", async () => {
+      await q(`update mcp_servers set auth_mode = 'bearer', secret_enc = $1 where id = 'w3-mcp'`, [encrypt("upstream-secret-123456", DATA_KEY, "mcp:w3-mcp")]);
+      await q(`update mcp_tools set definition = '{"description":"find","inputSchema":{"type":"object"}}'::jsonb where server_id = 'w3-mcp' and name = 'search'`);
+      const r = await makeRun();
+      const list = (await call("POST", MCPBASE(r, "mcp-tools"), { token: r.token, server: "w3-mcp" })).json();
+      expect(list.tools.map((x: { name: string }) => x.name)).toEqual(["search"]);
+      expect(list.tools[0]).toMatchObject({ description: "find", inputSchema: { type: "object" }, class: "read" });
+      const g = await makeRun({ attemptData: { writeGrants: ["w3-mcp/delete"] } });
+      expect((await call("POST", MCPBASE(g, "mcp-tools"), { token: g.token, server: "w3-mcp" })).json().tools.map((x: { name: string }) => x.name)).toEqual(["delete", "search"]);
+      const conn = await call("POST", MCPBASE(r, "mcp-connection"), { token: r.token, server: "w3-mcp" });
+      expect(conn.json()).toMatchObject({ ok: true, url: "https://mcp.example.net/sse", auth: { mode: "bearer", secret: "upstream-secret-123456" } });
+      expect(conn.headers["cache-control"]).toBe("no-store");
+      const other = await makeRun({ project: "risk" });
+      expect((await call("POST", MCPBASE(other, "mcp-connection"), { token: other.token, server: "w3-mcp" })).statusCode).toBe(403);
+      expect((await call("POST", MCPBASE(r, "mcp-connection"), { token: r.token, server: "w3-mcp" }, { authorization: "Bearer github-token-for-tests" })).statusCode).toBe(403);
+      expect((await call("POST", MCPBASE(r, "mcp-connection"), { token: "grt.xx.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", server: "w3-mcp" })).statusCode).toBe(403);
+      await q(`update mcp_tools set pending_hash = 'zz' where server_id = 'w3-mcp' and name = 'search'`);
+      expect((await call("POST", MCPBASE(r, "mcp-tools"), { token: r.token, server: "w3-mcp" })).json().tools).toEqual([]);
+      await q(`update mcp_tools set pending_hash = null where server_id = 'w3-mcp'`);
+    });
+    it("mcp-result completes the logged call once, records latency, and puts write calls and failures in the ledger", async () => {
+      const g = await makeRun({ attemptData: { writeGrants: ["w3-mcp/delete"] } });
+      const a = (await mcp(g, { tool: "delete", argsHash: "a".repeat(64) })).json();
+      expect(a.callId).toBeGreaterThan(0);
+      const done = await call("POST", MCPBASE(g, "mcp-result"), { token: g.token, callId: a.callId, outcome: "ok", ms: 42 });
+      expect(done.json()).toMatchObject({ ok: true, recorded: true });
+      expect((await q(`select outcome, latency_ms from mcp_calls where id = $1`, [a.callId]))[0]).toMatchObject({ outcome: "ok", latency_ms: 42 });
+      expect((await call("POST", MCPBASE(g, "mcp-result"), { token: g.token, callId: a.callId, outcome: "error", ms: 1 })).json()).toMatchObject({ recorded: false });
+      expect((await events("mcp.call")).some((e) => e.subject?.id === "w3-mcp/delete")).toBe(true);
+      const r = await makeRun();
+      const b = (await mcp(r, {})).json();
+      await call("POST", MCPBASE(r, "mcp-result"), { token: r.token, callId: b.callId, outcome: "error", ms: 7, error: "upstream 502" });
+      expect((await q(`select outcome, reason from mcp_calls where id = $1`, [b.callId]))[0]).toMatchObject({ outcome: "error", reason: "upstream 502" });
+      // another run cannot complete this run's call
+      const x = await makeRun();
+      expect((await call("POST", MCPBASE(x, "mcp-result"), { token: x.token, callId: b.callId, outcome: "ok", ms: 1 })).json()).toMatchObject({ recorded: false });
     });
   });
 
@@ -409,6 +482,7 @@ d("internal runs API", () => {
     it("returns a decrypted vendor key only to the edge", async () => {
       expect((await call("GET", "/internal/v1/vendors/w3-anthropic/key")).json()).toEqual({ ok: true, key: "sk-ant-real-secret-123456789" });
       expect((await call("GET", "/internal/v1/vendors/w3-anthropic/key", undefined, { authorization: "Bearer github-token-for-tests" })).statusCode).toBe(403);
+      expect((await q(`select outcome, actor from events where type = 'vendor.key.read.denied'`))).toEqual([{ outcome: "denied", actor: "github" }]);
       expect((await call("GET", "/internal/v1/vendors/w3-off/key")).statusCode).toBe(404);
       expect((await call("GET", "/internal/v1/vendors/missing/key")).statusCode).toBe(404);
     });

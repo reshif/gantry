@@ -11,6 +11,7 @@ export class FakeApi {
   server!: Server;
   fence: FenceRule = (c) => ({ allow: true, woId: "WO-1", branch: "gantry/WO-1", repo: "acme/payments-api", ...(c.body?.purpose ? {} : {}) });
   factsStatus = 200;
+  onboardingFence: (c: ApiCall) => { allow: boolean; code?: string; reason?: string } = () => ({ allow: true });
   repos: any[] = [];
   private fenceCount = 0;
 
@@ -28,6 +29,7 @@ export class FakeApi {
         res.setHeader("content-type", "application/json");
         if (call.auth !== `Bearer ${this.token}`) { res.statusCode = 401; return void res.end(JSON.stringify({ ok: false })); }
         if (/fence-check$/.test(call.path)) { try { res.end(JSON.stringify({ ok: true, ...this.fence(call, ++this.fenceCount) })); } catch { res.statusCode = 500; res.end("{}"); } return; }
+        if (call.path === "/internal/v1/onboarding/fence") { res.end(JSON.stringify({ ok: true, ...this.onboardingFence(call) })); return; }
         if (call.path === "/internal/v1/github/events") { res.statusCode = this.factsStatus; res.end(JSON.stringify(this.factsStatus === 200 ? { ok: true, counts: { drift: 0 }, merged: [] } : { ok: false })); return; }
         if (call.path === "/internal/v1/github/repos") { res.end(JSON.stringify({ ok: true, repos: this.repos })); return; }
         res.statusCode = 404; res.end("{}");

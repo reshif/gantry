@@ -13,7 +13,7 @@ const lead = "p-meera"; // line lead on payments
 const engineer = "p-tomas"; // engineer on payments
 
 const testRoutes: FastifyPluginAsync = async (app) => {
-  app.post("/api/v1/test/templates", async (req) => {
+  app.post("/api/v1/test/templates", { config: { apiKey: "template.edit" } }, async (req) => {
     const b = z.object({ id: z.string(), name: z.string(), via: z.string().optional() }).parse(req.body);
     return command(req, { action: "template.edit", idempotent: true }, async (tx) => {
       await tx.query(`insert into templates (org_id, id, name, body) values ($1,$2,$3,'{}')`, [req.gx.orgId, b.id, b.name]);
@@ -195,7 +195,12 @@ d("command pipeline", () => {
     const { generateApiKey } = await import("../src/core/auth/apikeys.js");
     const k = generateApiKey();
     await t.db.admin.query(`insert into api_keys (org_id, id, name, key_hash, key_prefix, scopes) values ($1,'key-9','bot',$2,$3,'["template.edit"]')`, [t.orgId, k.hash, k.prefix]);
-    const r = await t.app.inject({ method: "POST", url: "/api/v1/test/templates", headers: { authorization: `Bearer ${k.key}` }, payload: { id: "tpl-key", name: "K" } });
+    // spec 5.3: an API key creating something must send an Idempotency-Key
+    const noKey = await t.app.inject({ method: "POST", url: "/api/v1/test/templates", headers: { authorization: `Bearer ${k.key}` }, payload: { id: "tpl-key", name: "K" } });
+    expect(noKey.statusCode).toBe(422);
+    expect(noKey.json()).toMatchObject({ ok: false, msg: expect.stringContaining("Idempotency-Key") });
+    expect((await events("template.saved")).find((x) => x.subject.id === "tpl-key")).toBeUndefined();
+    const r = await t.app.inject({ method: "POST", url: "/api/v1/test/templates", headers: { authorization: `Bearer ${k.key}`, "idempotency-key": "k9-create-1" }, payload: { id: "tpl-key", name: "K" } });
     expect(r.statusCode).toBe(200);
     const ke = (await events("template.saved")).find((x) => x.subject.id === "tpl-key")!;
     expect(ke).toMatchObject({ actor: "apikey:key-9", channel: "api", session_id: null });

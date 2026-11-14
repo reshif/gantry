@@ -8,6 +8,7 @@ import { scanJson, scanText, type Finding } from "./secrets-scan.js";
 import { NoObjectStore, TraceIncrements, type ObjectStore } from "./trace.js";
 import { SseUsage, usageFromJson, type Usage } from "./usage.js";
 import { VendorKeys } from "./vendor-keys.js";
+import { registerMcpRoutes, type McpMetrics } from "./mcp/routes.js";
 
 export interface GatewayDeps {
   cfg: EdgeConfig;
@@ -72,6 +73,7 @@ export interface Gateway {
   metrics: GatewayMetrics;
   keys: VendorKeys;
   limiter: VendorLimiter;
+  mcp: McpMetrics;
   api: ApiClient;
   store: ObjectStore;
   /** Resolves when every model call's post-response work (trace, usage report) has finished. Used on shutdown and in tests. */
@@ -285,8 +287,15 @@ export function buildGateway(deps: GatewayDeps): Gateway {
   app.post("/model/v1/messages/count_tokens", (req, reply) => track(messages(req, reply, true)));
   app.all("/model/*", async (_req, reply) => modelError(reply, 404, "not_found_error", "Only the Messages API is served here."));
 
-  // MCP gateway: built when MCP servers exist (wave 4); the API composes no MCP server URLs until then.
-  app.all("/mcp/*", async (_req, reply) => reply.code(501).send({ ok: false, msg: "The MCP gateway is not implemented yet." }));
+  // MCP gateway (spec 6.4, 12.4): services/edge/src/mcp. The runner sees one endpoint per allowed server; the edge holds the credentials.
+  const mcp = registerMcpRoutes(app, {
+    cfg, api,
+    runAuth: (req) => {
+      const token = bearerOf(req);
+      const runId = token ? runIdOfToken(token) : null;
+      return token && runId ? { runId, token } : null;
+    },
+  });
 
   // ------------------------------------------------------------------ runner control calls
   const runAuth = (req: FastifyRequest): { runId: string; token: string } | null => {
@@ -373,5 +382,5 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     return relay(reply, await api.call("POST", `/internal/v1/runs/${encodeURIComponent(a.runId)}/result`, { ...(s.value as Record<string, unknown>), token: a.token }));
   });
 
-  return { app, metrics, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
+  return { app, metrics, mcp, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
 }

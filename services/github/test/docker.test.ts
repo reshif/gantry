@@ -58,4 +58,22 @@ d("DockerWorkspaceStore against real Docker", () => {
     await expect(store.seed("ws-w3gh-missing", src, { uid: 1, gid: 1 })).rejects.toMatchObject({ code: "volume_missing" });
     await rm(src, { recursive: true });
   });
+  it("refuses a workspace whose .git, or a part of it, is a symlink (the read would resolve inside the helper's own filesystem)", async () => {
+    const V = "ws-w3gh-symlink";
+    await docker.createVolume({ Name: V, Labels: { "gantry.managed-by": "gantry-launcher" } });
+    try {
+      const sh = (script: string): string => execFileSync("docker", ["run", "--rm", "--network", "none", "-v", `${V}:/w`, IMAGE, "sh", "-c", script], { encoding: "utf8" });
+      sh("mkdir /w/.real && echo 'ref: refs/heads/main' > /w/.real/HEAD && mkdir /w/.real/objects /w/.real/refs && ln -s /w/.real /w/.git");
+      const dest = await mkdtemp(join(tmpdir(), "w4fix-dest-"));
+      await expect(store.copyGitData(V, dest, { maxBytes: 1 << 24 })).rejects.toMatchObject({ code: "git_symlink" });
+      sh("rm /w/.git && mkdir /w/.git && echo 'ref: refs/heads/main' > /w/.git/HEAD && mkdir /w/.git/refs && ln -s / /w/.git/objects");
+      await expect(store.copyGitData(V, dest, { maxBytes: 1 << 24 })).rejects.toMatchObject({ code: "git_symlink" });
+      expect(existsSync(join(dest, "objects"))).toBe(false);
+      sh("rm /w/.git/objects && mkdir /w/.git/objects");
+      await expect(store.copyGitData(V, dest, { maxBytes: 1 << 24 })).resolves.toMatchObject({ files: expect.any(Number) });
+      await rm(dest, { recursive: true });
+    } finally {
+      await docker.getVolume(V).remove({ force: true }).catch(() => undefined);
+    }
+  });
 });

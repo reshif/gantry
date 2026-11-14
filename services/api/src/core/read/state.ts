@@ -13,7 +13,7 @@ export async function loadPolicyState(db: Queryable, orgId: string): Promise<Pol
   // Only the columns the decision point uses: the full project read joins flow versions, approver rules and budgets, and the stop path
   // (spec 8.5, I7) must not fail because the flow engine's tables do.
   const [people, matrix, policies, freezes, projects, repos, catalog] = await reads(db, [
-    () => readPeople(db, orgId), () => readMatrix(db, orgId), () => readPolicies(db, orgId), () => readFreezes(db, orgId), () => policyProjects(db, orgId, stops), () => policyRepos(db, orgId, stops), () => readCatalog(db, orgId, org),
+    () => readPeople(db, orgId), () => readMatrix(db, orgId), () => readPolicies(db, orgId), () => readFreezes(db, orgId), () => policyProjects(db, orgId).then((r) => foldProjects(r, stops)), () => policyRepos(db, orgId).then((r) => foldRepos(r, stops)), () => readCatalog(db, orgId, org),
   ]);
   const f = stops.find((s) => s.scope === "factory" && s.mode === "kill");
   return {
@@ -42,10 +42,21 @@ export async function loadFlowState(db: Queryable, orgId: string, opts: FlowLoad
 type PolicyProject = PolicyState["projects"][number];
 type PolicyRepo = PolicyState["repos"][number];
 
-async function policyProjects(db: Queryable, orgId: string, stops: ActiveStop[]): Promise<PolicyProject[]> {
-  const { rows } = await db.query<{ id: string; name: string; status: string; regulated: boolean }>(
-    `select id, name, status, regulated from projects where org_id = $1 order by position nulls last, created_at, id`, [orgId],
-  );
+export interface ProjectRow { id: string; name: string; status: string; regulated: boolean }
+export interface RepoRow { id: string; name: string; project_id: string }
+
+export async function policyProjects(db: Queryable, orgId: string): Promise<ProjectRow[]> {
+  const { rows } = await db.query<ProjectRow>(`select id, name, status, regulated from projects where org_id = $1 order by position nulls last, created_at, id`, [orgId]);
+  return rows;
+}
+
+export async function policyRepos(db: Queryable, orgId: string): Promise<RepoRow[]> {
+  const { rows } = await db.query<RepoRow>(`select id, name, project_id from repos where org_id = $1 order by created_at, id`, [orgId]);
+  return rows;
+}
+
+/** Folds the active stops into the project records the engine reads. */
+export function foldProjects(rows: ProjectRow[], stops: ActiveStop[]): PolicyProject[] {
   return rows.map((r) => {
     const kill = stops.find((s) => s.scope === "project" && s.project === r.id && s.mode === "kill");
     const halt = stops.find((s) => s.scope === "project" && s.project === r.id && s.mode === "halt");
@@ -53,8 +64,7 @@ async function policyProjects(db: Queryable, orgId: string, stops: ActiveStop[])
   });
 }
 
-async function policyRepos(db: Queryable, orgId: string, stops: ActiveStop[]): Promise<PolicyRepo[]> {
-  const { rows } = await db.query<{ id: string; name: string; project_id: string }>(`select id, name, project_id from repos where org_id = $1 order by created_at, id`, [orgId]);
+export function foldRepos(rows: RepoRow[], stops: ActiveStop[]): PolicyRepo[] {
   return rows.map((r) => {
     const halt = stops.find((s) => s.scope === "repo" && s.repo === r.id && s.mode === "halt");
     return { id: r.id, name: r.name, project: r.project_id, halted: halt ? haltInfo(halt) : null } as PolicyRepo;

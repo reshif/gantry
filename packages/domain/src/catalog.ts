@@ -905,6 +905,14 @@ export const NOTIFY_EVENTS: ReadonlyArray<{ id: string; name: string }> = [
   {
     id: "outcome.recorded",
     name: "Post-release outcome recorded"
+  },
+  {
+    id: "gate.escalated",
+    name: "Gate escalated"
+  },
+  {
+    id: "delivery.failed",
+    name: "Notification delivery failed"
   }
 ];
 
@@ -1461,6 +1469,8 @@ export const CARD_DEFAULTS: Record<string, string> = {
   "trust.changed": "submitted",
   "learning.proposed": "submitted",
   "outcome.recorded": "incident",
+  "gate.escalated": "gate",
+  "delivery.failed": "incident",
 };
 
 export const TRUST_LEVELS: readonly TrustLevelDef[] = [
@@ -1479,7 +1489,7 @@ export const AUDIT_CATEGORY_BY_PREFIX: Record<string, AuditCategory> = {
   kill: "kill", restore: "kill", wo: "flow", line: "flow", check: "flow", brief: "flow",
   gate: "approvals", approvers: "config", project: "config", flow: "config", template: "config",
   repo: "onboarding", onboarding: "onboarding", guidelines: "onboarding",
-  integration: "integrations", notify: "integrations", trigger: "integrations", delivery: "integrations",
+  integration: "integrations", notify: "integrations", trigger: "integrations", triggers: "integrations", delivery: "integrations",
   api: "api", trust: "agents", learning: "agents", class: "config", station: "config", card: "config",
   record: "flow", outcome: "flow", agent: "agents", skill: "agents", eval: "agents", model: "agents", vendor: "agents", routing: "agents", mcp: "integrations",
 };

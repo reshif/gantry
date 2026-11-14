@@ -1,5 +1,5 @@
-import { parseJob, reconcileStop } from "@gantry/api/core";
-import { withTx, type Job } from "@gantry/db";
+import { job as buildJob, parseJob, reconcileStop } from "@gantry/api/core";
+import { enqueue, withTx, type Job } from "@gantry/db";
 import { raiseAlert, recordEvent } from "../alerts.js";
 import type { Deps } from "../deps.js";
 import { errMsg, PermanentError, TransientError } from "../errors.js";
@@ -99,8 +99,14 @@ export async function stopEnforce(job: Job, ctx: HandlerCtx): Promise<unknown> {
   const row = (await deps.pool.query<StopRow>(`select org_id, id, scope_type, project_id, repo_id, wo_id, mode, in_flight, lifted_at from stops where org_id = $1 and id = $2`, [org, p.value.stopId])).rows[0];
   if (!row) return { skipped: "unknown stop" };
 
-  const rec = await withTx(deps.pool, (tx) => reconcileStop(tx, row.id, { orgId: org }));
+  const rec = await withTx(deps.pool, (tx) => reconcileStop(tx, row.id, { orgId: org, now: deps.now(), haltGraceMs: deps.cfg.haltGraceMs }));
   if (row.lifted_at) return { lifted: true, reconcile: rec.action };
+  if (rec.action === "enforcing" && rec.retryAt) {
+    // Spec 4.5: a halt lets the run checkpoint at the turn boundary. Model calls are already refused at the edge; nothing is torn down until the grace ends.
+    const j = buildJob("stop.enforce", { stopId: row.id, scope: row.scope_type, targetId: row.wo_id ?? row.repo_id ?? row.project_id ?? null, mode: row.mode }, { dedupeKey: `stop.enforce:${row.id}:grace:${rec.retryAt.getTime()}` });
+    await enqueue(deps.pool, { orgId: org, kind: j.kind, queue: j.queue, payload: j.payload, runAt: rec.retryAt, ...(j.dedupeKey ? { dedupeKey: j.dedupeKey } : {}), ...(j.priority !== undefined ? { priority: j.priority } : {}) });
+    return { grace: true, retryAt: rec.retryAt.toISOString() };
+  }
 
   const scope = await inScope(deps, row);
   const cancelledMerges = await cancelMerges(deps, org, scope.wos);

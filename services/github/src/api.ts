@@ -8,6 +8,9 @@ export type ApiResult<T> = { kind: "ok"; status: number; body: T } | { kind: "re
 
 export interface BrokerRepo { id: string; repo: string; installationId: number | null; projectId: string; defaultBranch: string; branchPrefix: string }
 
+/** Onboarding writes: opening or updating the pull request (`write`), merging it (`merge`) and the readiness canary. A kill refuses all three; a halt refuses only the merge, as in the decision point (spec 9.7). */
+export type OnboardingPurpose = "write" | "merge" | "canary";
+
 export type FencePurpose = "publish" | "pr" | "check_pass" | "check_pending" | "check_fail" | "merge" | "draft";
 
 /**
@@ -49,6 +52,15 @@ export class ApiClient {
 
   async fenceWorkOrder(woId: string, purpose: FencePurpose, repo?: string): Promise<Fence> {
     return this.toFence(await this.call("POST", `/internal/v1/work-orders/${encodeURIComponent(woId)}/fence-check`, { purpose, ...(repo ? { repo } : {}) }));
+  }
+
+  /** Fence for repository-level onboarding writes, which belong to no work order. */
+  async fenceOnboarding(repo: string, purpose: OnboardingPurpose): Promise<{ allow: true } | { allow: false; code: string; reason: string }> {
+    const r = await this.call<Record<string, unknown>>("POST", "/internal/v1/onboarding/fence", { repo, purpose });
+    if (r.kind === "ok" && r.body.allow === true) return { allow: true };
+    if (r.kind === "ok") return { allow: false, code: String(r.body.code ?? "denied"), reason: String(r.body.reason ?? "refused") };
+    if (r.kind === "refused") return { allow: false, code: "refused", reason: String(r.body.msg ?? `API refused (${r.status})`) };
+    return { allow: false, code: "unavailable", reason: `Could not confirm the repository with the API: ${r.msg}` };
   }
 
   /** Facts for storage and reconciliation (spec 11.6). */

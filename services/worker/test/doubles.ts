@@ -96,7 +96,7 @@ export class FakeLauncher {
 
 /* ------------------------------------------------------------------------------------------ github broker */
 
-export interface FakePr { number: number; state: "open" | "closed" | "merged"; head: string; draft: boolean; mergeSha: string | null }
+export interface FakePr { number: number; state: "open" | "closed" | "merged"; head: string; draft: boolean; mergeSha: string | null; checks?: Array<{ name: string; status: string; conclusion: string | null }> }
 
 export class FakeBroker {
   readonly token = "github-test-token";
@@ -110,6 +110,12 @@ export class FakeBroker {
   publishResponse: Record<string, any> | { status: number; body: Record<string, any> } | null = null;
   mergeResponse: { status: number; body: Record<string, any> } | null = null;
   gateCheckStatus = 200;
+  /** Onboarding (spec 11.3): what the broker answers to inspect, the pull request, the merge and the canary. A response with a status replaces the default. */
+  inspectFacts: Record<string, any> | null = null;
+  inspectResponse: { status: number; body: Record<string, any> } | null = null;
+  onboardingPrResponse: { status: number; body: Record<string, any> } | null = null;
+  onboardingMergeResponse: { status: number; body: Record<string, any> } | null = null;
+  canaryResponse: { status: number; body: Record<string, any> } | null = null;
   onPublish: ((b: Record<string, any>) => void | Promise<void>) | null = null;
   private server!: http.Server;
   url = "";
@@ -154,7 +160,7 @@ export class FakeBroker {
       this.calls.push({ op: "pull-state", at: Date.now(), query: u.search });
       const pr = this.prs.get(n);
       if (!pr) return send(res, 404, { ok: false, code: "not_found", msg: "no such pull request" });
-      return send(res, 200, { ok: true, pullRequest: { number: n, state: pr.state, draft: pr.draft, headSha: pr.head, mergeCommitSha: pr.mergeSha, mergedAt: pr.state === "merged" ? new Date().toISOString() : null }, checks: [], reviews: [], approvals: [], status: null, mergeable: true, mergeableState: "clean" });
+      return send(res, 200, { ok: true, pullRequest: { number: n, state: pr.state, draft: pr.draft, headSha: pr.head, mergeCommitSha: pr.mergeSha, mergedAt: pr.state === "merged" ? new Date().toISOString() : null }, checks: pr.checks ?? [], reviews: [], approvals: [], status: null, mergeable: true, mergeableState: "clean" });
     }
     if (path === "/v1/pulls/merge") {
       this.calls.push({ op: "merge", at: Date.now(), body: b });
@@ -168,6 +174,26 @@ export class FakeBroker {
       this.merges.push({ number: b.number, sha: b.headSha });
       if (this.dropAfterMerge > 0) { this.dropAfterMerge--; req.socket.destroy(); return; }
       return send(res, 200, { ok: true, merged: true, mergeSha: pr.mergeSha, alreadyMerged: false });
+    }
+    if (path === "/v1/onboarding/inspect") {
+      this.calls.push({ op: "inspect", at: Date.now(), body: b });
+      if (this.inspectResponse) return send(res, this.inspectResponse.status, this.inspectResponse.body);
+      return send(res, 200, { ok: true, ...(this.inspectFacts ?? {}), repo: b.repo });
+    }
+    if (path === "/v1/onboarding/pr") {
+      this.calls.push({ op: "onboarding-pr", at: Date.now(), body: b });
+      if (this.onboardingPrResponse) return send(res, this.onboardingPrResponse.status, this.onboardingPrResponse.body);
+      return send(res, 200, { ok: true, branch: b.branch, number: 12, url: "http://gh/pull/12", headSha: "d".repeat(40), created: true, changed: true, files: b.files.map((f: { path: string }) => ({ path: f.path, changed: true })) });
+    }
+    if (path === "/v1/onboarding/merge") {
+      this.calls.push({ op: "onboarding-merge", at: Date.now(), body: b });
+      if (this.onboardingMergeResponse) return send(res, this.onboardingMergeResponse.status, this.onboardingMergeResponse.body);
+      return send(res, 200, { ok: true, merged: true, mergeSha: "e".repeat(40), alreadyMerged: false });
+    }
+    if (path === "/v1/onboarding/canary") {
+      this.calls.push({ op: "canary", at: Date.now(), body: b });
+      if (this.canaryResponse) return send(res, this.canaryResponse.status, this.canaryResponse.body);
+      return send(res, 200, { ok: true, defaultBranch: "main", branch: "gantry/canary-x", published: true, draftOpened: true, prNumber: 3, closed: true, cleaned: true, checks: [{ name: "ci/test", status: "completed", conclusion: "success", app: "github-actions" }], directPush: "rejected", directPushDetail: "403 protected", error: null });
     }
     if (path === "/v1/reconcile") {
       this.calls.push({ op: "reconcile", at: Date.now(), body: b });

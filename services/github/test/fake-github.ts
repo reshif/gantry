@@ -51,6 +51,16 @@ export class FakeGithub {
   rulesets: any[] = [];
   protection: any = null;
   defaultBranch = "main";
+  language: string | null = "TypeScript";
+  archived = false;
+  /** Refs the rules protect: a PATCH to them is refused the way GitHub refuses a push that breaks a ruleset. */
+  protectedRefs = new Set<string>();
+  installationTargetType = "Organization";
+  /** Repositories the App is not installed on: the installation lookup answers 404. */
+  uninstalled = new Set<string>();
+  installedRepos: { full_name: string; language: string | null; private: boolean; archived: boolean; default_branch: string }[] = [];
+  /** Check runs the "CI" adds to a pushed head after `ciDelayRequests` further requests (0: immediately, -1: never). */
+  ciOnPush: { name: string; conclusion: string } | null = null;
   mergeResponse: { status: number; body: any } | null = null;
   private n = 0;
   private id = 100;
@@ -120,7 +130,7 @@ export class FakeGithub {
   private route(rec: Recorded): [number, unknown?] | null {
     const { method: m, path: p, body } = rec;
     let x: RegExpExecArray | null;
-    if (m === "GET" && (x = /^\/repos\/([^/]+)\/([^/]+)\/installation$/.exec(p))) return [200, { id: 77, app_slug: "gantry-test" }];
+    if (m === "GET" && (x = /^\/repos\/([^/]+)\/([^/]+)\/installation$/.exec(p))) return this.uninstalled.has(`${x[1]}/${x[2]}`) ? [404, { message: "Not Found" }] : [200, { id: 77, app_slug: "gantry-test" }];
     if (m === "POST" && (x = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(p))) {
       for (const [k, v] of Object.entries(body.permissions ?? {})) {
         const have = this.appPermissions[k];
@@ -131,7 +141,9 @@ export class FakeGithub {
       return [201, { token, expires_at: new Date(Date.now() + 3600_000).toISOString(), permissions: body.permissions, repository_selection: "selected" }];
     }
     if (m === "DELETE" && p === "/installation/token") { const t = this.tokens.get(rec.auth.replace(/^(token|Bearer) /, "")); if (t) t.revoked = true; return [204]; }
-    if (m === "GET" && /^\/app\/installations\/77$/.test(p)) return [200, { id: 77, app_slug: "gantry-test", permissions: this.appPermissions, repository_selection: "selected", target_type: "Organization" }];
+    if (m === "GET" && /^\/app\/installations\/77$/.test(p)) return [200, { id: 77, app_slug: "gantry-test", permissions: this.appPermissions, repository_selection: "selected", target_type: this.installationTargetType }];
+    if (m === "GET" && p === "/app/installations") return [200, [{ id: 77 }]];
+    if (m === "GET" && p === "/installation/repositories") return [200, { total_count: this.installedRepos.length, repositories: this.installedRepos }];
     if (m === "GET" && p === "/meta") return [200, { installed_version: "3.14.0" }];
     if (m === "GET" && p === "/app/hook/deliveries") return [200, this.deliveries];
     if (m === "POST" && (x = /^\/app\/hook\/deliveries\/(\d+)\/attempts$/.exec(p))) return [202, {}];
@@ -155,7 +167,19 @@ export class FakeGithub {
   private repoRoute(rec: Recorded, rest: string, body: any): [number, unknown?] | null {
     const m = rec.method;
     let x: RegExpExecArray | null;
-    if (m === "GET" && rest === "") return [200, { default_branch: this.defaultBranch }];
+    if (m === "GET" && rest === "") return [200, { default_branch: this.defaultBranch, language: this.language, archived: this.archived }];
+    if (m === "GET" && rest === "/languages") return [200, this.language ? { [this.language]: 1000 } : {}];
+    if (m === "GET" && (x = /^\/git\/trees\/([0-9a-f]+)$/.exec(rest))) {
+      const flat = this.trees.get(x[1]!);
+      if (!flat) return [404, { message: "Not Found" }];
+      return [200, { sha: x[1], truncated: false, tree: [...flat.entries()].map(([path, e]) => ({ path, mode: e.mode, type: e.type, sha: e.sha, size: this.blobs.get(e.sha)?.length ?? 0 })) }];
+    }
+    if (m === "GET" && (x = /^\/git\/blobs\/([0-9a-f]+)$/.exec(rest))) {
+      const b = this.blobs.get(x[1]!);
+      return b ? [200, { sha: x[1], encoding: "base64", content: b.toString("base64"), size: b.length }] : [404, { message: "Not Found" }];
+    }
+    if (m === "DELETE" && (x = /^\/git\/refs\/(.+)$/.exec(rest))) { const key = `refs/${x[1]}`; if (!this.refs.has(key)) return [422, { message: "Reference does not exist" }]; this.refs.delete(key); return [204]; }
+    if (m === "POST" && /^\/issues\/\d+\/comments$/.test(rest)) return [201, { id: ++this.id, body: body.body }];
     if (m === "POST" && rest === "/git/blobs") {
       const b = Buffer.from(body.content, body.encoding === "base64" ? "base64" : "utf8");
       const s = gitObj("blob", b); this.blobs.set(s, b); return [201, { sha: s }];
@@ -181,8 +205,8 @@ export class FakeGithub {
       const c = this.commits.get(x[1]!); return c ? [200, { sha: x[1], tree: { sha: c.tree }, parents: c.parents.map((s) => ({ sha: s })), message: c.message }] : [404, { message: "Not Found" }];
     }
     if (m === "GET" && (x = /^\/git\/ref\/(.+)$/.exec(rest))) { const s = this.refs.get(`refs/${x[1]}`); return s ? [200, { ref: `refs/${x[1]}`, object: { sha: s, type: "commit" } }] : [404, { message: "Not Found" }]; }
-    if (m === "POST" && rest === "/git/refs") { if (this.refs.has(body.ref)) return [422, { message: "Reference already exists" }]; if (!this.commits.has(body.sha)) return [422, { message: "Object does not exist" }]; this.refs.set(body.ref, body.sha); return [201, { ref: body.ref, object: { sha: body.sha } }]; }
-    if (m === "PATCH" && (x = /^\/git\/refs\/(.+)$/.exec(rest))) { const key = `refs/${x[1]}`; if (!this.refs.has(key)) return [422, { message: "Reference does not exist" }]; this.refs.set(key, body.sha); return [200, { ref: key, object: { sha: body.sha } }]; }
+    if (m === "POST" && rest === "/git/refs") { if (this.refs.has(body.ref)) return [422, { message: "Reference already exists" }]; if (!this.commits.has(body.sha)) return [422, { message: "Object does not exist" }]; this.refs.set(body.ref, body.sha); if (this.ciOnPush) this.checkRuns.push({ id: ++this.id, name: this.ciOnPush.name, status: "completed", conclusion: this.ciOnPush.conclusion, head_sha: body.sha, app: { slug: "github-actions" } }); return [201, { ref: body.ref, object: { sha: body.sha } }]; }
+    if (m === "PATCH" && (x = /^\/git\/refs\/(.+)$/.exec(rest))) { const key = `refs/${x[1]}`; if (!this.refs.has(key)) return [422, { message: "Reference does not exist" }]; if (this.protectedRefs.has(key)) return [403, { message: "Protected branch update failed: changes must be made through a pull request" }]; this.refs.set(key, body.sha); return [200, { ref: key, object: { sha: body.sha } }]; }
     if (m === "GET" && rest === "/pulls") {
       const head = rec.query.get("head")?.split(":")[1]; const state = rec.query.get("state") ?? "open";
       return [200, this.pulls.filter((q) => (!head || q.head.ref === head) && (state === "all" || q.state === state))];
@@ -194,7 +218,7 @@ export class FakeGithub {
     if ((x = /^\/pulls\/(\d+)$/.exec(rest))) {
       const pr = this.pulls.find((q) => q.number === Number(x![1])); if (!pr) return [404, { message: "Not Found" }];
       if (m === "GET") return [200, pr];
-      if (m === "PATCH") { Object.assign(pr, body.title ? { title: body.title } : {}, body.body !== undefined ? { body: body.body } : {}); return [200, pr]; }
+      if (m === "PATCH") { Object.assign(pr, body.title ? { title: body.title } : {}, body.body !== undefined ? { body: body.body } : {}, body.state ? { state: body.state } : {}); return [200, pr]; }
     }
     if (m === "PUT" && (x = /^\/pulls\/(\d+)\/merge$/.exec(rest))) {
       if (this.mergeResponse) return [this.mergeResponse.status, this.mergeResponse.body];

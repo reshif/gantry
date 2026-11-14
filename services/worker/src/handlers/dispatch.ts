@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { applyStationResult, attemptIsCurrent, issueRunToken, parseJob, revokeRunTokens } from "@gantry/api/core";
+import { applyStationResult, attemptIsCurrent, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
 import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg, PermanentError, TransientError } from "../errors.js";
@@ -14,12 +14,14 @@ interface Pinned {
   model: string | null;
   adapter: "claude" | "stub";
   wallClockSeconds: number;
+  /** The composition recorded on the run (spec 10.2): layer versions, instruction hash, skill versions. */
+  record: Record<string, unknown> | null;
 }
 
 /** Pins the agent version that will run (spec 13.1: agent version, skill versions, instruction hash, harness, model) and records it on the attempt. */
 async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
   const agentId = typeof a.attemptData.agent === "string" ? a.attemptData.agent : "";
-  const none: Pinned = { tupleId: null, model: null, adapter: "stub", wallClockSeconds: 3600 };
+  const none: Pinned = { tupleId: null, model: null, adapter: "stub", wallClockSeconds: 3600, record: null };
   if (!agentId) return none;
   const ag = (await tx.query<{ live_version: number | null; data: Record<string, unknown> }>(`select live_version, data from agents where org_id = $1 and id = $2`, [a.orgId, agentId])).rows[0];
   if (!ag || ag.live_version === null) return none;
@@ -27,14 +29,21 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
     `select body, harness_version, instruction_hash, model_id from agent_versions where org_id = $1 and agent_id = $2 and version = $3`, [a.orgId, agentId, ag.live_version],
   )).rows[0];
   if (!v) return none;
-  const skills = (await tx.query<{ skill_id: string; version: number | null }>(
-    `select s.id as skill_id, coalesce(k.pinned_version, s.live_version) as version from agent_skills k join skills s on s.org_id = k.org_id and s.id = k.skill_id where k.org_id = $1 and k.agent_id = $2 order by s.id`,
-    [a.orgId, agentId],
-  )).rows;
-  const skillVersions: Record<string, number> = {};
-  for (const s of skills) if (s.version !== null) skillVersions[s.skill_id] = s.version;
-  const model = v.model_id ?? (typeof v.body.model === "string" ? v.body.model : null);
-  const instruction = v.instruction_hash ?? sha(typeof v.body.instructions === "string" ? v.body.instructions : "");
+  // Spec 10.2: the four-layer composition (factory base, project overlay, this agent version, the repository's guidelines at the pinned commit) and the
+  // skills bundle are composed now and pinned, so the version tuple's instruction hash names the whole text the run is given.
+  const commit = a.repoId ? await resolveSeedCommit(tx, a.orgId, a.woId, a.repoId).catch(() => null) : null;
+  const run: RunPin | null = await pinRunConfig(tx, { orgId: a.orgId, agentId, agentVersion: ag.live_version, projectId: a.projectId, repoId: a.repoId, commit });
+  let skillVersions: Record<string, number> = run?.skillVersions ?? {};
+  if (!run) {
+    const skills = (await tx.query<{ skill_id: string; version: number | null }>(
+      `select s.id as skill_id, coalesce(k.pinned_version, s.live_version) as version from agent_skills k join skills s on s.org_id = k.org_id and s.id = k.skill_id where k.org_id = $1 and k.agent_id = $2 order by s.id`,
+      [a.orgId, agentId],
+    )).rows;
+    skillVersions = {};
+    for (const s of skills) if (s.version !== null) skillVersions[s.skill_id] = s.version;
+  }
+  const model = run?.modelOverride || v.model_id || (typeof v.body.model === "string" ? v.body.model : null);
+  const instruction = run?.composed.hash ?? v.instruction_hash ?? sha(typeof v.body.instructions === "string" ? v.body.instructions : "");
   const id = `tup-${sha([agentId, ag.live_version, instruction, v.harness_version, model ?? "", JSON.stringify(skillVersions)].join("\0")).slice(0, 20)}`;
   await tx.query(
     `insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
@@ -44,7 +53,8 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
   await tx.query(`update attempts set tuple_id = $3, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, a.attemptId, id]);
   const lim = (v.body.limits ?? ag.data.limits ?? {}) as { wallClockSeconds?: unknown };
   const wall = typeof lim.wallClockSeconds === "number" && Number.isInteger(lim.wallClockSeconds) && lim.wallClockSeconds > 0 ? lim.wallClockSeconds : 3600;
-  return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", wallClockSeconds: wall };
+  const record = run ? { instructionPin: run.pin, composed: { hash: run.composed.hash, layers: run.composed.layers.map((l) => ({ name: l.name, version: l.version, hash: l.hash })), skills: run.skills.map((x) => ({ id: x.id, version: x.version })), agentVersion: ag.live_version, tupleId: id } } : null;
+  return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", wallClockSeconds: wall, record };
 }
 
 /** Records the run, pins the tuple and issues a fresh per-run token (any earlier token of the run is revoked). All in one transaction. */
@@ -54,7 +64,7 @@ async function prepareRun(deps: Deps, a: AttemptInfo, runId: string): Promise<{ 
     await tx.query(
       `insert into runs (org_id, id, attempt_id, wo_id, state, model_id, data) values ($1,$2,$3,$4,'starting',$5,$6::jsonb)
        on conflict (org_id, id) do update set data = runs.data || excluded.data, model_id = excluded.model_id, updated_at = now()`,
-      [a.orgId, runId, a.attemptId, a.woId, pinned.model, JSON.stringify({ adapter: pinned.adapter, wallClockSeconds: pinned.wallClockSeconds, dispatch: { phase: "preparing", worker: deps.workerId } })],
+      [a.orgId, runId, a.attemptId, a.woId, pinned.model, JSON.stringify({ adapter: pinned.adapter, wallClockSeconds: pinned.wallClockSeconds, ...(pinned.record ?? {}), dispatch: { phase: "preparing", worker: deps.workerId } })],
     );
     await revokeRunTokens(tx, { orgId: a.orgId, runIds: [runId], reason: "re-dispatched" });
     const t = await issueRunToken(tx, runId, a.attemptId, a.fencing, { orgId: a.orgId });

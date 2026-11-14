@@ -31,6 +31,19 @@ export const JOB_SCHEMAS = {
   /** 'github' queue. */
   "github.reconcile": z.object({ repoId: id }),
   "github.event": z.object({ deliveryId: id }),
+  /** 'github' queue: repository onboarding (spec 11.3). `runId` names the assessment run the job belongs to; a job whose run is no longer current does nothing. */
+  "onboarding.assess": z.object({ repoId: id, runId: id }),
+  "onboarding.open_pr": z.object({ repoId: id, runId: id, by: id.nullable().default(null), request: z.string().max(5000).nullable().default(null) }),
+  "onboarding.merge": z.object({ repoId: id, runId: id, prNumber: z.number().int().positive(), headSha: z.string().regex(/^[0-9a-f]{40}$/), by: id }),
+  "onboarding.verify": z.object({ repoId: id, runId: id.nullable().default(null), trigger: z.enum(["merge", "manual", "schedule"]), by: id.nullable().default(null) }),
+  "onboarding.sync": z.object({ repoId: id }),
+  /** 'github' queue: an event from a source (a labelled issue, a pull request comment, a failing default-branch build) offered to the project's triggers (spec 11.7). Text fields are untrusted. */
+  "trigger.evaluate": z.object({
+    kind: z.enum(["issue", "comment", "ci"]), repo: z.string().min(1).max(300), title: z.string().max(2000).optional(), body: z.string().max(20000).optional(), labels: z.array(z.string().max(200)).max(100).optional(),
+    author: z.string().max(200).optional(), comment: z.string().max(20000).optional(), ref: z.string().max(300).optional(), url: z.string().max(1000).optional(), check: z.string().max(300).optional(), dedupeKey: z.string().min(1).max(300),
+  }),
+  /** 'github' queue: a schedule trigger came due (`due` is the instant it was scheduled for; it is also the run's dedupe key). */
+  "trigger.tick": z.object({ triggerId: id, due: z.string().min(1).max(40) }),
   /** 'system' queue. */
   "chain.verify": z.object({}),
   "reaper.sweep": z.object({}),
@@ -43,7 +56,8 @@ export type JobPayloadInput<K extends JobKind> = z.input<(typeof JOB_SCHEMAS)[K]
 
 export const JOB_QUEUE: { [K in JobKind]: Queue } = {
   "attempt.dispatch": "flow", "run.result": "flow", publish: "flow", "merge.request": "flow", "flow.timer": "flow",
-  "stop.enforce": "stop", "github.reconcile": "github", "github.event": "github", "chain.verify": "system", "reaper.sweep": "system",
+  "stop.enforce": "stop", "github.reconcile": "github", "github.event": "github", "trigger.evaluate": "github", "trigger.tick": "github", "chain.verify": "system", "reaper.sweep": "system",
+  "onboarding.assess": "github", "onboarding.open_pr": "github", "onboarding.merge": "github", "onboarding.verify": "github", "onboarding.sync": "github",
 };
 
 /** Outbox destinations (spec 6.2): delivered by the worker; chat and webhooks go through the edge forward proxy. */

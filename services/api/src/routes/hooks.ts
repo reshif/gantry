@@ -7,9 +7,13 @@
  */
 import type { FastifyPluginAsync } from "fastify";
 import { githubHookRoutes } from "../areas/github/hooks.js";
+import { slackHookRoutes } from "../areas/integrations/slack-hook.js";
 
 export const hookRoutes: FastifyPluginAsync = async (app) => {
   // POST /hooks/github: areas/github/hooks.ts (own encapsulated plugin: raw-body parser for the signature).
   await app.register(githubHookRoutes);
-  // Endpoints are registered here.
+  // POST /hooks/slack: areas/integrations/slack-hook.ts (interactive callbacks and `/gantry link`; signature, five-minute window and replay protection).
+  await app.register(slackHookRoutes);
+  // Microsoft Teams is listed in the catalogue but not yet available (spec 12.1): the endpoint says so instead of pretending to listen.
+  app.post("/hooks/teams", async (_req, reply) => reply.code(501).send({ ok: false, msg: "Microsoft Teams is not yet available in this version." }));
 };

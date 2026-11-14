@@ -74,4 +74,14 @@ export const versionOf = (x: unknown): number | undefined => {
   const v = (x as { version?: unknown } | null)?.version;
   return typeof v === "number" ? v : undefined;
 };
+/** The `If-Match` option for an entity read from the API (every versioned config entity carries `version`). */
+export const ifMatchOf = (x: unknown): { ifMatch: number } | undefined => {
+  const v = versionOf(x);
+  return v === undefined ? undefined : { ifMatch: v };
+};
+/** After a successful save: the version the server returned, or the next one (every save bumps it by one). */
+export const nextVersion = (result: unknown, current: number): number => {
+  const v = (result as { version?: unknown } | null)?.version;
+  return typeof v === "number" ? v : current + 1;
+};
 export const lockd = (reason: string, needs = "") => ({ allowed: false, reason, needs });

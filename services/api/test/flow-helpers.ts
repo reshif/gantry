@@ -3,6 +3,7 @@ import { expect } from "vitest";
 import type { Actor } from "../src/core/command.js";
 import { makeFx } from "../src/areas/workorders/ctx.js";
 import type { TestApp } from "./helpers.js";
+import { withVersion } from "./versions.js";
 
 export type M = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export interface Res { status: number; body: Record<string, any>; headers: Record<string, any> }
@@ -11,7 +12,7 @@ export function world(getT: () => TestApp) {
   const call = async (who: string, method: M, url: string, payload?: unknown, extra: Record<string, string> = {}, o: { authAgeSec?: number } = {}): Promise<Res> => {
     const t = getT();
     const s = await t.session(who, o);
-    const r = await t.app.inject({ method, url, headers: { ...s.headers, ...extra }, ...(payload === undefined ? {} : { payload: payload as object }) });
+    const r = await t.app.inject({ method, url, headers: { ...s.headers, ...(await withVersion(t.db.admin, method, url, extra)) }, ...(payload === undefined ? {} : { payload: payload as object }) });
     let body: Record<string, any> = {};
     try {
       body = r.json();

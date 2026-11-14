@@ -32,6 +32,7 @@ export function installErrorHandler(app: FastifyInstance): void {
     if (e instanceof Refusal) return sendRefusal(reply, e.error);
     if (e instanceof ZodError) return reply.code(422).send({ ok: false, msg: zodMsg(e) });
     const fe = e as { statusCode?: number; code?: string; message?: string };
+    if (fe.statusCode === 503 && fe.message) return reply.code(503).send({ ok: false, msg: fe.message });
     if (fe.statusCode && fe.statusCode >= 400 && fe.statusCode < 500) {
       const msg = fe.statusCode === 429 ? "Too many requests. Slow down and retry shortly." : fe.statusCode === 413 ? "Request body is too large." : fe.statusCode === 415 ? "Unsupported content type." : "The request could not be read.";
       return reply.code(fe.statusCode === 400 ? 422 : fe.statusCode).send({ ok: false, msg });

@@ -123,4 +123,33 @@ d("stop.enforce (spec 4.4, 9.7)", () => {
     expect(attempts[0].id).toBe(a.attemptId);
     expect(w.launcher.runs.size).toBe(1);
   });
+
+  it("spec 4.5: a halt gives the run a grace to checkpoint, then tears it down; a kill is immediate", async () => {
+    await w.close();
+    w = await startWorld({ cfg: { haltGraceMs: 60_000 } });
+    const a = await running("WO-9310");
+    await stop("wo:WO-9310:1", "wo", "WO-9310", "halt");
+    await w.drain();
+    // inside the grace: the attempt and its token are live, the container is untouched, the stop is not yet enforced, a later pass is queued
+    expect((await w.q(`select state, data->>'haltGraceUntil' as g from attempts where id = $1`, [a.attemptId]))[0]).toMatchObject({ state: expect.stringMatching(/queued|running/), g: expect.any(String) });
+    expect((await w.q(`select count(*)::int as n from run_tokens where run_id = $1 and revoked_at is null`, [a.runId]))[0].n).toBe(1);
+    expect(w.launcher.calls.some((c) => c.op === "stop")).toBe(false);
+    expect((await w.q(`select enforced_at from stops where id = 'wo:WO-9310:1'`))[0].enforced_at).toBeNull();
+    const later = (await w.q(`select count(*)::int as n from jobs where kind = 'stop.enforce' and status = 'queued' and run_at > now()`))[0].n;
+    expect(later).toBe(1);
+    // the grace ends: teardown
+    await w.q(`update attempts set data = data || jsonb_build_object('haltGraceUntil', to_char(now() - interval '1 second', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')) where id = $1`, [a.attemptId]);
+    await w.q(`update jobs set run_at = now() where status = 'queued'`);
+    await w.drain();
+    expect((await w.q(`select state from attempts where id = $1`, [a.attemptId]))[0].state).toBe("cancelled");
+    expect((await w.q(`select count(*)::int as n from run_tokens where run_id = $1 and revoked_at is null`, [a.runId]))[0].n).toBe(0);
+    expect(w.launcher.runs.has(a.runId)).toBe(false);
+    expect((await w.q(`select enforced_at from stops where id = 'wo:WO-9310:1'`))[0].enforced_at).not.toBeNull();
+    // kill: no grace even with the grace configured
+    const b = await running("WO-9311");
+    await stop("wo:WO-9311:1", "wo", "WO-9311", "kill", "hold");
+    await w.drain();
+    expect((await w.q(`select state from attempts where id = $1`, [b.attemptId]))[0].state).toBe("cancelled");
+    expect(w.launcher.runs.has(b.runId)).toBe(false);
+  });
 });

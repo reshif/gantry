@@ -314,6 +314,10 @@ export interface OnboardFinding {
   fix: string;
   file: string | null;
   manual?: boolean;
+  /** A gap in a required check blocks Ready; an advisory one is only listed. Absent on seeded demo data. */
+  required?: boolean;
+  /** What the assessment read to decide. Never a secret value. */
+  detail?: string;
 }
 export interface OnboardPrFile {
   path: string;
@@ -330,6 +334,9 @@ export interface OnboardPr {
   state: "open" | "merged" | "closed";
   reviewers: Id[];
   mergedBy: Id | null;
+  /** The pull request on GitHub and its head commit (what a merge is requested for). */
+  url?: string;
+  headSha?: string;
 }
 export interface TimelineEntry {
   at: Ms;
@@ -345,6 +352,14 @@ export interface RepoOnboarding {
   startedAt: Ms;
   readyAt?: Ms;
   blocker?: string;
+  /** Work the worker is doing for this repo right now (a command returned before it finished). */
+  busy?: "assessing" | "opening_pr" | "updating_pr" | "merging" | "verifying" | null;
+  /** The last live verification (spec 11.3 "Verified means"): each check with its result. */
+  verification?: { at: Ms; ok: boolean; trigger: "merge" | "manual" | "schedule"; unknown: boolean; checks: Array<{ id: string; label: string; ok: boolean; unknown?: boolean; detail: string; /** Set when this result is carried over from an earlier verification because the latest one did not run that check (the canary runs once a day). */ at?: number }> } | null;
+  /** The adapter the assessment ran with (stub: deterministic, reads the repo's facts; a model name when a key is configured). */
+  adapter?: string;
+  /** Guideline versions the assessment was made against. */
+  guidelines?: { org: number; project: number };
 }
 export interface RepoConfig {
   defaultBranch: string;
@@ -880,14 +895,22 @@ export interface EvalExtra {
 
 export interface McpTool {
   name: string;
+  /** The admin-set class (spec 12.4). */
   write: boolean;
   allowed: boolean;
+  /** The server's own suggestion of the class; only a hint. */
+  hint?: "read" | "write" | null;
+  description?: string;
+  /** Hash of the approved definition. */
+  hash?: string;
+  /** A rediscovery found a different definition: the server stays disabled until an admin re-approves it. */
+  changed?: boolean;
 }
 export type McpHealth = "healthy" | "degraded" | "failing" | "offline" | (string & {});
 export interface McpServer {
   id: Id;
   name: string;
-  transport: "http" | "stdio" | (string & {});
+  transport: "http" | "sse" | "stdio" | (string & {});
   url: string;
   auth: string;
   authMask: string;
@@ -895,6 +918,15 @@ export interface McpServer {
   sensitivity: string;
   writeGate: boolean;
   tools: McpTool[];
+  /** Registry fields of the real MCP gateway (spec 12.4); the legacy seed does not carry them. */
+  authMode?: "none" | "bearer" | "header";
+  authHeader?: string | null;
+  protocolRevision?: string;
+  enabled?: boolean;
+  disabledReason?: string | null;
+  healthDetail?: string | null;
+  discoveredAt?: Ms | null;
+  version?: number;
   projects: "all" | Id[];
   repos: "all" | Id[];
   agents: "all" | Id[];
@@ -907,8 +939,13 @@ export interface McpUsage {
   tool: string;
   agent: Id;
   project: Id;
-  outcome: "ok" | "error" | "gated" | "denied" | (string & {});
+  outcome: "ok" | "error" | "gated" | "denied" | "allowed" | (string & {});
   ms: number;
+  id?: number;
+  wo?: Id | null;
+  station?: string | null;
+  argsHash?: string | null;
+  reason?: string | null;
 }
 
 /* ------------------------------------------------------------------ integrations -------- */
@@ -938,6 +975,11 @@ export interface IntegrationType {
   custom?: boolean;
   createdBy?: Id;
   createdAt?: Ms;
+  /** False for types the catalogue lists but this version cannot connect (spec 12.1); `unavailableReason` says why. */
+  available?: boolean;
+  unavailableReason?: string;
+  /** Custom types: the templated HTTP request sent for each notification (spec 12.1). */
+  httpTemplate?: { method: "POST" | "PUT"; body: string; contentType: string };
 }
 export interface IntegrationInstance {
   id: Id;
@@ -953,6 +995,9 @@ export interface IntegrationInstance {
   createdAt: Ms;
   available?: Array<{ repo: string; lang: string }>;
   targetId?: string;
+  /** Result of the last connection test (real call), when one ran. */
+  lastTest?: { at: Ms; ok: boolean; by: Id; lines?: string[]; ms?: number };
+  version?: number;
 }
 export interface WebhookEndpoint {
   id: string;
@@ -984,11 +1029,22 @@ export interface Delivery {
   route?: string;
   override?: string | null;
   repo?: Id | null;
+  test?: boolean;
+  /** pending until the outbox sends it; failed is retrying; dead is out of attempts. */
+  state?: "pending" | "sent" | "failed" | "dead";
+  retriedAt?: Ms;
 }
 export interface CardTemplate {
   id: string;
   name: string;
   actions: string[];
+  kind?: string;
+  fields?: string[];
+  integration?: Id | null;
+  project?: Id | null;
+  by?: Id;
+  at?: Ms;
+  version?: number;
 }
 
 /* ------------------------------------------------------------------ api keys, triggers -- */
@@ -1003,12 +1059,20 @@ export interface ApiKey {
   lastUsed: Ms | null;
   revoked: boolean;
   by: Id;
+  /** When the key stops working (null: never). */
+  expires?: Ms | null;
+  expired?: boolean;
+  revokedAt?: Ms;
+  revokedBy?: Id;
 }
 export interface ApiConfig {
   rateLimit: number;
   burst: number;
   idempotencyHours: number;
   webhookSigning: string;
+  /** Master switch for every trigger (spec 15.3): off in a new install. */
+  triggersEnabled?: boolean;
+  version?: number;
 }
 export interface RequestLogEntry {
   at: Ms;
@@ -1020,9 +1084,44 @@ export interface RequestLogEntry {
 }
 export interface TriggerRun {
   at: Ms;
-  outcome: "created" | "deduped" | (string & {});
+  /** created, held (a proposal waits for a person), deduped, limited, refused, skipped. */
+  outcome: "created" | "deduped" | "held" | "limited" | "refused" | "skipped" | (string & {});
   wo: Id;
   source: string;
+  id?: string;
+  /** What decided it, in a sentence. */
+  msg?: string;
+  /** The held proposal this run made (spec 11.7). */
+  proposal?: string | null;
+  /** Gantry identity the work was attributed to, when the source user mapped to one. */
+  person?: Id | null;
+  simulated?: boolean;
+}
+/** Work a trigger holds for a person to release (spec 11.7): the acting source user has no Gantry identity allowed to submit, or the trigger always asks. */
+export interface TriggerProposal {
+  id: string;
+  trigger: Id;
+  project: Id;
+  repo: Id | null;
+  title: string;
+  description: string;
+  cls: string | null;
+  priority: string | null;
+  source: string;
+  actor: string | null;
+  reason: string;
+  status: "held" | "released" | "declined";
+  wo: Id | null;
+  at: Ms;
+  decidedBy: Id | null;
+  decidedAt: Ms | null;
+  note: string;
+}
+export interface TriggerLimits {
+  /** Work orders or proposals one trigger may make in an hour. */
+  perHour: number;
+  /** ... and in 24 hours (the trigger's budget). */
+  perDay: number;
 }
 export type TriggerType = "issue" | "comment" | "schedule" | "ci" | (string & {});
 export interface Trigger {
@@ -1042,6 +1141,18 @@ export interface Trigger {
   repos: string;
   runs: TriggerRun[];
   source?: string;
+  /** Title of the scheduled work (schedule triggers). */
+  title?: string;
+  /** Repo a schedule or build trigger files work in (default: the project's first ready repo). */
+  repo?: Id;
+  priority?: string;
+  limits?: TriggerLimits;
+  version?: number;
+  /** Next scheduled run (schedule triggers that are on). */
+  nextRun?: Ms | null;
+  /** Proposals waiting for a person. */
+  held?: number;
+  createdBy?: Id;
 }
 
 /* ------------------------------------------------------------------ access -------------- */

@@ -1,6 +1,7 @@
 /** Stop scopes and targets (spec 9.7). API ids are `${scope}:${targetId}` with scope factory|project|repo|workorder; rows use scope_type factory|project|repo|wo. */
 import type { Queryable } from "@gantry/db";
 import { invalid, refuse } from "../../core/errors.js";
+import { readStopSnapshot } from "../../core/stop-snapshot.js";
 
 export type ScopeType = "factory" | "project" | "repo" | "wo";
 export type ApiScope = "factory" | "project" | "repo" | "workorder";
@@ -36,17 +37,37 @@ export async function resolveTarget(db: Queryable, orgId: string, scopeIn: strin
   if (scope === "factory") return { scope, target: null, project: null, repo: null, wo: null, name: "the factory", regulated: false };
   const id = (idIn ?? "").trim();
   if (!id) throw invalid("Say which one.");
+  // Spec 8.5, I7: if the projects or repos tables cannot be read, the target comes from the break-glass snapshot. Work orders have no fallback: the lookup is one row of work_orders.
+  const snap = async () => (await readStopSnapshot(db, orgId).catch(() => null))?.snapshot ?? null;
   if (scope === "project") {
-    const p = (await db.query<{ id: string; name: string; regulated: boolean }>(`select id, name, regulated from projects where org_id = $1 and id = $2`, [orgId, id])).rows[0];
+    const p = await (async () => {
+      try {
+        return (await db.query<{ id: string; name: string; regulated: boolean }>(`select id, name, regulated from projects where org_id = $1 and id = $2`, [orgId, id])).rows[0];
+      } catch (err) {
+        const s = await snap();
+        if (!s) throw err;
+        return s.projects.find((x) => x.id === id);
+      }
+    })();
     if (!p) throw refuse("not_found", "No such project.");
     return { scope, target: p.id, project: p.id, repo: null, wo: null, name: p.name, regulated: p.regulated };
   }
   if (scope === "repo") {
-    const r = (await db.query<{ id: string; name: string; project_id: string }>(`select id, name, project_id from repos where org_id = $1 and (id = $2 or name = $2) order by (id = $2) desc limit 1`, [orgId, id])).rows[0];
+    const r = await (async () => {
+      try {
+        return (await db.query<{ id: string; name: string; project_id: string }>(`select id, name, project_id from repos where org_id = $1 and (id = $2 or name = $2) order by (id = $2) desc limit 1`, [orgId, id])).rows[0];
+      } catch (err) {
+        const s = await snap();
+        if (!s) throw err;
+        return s.repos.find((x) => x.id === id || x.name === id);
+      }
+    })();
     if (!r) throw refuse("not_found", "No such repo.");
     return { scope, target: r.id, project: r.project_id, repo: r.id, wo: null, name: r.name, regulated: false };
   }
-  const w = (await db.query<{ id: string; project_id: string; repo_id: string | null }>(`select id, project_id, repo_id from work_orders where org_id = $1 and id = $2`, [orgId, id.toUpperCase()])).rows[0];
+  const w = (await db.query<{ id: string; project_id: string; repo_id: string | null }>(`select id, project_id, repo_id from work_orders where org_id = $1 and id = $2`, [orgId, id.toUpperCase()]).catch((err: unknown) => {
+    throw Object.assign(new Error("Work orders cannot be read right now, so this work order cannot be looked up. Kill its project instead."), { cause: err, statusCode: 503 });
+  })).rows[0];
   if (!w) throw refuse("not_found", "No such work order.");
   return { scope, target: w.id, project: w.project_id, repo: w.repo_id, wo: w.id, name: w.id, regulated: false };
 }

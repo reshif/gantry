@@ -13,6 +13,7 @@ import { MiniBelt, metricsOf, projectRoles, roleName, useRes, useTeams } from ".
 import { useSaveFromProject } from "../projects/templates";
 import { useTemplates } from "../../api/queries";
 import { membersOf, rolesIn, type PcProps } from "./ctx";
+import { nextVersion } from "../govern/data";
 
 export function OverviewTab({ p, cat, people, s, set }: PcProps) {
   const res = useRes();
@@ -54,11 +55,14 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
             <Btn kind="primary" id="pcf-ov-save" guard={d} label="Save details" onClick={async () => {
               if (!dirty) return void ui.toast("No changes to save.", "info");
               let ok = true;
-              if (desc !== (p.desc ?? "")) ok = res(await ops.setProject(p.id, "desc", desc.trim(), { ifMatch: p.version }), "Description saved.").ok;
-              if (ok && overlay !== (p.overlay ?? "")) {
-                // the description save bumped the project version
-                res(await ops.setProject(p.id, "overlay", overlay.trim()), "Instructions overlay saved.");
+              let ver = p.version;
+              if (desc !== (p.desc ?? "")) {
+                const x = await ops.setProject(p.id, "desc", desc.trim(), { ifMatch: ver });
+                ok = res(x, "Description saved.").ok;
+                // the description save bumped the project version; the next save must carry the new one
+                if (x.ok) ver = nextVersion(x, ver);
               }
+              if (ok && overlay !== (p.overlay ?? "")) res(await ops.setProject(p.id, "overlay", overlay.trim(), { ifMatch: ver }), "Instructions overlay saved.");
               set({ text: {} });
             }} />
             {dirty ? <Btn kind="ghost" id="pcf-ov-discard" label="Discard" onClick={() => set({ text: {} })} /> : null}

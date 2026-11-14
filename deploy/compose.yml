@@ -81,6 +81,8 @@ services:
       GITHUB_BROKER_URL: http://gantry-github:9200
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
+      # Connection tests for chat and webhook integrations leave through the edge allow-list, like deliveries do.
+      GANTRY_EGRESS_PROXY: http://gantry-edge:8444
       GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-true}
       # Off by default: the org starts empty and the first sign-in with GANTRY_BOOTSTRAP_ADMIN_EMAIL becomes Factory Admin.
       # GANTRY_DEV_SEED=true loads the legacy demo data (people, projects, repos, policies) once, for development and demos only.

@@ -243,7 +243,7 @@ export function FlowTab({ p, cat, s, set }: PcProps) {
   const setClasses = async (fn: (arr: WorkClass[]) => void) => {
     const arr = clone(p.flow.classes);
     fn(arr);
-    res(await ops.setProject(p.id, "flow.classes", arr), "Class routes saved.");
+    res(await ops.setProject(p.id, "flow.classes", arr, { ifMatch: p.version }), "Class routes saved.");
   };
   const dialog = (render: (close: () => void) => ReactNode) => ui.open(render);
   void agents;
@@ -289,26 +289,26 @@ export function FlowTab({ p, cat, s, set }: PcProps) {
                       {st.id === "intake" ? (
                         <span data-tip="Intake is always on: every work order starts there." tabIndex={0} className="muted small"><Icon name="lock" /> always on</span>
                       ) : (
-                        <Toggle id={`pcf-st-${st.id}`} checked={cfg.enabled} decision={d} label={`${st.name} on`} onChange={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v), `${st.name}${v ? " turned on." : " turned off."}`)} />
+                        <Toggle id={`pcf-st-${st.id}`} checked={cfg.enabled} decision={d} label={`${st.name} on`} onChange={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " turned on." : " turned off."}`)} />
                       )}
                     </td>
-                    <td><NumInput id={`pcf-wip-${st.id}`} value={cfg.wip} min={1} max={30} locked={!d.allowed} label={`${st.name} WIP limit`} onCommit={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v), `${st.name} WIP limit set to ${v}.`)} /></td>
+                    <td><NumInput id={`pcf-wip-${st.id}`} value={cfg.wip} min={1} max={30} locked={!d.allowed} label={`${st.name} WIP limit`} onCommit={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `${st.name} WIP limit set to ${v}.`)} /></td>
                     <td className={`num mono${here > cfg.wip ? " neg" : ""}`}>{here + (here > cfg.wip ? " over" : "")}</td>
                     <td>
                       {st.id === "build" ? (
                         <div className="pcf-slots">
-                          <NumInput id="pcf-slots" value={p.flow.slots} min={1} max={8} locked={!d.allowed} label="Coding slots" onCommit={async (v) => res(await ops.setProject(p.id, "flow.slots", v), `Coding slots set to ${v}.`)} />
+                          <NumInput id="pcf-slots" value={p.flow.slots} min={1} max={8} locked={!d.allowed} label="Coding slots" onCommit={async (v) => res(await ops.setProject(p.id, "flow.slots", v, { ifMatch: p.version }), `Coding slots set to ${v}.`)} />
                           <span className="small muted">{`${m.slotsUsed} in use`}</span>
                         </div>
                       ) : null}
                     </td>
                     <td className="pcf-order">
                       {fixed ? <span className="muted small pcf-fixed" data-tip={st.id === "intake" ? "Intake stays first." : "Close stays last."} tabIndex={0}><Icon name="lock" />{st.id === "intake" ? " first" : " last"}</span> : null}
-                      {fixed ? null : <Btn small kind="ghost" icon="up" id={`pcf-mv-up-${st.id}`} aria={`Move ${st.name} earlier`} guard={fd} disabledReason={fd.allowed ? upWhy : null} onClick={async () => { res(await ops.moveStation(p.id, st.id, -1)); focusLater(`pcf-mv-up-${st.id}`); }} />}
-                      {fixed ? null : <Btn small kind="ghost" icon="down" id={`pcf-mv-dn-${st.id}`} aria={`Move ${st.name} later`} guard={fd} disabledReason={fd.allowed ? downWhy : null} onClick={async () => { res(await ops.moveStation(p.id, st.id, 1)); focusLater(`pcf-mv-dn-${st.id}`); }} />}
+                      {fixed ? null : <Btn small kind="ghost" icon="up" id={`pcf-mv-up-${st.id}`} aria={`Move ${st.name} earlier`} guard={fd} disabledReason={fd.allowed ? upWhy : null} onClick={async () => { res(await ops.moveStation(p.id, st.id, -1, { ifMatch: p.version })); focusLater(`pcf-mv-up-${st.id}`); }} />}
+                      {fixed ? null : <Btn small kind="ghost" icon="down" id={`pcf-mv-dn-${st.id}`} aria={`Move ${st.name} later`} guard={fd} disabledReason={fd.allowed ? downWhy : null} onClick={async () => { res(await ops.moveStation(p.id, st.id, 1, { ifMatch: p.version })); focusLater(`pcf-mv-dn-${st.id}`); }} />}
                       {st.custom ? (
                         <Btn small kind="ghost" icon="x" id={`pcf-st-rm-${st.id}`} aria={`Remove ${st.name}`} label="Remove" guard={fd} disabledReason={fd.allowed && here ? `${here} work order${here > 1 ? "s are" : " is"} at ${st.name}. Move them first.` : null}
-                          onClick={() => ui.typedConfirm({ title: `Remove ${st.name}`, kicker: `Flow · ${p.name}`, sub: "Its gate goes too. Routes skip it from now on. History keeps the station's past entries.", phrase: st.name, okLabel: "Remove station", guard: fd, onOk: async () => { const r = await ops.removeStation(p.id, st.id); ui.toast(r.msg, r.ok ? "ok" : "error"); return r.ok ? undefined : { ok: false, msg: r.msg }; } })} />
+                          onClick={() => ui.typedConfirm({ title: `Remove ${st.name}`, kicker: `Flow · ${p.name}`, sub: "Its gate goes too. Routes skip it from now on. History keeps the station's past entries.", phrase: st.name, okLabel: "Remove station", guard: fd, onOk: async () => { const r = await ops.removeStation(p.id, st.id, { ifMatch: p.version }); ui.toast(r.msg, r.ok ? "ok" : "error"); return r.ok ? undefined : { ok: false, msg: r.msg }; } })} />
                       ) : null}
                     </td>
                   </tr>
@@ -339,7 +339,7 @@ export function FlowTab({ p, cat, s, set }: PcProps) {
                       </th>
                       <td className="small">
                         <div>
-                          <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.label} mode`} disabled={!d.allowed || g.id === "G0G1"} options={opts} value={mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v))} />
+                          <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.label} mode`} disabled={!d.allowed || g.id === "G0G1"} options={opts} value={mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }))} />
                           {mode !== "human" && (g.checks ?? []).length ? <div className="muted small">{g.checks.join(", ")}</div> : null}
                         </div>
                       </td>
@@ -347,7 +347,7 @@ export function FlowTab({ p, cat, s, set }: PcProps) {
                         {g.id === "G0G1" ? (
                           <span data-tip="The brief confirmation gate cannot be turned off." tabIndex={0} className="muted small"><Icon name="lock" /> always on</span>
                         ) : (
-                          <Toggle id={`pcf-gate-${g.id}`} checked={on} decision={d} label={`${g.label} on`} onChange={async (v) => res(await ops.setProject(p.id, `flow.gates.${g.id}.enabled`, v), `${g.label}${v ? " turned on." : " turned off."}`)} />
+                          <Toggle id={`pcf-gate-${g.id}`} checked={on} decision={d} label={`${g.label} on`} onChange={async (v) => res(await ops.setProject(p.id, `flow.gates.${g.id}.enabled`, v, { ifMatch: p.version }), `${g.label}${v ? " turned on." : " turned off."}`)} />
                         )}
                       </td>
                       <td>{mode === "auto" ? <span className="muted small">no approvers</span> : <Btn small kind="ghost" id={`pcf-gate-ap-${g.id}`} label="Approvers" onClick={() => set({ tab: "approvers", gate: g.id })} />}</td>
@@ -393,7 +393,7 @@ export function FlowTab({ p, cat, s, set }: PcProps) {
               const fresh = flowFrom(cat, tpl).classes;
               for (const c of fresh) { const cur = p.flow.classes.find((x) => x.id === c.id); if (cur) c.enabled = cur.enabled; }
               for (const c of p.flow.classes.filter((x) => x.custom)) fresh.push(clone(c));
-              res(await ops.setProject(p.id, "flow.classes", fresh), "Built-in class routes reset to the template. Custom classes kept.");
+              res(await ops.setProject(p.id, "flow.classes", fresh, { ifMatch: p.version }), "Built-in class routes reset to the template. Custom classes kept.");
             }} />
           </div>
         </div>

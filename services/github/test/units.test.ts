@@ -108,6 +108,10 @@ describe("small things", () => {
   });
   it("never asks for a permission outside spec 11.1, and never for administration write or secrets", () => {
     const allowed: Record<string, string[]> = { metadata: ["read"], contents: ["read", "write"], pull_requests: ["read", "write"], issues: ["read", "write"], checks: ["read", "write"], actions: ["read"], statuses: ["read"], administration: ["read"] };
-    for (const [op, perms] of Object.entries(OPERATIONS)) for (const [k, v] of Object.entries(perms)) expect(allowed[k]?.includes(v), `${op}: ${k}=${v}`).toBe(true);
+    for (const [op, perms] of Object.entries(OPERATIONS)) for (const [k, v] of Object.entries(perms)) {
+      // Workflows write is requested only for an onboarding pull request that adds a workflow file (spec 11.1).
+      if (k === "workflows") { expect(op, "workflows may be requested only by the workflow-adding onboarding pull request").toBe("onboard_pr_workflows"); expect(v).toBe("write"); continue; }
+      expect(allowed[k]?.includes(v), `${op}: ${k}=${v}`).toBe(true);
+    }
   });
 });
