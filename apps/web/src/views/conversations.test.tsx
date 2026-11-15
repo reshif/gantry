@@ -33,7 +33,7 @@ const session = (over: Partial<WoSession> = {}): WoSession => ({
   agent: { mode: "agent", name: "Intake Clerk", id: "ag-intake", model: "claude-haiku-5-5", vendor: "anthropic", version: 1, station: "intake" },
   budget: { spentUsd: 0.02, limitUsd: 0.5 }, costUsd: 0.02, can: { talk: true, talkWhy: "", confirm: true, confirmWhy: "" },
   steps: [{ id: "intake", name: "Intake", state: "current" }, { id: "plan", name: "Plan", state: "todo" }],
-  next: { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }, waiting: null, pending: [],
+  next: { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }, waiting: null, pending: [], dialogue: { questions: [], assumptions: [], askedMe: false }, documents: [],
   brief: { ...BRIEF, goal: "", scopeIn: [], ac: [], route: [], children: [] } as never, briefConfirmed: false, briefOpen: true, ruleQuestion: null, ruleReady: false, busy: false, ...over,
 });
 const withProposal = (): WoSession => session({
@@ -156,5 +156,67 @@ describe("Open conversation from the traveler", () => {
     expect(screen.getByRole("img", { name: "Unread messages" })).toBeTruthy();
     fireEvent.click(btn);
     await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/conversations/${W.id}`));
+  });
+});
+
+describe("Station questions, assumptions and documents in the session", () => {
+  const q = (over: Record<string, unknown> = {}) => ({ id: "Q-AT1-1", station: "research", attemptId: "AT1", askedBy: "ag-research", question: "Which currency should refunds use?", why: "Rounding differs per currency.", options: ["EUR", "USD"], blocking: true, askOf: "requester", status: "open" as const, answer: null, answerKind: null, answeredBy: null, answeredAt: null, createdAt: Date.now() - 1000, mine: true, ...over });
+  const asked = (over: Partial<WoSession> = {}) => session({
+    wo: { ...session().wo, station: "research", stationName: "Research", bay: "person", gate: null },
+    messages: [{ id: "wm-st", role: "assistant", author: "ag-research", text: "Research needs an answer before going on.", at: Date.now(), data: { kind: "station", mode: "agent", agent: "ag-research", cards: [{ kind: "document", id: "art-1", name: "research.md", version: 1 }, { kind: "station_question", id: "Q-AT1-1" }, { kind: "assumptions", station: "research", attempt: "AT1", count: 1 }] } as never }],
+    next: { actor: "you", text: "Research is waiting for your answer below." }, waiting: { text: "Waiting for you: 1 question from Research", kind: "you" },
+    dialogue: { questions: [q()], assumptions: [{ id: "A-AT1-1", station: "research", attemptId: "AT1", madeBy: "ag-research", statement: "Refunds are always full refunds", because: "The request says refund the order.", impact: "high", status: "open", note: null, decidedBy: null, decidedAt: null, createdAt: Date.now() }], askedMe: true },
+    documents: [{ id: "art-1", doc: "research.md", station: "research", version: 1, supersedes: null, authorKind: "agent", authorId: "ag-research", attemptId: "AT1", size: 10, contentHash: "a".repeat(64), createdAt: Date.now(), acceptedBy: null }],
+    ...over,
+  });
+
+  it("the person asked answers with a suggestion; the status line says the station waits for them", async () => {
+    const calls = await showSession(asked(), { [`POST /api/v1/work-orders/${W.id}/questions/Q-AT1-1/answer`]: () => ({ body: { ok: true, msg: "Answer recorded; Research runs again with it.", resumed: true } }) });
+    expect(document.getElementById("wos-status")!.textContent).toContain("Research is waiting for your answer below.");
+    expect(screen.getByText("Why it matters:")).toBeTruthy();
+    expect(screen.getByText(/Research asks the requester \(you\)/)).toBeTruthy();
+    expect(document.querySelector("#wos-asks")?.textContent).toContain("asks you");
+    fireEvent.click(screen.getByRole("button", { name: "EUR" }));
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/questions/Q-AT1-1/answer`)).toHaveLength(1));
+    expect(posts(calls, `/api/v1/work-orders/${W.id}/questions/Q-AT1-1/answer`)[0]!.body).toEqual({ kind: "answer", answer: "EUR" });
+  });
+
+  it("someone else sees whom it waits on; an answered question shows who answered", async () => {
+    await showSession(asked({ next: { actor: "person", text: "Research is waiting for an answer from the requester." }, dialogue: { questions: [q({ status: "answered", answer: "EUR", answerKind: "answer", answeredBy: "p-tomas", answeredAt: Date.now(), mine: false })], assumptions: [], askedMe: false } }));
+    expect(document.getElementById("wos-status")!.textContent).toContain("Research is waiting for an answer from the requester.");
+    const card = document.querySelector("#sq-Q-AT1-1")!;
+    expect(card.textContent).toContain("Answered");
+    expect(card.textContent).toContain("EUR");
+    expect(card.querySelector("textarea")).toBeNull();
+  });
+
+  it("an assumption can be corrected, and the correction needs words", async () => {
+    const calls = await showSession(asked(), { [`POST /api/v1/work-orders/${W.id}/assumptions/A-AT1-1`]: () => ({ body: { ok: true, msg: "Correction recorded; later stations work from it." } }) });
+    expect(screen.getByText("Refunds are always full refunds", { selector: ".as-statement" })).toBeTruthy();
+    fireEvent.click(document.getElementById("as-A-AT1-1-fix")!);
+    const save = document.getElementById("as-A-AT1-1-save") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(document.getElementById("as-A-AT1-1-note")!, { target: { value: "Partial refunds too." } });
+    fireEvent.click(save);
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/assumptions/A-AT1-1`)[0]?.body).toEqual({ status: "corrected", note: "Partial refunds too." }));
+  });
+
+  it("a document card opens the viewer: outline, versions, and the change against the previous version", async () => {
+    const v1 = { id: "art-1", doc: "research.md", station: "research", version: 1, supersedes: null, authorKind: "agent", authorId: "ag-research", attemptId: "AT1", size: 10, contentHash: "a".repeat(64), createdAt: Date.now() - 5000, acceptedBy: null };
+    const v2 = { ...v1, id: "art-2", version: 2, supersedes: "art-1", attemptId: "AT2", createdAt: Date.now() };
+    await showSession(asked(), {
+      [`GET /api/v1/work-orders/${W.id}/documents`]: () => ({ body: { items: [v1, v2] } }),
+      [`GET /api/v1/work-orders/${W.id}/documents/art-1`]: () => ({ body: { ...v1, body: "# Research\n\n## Findings\n\nRetry lives in sync.py.\n" } }),
+      [`GET /api/v1/work-orders/${W.id}/documents/art-2`]: () => ({ body: { ...v2, body: "# Research\n\n## Findings\n\nRetry lives in jobs/sync.py.\n\n## Sources\n\n| File | Lines |\n|---|---|\n| jobs/sync.py | 15-34 |\n" } }),
+    });
+    fireEvent.click(document.getElementById("wos-doc-art-1")!);
+    expect(await screen.findByText(/Version 1 · written by/)).toBeTruthy();
+    fireEvent.change(await screen.findByLabelText("Version"), { target: { value: "art-2" } });
+    expect(await screen.findByRole("columnheader", { name: "File" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "On this page" }).textContent).toContain("Sources");
+    fireEvent.click(screen.getByRole("button", { name: "Compare with v1" }));
+    const diff = await screen.findByLabelText("Changes since version 1");
+    expect(diff.querySelector(".doc-dl.is-del")?.textContent).toContain("Retry lives in sync.py.");
+    expect(diff.querySelector(".doc-dl.is-add")?.textContent).toContain("Retry lives in jobs/sync.py.");
   });
 });

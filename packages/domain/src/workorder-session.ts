@@ -22,7 +22,11 @@ export interface BriefChange { field: keyof BriefDraft; label: string; before: s
 
 export type WoCard =
   | { kind: "progress"; text: string; detail?: string }
-  | { kind: "question"; id: string; question: string; options: string[]; answered?: string }
+  | { kind: "question"; id: string; question: string; options: string[]; answered?: string; blocking?: boolean }
+  /** A station's document version (artefact id) and a question a station asked (wo_questions id): the thread reads their live state by id. */
+  | { kind: "document"; id: string; name: string; version: number }
+  | { kind: "station_question"; id: string }
+  | { kind: "assumptions"; station: string; attempt?: string; count: number }
   | {
       kind: "proposal"; id: string; what: "brief" | "reclassify" | "decline"; title: string; summary: string; mode: "agent" | "rule-based";
       status: "pending" | "approved" | "changes" | "discarded" | "superseded" | "failed"; decidedBy?: string; note?: string;

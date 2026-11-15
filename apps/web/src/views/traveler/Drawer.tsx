@@ -16,6 +16,7 @@ import { Journey } from "./Journey";
 import { ArtefactsTab, BriefTab, HistoryTab } from "./Tabs";
 import { bayLabel, stName, stNo, useTravelerWo } from "./model";
 import { setTravelerTab, useTravelerTab } from "./state";
+import { DocViewer } from "../documents/DocViewer";
 import { useRepoName } from "./repo";
 import { ApproversPanel } from "./Approvers";
 import { navigate } from "../../lib/router";
@@ -68,11 +69,12 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
     { id: "journey", label: "Journey" },
     { id: "lifecycle", label: "Lifecycle" },
     { id: "brief", label: "Brief" },
+    { id: "documents", label: "Documents" },
     { id: "artefacts", label: "Artefacts" },
     { id: "history", label: "History" },
   ];
   const body =
-    tab === "lifecycle" ? <Lifecycle woId={wo.id} compact /> : tab === "brief" ? <BriefTab wo={wo} cat={cat} /> : tab === "artefacts" ? <ArtefactsTab wo={wo} project={project} /> : tab === "history" ? <HistoryTab wo={wo} /> : <Journey wo={wo} project={project} cat={cat} />;
+    tab === "lifecycle" ? <Lifecycle woId={wo.id} compact /> : tab === "brief" ? <BriefTab wo={wo} cat={cat} /> : tab === "documents" ? <DocViewer woId={wo.id} /> : tab === "artefacts" ? <ArtefactsTab wo={wo} project={project} /> : tab === "history" ? <HistoryTab wo={wo} /> : <Journey wo={wo} project={project} cat={cat} />;
   const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;
   return (
     <div className={`drawer-inner trv-drawer${wo.state === "killed" ? " is-killed" : ""}`}>

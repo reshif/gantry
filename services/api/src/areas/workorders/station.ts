@@ -12,7 +12,8 @@ import { schedule, type Tx } from "@gantry/db";
 import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, type Fx } from "./engine.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { lockWo, saveWo, type Wo } from "./model.js";
-import { saveConversation } from "./conversation.js";
+import { recordDialogue, type QuestionRow } from "./documents.js";
+import { addWoMessage, updateId } from "./session/store.js";
 
 /** The whole summary goes in the thread (lists truncate their own previews); the cap only guards against a runaway output. */
 const clip = (t: string): string => (t.length > 8000 ? `${t.slice(0, 8000)}…` : t);
@@ -76,6 +77,23 @@ function absorbOutput(w: Wo, station: string, r: StationResult): { checks: Obser
   return { checks, headSha: r.observed?.headSha ?? (typeof out.headSha === "string" ? out.headSha : undefined) };
 }
 
+/**
+ * The station's own message in the work order's session: what it said, the documents it wrote and the questions it asked (as cards that read their
+ * live state). Posted once per attempt; the event scan then leaves this attempt's "finished" line out.
+ */
+async function postStationMessage(fx: Fx, w: Wo, station: string, attemptId: string, text: string, questions: QuestionRow[], assumptions = 0): Promise<void> {
+  const docs = (await fx.tx.query<{ id: string; doc: string; version: number }>(`select id, doc, version from artefacts where org_id = $1 and wo_id = $2 and attempt_id = $3 and doc is not null order by doc`, [fx.orgId, w.id, attemptId])).rows;
+  if (!docs.length && !questions.length && !assumptions) return;
+  const id = updateId(fx.orgId, w.id, `station:${attemptId}`);
+  if ((await fx.tx.query(`select 1 from workorder_messages where org_id = $1 and id = $2`, [fx.orgId, id])).rowCount) return;
+  const cards = [
+    ...docs.map((d) => ({ kind: "document" as const, id: d.id, name: d.doc, version: d.version })),
+    ...questions.map((q) => ({ kind: "station_question" as const, id: q.id })),
+    ...(assumptions ? [{ kind: "assumptions" as const, station, attempt: attemptId, count: assumptions }] : []),
+  ];
+  await addWoMessage(fx.tx, fx.orgId, w.id, "assistant", fx.actor, text, { kind: "station", station, mode: "agent", agent: fx.actor, cards }, fx.now, id);
+}
+
 async function failCount(tx: Tx, orgId: string, woId: string, station: string): Promise<number> {
   return Number((await tx.query(`select count(*)::int as n from attempts where org_id = $1 and wo_id = $2 and station = $3 and state = 'failed' and (data->>'streakBroken') is null`, [orgId, woId, station])).rows[0].n);
 }
@@ -125,6 +143,8 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
   let next = "";
   if (result.status === "succeeded") {
     const { checks, headSha } = absorbOutput(w, sid, result);
+    const dl = await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue: asObj(result.output).dialogue, now });
+    await postStationMessage(fx, w, sid, attemptId, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${clip(result.summary)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`, dl.questions, dl.assumptions);
     closeEntry(w, fx, "passed", result.summary ?? "");
     w.data.progress = 100;
     note(w, fx, fx.actor, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${clip(result.summary)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`);
@@ -132,14 +152,17 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     await arriveAtGate(fx, w, fx.actor, { project: p, ...(checks ? { checks } : {}), ...(headSha !== undefined ? { headSha } : {}) });
     next = bayOf(fx.catalog, w) ?? stationIdOf(fx.catalog, w);
   } else if (result.status === "needs_person") {
-    closeEntry(w, fx, "question");
-    const q = typeof asObj(result.output).question === "string" ? String(asObj(result.output).question) : result.summary ?? "The agent needs a decision.";
-    const conv = (await loadOne(fx, w)).conv;
-    const c2 = structuredClone(conv);
-    c2.raised.push({ station: sid, text: q, at: now.getTime(), answered: false });
-    c2.messages.push({ from: fx.actor, at: now.getTime(), text: q });
-    await saveConversation(fx, w.id, c2, conv.messages.length, "open");
-    await needsPerson(fx, w, `Question raised at ${stationDef(fx.catalog, sid)?.name ?? sid}`);
+    closeEntry(w, fx, "question", result.summary ?? "");
+    const out = asObj(result.output);
+    // An older runner reports one `output.question`; the station tools report `output.dialogue`. Either way the questions become rows.
+    const dialogue = out.dialogue ?? (typeof out.question === "string" ? { questions: [{ question: out.question, why: "", blocking: true }] } : { questions: [{ question: result.summary || "The agent needs a decision to go on.", why: "", blocking: true }] });
+    const dl = await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue, now });
+    const waiting = dl.questions.filter((q) => q.blocking);
+    const name = stationDef(fx.catalog, sid)?.name ?? sid;
+    w.data.waitingOn = { station: sid, attempt: attemptId, questions: waiting.map((q) => q.id), askOf: [...new Set(waiting.map((q) => q.askOf))] };
+    await postStationMessage(fx, w, sid, attemptId, result.summary || `${name} needs ${waiting.length === 1 ? "an answer" : `${waiting.length} answers`} before going on.`, dl.questions, dl.assumptions);
+    await needsPerson(fx, w, `Waiting for ${waiting.length === 1 ? "an answer" : `${waiting.length} answers`} at ${name}`);
+    ev(fx, w, "wo.question", { station: sid, text: waiting.map((q) => q.question).join(" · ").slice(0, 300) }, { category: "flow" });
     next = "person";
   } else {
     closeEntry(w, fx, result.status === "failed" ? "failed" : "interrupted", result.error?.msg ?? result.summary ?? "");
@@ -259,4 +282,4 @@ export async function handleFlowTimer(tx: Tx, p: { kind: "escalation" | "soak" |
   return { handled: true, note: "escalated" };
 }
 
-void [openInstanceOf, cancelAttempts, startAttempt];
+void [openInstanceOf, cancelAttempts, startAttempt, loadOne];

@@ -20,7 +20,7 @@ import { useProjectRepos } from "./floor/kit";
 
 type Tab = "waiting" | "open" | "closed";
 
-const WAIT: Record<WoSessionRow["waitingOn"], string> = { you: "Waiting on you", approver: "Waiting on an approver", agent: "Agent working", nobody: "Closed" };
+const WAIT: Record<WoSessionRow["waitingOn"], string> = { you: "Waiting on you", approver: "Waiting on an approver", person: "Waiting on someone else", agent: "Agent working", nobody: "Closed" };
 
 export default function ConversationsView() {
   const hash = useHash();

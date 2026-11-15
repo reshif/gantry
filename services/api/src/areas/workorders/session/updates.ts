@@ -78,6 +78,8 @@ export async function scanWoEvents(pool: pg.Pool, orgId: string, now = new Date(
       default: continue;
     }
     if (!text) continue;
+    // The station already said this in its own message, with its documents and questions.
+    if (e.type === "wo.station.done" && typeof a.attempt === "string" && (await pool.query(`select 1 from workorder_messages where org_id = $1 and id = $2`, [orgId, updateId(orgId, e.wo_id, `station:${a.attempt}`)])).rowCount) continue;
     const posted = await withTx(pool, (tx) => postWoUpdate(tx, orgId, { id: e.wo_id, project_id: e.project_id, title: e.title }, { key: `ev:${e.id}`, event: e.type, text, now: e.occurred_at, followUp }));
     if (posted) n++;
   }

@@ -49,7 +49,9 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
   it("passes limits, model, tools and composed instructions explicitly", () => {
     expect(flag("--max-turns")).toBe("12");
     expect(flag("--model")).toBe("claude-sonnet-4-5-20250929");
-    expect(flag("--allowedTools")).toBe("Read,Edit,Bash(npm test:*)");
+    expect(flag("--allowedTools")).toBe("Read,Edit,Bash(npm test:*),mcp__gantry__write_document,mcp__gantry__ask,mcp__gantry__assume");
+    expect(inv.mcpConfig.mcpServers.gantry).toMatchObject({ type: "stdio" });
+    expect(flag("--append-system-prompt")).toContain("write_document");
     const sys = flag("--append-system-prompt")!;
     expect(sys).toContain("Base rules.");
     expect(sys.indexOf("Base rules.")).toBeLessThan(sys.indexOf("## Skill: git"));

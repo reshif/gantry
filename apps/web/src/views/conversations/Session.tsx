@@ -19,6 +19,8 @@ import { Markdown } from "../console/Markdown";
 import { ApproversPanel } from "../traveler/Approvers";
 import { ProgressLine, QuestionCard, useLiveTurn } from "../session/kit";
 import { decideWo, markWoSeen, sendWoTurn, useWoSession, type WoSession, type WoSessionMessage } from "./session-api";
+import { DocViewer } from "../documents/DocViewer";
+import { AssumptionList, StationQuestionCard } from "../documents/Dialogue";
 
 type Proposal = Extract<WoCard, { kind: "proposal" }>;
 
@@ -106,13 +108,95 @@ function ProposalCard({ m, c, s, agent, send }: { m: WoSessionMessage; c: Propos
   );
 }
 
+/** Opens a station document in the viewer, in a wide dialog over the conversation. */
+export function useOpenDocument() {
+  const ui = useUI();
+  return (woId: string, id?: string) => ui.dialog({ title: "Station documents", kicker: woId, wide: true, body: <DocViewer woId={woId} initial={id} />, actions: [{ label: "Close" }] });
+}
+
+function DocLine({ s, c }: { s: WoSession; c: Extract<WoCard, { kind: "document" }> }) {
+  const open = useOpenDocument();
+  return (
+    <button type="button" className="osx-file wos-doc" id={`wos-doc-${c.id}`} onClick={() => open(s.woId, c.id)}>
+      <Icon name="page" />
+      <span className="mono">{c.name}</span>
+      <span className="muted small">{`version ${c.version}`}</span>
+      <span className="wos-doc-open small">Read</span>
+    </button>
+  );
+}
+
 function Cards({ m, s, agent, send, last }: { m: WoSessionMessage; s: WoSession; agent: string; send: (b: { kind: "message" | "continue"; text?: string }) => void; last: boolean }) {
   return (
     <>
-      {(m.data.cards ?? []).map((c, i) =>
-        c.kind === "progress" ? <ProgressLine key={i} text={c.text} detail={c.detail} />
-        : c.kind === "question" ? <QuestionCard key={i} question={c.question} options={c.options} answered={c.answered} last={last} answer={(t) => send({ kind: "message", text: t })} />
-        : <ProposalCard key={i} m={m} c={c} s={s} agent={agent} send={send} />)}
+      {(m.data.cards ?? []).map((c, i) => {
+        if (c.kind === "progress") return <ProgressLine key={i} text={c.text} detail={c.detail} />;
+        if (c.kind === "question") return <QuestionCard key={i} question={c.question} options={c.options} answered={c.answered} last={last} answer={(t) => send({ kind: "message", text: t })} />;
+        if (c.kind === "document") return <DocLine key={i} s={s} c={c} />;
+        if (c.kind === "station_question") {
+          const q = s.dialogue.questions.find((x) => x.id === c.id);
+          // A person's answer quotes the question it answers; the card itself lives on the agent's message.
+          if (!q || m.role === "user") return null;
+          return <StationQuestionCard key={i} woId={s.woId} q={q} mine={q.mine} canAnswer={s.can.talk} why={s.can.talkWhy} />;
+        }
+        if (c.kind === "assumptions") {
+          const items = s.dialogue.assumptions.filter((a) => a.station === c.station && (!c.attempt || a.attemptId === c.attempt));
+          return <AssumptionList key={i} woId={s.woId} items={items} canDecide={s.can.talk} />;
+        }
+        return <ProposalCard key={i} m={m} c={c} s={s} agent={agent} send={send} />;
+      })}
+    </>
+  );
+}
+
+/** A person's answer to a station question, quoting the question so the thread reads on its own. */
+function AnswerText({ m, s }: { m: WoSessionMessage; s: WoSession }) {
+  const qid = (m.data.cards ?? []).find((c) => c.kind === "station_question")?.id;
+  const q = s.dialogue.questions.find((x) => x.id === qid);
+  return (
+    <div className="osx-text wos-answer">
+      {q ? <p className="small muted wos-answer-q">{`Answer to ${q.station.charAt(0).toUpperCase()}${q.station.slice(1)}: “${q.question}”`}</p> : null}
+      <p className="wos-answer-a">{m.text}</p>
+    </div>
+  );
+}
+
+/** Side panel: what the stations wait on, the assumptions nobody confirmed yet, and the documents. */
+function SideDialogue({ s }: { s: WoSession }) {
+  const open = useOpenDocument();
+  const asks = s.dialogue.questions.filter((q) => q.status === "open");
+  const assumed = s.dialogue.assumptions.filter((a) => a.status === "open");
+  const latest = new Map<string, (typeof s.documents)[number]>();
+  for (const d of s.documents) if ((latest.get(d.doc)?.version ?? 0) < d.version) latest.set(d.doc, d);
+  const jump = (id: string) => document.getElementById(id)?.scrollIntoView?.({ block: "center" });
+  return (
+    <>
+      {asks.length ? (
+        <section className="wos-side-sec" id="wos-asks">
+          <h3 className="sub-h">{`Questions waiting (${asks.length})`}</h3>
+          <ul className="osx-pending">
+            {asks.map((q) => (
+              <li key={q.id}><button type="button" className="linkish" onClick={() => jump(`sq-${q.id.replace(/[^A-Za-z0-9_-]/g, "-")}`)}>{q.question}</button>{q.mine ? <span className="small wos-mine"> · asks you</span> : null}{q.blocking ? <span className="small muted"> · blocking</span> : null}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {assumed.length ? (
+        <section className="wos-side-sec" id="wos-assumed">
+          <h3 className="sub-h">{`Not confirmed (${assumed.length})`}</h3>
+          <ul className="osx-pending">
+            {assumed.map((a) => <li key={a.id}><button type="button" className="linkish" onClick={() => jump(`as-${a.id.replace(/[^A-Za-z0-9_-]/g, "-")}`)}>{a.statement}</button>{a.impact === "high" ? <span className="small muted"> · high impact</span> : null}</li>)}
+          </ul>
+        </section>
+      ) : null}
+      {latest.size ? (
+        <section className="wos-side-sec" id="wos-docs">
+          <h3 className="sub-h">Documents</h3>
+          <ul className="osx-pending">
+            {[...latest.values()].map((d) => <li key={d.doc}><button type="button" className="linkish mono" onClick={() => open(s.woId, d.id)}>{d.doc}</button><span className="small muted">{` · v${d.version}`}</span></li>)}
+          </ul>
+        </section>
+      ) : null}
     </>
   );
 }
@@ -155,8 +239,8 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
   const submit = () => { const t = draft.trim(); if (!t) return; setDraft(""); send({ kind: "message", text: t }); };
   const status = live ? { cls: "is-live", text: `${agentName} is thinking…` }
     : s.wo.closed ? { cls: "is-idle", text: s.next.text }
-    : s.next.actor === "you" ? { cls: "is-you", text: ruleBased ? "Waiting for you: answer the question below" : `${agentName} is waiting for you` }
-    : s.next.actor === "approver" ? { cls: "is-wait", text: s.next.text }
+    : s.next.actor === "you" ? { cls: "is-you", text: ruleBased ? "Waiting for you: answer the question below" : s.dialogue.askedMe ? s.next.text : `${agentName} is waiting for you` }
+    : s.next.actor === "approver" || s.next.actor === "person" ? { cls: "is-wait", text: s.next.text }
     : { cls: "is-live", text: s.waiting?.text ?? s.next.text };
   const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."}` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}: answer, correct it, or ask anything about this work order`;
   const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : (m.data.agent ?? agentName));
@@ -188,6 +272,7 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
                 <div className={`osx-msg is-${m.role}${m.data.kind === "update" ? " is-update" : ""}${m.data.mode === "legacy" ? " is-legacy" : ""}`}>
                   {m.data.kind === "update" ? null : <div className="osx-who small strong">{tag(m)}{m.data.mode === "rule-based" ? <span className="muted"> · rule-based</span> : null}</div>}
                   {m.data.kind === "update" ? <p className="osx-event small"><span className="muted">{fmt.stamp(m.at)}</span> {m.text}</p>
+                    : m.data.kind === "answer" ? <AnswerText m={m} s={s} />
                     : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
                   <Cards m={m} s={s} agent={agentName} send={(b) => send(b)} last={m.id === lastId} />
                 </div>
@@ -223,7 +308,7 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
             <dt>Station</dt><dd>{s.wo.bay ? `${s.wo.stationName} (in the ${s.wo.bay} bay)` : s.wo.stationName}</dd>
             {/* a gate's name is the outcome it waits for ("Brief confirmed"): say it is waiting, so it never reads as already passed */}
             <dt>Gate</dt><dd id="wos-gate" data-tip={s.wo.gate?.purpose || undefined}>{s.wo.gate ? `${s.wo.gate.label} waiting · passes when: ${s.wo.gate.name.toLowerCase()}` : "none waiting"}</dd>
-            <dt>Next</dt><dd id="wos-next"><strong>{{ agent: agentName, you: "You", approver: "An approver", nobody: "" }[s.next.actor]}</strong>{s.next.actor === "nobody" ? "" : " — "}{s.next.text}</dd>
+            <dt>Next</dt><dd id="wos-next"><strong>{{ agent: agentName, you: "You", approver: "An approver", person: "Someone else", nobody: "" }[s.next.actor]}</strong>{s.next.actor === "nobody" ? "" : " — "}{s.next.text}</dd>
           </dl>
           <ol className="osx-steps" id="wos-steps" aria-label="The belt">
             {s.steps.map((st) => (
@@ -234,6 +319,7 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
             ))}
           </ol>
           {s.wo.gate && s.wo.gate.id !== "G0G1" ? <ApproversPanel woId={s.woId} gate={s.wo.gate.id} project={s.project} /> : null}
+          <SideDialogue s={s} />
           <h3 className="sub-h">Brief</h3>
           {s.brief.goal ? <><p className="small muted">{s.briefConfirmed ? "Confirmed." : "Draft: not confirmed yet."}</p><BriefBlock b={{ goal: s.brief.goal, scopeIn: s.brief.scopeIn, scopeOut: s.brief.scopeOut, ac: s.brief.ac, risks: s.brief.risks, open: s.brief.open, decisions: s.brief.decisions, estimate: s.brief.estimate }} /></> : <p className="muted small">Not drafted yet.</p>}
           {s.ruleReady ? <Btn kind="primary" small id="wos-rule-confirm" label="Confirm brief" disabled={!s.can.confirm} disabledReason={!s.can.confirm ? s.can.confirmWhy : undefined} onClick={async () => { const r = await ops.confirmBrief(s.woId); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}

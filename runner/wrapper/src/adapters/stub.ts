@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Adapter, AdapterContext, AdapterOutcome } from "../adapter.js";
 import type { RunSpec } from "../spec.js";
+import { callTool, STATION_DIR } from "../station-tools.js";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const text = (v: unknown): string => (typeof v === "string" ? v : v === undefined ? "" : JSON.stringify(v));
@@ -65,6 +66,12 @@ export const stubAdapter: Adapter = {
     }
     if (spec.stub?.failWith !== undefined) return { status: "failed", usage: [], error: { code: "stub_failure", msg: spec.stub.failWith } };
     const output = spec.stub?.output !== undefined ? spec.stub.output : stubStationResult(spec);
+    // The stub uses the station tools the way an agent would: its primary document, and any questions or assumptions the spec scripts.
+    const dir = ctx.stationDir ?? STATION_DIR;
+    const subj = subject(spec.input);
+    await callTool("write_document", { name: `${spec.station}.md`, markdown: spec.stub?.document ?? `# ${spec.station}${subj ? `: ${subj}` : ""}\n\nStub adapter: no model was consulted, so this document records only what the run was given.\n` }, dir);
+    for (const q of spec.stub?.questions ?? []) await callTool("ask", q, dir);
+    for (const a of spec.stub?.assumptions ?? []) await callTool("assume", a, dir);
     await ctx.checkpoint({ turn: 1, kind: "artefact", name: `${spec.station}-result.json`, contentType: "application/json", content: JSON.stringify(output) });
     return { status: "succeeded", output, usage: [] };
   },

@@ -20,9 +20,16 @@ import { addFollowup, decline, postMessage, reclassify, submitWO } from "../area
 import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
 import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
+import { listDialogue, listDocuments, readDocument } from "../areas/workorders/documents.js";
+import { answerStationQuestion, decideAssumption } from "../areas/workorders/dialogue.js";
 import { listConversations, listWorkOrders, readChanges, readRecord, readTraveler, recordBundle, recordMarkdown } from "../areas/workorders/reads.js";
 
 const Id = z.object({ id: z.string().min(1).max(100) });
+const DocId = z.object({ doc: z.string().min(1).max(200) });
+const QId = z.object({ qid: z.string().min(1).max(200) });
+const AId = z.object({ aid: z.string().min(1).max(200) });
+const AnswerBody = z.object({ kind: z.enum(["answer", "dont_know", "not_relevant"]).default("answer"), answer: z.string().max(4000).optional() });
+const AssumptionBody = z.object({ status: z.enum(["confirmed", "corrected"]), note: z.string().max(2000).optional() });
 const Via = z.string().max(20).optional();
 const Reason = z.string().max(2000);
 
@@ -124,6 +131,43 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const who = req.gx.principal?.kind === "person" ? req.gx.principal.id : null;
     const [edit, grant] = await Promise.all([decide(req, "approvers.edit", { project: s.project }), decide(req, "project.members", { project: s.project })]);
     return { ...r, viewerCanOverride: !!who && r.overrides.some((o) => o.id === who), can: { editRule: edit.allowed, editWhy: edit.allowed ? "" : edit.reason, grantRole: grant.allowed, grantWhy: grant.allowed ? "" : grant.reason } };
+  });
+
+  /* Station documents and the dialogue log (agent workspace, Phase 1). Anyone who can see the work order reads them. */
+  app.get("/api/v1/work-orders/:id/documents", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    await scopeOf(req, id);
+    return { items: await listDocuments(g.pool, req.gx.orgId, id) };
+  });
+  app.get("/api/v1/work-orders/:id/documents/:doc", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    const { doc } = DocId.parse(req.params);
+    await scopeOf(req, id);
+    const d = await readDocument(g.pool, req.gx.orgId, id, doc);
+    if (!d) throw refuse("not_found", "No such document on this work order.");
+    return d;
+  });
+  app.get("/api/v1/work-orders/:id/dialogue", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    await scopeOf(req, id);
+    return listDialogue(g.pool, req.gx.orgId, id);
+  });
+  app.post("/api/v1/work-orders/:id/questions/:qid/answer", { config: { apiKey: "wo.answer" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    const { qid } = QId.parse(req.params);
+    const b = AnswerBody.parse(req.body);
+    const s = await scopeOf(req, id);
+    // The requester may always answer about their own request; anyone else needs the right to answer (as for the intake conversation).
+    const own = req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
+    return command(req, spec(id, own ? null : "wo.answer", s), (tx, a) => answerStationQuestion(tx, a, id, qid, { kind: b.kind, ...(b.answer !== undefined ? { answer: b.answer } : {}) }));
+  });
+  app.post("/api/v1/work-orders/:id/assumptions/:aid", { config: { apiKey: "wo.answer" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    const { aid } = AId.parse(req.params);
+    const b = AssumptionBody.parse(req.body);
+    const s = await scopeOf(req, id);
+    const own = req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
+    return command(req, spec(id, own ? null : "wo.answer", s), (tx, a) => decideAssumption(tx, a, id, aid, { status: b.status, ...(b.note !== undefined ? { note: b.note } : {}) }));
   });
 
   app.get("/api/v1/work-orders/:id/record", { config: { apiKey: "wo.read" } }, async (req) => {

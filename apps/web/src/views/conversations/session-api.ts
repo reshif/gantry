@@ -5,6 +5,7 @@ import { api, get, post, streamCommand, type ApiResult } from "../../api/client"
 import { invalidateSlices } from "../../api/keys";
 import { SseReader } from "../console/api";
 import type { TurnEvent } from "../session/kit";
+import type { Assumption, DocVersion, StationQuestion } from "../documents/api";
 
 export interface WoSessionMessage {
   id: string;
@@ -14,7 +15,8 @@ export interface WoSessionMessage {
   at: number;
   data: { cards?: WoCard[]; kind?: string; mode?: "agent" | "rule-based" | "legacy"; model?: string | null; agent?: string; version?: number; stopped?: boolean; chips?: string[] };
 }
-export type NextActor = "agent" | "you" | "approver" | "nobody";
+/** `person`: waiting for someone else (a station asked a particular person or role). */
+export type NextActor = "agent" | "you" | "approver" | "person" | "nobody";
 export interface WoSession {
   woId: string;
   project: string;
@@ -27,7 +29,10 @@ export interface WoSession {
   can: { talk: boolean; talkWhy: string; confirm: boolean; confirmWhy: string };
   steps: Array<{ id: string; name: string; state: "done" | "current" | "todo" }>;
   next: { actor: NextActor; text: string };
-  waiting: { text: string; kind: "agent" | "gate" } | null;
+  waiting: { text: string; kind: "agent" | "gate" | "you" | "person" } | null;
+  /** The questions the station agents asked (with whether this person is the one asked) and the assumptions they proceeded on. */
+  dialogue: { questions: Array<StationQuestion & { mine: boolean }>; assumptions: Assumption[]; askedMe: boolean };
+  documents: DocVersion[];
   pending: Array<{ mid: string; id: string; what: "brief" | "reclassify" | "decline"; title: string }>;
   brief: Brief;
   briefConfirmed: boolean;
@@ -48,7 +53,7 @@ export interface WoSessionRow {
   gate: string | null;
   agent: string | null;
   agentName: string | null;
-  waitingOn: "you" | "approver" | "agent" | "nobody";
+  waitingOn: "you" | "approver" | "agent" | "person" | "nobody";
   latest: { text: string; at: number; by: string; role: string } | null;
   unread: boolean;
   closed: boolean;

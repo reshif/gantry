@@ -390,6 +390,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     return relay(reply, await api.call("POST", `/internal/v1/runs/${encodeURIComponent(a.runId)}/heartbeat`, { ...strip(b, "token"), token: a.token }));
   });
 
+  const DOC_MAX_BYTES = 512 * 1024;
   const Checkpoint = z.looseObject({ turn: z.number().int().nonnegative(), kind: z.enum(["transcript", "artefact"]), name: z.string().min(1).max(300), contentType: z.string().min(1).max(200), content: z.string() });
   app.post("/run/v1/checkpoint", async (req, reply) => {
     const a = runAuth(req);
@@ -416,6 +417,9 @@ export function buildGateway(deps: GatewayDeps): Gateway {
       contentType: p.data.contentType,
       contentHash: ref.slice("sha256/".length),
       size: bytes.length,
+      // A station document (markdown) is also kept with its artefact row, so people can read and compare it (the API cannot reach object storage).
+      // It is the scanned text: secrets were already redacted above.
+      ...(p.data.kind === "artefact" && /^text\/markdown\b/i.test(p.data.contentType) && bytes.length <= DOC_MAX_BYTES ? { content: scanned.text } : {}),
     });
     return relay(reply, r);
   });

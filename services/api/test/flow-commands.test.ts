@@ -166,7 +166,9 @@ d("work order commands: denied and stale for every one", () => {
     expect(q).toMatchObject({ applied: true, next: "person" });
     const w2 = await w.get(id2);
     expect(w2.bay).toBe("person");
-    expect(w2.conv.raised.at(-1)).toMatchObject({ text: "Which currency should refunds use?", answered: false });
+    expect(w2.bayReason).toBe("Waiting for an answer at Research");
+    const dl = (await w.call("p-asha", "GET", `/api/v1/work-orders/${id2}/dialogue`)).body;
+    expect(dl.questions).toMatchObject([{ question: "Which currency should refunds use?", blocking: true, status: "open", station: "research" }]);
     // a lost lease: bounded retry
     const id3 = await w.atStation("research", "Lost lease");
     const a3 = (await w.liveAttempt(id3))!;

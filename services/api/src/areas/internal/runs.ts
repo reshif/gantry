@@ -11,6 +11,7 @@ import { budgetBreach, costMicros, currentPrices } from "./metering.js";
 import { resolveRoute } from "./route.js";
 import { runEgressHosts, systemEgressHosts } from "./egress.js";
 import { findRunToken, type TokenRow } from "./tokens.js";
+import { recordDocument } from "../workorders/documents.js";
 
 const Token = z.string().min(20).max(700);
 const RunParams = z.object({ id: z.string().min(1).max(200) });
@@ -47,10 +48,12 @@ const CheckpointBody = z.looseObject({
   /** sha256 of the content the edge stored under sha256/<hash>. */
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
   size: nonneg.default(0),
+  /** A station document's text (markdown), already scanned by the edge. */
+  content: z.string().max(600_000).optional(),
 });
 const ResultBody = z.looseObject({
   token: Token,
-  status: z.enum(["succeeded", "failed", "interrupted"]),
+  status: z.enum(["succeeded", "failed", "interrupted", "needs_person"]),
   output: z.unknown().optional(),
   usage: z.array(z.looseObject({ model: z.string() })).default([]),
   error: z.object({ code: z.string(), msg: z.string() }).optional(),
@@ -213,7 +216,9 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       await tx.query(`insert into checkpoints (org_id, id, run_id, attempt_id, seq, content_hash, data) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`, [
         c.orgId, ckId, id, c.attemptId, seq, b.contentHash, JSON.stringify({ turn: b.turn, kind: b.kind, name: b.name, contentType: b.contentType, size: b.size }),
       ]);
-      if (b.kind === "artefact") {
+      if (b.kind === "artefact" && b.content !== undefined && /^text\/markdown\b/i.test(b.contentType)) {
+        await recordDocument(tx, { orgId: c.orgId, id: `art-${id}-${seq}`, woId: c.woId, attemptId: c.attemptId, station: c.station, name: b.name, hash: b.contentHash, mediaType: b.contentType, size: b.size, body: b.content, author: c.agentId });
+      } else if (b.kind === "artefact") {
         await tx.query(`insert into artefacts (org_id, id, wo_id, attempt_id, kind, name, content_hash, media_type, size_bytes) values ($1,$2,$3,$4,'station',$5,$6,$7,$8)`, [
           c.orgId, `art-${id}-${seq}`, c.woId, c.attemptId, b.name, b.contentHash, b.contentType, b.size,
         ]);

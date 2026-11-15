@@ -28,6 +28,17 @@ export const RunSpec = z.looseObject({
   /** The previous station's structured result and artefacts (spec 10.2), or the work order brief. */
   input: z.unknown().optional(),
   /** Stub adapter control: when `output` is present it is returned as the station result verbatim. */
-  stub: z.object({ output: z.unknown().optional(), failWith: z.string().optional(), delayMs: z.number().int().min(0).max(60_000).optional() }).optional(),
+  stub: z
+    .object({
+      output: z.unknown().optional(),
+      failWith: z.string().optional(),
+      delayMs: z.number().int().min(0).max(60_000).optional(),
+      /** The stub's primary document (default: a short note that no model was consulted). */
+      document: z.string().optional(),
+      /** Questions and assumptions the stub records through the station tools, as an agent would. */
+      questions: z.array(z.record(z.string(), z.unknown())).optional(),
+      assumptions: z.array(z.record(z.string(), z.unknown())).optional(),
+    })
+    .optional(),
 });
 export type RunSpec = z.infer<typeof RunSpec>;

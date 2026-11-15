@@ -10,7 +10,7 @@ import { gradeEvalCase } from "./evals.js";
 import { teardownRun } from "./teardown.js";
 
 interface StoredResult {
-  outcome: "succeeded" | "failed" | "interrupted";
+  outcome: "succeeded" | "failed" | "interrupted" | "needs_person";
   summary: string;
   body: { output?: Record<string, unknown> | null; usage?: Array<{ inputTokens?: number; outputTokens?: number; costUsd?: number }>; error?: { code: string; msg: string } | null };
 }
@@ -74,8 +74,9 @@ export async function runResult(job: Job, ctx: HandlerCtx): Promise<unknown> {
   const cur = await attemptIsCurrent(deps.pool, job.orgId, attemptId, fencing);
   // Spec 13.2: an eval case's result is graded and recorded, never published to a repository and never applied through the flow.
   if (a.woData.eval) {
-    const graded = cur.current ? await gradeEvalCase(deps, a, { status: sr.outcome, output: sr.body.output ?? null, error: sr.body.error ?? null }) : { superseded: cur.reason };
-    await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" ? "succeeded" : "failed");
+    const graded = cur.current ? await gradeEvalCase(deps, a, { status: sr.outcome === "needs_person" ? "succeeded" : sr.outcome, output: sr.body.output ?? null, error: sr.body.error ?? null }) : { superseded: cur.reason };
+    // An eval run that stopped to ask delivered a result (its questions are in output.dialogue for the checks to read).
+    await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" || sr.outcome === "needs_person" ? "succeeded" : "failed");
     return graded;
   }
   // An onboarding agent step: its result stays in station_results for the collector to validate; nothing is published and the flow engine never hears of it.
@@ -126,7 +127,8 @@ export async function runResult(job: Job, ctx: HandlerCtx): Promise<unknown> {
       outcome = await withTx(deps.pool, (tx) => applyStationResult(tx, attemptId, fencing, result));
     } else outcome = { fenced: true };
   }
-  await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" ? "succeeded" : "failed");
+  // A run that stopped to ask delivered what it was asked to: it ends as succeeded; the work order waits in the bay.
+  await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" || sr.outcome === "needs_person" ? "succeeded" : "failed");
   return outcome;
 }
 

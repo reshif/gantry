@@ -1,5 +1,6 @@
 import type { Queryable } from "@gantry/db";
 import { agentConfig } from "./metering.js";
+import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
 import type { RunCtx } from "./context.js";
 import { scopeVerdict, type ScopeRow } from "../mcp/scope.js";
 import { assemble, composeLayers, loadAgentVersion, resolveSkills, type InstructionPin } from "../agents/compose.js";
@@ -135,5 +136,9 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
     )
   ).rows;
   const title = (await db.query(`select title from work_orders where org_id = $1 and id = $2`, [c.orgId, c.woId])).rows[0]?.title;
-  return { workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, previous: prior };
+  // Phase 1: the documents the earlier stations (and earlier runs of this one) wrote, and what was asked, answered and assumed, so the
+  // agent starts from what was settled and does not ask again.
+  const documents = await latestDocuments(db, c.orgId, c.woId, { exceptAttempt: c.attemptId });
+  const dialogue = await dialogueHandoff(db, c.orgId, c.woId);
+  return { workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, previous: prior, documents, dialogue };
 }

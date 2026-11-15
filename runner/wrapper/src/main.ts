@@ -4,6 +4,7 @@ import { createClaudeAdapter } from "./adapters/claude.js";
 import { stubAdapter } from "./adapters/stub.js";
 import { EdgeClient, type Checkpoint, type RunResult } from "./edge.js";
 import { readEnv, type RunEnv } from "./env.js";
+import { readLog, resetLog, STATION_DIR } from "./station-tools.js";
 import type { RunSpec } from "./spec.js";
 
 export interface WrapperDeps {
@@ -11,6 +12,8 @@ export interface WrapperDeps {
   edge: EdgeClient;
   adapters?: Record<RunSpec["adapter"], Adapter>;
   log?: (msg: string) => void;
+  /** Where the station tools keep this run's documents, questions and assumptions. */
+  stationDir?: string;
   /** Signals to listen for. Defaults to the process; tests pass their own. */
   onSignal?: (handler: (reason: string) => void) => () => void;
 }
@@ -80,9 +83,11 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
     }
   };
 
+  const stationDir = deps.stationDir ?? STATION_DIR;
+  await resetLog(stationDir);
   let outcome: AdapterOutcome;
   try {
-    outcome = await adapter.run({ spec, env, signal: ac.signal, setTurn: (t) => (turn = t), checkpoint });
+    outcome = await adapter.run({ spec, env, signal: ac.signal, setTurn: (t) => (turn = t), checkpoint, stationDir });
   } catch (e) {
     outcome = { status: "failed", usage: [], error: { code: "adapter_crash", msg: e instanceof Error ? e.message : String(e) } };
   }
@@ -92,6 +97,8 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
   if (outcome.status === "interrupted" && ac.signal.reason === "wall_clock") {
     outcome = { ...outcome, status: "failed", error: { code: "wall_clock", msg: `wall-clock limit ${spec.limits.wallClockSeconds}s reached` } };
   }
+
+  if (!refused && !ac.signal.aborted) outcome = await handOver(outcome, stationDir, spec.station, checkpoint, turn, log);
 
   let code: number = EXIT.delivered;
   if (refused) {
@@ -110,6 +117,29 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
   clearInterval(hb);
   unsignal();
   return code;
+}
+
+/**
+ * What the station tools recorded goes with the result: each document as an artefact checkpoint (the edge scans and stores it, the API versions it),
+ * the questions and assumptions in `output.dialogue`. A blocking question turns the run into `needs_person` (the agent was told to stop and hand over),
+ * even when it ended without its result JSON. A failed run hands over nothing.
+ */
+export async function handOver(o: AdapterOutcome, dir: string, station: string, checkpoint: (cp: Checkpoint) => Promise<void>, turn: number, log: (m: string) => void): Promise<AdapterOutcome> {
+  const rec = await readLog(dir);
+  const blocking = rec.questions.some((q) => q.blocking);
+  const waiting = blocking && (o.status === "succeeded" || (o.status === "failed" && o.error?.code === "no_structured_output"));
+  if (o.status !== "succeeded" && !waiting) return o;
+  const names = Object.keys(rec.documents);
+  for (const name of names) await checkpoint({ turn, kind: "artefact", name, contentType: "text/markdown; charset=utf-8", content: rec.documents[name]! });
+  if (names.length) log(`handed over ${names.length} document(s)`);
+  const base = o.output && typeof o.output === "object" && !Array.isArray(o.output) ? (o.output as Record<string, unknown>) : {};
+  const output: Record<string, unknown> = { ...base, documents: names, dialogue: { questions: rec.questions, assumptions: rec.assumptions } };
+  if (waiting) {
+    const n = rec.questions.filter((q) => q.blocking).length;
+    if (typeof output.summary !== "string" || !output.summary) output.summary = `${station}: waiting for ${n === 1 ? "an answer" : `${n} answers`} before going on.`;
+    return { status: "needs_person", output, usage: o.usage };
+  }
+  return { ...o, output };
 }
 
 async function main(): Promise<number> {

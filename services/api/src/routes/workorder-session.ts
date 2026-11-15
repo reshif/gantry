@@ -26,7 +26,9 @@ import { confirmAgentBrief } from "../areas/workorders/session/approve.js";
 import { addWoMessage, legacyMessages, listWoMessages, lockWoMessage, newWoMessageId, saveWoMessageData, supersedeWoPending, woSessionSpend, markWoSeen, type WoMessage } from "../areas/workorders/session/store.js";
 import { executeWoTool, stationName, woToolDefs, type WoSessionCtx } from "../areas/workorders/session/tools.js";
 import { openIntakeSessions, scanWoEvents } from "../areas/workorders/session/updates.js";
-import { command, decide, policyState, refuse, type CommandResult } from "../core/index.js";
+import { command, decide, decideFor, policyState, refuse, type CommandResult } from "../core/index.js";
+import { asksMe, askOfLabel } from "../areas/workorders/asked.js";
+import { listDialogue, listDocuments } from "../areas/workorders/documents.js";
 
 /** Output room for one turn: enough for a full brief (several lists) in a single tool call. */
 export const WO_SESSION_MAX_TOKENS = 16_000;
@@ -53,7 +55,7 @@ const system = (o: { agent: string; station: string; purpose: string; wo: string
   `You are ${o.agent}, the agent at the ${o.station} station of Gantry, a factory of AI coding agents. You work with people, in one conversation per work order, for the whole life of that work order. This conversation is about ${o.wo} in project ${o.project}. Station purpose: ${o.purpose}`,
   "Rules. Facts about the work order, the project and the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What a person tells you is their claim: use it and say it is theirs. You never change anything yourself: you propose, as cards, and a person approves; say plainly when something waits for their approval and never claim a change happened. You understand free text: answer every message the person writes, in plain sentences, whatever they ask (a brief, why a class, where the work is, what a station did), then say the next concrete step.",
   o.atIntake
-    ? `Intake. The request was submitted as text and the person is waiting. Start with get_work_order; read the repository (inspect_repository, read_file) and look at related work (list_related_work) when it helps. Work out yourself what you need: ask only what the request and the repository do not already answer, in natural language, one question at a time, with suggested answers (ask_user), at most two questions before you act; if the request is clear enough, ask nothing. As soon as you can write a brief, call propose_brief (goal, scope in and out, acceptance criteria a reviewer can check, risks, open questions, estimate) and say in two sentences what you propose, how you classified the request (${o.cls}) and why; open questions may stay open in the brief. If the person asks for changes, revise and propose again. If you read the request as a different class, use propose_reclassify; if it should not be built, propose_decline with the reason. ${o.canConfirm ? "This person may confirm the brief." : "This person may not confirm the brief; an approver with the right does, say so."}`
+    ? `Intake. The request was submitted as text and the person is waiting. Start with get_work_order; read the repository (inspect_repository, read_file) and look at related work (list_related_work) when it helps. Work out yourself what you need: ask only what the request and the repository do not already answer, in natural language, one question at a time, with suggested answers (ask_user); if the request is clear enough, ask nothing. Do not guess: a question is blocking when the brief would be a guess without its answer, and you cannot propose a brief while a blocking question is unanswered. What you proceed on without confirmation goes into the brief as an assumption (in its open questions or decisions, said as such), never as a fact. As soon as you can write a brief, call propose_brief (goal, scope in and out, acceptance criteria a reviewer can check, risks, open questions, estimate) and say in two sentences what you propose, how you classified the request (${o.cls}) and why. If the person asks for changes, revise and propose again. If you read the request as a different class, use propose_reclassify; if it should not be built, propose_decline with the reason. ${o.canConfirm ? "This person may confirm the brief." : "This person may not confirm the brief; an approver with the right does, say so."}`
     : "This work order is past Intake. From here you cannot change anything: gates are decided by people on the work order's traveler. Answer questions from get_work_order and get_station_progress: where it is, what each station did, what waits on whom. Say what the next step is and who takes it.",
   UNTRUSTED_NOTE,
   "Keep each answer under 140 words. Plain sentences, no headings, no emoji.",
@@ -242,6 +244,9 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       g.pool.query<{ wo_id: string; author_kind: string; body: string; created_at: Date; status: string }>(`select distinct on (c.wo_id) c.wo_id, m.author_kind, m.body, m.created_at, c.status from conversations c join messages m on m.org_id = c.org_id and m.conversation_id = c.id where c.org_id = $1 and c.wo_id = any($2) order by c.wo_id, m.created_at desc, m.id desc`, [g.orgId, woIds]),
       g.pool.query<{ id: string; name: string }>(`select id, name from agents where org_id = $1`, [g.orgId]),
     ]);
+    const askRows = (await g.pool.query<{ wo_id: string; ask_of: string }>(`select wo_id, ask_of from wo_questions where org_id = $1 and status = 'open' and wo_id = any($2)`, [g.orgId, woIds])).rows;
+    const pst = await policyState(req);
+    const meP = pst.people.find((p) => p.id === who.id);
     const last = new Map(lastRows.rows.map((r) => [r.wo_id, r]));
     const seen = new Map(seenRows.rows.map((r) => [r.wo_id, r.seen_at.getTime()]));
     const gates = new Map(gateRows.rows.map((r) => [r.wo_id, r.gate_id]));
@@ -257,8 +262,11 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       const stn = stationDef(catalog, sid);
       const pending = !!m && m.role === "assistant" && (m.data.cards ?? []).some((c) => (c.kind === "proposal" && c.status === "pending") || c.kind === "question");
       const gate = gates.get(w.id) ?? null;
-      const waitingOn: "you" | "approver" | "agent" | "nobody" = closed ? "nobody"
+      const asks = askRows.filter((a) => a.wo_id === w.id);
+      const askedMe = asks.some((a) => asksMe(a.ask_of, meP, { project: w.project_id, requestedBy: w.submitter }, (act) => decideFor(pst, req.gx.principal!, act, { project: w.project_id }).allowed));
+      const waitingOn: "you" | "approver" | "agent" | "person" | "nobody" = closed ? "nobody"
         : pending ? "you"
+        : asks.length ? (askedMe ? "you" : "person")
         : w.position === "person" ? "you"
         : gate ? "approver"
         : m && m.role === "user" ? "agent"
@@ -283,9 +291,16 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const wo = f.wo;
     const c = f.catalog;
     const ag = await agentState(row, wo, c);
-    const [own, confirm, legacy, mine] = await Promise.all([
-      canTalk(req, row, who), decide(req, "brief.confirm", scopeOf(row)), legacyMessages(g.pool, g.orgId, id), listWoMessages(g.pool, g.orgId, id),
+    const [own, confirm, legacy, mine, dialogue, pst] = await Promise.all([
+      canTalk(req, row, who), decide(req, "brief.confirm", scopeOf(row)), legacyMessages(g.pool, g.orgId, id), listWoMessages(g.pool, g.orgId, id), listDialogue(g.pool, g.orgId, id), policyState(req),
     ]);
+    // Station questions still open, and whether this person is the one asked (G11).
+    const meP = pst.people.find((p) => p.id === who.id);
+    const openAsks = dialogue.questions.filter((q) => q.status === "open");
+    const blockingAsks = openAsks.filter((q) => q.blocking);
+    const askedMe = blockingAsks.some((q) => asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed));
+    const roleName = (rid: string) => (f.catalog.roles ?? []).find((r) => r.id === rid)?.name ?? rid.replace(/_/g, " ");
+    const askedOf = [...new Set(blockingAsks.map((q) => askOfLabel(q.askOf, roleName)))].join(" or ");
     // The scripted questionnaire is history: shown until the session starts, never mixed into it afterwards.
     const messages = mine.length ? mine : legacy;
     const history = mine.length ? legacy.filter((m) => m.at < (mine[0]?.at ?? 0)) : [];
@@ -303,12 +318,14 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const gdef = gateWaiting ? c.gates.find((x) => x.id === gateWaiting[0]) : null;
     const next = closed ? { actor: "nobody", text: wo.bay === "declined" ? "The request was declined." : wo.state === "done" ? "The work order is finished." : "The work order was killed." }
       : pending.length ? (confirm.allowed || !pending.some((p) => p.what === "brief") ? { actor: "you", text: "Review the proposal below: approve it, ask for changes, or discard it." } : { actor: "approver", text: "An approver with the right to confirm briefs has to approve the proposal." })
+      : blockingAsks.length ? (askedMe ? { actor: "you", text: `${stationName(c, blockingAsks[0]!.station)} is waiting for your answer${blockingAsks.length > 1 ? `s to ${blockingAsks.length} questions` : ""} below.` } : { actor: "person", text: `${stationName(c, blockingAsks[0]!.station)} is waiting for an answer from ${askedOf}.` })
       : openQuestion ? { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }
       : atIntake ? (ag.mode === "agent" ? { actor: "agent", text: `${ag.agentName} reads the request and will ask or propose the brief.` } : { actor: wo.conv.done ? "approver" : "you", text: wo.conv.done ? "Confirm the brief." : "Answer the intake question below." })
       : gateWaiting ? { actor: "approver", text: `Waiting for a decision at ${gdef?.label ?? gateWaiting[0]}${gdef?.purpose ? `: ${gdef.purpose}` : "."}` }
       : wo.bay ? { actor: "you", text: `${wo.id} is in the ${c.bays.find((b) => b.id === wo.bay)?.name ?? wo.bay} bay; a person has to move it on.` }
       : { actor: "agent", text: `${ag.agentName} works at ${stationName(c, sid)}.` };
-    const waiting = closed ? null : atIntake && ag.mode === "agent" && !pending.length && !openQuestion ? { text: `${ag.agentName} is reading the request`, kind: "agent" }
+    const waiting = closed ? null : blockingAsks.length ? { text: `Waiting for ${askedMe ? "you" : askedOf}: ${blockingAsks.length === 1 ? "1 question" : `${blockingAsks.length} questions`} from ${stationName(c, blockingAsks[0]!.station)}`, kind: askedMe ? "you" : "person" }
+      : atIntake && ag.mode === "agent" && !pending.length && !openQuestion ? { text: `${ag.agentName} is reading the request`, kind: "agent" }
       : gateWaiting ? { text: `Waiting for approval at ${gdef?.label ?? gateWaiting[0]}`, kind: "gate" }
       : !atIntake && wo.state === "running" ? { text: `${ag.agentName} is working at ${stationName(c, sid)}`, kind: "agent" } : null;
     const legacyQ = !wo.conv.done ? wo.conv.questions[wo.conv.qi] : undefined;
@@ -320,6 +337,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       budget: ag.budget, costUsd: ag.budget.spentUsd,
       can: { talk: own.allowed && !closed, talkWhy: closed ? "This work order is closed." : own.reason, confirm: confirm.allowed, confirmWhy: confirm.allowed ? "" : confirm.reason },
       steps: r.map((s, i) => ({ id: s, name: stationName(c, s), state: closed && wo.state === "done" ? "done" : stepIdx < 0 ? "todo" : i < stepIdx ? "done" : i === stepIdx ? "current" : "todo" })),
+      dialogue: { questions: dialogue.questions.map((q) => ({ ...q, mine: q.status === "open" && asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed) })), assumptions: dialogue.assumptions, askedMe }, documents: await listDocuments(g.pool, g.orgId, id),
       next, waiting, pending, brief: wo.brief, briefConfirmed: (wo.briefVersions ?? []).length > 0 || wo.gates.G0G1?.status === "passed", briefOpen: atIntake,
       ruleQuestion: ag.mode === "rule-based" && atIntake && legacyQ ? { id: legacyQ.id, text: legacyQ.text, chips: legacyQ.chips } : null, ruleReady: ag.mode === "rule-based" && atIntake && wo.conv.done,
       busy: active.has(id),

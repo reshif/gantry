@@ -9,6 +9,8 @@ export interface AdapterContext {
   signal: AbortSignal;
   /** Reports the current turn for the heartbeat. */
   setTurn(turn: number): void;
+  /** Where the station tools record (the stub writes there directly; a harness reaches it through the stdio MCP server). */
+  stationDir?: string;
   /** Saves a transcript increment or artefact through the edge at a turn boundary. */
   checkpoint(cp: Checkpoint): Promise<void>;
 }

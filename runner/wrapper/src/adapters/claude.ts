@@ -9,7 +9,9 @@
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { STATION_DIR, STATION_TOOLS_INSTRUCTION, TOOL_DEFS } from "../station-tools.js";
 import type { Adapter, AdapterContext, AdapterOutcome } from "../adapter.js";
 import type { UsageEntry } from "../edge.js";
 import type { RunEnv } from "../env.js";
@@ -19,6 +21,9 @@ import type { RunSpec } from "../spec.js";
 export const SCRATCH = process.env.GANTRY_SCRATCH ?? "/tmp/gantry";
 
 const MAX_ARG_BYTES = 100_000;
+const STATION_TOOLS_JS = fileURLToPath(new URL("../station-tools.js", import.meta.url));
+/** The harness names MCP tools `mcp__<server>__<tool>`. */
+export const STATION_TOOL_NAMES = TOOL_DEFS.map((t) => `mcp__gantry__${t.name}`);
 
 export interface ClaudeInvocation {
   args: string[];
@@ -35,6 +40,7 @@ const RESULT_INSTRUCTION =
 export function composeSystemPrompt(spec: RunSpec): string {
   const parts = [spec.instructions.trim()];
   for (const s of spec.skills) parts.push(`## Skill: ${s.name}\n\n${s.content.trim()}`);
+  parts.push(STATION_TOOLS_INSTRUCTION);
   parts.push(RESULT_INSTRUCTION);
   return parts.filter((p) => p !== "").join("\n\n");
 }
@@ -52,6 +58,8 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
   for (const [name, s] of Object.entries(spec.mcpServers)) {
     mcpServers[name] = { ...s, headers: { authorization: `Bearer ${env.runToken}` } };
   }
+  // The station tools run in this container as a stdio server (they only record into the run's scratch space): see station-tools.ts.
+  mcpServers.gantry = { type: "stdio", command: baseEnv.GANTRY_NODE_BIN ?? process.execPath, args: [STATION_TOOLS_JS], env: { GANTRY_STATION_DIR: STATION_DIR } };
   const mcpConfigPath = join(SCRATCH, "mcp.json");
   const args = [
     "-p",
@@ -65,7 +73,7 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
     "--append-system-prompt", composeSystemPrompt(spec),
   ];
   if (spec.model) args.push("--model", spec.model);
-  if (spec.toolAllowList.length > 0) args.push("--allowedTools", spec.toolAllowList.join(","));
+  args.push("--allowedTools", [...spec.toolAllowList, ...STATION_TOOL_NAMES].join(","));
 
   const cloneEnv: Record<string, string> = {};
   for (const k of ["PATH", "LANG", "LC_ALL", "TZ"]) {

@@ -57,6 +57,16 @@ async function factsOf(ctx: WoSessionCtx, scan: boolean): Promise<{ ok: true; fa
   return { ok: true, facts: r.facts };
 }
 
+/** Blocking question cards in this work order's session that nobody answered yet. */
+async function openBlockingQuestions(ctx: WoSessionCtx): Promise<string[]> {
+  const { rows } = await ctx.db.query<{ q: string }>(
+    `select c->>'question' as q from workorder_messages m, jsonb_array_elements(coalesce(m.data->'cards', '[]'::jsonb)) c
+      where m.org_id = $1 and m.wo_id = $2 and c->>'kind' = 'question' and (c->>'blocking')::boolean is true and not (c ? 'answered')`,
+    [ctx.orgId, ctx.wo.id],
+  );
+  return rows.map((r) => r.q);
+}
+
 export const WO_TOOLS: WoTool[] = [
   {
     name: "get_work_order",
@@ -139,13 +149,14 @@ export const WO_TOOLS: WoTool[] = [
   },
   {
     name: "ask_user",
-    description: "Ask the person one targeted question that only they can answer, in natural language, with up to four suggested answers they can click (they may type their own). It appears as a card; their answer arrives as their next message. Ask nothing the request or the repository already answers.",
-    input_schema: { type: "object", properties: { question: { type: "string" }, options: { type: "array", items: { type: "string" } } }, required: ["question"] },
+    description: "Ask the person one targeted question that only they can answer, in natural language, with up to four suggested answers they can click (they may type their own). It appears as a card; their answer arrives as their next message. Ask nothing the request or the repository already answers. Set `blocking` to true when the brief would be a guess without the answer: you cannot propose a brief while a blocking question is unanswered.",
+    input_schema: { type: "object", properties: { question: { type: "string" }, options: { type: "array", items: { type: "string" } }, blocking: { type: "boolean" } }, required: ["question", "blocking"] },
     async run(ctx, i) {
       const q = str(i.question, 500);
       if (!q) return { error: "Give a question." };
-      ctx.cards.push({ kind: "question", id: `Q-${ctx.next++}`, question: q, options: strs(i.options, 4, 90) });
-      return { asked: true, note: "Shown to the person as a card. Wait for their answer." };
+      const blocking = i.blocking === true;
+      ctx.cards.push({ kind: "question", id: `Q-${ctx.next++}`, question: q, options: strs(i.options, 4, 90), ...(blocking ? { blocking: true } : {}) });
+      return { asked: true, blocking, note: blocking ? "Shown to the person as a card. Wait for their answer before you propose the brief." : "Shown to the person as a card. You may go on; say what you assume meanwhile." };
     },
   },
   {
@@ -162,6 +173,9 @@ export const WO_TOOLS: WoTool[] = [
     },
     async run(ctx, i) {
       if (!ctx.briefOpen) return { error: "The brief cannot change now: the work order is past Intake or the brief was already confirmed. Answer questions instead." };
+      // G7: no brief on a guess. A blocking question (asked now or earlier and still unanswered) must be answered first.
+      const open = [...ctx.cards.filter((c) => c.kind === "question" && c.blocking && c.answered === undefined).map((c) => (c as { question: string }).question), ...(await openBlockingQuestions(ctx))];
+      if (open.length) return { error: `A blocking question is still unanswered: "${open[0]}". Wait for the answer before proposing the brief, or ask it again as not blocking if the brief can stand without it (and say what you assume).` };
       const v = resolveBriefDraft(i);
       if (!v.ok) return { error: v.reasons.join(" "), note: "Nothing was proposed. Fix the brief and call propose_brief again; do not ask the person to fix it." };
       const w = ctx.wo;

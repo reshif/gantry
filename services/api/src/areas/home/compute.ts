@@ -1,5 +1,6 @@
 import { involved } from "../onboarding/session/updates.js";
 import { involvedInWo } from "../workorders/session/updates.js";
+import { asksMe } from "../workorders/asked.js";
 import { fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { decideFor, readSecurity, type ActiveStop, type PolicyStateLoaded, type Principal } from "../../core/index.js";
@@ -224,6 +225,13 @@ async function myConversations(db: Queryable, orgId: string, st: Flow, st0: Poli
     const lead = rolesIn(me, w.project).some((r) => r === "line_lead" || r === "project_admin");
     const mine = toConfirm && !open && !raised ? canApprove(st, me.id, w, "G0G1", now) && (w.requestedBy === me.id || lead) : w.requestedBy === me.id || (raised && lead && decideFor(st0, principal, "wo.answer", { project: w.project, time: now }).allowed);
     if (mine) out.push({ wo: w.id, title: w.title, project: w.project, question: text.get(w.id) ?? null });
+  }
+  // A station agent's question (wo_questions) is for the people its `ask_of` names, not for everyone who can see the work order.
+  const asks = await db.query<{ wo_id: string; ask_of: string; question: string }>(`select wo_id, ask_of, question from wo_questions where org_id = $1 and status = 'open' order by created_at`, [orgId]);
+  for (const a of asks.rows) {
+    const w = st.workOrders.find((x) => x.id === a.wo_id);
+    if (!w || !vis.has(w.project) || w.state === "done" || w.state === "killed" || out.some((x) => x.wo === w.id)) continue;
+    if (asksMe(a.ask_of, me, { project: w.project, requestedBy: w.requestedBy }, (act) => decideFor(st0, principal, act, { project: w.project, time: now }).allowed)) out.push({ wo: w.id, title: w.title, project: w.project, question: a.question.slice(0, 160) });
   }
   // The work-order session: the agent asked or proposed, or Gantry posted an update (a station finished, a gate decided), and this person has not opened it since.
   const ups = await db.query<{ wo_id: string; project_id: string; title: string; body: string }>(

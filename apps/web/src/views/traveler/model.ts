@@ -108,5 +108,5 @@ export function useTravelerCatalog(): Catalog | null {
 export { plural } from "../../lib/plural";
 export const isClosed = (w: Pick<WorkOrder, "state">): boolean => w.state === "done" || w.state === "killed";
 /** Tab ids of the traveler. */
-export const TRAVELER_TABS = ["journey", "lifecycle", "conversation", "brief", "artefacts", "history"] as const;
+export const TRAVELER_TABS = ["journey", "lifecycle", "conversation", "brief", "documents", "artefacts", "history"] as const;
 export type TravelerTab = (typeof TRAVELER_TABS)[number];

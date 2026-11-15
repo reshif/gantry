@@ -245,6 +245,30 @@ d("the work-order session", () => {
     });
   });
 
+  describe("no brief on a guess (G7)", () => {
+    it("refuses propose_brief while a blocking question is unanswered, and allows it once the person answers", async () => {
+      const id = await submit();
+      const brief = { goal: "Accept an Idempotency-Key header on refund requests.", scopeIn: ["Refund endpoint"], ac: ["A repeated key returns the first response"] };
+      edge.script = [
+        { blocks: [{ type: "tool_use", id: "t1", name: "ask_user", input: { question: "How long should a key be remembered?", options: ["24 hours"], blocking: true } }, { type: "tool_use", id: "t2", name: "propose_brief", input: brief }] },
+        { blocks: [{ type: "text", text: "I need that answer first." }] },
+      ];
+      await call(tomas, "POST", url(id, "/messages"), { kind: "open" });
+      let s = (await call(tomas, "GET", url(id))).body;
+      let last = s.messages.at(-1);
+      expect(last.data.cards.map((c: any) => c.kind)).toEqual(["question"]);
+      expect(last.data.cards[0].blocking).toBe(true);
+      const sent = edge.calls.at(-1)!.body as { messages: Array<{ content: unknown }> };
+      const refusal = (sent.messages.at(-1)!.content as any[]).find((b: any) => b.type === "tool_result" && b.tool_use_id === "t2");
+      expect(String(JSON.stringify(refusal))).toMatch(/blocking question is still unanswered/);
+      edge.script = [{ blocks: [{ type: "tool_use", id: "t3", name: "propose_brief", input: brief }] }, { blocks: [{ type: "text", text: "Proposed." }] }];
+      await call(tomas, "POST", url(id, "/messages"), { text: "24 hours." });
+      s = (await call(tomas, "GET", url(id))).body;
+      last = s.messages.at(-1);
+      expect(last.data.cards.some((c: any) => c.kind === "proposal")).toBe(true);
+    });
+  });
+
   describe("the list", () => {
     it("lists work-order sessions with who waits on whom, the latest message and the station", async () => {
       const id = await submit();
