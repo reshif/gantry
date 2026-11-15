@@ -56,7 +56,8 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     };
 
     if (!email) return deny("no_email", null);
-    if (claims.emailVerified === false) return deny("email_unverified", null);
+    // Only a provider-verified address links or provisions a person: an IdP that omits email_verified must not claim an invitee by address.
+    if (claims.emailVerified !== true) return deny("email_unverified", null);
     if (!emailDomainAllowed(email, sec.domains)) return deny("domain_not_allowed", null);
 
     const find = async (sql: string, p: unknown[]) => (await tx.query(sql, p)).rows[0] as typeof person | undefined;

@@ -305,6 +305,18 @@ d("people and access", () => {
       const [e] = await ev("approvers.delegate");
       expect(e.category).toBe("approvals");
     });
+    it("away is global, so a project right covers only people whose every role is on projects the caller administers", async () => {
+      const away = { to: Date.now() + 24 * hour, delegate: "p-priya" };
+      // Daniel is Project Admin on Payments and Storefront. Priya also leads Risk, Meera also reviews Partner API; Asha holds factory roles.
+      expect((await call("p-daniel", "PUT", "/api/v1/people/p-priya/away", { project: "payments", away })).status).toBe(403);
+      expect((await call("p-daniel", "PUT", "/api/v1/people/p-asha/away", { project: "payments", away })).status).toBe(403);
+      expect((await call("p-daniel", "PUT", "/api/v1/people/p-meera/away", { project: "payments", away })).status).toBe(403);
+      expect((await find("p-priya")).away).toBeNull();
+      // Tomás is an engineer on Payments only: within Daniel's reach.
+      const ok = await call("p-daniel", "PUT", "/api/v1/people/p-tomas/away", { project: "payments", away });
+      expect(ok.status).toBe(200);
+      expect((await call("p-tomas", "PUT", "/api/v1/people/p-tomas/away", { away: null })).status).toBe(200);
+    });
   });
 
   describe("role matrix", () => {

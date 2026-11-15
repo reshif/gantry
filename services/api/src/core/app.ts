@@ -16,6 +16,7 @@ import type { Gantry, Principal } from "./context.js";
 import { safeEqual } from "./crypto.js";
 import { installErrorHandler } from "./errors.js";
 import { createOidcAdapter, type OidcAdapter } from "./oidc.js";
+import { canonicalPath } from "./paths.js";
 import { readOrg } from "./read/index.js";
 import { loadPolicyState } from "./read/state.js";
 import { ipAllowed, SecurityCache } from "./security.js";
@@ -107,13 +108,17 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     global: true,
     max: o.rateLimitMax ?? 600,
     timeWindow: "1 minute",
-    allowList: (req) => req.url === "/healthz" || req.url.startsWith("/api/v1/stream") || req.url.startsWith("/internal/v1/"),
+    allowList: (req) => {
+      const path = canonicalPath(req.url) ?? "";
+      return path === "/healthz" || path.startsWith("/api/v1/stream") || path.startsWith("/internal/v1/");
+    },
     keyGenerator: (req) => req.ip,
   });
 
   app.addHook("onRequest", async (req, reply) => {
     req.gx = { orgId, principal: null, session: null, ip: req.ip, requestId: req.id, channel: "web", reply };
-    const path = req.url.split("?")[0] ?? "";
+    const path = canonicalPath(req.url);
+    if (path === null) return void (await reply.code(400).send({ ok: false, msg: "Malformed request path." }));
     if (path.startsWith("/internal/v1/")) return authInternal(req, reply);
     if (path.startsWith("/api/v1/")) {
       await authApi(app, req, reply);

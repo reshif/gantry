@@ -120,6 +120,10 @@ d("OIDC sign-in against a local issuer", () => {
     expect(await outcomes()).toEqual({ outcome: "denied", reason: "email_unverified" });
     x = await signInFlow(t, issuer, { sub: "u2" });
     expect(await outcomes()).toEqual({ outcome: "denied", reason: "no_email" });
+    // A provider that omits email_verified does not link or provision by address.
+    x = await signInFlow(t, issuer, { sub: "u4", email: "u4@acme.dev" });
+    expect(x.session).toBeUndefined();
+    expect(await outcomes()).toEqual({ outcome: "denied", reason: "email_unverified" });
 
     await setSecurity(t, { domains: ["acme.dev"] });
     x = await signInFlow(t, issuer, { sub: "u3", email: "u3@evil.example", email_verified: true });
@@ -315,9 +319,10 @@ d("an empty org: bootstrap admin", () => {
   });
 
   it("does not make the bootstrap email Factory Admin unless the provider verified it", async () => {
+    // An unverified address does not sign in at all, so it can never claim the bootstrap Factory Admin.
     const unverified = await signInFlow(t, issuer, { sub: "boss-1", email: "boss@corp.example", name: "The Boss", auth_time: now() });
-    const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie: `__Host-gantry_session=${unverified.session!.value}` } })).json();
-    expect(me.person.roles).toEqual([]);
+    expect(unverified.session).toBeUndefined();
+    expect((await t.db.admin.query(`select 1 from role_assignments where role_id = 'factory_admin' and revoked_at is null`)).rowCount).toBe(0);
   });
 
   it("the first sign-in with the bootstrap email becomes Factory Admin; others get nothing", async () => {

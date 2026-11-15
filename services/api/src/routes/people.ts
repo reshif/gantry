@@ -131,7 +131,20 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
   app.put("/api/v1/people/:id/away", async (req) => {
     const { id } = Id.parse(req.params);
     const body = AwayBody.parse(req.body);
-    const project = body.project ?? null;
+    let project = body.project ?? null;
+    // Away is global: the delegate stands in on every project the person approves for. A project-scoped right (approvers.edit on the
+    // body's project) is therefore enough only when it covers every project the person holds a role on; a factory role needs people.manage.
+    if (project && !isSelf(req, id)) {
+      const target = (await readPeople(g.pool, req.gx.orgId)).find((x) => x.id === id);
+      const scopes = new Set((target?.roles ?? []).map((r) => r.scope));
+      if (!target || !scopes.has(project) || scopes.has("factory")) project = null;
+      else {
+        for (const other of scopes) {
+          if (other === project) continue;
+          if (!(await decide(req, "approvers.edit", { project: other })).allowed) project = null;
+        }
+      }
+    }
     const action = await selfOrAction(req, id, project ? "approvers.edit" : "people.manage", { project });
     return command(req, { action, scope: project ? { project } : {}, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setAway(tx, a.orgId, id, body, a.now.getTime()));
   });

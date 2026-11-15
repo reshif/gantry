@@ -509,6 +509,18 @@ export const ACTIONS: readonly Action[] = [
     group: "Stops"
   },
   {
+    id: "halt.factory",
+    name: "Halt the whole factory",
+    scope: "factory",
+    group: "Stops"
+  },
+  {
+    id: "resume.factory",
+    name: "Resume the whole factory",
+    scope: "factory",
+    group: "Stops"
+  },
+  {
     id: "kill.factory",
     name: "Kill the factory",
     scope: "factory",

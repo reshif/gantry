@@ -6,7 +6,7 @@
  * This fallback is used only when the server sends no list. It names the identity provider's users (email = id without "p-" + @acme.dev)
  * and claims nothing about their permissions, because those depend on what has been granted in People & teams.
  */
-import type { DemoAccount } from "../api/types";
+import type { DemoAccount } from "../api/types.js";
 
 const USERS: ReadonlyArray<readonly [string, string]> = [
   ["asha", "Asha Raman"], ["daniel", "Daniel Okafor"], ["meera", "Meera Iyer"], ["tomas", "Tomás Ferreira"], ["priya", "Priya Nair"],

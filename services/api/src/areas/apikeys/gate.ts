@@ -6,6 +6,7 @@
 import { appendEvent, withTx } from "@gantry/db";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { sha256Hex } from "../../core/crypto.js";
+import { canonicalPath } from "../../core/paths.js";
 
 /**
  * A route is reachable with an API key only if it declares so in its route options (`config: { apiKey: "<scope>", apiKeyProject: "<param>" }`): the scope the key must carry
@@ -17,7 +18,7 @@ export interface ApiKeyRouteConfig { apiKey?: string; apiKeyProject?: string }
 /** Which key a request belongs to, for the log: set for a valid key and, when the key is known but revoked or expired, for the 401 it gets. */
 const keyOfRequest = new WeakMap<FastifyRequest, { id: string; project: string | null }>();
 
-const pathOf = (req: FastifyRequest): string => (req.url.split("?")[0] ?? "").slice(0, 300);
+const pathOf = (req: FastifyRequest): string => (canonicalPath(req.url) ?? req.url.split("?")[0] ?? "").slice(0, 300);
 
 /** A key that fails to authenticate may still be one we know (revoked, expired): the log records the refusal against it. */
 export async function noteRejectedKey(req: FastifyRequest, secret: string): Promise<void> {

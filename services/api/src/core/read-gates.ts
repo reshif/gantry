@@ -12,6 +12,7 @@
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { decide } from "./decide.js";
+import { canonicalPath } from "./paths.js";
 
 interface Gate {
   re: RegExp;
@@ -44,7 +45,7 @@ export function readGateFor(path: string): { action: string; project: string | n
 /** Refuses (403) a read; read refusals are not written to the ledger (a no-access screen polls several reads, which would flood it); writes are. Covers a read the person has no role for. Called after authentication; only for people reading with GET/HEAD. */
 export async function enforceReadGate(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   if ((req.method !== "GET" && req.method !== "HEAD") || req.gx.principal?.kind !== "person") return;
-  const gate = readGateFor(req.url.split("?")[0] ?? "");
+  const gate = readGateFor(canonicalPath(req.url) ?? "");
   if (!gate) return;
   const d = await decide(req, gate.action, gate.project ? { project: gate.project } : {});
   if (d.allowed) return;

@@ -206,7 +206,7 @@ export function effectiveStop(state: PolicyState, scope: { project?: string | nu
 }
 
 /** Stop controls and reads keep working in a stopped scope (I7). */
-const STOP_EXEMPT = new Set(["project.view", "audit.view", "line.halt", "line.resume", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
+const STOP_EXEMPT = new Set(["project.view", "audit.view", "line.halt", "line.resume", "halt.factory", "resume.factory", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
 /** A halt blocks gate progression, merges and moves; a kill or archive blocks all stoppable work. */
 const HALT_BLOCKS = new Set(["gate.approve", "release", "onboarding.merge", "wo.move", "brief.confirm"]);
 const STOPPABLE_GROUPS = new Set(["Work", "Gates", "Onboarding"]);
@@ -229,7 +229,7 @@ function whereOk(q: Policy, projectId: string | null): boolean {
 }
 
 /** Actions a Factory Admin keeps even if the matrix is damaged (I7): stopping and restoring. */
-const ADMIN_ALWAYS = new Set(["line.halt", "line.resume", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
+const ADMIN_ALWAYS = new Set(["line.halt", "line.resume", "halt.factory", "resume.factory", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
 
 export function can(state: PolicyState, personId: string | null | undefined, action: string, ctx: PolicyContext = {}): Decision {
   const matrix = state.matrix;

@@ -435,7 +435,10 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
       await saveWo(fx.tx, fx.orgId, w);
       return;
     }
-    if (kind === "auto") {
+    // Spec 9.5: any risk tag forces a human vote, even on an automatic gate. A change to CI, dependencies, code owners, auth,
+    // migrations or the tests it is judged by must not pass on checks the change itself could influence.
+    if (kind === "auto" && tags.length) note(w, fx, "system", `${g.label} ${g.name} checks passed; a person must decide because the change touches ${tags.join(", ")}.`);
+    if (kind === "auto" && !tags.length) {
       await closeInstance(fx, instance, "decision");
       await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto" }), fx.now]);
       note(w, fx, "system", `${g.label} ${g.name} passed automatically.`);

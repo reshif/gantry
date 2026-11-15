@@ -24,6 +24,7 @@ describe("can() equals legacy G.can", () => {
       for (const act of S.catalog.actions) {
         if (CONSOLE_RIGHTS.includes(act.id)) continue; // console rights (spec 12.6) are newer than the legacy engine: no legacy answer
         if ((READ_ACTIONS as readonly string[]).includes(act.id)) continue; // rights added after the legacy engine (Read rights) have no legacy answer
+        if (act.id === "halt.factory" || act.id === "resume.factory") continue; // factory-scoped stop rights (2026-11 security fix) are newer than the legacy engine
         for (const project of projects) {
           for (const time of times) {
             const ctx = { project, time };

@@ -1,7 +1,7 @@
 import { randomBytes, createHash } from "node:crypto";
 import { checkRoleChange, type Person, type RoleGrant } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
-import { conflict, invalid, notFound, Refusal } from "../../core/errors.js";
+import { conflict, invalid, notFound, refuse, Refusal } from "../../core/errors.js";
 import type { CommandResult } from "../../core/command.js";
 import { emailDomainAllowed } from "../../core/security.js";
 import { readPeople, readSecurity, readTeams } from "../../core/read/index.js";
@@ -97,6 +97,11 @@ export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id:
   const has = p.roles.some((g) => g.role === roleId && g.scope === "factory" && !g.via);
   const before = factoryRolesOf(p);
   if (has === add) return { msg: `${p.name} ${add ? "already is" : "is not"} ${role.name}.`, events: [], extra: { version: versionOf(p) }, changes: ["people"], project: null };
+  // Escalation guards: people.manage can be handed to a custom role, so it must not be a path to Factory Admin or to more rights for oneself.
+  if (add && actorId === id) throw refuse("denied", `You cannot grant yourself ${role.name}. Ask another administrator.`);
+  const actor = st.people.find((x) => x.id === actorId);
+  if (roleId === "factory_admin" && !actor?.roles.some((g) => g.role === "factory_admin" && g.scope === "factory"))
+    throw refuse("denied", `Only a Factory Admin can ${add ? "grant" : "remove"} Factory Admin.`, { needs: "factory_admin" });
   const nextRoles = add ? [...p.roles, { role: roleId, scope: "factory" }] : p.roles.filter((g) => !(g.role === roleId && g.scope === "factory" && !g.via));
   const checked = checkRoleChange(st.people, { actorId, targetId: id, nextRoles });
   if (!checked.ok) throw new Refusal(checked.error);

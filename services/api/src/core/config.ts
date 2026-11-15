@@ -51,7 +51,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
       githubIdpAlias: env.OIDC_GITHUB_IDP_ALIAS || null,
     },
     devSeed: env.GANTRY_DEV_SEED === "true",
-    demoAccounts: env.GANTRY_DEV_DEMO_ACCOUNTS === "true",
+    demoAccounts: demoAccountsAllowed(env.GANTRY_DEV_DEMO_ACCOUNTS === "true", publicUrl),
     bootstrapAdminEmail: env.GANTRY_BOOTSTRAP_ADMIN_EMAIL ? env.GANTRY_BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase() : null,
     trustProxy: env.GANTRY_TRUST_PROXY !== "false",
     host: env.HOST || "0.0.0.0",
@@ -59,4 +59,15 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     secrets: { sessionKey: Buffer.from(sessionKey, "utf8"), dataKey, edgeToken, githubToken },
     brokerUrl: (env.GITHUB_BROKER_URL || "http://gantry-github:9200").replace(/\/+$/, ""),
   };
+}
+
+/**
+ * The demo sign-in list publishes every person's name, email and roles to anyone who reaches the sign-in page. It is a local
+ * development aid only: refused (the service does not start) when the public URL is not this machine, so it cannot ship by accident.
+ */
+function demoAccountsAllowed(on: boolean, publicUrl: string): boolean {
+  if (!on) return false;
+  const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
+  if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost")) return true;
+  throw new Error(`GANTRY_DEV_DEMO_ACCOUNTS=true is for local development only; GANTRY_PUBLIC_URL (${publicUrl}) is not localhost. Unset it.`);
 }

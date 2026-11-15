@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readGateFor } from "../src/core/read-gates.js";
+import { canonicalPath } from "../src/core/paths.js";
 import { signIn } from "../src/core/auth/signin.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 
@@ -18,6 +19,22 @@ describe("readGateFor", () => {
   });
   it("leaves own data and the can endpoint open", () => {
     for (const u of ["/api/v1/me", "/api/v1/sessions", "/api/v1/signins", "/api/v1/saved-views", "/api/v1/can", "/api/v1/notifications", "/api/v1/stream"]) expect(readGateFor(u), u).toBeNull();
+  });
+});
+
+describe("canonicalPath", () => {
+  it("decodes each segment once, as the router does, so an encoded character cannot dodge a check", () => {
+    expect(canonicalPath("/api/v1/%70eople?x=1")).toBe("/api/v1/people");
+    expect(canonicalPath("/%61pi/v1/catalog")).toBe("/api/v1/catalog");
+    expect(canonicalPath("/%69nternal/v1/runs")).toBe("/internal/v1/runs");
+    expect(readGateFor(canonicalPath("/api/v1/%61ccess/matrix")!)).toEqual({ action: "policy.view", project: null });
+  });
+  it("keeps an encoded slash or percent inside its segment, and the gate's project id equals the router's parameter", () => {
+    expect(canonicalPath("/api/v1/projects/a%2Fb/floor")).toBe("/api/v1/projects/a%2Fb/floor");
+    expect(readGateFor(canonicalPath("/api/v1/projects/a%2541/floor")!)).toEqual({ action: "project.view", project: "a%41" });
+  });
+  it("refuses a path that does not decode", () => {
+    expect(canonicalPath("/api/v1/%E0%A4%A")).toBeNull();
   });
 });
 
@@ -41,6 +58,13 @@ d("default deny for reads", () => {
     expect(res.json().msg).toMatch(/No role held by No Body/);
     expect(await get(r.personId, "/api/v1/me")).toBe(200);
     expect(await get(r.personId, "/api/v1/projects/payments/floor")).toBe(404);
+    for (const url of ["/api/v1/%70eople", "/api/v1/%61ccess/matrix", "/api/v1/%61gents", "/api/v1/%73kills", "/api/v1/%69ntegrations"]) expect(await get(r.personId, url), url).toBe(403);
+  });
+
+  it("a percent-encoded prefix does not skip authentication", async () => {
+    const res = await t.app.inject({ method: "GET", url: "/%61pi/v1/catalog" });
+    expect(res.statusCode).toBe(401);
+    expect((await t.app.inject({ method: "GET", url: "/api/v1/%E0%A4%A" })).statusCode).toBe(400);
   });
 
   it("an Engineer on one project reads the catalogue and their project, not the factory registers (they need a factory-level role)", async () => {

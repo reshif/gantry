@@ -1,6 +1,6 @@
 import { checkMatrixEdit, type Matrix } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
-import { conflict, invalid, notFound, Refusal } from "../../core/errors.js";
+import { conflict, invalid, notFound, refuse, Refusal } from "../../core/errors.js";
 import type { CommandResult } from "../../core/command.js";
 import { readMatrix, readPeople } from "../../core/read/index.js";
 import { lockOrgConfig, publishMatrix, stateIn } from "./config.js";
@@ -15,6 +15,10 @@ export async function setMatrixCell(tx: Tx, orgId: string, by: string, roleId: s
   const action = st.catalog.actions.find((a) => a.id === actionId);
   if (!role) throw notFound(`There is no role ${roleId}.`);
   if (!action) throw invalid(`There is no action ${actionId}.`);
+  // policy.edit must not be self-elevating: adding a right to a role the editor holds (directly or through a team) needs a Factory Admin.
+  const editor = st.people.find((p) => p.id === by);
+  if (on && editor?.roles.some((g) => g.role === roleId) && !editor.roles.some((g) => g.role === "factory_admin" && g.scope === "factory"))
+    throw refuse("denied", `You hold ${role.name}, so you cannot add rights to it. Ask a Factory Admin.`, { needs: "factory_admin" });
   const cur = await readMatrix(tx, orgId, st.catalog.actions);
   const before = !!cur.value[roleId]?.[actionId];
   const checked = checkMatrixEdit(cur.value, await readPeople(tx, orgId), { role: roleId, action: actionId, value: on });

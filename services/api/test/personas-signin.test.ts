@@ -124,7 +124,7 @@ d("sign-in resolves each demo user to the right person", () => {
     expect(me.body.projects).toEqual([]);
     // every catalogue action, at factory and in every project, is refused
     const projects = seed.projects.map((p) => p.id);
-    const checks = ACTIONS.flatMap((a) => (a.scope === "project" ? projects.map((project) => ({ action: a.id, project })) : [{ action: a.id, project: null }]));
+    const checks = ACTIONS.flatMap<{ action: string; project: string | null }>((a) => (a.scope === "project" ? projects.map((project) => ({ action: a.id, project })) : [{ action: a.id, project: null }]));
     // The batch endpoint takes at most 500 checks; the catalogue grew past that with the Console group, so it is asked in chunks.
     const allowed: unknown[] = [];
     for (let i = 0; i < checks.length; i += 400) {

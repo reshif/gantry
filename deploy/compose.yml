@@ -83,7 +83,8 @@ services:
       SMTP_PORT: "1025"
       # Connection tests for chat and webhook integrations leave through the edge allow-list, like deliveries do.
       GANTRY_EGRESS_PROXY: http://gantry-edge:8444
-      GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-true}
+      # Off by default: when true, the sign-in page lists every person's name, email and roles. Local development only (refused unless the public URL is localhost).
+      GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-false}
       # Off by default: the org starts empty and the first sign-in with GANTRY_BOOTSTRAP_ADMIN_EMAIL becomes Factory Admin.
       # GANTRY_DEV_SEED=true loads the legacy demo data (people, projects, repos, policies) once, for development and demos only.
       GANTRY_DEV_SEED: ${GANTRY_DEV_SEED:-false}
@@ -289,6 +290,10 @@ services:
       KC_HEALTH_ENABLED: "true"
     secrets: [keycloak_admin_password, oidc_client_secret]
     volumes:
+      # The dev H2 database lives under data/. Persisting it keeps user ids (the OIDC `sub` Gantry links people to)
+      # stable across container recreation. --import-realm skips a realm that already exists, so edits to
+      # realm-gantry.json only apply after `docker volume rm gantry_kcdata`.
+      - kcdata:/opt/keycloak/data
       - ./keycloak/realm-gantry.json:/opt/keycloak/data/import/realm-gantry.json:ro
     healthcheck:
       test:
@@ -363,6 +368,7 @@ volumes:
   pgdata:
   objdata:
   caddydata:
+  kcdata:
 
 secrets:
   db_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/db_password" }
