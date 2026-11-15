@@ -187,6 +187,7 @@ export const slackHookRoutes: FastifyPluginAsync = async (app) => {
     }
     // The click is a command by the linked person, through the same pipeline: decision point at click time, audited denials, one transaction.
     (req.gx as { principal: unknown }).principal = { kind: "person", id: who.personId, name: who.name, sessionId: `slack:${p.team?.id ?? "-"}:${user}` };
+    (req.gx as { channel: string }).channel = "slack"; // set by the signature-checked hook; trustedVia() honours only this
     (req as { body: unknown }).body = { via: "slack" };
     const catalog = await readCatalog(g.pool, g.orgId);
     try {

@@ -101,7 +101,6 @@ export interface Actor {
 const SELF: Decision = { allowed: true, reason: "The caller changes their own data.", rule: { kind: "self", id: "SELF", name: "Own data" }, needs: "" };
 
 const CHANNELS: readonly EventChannel[] = ["web", "console", "slack", "teams", "api", "github", "schedule", "system"];
-const VIA: readonly string[] = ["web", "console", "slack", "teams"];
 
 /** A denial found inside the transaction: the transaction rolls back, the denial is audited in its own, and the caller gets 403 or 409. */
 class Denied extends Error {
@@ -125,14 +124,40 @@ export function parseIfMatch(req: FastifyRequest): number | null {
   return Number(m[1]);
 }
 
-const bodyVia = (body: unknown): string | null => {
-  const v = body && typeof body === "object" ? (body as { via?: unknown }).via : undefined;
-  return typeof v === "string" && VIA.includes(v) ? v : null;
-};
+/** Surfaces a signed-in browser session may name for itself: both are the same session, in the app or its console. */
+const BROWSER_VIA: readonly string[] = ["web", "console"];
+
+/**
+ * The channel an action came through, from the transport and never from what the client claims. A browser session
+ * may say `console` (the app's own console) and nothing else; an API key or a service names no channel; Slack and
+ * Teams are set only by the server's signature-checked chat hooks (`req.gx.channel`).
+ */
+export function trustedVia(req: FastifyRequest): string | null {
+  const t = req.gx?.channel;
+  if (t === "slack" || t === "teams") return t;
+  if (t !== "web" || req.gx.principal?.kind !== "person") return null;
+  const b = req.body;
+  const v = b && typeof b === "object" ? (b as { via?: unknown }).via : undefined;
+  return typeof v === "string" && BROWSER_VIA.includes(v) ? v : null;
+}
+
+/**
+ * Rewrites a request body's `via` to the trusted value before any route reads it, so a vote, a decision or an audit
+ * row can't be stamped "via slack" from a browser. Registered as a preHandler on the whole API.
+ */
+export function pinVia(req: FastifyRequest): void {
+  const b = req.body;
+  if (!b || typeof b !== "object" || Array.isArray(b) || !("via" in b)) return;
+  const v = trustedVia(req);
+  if (v === null) delete (b as { via?: unknown }).via;
+  else (b as { via?: unknown }).via = v;
+}
+
+const bodyVia = (req: FastifyRequest): string | null => trustedVia(req);
 
 function actorFor(req: FastifyRequest, decision: Decision, ifMatch: number | null, key: string | null): Actor {
   const p = req.gx.principal!;
-  const via = bodyVia(req.body);
+  const via = bodyVia(req);
   const channel: EventChannel = p.kind === "apikey" ? "api" : p.kind === "service" ? "system" : ((via as EventChannel | null) ?? "web");
   return {
     orgId: req.gx.orgId,
@@ -295,7 +320,7 @@ export async function auditDenial(req: FastifyRequest, spec: { action: string | 
   const g = req.server.gantry;
   const p = req.gx.principal;
   if (!p) return;
-  const via = bodyVia(req.body);
+  const via = bodyVia(req);
   const channel: EventChannel = p.kind === "apikey" ? "api" : p.kind === "service" ? "system" : ((via as EventChannel | null) ?? "web");
   await withTx(g.pool, (tx) =>
     appendEvent(tx, {

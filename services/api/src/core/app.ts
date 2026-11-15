@@ -17,6 +17,7 @@ import { safeEqual } from "./crypto.js";
 import { installErrorHandler } from "./errors.js";
 import { createOidcAdapter, type OidcAdapter } from "./oidc.js";
 import { canonicalPath } from "./paths.js";
+import { pinVia } from "./command.js";
 import { readOrg } from "./read/index.js";
 import { loadPolicyState } from "./read/state.js";
 import { ipAllowed, SecurityCache } from "./security.js";
@@ -125,6 +126,9 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
       if (!reply.sent) await enforceReadGate(req, reply);
     }
   });
+
+  // The audit channel comes from the transport: a client-sent `via` is pinned to what the caller may claim.
+  app.addHook("preHandler", async (req) => pinVia(req));
 
   app.addHook("onResponse", logApiRequest);
 
