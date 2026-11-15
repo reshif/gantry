@@ -170,7 +170,28 @@ describe("People", () => {
     fireEvent.click(await byId("ppl-mem-platform-p-tomas"));
     const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "factory_admin" } });
+    fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Covering for Asha" } });
+    fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
     expect(await screen.findByText(/Sign in again to confirm this change/)).toBeTruthy();
+  });
+
+  it("a factory role asks why, sends the reason, and can be undone straight after", async () => {
+    const calls = setup({
+      "PUT /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ body: { ok: true, msg: "Granted Factory Admin to Tomas Eriksen.", version: 2 } }),
+      "DELETE /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ body: { ok: true, msg: "Removed Factory Admin from Tomas Eriksen.", version: 3 } }),
+    });
+    mount(<PeopleView />);
+    fireEvent.click(await byId("ppl-mem-platform-p-tomas"));
+    const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
+    fireEvent.change(sel, { target: { value: "factory_admin" } });
+    expect(await screen.findByText(/A factory role applies on every project/)).toBeTruthy();
+    fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Quarterly review" } });
+    fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path.endsWith("/factory-roles/factory_admin"))).toBe(true));
+    expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/factory-roles/factory_admin"))?.body).toEqual({ reason: "Quarterly review" });
+    fireEvent.click(await byId("ppl-frole-undo"));
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path.endsWith("/factory-roles/factory_admin"))).toBe(true));
+    expect(calls.find((c) => c.method === "DELETE")?.body).toEqual({ reason: "Undo: Quarterly review" });
   });
 });
 

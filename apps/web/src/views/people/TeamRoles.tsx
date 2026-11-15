@@ -16,6 +16,7 @@ function GrantForm({ team, roles, projects, perm, close, registerSubmit }: { tea
   const [role, setRole] = useState(options.find((r) => r.level !== "factory")?.id ?? options[0]?.id ?? "");
   const [scope, setScope] = useState(projects[0]?.id ?? "");
   const [until, setUntil] = useState("");
+  const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
   const level = options.find((r) => r.id === role)?.level ?? "project";
 
@@ -25,7 +26,8 @@ function GrantForm({ team, roles, projects, perm, close, registerSubmit }: { tea
       if (level !== "factory" && !scope) return setErr("Pick a project.");
       const expiresAt = until ? new Date(`${until}T23:59:59`).getTime() : null;
       if (expiresAt !== null && expiresAt <= Date.now()) return setErr("The expiry must be in the future.");
-      const r = await ops.addTeamRole(team.id, { role, scope: level === "factory" ? "factory" : scope, ...(expiresAt !== null ? { expiresAt } : {}) });
+      if (level === "factory" && reason.trim().length < 3) return setErr("Say why the team needs a factory role: it is recorded on the audit log.");
+      const r = await ops.addTeamRole(team.id, { role, scope: level === "factory" ? "factory" : scope, ...(expiresAt !== null ? { expiresAt } : {}), ...(level === "factory" ? { reason: reason.trim() } : {}) });
       outcome(r);
       if (!r.ok) return setErr(r.msg);
       close();
@@ -39,7 +41,9 @@ function GrantForm({ team, roles, projects, perm, close, registerSubmit }: { tea
         <Select id="ppl-tr-role" value={role} onChange={setRole} options={options.map((r) => ({ value: r.id, label: `${r.name} (${r.level === "factory" ? "factory" : "project"})` }))} />
       </Field>
       {level === "factory" ? (
-        <p className="muted small">This role applies across the whole factory.</p>
+        <Field label="Reason" htmlFor="ppl-tr-reason" hint="This role applies across the whole factory. The reason is recorded on the audit log.">
+          <input id="ppl-tr-reason" className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why does this team need it?" />
+        </Field>
       ) : (
         <Field label="Project" htmlFor="ppl-tr-scope">
           <Select id="ppl-tr-scope" value={scope} onChange={setScope} options={projects.map((p) => ({ value: p.id, label: p.name }))} />
@@ -70,6 +74,20 @@ export function TeamRoles({ team, roles, projects, perm, members }: { team: Team
     });
   };
   const remove = async (g: NonNullable<Team["roles"]>[number]) => {
+    if (g.scope === "factory") {
+      // a factory-level grant: the reason goes on the ledger
+      ui.reasonDialog({
+        title: `Remove ${roleName(g.role)} from ${team.name}?`, kicker: "People & teams", kind: "danger", ok: "Remove role", label: "Reason", min: 3,
+        sub: `${members} member${members === 1 ? "" : "s"} lose${members === 1 ? "s" : ""} ${roleName(g.role)} across the factory unless they hold it another way. The reason is recorded on the audit log.`,
+        onOk: async (reason) => {
+          const r = await ops.removeTeamRole(team.id, g.id, reason);
+          if (!r.ok) return r;
+          outcome(r);
+          return { ok: true };
+        },
+      });
+      return;
+    }
     const ok = await ui.confirm({
       title: `Remove ${roleName(g.role)} from ${team.name}?`, kicker: "People & teams", kind: "danger", ok: "Remove role",
       body: <p>{`${members} member${members === 1 ? "" : "s"} lose${members === 1 ? "s" : ""} ${roleName(g.role)} on ${where(g.scope)} unless they hold it another way.`}</p>,

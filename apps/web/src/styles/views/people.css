@@ -66,6 +66,8 @@
 .chip-x:hover, .chip-x:focus-visible { color: var(--text); }
 .chip-x[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 .ppl-held { display: grid; gap: 8px; }
+.ppl-held .kicker { display: block; margin-bottom: 4px; }
+.ppl-held .kicker + .ppl-held-list { margin-top: 0; }
 .ppl-held-list { display: flex; gap: 4px; flex-wrap: wrap; list-style: none; margin: 4px 0 0; padding: 0; }
 .ppl-via { display: block; color: var(--accent); }
 .eff-src { font-size: 9px; color: var(--accent); margin-left: 2px; }

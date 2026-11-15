@@ -94,6 +94,7 @@ export async function grantTeamRole(tx: Tx, orgId: string, actorId: string, team
   const checked = checkTeamGrant(st.catalog.roles, st.projects.map((p) => p.id), body);
   if (!checked.ok) throw new Refusal(checked.error);
   if (body.expiresAt != null && body.expiresAt <= now) throw invalid("The expiry must be in the future.");
+  if (body.scope === "factory" && !body.reason) throw invalid("A factory-level grant needs a reason: say why, in a few words.");
   const role = st.catalog.roles.find((r) => r.id === body.role)!;
   const where = body.scope === "factory" ? "the factory" : st.projects.find((p) => p.id === body.scope)?.name ?? body.scope;
   const live = await tx.query<{ id: string }>(
@@ -112,7 +113,7 @@ export async function grantTeamRole(tx: Tx, orgId: string, actorId: string, team
   const members = (await tx.query<{ n: number }>(`select count(*)::int as n from team_members where org_id = $1 and team_id = $2`, [orgId, teamId])).rows[0]!.n;
   return {
     msg: `${team.name} now has ${role.name} on ${where}. ${members} member${members === 1 ? "" : "s"} inherit${members === 1 ? "s" : ""} it.`,
-    events: [{ type: "team.role.grant", category: "access", subject: { type: "team", id: teamId }, before: null, after: { role: body.role, scope: body.scope, expiresAt: body.expiresAt ?? null, members }, projectId: body.scope === "factory" ? null : body.scope }],
+    events: [{ type: "team.role.grant", category: "access", subject: { type: "team", id: teamId }, before: null, after: { role: body.role, scope: body.scope, expiresAt: body.expiresAt ?? null, members, ...(body.reason ? { reason: body.reason } : {}) }, projectId: body.scope === "factory" ? null : body.scope }],
     extra: { grant: { id, role: body.role, scope: body.scope, expiresAt: body.expiresAt ?? null } },
     changes: ["teams", "people", "matrix"],
     project: null,
@@ -120,16 +121,17 @@ export async function grantTeamRole(tx: Tx, orgId: string, actorId: string, team
 }
 
 /** Revoke one team grant by id. Members lose the inherited role at once (unless they hold it another way). */
-export async function revokeTeamRole(tx: Tx, orgId: string, teamId: string, grantId: string): Promise<CommandResult> {
+export async function revokeTeamRole(tx: Tx, orgId: string, teamId: string, grantId: string, reason?: string): Promise<CommandResult> {
   await lockOrgConfig(tx, orgId);
   const team = await teamIn(tx, orgId, teamId);
   const g = (await tx.query<{ role_id: string; project_id: string | null }>(`select role_id, project_id from team_role_assignments where org_id = $1 and team_id = $2 and id = $3 and revoked_at is null`, [orgId, teamId, grantId])).rows[0];
   if (!g) throw notFound("No such grant on this team.");
+  if (!g.project_id && !reason) throw invalid("Removing a factory-level grant needs a reason: say why, in a few words.");
   await tx.query(`update team_role_assignments set revoked_at = now(), updated_at = now() where org_id = $1 and id = $2`, [orgId, grantId]);
   const name = (await stateIn(tx, orgId)).catalog.roles.find((r) => r.id === g.role_id)?.name ?? g.role_id;
   return {
     msg: `Removed ${name} from ${team.name}.`,
-    events: [{ type: "team.role.revoke", category: "access", subject: { type: "team", id: teamId }, before: { role: g.role_id, scope: g.project_id ?? "factory" }, after: null, projectId: g.project_id }],
+    events: [{ type: "team.role.revoke", category: "access", subject: { type: "team", id: teamId }, before: { role: g.role_id, scope: g.project_id ?? "factory" }, after: reason ? { reason } : null, projectId: g.project_id }],
     changes: ["teams", "people", "matrix"],
     project: null,
   };

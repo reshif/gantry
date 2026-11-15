@@ -25,10 +25,16 @@ export const AwayBody = z.object({
   project: id.nullish(),
 });
 
+/** Why a factory-level grant changes: recorded on the audit event. Required for factory scope (Wave 3, F7). */
+const grantReason = z.string().trim().min(3, "Say why, in a few words.").max(500);
 export const TeamGrantBody = z.object({
   role: id,
   /** "factory" or a project id. */
   scope: id,
   /** Epoch ms; the grant lapses then. Omit for no expiry. */
   expiresAt: z.number().int().positive().nullish(),
+  /** Required when scope is "factory". */
+  reason: grantReason.optional(),
 });
+export const FactoryRoleBody = z.object({ reason: grantReason });
+export const RevokeBody = z.object({ reason: grantReason.optional() }).nullish();

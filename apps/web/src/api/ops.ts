@@ -301,15 +301,16 @@ export const ops = {
   /* ===== people, access ===== */
   invite: (o: Obj) => run(["people"], post(api("invites"), o, create)),
   acceptInvite: (personId: string) => run(["people", "me"], post(api(`invites/${enc(personId)}/accept`))),
-  setFactoryRole: (personId: string, roleId: string, add: boolean) =>
-    run(["people", "me"], (add ? put : del)(api(`people/${enc(personId)}/factory-roles/${enc(roleId)}`))),
+  /** A factory role reaches every project: the server wants a reason (recorded on the ledger) and a fresh sign-in. */
+  setFactoryRole: (personId: string, roleId: string, add: boolean, reason: string) =>
+    run(["people", "me"], (add ? put : del)(api(`people/${enc(personId)}/factory-roles/${enc(roleId)}`), { reason })),
   setTeams: (personId: string, teams: string[]) => run(["people"], put(api(`people/${enc(personId)}/teams`), { teams })),
   createTeam: (o: { name: string; desc?: string; id?: string }) => run(["teams", "people"], post(api("teams"), o, create)),
   updateTeam: (teamId: string, o: { name?: string; desc?: string }) => run(["teams", "people", "projects"], patch(api(`teams/${enc(teamId)}`), o)),
   deleteTeam: (teamId: string) => run(["teams", "people"], del(api(`teams/${enc(teamId)}`))),
   /** Team role grants (spec 8.9): members inherit them. `scope` is "factory" or a project id. */
-  addTeamRole: (teamId: string, g: { role: string; scope: string; expiresAt?: number | null }) => run(["teams", "people", "me", "matrix"], post(api(`teams/${enc(teamId)}/roles`), g)),
-  removeTeamRole: (teamId: string, grantId: string) => run(["teams", "people", "me", "matrix"], del(api(`teams/${enc(teamId)}/roles/${enc(grantId)}`))),
+  addTeamRole: (teamId: string, g: { role: string; scope: string; expiresAt?: number | null; reason?: string }) => run(["teams", "people", "me", "matrix"], post(api(`teams/${enc(teamId)}/roles`), g)),
+  removeTeamRole: (teamId: string, grantId: string, reason?: string) => run(["teams", "people", "me", "matrix"], del(api(`teams/${enc(teamId)}/roles/${enc(grantId)}`), reason ? { reason } : undefined)),
   setMatrix: (roleId: string, actionId: string, on: boolean, v?: Versioned) =>
     run(["matrix"], put(api(`access/matrix/${enc(roleId)}/${enc(actionId)}`), { on }, opts(v))),
   addRole: (def: Obj) => run(["matrix"], post(api("roles"), def, create)),

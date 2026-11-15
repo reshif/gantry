@@ -233,11 +233,38 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   if (perm.allowed && p.id === viewerId) factGuard = lockd("You cannot change your own factory role. Ask another Factory Admin.");
   else if (perm.allowed && frRole === "factory_admin" && admins.length < 2) factGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
 
-  const changeFactoryRole = async (v: string) => {
-    let r: { ok: boolean; msg: string } = { ok: true, msg: "" };
-    if (frRole && frRole !== v) r = outcome(await ops.setFactoryRole(p.id, frRole, false));
-    if (r.ok && v) r = outcome(await ops.setFactoryRole(p.id, v, true), `${p.name} is now ${roleName(v)} across the factory.`);
-    else if (r.ok) ui.toast(`${p.name} has no factory role now.`, "ok");
+  /** Move from one factory role (or none) to another. Each step is its own audited grant or revoke with the same reason. */
+  const swapFactoryRole = async (from: string, to: string, reason: string): Promise<{ ok: boolean; msg: string }> => {
+    if (from && from !== to) {
+      const r = await ops.setFactoryRole(p.id, from, false, reason);
+      if (!r.ok) return r;
+    }
+    if (to) return ops.setFactoryRole(p.id, to, true, reason);
+    return { ok: true, msg: "" };
+  };
+
+  // A factory role reaches every project (Wave 3, F7): ask why (it goes on the ledger), and offer to undo straight after.
+  const changeFactoryRole = (v: string) => {
+    const prev = frRole;
+    if (v === prev) return;
+    ui.reasonDialog({
+      title: v ? `Make ${p.name} ${roleName(v)}?` : `Remove ${roleName(prev)} from ${p.name}?`,
+      kicker: "Factory role",
+      sub: `A factory role applies on every project. The reason is recorded on the audit log${prev && v ? `, and replaces ${roleName(prev)}` : ""}. You may be asked to sign in again.`,
+      label: "Reason",
+      placeholder: v ? "Why does this person need it?" : "Why is it no longer needed?",
+      ok: v ? `Grant ${roleName(v)}` : "Remove role",
+      kind: v ? "primary" : "danger",
+      min: 3,
+      onOk: async (reason) => {
+        const r = await swapFactoryRole(prev, v, reason);
+        if (!r.ok) return r;
+        const undo = () =>
+          void swapFactoryRole(v, prev, `Undo: ${reason}`).then((u) => ui.toast(u.ok ? (prev ? `${p.name} is ${roleName(prev)} again.` : `${p.name} has no factory role again.`) : u.msg, u.ok ? "ok" : "error"));
+        ui.toast(v ? `${p.name} is now ${roleName(v)} across the factory.` : `${p.name} has no factory role now.`, "ok", { label: "Undo", id: "ppl-frole-undo", onClick: undo });
+        return { ok: true };
+      },
+    });
   };
 
   const openTeams = () => {
@@ -256,7 +283,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
       <div className="ad-head">
         <Avatar id={p.id} size="lg" />
         <div className="ppl-who">
-          <div className="kicker">{`${(p.teams ?? []).map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ")} · ${p.status === "invited" ? "invite pending" : "active"}`}</div>
+          <div className="kicker">{[(p.teams ?? []).map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", "), p.status === "invited" ? "invite pending" : "active"].filter(Boolean).join(" · ")}</div>
           <h2 className="ad-title">{p.name}</h2>
           <div className="ad-meta">{`${p.title} · `}<span className="mono">{p.email}</span>{p.github ? <span className="mono">{` · github ${p.github}`}</span> : null}</div>
           <div className="ppl-badges">
@@ -293,7 +320,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
             value={frRole}
             aria-label={`Factory role for ${p.name}`}
             disabled={!factGuard.allowed}
-            onChange={(v) => void changeFactoryRole(v)}
+            onChange={(v) => changeFactoryRole(v)}
             options={[{ value: "", label: "None (project roles only)" }, ...factoryRoles.map((r) => ({ value: r.id, label: roleName(r.id) + (r.id === "factory_admin" ? ": everything, every project" : r.id === "auditor" ? ": read everything, change nothing" : r.id === "factory_manager" ? ": read everything, run every project; no access admin" : r.id === "security_reviewer" ? ": read everything, sign off or stop risky work" : r.custom ? ` (custom): ${r.desc || "custom factory role"}` : "") }))]}
           />
           {!factGuard.allowed ? <span className="muted small">{(factGuard.needs ? `${factGuard.needs}. ` : "") + factGuard.reason}</span> : null}

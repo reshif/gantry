@@ -324,6 +324,7 @@ select.input { padding-right: 4px; }
 .toast-ok { border-left-color: var(--done); } .toast-ok > .ic { color: var(--done); }
 .toast-error { border-left-color: var(--block); } .toast-error > .ic { color: var(--block); }
 .toast-warn { border-left-color: var(--wait); } .toast-warn > .ic { color: var(--wait); }
+.toast-act { margin: -3px 0; }
 .toast-x { background: none; border: 0; color: var(--muted); padding: 2px; }
 .toast-x .ic { width: 14px; height: 14px; }
 .toast.out { opacity: 0; transform: translateY(6px); transition: opacity 0.25s, transform 0.25s; }

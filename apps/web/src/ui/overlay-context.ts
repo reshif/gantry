@@ -3,6 +3,12 @@ import type { Decision } from "./primitives";
 
 export type ToastKind = "info" | "ok" | "warn" | "error";
 
+export interface ToastAction {
+  label: string;
+  id?: string;
+  onClick: () => void;
+}
+
 export interface DialogAction {
   label: string;
   kind?: string;
@@ -37,7 +43,8 @@ export interface MenuItem {
 }
 
 export interface UIApi {
-  toast(text: string, kind?: ToastKind): void;
+  /** A short notice. An action (e.g. Undo) keeps it up longer and runs once when pressed. */
+  toast(text: string, kind?: ToastKind, action?: ToastAction): void;
   /** Push a custom modal onto the dialog stack. */
   open(render: (close: () => void) => ReactNode): { close: () => void };
   dialog(o: DialogOpts): { close: () => void };

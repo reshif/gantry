@@ -14,7 +14,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { command, decide, policyState, refuse, readPeople, readTeams } from "../core/index.js";
 import { effectivePermissions } from "../areas/access/simulate.js";
-import { AwayBody, CreateTeamBody, InviteBody, OncallBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
+import { AwayBody, CreateTeamBody, FactoryRoleBody, InviteBody, OncallBody, RevokeBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
 import { acceptInvite, invitePerson, personVersion, setAway, setFactoryRole, setOncall, setTeams } from "../areas/people/people.js";
 import { createTeam, deleteTeam, grantTeamRole, revokeTeamRole, updateTeam } from "../areas/people/teams.js";
 import { directoryPeople, directoryScope, directoryTeams } from "../core/directory.js";
@@ -86,7 +86,8 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
 
   app.delete("/api/v1/teams/:id/roles/:grant", async (req) => {
     const { id, grant } = IdGrant.parse(req.params);
-    return command(req, { action: "people.manage", stepUp: true }, (tx, a) => revokeTeamRole(tx, a.orgId, id, grant));
+    const reason = RevokeBody.parse(req.body ?? null)?.reason;
+    return command(req, { action: "people.manage", stepUp: true }, (tx, a) => revokeTeamRole(tx, a.orgId, id, grant, reason));
   });
 
   app.get("/api/v1/people/:id/effective-permissions", async (req) => {
@@ -108,14 +109,15 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
     return command(req, { action: "people.manage", ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => acceptInvite(tx, a.orgId, id));
   });
 
-  // Role grants decide who can restore and who can edit policy, so they need a fresh sign-in (spec 14.4).
+  // Role grants decide who can restore and who can edit policy, so they need a fresh sign-in (spec 14.4) and a reason for the ledger.
   for (const [method, add] of [["PUT", true], ["DELETE", false]] as const) {
     app.route({
       method,
       url: "/api/v1/people/:id/factory-roles/:role",
       handler: async (req) => {
         const { id, role } = IdRole.parse(req.params);
-        return command(req, { action: "people.manage", stepUp: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setFactoryRole(tx, a.orgId, a.id, id, role, add));
+        const { reason } = FactoryRoleBody.parse(req.body ?? {});
+        return command(req, { action: "people.manage", stepUp: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setFactoryRole(tx, a.orgId, a.id, id, role, add, reason));
       },
     });
   }

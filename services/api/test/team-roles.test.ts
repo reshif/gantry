@@ -136,9 +136,13 @@ d("team role grants (spec 8.9)", () => {
   it("factory-level roles via a team apply everywhere; a role held by a team cannot be deleted; deleting the team drops its grants", async () => {
     const c = await call(admin, "POST", "/api/v1/roles", { name: "Observer", level: "factory", base: "auditor" });
     const roleId = c.body.role?.id ?? c.body.id ?? "observer";
-    const g = await call(admin, "POST", `/api/v1/teams/${team}/roles`, { role: roleId, scope: "factory" });
+    // a factory-level grant needs a reason, and so does taking it away
+    expect((await call(admin, "POST", `/api/v1/teams/${team}/roles`, { role: roleId, scope: "factory" })).status).toBe(422);
+    const g = await call(admin, "POST", `/api/v1/teams/${team}/roles`, { role: roleId, scope: "factory", reason: "Quarterly access review" });
     expect(g.status, JSON.stringify(g.body)).toBe(200);
+    expect((await ev("team.role.grant")).at(-1).after).toMatchObject({ scope: "factory", reason: "Quarterly access review" });
     expect((await person(engineer)).roles).toContainEqual({ role: roleId, scope: "factory", via: team });
+    expect((await call(admin, "DELETE", `/api/v1/teams/${team}/roles/${g.body.grant.id}`)).status).toBe(422);
     const del = await call(admin, "DELETE", `/api/v1/roles/${roleId}`, undefined, { headers: { "if-match": String((await t.db.admin.query(`select version from roles where id = $1`, [roleId])).rows[0].version) } });
     expect(del.status).toBe(409);
     await setTeams(engineer, (await person(engineer)).teams.filter((x: string) => x !== team));

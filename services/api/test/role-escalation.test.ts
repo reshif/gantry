@@ -17,18 +17,18 @@ d("role-grant escalation", () => {
   const roles = async (id: string) => ((await w.call("p-asha", "GET", "/api/v1/people")).body as unknown as Array<{ id: string; roles: Array<{ role: string }> }>).find((p) => p.id === id)!.roles.map((r) => r.role);
 
   it("cannot grant themselves any role", async () => {
-    const r = await w.call("p-sam", "PUT", "/api/v1/people/p-sam/factory-roles/factory_admin");
+    const r = await w.call("p-sam", "PUT", "/api/v1/people/p-sam/factory-roles/factory_admin", { reason: "escalation test" });
     expect(r.status).toBe(403);
     expect(r.body.msg).toMatch(/yourself/);
   });
   it("cannot grant or remove Factory Admin unless they are one", async () => {
-    expect((await w.call("p-sam", "PUT", "/api/v1/people/p-tomas/factory-roles/factory_admin")).status).toBe(403);
-    expect((await w.call("p-sam", "DELETE", "/api/v1/people/p-omar/factory-roles/factory_admin")).status).toBe(403);
+    expect((await w.call("p-sam", "PUT", "/api/v1/people/p-tomas/factory-roles/factory_admin", { reason: "escalation test" })).status).toBe(403);
+    expect((await w.call("p-sam", "DELETE", "/api/v1/people/p-omar/factory-roles/factory_admin", { reason: "escalation test" })).status).toBe(403);
     expect(await roles("p-tomas")).not.toContain("factory_admin");
     expect(await roles("p-omar")).toContain("factory_admin");
   });
   it("still grants the other factory roles it is for", async () => {
-    expect((await w.call("p-sam", "PUT", "/api/v1/people/p-tomas/factory-roles/auditor")).status).toBe(200);
+    expect((await w.call("p-sam", "PUT", "/api/v1/people/p-tomas/factory-roles/auditor", { reason: "escalation test" })).status).toBe(200);
     expect(await roles("p-tomas")).toContain("auditor");
   });
 

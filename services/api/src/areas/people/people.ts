@@ -87,7 +87,7 @@ export async function acceptInvite(tx: Tx, orgId: string, id: string): Promise<C
 }
 
 /** Grant or revoke one factory-level role. Spec 14.4 invariants apply: the last Factory Admin stays, and nobody removes their own admin role. */
-export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id: string, roleId: string, add: boolean): Promise<CommandResult<{ version: number }>> {
+export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id: string, roleId: string, add: boolean, reason: string): Promise<CommandResult<{ version: number }>> {
   await lockOrgConfig(tx, orgId);
   const st = await stateIn(tx, orgId);
   const role = st.catalog.roles.find((r) => r.id === roleId);
@@ -112,7 +112,7 @@ export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id:
   const after = nextRoles.filter((g) => g.scope === "factory" && !g.via).map((g) => g.role).join(",") || "none";
   return {
     msg: `${add ? "Granted" : "Removed"} ${role.name}${add ? " to " : " from "}${p.name}.`,
-    events: [{ type: add ? "role.grant" : "role.revoke", category: "access", subject: { type: "person", id }, before, after, projectId: null }],
+    events: [{ type: add ? "role.grant" : "role.revoke", category: "access", subject: { type: "person", id }, before: { roles: before }, after: { roles: after, reason }, projectId: null }],
     extra: { version: v },
     changes: ["people", "matrix"],
     project: null,

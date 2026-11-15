@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
-import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastKind, type UIApi } from "./overlay-context";
+import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
 import { tip } from "./Tip";
 
 /* ---------- focus trap ---------- */
@@ -313,6 +313,7 @@ interface ToastItem {
   text: string;
   kind: ToastKind;
   out: boolean;
+  action?: ToastAction | undefined;
 }
 interface StackItem {
   id: number;
@@ -332,13 +333,13 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   popRef.current = pop;
   drawerRef.current = drawer;
 
-  const toast = useCallback((text: string, kind: ToastKind = "info") => {
+  const toast = useCallback((text: string, kind: ToastKind = "info", action?: ToastAction) => {
     const id = seq.current++;
-    setToasts((l) => [...l, { id, text, kind, out: false }].slice(-3));
+    setToasts((l) => [...l, { id, text, kind, out: false, action }].slice(-3));
     setTimeout(() => {
       setToasts((l) => l.map((t) => (t.id === id ? { ...t, out: true } : t)));
       setTimeout(() => setToasts((l) => l.filter((t) => t.id !== id)), 300);
-    }, 4600);
+    }, action ? 10_000 : 4600);
   }, []);
 
   const closePopover = useCallback(() => {
@@ -461,6 +462,19 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
           <div key={t.id} className={`toast toast-${t.kind}${t.out ? " out" : ""}`}>
             <Icon name={t.kind === "error" ? "alert" : t.kind === "warn" ? "halt" : "check"} />
             <span>{t.text}</span>
+            {t.action ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost toast-act"
+                id={t.action.id}
+                onClick={() => {
+                  setToasts((l) => l.filter((x) => x.id !== t.id));
+                  t.action!.onClick();
+                }}
+              >
+                {t.action.label}
+              </button>
+            ) : null}
             <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => setToasts((l) => l.filter((x) => x.id !== t.id))}>
               <Icon name="x" />
             </button>
