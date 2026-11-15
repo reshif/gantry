@@ -13,6 +13,7 @@ import { effectiveFor } from "../areas/agents/effective.js";
 import { CreateBody, EffectiveQuery, IdParam, InstructionsBody, NewVersionBody, RollbackBody, SaveBody, SkillParam, VersionParam } from "../areas/agents/schemas.js";
 import { agentRows, readAgents } from "../areas/agents/store.js";
 import { refuseIfFactoryKilled } from "../areas/integrations/stop.js";
+import { directoryAgents, directoryScope } from "../core/directory.js";
 
 const requirePerson = (req: FastifyRequest): string => {
   const p = req.gx.principal;
@@ -28,7 +29,9 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/v1/agents", async (req) => {
     requirePerson(req);
-    return readAgents(g.pool, g.orgId);
+    const mine = await directoryScope(req);
+    const agents = await readAgents(g.pool, g.orgId);
+    return mine ? directoryAgents(agents, mine) : agents;
   });
 
   /** The eval suites an agent may be gated on (the promotion gate picker). */

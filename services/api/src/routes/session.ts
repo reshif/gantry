@@ -263,9 +263,10 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
 
   /* ------------------------------------------------------------ security settings */
 
+  /** Read by whoever may change them, and by anyone who may read access policy (an Auditor reviews them; only security.manage edits). */
   app.get("/api/v1/security", async (req) => {
     const d = await decide(req, "security.manage");
-    if (!d.allowed) throw refuse(d.rule.kind === "stop" ? "stopped" : "denied", d.reason, { rule: d.rule, needs: d.needs });
+    if (!d.allowed && !(await decide(req, "policy.view")).allowed) throw refuse(d.rule.kind === "stop" ? "stopped" : "denied", d.reason, { rule: d.rule, needs: d.needs });
     const s = await readSecurity(g.pool, g.orgId);
     return { ...s.value, version: s.version };
   });

@@ -9,6 +9,7 @@ import { refuseIfFactoryKilled } from "../areas/integrations/stop.js";
 import { createSkill, saveSkill, setSkillProjects } from "../areas/skills/commands.js";
 import { CreateSkillBody, ProjectsBody, SaveSkillBody, SkillIdParam } from "../areas/skills/schemas.js";
 import { readSkills, skillRows } from "../areas/skills/store.js";
+import { directoryScope, directorySkills } from "../core/directory.js";
 
 const requirePerson = (req: FastifyRequest): void => {
   if (req.gx.principal?.kind !== "person") throw refuse("denied", "This view is for signed-in people.");
@@ -21,7 +22,9 @@ export const skillRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/v1/skills", async (req) => {
     requirePerson(req);
-    return readSkills(g.pool, g.orgId);
+    const mine = await directoryScope(req);
+    const skills = await readSkills(g.pool, g.orgId);
+    return mine ? directorySkills(skills, mine) : skills;
   });
 
   app.post("/api/v1/skills", async (req) => {

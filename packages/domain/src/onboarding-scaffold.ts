@@ -108,7 +108,7 @@ export function reviewFiles(authored: readonly AuthoredFile[], env: ReviewEnv): 
     if (CREDENTIAL_FILES.test(path)) { bad("is a credential file (environment file, key, token file); never commit those. Commit an .env.example without values instead."); continue; }
     if (fileLooksSecret(a.content)) { bad("contains something that looks like a credential. Reference a secret by name instead (for example ${{ secrets.NAME }})."); continue; }
     if (LOCKFILES.test(path)) { bad("is a lockfile. A package tool generates it (its hashes cannot be authored); leave it out and let CI or a person run the tool."); continue; }
-    if (BRANCH_RULE_FILES.test(path)) { bad("would set branch rules. Branch protection and rulesets are GitHub settings that Gantry never sets (spec 11.2)."); continue; }
+    if (BRANCH_RULE_FILES.test(path)) { bad("would set branch rules. Branch protection and rulesets are GitHub settings that Gantry never sets."); continue; }
     const exists = facts.files.includes(path);
     if (exists && CODE_EXT.test(path)) { bad("is existing application code. An onboarding pull request does not rewrite it."); continue; }
     if (SHELLISH.test(path) || CODE_EXT.test(path)) {

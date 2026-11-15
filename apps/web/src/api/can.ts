@@ -5,7 +5,7 @@
  * matrix, policies, people (and the other decision inputs) change, and when the session changes.
  */
 import { useSyncExternalStore } from "react";
-import { api, post } from "./client";
+import { ApiError, api, post } from "./client";
 import { onCanInvalidated } from "./keys";
 import type { CanCheck, CanResult } from "./types";
 
@@ -72,6 +72,21 @@ export class CanBatcher {
       this.schedule();
     }
     return null;
+  }
+
+  /** The decision, waiting for the batch when it is not cached yet. */
+  ask(check: CanCheck): Promise<CanResult> {
+    const hit = this.peek(check);
+    if (hit) return Promise.resolve(hit);
+    return new Promise((resolve) => {
+      const off = this.subscribe(() => {
+        const r = this.get(check);
+        if (r) {
+          off();
+          resolve(r);
+        } else if (!this.pending.has(canKey(this.session, check)) && !this.inflight.has(canKey(this.session, check))) this.peek(check); // cleared meanwhile: ask again
+      });
+    });
   }
 
   get(check: CanCheck): CanResult | null {
@@ -154,4 +169,15 @@ export function useCanMany(checks: Array<{ action: string } & CanContext>): Arra
 /** Keeps the cache keyed to the signed-in session. Mount once under the shell. */
 export function useCanSession(sessionId: string | null): void {
   canBatcher.setSession(sessionId); // idempotent; must run before children call useCan in the same render
+}
+
+/**
+ * A read the person may not be allowed: ask first, and when the answer is no, fail like a 403 without sending the request (the
+ * page shows "Not visible to you", and the network and console stay clean). Any one of `actions` allowed is enough.
+ */
+export async function readIfAllowed<T>(actions: readonly string[], read: () => Promise<T>): Promise<T> {
+  const results = await Promise.all(actions.map((action) => canBatcher.ask({ action })));
+  if (results.some((r) => r.allowed)) return read();
+  const first = results[0];
+  throw new ApiError(403, first?.reason || "Your roles don't include this.", { ok: false, msg: first?.reason, needs: first?.needs });
 }

@@ -11,7 +11,7 @@ import { useUI } from "../../ui/overlay-context";
 import { Health, Rw, SENS, classesFor, dec, draftOf, projectsIn, stationsFor, type ScopeDraft } from "./kit";
 import { UsageTable } from "./Usage";
 
-const WRITE_ALWAYS: Decision = { allowed: false, reason: "Write tools always need a station pre-authorisation for the work order and attempt (spec 12.4). There is no switch to turn it off." };
+const WRITE_ALWAYS: Decision = { allowed: false, reason: "Write tools always need a station pre-authorisation for the work order and attempt. There is no switch to turn it off." };
 
 function ScopeGroup({ k, label, items, d, ro, allowAll, set }: { k: keyof ScopeDraft; label: string; items: Array<{ id: string; label: string; mono?: boolean }>; d: ScopeDraft; ro: boolean; allowAll: boolean; set: (next: ScopeDraft) => void }) {
   const all = d[k] === "all";

@@ -83,14 +83,6 @@ export function Shell({ me }: { me: Me }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoped, loc.project, project?.id]);
 
-  // a route the person cannot see falls back to home with a notice
-  const warned = useRef<string | null>(null);
-  useEffect(() => {
-    if (denied && warned.current !== denied.id + loc.param) {
-      warned.current = denied.id + loc.param;
-      ui.toast(`You do not have access to ${denied.title}.`, "warn");
-    }
-  }, [denied, loc.param, ui]);
 
   // new route: top of the page, focus moves to the main region
   useEffect(() => {
@@ -102,8 +94,8 @@ export function Shell({ me }: { me: Me }) {
   }, [routeId, loc.param]);
 
   useEffect(() => {
-    document.title = `${def?.title ?? "Home"}${scoped && project ? ` · ${project.name}` : ""} · Gantry Software Factory`;
-  }, [def, scoped, project]);
+    document.title = `${denied?.title ?? def?.title ?? "Home"}${scoped && project ? ` · ${project.name}` : ""} · Gantry Software Factory`;
+  }, [def, denied, scoped, project]);
 
   const openPalette = useCallback(() => {
     ui.open((close) => <PaletteDialog projectId={projectId} onClose={close} />);
@@ -128,7 +120,8 @@ export function Shell({ me }: { me: Me }) {
   };
   const View = VIEWS[routeId] ?? VIEWS.home;
   const noAccess = hasNoAccess(me);
-  const crumb = scoped ? [def?.title ?? ""] : [...(def && !["Overview"].includes(def.group) ? [def.group] : []), def?.title ?? "Home"];
+  const shown = denied ?? def;
+  const crumb = scoped ? [def?.title ?? ""] : [...(shown && !["Overview"].includes(shown.group) ? [shown.group] : []), shown?.title ?? "Home"];
   const switcherProject = scoped ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
   const ready = !scoped || (!!project && synced === project.id);
   const killed = !!me.factory.killed;
@@ -138,7 +131,7 @@ export function Shell({ me }: { me: Me }) {
       <div className="sysbanner" id="sysbanner" hidden={!killed}>
         {killed ? <StopBanner projectId={null} /> : null}
       </div>
-      <Nav me={me} current={routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
+      <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
       <div className="nav-scrim" id="nav-scrim" hidden={!navOpen} onClick={() => setNavOpen(false)} />
       <main className="main" id="main" tabIndex={-1} ref={main}>
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
@@ -150,6 +143,11 @@ export function Shell({ me }: { me: Me }) {
           ) : noProjectAccess ? (
             <div className="view">
               <Empty id="no-project-access" title="You do not have access to this project" text="It may not exist, or you hold no role on it. Projects you cannot see are hidden from you." action={<p><a href="#projects" className="linkish">Back to all projects</a></p>} />
+            </div>
+          ) : denied ? (
+            // a page outside the person's roles: say so where they asked for it (the URL stays, so it works once access is granted)
+            <div className="view">
+              <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
             </div>
           ) : ready ? (
             <Suspense fallback={null}>{View ? <View /> : null}</Suspense>

@@ -17,6 +17,7 @@ import { effectivePermissions } from "../areas/access/simulate.js";
 import { AwayBody, CreateTeamBody, InviteBody, OncallBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
 import { acceptInvite, invitePerson, personVersion, setAway, setFactoryRole, setOncall, setTeams } from "../areas/people/people.js";
 import { createTeam, deleteTeam, grantTeamRole, revokeTeamRole, updateTeam } from "../areas/people/teams.js";
+import { directoryPeople, directoryScope, directoryTeams } from "../core/directory.js";
 
 const Id = z.object({ id: z.string().min(1).max(100) });
 const IdGrant = z.object({ id: z.string().min(1).max(100), grant: z.string().min(1).max(100) });
@@ -40,12 +41,16 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/v1/people", async (req) => {
     requirePerson(req);
-    return readPeople(g.pool, req.gx.orgId);
+    const mine = await directoryScope(req);
+    const people = await readPeople(g.pool, req.gx.orgId);
+    return mine ? directoryPeople(people, mine, await readTeams(g.pool, req.gx.orgId)) : people;
   });
 
   app.get("/api/v1/teams", async (req) => {
     requirePerson(req);
-    return readTeams(g.pool, req.gx.orgId);
+    const mine = await directoryScope(req);
+    const teams = await readTeams(g.pool, req.gx.orgId);
+    return mine ? directoryTeams(teams, mine) : teams;
   });
 
   app.post("/api/v1/teams", async (req) => {

@@ -129,15 +129,16 @@ describe("signed in", () => {
     expect(FakeES.instances[0]?.url).toBe("/api/v1/stream");
   });
 
-  it("hides routes the roles do not allow and falls back to home with a notice", async () => {
+  it("hides routes the roles do not allow and says so on the page asked for", async () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody({ roles: [{ role: "engineer", scope: "payments" }] }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
     window.location.hash = "#security";
     render(<App />);
     const nav = await screen.findByRole("navigation", { name: "Main" });
     expect(within(nav).queryByText("Security")).toBeNull();
     expect(within(nav).queryByText("Agents")).toBeNull();
-    expect(await screen.findByText("You do not have access to Security.")).toBeTruthy();
-    expect(within(nav).getByText("Home").closest("a")?.getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByText("Security isn't available to your roles")).toBeTruthy();
+    expect(window.location.hash).toBe("#security");
+    expect(within(nav).getByText("Home").closest("a")?.getAttribute("aria-current")).toBeNull();
   });
 
   it("shows the factory kill banner from me.factory", async () => {

@@ -15,6 +15,7 @@ import { openSecret } from "../areas/mcp/secret.js";
 import { AddBody, CallsQuery, CheckQuery, DiscoverBody, GrantBody, IdParam, PatchBody } from "../areas/mcp/schemas.js";
 import { readCalls, readServer, readServerRows, readServers } from "../areas/mcp/store.js";
 import { refuseIfFactoryKilled } from "../areas/integrations/stop.js";
+import { directoryScope, directoryServers } from "../core/directory.js";
 
 const requirePerson = (req: FastifyRequest): void => {
   if (req.gx.principal?.kind !== "person") throw refuse("denied", "This view is for signed-in people.");
@@ -37,7 +38,9 @@ export const mcpRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/api/v1/mcp/servers", async (req) => {
     requirePerson(req);
-    return readServers(g.pool, g.orgId);
+    const mine = await directoryScope(req);
+    const servers = await readServers(g.pool, g.orgId);
+    return mine ? directoryServers(servers, mine) : servers;
   });
 
   app.get("/api/v1/mcp/calls", async (req) => {

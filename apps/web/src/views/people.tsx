@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fmt, type Person, type Project, type Role, type Team } from "@gantry/domain";
 import { api, get } from "../api/client";
 import { ops } from "../api/ops";
-import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
+import { useAccessMatrix, useMe, usePeople, useProjects, useSecurity } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate } from "../lib/router";
 import { ExplainDenial } from "./console/ExplainDenial";
@@ -44,7 +44,7 @@ export default function PeopleView() {
   const selected = people.find((p) => p.id === sel) ?? people.find((p) => p.id === viewerId) ?? people[0];
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
   const admins = people.filter((p) => p.status === "active" && p.roles.some((g) => g.role === "factory_admin"));
-  const sec = useQuery({ queryKey: ["security"], queryFn: () => get<{ domains: string[] }>(api("security")), retry: false });
+  const sec = useSecurity(); // the allowed invite domains, when this person may read the security settings (the server checks them anyway)
   const invite = useInviteDialog({ perm, teams, projects: projects as Project[], roles, domains: sec.data?.domains ?? [], onDone: setSel });
   const teamDlg = useTeamDialogs(perm);
 

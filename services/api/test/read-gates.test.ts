@@ -69,9 +69,50 @@ d("default deny for reads", () => {
 
   it("an Engineer on one project reads the catalogue and their project, not the factory registers (they need a factory-level role)", async () => {
     expect(await get("p-tomas", REGISTERS.catalog)).toBe(200);
-    for (const k of ["people", "teams", "policies", "freezes", "matrix", "agents", "skills", "vendors", "integrations"] as const) expect(await get("p-tomas", REGISTERS[k]), k).toBe(403);
+    for (const k of ["policies", "freezes", "matrix", "vendors"] as const) expect(await get("p-tomas", REGISTERS[k]), k).toBe(403);
+    for (const u of ["/api/v1/people/p-asha/effective-permissions", "/api/v1/agents/suites", "/api/v1/mcp/calls", "/api/v1/instructions/base"]) expect(await get("p-tomas", u), u).toBe(403);
     expect(await get("p-tomas", "/api/v1/projects/payments/floor")).toBe(200);
     expect(await get("p-tomas", "/api/v1/projects/risk/floor")).toBe(404);
+  });
+
+  it("the plain lists answer someone on a project with a directory of their own projects: who and what works there, nothing more", async () => {
+    const read = async (url: string) => {
+      const r = await t.app.inject({ method: "GET", url, headers: (await t.session("p-tomas")).headers });
+      expect(r.statusCode, url).toBe(200);
+      return r.json();
+    };
+    const mine = new Set((await read("/api/v1/me")).projects.map((p: { id: string }) => p.id));
+    const ok = (scope: string, role: string) => mine.has(scope) || (scope === "factory" && role === "factory_admin");
+    const people = await read("/api/v1/people");
+    const all = await t.app.inject({ method: "GET", url: "/api/v1/people", headers: (await t.session("p-asha")).headers });
+    expect(people.length).toBeGreaterThan(0);
+    expect(people.length).toBeLessThan(all.json().length);
+    for (const p of people) {
+      expect(p.roles.length, p.id).toBeGreaterThan(0);
+      for (const g of p.roles) expect(ok(g.scope, g.role), `${p.id} ${g.role}@${g.scope}`).toBe(true);
+      expect(p.mfa).toBeUndefined();
+      expect(p.invitedBy).toBeUndefined();
+    }
+    for (const tm of await read("/api/v1/teams")) for (const g of tm.roles ?? []) expect(mine.has(g.scope)).toBe(true);
+    for (const a of await read("/api/v1/agents")) {
+      expect(a.instructions).toBe("");
+      expect(a.versions).toEqual([]);
+      expect(a.projects === "all" || a.projects.every((x: string) => mine.has(x))).toBe(true);
+    }
+    for (const sk of await read("/api/v1/skills")) expect(sk.body).toBe("");
+    for (const m of await read("/api/v1/mcp/servers")) {
+      expect(m.url).toBe("");
+      expect(m.authMask).toBe("");
+    }
+    await read("/api/v1/integrations");
+    await read("/api/v1/integration-types");
+  });
+
+  it("an Auditor reads the security settings but cannot change them", async () => {
+    expect(await get("p-sam", "/api/v1/security")).toBe(200);
+    const r = await t.app.inject({ method: "PATCH", url: "/api/v1/security", headers: (await t.session("p-sam")).headers, payload: { path: "domains", value: ["acme.dev"] } });
+    expect(r.statusCode).toBe(403);
+    expect(await get("p-tomas", "/api/v1/security")).toBe(403);
   });
 
   it("an Auditor and a Factory Admin read every register", async () => {
@@ -82,9 +123,14 @@ d("default deny for reads", () => {
     await t.db.admin.query(`insert into teams (org_id, id, name, description) values ($1,'readers','Readers','')`, [t.orgId]);
     await t.db.admin.query(`insert into team_members (org_id, team_id, person_id) values ($1,'readers','p-tomas')`, [t.orgId]);
     await t.db.admin.query(`insert into team_role_assignments (org_id, id, team_id, role_id, scope_type, project_id) values ($1,'tra-r','readers','auditor','factory',null)`, [t.orgId]);
-    expect(await get("p-tomas", REGISTERS.people)).toBe(200);
+    const count = async (who: string) => (await t.app.inject({ method: "GET", url: REGISTERS.people, headers: (await t.session(who)).headers })).json().length as number;
+    const everyone = await count("p-asha");
+    expect(await count("p-tomas")).toBe(everyone);
+    expect(await get("p-tomas", REGISTERS.policies)).toBe(200);
     await t.db.admin.query(`update team_role_assignments set revoked_at = now() where id = 'tra-r'`);
-    expect(await get("p-tomas", REGISTERS.people)).toBe(403);
+    // back to the directory of their own project, and no factory register
+    expect(await count("p-tomas")).toBeLessThan(everyone);
+    expect(await get("p-tomas", REGISTERS.policies)).toBe(403);
   });
 
   it("an existing org gains the new read actions with their defaults on start-up, leaving its other cells alone", async () => {

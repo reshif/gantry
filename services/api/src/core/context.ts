@@ -37,6 +37,8 @@ export interface RequestCtx {
   /** Per-request cache: policy state (spec 14.3 "cached per request"). */
   state?: Promise<PolicyStateLoaded>;
   person?: Promise<Person | null>;
+  /** Set by the read gate: this person reads a list endpoint through its project directory view (core/directory.ts). */
+  directory?: boolean;
 }
 
 export interface Gantry {

@@ -6,6 +6,15 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { api, ApiError, get, getText, setCsrfToken } from "./client";
 import { qk } from "./keys";
+import { readIfAllowed } from "./can";
+
+/* The factory-level reads behind each register (core/read-gates.ts on the server): asked before the request is sent. */
+const MODELS = ["models.view"] as const;
+const POLICY = ["policy.view"] as const;
+const PEOPLE = ["people.view"] as const;
+const AGENTS = ["agents.view"] as const;
+const INTEG = ["integrations.view"] as const;
+const SECURITY = ["security.manage", "policy.view"] as const;
 import { usePrefs } from "../lib/prefs";
 import type {
   AccessMatrixData, Agent, AgentEffective, AgentInstructions, AgentSuite, ApiConfig, ApiKey, AuditEntry, AuditFilters, CardTemplate, Conversation, Delivery,
@@ -52,7 +61,7 @@ export function useMe(): Me | null {
 /** `all`: everyone's sessions (Security screen); the server returns only the caller's own without security.manage. */
 export const useSessions = (o: { all?: boolean } = {}) =>
   useQuery({ queryKey: o.all ? [...qk.sessions(), "all"] : qk.sessions(), queryFn: () => get<Session[]>(api("sessions"), o.all ? { all: "1" } : undefined) });
-export const useSecurity = () => useQuery({ queryKey: qk.security(), queryFn: () => get<SecuritySettings>(api("security")) });
+export const useSecurity = () => useQuery({ queryKey: qk.security(), queryFn: () => readIfAllowed(SECURITY, () => get<SecuritySettings>(api("security"))) });
 export const useSignins = (q: { cursor?: string; limit?: number; all?: "1" } = {}) =>
   useQuery({ queryKey: [...qk.signins(), q], queryFn: () => get<SignIn[] | Page<SignIn>>(api("signins"), q) });
 
@@ -116,25 +125,25 @@ export const useGuidelines = () => useQuery({ queryKey: qk.guidelines(), queryFn
 
 export const useAgents = () => useQuery({ queryKey: qk.agents(), queryFn: () => get<Agent[]>(api("agents")) });
 /** The eval suites an agent may be gated on. */
-export const useAgentSuites = () => useQuery({ queryKey: ["agents", "suites"], queryFn: () => get<AgentSuite[]>(api("agents/suites")) });
+export const useAgentSuites = () => useQuery({ queryKey: ["agents", "suites"], queryFn: () => readIfAllowed(AGENTS, () => get<AgentSuite[]>(api("agents/suites"))) });
 export const useAgentEffective = (id: string | null | undefined, q: { project?: string; repo?: string; version?: string } = {}) =>
   useQuery({
     queryKey: qk.agentEffective(id ?? "", q),
     queryFn: () => get<AgentEffective>(api(`agents/${encodeURIComponent(id ?? "")}/effective`), q),
     enabled: !!id,
   });
-export const useInstructions = () => useQuery({ queryKey: ["instructions"], queryFn: () => get<AgentInstructions>(api("instructions/base")) });
+export const useInstructions = () => useQuery({ queryKey: ["instructions"], queryFn: () => readIfAllowed(AGENTS, () => get<AgentInstructions>(api("instructions/base"))) });
 export const useSkills = () => useQuery({ queryKey: qk.skills(), queryFn: () => get<Skill[]>(api("skills")) });
-export const useVendors = () => useQuery({ queryKey: qk.vendors(), queryFn: () => get<Vendor[]>(api("vendors")) });
-export const useVendorTemplates = () => useQuery({ queryKey: ["vendor-templates"], queryFn: () => get<VendorTemplate[]>(api("vendor-templates")), staleTime: 3_600_000 });
-export const useRouting = () => useQuery({ queryKey: qk.routing(), queryFn: () => get<Routing>(api("routing")) });
+export const useVendors = () => useQuery({ queryKey: qk.vendors(), queryFn: () => readIfAllowed(MODELS, () => get<Vendor[]>(api("vendors"))) });
+export const useVendorTemplates = () => useQuery({ queryKey: ["vendor-templates"], queryFn: () => readIfAllowed(MODELS, () => get<VendorTemplate[]>(api("vendor-templates"))), staleTime: 3_600_000 });
+export const useRouting = () => useQuery({ queryKey: qk.routing(), queryFn: () => readIfAllowed(MODELS, () => get<Routing>(api("routing"))) });
 export interface PriceVersion { version: number; effectiveFrom: string; publishedAt: string; publishedBy: string | null; note: string; prices: Record<string, { in: number; out: number; cacheRead?: number; cacheWrite?: number }> }
-export const usePrices = () => useQuery({ queryKey: qk.prices(), queryFn: () => get<{ current: number | null; versions: PriceVersion[] }>(api("prices")) });
+export const usePrices = () => useQuery({ queryKey: qk.prices(), queryFn: () => readIfAllowed(MODELS, () => get<{ current: number | null; versions: PriceVersion[] }>(api("prices"))) });
 export interface BudgetRow { project: string; monthly: number; alertAt: number; perWorkOrder: number; spent: number; version: number }
-export const useBudgets = () => useQuery({ queryKey: qk.budgets(), queryFn: () => get<BudgetRow[]>(api("budgets")) });
+export const useBudgets = () => useQuery({ queryKey: qk.budgets(), queryFn: () => readIfAllowed(MODELS, () => get<BudgetRow[]>(api("budgets"))) });
 export interface RouteAnswer { model: string | null; vendor: string | null; wanted: string | null; layer: string; steps: string[]; blocked: string | null; crossModel: boolean; sameModelFallback: boolean; rule: { id: string; tag: string } | null }
 export const useRoutingResolve = (q: { station?: string; repo?: string; project?: string; class?: string }, enabled = true) =>
-  useQuery({ queryKey: qk.routingResolve(q), queryFn: () => get<RouteAnswer>(api("routing/resolve"), q), enabled });
+  useQuery({ queryKey: qk.routingResolve(q), queryFn: () => readIfAllowed(MODELS, () => get<RouteAnswer>(api("routing/resolve"), q)), enabled });
 export const useScorecards = () => useQuery({ queryKey: qk.scorecards(), queryFn: () => get<Record<string, Scorecard>>(api("evals/scorecards")) });
 export const useSuiteRuns = (suiteId: string | null | undefined) =>
   useQuery({ queryKey: qk.suiteRuns(suiteId ?? ""), queryFn: () => get<EvalRun[]>(api(`suites/${encodeURIComponent(suiteId ?? "")}/runs`)), enabled: !!suiteId });
@@ -166,9 +175,9 @@ export const useMcpServers = () => useQuery({ queryKey: qk.mcpServers(), queryFn
 export interface McpAccessQuery { server?: string; tool?: string; agent?: string; project?: string; repo?: string; station?: string; cls?: string }
 export interface McpAccessDecision { allowed: boolean; gated?: boolean; reason: string; rule: string }
 export const useMcpAccessCheck = (q: McpAccessQuery, enabled = true) =>
-  useQuery({ queryKey: qk.mcpAccess(q), queryFn: () => get<McpAccessDecision>(api("mcp/access-check"), q as Record<string, string | undefined>), enabled });
+  useQuery({ queryKey: qk.mcpAccess(q), queryFn: () => readIfAllowed(INTEG, () => get<McpAccessDecision>(api("mcp/access-check"), q as Record<string, string | undefined>)), enabled });
 export const useMcpCalls = (q: { cursor?: string; limit?: number; server?: string } = {}) =>
-  useQuery({ queryKey: qk.mcpCalls(q), queryFn: () => get<McpUsage[] | Page<McpUsage>>(api("mcp/calls"), q) });
+  useQuery({ queryKey: qk.mcpCalls(q), queryFn: () => readIfAllowed(INTEG, () => get<McpUsage[] | Page<McpUsage>>(api("mcp/calls"), q)) });
 export const useApiKeys = () => useQuery({ queryKey: qk.apiKeys(), queryFn: () => get<ApiKey[]>(api("api-keys")) });
 export const useApiConfig = () => useQuery({ queryKey: qk.apiConfig(), queryFn: () => get<ApiConfig>(api("api-config")) });
 export const useApiRequests = (q: { cursor?: string; limit?: number } = {}) =>
@@ -183,10 +192,10 @@ export const useTriggerRuns = (id: string | null | undefined) =>
 
 export const usePeople = () => useQuery({ queryKey: qk.people(), queryFn: () => get<Person[]>(api("people")) });
 export const useEffectivePermissions = (personId: string | null | undefined) =>
-  useQuery({ queryKey: qk.effectivePermissions(personId ?? ""), queryFn: () => get<unknown>(api(`people/${encodeURIComponent(personId ?? "")}/effective-permissions`)), enabled: !!personId });
-export const useAccessMatrix = () => useQuery({ queryKey: qk.matrix(), queryFn: () => get<AccessMatrixData>(api("access/matrix")) });
-export const usePolicies = () => useQuery({ queryKey: qk.policies(), queryFn: () => get<Policy[]>(api("policies")) });
-export const useFreezes = () => useQuery({ queryKey: qk.freezes(), queryFn: () => get<Freeze[]>(api("freezes")) });
+  useQuery({ queryKey: qk.effectivePermissions(personId ?? ""), queryFn: () => readIfAllowed(PEOPLE, () => get<unknown>(api(`people/${encodeURIComponent(personId ?? "")}/effective-permissions`))), enabled: !!personId });
+export const useAccessMatrix = () => useQuery({ queryKey: qk.matrix(), queryFn: () => readIfAllowed(POLICY, () => get<AccessMatrixData>(api("access/matrix"))) });
+export const usePolicies = () => useQuery({ queryKey: qk.policies(), queryFn: () => readIfAllowed(POLICY, () => get<Policy[]>(api("policies"))) });
+export const useFreezes = () => useQuery({ queryKey: qk.freezes(), queryFn: () => readIfAllowed(POLICY, () => get<Freeze[]>(api("freezes"))) });
 export const useAudit = (filters: AuditFilters = {}) =>
   useQuery({ queryKey: qk.audit(filters), queryFn: () => get<Page<AuditEntry> | AuditEntry[]>(api("audit"), { ...filters }) });
 export const useAuditEntry = (seq: number | string | null | undefined) =>
