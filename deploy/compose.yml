@@ -142,13 +142,35 @@ services:
       postgres: { condition: service_healthy }
     networks: [control]
 
+  # The only container with the host's Docker socket. It lets through only the launcher's own calls, on resources the
+  # launcher owns, and container/network/volume creates that match the runner template (services/launcher/src/sockpolicy.ts).
+  gantry-sockproxy:
+    <<: *hardened
+    image: gantry-launcher:dev
+    command: ["node", "dist/sockproxy.js"]
+    # The Docker socket is group-owned by the host's docker group. Set DOCKER_GID to `stat -c %g /var/run/docker.sock`.
+    group_add: ["${DOCKER_GID:-999}"]
+    environment:
+      SOCKPROXY_PORT: "2375"
+      RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=gantry-runner:dev}
+      EDGE_COMPOSE_SERVICE: gantry-edge
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2375/_ping').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks: [dockerapi]
+
   gantry-launcher:
     <<: *hardened
     build: { context: .., dockerfile: services/launcher/Dockerfile }
     image: gantry-launcher:dev
-    # The Docker socket is group-owned by the host's docker group. Set DOCKER_GID to `stat -c %g /var/run/docker.sock`.
-    group_add: ["${DOCKER_GID:-999}"]
+    # No Docker socket here: every Docker call goes through gantry-sockproxy.
     environment:
+      DOCKER_PROXY_URL: http://gantry-sockproxy:2375
       LAUNCHER_PORT: "9100"
       RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=gantry-runner:dev}
       # Dedicated pool for run networks (/28 each). Keep it clear of every other network on this host. See deploy/README.md.
@@ -160,12 +182,12 @@ services:
       EDGE_URL: http://gantry-edge:8443
       RUNNER_PROXY_URL: http://gantry-edge:8444
     secrets: [launcher_token]
-    volumes:
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9100/healthz"]
-    networks: [launch]
+    depends_on:
+      gantry-sockproxy: { condition: service_healthy }
+    networks: [launch, dockerapi]
 
   gantry-edge:
     <<: *hardened
@@ -367,6 +389,10 @@ networks:
     driver: bridge
     internal: true
   launch:
+    driver: bridge
+    internal: true
+  # Launcher <-> socket proxy only.
+  dockerapi:
     driver: bridge
     internal: true
   egress:

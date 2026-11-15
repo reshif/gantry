@@ -14,7 +14,8 @@ async function main(): Promise<number> {
     console.error("launcher:", token.error.msg);
     return 2;
   }
-  const docker = new Docker(cfg.value.dockerSocket ? { socketPath: cfg.value.dockerSocket } : undefined);
+  // Through the socket proxy when configured (compose does): the launcher then never holds the host's Docker socket.
+  const docker = new Docker(cfg.value.dockerProxy ? { protocol: "http", host: cfg.value.dockerProxy.host, port: cfg.value.dockerProxy.port } : cfg.value.dockerSocket ? { socketPath: cfg.value.dockerSocket } : undefined);
   const manager = new RunManager(docker, cfg.value);
   const app = buildServer({ cfg: cfg.value, manager, token: token.value });
 

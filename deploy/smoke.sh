@@ -110,7 +110,17 @@ for n in control launch; do
 done
 if has_service gantry-launcher; then
   nets="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(cid gantry-launcher)")"
-  [ "$nets" = "${project}_launch " ] && ok "launcher is on the launch network only" || bad "launcher is on the launch network only" "$nets"
+  [ "$nets" = "${project}_dockerapi ${project}_launch " ] && ok "launcher is on the launch and dockerapi networks only" || bad "launcher is on the launch and dockerapi networks only" "$nets"
+  mounts="$(docker inspect -f '{{range .Mounts}}{{.Destination}} {{end}}' "$(cid gantry-launcher)")"
+  case "$mounts" in *docker.sock*) bad "launcher holds no Docker socket" "$mounts" ;; *) ok "launcher holds no Docker socket (it goes through gantry-sockproxy)" ;; esac
+fi
+if has_service gantry-sockproxy; then
+  pnets="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(cid gantry-sockproxy)")"
+  [ "$pnets" = "${project}_dockerapi " ] && ok "socket proxy is on the dockerapi network only" || bad "socket proxy is on the dockerapi network only" "$pnets"
+  probe() { docker exec "$(cid gantry-launcher)" node -e "fetch('http://gantry-sockproxy:2375$2',{method:'$1',headers:{'content-type':'application/json'},body:$3}).then(r=>console.log(r.status))" 2>/dev/null; }
+  [ "$(probe POST '/containers/create?name=gantry-runner-x' "JSON.stringify({Image:'alpine',HostConfig:{Privileged:true,Binds:['/:/host']}})")" = 403 ] && ok "socket proxy refuses a privileged container with a host mount" || bad "socket proxy refuses a privileged container with a host mount" ""
+  [ "$(probe POST '/containers/gantry-sockproxy/exec' "JSON.stringify({Cmd:['sh']})")" = 403 ] && ok "socket proxy refuses exec" || bad "socket proxy refuses exec" ""
+  [ "$(probe GET '/info' undefined)" = 403 ] && ok "socket proxy refuses calls the launcher does not make" || bad "socket proxy refuses calls the launcher does not make" ""
 fi
 
 # ---- isolation from a runner-like container -------------------------------------------------------------------

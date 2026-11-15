@@ -18,6 +18,8 @@ export interface LauncherConfig {
   limits: { memoryBytes: number; nanoCpus: number; pids: number; tmpBytes: number; stopGraceSeconds: number; uid: number; gid: number };
   /** Optional explicit docker socket path. */
   dockerSocket?: string;
+  /** The Docker socket proxy (http://host:port). When set, the launcher has no socket of its own (sockproxy.ts). */
+  dockerProxy?: { host: string; port: number };
   tokenFile: string;
 }
 
@@ -44,6 +46,7 @@ const EnvSchema = z.object({
   STOP_GRACE_SECONDS: int(0, 600).default(10),
   RUNNER_UID: int(1000, 65535).default(10001),
   DOCKER_SOCKET: z.string().min(1).optional(),
+  DOCKER_PROXY_URL: z.string().url().optional(),
 });
 
 const VARIANT_NAME = /^[a-z0-9][a-z0-9._-]{0,31}$/;
@@ -103,6 +106,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Result<Launche
     tokenFile: e.LAUNCHER_TOKEN_FILE,
   };
   if (e.DOCKER_SOCKET !== undefined) cfg.dockerSocket = e.DOCKER_SOCKET;
+  if (e.DOCKER_PROXY_URL !== undefined) {
+    const u = new URL(e.DOCKER_PROXY_URL);
+    cfg.dockerProxy = { host: u.hostname, port: Number(u.port || 2375) };
+  }
   return ok(cfg);
 }
 

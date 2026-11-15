@@ -48,16 +48,16 @@ The weaknesses are in the shape of the product:
 | — | The API typecheck was red on main (a test importing web source, type drift). | Fixed. | `npm run typecheck` |
 | — | Keycloak user IDs changed whenever its container was recreated, which locked everyone out with "linked to a different identity". | `kcdata` volume. | — |
 
-## Wave 1: remaining security and correctness
+## Wave 1: remaining security and correctness (done 2026-11-15)
 
-1. Ingress: block `/idp/admin` and the master realm. Serve Mailpit only in a dev profile.
-2. Sign-out ends the Keycloak SSO session (RP-initiated logout).
-3. Take the audit channel from the authenticated transport, not from the `via` field in the request body.
-4. Audit `summary` counts only rows the caller can see. SSE events with no project carry no slice names for invisible data.
-5. Make email read-only in the Keycloak user profile, and link invites by one-time token rather than by address.
-6. On-call status that grants rights comes from a schedule, not a self-toggle (needs an owner decision).
-7. Rate-limit and sample unsigned webhook denials. Pin `trustProxy` to the ingress.
-8. Docker socket: a socket proxy that allows only the launcher's calls.
+1. Ingress blocks `/idp/admin`, the admin API and the master realm (404); the admin console is on loopback `127.0.0.1:8081` only. Mailpit is in the `dev` ingress profile only.
+2. Sign-out ends the Keycloak SSO session (RP-initiated logout with `id_token_hint`).
+3. The audit channel comes from the transport; a client-sent `via` is pinned to what the caller may claim.
+4. The audit chain head is returned only to whole-ledger readers. SSE factory-wide changes reach project-only people without factory-only slice names.
+5. Email and username are admin-edit only in Keycloak. Invites are claimed by a one-time token in the invite link.
+6. On call is per project, set by project admins (decision 7). Factory Admins always count, the self-toggle is retired, and hand-over is audited.
+7. Unsigned webhook denials are sampled (5 per source, 30 per hook a minute, with the rest counted). `trustProxy` defaults to private networks and refuses `true`.
+8. Docker socket: `gantry-sockproxy` holds it and checks every call against the launcher's needs and the runner template.
 
 ## Wave 2: frontend framework (the main structural fix)
 
