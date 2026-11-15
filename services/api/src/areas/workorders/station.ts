@@ -13,6 +13,7 @@ import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEn
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { lockWo, saveWo, type Wo } from "./model.js";
 import { recordDialogue, type QuestionRow } from "./documents.js";
+import type { ResearchPlan } from "./research.js";
 import { addWoMessage, updateId } from "./session/store.js";
 
 /** The whole summary goes in the thread (lists truncate their own previews); the cap only guards against a runaway output. */
@@ -81,12 +82,24 @@ function absorbOutput(w: Wo, station: string, r: StationResult): { checks: Obser
  * The station's own message in the work order's session: what it said, the documents it wrote and the questions it asked (as cards that read their
  * live state). Posted once per attempt; the event scan then leaves this attempt's "finished" line out.
  */
-async function postStationMessage(fx: Fx, w: Wo, station: string, attemptId: string, text: string, questions: QuestionRow[], assumptions = 0): Promise<void> {
+/** A research plan the run proposed (output.researchPlan from the station tools), re-checked here. */
+function proposedPlan(raw: unknown, station: string, attempt: string, now: Date): ResearchPlan | null {
+  const p = asObj(raw);
+  const questions = strs(p.questions).map((q) => q.trim().slice(0, 300)).filter(Boolean).slice(0, 12);
+  if (!questions.length || typeof p.web !== "boolean") return null;
+  const hosts = p.web ? strs(p.hosts).map((h) => h.trim().toLowerCase()).filter((h) => HOST.test(h)).slice(0, 20) : [];
+  const budget = typeof p.budgetUsd === "number" && p.budgetUsd > 0 ? Math.min(p.budgetUsd, 100) : null;
+  return { status: "proposed", questions, hosts, web: p.web, budgetUsd: budget, why: typeof p.why === "string" ? p.why.slice(0, 1200) : "", station, attempt, proposedAt: now.getTime() };
+}
+const HOST = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+async function postStationMessage(fx: Fx, w: Wo, station: string, attemptId: string, text: string, questions: QuestionRow[], assumptions = 0, plan = false): Promise<void> {
   const docs = (await fx.tx.query<{ id: string; doc: string; version: number }>(`select id, doc, version from artefacts where org_id = $1 and wo_id = $2 and attempt_id = $3 and doc is not null order by doc`, [fx.orgId, w.id, attemptId])).rows;
-  if (!docs.length && !questions.length && !assumptions) return;
+  if (!docs.length && !questions.length && !assumptions && !plan) return;
   const id = updateId(fx.orgId, w.id, `station:${attemptId}`);
   if ((await fx.tx.query(`select 1 from workorder_messages where org_id = $1 and id = $2`, [fx.orgId, id])).rowCount) return;
   const cards = [
+    ...(plan ? [{ kind: "research_plan" as const, station }] : []),
     ...docs.map((d) => ({ kind: "document" as const, id: d.id, name: d.doc, version: d.version })),
     ...questions.map((q) => ({ kind: "station_question" as const, id: q.id })),
     ...(assumptions ? [{ kind: "assumptions" as const, station, attempt: attemptId, count: assumptions }] : []),
@@ -155,13 +168,17 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     closeEntry(w, fx, "question", result.summary ?? "");
     const out = asObj(result.output);
     // An older runner reports one `output.question`; the station tools report `output.dialogue`. Either way the questions become rows.
-    const dialogue = out.dialogue ?? (typeof out.question === "string" ? { questions: [{ question: out.question, why: "", blocking: true }] } : { questions: [{ question: result.summary || "The agent needs a decision to go on.", why: "", blocking: true }] });
+    const dialogue = out.dialogue ?? (typeof out.question === "string" ? { questions: [{ question: out.question, why: "", blocking: true }] } : out.researchPlan ? {} : { questions: [{ question: result.summary || "The agent needs a decision to go on.", why: "", blocking: true }] });
     const dl = await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue, now });
-    const waiting = dl.questions.filter((q) => q.blocking);
     const name = stationDef(fx.catalog, sid)?.name ?? sid;
-    w.data.waitingOn = { station: sid, attempt: attemptId, questions: waiting.map((q) => q.id), askOf: [...new Set(waiting.map((q) => q.askOf))] };
-    await postStationMessage(fx, w, sid, attemptId, result.summary || `${name} needs ${waiting.length === 1 ? "an answer" : `${waiting.length} answers`} before going on.`, dl.questions, dl.assumptions);
-    await needsPerson(fx, w, `Waiting for ${waiting.length === 1 ? "an answer" : `${waiting.length} answers`} at ${name}`);
+    const plan = proposedPlan(out.researchPlan, sid, attemptId, now);
+    if (plan) w.data.researchPlan = plan;
+    const waiting = dl.questions.filter((q) => q.blocking);
+    w.data.waitingOn = { station: sid, attempt: attemptId, questions: waiting.map((q) => q.id), askOf: [...new Set(waiting.map((q) => q.askOf))], ...(plan ? { plan: true } : {}) };
+    const what = [waiting.length ? (waiting.length === 1 ? "an answer" : `${waiting.length} answers`) : "", plan ? "the research plan to be approved" : ""].filter(Boolean).join(" and ") || "a person";
+    await postStationMessage(fx, w, sid, attemptId, result.summary || `${name} is waiting for ${what}.`, dl.questions, dl.assumptions, !!plan);
+    await needsPerson(fx, w, plan && !waiting.length ? `Waiting for the research plan at ${name}` : `Waiting for ${waiting.length === 1 ? "an answer" : `${waiting.length} answers`} at ${name}`);
+    if (plan) ev(fx, w, "research.plan.proposed", { station: sid, text: plan.questions.join(" · ").slice(0, 300), hosts: plan.hosts, web: plan.web, budgetUsd: plan.budgetUsd }, { category: "flow" });
     ev(fx, w, "wo.question", { station: sid, text: waiting.map((q) => q.question).join(" · ").slice(0, 300) }, { category: "flow" });
     next = "person";
   } else {

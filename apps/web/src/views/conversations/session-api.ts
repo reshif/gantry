@@ -5,7 +5,7 @@ import { api, get, post, streamCommand, type ApiResult } from "../../api/client"
 import { invalidateSlices } from "../../api/keys";
 import { SseReader } from "../console/api";
 import type { TurnEvent } from "../session/kit";
-import type { Assumption, DocVersion, StationQuestion } from "../documents/api";
+import type { Assumption, DocVersion, ResearchState, Source, StationQuestion } from "../documents/api";
 
 export interface WoSessionMessage {
   id: string;
@@ -33,6 +33,8 @@ export interface WoSession {
   /** The questions the station agents asked (with whether this person is the one asked) and the assumptions they proceeded on. */
   dialogue: { questions: Array<StationQuestion & { mine: boolean }>; assumptions: Assumption[]; askedMe: boolean };
   documents: DocVersion[];
+  research: ResearchState;
+  sources: Source[];
   pending: Array<{ mid: string; id: string; what: "brief" | "reclassify" | "decline"; title: string }>;
   brief: Brief;
   briefConfirmed: boolean;

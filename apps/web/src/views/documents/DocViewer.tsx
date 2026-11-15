@@ -8,10 +8,11 @@ import { fmt } from "@gantry/domain";
 import { Btn, Empty } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
-import { Markdown, outlineOf } from "../../ui/Markdown";
+import { CiteContext, Markdown, outlineOf } from "../../ui/Markdown";
+import { SourceDetail, SourceList } from "./Research";
 import { diffStats, lineDiff } from "../../ui/linediff";
 import { useName } from "../record/bits";
-import { useWoDocument, useWoDocuments, type DocVersion } from "./api";
+import { useWoDocument, useWoDocuments, useWoSources, type DocVersion } from "./api";
 
 const stationLabel = (s: string | null) => (s ? `${s.charAt(0).toUpperCase()}${s.slice(1)}` : "Gantry");
 
@@ -55,6 +56,9 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
   const docs = useMemo(() => byDoc(list.data?.items ?? []), [list.data]);
   const [picked, setPicked] = useState<string | null>(initial ?? null);
   const [compare, setCompare] = useState(false);
+  const [source, setSource] = useState<string | null>(null);
+  const [showSources, setShowSources] = useState(false);
+  const sources = useWoSources(woId).data?.items ?? [];
   // the picked version, or the newest version of the first document
   const all = list.data?.items ?? [];
   const current = all.find((d) => d.id === picked) ?? docs[0]?.versions.at(-1) ?? null;
@@ -97,6 +101,7 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
                 </label>
               ) : null}
               {prev ? <Btn small id="doc-compare" label={compare ? "Show document" : `Compare with v${prev.version}`} onClick={() => setCompare(!compare)} /> : null}
+              {sources.length ? <Btn small id="doc-sources" label={showSources ? "Hide sources" : `Sources (${sources.length})`} onClick={() => { setShowSources(!showSources); setSource(null); }} /> : null}
               <Btn small icon="copy" id="doc-copy" label="Copy" disabled={!text} onClick={async () => { try { await navigator.clipboard.writeText(text); ui.toast("Copied as Markdown.", "ok"); } catch { ui.toast("The browser did not allow copying.", "error"); } }} />
               <Btn small icon="down" id="doc-download" label="Download" disabled={!text} onClick={() => download(current.doc, text)} />
             </div>
@@ -109,7 +114,8 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
               </nav>
             ) : null}
             <div className="doc-body">
-              {body.data ? (compare && prev ? <Diff woId={woId} from={prev} to={text} /> : <div className="md-doc"><Markdown text={text} idPrefix="doc" /></div>) : <Async query={body} what="the document" id="doc-body">{() => null}</Async>}
+              {source ? <SourceDetail woId={woId} refId={source} onClose={() => setSource(null)} /> : showSources ? <section className="src-panel" aria-label="Sources"><SourceList items={sources} pick={(r) => setSource(r)} /></section> : null}
+              {body.data ? (compare && prev ? <Diff woId={woId} from={prev} to={text} /> : <CiteContext.Provider value={(r) => { setSource(r); setShowSources(false); }}><div className="md-doc"><Markdown text={text} idPrefix="doc" /></div></CiteContext.Provider>) : <Async query={body} what="the document" id="doc-body">{() => null}</Async>}
             </div>
           </div>
           <p className="small muted doc-foot">{`Agent-written. Stored with its hash ${current.contentHash.slice(0, 12)}; secrets are redacted before it is saved.`}</p>

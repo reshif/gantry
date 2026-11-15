@@ -33,7 +33,7 @@ const session = (over: Partial<WoSession> = {}): WoSession => ({
   agent: { mode: "agent", name: "Intake Clerk", id: "ag-intake", model: "claude-haiku-5-5", vendor: "anthropic", version: 1, station: "intake" },
   budget: { spentUsd: 0.02, limitUsd: 0.5 }, costUsd: 0.02, can: { talk: true, talkWhy: "", confirm: true, confirmWhy: "" },
   steps: [{ id: "intake", name: "Intake", state: "current" }, { id: "plan", name: "Plan", state: "todo" }],
-  next: { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }, waiting: null, pending: [], dialogue: { questions: [], assumptions: [], askedMe: false }, documents: [],
+  next: { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }, waiting: null, pending: [], dialogue: { questions: [], assumptions: [], askedMe: false }, documents: [], research: { plan: null, allowList: [], canDecide: false, canApproveUnlisted: false }, sources: [],
   brief: { ...BRIEF, goal: "", scopeIn: [], ac: [], route: [], children: [] } as never, briefConfirmed: false, briefOpen: true, ruleQuestion: null, ruleReady: false, busy: false, ...over,
 });
 const withProposal = (): WoSession => session({
@@ -218,5 +218,66 @@ describe("Station questions, assumptions and documents in the session", () => {
     const diff = await screen.findByLabelText("Changes since version 1");
     expect(diff.querySelector(".doc-dl.is-del")?.textContent).toContain("Retry lives in sync.py.");
     expect(diff.querySelector(".doc-dl.is-add")?.textContent).toContain("Retry lives in jobs/sync.py.");
+  });
+});
+
+describe("Research plan and sources", () => {
+  const plan = { status: "proposed" as const, questions: ["How do Nautobot jobs retry?"], hosts: ["docs.nautobot.com", "blog.example.org"], web: true, budgetUsd: 3, why: "No retry helper in the repo.", station: "research", attempt: "AT1", proposedAt: Date.now() };
+  const withPlan = (canApproveUnlisted: boolean) => session({
+    wo: { ...session().wo, station: "research", stationName: "Research", bay: "person", gate: null },
+    messages: [{ id: "wm-p", role: "assistant", author: "ag-research", text: "Research is waiting for the research plan to be approved.", at: Date.now(), data: { kind: "station", mode: "agent", cards: [{ kind: "research_plan", station: "research" }] } as never }],
+    research: { plan, allowList: ["docs.nautobot.com"], canDecide: true, canApproveUnlisted },
+  });
+
+  it("an approver without security rights cannot approve an unlisted host, untick it and approve the rest", async () => {
+    const calls = await showSession(withPlan(false), { [`POST /api/v1/work-orders/${W.id}/research-plan`]: () => ({ body: { ok: true, msg: "Plan approved; Research runs again.", resumed: true } }) });
+    expect(document.getElementById("rp-card")!.textContent).toContain("needs someone who manages security");
+    const approve = document.getElementById("rp-approve") as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /blog\.example\.org/ }));
+    expect(approve.disabled).toBe(false);
+    fireEvent.change(document.getElementById("rp-budget")!, { target: { value: "2" } });
+    fireEvent.click(approve);
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/research-plan`)[0]?.body).toEqual({ decision: "approve", web: true, hosts: ["docs.nautobot.com"], budgetUsd: 2 }));
+    expect((document.getElementById("rp-reject") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("citations in a document open the source with what the agent saw", async () => {
+    const v1 = { id: "art-9", doc: "research.md", station: "research", version: 1, supersedes: null, authorKind: "agent", authorId: "ag-research", attemptId: "AT2", size: 10, contentHash: "c".repeat(64), createdAt: Date.now(), acceptedBy: null };
+    const src = { id: "SRC-1", ref: "s1", kind: "web", station: "research", attemptId: "AT2", fetchedBy: "ag-research", url: "https://docs.nautobot.com/jobs", finalUrl: "https://docs.nautobot.com/jobs", host: "docs.nautobot.com", title: "Jobs", httpStatus: 200, contentType: "text/html", contentHash: "d".repeat(64), size: 120, truncated: false, why: "retry guidance", fetchedAt: Date.now() };
+    await showSession(withPlan(true), {
+      [`GET /api/v1/work-orders/${W.id}/documents`]: () => ({ body: { items: [v1] } }),
+      [`GET /api/v1/work-orders/${W.id}/documents/art-9`]: () => ({ body: { ...v1, body: "# Research\n\nJobs retry via the scheduler.[^s1]\n" } }),
+      [`GET /api/v1/work-orders/${W.id}/sources`]: () => ({ body: { items: [src] } }),
+      [`GET /api/v1/work-orders/${W.id}/sources/s1`]: () => ({ body: { ...src, excerpt: "Jobs can be scheduled and retried." } }),
+    });
+    const { DocViewer } = await import("./documents/DocViewer");
+    const { mount: m2 } = await import("./floor/testkit");
+    m2(<DocViewer woId={W.id} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Source s1" }, { timeout: 3000 }));
+    expect(await screen.findByText("Jobs")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show what the agent saw" }));
+    expect(screen.getByLabelText("Text the agent read").textContent).toBe("Jobs can be scheduled and retried.");
+  });
+});
+
+describe("Run timeline", () => {
+  it("shows the live run's steps, pages and cost, and polls only while it works", async () => {
+    const { RunTimelineView } = await import("./documents/Timeline");
+    const { mount: m2, mockApi: mk } = await import("./floor/testkit");
+    const now = Date.now();
+    mk({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/timeline`]: () => ({ body: { runs: [{ runId: "r1", attemptId: "a1", station: "research", state: "running", startedAt: now - 9000, endedAt: null, turn: 4, model: "claude-x", calls: 3, tokens: 1200, costUsd: 0.04, entries: [
+      { at: now - 9000, kind: "start", text: "Run started on claude-x" },
+      { at: now - 8000, kind: "step", turn: 1, tool: "Read", detail: "src/jobs.py" },
+      { at: now - 7000, kind: "source", ref: "s1", url: "https://docs.nautobot.com/x", title: "Jobs" },
+      { at: now - 6000, kind: "step", turn: 2, tool: "gantry:write_document", detail: "research.md" },
+    ] }] } }) });
+    m2(<RunTimelineView woId={W.id} />);
+    const run = await screen.findByRole("region", { name: "Research run" }, { timeout: 3000 });
+    expect(run.textContent).toContain("Working · turn 4");
+    expect(run.textContent).toContain("3 model calls");
+    expect(run.textContent).toContain("src/jobs.py");
+    expect(run.textContent).toContain("Wrote document");
+    expect(run.querySelector(".md-cite")?.textContent).toBe("s1");
   });
 });

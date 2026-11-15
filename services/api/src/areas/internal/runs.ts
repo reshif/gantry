@@ -12,6 +12,7 @@ import { resolveRoute } from "./route.js";
 import { runEgressHosts, systemEgressHosts } from "./egress.js";
 import { findRunToken, type TokenRow } from "./tokens.js";
 import { recordDocument } from "../workorders/documents.js";
+import { recordSource, researchHosts } from "../workorders/research.js";
 
 const Token = z.string().min(20).max(700);
 const RunParams = z.object({ id: z.string().min(1).max(200) });
@@ -50,7 +51,16 @@ const CheckpointBody = z.looseObject({
   size: nonneg.default(0),
   /** A station document's text (markdown), already scanned by the edge. */
   content: z.string().max(600_000).optional(),
+  /** A transcript's tool calls (name and short target) for the run timeline, extracted and scanned by the edge. */
+  steps: z.array(z.object({ turn: z.number().int().nonnegative(), tool: z.string().max(80), detail: z.string().max(200) })).max(50).optional(),
 });
+const SourceBody = z.object({
+  token: Token,
+  url: z.string().url().max(4000), finalUrl: z.string().url().max(4000), title: z.string().max(300).default(""), httpStatus: z.number().int().optional(),
+  contentType: z.string().max(200).default(""), contentHash: z.string().regex(/^[0-9a-f]{64}$/), size: nonneg.default(0), truncated: z.boolean().default(false),
+  why: z.string().max(500).default(""), excerpt: z.string().max(70_000).default(""),
+});
+const RefusedBody = z.object({ token: Token, url: z.string().max(4000), reason: z.string().max(500) });
 const ResultBody = z.looseObject({
   token: Token,
   status: z.enum(["succeeded", "failed", "interrupted", "needs_person"]),
@@ -214,7 +224,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       const seq = Number((await tx.query<{ n: string }>(`select (coalesce(max(seq),0) + 1)::text as n from checkpoints where org_id = $1 and run_id = $2`, [c.orgId, id])).rows[0]!.n);
       const ckId = `ck-${id}-${seq}`;
       await tx.query(`insert into checkpoints (org_id, id, run_id, attempt_id, seq, content_hash, data) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`, [
-        c.orgId, ckId, id, c.attemptId, seq, b.contentHash, JSON.stringify({ turn: b.turn, kind: b.kind, name: b.name, contentType: b.contentType, size: b.size }),
+        c.orgId, ckId, id, c.attemptId, seq, b.contentHash, JSON.stringify({ turn: b.turn, kind: b.kind, name: b.name, contentType: b.contentType, size: b.size, ...(b.steps?.length ? { steps: b.steps } : {}) }),
       ]);
       if (b.kind === "artefact" && b.content !== undefined && /^text\/markdown\b/i.test(b.contentType)) {
         await recordDocument(tx, { orgId: c.orgId, id: `art-${id}-${seq}`, woId: c.woId, attemptId: c.attemptId, station: c.station, name: b.name, hash: b.contentHash, mediaType: b.contentType, size: b.size, body: b.content, author: c.agentId });
@@ -362,6 +372,46 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
         extra: {},
         changes: ["audit"],
         ...(c ? { project: c.projectId } : {}),
+      };
+    });
+  });
+
+  // ---------------------------------------------------------------- governed web research (Phase 2): the edge's research fetcher asks and records here
+  app.post("/internal/v1/runs/:id/research/hosts", async (req) => {
+    const id = runId(req);
+    const b = EgressBody.parse(req.body);
+    const g = req.server.gantry;
+    const c = await loadRunCtx(g.pool, g.orgId, id);
+    const tok = c ? await findRunToken(g.pool, g.orgId, id, b.token) : null;
+    if (!c || !tok) throw refuse("denied", "The run token is not valid for this run.");
+    const d = await guardRun(g.pool, c, tok, { mode: "model" });
+    if (d) throw refusalFor(d);
+    return { ok: true, hosts: await researchHosts(g.pool, c.orgId, c.woData) };
+  });
+  app.post("/internal/v1/runs/:id/research/source", async (req) => {
+    const id = runId(req);
+    const b = SourceBody.parse(req.body);
+    return command(req, svc("research.fetch"), async (tx): Promise<CommandResult<Record<string, unknown>>> => {
+      const { c } = await mustGuard(tx, req.gx.orgId, id, b.token, "progress", true);
+      const ref = await recordSource(tx, { orgId: c.orgId, woId: c.woId, station: c.station, attemptId: c.attemptId, runId: id, agent: c.agentId, url: b.url, finalUrl: b.finalUrl, title: b.title, httpStatus: b.httpStatus ?? null, contentType: b.contentType, contentHash: b.contentHash, size: b.size, truncated: b.truncated, why: b.why, excerpt: b.excerpt });
+      return {
+        msg: "Source recorded.",
+        events: [{ type: "research.fetch", category: "integrations", subject: subject(id), projectId: c.projectId, woId: c.woId, after: { run: id, station: c.station, ref, url: b.finalUrl, title: b.title, contentHash: b.contentHash, size: b.size } }],
+        extra: { ref }, changes: ["workOrders"], project: c.projectId,
+      };
+    });
+  });
+  app.post("/internal/v1/runs/:id/research/refused", async (req) => {
+    const id = runId(req);
+    const b = RefusedBody.parse(req.body);
+    return command(req, svc("research.refused"), async (tx): Promise<CommandResult<Record<string, unknown>>> => {
+      const c = await loadRunCtx(tx, req.gx.orgId, id);
+      const tok = c ? await findRunToken(tx, req.gx.orgId, id, b.token) : null;
+      if (!c || !tok) throw refuse("denied", "The run token is not valid for this run.");
+      return {
+        msg: "Recorded.",
+        events: [{ type: "research.refused", category: "integrations", outcome: "denied", subject: subject(id), projectId: c.projectId, woId: c.woId, after: { run: id, station: c.station, url: b.url, reason: b.reason } }],
+        extra: {}, changes: ["audit"], project: c.projectId,
       };
     });
   });

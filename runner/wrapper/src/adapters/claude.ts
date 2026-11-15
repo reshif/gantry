@@ -59,7 +59,7 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
     mcpServers[name] = { ...s, headers: { authorization: `Bearer ${env.runToken}` } };
   }
   // The station tools run in this container as a stdio server (they only record into the run's scratch space): see station-tools.ts.
-  mcpServers.gantry = { type: "stdio", command: baseEnv.GANTRY_NODE_BIN ?? process.execPath, args: [STATION_TOOLS_JS], env: { GANTRY_STATION_DIR: STATION_DIR } };
+  mcpServers.gantry = { type: "stdio", command: baseEnv.GANTRY_NODE_BIN ?? process.execPath, args: [STATION_TOOLS_JS], env: { GANTRY_STATION_DIR: STATION_DIR, GANTRY_EDGE_URL: env.edgeUrl, GANTRY_RUN_TOKEN: env.runToken, GANTRY_RUN_ID: env.runId } };
   const mcpConfigPath = join(SCRATCH, "mcp.json");
   const args = [
     "-p",

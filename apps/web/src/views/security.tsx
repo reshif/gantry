@@ -56,7 +56,10 @@ export default function SecurityView() {
       <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in and sessions" }, { id: "network", label: "Domains and network" }, { id: "sessions", label: "Active sessions", count: active }, { id: "history", label: "Sign-in history", count: signins.length }]} />
       <div id="sec-tab-panel" role="tabpanel">
         {tab === "network" ? (
-          <div className="two-col sec-cols"><DomainsPanel perm={perm} sec={sec} mine={me.person.email.split("@")[1] ?? null} /><IpPanel perm={perm} sec={sec} thisIp={thisIp} sessions={sessions} /></div>
+          <>
+            <div className="two-col sec-cols"><DomainsPanel perm={perm} sec={sec} mine={me.person.email.split("@")[1] ?? null} /><IpPanel perm={perm} sec={sec} thisIp={thisIp} sessions={sessions} /></div>
+            <ResearchPanel perm={perm} sec={sec} />
+          </>
         ) : tab === "sessions" ? (
           <Async query={sessionsQ} what="sessions" id="sec-sessions">{() => <Panel><SessionsTab perm={perm} sessions={sessions} sec={sec} currentId={me.session.id} viewerId={me.person.id} /></Panel>}</Async>
         ) : tab === "history" ? (
@@ -292,6 +295,47 @@ function IpPanel({ perm, sec, thisIp, sessions }: { perm: Decision; sec: Securit
         </form>
         <div className="form-err" role="alert">{err}</div>
         <p className="footnote">Requests and sign-ins from addresses outside these ranges are refused. An empty list allows every address.</p>
+      </div>
+    </Panel>
+  );
+}
+
+const HOST = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+/** Hosts station agents may read in governed web research without someone who manages security approving each work order's plan. */
+function ResearchPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
+  const set = useSet(sec);
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState("");
+  const list = sec.researchHosts ?? [];
+  const submit = async () => {
+    if (!perm.allowed) return;
+    const h = val.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    if (!HOST.test(h)) return setErr("Enter a host such as docs.example.com or *.example.org.");
+    if (list.includes(h)) return setErr(`${h} is already on the list.`);
+    setErr("");
+    setVal("");
+    await set("researchHosts", [...list, h].sort(), `${h} added to the research allow-list.`);
+  };
+  return (
+    <Panel title="Research allow-list">
+      <div className="form-grid" id="sec-research">
+        <p className="small muted">Web hosts that people who approve gates may approve in a work order&apos;s research plan. A host that is not here needs someone who manages security. Agents read only the hosts of an approved plan, through Gantry, and every page is recorded.</p>
+        {list.length ? (
+          <ul className="sec-list">
+            {list.map((h) => (
+              <li key={h}>
+                <Icon name="page" /><span className="mono">{h}</span><span />
+                <Btn label="Remove" small kind="ghost" icon="x" id={`sec-rh-rm-${h.replace(/\W/g, "_")}`} guard={perm.allowed ? null : perm} onClick={() => void set("researchHosts", list.filter((x) => x !== h), `${h} removed from the research allow-list.`)} />
+              </li>
+            ))}
+          </ul>
+        ) : <p className="small">No hosts yet: every research plan that wants the web needs someone who manages security.</p>}
+        <form className="inline-form" id="sec-rh-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+          <input id="sec-rh-new" className="input mono" placeholder="Host, e.g. docs.nautobot.com" value={val} disabled={!perm.allowed} autoComplete="off" aria-label="Host to allow for research" onChange={(e) => setVal(e.target.value)} />
+          <Btn label="Add host" type="submit" small icon="plus" id="sec-rh-add" guard={perm} />
+        </form>
+        <div className="form-err" role="alert">{err}</div>
       </div>
     </Panel>
   );

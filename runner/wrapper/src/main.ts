@@ -126,17 +126,17 @@ export async function runWrapper(deps: WrapperDeps): Promise<number> {
  */
 export async function handOver(o: AdapterOutcome, dir: string, station: string, checkpoint: (cp: Checkpoint) => Promise<void>, turn: number, log: (m: string) => void): Promise<AdapterOutcome> {
   const rec = await readLog(dir);
-  const blocking = rec.questions.some((q) => q.blocking);
+  const blocking = rec.questions.some((q) => q.blocking) || !!rec.plan;
   const waiting = blocking && (o.status === "succeeded" || (o.status === "failed" && o.error?.code === "no_structured_output"));
   if (o.status !== "succeeded" && !waiting) return o;
   const names = Object.keys(rec.documents);
   for (const name of names) await checkpoint({ turn, kind: "artefact", name, contentType: "text/markdown; charset=utf-8", content: rec.documents[name]! });
   if (names.length) log(`handed over ${names.length} document(s)`);
   const base = o.output && typeof o.output === "object" && !Array.isArray(o.output) ? (o.output as Record<string, unknown>) : {};
-  const output: Record<string, unknown> = { ...base, documents: names, dialogue: { questions: rec.questions, assumptions: rec.assumptions } };
+  const output: Record<string, unknown> = { ...base, documents: names, dialogue: { questions: rec.questions, assumptions: rec.assumptions }, ...(rec.plan ? { researchPlan: rec.plan } : {}) };
   if (waiting) {
     const n = rec.questions.filter((q) => q.blocking).length;
-    if (typeof output.summary !== "string" || !output.summary) output.summary = `${station}: waiting for ${n === 1 ? "an answer" : `${n} answers`} before going on.`;
+    if (typeof output.summary !== "string" || !output.summary) output.summary = rec.plan && !n ? `${station}: waiting for the research plan to be approved.` : `${station}: waiting for ${n === 1 ? "an answer" : `${n} answers`}${rec.plan ? " and the research plan" : ""} before going on.`;
     return { status: "needs_person", output, usage: o.usage };
   }
   return { ...o, output };

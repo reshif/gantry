@@ -61,6 +61,7 @@ const SecuritySchema = z.object({
   killNeedsStepUp: z.boolean(),
   stepUpWindowMinutes: z.number().int().min(5).max(60).optional(),
   githubLogin: z.boolean(),
+  researchHosts: z.array(z.string().max(253).regex(/^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/)).max(200).optional(),
 });
 
 /** Sets `value` at a dotted `path` that must already exist in `obj`. Returns the new object, or null for an unknown path. */

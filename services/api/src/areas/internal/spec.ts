@@ -1,6 +1,8 @@
 import type { Queryable } from "@gantry/db";
 import { agentConfig } from "./metering.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
+import { planOf, researchHosts, sourcesHandoff } from "../workorders/research.js";
+import { readSecurity } from "../../core/read/index.js";
 import type { RunCtx } from "./context.js";
 import { scopeVerdict, type ScopeRow } from "../mcp/scope.js";
 import { assemble, composeLayers, loadAgentVersion, resolveSkills, type InstructionPin } from "../agents/compose.js";
@@ -106,7 +108,10 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
   const mcp = carrier ? [] : await mcpServersInScope(db, c);
   const lim = (agent.body.limits ?? agent.data.limits ?? {}) as { turns?: unknown; wallClockSeconds?: unknown };
   const pos = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : undefined);
-  const costUsd = typeof agent.budgetUsd === "number" && agent.budgetUsd > 0 ? agent.budgetUsd : undefined;
+  const agentBudget = typeof agent.budgetUsd === "number" && agent.budgetUsd > 0 ? agent.budgetUsd : undefined;
+  // An approved research plan's budget caps the run too (the lower of the two wins).
+  const planBudget = planOf(c.woData)?.status === "approved" ? (planOf(c.woData)?.budgetUsd ?? undefined) : undefined;
+  const costUsd = agentBudget !== undefined && planBudget ? Math.min(agentBudget, planBudget) : (planBudget ?? agentBudget);
   const input = c.runData.input ?? c.attemptData.input ?? (await handoff(db, c));
   return {
     runId: c.runId,
@@ -140,5 +145,12 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   // agent starts from what was settled and does not ask again.
   const documents = await latestDocuments(db, c.orgId, c.woId, { exceptAttempt: c.attemptId });
   const dialogue = await dialogueHandoff(db, c.orgId, c.woId);
-  return { workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, previous: prior, documents, dialogue };
+  const sources = await sourcesHandoff(db, c.orgId, c.woId);
+  const plan = planOf(c.woData);
+  const research = {
+    plan: plan ? { status: plan.status, questions: plan.questions, hosts: plan.hosts, web: plan.web, budgetUsd: plan.budgetUsd, ...(plan.note ? { note: plan.note } : {}) } : null,
+    readableHosts: await researchHosts(db, c.orgId, c.woData),
+    factoryAllowList: (await readSecurity(db, c.orgId)).value.researchHosts ?? [],
+  };
+  return { workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, previous: prior, documents, dialogue, sources, research };
 }

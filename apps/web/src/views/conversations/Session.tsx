@@ -21,6 +21,8 @@ import { ProgressLine, QuestionCard, useLiveTurn } from "../session/kit";
 import { decideWo, markWoSeen, sendWoTurn, useWoSession, type WoSession, type WoSessionMessage } from "./session-api";
 import { DocViewer } from "../documents/DocViewer";
 import { AssumptionList, StationQuestionCard } from "../documents/Dialogue";
+import { ResearchPlanCard } from "../documents/Research";
+import { LiveRun, RunTimelineView } from "../documents/Timeline";
 
 type Proposal = Extract<WoCard, { kind: "proposal" }>;
 
@@ -133,6 +135,7 @@ function Cards({ m, s, agent, send, last }: { m: WoSessionMessage; s: WoSession;
         if (c.kind === "progress") return <ProgressLine key={i} text={c.text} detail={c.detail} />;
         if (c.kind === "question") return <QuestionCard key={i} question={c.question} options={c.options} answered={c.answered} last={last} answer={(t) => send({ kind: "message", text: t })} />;
         if (c.kind === "document") return <DocLine key={i} s={s} c={c} />;
+        if (c.kind === "research_plan") return m.role === "user" ? null : <ResearchPlanCard key={i} woId={s.woId} r={s.research} />;
         if (c.kind === "station_question") {
           const q = s.dialogue.questions.find((x) => x.id === c.id);
           // A person's answer quotes the question it answers; the card itself lives on the agent's message.
@@ -169,8 +172,16 @@ function SideDialogue({ s }: { s: WoSession }) {
   const latest = new Map<string, (typeof s.documents)[number]>();
   for (const d of s.documents) if ((latest.get(d.doc)?.version ?? 0) < d.version) latest.set(d.doc, d);
   const jump = (id: string) => document.getElementById(id)?.scrollIntoView?.({ block: "center" });
+  const ui = useUI();
   return (
     <>
+      <LiveRun woId={s.woId} onOpen={() => ui.dialog({ title: "Run timeline", kicker: s.woId, wide: true, body: <RunTimelineView woId={s.woId} />, actions: [{ label: "Close" }] })} />
+      {s.research.plan?.status === "proposed" ? (
+        <section className="wos-side-sec" id="wos-plan">
+          <h3 className="sub-h">Research plan</h3>
+          <button type="button" className="linkish small" onClick={() => jump("rp-card")}>{`Waiting for approval · ${s.research.plan.web ? `${s.research.plan.hosts.length} web host${s.research.plan.hosts.length === 1 ? "" : "s"}` : "repository only"}`}</button>
+        </section>
+      ) : null}
       {asks.length ? (
         <section className="wos-side-sec" id="wos-asks">
           <h3 className="sub-h">{`Questions waiting (${asks.length})`}</h3>

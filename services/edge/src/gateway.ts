@@ -10,6 +10,8 @@ import { SseUsage, usageFromJson, type Usage } from "./usage.js";
 import { VendorKeys } from "./vendor-keys.js";
 import { registerMcpRoutes, type McpMetrics } from "./mcp/routes.js";
 import { registerServiceRoutes, type ServiceMetrics } from "./service-gateway.js";
+import { registerResearchRoutes, type ResearchDeps } from "./research.js";
+import { stepsOf } from "./steps.js";
 
 export interface GatewayDeps {
   cfg: EdgeConfig;
@@ -18,6 +20,8 @@ export interface GatewayDeps {
   keys?: VendorKeys;
   limiter?: VendorLimiter;
   fetchImpl?: typeof fetch;
+  /** Tests: the research fetcher's outbound fetch (production uses undici with a public-only dispatcher). */
+  researchFetch?: ResearchDeps["fetchImpl"];
   logger?: boolean | { level: string };
 }
 
@@ -79,6 +83,8 @@ export interface Gateway {
   mcp: McpMetrics;
   /** Model calls that belong to no run (the console), spec 12.6. */
   service: ServiceMetrics;
+  /** Governed web research: pages fetched and refused. */
+  research: { fetched: number; refused: number };
   api: ApiClient;
   store: ObjectStore;
   /** Resolves when every model call's post-response work (trace, usage report) has finished. Used on shutdown and in tests. */
@@ -420,6 +426,8 @@ export function buildGateway(deps: GatewayDeps): Gateway {
       // A station document (markdown) is also kept with its artefact row, so people can read and compare it (the API cannot reach object storage).
       // It is the scanned text: secrets were already redacted above.
       ...(p.data.kind === "artefact" && /^text\/markdown\b/i.test(p.data.contentType) && bytes.length <= DOC_MAX_BYTES ? { content: scanned.text } : {}),
+      // A transcript's tool calls, as names and short targets, for the run timeline (src/steps.ts).
+      ...(p.data.kind === "transcript" ? { steps: stepsOf(p.data.content, p.data.turn, keys.knownKeys()) } : {}),
     });
     return relay(reply, r);
   });
@@ -435,8 +443,11 @@ export function buildGateway(deps: GatewayDeps): Gateway {
     return relay(reply, await api.call("POST", `/internal/v1/runs/${encodeURIComponent(a.runId)}/result`, { ...(s.value as Record<string, unknown>), token: a.token }));
   });
 
+  // Governed web research (agent workspace, Phase 2): src/research.ts.
+  const research = registerResearchRoutes(app, { api, store, knownKeys: () => keys.knownKeys(), runAuth, jsonBody, ...(deps.researchFetch ? { fetchImpl: deps.researchFetch } : {}) });
+
   // Model calls for the console and "explain why not" (spec 12.6): the API calls with the edge token, the key stays here.
   const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f, track });
 
-  return { app, metrics, mcp, service, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
+  return { app, metrics, mcp, service, research, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
 }

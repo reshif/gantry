@@ -1369,6 +1369,8 @@ export interface SecuritySettings {
   /** Minutes a sign-in counts as fresh for step-up operations (spec 14.1). Default 15, allowed 5 to 60. */
   stepUpWindowMinutes?: number;
   githubLogin: boolean;
+  /** Hosts station agents may read through governed web research (patterns like docs.example.com or *.example.org). Empty: no web research. */
+  researchHosts?: string[];
 }
 export interface Session {
   id: Id;

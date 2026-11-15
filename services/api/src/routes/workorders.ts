@@ -21,13 +21,18 @@ import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, 
 import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
 import { listDialogue, listDocuments, readDocument } from "../areas/workorders/documents.js";
-import { answerStationQuestion, decideAssumption } from "../areas/workorders/dialogue.js";
+import { answerStationQuestion, decideAssumption, decideResearchPlan } from "../areas/workorders/dialogue.js";
+import { listSources, readSource } from "../areas/workorders/research.js";
+import { woTimeline } from "../areas/workorders/timeline.js";
 import { listConversations, listWorkOrders, readChanges, readRecord, readTraveler, recordBundle, recordMarkdown } from "../areas/workorders/reads.js";
 
 const Id = z.object({ id: z.string().min(1).max(100) });
 const DocId = z.object({ doc: z.string().min(1).max(200) });
 const QId = z.object({ qid: z.string().min(1).max(200) });
 const AId = z.object({ aid: z.string().min(1).max(200) });
+const RefParam = z.object({ ref: z.string().regex(/^s\d{1,6}$/) });
+const HostRe = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+const PlanBody = z.object({ decision: z.enum(["approve", "reject"]), hosts: z.array(z.string().max(253).regex(HostRe)).max(20).optional(), web: z.boolean().optional(), budgetUsd: z.number().positive().max(100).nullable().optional(), note: z.string().max(1000).optional() });
 const AnswerBody = z.object({ kind: z.enum(["answer", "dont_know", "not_relevant"]).default("answer"), answer: z.string().max(4000).optional() });
 const AssumptionBody = z.object({ status: z.enum(["confirmed", "corrected"]), note: z.string().max(2000).optional() });
 const Via = z.string().max(20).optional();
@@ -168,6 +173,33 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const s = await scopeOf(req, id);
     const own = req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
     return command(req, spec(id, own ? null : "wo.answer", s), (tx, a) => decideAssumption(tx, a, id, aid, { status: b.status, ...(b.note !== undefined ? { note: b.note } : {}) }));
+  });
+
+  /* Governed web research (Phase 2): the pages the agents read, and the research plan a person decides. */
+  app.get("/api/v1/work-orders/:id/sources", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    await scopeOf(req, id);
+    return { items: await listSources(g.pool, req.gx.orgId, id) };
+  });
+  app.get("/api/v1/work-orders/:id/sources/:ref", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    const { ref } = RefParam.parse(req.params);
+    await scopeOf(req, id);
+    const src = await readSource(g.pool, req.gx.orgId, id, ref);
+    if (!src) throw refuse("not_found", "No such source on this work order.");
+    return src;
+  });
+  app.get("/api/v1/work-orders/:id/timeline", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    await scopeOf(req, id);
+    return { runs: await woTimeline(g.pool, req.gx.orgId, id) };
+  });
+  app.post("/api/v1/work-orders/:id/research-plan", async (req) => {
+    const { id } = Id.parse(req.params);
+    const b = PlanBody.parse(req.body);
+    const s = await scopeOf(req, id);
+    const sec = (await decide(req, "security.manage")).allowed;
+    return command(req, spec(id, "gate.approve", s), (tx, a) => decideResearchPlan(tx, a, id, { decision: b.decision, ...(b.hosts ? { hosts: b.hosts } : {}), ...(b.web !== undefined ? { web: b.web } : {}), ...(b.budgetUsd !== undefined ? { budgetUsd: b.budgetUsd } : {}), ...(b.note !== undefined ? { note: b.note } : {}) }, sec));
   });
 
   app.get("/api/v1/work-orders/:id/record", { config: { apiKey: "wo.read" } }, async (req) => {

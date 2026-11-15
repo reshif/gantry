@@ -29,6 +29,8 @@ import { openIntakeSessions, scanWoEvents } from "../areas/workorders/session/up
 import { command, decide, decideFor, policyState, refuse, type CommandResult } from "../core/index.js";
 import { asksMe, askOfLabel } from "../areas/workorders/asked.js";
 import { listDialogue, listDocuments } from "../areas/workorders/documents.js";
+import { listSources, planOf } from "../areas/workorders/research.js";
+import { readSecurity } from "../core/read/index.js";
 
 /** Output room for one turn: enough for a full brief (several lists) in a single tool call. */
 export const WO_SESSION_MAX_TOKENS = 16_000;
@@ -337,6 +339,8 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       budget: ag.budget, costUsd: ag.budget.spentUsd,
       can: { talk: own.allowed && !closed, talkWhy: closed ? "This work order is closed." : own.reason, confirm: confirm.allowed, confirmWhy: confirm.allowed ? "" : confirm.reason },
       steps: r.map((s, i) => ({ id: s, name: stationName(c, s), state: closed && wo.state === "done" ? "done" : stepIdx < 0 ? "todo" : i < stepIdx ? "done" : i === stepIdx ? "current" : "todo" })),
+      research: { plan: planOf(row.data), allowList: (await readSecurity(g.pool, g.orgId)).value.researchHosts ?? [], canDecide: (await decide(req, "gate.approve", scopeOf(row))).allowed, canApproveUnlisted: (await decide(req, "security.manage")).allowed },
+      sources: await listSources(g.pool, g.orgId, id),
       dialogue: { questions: dialogue.questions.map((q) => ({ ...q, mine: q.status === "open" && asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed) })), assumptions: dialogue.assumptions, askedMe }, documents: await listDocuments(g.pool, g.orgId, id),
       next, waiting, pending, brief: wo.brief, briefConfirmed: (wo.briefVersions ?? []).length > 0 || wo.gates.G0G1?.status === "passed", briefOpen: atIntake,
       ruleQuestion: ag.mode === "rule-based" && atIntake && legacyQ ? { id: legacyQ.id, text: legacyQ.text, chips: legacyQ.chips } : null, ruleReady: ag.mode === "rule-based" && atIntake && wo.conv.done,

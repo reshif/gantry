@@ -26,6 +26,8 @@ export type WoCard =
   /** A station's document version (artefact id) and a question a station asked (wo_questions id): the thread reads their live state by id. */
   | { kind: "document"; id: string; name: string; version: number }
   | { kind: "station_question"; id: string }
+  /** The work order's research plan (read live from the session's `research`). */
+  | { kind: "research_plan"; station: string }
   | { kind: "assumptions"; station: string; attempt?: string; count: number }
   | {
       kind: "proposal"; id: string; what: "brief" | "reclassify" | "decline"; title: string; summary: string; mode: "agent" | "rule-based";

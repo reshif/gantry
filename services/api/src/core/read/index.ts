@@ -251,6 +251,7 @@ export const DEFAULT_SECURITY: SecuritySettings = {
   killNeedsStepUp: true,
   stepUpWindowMinutes: 15,
   githubLogin: false,
+  researchHosts: [],
 };
 
 /* ---------------------------------------------------------------- catalog ---- */

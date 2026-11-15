@@ -5,14 +5,21 @@
  * A GitHub-flavoured subset: headings (with anchors for an outline), paragraphs, bullet, numbered and task lists (one level of nesting), fenced
  * code, block quotes, tables with a header row, horizontal rules, and inline code, bold, italic, strike-through and links.
  */
-import { Fragment, type ReactNode } from "react";
+import { createContext, Fragment, useContext, type ReactNode } from "react";
+
+/** Where a citation `[^s3]` goes: the document viewer provides it to open the source; without it a citation is a plain marker. */
+export const CiteContext = createContext<((ref: string) => void) | null>(null);
+function Cite({ refId }: { refId: string }) {
+  const open = useContext(CiteContext);
+  return open ? <button type="button" className="md-cite" aria-label={`Source ${refId}`} onClick={() => open(refId)}>{refId}</button> : <sup className="md-cite is-static">{refId}</sup>;
+}
 
 const SAFE_HREF = /^(https?:\/\/[^\s]+|#[^\s]*)$/i;
 
-/** Inline: `code`, **bold**, *italic*, ~~strike~~, [text](url). */
+/** Inline: `code`, **bold**, *italic*, ~~strike~~, [text](url), citations [^s3]. */
 export function inline(src: string, key = "i"): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /`([^`\n]+)`|\*\*([^*\n]+?)\*\*|__([^_\n]+?)__|\*([^*\s][^*\n]*?)\*|~~([^~\n]+?)~~|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  const re = /`([^`\n]+)`|\*\*([^*\n]+?)\*\*|__([^_\n]+?)__|\*([^*\s][^*\n]*?)\*|~~([^~\n]+?)~~|\[\^(s\d{1,6})\]|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
   let last = 0;
   let n = 0;
   for (let m = re.exec(src); m; m = re.exec(src)) {
@@ -22,9 +29,10 @@ export function inline(src: string, key = "i"): ReactNode[] {
     else if (m[2] !== undefined || m[3] !== undefined) out.push(<strong key={k}>{inline((m[2] ?? m[3])!, k)}</strong>);
     else if (m[4] !== undefined) out.push(<em key={k}>{inline(m[4], k)}</em>);
     else if (m[5] !== undefined) out.push(<s key={k}>{inline(m[5], k)}</s>);
-    else if (SAFE_HREF.test(m[7]!)) {
-      const href = m[7]!;
-      out.push(<a key={k} href={href} {...(href.startsWith("#") ? {} : { target: "_blank" })} rel="noopener noreferrer nofollow">{inline(m[6]!, k)}</a>);
+    else if (m[6] !== undefined) out.push(<Cite key={k} refId={m[6]} />);
+    else if (SAFE_HREF.test(m[8]!)) {
+      const href = m[8]!;
+      out.push(<a key={k} href={href} {...(href.startsWith("#") ? {} : { target: "_blank" })} rel="noopener noreferrer nofollow">{inline(m[7]!, k)}</a>);
     } else out.push(m[0]);
     last = m.index + m[0].length;
   }

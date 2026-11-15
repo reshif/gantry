@@ -82,3 +82,39 @@ export function askOfText(askOf: string): string {
   if (askOf.startsWith("role:")) return `a ${askOf.slice(5).replace(/_/g, " ")}`;
   return "a person";
 }
+
+export interface Source {
+  id: string; ref: string; kind: string; station: string; attemptId: string | null; fetchedBy: string | null; url: string; finalUrl: string; host: string; title: string;
+  httpStatus: number | null; contentType: string; contentHash: string; size: number; truncated: boolean; why: string; fetchedAt: number; excerpt?: string;
+}
+export interface ResearchPlan {
+  status: "proposed" | "approved" | "rejected"; questions: string[]; hosts: string[]; web: boolean; budgetUsd: number | null; why: string; station: string; attempt: string;
+  proposedAt: number; decidedBy?: string; decidedAt?: number; note?: string;
+}
+export interface ResearchState { plan: ResearchPlan | null; allowList: string[]; canDecide: boolean; canApproveUnlisted: boolean }
+
+export const useWoSources = (woId: string | null | undefined) =>
+  useQuery({ queryKey: ["workOrders", "sources", woId ?? ""], queryFn: () => get<{ items: Source[] }>(api(`work-orders/${enc(woId ?? "")}/sources`)), enabled: !!woId });
+export const useWoSource = (woId: string, ref: string | null) =>
+  useQuery({ queryKey: ["workOrders", "source", woId, ref ?? ""], queryFn: () => get<Source>(api(`work-orders/${enc(woId)}/sources/${enc(ref ?? "")}`)), enabled: !!ref, staleTime: Infinity });
+
+export async function decideResearchPlan(woId: string, b: { decision: "approve" | "reject"; hosts?: string[]; web?: boolean; budgetUsd?: number | null; note?: string }): Promise<ApiResult> {
+  const r = await post(api(`work-orders/${enc(woId)}/research-plan`), b);
+  if (r.ok) invalidateSlices(["workOrders", "conversations", "home", "floor", "audit"]);
+  return r;
+}
+
+export type TimelineEntry =
+  | { at: number; kind: "start"; text: string }
+  | { at: number; kind: "step"; turn: number; tool: string; detail: string }
+  | { at: number; kind: "source"; ref: string; url: string; title: string }
+  | { at: number; kind: "document"; name: string; version: number }
+  | { at: number; kind: "result"; outcome: string; text: string };
+export interface RunTimeline {
+  runId: string; attemptId: string; station: string; state: string; startedAt: number; endedAt: number | null; turn: number | null;
+  model: string | null; calls: number; tokens: number; costUsd: number; entries: TimelineEntry[];
+}
+const live = (runs: RunTimeline[] | undefined) => !!runs?.some((r) => r.state === "running" || r.state === "starting");
+/** Polls while a run is live (every 4 s), not otherwise. */
+export const useWoTimeline = (woId: string | null | undefined) =>
+  useQuery({ queryKey: ["workOrders", "timeline", woId ?? ""], queryFn: () => get<{ runs: RunTimeline[] }>(api(`work-orders/${enc(woId ?? "")}/timeline`)), enabled: !!woId, refetchInterval: (q) => (live(q.state.data?.runs) ? 4000 : false) });

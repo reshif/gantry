@@ -50,7 +50,7 @@ describe("station tools", () => {
     input.end();
     await done;
     expect(lines[0].result.serverInfo.name).toBe("gantry");
-    expect(lines[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["write_document", "ask", "assume"]);
+    expect(lines[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["write_document", "ask", "assume", "propose_research_plan", "web_fetch"]);
     expect(lines[2].result.isError).toBe(false);
     expect(lines[3].error.code).toBe(-32601);
     expect((await readLog(d)).documents["spec.md"]).toBe("# Spec");
@@ -77,5 +77,27 @@ describe("station tools", () => {
     const cp = edge.calls.find((c) => c.path === "/run/v1/checkpoint" && c.body.name === "research.md");
     expect(cp?.body.contentType).toContain("text/markdown");
     expect(edge.calls.at(-1)!.body).toMatchObject({ status: "needs_person", output: { dialogue: { questions: [{ question: "Which tenant first?" }] } } });
+  });
+
+  it("a research plan ends the run for approval; web_fetch goes through the edge and frames the page as untrusted", async () => {
+    const d = await dir();
+    expect((await callTool("propose_research_plan", { questions: ["How do Nautobot jobs retry?"], hosts: ["docs.nautobot.com", "not a host"], web: true, budgetUsd: 2, why: "The repo has no retry helper." }, d)).isError).toBe(false);
+    expect((await readLog(d)).plan).toEqual({ questions: ["How do Nautobot jobs retry?"], hosts: ["docs.nautobot.com"], web: true, budgetUsd: 2, why: "The repo has no retry helper." });
+    const out = await handOver({ status: "succeeded", output: { summary: "" }, usage: [] }, d, "research", async () => undefined, 1, () => undefined);
+    expect(out.status).toBe("needs_person");
+    expect(out.output).toMatchObject({ researchPlan: { hosts: ["docs.nautobot.com"] }, summary: "research: waiting for the research plan to be approved." });
+
+    edge = await startFakeEdge({}, TOKEN);
+    process.env.GANTRY_EDGE_URL = edge.url;
+    process.env.GANTRY_RUN_TOKEN = TOKEN;
+    const r = await callTool("web_fetch", { url: "https://docs.nautobot.com/jobs", why: "retry guidance" }, await dir());
+    const call = edge.calls.find((c) => c.path === "/run/v1/research/fetch")!;
+    expect(call.body).toEqual({ url: "https://docs.nautobot.com/jobs", why: "retry guidance" });
+    expect(call.auth).toBe(`Bearer ${TOKEN}`);
+    // the fake edge answers {} (no ok): the tool reports it could not read the page
+    expect(r.isError).toBe(true);
+    expect((await callTool("web_fetch", { url: "http://x.org", why: "x y" }, d)).isError).toBe(true);
+    delete process.env.GANTRY_EDGE_URL;
+    delete process.env.GANTRY_RUN_TOKEN;
   });
 });

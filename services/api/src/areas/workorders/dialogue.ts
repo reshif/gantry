@@ -7,10 +7,12 @@ import { stationDef } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
-import { bayOf, ev, leaveBay, note } from "./engine.js";
+import { bayOf, ev, leaveBay, note, type Fx } from "./engine.js";
+import { readSecurity } from "../../core/read/index.js";
+import { planOf } from "./research.js";
 import { begin, done, person, type CmdResult } from "./ctx.js";
 import { resumeAt } from "./intake.js";
-import { saveWo } from "./model.js";
+import { saveWo, type Wo } from "./model.js";
 import { lockAssumption, lockQuestion } from "./documents.js";
 import { addWoMessage } from "./session/store.js";
 
@@ -30,21 +32,63 @@ export async function answerStationQuestion(tx: Tx, actor: Actor, woId: string, 
   await addWoMessage(tx, fx.orgId, w.id, "user", by, answer, { kind: "answer", cards: [{ kind: "station_question", id: qid }] }, fx.now);
   ev(fx, w, "wo.answer", { station: q.station, question: qid, text: answer.slice(0, 200), kind: b.kind });
   const name = stationDef(fx.catalog, q.station)?.name ?? q.station;
-  let resumed = false;
-  const waitingOn = w.data.waitingOn as { station?: string; questions?: string[] } | undefined;
-  if (waitingOn?.questions?.includes(qid) && bayOf(fx.catalog, w) === "person") {
-    const open = (await tx.query<{ n: number }>(`select count(*)::int as n from wo_questions where org_id = $1 and wo_id = $2 and id = any($3) and status = 'open'`, [fx.orgId, w.id, waitingOn.questions])).rows[0]!.n;
-    if (open === 0) {
-      const back = String(waitingOn.station ?? w.data.bayFrom ?? q.station);
-      delete w.data.waitingOn;
-      await leaveBay(fx, w);
-      await resumeAt(fx, w, back);
-      note(w, fx, by, `Answered; ${stationDef(fx.catalog, back)?.name ?? back} runs again with the answers.`);
-      resumed = true;
-    } else note(w, fx, by, `Answered a question from ${name}; ${open} still open.`);
-  } else note(w, fx, by, `Answered a question from ${name}.`);
+  const resumed = await maybeResume(fx, w, by);
+  if (!resumed) note(w, fx, by, `Answered a question from ${name}.`);
   await saveWo(tx, fx.orgId, w);
   return done(fx, resumed ? `Answer recorded; ${name} runs again with it.` : "Answer recorded.", w.project, { version: w.version, resumed });
+}
+
+/**
+ * A waiting station runs again once nothing it waits for is open: its blocking questions answered and its research plan decided.
+ * Returns whether it resumed.
+ */
+export async function maybeResume(fx: Fx, w: Wo, by: string): Promise<boolean> {
+  const waitingOn = w.data.waitingOn as { station?: string; questions?: string[]; plan?: boolean } | undefined;
+  if (!waitingOn || bayOf(fx.catalog, w) !== "person") return false;
+  const qs = waitingOn.questions ?? [];
+  const open = qs.length ? (await fx.tx.query<{ n: number }>(`select count(*)::int as n from wo_questions where org_id = $1 and wo_id = $2 and id = any($3) and status = 'open'`, [fx.orgId, w.id, qs])).rows[0]!.n : 0;
+  const planOpen = waitingOn.plan === true && planOf(w.data)?.status === "proposed";
+  if (open > 0 || planOpen) return false;
+  const back = String(waitingOn.station ?? w.data.bayFrom);
+  delete w.data.waitingOn;
+  await leaveBay(fx, w);
+  await resumeAt(fx, w, back);
+  note(w, fx, by, `${stationDef(fx.catalog, back)?.name ?? back} runs again with the answers.`);
+  return true;
+}
+
+/**
+ * Approve or reject the research plan a station proposed. Approving lets the station read the approved hosts and spend up to the approved budget;
+ * a host that is not on the factory's research allow-list can be approved only by someone who manages security. Rejecting sends the station back
+ * to work from the repository alone. Either way the station runs again once nothing else is open.
+ */
+export async function decideResearchPlan(tx: Tx, actor: Actor, woId: string, b: { decision: "approve" | "reject"; hosts?: string[]; web?: boolean; budgetUsd?: number | null; note?: string }, canManageSecurity: boolean): Promise<CmdResult> {
+  const { fx, w } = await begin(tx, actor, woId, "gate.approve");
+  const by = person(actor, "Deciding a research plan is");
+  const plan = planOf(w.data);
+  if (!plan || plan.status !== "proposed") throw conflict("There is no research plan waiting for a decision.");
+  const note = (b.note ?? "").trim().slice(0, 1000);
+  if (b.decision === "reject") {
+    if (note.length < 3) throw invalid("Say why the plan is rejected, so the agent can work without it.");
+    w.data.researchPlan = { ...plan, status: "rejected", web: false, hosts: [], decidedBy: by, decidedAt: fx.now.getTime(), note };
+    ev(fx, w, "research.plan.decided", { station: plan.station, decision: "rejected", text: note });
+  } else {
+    const web = b.web ?? plan.web;
+    const hosts = web ? [...new Set((b.hosts ?? plan.hosts).map((h) => h.trim().toLowerCase()).filter(Boolean))] : [];
+    if (web && !hosts.length) throw invalid("Approve at least one host, or approve the plan without the web.");
+    const listed = new Set((await readSecurity(tx, fx.orgId)).value.researchHosts ?? []);
+    const unlisted = hosts.filter((h) => !listed.has(h));
+    if (unlisted.length && !canManageSecurity) {
+      throw refuse("denied", `${unlisted.join(", ")} ${unlisted.length === 1 ? "is" : "are"} not on the factory's research allow-list. Someone who manages security can approve ${unlisted.length === 1 ? "it" : "them"}, or add ${unlisted.length === 1 ? "it" : "them"} to the list first.`, { rule: { kind: "matrix", id: "security.manage", name: "Manage security" } });
+    }
+    const budget = b.budgetUsd === undefined ? plan.budgetUsd : b.budgetUsd;
+    w.data.researchPlan = { ...plan, status: "approved", web, hosts, budgetUsd: budget, decidedBy: by, decidedAt: fx.now.getTime(), ...(note ? { note } : {}) };
+    ev(fx, w, "research.plan.decided", { station: plan.station, decision: "approved", hosts, web, budgetUsd: budget, unlisted, text: note });
+  }
+  await addWoMessage(tx, fx.orgId, w.id, "user", by, b.decision === "approve" ? `Approved the research plan${note ? `: ${note}` : "."}` : `Rejected the research plan: ${note}`, { kind: "answer", cards: [{ kind: "research_plan", station: plan.station }] }, fx.now);
+  const resumed = await maybeResume(fx, w, by);
+  await saveWo(tx, fx.orgId, w);
+  return done(fx, `${b.decision === "approve" ? "Plan approved" : "Plan rejected"}${resumed ? `; ${stationDef(fx.catalog, plan.station)?.name ?? plan.station} runs again` : ""}.`, w.project, { version: w.version, resumed });
 }
 
 export async function decideAssumption(tx: Tx, actor: Actor, woId: string, aid: string, b: { status: "confirmed" | "corrected"; note?: string }): Promise<CmdResult> {

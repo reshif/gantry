@@ -130,5 +130,66 @@ d("station documents and dialogue", () => {
     expect(await list("p-tomas")).toBe("you");
     expect(await list("p-meera")).toBe("person");
   });
+
+  it("research: a proposed plan parks the station; an approver decides; unlisted hosts need security; the run reads only approved hosts", async () => {
+    const id = await w.atStation("research", "Research plan");
+    const att = (await w.liveAttempt(id))!;
+    await w.apply(att, { status: "needs_person", output: { researchPlan: { questions: ["How do Nautobot jobs retry?"], hosts: ["docs.nautobot.com", "blog.example.org"], web: true, budgetUsd: 3, why: "No retry helper in the repo." } } });
+    let wo = await w.get(id);
+    expect(wo.bayReason).toBe("Waiting for the research plan at Research");
+    const { researchHosts } = await import("../src/areas/workorders/research.js");
+    const data = async () => (await w.q<{ data: Record<string, unknown> }>(`select data from work_orders where id = $1`, [id]))[0]!.data;
+    expect(await researchHosts(t.db.app, t.orgId, await data())).toEqual([]);
+    let ses = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/session`)).body;
+    expect(ses.research.plan).toMatchObject({ status: "proposed", hosts: ["docs.nautobot.com", "blog.example.org"], budgetUsd: 3 });
+    expect(ses.research.canDecide).toBe(true);
+    // The factory allow-list has docs.nautobot.com only: a line lead may approve that host, not the other.
+    expect((await w.call("p-asha", "PATCH", "/api/v1/security", { path: "researchHosts", value: ["docs.nautobot.com"] })).status).toBe(200);
+    expect((await w.call("p-asha", "PATCH", "/api/v1/security", { path: "researchHosts", value: ["not a host"] })).status).toBe(422);
+    expect((await w.call("p-rui", "POST", `/api/v1/work-orders/${id}/research-plan`, { decision: "approve" })).status).toBe(403);
+    const unlisted = await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/research-plan`, { decision: "approve" });
+    expect(unlisted.status).toBe(403);
+    expect(unlisted.body.msg).toMatch(/blog\.example\.org is not on the factory's research allow-list/);
+    expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/research-plan`, { decision: "reject" })).status).toBe(422);
+    const ok = await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/research-plan`, { decision: "approve", hosts: ["docs.nautobot.com"], budgetUsd: 2, note: "Docs only." });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.resumed).toBe(true);
+    wo = await w.get(id);
+    expect(wo.bay).toBeNull();
+    expect((await w.liveAttempt(id))!.station).toBe("research");
+    expect(await researchHosts(t.db.app, t.orgId, await data())).toEqual(["docs.nautobot.com"]);
+    ses = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/session`)).body;
+    expect(ses.research.plan).toMatchObject({ status: "approved", hosts: ["docs.nautobot.com"], budgetUsd: 2, decidedBy: "p-meera", note: "Docs only." });
+    expect((await w.events("research.plan.decided")).some((e: { wo_id: string }) => e.wo_id === id)).toBe(true);
+
+    // A page read through the edge is recorded as source s1, then s2; people read what the agent saw.
+    const { recordSource } = await import("../src/areas/workorders/research.js");
+    const a2 = (await w.liveAttempt(id))!;
+    const rec = (n: number) => w.tx((tx) => recordSource(tx, { orgId: t.orgId, woId: id, station: "research", attemptId: a2.id, runId: `run-${n}`, agent: "ag-research", url: `https://docs.nautobot.com/p${n}`, finalUrl: `https://docs.nautobot.com/p${n}`, title: `Page ${n}`, httpStatus: 200, contentType: "text/html", contentHash: "b".repeat(64), size: 5, truncated: false, why: "retry", excerpt: `text ${n}` }));
+    expect(await rec(1)).toBe("s1");
+    expect(await rec(2)).toBe("s2");
+    const list = (await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/sources`)).body.items;
+    expect(list.map((x: { ref: string; host: string }) => `${x.ref}:${x.host}`)).toEqual(["s1:docs.nautobot.com", "s2:docs.nautobot.com"]);
+    expect(list[0].excerpt).toBeUndefined();
+    expect((await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/sources/s2`)).body).toMatchObject({ title: "Page 2", excerpt: "text 2" });
+    expect((await w.call("p-fatima", "GET", `/api/v1/work-orders/${id}/sources`)).status).toBe(404);
+    await w.call("p-asha", "PATCH", "/api/v1/security", { path: "researchHosts", value: [] });
+  });
+
+  it("the run timeline shows the steps, model calls, pages read, documents and the result of each run, and no transcript", async () => {
+    const id = await w.atStation("research", "Timeline");
+    const att = (await w.liveAttempt(id))!;
+    const run = `run-tl-${att.id}`;
+    await t.db.admin.query(`insert into runs (org_id, id, attempt_id, wo_id, state, model_id) values ($1,$2,$3,$4,'running','claude-test')`, [t.orgId, run, att.id, id]);
+    await t.db.admin.query(`insert into checkpoints (org_id, id, run_id, attempt_id, seq, content_hash, data) values ($1,$2,$3,$4,1,$5,$6::jsonb)`, [t.orgId, `ck-${run}-1`, run, att.id, "e".repeat(64), JSON.stringify({ turn: 1, kind: "transcript", steps: [{ turn: 1, tool: "Read", detail: "src/jobs.py" }, { turn: 1, tool: "gantry:web_fetch", detail: "https://docs.nautobot.com/x" }] })]);
+    await t.db.admin.query(`insert into run_usage (org_id, run_id, attempt_id, wo_id, model_id, input_tokens, output_tokens, cost_micros) values ($1,$2,$3,$4,'claude-test',100,50,12000)`, [t.orgId, run, att.id, id]);
+    const r = await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/timeline`);
+    expect(r.status).toBe(200);
+    const tl = r.body.runs[0];
+    expect(tl).toMatchObject({ runId: run, station: "research", state: "running", calls: 1, tokens: 150, costUsd: 0.012, model: "claude-test" });
+    expect(tl.entries.map((e: { kind: string }) => e.kind)).toEqual(["start", "step", "step"]);
+    expect(tl.entries[1]).toMatchObject({ tool: "Read", detail: "src/jobs.py" });
+    expect((await w.call("p-fatima", "GET", `/api/v1/work-orders/${id}/timeline`)).status).toBe(404);
+  });
 });
 
