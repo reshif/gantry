@@ -7,6 +7,7 @@
  * person at click time, the gate must be named for chat on that connection and never a release, hotfix, security hold or risk-tagged change, and the gate
  * instance on the card must still be the open one (a stale click is refused). The vote is stored with channel, chat user id, person and instance id.
  */
+import { hookDenials } from "../../core/denial-sampler.js";
 import { createHash } from "node:crypto";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { appendEvent, withTx } from "@gantry/db";
@@ -89,7 +90,8 @@ export const slackHookRoutes: FastifyPluginAsync = async (app) => {
       else if (c.reason === "missing" && worst !== "stale") worst = "missing";
     }
     if (!matched) {
-      await audit("slack.hook.denied", "denied", worst === "stale" ? "HOOK-STALE" : "HOOK-SIG", worst === "stale" ? "The request is outside the five-minute window." : worst === "missing" ? "The signature header is missing." : "The signature does not match.", req);
+      const smp = hookDenials.sample("slack", req.ip);
+      if (smp.audit) await audit("slack.hook.denied", "denied", worst === "stale" ? "HOOK-STALE" : "HOOK-SIG", worst === "stale" ? "The request is outside the five-minute window." : worst === "missing" ? "The signature header is missing." : "The signature does not match.", req, smp.suppressed ? { suppressed: smp.suppressed } : {});
       return res.code(401).send({ ok: false, msg: worst === "stale" ? "Stale request." : "Invalid signature." });
     }
 

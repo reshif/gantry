@@ -2,6 +2,7 @@
  * POST /hooks/github (spec 8.10, 11.6): verify the signature over the raw body, refuse replays by delivery id, store the payload and a delivery row,
  * enqueue a `github.event` job and acknowledge. Nothing is interpreted here: webhooks are hints, and processing is a job (`processGithubDelivery`).
  */
+import { hookDenials } from "../../core/denial-sampler.js";
 import type { FastifyPluginAsync } from "fastify";
 import { appendEvent, decrypt, enqueue, withTx } from "@gantry/db";
 import type { Queryable } from "@gantry/db";
@@ -42,16 +43,18 @@ export const githubHookRoutes: FastifyPluginAsync = async (app) => {
     const delivery = String(req.headers["x-github-delivery"] ?? "");
     const event = String(req.headers["x-github-event"] ?? "");
     const signature = req.headers["x-hub-signature-256"];
-    const audit = (type: string, outcome: "denied" | "failed", reason: string) =>
+    const audit = (type: string, outcome: "denied" | "failed", reason: string, suppressed = 0) =>
       withTx(g.pool, (tx) => appendEvent(tx, {
         orgId: g.orgId, type, category: "integrations", actor: "github-hook", channel: "github", subject: { type: "delivery", id: delivery || "unknown" }, outcome, rule: "HOOK-SIG",
-        after: { reason, event, ...(delivery ? { delivery } : {}) }, requestId: req.id, sourceIp: req.ip || null,
+        after: { reason, event: event.slice(0, 50), ...(delivery ? { delivery: delivery.slice(0, 100) } : {}), ...(suppressed ? { suppressed } : {}) }, requestId: req.id, sourceIp: req.ip || null,
       })).catch((err: unknown) => req.log.error({ err }, "could not audit hook denial"));
 
     const secrets = await webhookSecrets(g.pool, g.orgId, g.config.secrets.dataKey);
     if (!secrets.length) return reply.code(503).send({ ok: false, msg: "No GitHub webhook secret is configured." });
     if (!secrets.some((s) => verifyGithubSignature(raw, typeof signature === "string" ? signature : undefined, s))) {
-      await audit("github.hook.denied", "denied", signature ? "The signature does not match." : "The signature header is missing.");
+      // Unauthenticated: sampled, so a flood of forged calls can't grow the ledger one row per request.
+      const smp = hookDenials.sample("github", req.ip);
+      if (smp.audit) await audit("github.hook.denied", "denied", signature ? "The signature does not match." : "The signature header is missing.", smp.suppressed);
       return reply.code(401).send({ ok: false, msg: "Invalid signature." });
     }
     if (!/^[A-Za-z0-9._:-]{8,100}$/.test(delivery) || !/^[a-z_]{1,50}$/.test(event)) return reply.code(400).send({ ok: false, msg: "Missing or malformed X-GitHub-Delivery or X-GitHub-Event." });

@@ -3,6 +3,7 @@
  * connection's signing secret (the same `t=<unix>,v1=<hmac-sha256>` scheme Gantry uses for its own outbound webhooks), within a five-minute window. The delivery is stored
  * and deduplicated on source and delivery id, acknowledged, then offered to the connection's triggers by a job. Nothing in the body is trusted.
  */
+import { hookDenials } from "../../core/denial-sampler.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { appendEvent, enqueue, withTx } from "@gantry/db";
 import type { FastifyPluginAsync } from "fastify";
@@ -46,9 +47,9 @@ export const triggerHookRoutes: FastifyPluginAsync = async (app) => {
     const g = req.server.gantry;
     const id = String((req.params as { instance?: string }).instance ?? "");
     const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-    const audit = (type: string, reason: string) =>
+    const audit = (type: string, reason: string, suppressed = 0) =>
       withTx(g.pool, (tx) => appendEvent(tx, {
-        orgId: g.orgId, type, category: "integrations", actor: `hook:${id}`.slice(0, 100), channel: "api", subject: { type: "integration", id }, outcome: "denied", rule: "HOOK-SIG", after: { reason }, requestId: req.id, sourceIp: req.ip || null,
+        orgId: g.orgId, type, category: "integrations", actor: `hook:${id}`.slice(0, 100), channel: "api", subject: { type: "integration", id }, outcome: "denied", rule: "HOOK-SIG", after: { reason, ...(suppressed ? { suppressed } : {}) }, requestId: req.id, sourceIp: req.ip || null,
       })).catch((err: unknown) => req.log.error({ err }, "could not audit hook denial"));
 
     const inst = await readInstanceRow(g.pool, g.orgId, id);
@@ -61,7 +62,9 @@ export const triggerHookRoutes: FastifyPluginAsync = async (app) => {
     if (!secret) return reply.code(503).send({ ok: false, msg: "This connection has no signing secret." });
     const sig = req.headers["x-gantry-signature"];
     if (!verifySignature(raw, typeof sig === "string" ? sig : undefined, secret)) {
-      await audit("trigger.hook.denied", sig ? "The signature does not match or is outside the five-minute window." : "The signature header is missing.");
+      // Unauthenticated: sampled, so a flood of forged calls can't grow the ledger one row per request.
+      const smp = hookDenials.sample(`trigger:${id}`, req.ip);
+      if (smp.audit) await audit("trigger.hook.denied", sig ? "The signature does not match or is outside the five-minute window." : "The signature header is missing.", smp.suppressed);
       return reply.code(401).send({ ok: false, msg: "Invalid signature." });
     }
     let parsed: z.infer<typeof Body>;

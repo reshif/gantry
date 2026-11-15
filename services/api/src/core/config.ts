@@ -13,7 +13,12 @@ export interface Config {
   devSeed: boolean;
   demoAccounts: boolean;
   bootstrapAdminEmail: string | null;
-  trustProxy: boolean;
+  /**
+   * Which peers may set X-Forwarded-For (Fastify trustProxy). Default: loopback and private networks only (the ingress on the
+   * compose network), so a client reaching the API directly from a public address can't spoof the address that the IP
+   * allow-list, rate limits and audit use. `false` trusts nobody; a list of addresses or CIDRs pins the ingress.
+   */
+  trustProxy: boolean | string;
   host: string;
   port: number;
   secrets: { sessionKey: Buffer; dataKey: Buffer | null; edgeToken: string; githubToken: string };
@@ -53,7 +58,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     devSeed: env.GANTRY_DEV_SEED === "true",
     demoAccounts: demoAccountsAllowed(env.GANTRY_DEV_DEMO_ACCOUNTS === "true", publicUrl),
     bootstrapAdminEmail: env.GANTRY_BOOTSTRAP_ADMIN_EMAIL ? env.GANTRY_BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase() : null,
-    trustProxy: env.GANTRY_TRUST_PROXY !== "false",
+    trustProxy: trustProxyFrom(env.GANTRY_TRUST_PROXY),
     host: env.HOST || "0.0.0.0",
     port: env.PORT ? Number(env.PORT) : 8000,
     secrets: { sessionKey: Buffer.from(sessionKey, "utf8"), dataKey, edgeToken, githubToken },
@@ -70,4 +75,13 @@ function demoAccountsAllowed(on: boolean, publicUrl: string): boolean {
   const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
   if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost")) return true;
   throw new Error(`GANTRY_DEV_DEMO_ACCOUNTS=true is for local development only; GANTRY_PUBLIC_URL (${publicUrl}) is not localhost. Unset it.`);
+}
+
+/** GANTRY_TRUST_PROXY: unset -> "loopback, uniquelocal"; "false" -> false; anything else -> that address or CIDR list. "true" (trust any peer) is refused. */
+export function trustProxyFrom(v: string | undefined): boolean | string {
+  const x = (v ?? "").trim();
+  if (!x) return "loopback, uniquelocal";
+  if (x === "false") return false;
+  if (x === "true") throw new Error("GANTRY_TRUST_PROXY=true would let any client set its own address. Set the ingress address or CIDR, or leave it unset for private networks only.");
+  return x;
 }
