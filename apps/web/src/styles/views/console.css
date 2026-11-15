@@ -1,5 +1,7 @@
 /* Console. Builds on the round-one console styles in views.css. Tokens only. */
-.view-console .console-grid { grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; height: calc(100vh - 220px); min-height: 460px; }
+/* the page fills the window: header, then the conversation and its context side by side; only the thread and the side column scroll */
+.view-console .console-grid { grid-template-columns: minmax(0, 1fr) 320px; height: calc(100dvh - var(--topbar-h, 52px) - 210px); min-height: 460px; }
+.view-console .ctx { overflow-y: auto; min-height: 0; }
 .view-console .console-main { min-height: 0; }
 .view-console .thread { min-height: 0; }
 .view-console .msg { max-width: 820px; min-width: 0; }
@@ -62,11 +64,12 @@
 }
 
 /* round three: Claude mode, streaming, entity chips */
-.con-mode-line { display: flex; gap: 6px; align-items: center; color: var(--muted); margin: var(--s2) 0; }
+.con-mode-line { display: flex; gap: 6px; align-items: baseline; flex-wrap: nowrap; color: var(--muted); margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--sunk); border-radius: var(--r1) var(--r1) 0 0; }
 .con-mode-line a { color: var(--accent); }
 .con-model { display: inline-flex; align-items: center; gap: 6px; }
 .con-model select { max-width: 280px; font-family: var(--f-mono); font-size: var(--t-xs); }
-.con-mode-line .ic { width: 12px; height: 12px; }
+.con-mode-line .ic { width: 12px; height: 12px; flex: none; position: relative; top: 2px; }
+.con-mode-line a { white-space: nowrap; }
 .view-console .msg-text { white-space: pre-wrap; }
 .view-console .msg-text.is-thinking { color: var(--muted); font-style: italic; }
 .msg-meta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 2px; }

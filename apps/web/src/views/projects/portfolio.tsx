@@ -8,7 +8,7 @@ import { fmt, type Catalog } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useMe, useSavedViews, useTemplates } from "../../api/queries";
 import { useCan } from "../../api/can";
-import { Btn, Field, Meter, Segmented, Select } from "../../ui/primitives";
+import { Btn, Field, IconBtn, Meter, Segmented, Select } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { getPrefs, updatePrefs } from "../../lib/prefs";
 import { DataTable, EmptyState, HealthChip, MiniBelt, goProject, metricsOf, useCatalog, useTeams, type Col, type PView } from "./kit";
@@ -76,8 +76,13 @@ interface Row {
   team: string;
 }
 
-const effText = (m: Row["m"]) => (m.effN < MIN_EFF || m.eff === null ? "insufficient data" : fmt.pct(m.eff));
-const covText = (m: Row["m"]) => (m.cov.total < MIN_COV ? "insufficient data" : fmt.pct(m.cov.share));
+const effLow = (m: Row["m"]) => m.effN < MIN_EFF || m.eff === null;
+const covLow = (m: Row["m"]) => m.cov.total < MIN_COV;
+/** A dash, not a percentage, while the sample is too small to mean anything; the tooltip says why. */
+const effText = (m: Row["m"]) => (effLow(m) ? "—" : fmt.pct(m.eff!));
+const covText = (m: Row["m"]) => (covLow(m) ? "—" : fmt.pct(m.cov.share));
+const effTip = (m: Row["m"]) => `Agent working time over lead time, ${m.effN} work order${m.effN === 1 ? "" : "s"} shipped in 7 days${effLow(m) ? `. Too few to tell yet: needs ${MIN_EFF}.` : "."}`;
+const covTip = (m: Row["m"]) => `${m.cov.auto} of ${m.cov.total} gate decisions in 7 days passed under trust${covLow(m) ? `. Too few to tell yet: needs ${MIN_COV}.` : "."}`;
 
 const SORTS: Array<{ id: string; label: string; v: (r: Row) => number | string }> = [
   { id: "health", label: "Health", v: (r) => (HEALTH_ORDER[r.m.health.id] ?? 9) * 1000 - r.m.gates },
@@ -150,11 +155,11 @@ export function ProjectCard({ cat, r }: { cat: Catalog; r: Row }) {
         </div>
       </dl>
       <p className="hm-proj-ins small">
-        <span data-tip={`Agent working time over lead time, ${m.effN} shipped in 7 days`} tabIndex={0}>
+        <span data-tip={effTip(m)} tabIndex={0}>
           <span className="kv-k">Flow eff. </span>
           <span className="mono">{effText(m)}</span>
         </span>
-        <span data-tip={`${m.cov.auto} of ${m.cov.total} gate decisions passed under trust in 7 days`} tabIndex={0}>
+        <span data-tip={covTip(m)} tabIndex={0}>
           <span className="kv-k">Trust </span>
           <span className="mono">{covText(m)}</span>
         </span>
@@ -196,9 +201,8 @@ function rowCols(ctx: string, cat: Catalog, withRoles: boolean, myRoles: (id: st
     {
       key: "eff", label: "Flow eff.", align: "end",
       render: ({ m }) => (
-        <span className={`mono${m.effN < MIN_EFF ? " muted small" : ""}`} data-tip={`Agent working time over lead time for ${m.effN} work order${m.effN === 1 ? "" : "s"} shipped in 7 days`} tabIndex={0}>
+        <span className={`mono${effLow(m) ? " muted" : ""}`} data-tip={effTip(m)} tabIndex={0}>
           {effText(m)}
-          <span className="muted small">{` n=${m.effN}`}</span>
         </span>
       ),
     },
@@ -207,16 +211,15 @@ function rowCols(ctx: string, cat: Catalog, withRoles: boolean, myRoles: (id: st
       render: ({ m }) => (
         <span className={`mono${m.late ? " neg" : m.gates ? " warn-text" : ""}`}>
           {String(m.gates)}
-          {m.gates ? <span className="muted small">{` · ${fmt.dur(m.oldest)}${m.late ? ` · ${m.late} late` : ""}`}</span> : null}
+          {m.gates ? <span className="muted small">{`oldest ${fmt.dur(m.oldest)}${m.late ? `, ${m.late} late` : ""}`}</span> : null}
         </span>
       ),
     },
     {
       key: "trust", label: "Trust cover", align: "end",
       render: ({ m }) => (
-        <span className={`mono${m.cov.total < MIN_COV ? " muted small" : ""}`} data-tip={`${m.cov.auto} of ${m.cov.total} gate decisions in 7 days passed under trust`} tabIndex={0}>
+        <span className={`mono${covLow(m) ? " muted" : ""}`} data-tip={covTip(m)} tabIndex={0}>
           {covText(m)}
-          <span className="muted small">{` ${m.cov.auto}/${m.cov.total}`}</span>
         </span>
       ),
     },
@@ -365,84 +368,83 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
     });
   };
 
-  const builtInReason = curView?.builtIn ? "Built-in views can't be renamed or deleted. Save a copy first." : null;
-  const pickReason = builtInReason || (!curView ? "Pick a saved view first." : null);
-  const summary = `${shown.length} of ${projects.length} projects${archivedN && !st.archived ? ` · ${archivedN} archived hidden` : ""}${st.group !== "none" ? ` · ${groups.length} groups` : ""} · sorted by ${sorter.label.toLowerCase()}${st.dir > 0 ? "" : ", descending"}.`;
+    const summary = `${shown.length} of ${projects.length} projects${archivedN && !st.archived ? ` · ${archivedN} archived hidden` : ""}${st.group !== "none" ? ` · ${groups.length} groups` : ""} · sorted by ${sorter.label.toLowerCase()}${st.dir > 0 ? "" : ", descending"}.`;
   const cols = rowCols(ctx, cat, !!roles, myRoles);
 
   return (
     <div className={`pf pf-${st.layout}`} id={ctx}>
       <div className="pf-toolbar">
-        <div className="pf-views">
-          <div className="field pf-layout">
-            <span className="field-label">Layout</span>
+        <div className="pf-bar">
+          <div className="filters pf-bar-l">
+            <Field label="View" htmlFor={`${ctx}-view`}>
+              <Select
+                id={`${ctx}-view`}
+                                                options={[...views.map((v) => ({ value: v.id, label: v.name + (v.builtIn ? "" : " (saved)") })), ...(curView ? [] : [{ value: "", label: "Custom view" }])]}
+                value={curView ? st.view : ""}
+                onChange={(id) => {
+                  const v = views.find((x) => x.id === id);
+                  if (!v) return;
+                  applyView(v);
+                  setTimeout(() => document.getElementById(`${ctx}-view`)?.focus(), 40);
+                }}
+            />
+            </Field>
+            {modified ? <span className="status tone-wait pf-mod">Changed</span> : null}
+            {curView && !curView.builtIn && modified ? (
+              <Btn small id={`${ctx}-vupd`} label={`Update ${curView.name}`} onClick={async () => {
+                const s: Record<string, unknown> = {};
+                for (const k of VIEW_KEYS) s[k] = st[k];
+                const r = await ops.updateSavedView(curView.id, { s }, { ifMatch: curView.version });
+                ui.toast(r.ok ? `View ${curView.name} updated.` : r.msg, r.ok ? "ok" : "error");
+              }} />
+            ) : null}
+            <Btn small kind="ghost" icon="plus" id={`${ctx}-vsave`} label="Save view" onClick={() => viewDialog("new")} />
+            {curView && !curView.builtIn ? (
+              <>
+                <Btn small kind="ghost" id={`${ctx}-vren`} label="Rename" onClick={() => viewDialog("rename")} />
+                <Btn small kind="ghost" icon="x" id={`${ctx}-vdel`} label="Delete" onClick={async () => {
+                  const r = await ops.deleteSavedView(curView.id, { ifMatch: curView.version });
+                  if (!r.ok) return void ui.toast(r.msg, "error");
+                  set({ ...(PF_BUILTIN[0]!.s as Partial<PfState>), view: "v-all" });
+                  ui.toast(`View ${curView.name} deleted.`, "ok");
+                }} />
+              </>
+            ) : null}
+          </div>
+          <div className="pf-bar-r pf-layout">
             <Segmented name={`${ctx}-layout`} items={[{ id: "cards", label: "Cards" }, { id: "rows", label: "Rows" }]} value={st.layout} onChange={(v) => setFocus({ layout: v as PfState["layout"] }, `${ctx}-layout-${v}`)} label="Portfolio layout" />
           </div>
-          <Field label="View" htmlFor={`${ctx}-view`}>
-            <Select
-              id={`${ctx}-view`}
-              aria-label="Saved view"
-              options={[...views.map((v) => ({ value: v.id, label: v.name + (v.builtIn ? "" : " (saved)") })), ...(curView ? [] : [{ value: "", label: "Custom" }])]}
-              value={curView ? st.view : ""}
-              onChange={(id) => {
-                const v = views.find((x) => x.id === id);
-                if (!v) return;
-                applyView(v);
-                setTimeout(() => document.getElementById(`${ctx}-view`)?.focus(), 40);
-              }}
-            />
-          </Field>
-          {modified ? <span className="chip chip-warn pf-mod">changed</span> : null}
-          <Btn small icon="plus" id={`${ctx}-vsave`} label="Save as view" onClick={() => viewDialog("new")} />
-          {curView && !curView.builtIn && modified ? (
-            <Btn small id={`${ctx}-vupd`} label={`Update ${curView.name}`} onClick={async () => {
-              const s: Record<string, unknown> = {};
-              for (const k of VIEW_KEYS) s[k] = st[k];
-              const r = await ops.updateSavedView(curView.id, { s }, { ifMatch: curView.version });
-              ui.toast(r.ok ? `View ${curView.name} updated.` : r.msg, r.ok ? "ok" : "error");
-            }} />
-          ) : null}
-          <Btn small kind="ghost" id={`${ctx}-vren`} label="Rename" disabledReason={pickReason} onClick={() => viewDialog("rename")} />
-          <Btn small kind="ghost" icon="x" id={`${ctx}-vdel`} label="Delete" disabledReason={pickReason} onClick={async () => {
-            if (!curView) return;
-            const r = await ops.deleteSavedView(curView.id, { ifMatch: curView.version });
-            if (!r.ok) return void ui.toast(r.msg, "error");
-            set({ ...(PF_BUILTIN[0]!.s as Partial<PfState>), view: "v-all" });
-            ui.toast(`View ${curView.name} deleted.`, "ok");
-          }} />
         </div>
-        <div className="pf-filters">
-          <Field label="Search" htmlFor={qid}>
-            <input id={qid} className="input" type="search" placeholder="Name, key or description" value={st.q || ""} aria-label="Search projects" onChange={(e) => set({ q: e.target.value })} />
-          </Field>
-          <Field label="Group by" htmlFor={`${ctx}-group`}>
-            <Select id={`${ctx}-group`} options={GROUPS.map((g) => ({ value: g.id, label: g.label }))} value={st.group} onChange={(v) => setFocus({ group: v }, `${ctx}-group`)} />
-          </Field>
-          <div className="field pf-sort">
-            <label className="field-label" htmlFor={`${ctx}-sort`}>Sort</label>
-            <div className="pf-sort-row">
-              <Select id={`${ctx}-sort`} options={SORTS.map((s) => ({ value: s.id, label: s.label }))} value={st.sort} onChange={(v) => setFocus({ sort: v }, `${ctx}-sort`)} />
-              <Btn small kind="ghost" icon={st.dir > 0 ? "up" : "down"} id={`${ctx}-dir`} label={st.dir > 0 ? "Ascending" : "Descending"} aria={`Sort direction: ${st.dir > 0 ? "ascending" : "descending"}. Select to flip.`} onClick={() => setFocus({ dir: (st.dir > 0 ? -1 : 1) as 1 | -1 }, `${ctx}-dir`)} />
-            </div>
-          </div>
-          <Field label="Health" htmlFor={`${ctx}-health`}>
-            <Select id={`${ctx}-health`} options={[{ value: "all", label: "Any health" }, ...Object.keys(HEALTH_LABEL).filter((k) => k !== "archived" || st.archived).map((k) => ({ value: k, label: HEALTH_LABEL[k]! }))]} value={st.health} onChange={(v) => setFocus({ health: v }, `${ctx}-health`)} />
-          </Field>
-          <Field label="Team" htmlFor={`${ctx}-team`}>
-            <Select id={`${ctx}-team`} options={[{ value: "all", label: "Any team" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} value={st.team} onChange={(v) => setFocus({ team: v }, `${ctx}-team`)} />
-          </Field>
-          <Field label="Template" htmlFor={`${ctx}-tpl`}>
-            <Select id={`${ctx}-tpl`} options={[{ value: "all", label: "Any template" }, ...tpls.map((t) => ({ value: t.id, label: t.name }))]} value={st.tpl} onChange={(v) => setFocus({ tpl: v }, `${ctx}-tpl`)} />
-          </Field>
-          {archivedN ? (
-            <div className="field pf-arch">
-              <span className="field-label">Archived</span>
-              <label className="check" htmlFor={`${ctx}-arch`}>
+        <div className="pf-bar">
+          <div className="filters pf-bar-l">
+            <Field label="Search" htmlFor={qid}>
+              <input id={qid} className="input" type="search" placeholder="Name, key or description" value={st.q || ""} onChange={(e) => set({ q: e.target.value })} />
+            </Field>
+            <Field label="Health" htmlFor={`${ctx}-health`}>
+              <Select id={`${ctx}-health`} options={[{ value: "all", label: "Any" }, ...Object.keys(HEALTH_LABEL).filter((k) => k !== "archived" || st.archived).map((k) => ({ value: k, label: HEALTH_LABEL[k]! }))]} value={st.health} onChange={(v) => setFocus({ health: v }, `${ctx}-health`)} />
+            </Field>
+            <Field label="Team" htmlFor={`${ctx}-team`}>
+              <Select id={`${ctx}-team`} options={[{ value: "all", label: "Any" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} value={st.team} onChange={(v) => setFocus({ team: v }, `${ctx}-team`)} />
+            </Field>
+            <Field label="Template" htmlFor={`${ctx}-tpl`}>
+              <Select id={`${ctx}-tpl`} options={[{ value: "all", label: "Any" }, ...tpls.map((t) => ({ value: t.id, label: t.name }))]} value={st.tpl} onChange={(v) => setFocus({ tpl: v }, `${ctx}-tpl`)} />
+            </Field>
+            {archivedN ? (
+              <label className="check field-check" htmlFor={`${ctx}-arch`}>
                 <input type="checkbox" id={`${ctx}-arch`} checked={!!st.archived} onChange={(e) => setFocus({ archived: e.target.checked }, `${ctx}-arch`)} />
                 {`Show ${archivedN} archived`}
               </label>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
+          <div className="filters pf-bar-r">
+            <Field label="Group" htmlFor={`${ctx}-group`}>
+              <Select id={`${ctx}-group`} options={GROUPS.map((g) => ({ value: g.id, label: g.id === "none" ? "None" : g.label }))} value={st.group} onChange={(v) => setFocus({ group: v }, `${ctx}-group`)} />
+            </Field>
+            <Field label="Sort" htmlFor={`${ctx}-sort`}>
+              <Select id={`${ctx}-sort`} options={SORTS.map((s) => ({ value: s.id, label: s.label }))} value={st.sort} onChange={(v) => setFocus({ sort: v }, `${ctx}-sort`)} />
+              <IconBtn icon={st.dir > 0 ? "up" : "down"} id={`${ctx}-dir`} className="pf-dir" label={`Sort ${st.dir > 0 ? "ascending" : "descending"}. Select to flip.`} title={st.dir > 0 ? "Ascending" : "Descending"} onClick={() => setFocus({ dir: (st.dir > 0 ? -1 : 1) as 1 | -1 }, `${ctx}-dir`)} />
+            </Field>
+          </div>
         </div>
       </div>
       <p className="small muted pf-sum" aria-live="polite">{summary}</p>

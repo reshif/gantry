@@ -126,8 +126,16 @@
 
 /* ---------- board ---------- */
 .fl-boardwrap, .fl-listwrap { display: grid; gap: var(--s3); min-width: 0; }
-.fl-toolbar .filters .field { width: 160px; }
 .fl-board-tools { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* the board scrolls sideways; a fade and a named button on each cut-off edge say which stations are out of view */
+.fl-board-frame { position: relative; min-width: 0; }
+.fl-board-frame.more-r::after, .fl-board-frame.more-l::before { content: ""; position: absolute; top: 1px; bottom: 1px; width: 48px; pointer-events: none; z-index: 2; }
+.fl-board-frame.more-r::after { right: 1px; background: linear-gradient(to left, var(--panel), transparent); }
+.fl-board-frame.more-l::before { left: 1px; background: linear-gradient(to right, var(--panel), transparent); }
+.fl-board-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fl-more { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px; border: 1px solid var(--accent-line, var(--accent)); border-radius: 999px; background: var(--panel); color: var(--accent); font-size: var(--t-sm); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.fl-more:hover { background: var(--accent-soft); }
+.fl-more .icon { width: 14px; height: 14px; }
 .fl-board-scroll { overflow-x: auto; border: 1px solid var(--line-strong); background: var(--panel); max-width: 100%; }
 .fl-board { min-width: min-content; }
 .fl-lane { border-bottom: 1px solid var(--line-strong); }

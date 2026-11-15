@@ -178,16 +178,11 @@
 
 /* ---------- portfolio (home and projects) ---------- */
 .pf { display: grid; gap: var(--s3); min-width: 0; }
-.pf-toolbar { display: grid; gap: var(--s2); padding: var(--s2) var(--s3); border: 1px solid var(--line-strong); background: var(--panel); border-radius: var(--r1); min-width: 0; }
-.pf-views, .pf-filters { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: flex-end; min-width: 0; }
-.pf-views { border-bottom: 1px dotted var(--line); padding-bottom: var(--s2); }
-.pf-views .field { min-width: 180px; }
-.pf-filters .field { min-width: 130px; flex: 0 1 auto; }
-.pf-filters .field:first-child { flex: 1 1 200px; }
-.pf-sort-row { display: flex; gap: 4px; align-items: center; }
-.pf-sort-row .input { width: auto; min-width: 140px; }
-.pf-arch .check { min-height: 32px; }
-.pf-mod { align-self: center; }
+/* toolbar: views and layout on the first line, filters left and ordering right on the second; no box, no field labels */
+.pf-toolbar { display: grid; gap: var(--s2); min-width: 0; }
+.pf-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--s2) var(--s4); min-width: 0; }
+.pf-bar-l, .pf-bar-r { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
+.pf-dir { width: 28px; height: 30px; border: 0; border-left: 1px solid var(--line); border-radius: 0; }
 .pf-sum { margin: 0; }
 .pf-groups { display: grid; gap: var(--s4); min-width: 0; }
 .pf-group { display: grid; gap: var(--s2); min-width: 0; }
@@ -205,7 +200,6 @@
 .pf-rows .dtable td { vertical-align: middle; }
 .hm-proj-ins { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; }
 .hm-proj-ins > span { white-space: nowrap; }
-.hm-projects .pf-toolbar .field { min-width: 120px; }
 
 /* ---------- human attention ---------- */
 .hm-hu { display: grid; gap: var(--s3); }
@@ -225,11 +219,7 @@
 .hm-hu-up { color: var(--done); font-size: 10px; }
 .hm-hu-down { color: var(--block); font-size: 10px; }
 @media (max-width: 560px) {
-  .pf-views .field { min-width: 0; flex: 1 1 100%; }
-  .pf-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .pf-filters .field { min-width: 0; }
-  .pf-filters .field:first-child, .pf-filters .pf-sort { grid-column: 1 / -1; }
-  .pf-sort-row .input { flex: 1; min-width: 0; }
+  .pf-bar-l, .pf-bar-r { width: 100%; }
   .pf-acts { justify-content: flex-start; }
   .pf-belt { min-width: 0; }
 }

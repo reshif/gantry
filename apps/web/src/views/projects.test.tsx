@@ -157,11 +157,15 @@ describe("Projects: portfolio", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/saved-views")?.body).toMatchObject({ name: "Spend", screen: "portfolio" }));
   });
 
-  it("built-in views cannot be renamed or deleted", async () => {
+  it("offers Rename and Delete only for a saved view, not a built-in one", async () => {
     setup();
     mount(<ProjectsView />);
-    const del = await byId("prj-pf-vdel");
-    expect(del.getAttribute("data-reason")).toMatch(/Built-in views can't be renamed or deleted/);
+    await screen.findByText("Payments Platform");
+    expect(document.getElementById("prj-pf-vdel")).toBeNull();
+    expect(document.getElementById("prj-pf-vren")).toBeNull();
+    fireEvent.change(await byId("prj-pf-view"), { target: { value: "v-1" } });
+    expect(await byId("prj-pf-vdel")).toBeTruthy();
+    expect(await byId("prj-pf-vren")).toBeTruthy();
   });
 });
 

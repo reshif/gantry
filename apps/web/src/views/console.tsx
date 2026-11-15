@@ -274,9 +274,9 @@ export default function ConsoleView() {
     <div className="view view-console">
       <ViewHead title="Console" sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you."
         actions={hasModels && st ? <ModelPicker st={st} busy={streaming} /> : <span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id="con-mode" role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>} />
-      <p className="con-mode-line small" id="con-mode-reason"><Icon name={st?.configured ? "check" : "dots"} /><span>{modeLine}</span>{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>
       <div className="console-grid">
         <section className="console-main" aria-label="Conversation">
+          <p className="con-mode-line small" id="con-mode-reason"><Icon name={st?.configured ? "check" : "dots"} /><span>{modeLine}</span>{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>
           <div className="thread" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
             {msgs.map((m) => (
               <div className={`msg msg-${m.role}`} key={m.id}>

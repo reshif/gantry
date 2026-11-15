@@ -25,16 +25,26 @@
 .chip-ok, .chip-warn, .chip-block, .chip-accent { border-color: transparent; border-radius: 999px; padding: 1px 8px; }
 
 /* ---------- filters: one compact row ----------
-   Filters are a toolbar, not a form: small labels, controls sized to content, wrapping only when the row is full. */
-.filters { gap: var(--s2) var(--s3); }
-.filters .field, .wo-filters .field, .wo-filters .field:first-child { width: auto; min-width: 0; flex: 0 1 auto; gap: 2px; }
-.filters .field-label { font-family: var(--f-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.filters .input { height: 32px; font-size: var(--t-md); }
-.filters select.input { width: auto; min-width: 120px; max-width: 220px; }
-.filters input.input { width: 220px; }
+   Filters are a toolbar, not a form. Each filter is one 32px box that reads "Label  value", so a row of them stays
+   one line high, needs no label row above it, and looks the same on every page. */
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
+.filters .field { display: inline-flex; flex-direction: row; align-items: center; gap: 0; width: auto; min-width: 0; flex: 0 1 auto; height: 32px; border: 1px solid var(--line-strong); border-radius: var(--r1); background: var(--panel); overflow: hidden; }
+.filters .field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.filters .field-label { padding: 0 2px 0 10px; font-family: var(--f-body); font-size: var(--t-sm); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.filters .field .input { height: 30px; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-size: var(--t-sm); font-weight: 600; color: var(--ink); padding-left: 6px; }
+.filters .field .input:focus-visible { outline: 0; }
+.filters .field select.input { width: auto; min-width: 0; max-width: 200px; }
+.filters .field input.input { width: 200px; font-weight: 400; }
+.filters .field .field-hint { display: none; }
+.filters > .check, .filters .field-check { height: 32px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--t-sm); }
+.filters .field:has(> .check) { border: 0; background: transparent; }
+.filters .field:has(> .check) .field-label { display: none; }
+.filters .field:has(> .seg) { border: 0; background: transparent; overflow: visible; }
+.filters .field:has(> .seg) .field-label { padding-left: 0; padding-right: 8px; }
+.wo-filters .field, .wo-filters .field:first-child { width: auto; min-width: 0; flex: 0 1 auto; }
 @media (max-width: 860px) {
-  .filters .field, .wo-filters .field, .wo-filters .field:first-child { flex: 1 1 140px; }
-  .filters select.input, .filters input.input { width: 100%; max-width: none; }
+  .filters .field { flex: 1 1 160px; }
+  .filters .field select.input, .filters .field input.input { flex: 1; width: auto; max-width: none; }
 }
 
 /* a status next to a page title sits on the title's middle line */
