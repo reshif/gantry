@@ -14,6 +14,7 @@ import { readCatalog, readOrg } from "../../core/read/index.js";
 import { lockWo, saveWo, type Wo } from "./model.js";
 import { recordDialogue, type QuestionRow } from "./documents.js";
 import type { ResearchPlan } from "./research.js";
+import { applyScoutResult, scoutRequest, startSwarm } from "./swarm.js";
 import { addWoMessage, updateId } from "./session/store.js";
 
 /** The whole summary goes in the thread (lists truncate their own previews); the cap only guards against a runaway output. */
@@ -95,13 +96,15 @@ const HOST = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9
 
 async function postStationMessage(fx: Fx, w: Wo, station: string, attemptId: string, text: string, questions: QuestionRow[], assumptions = 0, plan = false): Promise<void> {
   const docs = (await fx.tx.query<{ id: string; doc: string; version: number }>(`select id, doc, version from artefacts where org_id = $1 and wo_id = $2 and attempt_id = $3 and doc is not null order by doc`, [fx.orgId, w.id, attemptId])).rows;
-  if (!docs.length && !questions.length && !assumptions && !plan) return;
+  const objs = (await fx.tx.query<{ id: string }>(`select id from wo_objections where org_id = $1 and wo_id = $2 and attempt_id = $3 order by id`, [fx.orgId, w.id, attemptId])).rows;
+  if (!docs.length && !questions.length && !assumptions && !plan && !objs.length) return;
   const id = updateId(fx.orgId, w.id, `station:${attemptId}`);
   if ((await fx.tx.query(`select 1 from workorder_messages where org_id = $1 and id = $2`, [fx.orgId, id])).rowCount) return;
   const cards = [
     ...(plan ? [{ kind: "research_plan" as const, station }] : []),
     ...docs.map((d) => ({ kind: "document" as const, id: d.id, name: d.doc, version: d.version })),
     ...questions.map((q) => ({ kind: "station_question" as const, id: q.id })),
+    ...objs.map((o) => ({ kind: "objection" as const, id: o.id })),
     ...(assumptions ? [{ kind: "assumptions" as const, station, attempt: attemptId, count: assumptions }] : []),
   ];
   await addWoMessage(fx.tx, fx.orgId, w.id, "assistant", fx.actor, text, { kind: "station", station, mode: "agent", agent: fx.actor, cards }, fx.now, id);
@@ -164,9 +167,17 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     ev(fx, w, "wo.station.done", { station: sid, attempt: attemptId, text: result.summary ?? "" });
     await arriveAtGate(fx, w, fx.actor, { project: p, ...(checks ? { checks } : {}), ...(headSha !== undefined ? { headSha } : {}) });
     next = bayOf(fx.catalog, w) ?? stationIdOf(fx.catalog, w);
+  } else if (result.status === "needs_person" && asObj(result.output).scouts !== undefined && scoutRequest(asObj(result.output).scouts, w).ok) {
+    // Phase 3: the run split its question among scouts. The work order stays at the station while they work; then the station runs again.
+    const req = scoutRequest(asObj(result.output).scouts, w) as { ok: true; scouts: Array<{ question: string; focus: "repo" | "web" }> };
+    await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue: asObj(result.output).dialogue, now });
+    await startSwarm(fx, w, sid, attemptId, req.scouts);
+    next = sid;
   } else if (result.status === "needs_person") {
     closeEntry(w, fx, "question", result.summary ?? "");
     const out = asObj(result.output);
+    // A scout request the rails refused becomes a question to a person, with the reason.
+    if (out.scouts !== undefined && !out.dialogue && !out.researchPlan) out.dialogue = { questions: [{ question: `The agent wanted to send scouts but: ${(scoutRequest(out.scouts, w) as { reason: string }).reason} How should it go on?`, why: "The station cannot continue its plan as asked.", blocking: true }] };
     // An older runner reports one `output.question`; the station tools report `output.dialogue`. Either way the questions become rows.
     const dialogue = out.dialogue ?? (typeof out.question === "string" ? { questions: [{ question: out.question, why: "", blocking: true }] } : out.researchPlan ? {} : { questions: [{ question: result.summary || "The agent needs a decision to go on.", why: "", blocking: true }] });
     const dl = await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue, now });
@@ -218,6 +229,13 @@ export async function expireLeases(tx: Tx, o: { now?: Date; limit?: number } = {
   );
   const handled: string[] = [];
   for (const a of rows) {
+    // A scout that stopped heartbeating counts as failed; the swarm goes on without it (it never restarts the station on its own).
+    const sd = (await tx.query<{ data: { scout?: unknown }; fencing: string }>(`select data, fencing::text from attempts where org_id = $1 and id = $2`, [a.org_id, a.id])).rows[0];
+    if (sd?.data.scout) {
+      await applyScoutResult(tx, a.id, Number(sd.fencing), { status: "failed", summary: "", output: null, error: { msg: "The scout stopped heartbeating." } }, now);
+      handled.push(a.id);
+      continue;
+    }
     const w = await lockWo(tx, a.org_id, a.wo_id);
     const cur = (await tx.query<{ state: string; lease_until: Date | null }>(`select state, lease_until from attempts where org_id = $1 and id = $2`, [a.org_id, a.id])).rows[0];
     if (cur?.state !== "running" || !cur.lease_until || cur.lease_until >= now) continue;

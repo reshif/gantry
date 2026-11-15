@@ -28,6 +28,9 @@ export type WoCard =
   | { kind: "station_question"; id: string }
   /** The work order's research plan (read live from the session's `research`). */
   | { kind: "research_plan"; station: string }
+  /** Phase 3: the scouts a station sent (read live from the session's `swarm`), and an objection one agent raised about another's work. */
+  | { kind: "swarm"; station: string }
+  | { kind: "objection"; id: string }
   | { kind: "assumptions"; station: string; attempt?: string; count: number }
   | {
       kind: "proposal"; id: string; what: "brief" | "reclassify" | "decline"; title: string; summary: string; mode: "agent" | "rule-based";

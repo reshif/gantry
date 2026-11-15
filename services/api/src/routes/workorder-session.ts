@@ -30,6 +30,7 @@ import { command, decide, decideFor, policyState, refuse, type CommandResult } f
 import { asksMe, askOfLabel } from "../areas/workorders/asked.js";
 import { listDialogue, listDocuments } from "../areas/workorders/documents.js";
 import { listSources, planOf } from "../areas/workorders/research.js";
+import { swarmOf } from "../areas/workorders/swarm.js";
 import { readSecurity } from "../core/read/index.js";
 
 /** Output room for one turn: enough for a full brief (several lists) in a single tool call. */
@@ -119,6 +120,25 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     if (row.submitter === who.id) return { allowed: true, reason: "" };
     const d = await decide(req, "wo.answer", scopeOf(row));
     return { allowed: d.allowed, reason: d.allowed ? "" : d.reason };
+  }
+
+  /** The scouts with what their attempts and runs say now (state, turn, cost). */
+  async function swarmView(data: Record<string, unknown>, woId: string) {
+    const sw = swarmOf(data);
+    if (!sw) return null;
+    const rows = (await g.pool.query<{ id: string; state: string; turn: number | null; micros: string }>(
+      `select a.id, a.state, (r.data->'heartbeat'->>'turn')::int as turn, coalesce((select sum(cost_micros) from run_usage u where u.org_id = a.org_id and u.attempt_id = a.id), 0)::text as micros
+         from attempts a left join runs r on r.org_id = a.org_id and r.attempt_id = a.id where a.org_id = $1 and a.wo_id = $2 and a.id = any($3)`, [g.orgId, woId, sw.scouts.map((x) => x.attempt)],
+    )).rows;
+    return {
+      ...sw,
+      scouts: sw.scouts.map((x) => {
+        const r = rows.find((y) => y.id === x.attempt);
+        const live = r && (r.state === "queued" || r.state === "running") ? (r.state as "queued" | "running") : null;
+        const gone = r && (r.state === "superseded" || r.state === "cancelled") && (x.state === "queued" || x.state === "running");
+        return { ...x, state: live ?? (gone ? "stopped" : x.state), turn: r?.turn ?? null, costUsd: Number(r?.micros ?? 0) / 1e6 };
+      }),
+    };
   }
 
   const briefOpenOf = (wo: WorkOrder, catalog: Catalog): boolean => !wo.bay && stationOf(catalog, wo) === "intake" && !!wo.gates.G0G1 && wo.gates.G0G1.status !== "passed" && wo.state !== "done" && wo.state !== "killed";
@@ -329,7 +349,10 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       : planWaiting ? (canDecidePlan ? { actor: "you", text: `${stationName(c, planWaiting.station)} proposed a research plan: approve it, change its hosts or budget, or reject it.` } : { actor: "approver", text: `${stationName(c, planWaiting.station)} proposed a research plan; someone who may approve gates decides it.` })
       : wo.bay ? { actor: "you", text: `${wo.id} is in the ${c.bays.find((b) => b.id === wo.bay)?.name ?? wo.bay} bay; a person has to move it on.` }
       : { actor: "agent", text: `${ag.agentName} works at ${stationName(c, sid)}.` };
-    const waiting = closed ? null : planWaiting && !blockingAsks.length ? { text: `Waiting for ${canDecidePlan ? "you" : "an approver"}: the research plan from ${stationName(c, planWaiting.station)}`, kind: canDecidePlan ? "you" : "gate" }
+    const swarmLive = swarmOf(row.data);
+    const scoutsLive = swarmLive && !swarmLive.endedAt ? swarmLive.scouts.filter((x) => x.state === "queued" || x.state === "running").length : 0;
+    const waiting = closed ? null : scoutsLive ? { text: `${scoutsLive} scout${scoutsLive === 1 ? "" : "s"} working at ${stationName(c, swarmLive!.station)}`, kind: "agent" }
+      : planWaiting && !blockingAsks.length ? { text: `Waiting for ${canDecidePlan ? "you" : "an approver"}: the research plan from ${stationName(c, planWaiting.station)}`, kind: canDecidePlan ? "you" : "gate" }
       : blockingAsks.length ? { text: `Waiting for ${askedMe ? "you" : askedOf}: ${blockingAsks.length === 1 ? "1 question" : `${blockingAsks.length} questions`} from ${stationName(c, blockingAsks[0]!.station)}`, kind: askedMe ? "you" : "person" }
       : atIntake && ag.mode === "agent" && !pending.length && !openQuestion ? { text: `${ag.agentName} is reading the request`, kind: "agent" }
       : gateWaiting ? { text: `Waiting for approval at ${gdef?.label ?? gateWaiting[0]}`, kind: "gate" }
@@ -341,11 +364,12 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       messages: [...history, ...messages],
       agent: ag.mode === "agent" ? { mode: "agent", name: ag.agentName, id: ag.agentId, model: ag.model, vendor: ag.vendor, version: ag.pin.version, station: sid } : { mode: "rule-based", name: ag.agentName, id: ag.agentId, reason: ag.reason, label: WO_AGENT_LABEL, station: sid },
       budget: ag.budget, costUsd: ag.budget.spentUsd,
-      can: { talk: own.allowed && !closed, talkWhy: closed ? "This work order is closed." : own.reason, confirm: confirm.allowed, confirmWhy: confirm.allowed ? "" : confirm.reason },
+      can: { talk: own.allowed && !closed, talkWhy: closed ? "This work order is closed." : own.reason, confirm: confirm.allowed, confirmWhy: confirm.allowed ? "" : confirm.reason, ...(await (async () => { const d = await decide(req, "wo.park", scopeOf(row)); return { park: d.allowed, parkWhy: d.allowed ? "" : d.reason }; })()) },
       steps: r.map((s, i) => ({ id: s, name: stationName(c, s), state: closed && wo.state === "done" ? "done" : stepIdx < 0 ? "todo" : i < stepIdx ? "done" : i === stepIdx ? "current" : "todo" })),
       research: { plan: planOf(row.data), allowList: (await readSecurity(g.pool, g.orgId)).value.researchHosts ?? [], canDecide: (await decide(req, "gate.approve", scopeOf(row))).allowed, canApproveUnlisted: (await decide(req, "security.manage")).allowed },
       sources: await listSources(g.pool, g.orgId, id),
-      dialogue: { questions: dialogue.questions.map((q) => ({ ...q, mine: q.status === "open" && asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed) })), assumptions: dialogue.assumptions, askedMe }, documents: await listDocuments(g.pool, g.orgId, id),
+      swarm: await swarmView(row.data, id),
+      dialogue: { questions: dialogue.questions.map((q) => ({ ...q, mine: q.status === "open" && asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed) })), assumptions: dialogue.assumptions, objections: dialogue.objections, askedMe }, documents: await listDocuments(g.pool, g.orgId, id),
       next, waiting, pending, brief: wo.brief, briefConfirmed: (wo.briefVersions ?? []).length > 0 || wo.gates.G0G1?.status === "passed", briefOpen: atIntake,
       ruleQuestion: ag.mode === "rule-based" && atIntake && legacyQ ? { id: legacyQ.id, text: legacyQ.text, chips: legacyQ.chips } : null, ruleReady: ag.mode === "rule-based" && atIntake && wo.conv.done,
       busy: active.has(id),

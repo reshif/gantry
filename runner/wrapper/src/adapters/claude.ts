@@ -21,6 +21,8 @@ import type { RunSpec } from "../spec.js";
 export const SCRATCH = process.env.GANTRY_SCRATCH ?? "/tmp/gantry";
 
 const MAX_ARG_BYTES = 100_000;
+/** A scout run (Phase 3): its handoff names its own question. */
+const isScout = (spec: RunSpec): boolean => !!spec.input && typeof spec.input === "object" && "scout" in (spec.input as object);
 const STATION_TOOLS_JS = fileURLToPath(new URL("../station-tools.js", import.meta.url));
 /** The harness names MCP tools `mcp__<server>__<tool>`. */
 export const STATION_TOOL_NAMES = TOOL_DEFS.map((t) => `mcp__gantry__${t.name}`);
@@ -59,7 +61,7 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
     mcpServers[name] = { ...s, headers: { authorization: `Bearer ${env.runToken}` } };
   }
   // The station tools run in this container as a stdio server (they only record into the run's scratch space): see station-tools.ts.
-  mcpServers.gantry = { type: "stdio", command: baseEnv.GANTRY_NODE_BIN ?? process.execPath, args: [STATION_TOOLS_JS], env: { GANTRY_STATION_DIR: STATION_DIR, GANTRY_EDGE_URL: env.edgeUrl, GANTRY_RUN_TOKEN: env.runToken, GANTRY_RUN_ID: env.runId } };
+  mcpServers.gantry = { type: "stdio", command: baseEnv.GANTRY_NODE_BIN ?? process.execPath, args: [STATION_TOOLS_JS], env: { GANTRY_STATION_DIR: STATION_DIR, GANTRY_EDGE_URL: env.edgeUrl, GANTRY_RUN_TOKEN: env.runToken, GANTRY_RUN_ID: env.runId, ...(isScout(spec) ? { GANTRY_STATION_ROLE: "scout" } : {}) } };
   const mcpConfigPath = join(SCRATCH, "mcp.json");
   const args = [
     "-p",

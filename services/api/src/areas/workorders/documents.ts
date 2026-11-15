@@ -129,10 +129,26 @@ const aRow = (r: Record<string, unknown>): AssumptionRow => ({
   decidedAt: r.decided_at ? (r.decided_at as Date).getTime() : null, createdAt: (r.created_at as Date).getTime(),
 });
 
-export async function listDialogue(db: Queryable, orgId: string, woId: string): Promise<{ questions: QuestionRow[]; assumptions: AssumptionRow[] }> {
+export interface ObjectionRow {
+  id: string; station: string; attemptId: string | null; raisedBy: string; targetDoc: string; targetStation: string | null; section: string; claim: string; reason: string;
+  severity: "low" | "medium" | "high"; status: "open" | "upheld" | "overruled"; note: string | null; decidedBy: string | null; decidedAt: number | null; createdAt: number;
+}
+const oRow = (r: Record<string, unknown>): ObjectionRow => ({
+  id: String(r.id), station: String(r.station), attemptId: (r.attempt_id as string | null) ?? null, raisedBy: String(r.raised_by), targetDoc: String(r.target_doc), targetStation: (r.target_station as string | null) ?? null,
+  section: String(r.section ?? ""), claim: String(r.claim ?? ""), reason: String(r.reason), severity: r.severity as ObjectionRow["severity"], status: r.status as ObjectionRow["status"],
+  note: (r.note as string | null) ?? null, decidedBy: (r.decided_by as string | null) ?? null, decidedAt: r.decided_at ? (r.decided_at as Date).getTime() : null, createdAt: (r.created_at as Date).getTime(),
+});
+
+export async function listDialogue(db: Queryable, orgId: string, woId: string): Promise<{ questions: QuestionRow[]; assumptions: AssumptionRow[]; objections: ObjectionRow[] }> {
   const q = await db.query(`select * from wo_questions where org_id = $1 and wo_id = $2 order by created_at, id`, [orgId, woId]);
   const a = await db.query(`select * from wo_assumptions where org_id = $1 and wo_id = $2 order by created_at, id`, [orgId, woId]);
-  return { questions: q.rows.map(qRow), assumptions: a.rows.map(aRow) };
+  const o = await db.query(`select * from wo_objections where org_id = $1 and wo_id = $2 order by created_at, id`, [orgId, woId]);
+  return { questions: q.rows.map(qRow), assumptions: a.rows.map(aRow), objections: o.rows.map(oRow) };
+}
+
+export async function lockObjection(tx: Tx, orgId: string, woId: string, id: string): Promise<ObjectionRow | null> {
+  const r = (await tx.query(`select * from wo_objections where org_id = $1 and wo_id = $2 and id = $3 for update`, [orgId, woId, id])).rows[0];
+  return r ? oRow(r) : null;
 }
 
 export async function lockQuestion(tx: Tx, orgId: string, woId: string, id: string): Promise<QuestionRow | null> {
@@ -154,6 +170,22 @@ const ASK_OF = /^(requester|approvers|anyone|role:[a-z0-9_]{1,40})$/;
 export async function recordDialogue(tx: Tx, d: { orgId: string; woId: string; station: string; attemptId: string; agent: string; dialogue: unknown; now: Date }): Promise<{ questions: QuestionRow[]; assumptions: number }> {
   const dl = (d.dialogue && typeof d.dialogue === "object" ? d.dialogue : {}) as { questions?: unknown; assumptions?: unknown };
   const qs = (Array.isArray(dl.questions) ? dl.questions : []).slice(0, 6);
+  const os = (Array.isArray((dl as { objections?: unknown }).objections) ? ((dl as { objections: unknown[] }).objections) : []).slice(0, 3);
+  let k = 0;
+  for (const raw of os) {
+    const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const target = s(o.targetDoc, 130).toLowerCase();
+    const reason = s(o.reason, 1200);
+    if (!target || reason.length < 10) continue;
+    // The document must exist on this work order, written by another station: an agent objects to someone else's work, not to its own.
+    const doc = (await tx.query<{ station: string | null }>(`select station from artefacts where org_id = $1 and wo_id = $2 and doc = $3 order by version desc limit 1`, [d.orgId, d.woId, target])).rows[0];
+    if (!doc || doc.station === d.station) continue;
+    const sev = o.severity === "low" || o.severity === "high" ? o.severity : "medium";
+    await tx.query(
+      `insert into wo_objections (org_id, id, wo_id, station, attempt_id, raised_by, target_doc, target_station, section, claim, reason, severity, created_at, updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13) on conflict (org_id, id) do nothing`,
+      [d.orgId, `O-${d.attemptId}-${++k}`, d.woId, d.station, d.attemptId, d.agent, target, doc.station, s(o.section, 200), s(o.claim, 600), reason, sev, d.now],
+    );
+  }
   const as = (Array.isArray(dl.assumptions) ? dl.assumptions : []).slice(0, 30);
   const out: QuestionRow[] = [];
   let i = 0;
@@ -187,10 +219,11 @@ export async function recordDialogue(tx: Tx, d: { orgId: string; woId: string; s
 }
 
 /** The dialogue as a later station receives it: what was asked and answered, and the assumptions with their status. */
-export async function dialogueHandoff(db: Queryable, orgId: string, woId: string): Promise<{ questions: unknown[]; assumptions: unknown[] }> {
-  const { questions, assumptions } = await listDialogue(db, orgId, woId);
+export async function dialogueHandoff(db: Queryable, orgId: string, woId: string): Promise<{ questions: unknown[]; assumptions: unknown[]; objections: unknown[] }> {
+  const { questions, assumptions, objections } = await listDialogue(db, orgId, woId);
   return {
     questions: questions.map((q) => ({ station: q.station, question: q.question, why: q.why, status: q.status, ...(q.answer !== null ? { answer: q.answer, answerKind: q.answerKind, answeredBy: q.answeredBy } : {}) })),
     assumptions: assumptions.map((a) => ({ station: a.station, statement: a.statement, because: a.because, impact: a.impact, status: a.status, ...(a.note ? { correction: a.note } : {}) })),
+    objections: objections.map((o) => ({ raisedAt: o.station, against: o.targetDoc, section: o.section, claim: o.claim, reason: o.reason, severity: o.severity, status: o.status, ...(o.note ? { decisionNote: o.note } : {}) })),
   };
 }

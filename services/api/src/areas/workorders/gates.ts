@@ -106,7 +106,9 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, ...(override ? { override: true, reason: overrideReason!.trim() } : {}) });
   await closeInstance(fx, inst.id, "decision");
   note(w, fx, by, `${g.label} ${g.name} approved${via && via !== "web" ? ` via ${via}` : ""}.`);
-  ev(fx, w, "gate.decision", { gate: gateId, mode: "human", by, trust: null, instance: inst.id }, { category: "approvals" });
+  // Phase 3: what the approver had in front of them, recorded with the decision (not a block): assumptions nobody confirmed, objections nobody decided.
+  const openNotes = (await fx.tx.query<{ a: number; o: number }>(`select (select count(*)::int from wo_assumptions where org_id = $1 and wo_id = $2 and status = 'open') as a, (select count(*)::int from wo_objections where org_id = $1 and wo_id = $2 and status = 'open') as o`, [fx.orgId, w.id])).rows[0]!;
+  ev(fx, w, "gate.decision", { gate: gateId, mode: "human", by, trust: null, instance: inst.id, openAssumptions: openNotes.a, openObjections: openNotes.o }, { category: "approvals" });
   let msg = "";
   if (gateId === "G0G1") await confirmBrief(fx, w, by);
   if (gateId === "G6") {

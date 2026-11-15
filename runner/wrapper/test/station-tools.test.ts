@@ -50,7 +50,7 @@ describe("station tools", () => {
     input.end();
     await done;
     expect(lines[0].result.serverInfo.name).toBe("gantry");
-    expect(lines[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["write_document", "ask", "assume", "propose_research_plan", "web_fetch"]);
+    expect(lines[1].result.tools.map((t: { name: string }) => t.name)).toEqual(["write_document", "ask", "assume", "propose_research_plan", "web_fetch", "spawn_scouts", "object"]);
     expect(lines[2].result.isError).toBe(false);
     expect(lines[3].error.code).toBe(-32601);
     expect((await readLog(d)).documents["spec.md"]).toBe("# Spec");
@@ -100,4 +100,24 @@ describe("station tools", () => {
     delete process.env.GANTRY_EDGE_URL;
     delete process.env.GANTRY_RUN_TOKEN;
   });
+
+  it("scouts and objections: rails, scout role refusals, and the hand-over", async () => {
+    const d = await dir();
+    expect((await callTool("spawn_scouts", { scouts: [1, 2, 3, 4, 5].map((i) => ({ question: `Sub-question ${i}`, focus: "repo" })) }, d)).isError).toBe(true);
+    expect((await callTool("spawn_scouts", { scouts: [{ question: "How do jobs retry?", focus: "web" }, { question: "Which tests cover sync?", focus: "repo" }] }, d)).isError).toBe(false);
+    expect((await callTool("spawn_scouts", { scouts: [{ question: "Again please", focus: "repo" }] }, d)).isError).toBe(true);
+    expect((await callTool("object", { targetDoc: "research.md", reason: "short", severity: "high" }, d)).isError).toBe(true);
+    for (let i = 0; i < 3; i++) expect((await callTool("object", { targetDoc: "research.md", section: "Findings", claim: "Jobs retry by default", reason: "The cited page s2 says retries must be coded explicitly.", severity: "high" }, d)).isError).toBe(false);
+    expect((await callTool("object", { targetDoc: "research.md", reason: "A fourth objection is one too many here.", severity: "low" }, d)).isError).toBe(true);
+    const out = await handOver({ status: "succeeded", output: {}, usage: [] }, d, "research", async () => undefined, 1, () => undefined);
+    expect(out.status).toBe("needs_person");
+    expect(out.output).toMatchObject({ scouts: [{ focus: "web" }, { focus: "repo" }], summary: "research: waiting for 2 scouts." });
+    expect((out.output as { dialogue: { objections: unknown[] } }).dialogue.objections).toHaveLength(3);
+    process.env.GANTRY_STATION_ROLE = "scout";
+    const d2 = await dir();
+    expect((await callTool("spawn_scouts", { scouts: [{ question: "Nested scout", focus: "repo" }] }, d2)).text).toMatch(/cannot send scouts/);
+    expect((await callTool("propose_research_plan", { questions: ["q?"], hosts: [], web: false, why: "because" }, d2)).text).toMatch(/cannot propose a plan/);
+    delete process.env.GANTRY_STATION_ROLE;
+  });
 });
+

@@ -33,7 +33,7 @@ const session = (over: Partial<WoSession> = {}): WoSession => ({
   agent: { mode: "agent", name: "Intake Clerk", id: "ag-intake", model: "claude-haiku-5-5", vendor: "anthropic", version: 1, station: "intake" },
   budget: { spentUsd: 0.02, limitUsd: 0.5 }, costUsd: 0.02, can: { talk: true, talkWhy: "", confirm: true, confirmWhy: "" },
   steps: [{ id: "intake", name: "Intake", state: "current" }, { id: "plan", name: "Plan", state: "todo" }],
-  next: { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }, waiting: null, pending: [], dialogue: { questions: [], assumptions: [], askedMe: false }, documents: [], research: { plan: null, allowList: [], canDecide: false, canApproveUnlisted: false }, sources: [],
+  next: { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }, waiting: null, pending: [], dialogue: { questions: [], assumptions: [], objections: [], askedMe: false }, swarm: null, documents: [], research: { plan: null, allowList: [], canDecide: false, canApproveUnlisted: false }, sources: [],
   brief: { ...BRIEF, goal: "", scopeIn: [], ac: [], route: [], children: [] } as never, briefConfirmed: false, briefOpen: true, ruleQuestion: null, ruleReady: false, busy: false, ...over,
 });
 const withProposal = (): WoSession => session({
@@ -165,7 +165,7 @@ describe("Station questions, assumptions and documents in the session", () => {
     wo: { ...session().wo, station: "research", stationName: "Research", bay: "person", gate: null },
     messages: [{ id: "wm-st", role: "assistant", author: "ag-research", text: "Research needs an answer before going on.", at: Date.now(), data: { kind: "station", mode: "agent", agent: "ag-research", cards: [{ kind: "document", id: "art-1", name: "research.md", version: 1 }, { kind: "station_question", id: "Q-AT1-1" }, { kind: "assumptions", station: "research", attempt: "AT1", count: 1 }] } as never }],
     next: { actor: "you", text: "Research is waiting for your answer below." }, waiting: { text: "Waiting for you: 1 question from Research", kind: "you" },
-    dialogue: { questions: [q()], assumptions: [{ id: "A-AT1-1", station: "research", attemptId: "AT1", madeBy: "ag-research", statement: "Refunds are always full refunds", because: "The request says refund the order.", impact: "high", status: "open", note: null, decidedBy: null, decidedAt: null, createdAt: Date.now() }], askedMe: true },
+    swarm: null, dialogue: { objections: [], questions: [q()], assumptions: [{ id: "A-AT1-1", station: "research", attemptId: "AT1", madeBy: "ag-research", statement: "Refunds are always full refunds", because: "The request says refund the order.", impact: "high", status: "open", note: null, decidedBy: null, decidedAt: null, createdAt: Date.now() }], askedMe: true },
     documents: [{ id: "art-1", doc: "research.md", station: "research", version: 1, supersedes: null, authorKind: "agent", authorId: "ag-research", attemptId: "AT1", size: 10, contentHash: "a".repeat(64), createdAt: Date.now(), acceptedBy: null }],
     ...over,
   });
@@ -182,7 +182,7 @@ describe("Station questions, assumptions and documents in the session", () => {
   });
 
   it("someone else sees whom it waits on; an answered question shows who answered", async () => {
-    await showSession(asked({ next: { actor: "person", text: "Research is waiting for an answer from the requester." }, dialogue: { questions: [q({ status: "answered", answer: "EUR", answerKind: "answer", answeredBy: "p-tomas", answeredAt: Date.now(), mine: false })], assumptions: [], askedMe: false } }));
+    await showSession(asked({ next: { actor: "person", text: "Research is waiting for an answer from the requester." }, dialogue: { questions: [q({ status: "answered", answer: "EUR", answerKind: "answer", answeredBy: "p-tomas", answeredAt: Date.now(), mine: false })], assumptions: [], objections: [], askedMe: false } }));
     expect(document.getElementById("wos-status")!.textContent).toContain("Research is waiting for an answer from the requester.");
     const card = document.querySelector("#sq-Q-AT1-1")!;
     expect(card.textContent).toContain("Answered");
@@ -279,5 +279,51 @@ describe("Run timeline", () => {
     expect(run.textContent).toContain("src/jobs.py");
     expect(run.textContent).toContain("Wrote document");
     expect(run.querySelector(".md-cite")?.textContent).toBe("s1");
+  });
+});
+
+describe("Scouts and objections", () => {
+  const sw = { station: "research", parent: "AT1", startedAt: Date.now() - 60_000, scouts: [
+    { id: "A", attempt: "AT2", question: "Where is retry implemented?", focus: "repo" as const, state: "running" as const, turn: 3, costUsd: 0.05 },
+    { id: "B", attempt: "AT3", question: "What do the docs say?", focus: "web" as const, state: "done" as const, summary: "Retries must be coded.", turn: null, costUsd: 0.08 },
+  ] };
+  const ob = { id: "O-AT9-1", station: "spec", attemptId: "AT9", raisedBy: "ag-spec", targetDoc: "research.md", targetStation: "research", section: "Findings", claim: "Jobs retry by default", reason: "The cited page says retries must be coded explicitly.", severity: "high" as const, status: "open" as const, note: null, decidedBy: null, decidedAt: null, createdAt: Date.now() };
+  const withBoard = (park: boolean) => session({
+    wo: { ...session().wo, station: "spec", stationName: "Spec", gate: { id: "G2", label: "G2", name: "Spec approved" } },
+    can: { talk: true, talkWhy: "", confirm: true, confirmWhy: "", park, parkWhy: park ? "" : "Needs a role that may park work." },
+    messages: [
+      { id: "wm-s", role: "assistant", author: "ag-research", text: "Research sent 2 scouts.", at: Date.now(), data: { kind: "station", mode: "agent", cards: [{ kind: "swarm", station: "research" }] } as never },
+      { id: "wm-o", role: "assistant", author: "ag-spec", text: "Spec finished.", at: Date.now(), data: { kind: "station", mode: "agent", cards: [{ kind: "objection", id: ob.id }] } as never },
+    ],
+    swarm: sw, dialogue: { questions: [], assumptions: [], objections: [ob], askedMe: false },
+    research: { plan: null, allowList: [], canDecide: true, canApproveUnlisted: false },
+  });
+
+  it("the board shows each scout and stops a live one after confirming", async () => {
+    const calls = await showSession(withBoard(true), { [`POST /api/v1/work-orders/${W.id}/scouts/A/stop`]: () => ({ body: { ok: true, msg: "Scout A stopped." } }) });
+    const board = document.getElementById("sw-board")!;
+    expect(board.textContent).toContain("1 working");
+    expect(document.getElementById("sw-A")!.textContent).toContain("Repository · Working · turn 3");
+    expect(document.getElementById("sw-B")!.textContent).toContain("Retries must be coded.");
+    expect(document.getElementById("sw-stop-B")).toBeNull();
+    fireEvent.click(document.getElementById("sw-stop-A")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Stop scout" }));
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/scouts/A/stop`)).toHaveLength(1));
+  });
+
+  it("without the right, Stop is locked with the reason", async () => {
+    await showSession(withBoard(false));
+    expect((document.getElementById("sw-stop-A") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("an objection needs a reason to decide, and the gate shows what is still open", async () => {
+    const calls = await showSession(withBoard(true), { [`POST /api/v1/work-orders/${W.id}/objections/${ob.id}`]: () => ({ body: { ok: true, msg: "Objection upheld." } }) });
+    expect(document.getElementById("gate-notes")!.textContent).toContain("1 objection not decided");
+    const up = document.getElementById("ob-O-AT9-1-up") as HTMLButtonElement;
+    expect(up.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Research is right" })).toBeTruthy();
+    fireEvent.change(document.getElementById("ob-O-AT9-1-note")!, { target: { value: "The docs are explicit." } });
+    fireEvent.click(up);
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/objections/${ob.id}`)[0]?.body).toEqual({ decision: "upheld", note: "The docs are explicit." }));
   });
 });

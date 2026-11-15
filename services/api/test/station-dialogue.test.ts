@@ -208,5 +208,89 @@ d("station documents and dialogue", () => {
     await t.db.admin.query(`insert into run_usage (org_id, run_id, attempt_id, wo_id, model_id, cost_micros) values ($1,$2,$3,$4,'m',600000)`, [t.orgId, run, att.id, id]);
     expect(await budgetBreach(t.db.app, ctx)).toMatchObject({ scope: "plan", limitMicros: 500000, spentMicros: 600000 });
   });
+
+  it("scouts: a run sends scouts, each result goes to the swarm, a person may stop one, and the station runs again when all ended", async () => {
+    const id = await w.atStation("research", "Scouts");
+    const att = (await w.liveAttempt(id))!;
+    // a web scout needs an approved plan with the web: refused, it becomes a question for a person
+    const refused = await w.apply(att, { status: "needs_person", output: { scouts: [{ question: "What do the docs say about retries?", focus: "web" }] } });
+    expect(refused).toMatchObject({ next: "person" });
+    let dl = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/dialogue`)).body;
+    expect(dl.questions[0].question).toMatch(/approved research plan with the web/);
+    await w.call("p-tomas", "POST", `/api/v1/work-orders/${id}/questions/${dl.questions[0].id}/answer`, { answer: "Use the repository only." });
+    const att2 = (await w.liveAttempt(id))!;
+    const r = await w.apply(att2, { status: "needs_person", output: { scouts: [{ question: "Where is retry implemented?", focus: "repo" }, { question: "Which tests cover the sync job?", focus: "repo" }, { question: "How are timeouts configured?", focus: "repo" }] } });
+    expect(r).toMatchObject({ applied: true, next: "research" });
+    let wo = await w.get(id);
+    expect(wo.bay).toBeNull();
+    expect(wo.state).toBe("running");
+    const scouts = await w.q<{ id: string; fencing: string; data: { scout: { id: string; question: string } } }>(`select id, fencing::text, data from attempts where wo_id = $1 and data ? 'scout' order by visit`, [id]);
+    expect(scouts.map((x) => x.data.scout.id)).toEqual(["A", "B", "C"]);
+    const ses = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/session`)).body;
+    expect(ses.swarm.scouts.map((x: { state: string }) => x.state)).toEqual(["queued", "queued", "queued"]);
+    // the scout's handoff names its own question
+    const { applyScoutResult } = await import("../src/areas/workorders/swarm.js");
+    expect(await w.tx((tx) => applyScoutResult(tx, scouts[0]!.id, Number(scouts[0]!.fencing), { status: "succeeded", summary: "Retry is in jobs.py.", output: { dialogue: { questions: [{ question: "Should retries be capped?", why: "Budget", blocking: true }] } } }))).toMatchObject({ applied: true, closed: false });
+    expect((await w.call("p-rui", "POST", `/api/v1/work-orders/${id}/scouts/B/stop`, { reason: "Not needed" })).status).toBe(403);
+    expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/scouts/B/stop`, { reason: "Not needed" })).status).toBe(200);
+    expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/scouts/B/stop`, {})).status).toBe(409);
+    // a scout's late result after it was stopped is ignored
+    expect(await w.tx((tx) => applyScoutResult(tx, scouts[1]!.id, Number(scouts[1]!.fencing), { status: "succeeded", summary: "late", output: null }))).toMatchObject({ applied: false });
+    const last = await w.tx((tx) => applyScoutResult(tx, scouts[2]!.id, Number(scouts[2]!.fencing), { status: "failed", summary: "", output: null, error: { msg: "harness crashed" } }));
+    expect(last).toMatchObject({ applied: true, closed: true });
+    const next = (await w.liveAttempt(id))!;
+    expect(next.station).toBe("research");
+    expect(scouts.map((x) => x.id)).not.toContain(next.id);
+    wo = await w.get(id);
+    expect(wo.state).toBe("running");
+    const after = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/session`)).body;
+    expect(after.swarm.scouts.map((x: { id: string; state: string }) => `${x.id}:${x.state}`)).toEqual(["A:done", "B:stopped", "C:failed"]);
+    dl = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/dialogue`)).body;
+    expect(dl.questions.find((q: { question: string }) => q.question === "Should retries be capped?").blocking).toBe(false);
+    // the run after the swarm gets what each scout did
+    const { loadRunCtx } = await import("../src/areas/internal/context.js");
+    const { composeRunSpec } = await import("../src/areas/internal/spec.js");
+    const run = `run-sw-${next.id}`;
+    await t.db.admin.query(`insert into runs (org_id, id, attempt_id, wo_id, state, data) values ($1,$2,$3,$4,'running','{"adapter":"stub"}'::jsonb)`, [t.orgId, run, next.id, id]);
+    const spec = await composeRunSpec(t.db.app, (await loadRunCtx(t.db.app, t.orgId, run))!, "http://edge") as { input: { scouts: Array<{ id: string; state: string; summary: string }> } };
+    expect(spec.input.scouts.map((x) => `${x.id}:${x.state}`)).toEqual(["A:done", "B:stopped", "C:failed"]);
+    expect(spec.input.scouts[0]!.summary).toBe("Retry is in jobs.py.");
+  });
+
+  it("objections: one agent objects to another's document; a person decides with a reason; the gate decision records what was open", async () => {
+    const id = await w.atStation("research", "Objections");
+    const att = (await w.liveAttempt(id))!;
+    const { recordDocument } = await import("../src/areas/workorders/documents.js");
+    await w.tx((tx) => recordDocument(tx, { orgId: t.orgId, id: `art-${att.id}-r`, woId: id, attemptId: att.id, station: "research", name: "research.md", hash: "f".repeat(64), mediaType: "text/markdown", size: 3, body: "# R", author: "ag-research" }));
+    await w.apply(att);
+    const spec = (await w.walk(id, (x: any) => x.state === "running" && x.station !== undefined && x.allowed !== undefined && !x.bay && x.history.at(-1)?.station === "spec"));
+    void spec;
+    const sAtt = (await w.liveAttempt(id))!;
+    await w.apply(sAtt, { status: "succeeded", summary: "Spec written.", output: { dialogue: { objections: [
+      { targetDoc: "research.md", section: "Findings", claim: "Jobs retry by default", reason: "The cited page says retries must be coded explicitly.", severity: "high" },
+      { targetDoc: "spec.md", reason: "An agent cannot object to its own station's document.", severity: "low" },
+      { targetDoc: "missing.md", reason: "There is no such document on this work order.", severity: "low" },
+    ] } } });
+    const dl = (await w.call("p-meera", "GET", `/api/v1/work-orders/${id}/dialogue`)).body;
+    expect(dl.objections).toHaveLength(1);
+    expect(dl.objections[0]).toMatchObject({ targetDoc: "research.md", targetStation: "research", station: "spec", severity: "high", status: "open" });
+    const oid = dl.objections[0].id;
+    expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/objections/${oid}`, { decision: "upheld" })).status).toBe(422);
+    expect((await w.call("p-rui", "POST", `/api/v1/work-orders/${id}/objections/${oid}`, { decision: "upheld", note: "Right" })).status).toBe(403);
+    const wo = await w.get(id);
+    const gate = wo.allowed.approve?.gate;
+    if (gate) {
+      for (const who of w.APPROVERS) {
+        const g = await w.call(who, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}`)}/approve`, {});
+        if (g.status === 200) break;
+      }
+      const evs = (await w.events("gate.decision")).filter((e: { wo_id: string }) => e.wo_id === id);
+      expect(evs.at(-1).after).toMatchObject({ openObjections: 1 });
+    }
+    expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/objections/${oid}`, { decision: "upheld", note: "The docs are explicit; research must be corrected." })).status).toBe(200);
+    expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/objections/${oid}`, { decision: "overruled", note: "again" })).status).toBe(409);
+    const { dialogueHandoff } = await import("../src/areas/workorders/documents.js");
+    expect((await dialogueHandoff(t.db.app, t.orgId, id)).objections).toMatchObject([{ against: "research.md", status: "upheld", decisionNote: "The docs are explicit; research must be corrected." }]);
+  });
 });
 

@@ -5,7 +5,7 @@ import { api, get, post, streamCommand, type ApiResult } from "../../api/client"
 import { invalidateSlices } from "../../api/keys";
 import { SseReader } from "../console/api";
 import type { TurnEvent } from "../session/kit";
-import type { Assumption, DocVersion, ResearchState, Source, StationQuestion } from "../documents/api";
+import type { Assumption, DocVersion, Objection, ResearchState, Source, StationQuestion, SwarmView } from "../documents/api";
 
 export interface WoSessionMessage {
   id: string;
@@ -26,12 +26,13 @@ export interface WoSession {
   agent: { mode: "agent"; name: string; id: string; model: string; vendor: string; version: number; station: string } | { mode: "rule-based"; name: string; id: string; reason: string; label: string; station: string };
   budget: { spentUsd: number; limitUsd: number };
   costUsd: number;
-  can: { talk: boolean; talkWhy: string; confirm: boolean; confirmWhy: string };
+  can: { talk: boolean; talkWhy: string; confirm: boolean; confirmWhy: string; park?: boolean; parkWhy?: string };
   steps: Array<{ id: string; name: string; state: "done" | "current" | "todo" }>;
   next: { actor: NextActor; text: string };
   waiting: { text: string; kind: "agent" | "gate" | "you" | "person" } | null;
   /** The questions the station agents asked (with whether this person is the one asked) and the assumptions they proceeded on. */
-  dialogue: { questions: Array<StationQuestion & { mine: boolean }>; assumptions: Assumption[]; askedMe: boolean };
+  dialogue: { questions: Array<StationQuestion & { mine: boolean }>; assumptions: Assumption[]; objections: Objection[]; askedMe: boolean };
+  swarm: SwarmView | null;
   documents: DocVersion[];
   research: ResearchState;
   sources: Source[];

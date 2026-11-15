@@ -304,6 +304,12 @@ export const pinned = async (fx: Fx, w: Wo): Promise<Project> => {
 
 /** Puts a work order at a station: Intake waits on its conversation and brief; other stations get a run (Build first needs a coding slot). */
 export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { project?: Project; entryNote?: string } = {}): Promise<void> {
+  // A swarm still open when the work order enters a station again (a halt and resume, a send-back) is over: its live scouts count as stopped.
+  const sw = w.data.swarm as { endedAt?: number; scouts?: Array<{ state: string }> } | undefined;
+  if (sw && !sw.endedAt) {
+    sw.endedAt = fx.now.getTime();
+    for (const sc of sw.scouts ?? []) if (sc.state === "queued" || sc.state === "running") sc.state = "stopped";
+  }
   const project = o.project ?? (await pinned(fx, w));
   const live = await projectOf(fx, w.project);
   delete w.data.bayReason;

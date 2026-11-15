@@ -118,3 +118,21 @@ const live = (runs: RunTimeline[] | undefined) => !!runs?.some((r) => r.state ==
 /** Polls while a run is live (every 4 s), not otherwise. */
 export const useWoTimeline = (woId: string | null | undefined) =>
   useQuery({ queryKey: ["workOrders", "timeline", woId ?? ""], queryFn: () => get<{ runs: RunTimeline[] }>(api(`work-orders/${enc(woId ?? "")}/timeline`)), enabled: !!woId, refetchInterval: (q) => (live(q.state.data?.runs) ? 4000 : false) });
+
+export interface Objection {
+  id: string; station: string; attemptId: string | null; raisedBy: string; targetDoc: string; targetStation: string | null; section: string; claim: string; reason: string;
+  severity: "low" | "medium" | "high"; status: "open" | "upheld" | "overruled"; note: string | null; decidedBy: string | null; decidedAt: number | null; createdAt: number;
+}
+export interface SwarmScout { id: string; attempt: string; question: string; focus: "repo" | "web"; state: "queued" | "running" | "done" | "failed" | "stopped"; summary?: string; stoppedBy?: string; turn: number | null; costUsd: number }
+export interface SwarmView { station: string; parent: string; startedAt: number; endedAt?: number; scouts: SwarmScout[] }
+
+export async function decideObjection(woId: string, oid: string, b: { decision: "upheld" | "overruled"; note: string }): Promise<ApiResult> {
+  const r = await post(api(`work-orders/${enc(woId)}/objections/${enc(oid)}`), b);
+  if (r.ok) invalidateSlices(["workOrders", "conversations", "audit"]);
+  return r;
+}
+export async function stopScout(woId: string, sid: string, reason: string): Promise<ApiResult> {
+  const r = await post(api(`work-orders/${enc(woId)}/scouts/${enc(sid)}/stop`), { reason });
+  if (r.ok) invalidateSlices(["workOrders", "conversations", "floor"]);
+  return r;
+}

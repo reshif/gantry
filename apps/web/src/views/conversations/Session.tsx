@@ -23,6 +23,7 @@ import { DocViewer } from "../documents/DocViewer";
 import { AssumptionList, StationQuestionCard } from "../documents/Dialogue";
 import { ResearchPlanCard } from "../documents/Research";
 import { LiveRun, RunTimelineView } from "../documents/Timeline";
+import { GateNotes, ObjectionCard, SwarmBoard } from "../documents/Swarm";
 
 type Proposal = Extract<WoCard, { kind: "proposal" }>;
 
@@ -135,6 +136,11 @@ function Cards({ m, s, agent, send, last }: { m: WoSessionMessage; s: WoSession;
         if (c.kind === "progress") return <ProgressLine key={i} text={c.text} detail={c.detail} />;
         if (c.kind === "question") return <QuestionCard key={i} question={c.question} options={c.options} answered={c.answered} last={last} answer={(t) => send({ kind: "message", text: t })} />;
         if (c.kind === "document") return <DocLine key={i} s={s} c={c} />;
+        if (c.kind === "swarm") return s.swarm ? <SwarmBoard key={i} woId={s.woId} sw={s.swarm} canStop={!!s.can.park} stopWhy={s.can.parkWhy} /> : null;
+        if (c.kind === "objection") {
+          const o = s.dialogue.objections.find((x) => x.id === c.id);
+          return !o || m.role === "user" ? null : <ObjectionCard key={i} woId={s.woId} o={o} canDecide={s.research.canDecide} />;
+        }
         if (c.kind === "research_plan") return m.role === "user" ? null : <ResearchPlanCard key={i} woId={s.woId} r={s.research} />;
         if (c.kind === "station_question") {
           const q = s.dialogue.questions.find((x) => x.id === c.id);
@@ -330,6 +336,7 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
               </li>
             ))}
           </ol>
+          {s.wo.gate && s.wo.gate.id !== "G0G1" ? <GateNotes assumptions={s.dialogue.assumptions} objections={s.dialogue.objections} jump={(id) => document.getElementById(id)?.scrollIntoView?.({ block: "center" })} /> : null}
           {s.wo.gate && s.wo.gate.id !== "G0G1" ? <ApproversPanel woId={s.woId} gate={s.wo.gate.id} project={s.project} /> : null}
           <SideDialogue s={s} />
           <h3 className="sub-h">Brief</h3>

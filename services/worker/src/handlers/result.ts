@@ -1,4 +1,4 @@
-import { applyStationResult, attemptIsCurrent, endCarrierAttempt, isCarrier, parseJob, type StationResult } from "@gantry/api/core";
+import { applyScoutResult, applyStationResult, attemptIsCurrent, endCarrierAttempt, isCarrier, parseJob, type StationResult } from "@gantry/api/core";
 import { enqueue, withTx, type Job, type Queryable } from "@gantry/db";
 import type { PublishOutcome } from "../clients/broker.js";
 import type { Deps } from "../deps.js";
@@ -90,6 +90,12 @@ export async function runResult(job: Job, ctx: HandlerCtx): Promise<unknown> {
       : false;
     await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" ? "succeeded" : "failed");
     return { onboarding: true, collected: ended, ...(cur.current ? {} : { superseded: cur.reason }) };
+  }
+  // Phase 3: a scout's result goes to its swarm, never through the flow engine; it publishes nothing.
+  if (a.attemptData.scout) {
+    const r = await withTx(deps.pool, (tx) => applyScoutResult(tx, attemptId, fencing, { status: sr.outcome, summary: sr.summary, output: sr.body.output ?? null, error: sr.body.error ?? null }, deps.now()));
+    await teardownRun(deps, job.orgId, runId, sr.outcome === "succeeded" || sr.outcome === "needs_person" ? "succeeded" : "failed");
+    return { scout: true, ...r };
   }
   let outcome: unknown = { superseded: cur.reason };
   if (cur.current) {

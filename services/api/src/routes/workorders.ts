@@ -21,7 +21,8 @@ import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, 
 import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
 import { listDialogue, listDocuments, readDocument } from "../areas/workorders/documents.js";
-import { answerStationQuestion, decideAssumption, decideResearchPlan } from "../areas/workorders/dialogue.js";
+import { answerStationQuestion, decideAssumption, decideObjection, decideResearchPlan } from "../areas/workorders/dialogue.js";
+import { stopScout } from "../areas/workorders/swarm.js";
 import { listSources, readSource } from "../areas/workorders/research.js";
 import { woTimeline } from "../areas/workorders/timeline.js";
 import { listConversations, listWorkOrders, readChanges, readRecord, readTraveler, recordBundle, recordMarkdown } from "../areas/workorders/reads.js";
@@ -30,6 +31,10 @@ const Id = z.object({ id: z.string().min(1).max(100) });
 const DocId = z.object({ doc: z.string().min(1).max(200) });
 const QId = z.object({ qid: z.string().min(1).max(200) });
 const AId = z.object({ aid: z.string().min(1).max(200) });
+const OId = z.object({ oid: z.string().min(1).max(200) });
+const SId = z.object({ sid: z.string().regex(/^[A-Z]$/) });
+const ObjectionBody = z.object({ decision: z.enum(["upheld", "overruled"]), note: z.string().max(1000).optional() });
+const StopScoutBody = z.object({ reason: z.string().max(300).optional() }).default({});
 const RefParam = z.object({ ref: z.string().regex(/^s\d{1,6}$/) });
 const HostRe = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 const PlanBody = z.object({ decision: z.enum(["approve", "reject"]), hosts: z.array(z.string().max(253).regex(HostRe)).max(20).optional(), web: z.boolean().optional(), budgetUsd: z.number().positive().max(100).nullable().optional(), note: z.string().max(1000).optional() });
@@ -193,6 +198,20 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const { id } = Id.parse(req.params);
     await scopeOf(req, id);
     return { runs: await woTimeline(g.pool, req.gx.orgId, id) };
+  });
+  app.post("/api/v1/work-orders/:id/objections/:oid", async (req) => {
+    const { id } = Id.parse(req.params);
+    const { oid } = OId.parse(req.params);
+    const b = ObjectionBody.parse(req.body);
+    const s = await scopeOf(req, id);
+    return command(req, spec(id, "gate.approve", s), (tx, a) => decideObjection(tx, a, id, oid, { decision: b.decision, ...(b.note !== undefined ? { note: b.note } : {}) }));
+  });
+  app.post("/api/v1/work-orders/:id/scouts/:sid/stop", async (req) => {
+    const { id } = Id.parse(req.params);
+    const { sid } = SId.parse(req.params);
+    const b = StopScoutBody.parse(req.body ?? {});
+    const s = await scopeOf(req, id);
+    return command(req, spec(id, "wo.park", s), (tx, a) => stopScout(tx, a, id, sid, b.reason ?? ""));
   });
   app.post("/api/v1/work-orders/:id/research-plan", async (req) => {
     const { id } = Id.parse(req.params);

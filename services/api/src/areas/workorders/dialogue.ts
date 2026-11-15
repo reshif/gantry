@@ -13,7 +13,7 @@ import { planOf } from "./research.js";
 import { begin, done, person, type CmdResult } from "./ctx.js";
 import { resumeAt } from "./intake.js";
 import { saveWo, type Wo } from "./model.js";
-import { lockAssumption, lockQuestion } from "./documents.js";
+import { lockAssumption, lockObjection, lockQuestion } from "./documents.js";
 import { addWoMessage } from "./session/store.js";
 
 export type AnswerKind = "answer" | "dont_know" | "not_relevant";
@@ -104,4 +104,21 @@ export async function decideAssumption(tx: Tx, actor: Actor, woId: string, aid: 
   note(w, fx, by, b.status === "confirmed" ? `Confirmed an assumption: ${a.statement.slice(0, 160)}` : `Corrected an assumption: ${text.slice(0, 160)}`);
   await saveWo(tx, fx.orgId, w);
   return done(fx, b.status === "confirmed" ? "Assumption confirmed." : "Correction recorded; later stations work from it.", w.project, { version: w.version });
+}
+
+/** A person decides an objection one agent raised about another's work: it stands (upheld) or the author is right (overruled). Audited; the decision travels with the handoff. */
+export async function decideObjection(tx: Tx, actor: Actor, woId: string, oid: string, b: { decision: "upheld" | "overruled"; note?: string }): Promise<CmdResult> {
+  const { fx, w } = await begin(tx, actor, woId, "gate.approve");
+  const by = person(actor, "Deciding an objection is");
+  const o = await lockObjection(tx, fx.orgId, w.id, oid);
+  if (!o) throw refuse("not_found", "No such objection on this work order.");
+  if (o.status !== "open") throw conflict("That objection was already decided.");
+  const text = (b.note ?? "").trim().slice(0, 1000);
+  if (text.length < 3) throw invalid("Say why, so both agents work from the decision.");
+  await tx.query(`update wo_objections set status = $4, note = $5, decided_by = $6, decided_at = $7, updated_at = $7 where org_id = $1 and wo_id = $2 and id = $3`, [fx.orgId, w.id, oid, b.decision, text, by, fx.now]);
+  ev(fx, w, "wo.objection.decided", { station: o.station, objection: oid, against: o.targetDoc, decision: b.decision, text: text.slice(0, 200) });
+  note(w, fx, by, `${b.decision === "upheld" ? "Upheld" : "Overruled"} an objection to ${o.targetDoc}: ${text.slice(0, 160)}`);
+  await addWoMessage(tx, fx.orgId, w.id, "user", by, `${b.decision === "upheld" ? "The objection stands" : "The author is right"}: ${text}`, { kind: "answer", cards: [{ kind: "objection", id: oid }] }, fx.now);
+  await saveWo(tx, fx.orgId, w);
+  return done(fx, b.decision === "upheld" ? `Objection upheld. To have ${o.targetStation ?? "the author"} redo it, send the work order back.` : "Objection overruled.", w.project, { version: w.version });
 }

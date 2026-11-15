@@ -145,3 +145,25 @@
 .osx-side .tl-run { padding: 6px 8px; }
 .osx-side .tl-line { grid-template-columns: 52px minmax(0, 1fr); font-size: var(--t-xs); }
 .osx-side .tl-meter { margin-left: 0; flex-basis: 100%; }
+
+/* ---- scouts, objections, gate notes ---- */
+.sw-card { border-left: 3px solid var(--line-strong); }
+.sw-card.is-live { border-left-color: var(--run); }
+.sw-meta { margin: 0; }
+.sw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.sw-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.sw-row:first-child { border-top: 0; padding-top: 2px; }
+.sw-id { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border: 1.5px solid var(--line-strong); border-radius: 50%; font-size: var(--t-xs); font-weight: 700; color: var(--ink-2); }
+.sw-row.is-running .sw-id { border-color: var(--run); color: var(--run); }
+.sw-row.is-done .sw-id { border-color: var(--done); color: var(--done); }
+.sw-row.is-failed .sw-id { border-color: var(--block); color: var(--block); }
+.sw-row.is-stopped .sw-id { border-style: dashed; color: var(--muted); }
+.sw-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sw-q { overflow-wrap: anywhere; }
+.sw-sum { color: var(--ink-2); overflow-wrap: anywhere; }
+.ob-card { border-left: 3px solid var(--wait); }
+.ob-card.sev-high { border-left-color: var(--block); }
+.ob-card.is-upheld, .ob-card.is-overruled { border-left-color: var(--line-strong); }
+.ob-claim, .ob-reason, .ob-decided { margin: 0; overflow-wrap: anywhere; }
+.gate-notes { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.gate-notes ul { margin: 0; padding-left: 18px; }

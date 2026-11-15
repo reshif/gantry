@@ -2,6 +2,7 @@ import type { Queryable } from "@gantry/db";
 import { agentConfig } from "./metering.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
 import { planOf, researchHosts, sourcesHandoff } from "../workorders/research.js";
+import { swarmOf } from "../workorders/swarm.js";
 import { readSecurity } from "../../core/read/index.js";
 import type { RunCtx } from "./context.js";
 import { scopeVerdict, type ScopeRow } from "../mcp/scope.js";
@@ -152,5 +153,13 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
     readableHosts: await researchHosts(db, c.orgId, c.woData),
     factoryAllowList: (await readSecurity(db, c.orgId)).value.researchHosts ?? [],
   };
-  return { workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, previous: prior, documents, dialogue, sources, research };
+  // Phase 3: a scout gets its own question; the run after a swarm gets what each scout did (their documents are in `documents`).
+  const sc = c.attemptData.scout as { id: string; question: string; focus: string } | undefined;
+  const sw = swarmOf(c.woData);
+  const scouts = !sc && sw?.endedAt && sw.station === c.station ? sw.scouts.map((x) => ({ id: x.id, question: x.question, focus: x.focus, state: x.state, summary: x.summary ?? "" })) : undefined;
+  return {
+    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, previous: prior, documents, dialogue, sources, research,
+    ...(sc ? { scout: { id: sc.id, question: sc.question, focus: sc.focus, note: `You are scout ${sc.id}. Answer only this question, write your findings to research/scout-${sc.id.toLowerCase()}.md with write_document, cite web sources, and end. You cannot send scouts or propose a plan.` } } : {}),
+    ...(scouts ? { scouts } : {}),
+  };
 }
