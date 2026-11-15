@@ -18,6 +18,21 @@ export interface HubHooks {
 
 const VISIBILITY_KEYS = new Set(["people", "projects", "matrix", "roles", "session", "sessions", "factory", "*"]);
 
+/**
+ * Slices only factory-wide readers (Factory Admin, Auditor, Security Reviewer) can read. A factory-wide change (no project)
+ * is sent to everyone else without these names, and not at all if nothing remains: knowing that API keys, security
+ * settings or the ledger just changed is itself information a project-only person should not get.
+ */
+const FACTORY_ONLY_KEYS = new Set(["apiKeys", "apiConfig", "security", "signins", "sessions", "chatLinks", "audit", "policies", "freezes"]);
+
+/** The change as one subscriber may see it, or null when there is nothing for them. */
+export function changeFor(ch: Change, visible: Set<string> | "all"): { keys: string[]; project?: string } | null {
+  if (visible === "all") return { keys: ch.keys, ...(ch.project ? { project: ch.project } : {}) };
+  if (ch.project) return visible.has(ch.project) ? { keys: ch.keys, project: ch.project } : null;
+  const keys = ch.keys.filter((k) => !FACTORY_ONLY_KEYS.has(k));
+  return keys.length ? { keys } : null;
+}
+
 /** Fans Postgres LISTEN/NOTIFY messages out to SSE subscribers, filtered per person by visible project. */
 export class Hub {
   private subs = new Set<Subscriber>();
@@ -82,7 +97,6 @@ export class Hub {
 
   async dispatch(ch: Change): Promise<void> {
     const refresh = ch.keys.some((k) => VISIBILITY_KEYS.has(k));
-    const msg = `event: change\ndata: ${JSON.stringify({ keys: ch.keys, ...(ch.project ? { project: ch.project } : {}) })}\n\n`;
     await Promise.all(
       [...this.subs].map(async (s) => {
         if (refresh) {
@@ -90,8 +104,8 @@ export class Hub {
           if (v === null) return s.close();
           s.visible = v;
         }
-        if (ch.project && s.visible !== "all" && !s.visible.has(ch.project)) return;
-        s.write(msg);
+        const out = changeFor(ch, s.visible);
+        if (out) s.write(`event: change\ndata: ${JSON.stringify(out)}\n\n`);
       }),
     );
   }

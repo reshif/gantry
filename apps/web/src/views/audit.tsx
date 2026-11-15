@@ -67,7 +67,7 @@ export default function AuditView() {
       <ViewHead
         title="Audit"
         sub="Append-only ledger of every human, agent, API key and trigger action, including denied attempts. Nothing here can be edited or deleted."
-        meta={[["Entries", qState(feed, () => String(sum?.entries ?? 0))], ["Denied", qState(feed, () => String(sum?.denied ?? 0))], ["Config changes", qState(feed, () => String(sum?.changes ?? 0))], ["Head digest", qState(feed, () => (sum?.head ?? "").slice(0, 8))]]}
+        meta={[["Entries", qState(feed, () => String(sum?.entries ?? 0))], ["Denied", qState(feed, () => String(sum?.denied ?? 0))], ["Config changes", qState(feed, () => String(sum?.changes ?? 0))], ...(feed.data === undefined || sum?.head ? [["Head digest", qState(feed, () => (sum?.head ?? "").slice(0, 8))] as [string, React.ReactNode]] : [])]}
         actions={canVerify ? <Btn label="Verify chain" kind="ghost" icon="shield" id="aud-verify" onClick={() => void runVerify()} /> : undefined}
       />
       {scoped ? (

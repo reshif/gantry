@@ -102,6 +102,12 @@ d("audit, activity and home", () => {
       // A project the engineer cannot see yields nothing, even when asked for by name.
       const other = await call(engineer, "/api/v1/audit?project=risk&limit=200");
       expect(other.body.items).toEqual([]);
+      // ...and its summary says nothing about that project: the same counts as without the filter, no categories, no chain head.
+      expect(other.body.total).toBe(0);
+      expect(other.body.summary.entries).toBe(r.body.summary.entries);
+      expect(Object.values(other.body.summary.categories as Record<string, number>).every((n) => n === 0)).toBe(true);
+      expect(other.body.summary.head).toBe("");
+      expect(r.body.summary.head).toBe("");
     });
     it("needs a signed-in person", async () => {
       const r = await t.app.inject({ method: "GET", url: "/api/v1/audit" });

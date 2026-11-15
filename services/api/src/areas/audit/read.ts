@@ -147,7 +147,7 @@ export interface AuditPage {
     entries: number;
     denied: number;
     changes: number;
-    /** Hash of the newest entry in the org's chain. */
+    /** Hash of the newest entry in the org's chain, for readers of the whole ledger only; "" otherwise (it moves with activity in projects the caller can't see). */
     head: string;
     /** Per category, over the other filters. */
     categories: Record<string, number>;
@@ -171,7 +171,7 @@ export async function listAudit(db: Queryable, orgId: string, vis: Visibility, f
     db.query<{ outcomes: string[]; channels: string[] }>(
       `select coalesce(array_agg(distinct e.outcome), '{}') as outcomes, coalesce(array_agg(distinct e.channel), '{}') as channels from ${FROM} where ${base.sql}`, base.params),
     db.query<{ id: string; name: string }>(`select distinct e.actor as id, p.name from ${FROM} where ${base.sql} and p.id is not null order by p.name`, base.params),
-    db.query<{ hash: string }>(`select last_hash as hash from gantry_event_head($1)`, [orgId]),
+    vis.all ? db.query<{ hash: string }>(`select last_hash as hash from gantry_event_head($1)`, [orgId]) : Promise.resolve({ rows: [{ hash: "" }] }),
   ]);
   const page = rows.rows.slice(0, o.limit).map(toAudit);
   const more = rows.rows.length > o.limit;
@@ -181,7 +181,7 @@ export async function listAudit(db: Queryable, orgId: string, vis: Visibility, f
     next: more && page.length ? String(page[page.length - 1]!.seq) : null,
     total: Number(total.rows[0]?.n ?? 0),
     summary: {
-      entries: Number(tot.rows[0]?.n ?? 0), denied: Number(tot.rows[0]?.denied ?? 0), changes: Number(tot.rows[0]?.changes ?? 0), head: head.rows[0]?.hash ?? "0".repeat(64),
+      entries: Number(tot.rows[0]?.n ?? 0), denied: Number(tot.rows[0]?.denied ?? 0), changes: Number(tot.rows[0]?.changes ?? 0), head: head.rows[0]?.hash ?? (vis.all ? "0".repeat(64) : ""),
       categories: Object.fromEntries(cats.rows.map((r) => [r.category, Number(r.n)])),
       topics: Object.fromEntries(TOPICS.map((t) => [t.id, Number(topics.rows[0]?.[t.id] ?? 0)])),
       facets: { outcomes: [...(fx?.outcomes ?? [])].sort(), channels: [...(fx?.channels ?? [])].sort(), actors: people.rows },

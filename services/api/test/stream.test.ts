@@ -99,6 +99,22 @@ d("SSE stream over LISTEN/NOTIFY", () => {
     tomas.stream.close();
   });
 
+  it("a factory-wide change reaches a project-only person without the names of admin-only data", async () => {
+    const a = await open("p-asha");
+    const tomas = await open("p-tomas");
+    expect(await until(() => tomas.stream.messages.some((m) => m.includes(": connected")))).toBe(true);
+    await withTx(t.db.admin as never, (tx) => publishChange(tx, { org: t.orgId, keys: ["apiKeys", "audit"] }));
+    await withTx(t.db.admin as never, (tx) => publishChange(tx, { org: t.orgId, keys: ["agents", "security", "audit"] }));
+    expect(await until(() => changes(a.stream.messages).length >= 2)).toBe(true);
+    expect(changes(a.stream.messages).map((c) => c.keys)).toEqual([["apiKeys", "audit"], ["agents", "security", "audit"]]);
+    expect(await until(() => changes(tomas.stream.messages).length >= 1)).toBe(true);
+    await new Promise((r) => setTimeout(r, 200));
+    // the API-key change is not sent at all; the agents change arrives with only the name Tomas may read
+    expect(changes(tomas.stream.messages)).toEqual([{ keys: ["agents"] }]);
+    a.stream.close();
+    tomas.stream.close();
+  });
+
   it("a rolled-back command publishes nothing (NOTIFY fires on commit only)", async () => {
     const a = await open("p-asha");
     expect(await until(() => a.stream.messages.some((m) => m.includes(": connected")))).toBe(true);
