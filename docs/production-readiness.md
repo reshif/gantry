@@ -139,7 +139,7 @@ The design is in [agent-experience.md §4](review/2026-11-15/agent-experience.md
   - governed web research (allow-listed, snapshotted, audited) with source records and citation chips
   - a research plan card the person approves, covering scope, domains and budget
   - a live run timeline for every station
-- **Phase 3:**
+- **Phase 3:** scouts and objections done 2026-11-16 (db5367c) and covered by tests; live on WO-1004 both agents chose not to use them (Research re-checked three things itself; Spec raised no objection), so parallel scout containers have not yet run against the real model. Not done yet: side threads with a chosen agent and @mention routing.
   - a research swarm: child runs capped in number and drawing on the work order's budget, a board of scouts in progress, pause or stop per scout
   - agent-to-agent objections that a person resolves
 - **Phase 4:** one Agent Workspace:
