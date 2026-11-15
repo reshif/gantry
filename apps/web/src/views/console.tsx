@@ -16,7 +16,8 @@ import { Icon } from "../ui/Icon";
 import { Avatar, Btn, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { useOpenTraveler } from "../shell/useTraveler";
-import { callTool, ck, clearThread, savePinned, sendMessage, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
+import { callTool, ck, clearThread, renameThread, savePinned, sendMessage, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
+import { ChatList } from "./console/ChatList";
 import { ResultCard, unmark, type CardCtx } from "./console/Cards";
 import { EntityChip } from "./console/Chips";
 import { ProposalCard } from "./console/Confirm";
@@ -242,6 +243,39 @@ export default function ConsoleView() {
     await qc.invalidateQueries({ queryKey: ck.threads() });
   };
 
+  /* ---------- chats ---------- */
+  // Leave what is on screen behind: the saved chat is reloaded from the server; slash answers belong to the chat they were asked in.
+  const leave = (): void => {
+    ac.current?.abort();
+    setLocal(() => []);
+    setTail([]);
+    setRedo([]);
+  };
+  const pickChat = (id: string): void => {
+    if (id === threadId) return;
+    leave();
+    setFresh(false);
+    setThreadId(id);
+    focusComposer();
+  };
+  const newChat = (): void => {
+    leave();
+    setThreadId(null);
+    setFresh(true);
+    focusComposer();
+  };
+  const renameChat = async (id: string, title: string): Promise<string | null> => {
+    const r = await renameThread(id, title);
+    if (!r.ok) return r.msg;
+    await qc.invalidateQueries({ queryKey: ck.threads() });
+    return null;
+  };
+  const deleteChat = async (id: string): Promise<void> => {
+    if (id === threadId) return clear();
+    await clearThread(id);
+    await qc.invalidateQueries({ queryKey: ck.threads() });
+  };
+
   /* ---------- composer ---------- */
   const slash = draft.startsWith("/") && !draft.includes(" ") ? SLASH.filter((x) => x.cmd.startsWith(draft.toLowerCase())) : [];
   const idx = slashIdx >= slash.length ? 0 : slashIdx;
@@ -275,6 +309,7 @@ export default function ConsoleView() {
       <ViewHead title="Console" sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you."
         actions={hasModels && st ? <ModelPicker st={st} busy={streaming} /> : <span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id="con-mode" role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>} />
       <div className="console-grid">
+        <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />
         <section className="console-main" aria-label="Conversation">
           <p className="con-mode-line small" id="con-mode-reason"><Icon name={st?.configured ? "check" : "dots"} /><span>{modeLine}</span>{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>
           <div className="thread" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">

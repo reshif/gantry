@@ -10,6 +10,7 @@
  * The model is called through the edge (`/service/v1/messages`); a confirm card calls the ordinary endpoint itself, so the decision point, audit,
  * stop checks and idempotency are the endpoint's own. Every state change here (a saved message, a switch, a deleted thread) goes through command().
  */
+import { z } from "zod";
 import { visibleProjects } from "@gantry/domain";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { command, decide, policyState, refuse } from "../core/index.js";
@@ -18,7 +19,7 @@ import { allowedTools, consoleRights, missingRightText, type ConsoleRights } fro
 import { completeOnce, ModelUnavailable, readiness, runConversation, systemPrompt, type Readiness } from "../areas/console/model.js";
 import { consoleModel, setModelPref } from "../areas/console/route.js";
 import { ExplainBody, MessageBody, ModelBody, StatusQuery, PinnedBody, ProposalBody, ProposalParams, SettingsBody, ThreadId, ToolBody, ToolParams } from "../areas/console/schemas.js";
-import { addMessage, deleteThread, ensureThread, getThread, listThreads, newMessageId, purgeExpired, setPinned, setProposalStatus } from "../areas/console/threads.js";
+import { addMessage, deleteThread, ensureThread, getThread, listThreads, newMessageId, purgeExpired, renameThread, setPinned, setProposalStatus } from "../areas/console/threads.js";
 import { ALL_TOOLS, execute, mentioned, offered, toolByName, type ToolCtx } from "../areas/console/tools.js";
 
 const requirePerson = (req: FastifyRequest): { id: string; name: string } => {
@@ -115,6 +116,17 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     return command(req, { action: null }, async (tx, a) => {
       if (!(await deleteThread(tx, a.orgId, who.id, id))) throw refuse("not_found", "No such conversation.");
       return { msg: "Conversation cleared.", events: [{ type: "console.thread.deleted", category: "access", subject: { type: "console_thread", id }, projectId: null }], changes: ["console"], project: null };
+    });
+  });
+
+  /** Rename a thread (owner decision: chats are organised by the person; the title is theirs to set). Own threads only. */
+  app.patch("/api/v1/console/threads/:id", async (req) => {
+    const who = requirePerson(req);
+    const { id } = ThreadId.parse(req.params);
+    const { title } = z.object({ title: z.string().trim().min(1, "Give the conversation a name.").max(120) }).parse(req.body);
+    return command(req, { action: null }, async (tx, a) => {
+      if (!(await renameThread(tx, a.orgId, who.id, id, title))) throw refuse("not_found", "No such conversation.");
+      return { msg: "Renamed.", events: [], changes: ["console"], project: null, extra: { title } };
     });
   });
 

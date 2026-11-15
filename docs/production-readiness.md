@@ -125,7 +125,7 @@ The original findings:
 
 The design is in [agent-experience.md §4](review/2026-11-15/agent-experience.md). Every piece keeps the rule that agents propose and people approve. Code only gives structure and safety limits; agents decide the content.
 
-- **Phase 0:**
+- **Phase 0 (done 2026-11-15):**
   - fix the contradictory gate label, the red diff of scaffold lines, the cut-off summaries and the duplicate banner
   - add a Console chat list with New chat, rename and search
   - retire the legacy Conversation tab

@@ -576,3 +576,48 @@ describe("Markdown (assistant text is untrusted)", () => {
     expect(c.textContent).toContain("<img src=x onerror=alert(1)>");
   });
 });
+
+describe("Console chats", () => {
+  const th = (id: string, title: string, text: string, ago: number) => ({ id, title, pinned: [], createdAt: Date.now() - ago, updatedAt: Date.now() - ago, expiresAt: Date.now() + 1e9, retentionDays: 90, count: 2, messages: [{ id: `${id}-m1`, threadId: id, role: "user", text, at: Date.now() - ago, data: {} }, { id: `${id}-m2`, threadId: id, role: "assistant", text: `Answer to ${text}`, at: Date.now() - ago, data: { mode: "model" } }] });
+  const A = th("ct-a", "Payments gates", "Which gates wait on me?", 60_000);
+  const B = th("ct-b", "Release notes", "Summarise WO-1002", 3_600_000);
+  const chats = () => setup({
+    "GET /api/v1/console/threads": () => ({ body: { items: [A, B].map(({ messages: _m, ...t }) => t), retentionDays: 90 } }),
+    "GET /api/v1/console/threads/ct-a": () => ({ body: A }),
+    "GET /api/v1/console/threads/ct-b": () => ({ body: B }),
+    "PATCH /api/v1/console/threads/ct-b": () => ({ body: { ok: true, msg: "Renamed.", title: "Release notes Nov" } }),
+  });
+
+  it("lists saved chats newest first, opens the latest, and switches to another", async () => {
+    chats();
+    mount();
+    expect((await byId("con-chat-ct-a")).getAttribute("aria-current")).toBe("true");
+    await waitFor(() => expect(text()).toContain("Which gates wait on me?"));
+    fireEvent.click(await byId("con-chat-ct-b"));
+    await waitFor(() => expect(text()).toContain("Summarise WO-1002"));
+    expect(text()).not.toContain("Which gates wait on me?");
+    expect(document.getElementById("con-chat-ct-b")!.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("New chat starts an empty conversation without deleting the others", async () => {
+    const calls = chats();
+    mount();
+    await waitFor(() => expect(text()).toContain("Which gates wait on me?"));
+    fireEvent.click(await byId("con-new-chat"));
+    await waitFor(() => expect(text()).not.toContain("Which gates wait on me?"));
+    expect(document.getElementById("con-chat-ct-a")!.getAttribute("aria-current")).toBeNull();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+
+  it("renames a chat from its menu", async () => {
+    const calls = chats();
+    mount();
+    fireEvent.click(await byId("con-chat-more-ct-b"));
+    fireEvent.click(await waitFor(() => { const m = [...document.querySelectorAll("[role=menuitem]")].find((e) => /Rename/.test(e.textContent ?? "")); if (!m) throw new Error("no menu"); return m as HTMLElement; }));
+    const name = (await byId("con-chat-name")) as HTMLInputElement;
+    expect(name.value).toBe("Release notes");
+    fireEvent.change(name, { target: { value: "Release notes Nov" } });
+    fireEvent.click(await byId("con-chat-rename-ok"));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ title: "Release notes Nov" }));
+  });
+});

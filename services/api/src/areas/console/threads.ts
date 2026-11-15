@@ -61,6 +61,12 @@ export async function deleteThread(tx: Tx, orgId: string, person: string, id: st
   return (r.rowCount ?? 0) > 0;
 }
 
+/** Rename one of the person's own threads. */
+export async function renameThread(tx: Tx, orgId: string, person: string, id: string, title: string): Promise<boolean> {
+  const r = await tx.query(`update console_threads set title = $4, updated_at = clock_timestamp() where org_id = $1 and person_id = $2 and id = $3`, [orgId, person, id, title.slice(0, 120)]);
+  return (r.rowCount ?? 0) > 0;
+}
+
 export async function setPinned(tx: Tx, orgId: string, person: string, id: string, pinned: string[]): Promise<boolean> {
   const r = await tx.query(`update console_threads set pinned = $4::jsonb, updated_at = clock_timestamp() where org_id = $1 and person_id = $2 and id = $3`, [orgId, person, id, JSON.stringify(pinned)]);
   return (r.rowCount ?? 0) > 0;

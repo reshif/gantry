@@ -234,6 +234,12 @@ describe("console", () => {
       expect((await get(ASHA, `/api/v1/console/threads/${threadId}`)).status).toBe(404);
       expect((await get(ASHA, "/api/v1/console/threads")).json().items).toHaveLength(0);
       expect((await get(TOMAS, "/api/v1/console/threads")).json().items).toHaveLength(1);
+      // the owner renames it; nobody else can, and an empty name is refused
+      const rename = async (who: string, title: string) => t.app.inject({ method: "PATCH", url: `/api/v1/console/threads/${threadId}`, headers: await as(who), payload: { title } });
+      expect((await rename(ASHA, "Mine now")).statusCode).toBe(404);
+      expect((await rename(TOMAS, "  ")).statusCode).toBe(422);
+      expect((await rename(TOMAS, "Payments work orders")).statusCode).toBe(200);
+      expect((await get(TOMAS, "/api/v1/console/threads")).json().items[0].title).toBe("Payments work orders");
     });
 
     it("keeps the earlier turns as context in a follow-up on the same thread", async () => {

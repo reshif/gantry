@@ -1,6 +1,6 @@
 /* Console. Builds on the round-one console styles in views.css. Tokens only. */
 /* the page fills the window: header, then the conversation and its context side by side; only the thread and the side column scroll */
-.view-console .console-grid { grid-template-columns: minmax(0, 1fr) 320px; height: calc(100dvh - var(--topbar-h, 52px) - 210px); min-height: 460px; }
+.view-console .console-grid { grid-template-columns: 220px minmax(0, 1fr) 300px; height: calc(100dvh - var(--topbar-h, 52px) - 210px); min-height: 460px; }
 .view-console .ctx { overflow-y: auto; min-height: 0; }
 .view-console .console-main { min-height: 0; }
 .view-console .thread { min-height: 0; }
@@ -103,3 +103,26 @@
 .view-console .msg-text code { font-family: var(--mono, monospace); font-size: 0.92em; padding: 0 4px; border-radius: 4px; background: var(--surface-2, rgba(127,127,127,.15)); }
 .view-console .msg-text pre.md-code { margin: 0 0 8px; padding: 8px 10px; overflow-x: auto; white-space: pre; border-radius: 6px; background: var(--surface-2, rgba(127,127,127,.15)); }
 .view-console .msg-text pre.md-code code { padding: 0; background: none; }
+
+/* Chat list (left column) */
+.con-chats { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.con-chats-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
+.con-chats-q { height: 32px; }
+.con-chats-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
+.con-chats-list li { position: relative; display: flex; align-items: stretch; border-radius: var(--r1); }
+.con-chats-list li:hover, .con-chats-list li.is-current { background: var(--sunk); }
+.con-chats-list li.is-current { box-shadow: inset 3px 0 0 var(--accent); }
+.con-chat { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 7px 4px 7px 10px; background: none; border: 0; text-align: left; color: var(--ink); cursor: pointer; }
+.con-chat:disabled { cursor: not-allowed; opacity: .6; }
+.con-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.con-chat-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.con-chat-more { align-self: center; margin-right: 4px; opacity: 0; }
+.con-chats-list li:hover .con-chat-more, .con-chats-list li.is-current .con-chat-more, .con-chat-more:focus-visible { opacity: 1; }
+.con-chats-empty { margin: 0; }
+@media (max-width: 1360px) and (min-width: 1101px) {
+  .view-console .console-grid { grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: max(460px, calc(100dvh - var(--topbar-h, 52px) - 210px)) auto; height: auto; }
+  .view-console .console-grid > .ctx { grid-column: 1 / -1; height: auto; }
+}
+@media (max-width: 1100px) {
+  .con-chats-list { max-height: 180px; }
+}
