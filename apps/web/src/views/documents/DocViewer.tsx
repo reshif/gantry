@@ -62,7 +62,8 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
   const prev = current && group ? group.versions.filter((v) => v.version < current.version).at(-1) ?? null : null;
   const body = useWoDocument(woId, current?.id);
   const text = body.data?.body ?? "";
-  const outline = useMemo(() => outlineOf(text, "doc"), [text]);
+  // a single top-level title is the document's name, not a section: the outline starts below it
+  const outline = useMemo(() => { const o = outlineOf(text, "doc"); return o.filter((h) => h.level === 1).length === 1 ? o.filter((h) => h.level > 1) : o; }, [text]);
   useEffect(() => { if (!prev) setCompare(false); }, [prev]);
 
   if (!list.data) return <Async query={list} what="the documents" id="doc-viewer">{() => null}</Async>;

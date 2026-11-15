@@ -129,7 +129,7 @@ The design is in [agent-experience.md §4](review/2026-11-15/agent-experience.md
   - fix the contradictory gate label, the red diff of scaffold lines, the cut-off summaries and the duplicate banner
   - add a Console chat list with New chat, rename and search
   - retire the legacy Conversation tab
-- **Phase 1:**
+- **Phase 1:** done 2026-11-16, verified live on WO-1003 (the Spec agent on the real model wrote `spec.md`, asked one question and recorded two assumptions). Not done yet: gate cards listing open assumptions, "Accept as station output", per-section comments and a person's direct edit of a document.
   - every station writes a versioned markdown document, shown in one document viewer
   - an `ask` tool for every station, with pause and resume carrying the answers
   - a log of questions, assumptions and decisions that is handed between stations

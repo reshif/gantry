@@ -87,3 +87,8 @@
 .as-decided { display: flex; flex-wrap: wrap; align-items: center; gap: 0 2px; }
 .as-row.is-confirmed .as-statement { color: var(--ink-2); }
 .as-row.is-corrected .as-statement { color: var(--muted); text-decoration: line-through; }
+.wos-clamp { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: left; }
+.sq-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sq-state { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.04em; padding: 0 5px; border: 1px solid var(--line-strong); color: var(--ink-2); }
+.sq-state.is-blocking { border-color: var(--wait); color: var(--ink); }
+.sq-state.is-answered { border-color: var(--done); color: var(--done); }

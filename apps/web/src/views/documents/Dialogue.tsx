@@ -26,12 +26,12 @@ export function StationQuestionCard({ woId, q, mine, canAnswer, why }: { woId: s
   const fid = `sq-${q.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
   return (
     <article className={`osx-card sq-card${open ? (q.blocking ? " is-blocking" : "") : " is-answered"}${mine && open ? " is-mine" : ""}`} id={fid} aria-label={`Question from ${station(q.station)}`}>
-      <header className="osx-card-h">
-        <strong className="sq-q">{q.question}</strong>
-        <span className="osx-status">{open ? (q.blocking ? "Blocking" : "Open") : "Answered"}</span>
-      </header>
+      <strong className="sq-q">{q.question}</strong>
       {q.why ? <p className="small sq-why"><span className="muted">Why it matters: </span>{q.why}</p> : null}
-      <p className="small muted sq-meta">{`${station(q.station)} asks ${askOfText(q.askOf)}${mine && open ? " (you)" : ""}${q.blocking && open ? " · the station waits for the answer" : ""}`}</p>
+      <p className="small muted sq-meta">
+        <span className={`sq-state is-${open ? (q.blocking ? "blocking" : "open") : "answered"}`}>{open ? (q.blocking ? "Blocking" : "Open") : "Answered"}</span>
+        {`${station(q.station)} asks ${askOfText(q.askOf)}${mine && open ? " (you)" : ""}${q.blocking && open ? " · the station waits for the answer" : ""}`}
+      </p>
       {!open ? (
         <p className="small sq-answer">
           <span className="sq-answer-text">{q.answer}</span>

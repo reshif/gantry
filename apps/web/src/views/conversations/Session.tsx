@@ -176,7 +176,7 @@ function SideDialogue({ s }: { s: WoSession }) {
           <h3 className="sub-h">{`Questions waiting (${asks.length})`}</h3>
           <ul className="osx-pending">
             {asks.map((q) => (
-              <li key={q.id}><button type="button" className="linkish" onClick={() => jump(`sq-${q.id.replace(/[^A-Za-z0-9_-]/g, "-")}`)}>{q.question}</button>{q.mine ? <span className="small wos-mine"> · asks you</span> : null}{q.blocking ? <span className="small muted"> · blocking</span> : null}</li>
+              <li key={q.id}><button type="button" className="linkish wos-clamp" title={q.question} onClick={() => jump(`sq-${q.id.replace(/[^A-Za-z0-9_-]/g, "-")}`)}>{q.question}</button>{q.mine ? <span className="small wos-mine"> · asks you</span> : null}{q.blocking ? <span className="small muted"> · blocking</span> : null}</li>
             ))}
           </ul>
         </section>
@@ -185,7 +185,7 @@ function SideDialogue({ s }: { s: WoSession }) {
         <section className="wos-side-sec" id="wos-assumed">
           <h3 className="sub-h">{`Not confirmed (${assumed.length})`}</h3>
           <ul className="osx-pending">
-            {assumed.map((a) => <li key={a.id}><button type="button" className="linkish" onClick={() => jump(`as-${a.id.replace(/[^A-Za-z0-9_-]/g, "-")}`)}>{a.statement}</button>{a.impact === "high" ? <span className="small muted"> · high impact</span> : null}</li>)}
+            {assumed.map((a) => <li key={a.id}><button type="button" className="linkish wos-clamp" title={a.statement} onClick={() => jump(`as-${a.id.replace(/[^A-Za-z0-9_-]/g, "-")}`)}>{a.statement}</button>{a.impact === "high" ? <span className="small muted"> · high impact</span> : null}</li>)}
           </ul>
         </section>
       ) : null}
