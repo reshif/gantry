@@ -192,7 +192,7 @@ export async function setRecordSummary(tx: Tx, actor: Actor, woId: string, text:
   if (!text || text.trim().length < 10) throw invalid("Write at least a sentence.");
   const before = (w.data.recordSummary as { text?: string } | undefined)?.text ?? null;
   w.data.recordSummary = { text: text.trim(), by, at: fx.now.getTime() };
-  ev(fx, w, "record.summary", { text: text.trim().slice(0, 200) }, { before: { text: before } });
+  ev(fx, w, "record.summary", { text: text.trim().slice(0, 8000) }, { before: { text: before } });
   await saveWo(fx.tx, fx.orgId, w);
   return done(fx, `Summary saved on ${w.id}.`, w.project, { version: w.version });
 }

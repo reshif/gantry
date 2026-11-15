@@ -305,7 +305,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       : pending.length ? (confirm.allowed || !pending.some((p) => p.what === "brief") ? { actor: "you", text: "Review the proposal below: approve it, ask for changes, or discard it." } : { actor: "approver", text: "An approver with the right to confirm briefs has to approve the proposal." })
       : openQuestion ? { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }
       : atIntake ? (ag.mode === "agent" ? { actor: "agent", text: `${ag.agentName} reads the request and will ask or propose the brief.` } : { actor: wo.conv.done ? "approver" : "you", text: wo.conv.done ? "Confirm the brief." : "Answer the intake question below." })
-      : gateWaiting ? { actor: "approver", text: `Waiting for a decision at ${gdef?.label ?? gateWaiting[0]} ${gdef?.name ?? ""}.`.trim() }
+      : gateWaiting ? { actor: "approver", text: `Waiting for a decision at ${gdef?.label ?? gateWaiting[0]}${gdef?.purpose ? `: ${gdef.purpose}` : "."}` }
       : wo.bay ? { actor: "you", text: `${wo.id} is in the ${c.bays.find((b) => b.id === wo.bay)?.name ?? wo.bay} bay; a person has to move it on.` }
       : { actor: "agent", text: `${ag.agentName} works at ${stationName(c, sid)}.` };
     const waiting = closed ? null : atIntake && ag.mode === "agent" && !pending.length && !openQuestion ? { text: `${ag.agentName} is reading the request`, kind: "agent" }
@@ -314,7 +314,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const legacyQ = !wo.conv.done ? wo.conv.questions[wo.conv.qi] : undefined;
     return {
       woId: id, project: row.project, repo: row.repo,
-      wo: { id: wo.id, title: wo.title, description: wo.description, cls: wo.cls, clsName: cls.name, confidence: wo.clsConfidence, rationale: wo.clsRationale, priority: wo.priority, station: sid, stationName: stationName(c, sid), state: wo.state, bay: wo.bay, gate: gateWaiting ? { id: gateWaiting[0], label: gdef?.label ?? gateWaiting[0], name: gdef?.name ?? "" } : null, requestedBy: wo.requestedBy, closed },
+      wo: { id: wo.id, title: wo.title, description: wo.description, cls: wo.cls, clsName: cls.name, confidence: wo.clsConfidence, rationale: wo.clsRationale, priority: wo.priority, station: sid, stationName: stationName(c, sid), state: wo.state, bay: wo.bay, gate: gateWaiting ? { id: gateWaiting[0], label: gdef?.label ?? gateWaiting[0], name: gdef?.name ?? "", purpose: gdef?.purpose ?? "" } : null, requestedBy: wo.requestedBy, closed },
       messages: [...history, ...messages],
       agent: ag.mode === "agent" ? { mode: "agent", name: ag.agentName, id: ag.agentId, model: ag.model, vendor: ag.vendor, version: ag.pin.version, station: sid } : { mode: "rule-based", name: ag.agentName, id: ag.agentId, reason: ag.reason, label: WO_AGENT_LABEL, station: sid },
       budget: ag.budget, costUsd: ag.budget.spentUsd,

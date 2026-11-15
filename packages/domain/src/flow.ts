@@ -233,6 +233,10 @@ export function convQuestions(wo: Pick<WorkOrder, "cls" | "title" | "repo"> & { 
 const FIELD_LABEL: Record<string, string> = { scope: "Scope", ac: "Acceptance", rollback: "Rollback", version: "Target release", testdata: "Test data", repro: "Reproduction", children: "Split", extra: "Note" };
 const fieldLabel = (f: string) => FIELD_LABEL[f] ?? f;
 
+/** Placeholders Gantry seeds into a brief before anyone has written it: dropping one is not taking away something a person wrote. */
+export const BRIEF_SCAFFOLD_OUT = { spike: ["Code changes"], other: ["UI changes unless stated", "Data backfills unless stated"] } as const;
+export const isBriefScaffold = (x: string): boolean => (BRIEF_SCAFFOLD_OUT.spike as readonly string[]).includes(x) || (BRIEF_SCAFFOLD_OUT.other as readonly string[]).includes(x);
+
 /** The brief derived from the conversation so far (legacy G.buildBrief). */
 export function buildBrief(c: Catalog, project: Project | null | undefined, wo: Pick<WorkOrder, "cls" | "title" | "conv">): Brief {
   const a = wo.conv.answers;
@@ -241,7 +245,7 @@ export function buildBrief(c: Catalog, project: Project | null | undefined, wo: 
   const b: Brief = {
     goal: wo.title,
     scopeIn: a.scope ? [a.scope] : a.question ? [a.question] : [],
-    scopeOut: wo.cls === "spike" ? ["Code changes"] : ["UI changes unless stated", "Data backfills unless stated"],
+    scopeOut: wo.cls === "spike" ? [...BRIEF_SCAFFOLD_OUT.spike] : [...BRIEF_SCAFFOLD_OUT.other],
     ac: a.ac ? [a.ac] : [],
     risks: wo.conv.misses.filter((m) => !m.resolved).map((m) => m.text),
     open: wo.conv.done ? [] : wo.conv.questions.slice(wo.conv.qi).map((q) => q.text),

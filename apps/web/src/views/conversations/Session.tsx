@@ -70,6 +70,7 @@ function ProposalCard({ m, c, s, agent, send }: { m: WoSessionMessage; c: Propos
                 <strong className="small">{ch.label}</strong>
                 {ch.removed.map((x) => <div key={`r${x}`} className="small wos-minus">{`- ${x}`}</div>)}
                 {ch.added.map((x) => <div key={`a${x}`} className="small wos-plus">{`+ ${x}`}</div>)}
+                {(ch.resolved ?? []).map((x) => <div key={`q${x}`} className="small wos-resolved">{`Answered: ${x}`}</div>)}
               </li>
             ))}
           </ul>
@@ -169,7 +170,7 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
           <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite">
             <span className="wos-dot" aria-hidden="true" />
             <span>{status.text}</span>
-            <span className="muted small">{s.next.actor === "you" && !live ? "" : ` · ${s.next.text}`}</span>
+            {(s.next.actor === "you" && !live) || s.next.text === status.text ? null : <span className="muted small">{` · ${s.next.text}`}</span>}
           </div>
           <div className="osx-thread" role="log" aria-live="polite">
             {s.messages.map((m, i) => (
@@ -212,7 +213,8 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
             <dt>Work order</dt><dd><span className="mono">{s.wo.id}</span> · {s.wo.priority}</dd>
             <dt>Class</dt><dd>{`${s.wo.clsName} · ${Math.round(s.wo.confidence * 100)}%`}</dd>
             <dt>Station</dt><dd>{s.wo.bay ? `${s.wo.stationName} (in the ${s.wo.bay} bay)` : s.wo.stationName}</dd>
-            <dt>Gate</dt><dd>{s.wo.gate ? `${s.wo.gate.label} ${s.wo.gate.name}` : "none waiting"}</dd>
+            {/* a gate's name is the outcome it waits for ("Brief confirmed"): say it is waiting, so it never reads as already passed */}
+            <dt>Gate</dt><dd id="wos-gate" data-tip={s.wo.gate?.purpose || undefined}>{s.wo.gate ? `${s.wo.gate.label} waiting · passes when: ${s.wo.gate.name.toLowerCase()}` : "none waiting"}</dd>
             <dt>Next</dt><dd id="wos-next"><strong>{{ agent: agentName, you: "You", approver: "An approver", nobody: "" }[s.next.actor]}</strong>{s.next.actor === "nobody" ? "" : " — "}{s.next.text}</dd>
           </dl>
           <ol className="osx-steps" id="wos-steps" aria-label="The belt">

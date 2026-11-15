@@ -14,6 +14,7 @@
 .wos-brief { display: flex; flex-direction: column; gap: 4px; }
 .wos-diff { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .wos-plus { color: var(--ok, inherit); overflow-wrap: anywhere; }
+.wos-resolved { color: var(--muted); overflow-wrap: anywhere; }
 .wos-minus { color: var(--block, inherit); overflow-wrap: anywhere; }
 .osx-answered { margin: 0; }
 .osx-question.is-answered { opacity: 0.75; }

@@ -14,6 +14,9 @@ import { readCatalog, readOrg } from "../../core/read/index.js";
 import { lockWo, saveWo, type Wo } from "./model.js";
 import { saveConversation } from "./conversation.js";
 
+/** The whole summary goes in the thread (lists truncate their own previews); the cap only guards against a runaway output. */
+const clip = (t: string): string => (t.length > 8000 ? `${t.slice(0, 8000)}…` : t);
+
 export interface ObservedChecks { name: string; ok: boolean; warn?: boolean; note?: string }
 export interface StationResult {
   status: "succeeded" | "failed" | "interrupted" | "needs_person";
@@ -124,7 +127,7 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     const { checks, headSha } = absorbOutput(w, sid, result);
     closeEntry(w, fx, "passed", result.summary ?? "");
     w.data.progress = 100;
-    note(w, fx, fx.actor, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${result.summary.slice(0, 200)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`);
+    note(w, fx, fx.actor, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${clip(result.summary)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`);
     ev(fx, w, "wo.station.done", { station: sid, attempt: attemptId, text: result.summary ?? "" });
     await arriveAtGate(fx, w, fx.actor, { project: p, ...(checks ? { checks } : {}), ...(headSha !== undefined ? { headSha } : {}) });
     next = bayOf(fx.catalog, w) ?? stationIdOf(fx.catalog, w);

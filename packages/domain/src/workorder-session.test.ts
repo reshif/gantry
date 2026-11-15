@@ -30,3 +30,19 @@ describe("the brief diff", () => {
     expect(applyBriefDraft(cur, r.draft)).toMatchObject({ goal: ok.goal, route: [], children: [] });
   });
 });
+
+describe("briefDiff against a seeded brief", () => {
+  it("does not show Gantry's own placeholders as removals, and shows answered questions as resolved", () => {
+    const current = { goal: "Add retry", scopeIn: [], scopeOut: ["UI changes unless stated", "Data backfills unless stated"], ac: [], risks: [], open: ["How will we know it is done?"], decisions: [], estimate: "M" };
+    const next = { goal: "Add retry with backoff to the device sync job", scopeIn: ["Device sync job"], scopeOut: ["Admin API"], ac: ["Retries 3 times with backoff"], risks: [], open: [], decisions: [], estimate: "M" };
+    const d = briefDiff(current, next);
+    const out = d.find((x) => x.field === "scopeOut")!;
+    expect(out.removed).toEqual([]);
+    expect(out.added).toEqual(["Admin API"]);
+    const open = d.find((x) => x.field === "open")!;
+    expect(open.removed).toEqual([]);
+    expect(open.resolved).toEqual(["How will we know it is done?"]);
+    // a person's own words still show as removed
+    expect(briefDiff({ ...current, scopeIn: ["Mobile app"] }, next).find((x) => x.field === "scopeIn")!.removed).toEqual(["Mobile app"]);
+  });
+});

@@ -4,6 +4,7 @@
  * propose is not dictated here, only what a proposal must look like to be shown at all. Nothing in it writes anything.
  */
 import type { Brief } from "./types.js";
+import { isBriefScaffold } from "./flow.js";
 
 /** The brief fields an agent authors. Route, children and the class stay Gantry's (the class changes only through a reclassify proposal). */
 export interface BriefDraft {
@@ -17,7 +18,7 @@ export interface BriefDraft {
   estimate: string;
 }
 
-export interface BriefChange { field: keyof BriefDraft; label: string; before: string[]; after: string[]; added: string[]; removed: string[] }
+export interface BriefChange { field: keyof BriefDraft; label: string; before: string[]; after: string[]; added: string[]; removed: string[]; /** Open questions the proposal answers (shown as resolved, not as removals). */ resolved?: string[] }
 
 export type WoCard =
   | { kind: "progress"; text: string; detail?: string }
@@ -64,8 +65,11 @@ export function briefDiff(current: Partial<Brief> | null | undefined, next: Brie
     const before = asList(current, f);
     const after = Array.isArray(next[f]) ? (next[f] as string[]) : next[f] ? [next[f] as string] : [];
     const added = after.filter((x) => !before.includes(x));
-    const removed = before.filter((x) => !after.includes(x));
-    return added.length || removed.length ? [{ field: f, label: BRIEF_LABELS[f], before, after, added, removed }] : [];
+    const gone = before.filter((x) => !after.includes(x));
+    // An open question that disappears was answered, not deleted; a seeded placeholder that disappears was never a person's words.
+    const resolved = f === "open" ? gone : [];
+    const removed = f === "open" ? [] : gone.filter((x) => !isBriefScaffold(x));
+    return added.length || removed.length || resolved.length ? [{ field: f, label: BRIEF_LABELS[f], before, after, added, removed, ...(resolved.length ? { resolved } : {}) }] : [];
   });
 }
 

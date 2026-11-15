@@ -19,7 +19,7 @@ export interface WoSession {
   woId: string;
   project: string;
   repo: string | null;
-  wo: { id: string; title: string; description: string; cls: string; clsName: string; confidence: number; rationale: string; priority: string; station: string; stationName: string; state: string; bay: string | null; gate: { id: string; label: string; name: string } | null; requestedBy: string; closed: boolean };
+  wo: { id: string; title: string; description: string; cls: string; clsName: string; confidence: number; rationale: string; priority: string; station: string; stationName: string; state: string; bay: string | null; gate: { id: string; label: string; name: string; purpose?: string } | null; requestedBy: string; closed: boolean };
   messages: WoSessionMessage[];
   agent: { mode: "agent"; name: string; id: string; model: string; vendor: string; version: number; station: string } | { mode: "rule-based"; name: string; id: string; reason: string; label: string; station: string };
   budget: { spentUsd: number; limitUsd: number };
