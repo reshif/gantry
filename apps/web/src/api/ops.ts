@@ -65,8 +65,16 @@ export const ops = {
     window.location.assign(loginUrl(method, loginHint));
     return Promise.resolve({ ok: true, msg: "Redirecting to sign in.", status: 302 });
   },
-  async signOut(): Promise<ApiResult> {
-    const r = await post("/auth/logout");
+  /**
+   * Ends the Gantry session, then sends the browser to the identity provider's end-session page (`logoutUrl`) so its SSO
+   * session ends too; the provider redirects back to the app. Without a `logoutUrl`, the app just shows the signed-out screen.
+   */
+  async signOut(): Promise<ApiResult<{ logoutUrl?: string }>> {
+    const r = await post<{ logoutUrl?: string }>("/auth/logout");
+    if (r.ok && typeof r.logoutUrl === "string" && /^https?:\/\//.test(r.logoutUrl)) {
+      window.location.assign(r.logoutUrl);
+      return r;
+    }
     if (r.ok) invalidateSlices(["session"]);
     return r;
   },

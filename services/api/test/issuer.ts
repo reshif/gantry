@@ -34,7 +34,7 @@ export async function startIssuer(clientId: string, clientSecret: string) {
     };
     if (url.pathname === "/.well-known/openid-configuration") {
       return json(200, {
-        issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, jwks_uri: `${base}/jwks`,
+        issuer: base, authorization_endpoint: `${base}/authorize`, token_endpoint: `${base}/token`, jwks_uri: `${base}/jwks`, end_session_endpoint: `${base}/logout`,
         response_types_supported: ["code"], subject_types_supported: ["public"], id_token_signing_alg_values_supported: ["RS256"],
         token_endpoint_auth_methods_supported: ["client_secret_post"], code_challenge_methods_supported: ["S256"],
       });

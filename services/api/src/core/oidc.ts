@@ -22,6 +22,8 @@ export interface IdClaims {
   acr?: string;
   sid?: string;
   preferredUsername?: string;
+  /** The raw ID token, kept (sealed) only to end the provider's session at sign-out as `id_token_hint`. */
+  idToken?: string;
 }
 
 export interface OidcAdapter {
@@ -29,6 +31,12 @@ export interface OidcAdapter {
   authorizationUrl(p: LoginParams): Promise<URL>;
   /** Exchanges the callback for validated ID-token claims (state, nonce, PKCE, signature, issuer, audience). */
   exchange(currentUrl: URL, check: { codeVerifier: string; state: string; nonce: string }): Promise<IdClaims>;
+  /**
+   * RP-initiated logout: where to send the browser so the provider ends its own SSO session too. Without this, signing out
+   * of Gantry leaves the provider session alive and the next "Sign in" goes straight back in without a password.
+   * Null when the provider publishes no end-session endpoint.
+   */
+  endSessionUrl(p: { idTokenHint?: string | null; postLogoutRedirectUri: string }): Promise<URL | null>;
   /** Whether a federated GitHub identity provider is configured. */
   readonly githubIdp: string | null;
 }
@@ -93,7 +101,15 @@ export function createOidcAdapter(cfg: Config["oidc"], opts: { allowInsecure?: b
       return {
         sub: k.sub, email: s(k.email)?.toLowerCase(), emailVerified: typeof k.email_verified === "boolean" ? k.email_verified : undefined,
         name: s(k.name), gantryId: s(k.gantry_id), gantryTitle: s(k.gantry_title), authTime: n(k.auth_time), acr: s(k.acr), sid: s(k.sid), preferredUsername: s(k.preferred_username),
+        ...(tokens.id_token ? { idToken: tokens.id_token } : {}),
       };
+    },
+    async endSessionUrl(p) {
+      const c = await load();
+      if (!c.serverMetadata().end_session_endpoint) return null;
+      const params: Record<string, string> = { client_id: cfg.clientId, post_logout_redirect_uri: p.postLogoutRedirectUri };
+      if (p.idTokenHint) params.id_token_hint = p.idTokenHint;
+      return client.buildEndSessionUrl(c, params);
     },
   };
 }

@@ -28,6 +28,8 @@ import { publicConfig } from "../core/app.js";
 import { openStream } from "../core/stream.js";
 
 const OIDC_COOKIE = "gantry_oidc";
+/** The provider's ID token, sealed, kept only to end the provider session at sign-out (path /auth, never sent to the API). */
+const IDT_COOKIE = "gantry_idt";
 
 interface OidcState {
   state: string;
@@ -81,6 +83,7 @@ const getPath = (obj: unknown, path: string): unknown => path.split(".").reduce<
 export const sessionRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
   const oidcKey = deriveKey(g.config.secrets.sessionKey, "oidc-cookie");
+  const idtKey = deriveKey(g.config.secrets.sessionKey, "id-token-cookie");
   const redirectUri = `${g.config.publicUrl}/auth/callback`;
   const cookieOpts = { path: "/auth", httpOnly: true, sameSite: "lax" as const, secure: g.config.cookieSecure };
   const authRate = { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } };
@@ -146,18 +149,33 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp });
     if (!r.ok) return st.popup ? popupDone(reply, false, r.msg) : toApp(reply, "/", r.msg);
     if (r.token && r.expiresAt) reply.setCookie(g.config.sessionCookie, r.token, { path: "/", httpOnly: true, sameSite: "lax", secure: g.config.cookieSecure, expires: r.expiresAt });
+    if (claims.idToken) reply.setCookie(IDT_COOKIE, seal({ t: claims.idToken }, idtKey, "id-token"), { ...cookieOpts, ...(r.expiresAt ? { expires: r.expiresAt } : { maxAge: 12 * 3600 }) });
     await withTx(g.pool, (tx) => publishChange(tx, { org: g.orgId, keys: ["signins", "sessions", ...(r.provisioned ? ["people"] : [])] })).catch(() => undefined);
     return st.popup ? popupDone(reply, true) : toApp(reply, st.returnTo);
   });
 
   app.post("/auth/logout", authRate, async (req, reply) => {
     const tok = req.cookies[g.config.sessionCookie];
-    const clear = (): void => void reply.clearCookie(g.config.sessionCookie, { path: "/", httpOnly: true, sameSite: "lax", secure: g.config.cookieSecure });
+    const idt = unseal<{ t: string }>(req.cookies[IDT_COOKIE], idtKey, "id-token")?.t ?? null;
+    const clear = (): void => {
+      reply.clearCookie(g.config.sessionCookie, { path: "/", httpOnly: true, sameSite: "lax", secure: g.config.cookieSecure });
+      reply.clearCookie(IDT_COOKIE, cookieOpts);
+    };
+    /** Where the browser goes next so the identity provider ends its SSO session as well. Best effort: Gantry's own sign-out never waits on it. */
+    const providerLogout = async (): Promise<string | undefined> => {
+      try {
+        return (await g.oidc.endSessionUrl({ idTokenHint: idt, postLogoutRedirectUri: `${g.config.publicUrl}/` }))?.toString();
+      } catch (e) {
+        req.log.warn({ err: e }, "OIDC end-session URL unavailable");
+        return undefined;
+      }
+    };
     const sec = (await g.security.get()).value;
     const s = tok ? await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, tok, sec.idleMin) : null;
     if (!s) {
       clear();
-      return { ok: true, msg: "You are signed out." };
+      const logoutUrl = idt ? await providerLogout() : undefined;
+      return { ok: true, msg: "You are signed out.", ...(logoutUrl ? { logoutUrl } : {}) };
     }
     const sent = req.headers["x-csrf-token"];
     if (typeof sent !== "string" || !safeEqual(sent, csrfFor(g.config.secrets.sessionKey, s.id))) {
@@ -170,7 +188,8 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       await publishChange(tx, { org: g.orgId, keys: ["sessions", "audit"] });
     });
     clear();
-    return { ok: true, msg: "You are signed out." };
+    const logoutUrl = await providerLogout();
+    return { ok: true, msg: "You are signed out.", ...(logoutUrl ? { logoutUrl } : {}) };
   });
 
   /* ------------------------------------------------------------ me */

@@ -280,18 +280,36 @@ d("OIDC sign-in against a local issuer", () => {
     expect(plain.r.headers.location).toBe("/");
   });
 
+  it("logout also ends the provider session: it returns the end-session URL with the sealed ID token as the hint", async () => {
+    const { r, session } = await signInFlow(t, issuer, { ...asha, auth_time: now() });
+    const idt = r.cookies.find((c) => c.name === "gantry_idt");
+    expect(idt).toMatchObject({ httpOnly: true, path: "/auth" });
+    expect(idt!.value).not.toMatch(/^ey/); // sealed, not the raw JWT
+    const cookie = `__Host-gantry_session=${session!.value}; gantry_idt=${idt!.value}`;
+    const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).json();
+    const out = (await t.app.inject({ method: "POST", url: "/auth/logout", headers: { cookie, "x-csrf-token": me.csrf } })).json();
+    const u = new URL(out.logoutUrl);
+    expect(`${u.origin}${u.pathname}`).toBe(`${issuer.issuer}/logout`);
+    expect(u.searchParams.get("client_id")).toBe("gantry-web");
+    expect(u.searchParams.get("post_logout_redirect_uri")).toMatch(/\/$/);
+    expect(u.searchParams.get("id_token_hint")).toMatch(/^ey/);
+  });
+
   it("logout needs the CSRF token, revokes the session, clears the cookie and records the event", async () => {
     const { session } = await signInFlow(t, issuer, { ...asha, auth_time: now() });
     const cookie = `__Host-gantry_session=${session!.value}`;
     const me = (await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).json();
+    const signouts = async () => (await t.db.admin.query(`select 1 from events where type = 'auth.signout'`)).rowCount;
+    const before = await signouts();
     const forged = await t.app.inject({ method: "POST", url: "/auth/logout", headers: { cookie } });
     expect(forged.statusCode).toBe(403);
     expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(200); // still signed in
     const out = await t.app.inject({ method: "POST", url: "/auth/logout", headers: { cookie, "x-csrf-token": me.csrf } });
     expect(out.statusCode).toBe(200);
     expect(out.cookies.find((c) => c.name === "__Host-gantry_session")?.value).toBe("");
+    expect(out.cookies.find((c) => c.name === "gantry_idt")?.value).toBe("");
     expect((await t.app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(401);
-    expect((await t.db.admin.query(`select 1 from events where type = 'auth.signout'`)).rowCount).toBe(1);
+    expect(await signouts()).toBe(before! + 1);
     expect((await t.app.inject({ method: "POST", url: "/auth/logout" })).statusCode).toBe(200); // already signed out
   });
 });
