@@ -1,5 +1,6 @@
 /** The Repo overrides, Delivery log and Card templates tabs (legacy overridesTab, deliveriesTab, templatesTab). */
 import { useEffect, useState } from "react";
+import { Async, qState } from "../../ui/async";
 import { fmt, type Delivery, type Project } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { useDeliveries } from "../../api/queries";
@@ -113,10 +114,11 @@ export function DeliveriesTab({ p, nt }: { p: Project; nt: Nt }) {
           <Field label="Event" htmlFor="nt-dl-event"><Select id="nt-dl-event" options={[{ value: "all", label: "All" }, ...events()]} value={f.event} onChange={(v) => { setF({ ...f, event: v }); setLimit(40); }} /></Field>
         </div>
         <div className="kv-row">
-          <div><div className="kv-k">Shown</div><div className="kv-v mono">{list.length}</div></div>
-          <div><div className="kv-k">Failed</div><div className={`kv-v mono${failed ? " neg" : ""}`}>{failed}</div></div>
+          <div><div className="kv-k">Shown</div><div className="kv-v mono">{qState(q, () => String(list.length))}</div></div>
+          <div><div className="kv-k">Failed</div><div className={`kv-v mono${failed ? " neg" : ""}`}>{qState(failedQ, () => String(failed))}</div></div>
         </div>
       </div>
+      <Async query={q} what="the delivery log" id="nt-dl">{() => (
       <Panel flush>
         <div className="table-scroll">
           <table className="table table-compact nt-dl">
@@ -140,6 +142,7 @@ export function DeliveriesTab({ p, nt }: { p: Project; nt: Nt }) {
           </table>
         </div>
       </Panel>
+      )}</Async>
       {page.next ? <div className="more"><Btn label="Show 40 more" id="nt-dl-more" onClick={() => setLimit(limit + 40)} /></div> : null}
       <LockNote decision={perm} what={`Retries on ${p.name}`} />
     </div>

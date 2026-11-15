@@ -9,6 +9,7 @@ import { navigate } from "../../lib/router";
 import { makeStopActions } from "../../shell/stopActions";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { Btn, Empty, Field, LockNote, Meter, Panel, Select, Toggle } from "../../ui/primitives";
+import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
@@ -76,11 +77,12 @@ export function McpTab({ p }: PcProps) {
   const res = useRes();
   const me = useMe();
   const d = useCan("project.config", { project: p.id });
-  const servers = useMcpServers().data ?? [];
+  const serversQ = useMcpServers();
   return (
     <div className="pcf-stack">
       <LockNote decision={d} what="MCP servers for this project" />
       <Panel title={`MCP servers available to ${p.name}`} flush tools={canSeeRoute("mcp", me) ? <Btn small kind="ghost" id="pcf-to-mcp" label="Manage servers" onClick={() => navigate("mcp")} /> : null}>
+        <Async query={serversQ} what="MCP servers" id="pcf-mcp" empty={<Empty id="pcf-mcp-empty" title="No MCP servers yet" text="A Factory Admin adds MCP servers; then they can be enabled here." />}>{(servers) => (
         <div className="table-scroll">
           <table className="table table-compact">
             <thead><tr><th>Server</th><th>Health</th><th>Sensitivity</th><th className="num">Tools</th><th>Factory scope</th><th>Enabled here</th></tr></thead>
@@ -103,6 +105,7 @@ export function McpTab({ p }: PcProps) {
             </tbody>
           </table>
         </div>
+        )}</Async>
       </Panel>
     </div>
   );

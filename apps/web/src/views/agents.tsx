@@ -10,6 +10,7 @@ import { useCan } from "../api/can";
 import { useAgents, usePolicies, useProjects } from "../api/queries";
 import { ops } from "../api/ops";
 import { updatePrefs, usePrefs } from "../lib/prefs";
+import { Async } from "../ui/async";
 import { Avatar, Btn, Chip, Empty, LockNote, Panel, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Icon } from "../ui/Icon";
 import { Spark } from "../ui/charts";
@@ -153,13 +154,21 @@ export default function AgentsView() {
     }
   }, [prefs.agent, agents]);
 
-  if (q.isLoading) return <div className="view view-agents"><ViewHead title="Agents" /><Empty title="Loading agents" text="" /></div>;
-  if (q.isError || !agents.length) {
+  const sub = "Who staffs each station, on which model, with which instructions, skills and permissions.";
+  const create = <Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />;
+  if (q.data === undefined) {
     return (
       <div className="view view-agents">
-        <ViewHead title="Agents" sub="Who staffs each station, on which model, with which instructions, skills and permissions."
-          actions={<Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />} />
-        <Empty title={q.isError ? "Agents could not be loaded" : "No agents yet"} text={q.isError ? "Try again in a moment." : "Create the first agent."} />
+        <ViewHead title="Agents" sub={sub} actions={q.isError ? create : undefined} />
+        <Async query={q} what="agents" id="agents">{() => null}</Async>
+      </div>
+    );
+  }
+  if (!agents.length) {
+    return (
+      <div className="view view-agents">
+        <ViewHead title="Agents" sub={sub} actions={create} />
+        <Empty title="No agents yet" text="Create the first agent." />
       </div>
     );
   }
@@ -170,9 +179,9 @@ export default function AgentsView() {
   const below = agents.filter((a) => a.threshold != null && a.evalScore < a.threshold).length;
   return (
     <div className="view view-agents">
-      <ViewHead title="Agents" sub="Who staffs each station, on which model, with which instructions, skills and permissions."
+      <ViewHead title="Agents" sub={sub}
         meta={[["Agents", String(agents.length)], ["Active", `${active} / ${agents.length}`], ["Candidates", String(cands)], ["Below threshold", String(below)], ["Spend 7d", fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))]]}
-        actions={<Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />} />
+        actions={create} />
       <Panel title="Roster" flush tools={<span className="muted small">Select a row to configure</span>}><Roster agents={agents} /></Panel>
       <Detail a={current} agents={agents} projects={projects} />
     </div>

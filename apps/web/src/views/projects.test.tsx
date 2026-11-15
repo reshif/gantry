@@ -110,6 +110,13 @@ describe("template helpers", () => {
 });
 
 describe("Projects: portfolio", () => {
+  it("says the portfolio is not visible on a 403, instead of showing no projects", async () => {
+    setup({ "GET /api/v1/projects": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
+    mount(<ProjectsView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.queryByText("No projects yet")).toBeNull();
+  });
+
   it("lists the projects with their health, hides archived ones, and filters", async () => {
     setup();
     mount(<ProjectsView />);
@@ -232,6 +239,12 @@ describe("Projects: templates and wizard", () => {
 });
 
 describe("Project config", () => {
+  it("says the project is not visible on a 403", async () => {
+    setup({ "GET /api/v1/projects": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
+    mount(<ProjectConfigView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+  });
+
   const withPayments = (extra: Record<string, Handler> = {}, denied: string[] = []) => setup({ "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }), ...extra }, denied);
 
   it("shows the overview and saves the description with the project version", async () => {

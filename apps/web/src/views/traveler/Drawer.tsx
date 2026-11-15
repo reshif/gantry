@@ -4,6 +4,7 @@
  */
 import { fmt } from "@gantry/domain";
 import { Btn, Empty, StateChip, Tabs } from "../../ui/primitives";
+import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useProject } from "../../api/queries";
@@ -54,7 +55,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
           </div>
         </div>
         <div className="drawer-scroll">
-          {q.isLoading ? <p className="muted small" role="status">Loading…</p> : <Empty title={`No work order ${woId}`} text="It may have been removed, or it belongs to a project you cannot see." />}
+          {!(q.isError && (q.error as { status?: number } | null)?.status === 404) && (q.isError || q.isPending) ? <Async query={q} what={`work order ${woId}`} id="trv">{() => null}</Async> : <Empty title={`No work order ${woId}`} text="It may have been removed, or it belongs to a project you cannot see." />}
         </div>
       </div>
     );

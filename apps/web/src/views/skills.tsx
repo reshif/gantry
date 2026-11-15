@@ -8,6 +8,7 @@ import { fmt, type Skill } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useLearningProposals, useProjects, useSkills } from "../api/queries";
 import { ops } from "../api/ops";
+import { Async } from "../ui/async";
 import { Btn, Chip, Empty, Field, LockNote, Panel, Segmented, Select, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
 import { Dialog } from "../ui/Overlay";
 import { useActors } from "../ui/actors";
@@ -308,7 +309,7 @@ export default function SkillsView() {
     <ViewHead title="Skills" sub="Reusable know-how that agents load when a task calls for it. Versioned, owned and covered by evals." meta={extra?.meta}
       actions={<Btn label="New skill" kind="primary" icon="plus" id="sk-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill agents={agents} close={close} />)} />} />
   );
-  if (q.isLoading) return <div className="view view-skills">{head()}<Empty title="Loading skills" text="" /></div>;
+  if (q.data === undefined) return <div className="view view-skills">{head()}<Async query={q} what="skills" id="skills">{() => null}</Async></div>;
   if (!skills.length) return <div className="view view-skills">{head()}<Empty title="No skills yet" text="Create the first skill." /></div>;
   if (!ui.sel || !skills.some((s) => s.id === ui.sel)) ui.sel = skills[0]!.id;
   const current = skills.find((s) => s.id === ui.sel) ?? skills[0]!;

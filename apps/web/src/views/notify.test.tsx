@@ -84,6 +84,14 @@ beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash =
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("Integrations", () => {
+  it("says Not visible to you when the connections read is refused, and the header count is not a 0", async () => {
+    setup({ "GET /api/v1/integrations": () => ({ status: 403, body: { ok: false, msg: "Needs Factory Admin to see integrations." } }) });
+    mount(<IntegrationsView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.getByText("Needs Factory Admin to see integrations.")).toBeTruthy();
+    expect(document.getElementById("int-table")).toBeNull();
+  });
+
   it("lists connections with their health, scope and masked secret, and counts what needs attention", async () => {
     setup();
     mount(<IntegrationsView />);
@@ -206,6 +214,14 @@ describe("Integrations", () => {
 });
 
 describe("Notifications", () => {
+  it("says Not visible to you when the delivery log is refused, instead of no deliveries", async () => {
+    setup({ "GET /api/v1/deliveries": () => ({ status: 403, body: { ok: false, msg: "Needs notify.view on this project." } }) });
+    mount(<NotificationsView />);
+    fireEvent.click(await byId("nt-tab-log"));
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.queryByText("No deliveries match these filters.")).toBeNull();
+  });
+
   it("lists the project's routes with their destinations and locks the kill route's switch with the reason", async () => {
     setup();
     mount(<NotificationsView />);

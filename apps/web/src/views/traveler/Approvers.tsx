@@ -8,6 +8,7 @@ import type { GateApprovers } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { ops } from "../../api/ops";
 import { Btn } from "../../ui/primitives";
+import { Async } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 
@@ -22,7 +23,7 @@ export function ApproversPanel({ woId, gate, project, onNavigate }: { woId: stri
   const q = useGateApprovers(woId, gate);
   const ui = useUI();
   const a = q.data;
-  if (!a) return q.isError ? null : <p className="muted small" role="status">Loading approvers…</p>;
+  if (!a) return <Async query={q} what="who may approve this gate" id="apr" rows={2}>{() => null}</Async>;
   const go = (route: string, param?: string) => { onNavigate?.(); navigate(route, param ?? null, route === "project-config" ? project : undefined); };
   return (
     <section className="apr-panel" id="apr-panel" aria-label={`Who may approve ${a.label}`}>

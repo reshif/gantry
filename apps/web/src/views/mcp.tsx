@@ -11,6 +11,7 @@ import { DAY } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useMcpCalls, useMcpServers, useProjects } from "../api/queries";
 import { Btn, Empty, Panel, Tabs, ViewHead } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { useCatalog } from "./projects/kit";
@@ -23,7 +24,8 @@ import { UsageTab } from "./mcp/Usage";
 export default function McpView() {
   const ui = useUI();
   const perm = dec(useCan("mcp.edit"));
-  const servers = useMcpServers().data ?? [];
+  const serversQ = useMcpServers();
+  const servers = serversQ.data ?? [];
   const callsQ = useMcpCalls({ limit: 500 });
   const calls = Array.isArray(callsQ.data) ? callsQ.data : callsQ.data?.items ?? [];
   const projects = useProjects().data ?? [];
@@ -38,9 +40,9 @@ export default function McpView() {
   const day = calls.filter((u) => u.at > Date.now() - DAY).length;
   const writeTools = servers.reduce((n, m) => n + m.tools.filter((t) => t.write).length, 0);
 
-  const registry = !servers.length ? (
-    <Empty id="mcp-empty" title="No MCP servers yet" text="An MCP server gives agents tools: a tracker, docs or a database. Add one, then choose the projects, stations and agents that may use it." />
-  ) : (
+  const registry = (
+    <Async query={serversQ} what="MCP servers" id="mcp" empty={<Empty id="mcp-empty" title="No MCP servers yet" text="An MCP server gives agents tools: a tracker, docs or a database. Add one, then choose the projects, stations and agents that may use it." />}>
+      {() => (
     <div className="mcp-split">
       <Panel title="Registry" flush>
         <div className="table-scroll">
@@ -70,6 +72,8 @@ export default function McpView() {
       </Panel>
       {current ? <Detail key={current.id} srv={current} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} onRemoved={() => setSel(null)} /> : null}
     </div>
+      )}
+    </Async>
   );
 
   return (
@@ -77,12 +81,14 @@ export default function McpView() {
       <ViewHead
         title="MCP servers"
         sub="Tools agents may call, and exactly where. Scope by project, repo, agent, station and work class; deny single tools; write tools need a pre-authorisation at the station. The edge makes every connection and holds every credential."
-        meta={[["Servers", String(servers.length)], ["Not healthy", String(servers.filter((m) => m.health !== "healthy").length)], ["Write tools", String(writeTools)], ["Calls 24h", String(day)]]}
+        meta={[["Servers", qState(serversQ, (d) => String(d.length))], ["Not healthy", qState(serversQ, (d) => String(d.filter((m) => m.health !== "healthy").length))], ["Write tools", qState(serversQ, () => String(writeTools))], ["Calls 24h", qState(callsQ, () => String(day))]]}
         actions={<Btn label="Add server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} onAdded={(id) => { setSel(id); setTab("registry"); }} />)} />}
       />
       <Tabs idPrefix="mcp-tab" items={[{ id: "registry", label: "Registry", count: servers.length }, { id: "usage", label: "Usage log", count: calls.length }]} active={tab} onChange={setTab} />
       <div id="mcp-tab-panel" role="tabpanel" aria-labelledby={`mcp-tab-${tab}`}>
-        {tab === "usage" ? <UsageTab calls={calls} servers={servers} agents={agents} projects={projects} actorName={actorName} /> : registry}
+        {tab === "usage" ? (
+          <Async query={callsQ} what="the MCP usage log" id="mcp-usage">{() => <UsageTab calls={calls} servers={servers} agents={agents} projects={projects} actorName={actorName} />}</Async>
+        ) : registry}
       </div>
     </div>
   );

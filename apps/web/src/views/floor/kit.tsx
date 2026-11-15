@@ -242,14 +242,14 @@ export function useProjectRepos(projectId: string | null | undefined): Repo[] {
   }, [q.data, f]);
 }
 
-export function useFloorState(projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): { value: FloorCtxValue | null; error: boolean } {
+export function useFloorState(projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): { value: FloorCtxValue | null; error: unknown } {
   const cat = useCatalog();
   const floor = useFloorRead(projectId, rp?.at);
   const repos = useProjectRepos(projectId);
   const f = floor.data;
-  if (!cat || !f) return { value: null, error: floor.isError };
+  if (!cat || !f) return { value: null, error: floor.isError ? floor.error : null };
   const replay: ReplayCtx | null = rp ? { ...rp, state: f.replay ?? { at: rp.at, workOrders: [], halted: null, killed: null, haltedRepos: {} } } : null;
-  return { value: { cat, project: f.project, floor: f, wos: f.workOrders, repos, replay, now: replay ? replay.at : Date.now() }, error: false };
+  return { value: { cat, project: f.project, floor: f, wos: f.workOrders, repos, replay, now: replay ? replay.at : Date.now() }, error: null };
 }
 
 export const useFloorValue = (projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): FloorCtxValue | null => useFloorState(projectId, rp).value;

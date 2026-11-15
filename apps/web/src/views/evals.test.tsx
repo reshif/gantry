@@ -289,3 +289,12 @@ describe("Evals screen: factory-wide", () => {
     await byId("ev-n");
   });
 });
+
+describe("Evals screen: a read the person may not make", () => {
+  it("says Not visible to you, not an empty list, when the primary read is refused", async () => {
+    setup({ "GET /api/v1/suites": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include eval.view." } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("evals-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.getElementById("evals-hidden")?.textContent).toContain("eval.view");
+  });
+});

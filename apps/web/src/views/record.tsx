@@ -8,6 +8,7 @@ import { useMe } from "../api/queries";
 import { useHash, navigate } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Btn, Empty, ViewHead } from "../ui/primitives";
+import { Loading } from "../ui/async";
 import { useOpenTraveler } from "../shell/useTraveler";
 import { Crumbs } from "./projects/kit";
 import { Picker } from "./record/Picker";
@@ -37,7 +38,7 @@ function One({ id }: { id: string }) {
   const exportRec = useExportRecord();
   const openTraveler = useOpenTraveler();
   const name = useName();
-  if (d.loading) return <div className="view rec-view"><p className="muted small" role="status">Loading the record…</p></div>;
+  if (d.loading) return <div className="view rec-view"><Loading id="rec-loading" label="the record" /></div>;
   const status = (d.error as { status?: number } | null)?.status;
   if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
     if (status === 401) return <Picker />;

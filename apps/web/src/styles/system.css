@@ -55,3 +55,14 @@
   .titleblock > div { padding: 6px 10px; }
   .titleblock dd { font-size: 18px; }
 }
+
+/* ---------- shared data states (ui/async.tsx) ---------- */
+.async-loading { display: grid; gap: 10px; padding: var(--s4) 0; min-height: 96px; align-content: start; }
+.async-bar { display: block; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--sunk) 0%, var(--line) 50%, var(--sunk) 100%); background-size: 200% 100%; animation: async-shimmer 1.4s linear infinite; }
+@keyframes async-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .async-bar { animation: none; } }
+.empty.empty-block { border-color: var(--block); border-style: solid; background: var(--block-soft); }
+.empty.empty-block .empty-icon { color: var(--block); }
+.empty-state .empty-icon { color: var(--faint); }
+.empty-state .empty-icon .ic, .empty-state .empty-icon svg { width: 22px; height: 22px; }
+.async-stat .ic, .async-stat svg { width: 14px; height: 14px; vertical-align: -2px; }

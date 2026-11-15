@@ -20,6 +20,7 @@ export interface SortState {
   dir: 1 | -1;
 }
 
+/** The one table component; `DataTable` is the same component under its design-system name. */
 export function SortTable<R>({ id, caption, columns, rows, rowKey, onRow, sort, onSort, pageSize, empty }: {
   id?: string;
   caption?: string;
@@ -91,3 +92,5 @@ export function SortTable<R>({ id, caption, columns, rows, rowKey, onRow, sort, 
     </div>
   );
 }
+
+export { SortTable as DataTable, type SortCol as Col };

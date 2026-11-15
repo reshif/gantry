@@ -10,6 +10,7 @@ import { pickProject } from "../lib/routes";
 import { usePrefs } from "../lib/prefs";
 import { useActors } from "../ui/actors";
 import { Btn, Empty, Tabs } from "../ui/primitives";
+import { Async } from "../ui/async";
 import { HealthChip, useCatalog, type PView } from "./projects/kit";
 import { TABS, membersOf, type CfgState } from "./project-config/ctx";
 import { OverviewTab, MembersTab } from "./project-config/overview";
@@ -28,7 +29,8 @@ const fresh = (): CfgState => ({ tab: linked()?.tab ?? "overview", gate: linked(
 export default function ProjectConfigView() {
   const me = useMe();
   const prefs = usePrefs();
-  const projects = (useProjects().data ?? []) as PView[];
+  const projectsQ = useProjects();
+  const projects = (projectsQ.data ?? []) as PView[];
   const people = usePeople().data ?? [];
   const cat = useCatalog();
   const actor = useActors();
@@ -44,7 +46,8 @@ export default function ProjectConfigView() {
 
   if (!me) return null;
   if (!pid) return <div className="view"><Empty title="No project" text="Pick a project in the top bar." /></div>;
-  if (!p || !cat) return <div className="view pcf" />;
+  if (!p) return <div className="view pcf">{projectsQ.data ? <Empty id="pcf-gone" title="Project not found" text="It may have been removed, or you no longer have a role on it." /> : <Async query={projectsQ} what="this project" id="pcf-project">{() => null}</Async>}</div>;
+  if (!cat) return <div className="view pcf" />;
 
   const dirtyN = Object.keys(s.drafts).filter((g) => JSON.stringify(s.drafts[g]) !== JSON.stringify(p.approvers[g])).length;
   const count = (id: string): number | null => (id === "approvers" && dirtyN ? dirtyN : id === "members" ? membersOf(people, p).length : id === "classes" ? p.flow.classes.filter((c) => c.enabled !== false).length : id === "flow" ? p.flow.order.length : null);

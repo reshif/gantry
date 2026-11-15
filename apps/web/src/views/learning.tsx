@@ -10,6 +10,7 @@ import { useCan } from "../api/can";
 import { ops } from "../api/ops";
 import { useLearningFindings, useLearningProposals, useLearningSettings, useLearningSignals } from "../api/queries";
 import { Btn, LockNote, Tabs, ViewHead } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { dec } from "./mcp/kit";
@@ -22,9 +23,12 @@ export { learningFocus } from "./learning/focus";
 
 export default function LearningView() {
   const ui = useUI();
-  const findings = useLearningFindings().data ?? [];
-  const proposals = useLearningProposals().data ?? [];
-  const signals = useLearningSignals(30).data ?? [];
+  const fq = useLearningFindings();
+  const pq = useLearningProposals();
+  const sq = useLearningSignals(30);
+  const findings = fq.data ?? [];
+  const proposals = pq.data ?? [];
+  const signals = sq.data ?? [];
   const settings = useLearningSettings().data;
   const perm = dec(useCan("learning.apply"));
   const [tab, setTab] = useState("proposals");
@@ -60,15 +64,15 @@ export default function LearningView() {
   };
 
   const body = tab === "findings"
-    ? <FindingsTab findings={findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />
-    : tab === "signals" ? <SignalsTab signals={signals} />
-    : <ProposalsTab proposals={proposals} status={status} setStatus={setStatus} hi={hi} onFocusFinding={focusFinding} />;
+    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
+    : tab === "signals" ? <Async query={sq} what="learning signals" id="ln-signals">{() => <SignalsTab signals={signals} />}</Async>
+    : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} status={status} setStatus={setStatus} hi={hi} onFocusFinding={focusFinding} />}</Async>;
   return (
     <div className="view view-learning">
       <ViewHead
         title="Learning"
         sub="What the factory learns from its own outcomes: repeated rejections, send-backs, reverts and misses become proposed changes to skills, guidelines, evals, guardrails, approver rules and routes."
-        meta={[["Open findings", String(openFindings)], ["To review", String(open)], ["Applied", String(proposals.filter((lp) => lp.status === "accepted").length)], ["Verified", String(proposals.filter((lp) => lp.status === "verified").length)], ["Signals 7d", String(week)]]}
+        meta={[["Open findings", qState(fq, () => String(openFindings))], ["To review", qState(pq, () => String(open))], ["Applied", qState(pq, () => String(proposals.filter((lp) => lp.status === "accepted").length))], ["Verified", qState(pq, () => String(proposals.filter((lp) => lp.status === "verified").length))], ["Signals 7d", qState(sq, () => String(week))]]}
         actions={settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" small icon={on ? "x" : "check"} id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined} />
       {perm.allowed ? null : <LockNote decision={perm} what="Applying learning proposals" />}
       {settings && !on ? (

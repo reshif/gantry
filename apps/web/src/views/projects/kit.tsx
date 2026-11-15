@@ -184,60 +184,11 @@ export function MiniBelt({ cat, project, counts, cls, labels, stationsOff, gates
 
 /* ---------- table ---------- */
 
-export interface Col<R> {
-  key: string;
-  label: string;
-  render?: (row: R) => ReactNode;
-  align?: "end";
-  hideSmall?: boolean;
-}
+/** The one table: `ui/SortTable`. Columns sort only when they say how. */
+export { SortTable as DataTable, type SortCol as Col } from "../../ui/SortTable";
 
-/** Responsive table (legacy G.dataTable without sorting; the portfolio sorts before rendering). */
-export function DataTable<R>({ id, caption, columns, rows, rowKey, empty }: { id?: string; caption?: string; columns: Col<R>[]; rows: R[]; rowKey: (r: R) => string; empty?: { title: string; text?: string } }) {
-  if (!rows.length) return <Empty title={empty?.title ?? "Nothing here"} text={empty?.text ?? "No rows match."} />;
-  return (
-    <div className="dtable-wrap" id={id}>
-      <table className="dtable">
-        {caption ? <caption className="sr-only">{caption}</caption> : null}
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={rowKey(r)} data-key={rowKey(r)}>
-              {columns.map((c) => (
-                <td key={c.key} data-label={c.label} className={`${c.align === "end" ? "is-end" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
-                  {c.render ? c.render(r) : null}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-export function EmptyState({ id, icon, title, text, action }: { id?: string; icon?: string; title: ReactNode; text?: ReactNode; action?: ReactNode }) {
-  return (
-    <div className="empty empty-state" id={id}>
-      {icon ? (
-        <div className="empty-icon" aria-hidden="true">
-          <Icon name={icon} />
-        </div>
-      ) : null}
-      <div className="empty-title">{title}</div>
-      {text ? <p>{text}</p> : null}
-      {action ?? null}
-    </div>
-  );
-}
+/** Kept as a name for existing call sites; it is the shared `Empty`. */
+export const EmptyState = Empty;
 
 /** Crumbs above the page title (legacy pageHeader crumbs). */
 export function Crumbs({ items }: { items: Array<{ label: string; href?: string }> }) {

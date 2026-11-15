@@ -344,3 +344,12 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     expect(document.querySelector("#ln-sig-table th[aria-sort]")?.getAttribute("aria-sort")).toBe("ascending");
   });
 });
+
+describe("Learning screen: a read the person may not make", () => {
+  it("says Not visible to you, not an empty list, when the primary read is refused", async () => {
+    setup({ "GET /api/v1/learning/proposals": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include learning.view." } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("ln-proposals-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.getElementById("ln-proposals-hidden")?.textContent).toContain("learning.view");
+  });
+});

@@ -80,6 +80,13 @@ beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash =
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("API & triggers: keys", () => {
+  it("says Not visible to you when the keys read is refused, and the key count is not a 0", async () => {
+    setup({ "GET /api/v1/api-keys": () => ({ status: 403, body: { ok: false, msg: "Needs api.keys on a project." } }) });
+    mount();
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.getByText("Needs api.keys on a project.")).toBeTruthy();
+  });
+
   it("lists keys with their prefix, scope, status and expiry, and counts what is live", async () => {
     setup();
     mount();

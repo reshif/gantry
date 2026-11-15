@@ -54,16 +54,28 @@ The vertical position of the title is the same on every page.
 
 | Need | Use | Not |
 |---|---|---|
-| Page title, actions | `PageHeader` | hand-made headings |
-| Numbers row | `StatStrip` | `titleblock`, ad-hoc KPI grids |
-| Status | `Status` | `chip-warn`, `.health`, bespoke pills |
-| Small label | `Tag` | ad-hoc `*-tag` classes |
-| Loading, error, empty, no access | `Async`, `EmptyState` | blank areas, raw messages |
-| Table | `DataTable` | raw `<table>` |
-| Filters | `FilterBar` (inline, compact, URL-synced) | a grid of labelled selects |
-| Factory line | `FlowStrip` | rows of boxes |
-| Writes | `useCommand` | hand-written busy flags |
-| Permission checks | `useGuard` | role-name checks |
+| Page title, actions, stats row | `ViewHead` (`title`, `sub`, `actions`, `meta`) | hand-made headings, floating stat boxes |
+| Status | `Status` (`primitives.tsx`) | `chip-warn`, bespoke pills |
+| A read: loading, failed, not visible, empty | `Async` (`async.tsx`) | `useX().data ?? []` for the page's main list |
+| A number in the stats row from a read | `qState(query, d => …)` | a bare `String(list.length)` that shows 0 when the read failed |
+| Empty state | `Empty` (`primitives.tsx`) | blank areas, a second empty component |
+| A write | `useCommand(fn, { ok })` (`async.tsx`) | hand-written `busy` flags and toasts |
+| Permission on a control | `useCan(action, ctx)` passed as `guard` to `Btn` | role-name checks, hiding the control without a reason |
+| Table | `DataTable` (= `SortTable`, `SortTable.tsx`) | raw `<table>` for lists of records |
+| Filters | `.filters` row of `Field`s: one 32 px "Label value" box each | a grid of labelled selects, a boxed form |
+| Factory line | `MiniBelt` (compact) and the Floor line (full) | rows of boxes |
+
+### How the data states read
+
+| State | What the person sees |
+|---|---|
+| Loading | A quiet placeholder, only after 180 ms so fast loads don't flash |
+| 403 | "Not visible to you" with the server's reason. Never an empty list, never "0" |
+| Other failure | "Couldn't load <what>" with the reason and **Try again** |
+| Empty | The page's own empty state: what this is, and how to add the first one |
+| Refetch fails after data arrived | The data stays; the failure doesn't wipe the screen |
+
+A write refuses a second click while the first is running, and its refusal toast carries the server's reason ("Needs Project Admin").
 
 ## 5. Text
 

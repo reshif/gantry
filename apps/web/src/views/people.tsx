@@ -12,6 +12,7 @@ import { useCan } from "../api/can";
 import { navigate } from "../lib/router";
 import { ExplainDenial } from "./console/ExplainDenial";
 import { Avatar, Btn, LockNote, Panel, Select, Toggle, ViewHead, Empty, type Decision } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { Icon, Logo } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { useActors } from "../ui/actors";
@@ -26,8 +27,10 @@ const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }
 
 export default function PeopleView() {
   const me = useMe();
-  const people = usePeople().data ?? [];
-  const teams = useTeams().data ?? [];
+  const peopleQ = usePeople();
+  const teamsQ = useTeams();
+  const people = peopleQ.data ?? [];
+  const teams = teamsQ.data ?? [];
   const projects = useProjects().data ?? me?.projects ?? [];
   const matrix = useAccessMatrix().data;
   const { repos } = useAllRepos();
@@ -56,19 +59,21 @@ export default function PeopleView() {
       <ViewHead
         title="People & teams"
         sub="Teams group people. Roles are granted on the factory or on one project, so a person can be an Engineer here and a Reviewer there."
-        meta={[["People", String(people.length)], ["Teams", String(teams.length)], ["Factory Admins", String(admins.length)], ["Custom roles", String(roles.filter((r) => r.custom).length)], ["Invites pending", String(invited)]]}
+        meta={[["People", qState(peopleQ, () => String(people.length))], ["Teams", qState(teamsQ, () => String(teams.length))], ["Factory Admins", qState(peopleQ, () => String(admins.length))], ["Custom roles", String(roles.filter((r) => r.custom).length)], ["Invites pending", qState(peopleQ, () => String(invited))]]}
         actions={<><Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} /><Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /></>}
       />
       <LockNote decision={perm} what="Invites, teams and roles" />
       <p className="ppl-defaults muted small" id="ppl-defaults">
         <Icon name="shield" /> <strong>Default for new people: no access until granted.</strong> Give access to a team (every member inherits it while they are in it) or to one person. A person's effective roles are their own grants plus their teams' grants.
       </p>
+      <Async query={peopleQ} what="people" id="ppl">{() => (
       <div className="people-grid">
         <Panel title="Organisation" cls="ppl-tree">
           <OrgTree people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} sel={selected?.id ?? null} onSel={setSel} q={q} setQ={setQ} perm={perm} invite={invite} teamDlg={teamDlg} orgName={org?.name ?? ""} plant={org?.plant ?? ""} />
         </Panel>
         {selected ? <MemberDetail key={selected.id} p={selected} teams={teams} projects={projects as Project[]} roles={roles} perm={perm} admins={admins} viewerId={viewerId} roleName={roleName} /> : <Empty title="No people yet" />}
       </div>
+      )}</Async>
     </div>
   );
 }
@@ -323,25 +328,25 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         <Select id="ppl-eff-proj" aria-label="Project for effective permissions" value={effProject} onChange={setEffProject} options={[{ value: "all", label: "All projects" }, ...visible.map((x) => ({ value: x.id, label: x.name }))]} />
       </div>
       <p className="muted small ppl-pad">Roles, scope, release windows, on-call rules and freezes combined, as the policy engine decides them right now. Hover or focus a cell for the deciding rule and where the role comes from. P-numbers mark cells decided by a policy; T marks cells allowed only through a team.</p>
-      {eff.isPending ? <p className="muted small ppl-pad">Loading permissions.</p> : eff.isError || !eff.data ? <p className="muted small ppl-pad">Permissions could not be loaded.</p> : (
+      <Async query={eff} what="effective permissions" id="ppl-eff" rows={4}>{(effData) => (
         <>
-          <EffTable p={p} eff={eff.data} project={effProject} cell={cell} onPick={setCell} />
-          <CellDetail p={p} eff={eff.data} cell={cell} decision={selDecision.data} />
+          <EffTable p={p} eff={effData} project={effProject} cell={cell} onPick={setCell} />
+          <CellDetail p={p} eff={effData} cell={cell} decision={selDecision.data} />
           <h3 className="sub-h">Factory-wide</h3>
           <ul className="caps caps-grid ppl-pad">
-            {eff.data.actions.filter((a) => a.scope === "factory").map((a) => {
-              const d = eff.data.factory[a.id];
+            {effData.actions.filter((a) => a.scope === "factory").map((a) => {
+              const d = effData.factory[a.id];
               const ok = !!d?.allowed;
               return (
-                <li key={a.id} className={ok ? "ok" : "no"} data-tip={d?.reason + (ok && d?.sources?.length ? ` Role ${sourceText(d.sources, eff.data.teams)}.` : "")} tabIndex={0}>
+                <li key={a.id} className={ok ? "ok" : "no"} data-tip={d?.reason + (ok && d?.sources?.length ? ` Role ${sourceText(d.sources, effData.teams)}.` : "")} tabIndex={0}>
                   <Icon name={ok ? "check" : "lock"} />
-                  <span>{a.name}{ok && d?.sources?.length && !d.sources.includes("direct") ? <span className="muted small">{` · ${sourceText(d.sources, eff.data.teams)}`}</span> : null}</span>
+                  <span>{a.name}{ok && d?.sources?.length && !d.sources.includes("direct") ? <span className="muted small">{` · ${sourceText(d.sources, effData.teams)}`}</span> : null}</span>
                 </li>
               );
             })}
           </ul>
         </>
-      )}
+      )}</Async>
       <h3 className="sub-h">History</h3>
       <div className="ppl-pad"><HistoryList id={p.id} limit={8} /></div>
     </section>

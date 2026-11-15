@@ -26,6 +26,15 @@ function Host() {
 }
 
 describe("Work orders table", () => {
+  it("says the work orders are not visible on a 403, and the header counts don't read as 0", async () => {
+    mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
+    mount(<WorkOrdersView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.queryByText("No work orders match")).toBeNull();
+    const shipped = Array.from(document.querySelectorAll(".titleblock div")).find((d) => d.textContent?.startsWith("Shipped"));
+    expect(shipped?.querySelector(".async-stat")).toBeTruthy();
+  });
+
   it("asks the server for the sorted, filtered page and pages with the cursor", async () => {
     const first = WOS.slice(0, 3);
     const calls = mockApi({

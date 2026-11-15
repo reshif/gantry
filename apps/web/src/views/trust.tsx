@@ -8,6 +8,7 @@ import { useEffect, useMemo } from "react";
 import { useAgents, useProjects, useTrustCells } from "../api/queries";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Empty, Tabs, ViewHead } from "../ui/primitives";
+import { Async } from "../ui/async";
 import { DemotionsTab, PolicyTab, ProposalsTab } from "./trust/Tabs";
 import { LadderTab, type LadderProps } from "./trust/Ladder";
 import { rerender, trustFocus, trustUi, useTrustUi, type CellOut, type TrustTab } from "./trust/kit";
@@ -20,7 +21,8 @@ export default function TrustView() {
   useTrustUi();
   const prefs = usePrefs();
   const cat = useCatalog();
-  const projects = ((useProjects().data ?? []) as Project[]).filter((p) => p.status !== "archived");
+  const pq = useProjects();
+  const projects = ((pq.data ?? []) as Project[]).filter((p) => p.status !== "archived");
   const agents = useAgents().data ?? [];
   const all = useTrustCells();
   const project = (trustUi.project && projects.some((p) => p.id === trustUi.project) ? trustUi.project : null) ?? (prefs.project && projects.some((p) => p.id === prefs.project) ? prefs.project : null) ?? projects[0]?.id ?? null;
@@ -37,8 +39,9 @@ export default function TrustView() {
   }, [focus, tr]); // eslint-disable-line react-hooks/exhaustive-deps
   const agentName = useMemo(() => (id: string) => agents.find((a) => a.id === id)?.name ?? id, [agents]);
   const clsName = useMemo(() => (id: string) => cat?.classes.find((c) => c.id === id)?.name ?? id, [cat]);
+  if (pq.data === undefined) return <div className="view view-trust"><ViewHead title="Trust" /><Async query={pq} what="projects" id="trust-projects">{() => null}</Async></div>;
   if (!projects.length) return <div className="view view-trust"><ViewHead title="Trust" /><Empty title="No projects to show" text="You have no role on an active project." /></div>;
-  if (!tr || !cat) return <div className="view view-trust"><ViewHead title="Trust" /><div className="skeleton" aria-busy="true" /></div>;
+  if (!tr || !cat) return <div className="view view-trust"><ViewHead title="Trust" /><Async query={all} what="trust levels" id="trust">{() => null}</Async></div>;
   const proj = projects.find((p) => p.id === project)!;
   const pending = proposals.filter((x) => x.status === "pending");
   const saved = pending.reduce((t, x) => t + (x.savedPerWeek || 0), 0);

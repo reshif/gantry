@@ -4,6 +4,7 @@ import { useHome, useMe, useProjects } from "../api/queries";
 import { hasCommand, runCommand } from "../lib/commands";
 import { fmt } from "@gantry/domain";
 import { Btn, Empty, ViewHead } from "../ui/primitives";
+import { Async } from "../ui/async";
 import type { HomeFull } from "./home/data";
 import { ApproversWatch, AttentionStrip, FactoryHealth, InMotion, ProjectsSummary, SetupChecklist, WaitingOnYou, openNewProject } from "./home/sections";
 import type { PView } from "./projects/kit";
@@ -18,19 +19,12 @@ export default function HomeView() {
   const submit = useCan("wo.submit");
   const home = q.data as unknown as HomeFull | undefined;
   if (!me) return null;
-  if (q.isError) {
-    return (
-      <div className="view hm">
-        <ViewHead title="Home" />
-        <Empty title="Home could not be loaded" text="Reload the page, or try again in a moment." />
-      </div>
-    );
-  }
   if (!home) {
+    // Loading, refused and failed look the same here as on every other page.
     return (
       <div className="view hm">
         <ViewHead title="Home" />
-        <p className="muted small">Loading…</p>
+        <Async query={q} what="your home page" id="hm">{() => null}</Async>
       </div>
     );
   }

@@ -261,7 +261,7 @@ describe("Trust screen: demotions", () => {
     expect(t.textContent).toContain("Post-release incident on WO-77");
     expect(document.body.textContent).not.toMatch(/simulat/i);
     fireEvent.click(document.getElementById("tr-demof-revert")!);
-    await waitFor(() => expect(document.getElementById("tr-demo-table")).toBeNull());
+    await waitFor(() => expect(document.querySelector("#tr-demo-table table")).toBeNull());
     expect(document.body.textContent).toContain("No demotions");
   });
   it("records a real post-release outcome with its attribution on a shipped work order", async () => {
@@ -362,5 +362,14 @@ describe("Trust screen: ceilings, criteria and the switch", () => {
     expect((document.getElementById("tr-sample") as HTMLInputElement).disabled).toBe(true);
     expect(document.getElementById("tr-crit-save-2")!.getAttribute("aria-disabled")).toBe("true");
     expect(document.getElementById("tr-switch")!.getAttribute("aria-disabled")).toBe("true");
+  });
+});
+
+describe("Trust screen: a read the person may not make", () => {
+  it("says Not visible to you, not an empty list, when the primary read is refused", async () => {
+    setup({ "GET /api/v1/trust/cells": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include trust.view." } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("trust-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.getElementById("trust-hidden")?.textContent).toContain("trust.view");
   });
 });

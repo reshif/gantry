@@ -240,9 +240,16 @@ export function Who({ id }: { id: string | null | undefined }) {
 
 /* ---------- layout pieces ---------- */
 
-export function Empty({ title, text, action, id }: { title: ReactNode; text?: ReactNode; action?: ReactNode; /** Legacy G.emptyState id, kept for fidelity and tests. */ id?: string }) {
+/** The one empty state: a title, a line of text, an optional action. `icon` and `tone` are for the shared
+ *  not-visible and failed states (ui/async); a screen's own empty state is usually quiet, without them. */
+export function Empty({ title, text, action, id, icon, tone }: { title: ReactNode; text?: ReactNode; action?: ReactNode; id?: string; icon?: string; tone?: "block" }) {
   return (
-    <div className="empty" id={id}>
+    <div className={`empty${icon ? " empty-state" : ""}${tone ? ` empty-${tone}` : ""}`} id={id}>
+      {icon ? (
+        <div className="empty-icon" aria-hidden="true">
+          <Icon name={icon} />
+        </div>
+      ) : null}
       <div className="empty-title">{title}</div>
       {text != null ? <p>{text}</p> : null}
       {action ?? null}

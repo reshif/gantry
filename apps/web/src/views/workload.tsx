@@ -10,6 +10,7 @@ import { useCan } from "../api/can";
 import { useMe, useWorkload } from "../api/queries";
 import type { Workload, WorkloadSuggestion } from "../api/types";
 import { Btn, Empty, Field, Segmented, Select, Tabs, ViewHead } from "../ui/primitives";
+import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { fmt } from "@gantry/domain";
 import { useUI } from "../ui/overlay-context";
@@ -52,7 +53,8 @@ export default function WorkloadView() {
   const m = q.data;
 
   if (!me) return null;
-  if (!m) return <div className="view view-workload">{q.isError ? <Empty title="Workload is not available" text={(q.error as Error)?.message ?? "Try again shortly."} /> : null}</div>;
+  // until the snapshot arrives the page is its header and the shared loading, not-visible or failed state
+  if (!m) return <div className="view view-workload"><ViewHead title="Workload" /><Async query={q} what="workload" id="wl">{() => null}</Async></div>;
 
   const setSort = (id: string, s: SortState): void => setSorts((x) => ({ ...x, [id]: s }));
   const openPerson = (pid: string): void => ui.drawer.open(`workload:${pid}`, (close) => <PersonDrawer pid={pid} m={m} close={close} />);
@@ -100,7 +102,7 @@ export default function WorkloadView() {
           {sugg.length ? (
             <ol className="wl-sugg-list">{sugg.slice(0, allSugg ? sugg.length : 5).map((s) => <SuggestionItem key={s.key} s={s} m={m} openDelegate={openDelegate} />)}</ol>
           ) : (
-            <div className="empty empty-state" id="wl-sugg-empty"><div className="empty-icon" aria-hidden="true"><Icon name="check" /></div><div className="empty-title">No suggestions</div><p>No single points of failure, long waits or pending trust proposals in this scope.</p></div>
+            <Empty id="wl-sugg-empty" icon="check" title="No suggestions" text="No single points of failure, long waits or pending trust proposals in this scope." />
           )}
         </div>
       </section>

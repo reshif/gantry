@@ -75,8 +75,10 @@ export interface Usage {
 
 /** Everything the data screens already read: a connection's type, who may use it, and what depends on it. */
 export function useIntegrationData() {
-  const types = (useIntegrationTypes().data ?? []) as TypeRow[];
-  const insts = useIntegrations().data ?? [];
+  const typesQ = useIntegrationTypes();
+  const instsQ = useIntegrations();
+  const types = (typesQ.data ?? []) as TypeRow[];
+  const insts = instsQ.data ?? [];
   const projects = useProjects().data ?? [];
   const triggers = useTriggers().data ?? [];
   const { repos } = useAllRepos();
@@ -106,7 +108,7 @@ export function useIntegrationData() {
     const rp = typeOf(inst).category === "source" ? repos.filter((r) => (r as unknown as { source?: string }).source === inst.id) : [];
     return { routes, implicit, overrides, triggers: trig, repos: rp };
   };
-  return { types, insts, projects, live, repos, typeOf, pname, usage, integrationFor };
+  return { types, insts, typesQ, instsQ, projects, live, repos, typeOf, pname, usage, integrationFor };
 }
 
 export const usageCount = (u: Usage): number => u.routes.length + u.implicit.length + u.overrides.length + u.triggers.length + u.repos.length;

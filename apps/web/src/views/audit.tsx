@@ -4,6 +4,7 @@ import { fmt } from "@gantry/domain";
 import { useAuditVerify, useMe, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { Btn, Empty, Field, Select, ViewHead } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { ActorCell, AuditDrawer, CatChip } from "./audit/Detail";
@@ -66,7 +67,7 @@ export default function AuditView() {
       <ViewHead
         title="Audit"
         sub="Append-only ledger of every human, agent, API key and trigger action, including denied attempts. Nothing here can be edited or deleted."
-        meta={[["Entries", String(sum?.entries ?? 0)], ["Denied", String(sum?.denied ?? 0)], ["Config changes", String(sum?.changes ?? 0)], ["Head digest", (sum?.head ?? "").slice(0, 8)]]}
+        meta={[["Entries", qState(feed, () => String(sum?.entries ?? 0))], ["Denied", qState(feed, () => String(sum?.denied ?? 0))], ["Config changes", qState(feed, () => String(sum?.changes ?? 0))], ["Head digest", qState(feed, () => (sum?.head ?? "").slice(0, 8))]]}
         actions={canVerify ? <Btn label="Verify chain" kind="ghost" icon="shield" id="aud-verify" onClick={() => void runVerify()} /> : undefined}
       />
       {scoped ? (
@@ -115,9 +116,13 @@ export default function AuditView() {
           {dirty ? <Btn label="Clear filters" small kind="ghost" id="aud-clear" onClick={clear} /> : null}
         </div>
       </div>
-      {feed.isError ? (
-        <Empty title="The ledger could not be loaded" text="Reload the page, or try again in a moment." />
-      ) : rows.length ? (
+      <Async
+        query={feed}
+        what="the audit ledger"
+        id="aud"
+        isEmpty={(d) => !d.pages.some((pg) => pg.items.length)}
+        empty={<Empty id="aud-empty" icon="ledger" title={dirty ? "No entries match" : "The ledger is empty"} text={dirty ? "Clear the filters to see the full ledger." : "Every change, denial and sign-in is written here as it happens."} />}
+      >{() => (
         <div className="table-scroll ledger" data-keep-scroll="aud-ledger">
           <table className="table table-compact aud-table">
             <thead>
@@ -141,15 +146,7 @@ export default function AuditView() {
             </tbody>
           </table>
         </div>
-      ) : feed.isLoading ? (
-        <p className="muted small">Loading the ledger…</p>
-      ) : (
-        <div className="empty" id="aud-empty">
-          <Icon name="ledger" />
-          <div className="empty-title">{dirty ? "No entries match" : "The ledger is empty"}</div>
-          <p>{dirty ? "Clear the filters to see the full ledger." : "Every change, denial and sign-in is written here as it happens."}</p>
-        </div>
-      )}
+      )}</Async>
       {feed.hasNextPage ? (
         <div className="more">
           <Btn label={`Show ${Math.min(PAGE, total - rows.length)} more`} id="aud-more" onClick={() => void feed.fetchNextPage()} />

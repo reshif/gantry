@@ -89,6 +89,14 @@ afterEach(() => {
 });
 
 describe("MCP servers screen", () => {
+  it("says Not visible to you when the registry read is refused, instead of No MCP servers yet", async () => {
+    setup({ "GET /api/v1/mcp/servers": () => ({ status: 403, body: { ok: false, msg: "Needs Factory Admin to see MCP servers." } }) });
+    mount();
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.getByText("Needs Factory Admin to see MCP servers.")).toBeTruthy();
+    expect(screen.queryByText("No MCP servers yet")).toBeNull();
+  });
+
   it("lists the registry with health, tool counts, sensitivity and the scope line, and shows the first server's detail", async () => {
     setup();
     mount();

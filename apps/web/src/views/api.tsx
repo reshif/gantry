@@ -13,6 +13,7 @@ import { PlayTab } from "./api/Playground";
 import { RefTab } from "./api/Reference";
 import { TriggersTab } from "./api/Triggers";
 import { useApiData } from "./api/kit";
+import { Async, qState } from "../ui/async";
 
 export default function ApiView() {
   const d = useApiData();
@@ -29,11 +30,19 @@ export default function ApiView() {
       <ViewHead
         title="API & triggers"
         sub="Submit and follow work orders from other systems, and open work from source control, issue trackers, CI and schedules. Triggers are off until you switch them on."
-        meta={[["Active keys", String(active.length)], ["Requests 24h", String(d.last24h)], ["Rate limited 24h", String(d.limited24h)], ["Triggers on", `${on.length} of ${d.triggers.length}`]]}
+        meta={[["Active keys", qState(d.keysQ, () => String(active.length))], ["Requests 24h", qState(d.logQ, () => String(d.last24h))], ["Rate limited 24h", qState(d.logQ, () => String(d.limited24h))], ["Triggers on", qState(d.trigQ, () => `${on.length} of ${d.triggers.length}`)]]}
       />
       <Tabs idPrefix="api-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="api-tab-panel" role="tabpanel" aria-labelledby={`api-tab-${tab}`}>
-        {tab === "ref" ? <RefTab d={d} /> : tab === "play" ? <PlayTab d={d} /> : tab === "log" ? <LogTab d={d} /> : tab === "triggers" ? <TriggersTab d={d} /> : tab === "limits" ? <LimitsTab d={d} /> : <KeysTab d={d} onCreated={() => undefined} />}
+        {tab === "ref" ? <RefTab d={d} /> : tab === "play" ? <PlayTab d={d} /> : tab === "log" ? (
+          <Async query={d.logQ} what="the request log" id="api-log">{() => <LogTab d={d} />}</Async>
+        ) : tab === "triggers" ? (
+          <Async query={d.trigQ} what="triggers" id="api-trig">{() => <TriggersTab d={d} />}</Async>
+        ) : tab === "limits" ? (
+          <Async query={d.cfgQ} what="the API limits" id="api-limits">{() => <LimitsTab d={d} />}</Async>
+        ) : (
+          <Async query={d.keysQ} what="API keys" id="api-keys">{() => <KeysTab d={d} onCreated={() => undefined} />}</Async>
+        )}
       </div>
     </div>
   );

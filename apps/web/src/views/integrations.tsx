@@ -9,6 +9,7 @@ import { DAY, type IntegrationInstance } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useDeliveries } from "../api/queries";
 import { Btn, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { Dialog } from "../ui/Overlay";
 import { useUI } from "../ui/overlay-context";
 import { AddIntegration } from "./integrations/AddDialog";
@@ -80,12 +81,18 @@ export default function IntegrationsView() {
       <ViewHead
         title="Integrations"
         sub="Where Gantry reads work from and where it sends cards. Several connections per type, each scoped to projects. A new connection stays switched off until you turn it on."
-        meta={[["Connected", String(all.length - off)], ["Failing", String(failing)], ["Disabled", String(off)], ["Types", `${d.types.length} (${customN} custom)`], ["Failed deliveries 24h", String(failed)], ...(unrouted ? [["No connection 24h", String(unrouted)] as [string, string]] : [])]}
+        meta={[["Connected", qState(d.instsQ, () => String(all.length - off))], ["Failing", qState(d.instsQ, () => String(failing))], ["Disabled", qState(d.instsQ, () => String(off))], ["Types", qState(d.typesQ, () => `${d.types.length} (${customN} custom)`)], ["Failed deliveries 24h", qState(failedQ, () => String(failed))], ...(unrouted ? [["No connection 24h", String(unrouted)] as [string, string]] : [])]}
         actions={<><Btn label="Add integration" kind="primary" icon="plus" id="int-add" guard={add} onClick={() => addDialog(null)} /><Btn label="Build custom integration" icon="tool" id="int-build" guard={add} onClick={() => setTab("custom")} /></>}
       />
       <Tabs idPrefix="int-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="int-tab-panel" role="tabpanel" aria-labelledby={`int-tab-${tab}`}>
-        {tab === "catalogue" ? <CatalogueTab nav={nav} openType={openType} onAdd={addDialog} goBuild={() => setTab("custom")} /> : tab === "custom" ? <CustomTab onAddInstance={addDialog} openType={openType} /> : <ConnectedTab nav={nav} openInstance={openInstance} />}
+        {tab === "catalogue" ? (
+          <Async query={d.typesQ} what="the integration catalogue" id="int-cat">{() => <CatalogueTab nav={nav} openType={openType} onAdd={addDialog} goBuild={() => setTab("custom")} />}</Async>
+        ) : tab === "custom" ? (
+          <Async query={d.typesQ} what="custom integration types" id="int-custom">{() => <CustomTab onAddInstance={addDialog} openType={openType} />}</Async>
+        ) : (
+          <Async query={d.instsQ} what="connected integrations" id="int">{() => <ConnectedTab nav={nav} openInstance={openInstance} />}</Async>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 /** Add an MCP server (legacy addDialog). Discovery is real: the edge connects to the server and lists its tools. The server rediscovers on add, so the browser's list only carries the admin's choices. */
 import { useState } from "react";
+import { useCommand } from "../../ui/async";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { Btn, Field, LockNote, Select } from "../../ui/primitives";
@@ -22,20 +23,21 @@ export function AddMcp({ close, onAdded }: { close: () => void; onAdded: (id: st
   const [sens, setSens] = useState("internal");
   const [tools, setTools] = useState<Found[] | null>(null);
   const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   /** Anything that changes what would answer invalidates the discovered list. */
   const touch = <T,>(set: (v: T) => void) => (v: T) => { set(v); setTools(null); setStatus(""); };
 
   const conn = () => ({ name: name.trim(), transport, url: url.trim(), authMode, ...(authMode === "header" ? { authHeader: header.trim() || "x-api-key" } : {}), ...(authMode !== "none" && secret ? { secret } : {}) });
 
+  // the outcome shows inline in the status line, so no toast either way
+  const discoverCmd = useCommand(ops.discoverTools, { ok: false, toastFail: false });
+  const busy = discoverCmd.busy;
   const discover = async () => {
     setErr("");
     if (!name.trim() || !url.trim()) { ui.toast("Enter a name and URL first.", "error"); return; }
-    setBusy(true);
     setTools(null);
-    const r = await ops.discoverTools(conn());
-    setBusy(false);
+    const r = await discoverCmd.run(conn());
+    if (!r) return;
     if (!r.ok) { setStatus(r.msg); return; }
     const found = ((r as unknown as { tools?: Array<{ name: string; write: boolean; allowed: boolean; hint?: "read" | "write" }> }).tools ?? []);
     setTools(found.length ? found.map((t) => ({ name: t.name, write: t.write, allowed: t.allowed, hint: t.hint })) : null);

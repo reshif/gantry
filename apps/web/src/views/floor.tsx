@@ -10,6 +10,7 @@ import { DAY, MIN, fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
 import { Btn, Empty, Segmented, ViewHead, type Decision } from "../ui/primitives";
+import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { pickProject } from "../lib/routes";
@@ -215,17 +216,11 @@ export default function FloorView() {
       </div>
     );
   }
-  if (!value && error) {
-    return (
-      <div className="view view-floor">
-        <Empty title="The floor could not be loaded" text="Reload the page, or try again in a moment." />
-      </div>
-    );
-  }
   if (!value) {
+    const f = error ? failureOf(error) : null;
     return (
       <div className="view view-floor">
-        <p className="muted small">Loading the floor…</p>
+        {!f ? <Loading id="floor-loading" label="the floor" /> : f.hidden ? <NotVisible id="floor-hidden" what="this floor" reason={f.msg} /> : <LoadFailed id="floor-error" what="the floor" msg={f.msg} onRetry={() => window.location.reload()} />}
       </div>
     );
   }

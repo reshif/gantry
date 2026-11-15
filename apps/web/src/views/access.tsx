@@ -7,6 +7,8 @@ import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useAccessMatrix, useFreezes, useMe, usePeople, usePolicies, useProjects } from "../api/queries";
 import { Btn, Empty, LockNote, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { useOutcome, useAllRepos } from "./govern/data";
 import { FreezeList, useFreezeDialog } from "./access/Freezes";
 import { MatrixTable } from "./access/Matrix";
@@ -20,10 +22,13 @@ const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }
 export default function AccessView() {
   const me = useMe();
   const outcome = useOutcome();
-  const m = useAccessMatrix().data;
+  const mQ = useAccessMatrix();
+  const m = mQ.data;
   const people = usePeople().data ?? [];
-  const policies = usePolicies().data ?? [];
-  const freezes = useFreezes().data ?? [];
+  const policiesQ = usePolicies();
+  const freezesQ = useFreezes();
+  const policies = policiesQ.data ?? [];
+  const freezes = freezesQ.data ?? [];
   const projects = (useProjects().data ?? me?.projects ?? []) as Project[];
   const { repos } = useAllRepos();
   const perm = dec(useCan("policy.edit"));
@@ -123,7 +128,7 @@ export default function AccessView() {
       <ViewHead
         title="Access"
         sub="Who can do what, where and when. Roles grant actions per project; policies narrow or extend them by project, hour and on-call status; freezes override everything for release."
-        meta={[["Roles", String(roles.length) + (custom ? ` (${custom} custom)` : "")], ["Actions", String(actions.length)], ["Policies on", String(policies.filter((p) => p.enabled).length)], ["Freezes active", String(activeFz)]]}
+        meta={[["Roles", qState(mQ, () => String(roles.length) + (custom ? ` (${custom} custom)` : ""))], ["Actions", qState(mQ, () => String(actions.length))], ["Policies on", qState(policiesQ, () => String(policies.filter((p) => p.enabled).length))], ["Freezes active", qState(freezesQ, () => String(activeFz))]]}
       />
       <LockNote decision={perm} what="The role matrix, policies and freezes" />
       <Simulator
@@ -141,7 +146,8 @@ export default function AccessView() {
           <div className="acc-tab-tools">{tools}</div>
         </div>
         <div className={`panel-body${tab === "matrix" ? " flush" : ""}`} id="acc-tab-panel" role="tabpanel">
-          {tab === "matrix" ? <MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} hl={hl} evaluated={evaluated} people={people} newRole={newRole} />
+          <Async query={(tab === "freezes" ? freezesQ : tab === "policies" ? policiesQ : mQ) as UseQueryResult<unknown>} what={tab === "freezes" ? "freezes" : tab === "policies" ? "policies" : "the access matrix"} id="acc">{() => (
+          tab === "matrix" ? <MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} hl={hl} evaluated={evaluated} people={people} newRole={newRole} />
           : tab === "freezes" ? <FreezeList freezes={freezes} repos={repos} hlFreeze={evaluated && (evaluated.result.decision.rule as { freeze?: string }).freeze ? (evaluated.result.decision.rule as { freeze?: string }).freeze! : null} />
           : tab === "roles" ? <RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} />
           : (
@@ -155,7 +161,8 @@ export default function AccessView() {
                 window.scrollTo({ top: 0 });
               }}
             />
-          )}
+          )
+          )}</Async>
         </div>
       </section>
     </div>

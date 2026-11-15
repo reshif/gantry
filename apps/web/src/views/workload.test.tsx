@@ -103,6 +103,13 @@ afterEach(() => {
 });
 
 describe("Workload screen (legacy workload.js on the real API)", () => {
+  it("says Not visible to you when the workload read is refused", async () => {
+    setup({ "GET /api/v1/workload": () => ({ status: 403, body: { ok: false, msg: "Needs workload.view." } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("wl-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.getElementById("wl-hidden")?.textContent).toContain("Needs workload.view.");
+  });
+
   it("shows the title block, the bus-factor note and the people table with counts beside every rate", async () => {
     setup();
     mount();

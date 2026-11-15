@@ -57,6 +57,13 @@ async function showSession(s: WoSession, extra: Parameters<typeof mockApi>[0] = 
 }
 
 describe("Conversations list", () => {
+  it("says the conversations are not visible on a 403", async () => {
+    mockApi({ ...readsFor(W), "GET /api/v1/work-order-sessions": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
+    mount(<ConversationsView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.queryByText("Nothing waits on you")).toBeNull();
+  });
+
   it("lists work-order sessions with who waits on whom and the latest message; it has no forms; a row opens that work order's session", async () => {
     showList([row(), row({ id: "WO-9", title: "Other", waitingOn: "agent", unread: false, latest: null, started: false })]);
     expect(await screen.findByText("Waiting on you")).toBeTruthy();

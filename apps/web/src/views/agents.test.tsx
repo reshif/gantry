@@ -521,3 +521,20 @@ describe("Skills screen", () => {
   });
 });
 
+
+describe("Agents screen: a read the person may not make", () => {
+  it("says Not visible to you, not an empty list, when the primary read is refused", async () => {
+    setup({ "GET /api/v1/agents": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include agent.view." } }) });
+    mount(<AgentsView />);
+    await waitFor(() => expect(document.getElementById("agents-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.getElementById("agents-hidden")?.textContent).toContain("agent.view");
+  });
+});
+
+describe("Skills screen: a read the person may not make", () => {
+  it("says Not visible to you when the skills read is refused", async () => {
+    setup({ "GET /api/v1/skills": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include skill.view." } }) });
+    mount(<SkillsView />);
+    await waitFor(() => expect(document.getElementById("skills-hidden")?.textContent).toContain("Not visible to you"));
+  });
+});

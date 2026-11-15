@@ -9,6 +9,7 @@ import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useMe, usePeople, useSecurity, useSessions, useSignins } from "../api/queries";
 import { Btn, Field, LockNote, Panel, Segmented, Select, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { ExplainDenial } from "./console/ExplainDenial";
@@ -28,13 +29,18 @@ function useSet(sec: SecuritySettings | undefined) {
 
 export default function SecurityView() {
   const me = useMe();
-  const sec = useSecurity().data;
-  const sessions = useSessions({ all: true }).data ?? [];
-  const signinsRaw = useSignins({ limit: 200, all: "1" }).data;
+  const secQ = useSecurity();
+  const sec = secQ.data;
+  const sessionsQ = useSessions({ all: true });
+  const signinsQ = useSignins({ limit: 200, all: "1" });
+  const sessions = sessionsQ.data ?? [];
+  const signinsRaw = signinsQ.data;
   const signins: SignIn[] = Array.isArray(signinsRaw) ? signinsRaw : signinsRaw?.items ?? [];
   const perm = dec(useCan("security.manage"));
   const [tab, setTab] = useState("signin");
-  if (!sec || !me) return null;
+  if (!me) return null;
+  // without the settings the page is its header and the shared loading, not-visible or failed state, never a blank page
+  if (!sec) return <div className="view view-security"><ViewHead title="Security" /><Async query={secQ} what="security settings" id="sec">{() => null}</Async></div>;
   const active = sessions.filter((x) => !x.revoked).length;
   const fails = signins.filter((x) => x.outcome === "failure" && Date.now() - x.at < 86400000).length;
   const thisIp = me.session.ip;
@@ -44,7 +50,7 @@ export default function SecurityView() {
       <ViewHead
         title="Security"
         sub="How people get in and how long they stay. Every change here is audited under auth."
-        meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", sec.mfa.policy === "all" ? "everyone" : sec.mfa.policy === "admins" ? "admins" : "off"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", String(active)], ["Failed sign-ins 24 h", String(fails)]]}
+        meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", sec.mfa.policy === "all" ? "everyone" : sec.mfa.policy === "admins" ? "admins" : "off"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", qState(sessionsQ, () => String(active))], ["Failed sign-ins 24 h", qState(signinsQ, () => String(fails))]]}
       />
       {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /><ExplainDenial id="sec-explain" action="security.manage" /></div> : null}
       <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in and sessions" }, { id: "network", label: "Domains and network" }, { id: "sessions", label: "Active sessions", count: active }, { id: "history", label: "Sign-in history", count: signins.length }]} />
@@ -52,9 +58,9 @@ export default function SecurityView() {
         {tab === "network" ? (
           <div className="two-col sec-cols"><DomainsPanel perm={perm} sec={sec} mine={me.person.email.split("@")[1] ?? null} /><IpPanel perm={perm} sec={sec} thisIp={thisIp} sessions={sessions} /></div>
         ) : tab === "sessions" ? (
-          <Panel><SessionsTab perm={perm} sessions={sessions} sec={sec} currentId={me.session.id} viewerId={me.person.id} /></Panel>
+          <Async query={sessionsQ} what="sessions" id="sec-sessions">{() => <Panel><SessionsTab perm={perm} sessions={sessions} sec={sec} currentId={me.session.id} viewerId={me.person.id} /></Panel>}</Async>
         ) : tab === "history" ? (
-          <Panel><HistoryTab signins={signins} /></Panel>
+          <Async query={signinsQ} what="sign-in history" id="sec-history">{() => <Panel><HistoryTab signins={signins} /></Panel>}</Async>
         ) : (
           <div className="two-col sec-cols">
             <div className="sec-stack"><SsoPanel perm={perm} sec={sec} /><MfaPanel perm={perm} sec={sec} /></div>

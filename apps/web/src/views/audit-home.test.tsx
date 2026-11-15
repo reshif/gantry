@@ -74,6 +74,13 @@ afterEach(() => {
 describe("Audit", () => {
   const page = (items: unknown[], next: string | null = null, total = items.length) => ({ items, next, total, summary: SUMMARY });
 
+  it("says Not visible to you when the ledger read is refused, and the entry counts are not 0", async () => {
+    setup(SAM, { "GET /api/v1/audit": () => ({ status: 403, body: { ok: false, msg: "Needs audit.view." } }) });
+    mount(<AuditView />);
+    await waitFor(() => expect(document.getElementById("aud-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.getElementById("aud-empty")).toBeNull();
+  });
+
   it("lists the ledger with counts, outcome chips and digests, and asks the server for filters", async () => {
     const calls = setup(SAM, {
       "GET /api/v1/audit": () => ({ body: page([row(3, { outcome: "denied", action: "policy.edit.denied", target: "action policy.edit" }), row(2, { before: "a", after: "b", category: "config", action: "station.add" }), row(1)]) }),

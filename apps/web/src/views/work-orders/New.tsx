@@ -13,6 +13,7 @@ import { useProjectRepos } from "../floor/kit";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { Field, Select } from "../../ui/primitives";
+import { useCommand } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { registerCommand } from "../../lib/commands";
 import { navigate } from "../../lib/router";
@@ -68,7 +69,9 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const [prio, setPrio] = useState("auto");
   const [source, setSource] = useState(preset.source ?? "web");
   const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
+  // The refusal is shown inline (setErr), so the command toasts nothing itself.
+  const send = useCommand(ops.submitWO, { ok: false, toastFail: false });
+  const busy = send.busy;
   const key = useRef(globalThis.crypto.randomUUID());
   const can = useCanMany(projects.map((p) => ({ action: "wo.submit", project: p.id })));
   const project = projects.find((p) => p.id === projectId);
@@ -98,13 +101,12 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
       setErr("Give the work order a title.");
       return;
     }
-    setBusy(true);
-    const r = await ops.submitWO(
+    const r = await send.run(
       { project: projectId, repo, title: title.trim(), description: desc.trim(), priority: prio === "auto" ? undefined : prio, requestedCls: cls || undefined, attachments: att.split(",").map((s) => s.trim()).filter(Boolean), source },
       source === "console" ? "console" : "web",
       key.current,
     );
-    setBusy(false);
+    if (!r) return;
     if (!r.ok) {
       setErr(r.msg);
       return;

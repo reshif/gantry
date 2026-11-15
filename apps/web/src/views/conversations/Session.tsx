@@ -9,6 +9,7 @@ import type { WoCard } from "@gantry/domain";
 import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { Btn, Chip, Empty, Who } from "../../ui/primitives";
+import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { setProject } from "../../lib/prefs";
@@ -139,8 +140,7 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
 
   const lastId = s?.messages.at(-1)?.id;
   const firstSession = useMemo(() => s?.messages.findIndex((m) => m.data.mode !== "legacy") ?? -1, [s]);
-  if (q.isError) return <Empty title="Cannot open the conversation" text="This work order may not exist, or you may not have access to its project." action={<Btn label="Back to conversations" onClick={back} />} />;
-  if (!s) return <div className="osx" aria-busy="true"><p className="muted">Loading the conversation...</p></div>;
+  if (!s) return <div className="osx"><Async query={q} what="this conversation" id="conv-session">{() => null}</Async><Btn label="Back to conversations" small kind="ghost" icon="back" onClick={back} /></div>;
 
   const agentName = s.agent.name;
   const submit = () => { const t = draft.trim(); if (!t) return; setDraft(""); send({ kind: "message", text: t }); };

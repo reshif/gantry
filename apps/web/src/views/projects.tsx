@@ -5,6 +5,7 @@ import { useMe, useProjects, useTemplates } from "../api/queries";
 import { usePrefs } from "../lib/prefs";
 import { Btn, Tabs, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
+import { Async, qState } from "../ui/async";
 import { registerCommand } from "../lib/commands";
 import { Portfolio } from "./projects/portfolio";
 import { TemplatesTab } from "./projects/templates";
@@ -15,8 +16,10 @@ export default function ProjectsView() {
   const ui = useUI();
   const me = useMe();
   const prefs = usePrefs();
-  const projects = ((useProjects().data ?? []) as PView[]).slice();
-  const tpls = useTemplates().data ?? [];
+  const projectsQ = useProjects();
+  const tplsQ = useTemplates();
+  const projects = ((projectsQ.data ?? []) as PView[]).slice();
+  const tpls = tplsQ.data ?? [];
   const create = useCan("project.create");
   const [tab, setTab] = useState<"projects" | "templates">("projects");
   const current = projects.find((p) => p.id === prefs.project) ?? null;
@@ -34,16 +37,20 @@ export default function ProjectsView() {
     <div className="view prj">
       <ViewHead
         title="Projects" sub="Each project is a line in the factory: its own repos, flow, approvers, budget and kill switch."
-        meta={[["Projects", String(live)], ["Archived", String(archived)], ["Templates", String(tpls.length)], ["Killed", String(killed)]]}
+        meta={[["Projects", qState(projectsQ, () => String(live))], ["Archived", qState(projectsQ, () => String(archived))], ["Templates", qState(tplsQ, (d) => String(d.length))], ["Killed", qState(projectsQ, () => String(killed))]]}
         actions={<Btn kind="primary" icon="plus" id="prj-new" guard={create} label="New project" onClick={() => openWizard()} />}
       />
       <Tabs idPrefix="prj-tab" items={[{ id: "projects", label: "Portfolio", count: projects.length }, { id: "templates", label: "Templates", count: tpls.length }]} active={tab} onChange={(id) => setTab(id as typeof tab)} />
       <div role="tabpanel" id="prj-tab-panel" aria-labelledby={`prj-tab-${tab}`}>
         {tab === "templates" ? (
-          <TemplatesTab projects={projects} current={current} onUse={openWizard} />
+          <Async query={tplsQ} what="templates" id="prj-tpl">
+            {() => <TemplatesTab projects={projects} current={current} onUse={openWizard} />}
+          </Async>
         ) : (
           <div className="prj-stack">
-            <Portfolio ctx="prj-pf" projects={projects} defaultLayout="rows" roles />
+            <Async query={projectsQ} what="projects" id="prj-pf">
+              {() => <Portfolio ctx="prj-pf" projects={projects} defaultLayout="rows" roles />}
+            </Async>
           </div>
         )}
       </div>

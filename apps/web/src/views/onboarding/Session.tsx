@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { assessorLabel, fmt, type OnboardFinding, type SessionCard } from "@gantry/domain";
 import { useRepos } from "../../api/queries";
 import { Btn, Chip, Empty, Who } from "../../ui/primitives";
+import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { decide, markSeen, sendTurn, useSession, type Session, type SessionMessage } from "./session-api";
@@ -188,8 +189,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   }, [s, r]);
 
   if (!r) return <Empty title="No such repo" text="This repo is not in the project." action={<Btn label="Back to the pipeline" onClick={back} />} />;
-  if (q.isError) return <Empty title="Cannot open the session" text="You may not have access to this repo's onboarding." action={<Btn label="Back to the pipeline" onClick={back} />} />;
-  if (!s) return <div className="osx" aria-busy="true"><p className="muted">Loading the conversation...</p></div>;
+  if (!s) return <div className="osx"><Async query={q} what="this onboarding session" id="onb-session">{() => null}</Async><Btn label="Back to the pipeline" small kind="ghost" icon="back" onClick={back} /></div>;
 
   const o = r.onboarding;
   const lastMsg = s.messages.at(-1)?.id;

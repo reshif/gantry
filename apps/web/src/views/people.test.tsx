@@ -79,6 +79,13 @@ afterEach(() => {
 });
 
 describe("People & teams: roles for teams", () => {
+  it("says Not visible to you when the people read is refused, and the counts are not 0", async () => {
+    setup({ "GET /api/v1/people": () => ({ status: 403, body: { ok: false, msg: "Needs people.view." } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("ppl-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.body.textContent).not.toContain("No people yet");
+  });
+
   it("states the default for new people and lists each team's roles", async () => {
     setup();
     mount();

@@ -61,6 +61,12 @@ const open = async (repoId: string) => { fireEvent.click(await byId(`onb-detail-
 const locked = (id: string): string | null => { const e = document.getElementById(id)!; return e.getAttribute("aria-disabled") === "true" ? e.getAttribute("data-reason") : null; };
 
 describe("Onboarding: pipeline", () => {
+  it("says the repos are not visible on a 403", async () => {
+    api([], { "GET /api/v1/projects/storefront/repos": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
+    mount(<OnboardingView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+  });
+
   it("shows the project's repos by stage, what needs a person and what waits for a merge, from the real stage of each repo", async () => {
     api([find("web-storefront"), GREEN, find("search-indexer"), repo("notifications", (r) => { r.onboarding.stage = "connected"; r.onboarding.pr = null; r.onboarding.findings = []; })]);
     mount(<OnboardingView />);

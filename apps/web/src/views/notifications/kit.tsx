@@ -51,7 +51,8 @@ export function defaultTarget(type: string, p: Pick<Project, "key">, inst: Integ
 export function useNtData() {
   const me = useMe();
   const prefs = usePrefs();
-  const projects = useProjects().data ?? [];
+  const projectsQ = useProjects();
+  const projects = projectsQ.data ?? [];
   const types = (useIntegrationTypes().data ?? []) as TypeRow[];
   const insts = useIntegrations().data ?? [];
   const customCards = useCardTemplates().data ?? [];
@@ -89,7 +90,7 @@ export function useNtData() {
     for (const p of projects) for (const r of p.notifications ?? []) if (r.template === id) out.push(`${p.key} ${r.id}`);
     return out;
   };
-  return { me, project, visible, projects, types, insts, destInsts, instOf, typeOf, tplInfo, tplOptions, customCards, routesUsingTpl, versions, routes: project?.notifications ?? [] };
+  return { me, project, visible, projects, projectsQ, types, insts, destInsts, instOf, typeOf, tplInfo, tplOptions, customCards, routesUsingTpl, versions, routes: project?.notifications ?? [] };
 }
 
 export function targetError(d: Dest, ctx: { project: Project; instOf: (d: Dest) => IntegrationInstance | null; typeOf: (id: string) => TypeRow }): string | null {

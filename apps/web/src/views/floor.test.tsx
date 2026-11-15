@@ -17,6 +17,12 @@ const bodyOf = (calls: Call[], method: string, path: string) => calls.filter((c)
 const live = WOS.filter((w) => w.state !== "done" && w.state !== "killed" && w.bay !== "declined");
 
 describe("Floor: belt", () => {
+  it("says the floor is not visible on a 403", async () => {
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
+    mount(<FloorView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+  });
+
   it("draws every station and its gate, the coding slots, the bays and the shipped strip from the floor read", async () => {
     mockApi();
     mount(<FloorView />);

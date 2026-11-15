@@ -8,6 +8,7 @@ import { fmt } from "@gantry/domain";
 import { useMemo } from "react";
 import { usePrefs } from "../lib/prefs";
 import { Tabs, ViewHead, Empty } from "../ui/primitives";
+import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useProjects } from "../api/queries";
 import { FactoryTab } from "./evals/Factory";
@@ -51,7 +52,7 @@ export default function EvalsView() {
     const p = projects.find((x) => x.id === c.project)?.name ?? c.project;
     return `${a} · ${c.cls} · ${p}${c.repo ? ` · ${c.repo}` : ""}`;
   }, [d.agents, projects]);
-  if (d.pending && !d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><div className="skeleton" aria-busy="true" /></div>;
+  if (d.q.data === undefined) return <div className="view view-evals"><ViewHead title="Evals" /><Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
   if (!d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
   const regs = regressionsOf(d);
   let eligible = 0;

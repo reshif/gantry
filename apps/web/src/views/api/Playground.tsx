@@ -3,6 +3,7 @@
  * bearer only, Idempotency-Key header). Gantry keeps only each key's hash, so a key cannot be filled in for you: paste it.
  */
 import { useState } from "react";
+import { useCommand } from "../../ui/async";
 import { classesOf, fmt } from "@gantry/domain";
 import { invalidateSlices } from "../../api/keys";
 import { useRepos } from "../../api/queries";
@@ -39,7 +40,6 @@ export function PlayTab({ d }: { d: ApiData }) {
   const cat = useCatalog();
   const [f, setF] = useState({ secret: "", project: prefs.project && d.visIds.includes(prefs.project) ? prefs.project : d.vis[0]?.id ?? "", repo: "", cls: "", priority: "P2", title: "Retry failed payout webhooks with backoff", description: "Payout webhooks fail permanently after one 5xx. Retry with exponential backoff.", idem: "" });
   const [last, setLast] = useState<Last | null>(null);
-  const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (v: string) => setF((x) => ({ ...x, [k]: v }));
   const reposQ = useRepos(f.project);
   const repos = reposQ.data ?? [];
@@ -51,11 +51,13 @@ export function PlayTab({ d }: { d: ApiData }) {
   const body: Record<string, unknown> = { repo, title: f.title, description: f.description, ...(cls ? { class: cls } : {}), priority: f.priority };
   const req = `POST /api/v1/projects/${f.project}/work-orders\nAuthorization: Bearer ${prefix ? `${prefix}…` : "(paste a key)"}\nContent-Type: application/json\nIdempotency-Key: ${f.idem || "(a fresh one per send)"}\n\n${JSON.stringify(body, null, 2)}`;
   const need: Decision | null = f.secret.trim().startsWith("gk_") ? null : { allowed: false, reason: "Paste a key from the Keys tab.", needs: "A key" };
+  // the toast carries the HTTP status, so useCommand only guards against a double send
+  const sendCmd = useCommand(sendPublic, { ok: false, toastFail: false });
+  const busy = sendCmd.busy;
   const send = async () => {
     if (!f.title.trim()) { ui.toast("A title is required by the API.", "error"); return; }
-    setBusy(true);
-    const r = await sendPublic(f.secret.trim(), f.project, body, f.idem || globalThis.crypto.randomUUID());
-    setBusy(false);
+    const r = await sendCmd.run(f.secret.trim(), f.project, body, f.idem || globalThis.crypto.randomUUID());
+    if (!r) return;
     setLast(r);
     ui.toast(`${r.status} ${r.msg}`, r.ok ? "ok" : "error");
     invalidateSlices(["requestLog", ...(r.ok ? ["workOrders", "apiKeys"] : [])]);

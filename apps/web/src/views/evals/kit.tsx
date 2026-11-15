@@ -44,10 +44,13 @@ export interface EvalsData {
   skills: NonNullable<ReturnType<typeof useSkills>["data"]>;
   models: Array<{ value: string; label: string }>;
   pending: boolean;
+  /** The page's primary reads (agents, suites, runs, scorecards) as one query for `Async`: data once all have loaded, the first failure otherwise. */
+  q: { data: true | undefined; error: Error | null; isPending: boolean; isError: boolean; refetch: () => Promise<unknown> };
 }
 
 export function useEvalsData(): EvalsData {
-  const agents = (useAgents().data ?? []) as unknown as AgentRow[];
+  const agentsQ = useAgents();
+  const agents = (agentsQ.data ?? []) as unknown as AgentRow[];
   const suitesQ = useSuites();
   const suites = suitesQ.data ?? [];
   const runQ = useAllSuiteRuns();
@@ -61,6 +64,7 @@ export function useEvalsData(): EvalsData {
   return {
     agents, suites, runs, runsOf: (id) => runs.filter((r) => r.suite === id), scorecards: sc.data ?? {}, extra: fx.data, skills, models,
     pending: suitesQ.isPending || sc.isPending || runQ.isPending,
+    q: combine([agentsQ, suitesQ, runQ, sc]),
   };
 }
 
@@ -141,3 +145,16 @@ export function ScoreN({ r, short }: { r: Pick<RunRow, "score" | "count" | "pass
 
 export const asAgent = (a: AgentRow): Agent => a as unknown as Agent;
 export type { ReactNode };
+
+type QLike = { data: unknown; error: Error | null; isPending: boolean; isError: boolean; refetch: () => Promise<unknown> };
+function combine(qs: QLike[]): EvalsData["q"] {
+  const failed = qs.find((x) => x.isError && x.data === undefined);
+  const ready = qs.every((x) => x.data !== undefined);
+  return {
+    data: ready ? true : undefined,
+    error: failed?.error ?? null,
+    isPending: !ready && !failed,
+    isError: !!failed,
+    refetch: () => Promise.all(qs.filter((x) => x.isError).map((x) => x.refetch())),
+  };
+}

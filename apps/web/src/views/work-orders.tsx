@@ -12,6 +12,7 @@ import { useMe, useProject } from "../api/queries";
 import { useProjectRepos } from "./floor/kit";
 import type { Page, WorkOrder } from "../api/types";
 import { Btn, Field, Select, StateChip, ViewHead } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useActors } from "../ui/actors";
 import { navigate } from "../lib/router";
@@ -54,7 +55,8 @@ export default function WorkOrdersView() {
   const [f, setF] = useState<Filters>(NONE);
   const [sort, setSort] = useState<{ k: SortKey; dir: 1 | -1 }>({ k: "id", dir: -1 });
   const projectId = me ? pickProject(me, prefs.project) : null;
-  const project = useProject(projectId).data ?? null;
+  const projectQ = useProject(projectId);
+  const project = projectQ.data ?? null;
   const repos = useProjectRepos(projectId);
   const submit = useCan("wo.submit", projectId ? { project: projectId } : {});
   const q = useDebounced(f.q.trim(), 250);
@@ -96,7 +98,7 @@ export default function WorkOrdersView() {
   if (!projectId || !project) {
     return (
       <div className="view">
-        <EmptyState title={projectId ? "Loading" : "No project"} text={projectId ? "Loading the work orders…" : "You do not have a project to show."} />
+        {projectId ? <Async query={projectQ} what="this project" id="wo-project">{() => null}</Async> : <EmptyState title="No project" text="You do not have a project to show." />}
       </div>
     );
   }
@@ -140,7 +142,6 @@ export default function WorkOrdersView() {
       </th>
     );
   };
-  const stats = stat.data;
   return (
     <div className="view wo-view">
       <div id="wo-head">
@@ -148,11 +149,11 @@ export default function WorkOrdersView() {
           title="Work orders"
           sub="Everything this project has taken on. Open a row for its traveler, or the record icon for the full lifecycle record."
           meta={[
-            ["In flight", String(stats?.open ?? "…")],
-            ["At Intake", String(atIntake.length)],
-            ["Shipped", String(stats?.done ?? "…")],
-            ["Killed", String(stats?.killed ?? "…")],
-            ["All time", String(stats?.all ?? "…")],
+            ["In flight", qState(stat, (d) => String(d.open))],
+            ["At Intake", qState(live, () => String(atIntake.length))],
+            ["Shipped", qState(stat, (d) => String(d.done))],
+            ["Killed", qState(stat, (d) => String(d.killed))],
+            ["All time", qState(stat, (d) => String(d.all))],
           ]}
           actions={
             <>
@@ -201,7 +202,7 @@ export default function WorkOrdersView() {
           {filtered ? <Btn label="Clear filters" small kind="ghost" id="wo-clear-top" onClick={clear} /> : null}
         </div>
       </div>
-      {rows.length ? (
+      <Async query={list} what="work orders" id="wo-list">{() => rows.length ? (
         <div className="dtable-wrap wo-table" id="wo-table">
           <div className="dtable-scroll">
             <table className="dtable is-clickable">
@@ -284,11 +285,11 @@ export default function WorkOrdersView() {
         <EmptyState
           id="wo-empty"
           icon="list"
-          title={list.isPending ? "Loading" : "No work orders match"}
-          text={list.isPending ? "Loading the work orders…" : filtered ? "Clear the search or filters." : "Submit the first work order to a Ready repo."}
+          title="No work orders match"
+          text={filtered ? "Clear the search or filters." : "Submit the first work order to a Ready repo."}
           action={filtered ? <Btn label="Clear filters" id="wo-clear" onClick={clear} /> : undefined}
         />
-      )}
+      )}</Async>
     </div>
   );
 }

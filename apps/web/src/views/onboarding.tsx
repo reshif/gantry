@@ -5,6 +5,7 @@ import { useMe, useProjects, useRepos } from "../api/queries";
 import { usePrefs } from "../lib/prefs";
 import { navigate, useHash } from "../lib/router";
 import { Btn, Empty, Tabs, ViewHead } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { AgentTab } from "./onboarding/Agent";
 import { RepoDrawer, rememberTab } from "./onboarding/Drawer";
@@ -18,9 +19,11 @@ export default function OnboardingView() {
   const me = useMe();
   const hash = useHash();
   const prefs = usePrefs();
-  const projects = useProjects().data ?? [];
+  const projectsQ = useProjects();
+  const projects = projectsQ.data ?? [];
   const project = projects.find((p) => p.id === prefs.project) ?? null;
-  const repos = (useRepos(project?.id).data ?? []) as RepoV[];
+  const reposQ = useRepos(project?.id);
+  const repos = (reposQ.data ?? []) as RepoV[];
   const connect = useCan("repo.onboard", { project: project?.id });
   const [tab, setTab] = useState<"pipeline" | "agent">("pipeline");
   const openRepo = (repoId: string, dtab?: string) => {
@@ -33,7 +36,7 @@ export default function OnboardingView() {
     ui.open((close) => <ConnectWizard project={project} repos={repos} close={close} onDone={(id) => { setTab("pipeline"); navigate("onboarding", id); }} />);
   };
   if (!me) return null;
-  if (!project) return <div className="view"><Empty title="No project" text="You do not have a project to show." /></div>;
+  if (!project) return <div className="view">{projectsQ.data ? <Empty title="No project" text="You do not have a project to show." /> : <Async query={projectsQ} what="your projects" id="onb-projects">{() => null}</Async>}</div>;
   // `#/p/<project>/onboarding/<repo>`: the onboarding session of one repo (the pipeline's rows open it).
   if (hash.param) return <div className="view onb-view"><SessionPage projectId={project.id} repoId={hash.param} back={() => navigate("onboarding", null)} details={() => openRepo(hash.param!)} /></div>;
   const ready = repos.filter((r) => r.onboarding.stage === "ready").length;
@@ -43,11 +46,11 @@ export default function OnboardingView() {
       <ViewHead
         title="Onboarding"
         sub="A repo must reach Ready before anyone can submit work orders to it. Gantry assesses each repo and opens a PR with the changes it needs. The Onboarding Agent adds its judgement and drafts when a model vendor is connected; otherwise the work is rule-based."
-        meta={[["Repos", String(repos.length)], ["Ready", `${ready} / ${repos.length}`], ["In progress", String(repos.length - ready - attention)], ["Needs action", String(attention)]]}
+        meta={[["Repos", qState(reposQ, () => String(repos.length))], ["Ready", qState(reposQ, () => `${ready} / ${repos.length}`)], ["In progress", qState(reposQ, () => String(repos.length - ready - attention))], ["Needs action", qState(reposQ, () => String(attention))]]}
         actions={<Btn kind="primary" icon="plus" id="onb-connect" label="Connect repo" guard={connect} onClick={wizard} />}
       />
       <Tabs idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: repos.length }, { id: "agent", label: "Onboarding agent and guidelines" }]} active={tab} onChange={(t) => setTab(t as typeof tab)} />
-      {tab === "pipeline" ? <Pipeline project={project.id} repos={repos} open={(id) => navigate("onboarding", id)} details={openRepo} /> : <AgentTab project={project} />}
+      {tab === "pipeline" ? <Async query={reposQ} what="repos" id="onb-repos">{() => <Pipeline project={project.id} repos={repos} open={(id) => navigate("onboarding", id)} details={openRepo} />}</Async> : <AgentTab project={project} />}
     </div>
   );
 }

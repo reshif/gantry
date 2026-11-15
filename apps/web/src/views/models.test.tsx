@@ -470,3 +470,12 @@ describe("vendor templates and model discovery", () => {
     expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/vendors/anthropic/discover" });
   });
 });
+
+describe("Models screen: a read the person may not make", () => {
+  it("says Not visible to you, not an empty list, when the primary read is refused", async () => {
+    setup({ "GET /api/v1/vendors": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include model.view." } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("models-hidden")?.textContent).toContain("Not visible to you"));
+    expect(document.getElementById("models-hidden")?.textContent).toContain("model.view");
+  });
+});

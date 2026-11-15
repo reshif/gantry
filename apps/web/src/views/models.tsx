@@ -11,7 +11,8 @@
 import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useProjects, useRouting, useVendors } from "../api/queries";
-import { Btn, Empty, ViewHead } from "../ui/primitives";
+import { Btn, ViewHead } from "../ui/primitives";
+import { Async, qState } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { useCatalog } from "./projects/kit";
 import { useAllRepos } from "./govern/data";
@@ -32,7 +33,6 @@ export default function ModelsView() {
   const projects = useProjects().data ?? [];
   const cat = useCatalog();
   const { repos } = useAllRepos();
-  const routing = rq.data;
 
   const mtd = vendors.reduce((t, v) => t + (v.mtd || 0), 0);
   const bud = vendors.reduce((t, v) => t + (v.budget || 0), 0);
@@ -46,7 +46,7 @@ export default function ModelsView() {
       <ViewHead
         title="Models"
         sub="Vendors the factory may call, what each costs, where data is processed, and how work is routed between them."
-        meta={[["Default", routing?.defaultModel ?? "–"], ["Vendors connected", `${vendors.filter((v) => v.connected).length} / ${vendors.length}`], ["Models on", String(enabledN)], ["Spend MTD", `${fmt.money0(mtd)} / ${fmt.money0(bud)}`]]}
+        meta={[["Default", qState(rq, (r) => r.defaultModel ?? "–")], ["Vendors connected", qState(vq, () => `${vendors.filter((v) => v.connected).length} / ${vendors.length}`)], ["Models on", qState(vq, () => String(enabledN))], ["Spend MTD", qState(vq, () => `${fmt.money0(mtd)} / ${fmt.money0(bud)}`)]]}
         actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} />}
       />
       {degraded.length ? (
@@ -54,13 +54,22 @@ export default function ModelsView() {
           {`${degraded.map((v) => `${v.name} is ${v.health}${v.latency ? ` (p50 ${v.latency} ms)` : ""}.`).join(" ")} Calls to it fall back to the same model on another allowed vendor when it errors.`}
         </Callout>
       ) : null}
-      {vq.isError || rq.isError ? <Empty title="Models could not be loaded" text="Reload the page, or try again in a moment." /> : null}
-      <div className="vendor-grid">
-        {routing ? vendors.map((v) => <VendorPanel key={v.id} v={v} vendors={vendors} routing={routing} agents={agents} cat={cat} />) : null}
-      </div>
-      {routing ? <RoutingPanel routing={routing} vendors={vendors} agents={agents} repos={repos} projects={projects} cat={cat} /> : null}
-      {routing ? <PricesPanel vendors={vendors} /> : null}
-      {routing ? <BudgetsPanel projects={projects} /> : null}
+      <Async query={vq} what="model vendors" id="models">
+        {() => (
+          <Async query={rq} what="model routing" id="models-routing">
+            {(r) => (
+              <>
+                <div className="vendor-grid">
+                  {vendors.map((v) => <VendorPanel key={v.id} v={v} vendors={vendors} routing={r} agents={agents} cat={cat} />)}
+                </div>
+                <RoutingPanel routing={r} vendors={vendors} agents={agents} repos={repos} projects={projects} cat={cat} />
+                <PricesPanel vendors={vendors} />
+                <BudgetsPanel projects={projects} />
+              </>
+            )}
+          </Async>
+        )}
+      </Async>
     </div>
   );
 }

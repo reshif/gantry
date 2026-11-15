@@ -84,6 +84,12 @@ afterEach(() => {
 const text = (): string => document.body.textContent ?? "";
 
 describe("Home: one page", () => {
+  it("says Home is not visible on a 403, and shows a retry on other failures", async () => {
+    setup(ASHA, adminHome(), { extra: { "GET /api/v1/home": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) } });
+    mount();
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+  });
+
   it("a Factory Admin on a live org with a repo onboarding sees attention, the checklist and the project, once each", async () => {
     const calls = setup(ASHA, adminHome());
     mount();

@@ -174,6 +174,13 @@ describe("People", () => {
 });
 
 describe("Access", () => {
+  it("says Not visible to you when the policies read is refused, instead of No policies yet", async () => {
+    setup({ "GET /api/v1/policies": () => ({ status: 403, body: { ok: false, msg: "Needs policy.view." } }) });
+    mount(<AccessView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.queryByText("No policies yet")).toBeNull();
+  });
+
   it("renders policies, and the engine-owned ones cannot be edited", async () => {
     setup();
     mount(<AccessView />);
@@ -259,6 +266,13 @@ describe("Access", () => {
 });
 
 describe("Security", () => {
+  it("says Not visible to you when the settings read is refused, instead of a blank page", async () => {
+    setup({ "GET /api/v1/security": () => ({ status: 403, body: { ok: false, msg: "Needs security.manage." } }) });
+    mount(<SecurityView />);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Security" })).toBeTruthy();
+  });
+
   it("toggles a setting with PATCH {path, value} and the settings version", async () => {
     const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 8 } }) });
     mount(<SecurityView />);

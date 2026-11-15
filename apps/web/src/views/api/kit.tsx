@@ -44,6 +44,10 @@ export interface ApiData {
   insts: IntegrationInstance[];
   typeOf: (id: string) => { id: string; name: string; category: string; source?: boolean | undefined; custom?: boolean | undefined } | undefined;
   loading: boolean;
+  keysQ: ReturnType<typeof useApiKeys>;
+  trigQ: ReturnType<typeof useTriggers>;
+  logQ: ReturnType<typeof useApiRequests>;
+  cfgQ: ReturnType<typeof useApiConfig>;
 }
 
 export function useApiData(): ApiData {
@@ -65,7 +69,7 @@ export function useApiData(): ApiData {
     me, vis, visIds, pname: (id) => projects.find((p) => p.id === id)?.name ?? id,
     keys: (keysQ.data ?? []).filter((k) => visIds.includes(k.project)), cfg: cfgQ.data, triggers: (trigQ.data ?? []).filter((t) => visIds.includes(t.project)),
     log: items, last24h: extra.last24h ?? items.filter((x) => x.at > day).length, limited24h: extra.limited24h ?? items.filter((x) => x.at > day && x.status === 429).length,
-    insts, typeOf: (id) => types.find((t) => t.id === id), loading: keysQ.isPending || trigQ.isPending,
+    insts, typeOf: (id) => types.find((t) => t.id === id), loading: keysQ.isPending || trigQ.isPending, keysQ, trigQ, logQ, cfgQ,
   };
 }
 

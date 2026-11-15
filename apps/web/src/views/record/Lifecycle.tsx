@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fmt, flowOf } from "@gantry/domain";
 import { api, get, getText } from "../../api/client";
 import { Btn, Empty } from "../../ui/primitives";
+import { Loading, NotVisible, failureOf } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { reducedMotion } from "../../lib/prefs";
@@ -230,8 +231,12 @@ export function Lifecycle({ woId, compact = false }: { woId: string; compact?: b
   const d = useRecordData(woId);
   const copy = useCopyMarkdown();
   const openRecord = useOpenRecordRoute();
-  if (d.loading) return <p className="muted small">Loading the record…</p>;
-  if (d.error || !d.wo || !d.rec || !d.project || !d.cat) return <Empty title="Record unavailable" text={d.error instanceof Error ? d.error.message : "It may have been removed, or you cannot see its project."} />;
+  if (d.loading) return <Loading label="the record" />;
+  if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
+    const f = d.error ? failureOf(d.error) : null;
+    if (f?.hidden) return <NotVisible id="lc-hidden" what="this record" reason={f.msg} />;
+    return <Empty title="Record unavailable" text={d.error instanceof Error ? d.error.message : "It may have been removed, or you cannot see its project."} />;
+  }
   const pre = compact ? "lc-" : "rec-";
   const c: Ctx = { wo: d.wo, rec: d.rec, project: d.project, cat: d.cat as Catalog, pre, compact };
   const events = journeyOf(d.rec.events.map(toRecEvent));
