@@ -191,5 +191,22 @@ d("station documents and dialogue", () => {
     expect(tl.entries[1]).toMatchObject({ tool: "Read", detail: "src/jobs.py" });
     expect((await w.call("p-fatima", "GET", `/api/v1/work-orders/${id}/timeline`)).status).toBe(404);
   });
+
+  it("an approved plan's budget is enforced from the approval on, for its station only", async () => {
+    const id = await w.atStation("research", "Plan budget");
+    const att = (await w.liveAttempt(id))!;
+    const decidedAt = Date.now() - 1000;
+    await t.db.admin.query(`update work_orders set data = data || $2::jsonb where id = $1`, [id, JSON.stringify({ researchPlan: { status: "approved", questions: ["q"], hosts: ["docs.nautobot.com"], web: true, budgetUsd: 0.5, why: "w", station: "research", attempt: att.id, proposedAt: decidedAt, decidedBy: "p-meera", decidedAt } })]);
+    const run = `run-pb-${att.id}`;
+    await t.db.admin.query(`insert into runs (org_id, id, attempt_id, wo_id, state) values ($1,$2,$3,$4,'running')`, [t.orgId, run, att.id, id]);
+    const { budgetBreach } = await import("../src/areas/internal/metering.js");
+    const { loadRunCtx } = await import("../src/areas/internal/context.js");
+    const ctx = (await loadRunCtx(t.db.app, t.orgId, run))!;
+    // spend before the approval does not count
+    await t.db.admin.query(`insert into run_usage (org_id, run_id, attempt_id, wo_id, model_id, cost_micros, at) values ($1,$2,$3,$4,'m',900000, now() - interval '1 hour')`, [t.orgId, run, att.id, id]);
+    expect(await budgetBreach(t.db.app, ctx)).toBeNull();
+    await t.db.admin.query(`insert into run_usage (org_id, run_id, attempt_id, wo_id, model_id, cost_micros) values ($1,$2,$3,$4,'m',600000)`, [t.orgId, run, att.id, id]);
+    expect(await budgetBreach(t.db.app, ctx)).toMatchObject({ scope: "plan", limitMicros: 500000, spentMicros: 600000 });
+  });
 });
 

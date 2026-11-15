@@ -71,7 +71,8 @@ describe("governed web research", () => {
     expect(fetched).toEqual(["https://docs.nautobot.com/go"]);
     pages["https://a.example.org/f.zip"] = { type: "application/zip", body: "PK" };
     expect((await research({ url: "https://a.example.org/f.zip" })).status).toBe(415);
-    expect(api.of("/research/refused").length).toBe(4);
+    expect((await research({ url: "https://docs.nautobot.com/missing" })).status).toBe(502);
+    expect(api.of("/research/refused").length).toBe(5);
     expect(api.of("/research/source")).toHaveLength(0);
   });
 

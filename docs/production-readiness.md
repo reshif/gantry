@@ -135,7 +135,7 @@ The design is in [agent-experience.md §4](review/2026-11-15/agent-experience.md
   - a log of questions, assumptions and decisions that is handed between stations
   - Intake can't propose a brief while a blocking question is open
   - answers show who gave them, and "waiting for you" means the person actually asked
-- **Phase 2:**
+- **Phase 2:** done 2026-11-16, verified live on WO-1004 (Research proposed a plan for docs.nautobot.com with a $0.50 budget; a line lead approved it; the agent read 2 pages, cited them in research.md v2, and Spec reused the citations). Not done yet: a web search tool (no search provider is connected; agents read known URLs on approved hosts), streaming the timeline (it polls every 4 s while a run works), and CITE/ASK/ASSUME/injection eval cases.
   - governed web research (allow-listed, snapshotted, audited) with source records and citation chips
   - a research plan card the person approves, covering scope, domains and budget
   - a live run timeline for every station

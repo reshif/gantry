@@ -254,7 +254,8 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
     : s.next.actor === "approver" || s.next.actor === "person" ? { cls: "is-wait", text: s.next.text }
     : { cls: "is-live", text: s.waiting?.text ?? s.next.text };
   const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."}` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}: answer, correct it, or ask anything about this work order`;
-  const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : (m.data.agent ?? agentName));
+  // a station's message carries its agent's id: show the agent's name, as everywhere else
+  const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
 
   return (
     <div className="osx wos" id="wos" data-wo={s.woId}>

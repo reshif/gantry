@@ -1,3 +1,4 @@
+import { planOf } from "../workorders/research.js";
 import type { Queryable } from "@gantry/db";
 import type { RunCtx } from "./context.js";
 
@@ -16,7 +17,7 @@ export interface Limits {
 }
 
 export interface Breach {
-  scope: "project" | "wo" | "run";
+  scope: "project" | "wo" | "run" | "plan";
   spentMicros: number;
   limitMicros: number;
 }
@@ -60,6 +61,13 @@ export async function budgetBreach(db: Queryable, c: RunCtx): Promise<Breach | n
   if (lim.projectMicros !== null && spent.project >= lim.projectMicros) return { scope: "project", spentMicros: spent.project, limitMicros: lim.projectMicros };
   if (lim.woMicros !== null && spent.wo >= lim.woMicros) return { scope: "wo", spentMicros: spent.wo, limitMicros: lim.woMicros };
   if (lim.runMicros !== null && spent.run >= lim.runMicros) return { scope: "run", spentMicros: spent.run, limitMicros: lim.runMicros };
+  // An approved research plan's budget covers its station's runs from the approval on (Phase 2): the gateway refuses the next model call past it.
+  const plan = planOf(c.woData);
+  if (plan?.status === "approved" && plan.budgetUsd && plan.station === c.station && plan.decidedAt) {
+    const limit = Math.round(plan.budgetUsd * 1e6);
+    const used = Number((await db.query<{ n: string }>(`select coalesce(sum(u.cost_micros),0)::text as n from run_usage u join attempts a on a.org_id = u.org_id and a.id = u.attempt_id where u.org_id = $1 and u.wo_id = $2 and a.station = $3 and u.at >= $4`, [c.orgId, c.woId, c.station, new Date(plan.decidedAt)])).rows[0]!.n);
+    if (used >= limit) return { scope: "plan", spentMicros: used, limitMicros: limit };
+  }
   return null;
 }
 

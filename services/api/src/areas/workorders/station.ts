@@ -176,7 +176,9 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     const waiting = dl.questions.filter((q) => q.blocking);
     w.data.waitingOn = { station: sid, attempt: attemptId, questions: waiting.map((q) => q.id), askOf: [...new Set(waiting.map((q) => q.askOf))], ...(plan ? { plan: true } : {}) };
     const what = [waiting.length ? (waiting.length === 1 ? "an answer" : `${waiting.length} answers`) : "", plan ? "the research plan to be approved" : ""].filter(Boolean).join(" and ") || "a person";
-    await postStationMessage(fx, w, sid, attemptId, result.summary || `${name} is waiting for ${what}.`, dl.questions, dl.assumptions, !!plan);
+    // The runner's own default ("research: waiting for ...") says less than this; an agent's real summary is kept after it.
+    const said = result.summary && !/^[a-z-]+: waiting for /.test(result.summary) ? ` ${clip(result.summary)}` : "";
+    await postStationMessage(fx, w, sid, attemptId, `${name} is waiting for ${what}.${said}`, dl.questions, dl.assumptions, !!plan);
     await needsPerson(fx, w, plan && !waiting.length ? `Waiting for the research plan at ${name}` : `Waiting for ${waiting.length === 1 ? "an answer" : `${waiting.length} answers`} at ${name}`);
     if (plan) ev(fx, w, "research.plan.proposed", { station: sid, text: plan.questions.join(" · ").slice(0, 300), hosts: plan.hosts, web: plan.web, budgetUsd: plan.budgetUsd }, { category: "flow" });
     ev(fx, w, "wo.question", { station: sid, text: waiting.map((q) => q.question).join(" · ").slice(0, 300) }, { category: "flow" });

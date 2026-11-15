@@ -155,6 +155,8 @@ export function registerResearchRoutes(app: FastifyInstance, deps: ResearchDeps)
         break;
       }
       if (!res) return await refuse(reply, a, recordedUrl(cur), { status: 502, msg: "Too many redirects." });
+      // An error page is not a source: the agent learns the page is missing, nothing is recorded as read.
+      if (res.status >= 400) return await refuse(reply, a, recordedUrl(cur), { status: 502, msg: `The page answered HTTP ${res.status}; nothing was recorded.` });
       const type = res.headers.get("content-type") ?? "";
       if (!TEXT_TYPES.test(type)) return await refuse(reply, a, recordedUrl(cur), { status: 415, msg: `Only text pages can be read (this is ${type || "of unknown type"}).` });
       const { buf, cut } = await readCapped(res, RESEARCH_LIMITS.maxBytes);

@@ -246,7 +246,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       g.pool.query<{ wo_id: string; author_kind: string; body: string; created_at: Date; status: string }>(`select distinct on (c.wo_id) c.wo_id, m.author_kind, m.body, m.created_at, c.status from conversations c join messages m on m.org_id = c.org_id and m.conversation_id = c.id where c.org_id = $1 and c.wo_id = any($2) order by c.wo_id, m.created_at desc, m.id desc`, [g.orgId, woIds]),
       g.pool.query<{ id: string; name: string }>(`select id, name from agents where org_id = $1`, [g.orgId]),
     ]);
-    const askRows = (await g.pool.query<{ wo_id: string; ask_of: string }>(`select wo_id, ask_of from wo_questions where org_id = $1 and status = 'open' and wo_id = any($2)`, [g.orgId, woIds])).rows;
+    const askRows = (await g.pool.query<{ wo_id: string; ask_of: string }>(`select wo_id, ask_of from wo_questions where org_id = $1 and status = 'open' and blocking and wo_id = any($2)`, [g.orgId, woIds])).rows;
     const pst = await policyState(req);
     const meP = pst.people.find((p) => p.id === who.id);
     const last = new Map(lastRows.rows.map((r) => [r.wo_id, r]));
@@ -303,6 +303,8 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const askedMe = blockingAsks.some((q) => asksMe(q.askOf, meP, { project: row.project, requestedBy: wo.requestedBy }, (act) => decideFor(pst, req.gx.principal!, act, { project: row.project }).allowed));
     const roleName = (rid: string) => (f.catalog.roles ?? []).find((r) => r.id === rid)?.name ?? rid.replace(/_/g, " ");
     const askedOf = [...new Set(blockingAsks.map((q) => askOfLabel(q.askOf, roleName)))].join(" or ");
+    const planWaiting = planOf(row.data)?.status === "proposed" ? planOf(row.data) : null;
+    const canDecidePlan = planWaiting ? (await decide(req, "gate.approve", scopeOf(row))).allowed : false;
     // The scripted questionnaire is history: shown until the session starts, never mixed into it afterwards.
     const messages = mine.length ? mine : legacy;
     const history = mine.length ? legacy.filter((m) => m.at < (mine[0]?.at ?? 0)) : [];
@@ -324,9 +326,11 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       : openQuestion ? { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }
       : atIntake ? (ag.mode === "agent" ? { actor: "agent", text: `${ag.agentName} reads the request and will ask or propose the brief.` } : { actor: wo.conv.done ? "approver" : "you", text: wo.conv.done ? "Confirm the brief." : "Answer the intake question below." })
       : gateWaiting ? { actor: "approver", text: `Waiting for a decision at ${gdef?.label ?? gateWaiting[0]}${gdef?.purpose ? `: ${gdef.purpose}` : "."}` }
+      : planWaiting ? (canDecidePlan ? { actor: "you", text: `${stationName(c, planWaiting.station)} proposed a research plan: approve it, change its hosts or budget, or reject it.` } : { actor: "approver", text: `${stationName(c, planWaiting.station)} proposed a research plan; someone who may approve gates decides it.` })
       : wo.bay ? { actor: "you", text: `${wo.id} is in the ${c.bays.find((b) => b.id === wo.bay)?.name ?? wo.bay} bay; a person has to move it on.` }
       : { actor: "agent", text: `${ag.agentName} works at ${stationName(c, sid)}.` };
-    const waiting = closed ? null : blockingAsks.length ? { text: `Waiting for ${askedMe ? "you" : askedOf}: ${blockingAsks.length === 1 ? "1 question" : `${blockingAsks.length} questions`} from ${stationName(c, blockingAsks[0]!.station)}`, kind: askedMe ? "you" : "person" }
+    const waiting = closed ? null : planWaiting && !blockingAsks.length ? { text: `Waiting for ${canDecidePlan ? "you" : "an approver"}: the research plan from ${stationName(c, planWaiting.station)}`, kind: canDecidePlan ? "you" : "gate" }
+      : blockingAsks.length ? { text: `Waiting for ${askedMe ? "you" : askedOf}: ${blockingAsks.length === 1 ? "1 question" : `${blockingAsks.length} questions`} from ${stationName(c, blockingAsks[0]!.station)}`, kind: askedMe ? "you" : "person" }
       : atIntake && ag.mode === "agent" && !pending.length && !openQuestion ? { text: `${ag.agentName} is reading the request`, kind: "agent" }
       : gateWaiting ? { text: `Waiting for approval at ${gdef?.label ?? gateWaiting[0]}`, kind: "gate" }
       : !atIntake && wo.state === "running" ? { text: `${ag.agentName} is working at ${stationName(c, sid)}`, kind: "agent" } : null;

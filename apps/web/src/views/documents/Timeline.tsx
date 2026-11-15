@@ -10,11 +10,14 @@ import { useWoTimeline, type RunTimeline, type TimelineEntry } from "./api";
 
 const station = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
 const TOOL: Record<string, string> = { Read: "Read", Grep: "Searched", Glob: "Listed", Bash: "Ran", Edit: "Edited", Write: "Wrote", "gantry:write_document": "Wrote document", "gantry:ask": "Asked", "gantry:assume": "Assumed", "gantry:web_fetch": "Read page", "gantry:propose_research_plan": "Proposed a plan" };
-const time = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const time = (at: number) => new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+/** Claude Code loads deferred tool definitions with ToolSearch: say so in words, without the raw tool ids. */
+const pretty = (tool: string, detail: string): [string, string] =>
+  tool === "ToolSearch" ? ["Loaded tools", detail.replace(/^select:/, "").replace(/mcp__gantry__/g, "").replace(/,/g, ", ")] : [TOOL[tool] ?? tool, detail.replace(/mcp__gantry__/g, "gantry:")];
 
 function Line({ e }: { e: TimelineEntry }) {
   const body =
-    e.kind === "step" ? <><span className="tl-what">{TOOL[e.tool] ?? e.tool}</span>{e.detail ? <span className="mono tl-detail">{e.detail}</span> : null}</>
+    e.kind === "step" ? (() => { const [what, detail] = pretty(e.tool, e.detail); return <><span className="tl-what">{what}</span>{detail ? <span className="mono tl-detail" title={detail}>{detail}</span> : null}</>; })()
     : e.kind === "source" ? <><span className="tl-what">Source</span><span className="md-cite is-static">{e.ref}</span><span className="tl-detail">{e.title || e.url}</span></>
     : e.kind === "document" ? <><span className="tl-what">Document</span><span className="mono tl-detail">{`${e.name} v${e.version}`}</span></>
     : e.kind === "result" ? <><span className={`tl-what tl-out is-${e.outcome}`}>{e.outcome === "succeeded" ? "Finished" : e.outcome === "needs_person" ? "Waiting for a person" : e.outcome === "failed" ? "Failed" : e.outcome}</span>{e.text ? <span className="tl-detail">{e.text}</span> : null}</>

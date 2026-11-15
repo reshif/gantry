@@ -148,6 +148,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
               : row.closed ? "Closed."
               : row.waitingOn === "you" ? <strong>{`${row.agentName ?? "The agent"} is waiting for you`}</strong>
               : row.waitingOn === "approver" ? "Waiting for an approver"
+              : row.waitingOn === "person" ? "Waiting for someone else's answer"
               : `${row.agentName ?? "The agent"} is working`}
             {row?.unread ? <span className="wos-unread" role="img" aria-label="Unread messages" /> : null}
           </span>
