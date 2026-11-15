@@ -280,6 +280,30 @@ d("OIDC sign-in against a local issuer", () => {
     expect(plain.r.headers.location).toBe("/");
   });
 
+  it("an invited person is claimed only with the invite link's one-time token, which works once", async () => {
+    const { createHash } = await import("node:crypto");
+    const token = "tok_" + "x".repeat(28);
+    await t.db.admin.query(`insert into people (org_id, id, name, title, email, status) values ($1, 'p-nina', 'Nina Park', 'Invited', 'nina@acme.dev', 'invited')`, [t.orgId]);
+    await t.db.admin.query(`insert into invites (org_id, id, email, token_hash, expires_at) values ($1, 'p-nina', 'nina@acme.dev', $2, now() + interval '1 day')`, [t.orgId, createHash("sha256").update(token).digest("hex")]);
+    const nina = { sub: "kc-nina", email: "nina@acme.dev", email_verified: true, name: "Nina Park" };
+    // the right address alone is refused, and the invitee stays unclaimed
+    const bare = await signInFlow(t, issuer, { ...nina, auth_time: now() });
+    expect(bare.session).toBeUndefined();
+    expect(decodeURIComponent(String(bare.r.headers.location))).toContain("Open the invite link from your email");
+    expect((await t.db.admin.query(`select idp_subject, status from people where id = 'p-nina'`)).rows[0]).toEqual({ idp_subject: null, status: "invited" });
+    // a wrong token is refused too
+    const wrong = await signInFlow(t, issuer, { ...nina, auth_time: now() }, { query: `?invite=${"y".repeat(32)}` });
+    expect(wrong.session).toBeUndefined();
+    // the invite link's token links and activates the person and spends the invite
+    const ok = await signInFlow(t, issuer, { ...nina, auth_time: now() }, { query: `?invite=${token}&login_hint=nina%40acme.dev` });
+    expect(ok.session).toBeTruthy();
+    expect((await t.db.admin.query(`select idp_subject, status from people where id = 'p-nina'`)).rows[0]).toEqual({ idp_subject: "kc-nina", status: "active" });
+    expect((await t.db.admin.query(`select status from invites where id = 'p-nina'`)).rows[0].status).toBe("accepted");
+    // another identity replaying the same link gets nothing
+    const replay = await signInFlow(t, issuer, { sub: "kc-mallory", email: "nina@acme.dev", email_verified: true, auth_time: now() }, { query: `?invite=${token}` });
+    expect(replay.session).toBeUndefined();
+  });
+
   it("logout also ends the provider session: it returns the end-session URL with the sealed ID token as the hint", async () => {
     const { r, session } = await signInFlow(t, issuer, { ...asha, auth_time: now() });
     const idt = r.cookies.find((c) => c.name === "gantry_idt");

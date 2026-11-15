@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { appendEvent, withTx, type Tx } from "@gantry/db";
 import type { Gantry } from "../context.js";
 import type { IdClaims } from "../oidc.js";
@@ -14,6 +15,8 @@ export interface SignInRequest {
   existingSession?: { id: string; personId: string } | null;
   /** A step-up must refresh the held session and must never switch it to another person. */
   stepUpOnly?: boolean;
+  /** The one-time token from an invite link. Required to claim an invited person by email address. */
+  inviteToken?: string;
 }
 
 export type SignInResult =
@@ -28,6 +31,7 @@ const DENY = {
   account_inactive: "This account is deactivated or suspended.",
   different_person: "That sign-in was a different person, so the change was cancelled. Sign in again as yourself.",
   identity_mismatch: "This account is linked to a different identity at the provider.",
+  invite_required: "You've been invited to Gantry. Open the invite link from your email to join; it is valid for 14 days.",
 } as const;
 
 const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "user";
@@ -67,7 +71,19 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
       const byId = await find(`select ${cols} from people where org_id = $1 and id = $2`, [orgId, claims.gantryId]);
       if (byId && byId.email.toLowerCase() === email) person = byId;
     }
-    person ??= (await find(`select ${cols} from people where org_id = $1 and lower(email) = $2`, [orgId, email])) ?? null;
+    let inviteId: string | null = null;
+    if (!person) {
+      const byEmail = (await find(`select ${cols} from people where org_id = $1 and lower(email) = $2`, [orgId, email])) ?? null;
+      // An invited person nobody has claimed yet is linked only with the invite's one-time token: the address alone does not
+      // prove the caller is the invitee (an account at the provider could hold that address). The token is single-use.
+      if (byEmail && byEmail.status === "invited" && !byEmail.idp_subject) {
+        const hash = r.inviteToken ? createHash("sha256").update(r.inviteToken).digest("hex") : null;
+        const inv = hash ? (await tx.query<{ id: string }>(`select id from invites where org_id = $1 and lower(email) = $2 and token_hash = $3 and status = 'pending' and expires_at > now() for update`, [orgId, email, hash])).rows[0] : undefined;
+        if (!inv) return deny("invite_required", byEmail.id);
+        inviteId = inv.id;
+      }
+      person = byEmail;
+    }
 
     if (!ipAllowed(r.ip, sec.ipAllow)) return deny("ip_not_allowed", person?.id ?? null);
 
@@ -85,6 +101,7 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     if (person.status === "deactivated" || person.status === "suspended") return deny("account_inactive", person.id);
 
     await tx.query(`update people set idp_subject = coalesce(idp_subject, $3), status = case when status = 'invited' then 'active' else status end, last_seen_at = now(), updated_at = now() where org_id = $1 and id = $2`, [orgId, person.id, claims.sub]);
+    if (inviteId) await tx.query(`update invites set status = 'accepted', accepted_at = now(), updated_at = now() where org_id = $1 and id = $2`, [orgId, inviteId]);
 
     // Bootstrap Factory Admin: the configured email, signing in to an org that has no Factory Admin yet.
     // Only a provider-verified address counts: an IdP that omits email_verified must not hand out the factory.

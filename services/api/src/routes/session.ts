@@ -40,6 +40,8 @@ interface OidcState {
   returnTo: string;
   /** Opened in a small window by the app: the callback answers by redirecting to the app's step-up result page, which tells the opener. */
   popup?: boolean;
+  /** One-time invite token from the invite email's link, checked at the callback before an invited person is claimed. */
+  invite?: string;
 }
 
 /** Only same-site relative paths may be returned to (no open redirect). */
@@ -95,7 +97,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
   /* ------------------------------------------------------------ sign-in */
 
   app.get("/auth/login", authRate, async (req, reply) => {
-    const q = z.object({ method: z.enum(["sso", "github"]).optional(), login_hint: z.string().max(254).optional(), step_up: z.string().optional(), popup: z.string().optional(), return_to: z.string().max(500).optional() }).safeParse(req.query);
+    const q = z.object({ method: z.enum(["sso", "github"]).optional(), login_hint: z.string().max(254).optional(), step_up: z.string().optional(), popup: z.string().optional(), return_to: z.string().max(500).optional(), invite: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/).optional() }).safeParse(req.query);
     if (!q.success) return toApp(reply, "/", "The sign-in link is not valid.");
     const method = q.data.method ?? "sso";
     const meta = { ip: req.ip, userAgent: String(req.headers["user-agent"] ?? ""), requestId: req.id, method };
@@ -118,7 +120,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       req.log.error({ err: e }, "OIDC discovery failed");
       return toApp(reply, "/", "The identity provider is not reachable. Try again shortly.");
     }
-    const st: OidcState = { state, nonce, verifier, method, stepUp: q.data.step_up === "1", returnTo: safeReturn(q.data.return_to), ...(q.data.popup === "1" && q.data.step_up === "1" ? { popup: true } : {}) };
+    const st: OidcState = { state, nonce, verifier, method, stepUp: q.data.step_up === "1", returnTo: safeReturn(q.data.return_to), ...(q.data.popup === "1" && q.data.step_up === "1" ? { popup: true } : {}), ...(q.data.invite ? { invite: q.data.invite } : {}) };
     reply.setCookie(OIDC_COOKIE, seal(st, oidcKey, "oidc-state"), { ...cookieOpts, maxAge: 600 });
     return reply.redirect(url.toString(), 302);
   });
@@ -146,7 +148,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       const s = await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, tok, (await g.security.get()).value.idleMin);
       if (s) existing = { id: s.id, personId: s.personId };
     }
-    const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp });
+    const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp, ...(st.invite ? { inviteToken: st.invite } : {}) });
     if (!r.ok) return st.popup ? popupDone(reply, false, r.msg) : toApp(reply, "/", r.msg);
     if (r.token && r.expiresAt) reply.setCookie(g.config.sessionCookie, r.token, { path: "/", httpOnly: true, sameSite: "lax", secure: g.config.cookieSecure, expires: r.expiresAt });
     if (claims.idToken) reply.setCookie(IDT_COOKIE, seal({ t: claims.idToken }, idtKey, "id-token"), { ...cookieOpts, ...(r.expiresAt ? { expires: r.expiresAt } : { maxAge: 12 * 3600 }) });

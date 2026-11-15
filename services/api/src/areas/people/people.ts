@@ -51,7 +51,8 @@ export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by:
   for (const g of grants) {
     await tx.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type, project_id, granted_by) values ($1,$2,$3,$4,$5,$6,$7)`, [orgId, `ra-${randomBytes(6).toString("hex")}`, id, g.role, g.scope === "factory" ? "factory" : "project", g.scope === "factory" ? null : g.scope, by]);
   }
-  // Signing in with this address through the identity provider activates the person (core sign-in); the invite row records the offer.
+  // The emailed link carries a one-time token: only a sign-in that presents it (with a provider-verified matching address)
+  // claims this invited person. Knowing or controlling the address alone is not enough (core/auth/signin.ts).
   const token = randomBytes(24).toString("base64url");
   await tx.query(`insert into invites (org_id, id, email, role_id, project_id, invited_by, token_hash, expires_at) values ($1,$2,$3,$4,$5,$6,$7, now() + interval '14 days')`, [
     orgId, id, body.email, grants[0]?.role ?? null, grants.find((g) => g.scope !== "factory")?.scope ?? null, by, createHash("sha256").update(token).digest("hex"),
@@ -60,7 +61,7 @@ export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by:
   return {
     msg: `Invite sent to ${body.email}.`,
     events: [{ type: "people.invite", category: "access", subject: { type: "person", id }, before: null, after: { name: body.name, email: body.email, teams: body.teams, roles: grants }, projectId: null }],
-    outbox: [{ destination: "smtp", payload: { kind: "invite", to: body.email, name: body.name, invitedBy: by, link: `${publicUrl.replace(/\/$/, "")}/auth/login?login_hint=${encodeURIComponent(body.email)}` } }],
+    outbox: [{ destination: "smtp", payload: { kind: "invite", to: body.email, name: body.name, invitedBy: by, link: `${publicUrl.replace(/\/$/, "")}/auth/login?invite=${token}&login_hint=${encodeURIComponent(body.email)}` } }],
     extra: { person, version: versionOf(person) },
     changes: ["people"],
     project: null,
