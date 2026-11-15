@@ -1,4 +1,5 @@
 /** Factory state, IST clock and shift, release windows and freezes (legacy status cluster, without the simulation control). */
+import { FACTORY_READ } from "../lib/routes";
 import { useEffect, useRef, useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
@@ -93,7 +94,7 @@ function FactoryStop({ close }: { close: () => void }) {
 
 function StatusPopover({ s, replayAt, close }: { s: StatusInfo; replayAt: number | undefined; close: () => void }) {
   const me = useMe();
-  const canAccess = !!me && me.person.roles.some((g) => g.role === "factory_admin" || g.role === "auditor");
+  const canAccess = !!me && me.person.roles.some((g) => g.scope === "factory" && (FACTORY_READ as readonly string[]).includes(g.role));
   return (
     <div className="status-pop">
       <div className="pop-head">

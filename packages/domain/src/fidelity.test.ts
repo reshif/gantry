@@ -12,6 +12,12 @@ import type { WorkOrder } from "./types.js";
 const { G } = loadLegacy();
 const S = seedState();
 const legacyState = G.store.get();
+// The Factory Manager and Security Reviewer templates (owner decision 6) are newer than the legacy engine and nobody in the seed holds
+// them; they only show up in "Needs …" wording. Compare without them.
+for (const r of ["factory_manager", "security_reviewer"]) {
+  delete (S.matrix as Record<string, unknown>)[r];
+  S.catalog.roles = S.catalog.roles.filter((x) => x.id !== r);
+}
 // On call is per project now, and a Factory Admin always counts (owner decision 7). The seed puts each on-call person on
 // call for every project they hold a role on, which the legacy engine's global switch expresses exactly; it has no notion
 // of the Factory Admin rule, so give it the same input.

@@ -1,4 +1,5 @@
 /** Audit (#audit): the append-only ledger of human, agent, API and trigger actions, denied attempts included. Ported from legacy/js/views/audit.js. */
+import { FACTORY_READ } from "../lib/routes";
 import { useEffect, useMemo, useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useAuditVerify, useMe, useProjects } from "../api/queries";
@@ -37,7 +38,7 @@ export default function AuditView() {
   const sum = first?.summary;
   const total = first?.total ?? 0;
   const projectName = (id: string | null): string => (id ? projects.find((p) => p.id === id)?.name ?? id : "factory");
-  const canVerify = !!me?.person.roles.some((g) => g.scope === "factory" && (g.role === "auditor" || g.role === "factory_admin"));
+  const canVerify = !!me?.person.roles.some((g) => g.scope === "factory" && (FACTORY_READ as readonly string[]).includes(g.role));
   const set = (patch: Partial<Filters>) => setF((x) => ({ ...x, ...patch }));
   const dirty = typed || f.project !== "all" || f.cat !== "all" || f.topic !== "all" || f.actor !== "all" || f.outcome !== "all" || f.via !== "all" || f.changes;
   const clear = () => {

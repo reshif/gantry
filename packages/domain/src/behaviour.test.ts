@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   answerConversation, buildWorkOrder, can, canMany, checkAgentAuthority, checkFlowEntryRemoval, checkMatrixEdit, checkPersonRemoval, checkRoleChange, checkRoleDelete, classify,
   completeness, defaultMatrix, devSeed, effectiveStop, gateDecision, gateProgress, hasIndependentApprover, istTime, learningSignals, lockedOutRights, moveCheck, queueOrder, refusalBody,
-  httpStatusFor, replay, riskTagsFor, riskTagsOf, forcesHuman, slotsUsed, freeSlot, stateAt, submitGuard, summaryText, trackStates, trust, workloadSummary, err, ok, DEFAULT_CATALOG,
+  httpStatusFor, replay, riskTagsFor, riskTagsOf, forcesHuman, slotsUsed, freeSlot, stateAt, submitGuard, summaryText, trackStates, trust, workloadSummary, err, ok, DEFAULT_CATALOG, PROTECTED_RIGHTS, READ_ACTIONS,
   SEED_ANCHOR, gantryError,
 } from "./index.js";
 import { NOW, mutate, seedState } from "./testkit.js";
@@ -458,5 +458,26 @@ describe("on call is per project (owner decision 7)", () => {
     expect(isOnCall(st, asha, "identity")).toBe(true);
     expect(isOnCall(st, asha, null)).toBe(true);
     expect(isOnCall(st, lena, "identity")).toBe(false);
+  });
+});
+
+describe("role templates: Factory Manager and Security Reviewer (owner decision 6)", () => {
+  const m = defaultMatrix(DEFAULT_CATALOG.actions);
+  const has = (role: string, ids: string[]) => ids.filter((a) => m[role]?.[a] !== true);
+  const lacks = (role: string, ids: string[]) => ids.filter((a) => m[role]?.[a] === true);
+
+  it("are factory-level built-in roles", () => {
+    for (const id of ["factory_manager", "security_reviewer"]) expect(DEFAULT_CATALOG.roles.find((r) => r.id === id)?.level).toBe("factory");
+  });
+
+  it("a Factory Manager reads everything and operates every project, but administers no access", () => {
+    expect(has("factory_manager", ["project.view", ...READ_ACTIONS, "audit.view", "wo.move", "gate.approve", "flow.edit", "project.config", "line.halt", "line.resume", "kill.project", "restore.project", "halt.factory", "resume.factory", "project.create", "template.edit"])).toEqual([]);
+    expect(lacks("factory_manager", [...PROTECTED_RIGHTS, "project.members", "approvers.edit", "trust.grant", "api.keys", "kill.factory", "agent.edit", "model.edit", "integration.edit"])).toEqual([]);
+    expect(lacks("factory_manager", DEFAULT_CATALOG.actions.map((a) => a.id).filter((a) => a.startsWith("console.propose")))).toEqual([]);
+  });
+
+  it("a Security Reviewer reads everything and can stop or sign off risky work, and changes no configuration", () => {
+    expect(has("security_reviewer", ["project.view", ...READ_ACTIONS, "audit.view", "gate.approve", "wo.sendback", "line.halt", "kill.workorder"])).toEqual([]);
+    expect(lacks("security_reviewer", [...PROTECTED_RIGHTS, "line.resume", "flow.edit", "project.config", "wo.move", "release", "agent.edit"])).toEqual([]);
   });
 });

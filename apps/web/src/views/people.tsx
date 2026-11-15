@@ -294,7 +294,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
             aria-label={`Factory role for ${p.name}`}
             disabled={!factGuard.allowed}
             onChange={(v) => void changeFactoryRole(v)}
-            options={[{ value: "", label: "None (project roles only)" }, ...factoryRoles.map((r) => ({ value: r.id, label: roleName(r.id) + (r.id === "factory_admin" ? ": everything, every project" : r.id === "auditor" ? ": read everything, change nothing" : r.custom ? ` (custom): ${r.desc || "custom factory role"}` : "") }))]}
+            options={[{ value: "", label: "None (project roles only)" }, ...factoryRoles.map((r) => ({ value: r.id, label: roleName(r.id) + (r.id === "factory_admin" ? ": everything, every project" : r.id === "auditor" ? ": read everything, change nothing" : r.id === "factory_manager" ? ": read everything, run every project; no access admin" : r.id === "security_reviewer" ? ": read everything, sign off or stop risky work" : r.custom ? ` (custom): ${r.desc || "custom factory role"}` : "") }))]}
           />
           {!factGuard.allowed ? <span className="muted small">{(factGuard.needs ? `${factGuard.needs}. ` : "") + factGuard.reason}</span> : null}
         </div>

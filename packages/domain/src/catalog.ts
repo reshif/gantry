@@ -300,6 +300,16 @@ export const ROLES: readonly Role[] = [
     level: "factory"
   },
   {
+    id: "factory_manager",
+    name: "Factory Manager",
+    level: "factory"
+  },
+  {
+    id: "security_reviewer",
+    name: "Security Reviewer",
+    level: "factory"
+  },
+  {
     id: "project_admin",
     name: "Project Admin",
     level: "project"
@@ -1599,6 +1609,9 @@ export const DEFAULT_CATALOG: Catalog = {
 /** Read rights beyond project.view: who may see people, policy, agents, models, integrations (spec 14.3, default deny). */
 export const READ_ACTIONS = ["people.view", "policy.view", "agents.view", "models.view", "integrations.view"] as const;
 
+/** Project rights a Factory Manager does not get by default: the ones that administer access rather than operate the line. */
+const FACTORY_MANAGER_EXCLUDED: ReadonlySet<string> = new Set(["project.members", "approvers.edit", "trust.grant", "api.keys"]);
+
 /** The default role-by-action matrix (legacy `matrix()`), built over the given actions. */
 export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
   const only = (list: string[]): Record<string, boolean> => {
@@ -1613,6 +1626,16 @@ export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
     // Default deny (spec 14.3): reading anything beyond a project one holds is itself a right. The "Read" actions are factory-scoped (they need
     // a factory-level role such as Auditor or a custom one); a person with no grants reads nothing but their own profile.
     auditor: only(["project.view", "audit.view", ...READ_ACTIONS, CONSOLE_USE]),
+    // Owner decision 6 (2026-11-15): two factory-level templates for real jobs, so nobody is over-granted Factory Admin or Project Admin.
+    // Factory Manager reads everything and operates every project, but administers no access: no roles, members, approver rules, trust
+    // grants, API keys, security or policy, and no factory kill/restore (those stay with Factory Admin).
+    factory_manager: only([
+      ...projectActions.filter((a) => !FACTORY_MANAGER_EXCLUDED.has(a)),
+      ...READ_ACTIONS, "audit.view", "halt.factory", "resume.factory", "project.create", "template.edit", "eval.run", CONSOLE_USE,
+    ]),
+    // Security Reviewer reads everything (including the security settings and the ledger) and can stop or sign off risky work: answer,
+    // approve the gates whose rules name them, send back, halt a line, kill a work order. Nothing that changes configuration.
+    security_reviewer: only(["project.view", "audit.view", ...READ_ACTIONS, "wo.answer", "gate.approve", "wo.sendback", "line.halt", "kill.workorder", CONSOLE_USE]),
     // Console (spec 12.6): everyone who can see a project may ASK the console (read-only: its read tools still filter by their own rights);
     // only Factory Admin may have it propose changes, until a Factory Admin grants a console.propose.* right to a role or team.
     project_admin: only(projectActions.concat(["eval.run", "audit.view"]).concat([CONSOLE_USE])),

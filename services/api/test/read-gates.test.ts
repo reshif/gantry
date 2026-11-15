@@ -133,6 +133,26 @@ d("default deny for reads", () => {
     expect(await get("p-tomas", REGISTERS.policies)).toBe(403);
   });
 
+  it("an existing org gains the Factory Manager and Security Reviewer roles on start-up, with their defaults and nothing else changed", async () => {
+    const { bootstrapOrg } = await import("../src/core/bootstrap.js");
+    await t.db.admin.query(`delete from roles where id in ('factory_manager','security_reviewer')`);
+    await t.db.admin.query(`insert into role_matrix_versions (org_id, version, matrix, published_at, published_by) select org_id, version + 1, matrix - 'factory_manager' - 'security_reviewer', now(), 'test' from role_matrix_versions order by version desc limit 1`);
+    const before = (await t.db.admin.query(`select matrix from role_matrix_versions order by version desc limit 1`)).rows[0].matrix;
+    await bootstrapOrg(t.db.app, t.config);
+    const roles = (await t.db.admin.query(`select id, level, builtin from roles where id in ('factory_manager','security_reviewer') order by id`)).rows;
+    expect(roles).toEqual([{ id: "factory_manager", level: "factory", builtin: true }, { id: "security_reviewer", level: "factory", builtin: true }]);
+    const m = (await t.db.admin.query(`select matrix from role_matrix_versions order by version desc limit 1`)).rows[0].matrix;
+    expect(m.factory_manager["line.halt"]).toBe(true);
+    expect(m.factory_manager["role.edit"]).toBe(false);
+    expect(m.security_reviewer["gate.approve"]).toBe(true);
+    expect(m.security_reviewer["flow.edit"]).toBe(false);
+    for (const r of Object.keys(before)) expect(m[r], r).toEqual(before[r]);
+    // a second start changes nothing
+    const v = (await t.db.admin.query(`select max(version) v from role_matrix_versions`)).rows[0].v;
+    await bootstrapOrg(t.db.app, t.config);
+    expect((await t.db.admin.query(`select max(version) v from role_matrix_versions`)).rows[0].v).toBe(v);
+  });
+
   it("an existing org gains the new read actions with their defaults on start-up, leaving its other cells alone", async () => {
     const { bootstrapOrg } = await import("../src/core/bootstrap.js");
     await t.db.admin.query(`update orgs set settings = jsonb_set(settings, '{catalog,actions}', (select jsonb_agg(a) from jsonb_array_elements(settings->'catalog'->'actions') a where a->>'id' not like '%.view' or a->>'id' in ('project.view','audit.view')))`);

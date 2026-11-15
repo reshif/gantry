@@ -26,7 +26,8 @@ export interface RouteCtx {
 
 export const anyRole = (me: Me, roles: readonly string[]): boolean => me.person.roles.some((g) => roles.includes(g.role));
 
-export const FACTORY_READ = ["factory_admin", "auditor"] as const;
+/** Factory-level roles that read the factory registers (the route rules are display only; the read rights decide). */
+export const FACTORY_READ = ["factory_admin", "auditor", "factory_manager", "security_reviewer"] as const;
 export const BUILD_READ = [...FACTORY_READ, "project_admin", "line_lead"] as const;
 
 export const ROUTES: readonly RouteDef[] = [
