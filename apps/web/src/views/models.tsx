@@ -44,7 +44,6 @@ export default function ModelsView() {
   return (
     <div className="view view-models">
       <ViewHead
-        kicker="Agents · Sheet 15"
         title="Models"
         sub="Vendors the factory may call, what each costs, where data is processed, and how work is routed between them."
         meta={[["Default", routing?.defaultModel ?? "–"], ["Vendors connected", `${vendors.filter((v) => v.connected).length} / ${vendors.length}`], ["Models on", String(enabledN)], ["Spend MTD", `${fmt.money0(mtd)} / ${fmt.money0(bud)}`]]}

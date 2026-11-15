@@ -27,7 +27,6 @@ export default function ApiView() {
   return (
     <div className="view cx api-view">
       <ViewHead
-        kicker="Connect · API & triggers"
         title="API & triggers"
         sub="Submit and follow work orders from other systems, and open work from source control, issue trackers, CI and schedules. Triggers are off until you switch them on."
         meta={[["Active keys", String(active.length)], ["Requests 24h", String(d.last24h)], ["Rate limited 24h", String(d.limited24h)], ["Triggers on", `${on.length} of ${d.triggers.length}`]]}

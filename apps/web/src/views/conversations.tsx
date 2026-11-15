@@ -59,7 +59,6 @@ export default function ConversationsView() {
   return (
     <div className="view conv-view">
       <ViewHead
-        kicker={`Project · ${project.name}`}
         title="Conversations"
         sub="One conversation per work order, for its whole life, with the agent at its current station. Open one to talk to the agent, review its proposals and see what happened."
         meta={[["Waiting on me", String(groups.waiting.length)], ["Open", String(groups.open.length)], ["Unread", String(unread)]]}

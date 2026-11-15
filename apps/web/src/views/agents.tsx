@@ -153,11 +153,11 @@ export default function AgentsView() {
     }
   }, [prefs.agent, agents]);
 
-  if (q.isLoading) return <div className="view view-agents"><ViewHead kicker="Agents · Sheet 13" title="Agents" /><Empty title="Loading agents" text="" /></div>;
+  if (q.isLoading) return <div className="view view-agents"><ViewHead title="Agents" /><Empty title="Loading agents" text="" /></div>;
   if (q.isError || !agents.length) {
     return (
       <div className="view view-agents">
-        <ViewHead kicker="Agents · Sheet 13" title="Agents" sub="Who staffs each station, on which model, with which instructions, skills and permissions."
+        <ViewHead title="Agents" sub="Who staffs each station, on which model, with which instructions, skills and permissions."
           actions={<Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />} />
         <Empty title={q.isError ? "Agents could not be loaded" : "No agents yet"} text={q.isError ? "Try again in a moment." : "Create the first agent."} />
       </div>
@@ -170,7 +170,7 @@ export default function AgentsView() {
   const below = agents.filter((a) => a.threshold != null && a.evalScore < a.threshold).length;
   return (
     <div className="view view-agents">
-      <ViewHead kicker="Agents · Sheet 13" title="Agents" sub="Who staffs each station, on which model, with which instructions, skills and permissions."
+      <ViewHead title="Agents" sub="Who staffs each station, on which model, with which instructions, skills and permissions."
         meta={[["Agents", String(agents.length)], ["Active", `${active} / ${agents.length}`], ["Candidates", String(cands)], ["Below threshold", String(below)], ["Spend 7d", fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))]]}
         actions={<Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />} />
       <Panel title="Roster" flush tools={<span className="muted small">Select a row to configure</span>}><Roster agents={agents} /></Panel>

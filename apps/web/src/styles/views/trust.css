@@ -63,7 +63,7 @@
 /* detail */
 .tr-detail { min-width: 0; }
 .tr-dhead { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--s3); align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-.tr-dtitle { font-family: var(--f-display); font-size: var(--t-xl); text-transform: uppercase; margin: 2px 0; letter-spacing: 0.02em; }
+.tr-dtitle { font-family: var(--f-display); font-size: var(--t-xl); margin: 2px 0; letter-spacing: 0.02em; }
 .tr-dmeta { color: var(--ink-2); }
 .tr-dlevel { display: grid; gap: 4px; justify-items: end; }
 .tr-dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }

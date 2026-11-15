@@ -1,5 +1,9 @@
-/** The belt of the floor: serpentine conveyor of stations with gates, the bays and the shipped strip (legacy floor.js belt). */
-import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+/**
+ * The belt of the floor: the project's line drawn top to bottom, one row per station and one row per gate
+ * between them, ending in Shipped, with the bays (work that left the line) underneath. The line never wraps
+ * back on itself, and every gate has room for its full name, state and who must act (docs/ui/design-system.md §1).
+ */
+import { Fragment, useState, type CSSProperties } from "react";
 import { DAY, approvalText, flowOf, gateDef, gateExplain, gateKind, gateKindText, gateStateText, gateTitle, route as routeOf, routeGates as routeGatesOf, fmt, type Gate } from "@gantry/domain";
 import { useAgents, useMcpServers, useMe } from "../../api/queries";
 import { Btn } from "../../ui/primitives";
@@ -51,16 +55,17 @@ export function GateNode({ gid, onOpen, gates }: { gid: string; onOpen: (gid: st
   const label = tr ? `${base} ${tr.tip}` : base;
   return (
     <div className={`fl-gate fl-gate-${gs.state}${tr && tr.mode === "trust" ? " is-trusted" : ""}${gates && !gates.includes(gid) ? " is-offroute" : ""}`} data-gate={gid} style={{ "--o": L.order[gid] } as CSSProperties}>
+      <span className="fl-gate-rail" aria-hidden="true" />
       <button type="button" id={`floor-gate-${gid}`} className={`gate gate-${gs.state} gate-md gate-kind-${g.kind}`} aria-label={label} data-tip={label} onClick={() => onOpen(gid)}>
         <span className="gate-shape" aria-hidden="true">
           <span className="gate-count">{gs.state === "waiting" ? String(count) : gs.state === "failing" ? "!" : gs.state === "off" ? "–" : "✓"}</span>
         </span>
         <span className="gate-label mono">{g.label}</span>
       </button>
-      <span className="fl-gate-cap mono">
+      <span className="fl-gate-cap">
         <span className="fl-gate-name">{g.name}</span>
-        {cap}
-        {need ? <span className="fl-gate-need" title={approval}>{need}</span> : null}
+        <span className="fl-gate-state">{cap}</span>
+        {need ? <span className="fl-gate-need" title={approval}>{`needs ${need}`}</span> : null}
         {tr ? (
           <span className={`fl-gate-tr is-${tr.mode}`} aria-hidden="true">
             <Icon name={tr.mode === "trust" ? "trust" : "human"} />
@@ -170,7 +175,7 @@ function StationCard({ sid, onStation, route, name }: { sid: string; onStation: 
         {show.length > max ? <Btn label={`+${show.length - max} more at ${st.name}`} small kind="ghost" id={`floor-more-${sid}`} onClick={() => onStation(sid)} /> : null}
         {!show.length && conf.enabled ? <p className="fl-idle">idle</p> : null}
       </div>
-      <span className="fl-bypass" aria-hidden="true">{bypassed ? `Bypassed by ${name}` : ""}</span>
+      <span className="fl-bypass" aria-hidden="true">{bypassed ? `${name} skips this station` : ""}</span>
     </section>
   );
 }
@@ -178,13 +183,14 @@ function StationCard({ sid, onStation, route, name }: { sid: string; onStation: 
 /* ---------- bays and shipped ---------- */
 
 function Bays() {
+  // Bays sit off the line, under it: work that left the belt and returns to the station it came from.
   const ctx = useFloorCtx();
   const bays = flowOf(ctx.cat, ctx.project).bays;
   return (
-    <section className="fl-bays" aria-label="Off the main belt" style={{ "--bays": Math.min(6, bays.length) } as CSSProperties}>
+    <section className="fl-bays" aria-label="Off the line" style={{ "--bays": Math.min(6, bays.length) } as CSSProperties}>
       <div className="fl-bays-h">
-        <span className="fl-bays-t">Off the main belt</span>
-        <span className="muted small">bays hold work that left the belt; it returns to the station it came from</span>
+        <span className="fl-bays-t">Off the line</span>
+        <span className="muted small">Work that left the line waits here, then returns to the station it came from.</span>
       </div>
       <div className="fl-bays-row">
         {bays.map((b) => {
@@ -254,117 +260,6 @@ function useBeltStatus(): { cls: string; label: string; icon: string } {
   return { cls: "is-live", label: "Running · live", icon: "st-run" };
 }
 
-const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
-
-/** SVG conveyor layer, measured from the laid-out cards (legacy drawBelt). */
-function drawBelt(beltEl: HTMLElement, ctx: ReturnType<typeof useFloorCtx>, cls: string | null): void {
-  const stage = beltEl.querySelector<HTMLElement>(".fl-stage");
-  const holder = beltEl.querySelector<HTMLElement>(".fl-svg");
-  if (!stage || !holder) return;
-  const sr = stage.getBoundingClientRect();
-  if (!sr.width) return;
-  const box = (sel: string) => {
-    const el = stage.querySelector(sel);
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { l: r.left - sr.left, t: r.top - sr.top, w: r.width, h: r.height, cx: r.left - sr.left + r.width / 2, cy: r.top - sr.top + r.height / 2, r: r.right - sr.left, b: r.bottom - sr.top };
-  };
-  const grid = stage.querySelector<HTMLElement>(".fl-grid");
-  const vertical = !!grid && getComputedStyle(grid).getPropertyValue("--vertical").trim() === "1";
-  const W = Math.round(sr.width);
-  const H = Math.round(stage.scrollHeight);
-  const L = layoutFor(ctx.cat, ctx.project);
-  let s = "";
-  let d = "";
-  const arrows: Array<[number, number, number]> = [];
-  if (vertical) {
-    const first = box('[data-station="intake"]');
-    const last = box("[data-ship]");
-    if (!first || !last) {
-      holder.innerHTML = "";
-      return;
-    }
-    const gx = box('[data-gate="G0G1"] .gate-shape');
-    const x = gx ? Math.round(gx.cx) : 18;
-    d = `M${x} ${first.t + 10} V${last.t + 8}`;
-    for (const id of ["research", "plan", "verify", "close"]) {
-      const b = box(`[data-station="${id}"]`);
-      if (b) arrows.push([x, b.t - 8, 90]);
-    }
-  } else {
-    const intake = box(`[data-station="${L.top[0]}"]`);
-    const ship = box("[data-ship]");
-    const plan = box(`[data-station="${L.top[L.top.length - 1]}"]`);
-    const build = box(`[data-station="${L.bottom[0]}"]`);
-    const close = box(`[data-station="${L.bottom[L.bottom.length - 1]}"]`);
-    if (!intake || !ship || !plan || !build || !close) {
-      holder.innerHTML = "";
-      return;
-    }
-    const g0 = box(".fl-top .fl-gate .gate-shape");
-    const turn = box(".fl-turn .gate-shape");
-    const g4 = box(".fl-bottom .fl-gate .gate-shape");
-    const g6 = box(".fl-g6 .gate-shape");
-    const yT = g0 ? g0.cy : intake.t + 40;
-    const xT = turn ? turn.cx : plan.r + 32;
-    const yB = g4 ? g4.cy : build.t + 40;
-    const xG = g6 ? g6.cx : close.cx;
-    const R = 18;
-    const g6t = g6 ? g6.t : close.b + 20;
-    d = `M${intake.l - 6} ${yT} H${xT - R} Q${xT} ${yT} ${xT} ${yT + R} V${yB - R} Q${xT} ${yB} ${xT - R} ${yB} H${xG + R} Q${xG} ${yB} ${xG} ${yB + R} V${ship.t + 6}`;
-    arrows.push([(plan.r + xT) / 2, yT, 0], [xT, (yT + yB) / 2 - 40, 90], [xT, (yT + yB) / 2 + 40, 90], [(build.r + xT) / 2, yB, 180], [xG, (close.b + g6t) / 2, 90]);
-    if (cls) {
-      const route = routeOf(ctx.cat, ctx.project, cls);
-      const klass = classOf(ctx.cat, ctx.project, cls);
-      const name = klass.name;
-      const pill = (x: number, y: number, text: string) => {
-        const w = Math.max(60, text.length * 6.1 + 16);
-        return `<g class="fl-pill"><rect x="${(x - w / 2).toFixed(1)}" y="${(y - 9).toFixed(1)}" width="${w.toFixed(1)}" height="18" rx="9"/><text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="middle">${esc(text)}</text></g>`;
-      };
-      let bypass = "";
-      [L.top, L.bottom].forEach((row, ri) => {
-        let k = 0;
-        while (k < row.length) {
-          if (route.includes(row[k] as string)) {
-            k++;
-            continue;
-          }
-          let j = k;
-          while (j < row.length && !route.includes(row[j] as string)) j++;
-          const a = box(`[data-station="${row[k]}"]`);
-          const b = box(`[data-station="${row[j - 1]}"]`);
-          if (!a || !b) {
-            k = j;
-            continue;
-          }
-          const label = `${name} skips ${row.slice(k, j).map((sid) => ctx.cat.stations.find((x) => x.id === sid)?.name ?? sid).join(", ")}`;
-          const ends = (j >= row.length && ri === 1) || (!!klass.endsAfter && stationIdx(ctx.cat, row[k] as string) > stationIdx(ctx.cat, klass.endsAfter));
-          if (ri === 0) {
-            const x1 = a.l - 10;
-            const x2 = b.r + 10;
-            const y = a.t + 4;
-            const top = a.t - 22;
-            bypass += `<path d="M${x1} ${y + 10} C${x1} ${top} ${x2} ${top} ${x2} ${y + 10}" class="fl-bypass-arc"/>` + pill((x1 + x2) / 2, top + 3, ends ? `${name} ends here` : label);
-          } else {
-            const l = Math.min(a.l, b.l) - 10;
-            const r = Math.max(a.r, b.r) + 10;
-            const yb = a.b - 4;
-            const bot = a.b + 22;
-            bypass += `<path d="M${r} ${yb - 10} C${r} ${bot} ${l} ${bot} ${l} ${yb - 10}" class="fl-bypass-arc"/>` + pill((l + r) / 2, bot - 3, ends ? `${name} ends before here` : label);
-          }
-          k = j;
-        }
-      });
-      s += "\u0000" + bypass;
-    }
-  }
-  const tail = s.includes("\u0000") ? s.split("\u0000")[1] : "";
-  let out = `<path d="${d}" class="fl-band"/><path d="${d}" class="fl-rollers"/><path d="${d}" class="fl-center"/>`;
-  for (const a of arrows) out += `<path d="M-4 -5 L4 0 L-4 5" class="fl-arrow" transform="translate(${a[0].toFixed(1)} ${a[1].toFixed(1)}) rotate(${a[2]})"/>`;
-  out += tail;
-  holder.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${out}</svg>`;
-}
-
 function RoutePill({ id, hover, onHover }: { id: string; hover: string | null; onHover: (id: string | null) => void }) {
   const ctx = useFloorCtx();
   const prefs = usePrefs();
@@ -398,7 +293,6 @@ export function Belt({ onStation, onGate }: { onStation: (sid: string) => void; 
   const me = useMe();
   const status = useBeltStatus();
   const [hover, setHover] = useState<string | null>(null);
-  const beltRef = useRef<HTMLElement>(null);
   const p = ctx.project;
   const L = layoutFor(ctx.cat, p);
   const classes = flowOf(ctx.cat, p).classes;
@@ -409,30 +303,7 @@ export function Belt({ onStation, onGate }: { onStation: (sid: string) => void; 
   const repoHalts = ctx.replay
     ? Object.keys(ctx.replay.state.haltedRepos).map((id) => ({ name: ctx.repos.find((r) => r.id === id)?.name ?? id, reason: ctx.replay?.state.haltedRepos[id]?.text ?? "" }))
     : ctx.repos.filter((r) => r.halted).map((r) => ({ name: r.name, reason: r.halted?.reason ?? "" }));
-  const bottomVisual = [...L.bottom].reverse();
-  const turnGate = gateOfStation(ctx.cat, p, L.top[L.top.length - 1] as string);
-  const lastGate = gateOfStation(ctx.cat, p, L.bottom[L.bottom.length - 1] as string);
-  const colsFor = (kids: Array<{ kind: "gate" | "link" | "build" | "st" }>) => kids.map((k) => (k.kind === "gate" ? "60px" : k.kind === "link" ? "24px" : k.kind === "build" ? "minmax(0, 1.6fr)" : "minmax(0, 1fr)")).join(" ");
-  const topKids: Array<{ kind: "gate" | "link" | "build" | "st" }> = [];
-  L.top.forEach((sid, k) => {
-    topKids.push({ kind: sid === "build" ? "build" : "st" });
-    if (k < L.top.length - 1) topKids.push({ kind: gateOfStation(ctx.cat, p, sid) ? "gate" : "link" });
-  });
-  const botKids: Array<{ kind: "gate" | "link" | "build" | "st" }> = [];
-  bottomVisual.forEach((sid, k) => {
-    if (k > 0) botKids.push({ kind: gateOfStation(ctx.cat, p, sid) && gateOfStation(ctx.cat, p, sid)?.id !== "G6" ? "gate" : "link" });
-    botKids.push({ kind: sid === "build" ? "build" : "st" });
-  });
-  const custom = L.bottom.length !== 4 || L.top.length !== 5;
-
-  useLayoutEffect(() => {
-    const el = beltRef.current;
-    if (!el) return;
-    drawBelt(el, ctx, activeCls);
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => drawBelt(el, ctx, activeCls)) : null;
-    ro?.observe(el);
-    return () => ro?.disconnect();
-  });
+  const line = [...L.top, ...L.bottom];
 
   const legend = (state: string, text: string) => (
     <span key={state} className={`fl-leg gate-${state}`}>
@@ -442,7 +313,7 @@ export function Belt({ onStation, onGate }: { onStation: (sid: string) => void; 
   );
   void me;
   return (
-    <section ref={beltRef} className={`fl-belt ${status.cls}${activeCls ? " has-route" : ""}`} id="floor-belt" aria-label={`Belt for ${p.name}. ${status.label}`} data-active={prefs.activeClass ?? ""}>
+    <section className={`fl-belt ${status.cls}${activeCls ? " has-route" : ""}`} id="floor-belt" aria-label={`Belt for ${p.name}. ${status.label}`} data-active={prefs.activeClass ?? ""}>
       <div className="fl-belt-head">
         <div className="fl-stamp">
           <Icon name={status.icon} />
@@ -471,76 +342,30 @@ export function Belt({ onStation, onGate }: { onStation: (sid: string) => void; 
           <RoutePill key={c.id} id={c.id} hover={hover} onHover={setHover} />
         ))}
       </div>
-      <div className="fl-stage" data-keep-scroll="floor-belt">
-        <div className="fl-svg" aria-hidden="true" />
-        <BeltGrid
-          custom={custom}
-          dense={Math.max(L.top.length, L.bottom.length) > 5 || L.bottom.length > 4 || L.top.length > 5}
-          topCols={custom ? colsFor(topKids) : undefined}
-          botCols={custom ? colsFor(botKids) : undefined}
-          route={route}
-          gates={gates}
-          name={name}
-        >
-          <div className="fl-row fl-top">
-            {L.top.map((sid, k) => {
-              const g = gateOfStation(ctx.cat, p, sid);
-              return (
-                <Fragment key={sid}>
-                  <StationCard sid={sid} onStation={onStation} route={route} name={name} />
-                  {k < L.top.length - 1 ? g ? <GateNode gid={g.id} onOpen={onGate} gates={gates} /> : <div className="fl-link" aria-hidden="true" /> : null}
-                </Fragment>
-              );
-            })}
-          </div>
-          <div className="fl-turn">{turnGate ? <GateNode gid={turnGate.id} onOpen={onGate} gates={gates} /> : null}</div>
-          <Bays />
-          <div className="fl-row fl-bottom">
-            {bottomVisual.map((sid, k) => {
-              const g = gateOfStation(ctx.cat, p, sid);
-              const prev = bottomVisual[k - 1];
-              return (
-                <Fragment key={sid}>
-                  {k > 0 ? (
-                    g && g.id !== "G6" ? (
-                      <GateNode gid={g.id} onOpen={onGate} gates={gates} />
-                    ) : (
-                      <div className="fl-link" aria-hidden="true" title={`No gate between ${ctx.cat.stations.find((x) => x.id === sid)?.name} and ${ctx.cat.stations.find((x) => x.id === prev)?.name}`} />
-                    )
-                  ) : null}
-                  <StationCard sid={sid} onStation={onStation} route={route} name={name} />
-                </Fragment>
-              );
-            })}
-          </div>
-          <div className="fl-row fl-g6">{lastGate ? <GateNode gid={lastGate.id} onOpen={onGate} gates={gates} /> : null}</div>
+      <ol className="fl-line" aria-label="Stations and gates, in order">
+        {line.map((sid) => {
+          const g = gateOfStation(ctx.cat, p, sid);
+          return (
+            <Fragment key={sid}>
+              <li className="fl-line-item">
+                <StationCard sid={sid} onStation={onStation} route={route} name={name} />
+              </li>
+              {g ? (
+                <li className="fl-line-item fl-line-gate">
+                  <GateNode gid={g.id} onOpen={onGate} gates={gates} />
+                </li>
+              ) : (
+                <li className="fl-line-item fl-line-link" aria-hidden="true" />
+              )}
+            </Fragment>
+          );
+        })}
+        <li className="fl-line-item">
           <Shipped />
-        </BeltGrid>
-      </div>
+        </li>
+      </ol>
+      <Bays />
     </section>
-  );
-}
-
-function BeltGrid({ custom, dense, topCols, botCols, children }: { custom: boolean; dense: boolean; topCols?: string | undefined; botCols?: string | undefined; route: string[] | null; gates: string[] | null; name: string; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const top = el.querySelector<HTMLElement>(".fl-top");
-    const bot = el.querySelector<HTMLElement>(".fl-bottom");
-    const g6 = el.querySelector<HTMLElement>(".fl-g6");
-    if (!custom) {
-      for (const x of [top, bot, g6]) x?.style.removeProperty("--cols");
-      return;
-    }
-    if (top && topCols) top.style.setProperty("--cols", topCols);
-    if (bot && botCols) bot.style.setProperty("--cols", botCols);
-    if (g6 && botCols) g6.style.setProperty("--cols", botCols);
-  });
-  return (
-    <div ref={ref} className={`fl-grid${custom ? " has-custom" : ""}${dense ? " is-dense" : ""}`}>
-      {children}
-    </div>
   );
 }
 

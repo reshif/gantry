@@ -42,7 +42,6 @@ export default function SecurityView() {
   return (
     <div className="view view-security">
       <ViewHead
-        kicker="Govern · Security"
         title="Security"
         sub="How people get in and how long they stay. Every change here is audited under auth."
         meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", sec.mfa.policy === "all" ? "everyone" : sec.mfa.policy === "admins" ? "admins" : "off"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", String(active)], ["Failed sign-ins 24 h", String(fails)]]}

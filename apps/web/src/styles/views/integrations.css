@@ -26,13 +26,13 @@
 
 /* ---------- catalogue ---------- */
 .int-catsec { display: grid; gap: var(--s2); }
-.int-cat-h { font-family: var(--f-display); font-size: var(--t-lg); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--line-strong); padding-bottom: 4px; }
+.int-cat-h { font-family: var(--f-display); font-size: var(--t-lg); font-weight: 700; letter-spacing: 0.04em; border-bottom: 1px solid var(--line-strong); padding-bottom: 4px; }
 .int-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: var(--s3); }
 .int-tile { display: flex; flex-direction: column; border-color: var(--line-strong); gap: var(--s2); }
 .int-tile.is-custom { border-style: dashed; }
 .int-tile-head { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4) 0; }
 .int-tile-name { flex: 1; min-width: 0; }
-.int-name { font-family: var(--f-display); font-size: var(--t-lg); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1.05; }
+.int-name { font-family: var(--f-display); font-size: var(--t-lg); font-weight: 700; letter-spacing: 0.02em; line-height: 1.05; }
 .int-what { color: var(--ink-2); padding: 0 var(--s4); }
 .int-tile-actions { display: flex; gap: var(--s2); flex-wrap: wrap; padding: 0 var(--s4) var(--s3); margin-top: auto; }
 

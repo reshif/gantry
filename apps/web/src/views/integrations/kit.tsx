@@ -34,12 +34,14 @@ export const keyOf = (s: string): string => {
 
 export const statusOf = (i: IntegrationInstance): "disabled" | "failing" | "offline" | "healthy" => (!i.connected ? "disabled" : i.status === "failing" ? "failing" : i.status === "offline" ? "offline" : "healthy");
 
+const STATUS_WORD: Record<string, string> = { healthy: "Healthy", failing: "Failing", degraded: "Degraded", offline: "Offline", disabled: "Disabled" };
+
 export function Health({ st }: { st: string }) {
   const cls = st === "healthy" ? "healthy" : st === "failing" ? "failing" : st === "degraded" ? "degraded" : "offline";
   return (
     <span className={`health h-${cls}`}>
       <span className="health-shape" aria-hidden="true" />
-      {st}
+      {STATUS_WORD[st] ?? st}
     </span>
   );
 }

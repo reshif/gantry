@@ -66,7 +66,7 @@ export default function LearningView() {
   return (
     <div className="view view-learning">
       <ViewHead
-        kicker="Agents · Sheet 18" title="Learning"
+        title="Learning"
         sub="What the factory learns from its own outcomes: repeated rejections, send-backs, reverts and misses become proposed changes to skills, guidelines, evals, guardrails, approver rules and routes."
         meta={[["Open findings", String(openFindings)], ["To review", String(open)], ["Applied", String(proposals.filter((lp) => lp.status === "accepted").length)], ["Verified", String(proposals.filter((lp) => lp.status === "verified").length)], ["Signals 7d", String(week)]]}
         actions={settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" small icon={on ? "x" : "check"} id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined} />

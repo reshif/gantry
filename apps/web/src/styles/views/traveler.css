@@ -70,7 +70,7 @@
 .trv-scrub { display: grid; gap: 6px; padding: 8px 10px 10px; margin-bottom: 10px; border: 1px solid var(--line-strong); background: var(--panel); }
 .trv-scrub.is-on { border: 2px solid var(--accent); background: var(--surface); }
 .trv-sc-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; }
-.trv-sc-t { display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-display); font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em; }
+.trv-sc-t { display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-display); font-weight: 700; font-size: 15px; letter-spacing: 0.06em; }
 .trv-scrub.is-on .trv-sc-t { color: var(--accent); }
 .trv-sc-t .ic { width: 15px; height: 15px; }
 .trv-sc-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; }

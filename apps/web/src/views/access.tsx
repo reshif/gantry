@@ -103,7 +103,7 @@ export default function AccessView() {
   });
 
   if (!me) return null;
-  if (!view.allowed) return <div className="view view-access"><ViewHead kicker="Govern · Access" title="Access" sub="" /><Empty id="access-no-access" title="No access to the access policy" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin to give you a role that can see policy.`} /></div>;
+  if (!view.allowed) return <div className="view view-access"><ViewHead title="Access" sub="" /><Empty id="access-no-access" title="No access to the access policy" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin to give you a role that can see policy.`} /></div>;
   const now = Date.now();
   const activeFz = freezes.filter((f) => now >= f.from && now < f.to).length;
   const custom = roles.filter((r) => r.custom).length;
@@ -121,16 +121,9 @@ export default function AccessView() {
   return (
     <div className="view view-access">
       <ViewHead
-        kicker="Govern · Access"
         title="Access"
         sub="Who can do what, where and when. Roles grant actions per project; policies narrow or extend them by project, hour and on-call status; freezes override everything for release."
         meta={[["Roles", String(roles.length) + (custom ? ` (${custom} custom)` : "")], ["Actions", String(actions.length)], ["Policies on", String(policies.filter((p) => p.enabled).length)], ["Freezes active", String(activeFz)]]}
-        actions={
-          <>
-            <Btn label="Add role" kind="ghost" icon="plus" id="acc-head-role" guard={rperm} onClick={() => openRole(null)} />
-            <Btn label="Add policy" icon="plus" id="acc-head-add" guard={perm} onClick={() => openPolicy(null)} />
-          </>
-        }
       />
       <LockNote decision={perm} what="The role matrix, policies and freezes" />
       <Simulator

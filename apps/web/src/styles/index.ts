@@ -31,3 +31,4 @@ import "./views/trust.css";
 import "./views/learning.css";
 import "./views/workload.css";
 import "./app.css";
+import "./system.css";

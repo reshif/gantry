@@ -3,7 +3,7 @@
 .prj-tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--s3); }
 .prj-tpl { background: var(--surface); border: 1px solid var(--line-strong); border-top: 3px solid var(--ink); border-radius: var(--r1); padding: var(--s3); display: grid; gap: var(--s2); align-content: start; min-width: 0; }
 .prj-tpl-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.prj-tpl-head h3 { font-family: var(--f-display); font-size: var(--t-xl); font-weight: 600; text-transform: uppercase; line-height: 1.05; }
+.prj-tpl-head h3 { font-family: var(--f-display); font-size: var(--t-xl); font-weight: 600; line-height: 1.05; }
 .prj-tag-custom { border-style: dashed; color: var(--accent); border-color: var(--accent-line); }
 .prj-tpl-facts { display: grid; gap: 2px; border-top: 1px solid var(--line); padding-top: 6px; }
 .prj-tpl-facts > div { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 8px; }

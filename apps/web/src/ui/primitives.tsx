@@ -250,11 +250,11 @@ export function Empty({ title, text, action, id }: { title: ReactNode; text?: Re
   );
 }
 
-export function ViewHead({ kicker, title, sub, meta, actions }: { kicker: ReactNode; title: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+export function ViewHead({ kicker, title, sub, meta, actions }: { kicker?: ReactNode; title: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
   return (
     <header className="vhead">
       <div className="vhead-main">
-        <div className="kicker">{kicker}</div>
+        {kicker ? <div className="kicker">{kicker}</div> : null}
         <h1 className="vtitle">{title}</h1>
         {sub ? <p className="vsub">{sub}</p> : null}
       </div>
@@ -325,3 +325,19 @@ export function useCopy(): (text: string) => void {
 
 /** Stable unique id for form controls inside a component. */
 export const useFieldId = (prefix = "f"): string => `${prefix}-${useId().replace(/:/g, "")}`;
+
+/* ---------- status (docs/ui/design-system.md §2) ---------- */
+
+export type Tone = "run" | "wait" | "block" | "fail" | "done" | "accent" | "neutral";
+const TONE_GLYPH: Record<Tone, string> = { run: "st-run", wait: "st-wait", block: "st-block", fail: "st-fail", done: "st-done", accent: "st-park", neutral: "st-park" };
+
+/** The one status badge: a glyph and a word on a soft tone. Colour never carries meaning alone. */
+export function Status({ tone, icon, children, title, id }: { tone: Tone; icon?: string | null; children: ReactNode; title?: string; id?: string }) {
+  const glyph = icon === null ? null : (icon ?? TONE_GLYPH[tone]);
+  return (
+    <span className={`status tone-${tone}`} title={title} id={id}>
+      {glyph ? <Icon name={glyph} /> : null}
+      <span>{children}</span>
+    </span>
+  );
+}

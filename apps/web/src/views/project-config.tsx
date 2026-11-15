@@ -10,7 +10,7 @@ import { pickProject } from "../lib/routes";
 import { usePrefs } from "../lib/prefs";
 import { useActors } from "../ui/actors";
 import { Btn, Empty, Tabs } from "../ui/primitives";
-import { Crumbs, HealthChip, useCatalog, type PView } from "./projects/kit";
+import { HealthChip, useCatalog, type PView } from "./projects/kit";
 import { TABS, membersOf, type CfgState } from "./project-config/ctx";
 import { OverviewTab, MembersTab } from "./project-config/overview";
 import { FlowTab } from "./project-config/flow";
@@ -57,9 +57,9 @@ export default function ProjectConfigView() {
     <div className="view pcf">
       <header className="vhead" id="pcf-head">
         <div className="vhead-main">
-          <Crumbs items={[{ label: "Projects", href: "#projects" }, { label: p.name }]} />
-          <div className="kicker">{`Project · ${p.key} · Config`}</div>
-          <h1 className="vtitle">{p.name}</h1>
+          <h1 className="vtitle">
+            Project config <HealthChip p={p} />
+          </h1>
           {p.desc ? <p className="vsub">{p.desc}</p> : null}
         </div>
         <dl className="titleblock">
@@ -68,7 +68,6 @@ export default function ProjectConfigView() {
           ))}
         </dl>
         <div className="vhead-actions">
-          <HealthChip p={p} />
           <Btn icon="belt" kind="ghost" id="pcf-to-floor" label="Open floor" onClick={() => navigate("floor")} />
         </div>
       </header>

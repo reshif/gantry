@@ -37,8 +37,8 @@ export default function TrustView() {
   }, [focus, tr]); // eslint-disable-line react-hooks/exhaustive-deps
   const agentName = useMemo(() => (id: string) => agents.find((a) => a.id === id)?.name ?? id, [agents]);
   const clsName = useMemo(() => (id: string) => cat?.classes.find((c) => c.id === id)?.name ?? id, [cat]);
-  if (!projects.length) return <div className="view view-trust"><ViewHead kicker="Agents · Sheet 17" title="Trust" /><Empty title="No projects to show" text="You have no role on an active project." /></div>;
-  if (!tr || !cat) return <div className="view view-trust"><ViewHead kicker="Agents · Sheet 17" title="Trust" /><div className="skeleton" aria-busy="true" /></div>;
+  if (!projects.length) return <div className="view view-trust"><ViewHead title="Trust" /><Empty title="No projects to show" text="You have no role on an active project." /></div>;
+  if (!tr || !cat) return <div className="view view-trust"><ViewHead title="Trust" /><div className="skeleton" aria-busy="true" /></div>;
   const proj = projects.find((p) => p.id === project)!;
   const pending = proposals.filter((x) => x.status === "pending");
   const saved = pending.reduce((t, x) => t + (x.savedPerWeek || 0), 0);
@@ -58,7 +58,7 @@ export default function TrustView() {
     : <LadderTab p={base} />;
   return (
     <div className="view view-trust">
-      <ViewHead kicker="Agents · Sheet 17" title="Trust" sub="Earned autonomy. Each agent earns a level per work class and project from evidence; people grant it, and regressions take it away automatically. L0 and L1 are enforced; higher levels are off until switched on."
+      <ViewHead title="Trust" sub="Earned autonomy. Each agent earns a level per work class and project from evidence; people grant it, and regressions take it away automatically. L0 and L1 are enforced; higher levels are off until switched on."
         meta={[["Cells", String(cells.length)], ["L3 and up", String(unattended)], ["Pending", String(pending.length)], ["Saves if approved", `${Math.round(saved * 10) / 10}/wk`], ["Under trust 7d", cov.total >= 10 ? `${Math.round((cov.auto / cov.total) * 100)}% n=${cov.total}` : `n=${cov.total}`], ["Levels above L1", tr.levelsAboveL1 ? "on" : "off"]]} />
       <Tabs idPrefix="tr-tab" items={tabs} active={tab} onChange={(t) => { trustUi.tab = t as TrustTab; trustUi.hiProposal = null; rerender(); }} />
       <div id="tr-tab-panel" role="tabpanel" className="tr-panel">{body}</div>

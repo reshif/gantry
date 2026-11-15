@@ -65,7 +65,7 @@ describe("Onboarding: pipeline", () => {
     api([find("web-storefront"), GREEN, find("search-indexer"), repo("notifications", (r) => { r.onboarding.stage = "connected"; r.onboarding.pr = null; r.onboarding.findings = []; })]);
     mount(<OnboardingView />);
     expect(await screen.findByText("Onboarding")).toBeTruthy();
-    expect(document.querySelector(".vhead .kicker")?.textContent).toBe("Project · Storefront");
+    expect(document.querySelector(".vhead .kicker")).toBeNull(); // the top bar already names the project
     const meta = Array.from(document.querySelectorAll(".titleblock div")).map((d) => d.textContent);
     expect(meta).toEqual(["Repos4", "Ready1 / 4", "In progress1", "Needs action2"]); // the buckets do not overlap
     const strip = Array.from(document.querySelectorAll(".onb-strip li")).map((li) => li.querySelector(".onb-strip-n")?.textContent);

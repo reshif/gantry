@@ -28,46 +28,44 @@ export function useRouteAccess(me: Me): { visible: (id: string) => boolean; deni
   };
 }
 
-const OPEN_KEY = "gantry.navOpen";
-function readOpen(): string | null {
+const CLOSED_KEY = "gantry.navClosed";
+function readClosed(): string[] {
   try {
-    return sessionStorage.getItem(OPEN_KEY) || null;
+    const v = JSON.parse(localStorage.getItem(CLOSED_KEY) || "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   } catch {
-    return null;
+    return [];
   }
 }
-function writeOpen(g: string | null): void {
+function writeClosed(gs: string[]): void {
   try {
-    if (g) sessionStorage.setItem(OPEN_KEY, g);
-    else sessionStorage.removeItem(OPEN_KEY);
+    localStorage.setItem(CLOSED_KEY, JSON.stringify(gs));
   } catch {
-    /* session storage unavailable: the menu just stays collapsed after a reload */
+    /* storage unavailable: groups just reopen after a reload */
   }
 }
 
 /**
- * Left nav: only the group headers show, all collapsed on a fresh load. Opening a group closes the
- * others (accordion); the group holding the current page is marked, not forced open. The Project group
- * is entered from its header: switcher, "All projects" and the project's pages.
+ * Left nav: every group shows its pages, so the person always sees where they are and what else exists.
+ * A group can be collapsed (remembered per browser); the group holding the current page always stays open.
+ * The Project group needs a chosen project.
  */
 export function Nav({ me, current, project, onNavigate }: { me: Me; current: string; project: ProjectLite | null; onNavigate: () => void }) {
   const prefs = usePrefs();
   const badges = useNavBadges();
   const access = useRouteAccess(me);
   const rail = prefs.navRail;
-  const [open, setOpenState] = useState<string | null>(readOpen);
-  const setOpen = (g: string | null) => {
-    setOpenState(g);
-    writeOpen(g);
+  const [closed, setClosedState] = useState<string[]>(readClosed);
+  const toggleGroup = (g: string) => {
+    const next = closed.includes(g) ? closed.filter((x) => x !== g) : [...closed, g];
+    setClosedState(next);
+    writeClosed(next);
   };
   const inProject = isProjectRoute(current) && !!project;
   // on factory pages the Project group is a shortcut to the last project, never a selector implying scope
   const shown = inProject ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
   const activeGroup = routeDef(current)?.group ?? null;
-  const go = () => {
-    setOpen(null);
-    onNavigate();
-  };
+  const go = () => onNavigate();
   const onHeaderKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
     const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
     if (!keys.includes(e.key)) return;
@@ -84,7 +82,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
         const noProj = isProj && !shown;
         const items = ROUTES.filter((r) => r.group === gname && r.nav !== false && (noProj || access.visible(r.id)));
         if (!items.length) return null;
-        const expanded = !noProj && open === gname;
+        const expanded = !noProj && (activeGroup === gname || !closed.includes(gname));
         const gid = `navg-${gname.toLowerCase()}`;
         const total = items.reduce((n, it) => n + (badges[it.id]?.n ?? 0), 0);
         const activeG = activeGroup === gname;
@@ -107,7 +105,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
                 title={noProj ? "Choose a project" : undefined}
                 aria-controls={gid}
                 data-active-group={activeG ? "true" : undefined}
-                onClick={() => { if (!noProj) setOpen(open === gname ? null : gname); }}
+                onClick={() => { if (!noProj && activeGroup !== gname) toggleGroup(gname); }}
                 onKeyDown={onHeaderKey}
               >
                 <Icon name={expanded ? "down" : "chevron"} className="nav-caret" />

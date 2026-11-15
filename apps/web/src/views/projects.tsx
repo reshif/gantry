@@ -33,7 +33,7 @@ export default function ProjectsView() {
   return (
     <div className="view prj">
       <ViewHead
-        kicker="Factory · Projects" title="Projects" sub="Each project is a line in the factory: its own repos, flow, approvers, budget and kill switch."
+        title="Projects" sub="Each project is a line in the factory: its own repos, flow, approvers, budget and kill switch."
         meta={[["Projects", String(live)], ["Archived", String(archived)], ["Templates", String(tpls.length)], ["Killed", String(killed)]]}
         actions={<Btn kind="primary" icon="plus" id="prj-new" guard={create} label="New project" onClick={() => openWizard()} />}
       />

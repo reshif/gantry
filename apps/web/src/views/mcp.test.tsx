@@ -294,7 +294,7 @@ describe("MCP servers screen", () => {
   it("with no servers it says so and offers Add", async () => {
     setup({ "GET /api/v1/mcp/servers": () => ({ body: [] }) });
     mount();
-    expect(await screen.findByText("No servers")).toBeTruthy();
+    expect(await screen.findByText("No MCP servers yet")).toBeTruthy();
     expect(await byId("mcp-add")).toBeTruthy();
   });
 });

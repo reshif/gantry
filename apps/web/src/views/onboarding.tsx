@@ -41,7 +41,7 @@ export default function OnboardingView() {
   return (
     <div className="view onb-view">
       <ViewHead
-        kicker={`Project · ${project.name}`} title="Onboarding"
+        title="Onboarding"
         sub="A repo must reach Ready before anyone can submit work orders to it. Gantry assesses each repo and opens a PR with the changes it needs. The Onboarding Agent adds its judgement and drafts when a model vendor is connected; otherwise the work is rule-based."
         meta={[["Repos", String(repos.length)], ["Ready", `${ready} / ${repos.length}`], ["In progress", String(repos.length - ready - attention)], ["Needs action", String(attention)]]}
         actions={<Btn kind="primary" icon="plus" id="onb-connect" label="Connect repo" guard={connect} onClick={wizard} />}

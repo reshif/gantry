@@ -145,13 +145,13 @@ export function MiniBelt({ cat, project, counts, cls, labels, stationsOff, gates
     const skipped = !!route && !route.includes(s.id);
     const n = c[s.id]?.n ?? 0;
     const blocked = (c[s.id]?.blocked ?? 0) > 0;
-    const segCls = `mseg${off ? " is-off" : ""}${skipped ? " is-skipped" : ""}${blocked ? " is-blocked" : ""}${s.custom ? " is-custom" : ""}`;
+    const segCls = `mseg${off ? " is-off" : ""}${!off && !n ? " is-empty" : ""}${skipped ? " is-skipped" : ""}${blocked ? " is-blocked" : ""}${s.custom ? " is-custom" : ""}`;
     const title = `${s.no} ${s.name}${off ? " (off)" : ""}: ${n} WIP${blocked ? ", blocked work" : ""}`;
     const style = { "--heat": (n / max).toFixed(2) } as React.CSSProperties;
     const body = (
       <>
         {labels ? <span className="mseg-l">{s.name}</span> : null}
-        <span className="mseg-n mono">{off ? "–" : String(n)}</span>
+        {off || n ? <span className="mseg-n mono">{off ? "–" : String(n)}</span> : null}
         {blocked ? <span className="mseg-x" aria-hidden="true" /> : null}
       </>
     );

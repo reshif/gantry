@@ -47,14 +47,13 @@ export default function PeopleView() {
 
   if (!me) return null;
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
-  if (!view.allowed) return <div className="view view-people"><ViewHead kicker="Govern · People & teams" title="People & teams" sub="" /><Empty id="people-no-access" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
+  if (!view.allowed) return <div className="view view-people"><ViewHead title="People & teams" sub="" /><Empty id="people-no-access" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
   const invited = people.filter((p) => p.status === "invited").length;
   const org = me.org;
 
   return (
     <div className="view view-people">
       <ViewHead
-        kicker="Govern · People & teams"
         title="People & teams"
         sub="Teams group people. Roles are granted on the factory or on one project, so a person can be an Engineer here and a Reviewer there."
         meta={[["People", String(people.length)], ["Teams", String(teams.length)], ["Factory Admins", String(admins.length)], ["Custom roles", String(roles.filter((r) => r.custom).length)], ["Invites pending", String(invited)]]}

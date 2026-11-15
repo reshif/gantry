@@ -92,7 +92,7 @@ describe("Integrations", () => {
     expect(within(table).getByText("Acme Slack")).toBeTruthy();
     expect(within(table).getByText("Staging Slack")).toBeTruthy();
     expect(within(table).getAllByText("All projects").length).toBe(2);
-    expect(within(table).getByText("disabled")).toBeTruthy();
+    expect(within(table).getByText("Disabled")).toBeTruthy();
     expect((await byId("int-attn-int-off")).textContent).toBe("Staging Slack");
     expect(document.body.textContent).not.toMatch(/simulated/i);
     fireEvent.click(await byId("int-open-int-slack"));

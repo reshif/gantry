@@ -28,7 +28,7 @@ export default function NotificationsView() {
   if (!p) {
     return (
       <div className="view cx nt-view">
-        <ViewHead kicker="Connect · Notifications" title="Notifications" />
+        <ViewHead title="Notifications" />
         <Empty title="No projects" text="You have no projects to configure." />
       </div>
     );
@@ -36,7 +36,6 @@ export default function NotificationsView() {
   return (
     <div className="view cx nt-view">
       <ViewHead
-        kicker="Connect · Notifications"
         title="Notifications"
         sub="Which events reach which people, through which connection, with which card. Per project, with repo overrides. Every notification comes from a committed event and is delivered at least once."
         meta={[["Project", p.name], ["Routes", `${p.notifications.filter((r) => r.enabled).length} on / ${p.notifications.length}`], ["Connections", String(nt.destInsts.length)], ["Failed deliveries", String(failed)], ["Edit rights", perm.allowed ? "yes" : "read-only"]]}

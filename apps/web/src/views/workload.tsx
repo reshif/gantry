@@ -72,7 +72,7 @@ export default function WorkloadView() {
   const sugg = m.suggestions;
   return (
     <div className="view view-workload">
-      <ViewHead kicker="Govern · Workload" title="Workload"
+      <ViewHead title="Workload"
         sub="Human attention is the scarce resource. Who waits on whom, how long, out of hours, and where one person is the only way through. Derived from approvals, brief confirmations and answers in the work order records."
         meta={[["Gates waiting", String(t.gatesWaiting)], ["Median wait", t.timedN >= MIN_N ? mins(t.medianWaitMin) : t.timedN ? `n=${t.timedN}` : "–"], ["After hours", t.acts >= MIN_N ? fmt.pct(t.afterHours / t.acts) : "–"], ["Human minutes", String(t.minutes)]]} />
       <div className="toolbar wl-tools">

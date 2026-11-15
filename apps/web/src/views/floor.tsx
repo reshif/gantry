@@ -106,7 +106,6 @@ function Header() {
     <>
       <div id="floor-head">
         <ViewHead
-          kicker={`Project · Floor · ${p.key}`}
           title={
             <>
               {p.name}

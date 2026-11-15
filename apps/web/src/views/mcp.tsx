@@ -38,7 +38,9 @@ export default function McpView() {
   const day = calls.filter((u) => u.at > Date.now() - DAY).length;
   const writeTools = servers.reduce((n, m) => n + m.tools.filter((t) => t.write).length, 0);
 
-  const registry = (
+  const registry = !servers.length ? (
+    <Empty id="mcp-empty" title="No MCP servers yet" text="An MCP server gives agents tools: a tracker, docs or a database. Add one, then choose the projects, stations and agents that may use it." />
+  ) : (
     <div className="mcp-split">
       <Panel title="Registry" flush>
         <div className="table-scroll">
@@ -66,14 +68,13 @@ export default function McpView() {
           </table>
         </div>
       </Panel>
-      {current ? <Detail key={current.id} srv={current} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} onRemoved={() => setSel(null)} /> : <Empty title="No servers" text="Add an MCP server to give agents tools." />}
+      {current ? <Detail key={current.id} srv={current} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} onRemoved={() => setSel(null)} /> : null}
     </div>
   );
 
   return (
     <div className="view cx mcp-view">
       <ViewHead
-        kicker="Connect · MCP servers"
         title="MCP servers"
         sub="Tools agents may call, and exactly where. Scope by project, repo, agent, station and work class; deny single tools; write tools need a pre-authorisation at the station. The edge makes every connection and holds every credential."
         meta={[["Servers", String(servers.length)], ["Not healthy", String(servers.filter((m) => m.health !== "healthy").length)], ["Write tools", String(writeTools)], ["Calls 24h", String(day)]]}

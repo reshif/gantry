@@ -64,7 +64,7 @@ export default function AuditView() {
   return (
     <div className="view view-audit">
       <ViewHead
-        kicker="Govern · Audit" title="Audit"
+        title="Audit"
         sub="Append-only ledger of every human, agent, API key and trigger action, including denied attempts. Nothing here can be edited or deleted."
         meta={[["Entries", String(sum?.entries ?? 0)], ["Denied", String(sum?.denied ?? 0)], ["Config changes", String(sum?.changes ?? 0)], ["Head digest", (sum?.head ?? "").slice(0, 8)]]}
         actions={canVerify ? <Btn label="Verify chain" kind="ghost" icon="shield" id="aud-verify" onClick={() => void runVerify()} /> : undefined}

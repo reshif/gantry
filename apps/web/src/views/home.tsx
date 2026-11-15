@@ -21,7 +21,7 @@ export default function HomeView() {
   if (q.isError) {
     return (
       <div className="view hm">
-        <ViewHead kicker="Home" title="Home" />
+        <ViewHead title="Home" />
         <Empty title="Home could not be loaded" text="Reload the page, or try again in a moment." />
       </div>
     );
@@ -29,7 +29,7 @@ export default function HomeView() {
   if (!home) {
     return (
       <div className="view hm">
-        <ViewHead kicker="Home" title="Home" />
+        <ViewHead title="Home" />
         <p className="muted small">Loading…</p>
       </div>
     );
@@ -38,7 +38,7 @@ export default function HomeView() {
   if (s.access === "none") {
     return (
       <div className="view hm">
-        <ViewHead kicker="Home" title="Home" />
+        <ViewHead title="Home" />
         <Empty id="hm-no-access" title="No access yet" text="Your account is signed in but has no role yet. Ask a Factory Admin or Project Admin to give you one." />
       </div>
     );
@@ -63,7 +63,7 @@ export default function HomeView() {
   return (
     <div className="view hm">
       <ViewHead
-        kicker="Home" title="Home"
+        title="Home"
         sub={away || undefined}
         actions={
           <>

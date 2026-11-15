@@ -154,25 +154,27 @@ describe("signed in", () => {
   const homeApi = () => mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
   const headers = (nav: HTMLElement) => Array.from(nav.querySelectorAll<HTMLButtonElement>(".nav-group-btn"));
 
-  it("starts with every nav group collapsed, opens one at a time and collapses after a link", async () => {
+  it("shows every nav group open, remembers a collapsed group and keeps the current page's group open", async () => {
     sessionStorage.clear();
+    localStorage.removeItem("gantry.navClosed");
     homeApi();
     window.location.hash = "#home";
     render(<App />);
     const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(headers(nav).every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
+    const open = () => headers(nav).filter((h) => h.getAttribute("aria-expanded") === "true").map((h) => h.id);
+    expect(open()).toEqual(["navg-overview-btn", "navg-agents-btn", "navg-connect-btn", "navg-govern-btn"]);
+    expect(within(nav).getByText("Skills")).toBeTruthy();
     const [overview, , agents] = headers(nav) as [HTMLButtonElement, HTMLButtonElement, HTMLButtonElement];
     fireEvent.click(agents);
-    expect(agents.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(overview);
-    expect(overview.getAttribute("aria-expanded")).toBe("true");
     expect(agents.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(overview);
-    expect(overview.getAttribute("aria-expanded")).toBe("false");
+    expect(JSON.parse(localStorage.getItem("gantry.navClosed") || "[]")).toEqual(["Agents"]);
+    fireEvent.click(overview); // the current page's group cannot be collapsed
+    expect(overview.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(agents);
     fireEvent.click(within(nav).getByText("Skills"));
     await waitFor(() => expect(window.location.hash).toBe("#skills"));
-    expect(headers(nav).every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
+    expect(agents.getAttribute("aria-expanded")).toBe("true");
+    localStorage.removeItem("gantry.navClosed");
   });
 
   it("marks the group of the current page and moves between headers with arrow keys", async () => {
@@ -183,7 +185,7 @@ describe("signed in", () => {
     const nav = await screen.findByRole("navigation", { name: "Main" });
     const hs = headers(nav);
     await waitFor(() => expect(headers(nav).filter((h) => h.dataset.activeGroup === "true").map((h) => h.id)).toEqual(["navg-project-btn"]));
-    expect(hs.every((h) => h.getAttribute("aria-expanded") === "false")).toBe(true);
+    expect(nav.querySelector("#navg-project-btn")?.getAttribute("aria-expanded")).toBe("true");
     hs[0]!.focus();
     fireEvent.keyDown(hs[0]!, { key: "ArrowDown" });
     expect(document.activeElement).toBe(hs[1]);

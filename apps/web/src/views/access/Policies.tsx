@@ -2,7 +2,7 @@ import { useState } from "react";
 import { DAYS, type Action, type Person, type Policy, type Project, type Role } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Btn, Chip, Field, LockNote, Segmented, Toggle, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Empty, Field, LockNote, Segmented, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ifMatchOf, lockd, useOutcome, usePolicyWording, versionOf } from "../govern/data";
@@ -158,6 +158,7 @@ export function PolicyCards({ policies, hl, people, onEdit, onSimulate }: { poli
   const perm = useCan("policy.edit");
   const wording = usePolicyWording();
   const list = [...policies].sort((a, b) => (a.id < b.id ? -1 : 1));
+  if (!list.length) return <Empty id="acc-policies-empty" title="No policies yet" text="Roles alone decide who can do what. Add a policy to narrow a right to certain hours or projects, or to extend it, for example while on call." />;
   return (
     <ul className="policy-cards">
       {list.map((p) => {

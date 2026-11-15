@@ -51,8 +51,8 @@ export default function EvalsView() {
     const p = projects.find((x) => x.id === c.project)?.name ?? c.project;
     return `${a} · ${c.cls} · ${p}${c.repo ? ` · ${c.repo}` : ""}`;
   }, [d.agents, projects]);
-  if (d.pending && !d.agents.length) return <div className="view view-evals"><ViewHead kicker="Agents · Sheet 16" title="Evals" /><div className="skeleton" aria-busy="true" /></div>;
-  if (!d.agents.length) return <div className="view view-evals"><ViewHead kicker="Agents · Sheet 16" title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
+  if (d.pending && !d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><div className="skeleton" aria-busy="true" /></div>;
+  if (!d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
   const regs = regressionsOf(d);
   let eligible = 0;
   for (const a of d.agents) for (const v of a.versions) if (v.rc && v.eligibility.ok) eligible++;
@@ -61,7 +61,7 @@ export default function EvalsView() {
   const overall = d.extra?.overrideRate ?? 0;
   return (
     <div className="view view-evals">
-      <ViewHead kicker="Agents · Sheet 16" title="Evals" sub="How well each agent does its job, on golden suites and on live work. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories."
+      <ViewHead title="Evals" sub="How well each agent does its job, on golden suites and on live work. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories."
         meta={[["Suites", String(d.suites.length)], ["Runs", String(d.runs.length)], ["Regressions", String(regs.length)], ["Candidates eligible", String(eligible)], ["Override rate", fmt.pct(overall)]]} />
       {regs.length ? (
         <div className="callout callout-fail ev-regs" role="note">

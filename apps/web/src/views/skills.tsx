@@ -305,7 +305,7 @@ export default function SkillsView() {
   const agents = (useAgents().data ?? []) as unknown as AgentRow[];
   const perm = dec(useCan("skill.edit"));
   const head = (extra?: { meta?: Array<[string, string]> }) => (
-    <ViewHead kicker="Agents · Sheet 14" title="Skills" sub="Reusable know-how that agents load when a task calls for it. Versioned, owned and covered by evals." meta={extra?.meta}
+    <ViewHead title="Skills" sub="Reusable know-how that agents load when a task calls for it. Versioned, owned and covered by evals." meta={extra?.meta}
       actions={<Btn label="New skill" kind="primary" icon="plus" id="sk-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill agents={agents} close={close} />)} />} />
   );
   if (q.isLoading) return <div className="view view-skills">{head()}<Empty title="Loading skills" text="" /></div>;

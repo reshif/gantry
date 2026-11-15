@@ -131,7 +131,7 @@ The design is in [agent-experience.md §4](review/2026-11-15/agent-experience.md
   - a research plan card the person approves, covering scope, domains and budget
   - a live run timeline for every station
 - **Phase 3:**
-  - a research swarm: child runs capped in number and budget, a board of scouts in progress, pause or stop per scout
+  - a research swarm: child runs capped in number and drawing on the work order's budget, a board of scouts in progress, pause or stop per scout
   - agent-to-agent objections that a person resolves
 - **Phase 4:** one Agent Workspace:
   - an inbox, threads and a context pane
@@ -171,9 +171,6 @@ Answered 2026-11-15:
 2. **Web research: allow-list.** Agents reach only domains on an allow-list kept by an admin. A research plan can propose new domains, and a person approves them when they approve the plan. Every fetch is snapshotted and audited.
 5. **Agent-to-agent challenges: only where necessary.** The agent judges whether a challenge is warranted; there is no project-wide switch and no fixed rule that forces one. A challenge always goes to a person, who resolves it. Code limits only how often challenges happen and what they cost.
 6. **Role templates: yes.** Ship Factory Manager and Security Reviewer.
+3. **Agent spending cap: per work order.** Each work order has one budget that covers every station, research run and scout in the swarm. A research plan shows how much of the remaining budget it expects to use. Raising the cap needs a person with the right to do so, and a work order that reaches its cap pauses and asks.
 4. **Agent documents: no direct editing.** Only the agent that owns a document changes it. People steer it through the dialogue with questions, answers, corrections and send-backs, and the agent writes a new version. Each version records the dialogue turn that caused it, so the gate shows why the document changed. The UI has no editor for station documents, and the API refuses writes to them from anyone but the owning station's run.
-
-Still open:
-
-3. Swarm cost cap: per research plan (assumed until answered), per station, or per work order?
-7. On-call: should it come from a schedule instead of a self-toggle? Self-toggle stays until answered, and it grants no extra rights.
+7. **On-call: Factory Admins always count, and each project sets its own.** A Factory Admin always counts as on call, on every project, so the factory always has someone who can act. Each project's admins choose who is on call for that project: named people or a rotation. A person can no longer switch themselves on call; they can only hand over to someone the project allows. On-call status is per project: being on call for payments unlocks on-call rules on payments only. Every hand-over and every use of an on-call right is audited.

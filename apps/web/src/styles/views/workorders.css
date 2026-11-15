@@ -20,7 +20,7 @@
 .int-route { list-style: none; display: flex; flex-wrap: wrap; align-items: stretch; gap: 3px; margin: 6px 0; }
 .int-rs { display: grid; grid-template-rows: auto auto; padding: 3px 7px; border: 1px solid var(--line-strong); background: var(--surface); min-width: 0; }
 .int-rs-no { font-size: 9.5px; color: var(--muted); }
-.int-rs-n { font-family: var(--f-display); font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1.1; }
+.int-rs-n { font-family: var(--f-display); font-size: 14px; font-weight: 600; letter-spacing: 0.02em; line-height: 1.1; }
 .int-rs.is-skip { border-style: dashed; background: transparent; color: var(--faint); }
 .int-rs.is-skip .int-rs-n { text-decoration: line-through; }
 .int-rg { display: grid; justify-items: center; align-content: center; gap: 2px; padding: 0 2px; }

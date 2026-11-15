@@ -29,7 +29,10 @@ export default function IntegrationsView() {
   const [status, setStatus] = useState("all");
   const failedQ = useDeliveries({ status: "failed", limit: 200 });
   const failedItems = Array.isArray(failedQ.data) ? failedQ.data : failedQ.data?.items ?? [];
-  const failed = failedItems.filter((x) => x.at > Date.now() - DAY).length;
+  const failedDay = failedItems.filter((x) => x.at > Date.now() - DAY);
+  // a failure on a connection makes that connection unhealthy; one with no connection is a routing gap, not a broken integration
+  const failed = failedDay.filter((x) => x.integration).length;
+  const unrouted = failedDay.length - failed;
 
   const openInstance = (id: string): void => {
     ui.drawer.open(`int:${id}`, (close) => (
@@ -75,10 +78,9 @@ export default function IntegrationsView() {
   return (
     <div className="view cx int-view">
       <ViewHead
-        kicker="Connect · Integrations"
         title="Integrations"
         sub="Where Gantry reads work from and where it sends cards. Several connections per type, each scoped to projects. A new connection stays switched off until you turn it on."
-        meta={[["Connected", String(all.length - off)], ["Failing", String(failing)], ["Disabled", String(off)], ["Types", `${d.types.length} (${customN} custom)`], ["Failed deliveries 24h", String(failed)]]}
+        meta={[["Connected", String(all.length - off)], ["Failing", String(failing)], ["Disabled", String(off)], ["Types", `${d.types.length} (${customN} custom)`], ["Failed deliveries 24h", String(failed)], ...(unrouted ? [["No connection 24h", String(unrouted)] as [string, string]] : [])]}
         actions={<><Btn label="Add integration" kind="primary" icon="plus" id="int-add" guard={add} onClick={() => addDialog(null)} /><Btn label="Build custom integration" icon="tool" id="int-build" guard={add} onClick={() => setTab("custom")} /></>}
       />
       <Tabs idPrefix="int-tab" items={tabs} active={tab} onChange={setTab} />

@@ -61,7 +61,7 @@ function One({ id }: { id: string }) {
     <div className="view rec-view">
       <Crumbs items={[{ label: project.name, href: "#work-orders" }, { label: "Records" }, { label: wo.id }]} />
       <ViewHead
-        kicker={`Project · ${project.name} · Work order record`}
+        kicker="Work order record"
         title={`${wo.id} ${wo.title}`}
         sub={`${wo.repo} · ${clsName(cat, wo.cls)} · requested by ${name(wo.requestedBy)} via ${srcName(wo.source)}, ${fmt.stamp(wo.createdAt)}`}
         meta={[

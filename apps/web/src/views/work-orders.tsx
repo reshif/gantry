@@ -145,7 +145,6 @@ export default function WorkOrdersView() {
     <div className="view wo-view">
       <div id="wo-head">
         <ViewHead
-          kicker={`Project · ${project.name}`}
           title="Work orders"
           sub="Everything this project has taken on. Open a row for its traveler, or the record icon for the full lifecycle record."
           meta={[

@@ -251,7 +251,7 @@ describe("Access", () => {
   it("locks everything when policy.edit and role.edit are denied", async () => {
     setup({}, ["policy.edit", "role.edit"]);
     mount(<AccessView />);
-    const add = await byId("acc-head-add");
+    const add = await byId("acc-add-policy");
     await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
     expect(screen.getByLabelText("Enable POL-101").getAttribute("aria-disabled")).toBe("true");
     expect(screen.getAllByText(/Read-only for you/).length).toBeGreaterThan(0);
