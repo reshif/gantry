@@ -127,6 +127,8 @@ kbd { font-family: var(--f-mono); font-size: var(--t-xs); border: 1px solid var(
 .btn.is-locked, .btn.is-locked:hover {
   background: var(--sunk); border-color: var(--line); color: var(--faint); cursor: not-allowed; filter: none;
 }
+/* Natively disabled (nothing to send yet, busy, read-only): quiet, without the lock mark a permission lock carries. */
+.btn:disabled, .btn:disabled:hover { background: var(--sunk); border-color: var(--line); color: var(--faint); cursor: not-allowed; filter: none; }
 .btn.is-locked::after {
   content: ""; width: 10px; height: 10px; margin-left: 2px;
   background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4'%3E%3Crect x='5' y='11' width='14' height='9' rx='1.5'/%3E%3Cpath d='M8 11V8a4 4 0 018 0v3'/%3E%3C/svg%3E") center / contain no-repeat;

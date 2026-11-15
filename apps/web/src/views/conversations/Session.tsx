@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WoCard } from "@gantry/domain";
-import { fmt } from "@gantry/domain";
+import { fmt, isBriefScaffold } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { Btn, Chip, Empty, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
@@ -65,14 +65,22 @@ function ProposalCard({ m, c, s, agent, send }: { m: WoSessionMessage; c: Propos
       {c.what === "brief" && c.changes ? (
         c.changes.length ? (
           <ul className="wos-diff" aria-label="What changes against the current brief">
-            {c.changes.map((ch) => (
-              <li key={ch.field}>
-                <strong className="small">{ch.label}</strong>
-                {ch.removed.map((x) => <div key={`r${x}`} className="small wos-minus">{`- ${x}`}</div>)}
-                {ch.added.map((x) => <div key={`a${x}`} className="small wos-plus">{`+ ${x}`}</div>)}
-                {(ch.resolved ?? []).map((x) => <div key={`q${x}`} className="small wos-resolved">{`Answered: ${x}`}</div>)}
-              </li>
-            ))}
+            {c.changes.map((ch) => {
+              // read from before/after so proposals stored before the rule changed show the same way: seeded placeholders are not
+              // a person's words, and an open question that goes away was answered
+              const gone = ch.before.filter((x) => !ch.after.includes(x));
+              const removed = ch.field === "open" ? [] : gone.filter((x) => !isBriefScaffold(x));
+              const resolved = ch.field === "open" ? gone : [];
+              if (!removed.length && !ch.added.length && !resolved.length) return null;
+              return (
+                <li key={ch.field}>
+                  <strong className="small">{ch.label}</strong>
+                  {removed.map((x) => <div key={`r${x}`} className="small wos-minus">{`- ${x}`}</div>)}
+                  {ch.added.map((x) => <div key={`a${x}`} className="small wos-plus">{`+ ${x}`}</div>)}
+                  {resolved.map((x) => <div key={`q${x}`} className="small wos-resolved">{`Answered: ${x}`}</div>)}
+                </li>
+              );
+            })}
           </ul>
         ) : <p className="small muted">No change against the brief as it stands.</p>
       ) : null}
