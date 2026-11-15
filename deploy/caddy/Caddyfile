@@ -49,14 +49,20 @@ https://localhost:8443 {
 	}
 
 	# Identity provider (Keycloak serves under /idp and sets its own CSP and frame headers).
-	handle /idp/* {
+	# Only the gantry realm (sign-in, tokens, account) and the static resources its pages load are public.
+	# The admin console, the admin REST API and the master realm are never reachable through the ingress:
+	# administrators use the loopback-only port (see deploy/README.md, "Keycloak admin console").
+	@idp path /idp/realms/gantry/* /idp/resources/*
+	handle @idp {
 		reverse_proxy keycloak:8081
 	}
-
-	# Mail catcher UI (development only; MP_WEBROOT=/mail).
-	handle /mail/* {
-		reverse_proxy mailpit:8025
+	handle /idp/* {
+		header Cache-Control "no-store"
+		respond "Not found" 404
 	}
+
+	# Development-only routes (the Mailpit inbox). GANTRY_INGRESS_PROFILE=prod imports an empty file instead.
+	import /etc/caddy/profiles/{$GANTRY_INGRESS_PROFILE:prod}.caddy
 
 	# Everything else is the single-page app.
 	handle {
@@ -64,5 +70,18 @@ https://localhost:8443 {
 		header X-Frame-Options "DENY"
 		encode zstd gzip
 		reverse_proxy gantry-web:8080
+	}
+}
+
+# Keycloak admin console and admin API, for operators only. Compose publishes this listener as 127.0.0.1:8081, so it is
+# reachable from the host itself (or through an SSH tunnel), never from the network. KC_HOSTNAME_ADMIN points here.
+http://localhost:8081 {
+	header -Server
+	@admin path /idp/admin/* /idp/realms/master/* /idp/resources/* /idp/js/*
+	handle @admin {
+		reverse_proxy keycloak:8081
+	}
+	handle {
+		respond "Not found" 404
 	}
 }

@@ -40,9 +40,15 @@ services:
     # Caddy listens unprivileged on 8443 inside the container; the host side is 127.0.0.1:443 only.
     ports:
       - "127.0.0.1:443:8443"
+      # Keycloak admin console, host loopback only (never the public site). Reach it remotely with an SSH tunnel.
+      - "127.0.0.1:8081:8081"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/profiles:/etc/caddy/profiles:ro
       - caddydata:/data
+    environment:
+      # dev serves the Mailpit inbox at /mail; prod (the Caddyfile default) serves no development routes.
+      GANTRY_INGRESS_PROFILE: ${GANTRY_INGRESS_PROFILE:-dev}
     # Caddy writes its local CA and config under XDG_*; both are on the writable volume or tmpfs.
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
@@ -288,6 +294,8 @@ services:
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
+      # The admin console is not served on the public site; the ingress serves it on 127.0.0.1:8081 only.
+      KC_HOSTNAME_ADMIN: http://localhost:8081/idp
     secrets: [keycloak_admin_password, oidc_client_secret]
     volumes:
       # The dev H2 database lives under data/. Persisting it keeps user ids (the OIDC `sub` Gantry links people to)

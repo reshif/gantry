@@ -74,7 +74,11 @@ curl_in() { curl -sk --max-time 10 --resolve localhost:443:127.0.0.1 "$@"; }
 if has_service ingress; then
   check "GET https://localhost/healthz answers ok through the ingress" bash -c "[ \"\$(curl -sk --max-time 10 --resolve localhost:443:127.0.0.1 https://localhost/healthz)\" = ok ]"
   ports="$(docker port "$(cid ingress)" 2>/dev/null)"
-  if [ "$ports" = "8443/tcp -> 127.0.0.1:443" ]; then ok "ingress publishes only 127.0.0.1:443"; else bad "ingress publishes only 127.0.0.1:443" "$ports"; fi
+  if [ "$(printf '%s\n' "$ports" | sort | tr '\n' ' ')" = "8081/tcp -> 127.0.0.1:8081 8443/tcp -> 127.0.0.1:443 " ]; then ok "ingress publishes only 127.0.0.1:443 and the loopback admin port 127.0.0.1:8081"; else bad "ingress publishes only 127.0.0.1:443 and 127.0.0.1:8081" "$ports"; fi
+  for p in /idp/admin/ /idp/admin/realms/gantry/users /idp/realms/master/protocol/openid-connect/token; do
+    check "public site refuses $p (404)" bash -c "[ \"\$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve localhost:443:127.0.0.1 https://localhost$p)\" = 404 ]"
+  done
+  check "Keycloak admin console answers on the loopback admin port" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:8081/idp/admin/)\" = 200 ]"
   published="$(docker ps --filter "label=com.docker.compose.project=$project" --format '{{.Names}} {{.Ports}}' | grep -v '^[^ ]*ingress' | grep -c -- '->' || true)"
   if [ "$published" = "0" ]; then ok "no other container publishes a port"; else bad "no other container publishes a port" "$published"; fi
   hdrs="$(curl_in -sI https://localhost/healthz)"
