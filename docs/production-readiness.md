@@ -96,9 +96,18 @@ The target design is in [frontend-architecture.md §7](review/2026-11-15/fronten
   - tabs and filters in the URL
   - accessibility check clean
 
-## Wave 3: what each persona sees
+## Wave 3: what each persona sees (done 2026-11-15)
 
-From the live persona test (the UI matched the role model; these are the gaps):
+From the live persona test (the UI matched the role model; these are the gaps). All fixed and re-checked by signing in as every
+persona and opening every page: no refused reads, no blank pages.
+
+- Project members read a directory of their own projects (people, teams, agents, skills, MCP servers, integrations, redacted) instead
+  of a 403; the web asks before reading a factory register; denied pages say so at their own address (F2, F3, F5, F10).
+- Auditors read the security settings; Andon is locked without the right; locked reasons reach screen readers (F1, F2, F4).
+- Factory-level grants need a reason on the ledger and a fresh sign-in, with Undo; Factory Manager and Security Reviewer ship (F7, F9).
+- No spec references in user-facing text; onboarding alerts go only to people with the right to act; audit subjects show names (F12, F13, F5).
+
+The original findings:
 
 - **F2:** an Auditor sees Security in the nav, but the page is blank. Every view must show a "you can't view this" state for a 403.
 - **F3:** clients request data the user can't read, causing 403s on every route. Queries are only enabled when the read is allowed.

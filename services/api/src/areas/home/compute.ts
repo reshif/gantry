@@ -102,8 +102,10 @@ async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveSt
     if (!p || !seeProject(p.id)) continue;
     if (r.halted) add({ id: `hm-att-rh-${r.id}`, sev: 1, icon: "halt", title: `${r.name} halted`, where: p.name, sub: r.halted.reason, act: { label: "Open floor", route: "floor", project: p.id } });
     const o = r.onboarding;
-    const onb = sc.holds("onboarding.manage", p.id) || sc.holds("onboarding.merge", p.id) || sc.holds("audit.view", p.id);
-    if (onb && o && (o.stage === "failed" || o.stage === "person" || (o.pr && o.pr.checks === "red" && o.pr.state === "open"))) {
+    // "needs you" only for people who can act: running onboarding fixes a failed or stuck repo; red checks also concern whoever may merge
+    const redPr = !!o?.pr && o.pr.checks === "red" && o.pr.state === "open";
+    const onb = sc.holds("onboarding.manage", p.id) || (redPr && sc.holds("onboarding.merge", p.id));
+    if (onb && o && (o.stage === "failed" || o.stage === "person" || redPr)) {
       const why = o.stage === "failed" ? "verification failed" : o.stage === "person" ? "needs a person" : "PR checks are red";
       add({ id: `hm-att-onb-${r.id}`, sev: 1, icon: "rocket", title: `${r.name} onboarding needs you: ${why}`, where: p.name, sub: o.blocker || "Open the onboarding session to continue.", act: { label: "Open session", route: "onboarding", project: p.id } });
     }
@@ -156,6 +158,9 @@ async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveSt
 
 const canApprove = (st: Flow, who: string, w: HomeWorkOrder, gate: string, now: number): boolean => gateDecision(st, who, w, gate, now).allowed;
 
+/** Onboarding session updates a merge right can act on (session/updates.ts event names); every other update needs onboarding.manage. */
+const MERGE_UPDATES: ReadonlySet<string> = new Set(["pr", "checks.green", "checks.none", "merge.refused"]);
+
 /** My approvals: gates I may decide now and onboarding PRs I may merge (legacy `G.myApprovals`). */
 async function myApprovals(db: Queryable, orgId: string, st: Flow, st0: PolicyStateLoaded, principal: Principal, me: Person, now: number) {
   const vis = new Set(visibleProjects(st, me.id).map((p) => p.id));
@@ -180,8 +185,8 @@ async function myApprovals(db: Queryable, orgId: string, st: Flow, st0: PolicySt
     out.push({ repo: r.repo_id, repoName: r.repo, pr: r.number ?? 0, project: r.project_id, projectName: p?.name ?? r.project_id });
   }
   // Onboarding session updates (checks finished, merged, verified, ...) for the people involved in the session, until they open it.
-  const ups = await db.query<{ repo_id: string; project_id: string; repo: string; body: string }>(
-    `select distinct on (m.repo_id) m.repo_id, r.project_id, r.name as repo, m.body
+  const ups = await db.query<{ repo_id: string; project_id: string; repo: string; body: string; event: string | null }>(
+    `select distinct on (m.repo_id) m.repo_id, r.project_id, r.name as repo, m.body, m.data->>'event' as event
        from onboarding_messages m join repos r on r.org_id = m.org_id and r.id = m.repo_id
       where m.org_id = $1 and m.data->>'kind' = 'update' and m.created_at > now() - interval '7 days'
         and m.created_at > coalesce((select s.seen_at from onboarding_session_seen s where s.org_id = m.org_id and s.repo_id = m.repo_id and s.person_id = $2), '-infinity'::timestamptz)
@@ -190,6 +195,9 @@ async function myApprovals(db: Queryable, orgId: string, st: Flow, st0: PolicySt
   );
   for (const u of ups.rows) {
     if (!vis.has(u.project_id) || !(await involved(db, orgId, u.repo_id, u.project_id)).includes(me.id)) continue;
+    // only people who can act on it (Wave 3, F13): a PR to merge needs a merge right; anything else needs the right to run onboarding
+    const acts = MERGE_UPDATES.has(u.event ?? "") ? ["onboarding.merge", "onboarding.manage"] : ["onboarding.manage"];
+    if (!acts.some((a) => decideFor(st0, principal, a, { project: u.project_id }).allowed)) continue;
     const p = st.projects.find((x) => x.id === u.project_id);
     out.push({ repo: u.repo_id, repoName: u.repo, pr: 0, project: u.project_id, projectName: p?.name ?? u.project_id, note: u.body.slice(0, 160) });
   }

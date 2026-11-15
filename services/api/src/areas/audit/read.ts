@@ -62,7 +62,12 @@ export interface AuditDetail extends AuditRow {
 const COLS = `e.seq, e.occurred_at, e.type, e.category, e.actor, e.on_behalf_of, e.channel, e.subject, e.project_id, e.wo_id, e.outcome, e.rule,
   e.before, e.after, e.session_id, host(e.source_ip) as ip, e.request_id, e.command_id, e.idempotency_key, e.hash, e.prev_hash,
   case when p.id is not null then 'human' when a.id is not null then 'agent' else 'system' end as actor_kind,
-  coalesce(p.name, a.name, e.actor) as actor_name`;
+  coalesce(p.name, a.name, e.actor) as actor_name,
+  case e.subject->>'type'
+    when 'person' then (select sp.name from people sp where sp.org_id = e.org_id and sp.id = e.subject->>'id')
+    when 'team' then (select st.name from teams st where st.org_id = e.org_id and st.id = e.subject->>'id')
+    when 'agent' then (select sa.name from agents sa where sa.org_id = e.org_id and sa.id = e.subject->>'id')
+  end as subject_name`;
 const FROM = `events e left join people p on p.org_id = e.org_id and p.id = e.actor left join agents a on a.org_id = e.org_id and a.id = e.actor`;
 
 /** jsonb -> the legacy text form: strings as they are, everything else as JSON. */
@@ -73,6 +78,8 @@ interface Raw {
   seq: string; occurred_at: Date; type: string; category: string; actor: string; on_behalf_of: string | null; channel: string; subject: unknown; project_id: string | null;
   wo_id: string | null; outcome: string; rule: string | null; before: unknown; after: unknown; session_id: string | null; ip: string | null; request_id: string | null;
   command_id: string | null; idempotency_key: string | null; hash: string; prev_hash: string; actor_kind: "human" | "agent" | "system"; actor_name: string;
+  /** The person, team or agent the event is about, by name (null for other subjects or a name since removed). */
+  subject_name?: string | null;
 }
 
 /** The legacy topic tests, in JS (the detail view shows the topic chip). Mirrors TOPICS.sql. */
@@ -89,7 +96,8 @@ export function toAudit(r: Raw): AuditRow {
   const sid = subject && typeof subject.id === "string" ? subject.id : null;
   const stype = subject && typeof subject.type === "string" ? subject.type : null;
   const named = subject && (typeof subject.target === "string" ? subject.target : typeof subject.name === "string" ? subject.name : null);
-  const target = named ?? (stype ? `${stype}${sid ? ` ${sid}` : ""}` : r.type);
+  // a person, team or agent reads by name first; the id stays in the text so a search for it still finds the row
+  const target = named ?? (r.subject_name && sid ? `${r.subject_name} · ${stype} ${sid}` : stype ? `${stype}${sid ? ` ${sid}` : ""}` : r.type);
   const seq = Number(r.seq);
   return {
     id: seq, seq, at: ms(r.occurred_at) ?? 0, actor: r.actor, action: r.type, target, where: r.project_id ?? "factory", project: r.project_id, category: r.category,
