@@ -89,6 +89,8 @@ function Header() {
   ) : (
     <Btn label="Kill project" kind="danger" icon="st-kill" id="floor-kill" guard={lockIf(factoryKilled ? { allowed: false, reason: "The whole factory is killed; restore it from Home.", needs: "" } : dKill.pending ? null : dKill)} onClick={() => stop.kill("project", p.id)} />
   );
+  // the cord is for people who may halt (or, on a halted line, resume): locked with the reason for everyone else
+  const andonGuard = p.halted ? (dResume.pending ? null : dResume) : dHalt.pending ? null : dHalt;
   const andonMenu = (anchor: HTMLElement) => {
     const items = [
       p.halted
@@ -124,7 +126,7 @@ function Header() {
           actions={
             <>
               <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
-              <Btn label={p.halted ? "Andon: halted" : "Andon"} kind="andon" icon="halt" id="floor-andon" aria="Andon controls: halt or resume the project or a repo" guard={lockIf(null)} onClick={(e) => andonMenu(e.currentTarget)} aria-haspopup="menu" />
+              <Btn label={p.halted ? "Andon: halted" : "Andon"} kind="andon" icon="halt" id="floor-andon" aria="Andon controls: halt or resume the project or a repo" guard={lockIf(andonGuard)} onClick={(e) => andonMenu(e.currentTarget)} aria-haspopup="menu" />
               {killBtn}
             </>
           }

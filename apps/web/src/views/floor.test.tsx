@@ -249,6 +249,16 @@ describe("Floor: andon and kill", () => {
     await screen.findByText("Payments Platform");
     await waitFor(() => expect(document.getElementById("floor-kill")?.getAttribute("aria-disabled")).toBe("true"));
     expect(document.getElementById("floor-kill")?.getAttribute("data-reason")).toMatch(/Factory Admin/);
+    expect(document.getElementById("floor-kill")?.getAttribute("aria-description")).toMatch(/Factory Admin/);
+  });
+
+  it("locks the Andon cord for someone who may not halt, instead of opening a menu of locked items", async () => {
+    mockApi({}, { denied: ["line.halt"] });
+    mount(<FloorView />);
+    await screen.findByText("Payments Platform");
+    await waitFor(() => expect(document.getElementById("floor-andon")?.getAttribute("aria-disabled")).toBe("true"));
+    fireEvent.click(document.getElementById("floor-andon") as HTMLElement);
+    expect(screen.queryByRole("menuitem", { name: /Halt Payments Platform/ })).toBeNull();
   });
 });
 

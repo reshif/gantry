@@ -51,6 +51,8 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
       type={type}
       className={className}
       aria-label={aria}
+      // why it is locked, read by screen readers with the control (the tooltip shows it on hover, focus and tap)
+      aria-description={locked && reason ? reason : undefined}
       aria-disabled={locked ? "true" : undefined}
       data-reason={reason || undefined}
       onClick={(e) => {
@@ -86,6 +88,7 @@ export function Toggle({ id, checked, onChange, decision, label }: { id: string;
   return (
     <span className={`switch${g.locked ? " is-locked" : ""}`}>
       <input
+        aria-description={g["data-reason"]}
         type="checkbox"
         role="switch"
         id={id}
