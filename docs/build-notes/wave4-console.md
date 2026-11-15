@@ -1,5 +1,12 @@
 # Wave 4: console
 
+> **Superseded (2026-11-15): there is no factory-wide "Console actions" switch any more.** What the console may propose is decided per person by
+> the `console.propose.*` rights in the role matrix (Govern > Access, Console group). Factory Admin holds all of them; nobody else holds any until a
+> Factory Admin grants them to a role or team. `PUT /console/settings` always answers 409 with that pointer, and `actionsEnabled` in
+> `GET /console/status` now means "this person holds at least one propose right". The model is told each turn which proposals this person may and
+> may not make, so it can't claim actions are "switched off". Where this note mentions the switch below, read "the person's console rights".
+
+
 ## Summary
 The Console (spec 8.9 Console row, 12.6) is real. `POST /api/v1/console/messages` streams an answer from a model called through the edge, with a fixed tool set that reads live data as the person (same visibility and permissions as the screens). Action tools never execute: they return proposals that the page draws as confirm cards, and confirming calls the ordinary endpoint under the person's own authority with `via: console`. Without a configured model the console says so plainly and answers nothing; the read tools and the slash commands still work. Action proposals are off in a new install. The screen is ported from `legacy/js/views/console.js` and `ask.js`, and an "Explain" affordance (legacy `G.explainDenial`) is added to the access simulator, the people cell detail and the security lock note. Real vendor calls are unverified (no key); the model loop is tested against a fake edge.
 

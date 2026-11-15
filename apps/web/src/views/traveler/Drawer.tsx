@@ -9,7 +9,6 @@ import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useProject } from "../../api/queries";
 import { ClassChip, classOf, useCatalog } from "../projects/kit";
-import { ConversationThread } from "../conversations/Thread";
 import { Lifecycle } from "../record/Lifecycle";
 import { useOpenRecordRoute } from "../record/nav";
 import { Actions } from "./Actions";
@@ -68,13 +67,12 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
   const tabs = [
     { id: "journey", label: "Journey" },
     { id: "lifecycle", label: "Lifecycle" },
-    { id: "conversation", label: "Conversation", count: wo.conv.messages.length },
     { id: "brief", label: "Brief" },
     { id: "artefacts", label: "Artefacts" },
     { id: "history", label: "History" },
   ];
   const body =
-    tab === "lifecycle" ? <Lifecycle woId={wo.id} compact /> : tab === "conversation" ? <TravelerConversation woId={wo.id} /> : tab === "brief" ? <BriefTab wo={wo} cat={cat} /> : tab === "artefacts" ? <ArtefactsTab wo={wo} project={project} /> : tab === "history" ? <HistoryTab wo={wo} /> : <Journey wo={wo} project={project} cat={cat} />;
+    tab === "lifecycle" ? <Lifecycle woId={wo.id} compact /> : tab === "brief" ? <BriefTab wo={wo} cat={cat} /> : tab === "artefacts" ? <ArtefactsTab wo={wo} project={project} /> : tab === "history" ? <HistoryTab wo={wo} /> : <Journey wo={wo} project={project} cat={cat} />;
   const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;
   return (
     <div className={`drawer-inner trv-drawer${wo.state === "killed" ? " is-killed" : ""}`}>
@@ -161,7 +159,3 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
   );
 }
 
-/** The traveler's Conversation tab: the thread without the confirm and decline buttons (they are in the header). */
-function TravelerConversation({ woId }: { woId: string }) {
-  return <ConversationThread woId={woId} idPrefix="trv-conv" noActions />;
-}
