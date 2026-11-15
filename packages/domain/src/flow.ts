@@ -5,7 +5,7 @@
  */
 import { DEFAULT_CATALOG, ONBOARD_STAGES, RISK_TAG_RULES } from "./catalog.js";
 import { HOUR } from "./format.js";
-import { actorName, can, effectiveStop, findPerson, findProject, findRepo, rolesIn } from "./policy.js";
+import { actorName, can, effectiveStop, findPerson, findProject, findRepo, isOnCall, rolesIn } from "./policy.js";
 import type { PolicyState } from "./policy.js";
 import type {
   ApproverCondition, ApproverNeeds, ApproverRule, Bay, Brief, Catalog, Conversation, ConvMiss, ConvQuestion, Decision, DecisionRule, Gate, GateKind, GateInstance,
@@ -406,7 +406,7 @@ export function conditionsFor(project: Project, wo: Pick<WorkOrder, "cls" | "ris
 function satisfies(person: Person, project: Project, needs: ApproverNeeds): boolean {
   const roles = rolesIn(person, project.id);
   const ok = needs.people.includes(person.id) || needs.roles.some((r) => roles.includes(r));
-  return ok && (!needs.oncall || person.oncall);
+  return ok && (!needs.oncall || isOnCall({ projects: [project] }, person, project.id));
 }
 
 export interface GateProgress {
@@ -483,7 +483,7 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
   if (!byRole && !byName && !delegateFor && !byCond) {
     const cn = conds.filter((cd) => cd.needs.oncall && cd.needs.roles.some((r) => roles.includes(r)));
     const roleList = (rs: string[]) => rs.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ");
-    if (cn.length && !person.oncall) return deny((cn[0] as ApproverCondition).text + "; " + person.name + " is not on call.", "On-call " + roleList((cn[0] as ApproverCondition).needs.roles), "APR-" + gateId);
+    if (cn.length && !isOnCall({ projects: [project] }, person, project.id)) return deny((cn[0] as ApproverCondition).text + "; " + person.name + " is not on call.", "On-call " + roleList((cn[0] as ApproverCondition).needs.roles), "APR-" + gateId);
     return deny(
       "Approver rule for " + g.label + " on " + project.name + " lists " + (rule.roles.length ? roleList(rule.roles) : "no roles") + (rule.people.length ? " and " + rule.people.map((p) => actorName(state, p)).join(", ") : "") + ".",
       "Needs " + (rule.roles.length ? roleList(rule.roles) : rule.people.map((p) => actorName(state, p)).join(", ")),

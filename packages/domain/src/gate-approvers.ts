@@ -3,7 +3,7 @@
  * and whether the gate can pass as configured. Read only. A Factory Admin is never listed as an approver of the rule: they may override (break-glass), which is shown apart.
  */
 import { gateDef, gateDecision, gateProgress, conditionsFor, type FlowState } from "./flow.js";
-import { rolesIn } from "./policy.js";
+import { isOnCall, rolesIn } from "./policy.js";
 import type { ApproverRule, Person, Project, WorkOrder } from "./types.js";
 
 export interface EligibleApprover { id: string; name: string; why: string; away: boolean; oncall: boolean }
@@ -63,7 +63,7 @@ export function gateApprovers(state: FlowState, wo: WorkOrder, gateId: string, n
     const judged = without(p, "factory_admin");
     const st2 = { ...state, people: state.people.map((x) => (x.id === p.id ? judged : x)) } as FlowState;
     const d = gateDecision(st2, p.id, open, gateId, now);
-    if (d.allowed) eligible.push({ id: p.id, name: p.name, why: d.reason, away: !!p.away && p.away.to > now, oncall: p.oncall });
+    if (d.allowed) eligible.push({ id: p.id, name: p.name, why: d.reason, away: !!p.away && p.away.to > now, oncall: isOnCall(state, p, project.id) });
   }
   const need = prog.need;
   const remaining = eligible.filter((e) => !wo.gates[gateId]?.approvals.some((a) => a.by === e.id));

@@ -359,6 +359,21 @@ describe("Project config", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path.endsWith("/members/p-meera/roles/reviewer") || c.path.includes("/members/p-tomas/roles/reviewer"))).toBe(true));
   });
 
+  it("members tab: project admins choose who is on call, with the project version; a stale save says so", async () => {
+    let stale = false;
+    const calls = withPayments({ "PUT /api/v1/projects/payments/oncall": () => (stale ? { status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } } : ok({ oncall: ["p-meera"], version: 8 })) });
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-members"));
+    expect(await byId("pcf-oncall-none")).toBeTruthy();
+    fireEvent.change(await byId("pcf-oncall-pick"), { target: { value: "p-meera" } });
+    fireEvent.click(await byId("pcf-oncall-add"));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/oncall"))?.body).toEqual({ people: ["p-meera"] }));
+    expect(calls.find((c) => c.path.endsWith("/oncall"))!.headers["if-match"]).toBe("7");
+    stale = true;
+    fireEvent.click(await byId("pcf-oncall-add"));
+    expect(await screen.findByText(/changed since you loaded it/)).toBeTruthy();
+  });
+
   it("approvers tab: edits a rule, refuses N larger than the eligible people, and saves with If-Match", async () => {
     const people = [PEOPLE[0]!, person("p-meera", "Meera Iyer", [{ role: "line_lead", scope: "payments" }]), person("p-priya", "Priya Nair", [{ role: "reviewer", scope: "payments" }])];
     const calls = withPayments({ "GET /api/v1/people": () => ({ body: people }), "PUT /api/v1/projects/payments/approvers/G5": () => ok() });

@@ -288,9 +288,12 @@ d("demo personas: enforcement on real endpoints", () => {
   });
 
   describe("on call changes what a person may do (POL-103, POL-106)", () => {
-    const setOncall = async (who: string, on: boolean) => {
-      const v = (await w.q(`select version from people where id = $1`, [who]))[0].version;
-      return w.call(who, "PUT", `/api/v1/people/${who}/oncall`, { on }, { "if-match": String(v) });
+    // On call is per project (owner decision 7): the project's admin (Asha here) sets the list.
+    const setOncall = async (who: string, on: boolean, project: string) => {
+      const row = (await w.q(`select version, coalesce(config -> 'oncall', '[]'::jsonb) as oncall from projects where id = $1`, [project]))[0];
+      const cur = row.oncall as string[];
+      const next = on ? [...new Set([...cur, who])] : cur.filter((x) => x !== who);
+      return w.call("p-asha", "PUT", `/api/v1/projects/${project}/oncall`, { people: next }, { "if-match": String(row.version) });
     };
     const canNow = async (who: string, action: string, project: string, time = Date.UTC(2026, 10, 11, 5, 30)) => {
       const s = await t.session(who);
@@ -299,28 +302,29 @@ d("demo personas: enforcement on real endpoints", () => {
     };
     it("Lena on call may release Identity; off call she may not (POL-103 applies only on call)", async () => {
       expect((await canNow("p-lena", "release", "identity")).allowed).toBe(true);
-      const off = await setOncall("p-lena", false);
+      const off = await setOncall("p-lena", false, "identity");
       expect(off.status, JSON.stringify(off.body)).toBe(200);
       const x = await canNow("p-lena", "release", "identity");
       expect(x.allowed).toBe(false);
       expect(x.reason).toMatch(/not on call/);
-      expect((await setOncall("p-lena", true)).status).toBe(200);
+      expect((await setOncall("p-lena", true, "identity")).status).toBe(200);
       expect((await canNow("p-lena", "release", "identity")).allowed).toBe(true);
       ok(0);
     });
     it("Meera on call may kill her project (POL-106 extends kill.project to on-call line leads) but still not restore it", async () => {
       expect((await canNow("p-meera", "kill.project", "payments")).allowed).toBe(false);
-      expect((await setOncall("p-meera", true)).status).toBe(200);
+      expect((await setOncall("p-meera", true, "payments")).status).toBe(200);
       expect((await canNow("p-meera", "kill.project", "payments")).allowed).toBe(true);
       expect((await canNow("p-meera", "restore.project", "payments")).allowed).toBe(false);
       expect((await canNow("p-meera", "kill.project", "storefront")).allowed).toBe(false); // on call on Payments only
-      expect((await setOncall("p-meera", false)).status).toBe(200);
+      expect((await setOncall("p-meera", false, "payments")).status).toBe(200);
       expect((await canNow("p-meera", "kill.project", "payments")).allowed).toBe(false);
       ok(0);
     });
-    it("a person cannot set someone else's on-call status without people.manage", async () => {
-      const v = (await w.q(`select version from people where id = 'p-lena'`))[0].version;
-      await expectDenied("p-tomas", "people.manage", () => w.call("p-tomas", "PUT", "/api/v1/people/p-lena/oncall", { on: false }, { "if-match": String(v) }));
+    it("nobody puts themselves on call, and only a project admin sets who is (project.members)", async () => {
+      expect((await w.call("p-lena", "PUT", "/api/v1/people/p-lena/oncall", { on: true })).status).toBe(410);
+      const v = (await w.q(`select version from projects where id = 'payments'`))[0].version;
+      await expectDenied("p-tomas", "project.members", () => w.call("p-tomas", "PUT", "/api/v1/projects/payments/oncall", { people: ["p-tomas"] }, { "if-match": String(v) }));
     });
   });
 

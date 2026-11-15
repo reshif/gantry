@@ -20,7 +20,7 @@ export interface PolicyState {
   matrix: Matrix;
   policies: Policy[];
   freezes: Freeze[];
-  projects: Array<Pick<Project, "id" | "name" | "status"> & Partial<Pick<Project, "killed" | "halted" | "regulated">>>;
+  projects: Array<Pick<Project, "id" | "name" | "status"> & Partial<Pick<Project, "killed" | "halted" | "regulated" | "oncall">>>;
   repos: Array<Pick<Repo, "id" | "name" | "project"> & Partial<Pick<Repo, "halted">>>;
   /** Factory-level stop. Project, repo and work-order stops are read from their own records. */
   stops?: { factory: KillInfo | null };
@@ -250,6 +250,7 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   const granting = grants.filter((g) => matrix[g.role]?.[action]).sort((a, b) => Number(!!a.via) - Number(!!b.via));
   const heldRoles = grants.map((g) => g.role);
   const t = ist(time);
+  const onCall = isOnCall(state, person, projectId);
 
   /* spec 9.7: stop state of the scope refuses work; stop controls themselves are exempt (I7) */
   const stop = effectiveStop(state, { project: projectId, repo: ctx.repo ?? null, wo: ctx.wo ?? null });
@@ -260,7 +261,7 @@ export function can(state: PolicyState, personId: string | null | undefined, act
 
   if (!granting.length) {
     const ext = state.policies.filter((p) => p.enabled && p.extend && p.effect === "allow" && p.actions.includes(action));
-    const hit = ext.find((q) => q.roles.some((r) => heldRoles.includes(r)) && whereOk(q, projectId) && whenOk(q, t) && (!q.oncallOnly || person.oncall));
+    const hit = ext.find((q) => q.roles.some((r) => heldRoles.includes(r)) && whereOk(q, projectId) && whenOk(q, t) && (!q.oncallOnly || onCall));
     if (hit) return { allowed: true, reason: "Allowed by " + hit.id + " '" + hit.name + "'.", rule: { kind: "policy", id: hit.id, name: hit.name }, needs: "" };
     /* I7: a Factory Admin can always halt, kill and restore, even if the matrix is damaged */
     if (ADMIN_ALWAYS.has(action) && person.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) {
@@ -279,7 +280,7 @@ export function can(state: PolicyState, personId: string | null | undefined, act
         ? person.name + "'s roles that allow this are held on single projects; '" + (act ? act.name : action) + "' needs a factory-level role."
         : person.name + "'s roles that allow this do not cover " + (project ? project.name : "this scope") + "."
       : "No role held by " + person.name + (scoped && project ? " in " + project.name : "") + " includes '" + (act ? act.name : action) + "'.";
-    if (ext.length && ext.some((q) => q.oncallOnly && q.roles.some((r) => heldRoles.includes(r))) && !person.oncall) reason += " " + (ext[0] as Policy).id + " would allow it while on call.";
+    if (ext.length && ext.some((q) => q.oncallOnly && q.roles.some((r) => heldRoles.includes(r))) && !onCall) reason += " " + (ext[0] as Policy).id + " would allow it while on call.";
     return { allowed: false, reason, rule: MATRIX_RULE, needs };
   }
 
@@ -306,8 +307,8 @@ export function can(state: PolicyState, personId: string | null | undefined, act
     }
     let why: { q: Policy; text: string } | null = null;
     for (const q of applicable) {
-      if (whenOk(q, t) && (!q.oncallOnly || person.oncall)) return { allowed: true, reason: "Allowed by " + q.id + " '" + q.name + "'.", rule: { kind: "policy", id: q.id, name: q.name }, needs: "" };
-      if (!why) why = { q, text: q.oncallOnly && !person.oncall ? person.name + " is not on call; " + q.id + " applies only on call." : "Outside the window in " + q.id + ": " + policyText.when(q.when) + "." };
+      if (whenOk(q, t) && (!q.oncallOnly || onCall)) return { allowed: true, reason: "Allowed by " + q.id + " '" + q.name + "'.", rule: { kind: "policy", id: q.id, name: q.name }, needs: "" };
+      if (!why) why = { q, text: q.oncallOnly && !onCall ? person.name + " is not on call; " + q.id + " applies only on call." : "Outside the window in " + q.id + ": " + policyText.when(q.when) + "." };
     }
     const w = why as { q: Policy; text: string };
     return { allowed: false, reason: w.text, rule: { kind: "policy", id: w.q.id, name: w.q.name }, needs: "Allowed " + policyText.when(w.q.when) + (w.q.oncallOnly ? " while on call" : "") };
@@ -315,6 +316,19 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   const g0 = granting[0] as { role: string; scope: string; via?: string };
   const scopeName = g0.scope === "factory" ? "the factory" : findProject(state, g0.scope)?.name ?? g0.scope;
   return { allowed: true, reason: "Role matrix: " + roleName(state, g0.role) + " on " + scopeName + (g0.via ? " (" + grantSource(state, g0) + ")" : "") + " may " + (act ? act.name.toLowerCase() : action) + ".", rule: MATRIX_RULE, needs: "" };
+}
+
+/**
+ * On call for a project (owner decision 7, 2026-11-15): a Factory Admin always counts, on every project, so the factory always
+ * has someone who can act; anyone else counts only on the projects whose admins put them on call. Being on call for one
+ * project never unlocks an on-call rule on another project, and nobody can put themselves on call.
+ */
+export function isOnCall(state: { projects: ReadonlyArray<Pick<Project, "id" | "oncall">> }, person: Pick<Person, "id" | "roles">, projectId: string | null | undefined): boolean {
+  if (person.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) return true;
+  // A question asked without a project ("may they do this anywhere?") counts any project, as role grants do in can().
+  if (!projectId) return state.projects.some((x) => Array.isArray(x.oncall) && x.oncall.includes(person.id));
+  const p = state.projects.find((x) => x.id === projectId);
+  return !!p && Array.isArray(p.oncall) && p.oncall.includes(person.id);
 }
 
 /** Batch form behind `POST /api/v1/can`. */

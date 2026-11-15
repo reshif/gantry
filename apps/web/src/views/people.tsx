@@ -261,13 +261,12 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
           <div className="ad-meta">{`${p.title} · `}<span className="mono">{p.email}</span>{p.github ? <span className="mono">{` · github ${p.github}`}</span> : null}</div>
           <div className="ppl-badges">
             <span className="chip"><Icon name="shield" />{p.mfa ? "MFA enrolled" : "No MFA"}</span>
-            {p.oncall ? <span className="chip chip-accent"><Icon name="clock" />On call</span> : null}
+            {p.oncall ? <span className="chip chip-accent" data-tip="On call for at least one project, or a Factory Admin (always on call). Project admins set who is on call in Project config." tabIndex={0}><Icon name="clock" />On call</span> : null}
             {away ? <span className="chip chip-warn"><Icon name="swap" />{`Away until ${fmt.istDate(away.to)}, delegate ${actors(away.delegate).name}`}</span> : null}
           </div>
         </div>
         <div className="ad-tools">
           {p.status === "invited" ? <Btn label="Mark invite accepted" small icon="check" id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
-          <Btn label={p.oncall ? "Take off call" : "Put on call"} small icon="clock" id="ppl-oncall" guard={perm} onClick={async () => void outcome(await ops.setOncall(p.id, !p.oncall))} />
           <Btn label="Edit teams" small kind="ghost" icon="teams" id="ppl-teams" guard={perm} onClick={openTeams} />
         </div>
       </div>

@@ -61,7 +61,9 @@ export const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reas
 
 export async function readPeople(db: Queryable, orgId: string): Promise<Person[]> {
   const { rows } = await db.query(
-    `select p.id, p.name, p.title, p.email, p.github_login, p.status, p.mfa, p.oncall, p.away, p.data, p.version,
+    `select p.id, p.name, p.title, p.email, p.github_login, p.status, p.mfa, p.away, p.data, p.version,
+       (exists (select 1 from projects pr where pr.org_id = p.org_id and pr.config -> 'oncall' ? p.id)
+         or exists (select 1 from role_assignments fa where fa.org_id = p.org_id and fa.person_id = p.id and fa.role_id = 'factory_admin' and fa.project_id is null and fa.revoked_at is null)) as oncall,
        coalesce((select jsonb_agg(jsonb_build_object('role', ra.role_id, 'scope', coalesce(ra.project_id, 'factory')) || case when ra.via_team is null then '{}'::jsonb else jsonb_build_object('via', ra.via_team) end order by (ra.via_team is not null), ra.created_at, ra.id)
                  from effective_role_assignments ra where ra.org_id = p.org_id and ra.person_id = p.id and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now())), '[]'::jsonb) as roles,
        coalesce((select array_agg(tm.team_id order by tm.created_at, tm.team_id) from team_members tm where tm.org_id = p.org_id and tm.person_id = p.id), '{}') as teams
@@ -126,6 +128,7 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
         id: String(x.id).slice(String(r.id).length + 1), event: x.event, dest: x.destinations, template: x.template, cond: x.conditions, enabled: x.enabled, fields: x.fields,
       })),
       mcp: Array.isArray(cfg.mcp) ? cfg.mcp : [],
+      oncall: Array.isArray(cfg.oncall) ? (cfg.oncall as unknown[]).filter((x): x is string => typeof x === "string") : [],
       budget: { monthly: b ? Math.round(num(b.monthly_limit_micros) / 1_000_000) : 0, mtd: num(cfg.mtd), alertAt: b ? num(b.alert_at) : 0.8 },
       created: ms(r.created_at) ?? 0,
       halted: halt ? haltInfo(halt) : null,

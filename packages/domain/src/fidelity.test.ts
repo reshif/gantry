@@ -12,6 +12,10 @@ import type { WorkOrder } from "./types.js";
 const { G } = loadLegacy();
 const S = seedState();
 const legacyState = G.store.get();
+// On call is per project now, and a Factory Admin always counts (owner decision 7). The seed puts each on-call person on
+// call for every project they hold a role on, which the legacy engine's global switch expresses exactly; it has no notion
+// of the Factory Admin rule, so give it the same input.
+for (const p of legacyState.people as Array<{ oncall?: boolean; roles: Array<{ role: string; scope: string }> }>) if (p.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) p.oncall = true;
 
 const times = [NOW, istTime("2026-11-20", "22:00"), istTime("2026-11-18", "11:00"), istTime("2026-11-22", "03:00"), istTime("2026-11-15", "02:00"), istTime("2026-12-25", "12:00")];
 

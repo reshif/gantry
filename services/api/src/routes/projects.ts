@@ -7,6 +7,7 @@
  *   POST/DELETE/PATCH /api/v1/projects/{id}/flow/{stations|gates|bays|classes}
  *   PUT /api/v1/projects/{id}/approvers/{gate}
  *   PUT/DELETE /api/v1/projects/{id}/members/{person}/roles/{role}
+ *   PUT /api/v1/projects/{id}/oncall, POST /api/v1/projects/{id}/oncall/handover
  *   POST /api/v1/projects/{id}/archive, /unarchive
  *
  * `GET /projects` and `GET /projects/{id}` return the legacy Project shape plus `version` and `metrics` (portfolio numbers computed from
@@ -27,6 +28,7 @@ import { readCatalog } from "../core/index.js";
 import { portfolioMetrics } from "../areas/projects/metrics.js";
 import { ArchiveBody, BayBody, ClassBody, ClassPatch, ConfigBody, GateBody, MoveBody, NewProject, RuleBody, StationBody, TemplateCreate, TemplatePatch, ViewCreate, ViewPatch } from "../areas/projects/schemas.js";
 import { projectVersion, refuseIfStopped } from "../areas/projects/store.js";
+import { handOverOncall, setProjectOncall } from "../areas/projects/oncall.js";
 
 const Id = z.object({ id: z.string().min(1).max(100) });
 const IdSub = z.object({ id: z.string().min(1).max(100), sub: z.string().min(1).max(100) });
@@ -223,6 +225,20 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       },
     });
   }
+
+  /* ------------------------------------------------------------------ on call */
+
+  // Project admins choose who is on call (project.members, like role grants); the person on call may hand over. Factory Admins always count.
+  app.put("/api/v1/projects/:id/oncall", async (req) => {
+    const { id } = Id.parse(req.params);
+    const body = z.object({ people: z.array(z.string().min(1).max(100)).max(50) }).parse(req.body);
+    return inProject(req, { action: "project.members", scope: { project: id }, ifMatch: projectVersion(g.orgId, id) }, id, "light", (tx, a) => setProjectOncall(tx, a, id, body.people));
+  });
+  app.post("/api/v1/projects/:id/oncall/handover", async (req) => {
+    const { id } = Id.parse(req.params);
+    const body = z.object({ to: z.string().min(1).max(100) }).parse(req.body);
+    return inProject(req, { action: null, scope: { project: id }, ifMatch: projectVersion(g.orgId, id) }, id, "light", (tx, a) => handOverOncall(tx, a, id, body.to));
+  });
 
   /* ------------------------------------------------------------------ archive */
 

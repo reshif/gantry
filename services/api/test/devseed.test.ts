@@ -1,3 +1,4 @@
+import { isOnCall } from "@gantry/domain";
 import { devSeed } from "@gantry/domain";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapOrg } from "../src/core/bootstrap.js";
@@ -32,7 +33,9 @@ d("dev seed loader and read mappers (rows -> legacy shapes)", () => {
     const got = (await readPeople(t.db.app, t.orgId)) as unknown as Array<Record<string, unknown>>;
     // `mfa` is a boolean column: absent in the seed reads back as false.
     const norm = (ps: Array<Record<string, any>>) => ps.map(({ version: _v, ...p }) => ({ mfa: false, ...p, teams: [...p.teams].sort() }));
-    expect(norm(got)).toEqual(norm(S.people as never));
+    // on call is read back derived (owner decision 7): on call for any project, or a Factory Admin; the seed's global switch is not stored
+    const want = S.people.map((p) => ({ ...p, oncall: isOnCall(S as never, p, null) }));
+    expect(norm(got)).toEqual(norm(want as never));
     expect(got.map((p) => p.id)).toEqual(S.people.map((p) => p.id)); // seed order kept
   });
 

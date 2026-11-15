@@ -156,11 +156,12 @@ describe("People", () => {
     expect(calls.some((c) => c.path === "/api/v1/invites")).toBe(false);
   });
 
-  it("a stale-version refusal shows its message", async () => {
-    setup({ "PUT /api/v1/people/p-asha/oncall": () => ({ status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } }) });
+  it("has no on-call switch: on call is chosen per project in Project config", async () => {
+    setup();
     mount(<PeopleView />);
-    fireEvent.click(await screen.findByText("Put on call"));
-    expect(await screen.findByText(/changed since you loaded it/)).toBeTruthy();
+    expect(await screen.findAllByText("Asha Raman")).toBeTruthy();
+    expect(screen.queryByText("Put on call")).toBeNull();
+    expect(document.getElementById("ppl-oncall")).toBeNull();
   });
 
   it("a step-up refusal nobody resolved is shown as its message (the shell's prompt handles the rest)", async () => {

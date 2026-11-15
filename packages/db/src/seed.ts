@@ -14,7 +14,7 @@ export interface SeedPerson {
 }
 export interface SeedProject {
   id: string; key: string; name: string; desc?: string; status?: string; teams?: string[]; owner?: string; template?: string;
-  regulated?: boolean; overlay?: string; halted?: unknown; killed?: unknown; created?: number;
+  regulated?: boolean; overlay?: string; halted?: unknown; killed?: unknown; created?: number; oncall?: string[];
   flow?: unknown; approvers?: Record<string, unknown>; notifications?: { id?: string; event: string; dest?: unknown; template?: string; cond?: unknown; fields?: unknown; enabled?: boolean }[];
   mcp?: string[]; budget?: { monthly?: number; mtd?: number; alertAt?: number };
   /** Any other legacy field (guidelines, ...) is kept in projects.config.extra. */
@@ -112,7 +112,7 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
   for (const p of state.people ?? []) {
     await q(
       `insert into people (org_id, id, name, title, email, github_login, status, mfa, oncall, away, data) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb)`,
-      [org, p.id, p.name, p.title ?? "", p.email, p.github ?? null, p.status ?? "active", p.mfa ?? false, p.oncall ?? false, p.away ? j(p.away) : null,
+      [org, p.id, p.name, p.title ?? "", p.email, p.github ?? null, p.status ?? "active", p.mfa ?? false, false, p.away ? j(p.away) : null,
         j(rest(p, ["id", "name", "title", "email", "github", "status", "mfa", "oncall", "away", "teams", "roles"]))],
     );
     for (const t of p.teams ?? []) await q(`insert into team_members (org_id, team_id, person_id) values ($1,$2,$3)`, [org, t, p.id]);
@@ -127,7 +127,7 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
       `insert into projects (org_id, id, key, name, description, status, owner_id, template_id, regulated, overlay, halted, killed, config, created_at, position)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb, coalesce($14::timestamptz, now()), $15)`,
       [org, pr.id, pr.key, pr.name, pr.desc ?? "", pr.status ?? "new", pr.owner ?? null, pr.template ?? null, pr.regulated ?? false, pr.overlay ?? "",
-        null, null, j({ mcp: pr.mcp ?? [], mtd: pr.budget?.mtd ?? 0, extra: rest(pr, PROJECT_COLUMNS) }), at(pr.created), position],
+        null, null, j({ mcp: pr.mcp ?? [], mtd: pr.budget?.mtd ?? 0, oncall: Array.isArray(pr.oncall) ? pr.oncall : [], extra: rest(pr, PROJECT_COLUMNS) }), at(pr.created), position],
     );
     await seedStop(q, org, "project", pr.id, pr.killed ? "kill" : pr.halted ? "halt" : null, pr.killed ?? pr.halted);
     for (const t of pr.teams ?? []) await q(`insert into project_teams (org_id, project_id, team_id) values ($1,$2,$3)`, [org, pr.id, t]);
@@ -298,7 +298,7 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
   return { orgId: org, created: true };
 }
 
-const PROJECT_COLUMNS = ["id", "key", "name", "desc", "status", "owner", "template", "regulated", "overlay", "halted", "killed", "created", "teams", "flow", "approvers", "notifications", "mcp", "budget"];
+const PROJECT_COLUMNS = ["id", "key", "name", "desc", "status", "owner", "template", "regulated", "overlay", "halted", "killed", "created", "teams", "flow", "approvers", "notifications", "mcp", "budget", "oncall"];
 
 function rest(o: object, keys: string[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k)));

@@ -160,6 +160,10 @@ export const ops = {
   addClass: (projectId: string, def: Obj, v?: Versioned) => run(["projects", "floor"], post(api(`projects/${enc(projectId)}/flow/classes`), { def }, opts(v, create))),
   updateClass: (projectId: string, clsId: string, patchBody: Obj, v?: Versioned) =>
     run(["projects", "floor"], patch(api(`projects/${enc(projectId)}/flow/classes/${enc(clsId)}`), patchBody, opts(v))),
+  /** Who is on call for a project (its admins choose; Factory Admins always count and are never listed). */
+  setProjectOncall: (projectId: string, people: string[], v?: Versioned) => run<{ oncall: string[]; version: number }>(["projects", "people", "me"], put(api(`projects/${enc(projectId)}/oncall`), { people }, opts(v))),
+  /** The person on call hands over to someone with a role on the same project. */
+  handOverOncall: (projectId: string, to: string, v?: Versioned) => run<{ oncall: string[]; version: number }>(["projects", "people", "me"], post(api(`projects/${enc(projectId)}/oncall/handover`), { to }, opts(v))),
   setMemberRole: (personId: string, projectId: string, role: string, add: boolean) =>
     run(["people", "projects", "me"], (add ? put : del)(api(`projects/${enc(projectId)}/members/${enc(personId)}/roles/${enc(role)}`))),
   setAway: (personId: string, away: Obj | null, projectId?: string) => run(["people", "me"], put(api(`people/${enc(personId)}/away`), { away, project: projectId ?? null })),
@@ -306,7 +310,6 @@ export const ops = {
   /** Team role grants (spec 8.9): members inherit them. `scope` is "factory" or a project id. */
   addTeamRole: (teamId: string, g: { role: string; scope: string; expiresAt?: number | null }) => run(["teams", "people", "me", "matrix"], post(api(`teams/${enc(teamId)}/roles`), g)),
   removeTeamRole: (teamId: string, grantId: string) => run(["teams", "people", "me", "matrix"], del(api(`teams/${enc(teamId)}/roles/${enc(grantId)}`))),
-  setOncall: (personId: string, on: boolean) => run(["people", "me"], put(api(`people/${enc(personId)}/oncall`), { on })),
   setMatrix: (roleId: string, actionId: string, on: boolean, v?: Versioned) =>
     run(["matrix"], put(api(`access/matrix/${enc(roleId)}/${enc(actionId)}`), { on }, opts(v))),
   addRole: (def: Obj) => run(["matrix"], post(api("roles"), def, create)),

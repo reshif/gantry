@@ -121,12 +121,9 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
     return command(req, { action: "people.manage", ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setTeams(tx, a.orgId, id, body.teams));
   });
 
-  app.put("/api/v1/people/:id/oncall", async (req) => {
-    const { id } = Id.parse(req.params);
-    const body = OncallBody.parse(req.body);
-    const action = await selfOrAction(req, id, "people.manage");
-    return command(req, { action, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setOncall(tx, a.orgId, id, body.on));
-  });
+  // On call is per project now (owner decision 7): a project's admins set it, and nobody can switch themselves on.
+  app.put("/api/v1/people/:id/oncall", async (_req, reply) =>
+    reply.code(410).send({ ok: false, msg: "On call is set per project now. A project admin chooses who is on call in Project config; the person on call can hand over there.", rule: { kind: "invariant", id: "ONCALL-PER-PROJECT", name: "On call per project" }, needs: "Project admin" }));
 
   app.put("/api/v1/people/:id/away", async (req) => {
     const { id } = Id.parse(req.params);

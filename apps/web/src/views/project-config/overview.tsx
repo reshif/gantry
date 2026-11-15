@@ -1,9 +1,9 @@
 /** Project config: Overview and Members & roles tabs (legacy project-config.js overview, membersTab). */
 import { useState } from "react";
-import { fmt } from "@gantry/domain";
+import { fmt, isOnCall } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { useRepos } from "../../api/queries";
+import { useMe, useRepos } from "../../api/queries";
 import { navigate } from "../../lib/router";
 import { Btn, Chip, Empty, Field, LockNote, Panel, Select, Who } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
@@ -161,7 +161,7 @@ export function MembersTab({ p, cat, people, s, set }: PcProps) {
                       </td>
                       <td className="small">{elsewhere.length ? elsewhere.map((g) => <div key={g.role + g.scope}>{`${roleName(cat, g.role)} on ${g.scope}`}</div>) : <span className="muted">only here</span>}</td>
                       <td className="small">
-                        {x.oncall ? <span className="chip chip-accent">on call</span> : null}
+                        {isOnCall({ projects: [p] }, x, p.id) ? <span className="chip chip-accent">on call</span> : null}
                         {x.away && x.away.to > now ? <span className="chip chip-warn">{`away, delegate ${actor(x.away.delegate).name}`}</span> : null}
                         {x.status !== "active" ? <Chip text="invited" /> : null}
                       </td>
@@ -184,6 +184,7 @@ export function MembersTab({ p, cat, people, s, set }: PcProps) {
           }} />
         </div>
       </Panel>
+      <OnCallPanel p={p} people={people} canSet={d} />
       <Panel title="Factory-wide roles">
         <ul className="plain-list">
           {factory.map((x) => (
@@ -195,5 +196,59 @@ export function MembersTab({ p, cat, people, s, set }: PcProps) {
         </ul>
       </Panel>
     </div>
+  );
+}
+
+/**
+ * Who is on call for this project (owner decision 7). Factory Admins always are; the project's admins choose who else is.
+ * Nobody can put themselves on call; the person on call can hand over to someone with a role here.
+ */
+function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["people"]; canSet: ReturnType<typeof useCan> }) {
+  const res = useRes();
+  const me = useMe();
+  const list = Array.isArray(p.oncall) ? p.oncall : [];
+  const v = (p as { version?: number }).version;
+  const isFA = (x: (typeof people)[number]) => x.roles.some((g) => g.role === "factory_admin" && g.scope === "factory");
+  const pool = people.filter((x) => x.status === "active" && !isFA(x) && x.roles.some((g) => g.scope === p.id || g.scope === "factory"));
+  const addable = pool.filter((x) => !list.includes(x.id));
+  const [pick, setPick] = useState("");
+  const [to, setTo] = useState("");
+  const mine = !!me && list.includes(me.person.id);
+  const handTo = pool.filter((x) => x.id !== me?.person.id);
+  const admins = people.filter((x) => x.status === "active" && isFA(x));
+  const save = (next: string[]) => ops.setProjectOncall(p.id, next, { ifMatch: v }).then((r) => res(r));
+  return (
+    <Panel title="On call">
+      <div className="form-grid" id="pcf-oncall">
+        <p className="small muted">{`On-call rules on ${p.name} (on-call policies, and approver conditions such as hotfix sign-off) apply only to the people on call here. Nobody can put themselves on call.`}</p>
+        {list.length ? (
+          <ul className="plain-list" id="pcf-oncall-list">
+            {list.map((id) => (
+              <li key={id} className="row gap-sm">
+                <Who id={id} />
+                <Btn small kind="ghost" icon="x" id={`pcf-oncall-rm-${id}`} aria={`Take ${people.find((x) => x.id === id)?.name ?? id} off call`} guard={canSet} onClick={() => void save(list.filter((x) => x !== id))} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="small muted" id="pcf-oncall-none">Nobody besides the Factory Admins is on call for {p.name}.</p>
+        )}
+        <p className="small muted">{`Always on call: ${admins.map((x) => x.name).join(", ") || "no Factory Admin"} (Factory Admin).`}</p>
+        <div className="filters">
+          <Field label="Put on call" htmlFor="pcf-oncall-pick">
+            <Select id="pcf-oncall-pick" disabled={!canSet.allowed || !addable.length} options={addable.length ? addable.map((x) => ({ value: x.id, label: x.name })) : [{ value: "", label: "Everyone with a role is on call" }]} value={pick || addable[0]?.id || ""} onChange={setPick} />
+          </Field>
+          <Btn small icon="plus" id="pcf-oncall-add" guard={canSet} disabledReason={addable.length ? null : "Everyone with a role here is already on call."} label="Add" onClick={() => void save([...list, pick || addable[0]!.id])} />
+        </div>
+        {mine ? (
+          <div className="filters" id="pcf-oncall-handover">
+            <Field label="Hand over to" htmlFor="pcf-oncall-to">
+              <Select id="pcf-oncall-to" options={handTo.map((x) => ({ value: x.id, label: x.name }))} value={to || handTo[0]?.id || ""} onChange={setTo} />
+            </Field>
+            <Btn small icon="swap" id="pcf-oncall-hand" disabledReason={handTo.length ? null : "Nobody else holds a role here."} label="Hand over" onClick={async () => res(await ops.handOverOncall(p.id, to || handTo[0]!.id, { ifMatch: v }))} />
+          </div>
+        ) : null}
+      </div>
+    </Panel>
   );
 }

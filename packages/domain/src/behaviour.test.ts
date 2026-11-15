@@ -427,3 +427,36 @@ describe("dev seed", () => {
     for (const role of Object.keys(dm)) for (const a of DEFAULT_CATALOG.actions) expect(state.matrix[role]![a.id], `${role} ${a.id}`).toBe(dm[role]![a.id]);
   });
 });
+
+describe("on call is per project (owner decision 7)", () => {
+  const release = (st: typeof S, project: string) => can(st, "p-lena", "release", { project, time: sun03 });
+
+  it("Lena's on-call release on Identity needs Identity's own on-call list, not another project's", () => {
+    expect(S.projects.find((p) => p.id === "identity")?.oncall).toContain("p-lena");
+    expect(release(S, "identity")).toMatchObject({ allowed: true, rule: { id: "POL-103" } });
+    const elsewhere = mutate(S, (s) => {
+      for (const p of s.projects) p.oncall = p.id === "payments" ? ["p-lena"] : (p.oncall ?? []).filter((x) => x !== "p-lena");
+    });
+    const d = release(elsewhere, "identity");
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toContain("not on call");
+  });
+
+  it("the person's own legacy switch no longer counts", () => {
+    const st = mutate(S, (s) => {
+      for (const p of s.projects) p.oncall = [];
+      for (const p of s.people) p.oncall = true;
+    });
+    expect(release(st, "identity").allowed).toBe(false);
+  });
+
+  it("a Factory Admin always counts as on call, with no list", async () => {
+    const { isOnCall } = await import("./policy.js");
+    const st = mutate(S, (s) => { for (const p of s.projects) p.oncall = []; });
+    const asha = st.people.find((p) => p.id === "p-asha")!;
+    const lena = st.people.find((p) => p.id === "p-lena")!;
+    expect(isOnCall(st, asha, "identity")).toBe(true);
+    expect(isOnCall(st, asha, null)).toBe(true);
+    expect(isOnCall(st, lena, "identity")).toBe(false);
+  });
+});

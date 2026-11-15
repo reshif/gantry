@@ -55,5 +55,17 @@ export function devSeed(now: number = Date.now()): DevSeed {
     const m = (data.state as { matrix?: Record<string, Record<string, boolean>> }).matrix;
     if (m) for (const role of Object.keys(m)) for (const a of added) if (defaults[role]?.[a.id] !== undefined) m[role]![a.id] = defaults[role]![a.id]!;
   }
+  onCallPerProject(data.state as unknown as { people: Array<{ id: string; oncall?: boolean; roles: Array<{ role: string; scope: string }> }>; projects: Array<{ id: string; oncall?: string[] }> });
   return { state: data.state, catalog: data.catalog, integrationCategories: data.integrationCategories, notifyEvents: data.notifyEvents };
+}
+
+/**
+ * The frozen legacy seed marks people on call with one global switch. On call is per project now (owner decision 7): a person
+ * the seed marks on call is on call for every project they hold a role on (all of them for a factory-level role).
+ */
+function onCallPerProject(st: { people: Array<{ id: string; oncall?: boolean; roles: Array<{ role: string; scope: string }> }>; projects: Array<{ id: string; oncall?: string[] }> }): void {
+  for (const pr of st.projects) {
+    if (Array.isArray(pr.oncall)) continue;
+    pr.oncall = st.people.filter((p) => p.oncall && p.roles.some((g) => g.scope === "factory" || g.scope === pr.id)).map((p) => p.id);
+  }
 }

@@ -313,6 +313,8 @@ export interface Project {
   killed: KillInfo | null;
   overlay: string;
   guidelines?: ProjectGuidelines;
+  /** People on call for this project, chosen by its admins. Factory Admins always count as on call too (see isOnCall). */
+  oncall?: Id[];
   [extra: string]: unknown;
 }
 

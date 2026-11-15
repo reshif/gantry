@@ -271,25 +271,37 @@ d("people and access", () => {
       expect((await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["security"] })).status).toBe(200);
       expect((await find("p-sam")).teams).toEqual(["security"]);
     });
-    it("on-call: managers set anyone's; people set their own; strangers are denied", async () => {
-      expect((await call(engineer, "PUT", "/api/v1/people/p-sam/oncall", { on: true })).status).toBe(403);
-      expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: true }, { "if-match": "999" })).status).toBe(409);
-      expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: true })).status).toBe(200);
-      expect((await find("p-sam")).oncall).toBe(true);
+    it("on call is per project: project admins set it, nobody switches themselves on, and only the person on call hands over", async () => {
+      // the old self-toggle is retired
       const own = await call(engineer, "PUT", `/api/v1/people/${engineer}/oncall`, { on: true });
-      expect(own.status).toBe(200);
+      expect(own.status).toBe(410);
+      expect(own.body.msg).toContain("per project");
+      // an engineer can't put anyone on call; a project admin can, but only people with a role on the project
+      expect((await call(engineer, "PUT", "/api/v1/projects/payments/oncall", { people: [engineer] })).status).toBe(403);
+      expect((await call(admin, "PUT", "/api/v1/projects/payments/oncall", { people: ["p-nobody"] })).status).toBe(422);
+      const set = await call(admin, "PUT", "/api/v1/projects/payments/oncall", { people: [engineer, admin] });
+      expect(set.status).toBe(200);
+      expect(set.body.oncall).toEqual([engineer]); // a Factory Admin is always on call and never listed
       expect((await find(engineer)).oncall).toBe(true);
-      expect((await call(engineer, "PUT", `/api/v1/people/${engineer}/oncall`, { on: false })).status).toBe(200);
-      expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: false })).status).toBe(200);
-      expect((await ev("people.oncall")).length).toBe(4);
+      // the person on call hands over to someone with a role on payments
+      const hand = await call(engineer, "POST", "/api/v1/projects/payments/oncall/handover", { to: "p-meera" });
+      expect(hand.status).toBe(200);
+      expect(hand.body.oncall).toEqual(["p-meera"]);
+      expect((await call(engineer, "POST", "/api/v1/projects/payments/oncall/handover", { to: engineer })).status).toBe(409); // no longer on call
+      const [e] = await ev("project.oncall");
+      expect(e).toMatchObject({ project_id: "payments", after: [engineer] });
+      const [h] = await ev("project.oncall_handover");
+      expect(h).toMatchObject({ actor: engineer, before: [engineer], after: ["p-meera"] });
+      expect((await call(admin, "PUT", "/api/v1/projects/payments/oncall", { people: [] })).status).toBe(200);
     });
-    it("on-call changes what the engine decides (POL-103 follows the flag)", async () => {
-      const before = await call(admin, "POST", "/api/v1/access/simulate", { person: "p-lena", action: "kill.project", project: "identity" });
-      await call(admin, "PUT", "/api/v1/people/p-lena/oncall", { on: false });
-      const after = await call(admin, "POST", "/api/v1/access/simulate", { person: "p-lena", action: "kill.project", project: "identity" });
-      expect(after.body.trace.join(" ")).toContain("Policies on this action");
-      expect(typeof before.body.decision.allowed).toBe("boolean");
-      await call(admin, "PUT", "/api/v1/people/p-lena/oncall", { on: true });
+    it("on call changes what the engine decides, per project (POL-103 follows Identity's list)", async () => {
+      const sim = async () => (await call(admin, "POST", "/api/v1/access/simulate", { person: "p-lena", action: "kill.project", project: "identity" })).body;
+      const before = (await call(admin, "GET", "/api/v1/projects/identity")).body.oncall as string[];
+      expect(before).toContain("p-lena");
+      await call(admin, "PUT", "/api/v1/projects/identity/oncall", { people: before.filter((x) => x !== "p-lena") });
+      expect((await sim()).trace.join(" ")).toContain("Policies on this action");
+      await call(admin, "PUT", "/api/v1/projects/identity/oncall", { people: before });
+      expect(typeof (await sim()).decision.allowed).toBe("boolean");
     });
     it("away: delegate rules, project permission, self, stale", async () => {
       const away = { to: Date.now() + 48 * hour, delegate: "p-meera" };
@@ -582,10 +594,10 @@ d("people and access", () => {
     it("access administration keeps working under a factory kill (exempt, spec 9.7); and the audit chain still verifies", async () => {
       await t.db.admin.query(`insert into stops (org_id, id, scope_type, mode, reason, set_by) values ($1, 'factory:factory:99', 'factory', 'kill', 'Test stop', $2)`, [t.orgId, admin]);
       // Administration is exempt from stops (domain stopBlocks: only project Work, Gates and Onboarding actions refuse), so a kill never locks people out of fixing access.
-      const r = await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: true });
+      const r = await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["data", "security"] });
       expect(r.status).toBe(200);
       await t.db.admin.query(`update stops set lifted_at = now(), lifted_by = 'p-asha' where id = 'factory:factory:99'`);
-      expect((await call(admin, "PUT", "/api/v1/people/p-sam/oncall", { on: false })).status).toBe(200);
+      expect((await call(admin, "PUT", "/api/v1/people/p-sam/teams", { teams: ["security"] })).status).toBe(200);
       expect((await verifyChain(t.db.app, t.orgId)).ok).toBe(true);
     });
   });
