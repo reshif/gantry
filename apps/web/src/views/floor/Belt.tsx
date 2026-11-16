@@ -90,7 +90,7 @@ function Staffing({ sid }: { sid: string }) {
   const g = gateOfStation(ctx.cat, ctx.project, sid);
   const human = g && gateKind(ctx.cat, ctx.project, g.id) !== "auto" && (ctx.project.flow.gates[g.id]?.enabled || g.id === "G0G1");
   return (
-    <div className="fl-staff">
+    <div className="fl-staff" title={`Agent: ${ag?.name ?? st.agent}. ${n} MCP servers allowed here.${human && g ? ` ${gateKindText(gateKind(ctx.cat, ctx.project, g.id))} gate: ${g.name}.` : ""}`}>
       <span className="fl-glyph" title={`Agent: ${ag?.name ?? st.agent}`}>
         <Icon name="agent" />
         <span className="sr">Agent </span>
@@ -140,8 +140,10 @@ function StationCard({ sid, onStation, route, name }: { sid: string; onStation: 
     return holders.find((h) => h.slot === n)?.wo ?? null;
   };
   const queued = ctx.wos.filter((x) => x.bay === "queue" && isLive(x)).length;
+  /* Nothing here: a slim row (number, name, wip, agent) with no token area. Stations with work, and the build slots, keep the full card. */
+  const idle = !show.length && sid !== "build";
   return (
-    <section className={`fl-st${conf.enabled ? "" : " is-off"}${over ? " is-over" : ""}${sid === "build" ? " is-build" : ""}${bypassed ? " is-bypassed" : ""}`} data-station={sid} style={{ "--o": L.order[sid] } as CSSProperties} aria-label={`${st.no} ${st.name}`}>
+    <section className={`fl-st${conf.enabled ? "" : " is-off"}${idle ? " is-idle" : ""}${over ? " is-over" : ""}${sid === "build" ? " is-build" : ""}${bypassed ? " is-bypassed" : ""}`} data-station={sid} style={{ "--o": L.order[sid] } as CSSProperties} aria-label={`${st.no} ${st.name}`}>
       <button type="button" className="fl-st-head" id={`floor-st-${sid}`} aria-label={`${st.no} ${st.name}: ${live.length} in progress, limit ${conf.wip}. Open station details`} onClick={() => onStation(sid)}>
         <span className="fl-st-no mono">{st.no}</span>
         <span className="fl-st-name">{st.name}</span>
@@ -168,13 +170,15 @@ function StationCard({ sid, onStation, route, name }: { sid: string; onStation: 
           ) : null}
         </ul>
       ) : null}
-      <div className="fl-toks">
-        {show.slice(0, max).map((w) => (
-          <WoToken key={w.id} w={w} idPrefix="floor-tok-" halted={haltedRepoName(ctx, w)} />
-        ))}
-        {show.length > max ? <Btn label={`+${show.length - max} more at ${st.name}`} small kind="ghost" id={`floor-more-${sid}`} onClick={() => onStation(sid)} /> : null}
-        {!show.length && conf.enabled ? <p className="fl-idle">idle</p> : null}
-      </div>
+      {idle ? null : (
+        <div className="fl-toks">
+          {show.slice(0, max).map((w) => (
+            <WoToken key={w.id} w={w} idPrefix="floor-tok-" halted={haltedRepoName(ctx, w)} />
+          ))}
+          {show.length > max ? <Btn label={`+${show.length - max} more at ${st.name}`} small kind="ghost" id={`floor-more-${sid}`} onClick={() => onStation(sid)} /> : null}
+          {!show.length && conf.enabled ? <p className="fl-idle">idle</p> : null}
+        </div>
+      )}
       <span className="fl-bypass" aria-hidden="true">{bypassed ? `${name} skips this station` : ""}</span>
     </section>
   );

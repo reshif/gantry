@@ -303,9 +303,11 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 .fl-line-gate { padding-left: 0; }
 
 .fl-gate { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; min-width: 0; min-height: 44px; padding: 4px 0; }
-.fl-gate-off { min-height: 30px; padding: 0; }
-.fl-gate-off .gate-shape { width: 14px; height: 14px; }
-.fl-gate-off .fl-gate-cap { font-size: var(--t-xs); }
+.fl-gate-clear { min-height: 34px; padding: 2px 0; }
+.fl-gate-off { min-height: 22px; padding: 0; }
+.fl-gate-off .gate-shape { width: 12px; height: 12px; box-shadow: 0 0 0 3px var(--panel); }
+.fl-gate-off .gate-shape > .gate-count { display: none; }
+.fl-gate-off .fl-gate-cap { font-size: var(--t-xs); flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
 .fl-gate-rail { display: none; }
 .fl-gate .gate { width: calc(var(--spine) * 2); flex: none; display: flex; justify-content: center; background: none; padding: 0; position: relative; z-index: 1; }
 .fl-gate .gate-label { display: none; }
@@ -333,6 +335,16 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 .fl-idle { text-align: left; padding: 6px 0; border: 0; }
 .fl-st:has(.fl-idle) { border-left-color: var(--line-strong); background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .fl-st.is-over { border-left-color: var(--block); }
+/* idle (and off) station: one slim row, name block on the left and the agent on the right, no token area.
+   Same left edge, border and name column as the full card so the spine, wip counters and gate captions stay aligned. */
+.fl-st.is-idle { grid-template-areas: "head staff"; align-items: center; padding: 5px 12px; min-height: 36px; }
+.fl-st.is-idle .fl-st-head { align-items: center; }
+.fl-st.is-idle .fl-st-name { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+.fl-st.is-idle .fl-staff { flex-wrap: nowrap; min-width: 0; overflow: hidden; }
+.fl-st.is-idle .fl-glyph { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fl-st.is-idle .fl-glyph:nth-child(n+2), .fl-st.is-idle > .fl-off { display: none; }
+.fl-st.is-idle.is-bypassed .fl-staff { display: none; }
+.fl-st.is-idle.is-bypassed .fl-bypass { grid-area: staff; }
 .fl-st.is-bypassed { outline: none; background: transparent; border-style: dashed; border-left-width: 3px; }
 .fl-st.is-bypassed .fl-bypass { position: static; grid-area: toks; align-self: center; font-size: var(--t-sm); color: var(--accent); font-weight: 600; }
 .fl-st.is-bypassed .fl-toks { display: none; }
@@ -343,5 +355,10 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
   .fl-line { --spine: 18px; padding: 10px 8px 12px; }
   .fl-line::before { left: calc(8px + var(--spine)); }
   .fl-st { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "staff" "extra" "toks"; }
+  .fl-st.is-idle { grid-template-columns: minmax(0, 1fr) 7rem; grid-template-areas: "head staff"; gap: 2px 10px; }
+  .fl-st.is-idle .fl-st-head { min-width: 0; }
+  .fl-st.is-idle .fl-staff { justify-content: flex-end; }
   .fl-toks .tok { width: 100%; }
+  .fl-ship-toks { flex: 1 1 100%; display: grid; }
+  .fl-ship-toks .tok { width: 100%; min-width: 0; }
 }

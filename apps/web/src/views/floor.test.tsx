@@ -73,6 +73,51 @@ describe("Floor: belt", () => {
     expect(g.querySelector("button.gate")?.getAttribute("aria-label")).toMatch(/turned off in this project/);
   });
 
+  it("renders stations with no work as slim rows and keeps full cards for stations with work", async () => {
+    const one = WOS.filter((w) => w.station === 3 && !w.bay).slice(0, 1);
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ workOrders: one, gates: [] }) }) });
+    mount(<FloorView />);
+    await screen.findByText("Payments Platform");
+    const stations = Array.from(document.querySelectorAll<HTMLElement>(".fl-st"));
+    const idle = stations.filter((e) => e.classList.contains("is-idle"));
+    expect(idle.length).toBeGreaterThan(0);
+    for (const e of idle) {
+      expect(e.querySelector(".fl-toks")).toBeNull();
+      expect(e.querySelector(".fl-idle")).toBeNull();
+      expect(e.querySelector(".fl-st-no")).toBeTruthy();
+      expect(e.querySelector(".fl-st-name")).toBeTruthy();
+      expect(e.querySelector(".fl-wip")).toBeTruthy();
+      expect(e.querySelector(".fl-staff")?.getAttribute("title")).toMatch(/^Agent: /);
+    }
+    // a station holding work keeps its full card; the build station keeps its slot list
+    for (const e of stations.filter((x) => x.querySelector(".tok"))) expect(e.classList.contains("is-idle")).toBe(false);
+    expect(document.querySelector('[data-station="build"]')?.classList.contains("is-idle")).toBe(false);
+    expect(document.querySelector('[data-station="build"] .fl-slots')).toBeTruthy();
+  });
+
+  it("keeps a slim row for an off station and says it is off", async () => {
+    const off = { ...PAYMENTS, version: 1, flow: { ...PAYMENTS.flow, stations: { ...PAYMENTS.flow.stations, research: { ...PAYMENTS.flow.stations.research, enabled: false } } } };
+    mockApi({ "GET /api/v1/projects": () => ({ body: [off] }), "GET /api/v1/projects/payments": () => ({ body: off }), "GET /api/v1/projects/payments/floor": () => ({ body: { ...floorRead({ workOrders: [], gates: [] }), project: off } }) });
+    mount(<FloorView />);
+    await screen.findByText("Payments Platform");
+    const st = document.querySelector('[data-station="research"]') as HTMLElement;
+    expect(st.classList.contains("is-idle") && st.classList.contains("is-off")).toBe(true);
+    expect(st.querySelector(".fl-wip")?.textContent).toBe("off");
+    expect(st.querySelector(".fl-toks")).toBeNull();
+  });
+
+  it("keeps the gate state and who approves in the markup for clear and off gates", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByText("Payments Platform");
+    for (const g of Array.from(document.querySelectorAll<HTMLElement>(".fl-gate"))) {
+      expect(g.querySelector(".fl-gate-name")?.textContent).toBeTruthy();
+      expect(g.querySelector(".fl-gate-state")?.textContent).toBeTruthy();
+    }
+    const waiting = document.querySelector(".fl-gate-waiting") as HTMLElement | null;
+    if (waiting) expect(waiting.querySelector(".fl-gate-need")).toBeTruthy();
+  });
+
   it("pins a class route and marks the stations it bypasses", async () => {
     mockApi();
     mount(<FloorView />);
