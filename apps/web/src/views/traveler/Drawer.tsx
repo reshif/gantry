@@ -23,6 +23,15 @@ import { ApproversPanel } from "./Approvers";
 import { navigate } from "../../lib/router";
 import { setProject } from "../../lib/prefs";
 import { useWoSessions } from "../conversations/session-api";
+import { useWoDialogue } from "../documents/api";
+import { GateNotes } from "../documents/Swarm";
+
+/** What is still open before this gate is decided; the links open the work-order conversation, where the items live. Quiet when nothing is open or the read fails. */
+function TravelerGateNotes({ woId, project, onNavigate }: { woId: string; project: string; onNavigate: () => void }) {
+  const q = useWoDialogue(woId);
+  if (!q.data) return null;
+  return <GateNotes assumptions={q.data.assumptions ?? []} objections={q.data.objections ?? []} jump={() => { onNavigate(); setProject(project); navigate("conversations", woId, project); }} />;
+}
 
 const tb = (k: string, v: string) => (
   <div key={k}>
@@ -77,6 +86,8 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
   ];
   const body =
     tab === "lifecycle" ? <Lifecycle woId={wo.id} compact /> : tab === "brief" ? <BriefTab wo={wo} cat={cat} /> : tab === "documents" ? <DocViewer woId={wo.id} /> : tab === "run" ? <RunTimelineView woId={wo.id} /> : tab === "artefacts" ? <ArtefactsTab wo={wo} project={project} /> : tab === "history" ? <HistoryTab wo={wo} /> : <Journey wo={wo} project={project} cat={cat} />;
+  /** The gate the viewer may approve right now (not the intake gate); the approvers panel and the open-items card share it. */
+  const gateG = wo.allowed.approve && !wo.bay && wo.state === "waiting" && wo.allowed.approve.gate !== "G0G1" ? wo.allowed.approve.gate : null;
   const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;
   return (
     <div className={`drawer-inner trv-drawer${wo.state === "killed" ? " is-killed" : ""}`}>
@@ -153,7 +164,8 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
             {row?.unread ? <span className="wos-unread" role="img" aria-label="Unread messages" /> : null}
           </span>
         </div>
-        {wo.allowed.approve && !wo.bay && wo.state === "waiting" && wo.allowed.approve.gate !== "G0G1" ? <ApproversPanel woId={wo.id} gate={wo.allowed.approve.gate} project={wo.project} onNavigate={close} /> : null}
+        {gateG ? <ApproversPanel woId={wo.id} gate={gateG} project={wo.project} onNavigate={close} /> : null}
+        {gateG ? <TravelerGateNotes woId={wo.id} project={wo.project} onNavigate={close} /> : null}
         <Actions wo={wo} />
         <Tabs idPrefix="trv-tab" items={tabs} active={tab} onChange={(t) => { setTravelerTab(t as typeof tab); setTimeout(() => document.getElementById(`trv-tab-${t}`)?.focus(), 0); }} />
         <div className="drawer-tabbody" id="trv-tab-panel" role="tabpanel" aria-labelledby={`trv-tab-${tab}`}>

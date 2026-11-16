@@ -52,7 +52,7 @@ export interface Assumption {
   createdAt: number;
 }
 
-export interface Dialogue { questions: StationQuestion[]; assumptions: Assumption[] }
+export interface Dialogue { questions: StationQuestion[]; assumptions: Assumption[]; objections: Objection[] }
 
 const enc = encodeURIComponent;
 export const useWoDocuments = (woId: string | null | undefined) =>

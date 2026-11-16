@@ -63,6 +63,29 @@ describe("Gate approver transparency", () => {
   });
 });
 
+describe("Open items before approving", () => {
+  const dlg = (assumptions: unknown[], objections: unknown[]) => ({ [`GET /api/v1/work-orders/${W.id}/dialogue`]: () => ({ body: { questions: [], assumptions, objections } }) });
+  const apr = { [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers() }) };
+  it("lists open objections and assumptions in the drawer, and the link opens the work-order conversation", async () => {
+    await show({ ...apr, ...dlg([{ id: "a1", status: "open", impact: "high" }], [{ id: "o1", status: "open" }, { id: "o2", status: "upheld" }]) });
+    const note = await waitFor(() => { const n = document.getElementById("gate-notes"); expect(n).toBeTruthy(); return n!; });
+    expect(note.textContent).toContain("1 objection not decided");
+    expect(note.textContent).toContain("1 assumption not confirmed (some high impact)");
+    fireEvent.click(screen.getByRole("button", { name: "1 objection not decided" }));
+    await waitFor(() => expect(window.location.hash).toMatch(new RegExp(`conversations/${encodeURIComponent(W.id)}`)));
+  });
+  it("shows nothing when nothing is open, or when the read fails", async () => {
+    await show({ ...apr, ...dlg([{ id: "a1", status: "confirmed", impact: "low" }], []) });
+    await screen.findByText(/Needs 2 approvals/);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.getElementById("gate-notes")).toBeNull();
+    cleanup();
+    await show({ ...apr, [`GET /api/v1/work-orders/${W.id}/dialogue`]: () => ({ status: 500, body: { error: "x" } }) });
+    await screen.findByText(/Needs 2 approvals/);
+    expect(document.getElementById("gate-notes")).toBeNull();
+  });
+});
+
 describe("Reassign", () => {
   const agent = (id: string, name: string) => ({ ...(AGENTS[0] as object), id, name, stations: [stationId], projects: "all", status: "active", version: "1.0.0", model: "m" });
   const open = async (agents: unknown[]) => {
