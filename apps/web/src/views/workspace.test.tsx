@@ -6,6 +6,7 @@ import { updatePrefs } from "../lib/prefs";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 import { intakeWo, readsFor } from "./traveler/testkit";
 import { filterInbox, snippetParts, type InboxItem, type WsAgent } from "./workspace/api";
+import { Inbox, rowWhere } from "./workspace/Inbox";
 import { mentionChoices, mentionOf, takeAsk } from "./workspace/mention";
 
 beforeEach(() => {
@@ -35,6 +36,34 @@ const AGENTS: WsAgent[] = [
   { id: "ag-spec", name: "Spec Writer", station: "spec", stationName: "Spec" },
   { id: "ag-specx", name: "Specialist", station: "special", stationName: "Special" },
 ];
+
+describe("inbox rows", () => {
+  it("names the full station for work orders, the bay when in one, and the agent for chats", () => {
+    const long = item({ wo: { cls: "feature", station: "review", stationName: "Review and merge to main", state: "waiting", bay: null, gate: "G4", closed: false } });
+    expect(rowWhere(long)).toBe("Review and merge to main");
+    expect(rowWhere(item({ wo: { ...long.wo!, bay: "B2" } }))).toBe("Review and merge to main · Bay B2");
+    expect(rowWhere(ITEMS[3]!)).toBe("Console");
+  });
+
+  it("renders the whole title and station in the row, with the wait chip and age on their own meta line", () => {
+    const title = "Follow the documented Nautobot onboarding steps for the new device inventory sync";
+    const items = [item({ title, waitingOn: "you", wo: { cls: "feature", station: "review", stationName: "Review and merge to main", state: "waiting", bay: null, gate: "G4", closed: false } })];
+    const { container } = mount(<Inbox me="p-asha" items={items} loading={false} current={null} filter="active" onFilter={() => {}} onPick={() => {}} onNew={() => {}} onSearch={() => {}} operator={null} />);
+    const row = container.querySelector(".ws-row-btn")!;
+    expect(row.querySelector(".ws-row-title")!.textContent).toBe(title);
+    expect(row.querySelector(".ws-row-where")!.textContent).toBe("Review and merge to main");
+    const meta = row.querySelector(".ws-row-meta")!;
+    expect(meta.querySelector(".ws-wait")!.textContent).toContain("G4");
+    expect(meta.querySelector(".ws-row-t")).not.toBeNull();
+    expect(row.querySelector(".ws-row-title")!.getAttribute("title")).toBe(title);
+  });
+
+  it("leaves out the where line when there is nothing to name", () => {
+    const { container } = mount(<Inbox me="p-asha" items={[item({ kind: "primary", wo: undefined, agentName: undefined, waitingOn: "nobody" })]} loading={false} current={null} filter="active" onFilter={() => {}} onPick={() => {}} onNew={() => {}} onSearch={() => {}} operator={null} />);
+    expect(container.querySelector(".ws-row-where")).toBeNull();
+    expect(container.querySelector(".ws-row-title")).not.toBeNull();
+  });
+});
 
 describe("workspace helpers", () => {
   it("filters the inbox: needs me is what waits on the person; archived holds what closed long ago or was filed away; shared is others' chats", () => {

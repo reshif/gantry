@@ -27,10 +27,18 @@ export function waitText(i: InboxItem): string {
   return WAIT[i.waitingOn];
 }
 
+/** Where the conversation sits: the agent for chats and side threads, the full station name (and the bay when in one) for work orders. */
+export function rowWhere(i: InboxItem): string {
+  if (i.kind === "side" || i.kind === "chat") return i.agentName ?? "";
+  if (i.wo) return i.wo.bay ? `${i.wo.stationName} · Bay ${i.wo.bay}` : i.wo.stationName;
+  return i.agentName ?? "";
+}
+
 function Row({ i, current, onPick, me }: { i: InboxItem; current: boolean; onPick: (key: string) => void; me: string }) {
   const ui = useUI();
   const now = Date.now();
   const wait = waitText(i);
+  const where = rowWhere(i);
   const menu = (el: HTMLElement) => ui.menu(el, null, [
     { label: i.pinned ? "Unpin" : "Pin to top", icon: "pin", onClick: () => void patchThread(i.key, { pinned: !i.pinned }).then((r) => !r.ok && ui.toast(r.msg, "error")) },
     i.archived === "auto" ? { label: "Archived because the work order closed", icon: "lock" }
@@ -42,12 +50,12 @@ function Row({ i, current, onPick, me }: { i: InboxItem; current: boolean; onPic
         <span className="ws-row-top">
           {i.pinned ? <Icon name="pin" /> : null}
           <span className={`ws-scope is-${i.scope.kind}`}>{i.kind === "primary" ? i.scope.id : i.kind === "onboarding" ? "Repo" : i.kind === "side" ? i.scope.label : "Chat"}</span>
-          <span className="ws-row-title">{i.title}</span>
+          <span className="ws-row-title" title={i.title}>{i.title}</span>
           {i.unread ? <span className="wos-unread" role="img" aria-label="Unread" /> : null}
         </span>
+        {where ? <span className="ws-row-where small muted" title={where}>{where}</span> : null}
         <span className="ws-row-meta small">
-          <span className="muted">{i.kind === "side" || i.kind === "chat" ? i.agentName : i.wo ? (i.wo.bay ? `Bay · ${i.wo.bay}` : i.wo.stationName) : i.agentName}</span>
-          {wait ? <span className={`ws-wait is-${i.waitingOn}`}>{wait}</span> : null}
+          {wait ? <span className={`ws-wait is-${i.waitingOn}`} title={wait}>{wait}</span> : null}
           {i.shared && (i.kind === "side" || i.kind === "chat") ? <span className="muted" title={i.visibility === "project" ? "Shared with the project" : "Shared with invited people"}><Icon name="people" /></span> : null}
           <span className="mono muted ws-row-t">{now - i.updatedAt < 86_400_000 ? fmt.ago(i.updatedAt, now) : fmt.istDate(i.updatedAt)}</span>
         </span>
