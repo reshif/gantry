@@ -65,7 +65,7 @@ export class GithubApp {
   readonly limiter: WriteLimiter;
   private readonly Base: typeof Octokit;
 
-  constructor(private readonly cfg: GithubConfig["app"], limiter: WriteLimiter, private readonly f?: typeof fetch) {
+  constructor(private readonly cfg: NonNullable<GithubConfig["app"]>, limiter: WriteLimiter, private readonly f?: typeof fetch) {
     this.limiter = limiter;
     this.Base = Octokit.defaults({ baseUrl: cfg.baseUrl, userAgent: "gantry-github", ...(f ? { request: { fetch: f } } : {}) }) as unknown as typeof Octokit;
     this.app = new App({ appId: cfg.appId, privateKey: cfg.privateKey, Octokit: this.Base as never });

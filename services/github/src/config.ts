@@ -31,7 +31,10 @@ export interface GithubConfig {
   apiUrl: string;
   /** Service token the worker and API present to this broker, and this broker presents to the API. */
   githubToken: string;
-  app: { appId: number; privateKey: string; baseUrl: string; installationId?: number };
+  /** Null when the GitHub App is not configured (missing, empty, malformed or placeholder secrets): the broker then stays up and answers 503. */
+  app: { appId: number; privateKey: string; baseUrl: string; installationId?: number } | null;
+  /** Why `app` is null. Never contains secret values. */
+  notConfiguredReason?: string;
   /** Writes per installation per minute (spec 11.6: below GitHub's content-creation limits). */
   writesPerMinute: number;
   writeBurst: number;
@@ -64,13 +67,28 @@ const Env = z.object({
   GITHUB_GIT_BIN: z.string().default("git"),
 });
 
+/** Reads the App credentials. Any problem means "not configured" with a safe reason; it never throws and never echoes secret content. */
+async function loadApp(env: NodeJS.ProcessEnv): Promise<{ app: NonNullable<GithubConfig["app"]> } | { reason: string }> {
+  let pem: string, json: string;
+  try { [pem, json] = await Promise.all([readSecretFile("github_app.pem", env), readSecretFile("github_app.json", env)]); }
+  catch (e) { return { reason: e instanceof SecretError ? e.message : "App secrets are unreadable" }; }
+  let raw: unknown;
+  try { raw = JSON.parse(json); } catch { return { reason: "github_app.json is not valid JSON" }; }
+  const s = AppSettings.safeParse(raw);
+  if (!s.success) return { reason: `github_app.json is invalid: ${[...new Set(s.error.issues.map((i) => i.path.join(".") || "body"))].join(", ")}` };
+  if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(pem)) return { reason: "github_app.pem is not a PEM private key" };
+  const a = s.data;
+  return { app: { appId: a.appId, privateKey: pem, baseUrl: a.baseUrl.replace(/\/+$/, ""), ...(a.installationId ? { installationId: a.installationId } : {}) } };
+}
+
 export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<GithubConfig> {
   const e = Env.parse(env);
-  const [githubToken, pem, json] = await Promise.all([readSecretFile("github_token", env), readSecretFile("github_app.pem", env), readSecretFile("github_app.json", env)]);
-  const s = AppSettings.parse(JSON.parse(json));
+  // The service token stays mandatory: without it the broker cannot authenticate anyone.
+  const githubToken = await readSecretFile("github_token", env);
+  const a = await loadApp(env);
   return {
     port: e.GITHUB_PORT, host: "0.0.0.0", apiUrl: e.GANTRY_API_URL.replace(/\/+$/, ""), githubToken,
-    app: { appId: s.appId, privateKey: pem, baseUrl: s.baseUrl.replace(/\/+$/, ""), ...(s.installationId ? { installationId: s.installationId } : {}) },
+    app: "app" in a ? a.app : null, ...("reason" in a ? { notConfiguredReason: a.reason } : {}),
     writesPerMinute: e.GITHUB_WRITES_PER_MINUTE, writeBurst: e.GITHUB_WRITE_BURST, pollIntervalMs: e.GITHUB_POLL_INTERVAL_MS,
     helperImage: e.GITHUB_HELPER_IMAGE, dockerSocket: e.DOCKER_SOCKET, scratchDir: e.GITHUB_SCRATCH_DIR, gateCheckName: e.GITHUB_GATE_CHECK_NAME,
     maxWorkspaceBytes: 1024 * 1024 * 1024, maxPatchBytes: 2 * 1024 * 1024, maxCommitsPerPublish: 200, issueLabel: e.GITHUB_ISSUE_LABEL, gitBin: e.GITHUB_GIT_BIN,

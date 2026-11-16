@@ -66,7 +66,7 @@ export async function startEnv(o: { writesPerMinute?: number; burst?: number } =
     writesPerMinute: o.writesPerMinute ?? 100000, writeBurst: o.burst ?? 100000, pollIntervalMs: 0, helperImage: "unused", dockerSocket: "/unused", scratchDir: scratch,
     gateCheckName: "Gantry gates", maxWorkspaceBytes: 1 << 30, maxPatchBytes: 64 * 1024, maxCommitsPerPublish: 50, issueLabel: "gantry", gitBin: "git",
   };
-  const app = new GithubApp(cfg.app, new WriteLimiter(cfg.writesPerMinute, cfg.writeBurst));
+  const app = new GithubApp(cfg.app!, new WriteLimiter(cfg.writesPerMinute, cfg.writeBurst));
   const store = new DirStore(join(root, "volumes"));
   // The "remote" the seed clones from: a local repository served over file:// (hooks and config of the source are irrelevant to the broker).
   const remote = join(root, "remote.git");

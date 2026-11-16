@@ -13,7 +13,8 @@ import type { WorkspaceStore } from "./workspace.js";
 
 export interface ServerDeps {
   cfg: GithubConfig;
-  app: GithubApp;
+  /** Null when the GitHub App is not configured. */
+  app: GithubApp | null;
   api: ApiClient;
   store: WorkspaceStore;
   /** Test seams for the clone source. */
@@ -27,11 +28,14 @@ const safeEqual = (a: string, b: string): boolean => {
   return x.length === y.length && timingSafeEqual(x, y);
 };
 
-const Repo = z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+const Repo = z.string().regex(/^(?!\.{1,2}\/)(?!.*\/\.{1,2}$)[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
 
 export async function buildServer(d: ServerDeps): Promise<{ server: FastifyInstance; poller: Poller; ops: OpDeps }> {
   const server = Fastify({ logger: d.logger === false ? false : { level: "info", redact: ["req.headers.authorization"] }, bodyLimit: 1024 * 1024 });
-  const ops: OpDeps = { cfg: d.cfg, app: d.app, api: d.api, appId: d.cfg.app.appId };
+  // Routes only run when configured (the hook below answers 503 otherwise), so these casts are never reached unconfigured.
+  const app = d.app as GithubApp, appCfg = d.cfg.app as NonNullable<GithubConfig["app"]>;
+  const configured = d.app !== null && d.cfg.app !== null;
+  const ops: OpDeps = { cfg: d.cfg, app, api: d.api, appId: configured ? appCfg.appId : 0 };
   const poller = new Poller(ops, d.cfg.pollIntervalMs, server.log);
 
   server.setErrorHandler((e, _req, reply) => {
@@ -49,11 +53,17 @@ export async function buildServer(d: ServerDeps): Promise<{ server: FastifyInsta
     if (!h.startsWith("Bearer ") || !safeEqual(h.slice(7), d.cfg.githubToken)) return reply.code(401).send({ ok: false, msg: "A service token is required." });
   });
 
-  server.get("/healthz", async () => ({ ok: true, poll: poller.lastRun }));
+  server.addHook("preHandler", async (req, reply) => {
+    if (!configured && req.url.startsWith("/v1/")) return reply.code(503).send({ ok: false, code: "not_configured", msg: "GitHub App is not configured. Add the App ID and key in Integrations or deploy/secrets." });
+  });
+
+  server.get("/healthz", async () => configured
+    ? { ok: true, configured: true, poll: poller.lastRun }
+    : { ok: true, configured: false, reason: d.cfg.notConfiguredReason ?? "GitHub App is not configured" });
 
   server.post("/v1/workspaces/seed", async (req) =>
-    seedWorkspace({ cfg: d.cfg, app: d.app, store: d.store, apiBase: d.cfg.app.baseUrl, ...(d.cloneUrl ? { cloneUrl: d.cloneUrl } : {}), ...(d.gitConfig ? { gitConfig: d.gitConfig } : {}) }, SeedBody.parse(req.body)));
-  server.post("/v1/publish", async (req) => publishWorkspace({ cfg: d.cfg, app: d.app, api: d.api, store: d.store }, PublishBody.parse(req.body)));
+    seedWorkspace({ cfg: d.cfg, app, store: d.store, apiBase: appCfg.baseUrl, ...(d.cloneUrl ? { cloneUrl: d.cloneUrl } : {}), ...(d.gitConfig ? { gitConfig: d.gitConfig } : {}) }, SeedBody.parse(req.body)));
+  server.post("/v1/publish", async (req) => publishWorkspace({ cfg: d.cfg, app, api: d.api, store: d.store }, PublishBody.parse(req.body)));
   server.post("/v1/checks/gate", async (req) => setGateCheck(ops, GateCheckBody.parse(req.body)));
   server.get("/v1/pull-state", async (req) => {
     const q = z.object({ repo: Repo, number: z.coerce.number().int().positive() }).parse(req.query);
