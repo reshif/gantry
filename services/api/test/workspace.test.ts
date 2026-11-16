@@ -143,6 +143,29 @@ d("the agent workspace", () => {
     expect((await call(lena, "GET", `/api/v1/workspace/threads/wo:${id}/export`)).status).toBe(404);
   });
 
+  it("every export is audited with its size and never its text; an unreadable thread exports nothing and audits nothing", async () => {
+    const id = await w.atStation("research", "Audit export");
+    await q(`insert into workorder_messages (org_id, id, wo_id, role, author, body) values ($1,$2,$3,'user',$4,'Top secret phrase zebra-9.')`, [t.orgId, `wm-a-${id}`, id, tomas]);
+    const events = () => q<{ category: string; project_id: string | null; actor: string; after: Record<string, unknown>; subject: { id: string } }>(`select category, project_id, actor, after, subject from events where type = 'thread.exported' and subject->>'id' = $1 order by seq`, [`wo:${id}`]);
+    expect((await call(lena, "GET", `/api/v1/workspace/threads/wo:${id}/export?format=json`)).status).toBe(404);
+    expect(await events()).toEqual([]);
+    expect((await call(rui, "GET", `/api/v1/workspace/threads/wo:${id}/export?format=json`)).status).toBe(200);
+    expect((await call(tomas, "GET", `/api/v1/workspace/threads/wo:${id}/export?format=md`)).status).toBe(200);
+    const ev = await events();
+    expect(ev).toHaveLength(2);
+    expect(ev[0]).toMatchObject({ category: "access", actor: rui, after: { format: "json" } });
+    expect(ev[1]).toMatchObject({ actor: tomas, after: { format: "md" } });
+    expect(ev[0]!.project_id).toBeTruthy();
+    expect(Number(ev[0]!.after.messages)).toBeGreaterThan(0);
+    expect(JSON.stringify(ev)).not.toContain("zebra-9");
+    // A project reader of a chat shared with the project is audited too; a person outside the project gets nothing.
+    const tid = (await call(tomas, "POST", "/api/v1/workspace/threads", { scope: { kind: "project", id: (await q<{ project_id: string }>(`select project_id from work_orders where id = $1`, [id]))[0]!.project_id }, visibility: "project" })).body.id as string;
+    expect((await call(rui, "GET", `/api/v1/workspace/threads/${tid}/export`)).status).toBe(200);
+    expect((await call(lena, "GET", `/api/v1/workspace/threads/${tid}/export`)).status).toBe(404);
+    const chat = await q<{ actor: string }>(`select actor from events where type = 'thread.exported' and subject->>'id' = $1`, [tid]);
+    expect(chat.map((c) => c.actor)).toEqual([rui]);
+  });
+
   it("the per-person chat cap stops new questions once a person's chats cost that much in 24 hours", async () => {
     await setSecurity({ chatCapUsdPerDay: 0 });
     try {

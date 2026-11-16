@@ -211,7 +211,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  /** A conversation as markdown or JSON, for whoever may read it. Card data stays in the JSON; the markdown is the readable transcript. */
+  /** A conversation as markdown or JSON, for whoever may read it. Every export is audited (key, project, format, count; never the text). Card data stays in the JSON; the markdown is the readable transcript. */
   app.get("/api/v1/workspace/threads/:key/export", async (req, reply) => {
     const me = person(req);
     const { key } = Key.parse(req.params);
@@ -243,8 +243,13 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
       rows = (await listOnboardingMessages(g.pool, g.orgId, id, 2000)).map((m) => ({ id: m.id, role: m.role, author: m.author, text: m.text, at: m.at, data: m.data }));
     } else throw refuse("not_found", "No such conversation.");
     const file = `${key.replace(/[^A-Za-z0-9_-]+/g, "-")}.${format}`;
+    // A transcript download is an access event: it joins the hash chain with who, what and how much, never the text.
+    await command(req, { action: null }, async () => ({
+      msg: "Exported.",
+      events: [{ type: "thread.exported", category: "access", subject: { type: "thread", id: key }, projectId: project, after: { format, messages: rows.length } }] as never,
+      changes: [], project,
+    }));
     void reply.header("content-disposition", `attachment; filename="${file}"`);
-    void project;
     if (format === "json") return { key, title, exportedAt: new Date().toISOString(), exportedBy: me.id, messages: rows };
     void reply.type("text/markdown; charset=utf-8");
     const iso = (t: number) => new Date(t).toISOString().replace("T", " ").slice(0, 16);
