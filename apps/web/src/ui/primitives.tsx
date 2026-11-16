@@ -3,7 +3,7 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { useId, useRef, type ButtonHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
@@ -166,6 +166,23 @@ export interface TabItem {
 
 export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: TabItem[]; active: string; onChange: (id: string) => void; idPrefix?: string }) {
   const bar = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState("");
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const measure = () => {
+      const start = el.scrollLeft > 2;
+      const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+      setMore([start ? "start" : "", end ? "end" : ""].filter(Boolean).join(" "));
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
+  }, [items.length]);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const tabs = Array.from(bar.current?.querySelectorAll<HTMLButtonElement>(".tab") ?? []);
@@ -176,7 +193,7 @@ export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: Tab
     n?.click();
   };
   return (
-    <div className="tabs" role="tablist" ref={bar} onKeyDown={onKey}>
+    <div className="tabs" role="tablist" data-more={more || undefined} ref={bar} onKeyDown={onKey}>
       {items.map((it) => (
         <button key={it.id} type="button" role="tab" id={`${idPrefix}-${it.id}`} className={`tab${it.id === active ? " is-active" : ""}`} aria-selected={it.id === active ? "true" : "false"} onClick={() => onChange(it.id)}>
           {it.label}

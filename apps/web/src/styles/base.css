@@ -262,6 +262,10 @@ select.input { padding-right: 4px; }
 .tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; color: var(--muted); font-weight: 500; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; margin-bottom: -1px; }
 .tab:hover { color: var(--ink); }
 .tab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+/* edge fades appear only on the side(s) where the strip actually has more tabs (data-more set by Tabs) */
+.tabs[data-more~="end"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.tabs[data-more~="start"] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+.tabs[data-more~="start"][data-more~="end"] { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .tab-count { font-family: var(--f-mono); font-size: var(--t-xs); background: var(--sunk); padding: 0 5px; border-radius: 8px; }
 
 /* ---------- feedback blocks ---------- */
@@ -433,6 +437,10 @@ select.input { padding-right: 4px; }
   .palette-btn kbd { display: none; }
   .viewing select { max-width: 150px; }
   .vtitle { font-size: 28px; }
+  /* equal-width columns (two per row at 390px), same gap and height; labels never wrap; an odd last button spans the row */
+  .vhead-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s2); }
+  .vhead-actions > * { min-width: 0; min-height: 36px; justify-content: center; white-space: nowrap; }
+  .vhead-actions > :last-child:nth-child(odd) { grid-column: 1 / -1; }
   .palette-item { grid-template-columns: 1fr; gap: 0; }
   .dlg-wrap { padding: 6px; }
 }
