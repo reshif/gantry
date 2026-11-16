@@ -73,6 +73,10 @@ services:
     <<: *limits
     mem_limit: 128m
 
+  gantry-sockproxy-ws:
+    <<: *limits
+    mem_limit: 128m
+
   gantry-launcher:
     <<: *limits
     mem_limit: 256m

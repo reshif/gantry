@@ -9,7 +9,7 @@ import { DockerWorkspaceStore } from "./workspace.js";
 const cfg = await loadConfig();
 const app = cfg.app ? new GithubApp(cfg.app, new WriteLimiter(cfg.writesPerMinute, cfg.writeBurst)) : null;
 if (!app) console.warn(`GitHub App is not configured (${cfg.notConfiguredReason ?? "unknown"}); serving 503 until it is.`);
-const store = new DockerWorkspaceStore(new Docker({ socketPath: cfg.dockerSocket }), cfg.helperImage);
+const store = new DockerWorkspaceStore(new Docker(cfg.dockerProxy ? { protocol: "http", host: cfg.dockerProxy.host, port: cfg.dockerProxy.port } : { socketPath: cfg.dockerSocket }), cfg.helperImage);
 const { server, poller } = await buildServer({ cfg, app, api: new ApiClient(cfg), store });
 await server.listen({ port: cfg.port, host: cfg.host });
 if (app) poller.start();

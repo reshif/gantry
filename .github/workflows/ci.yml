@@ -110,6 +110,8 @@ jobs:
           # The production profile must not contain development services or switches.
           docker compose --env-file deploy/prod.env.example -f deploy/compose.yml -f deploy/compose.prod.yml config > /tmp/prod.yml
           ! grep -nE 'mailpit|GANTRY_DEV_DEMO_ACCOUNTS: "true"|GANTRY_DEV_SEED: "true"|start-dev' /tmp/prod.yml
+      - name: Only the socket proxies hold the Docker socket
+        run: node deploy/ci/compose-socket.mjs
       - name: Caddyfile (development and production)
         run: |
           img=caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
