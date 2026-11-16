@@ -2,7 +2,7 @@ import http from "node:http";
 import net from "node:net";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildProxy, hostAllowed, inCidr, isPrivateAddress } from "../src/proxy.js";
+import { buildProxy, hostAllowed, inCidr, isPrivateAddress, type RunLimits } from "../src/proxy.js";
 import { baseConfig, close, FakeApi, makeToken } from "./helpers.js";
 
 const RUN = "run-w3-px";
@@ -40,9 +40,9 @@ describe("forward proxy", () => {
   let pxPort = 0;
   const TOKEN = makeToken(RUN);
 
-  const startProxy = async (cfg = baseConfig({ apiUrl: api.url, allowedPorts: [echoPort, webPort], runSubnet: "10.213.0.0/16" }), resolve = async () => "127.0.0.1"): Promise<void> => {
+  const startProxy = async (cfg = baseConfig({ apiUrl: api.url, allowedPorts: [echoPort, webPort], runSubnet: "10.213.0.0/16" }), resolve = async () => "127.0.0.1", limits?: Partial<RunLimits>): Promise<void> => {
     if (px) await new Promise<void>((r) => px.server.close(() => r()));
-    px = buildProxy({ cfg, logger: log, resolve });
+    px = buildProxy({ cfg, logger: log, resolve, ...(limits ? { limits } : {}) });
     await new Promise<void>((r) => px.server.listen(0, "127.0.0.1", r));
     pxPort = (px.server.address() as AddressInfo).port;
   };
@@ -225,5 +225,68 @@ describe("forward proxy", () => {
     expect(await get(`http://nope.example.org:${webPort}/`, { "proxy-authorization": basic(TOKEN) })).toBe(403);
     expect(await get("/anything")).toBe(400);
     expect(await get("/healthz")).toBe(200);
+  });
+
+  describe("per-run limits (one run cannot starve the shared edge or bloat the audit ledger)", () => {
+    afterAll(async () => { await startProxy(); });
+
+    it("records at most N denied-egress events a minute per run, then one summary, and counts the rest", async () => {
+      await startProxy(undefined, undefined, { deniedEventsPerMinute: 3 });
+      for (let i = 0; i < 8; i++) await connect(pxPort, `evil${i}.example.com:${echoPort}`, basic(TOKEN));
+      await new Promise((res) => setTimeout(res, 100));
+      const events = api.of("/egress/denied").map((c) => JSON.parse(c.body) as { host: string; reason: string });
+      expect(events).toHaveLength(3);
+      expect(events[2]!.host).toBe("(many hosts)");
+      expect(events[2]!.reason).toContain("further denials");
+      expect(px.metrics.deniedSuppressed).toBe(5);
+      expect(px.metrics.denied).toBe(8); // still refused and logged, only the ledger write is capped
+    });
+
+    it("refuses a run's tunnels past the per-run cap with 429, and frees the slot when one closes", async () => {
+      await startProxy(undefined, undefined, { maxTunnelsPerRun: 2 });
+      const open = async (): Promise<net.Socket> => {
+        const sk = net.connect(pxPort, "127.0.0.1");
+        let buf = "";
+        sk.on("error", () => undefined);
+        sk.on("data", (d) => (buf += d.toString()));
+        await new Promise<void>((r) => sk.on("connect", r));
+        sk.write(`CONNECT registry.npmjs.org:${echoPort} HTTP/1.1\r\nHost: x\r\nProxy-Authorization: ${basic(TOKEN)}\r\n\r\n`);
+        await vi.waitFor(() => expect(buf).toContain("200 Connection Established"));
+        return sk;
+      };
+      const a = await open();
+      const b = await open();
+      expect((await connect(pxPort, `registry.npmjs.org:${echoPort}`, basic(TOKEN))).status).toBe(429);
+      expect(px.metrics.tunnelRefused).toBe(1);
+      a.destroy();
+      await vi.waitFor(async () => expect((await connect(pxPort, `registry.npmjs.org:${echoPort}`, basic(TOKEN))).status).toBe(200));
+      b.destroy();
+    });
+
+    it("ends a tunnel at its absolute lifetime even while traffic keeps it busy", async () => {
+      await startProxy(undefined, undefined, { tunnelLifetimeMs: 300 });
+      const sk = net.connect(pxPort, "127.0.0.1");
+      let buf = "";
+      let closed = false;
+      sk.on("data", (d) => (buf += d.toString()));
+      sk.on("close", () => (closed = true));
+      sk.on("error", () => undefined);
+      await new Promise<void>((r) => sk.on("connect", r));
+      sk.write(`CONNECT registry.npmjs.org:${echoPort} HTTP/1.1\r\nHost: x\r\nProxy-Authorization: ${basic(TOKEN)}\r\n\r\n`);
+      await vi.waitFor(() => expect(buf).toContain("200 Connection Established"));
+      const keepalive = setInterval(() => { if (!closed) sk.write("k"); }, 50);
+      await vi.waitFor(() => expect(closed).toBe(true), { timeout: 2000 });
+      clearInterval(keepalive);
+    });
+
+    it("refuses an oversized request body on the plain HTTP path", async () => {
+      await startProxy(undefined, undefined, { maxHttpBodyBytes: 1024 });
+      const status = await new Promise<number>((resolve) => {
+        const rq = http.request({ host: "127.0.0.1", port: pxPort, method: "POST", path: `http://127.0.0.1:${webPort}/up`, headers: { host: `127.0.0.1:${webPort}`, "proxy-authorization": basic(TOKEN) } }, (r) => { r.resume(); resolve(r.statusCode ?? 0); });
+        rq.on("error", () => resolve(0));
+        rq.end(Buffer.alloc(64 * 1024, 1));
+      });
+      expect(status).toBe(413);
+    });
   });
 });
