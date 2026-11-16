@@ -21,6 +21,7 @@ import { useInviteDialog } from "./people/InviteDialog";
 import { useTeamDialogs } from "./people/TeamDialog";
 import { TeamRoles } from "./people/TeamRoles";
 import { HistoryList } from "./people/History";
+import { useOffboard } from "./people/Offboard";
 import type { EffectivePermissions } from "./people/types";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -91,7 +92,7 @@ function Member({ p, teamId, sel, onSel, roleName, projects, teamName }: { p: Pe
     <li>
       <button
         type="button"
-        className={`member${sel === p.id ? " is-on" : ""}`}
+        className={`member${sel === p.id ? " is-on" : ""}${p.status === "deactivated" ? " is-off" : ""}`}
         id={`ppl-mem-${teamId}-${p.id}`}
         aria-pressed={sel === p.id ? "true" : "false"}
         onClick={() => {
@@ -106,6 +107,7 @@ function Member({ p, teamId, sel, onSel, roleName, projects, teamName }: { p: Pe
         </span>
         <span className="ppl-flags">
           {p.status === "invited" ? <span className="chip chip-warn"><Icon name="mail" />invited</span> : null}
+          {p.status === "deactivated" ? <span className="chip chip-muted"><Icon name="lock" />deactivated</span> : null}
           {p.oncall ? <span className="chip chip-accent"><Icon name="clock" />on call</span> : null}
           {p.away && p.away.to > Date.now() ? <span className="chip"><Icon name="swap" />away</span> : null}
         </span>
@@ -113,6 +115,9 @@ function Member({ p, teamId, sel, onSel, roleName, projects, teamName }: { p: Pe
     </li>
   );
 }
+
+/** Deactivated people sit below active ones (stable otherwise). */
+const byStatus = (list: Person[]): Person[] => [...list.filter((p) => p.status !== "deactivated"), ...list.filter((p) => p.status === "deactivated")];
 
 function OrgTree({ people, teams, projects, repos, roles, sel, onSel, q, setQ, perm, invite, teamDlg, orgName, plant }: {
   people: Person[]; teams: Team[]; projects: Project[]; repos: Array<{ team: string }>; roles: Role[]; sel: string | null;
@@ -124,7 +129,7 @@ function OrgTree({ people, teams, projects, repos, roles, sel, onSel, q, setQ, p
     return !s || `${p.name} ${p.email} ${p.title} ${p.roles.map((g) => grantLabel(g, roleName, projects)).join(" ")}`.toLowerCase().includes(s);
   };
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
-  const noTeam = people.filter((p) => !p.teams?.length).filter(matches);
+  const noTeam = byStatus(people.filter((p) => !p.teams?.length)).filter(matches);
   return (
     <div className="org-tree">
       <div className="org-root">
@@ -137,7 +142,7 @@ function OrgTree({ people, teams, projects, repos, roles, sel, onSel, q, setQ, p
       </div>
       <ul className="teams">
         {teams.map((t) => {
-          const members = people.filter((p) => (p.teams ?? []).includes(t.id));
+          const members = byStatus(people.filter((p) => (p.teams ?? []).includes(t.id)));
           const shown = members.filter(matches);
           if (q && !shown.length) return null;
           const projs = projects.filter((p) => (p as Project & { teams?: string[] }).teams?.includes(t.id));
@@ -276,6 +281,12 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
     });
   };
 
+  const offboard = useOffboard({ perm, projects, roleName });
+  const off = p.status === "deactivated";
+  let offGuard: Decision = perm;
+  if (perm.allowed && p.id === viewerId) offGuard = lockd("You cannot deactivate yourself. Ask another Factory Admin.");
+  else if (perm.allowed && p.status === "active" && p.roles.some((g) => g.role === "factory_admin" && !g.via) && admins.length < 2) offGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
+
   const selDecision = useSelectedCell(p.id, cell);
 
   return (
@@ -283,10 +294,11 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
       <div className="ad-head">
         <Avatar id={p.id} size="lg" />
         <div className="ppl-who">
-          <div className="kicker">{[(p.teams ?? []).map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", "), p.status === "invited" ? "invite pending" : "active"].filter(Boolean).join(" · ")}</div>
+          <div className="kicker">{[(p.teams ?? []).map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", "), p.status === "invited" ? "invite pending" : p.status === "deactivated" ? "deactivated" : "active"].filter(Boolean).join(" · ")}</div>
           <h2 className="ad-title">{p.name}</h2>
           <div className="ad-meta">{`${p.title} · `}<span className="mono">{p.email}</span>{p.github ? <span className="mono">{` · github ${p.github}`}</span> : null}</div>
           <div className="ppl-badges">
+            {off ? <span className="chip chip-muted"><Icon name="lock" />deactivated</span> : null}
             <span className="chip"><Icon name="shield" />{p.mfa ? "MFA enrolled" : "No MFA"}</span>
             {p.oncall ? <span className="chip chip-accent" data-tip="On call for at least one project, or a Factory Admin (always on call). Project admins set who is on call in Project config." tabIndex={0}><Icon name="clock" />On call</span> : null}
             {away ? <span className="chip chip-warn"><Icon name="swap" />{`Away until ${fmt.istDate(away.to)}, delegate ${actors(away.delegate).name}`}</span> : null}
@@ -295,6 +307,9 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         <div className="ad-tools">
           {p.status === "invited" ? <Btn label="Mark invite accepted" small icon="check" id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
           <Btn label="Edit teams" small kind="ghost" icon="teams" id="ppl-teams" guard={perm} onClick={openTeams} />
+          {off
+            ? <Btn label="Reactivate" small icon="check" id="ppl-reactivate" guard={perm} onClick={() => offboard.reactivate(p)} />
+            : <Btn label="Deactivate" small kind="danger" icon="lock" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
         </div>
       </div>
 

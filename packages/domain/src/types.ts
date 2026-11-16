@@ -182,6 +182,8 @@ export interface Person {
   github: string;
   away: Away | null;
   mfa?: boolean;
+  /** Record version (read only). Sent as If-Match by offboarding. */
+  version?: number;
   invitedBy?: Id;
   invitedAt?: Ms;
 }

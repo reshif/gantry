@@ -71,3 +71,15 @@
 .ppl-held-list { display: flex; gap: 4px; flex-wrap: wrap; list-style: none; margin: 4px 0 0; padding: 0; }
 .ppl-via { display: block; color: var(--accent); }
 .eff-src { font-size: 9px; color: var(--accent); margin-left: 2px; }
+
+/* Deactivated people and the deactivate dialog */
+.chip-muted { border-color: var(--line); color: var(--muted); white-space: nowrap; }
+.member.is-off .ppl-name, .member.is-off .member-main > .muted { opacity: 0.6; }
+.ppl-off-sec { display: grid; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.ppl-off-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ppl-off-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ppl-off-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px 12px; align-items: baseline; }
+.ppl-off-what { min-width: 0; overflow-wrap: anywhere; }
+.ppl-off-ok { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
+.ppl-off-ok .ic { color: var(--done); }
+@media (max-width: 600px) { .ppl-off-list li { grid-template-columns: minmax(0, 1fr); } }

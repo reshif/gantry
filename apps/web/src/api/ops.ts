@@ -23,6 +23,8 @@ type Obj = Record<string, unknown>;
 export interface Versioned {
   ifMatch?: string | number;
 }
+/** Open work a deactivated person leaves behind: why they matter to it is `roles` (requester, assignee, sole_approver). */
+export interface OpenWorkItem { id: string; title?: string; project?: string; state?: string; roles?: string[]; gate?: string }
 type Via = string | undefined;
 
 const enc = encodeURIComponent;
@@ -304,6 +306,14 @@ export const ops = {
   /** A factory role reaches every project: the server wants a reason (recorded on the ledger) and a fresh sign-in. */
   setFactoryRole: (personId: string, roleId: string, add: boolean, reason: string) =>
     run(["people", "me"], (add ? put : del)(api(`people/${enc(personId)}/factory-roles/${enc(roleId)}`), { reason })),
+  /** Removes a person's access (spec 14.4): sessions end, their keys are revoked unless `keepKeys`, and the response lists the work they leave open. Needs a fresh sign-in and the person's version (If-Match). */
+  deactivatePerson: (personId: string, reason: string, keepKeys?: boolean, v?: Versioned) =>
+    run<{ openWork?: OpenWorkItem[] }>(
+      ["people", "me", "sessions", "apiKeys", "projects", "workOrders", "trust", "matrix"],
+      post(api(`people/${enc(personId)}/deactivate`), { reason, ...(keepKeys ? { keepKeys: true } : {}) }, opts(v)),
+    ),
+  reactivatePerson: (personId: string, reason: string, v?: Versioned) =>
+    run(["people", "me", "matrix"], post(api(`people/${enc(personId)}/reactivate`), { reason }, opts(v))),
   setTeams: (personId: string, teams: string[]) => run(["people"], put(api(`people/${enc(personId)}/teams`), { teams })),
   createTeam: (o: { name: string; desc?: string; id?: string }) => run(["teams", "people"], post(api("teams"), o, create)),
   updateTeam: (teamId: string, o: { name?: string; desc?: string }) => run(["teams", "people", "projects"], patch(api(`teams/${enc(teamId)}`), o)),
