@@ -9,9 +9,11 @@ export type KeyPart = string | number | boolean | null | undefined | Record<stri
 
 /** Slices whose reads also depend on another slice. Invalidating the key refreshes its dependents too. */
 export const DEPENDENTS: Readonly<Record<string, readonly string[]>> = {
-  workOrders: ["floor", "home", "conversations", "record", "changes", "events", "workload"],
+  workOrders: ["floor", "home", "conversations", "record", "changes", "events", "workload", "workspace"],
+  console: ["workspace"],
+  conversations: ["workspace"],
+  repos: ["home", "workspace"],
   projects: ["floor", "home", "me", "repos", "notifications"],
-  repos: ["home"],
   people: ["me", "home", "workload"],
   matrix: ["me", "home"],
   policies: ["home", "me"],

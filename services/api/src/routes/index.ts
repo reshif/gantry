@@ -19,6 +19,7 @@ import { notificationRoutes } from "./notifications.js";
 import { onboardingRoutes } from "./onboarding.js";
 import { onboardingSessionRoutes } from "./onboarding-session.js";
 import { workOrderSessionRoutes } from "./workorder-session.js";
+import { workspaceRoutes } from "./workspace.js";
 import { peopleRoutes } from "./people.js";
 import { projectRoutes } from "./projects.js";
 import { sessionRoutes } from "./session.js";
@@ -34,7 +35,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   for (const plugin of [
     sessionRoutes, catalogRoutes, homeRoutes, projectRoutes, peopleRoutes, accessRoutes, auditRoutes, floorRoutes, workOrderRoutes, stopRoutes, onboardingRoutes, onboardingSessionRoutes, workOrderSessionRoutes,
     agentRoutes, skillRoutes, modelRoutes, evalRoutes, trustRoutes, learningRoutes, integrationRoutes, notificationRoutes, mcpRoutes, apiKeyRoutes, triggerRoutes,
-    workloadRoutes, consoleRoutes, hookRoutes, internalRoutes, internalGithubRoutes,
+    workloadRoutes, consoleRoutes, workspaceRoutes, hookRoutes, internalRoutes, internalGithubRoutes,
   ]) {
     await app.register(plugin);
   }

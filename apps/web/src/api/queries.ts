@@ -211,7 +211,10 @@ export function useNavBadges(): Record<string, NavBadge> {
   const project = usePrefs().project;
   // Floor, work-order and onboarding badges follow the selected project; the API gives them per project.
   const byProject = (home.data?.projectBadges ?? {}) as Record<string, Record<string, NavBadge>>;
-  return { ...(home.data?.badges ?? {}), ...(project ? byProject[project] ?? {} : {}) };
+  const b: Record<string, NavBadge> = { ...(home.data?.badges ?? {}), ...(project ? byProject[project] ?? {} : {}) };
+  // The conversations now live in Agents at work: its item carries their badge.
+  if (b.conversations && !b.workspace) b.workspace = b.conversations;
+  return b;
 }
 
 export type { Me };

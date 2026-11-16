@@ -59,6 +59,7 @@ export default function SecurityView() {
           <>
             <div className="two-col sec-cols"><DomainsPanel perm={perm} sec={sec} mine={me.person.email.split("@")[1] ?? null} /><IpPanel perm={perm} sec={sec} thisIp={thisIp} sessions={sessions} /></div>
             <ResearchPanel perm={perm} sec={sec} />
+            <ChatCapPanel perm={perm} sec={sec} />
           </>
         ) : tab === "sessions" ? (
           <Async query={sessionsQ} what="sessions" id="sec-sessions">{() => <Panel><SessionsTab perm={perm} sessions={sessions} sec={sec} currentId={me.session.id} viewerId={me.person.id} /></Panel>}</Async>
@@ -334,6 +335,35 @@ function ResearchPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings })
         <form className="inline-form" id="sec-rh-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
           <input id="sec-rh-new" className="input mono" placeholder="Host, e.g. docs.nautobot.com" value={val} disabled={!perm.allowed} autoComplete="off" aria-label="Host to allow for research" onChange={(e) => setVal(e.target.value)} />
           <Btn label="Add host" type="submit" small icon="plus" id="sec-rh-add" guard={perm} />
+        </form>
+        <div className="form-err" role="alert">{err}</div>
+      </div>
+    </Panel>
+  );
+}
+
+/** The per-person cap on chats (the Console and side threads): a rolling 24 hours of what a person's questions cost. Empty: no cap. */
+function ChatCapPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
+  const set = useSet(sec);
+  const cur = sec.chatCapUsdPerDay ?? null;
+  const [val, setVal] = useState(cur === null ? "" : String(cur));
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    if (!perm.allowed) return;
+    const t = val.trim();
+    const n = t === "" ? null : Number(t);
+    if (n !== null && (!Number.isFinite(n) || n < 0 || n > 100000)) return setErr("Enter dollars per person per day (0 to 100000), or leave it empty for no cap.");
+    setErr("");
+    await set("chatCapUsdPerDay", n, n === null ? "Chats have no per-person cap." : `Each person may spend ${n.toFixed(2)} USD on chats per 24 hours.`);
+  };
+  return (
+    <Panel title="Chat spending per person">
+      <div className="form-grid" id="sec-chatcap">
+        <p className="small muted">The most one person&apos;s chats (the Console and side threads with agents) may cost over a rolling 24 hours. When it is reached, their next question is refused until earlier answers age out. Work orders keep their own budgets.</p>
+        <form className="inline-form" id="sec-chatcap-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+          <input id="sec-chatcap-usd" className="input mono" inputMode="decimal" placeholder="No cap" value={val} disabled={!perm.allowed} aria-label="Dollars per person per 24 hours" onChange={(e) => setVal(e.target.value)} />
+          <span className="small muted">USD per person per 24 hours</span>
+          <Btn label="Save" type="submit" small id="sec-chatcap-save" guard={perm} />
         </form>
         <div className="form-err" role="alert">{err}</div>
       </div>

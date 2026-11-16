@@ -6,7 +6,7 @@
  * Without a configured model the console says so: there are no canned answers.
  */
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan, useCanMany } from "../api/can";
 import { useAudit, useMe, useProjects, useWorkOrders } from "../api/queries";
@@ -14,6 +14,7 @@ import { setProject, usePrefs } from "../lib/prefs";
 import { navigate } from "../lib/router";
 import { Icon } from "../ui/Icon";
 import { Avatar, Btn, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
+import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { useOpenTraveler } from "../shell/useTraveler";
 import { callTool, ck, clearThread, renameThread, savePinned, sendMessage, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
@@ -35,7 +36,7 @@ const localCache = new Map<string, Msg[]>();
 export const resetConsoleLocal = (): void => localCache.clear();
 
 const fromServer = (m: ThreadMessage, me: string): Msg => {
-  if (m.role === "user") return { id: m.id, role: "user", at: m.at, text: m.text, mode: "pending", by: me };
+  if (m.role === "user") return { id: m.id, role: "user", at: m.at, text: m.text, mode: "pending", by: m.author ?? me };
   if (m.role === "system") return { id: m.id, role: "factory", at: m.at, text: m.text, mode: m.data.kind === "no_model" ? "none" : "error" };
   return {
     id: m.id, role: "factory", at: m.at, text: m.text, mode: "model", serverId: m.id, cited: m.data.cited ?? [], stopped: !!m.data.stopped,
@@ -55,7 +56,23 @@ function suggestionsFor(roles: string[], pn: string, projectId: string | null, s
 
 const CAPS: Array<[string, string]> = [["wo.submit", "Submit work orders"], ["gate.approve", "Approve gates"], ["line.halt", "Halt (andon)"], ["line.resume", "Resume"], ["repo.onboard", "Connect repos"], ["triggers.edit", "Edit triggers"], ["kill.workorder", "Kill a work order"], ["kill.project", "Kill this project"], ["restore.project", "Restore this project"], ["kill.factory", "Kill the factory"]];
 
-export default function ConsoleView() {
+/**
+ * The Console inside the Agent Workspace: the workspace owns which chat is open (its inbox replaces the chat list), may put its own header above
+ * the conversation, and replaces the context panel for a side thread. `readOnly` says why the person cannot post (an archived chat, or a shared
+ * one they were not invited to). `agent` names who answers in a side thread.
+ */
+export interface ConsoleEmbed {
+  threadId: string | null;
+  onThread: (id: string) => void;
+  header?: ReactNode;
+  aside?: ReactNode;
+  readOnly?: string | null;
+  agent?: { name: string; about: string } | null;
+  /** A question to ask as soon as the chat is open (an @mention from a work order's thread). */
+  initial?: string | null;
+}
+
+export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const me = useMe();
   const ui = useUI();
   const qc = useQueryClient();
@@ -64,9 +81,14 @@ export default function ConsoleView() {
   const threads = useThreads();
   const projects = useProjects().data ?? [];
   const openTraveler = useOpenTraveler();
+  const actorOf = useActors();
 
   const meId = me?.person.id ?? "";
-  const [threadId, setThreadId] = useState<string | null>(null);
+  const [threadId, setThreadIdState] = useState<string | null>(embed?.threadId ?? null);
+  const setThreadId = useCallback((id: string | null) => {
+    setThreadIdState(id);
+    if (id && embed && id !== embed.threadId) embed.onThread(id);
+  }, [embed]);
   const [fresh, setFresh] = useState(false);
   const thread = useThread(threadId);
   const [local, setLocalState] = useState<Msg[]>(() => localCache.get(meId) ?? []);
@@ -82,9 +104,9 @@ export default function ConsoleView() {
 
   const setLocal = useCallback((f: (x: Msg[]) => Msg[]) => setLocalState((x) => { const n = f(x); localCache.set(meId, n); return n; }), [meId]);
 
-  // Continue the latest saved conversation, unless the person cleared it.
+  // Continue the latest saved conversation, unless the person cleared it. In the workspace the inbox decides.
   useEffect(() => {
-    if (threadId || fresh || !threads.data) return;
+    if (embed || threadId || fresh || !threads.data) return;
     const latest = threads.data.items[0];
     if (latest) setThreadId(latest.id);
   }, [threads.data, threadId, fresh]);
@@ -128,6 +150,7 @@ export default function ConsoleView() {
     }
     const all = [...serverMsgs, ...local, ...rows].sort((a, b) => a.at - b.at);
     if (all.length) return all;
+    if (embed?.agent) return [{ id: "m0", role: "factory", at: 0, mode: "pending", text: `Ask ${embed.agent.name} about ${embed.agent.about}. ${embed.agent.name} answers from what the work has produced so far (documents, questions, sources) and reads live data with your permissions. Nothing changes from here: answers, corrections and send-backs belong in the primary thread.` } satisfies Msg];
     return [{ id: "m0", role: "factory", at: 0, mode: "pending", cards: [{ type: "suggest" }], text: `Ask about your projects in plain language, or use a slash command. ${st?.configured ? `Questions are answered by ${st.model} using tools over the live factory.` : "No model is configured, so questions cannot be answered yet; slash commands read live data directly."} Anything that changes state shows a confirm card and runs only when you click it. Questions without a project use your current project, ${cur?.name ?? "none"}.` } satisfies Msg];
   }, [serverMsgs, local, tail, st, cur]);
 
@@ -234,6 +257,16 @@ export default function ConsoleView() {
     else await askModel(text);
   };
 
+  // The question an @mention carried here is asked once, when the chat has loaded.
+  const askedInitial = useRef<string | null>(null);
+  useEffect(() => {
+    const init = embed?.initial;
+    if (!init || !threadId || askedInitial.current === threadId || streaming || !thread.data) return;
+    askedInitial.current = threadId;
+    void send(init);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embed?.initial, threadId, thread.data, streaming]);
+
   const clear = async (): Promise<void> => {
     if (threadId) await clearThread(threadId);
     setLocal(() => []);
@@ -264,6 +297,18 @@ export default function ConsoleView() {
     setFresh(true);
     focusComposer();
   };
+  // In the workspace the inbox picks the chat: follow it (a chat this view just created is already current).
+  const ext = embed ? embed.threadId : undefined;
+  const extSeen = useRef(ext);
+  useEffect(() => {
+    if (ext === undefined || ext === extSeen.current) return;
+    extSeen.current = ext;
+    if (ext === threadId) return;
+    leave();
+    setFresh(ext === null);
+    setThreadIdState(ext);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ext]);
   const renameChat = async (id: string, title: string): Promise<string | null> => {
     const r = await renameThread(id, title);
     if (!r.ok) return r.msg;
@@ -304,20 +349,21 @@ export default function ConsoleView() {
   const label = st?.configured ? "Model" : status.isLoading ? "Checking" : "No model";
   const cls = st?.configured ? "ready" : status.isLoading ? "checking" : "absent";
 
+  const modePicker = hasModels && st ? <ModelPicker st={st} busy={streaming} /> : <span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id="con-mode" role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>;
+  const nameOf = (m: Msg) => (m.role === "user" ? (m.by && m.by !== meId ? actorOf(m.by).name : me.person.name) : embed?.agent?.name ?? "Gantry");
   return (
-    <div className="view view-console">
-      <ViewHead title="Console" sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you."
-        actions={hasModels && st ? <ModelPicker st={st} busy={streaming} /> : <span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id="con-mode" role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>} />
-      <div className="console-grid">
-        <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />
+    <div className={embed ? "view-console ws-chat" : "view view-console"}>
+      {embed ? embed.header : <ViewHead title="Console" sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you." actions={modePicker} />}
+      <div className={`console-grid${embed ? " is-embedded" : ""}`}>
+        {embed ? null : <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />}
         <section className="console-main" aria-label="Conversation">
-          <p className="con-mode-line small" id="con-mode-reason"><Icon name={st?.configured ? "check" : "dots"} /><span>{modeLine}</span>{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>
+          {embed?.agent ? null : <p className="con-mode-line small" id="con-mode-reason"><Icon name={st?.configured ? "check" : "dots"} /><span>{modeLine}</span>{embed ? <span className="con-mode-pick">{modePicker}</span> : null}{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>}
           <div className="thread" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
             {msgs.map((m) => (
               <div className={`msg msg-${m.role}`} key={m.id}>
                 <div className="msg-who">
-                  {m.role === "user" ? <Avatar id={m.by} size="sm" /> : <span className="av av-factory av-sm" aria-hidden="true">G</span>}
-                  <span className="msg-name">{m.role === "user" ? me.person.name : "Gantry"}</span>
+                  {m.role === "user" ? <Avatar id={m.by} size="sm" /> : <span className="av av-factory av-sm" aria-hidden="true">{embed?.agent ? embed.agent.name.slice(0, 1) : "G"}</span>}
+                  <span className="msg-name">{nameOf(m)}</span>
                   {m.at ? <span className="mono muted small">{fmt.ist(m.at)}</span> : null}
                 </div>
                 {m.streaming ? <div className={`msg-text${m.text ? "" : " is-thinking"}`} id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div className={`msg-text${m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? " is-md" : ""}`} id={`con-msg-text-${m.id}`}>{m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
@@ -335,21 +381,24 @@ export default function ConsoleView() {
               </div>
             ))}
           </div>
+          {embed?.readOnly ? <p className="composer composer-ro small" id="con-readonly-thread" role="note"><Icon name="lock" /><span>{embed.readOnly}</span></p> : (
           <form className="composer" id="con-form" onSubmit={(e) => { e.preventDefault(); void send(draft); focusComposer(); }}>
             {slash.length ? (
               <ul className="slash-menu" id="con-slash" role="listbox" aria-label="Commands">
                 {slash.map((x, i) => <li key={x.cmd} role="option" id={`con-slash-${i}`} className={i === idx ? "is-active" : ""} aria-selected={i === idx} onMouseDown={(e) => { e.preventDefault(); toDraft(x.cmd); }}><span className="mono">{x.cmd.trim()}</span><span className="muted">{x.hint}</span></li>)}
               </ul>
             ) : null}
-            <textarea id="con-input" ref={input} className="input composer-input" rows={2} placeholder="Ask or instruct. Type / for commands." aria-label="Message the factory" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
+            <textarea id="con-input" ref={input} className="input composer-input" rows={2} placeholder={embed?.agent ? `Ask ${embed.agent.name}` : "Ask or instruct. Type / for commands."} aria-label="Message the factory" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
             <div className="composer-foot">
-              <div className="chips">{suggestions.slice(0, 3).map((sg, i) => <button type="button" key={sg} className="sugg" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
+              <div className="chips">{embed?.agent ? null : suggestions.slice(0, 3).map((sg, i) => <button type="button" key={sg} className="sugg" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
               {streaming ? (
                 <div className="row gap-sm"><Btn label="Stop" kind="danger" small icon="x" id="con-stop" onClick={() => ac.current?.abort()} /><Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" disabledReason="Wait for the answer or stop it." /></div>
               ) : <Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" />}
             </div>
           </form>
+          )}
         </section>
+        {embed?.aside ?? (
         <aside className="ctx" aria-label="Console context">
           <Panel title="Context">
             <div className="con-ctx">
@@ -378,6 +427,7 @@ export default function ConsoleView() {
           <Btn label="Clear conversation" small kind="ghost" icon="x" id="con-clear" disabledReason={threadId || local.length ? null : "There is nothing to clear."} onClick={() => void clear()} />
           <p className="footnote">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Work order, issue and repository text is passed as untrusted data. Slash commands read the same tools directly and never need a model. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
         </aside>
+        )}
       </div>
     </div>
   );

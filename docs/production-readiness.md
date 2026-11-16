@@ -139,13 +139,15 @@ The design is in [agent-experience.md §4](review/2026-11-15/agent-experience.md
   - governed web research (allow-listed, snapshotted, audited) with source records and citation chips
   - a research plan card the person approves, covering scope, domains and budget
   - a live run timeline for every station
-- **Phase 3:** scouts and objections done 2026-11-16 (db5367c) and covered by tests; live on WO-1004 both agents chose not to use them (Research re-checked three things itself; Spec raised no objection), so parallel scout containers have not yet run against the real model. Not done yet: side threads with a chosen agent and @mention routing.
+- **Phase 3:** scouts and objections done 2026-11-16 (db5367c) and covered by tests; live on WO-1004 both agents chose not to use them (Research re-checked three things itself; Spec raised no objection), so parallel scout containers have not yet run against the real model. Side threads with a chosen agent and @mention routing came with Phase 4.
   - a research swarm: child runs capped in number and drawing on the work order's budget, a board of scouts in progress, pause or stop per scout
   - agent-to-agent objections that a person resolves
-- **Phase 4:** one Agent Workspace:
-  - an inbox, threads and a context pane
-  - archive, share and full-text search
-  - an operator view of stuck, waiting and over-budget threads
+- **Phase 4:** done 2026-11-16, verified live on WO-1004 (Meera typed "@Researcher …" in the work order's thread; a side thread opened with the Researcher, which answered from research.md and its sources on its pinned model for $0.05 and changed nothing; search for "logger" found the source page and the latest version of each document; the operator view flagged that WO-1004's research plan had used 91% of its $0.50). Also finishes Phase 3's side threads with a chosen agent and @mention routing. Not done yet: @mentioning a person (an invite with a notification), per-section comments, streaming the inbox (it polls every 30 s), and moving the onboarding pipeline page itself into the workspace (its conversation is there; the page stays).
+  - "Agents at work" replaces Console and Conversations in the nav; their old links land on the same thread
+  - one inbox over work-order threads, side threads, onboarding threads and chats: Needs me (questions, proposals, gates the person may decide), Active, Mine, Shared, Archived; pins and archive per person; a closed work order's thread archives itself after 14 days
+  - side threads (migration 0038): a chat about a work order, repository or project with a chosen agent, answering read-only in that agent's voice from the work order's documents, dialogue and sources; shared with the project by default; owners invite people (never someone who cannot see the project), archive (read-only) and export as markdown or JSON
+  - full-text search over messages, documents (newest matching version), sources and questions, only where the person may read
+  - an operator view of stuck runs, work waiting on people, work near or over budget, and chat spend per person; a per-person 24-hour chat cap in Security
 
 ## Wave 5: operating it in production
 

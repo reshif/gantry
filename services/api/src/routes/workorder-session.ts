@@ -11,7 +11,7 @@
  * checks. An approval is the only way anything changes: it runs the ordinary command (confirm brief at G0+G1, reclassify, decline) under the approving person's own rights.
  * With no usable model the scripted questionnaire answers instead, labelled "Rule-based (no agent)".
  */
-import { appendEvent, withTx } from "@gantry/db";
+import { appendEvent, withTx, type Queryable } from "@gantry/db";
 import { SESSION_BUDGET_DEFAULT_USD, WO_AGENT_LABEL, classOf, route, stationDef, visibleProjects, type Catalog, type FlowState, type Project, type WoCard, type WorkOrder } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -64,6 +64,70 @@ const system = (o: { agent: string; station: string; purpose: string; wo: string
   "Keep each answer under 140 words. Plain sentences, no headings, no emoji.",
   `You are talking with ${o.person}.`,
 ].join("\n\n");
+
+export interface WoSessionRow {
+  id: string; project: string; title: string; cls: string; station: string; stationName: string; state: string; bay: string | null; gate: string | null; agent: string | null; agentName: string | null;
+  waitingOn: "you" | "approver" | "agent" | "person" | "nobody"; latest: { text: string; at: number; by: string; role: string } | null; unread: boolean; closed: boolean; started: boolean; requestedBy: string | null; createdAt: number; closedAt: number | null;
+}
+
+/** The work-order sessions a person sees (the Conversations list and the workspace inbox): who waits on whom, the latest message, the station. */
+export async function woSessionRows(db: Queryable, orgId: string, req: FastifyRequest, who: { id: string }, project: string | null, o: { all?: boolean } = {}): Promise<WoSessionRow[]> {
+    const st = await policyState(req);
+    const factory = st.people.find((x) => x.id === who.id)?.roles.some((r) => r.scope === "factory");
+    const ids = factory ? null : visibleProjects(st, who.id).map((p) => p.id);
+    // `all` (the workspace's Archived view) also lists work orders closed more than 14 days ago.
+    const { rows: wos } = await db.query<{ id: string; project_id: string; title: string; class: string; position: string; state: string; submitter: string | null; created_at: Date; closed_at: Date | null }>(
+      `select id, project_id, title, class, position, state, submitter, created_at, closed_at from work_orders
+        where org_id = $1 and source not in ('eval','onboarding') and ($2::text is null or project_id = $2) and ($3::text[] is null or project_id = any($3))
+          and ($4 or state not in ('done','killed','declined') and position <> 'declined' or coalesce(closed_at, created_at) > now() - interval '14 days')
+        order by created_at desc limit ${o.all ? 400 : 200}`,
+      [orgId, project ?? null, ids, o.all === true],
+    );
+    const woIds = wos.map((w) => w.id);
+    const [lastRows, seenRows, gateRows, legacyRows, agentRows] = await Promise.all([
+      db.query<{ wo_id: string; role: string; author: string; body: string; data: WoMessage["data"]; created_at: Date }>(`select distinct on (wo_id) wo_id, role, author, body, data, created_at from workorder_messages where org_id = $1 and wo_id = any($2) order by wo_id, created_at desc, id desc`, [orgId, woIds]),
+      db.query<{ wo_id: string; seen_at: Date }>(`select wo_id, seen_at from workorder_session_seen where org_id = $1 and person_id = $2 and wo_id = any($3)`, [orgId, who.id, woIds]),
+      db.query<{ wo_id: string; gate_id: string }>(`select wo_id, gate_id from gate_instances where org_id = $1 and status = 'open' and wo_id = any($2)`, [orgId, woIds]),
+      db.query<{ wo_id: string; author_kind: string; body: string; created_at: Date; status: string }>(`select distinct on (c.wo_id) c.wo_id, m.author_kind, m.body, m.created_at, c.status from conversations c join messages m on m.org_id = c.org_id and m.conversation_id = c.id where c.org_id = $1 and c.wo_id = any($2) order by c.wo_id, m.created_at desc, m.id desc`, [orgId, woIds]),
+      db.query<{ id: string; name: string }>(`select id, name from agents where org_id = $1`, [orgId]),
+    ]);
+    const askRows = (await db.query<{ wo_id: string; ask_of: string }>(`select wo_id, ask_of from wo_questions where org_id = $1 and status = 'open' and blocking and wo_id = any($2)`, [orgId, woIds])).rows;
+    const pst = await policyState(req);
+    const meP = pst.people.find((p) => p.id === who.id);
+    const last = new Map(lastRows.rows.map((r) => [r.wo_id, r]));
+    const seen = new Map(seenRows.rows.map((r) => [r.wo_id, r.seen_at.getTime()]));
+    const gates = new Map(gateRows.rows.map((r) => [r.wo_id, r.gate_id]));
+    const legacy = new Map(legacyRows.rows.map((r) => [r.wo_id, r]));
+    const names = new Map(agentRows.rows.map((a) => [a.id, a.name]));
+    const catalog = st.catalog;
+    const items = wos.map((w) => {
+      const m = last.get(w.id);
+      const l = legacy.get(w.id);
+      const closed = w.state === "done" || w.state === "killed" || w.state === "declined" || w.position === "declined";
+      const bay = catalog.bays.some((b) => b.id === w.position);
+      const sid = bay ? "intake" : w.position;
+      const stn = stationDef(catalog, sid);
+      const pending = !!m && m.role === "assistant" && (m.data.cards ?? []).some((c) => (c.kind === "proposal" && c.status === "pending") || c.kind === "question");
+      const gate = gates.get(w.id) ?? null;
+      const asks = askRows.filter((a) => a.wo_id === w.id);
+      const askedMe = asks.some((a) => asksMe(a.ask_of, meP, { project: w.project_id, requestedBy: w.submitter }, (act) => decideFor(pst, req.gx.principal!, act, { project: w.project_id }).allowed));
+      const waitingOn: "you" | "approver" | "agent" | "person" | "nobody" = closed ? "nobody"
+        : pending ? "you"
+        : asks.length ? (askedMe ? "you" : "person")
+        : w.position === "person" ? "you"
+        : gate ? "approver"
+        : m && m.role === "user" ? "agent"
+        : l && l.status === "open" && l.author_kind === "agent" && !m ? "you"
+        : "agent";
+      const latest = m ? { text: m.body, at: m.created_at.getTime(), by: m.author, role: m.role } : l ? { text: l.body, at: l.created_at.getTime(), by: l.author_kind === "person" ? "person" : "ag-intake", role: l.author_kind === "person" ? "user" : "assistant" } : null;
+      const unread = !!m && m.role !== "user" && m.created_at.getTime() > (seen.get(w.id) ?? 0);
+      return {
+        id: w.id, project: w.project_id, title: w.title, cls: w.class, station: sid, stationName: bay ? (catalog.bays.find((b) => b.id === w.position)?.name ?? w.position) : stn?.name ?? sid, state: w.state, bay: bay ? w.position : null, gate,
+        agent: stn?.agent ?? null, agentName: stn?.agent ? (names.get(stn.agent) ?? stn.name) : null, waitingOn, latest, unread, closed, started: !!m, requestedBy: w.submitter, createdAt: w.created_at.getTime(), closedAt: closed ? (w.closed_at ?? w.created_at).getTime() : null,
+      };
+    });
+    return items;
+}
 
 export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
@@ -248,59 +312,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
   app.get("/api/v1/work-order-sessions", async (req) => {
     const who = person(req);
     const q = ListQ.parse(req.query);
-    const st = await policyState(req);
-    const factory = st.people.find((x) => x.id === who.id)?.roles.some((r) => r.scope === "factory");
-    const ids = factory ? null : visibleProjects(st, who.id).map((p) => p.id);
-    const { rows: wos } = await g.pool.query<{ id: string; project_id: string; title: string; class: string; position: string; state: string; submitter: string | null; created_at: Date }>(
-      `select id, project_id, title, class, position, state, submitter, created_at from work_orders
-        where org_id = $1 and source not in ('eval','onboarding') and ($2::text is null or project_id = $2) and ($3::text[] is null or project_id = any($3))
-          and (state not in ('done','killed','declined') and position <> 'declined' or coalesce(closed_at, created_at) > now() - interval '14 days')
-        order by created_at desc limit 200`,
-      [g.orgId, q.project ?? null, ids],
-    );
-    const woIds = wos.map((w) => w.id);
-    const [lastRows, seenRows, gateRows, legacyRows, agentRows] = await Promise.all([
-      g.pool.query<{ wo_id: string; role: string; author: string; body: string; data: WoMessage["data"]; created_at: Date }>(`select distinct on (wo_id) wo_id, role, author, body, data, created_at from workorder_messages where org_id = $1 and wo_id = any($2) order by wo_id, created_at desc, id desc`, [g.orgId, woIds]),
-      g.pool.query<{ wo_id: string; seen_at: Date }>(`select wo_id, seen_at from workorder_session_seen where org_id = $1 and person_id = $2 and wo_id = any($3)`, [g.orgId, who.id, woIds]),
-      g.pool.query<{ wo_id: string; gate_id: string }>(`select wo_id, gate_id from gate_instances where org_id = $1 and status = 'open' and wo_id = any($2)`, [g.orgId, woIds]),
-      g.pool.query<{ wo_id: string; author_kind: string; body: string; created_at: Date; status: string }>(`select distinct on (c.wo_id) c.wo_id, m.author_kind, m.body, m.created_at, c.status from conversations c join messages m on m.org_id = c.org_id and m.conversation_id = c.id where c.org_id = $1 and c.wo_id = any($2) order by c.wo_id, m.created_at desc, m.id desc`, [g.orgId, woIds]),
-      g.pool.query<{ id: string; name: string }>(`select id, name from agents where org_id = $1`, [g.orgId]),
-    ]);
-    const askRows = (await g.pool.query<{ wo_id: string; ask_of: string }>(`select wo_id, ask_of from wo_questions where org_id = $1 and status = 'open' and blocking and wo_id = any($2)`, [g.orgId, woIds])).rows;
-    const pst = await policyState(req);
-    const meP = pst.people.find((p) => p.id === who.id);
-    const last = new Map(lastRows.rows.map((r) => [r.wo_id, r]));
-    const seen = new Map(seenRows.rows.map((r) => [r.wo_id, r.seen_at.getTime()]));
-    const gates = new Map(gateRows.rows.map((r) => [r.wo_id, r.gate_id]));
-    const legacy = new Map(legacyRows.rows.map((r) => [r.wo_id, r]));
-    const names = new Map(agentRows.rows.map((a) => [a.id, a.name]));
-    const catalog = st.catalog;
-    const items = wos.map((w) => {
-      const m = last.get(w.id);
-      const l = legacy.get(w.id);
-      const closed = w.state === "done" || w.state === "killed" || w.state === "declined" || w.position === "declined";
-      const bay = catalog.bays.some((b) => b.id === w.position);
-      const sid = bay ? "intake" : w.position;
-      const stn = stationDef(catalog, sid);
-      const pending = !!m && m.role === "assistant" && (m.data.cards ?? []).some((c) => (c.kind === "proposal" && c.status === "pending") || c.kind === "question");
-      const gate = gates.get(w.id) ?? null;
-      const asks = askRows.filter((a) => a.wo_id === w.id);
-      const askedMe = asks.some((a) => asksMe(a.ask_of, meP, { project: w.project_id, requestedBy: w.submitter }, (act) => decideFor(pst, req.gx.principal!, act, { project: w.project_id }).allowed));
-      const waitingOn: "you" | "approver" | "agent" | "person" | "nobody" = closed ? "nobody"
-        : pending ? "you"
-        : asks.length ? (askedMe ? "you" : "person")
-        : w.position === "person" ? "you"
-        : gate ? "approver"
-        : m && m.role === "user" ? "agent"
-        : l && l.status === "open" && l.author_kind === "agent" && !m ? "you"
-        : "agent";
-      const latest = m ? { text: m.body, at: m.created_at.getTime(), by: m.author, role: m.role } : l ? { text: l.body, at: l.created_at.getTime(), by: l.author_kind === "person" ? "person" : "ag-intake", role: l.author_kind === "person" ? "user" : "assistant" } : null;
-      const unread = !!m && m.role !== "user" && m.created_at.getTime() > (seen.get(w.id) ?? 0);
-      return {
-        id: w.id, project: w.project_id, title: w.title, cls: w.class, station: sid, stationName: bay ? (catalog.bays.find((b) => b.id === w.position)?.name ?? w.position) : stn?.name ?? sid, state: w.state, bay: bay ? w.position : null, gate,
-        agent: stn?.agent ?? null, agentName: stn?.agent ? (names.get(stn.agent) ?? stn.name) : null, waitingOn, latest, unread, closed, started: !!m, requestedBy: w.submitter, createdAt: w.created_at.getTime(),
-      };
-    });
+    const items = await woSessionRows(g.pool, g.orgId, req, who, q.project ?? null);
     return { items, next: null, total: items.length };
   });
 

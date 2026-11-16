@@ -33,10 +33,12 @@ export const BUILD_READ = [...FACTORY_READ, "project_admin", "line_lead"] as con
 export const ROUTES: readonly RouteDef[] = [
   { id: "home", title: "Home", group: "Overview", icon: "home" },
   { id: "projects", title: "Projects", group: "Overview", icon: "project" },
-  { id: "console", title: "Console", group: "Overview", icon: "console" },
+  { id: "workspace", title: "Agents at work", group: "Overview", icon: "chat" },
+  // The Console and Conversations now live in the workspace; their links still work and land there.
+  { id: "console", title: "Console", group: "Overview", icon: "console", nav: false },
   { id: "floor", title: "Floor", group: "Project", icon: "belt", project: true },
   { id: "work-orders", title: "Work orders", group: "Project", icon: "list", project: true },
-  { id: "conversations", title: "Conversations", group: "Project", icon: "chat", project: true },
+  { id: "conversations", title: "Conversations", group: "Project", icon: "chat", project: true, nav: false },
   { id: "onboarding", title: "Onboarding", group: "Project", icon: "rocket", project: true },
   { id: "project-config", title: "Project config", group: "Project", icon: "filter", project: true },
   { id: "record", title: "Work order record", group: "Project", icon: "record", project: true, nav: false },

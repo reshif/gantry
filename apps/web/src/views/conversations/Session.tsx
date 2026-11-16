@@ -24,6 +24,9 @@ import { AssumptionList, StationQuestionCard } from "../documents/Dialogue";
 import { ResearchPlanCard } from "../documents/Research";
 import { LiveRun, RunTimelineView } from "../documents/Timeline";
 import { GateNotes, ObjectionCard, SwarmBoard } from "../documents/Swarm";
+import { navigate } from "../../lib/router";
+import { createThread, useWsAgents } from "../workspace/api";
+import { mentionChoices, mentionOf, queueAsk } from "../workspace/mention";
 
 type Proposal = Extract<WoCard, { kind: "proposal" }>;
 
@@ -220,7 +223,7 @@ function SideDialogue({ s }: { s: WoSession }) {
 
 /* ------------------------------------------------------------------ the page ---- */
 
-export function WoSessionPage({ woId, back }: { woId: string; back: () => void }) {
+export function WoSessionPage({ woId, back, embedded }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean }) {
   const q = useWoSession(woId);
   const s = q.data;
   const ui = useUI();
@@ -233,6 +236,7 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
   const run = useCallback((on: Parameters<typeof sendWoTurn>[2], signal: AbortSignal) => sendWoTurn(woId, turn.current, on, signal), [woId]);
   const { live, error, start } = useLiveTurn<WoCard>(run, (m) => ui.toast(m, "error"));
   const send = (body: { kind: "message" | "open" | "continue"; text?: string }) => { turn.current = body; void start(); };
+  const agents = useWsAgents(woId).data?.items ?? [];
 
   const ruleBased = s?.agent.mode === "rule-based";
   const started = !!s && s.messages.some((m) => m.data.kind !== "update" && m.data.mode !== "legacy");
@@ -253,20 +257,31 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
   if (!s) return <div className="osx"><Async query={q} what="this conversation" id="conv-session">{() => null}</Async><Btn label="Back to conversations" small kind="ghost" icon="back" onClick={back} /></div>;
 
   const agentName = s.agent.name;
-  const submit = () => { const t = draft.trim(); if (!t) return; setDraft(""); send({ kind: "message", text: t }); };
+  // "@Researcher ..." asks that agent in a side thread about this work order (read-only, shared with the project); anything else goes to the station's agent.
+  const mention = mentionOf(draft, agents);
+  const choices = mentionChoices(draft, agents);
+  const askAside = async (m: NonNullable<typeof mention>) => {
+    if (!m.text) { ui.toast(`Write the question for ${m.agent.name} after the name.`, "warn"); return; }
+    const r = await createThread({ scope: { kind: "work_order", id: s.woId }, agent: m.agent.id, visibility: "project" });
+    if (!r.ok) { ui.toast(r.msg, "error"); return; }
+    setDraft("");
+    queueAsk(r.id, m.text);
+    navigate("workspace", r.id);
+  };
+  const submit = () => { const t = draft.trim(); if (!t) return; if (mention) { void askAside(mention); return; } if (!s.can.talk) return; setDraft(""); send({ kind: "message", text: t }); };
   const status = live ? { cls: "is-live", text: `${agentName} is thinking…` }
     : s.wo.closed ? { cls: "is-idle", text: s.next.text }
     : s.next.actor === "you" ? { cls: "is-you", text: ruleBased ? "Waiting for you: answer the question below" : s.dialogue.askedMe ? s.next.text : `${agentName} is waiting for you` }
     : s.next.actor === "approver" || s.next.actor === "person" ? { cls: "is-wait", text: s.next.text }
     : { cls: "is-live", text: s.waiting?.text ?? s.next.text };
-  const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."}` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}: answer, correct it, or ask anything about this work order`;
+  const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."} Type @ to ask an agent in a side thread.` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}, or type @ to ask another agent in a side thread`;
   // a station's message carries its agent's id: show the agent's name, as everywhere else
   const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
 
   return (
     <div className="osx wos" id="wos" data-wo={s.woId}>
       <div className="osx-top">
-        <Btn small icon="back" id="wos-back" label="Conversations" onClick={back} />
+        {embedded ? null : <Btn small icon="back" id="wos-back" label="Conversations" onClick={back} />}
         <h2 className="osx-title"><span className="mono">{s.wo.id}</span> {s.wo.title}</h2>
         <span className="chip">{s.wo.clsName}</span>
         <span className="chip">{s.wo.bay ? `Bay · ${s.wo.bay}` : s.wo.stationName}</span>
@@ -315,8 +330,14 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
             <div ref={end} />
           </div>
           <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-            <textarea id="wos-input" className="input" rows={2} aria-label={`Message to ${agentName}`} value={draft} placeholder={placeholder} disabled={!s.can.talk || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
-            <Btn kind="primary" type="submit" id="wos-send" label="Send" disabled={!s.can.talk || !!live || !draft.trim()} />
+            {choices.length ? (
+              <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
+                {choices.map((a) => <li key={a.id} role="option" aria-selected="false" id={`wos-mention-${a.id}`} onMouseDown={(e) => { e.preventDefault(); setDraft(`@${a.name} `); }}><span className="strong">{`@${a.name}`}</span><span className="muted">{`${a.stationName} · answers in a side thread`}</span></li>)}
+              </ul>
+            ) : null}
+            <textarea id="wos-input" className="input" rows={2} aria-label={`Message to ${agentName}`} value={draft} placeholder={placeholder} disabled={!!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
+            {mention ? <span className="small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</span> : null}
+            <Btn kind="primary" type="submit" id="wos-send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || !draft.trim() || (!mention && !s.can.talk)} />
           </form>
         </section>
         <aside className="osx-side" aria-label="Work order">

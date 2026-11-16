@@ -4,10 +4,11 @@ import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 export const VIEWS: Record<string, LazyExoticComponent<ComponentType>> = {
   home: lazy(() => import("./home")),
   projects: lazy(() => import("./projects")),
-  console: lazy(() => import("./console")),
+  workspace: lazy(() => import("./workspace")),
+  console: lazy(() => import("./workspace")),
   floor: lazy(() => import("./floor")),
   "work-orders": lazy(() => import("./work-orders")),
-  conversations: lazy(() => import("./conversations")),
+  conversations: lazy(() => import("./workspace")),
   onboarding: lazy(() => import("./onboarding")),
   "project-config": lazy(() => import("./project-config")),
   record: lazy(() => import("./record")),

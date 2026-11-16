@@ -53,7 +53,9 @@ export interface ThreadMessage {
   role: "user" | "assistant" | "system";
   text: string;
   at: number;
-  data: { mode?: string; model?: string | null; cited?: Cited[]; proposals?: Proposal[]; tools?: string[]; stopped?: boolean; truncated?: boolean; kind?: string; code?: string; project?: string };
+  /** Who wrote a person's message in a shared chat (null: the chat's owner); the agent's id on an answer in a side thread. */
+  author?: string | null;
+  data: { mode?: string; model?: string | null; agent?: string; agentName?: string; costMicros?: number; askedBy?: string; cited?: Cited[]; proposals?: Proposal[]; tools?: string[]; stopped?: boolean; truncated?: boolean; kind?: string; code?: string; project?: string };
 }
 export interface Thread {
   id: string;
@@ -64,6 +66,16 @@ export interface Thread {
   expiresAt: number;
   retentionDays: number;
   messages: ThreadMessage[];
+  owner?: string;
+  scope?: { kind: "factory" | "project" | "work_order" | "repo"; id: string | null };
+  projectId?: string | null;
+  agentId?: string | null;
+  visibility?: "private" | "project";
+  status?: "active" | "archived";
+  archivedAt?: number | null;
+  archivedBy?: string | null;
+  members?: string[];
+  can?: { post: boolean; manage: boolean };
 }
 export interface ThreadSummary { id: string; title: string; pinned: string[]; updatedAt: number; expiresAt: number; retentionDays: number; count?: number }
 

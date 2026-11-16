@@ -1371,6 +1371,8 @@ export interface SecuritySettings {
   githubLogin: boolean;
   /** Hosts station agents may read through governed web research (patterns like docs.example.com or *.example.org). Empty: no web research. */
   researchHosts?: string[];
+  /** Most a person may spend on chats (the Console and side threads with agents) per rolling 24 hours, in dollars. Null: no cap beyond the model budgets. */
+  chatCapUsdPerDay?: number | null;
 }
 export interface Session {
   id: Id;

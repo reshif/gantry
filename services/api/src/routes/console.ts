@@ -19,7 +19,11 @@ import { allowedTools, consoleRights, missingRightText, type ConsoleRights } fro
 import { completeOnce, ModelUnavailable, readiness, runConversation, systemPrompt, type Readiness } from "../areas/console/model.js";
 import { consoleModel, setModelPref } from "../areas/console/route.js";
 import { ExplainBody, MessageBody, ModelBody, StatusQuery, PinnedBody, ProposalBody, ProposalParams, SettingsBody, ThreadId, ToolBody, ToolParams } from "../areas/console/schemas.js";
-import { addMessage, deleteThread, ensureThread, getThread, listThreads, newMessageId, purgeExpired, renameThread, setPinned, setProposalStatus } from "../areas/console/threads.js";
+import { addMessage, chatAccess, deleteThread, ensureThread, listMessages, listThreads, newMessageId, purgeExpired, readChat, renameThread, setPinned, setProposalStatus } from "../areas/console/threads.js";
+import { agentOf, scopeContext, sideSystem } from "../areas/workspace/side.js";
+import { chatSpendMicros } from "../areas/workspace/spend.js";
+import { stationAgentGate, turnCostMicros } from "../areas/session/core.js";
+import { readSecurity } from "../core/read/index.js";
 import { ALL_TOOLS, execute, mentioned, offered, toolByName, type ToolCtx } from "../areas/console/tools.js";
 
 const requirePerson = (req: FastifyRequest): { id: string; name: string } => {
@@ -102,12 +106,21 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     return { items: await listThreads(g.pool, g.orgId, who.id), retentionDays: THREAD_RETENTION_DAYS };
   });
 
+  /** Whether the person sees a project (for chats about a work order, repository or project: sharing never widens what someone can see). */
+  const seer = async (req: FastifyRequest, who: { id: string }): Promise<(p: string) => boolean> => {
+    const st = await policyState(req);
+    const ids = new Set(visibleProjects(st, who.id).map((p) => p.id));
+    return (p) => ids.has(p);
+  };
+
+  /** A chat the person may read: their own, one they were invited to, or one shared with a project they see. Anything else reads as missing. */
   app.get("/api/v1/console/threads/:id", async (req) => {
     const who = requirePerson(req);
     const { id } = ThreadId.parse(req.params);
-    const t = await getThread(g.pool, g.orgId, who.id, id);
-    if (!t) throw refuse("not_found", "No such conversation.");
-    return t;
+    const t = await readChat(g.pool, g.orgId, id);
+    const can = t ? chatAccess(t, who.id, await seer(req, who)) : null;
+    if (!t || !can?.read) throw refuse("not_found", "No such conversation.");
+    return { ...t, messages: await listMessages(g.pool, g.orgId, id), can: { post: can.post, manage: can.owner } };
   });
 
   app.delete("/api/v1/console/threads/:id", async (req) => {
@@ -201,14 +214,38 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     const mProject = await scopeProject(req, who, b.project);
     const mc = await consoleModel(g.pool, g.orgId, who.id, mProject);
     if (b.model && !mc.options.some((o) => o.id === b.model)) throw refuse("invalid", `${b.model} is not available to the console right now (disabled, not callable, or not allowed for this project). Pick another model.`);
-    const pick = { ...(modelFor(b.model, mc) ? { model: modelFor(b.model, mc)! } : {}), ...(mProject ? { project: mProject } : {}) };
+    let pick: { model?: string; project?: string } = { ...(modelFor(b.model, mc) ? { model: modelFor(b.model, mc)! } : {}), ...(mProject ? { project: mProject } : {}) };
+
+    // A side thread (a chat about a work order, repository or project, or with a chosen agent) answers in that agent's voice, read-only.
+    const sees = await seer(req, who);
+    const chat = b.threadId ? await readChat(g.pool, g.orgId, b.threadId) : null;
+    if (b.threadId) {
+      const can = chat ? chatAccess(chat, who.id, sees) : null;
+      if (!chat || !can?.read) throw refuse("not_found", "No such conversation.");
+      if (!can.post) throw chat.status === "archived"
+        ? refuse("conflict", "This conversation is archived, so it is read-only. Unarchive it or start a new chat.")
+        : refuse("denied", "You can read this conversation but not post in it. Its owner can invite you.");
+    }
+    const side = !!chat && (chat.scope.kind !== "factory" || !!chat.agentId);
+    const sideAgent = side ? await agentOf(g.pool, g.orgId, chat!.agentId) : null;
+    if (side && chat!.agentId && chat!.projectId) {
+      const gate = await stationAgentGate(g.pool, g.orgId, chat!.agentId, { station: "side", project: chat!.projectId });
+      if (gate.usable) pick = { model: gate.pin.model, project: chat!.projectId };
+    }
+
+    // The per-person cap on chats (Security settings): what this person's questions cost over a rolling 24 hours.
+    const cap = (await readSecurity(g.pool, g.orgId)).value.chatCapUsdPerDay;
+    if (typeof cap === "number") {
+      const spent = await chatSpendMicros(g.pool, g.orgId, who.id, new Date(Date.now() - 86_400_000));
+      if (spent >= cap * 1e6) throw refuse("conflict", `You have used your chat allowance for the last 24 hours (${(spent / 1e6).toFixed(2)} of ${cap.toFixed(2)} USD). It frees up as earlier answers age out. A Factory Admin sets the cap in Security.`, { needs: "Wait, or ask a Factory Admin to raise the chat cap" });
+    }
 
     // 1. The question is saved first (state and event in one transaction, idempotent on Idempotency-Key).
     const saved = await command(req, { action: null, idempotent: true }, async (tx, a) => {
       const purged = await purgeExpired(tx, a.orgId, a.now);
-      const t = await ensureThread(tx, a.orgId, who.id, b.threadId ?? null, b.text, a.now);
+      const t = await ensureThread(tx, a.orgId, who.id, b.threadId ?? null, b.text, a.now, (x) => chatAccess(x, who.id, sees).post);
       if (!t) throw refuse("not_found", "No such conversation.");
-      const messageId = await addMessage(tx, a.orgId, t.id, "user", b.text, { ...(b.project ? { project: b.project } : {}) }, a.now);
+      const messageId = await addMessage(tx, a.orgId, t.id, "user", b.text, { ...(b.project ? { project: b.project } : {}) }, a.now, undefined, who.id);
       return {
         msg: "Question saved.",
         // The ledger records that a question was asked and in which thread, never its text.
@@ -235,7 +272,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     const persist = async (role: "assistant" | "system", text: string, data: Record<string, unknown>, ev: Record<string, unknown>): Promise<string> => {
       const id = newMessageId();
       await command(req, { action: null }, async (tx, a) => {
-        await addMessage(tx, a.orgId, threadId, role, text, data, new Date(), id);
+        await addMessage(tx, a.orgId, threadId, role, text, { ...data, askedBy: who.id }, new Date(), id, side ? (chat!.agentId ?? null) : null);
         return { msg: "Answer saved.", events: [{ type: "console.answer", category: "access", subject: { type: "console_thread", id: threadId }, projectId: null, after: { thread: threadId, message: id, chars: text.length, ...ev } }], changes: ["console"], project: null };
       });
       return id;
@@ -254,8 +291,8 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
       const me = st.people.find((p) => p.id === who.id);
       const vis = visibleProjects(st, who.id).filter((p) => p.status !== "archived");
       const current = b.project ? vis.find((p) => p.id === b.project) : undefined;
-      const ctx = makeCtx(req, who, rights);
-      const prior = (await getThread(g.pool, g.orgId, who.id, threadId))?.messages ?? [];
+      const ctx = makeCtx(req, who, side ? null : rights);
+      const prior = await listMessages(g.pool, g.orgId, threadId);
       // The new question is the last message; earlier turns are context (text only, tool results are not replayed).
       const history = prior.slice(0, -1).filter((m) => (m.role === "user" || m.role === "assistant") && m.text).slice(-8).map((m) => ({ role: m.role as "user" | "assistant", text: m.text.slice(0, 600) }));
       while (history.length && history[0]!.role !== "user") history.shift();
@@ -265,7 +302,9 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
         if (last && last.role === h.role) last.text += `\n${h.text}`;
         else merged.push({ ...h });
       }
-      const system = systemPrompt({ person: who.name, roles: (me?.roles ?? []).map((r) => `${r.role} @ ${r.scope}`), projects: vis.map((p) => `${p.id} (${p.name})`), current: current ? `${current.id} (${current.name})` : null, may: rights.proposals.filter((p) => p.allowed).map((p) => ({ tool: p.tool, does: p.does })), mayNot: rights.proposals.filter((p) => !p.allowed).map((p) => ({ does: p.does, right: p.name })), now: new Date() });
+      const system = side
+        ? sideSystem({ agent: sideAgent, scope: chat!.scope, context: await scopeContext(g.pool, g.orgId, chat!.scope, st.catalog.bays), person: who.name, projects: vis.map((p) => `${p.id} (${p.name})`), now: new Date() })
+        : systemPrompt({ person: who.name, roles: (me?.roles ?? []).map((r) => `${r.role} @ ${r.scope}`), projects: vis.map((p) => `${p.id} (${p.name})`), current: current ? `${current.id} (${current.name})` : null, may: rights.proposals.filter((p) => p.allowed).map((p) => ({ tool: p.tool, does: p.does })), mayNot: rights.proposals.filter((p) => !p.allowed).map((p) => ({ does: p.does, right: p.name })), now: new Date() });
       // A trailing user turn in history would be followed by the new question: fold them into one message so roles alternate.
       let question = b.text;
       if (merged.length && merged[merged.length - 1]!.role === "user") question = `${merged.pop()!.text}\n\n${b.text}`;
@@ -276,7 +315,8 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
       });
       const cited = mentioned(r.text, ctx);
       const text = r.text || (r.stopped ? "" : "The model returned no text.");
-      const id = await persist("assistant", text, { mode: "model", model: r.model, cited, proposals: ctx.proposals, tools: ctx.used, usage: r.usage, ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}) }, {
+      const costMicros = r.model ? await turnCostMicros(g.pool, g.orgId, r.model, r.usage) : 0;
+      const id = await persist("assistant", text, { mode: "model", model: r.model, cited, proposals: ctx.proposals, tools: ctx.used, usage: r.usage, costMicros, ...(sideAgent ? { agent: sideAgent.id, agentName: sideAgent.name } : {}), ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}) }, {
         mode: "model", model: r.model, tools: ctx.used, proposals: ctx.proposals.length, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, ...(r.stopped ? { stopped: true } : {}),
       });
       for (const p of ctx.proposals) send("proposal", { messageId: id, proposal: p });

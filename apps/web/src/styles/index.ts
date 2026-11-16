@@ -27,6 +27,7 @@ import "./views/api.css";
 import "./views/console.css";
 import "./views/traveler.css";
 import "./views/documents.css";
+import "./views/workspace.css";
 import "./views/record.css";
 import "./views/trust.css";
 import "./views/learning.css";

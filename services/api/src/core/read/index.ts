@@ -252,6 +252,7 @@ export const DEFAULT_SECURITY: SecuritySettings = {
   stepUpWindowMinutes: 15,
   githubLogin: false,
   researchHosts: [],
+  chatCapUsdPerDay: null,
 };
 
 /* ---------------------------------------------------------------- catalog ---- */
