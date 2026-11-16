@@ -12,6 +12,9 @@ const EDGE = `${P}-edge`;
 const EDGE_NET = `${P}-edge-net`;
 const TOKEN = "i".repeat(48);
 const RUN_TOKEN = "run-token-0123456789";
+/** Run ids this suite uses; cleanup never touches any other gantry.run value. */
+const TEST_RUN_IDS = ["it1", "it2", "it3", "it4", "it5"];
+const BYSTANDER = `${P}-bystander`;
 
 function dockerUp(): boolean {
   try {
@@ -54,12 +57,17 @@ d("launcher against real Docker", () => {
   const auth = { authorization: `Bearer ${TOKEN}` };
   const body = (runId: string, extra: object = {}) => ({ runId, workspaceRef: "test/ref", variant: "base", runToken: RUN_TOKEN, ...extra });
 
+  /** Removes only this suite's resources: managed-by label AND one of our run ids (and the test image for containers). */
   function cleanup() {
-    for (const c of shOk("ps", "-aq", "--filter", `label=gantry.managed-by=gantry-launcher`).out.split("\n").filter(Boolean)) shOk("rm", "-fv", c);
+    const lines = (out: string) => out.split("\n").filter(Boolean);
+    for (const id of TEST_RUN_IDS) {
+      const f = ["--filter", "label=gantry.managed-by=gantry-launcher", "--filter", `label=gantry.run=${id}`];
+      for (const c of lines(shOk("ps", "-aq", ...f, "--filter", `ancestor=${IMAGE}`).out)) shOk("rm", "-fv", c);
+      for (const n of lines(shOk("network", "ls", "-q", ...f).out)) shOk("network", "rm", n);
+      for (const v of lines(shOk("volume", "ls", "-q", ...f).out)) shOk("volume", "rm", v);
+    }
     shOk("rm", "-fv", EDGE);
-    for (const n of shOk("network", "ls", "-q", "--filter", "label=gantry.managed-by=gantry-launcher").out.split("\n").filter(Boolean)) shOk("network", "rm", n);
     shOk("network", "rm", EDGE_NET);
-    for (const v of shOk("volume", "ls", "-q", "--filter", "label=gantry.managed-by=gantry-launcher").out.split("\n").filter(Boolean)) shOk("volume", "rm", v);
     shOk("rmi", IMAGE);
   }
 
@@ -70,7 +78,10 @@ d("launcher against real Docker", () => {
     // Stands in for gantry-edge: any running container is attachable; the launcher only needs its name.
     sh("run", "-d", "--name", EDGE, "--network", EDGE_NET, IMAGE);
   });
-  afterAll(() => cleanup());
+  afterAll(() => {
+    shOk("rm", "-fv", BYSTANDER);
+    cleanup();
+  });
 
   it("starts a run from the fixed template and isolates it", async () => {
     const r = await app.inject({ method: "POST", url: "/v1/runs", headers: auth, payload: body("it1") });
@@ -194,5 +205,17 @@ d("launcher against real Docker", () => {
     expect(r.json().kind).toBe("image_missing");
     expect(exists("network", "run-it5")).toBe(false);
     expect(exists("volume", "ws-it5")).toBe(false);
+  });
+
+  // Keep last: cleanup() also removes the edge stand-in and the image.
+  it("cleanup leaves an unrelated launcher-labelled container alone", () => {
+    try {
+      sh("run", "-d", "--name", BYSTANDER, "--label", "gantry.managed-by=gantry-launcher", "--label", "gantry.run=live-other-run", IMAGE);
+      cleanup();
+      expect(exists("container", BYSTANDER)).toBe(true);
+    } finally {
+      shOk("rm", "-fv", BYSTANDER);
+    }
+    expect(exists("container", BYSTANDER)).toBe(false);
   });
 });
