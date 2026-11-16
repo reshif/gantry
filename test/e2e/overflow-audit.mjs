@@ -1,13 +1,15 @@
 // TEST ONLY: browser audit of overflow/scroll problems across every nav screen, project page and overlay (dialogs, drawers, popovers, menus, palette).
 // Read-only: every non-GET /api request is aborted (except POST /api/v1/can, the read-only permission check), so nothing is created, approved, killed or sent. Usage: node overflow-audit.mjs <WxH> [user] [outDir]
 import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { SHOTS, ensureDir } from "./paths.mjs";
 import { session, close, sleep } from "./lib4.mjs";
 import { devSeed } from "../../packages/domain/dist/seed.js";
 import { route as routeOf, routeGates } from "../../packages/domain/dist/flow.js";
 
 const [W, H] = (process.argv[2] ?? "1366x768").split("x").map(Number);
 const USER = process.argv[3] ?? "asha";
-const OUT = process.argv[4] ?? "/tmp/claude-1000/-home-reshif-Downloads-gantry/8507a376-ec43-4ce1-a90c-9c34611957a7/scratchpad/overflow";
+const OUT = process.argv[4] ?? ensureDir(join(SHOTS, "overflow"));
 const PROJECT = "nautobot-jobs";
 mkdirSync(OUT, { recursive: true });
 const DENY = /sign out|log out|switch user/i;

@@ -3,13 +3,12 @@
 //   1. selects the stub adapter for every freshly started run (the agents in the dev seed pin a model, and no vendor key exists here) and gives it a stub delay (spec.stub.delayMs on the run row, which the edge hands to the runner) so the run lasts long enough to observe;
 //   2. while a Build run is up, creates one commit on top of the seeded base inside the run's workspace volume (what a coding agent would have left behind).
 // Everything else (dispatch, seeding, result intake, publish, PR, gates, merge) is the product's own code path.
-// Usage: node agent-double.mjs   (reads delays from $E2E_DELAYS, default /tmp/claude-0/w3e2e/delays.json: {"default":4000,"build":20000})
+// Usage: node agent-double.mjs   (reads delays from $E2E_DELAYS, default $E2E_DIR/delays.json (see paths.mjs): {"default":4000,"build":20000})
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
+import { PSQL, DELAYS } from "./paths.mjs";
 const sh = promisify(execFile);
-const PSQL = process.env.E2E_PSQL ?? "/tmp/claude-0/w3e2e/psql.sh";
-const DELAYS = process.env.E2E_DELAYS ?? "/tmp/claude-0/w3e2e/delays.json";
 const delays = () => { try { return JSON.parse(readFileSync(DELAYS, "utf8")); } catch { return { default: 4000, build: 20000 }; } };
 const q = async (sql) => (await sh(PSQL, ["-tA", "-F", "|", "-c", sql])).stdout.trim().split("\n").filter(Boolean).map((l) => l.split("|"));
 const committed = new Set();

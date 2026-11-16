@@ -1,18 +1,17 @@
 // TEST ONLY: halt and kill a run mid-flight through the real UI and measure spec 4.4 (edge refusal within 10 s, container gone within 60 s).
-// Usage: node stops.mjs [tag]. Needs agent-double.mjs running with long delays (/tmp/claude-0/w3e2e/delays.json {"default":180000,"build":180000}).
+// Usage: node stops.mjs [tag]. Needs agent-double.mjs running with long delays ($E2E_DELAYS, default $E2E_DIR/delays.json: {"default":180000,"build":180000}).
 import { execFileSync, spawn } from "node:child_process";
-import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
+import { PSQL, shotPath, launchChromium } from "./paths.mjs";
 const TAG = process.argv[2] ?? "s";
-const PSQL = "/tmp/claude-0/w3e2e/psql.sh";
 const q = (sql) => execFileSync(PSQL, ["-tA", "-F", "|", "-c", sql], { encoding: "utf8" }).trim().split("\n").filter(Boolean).map((l) => l.split("|"));
 const sh = (c, a) => { try { return execFileSync(c, a, { encoding: "utf8" }).trim(); } catch { return ""; } };
 const log = (...a) => console.log(new Date().toISOString().slice(11, 23), ...a);
 let n = 0;
-const shot = (page, name) => page.screenshot({ path: `/tmp/claude-0/w3e2e-${TAG}-${String(++n).padStart(2, "0")}-${name}.png` });
+const shot = (page, name) => page.screenshot({ path: shotPath(`w3e2e-${TAG}-${String(++n).padStart(2, "0")}-${name}.png`) });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = {};
 
-const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", args: ["--no-sandbox"] });
+const browser = await launchChromium();
 const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
 page.on("response", async (r) => { if (r.url().includes("/api/v1/") && r.request().method() !== "GET" && !r.url().endsWith("/can")) log("[api]", r.request().method(), r.url().replace("https://localhost", ""), r.status(), (await r.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200)); });

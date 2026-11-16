@@ -1,14 +1,13 @@
 // TEST ONLY: spec 5.4 T5-T8 against a real launcher-created runner on the compose stack. Submits a work order through the real UI so the worker dispatches a real runner,
 // then probes from inside the runner (docker exec) and, for T7, from the control network after the run is stopped. Usage: node isolation.mjs
 import { execFileSync } from "node:child_process";
-import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
-const PSQL = "/tmp/claude-0/w3e2e/psql.sh";
+import { PSQL, launchChromium, PROJECT_W3 as PROJECT } from "./paths.mjs";
 const q = (sql) => execFileSync(PSQL, ["-tA", "-F", "|", "-c", sql], { encoding: "utf8" }).trim().split("\n").filter(Boolean).map((l) => l.split("|"));
 const sh = (c, a, o = {}) => { try { return execFileSync(c, a, { encoding: "utf8", ...o }).trim(); } catch (e) { return `ERR ${String(e.stdout ?? "")}${String(e.stderr ?? "")}`.trim(); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 23), ...a);
 const out = {};
-const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", args: ["--no-sandbox"] });
+const browser = await launchChromium();
 const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
 await page.goto("https://localhost/", { waitUntil: "networkidle" });
@@ -111,7 +110,7 @@ if (await page.locator("#kill-confirm").count()) await page.fill("#kill-confirm"
 await page.click("#kill-ok");
 for (let i = 0; i < 60 && sh("docker", ["ps", "-q", "--filter", `name=${C}`]); i++) await sleep(250);
 log("runner removed:", !sh("docker", ["ps", "-aq", "--filter", `name=${C}`]));
-const net = (await sh("docker", ["network", "ls", "--format", "{{.Name}}", "--filter", "name=w3e2e_control"])).trim();
+const net = (await sh("docker", ["network", "ls", "--format", "{{.Name}}", "--filter", `name=${PROJECT}_control`])).trim();
 const after = JSON.parse(sh("docker", ["run", "--rm", "--network", net, "--entrypoint", "node", "node:22-alpine", "-e", callsFor(true)]));
 out.T7 = { liveBeforeStop: live, afterStopFromControlNet: after };
 log("T7 after stop", JSON.stringify(after));

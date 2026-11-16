@@ -1,19 +1,18 @@
 // TEST ONLY: drives the full work-order journey through the real browser path (Playwright, https://localhost, Keycloak sign-in) against the compose stack.
-// Usage: node journey.mjs [tag]   Screenshots go to /tmp/claude-0/w3e2e-<tag>-NN-*.png
+// Usage: node journey.mjs [tag]   Screenshots go to $E2E_SHOTS/w3e2e-<tag>-NN-*.png (see paths.mjs)
 import { execFileSync } from "node:child_process";
-import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
+import { PSQL, shotPath, launchChromium, PROJECT_W3 as PROJECT } from "./paths.mjs";
 
 const TAG = process.argv[2] ?? "j";
-const PSQL = "/tmp/claude-0/w3e2e/psql.sh";
 const q = (sql) => execFileSync(PSQL, ["-tA", "-F", "|", "-c", sql], { encoding: "utf8" }).trim().split("\n").filter(Boolean).map((l) => l.split("|"));
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }).trim();
-const fakeState = () => JSON.parse(sh("docker", ["exec", "w3e2e-fake-github-1", "node", "-e", "require('https').get('https://127.0.0.1:8090/_fake/state',{rejectUnauthorized:false},r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>console.log(b))})"]));
+const fakeState = () => JSON.parse(sh("docker", ["exec", `${PROJECT}-fake-github-1`, "node", "-e", "require('https').get('https://127.0.0.1:8090/_fake/state',{rejectUnauthorized:false},r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>console.log(b))})"]));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 23), ...a);
 let n = 0;
-const shot = (page, name) => page.screenshot({ path: `/tmp/claude-0/w3e2e-${TAG}-${String(++n).padStart(2, "0")}-${name}.png` });
+const shot = (page, name) => page.screenshot({ path: shotPath(`w3e2e-${TAG}-${String(++n).padStart(2, "0")}-${name}.png`) });
 const PEOPLE = { asha: "Asha Raman", daniel: "Daniel Okafor", meera: "Meera Iyer", priya: "Priya Nair", sam: "Sam Whitfield", omar: "Omar Haddad", kenji: "Kenji Watanabe", grace: "Grace Liu", hana: "Hana Sato" };
 
-const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", args: ["--no-sandbox"] });
+const browser = await launchChromium();
 async function session(user) {
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
