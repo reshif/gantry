@@ -162,6 +162,7 @@ services:
       SOCKPROXY_PORT: "2375"
       RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=${GANTRY_IMAGE_PREFIX:-}gantry-runner:${GANTRY_VERSION:-dev}}
       EDGE_COMPOSE_SERVICE: gantry-edge
+      EDGE_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-gantry}
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     healthcheck:
@@ -171,6 +172,28 @@ services:
       retries: 3
       start_period: 5s
     networks: [dockerapi]
+
+  # The workspace profile of the same proxy, for gantry-github only: it allows the broker's never-started helper container (fixed image,
+  # no network, one ws-<id> volume), its archive calls and its removal, and nothing else (sockpolicy.ts routeWorkspace). The broker
+  # no longer mounts the Docker socket. deploy/ci/compose-socket.mjs fails CI if any other service does.
+  gantry-sockproxy-ws:
+    <<: *hardened
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-launcher:${GANTRY_VERSION:-dev}
+    command: ["node", "dist/sockproxy.js"]
+    group_add: ["${DOCKER_GID:-999}"]
+    environment:
+      SOCKPROXY_PROFILE: workspace
+      SOCKPROXY_PORT: "2376"
+      GITHUB_HELPER_IMAGE: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2376/_ping').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks: [wsapi]
 
   gantry-launcher:
     <<: *hardened
@@ -210,6 +233,11 @@ services:
       # Must match the launcher's RUN_SUBNET_POOL: a caller from this range must present its run token to the proxy.
       EDGE_RUN_SUBNET: ${RUN_SUBNET_POOL:-10.213.0.0/16}
     secrets: [data_key, edge_token, vendor_keys.json, minio_root_password]
+    # The edge is shared by every run and the model gateway: bound what one run's traffic can take (the per-run caps are in proxy.ts).
+    mem_limit: ${GANTRY_EDGE_MEMORY:-768m}
+    pids_limit: 512
+    ulimits:
+      nofile: { soft: 8192, hard: 8192 }
     depends_on:
       gantry-api: { condition: service_healthy }
     healthcheck:
@@ -222,21 +250,22 @@ services:
     <<: *hardened
     build: { context: .., dockerfile: services/github/Dockerfile }
     image: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
-    # The broker seeds and reads ws-<id> volumes through the Docker API (services/github/src/workspace.ts); the socket is root-equivalent (spec 5.5).
-    group_add: ["${DOCKER_GID:-999}"]
+    # The broker seeds and reads ws-<id> volumes through the Docker API (services/github/src/workspace.ts). It holds no Docker socket (it is
+    # root-equivalent, and this process parses repository data an agent controls and holds the App key): it reaches the narrow workspace
+    # profile of the socket proxy instead.
     environment:
       GANTRY_API_URL: http://gantry-api:8000
       GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
       GITHUB_HELPER_IMAGE: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
+      DOCKER_PROXY_URL: http://gantry-sockproxy-ws:2376
     secrets: [data_key, github_token, github_app.pem, github_app.json]
-    volumes:
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     depends_on:
       gantry-api: { condition: service_healthy }
+      gantry-sockproxy-ws: { condition: service_healthy }
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9200/healthz"]
-    networks: [control, egress]
+    networks: [control, egress, wsapi]
 
   # ---- pulled images --------------------------------------------------------------------------------------------
   postgres:
@@ -438,6 +467,10 @@ networks:
     internal: true
   # Launcher <-> socket proxy only.
   dockerapi:
+    driver: bridge
+    internal: true
+  # Broker <-> workspace socket proxy only.
+  wsapi:
     driver: bridge
     internal: true
   egress:
