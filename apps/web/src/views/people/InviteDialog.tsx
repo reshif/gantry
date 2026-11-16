@@ -26,6 +26,7 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   const [fRole, setFRole] = useState("");
   const [proj, setProj] = useState(preset.project ?? "");
   const [pRole, setPRole] = useState("engineer");
+  const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
 
   registerSubmit(() => {
@@ -35,8 +36,9 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
       if (dom && domains.length && !domains.includes(dom)) return setErr(`${dom} is not an allowed domain. Add it in Security first.`);
       const rs: Array<{ role: string; scope: string }> = [];
       if (fRole) rs.push({ role: fRole, scope: "factory" });
+      if (fRole && reason.trim().length < 10) return setErr("Give a reason of at least 10 characters for the factory role.");
       if (proj) rs.push({ role: pRole, scope: proj });
-      const r = await ops.invite({ name, email: e, teams: picked, roles: rs });
+      const r = await ops.invite({ name, email: e, teams: picked, roles: rs, ...(fRole ? { reason: reason.trim() } : {}) });
       outcome(r);
       if (!r.ok) {
         setErr(r.msg);
@@ -80,6 +82,11 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
           <Select id="ppl-inv-prole" value={pRole} onChange={setPRole} options={projectRoles.map((r) => ({ value: r.id, label: r.name + (r.custom ? " (custom)" : "") }))} />
         </Field>
       </div>
+      {fRole ? (
+        <Field label="Reason for the factory role" htmlFor="ppl-inv-reason" hint="Recorded in the audit trail. Factory roles need a fresh sign-in.">
+          <input id="ppl-inv-reason" className="input" autoComplete="off" placeholder="Why this person needs it" value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+      ) : null}
       <div className="form-err" role="alert">{err}</div>
     </div>
   );

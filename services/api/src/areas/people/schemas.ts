@@ -7,6 +7,8 @@ export const InviteBody = z.object({
   email: z.string().trim().toLowerCase().max(320).regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Enter a valid email address."),
   teams: z.array(id).max(50).default([]),
   roles: z.array(z.object({ role: id, scope: id })).max(50).default([]),
+  /** Required when the invite carries a factory-level role; recorded in the audit event. */
+  reason: z.string().trim().max(2000).optional(),
 });
 
 export const TeamsBody = z.object({ teams: z.array(id).max(50) });

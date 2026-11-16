@@ -133,6 +133,23 @@ describe("People", () => {
     expect(c.headers["idempotency-key"]).toBeTruthy();
   });
 
+  it("asks for a reason when the invite carries a factory role, and sends it", async () => {
+    const calls = setup({ "POST /api/v1/invites": () => ({ body: { ok: true, msg: "Invite sent to n@acme.dev.", person: { id: "p-n", name: "Nina" } } }) });
+    mount(<PeopleView />);
+    fireEvent.click(await screen.findByText("Invite person"));
+    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Nina Park" } });
+    fireEvent.change(screen.getByLabelText("Work email"), { target: { value: "n@acme.dev" } });
+    expect(screen.queryByLabelText("Reason for the factory role")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Factory role"), { target: { value: "factory_admin" } });
+    fireEvent.click(screen.getByText("Send invite"));
+    expect(await screen.findByText(/at least 10 characters/)).toBeTruthy();
+    expect(calls.some((c) => c.path === "/api/v1/invites")).toBe(false);
+    fireEvent.change(screen.getByLabelText("Reason for the factory role"), { target: { value: "Quarterly audit support" } });
+    fireEvent.click(screen.getByText("Send invite"));
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/invites")).toBe(true));
+    expect(calls.find((x) => x.path === "/api/v1/invites")!.body).toMatchObject({ roles: [{ role: "factory_admin", scope: "factory" }], reason: "Quarterly audit support" });
+  });
+
   it("refuses a domain that is not allowed before calling the server", async () => {
     const calls = setup();
     mount(<PeopleView />);

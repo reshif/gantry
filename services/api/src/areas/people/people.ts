@@ -44,6 +44,18 @@ export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by:
     if (g.scope !== "factory" && !projects.has(g.scope)) throw invalid(`There is no project ${g.scope}.`);
     if (!grants.some((x) => x.role === g.role && x.scope === g.scope)) grants.push(g);
   }
+  // Factory-level roles decide who can edit policy and restore, so an invite carrying one is held to the same bar as setFactoryRole:
+  // only a Factory Admin may hand out factory_admin, and every factory-level grant needs a reason that goes into the audit trail.
+  const factoryGrants = grants.filter((g) => g.scope === "factory");
+  const reason = body.reason?.trim() ?? "";
+  if (factoryGrants.length) {
+    const actor = st.people.find((x) => x.id === by);
+    const actorIsAdmin = !!actor?.roles.some((g) => g.role === "factory_admin" && g.scope === "factory");
+    if (factoryGrants.some((g) => g.role === "factory_admin") && !actorIsAdmin) {
+      throw refuse("denied", "Only a Factory Admin can invite someone as Factory Admin.", { needs: "A Factory Admin to send this invite" });
+    }
+    if (reason.length < 10) throw refuse("invalid", "Give a reason of at least 10 characters for the factory-level role in this invite.", { needs: "reason" });
+  }
   const local = body.email.split("@")[0]!.replace(/[^a-z0-9]/g, "");
   const id = `p-${local || "user"}-${randomBytes(2).toString("hex")}`;
   await tx.query(`insert into people (org_id, id, name, title, email, status, data) values ($1,$2,$3,'Invited',$4,'invited',$5::jsonb)`, [orgId, id, body.name, body.email, JSON.stringify({ invitedBy: by, invitedAt: Date.now() })]);
@@ -60,7 +72,7 @@ export async function invitePerson(tx: Tx, orgId: string, publicUrl: string, by:
   const person = await personIn(tx, orgId, id);
   return {
     msg: `Invite sent to ${body.email}.`,
-    events: [{ type: "people.invite", category: "access", subject: { type: "person", id }, before: null, after: { name: body.name, email: body.email, teams: body.teams, roles: grants }, projectId: null }],
+    events: [{ type: "people.invite", category: "access", subject: { type: "person", id }, before: null, after: { name: body.name, email: body.email, teams: body.teams, roles: grants, ...(factoryGrants.length ? { reason } : {}) }, projectId: null }],
     outbox: [{ destination: "smtp", payload: { kind: "invite", to: body.email, name: body.name, invitedBy: by, link: `${publicUrl.replace(/\/$/, "")}/auth/login?invite=${token}&login_hint=${encodeURIComponent(body.email)}` } }],
     extra: { person, version: versionOf(person) },
     changes: ["people"],
@@ -119,11 +131,25 @@ export async function setFactoryRole(tx: Tx, orgId: string, actorId: string, id:
   };
 }
 
-export async function setTeams(tx: Tx, orgId: string, id: string, teams: string[]): Promise<CommandResult<{ version: number }>> {
+/** Change a person's teams. Members inherit their teams' roles, so nobody may add themselves to a team that holds a role, at any scope, they do not already hold. */
+export async function setTeams(tx: Tx, orgId: string, actorId: string, id: string, teams: string[]): Promise<CommandResult<{ version: number }>> {
   const p = await personIn(tx, orgId, id);
-  const known = new Set((await readTeams(tx, orgId)).map((t) => t.id));
+  const allTeams = await readTeams(tx, orgId);
+  const known = new Set(allTeams.map((t) => t.id));
   for (const t of teams) if (!known.has(t)) throw invalid(`There is no team ${t}.`);
   const next = [...new Set(teams)];
+  if (actorId === id) {
+    const key = (g: { role: string; scope: string }) => `${g.role}@${g.scope}`;
+    const held = new Set<string>(p.roles.map(key));
+    for (const t of p.teams) for (const g of allTeams.find((x) => x.id === t)?.roles ?? []) held.add(key(g));
+    for (const t of next.filter((x) => !p.teams.includes(x))) {
+      const team = allTeams.find((x) => x.id === t);
+      const extra = (team?.roles ?? []).filter((g) => !held.has(key(g)));
+      if (extra.length) {
+        throw refuse("denied", `You cannot add yourself to ${team?.name ?? t}: it grants ${extra.map((g) => `${g.role} (${g.scope})`).join(", ")}, which you do not hold. Ask another person with people access to add you.`, { needs: "Another person to add you to this team" });
+      }
+    }
+  }
   await tx.query(`delete from team_members where org_id = $1 and person_id = $2 and not (team_id = any($3::text[]))`, [orgId, id, next]);
   for (const t of next) await tx.query(`insert into team_members (org_id, team_id, person_id) values ($1,$2,$3) on conflict do nothing`, [orgId, t, id]);
   const v = (await bump(tx, orgId, id)).rows[0]!.version;

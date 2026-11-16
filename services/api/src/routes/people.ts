@@ -125,7 +125,7 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
   app.put("/api/v1/people/:id/teams", async (req) => {
     const { id } = Id.parse(req.params);
     const body = TeamsBody.parse(req.body);
-    return command(req, { action: "people.manage", ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setTeams(tx, a.orgId, id, body.teams));
+    return command(req, { action: "people.manage", ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => setTeams(tx, a.orgId, a.id, id, body.teams));
   });
 
   // On call is per project now (owner decision 7): a project's admins set it, and nobody can switch themselves on.
