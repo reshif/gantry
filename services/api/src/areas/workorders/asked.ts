@@ -13,6 +13,16 @@ export function asksMe(askOf: string, me: Person | undefined, w: { project: stri
   return false;
 }
 
+/**
+ * Whether this caller may answer a question put to `askOf`. The addressee may; so may anyone who can approve gates on the project (an approver can
+ * always speak for the factory). A question for approvers or for a role is not for the requester, nor for a bare `wo.answer` holder. Questions for
+ * the requester or anyone stay open to whoever the route already lets answer (the requester, or a `wo.answer` holder).
+ */
+export function mayAnswer(askOf: string, me: Person | undefined, w: { project: string; requestedBy: string | null }, can: (action: string) => boolean): boolean {
+  if (can("gate.approve") || asksMe(askOf, me, w, can)) return true;
+  return askOf !== "approvers" && !askOf.startsWith("role:");
+}
+
 /** "the requester", "an approver", ... for a sentence like "Waiting for an answer from the requester". */
 export function askOfLabel(askOf: string, roleName: (id: string) => string = (id) => id.replace(/_/g, " ")): string {
   if (askOf === "requester") return "the requester";

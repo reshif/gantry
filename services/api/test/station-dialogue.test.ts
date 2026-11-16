@@ -98,6 +98,46 @@ d("station documents and dialogue", () => {
     expect((await w.events("wo.answer")).filter((e: { wo_id: string; after: { question?: string } }) => e.wo_id === id && e.after?.question)).toHaveLength(2);
   });
 
+  it("a question is answerable only by the people it is for", async () => {
+    const id = await w.atStation("research", "Addressed questions");
+    const att = (await w.liveAttempt(id))!;
+    await w.apply(att, {
+      status: "needs_person",
+      output: { dialogue: { questions: [
+        { question: "Is the refund policy change approved?", why: "Policy.", blocking: true, askOf: "approvers" },
+        { question: "Which engineer owns the sync?", why: "Ownership.", blocking: true, askOf: "role:engineer" },
+        { question: "Which team reviews security?", why: "Routing.", blocking: true, askOf: "role:security_reviewer" },
+        { question: "Which region first?", why: "Rollout.", blocking: true, askOf: "anyone" },
+      ] } },
+    });
+    const dl = (await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/dialogue`)).body;
+    const qid = (n: string) => dl.questions.find((q: { question: string }) => q.question.startsWith(n)).id as string;
+    const answer = (who: string, q: string) => w.call(who, "POST", `/api/v1/work-orders/${id}/questions/${qid(q)}/answer`, { answer: "Yes." });
+    const open = async () => Number((await w.q<{ n: number }>(`select count(*)::int as n from wo_questions where wo_id = $1 and status = 'open'`, [id]))[0]!.n);
+
+    // The requester (an engineer, not an approver) cannot answer what is for approvers or for a role they do not hold.
+    const denied = await answer("p-tomas", "Is the refund");
+    expect(denied.status).toBe(403);
+    expect(denied.body.error?.message ?? JSON.stringify(denied.body)).toContain("an approver");
+    expect((await answer("p-tomas", "Which team reviews")).status).toBe(403);
+    expect(await open()).toBe(4);
+    // The refusal is audited like any other denial, with the rule that refused it, and nothing was recorded as an answer.
+    const audited = (await w.events("self.denied")).filter((e: { wo_id: string }) => e.wo_id === id);
+    expect(audited).toHaveLength(2);
+    expect(audited[0]).toMatchObject({ outcome: "denied", actor: "p-tomas", rule: "ASK-OF" });
+    expect((await w.q<{ n: number }>(`select count(*)::int as n from workorder_messages where wo_id = $1 and data->>'kind' = 'answer'`, [id]))[0]!.n).toBe(0);
+    expect((await w.get(id)).bay).toBe("person");
+
+    // An approver may answer a question for approvers, a role holder one for their role, and anyone one for anyone.
+    expect((await answer("p-meera", "Is the refund")).status).toBe(200);
+    expect((await answer("p-tomas", "Which engineer")).status).toBe(200);
+    expect((await answer("p-tomas", "Which region")).status).toBe(200);
+    // An approver can speak for a role question too.
+    const last = await answer("p-meera", "Which team reviews");
+    expect(last.status).toBe(200);
+    expect(last.body.resumed).toBe(true);
+  });
+
   it("assumptions are confirmed or corrected by people, with the correction handed on", async () => {
     const id = await w.atStation("research", "Assumptions path");
     const att = (await w.liveAttempt(id))!;

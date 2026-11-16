@@ -9,6 +9,9 @@ import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import { bayOf, ev, leaveBay, note, type Fx } from "./engine.js";
 import { readSecurity } from "../../core/read/index.js";
+import { loadPolicyState } from "../../core/read/state.js";
+import { decideFor } from "../../core/decide.js";
+import { askOfLabel, mayAnswer } from "./asked.js";
 import { planOf } from "./research.js";
 import { begin, done, person, type CmdResult } from "./ctx.js";
 import { resumeAt } from "./intake.js";
@@ -25,6 +28,14 @@ export async function answerStationQuestion(tx: Tx, actor: Actor, woId: string, 
   const q = await lockQuestion(tx, fx.orgId, w.id, qid);
   if (!q) throw refuse("not_found", "No such question on this work order.");
   if (q.status !== "open") throw conflict("That question was already answered.");
+  // The addressee is enforced here, inside the transaction and on the locked question, so a refusal is audited like any other denial.
+  const st = await loadPolicyState(tx, fx.orgId);
+  const principal = { kind: "person" as const, id: by, name: actor.name, sessionId: actor.sessionId ?? "" };
+  const me = st.people.find((p) => p.id === by);
+  if (!mayAnswer(q.askOf, me, { project: w.project, requestedBy: w.submitter }, (act) => decideFor(st, principal, act, { project: w.project, repo: w.repo, wo: w.id }).allowed)) {
+    const roleName = (rid: string) => st.catalog.roles?.find((r) => r.id === rid)?.name ?? rid.replace(/_/g, " ");
+    throw refuse("denied", `This question is for ${askOfLabel(q.askOf, roleName)}, so only they (or someone who can approve gates on the project) can answer it.`, { rule: { kind: "invariant", id: "ASK-OF", name: "Who the question is for" }, needs: "gate.approve" });
+  }
   const text = (b.answer ?? "").trim();
   if (b.kind === "answer" && text.length < 1) throw invalid("Write the answer.");
   const answer = b.kind === "answer" ? text.slice(0, 4000) : text ? `${KIND_TEXT[b.kind]} ${text.slice(0, 4000)}` : KIND_TEXT[b.kind];
