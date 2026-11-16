@@ -34,4 +34,5 @@ import "./views/learning.css";
 import "./views/workload.css";
 import "./views/system.css";
 import "./app.css";
+import "./foundation.css";
 import "./system.css";

@@ -6,7 +6,7 @@ import { useCan, useCanMany } from "../api/can";
 import type { Me } from "../api/types";
 import { NAV_GROUPS, ROUTES, ROUTE_PERMS, canSeeRoute, isProjectRoute, routeDef } from "../lib/routes";
 import { hashFor } from "../lib/router";
-import { usePrefs } from "../lib/prefs";
+import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Icon } from "../ui/Icon";
 
 export function useRouteCtx() {
@@ -113,6 +113,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
                   {gname}
                   {noProj ? <span className="nav-proj">Choose a project</span> : null}
                 </span>
+                {isProj && shown ? <ProjectStatus project={shown} /> : null}
                 {!expanded && total ? <span className="nav-count mono">{String(total)}</span> : null}
               </button>
             )}
@@ -143,8 +144,21 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
           </GroupBlock>
         );
       })}
+      <div className="nav-foot">
+        <button type="button" className="btn btn-sm btn-ghost nav-collapse" id="nav-collapse" aria-pressed={rail ? "true" : "false"} aria-label={rail ? "Expand the sidebar" : "Collapse the sidebar"} data-tip={rail ? "Expand the sidebar" : undefined} onClick={() => updatePrefs({ navRail: !rail })}>
+          <Icon name="rail" />
+          <span className="nav-collapse-l">{rail ? "" : "Collapse"}</span>
+        </button>
+      </div>
     </nav>
   );
+}
+
+/** The current project's state beside its group name: one status look, glyph and word. */
+function ProjectStatus({ project }: { project: ProjectLite }) {
+  const st = project.killed ? { tone: "block", t: "killed" } : project.halted ? { tone: "wait", t: "halted" } : project.status === "active" ? { tone: "done", t: "running" } : null;
+  if (!st) return null;
+  return <span className={`status tone-${st.tone} nav-group-status`}>{st.t}</span>;
 }
 
 export type ProjectLite = Me["projects"][number];
