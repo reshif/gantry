@@ -1,6 +1,17 @@
 /* Agents view. Tokens only. Builds on round-one .agent-detail, .cfg, .chain, .savebar in views.css. */
 .view-agents .ag-roster td { vertical-align: middle; }
 .ag-roster .nowrap { white-space: nowrap; }
+/* phone: each agent is a stacked card (same pattern as .dtable) so no column is cut off */
+@media (max-width: 640px) {
+  .ag-roster thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .ag-roster thead tr, .ag-roster thead th { position: absolute; left: 0; width: 1px; height: 1px; margin: 0; padding: 0; border: 0; overflow: hidden; }
+  .ag-roster, .ag-roster tbody, .ag-roster tr, .ag-roster td { display: block; width: 100%; }
+  .ag-roster tr { border: 1px solid var(--line); border-radius: var(--r2); margin-bottom: var(--s2); padding: 6px 10px; background: var(--surface); }
+  .ag-roster td { border: 0; padding: 3px 0; display: grid; grid-template-columns: minmax(90px, 35%) minmax(0, 1fr); gap: 8px; text-align: left; align-items: center; }
+  .ag-roster td::before { content: attr(data-label); font-family: var(--f-mono); font-size: var(--t-xs); text-transform: uppercase; color: var(--muted); }
+  .ag-roster td.num { text-align: left; }
+  .ag-roster .nowrap { white-space: normal; }
+}
 .ag-rc { margin-left: 6px; font-size: 10px; border-style: dashed; color: var(--wait); border-color: var(--wait); }
 .ag-below { width: 12px; height: 12px; margin-right: 3px; vertical-align: -2px; }
 
@@ -9,6 +20,7 @@
 .agent-detail .ad-meta { font-size: var(--t-sm); color: var(--ink-2); overflow-wrap: anywhere; }
 .agent-detail .ad-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .agent-detail > .tabs { overflow-x: auto; }
+@media (max-width: 720px) { .agent-detail > .tabs { flex-wrap: wrap; overflow-x: visible; -webkit-mask-image: none; mask-image: none; } .agent-detail > .tabs .tab { padding: 6px 9px; } }
 .cfg .ag-wide { grid-column: 1 / -1; }
 .ag-ident { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .ag-ident .kv { display: grid; gap: 1px; }

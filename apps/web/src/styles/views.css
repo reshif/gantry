@@ -414,6 +414,10 @@
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat { border-right: 1px solid var(--line) !important; border-bottom: 1px solid var(--line); }
   .stat:nth-child(2n) { border-right: 0 !important; }
+  /* an odd last cell spans the row; no divider below the final row */
+  .stat:last-child:nth-child(odd) { grid-column: 1 / -1; border-right: 0 !important; }
+  .stat:last-child, .stat:last-child:nth-child(even):not(:only-child) { border-bottom: 0; }
+  .stat:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
   .stat-v { font-size: var(--t-2xl); }
   .board { --lane: 128px; }
   .lane-repo { font-size: var(--t-sm); }

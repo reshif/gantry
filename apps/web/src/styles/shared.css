@@ -204,6 +204,11 @@ button.mseg:hover, button.mseg:focus-visible { box-shadow: inset 0 0 0 2px var(-
 .dtable-more { padding: var(--s2) 0; }
 @media (max-width: 640px) {
   .dtable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  /* the visually hidden header stays in the accessibility tree but nothing in it may reach past the viewport */
+  .dtable thead tr { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; border: 0; overflow: hidden; }
+  .dtable thead th { position: absolute; left: 0; width: 1px; height: 1px; padding: 0; overflow: hidden; }
+  .dtable thead .th-sort { max-width: 1px; overflow: hidden; }
+  .dtable thead .th-sort > * { min-width: 0; max-width: 1px; overflow: hidden; }
   .dtable, .dtable tbody, .dtable tr, .dtable td { display: block; width: 100%; }
   .dtable tr { border: 1px solid var(--line); border-radius: var(--r2); margin-bottom: var(--s2); padding: 6px 10px; background: var(--surface); }
   .dtable td { border: 0; padding: 3px 0; display: grid; grid-template-columns: minmax(90px, 35%) minmax(0, 1fr); gap: 8px; text-align: left; }
@@ -306,3 +311,10 @@ button.mseg:hover, button.mseg:focus-visible { box-shadow: inset 0 0 0 2px var(-
 .nav-rail-group[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 .nav-flyout { display: grid; gap: 4px; min-width: 200px; padding: 8px; }
 .nav-flyout .nav-text { position: static; width: auto; height: auto; clip: auto; }
+
+/* header stats on a phone: two columns, an odd last cell spans the row, dividers only between cells */
+@media (max-width: 860px) {
+  .titleblock > div:nth-child(2n) { border-right: 0; }
+  .titleblock > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .titleblock > div:last-child, .titleblock > div:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
+}

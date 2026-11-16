@@ -134,6 +134,14 @@ describe("Agents screen", () => {
     expect(document.querySelector(".ad-meta")!.textContent).toBe("2.6.1 · claude-opus-5-5 · 2 work orders now · SUITE-BUILD 80%");
   });
 
+  it("labels every roster cell with its column so the phone layout can stack them", async () => {
+    setup();
+    mount(<AgentsView />);
+    const row = await byId("ag-row-ag-build");
+    const heads = [...document.querySelectorAll(".ag-roster thead th")].map((h) => h.textContent);
+    expect([...row.querySelectorAll("td")].map((c) => c.getAttribute("data-label"))).toEqual(heads);
+  });
+
   it("edits the configuration in a draft and saves one audited PATCH with the agent's version and only the changed keys", async () => {
     const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
     mount(<AgentsView />);

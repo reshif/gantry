@@ -46,17 +46,17 @@ function Roster({ agents }: { agents: AgentRow[] }) {
             return (
               <tr key={a.id} className={`row-link${ui.sel === a.id ? " is-selected" : ""}`} tabIndex={0} id={`ag-row-${a.id}`} aria-current={ui.sel === a.id ? "true" : undefined}
                 onClick={() => select(a.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(a.id); } }}>
-                <td><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong>{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
-                <td><span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span></td>
-                <td className="nowrap">
+                <td data-label="Agent"><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong>{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
+                <td data-label="Status"><span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span></td>
+                <td data-label="Station" className="nowrap"><span>
                   <span className="mono muted">{station ? `${station.no} ` : ""}</span>{station ? station.name : "Off-belt"}
                   {a.stations.length > 1 ? <span className="muted small">{` +${a.stations.length - 1}`}</span> : null}
-                </td>
-                <td><span className="mono small">{a.model}</span>{a.fallbacks.length ? <span className="muted small">{` +${a.fallbacks.length} fallback${a.fallbacks.length > 1 ? "s" : ""}`}</span> : null}</td>
-                <td><span className="mono">{a.version}</span>{rc ? <span className="chip ag-rc">{`${rc} candidate`}</span> : null}</td>
-                <td className={`num mono${below ? " neg" : ""}`}>{below ? <Icon name="alert" className="ag-below" /> : null}{fmt.pct(a.evalScore)}</td>
-                <td className="num"><Spark values={a.spark} min={0.5} max={1} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /></td>
-                <td className="num mono">{fmt.money0(a.spend7d)}</td>
+                </span></td>
+                <td data-label="Model chain"><span><span className="mono small">{a.model}</span>{a.fallbacks.length ? <span className="muted small">{` +${a.fallbacks.length} fallback${a.fallbacks.length > 1 ? "s" : ""}`}</span> : null}</span></td>
+                <td data-label="Version"><span><span className="mono">{a.version}</span>{rc ? <span className="chip ag-rc">{`${rc} candidate`}</span> : null}</span></td>
+                <td data-label="Eval" className={`num mono${below ? " neg" : ""}`}><span>{below ? <Icon name="alert" className="ag-below" /> : null}{fmt.pct(a.evalScore)}</span></td>
+                <td data-label="7-day success" className="num"><Spark values={a.spark} min={0.5} max={1} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /></td>
+                <td data-label="Spend 7d" className="num mono">{fmt.money0(a.spend7d)}</td>
               </tr>
             );
           })}
