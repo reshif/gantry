@@ -5,7 +5,7 @@
  *   project.view          anywhere   catalogue, templates, home, activity, workload, conversations, stops, console, evals, learning, triggers, trust, card templates, deliveries
  *                                    (any project role; these views filter to the projects the person can see)
  *   project.view          on :id     everything under /projects/{id}
- *   people.view / policy.view / agents.view / models.view / integrations.view   the factory-wide registers (factory-level role)
+ *   people.view / policy.view / agents.view / models.view / integrations.view   the factory-wide registers (factory-level role; system health reads as integrations.view)
  *                                    (the plain lists of people, teams, agents, skills, MCP servers and integrations answer anyone on a
  *                                    project with a directory view of their own projects instead: core/directory.ts)
  *
@@ -33,7 +33,7 @@ export const READ_GATES: readonly Gate[] = [
   G(/^\/api\/v1\/agents\/[^/]+\/effective$/, "project.view"), // composed instructions for a project: filtered to visible projects
   G(/^\/api\/v1\/(agents|skills|instructions)(\/|$)/, "agents.view"),
   G(/^\/api\/v1\/(vendors|vendor-templates|models|routing|prices|budgets)(\/|$)/, "models.view"),
-  G(/^\/api\/v1\/(integrations|integration-types|mcp)(\/|$)/, "integrations.view"),
+  G(/^\/api\/v1\/(integrations|integration-types|mcp|system)(\/|$)/, "integrations.view"),
   G(/^\/api\/v1\/(catalog|templates|project-presets|guidelines|home|activity|workload|conversations|stops|console|suites|evals|learning|triggers|trigger-proposals|trust|card-templates|deliveries)(\/|$)/, "project.view"),
 ];
 

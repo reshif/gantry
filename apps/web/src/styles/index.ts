@@ -32,5 +32,6 @@ import "./views/record.css";
 import "./views/trust.css";
 import "./views/learning.css";
 import "./views/workload.css";
+import "./views/system.css";
 import "./app.css";
 import "./system.css";

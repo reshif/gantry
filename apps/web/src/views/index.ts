@@ -27,4 +27,5 @@ export const VIEWS: Record<string, LazyExoticComponent<ComponentType>> = {
   access: lazy(() => import("./access")),
   security: lazy(() => import("./security")),
   audit: lazy(() => import("./audit")),
+  system: lazy(() => import("./system")),
 };

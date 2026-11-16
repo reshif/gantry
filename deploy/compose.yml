@@ -103,6 +103,9 @@ services:
       GANTRY_ORG_NAME: ${GANTRY_ORG_NAME:-Gantry}
       # Alias of a GitHub identity provider configured in Keycloak; empty = GitHub sign-in is refused with a clear message.
       OIDC_GITHUB_IDP_ALIAS: ${OIDC_GITHUB_IDP_ALIAS:-}
+    # The backup service writes last-backup.json and last-drill.json here; the API only reads them (System health).
+    volumes:
+      - ${GANTRY_BACKUP_VOLUME:-backups}:/backups:ro
     secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret]
     depends_on:
       gantry-migrate: { condition: service_completed_successfully }

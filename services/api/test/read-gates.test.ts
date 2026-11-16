@@ -14,6 +14,7 @@ describe("readGateFor", () => {
     expect(readGateFor("/api/v1/trust/cells")).toEqual({ action: "project.view", project: null });
     expect(readGateFor("/api/v1/vendors")).toEqual({ action: "models.view", project: null });
     expect(readGateFor("/api/v1/integrations")).toEqual({ action: "integrations.view", project: null });
+    expect(readGateFor("/api/v1/system/health")).toEqual({ action: "integrations.view", project: null });
     expect(readGateFor("/api/v1/catalog")).toEqual({ action: "project.view", project: null });
     expect(readGateFor("/api/v1/projects/payments/floor")).toEqual({ action: "project.view", project: "payments" });
   });
