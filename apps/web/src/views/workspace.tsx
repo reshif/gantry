@@ -4,7 +4,7 @@
  * own context pane. `#workspace/<key>`: `wo:<id>`, `repo:<id>`, a chat id, `new` (a new factory chat) or `operator`.
  * The older Conversations (#conversations/<WO>) and Console (#console) links land here.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMe } from "../api/queries";
 import { anyRole, BUILD_READ } from "../lib/routes";
 import { navigate, useHash } from "../lib/router";
@@ -47,6 +47,14 @@ export default function WorkspaceView() {
   const cur: InboxFilter = filter ?? (needs ? "needs" : "active");
   const item = items.find((i) => i.key === key) ?? all.data?.items.find((i) => i.key === key) ?? null;
   const operator = !!me && anyRole(me, BUILD_READ);
+  // On a narrow screen the inbox stacks above the conversation: opening one brings its pane to the top of the screen.
+  const pane = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!key || !window.matchMedia?.("(max-width: 820px)").matches) return;
+    // after the shell has reset the page to its top for the new route
+    const t = window.setTimeout(() => pane.current?.scrollIntoView?.({ block: "start" }), 0);
+    return () => window.clearTimeout(t);
+  }, [key]);
 
   const open = (k: string | null) => { setQ(null); navigate("workspace", k); };
   const newChat = () => {
@@ -84,7 +92,7 @@ export default function WorkspaceView() {
       <div className="ws-grid">
         <Inbox me={me.person.id} items={items} loading={filter === "archived" ? archived.isLoading : all.isLoading} current={key} filter={cur} onFilter={setFilter} onPick={(k) => open(k)} onNew={newChat} onSearch={(s) => setQ(s)}
           operator={operator ? { show: true, active: key === "operator", onOpen: () => open("operator") } : null} />
-        <main className="ws-main" aria-label="Conversation">{main}</main>
+        <main className="ws-main" aria-label="Conversation" ref={pane}>{main}</main>
       </div>
     </div>
   );

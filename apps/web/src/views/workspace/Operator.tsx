@@ -54,10 +54,10 @@ export function OperatorPanel({ onOpen }: { onOpen: (key: string) => void }) {
             <p className="small muted" id="ws-op-cap-line">{v.capUsd === null ? "No per-person cap on chats." : `Cap: ${v.capUsd.toFixed(2)} USD per person per 24 hours.`}</p>
             {v.canSeePeople ? (
               v.chats.people.length ? (
-                <table className="tbl tbl-compact" id="ws-op-people">
+                <div className="table-scroll"><table className="table table-compact" id="ws-op-people">
                   <thead><tr><th>Person</th><th className="num">Last 24 h</th><th className="num">Answers</th></tr></thead>
                   <tbody>{v.chats.people.map((p) => <tr key={p.person} className={p.capUsd !== null && p.usd >= p.capUsd ? "is-over" : undefined}><td><Who id={p.person} /></td><td className="num mono">{`${p.usd.toFixed(2)} USD`}</td><td className="num mono">{p.answers}</td></tr>)}</tbody>
-                </table>
+                </table></div>
               ) : <p className="small muted">No chat answers in the last 24 hours.</p>
             ) : <p className="small muted">Spending per person needs the right to see people.</p>}
             {v.chats.threads.length ? (

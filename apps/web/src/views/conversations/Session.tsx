@@ -17,7 +17,7 @@ import { useOpenTraveler } from "../../shell/useTraveler";
 import { useOpenRecordRoute } from "../record/nav";
 import { Markdown } from "../console/Markdown";
 import { ApproversPanel } from "../traveler/Approvers";
-import { ProgressLine, QuestionCard, useLiveTurn } from "../session/kit";
+import { ProgressLine, QuestionCard, useLiveTurn, useThreadEnd } from "../session/kit";
 import { decideWo, markWoSeen, sendWoTurn, useWoSession, type WoSession, type WoSessionMessage } from "./session-api";
 import { DocViewer } from "../documents/DocViewer";
 import { AssumptionList, StationQuestionCard } from "../documents/Dialogue";
@@ -231,10 +231,10 @@ export function WoSessionPage({ woId, back, embedded }: { woId: string; back: ()
   const openRecord = useOpenRecordRoute();
   const [draft, setDraft] = useState("");
   const opened = useRef(false);
-  const end = useRef<HTMLDivElement>(null);
   const turn = useRef<{ kind: "message" | "open" | "continue"; text?: string }>({ kind: "open" });
   const run = useCallback((on: Parameters<typeof sendWoTurn>[2], signal: AbortSignal) => sendWoTurn(woId, turn.current, on, signal), [woId]);
   const { live, error, start } = useLiveTurn<WoCard>(run, (m) => ui.toast(m, "error"));
+  const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text);
   const send = (body: { kind: "message" | "open" | "continue"; text?: string }) => { turn.current = body; void start(); };
   const agents = useWsAgents(woId).data?.items ?? [];
 
@@ -249,7 +249,6 @@ export function WoSessionPage({ woId, back, embedded }: { woId: string; back: ()
   }, [s?.woId, started, ruleBased, s?.busy, s?.can.talk, s?.briefOpen]);
   const seenKey = s ? `${s.messages.length}:${s.messages.at(-1)?.id ?? ""}` : "";
   useEffect(() => { if (seenKey) void markWoSeen(woId); }, [seenKey, woId]);
-  useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [s?.messages.length, live?.text]);
   useEffect(() => { if (s) setProject(s.project); }, [s?.project]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lastId = s?.messages.at(-1)?.id;
@@ -297,7 +296,7 @@ export function WoSessionPage({ woId, back, embedded }: { woId: string; back: ()
             <span>{status.text}</span>
             {(s.next.actor === "you" && !live) || s.next.text === status.text ? null : <span className="muted small">{` · ${s.next.text}`}</span>}
           </div>
-          <div className="osx-thread" role="log" aria-live="polite">
+          <div className="osx-thread" role="log" aria-live="polite" ref={thread}>
             {s.messages.map((m, i) => (
               <div key={m.id}>
                 {i === 0 && m.data.mode === "legacy" ? <p className="small muted wos-legacy-h">Earlier: the scripted intake questions</p> : null}
@@ -327,7 +326,6 @@ export function WoSessionPage({ woId, back, embedded }: { woId: string; back: ()
             ) : null}
             {error ? <p className="callout callout-warn small" role="alert">{error}</p> : null}
             {ruleBased ? <p className="small muted osx-reason" id="wos-mode-note">{`Rule-based (no agent): ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
-            <div ref={end} />
           </div>
           <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
             {choices.length ? (

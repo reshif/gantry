@@ -169,3 +169,19 @@ describe("@mention from a work order's thread", () => {
     expect(takeAsk("ct-new")).toBe("why skip the API docs?");
   });
 });
+
+describe("Operator view", () => {
+  it("lists chat spending in the shared table styles, inside a scroll wrapper, with the number columns right-aligned", async () => {
+    window.location.hash = "#workspace/operator";
+    mockApi({
+      ...readsFor(intakeWo), "GET /api/v1/workspace/inbox": () => ({ body: { items: ITEMS } }),
+      "GET /api/v1/workspace/operator": () => ({ body: { stuck: [], waiting: [], budget: [], chats: { people: [{ person: "p-asha", usd: 1.25, answers: 4, capUsd: null }], threads: [] }, projects: ["payments"], capUsd: null, canEditCap: false, canSeePeople: true, quietMinutes: 15 } }),
+    });
+    mount(<WorkspaceView />);
+    const table = await waitFor(() => { const t = document.getElementById("ws-op-people"); expect(t).toBeTruthy(); return t as HTMLElement; });
+    expect(table.className).toBe("table table-compact");
+    expect(table.parentElement?.className).toBe("table-scroll");
+    expect([...table.querySelectorAll("th")].map((th) => th.className)).toEqual(["", "num", "num"]);
+    expect([...table.querySelectorAll("tbody td")].map((td) => td.className)).toEqual(["", "num mono", "num mono"]);
+  });
+});

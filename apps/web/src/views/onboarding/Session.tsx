@@ -12,7 +12,7 @@ import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { decide, markSeen, sendTurn, useSession, type Session, type SessionMessage } from "./session-api";
 import { stageName, type RepoV } from "./kit";
-import { QuestionCard } from "../session/kit";
+import { QuestionCard, useThreadEnd } from "../session/kit";
 
 type Proposal = Extract<SessionCard, { kind: "proposal" }>;
 const ACTORS: Record<string, string> = { system: "Gantry", "ag-onboard": "Onboarding Agent", ci: "CI" };
@@ -151,7 +151,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const opened = useRef(false);
-  const end = useRef<HTMLDivElement>(null);
+  const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text);
 
   const send = async (body: { kind: "message" | "open" | "continue"; text?: string }) => {
     if (live) return;
@@ -178,7 +178,6 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   // Opening the session (or a new update arriving while it is open) clears it from the bell.
   const seenKey = s ? `${s.messages.length}:${s.messages.at(-1)?.id ?? ""}` : "";
   useEffect(() => { if (seenKey) void markSeen(repoId); }, [seenKey, repoId]);
-  useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [s?.messages.length, live?.text]);
 
   const items = useMemo(() => {
     if (!s || !r) return [];
@@ -209,7 +208,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
       </div>
       <div className="osx-grid">
         <section className="osx-main" aria-label="Conversation">
-          <div className="osx-thread" role="log" aria-live="polite">
+          <div className="osx-thread" role="log" aria-live="polite" ref={thread}>
             <FindingsCard r={r} />
             {items.map((it) =>
               it.kind === "t" ? (
@@ -232,7 +231,6 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
             {s.waiting ? <p className="osx-waiting small" id="osx-waiting" role="status"><Icon name="clock" /> {`${s.waiting.text}${s.waiting.since ? ` since ${fmt.ago(s.waiting.since, Date.now())}` : ""}${s.waiting.checkedAt ? ` · checked ${fmt.ago(s.waiting.checkedAt, Date.now())}` : ""} · we'll post here and notify you`}</p> : null}
             {s.busy ? <p className="osx-event small muted">{`Gantry is working: ${s.next.text}.`}</p> : null}
             {error ? <p className="callout callout-warn small" role="alert">{error}</p> : null}
-            <div ref={end} />
           </div>
           <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
             <textarea id="osx-input" className="input" rows={2} aria-label="Message to the Onboarding Agent" value={draft} placeholder={composerNote} disabled={!s.can.talk || ruleBased || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
