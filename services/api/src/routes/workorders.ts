@@ -4,6 +4,7 @@
  *   GET /api/v1/conversations, POST /api/v1/work-orders/{id}/messages
  *   POST /api/v1/work-orders/{id}/reclassify, /confirm-brief, /decline
  *   POST /api/v1/gate-instances/{id}/approve, /reject            (id = `${woId}:${gateId}`, or `${woId}:${gateId}:${n}` for one exact opening)
+ *   PUT /api/v1/work-orders/{id}/budget       (set or raise the spending cap)
  *   POST /api/v1/work-orders/{id}/move (dry_run), /send-back, /park, /unpark, /reassign, /retry
  *   GET /api/v1/work-orders/{id}/record, record.md, record/export, PUT .../record/summary, GET .../changes
  *
@@ -18,6 +19,7 @@ import { loadFlow, stateWithPinned } from "../areas/workorders/model.js";
 import { actionForGate, approveGate, parseGateId, rejectGate } from "../areas/workorders/gates.js";
 import { addFollowup, decline, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
 import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
+import { setWoCap } from "../areas/workorders/budget.js";
 import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
 import { listDialogue, listDocuments, readDocument } from "../areas/workorders/documents.js";
@@ -66,6 +68,7 @@ const MoveBody = z.looseObject({ target: z.string().min(1).max(100), reason: Rea
 const SendBackBody = z.looseObject({ toStation: z.string().min(1).max(100), note: Reason.default(""), via: Via });
 const ParkBody = z.looseObject({ bay: z.string().min(1).max(100), reason: Reason.default(""), via: Via });
 const ReassignBody = z.looseObject({ agent: z.string().min(1).max(100), via: Via });
+const BudgetBody = z.looseObject({ usd: z.number().finite(), reason: Reason.optional(), via: Via });
 const SummaryBody = z.looseObject({ text: z.string().max(8000) });
 const ListQ = z.object({
   q: z.string().max(200).optional(), cls: z.string().max(60).optional(), where: z.string().max(100).optional(), repo: z.string().max(100).optional(), prio: z.string().max(10).optional(),
@@ -345,6 +348,13 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/work-orders/:id/retry", async (req) => {
     const { id } = Id.parse(req.params);
     return command(req, spec(id, "wo.sendback", await scopeOf(req, id)), (tx, a) => retry(tx, a, id));
+  });
+
+  /** The work order's spending cap. Needs the project configuration right (the one PUT /budgets/{project} uses); a raise lifts the work order's budget halt. */
+  app.put("/api/v1/work-orders/:id/budget", async (req) => {
+    const { id } = Id.parse(req.params);
+    const b = BudgetBody.parse(req.body);
+    return command(req, spec(id, "project.config", await scopeOf(req, id)), (tx, a) => setWoCap(tx, a, id, b));
   });
 
   app.put("/api/v1/work-orders/:id/record/summary", async (req) => {
