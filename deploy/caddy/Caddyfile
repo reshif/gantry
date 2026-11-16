@@ -1,18 +1,24 @@
-# Ingress for the local Gantry stack. The container listens on 8443; compose publishes it as 127.0.0.1:443 only.
-# `tls internal` issues a certificate from Caddy's local CA (root at /data/caddy/pki/authorities/local/root.crt in the
-# caddydata volume; see deploy/README.md for trusting it).
+# Ingress for the Gantry stack. The container listens on 8443 (HTTPS) and 8080 (HTTP, ACME challenges only); compose
+# publishes 8443 as 127.0.0.1:443 locally and as :443 in the production profile.
+#   GANTRY_HOSTNAME  the site's name (default localhost)
+#   GANTRY_TLS       `internal` (default): a certificate from Caddy's local CA (root at
+#                    /data/caddy/pki/authorities/local/root.crt in the caddydata volume; see deploy/README.md);
+#                    an email address: a public certificate from Let's Encrypt (ACME), renewed automatically;
+#                    `/certs/tls.crt /certs/tls.key`: your own certificate, mounted at /certs (deploy/PRODUCTION.md).
 {
 	admin off
+	http_port 8080
+	https_port 8443
 	auto_https disable_redirects
-	default_sni localhost
+	default_sni {$GANTRY_HOSTNAME:localhost}
 	skip_install_trust
 	servers {
 		protocols h1 h2
 	}
 }
 
-https://localhost:8443 {
-	tls internal
+https://{$GANTRY_HOSTNAME:localhost} {
+	tls {$GANTRY_TLS:internal}
 
 	log {
 		output stdout
@@ -71,6 +77,14 @@ https://localhost:8443 {
 		encode zstd gzip
 		reverse_proxy gantry-web:8080
 	}
+}
+
+# The container's healthcheck: plain HTTP on the container's own loopback, so it works whatever the site's name and
+# certificate are (busybox wget cannot send the site name as SNI to 127.0.0.1).
+http://127.0.0.1:8079 {
+	bind 127.0.0.1
+	respond /healthz "ok" 200
+	respond 404
 }
 
 # Keycloak admin console and admin API, for operators only. Compose publishes this listener as 127.0.0.1:8081, so it is

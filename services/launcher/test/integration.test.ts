@@ -65,7 +65,7 @@ d("launcher against real Docker", () => {
 
   beforeAll(() => {
     cleanup();
-    execFileSync("docker", ["build", "-t", IMAGE, "-"], { input: 'FROM node:22-alpine\nCMD ["sleep","3600"]\n', stdio: ["pipe", "ignore", "ignore"] });
+    execFileSync("docker", ["build", "-t", IMAGE, "-"], { input: 'FROM node:22.23.5-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a\nCMD ["sleep","3600"]\n', stdio: ["pipe", "ignore", "ignore"] });
     sh("network", "create", EDGE_NET);
     // Stands in for gantry-edge: any running container is attachable; the launcher only needs its name.
     sh("run", "-d", "--name", EDGE, "--network", EDGE_NET, IMAGE);

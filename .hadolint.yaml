@@ -1,0 +1,6 @@
+# Dockerfile lint (CI). Base images are pinned by digest; Alpine and Debian packages are not pinned to exact versions
+# (the digest fixes the base; Dependabot moves it), so DL3018/DL3008 are off.
+failure-threshold: warning
+ignored:
+  - DL3018
+  - DL3008

@@ -25,13 +25,10 @@ The weaknesses are in the shape of the product:
   - no web research or research swarm
   - no markdown documents
   - no list of chats and no way to archive them
-- **Operations.**
-  - no CI
-  - Keycloak in dev mode
-  - no backups
-  - unversioned images
+- **Operations.** The P0 items are done (Wave 5): CI, production Keycloak, a production profile, backups with a restore
+  drill, and versioned, signed images. Still missing:
   - no metrics or alerting
-  - no operator documentation
+  - documentation for users and admins (the operator guide exists: `deploy/PRODUCTION.md`)
 
 ## Wave 0: security holes found today (done, on the working tree)
 
@@ -151,22 +148,65 @@ The design is in [agent-experience.md §4](review/2026-11-15/agent-experience.md
 
 ## Wave 5: operating it in production
 
-From [enterprise-readiness.md](review/2026-11-15/enterprise-readiness.md):
+From [enterprise-readiness.md](review/2026-11-15/enterprise-readiness.md). **P0 done 2026-11-16**, on `security/wave-0`, not pushed:
 
-- **P0:**
-  - CI (lint, typecheck, tests with Postgres, build, audit, image scan, e2e) and branch protection
-  - Keycloak in production mode on Postgres
-  - a production compose profile without dev services
-  - backups and a restore drill
-  - versioned, pinned, signed images
+- **CI** (`.github/workflows/ci.yml`). Every action is pinned by commit. Jobs:
+  - lint, typecheck, tests against Postgres, build
+  - npm audit (high or critical fails anything that ships) and a licence allow-list
+  - hadolint, `compose config` for both profiles, `caddy validate`, shellcheck
+  - a migration upgrade test: the base's migrations, then this tree's, on one database
+  - per image: build, a Grype scan (a fixable high or critical fails), an SBOM
+  - on `main` and `v*`: push to GHCR, a cosign keyless signature and an SBOM attestation
+  - nightly: the whole stack, `smoke.sh`, a backup and a restore drill
+  - Dependabot for npm, Actions, Dockerfiles and compose
+  - branch protection is a script for a repository admin to run once: `deploy/ci/branch-protection.sh`
+- **Lint.** It did not exist (`npm run lint` was a silent no-op). Now there is one eslint config for every workspace: 0 errors and
+  12 hooks-memoisation warnings. It found dead code and no bugs; the one candidate turned out to be intended.
+- **Typecheck was red** (an API test). Fixed. `uuid` is pinned past GHSA-w5hq-g745-h8pq, so `npm audit --omit=dev` shows 0.
+- **Production profile** (`deploy/compose.prod.yml`):
+  - Mailpit removed; demo accounts and the seed forced off
+  - `GANTRY_HOSTNAME` drives Caddy, the public URL, the OIDC issuer, Keycloak and the realm (it was hard-coded in four places)
+  - TLS from Let's Encrypt, your own certificate, or the internal CA
+  - SMTP for Gantry, with a login (new: `SMTP_USER` and the `smtp_password` secret), and for Keycloak
+  - memory and process limits on every container
+- **Keycloak.** An optimized build (`deploy/keycloak/Dockerfile`) on Postgres with its own role and database
+  (`keycloak-db-init`), read-only root, strict hostname. The realm is generated without the 15 demo accounts, with a
+  password policy and `sslRequired: all` (`prod-realm.mjs`, checked in CI).
+- **Backups** (`deploy/backup`):
+  - daily sets: both databases, the object store, a manifest of every table's row count, checksums
+  - 7 kept; an optional off-host copy; a healthcheck that fails when the newest backup is more than 26 hours old
+  - a weekly restore drill: scratch databases and bucket; checks checksums, migration head, row counts, the audit hash
+    chain, Keycloak users and objects
+  - a restore that refuses while services are connected
+- **Images.** Third-party images are pinned by version and digest (node 22.23.5, nginx 1.27.5, caddy 2.11.9,
+  postgres 17.12, keycloak 26.4.7, mailpit 1.33.1, minio). Gantry's are `${GANTRY_IMAGE_PREFIX}gantry-<name>:${GANTRY_VERSION}`.
+  `deploy/verify-images.sh` checks a release's signatures and SBOMs before it is run.
+- **Operator guide:** [deploy/PRODUCTION.md](../deploy/PRODUCTION.md). It covers install, first sign-in, TLS, mail,
+  backups, restore, keys, upgrade and rollback, CI, and known limits.
+- **Live evidence:**
+  - Dev stack: a backup of 131 tables, 1093 audit events and 329 objects, drill passed in 8s. A tampered manifest fails the drill.
+  - The production profile, run as a second project (`gantry.test` on 127.0.0.1:9443):
+    - every service healthy; Keycloak optimized on Postgres with a read-only root
+    - the issuer is the configured hostname; no demo cards; the Keycloak admin console returns 404 on the public site
+  - A browser sign-in through production Keycloak made the bootstrap email Factory Admin of an empty org.
+  - Restore: a deleted Keycloak user was back after restoring a set, and signed in as the same Gantry person.
+  - The dev stack is unchanged: smoke 55/55.
+- **Not done in P0:**
+  - point-in-time recovery (WAL archiving); the recovery point is 24 hours
+  - encryption of the sets themselves (they need encrypted storage)
+  - `data_key` rotation with re-encryption
+  - CI's first run happens on the first push (not run yet)
+  - the browser e2e journeys still use local paths, so nightly runs `smoke.sh` and the drill, not the journeys
+  - dev-only advisories remain in vitest 3 (tinypool, @vitest/mocker); the fix is vitest 4
+
+Remaining (resource limits, a configurable hostname with real TLS, and the upgrade and rollback story came with P0):
+
 - **P1:**
   - retention jobs for every class in spec 7.4
   - `/metrics`, `/readyz`, tracing, alert rules and a runbook
-  - resource limits
-  - a configurable hostname and real TLS
-  - offboarding users and rotating keys
-  - a System health view in the UI
-  - an upgrade and rollback story
+  - offboarding users and rotating keys (`data_key` re-encryption)
+  - a System health view in the UI (backup and drill status are already in `last-backup.json` and `last-drill.json`)
+  - point-in-time recovery
 - **P2/P3:**
   - audit export to a SIEM
   - data export and erasure

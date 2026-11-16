@@ -1,0 +1,281 @@
+# Gantry CI. Every pull request and every push to main must pass `checks`, `audit`, `deploy-config`, `migrations` and
+# `images` (branch protection: deploy/ci/branch-protection.sh). Pushes to main and v* tags also publish the images to
+# GHCR, signed with cosign (keyless, this workflow's identity) and with an SBOM attestation. The nightly run brings
+# the whole stack up and runs the smoke and isolation checks and a backup with a restore drill.
+# Actions are pinned by commit; Dependabot (.github/dependabot.yml) proposes updates.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  schedule:
+    - cron: "30 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  checks:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17.12-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065
+        env:
+          POSTGRES_PASSWORD: pw
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      GANTRY_TEST_DATABASE_URL: postgres://postgres:pw@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            runner/wrapper/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Runner wrapper
+        working-directory: runner/wrapper
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: Production realm is generated from the development realm
+        run: node deploy/keycloak/prod-realm.mjs --check
+
+  audit:
+    name: Dependency audit and licences
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
+        working-directory: runner/wrapper
+      # Shipped code: any high or critical advisory fails the build.
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: runner/wrapper
+      # Build and test tools: reported, not blocking (they never reach an image).
+      - name: Development dependencies (report only)
+        run: npm audit --include=dev || echo "::warning title=npm audit::development dependencies have advisories (see the log)"
+      - name: Licences of shipped dependencies
+        run: node deploy/ci/licences.mjs
+
+  deploy-config:
+    name: Dockerfiles, compose, Caddy, shell
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          recursive: true
+          config: .hadolint.yaml
+      - name: Compose files (development and production)
+        run: |
+          deploy/secrets/generate.sh >/dev/null
+          docker compose -f deploy/compose.yml config -q
+          docker compose -f deploy/compose.yml --profile backup --profile runner-image config -q
+          docker compose --env-file deploy/prod.env.example -f deploy/compose.yml -f deploy/compose.prod.yml config -q
+          # The production profile must not contain development services or switches.
+          docker compose --env-file deploy/prod.env.example -f deploy/compose.yml -f deploy/compose.prod.yml config > /tmp/prod.yml
+          ! grep -nE 'mailpit|GANTRY_DEV_DEMO_ACCOUNTS: "true"|GANTRY_DEV_SEED: "true"|start-dev' /tmp/prod.yml
+      - name: Caddyfile (development and production)
+        run: |
+          img=caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+          docker run --rm -v "$PWD/deploy/caddy:/etc/caddy:ro" "$img" caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm -v "$PWD/deploy/caddy:/etc/caddy:ro" -e GANTRY_INGRESS_PROFILE=prod -e GANTRY_HOSTNAME=gantry.example.com -e GANTRY_TLS=ops@example.com "$img" caddy validate --config /etc/caddy/Caddyfile
+      - name: Shell scripts
+        run: shellcheck --severity=warning deploy/*.sh deploy/*/*.sh
+
+  migrations:
+    name: Migration upgrade from the base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.12-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065
+        env:
+          POSTGRES_PASSWORD: pw
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @gantry/domain --workspace @gantry/db
+      - name: Apply the base's migrations, then this tree's
+        env:
+          GANTRY_TEST_DATABASE_URL: postgres://postgres:pw@127.0.0.1:5432/postgres
+          # A pull request: its base. A push: the commit before it. A tag: the previous release tag.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$BASE"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then base="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"; fi
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base=origin/main; fi
+          deploy/ci/migration-upgrade.sh "$base"
+
+  images:
+    name: Image ${{ matrix.name }}
+    needs: [checks, deploy-config]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: api, dockerfile: services/api/Dockerfile }
+          - { name: worker, dockerfile: services/worker/Dockerfile }
+          - { name: migrate, dockerfile: packages/db/Dockerfile }
+          - { name: launcher, dockerfile: services/launcher/Dockerfile }
+          - { name: edge, dockerfile: services/edge/Dockerfile }
+          - { name: github, dockerfile: services/github/Dockerfile }
+          - { name: web, dockerfile: apps/web/Dockerfile }
+          - { name: runner, dockerfile: runner/Dockerfile }
+          - { name: keycloak, dockerfile: deploy/keycloak/Dockerfile }
+          - { name: backup, dockerfile: deploy/backup/Dockerfile }
+    env:
+      # Only pushes to this repository publish (never forks, never pull requests).
+      PUBLISH: ${{ github.event_name == 'push' && !github.event.repository.fork }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gantry-${{ matrix.name }}" >>"$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=gantry-${{ matrix.name }}
+            org.opencontainers.image.licenses=UNLICENSED
+      - name: Build (for the scan)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: gantry-${{ matrix.name }}:scan
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Vulnerability scan (fails on a fixable high or critical)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: gantry-${{ matrix.name }}:scan
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+      - name: SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: gantry-${{ matrix.name }}:scan
+          format: spdx-json
+          output-file: sbom-${{ matrix.name }}.spdx.json
+          upload-artifact: true
+      - if: env.PUBLISH == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: env.PUBLISH == 'true'
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          provenance: mode=max
+      - if: env.PUBLISH == 'true'
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: Sign and attest the SBOM
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign attest --yes --type spdxjson --predicate "sbom-${{ matrix.name }}.spdx.json" "${IMAGE}@${DIGEST}"
+          echo "### gantry-${{ matrix.name }}: \`${IMAGE}@${DIGEST}\`" >>"$GITHUB_STEP_SUMMARY"
+
+  e2e:
+    name: Whole stack (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the runner image
+        run: docker compose -f deploy/compose.yml --profile runner-image build gantry-runner
+      - name: Smoke and isolation checks
+        run: |
+          export DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          deploy/smoke.sh
+      - name: Backup and restore drill
+        run: |
+          export DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup now
+          docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup drill
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f deploy/compose.yml logs --no-color --tail=200 > compose.log
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compose-logs
+          path: compose.log

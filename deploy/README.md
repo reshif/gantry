@@ -2,6 +2,8 @@
 
 Everything runs in one Docker Compose project plus per-run containers that `gantry-launcher` creates on demand (spec section 3). Requirements: Docker Engine with Compose v2.24+, `openssl`, `curl`.
 
+This page is the local development stack. For a server, use the production profile: [PRODUCTION.md](PRODUCTION.md).
+
 ## Start
 
 ```bash
@@ -40,7 +42,7 @@ Ingress routes: `/api/*`, `/auth/*`, `/hooks/*` to `gantry-api:8000` (no bufferi
 
 The ingress serves the admin console on a second listener published as `127.0.0.1:8081` only. From another machine, tunnel to it: `ssh -L 8081:127.0.0.1:8081 <host>`, then open http://localhost:8081/idp/admin/. `KC_HOSTNAME_ADMIN` points Keycloak's admin links at this address.
 
-Every Gantry container is read-only with a `/tmp` tmpfs, `cap_drop: ALL`, `no-new-privileges`, uid 10001, a restart policy of `unless-stopped` and a healthcheck. Third-party images get what they can take: Postgres runs as uid 70, MinIO and Mailpit as 10001, and Keycloak keeps a writable root filesystem because `start-dev` rebuilds at boot (use an optimized image in production). The worker has no HTTP port and relies on the HEALTHCHECK in its own Dockerfile.
+Every Gantry container is read-only with a `/tmp` tmpfs, `cap_drop: ALL`, `no-new-privileges`, uid 10001, a restart policy of `unless-stopped` and a healthcheck. Third-party images get what they can take: Postgres runs as uid 70, MinIO and Mailpit as 10001, and Keycloak keeps a writable root filesystem because `start-dev` rebuilds at boot (the production profile runs an optimized build, read-only). The worker has no HTTP port and relies on the HEALTHCHECK in its own Dockerfile.
 
 ## Run networks and the address pool
 
@@ -60,7 +62,7 @@ Seeding order (spec 4.3): the launcher does not clone. Call `POST /v1/runs` with
 
 ## Configuration
 
-Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_DEMO_ACCOUNTS`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL`, `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`. Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
+Non-secret settings come from environment variables in `compose.yml`; override them in your shell or a `deploy/.env` file: `GANTRY_ORG_ID`, `GANTRY_ORG_NAME`, `GANTRY_DEV_DEMO_ACCOUNTS`, `GANTRY_DEV_SEED`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL`, `OIDC_GITHUB_IDP_ALIAS`, `RUNNER_VARIANTS`, `RUN_SUBNET_POOL`, `MAX_CONCURRENT_RUNS`, `DOCKER_GID`, `DOCKER_SOCKET`, `GANTRY_SECRETS_DIR`, `MINIO_IMAGE`, `KEYCLOAK_IMAGE`, `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, and the `GANTRY_BACKUP_*` settings (PRODUCTION.md). Set `COMPOSE_PROJECT_NAME` (or `-p`) to run a second copy; the launcher finds the edge through the compose project label.
 
 ## Keycloak realm
 
@@ -72,7 +74,9 @@ People can't change their own email address or username in Keycloak's account co
 
 ## Image sources
 
-Docker Hub rate-limits anonymous pulls; retry or set `KEYCLOAK_IMAGE` / `MINIO_IMAGE` to a mirror. MinIO's default is the Quay image `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`.
+Every third-party image is pinned by version and digest in `compose.yml` and the Dockerfiles; Dependabot proposes updates. Gantry's own images are `gantry-<name>:dev` when built locally and `${GANTRY_IMAGE_PREFIX}gantry-<name>:${GANTRY_VERSION}` for a release. Docker Hub rate-limits anonymous pulls; retry or set `KEYCLOAK_IMAGE` / `MINIO_IMAGE` to a mirror. MinIO no longer publishes images, so the default is the community build `pgsty/minio` of the same server.
+
+Backups and the restore drill run locally too: `docker compose -f deploy/compose.yml --profile backup run --rm gantry-backup now`, then `... gantry-backup drill` (PRODUCTION.md, "Backups").
 
 ### First sign-in and demo data
 

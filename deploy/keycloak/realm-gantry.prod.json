@@ -1,0 +1,114 @@
+{
+  "realm": "gantry",
+  "displayName": "Gantry",
+  "enabled": true,
+  "sslRequired": "all",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "failureFactor": 10,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "accessCodeLifespan": 60,
+  "clients": [
+    {
+      "clientId": "gantry-web",
+      "name": "Gantry web",
+      "description": "Gantry API acting for the browser (confidential client, auth-code + PKCE)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "secret": "${GANTRY_OIDC_CLIENT_SECRET}",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "${GANTRY_PUBLIC_URL}",
+      "baseUrl": "/",
+      "redirectUris": [
+        "${GANTRY_PUBLIC_URL}/auth/callback"
+      ],
+      "webOrigins": [
+        "${GANTRY_PUBLIC_URL}"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${GANTRY_PUBLIC_URL}/",
+        "access.token.lifespan": "300",
+        "client_credentials.use_refresh_token": "false"
+      },
+      "defaultClientScopes": [
+        "basic",
+        "acr",
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "gantry_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "gantry_id",
+            "claim.name": "gantry_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "gantry_title",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "gantry_title",
+            "claim.name": "gantry_title",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\": [{\"name\": \"username\", \"validations\": {\"length\": {\"min\": 3, \"max\": 255}, \"username-prohibited-characters\": {}, \"up-username-not-idn-homograph\": {}}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}}, {\"name\": \"email\", \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}}, {\"name\": \"firstName\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}}, {\"name\": \"lastName\", \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}, \"required\": {\"roles\": [\"user\"]}, \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}}, {\"name\": \"gantry_id\", \"validations\": {\"length\": {\"max\": 64}}, \"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}}, {\"name\": \"gantry_title\", \"validations\": {\"length\": {\"max\": 255}}, \"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}}]}"
+          ]
+        }
+      }
+    ]
+  },
+  "passwordPolicy": "length(12) and notUsername and notEmail and passwordHistory(5)",
+  "smtpServer": {
+    "host": "${GANTRY_SMTP_HOST}",
+    "port": "${GANTRY_SMTP_PORT:587}",
+    "from": "${GANTRY_SMTP_FROM_ADDRESS}",
+    "fromDisplayName": "Gantry",
+    "starttls": "${GANTRY_SMTP_STARTTLS:true}",
+    "ssl": "${GANTRY_SMTP_SSL:false}",
+    "auth": "${GANTRY_SMTP_AUTH:false}",
+    "user": "${GANTRY_SMTP_USER:}",
+    "password": "${GANTRY_SMTP_PASSWORD:}"
+  }
+}

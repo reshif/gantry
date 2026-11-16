@@ -3,7 +3,7 @@
 # Holds no secrets. Runs as uid 10001 with a read-only root: writable paths are /workspace (volume) and /tmp (tmpfs).
 # Behind a TLS-intercepting proxy, add: --secret id=cacert,src=/path/to/ca-bundle.crt (optional; used only for npm).
 # Variants for other tech stacks: FROM gantry-runner:dev as a base (as root), install the toolchain, then `USER 10001:10001`.
-ARG NODE_IMAGE=node:22-bookworm-slim
+ARG NODE_IMAGE=node:22.23.5-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 
 FROM ${NODE_IMAGE} AS wrapper-build
 WORKDIR /src/runner/wrapper
