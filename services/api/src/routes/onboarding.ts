@@ -102,7 +102,7 @@ export const onboardingRoutes: FastifyPluginAsync = async (app) => {
     };
 
   app.patch("/api/v1/repos/:id/config", async (req) => {
-    const { id } = Id.parse(req.params);
+    Id.parse(req.params);
     const body = ConfigBody.parse(req.body);
     return onRepo("onboarding.manage", (tx, a, repoId) => configureRepo(tx, a, repoId, body), { versionRequired: true })(req);
   });

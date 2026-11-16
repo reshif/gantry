@@ -64,7 +64,6 @@ function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Se
   const pending = c.status === "pending";
   const sensitive = (c.sensitive ?? []).filter((x) => x.id !== "guideline");
   const guideline = (c.sensitive ?? []).find((x) => x.id === "guideline");
-  const blocked = (c.blockers ?? []).length > 0;
   const mayApprove = c.what === "merge" ? s.can.merge : s.can.talk;
   const why = c.what === "merge" ? "You do not have the right to merge onboarding pull requests. Ask someone who does, or merge it on GitHub." : s.can.talkWhy;
   const run = async (d: "approve" | "changes" | "discard") => {

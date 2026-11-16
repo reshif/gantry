@@ -76,7 +76,7 @@ for (const [method, path] of routes) {
   const url = "https://localhost" + path.replace(/:(\w+)/g, (m, n) => (params[m] && !["id"].includes(n) ? params[m] : n === "id" ? idFor(path) : params[m] ?? "x"));
   const body = bodies[key] ?? {};
   const r = await ctx.request.fetch(url, { method, headers: { "x-csrf-token": csrf, "content-type": "application/json", origin: "https://localhost" }, data: JSON.stringify(body), failOnStatusCode: false });
-  let j = {}; try { j = await r.json(); } catch {}
+  let j = {}; try { j = await r.json(); } catch { /* not JSON */ }
   rows.push({ key, status: r.status(), msg: String(j.msg ?? "").slice(0, 90), rule: j.rule?.id ?? "" });
 }
 const after = Number(q("select count(*) from events where type like '%.denied'")[0][0]);

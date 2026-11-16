@@ -23,7 +23,7 @@ d("people and access", () => {
     return { status: r.statusCode, body: r.json() as Record<string, any>, headers: r.headers };
   };
   const ev = async (type: string) => (await t.db.admin.query(`select * from events where type = $1 order by seq`, [type])).rows;
-  const person = async (id: string) => (await call(admin, "GET", "/api/v1/people")).body as unknown as Array<Record<string, any>>;
+  const person = async (_id: string) => (await call(admin, "GET", "/api/v1/people")).body as unknown as Array<Record<string, any>>;
   const find = async (id: string) => (await person(id)).find((p) => p.id === id)!;
   const stepUpAge = 3600;
 

@@ -8,7 +8,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
-import { useCan, useCanMany } from "../api/can";
+import { useCanMany } from "../api/can";
 import { useAudit, useMe, useProjects, useWorkOrders } from "../api/queries";
 import { setProject, usePrefs } from "../lib/prefs";
 import { navigate } from "../lib/router";

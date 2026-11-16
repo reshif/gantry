@@ -4,7 +4,7 @@ import { asksMe } from "../workorders/asked.js";
 import { fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { decideFor, readSecurity, type ActiveStop, type PolicyStateLoaded, type Principal } from "../../core/index.js";
-import { ms, num, obj } from "../../core/read/rows.js";
+import { ms, num } from "../../core/read/rows.js";
 import { agentRows, eligibility, labelOf, versionRows } from "../agents/store.js";
 import { callableModels } from "../models/default.js";
 import { loadFacts } from "../models/facts.js";

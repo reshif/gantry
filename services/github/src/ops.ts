@@ -99,13 +99,13 @@ export async function readPrState(d: OpDeps, repo: string, number: number): Prom
       const req = rq(c.octokit);
       const pr = (await req("GET /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo: name, pull_number: number })).data;
       const head = pr.head.sha as string;
-      const checks = await paged(req, "GET /repos/{owner}/{repo}/commits/{ref}/check-runs", { owner, repo: name, ref: head }, (x) => x.check_runs as Record<string, any>[]);
-      const reviews = await paged(req, "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo: name, pull_number: number }, (x) => x as Record<string, any>[]);
+      const checks = await paged(req, "GET /repos/{owner}/{repo}/commits/{ref}/check-runs", { owner, repo: name, ref: head }, (x) => x.check_runs as Record<string, any>[]); // eslint-disable-line @typescript-eslint/no-explicit-any
+      const reviews = await paged(req, "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews", { owner, repo: name, pull_number: number }, (x) => x as Record<string, any>[]); // eslint-disable-line @typescript-eslint/no-explicit-any
       const combined = (await req("GET /repos/{owner}/{repo}/commits/{ref}/status", { owner, repo: name, ref: head }).catch(() => null))?.data;
       const status = combined?.state ?? null;
       // Commit statuses (the older CI reporting) count as CI: the sync needs to know whether anything at all reported on this head.
       const statusCount = Number(combined?.total_count ?? (Array.isArray(combined?.statuses) ? combined.statuses.length : 0)) || 0;
-      const latest = new Map<string, Record<string, any>>();
+      const latest = new Map<string, Record<string, any>>(); // eslint-disable-line @typescript-eslint/no-explicit-any
       for (const r of reviews) if (r.state !== "COMMENTED" && r.user?.login) latest.set(r.user.login, r);
       return {
         pullRequest: prFact(pr), checks: checks.map((x) => checkFact(x, head)), reviews: reviews.map((r) => reviewFact(r, number)),

@@ -77,7 +77,6 @@ export const channelFor = (k: InputKind): EventChannel => CHANNEL[k];
 /** Strips control characters, folds blank runs and limits length. */
 export const clean = (s: string | undefined, max: number): string =>
   (s ?? "")
-    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g, "")
     .replace(/\r\n?/g, "\n")
     .replace(/\n{4,}/g, "\n\n\n")

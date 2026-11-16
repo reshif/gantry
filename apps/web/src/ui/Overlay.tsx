@@ -4,7 +4,6 @@
  * rules: dialogs trap focus, Escape closes the top layer, focus returns to the opener.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
 import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";

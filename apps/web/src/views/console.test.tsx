@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -188,7 +188,7 @@ describe("Console (legacy console.js on the real API)", () => {
     it("/projects reads list_projects and draws the table", async () => {
       const calls = setup({
         "GET /api/v1/console/status": () => ({ body: NO_MODEL }),
-        "POST /api/v1/console/tools/*": (_u, _i, b) => ({ body: { ok: true, tool: "list_projects", result: [{ id: "payments", name: "Payments Platform", key: "PAY", status: "active", halted: null, killed: null, inFlight: 3, waitingAtGates: 1, inBays: 0, health: "Healthy" }], proposals: [], cited: [] } }),
+        "POST /api/v1/console/tools/*": (_u, _i, _b) => ({ body: { ok: true, tool: "list_projects", result: [{ id: "payments", name: "Payments Platform", key: "PAY", status: "active", halted: null, killed: null, inFlight: 3, waitingAtGates: 1, inBays: 0, health: "Healthy" }], proposals: [], cited: [] } }),
       });
       mount();
       await ask("/projects");

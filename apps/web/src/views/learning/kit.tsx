@@ -1,5 +1,5 @@
 /** Shared pieces of the Learning screen (legacy js/views/learning.js): kinds, signals, statuses, the word diff, what a change does, the status pipeline and evidence chips. */
-import { flowOf, fmt, type Catalog, type LearningProposal } from "@gantry/domain";
+import { fmt, type LearningProposal } from "@gantry/domain";
 import { useAgents, useProjects, useSkills, useSuites } from "../../api/queries";
 import { Icon } from "../../ui/Icon";
 import { useOpenRecordRoute } from "../record/nav";
@@ -65,6 +65,7 @@ export function WordDiff({ a, b }: { a: string; b: string }) {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- a proposal's change is free-form JSON from the agent
 type Change = Record<string, any>;
 
 /** What a proposal changes, in plain terms. */

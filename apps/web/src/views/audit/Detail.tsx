@@ -3,7 +3,6 @@ import { useAuditEntry, useMe } from "../../api/queries";
 import { Avatar, Btn, Chip, Empty } from "../../ui/primitives";
 import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
-import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 import { openRecord, setProject, updatePrefs } from "../../lib/prefs";
 import { useOpenTraveler } from "../../shell/useTraveler";

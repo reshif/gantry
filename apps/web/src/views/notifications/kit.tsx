@@ -5,7 +5,6 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { CARD_ACTIONS, CARD_DEFAULTS, CARD_TEMPLATES, NOTIFY_EVENTS, fmt, type CardTemplate, type IntegrationInstance, type NotificationRoute, type Project } from "@gantry/domain";
-import { api } from "../../api/client";
 import { ops } from "../../api/ops";
 import { useCardTemplates, useIntegrations, useIntegrationTypes, useMe, useProjects, useRoutes } from "../../api/queries";
 import { usePrefs } from "../../lib/prefs";

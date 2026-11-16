@@ -43,6 +43,7 @@ export async function createSession(db: Queryable, key: Buffer, s: NewSession): 
   return { id, token, expiresAt };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- a pg row
 const toRow = (r: Record<string, any>): SessionRow => ({
   id: r.id, personId: r.person_id, method: r.method, authTime: r.auth_time ? new Date(r.auth_time).getTime() : null,
   createdAt: new Date(r.created_at).getTime(), expiresAt: new Date(r.expires_at).getTime(), lastSeenAt: new Date(r.last_seen_at).getTime(), ip: r.ip,

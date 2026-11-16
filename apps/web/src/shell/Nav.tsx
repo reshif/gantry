@@ -6,7 +6,7 @@ import { useCan, useCanMany } from "../api/can";
 import type { Me } from "../api/types";
 import { NAV_GROUPS, ROUTES, ROUTE_PERMS, canSeeRoute, isProjectRoute, routeDef } from "../lib/routes";
 import { hashFor } from "../lib/router";
-import { updatePrefs, usePrefs } from "../lib/prefs";
+import { usePrefs } from "../lib/prefs";
 import { Icon } from "../ui/Icon";
 
 export function useRouteCtx() {

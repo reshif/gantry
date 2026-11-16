@@ -1,6 +1,6 @@
 /** The Agent Workspace (services/api routes/workspace.ts). Keys start with `workspace`, which work-order, console and repo changes refresh. */
 import { useQuery } from "@tanstack/react-query";
-import { api, del, get, patch, post, type ApiResult } from "../../api/client";
+import { api, del, get, patch, post } from "../../api/client";
 import { invalidateSlices } from "../../api/keys";
 
 export type ScopeKind = "factory" | "project" | "work_order" | "repo";

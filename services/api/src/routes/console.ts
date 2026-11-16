@@ -24,7 +24,7 @@ import { agentOf, scopeContext, sideSystem } from "../areas/workspace/side.js";
 import { chatSpendMicros } from "../areas/workspace/spend.js";
 import { stationAgentGate, turnCostMicros } from "../areas/session/core.js";
 import { readSecurity } from "../core/read/index.js";
-import { ALL_TOOLS, execute, mentioned, offered, toolByName, type ToolCtx } from "../areas/console/tools.js";
+import { ALL_TOOLS, execute, mentioned, toolByName, type ToolCtx } from "../areas/console/tools.js";
 
 const requirePerson = (req: FastifyRequest): { id: string; name: string } => {
   const p = req.gx.principal;

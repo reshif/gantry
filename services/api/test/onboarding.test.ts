@@ -7,7 +7,7 @@ import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 
 const d = TEST_URL ? describe : describe.skip;
 const lena = "p-lena"; // project_admin on identity: every onboarding right there
-const kenji = "p-kenji"; // release_manager on identity? no: payments, storefront, risk, mobile ...; used for merge on storefront
+const _kenji = "p-kenji"; // release_manager on identity? no: payments, storefront, risk, mobile ...; used for merge on storefront
 const rui = "p-rui"; // engineer on identity: onboarding.manage only
 const tomas = "p-tomas"; // engineer on payments only
 const admin = "p-asha";

@@ -8,7 +8,6 @@ vi.mock("./overlay-context", () => ({ useUI: () => ({ toast: toastSpy }) }));
 const toastSpy = vi.fn();
 
 type Q<T> = { data: T | undefined; error: unknown; isPending: boolean; isError: boolean; refetch: () => Promise<never> };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const q = <T,>(over: Partial<Q<T>>): any => ({ data: undefined, error: null, isPending: true, isError: false, refetch: vi.fn(), ...over });
 
 describe("Async", () => {

@@ -3,7 +3,7 @@
  * The submit button is guarded by the server's decision for this person and by the stop and onboarding state; one click makes one
  * work order (the request carries an Idempotency-Key that is kept for retries of the same dialog).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ONBOARD_STAGES, classify, classesOf, route as routeOf, type Project, type Repo } from "@gantry/domain";
 import { useCanMany } from "../../api/can";
 import { ops } from "../../api/ops";

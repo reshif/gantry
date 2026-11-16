@@ -26,7 +26,6 @@ win.navigator = { userAgent: "node" };
 const files = ["data", "flow", "lifecycle", "insight", "catalog", "store", "policy", "ui", "sim", "ops3"];
 for (const f of files) vm.runInContext(fs.readFileSync(path.join(root, f + ".js"), "utf8"), ctx, { filename: f + ".js" });
 const G = win.G;
-const state = G.store.get();
 export function loadLegacy() {
   return { G, anchor: ANCHOR };
 }

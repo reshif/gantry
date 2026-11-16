@@ -4,7 +4,7 @@ import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import { loadFlowState } from "../../core/read/state.js";
-import { appendMessage, closeConversation, replaceConversation, saveConversation } from "./conversation.js";
+import { closeConversation, replaceConversation, saveConversation } from "./conversation.js";
 import { createWorkOrder, newWoId } from "./create.js";
 import {
   bayOf, cancelAttempts, closeEntry, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,

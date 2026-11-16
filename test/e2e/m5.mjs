@@ -127,7 +127,7 @@ async function chat() {
   // 4. replay of a delivery already seen creates nothing new
   const n0 = q(`select count(*) from events where type='chat.approve'`)[0][0];
   h = await hookPost("/hooks/slack", c.b, c.headers); // same body, same trigger id
-  const dup = await hookPost("/hooks/slack", click(instance, "trg-fresh-card").b, click(instance, "trg-fresh-card").headers);
+  await hookPost("/hooks/slack", click(instance, "trg-fresh-card").b, click(instance, "trg-fresh-card").headers);
   check("replay: a replayed Slack delivery (same trigger id) creates nothing new", h.status === 200 && q(`select count(*) from events where type='chat.approve'`)[0][0] === n0 && q(`select count(*) from inbound_deliveries where source='slack' and delivery_id='trg-fresh-card'`)[0][0] === "1", `${h.status}; deliveries for trg-fresh-card=${q(`select count(*) from inbound_deliveries where source='slack' and delivery_id='trg-fresh-card'`)[0][0]}`);
   check("replay: the replay is audited as denied", q(`select count(*) from events where type='slack.hook.denied' and after::text like '%eplay%'`)[0][0] > "0" || q(`select count(*) from events where type='slack.hook.denied'`)[0][0] > "0", "");
 }

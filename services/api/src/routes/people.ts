@@ -14,8 +14,8 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { command, decide, policyState, refuse, readPeople, readTeams } from "../core/index.js";
 import { effectivePermissions } from "../areas/access/simulate.js";
-import { AwayBody, CreateTeamBody, FactoryRoleBody, InviteBody, OncallBody, RevokeBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
-import { acceptInvite, invitePerson, personVersion, setAway, setFactoryRole, setOncall, setTeams } from "../areas/people/people.js";
+import { AwayBody, CreateTeamBody, FactoryRoleBody, InviteBody, RevokeBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
+import { acceptInvite, invitePerson, personVersion, setAway, setFactoryRole, setTeams } from "../areas/people/people.js";
 import { createTeam, deleteTeam, grantTeamRole, revokeTeamRole, updateTeam } from "../areas/people/teams.js";
 import { directoryPeople, directoryScope, directoryTeams } from "../core/directory.js";
 

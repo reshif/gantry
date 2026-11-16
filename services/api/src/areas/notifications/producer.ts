@@ -31,7 +31,6 @@ export const unregisterNotificationProducer = (): void => {
 };
 
 const defaultOnError = (err: unknown, e: EventInput): void => {
-  // eslint-disable-next-line no-console
   console.error(`notification producer failed for ${e.type}: ${(err as Error)?.message ?? String(err)}`);
 };
 

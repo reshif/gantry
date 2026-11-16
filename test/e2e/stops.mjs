@@ -62,7 +62,7 @@ function probe(runId) {
   return { rows, stop: () => p.kill() };
 }
 async function measure(label, runIds, t0) {
-  const probes = Object.fromEntries(runIds.map((r) => [r, null]));
+  const _probes = Object.fromEntries(runIds.map((r) => [r, null]));
   // refusal time: first non-200 status after t0 (the probes were started before)
   const out = {};
   for (let i = 0; i < 300; i++) {

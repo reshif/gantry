@@ -1,6 +1,5 @@
 /** The Routes tab: routes of one project (event, destinations, card, conditions), the route editor and the card designer (legacy routesTab, editor, designer). */
 import { useEffect, useMemo, useState } from "react";
-import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { Btn, Empty, Field, LockNote, Panel, Segmented, Select, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
@@ -10,7 +9,6 @@ import type { Project, WorkClass } from "@gantry/domain";
 import { ALL_FIELDS, DEF_TPL, DestCard, FIELDS, WebhookCard, accepts, chanIcon, defaultTarget, draftError, evName, events, instState, usePreview, type Dest, type Draft, type Route, type useNtData } from "./kit";
 
 type Nt = ReturnType<typeof useNtData>;
-const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const norm = (r: Route | Draft): Draft => ({ ...(clone(r) as Draft), id: r.id ?? null, fields: { ...ALL_FIELDS, ...(r.fields ?? {}) }, cond: { ...(r.cond ?? {}), classes: r.cond?.classes ?? [], priority: r.cond?.priority ?? [], hours: r.cond?.hours ?? "any" } });
 

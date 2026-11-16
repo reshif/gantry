@@ -275,7 +275,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
     const { send, ac, end } = openSse(reply);
     active.add(repo.id);
     try {
-      let question = b.kind === "open" ? "(The person opened the onboarding session. Begin.)" : b.kind === "continue" ? "(The person asked for changes to your proposal; see their last message. Revise and propose again.)" : (b.text ?? "");
+      const question = b.kind === "open" ? "(The person opened the onboarding session. Begin.)" : b.kind === "continue" ? "(The person asked for changes to your proposal; see their last message. Revise and propose again.)" : (b.text ?? "");
       const mid = await agentTurn({ repo: fresh, doc, who, canMerge: merge.allowed, diff, ag, question, kind: b.kind, send, signal: ac.signal });
       send("done", { messageId: mid });
     } catch (e) {

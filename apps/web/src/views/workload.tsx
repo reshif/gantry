@@ -21,7 +21,7 @@ import { PersonDrawer } from "./workload/Drawer";
 import { MinutesTab, PeopleTab, TeamsTab, WaitsTab } from "./workload/Tabs";
 import { MIN_N, goConfig, goPerson, goTrust, mins, useDelegateGuard } from "./workload/kit";
 
-function SuggestionItem({ s, m, openDelegate }: { s: WorkloadSuggestion; m: Workload; openDelegate: (pid: string) => void }) {
+function SuggestionItem({ s, openDelegate }: { s: WorkloadSuggestion; m: Workload; openDelegate: (pid: string) => void }) {
   const a = s.action;
   const cfg = dec(useCan("approvers.edit", a.project ? { project: a.project } : {}));
   const del = useDelegateGuard(a.person ?? "");

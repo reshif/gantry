@@ -31,7 +31,7 @@ export async function addEvalCase(tx: Tx, a: Actor, suiteId: string, b: z.infer<
   const s = (await tx.query<{ id: string; name: string }>(`select id, name from suites where org_id = $1 and id = $2 for update`, [a.orgId, suiteId])).rows[0];
   if (!s) throw notFound("No such suite.");
   if (!b.name.trim()) throw invalid("Name the case.");
-  let repo = b.repo ?? null;
+  const repo = b.repo ?? null;
   let commit = b.commit ?? null;
   if (repo) {
     const r = (await tx.query<{ project_id: string }>(`select project_id from repos where org_id = $1 and id = $2`, [a.orgId, repo])).rows[0];

@@ -138,7 +138,7 @@ export function parseCodeowners(src: string): { rules: OwnerRule[]; invalid: { l
     const parts = line.split(/\s+/);
     const pattern = parts[0]!;
     const owners = parts.slice(1);
-    if (pattern.startsWith("!") || /[\[\]]/.test(pattern)) return void invalid.push({ line: i + 1, text: raw.trim(), why: "GitHub does not support this pattern syntax in CODEOWNERS" });
+    if (pattern.startsWith("!") || /[[\]]/.test(pattern)) return void invalid.push({ line: i + 1, text: raw.trim(), why: "GitHub does not support this pattern syntax in CODEOWNERS" });
     const bad = owners.find((o) => !/^@[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)?$/.test(o) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(o));
     if (bad) return void invalid.push({ line: i + 1, text: raw.trim(), why: `"${bad}" is not a user, team or email` });
     rules.push({ pattern, owners, line: i + 1 });

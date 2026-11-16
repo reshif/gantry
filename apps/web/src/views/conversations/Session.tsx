@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WoCard } from "@gantry/domain";
 import { fmt, isBriefScaffold } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { Btn, Chip, Empty, Who } from "../../ui/primitives";
+import { Btn, Chip, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";

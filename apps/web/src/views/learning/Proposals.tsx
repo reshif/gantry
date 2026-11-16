@@ -1,5 +1,4 @@
 /** Proposals tab: the status strip and one card per proposal, with accept, decline, verify and roll back. Each is a real command with its own refusal. */
-import { useState } from "react";
 import type { LearningFinding, LearningProposal } from "@gantry/domain";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";

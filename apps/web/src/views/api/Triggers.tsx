@@ -10,7 +10,7 @@ import { classesOf, fmt, type Trigger, type TriggerProposal, type TriggerRun } f
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useProjects, useRepos, useTriggerProposals } from "../../api/queries";
-import { Btn, Empty, Field, LockNote, Panel, Select, Toggle, type Decision } from "../../ui/primitives";
+import { Btn, Empty, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";

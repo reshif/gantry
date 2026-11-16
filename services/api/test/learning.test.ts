@@ -34,7 +34,7 @@ d("learning loop (spec 8.7, 13.4)", () => {
     return id;
   };
   const refresh = async (who = ASHA) => post("/api/v1/learning/findings/refresh", {}, who);
-  const switchOn = async () => (await w.call(ASHA, "PUT", "/api/v1/learning/switch", { on: true, reason: "Trying the loop" })).body;
+  const _switchOn = async () => (await w.call(ASHA, "PUT", "/api/v1/learning/switch", { on: true, reason: "Trying the loop" })).body;
   const skillText = async (id: string) => (await get("/api/v1/skills")).find((s: any) => s.id === id);
   const draftSkill = async (finding: string, after: string, who = ASHA, over: Record<string, unknown> = {}) =>
     post("/api/v1/learning/proposals", { finding, kind: "skill", title: "Spec writing: add a rollback section", expected: "Fewer rollback send-backs", change: { skill: "sk-testdesign", after }, metric: { target: 0 }, windowDays: 7, ...over }, who, key());

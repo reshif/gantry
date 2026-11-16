@@ -24,7 +24,6 @@ export interface Ctx {
   compact: boolean;
 }
 
-const Dot = () => <span className="muted"> · </span>;
 
 /* ------------------------------------------------------------------ summary */
 export function Summary({ c }: { c: Ctx }) {

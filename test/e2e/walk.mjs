@@ -27,7 +27,7 @@ for (const user of users) {
     console.log(`${row.errors.length || row.api.length || ph || text.length < 40 ? "WARN" : "ok  "} ${user} #${id} chars=${text.length}${ph ? " PLACEHOLDER=" + ph : ""}${row.errors.length ? " errors=" + JSON.stringify(row.errors) : ""}${row.api.length ? " api=" + JSON.stringify(row.api) : ""}`);
   }
   // the work order record screen (reachable from the traveler, not listed in the nav)
-  const rec = await page.evaluate(async () => { const r = await fetch("/api/v1/work-orders?limit=1"); return r.status; }).catch(() => 0);
+  await page.evaluate(async () => { const r = await fetch("/api/v1/work-orders?limit=1"); return r.status; }).catch(() => 0);
   await s.ctx.close();
 }
 await close();

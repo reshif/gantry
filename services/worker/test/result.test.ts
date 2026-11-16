@@ -3,7 +3,6 @@ import { TEST_URL } from "./db.js";
 import { startWorld, type World } from "./world.js";
 
 const d = TEST_URL ? describe : describe.skip;
-const SHA = "a".repeat(40);
 
 /** What the edge's /result intake stores: a station_results row and the run.result job. */
 async function deliverResult(w: World, a: { attemptId: string; fencing: number; runId: string }, woId: string, station: string, status: "succeeded" | "failed" | "interrupted", output: object = {}, error?: object) {
