@@ -40,3 +40,11 @@ export const TeamGrantBody = z.object({
 });
 export const FactoryRoleBody = z.object({ reason: grantReason });
 export const RevokeBody = z.object({ reason: grantReason.optional() }).nullish();
+
+const offboardReason = z.string().trim().min(10, "Give a reason of at least 10 characters.").max(500);
+export const DeactivateBody = z.object({
+  reason: offboardReason,
+  /** Leave the API keys they created live (they are listed in the audit event). The default revokes them. */
+  keepKeys: z.boolean().default(false),
+});
+export const ReactivateBody = z.object({ reason: offboardReason });

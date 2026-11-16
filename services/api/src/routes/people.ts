@@ -5,6 +5,7 @@
  *   GET/POST /api/v1/teams/{id}/roles, DELETE /api/v1/teams/{id}/roles/{grant}      (team role grants; members inherit them)
  *   POST /api/v1/invites, POST /api/v1/invites/{id}/accept       (the invite id is the invited person's id)
  *   PUT/DELETE /api/v1/people/{id}/factory-roles/{role}
+ *   POST /api/v1/people/{id}/deactivate, POST /api/v1/people/{id}/reactivate   (offboarding)
  *   PUT /api/v1/people/{id}/teams, PUT /api/v1/people/{id}/oncall, PUT /api/v1/people/{id}/away
  *
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4). Project role grants
@@ -14,7 +15,8 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { command, decide, policyState, refuse, readPeople, readTeams } from "../core/index.js";
 import { effectivePermissions } from "../areas/access/simulate.js";
-import { AwayBody, CreateTeamBody, FactoryRoleBody, InviteBody, RevokeBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
+import { deactivatePerson, reactivatePerson } from "../areas/people/offboard.js";
+import { AwayBody, CreateTeamBody, DeactivateBody, ReactivateBody, FactoryRoleBody, InviteBody, RevokeBody, TeamGrantBody, TeamsBody, UpdateTeamBody } from "../areas/people/schemas.js";
 import { acceptInvite, invitePerson, personVersion, setAway, setFactoryRole, setTeams } from "../areas/people/people.js";
 import { createTeam, deleteTeam, grantTeamRole, revokeTeamRole, updateTeam } from "../areas/people/teams.js";
 import { directoryPeople, directoryScope, directoryTeams } from "../core/directory.js";
@@ -121,6 +123,19 @@ export const peopleRoutes: FastifyPluginAsync = async (app) => {
       },
     });
   }
+
+  // Offboarding removes access, so it needs a fresh sign-in, the person's current version and a reason for the audit trail.
+  app.post("/api/v1/people/:id/deactivate", async (req) => {
+    const { id } = Id.parse(req.params);
+    const body = DeactivateBody.parse(req.body ?? {});
+    return command(req, { action: "people.manage", stepUp: true, ifMatchRequired: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => deactivatePerson(tx, a, id, body));
+  });
+
+  app.post("/api/v1/people/:id/reactivate", async (req) => {
+    const { id } = Id.parse(req.params);
+    const body = ReactivateBody.parse(req.body ?? {});
+    return command(req, { action: "people.manage", stepUp: true, ifMatchRequired: true, ifMatch: (tx) => personVersion(tx, g.orgId, id) }, (tx, a) => reactivatePerson(tx, a, id, body));
+  });
 
   app.put("/api/v1/people/:id/teams", async (req) => {
     const { id } = Id.parse(req.params);
