@@ -1,118 +1,130 @@
-/* Gantry design tokens. Light palette in bare :root, dark redefined twice
-   (system preference unless forced light, and explicit data-theme="dark"). */
+/* Gantry design tokens (shadcn-style neutrals, Tremor-style data cards, indigo accent).
+   Light palette in bare :root, dark redefined twice (system preference unless forced light, and explicit data-theme="dark").
+   Older token names (--ink, --muted, --line-strong, --r1 ...) keep working: they are the primary names; the short
+   preview names (--fg, --ok ...) are aliases. Do not redefine --panel or --muted with a different meaning. */
 :root {
   color-scheme: light;
-  --f-display: "Barlow Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
-  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --f-body: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-display: var(--f-body);
+  --f-ui: var(--f-body);
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
-  /* type scale */
+  /* type scale: page title 22, panel title 15, body 14, small 12/13 */
   --t-xs: 11px; --t-sm: 12px; --t-md: 13px; --t-base: 14px; --t-lg: 16px;
-  --t-xl: 20px; --t-2xl: 28px; --t-3xl: 40px;
+  --t-xl: 18px; --t-2xl: 22px; --t-3xl: 28px; --t-title: 22px; --t-panel: 15px;
 
   /* spacing */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
-  --r1: 3px; --r2: 5px;
+  /* radii: controls 6, cards 8, dialogs 12 */
+  --r1: 6px; --r2: 8px; --r3: 12px; --r: 8px; --r-sm: 6px;
+  --control-h: 32px;
 
-  /* neutrals, biased toward the cobalt accent */
-  --bg: #e9edf2;
+  --bg: #fafafa;
   --surface: #ffffff;
-  --panel: #f5f7fa;
-  --sunk: #e2e7ee;
-  --ink: #121a24;
-  --ink-2: #364352;
-  --muted: #5f6c7b;
-  --faint: #8b97a5;
-  --line: #d3dae3;
-  --line-strong: #a9b4c1;
-  --grid: rgba(43, 84, 201, 0.07);
+  --panel: #f4f4f5;
+  --sunk: #eeeef0;
+  --ink: #09090b;
+  --ink-2: #3f3f46;
+  --muted: #52525b;
+  --faint: #71717a;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  --grid: rgba(79, 70, 229, 0.06);
 
-  --accent: #2b54c9;
-  --accent-hover: #2246ad;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
   --accent-ink: #ffffff;
-  --accent-soft: #e2e9fa;
-  --accent-line: #9fb3ea;
+  --accent-soft: #eef2ff;
+  --accent-line: #c7d2fe;
 
   /* semantic states: each also has a distinct glyph */
-  --run: #0a7480;      --run-soft: #dcf0f1;
-  --wait: #9c5a00;     --wait-soft: #fbeed6;
-  --block: #bf2f28;    --block-soft: #fbe2df;
-  --fail: #a02b6b;     --fail-soft: #f6e0ec;
-  --done: #2c7638;     --done-soft: #dff0e1;
-  --halt-stripe: rgba(191, 47, 40, 0.10);
+  --run: #1d4ed8;      --run-soft: #dbeafe;
+  --wait: #b45309;     --wait-soft: #fef3c7;
+  --block: #b91c1c;    --block-soft: #fee2e2;
+  --fail: #a21caf;     --fail-soft: #fae8ff;
+  --done: #15803d;     --done-soft: #dcfce7;
+  --halt-stripe: rgba(185, 28, 28, 0.10);
 
   /* work classes: categorical, each chip also carries its name */
   --cls-feature: #2b54c9; --cls-bug: #b2462c; --cls-hotfix: #c2185b; --cls-epic: #6b3fa0; --cls-chore: #5f6c7b;
   --cls-refactor: #00796b; --cls-security: #a31515; --cls-docs: #4e7a1e; --cls-spike: #8a6100;
   --kill: #7a0d0d; --kill-soft: #f3d9d9; --gate: #b26a00; --gate-soft: #fdecc8;
-  --shadow-1: 0 1px 2px rgba(18, 26, 36, 0.08);
-  --shadow-2: 0 10px 30px rgba(18, 26, 36, 0.18), 0 2px 6px rgba(18, 26, 36, 0.10);
-  --scrim: rgba(14, 20, 28, 0.42);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
+  --shadow-2: 0 12px 32px rgb(0 0 0 / 0.2), 0 2px 6px rgb(0 0 0 / 0.08);
+  --scrim: rgba(9, 9, 11, 0.45);
   --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+
+  /* short aliases used by the approved preview and by new components */
+  --fg: var(--ink); --fg-2: var(--muted); --fg-3: var(--faint); --line-2: var(--line-strong);
+  --ok: var(--done); --ok-soft: var(--done-soft); --warn: var(--wait); --warn-soft: var(--wait-soft);
+  --bad: var(--block); --bad-soft: var(--block-soft); --info: var(--run); --info-soft: var(--run-soft);
+  --idle: #a1a1aa; --shadow: var(--shadow-1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0d1218;
-    --surface: #141b23;
-    --panel: #18212b;
-    --sunk: #0f151c;
-    --ink: #e4e9ef;
-    --ink-2: #b9c3ce;
-    --muted: #8a97a6;
-    --faint: #66737f;
-    --line: #26313d;
-    --line-strong: #3a4756;
-    --grid: rgba(125, 155, 255, 0.06);
-    --accent: #7f9cff;
-    --accent-hover: #9bb2ff;
-    --accent-ink: #0a1022;
-    --accent-soft: #1b2645;
-    --accent-line: #3d518c;
-    --run: #4cc4cb;   --run-soft: #10302f;
-    --wait: #e6a94a;  --wait-soft: #33260f;
-    --block: #ff6f62; --block-soft: #3a1714;
-    --fail: #ea7bb8;  --fail-soft: #3a1529;
-    --done: #6cc77a;  --done-soft: #142e19;
-    --halt-stripe: rgba(255, 111, 98, 0.10);
+    --bg: #09090b;
+    --surface: #111113;
+    --panel: #18181b;
+    --sunk: #0c0c0e;
+    --ink: #fafafa;
+    --ink-2: #d4d4d8;
+    --muted: #a1a1aa;
+    --faint: #8a8a94;
+    --line: #27272a;
+    --line-strong: #3f3f46;
+    --grid: rgba(129, 140, 248, 0.07);
+    --accent: #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-ink: #0b0b12;
+    --accent-soft: #1e1b4b;
+    --accent-line: #3730a3;
+    --run: #60a5fa;   --run-soft: #0c1f3d;
+    --wait: #fbbf24;  --wait-soft: #3a2a05;
+    --block: #f87171; --block-soft: #3b0d0d;
+    --fail: #e879f9;  --fail-soft: #3a0f3f;
+    --done: #4ade80;  --done-soft: #052e16;
+    --halt-stripe: rgba(248, 113, 113, 0.10);
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
     --cls-feature: #8fa8ff; --cls-bug: #f08a6c; --cls-hotfix: #f06292; --cls-epic: #b794f4; --cls-chore: #9aa6b4;
     --cls-refactor: #4dd0c1; --cls-security: #ff7a7a; --cls-docs: #9ccc65; --cls-spike: #e6b44a;
     --kill: #ff5a5a; --kill-soft: #3d0f12; --gate: #f0a63a; --gate-soft: #3a2a0c;
-    --scrim: rgba(0, 0, 0, 0.55);
+    --scrim: rgba(0, 0, 0, 0.6);
+    --idle: #52525b;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0d1218;
-  --surface: #141b23;
-  --panel: #18212b;
-  --sunk: #0f151c;
-  --ink: #e4e9ef;
-  --ink-2: #b9c3ce;
-  --muted: #8a97a6;
-  --faint: #66737f;
-  --line: #26313d;
-  --line-strong: #3a4756;
-  --grid: rgba(125, 155, 255, 0.06);
-  --accent: #7f9cff;
-  --accent-hover: #9bb2ff;
-  --accent-ink: #0a1022;
-  --accent-soft: #1b2645;
-  --accent-line: #3d518c;
-  --run: #4cc4cb;   --run-soft: #10302f;
-  --wait: #e6a94a;  --wait-soft: #33260f;
-  --block: #ff6f62; --block-soft: #3a1714;
-  --fail: #ea7bb8;  --fail-soft: #3a1529;
-  --done: #6cc77a;  --done-soft: #142e19;
-  --halt-stripe: rgba(255, 111, 98, 0.10);
+  --bg: #09090b;
+  --surface: #111113;
+  --panel: #18181b;
+  --sunk: #0c0c0e;
+  --ink: #fafafa;
+  --ink-2: #d4d4d8;
+  --muted: #a1a1aa;
+  --faint: #8a8a94;
+  --line: #27272a;
+  --line-strong: #3f3f46;
+  --grid: rgba(129, 140, 248, 0.07);
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-ink: #0b0b12;
+  --accent-soft: #1e1b4b;
+  --accent-line: #3730a3;
+  --run: #60a5fa;   --run-soft: #0c1f3d;
+  --wait: #fbbf24;  --wait-soft: #3a2a05;
+  --block: #f87171; --block-soft: #3b0d0d;
+  --fail: #e879f9;  --fail-soft: #3a0f3f;
+  --done: #4ade80;  --done-soft: #052e16;
+  --halt-stripe: rgba(248, 113, 113, 0.10);
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   --cls-feature: #8fa8ff; --cls-bug: #f08a6c; --cls-hotfix: #f06292; --cls-epic: #b794f4; --cls-chore: #9aa6b4;
   --cls-refactor: #4dd0c1; --cls-security: #ff7a7a; --cls-docs: #9ccc65; --cls-spike: #e6b44a;
   --kill: #ff5a5a; --kill-soft: #3d0f12; --gate: #f0a63a; --gate-soft: #3a2a0c;
-  --scrim: rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --idle: #52525b;
 }
