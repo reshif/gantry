@@ -119,9 +119,9 @@ kbd { font-size: var(--t-xs); border: 1px solid var(--line); border-bottom-width
 .titleblock dd, .stat-val { margin: 0; font-family: var(--f-body); font-weight: 600; font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { font-size: var(--t-sm); color: var(--muted); }
 .stat-row { display: grid; gap: var(--s3); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-.stat-tile.tone-wait .stat-val { color: var(--wait); }
-.stat-tile.tone-block .stat-val { color: var(--block); }
-.stat-tile.tone-done .stat-val { color: var(--done); }
+.stat-tile.stat-wait .stat-val { color: var(--wait); }
+.stat-tile.stat-block .stat-val { color: var(--block); }
+.stat-tile.stat-done .stat-val { color: var(--done); }
 .stat-delta.is-up { color: var(--done); } .stat-delta.is-down { color: var(--block); }
 /* the older floor stat strip follows the same tile look */
 .stats { border: 0; background: none; gap: var(--s3); }

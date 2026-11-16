@@ -39,7 +39,7 @@ describe("stat tiles and filter bar", () => {
     expect(screen.getByText("Work in flight")).toBeTruthy();
     expect(screen.getByText("4 running now")).toBeTruthy();
     expect(document.querySelectorAll(".stat-row > .stat-tile")).toHaveLength(2);
-    expect(document.querySelector(".stat-tile.tone-block")).toBeTruthy();
+    expect(document.querySelector(".stat-tile.stat-block")).toBeTruthy();
   });
 
   it("puts the count and actions after the filters and labels the search", () => {
