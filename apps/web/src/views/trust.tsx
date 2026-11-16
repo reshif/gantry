@@ -23,7 +23,7 @@ export default function TrustView() {
   const cat = useCatalog();
   const pq = useProjects();
   const projects = ((pq.data ?? []) as Project[]).filter((p) => p.status !== "archived");
-  const agents = useAgents().data ?? [];
+  const agentsData = useAgents().data;
   const all = useTrustCells();
   const project = (trustUi.project && projects.some((p) => p.id === trustUi.project) ? trustUi.project : null) ?? (prefs.project && projects.some((p) => p.id === prefs.project) ? prefs.project : null) ?? projects[0]?.id ?? null;
   if (project !== trustUi.project) trustUi.project = project;
@@ -37,7 +37,7 @@ export default function TrustView() {
     trustFocus(focus, cells, proposals);
     updatePrefs({ trustFocus: null } as never);
   }, [focus, tr]); // eslint-disable-line react-hooks/exhaustive-deps
-  const agentName = useMemo(() => (id: string) => agents.find((a) => a.id === id)?.name ?? id, [agents]);
+  const agentName = useMemo(() => (id: string) => (agentsData ?? []).find((a) => a.id === id)?.name ?? id, [agentsData]);
   const clsName = useMemo(() => (id: string) => cat?.classes.find((c) => c.id === id)?.name ?? id, [cat]);
   if (pq.data === undefined) return <div className="view view-trust"><ViewHead title="Trust" /><Async query={pq} what="projects" id="trust-projects">{() => null}</Async></div>;
   if (!projects.length) return <div className="view view-trust"><ViewHead title="Trust" /><Empty title="No projects to show" text="You have no role on an active project." /></div>;

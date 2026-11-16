@@ -46,12 +46,12 @@ export default function EvalsView() {
   useEvalsUi();
   const d = useEvalsData();
   usePrefs();
-  const projects = useProjects().data ?? [];
+  const projectsData = useProjects().data;
   const label = useMemo(() => (c: { agent: string; cls: string; project: string; repo: string | null }): string => {
     const a = d.agents.find((x) => x.id === c.agent)?.name ?? c.agent;
-    const p = projects.find((x) => x.id === c.project)?.name ?? c.project;
+    const p = (projectsData ?? []).find((x) => x.id === c.project)?.name ?? c.project;
     return `${a} · ${c.cls} · ${p}${c.repo ? ` · ${c.repo}` : ""}`;
-  }, [d.agents, projects]);
+  }, [d.agents, projectsData]);
   if (d.q.data === undefined) return <div className="view view-evals"><ViewHead title="Evals" /><Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
   if (!d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
   const regs = regressionsOf(d);

@@ -109,7 +109,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     if (embed || threadId || fresh || !threads.data) return;
     const latest = threads.data.items[0];
     if (latest) setThreadId(latest.id);
-  }, [threads.data, threadId, fresh]);
+  }, [embed, threads.data, threadId, fresh, setThreadId]);
 
   const visible = projects.filter((p) => p.status !== "archived");
   const cur = visible.find((p) => p.id === prefs.project) ?? visible[0] ?? null;
@@ -152,7 +152,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     if (all.length) return all;
     if (embed?.agent) return [{ id: "m0", role: "factory", at: 0, mode: "pending", text: `Ask ${embed.agent.name} about ${embed.agent.about}. ${embed.agent.name} answers from what the work has produced so far (documents, questions, sources) and reads live data with your permissions. Nothing changes from here: answers, corrections and send-backs belong in the primary thread.` } satisfies Msg];
     return [{ id: "m0", role: "factory", at: 0, mode: "pending", cards: [{ type: "suggest" }], text: `Ask about your projects in plain language, or use a slash command. ${st?.configured ? `Questions are answered by ${st.model} using tools over the live factory.` : "No model is configured, so questions cannot be answered yet; slash commands read live data directly."} Anything that changes state shows a confirm card and runs only when you click it. Questions without a project use your current project, ${cur?.name ?? "none"}.` } satisfies Msg];
-  }, [serverMsgs, local, tail, st, cur]);
+  }, [serverMsgs, local, tail, st, cur, embed?.agent]);
 
   const lastMsg = msgs[msgs.length - 1];
   const prevMsg = msgs[msgs.length - 2];

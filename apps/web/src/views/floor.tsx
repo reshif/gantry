@@ -144,13 +144,14 @@ function FloorBody({ projectId }: { projectId: string }) {
   const view = prefs.floorView || "belt";
   const [playing, setPlaying] = useState(false);
   const rp = ctx.replay;
+  const hasReplay = !!rp;
   const rpRef = useRef(rp);
   rpRef.current = rp;
   useTick(30_000);
 
   // play: advance the replay clock; each step is one read of the floor at that time
   useEffect(() => {
-    if (!playing || !rp) return;
+    if (!playing || !hasReplay) return;
     const t = setInterval(() => {
       const c = rpRef.current;
       if (!c) return;
@@ -163,7 +164,7 @@ function FloorBody({ projectId }: { projectId: string }) {
       setReplay({ at: next });
     }, 500);
     return () => clearInterval(t);
-  }, [playing, !!rp]);
+  }, [playing, hasReplay]);
   useEffect(() => {
     if (!rp) setPlaying(false);
   }, [rp]);

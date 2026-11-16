@@ -2,7 +2,7 @@
  * Access (spec 8.9, 14.4). Port of legacy/js/views/access.js: the policy simulator (server-side, same can() as enforcement),
  * scoped policies, freezes, the roles x actions matrix and roles.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useAccessMatrix, useFreezes, useMe, usePeople, usePolicies, useProjects } from "../api/queries";
@@ -24,18 +24,21 @@ export default function AccessView() {
   const outcome = useOutcome();
   const mQ = useAccessMatrix();
   const m = mQ.data;
-  const people = usePeople().data ?? [];
+  const peopleData = usePeople().data;
+  const people = useMemo(() => peopleData ?? [], [peopleData]);
   const policiesQ = usePolicies();
   const freezesQ = useFreezes();
   const policies = policiesQ.data ?? [];
   const freezes = freezesQ.data ?? [];
-  const projects = (useProjects().data ?? me?.projects ?? []) as Project[];
+  const projectsData = useProjects().data;
+  const myProjects = me?.projects;
+  const projects = useMemo(() => (projectsData ?? myProjects ?? []) as Project[], [projectsData, myProjects]);
   const { repos } = useAllRepos();
   const perm = dec(useCan("policy.edit"));
   const rperm = dec(useCan("role.edit"));
   const view = dec(useCan("policy.view"));
   const roles = m?.roles ?? [];
-  const actions = m?.actions ?? [];
+  const actions = useMemo(() => m?.actions ?? [], [m]);
   const matrix = m?.matrix ?? {};
 
   const [tab, setTab] = useState("policies");
@@ -131,10 +134,14 @@ export default function AccessView() {
         meta={[["Roles", qState(mQ, () => String(roles.length) + (custom ? ` (${custom} custom)` : ""))], ["Actions", qState(mQ, () => String(actions.length))], ["Policies on", qState(policiesQ, () => String(policies.filter((p) => p.enabled).length))], ["Freezes active", qState(freezesQ, () => String(activeFz))]]}
       />
       <LockNote decision={perm} what="The role matrix, policies and freezes" />
-      <Simulator
-        people={people} projects={projects} repos={repos} actions={actions} sim={cur} setSim={setSim} evaluated={evaluated}
-        onEvaluate={(s) => void evaluate(s)} onShowRule={setTab} presetsList={presets(people, projects, repos)}
-      />
+      {mQ.isError && !m ? (
+        <section className="panel" aria-label="Policy simulator"><div className="panel-body"><Async query={mQ} what="the access matrix" id="acc-matrix">{() => null}</Async></div></section>
+      ) : (
+        <Simulator
+          people={people} projects={projects} repos={repos} actions={actions} sim={cur} setSim={setSim} evaluated={evaluated}
+          onEvaluate={(s) => void evaluate(s)} onShowRule={setTab} presetsList={presets(people, projects, repos)}
+        />
+      )}
       <section className="panel acc-rules" aria-label="Rules">
         <div className="acc-tabbar">
           <Tabs

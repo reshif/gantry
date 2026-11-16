@@ -4,7 +4,7 @@
  * Edits stay in a draft (kept across tabs and screens) until Save; saving writes one audited change. A version is a snapshot of the saved configuration and is immutable.
  * Not ported, on purpose: nothing from the legacy screen is simulation; "Run suite" opens Evals, which owns suite runs.
  */
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { fmt, type Project } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, usePolicies, useProjects } from "../api/queries";
@@ -141,7 +141,7 @@ export default function AgentsView() {
   const ui_ = useUI();
   const prefs = usePrefs();
   const q = useAgents();
-  const agents = (q.data ?? []) as unknown as AgentRow[];
+  const agents = useMemo(() => (q.data ?? []) as unknown as AgentRow[], [q.data]);
   const projects = (useProjects().data ?? []) as Project[];
   const policies = usePolicies().data ?? [];
   const perm = dec(useCan("agent.edit"));

@@ -52,7 +52,8 @@ export interface ApiData {
 
 export function useApiData(): ApiData {
   const me = useMe();
-  const projects = useProjects().data ?? [];
+  const projectsData = useProjects().data;
+  const projects = useMemo(() => projectsData ?? [], [projectsData]);
   const keysQ = useApiKeys();
   const cfgQ = useApiConfig();
   const trigQ = useTriggers();

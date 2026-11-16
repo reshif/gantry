@@ -117,14 +117,14 @@ export function Changes({ c }: { c: Ctx }) {
   const name = useName();
   const ch = useChangesRead(wo.id).data;
   const [group, setGroup] = useState<"file" | "commit">("file");
-  const planFiles = (wo.files ?? []) as RecFile[];
   const files: RecFile[] = useMemo(() => {
+    const planFiles = (wo.files ?? []) as RecFile[];
     const real = ch?.files ?? rec.code.files;
     const byPath = new Map(planFiles.map((f) => [f.path, f]));
     const out: RecFile[] = real.map((f) => ({ ...(byPath.get(f.path) ?? {}), ...f }) as RecFile);
     for (const f of planFiles) if (!out.some((x) => x.path === f.path)) out.push(f);
     return out;
-  }, [ch, rec.code.files, planFiles]);
+  }, [ch, rec.code.files, wo.files]);
   const commits = ch?.commits ?? rec.code.commits.map((x) => ({ sha: x.sha, message: x.message, author: x.author, at: ms(x.at), files: [] as Array<{ path: string; status: string; plus: number; minus: number }> }));
   if (!files.length && !commits.length) return <None text={wo.criteria ? "Nothing planned yet. Plan lists the files before Build." : "No changes yet. Files appear once Build pushes a branch."} />;
   const plus = sum(files, "plus");
