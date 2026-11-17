@@ -2,6 +2,7 @@
 import { FACTORY_READ } from "../lib/routes";
 import { useEffect, useMemo, useState } from "react";
 import { fmt } from "@gantry/domain";
+import { useHash } from "../lib/router";
 import { useAuditVerify, useMe, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { Btn, Empty, Field, Select, ViewHead } from "../ui/primitives";
@@ -27,7 +28,13 @@ export default function AuditView() {
   const me = useMe();
   const perm = useCan("audit.view");
   const projects = (useProjects().data ?? []) as Array<{ id: string; name: string }>;
+  // "#audit/console" opens the ledger on what this person did through the Console (linked from the Console's side panel).
+  const asConsole = useHash().param === "console";
+  const myId = me?.person.id;
   const [f, setF] = useState<Filters>(NO_FILTERS);
+  useEffect(() => {
+    if (asConsole && myId) setF((x) => ({ ...x, via: "console", actor: myId }));
+  }, [asConsole, myId]);
   const [typed, setTyped] = useState("");
   const q = useDebounced(typed, 250);
   const filters = useMemo(() => ({ ...f, q }), [f, q]);

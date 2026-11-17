@@ -494,6 +494,17 @@ describe("Console model picker", () => {
     expect(document.getElementById("con-connect-vendor")).toBeNull();
   });
 
+  it("shows the status chip in the header, the toolbar above the thread, and the permission code on each capability", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
+    mount();
+    await byId("con-bar");
+    expect(document.querySelector(".vhead .ask-badge")).toBeTruthy();
+    for (const id of ["con-threads", "con-new", "con-clear"]) expect(document.getElementById(id)).toBeTruthy();
+    await waitFor(() => expect([...document.querySelectorAll(".ctx .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
+    expect(document.getElementById("con-open-audit")).toBeTruthy();
+    expect([...document.querySelectorAll(".ctx .panel-title")][0]!.textContent).toMatch(/^What .* can do/);
+  });
+
   it("the status line sits below the header rule: no negative margin pulls it into the heading", () => {
     const css = readFileSync(resolve(__dirname, "../styles/views/console.css"), "utf8");
     const rule = /\.con-mode-line \{[^}]*\}/.exec(css)![0];
