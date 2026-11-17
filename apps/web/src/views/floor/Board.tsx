@@ -1,7 +1,7 @@
 /** Board and list views of the floor, with the shared filter bar (legacy floor.js board, list and filterBar). */
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
-import { WO_STATES, bayDef, classesOf, flowOf, fmt, gateTitle, woTotals } from "@gantry/domain";
-import { Avatar, Btn, Empty, Field, Select, StateChip } from "../../ui/primitives";
+import { WO_STATES, classesOf, flowOf, fmt, gateTitle } from "@gantry/domain";
+import { Avatar, Btn, Field, Select } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { updatePrefs, usePrefs } from "../../lib/prefs";
@@ -403,106 +403,3 @@ export function Board() {
     </div>
   );
 }
-
-/* ---------- list ---------- */
-
-type SortKey = "id" | "title" | "cls" | "repo" | "where" | "state" | "prio" | "age" | "cost";
-
-export function ListView() {
-  const ctx = useFloorCtx();
-  const open = useOpenTraveler();
-  const actor = useActors();
-  const [sort, setSort] = useState<{ k: SortKey; dir: 1 | -1 }>({ k: "where", dir: 1 });
-  const { cat, project: p } = ctx;
-  const applyFilters = useApplyFilters();
-  const rows = applyFilters(ctx.wos).slice();
-  const fl = flowOf(cat, p);
-  const bayIds = fl.bays.map((b) => b.id);
-  const order = fl.stations.map((x) => x.id);
-  const key = (w: FWo): string | number =>
-    ({
-      id: w.id, title: w.title.toLowerCase(), cls: w.cls, repo: w.repo,
-      where: w.state === "done" ? 1000 : w.bay ? 500 + bayIds.indexOf(w.bay) : order.indexOf(cat.stations[w.station]?.id ?? ""),
-      state: w.state, prio: w.priority, age: since(w), cost: woTotals(w).cost,
-    })[sort.k];
-  rows.sort((a, b) => {
-    const x = key(a);
-    const y = key(b);
-    return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
-  });
-  const th = (k: SortKey, label: string, num?: boolean) => {
-    const on = sort.k === k;
-    return (
-      <th className={num ? "num" : undefined} aria-sort={on ? (sort.dir > 0 ? "ascending" : "descending") : "none"} scope="col">
-        <button type="button" className="th-sort" id={`floor-sort-${k}`} onClick={() => setSort({ k, dir: on ? (sort.dir === 1 ? -1 : 1) : 1 })}>
-          {label}
-          {on ? <Icon name={sort.dir > 0 ? "up" : "down"} /> : null}
-        </button>
-      </th>
-    );
-  };
-  const whereText = (w: FWo) => (w.bay ? (bayDef(cat, w.bay)?.name ?? w.bay) : `${cat.stations[w.station]?.no ?? ""} ${cat.stations[w.station]?.name ?? ""}`);
-  return (
-    <div className="fl-listwrap">
-      <FilterBar />
-      <div className="table-scroll" data-keep-scroll="floor-list">
-        <table className="table table-compact fl-table">
-          <caption className="sr">{`Work orders in ${p.name}`}</caption>
-          <thead>
-            <tr>
-              {th("id", "ID")}
-              {th("title", "Title")}
-              {th("cls", "Class")}
-              {th("repo", "Repo")}
-              {th("where", "Station or bay")}
-              {th("state", "State")}
-              <th scope="col">Gate</th>
-              <th scope="col">Agent</th>
-              {th("prio", "Priority")}
-              {th("age", "Here for", true)}
-              {th("cost", "Cost", true)}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length ? (
-              rows.map((w) => {
-                const gt = gateText(ctx, w);
-                const ag = assigneeOf(w);
-                return (
-                  <tr key={w.id} className={`fl-tr-${w.state}`}>
-                    <td>
-                      <button type="button" className="linkish mono" id={`floor-row-${w.id}`} onClick={() => open(w.id)}>
-                        {w.id}
-                      </button>
-                    </td>
-                    <td className="fl-td-title">{w.title}</td>
-                    <td>
-                      <ClassChip cls={classOf(cat, p, w.cls)} small />
-                    </td>
-                    <td className="mono small">{repoName(ctx.repos, w.repo)}</td>
-                    <td>{whereText(w)}</td>
-                    <td>
-                      <StateChip state={w.state} />
-                    </td>
-                    <td>{w.state === "done" ? <span className="muted">{w.split ? "split" : "shipped"}</span> : <span className={`fl-gt fl-gt-${gt.c}`}>{gt.t}</span>}</td>
-                    <td className="small">{ag ? actor(ag).name.replace(" (agent)", "") : "none"}</td>
-                    <td className="mono">{w.priority}</td>
-                    <td className="num mono">{w.state === "done" ? "done" : fmt.dur(Math.max(0, ctx.now - since(w)))}</td>
-                    <td className="num mono">{fmt.money(woTotals(w).cost)}</td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan={11}>
-                  <Empty title="No work orders match" text={`Clear the filters to see everything in ${p.name}.`} />
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-

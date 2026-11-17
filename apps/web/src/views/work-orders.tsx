@@ -296,7 +296,7 @@ export default function WorkOrdersView() {
           <div>
             <strong>{`${atIntake.length} at Intake`}</strong>
             <span>{" They wait for their brief to be confirmed at the first gate. Answer their questions in the work order's conversation. "}</span>
-            <Btn label="Show At Intake" small id="wo-to-intake" onClick={() => setTab("intake")} />{" "}
+            {mode === "table" ? <Btn label="Show At Intake" small id="wo-to-intake" onClick={() => setTab("intake")} /> : null}{" "}
             <a href="#conversations" id="wo-to-conv">Open Conversations</a>
           </div>
         </div>
