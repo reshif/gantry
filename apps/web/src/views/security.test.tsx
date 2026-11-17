@@ -8,7 +8,7 @@ import { OverlayProvider } from "../ui/Overlay";
 import SecurityView from "./security";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
-interface Call { method: string; path: string; body: any }
+interface Call { method: string; path: string; body: any; ifMatch?: string }
 
 const person = (id: string, name: string) => ({ id, name, title: "Engineer", email: `${id}@acme.dev`, teams: ["payments"], roles: [{ role: "factory_admin", scope: "factory" }], status: "active", oncall: false, github: "", away: null, version: 2 });
 const PEOPLE = [person("p-asha", "Asha Raman"), person("p-meera", "Meera Rao")];
@@ -41,7 +41,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     const u = new URL(url, "http://x");
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, path: u.pathname, body });
+    calls.push({ method, path: u.pathname, body, ifMatch: (init?.headers as Record<string, string> | undefined)?.["If-Match"] });
     if (u.pathname === "/api/v1/can") {
       const checks = (body as { checks: Array<{ action: string }> }).checks;
       return new Response(JSON.stringify({ results: checks.map((c) => (denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
@@ -178,5 +178,33 @@ describe("Security screen", () => {
     expect(locked(own)).toBe(true);
     expect(own.getAttribute("data-reason")).toMatch(/lock you out/);
     expect(locked(await byId("sec-dom-rm-partner_example"))).toBe(false);
+  });
+
+  it("sends the version it read with a setting change", async () => {
+    const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 4 } }) });
+    mount();
+    fireEvent.click(await byId("sec-gh"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]!.ifMatch).toBe("3");
+  });
+
+  it("shows a failed sign-in history read on the history tab while the rest of the page works", async () => {
+    setup({ "GET /api/v1/signins": () => ({ status: 500, body: { ok: false, msg: "History is unavailable." } }) });
+    mount();
+    await byId("sec-sso-domain");
+    fireEvent.click(await byId("sec-tab-history"));
+    const err = await byId("sec-history-error");
+    expect(err.textContent).toContain("History is unavailable.");
+  });
+
+  it("keeps the domain the viewer signed in with locked even for a manager, with the reason", async () => {
+    const calls = setup();
+    mount();
+    fireEvent.click(await byId("sec-tab-network"));
+    const own = await byId("sec-dom-rm-acme_dev");
+    expect(locked(own)).toBe(true);
+    expect(own.getAttribute("data-reason")).toMatch(/lock you out/);
+    fireEvent.click(own);
+    expect(writes(calls)).toHaveLength(0);
   });
 });

@@ -8,7 +8,7 @@ import { OverlayProvider } from "../ui/Overlay";
 import IntegrationsView from "./integrations";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
-interface Call { method: string; path: string; body: any }
+interface Call { method: string; path: string; body: any; ifMatch?: string }
 
 const person = (id: string, name: string) => ({ id, name, title: "Engineer", email: `${id}@acme.dev`, teams: ["payments"], roles: [{ role: "factory_admin", scope: "factory" }], status: "active", oncall: false, github: "", away: null, version: 2 });
 const PEOPLE = [person("p-asha", "Asha Raman")];
@@ -40,7 +40,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     const u = new URL(url, "http://x");
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, path: u.pathname, body });
+    calls.push({ method, path: u.pathname, body, ifMatch: (init?.headers as Record<string, string> | undefined)?.["If-Match"] });
     if (u.pathname === "/api/v1/can") {
       const checks = (body as { checks: Array<{ action: string }> }).checks;
       return new Response(JSON.stringify({ results: checks.map((c) => (denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
@@ -142,5 +142,43 @@ describe("Integrations screen", () => {
     expect(((await byId("int-b-name")) as HTMLInputElement).disabled).toBe(true);
     expect(locked(await byId("int-b-f-add"))).toBe(true);
     expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("says the connections are not visible when the list read is refused with 403", async () => {
+    setup({ "GET /api/v1/integrations": () => ({ status: 403, body: { ok: false, msg: "Needs Integrations access." } }) });
+    mount();
+    const hidden = await byId("int-hidden");
+    expect(hidden.textContent).toContain("Not visible to you");
+    expect(document.getElementById("int-table")).toBeNull();
+  });
+
+  it("shows a visible error on the catalogue tab when only the types fail to load", async () => {
+    setup({ "GET /api/v1/integration-types": () => ({ status: 500, body: { ok: false, msg: "Types are down." } }) });
+    mount();
+    await byId("int-table");
+    fireEvent.click(await byId("int-tab-catalogue"));
+    const err = await byId("int-cat-error");
+    expect(err.textContent).toContain("Couldn't load the integration catalogue");
+    expect(err.textContent).toContain("Types are down.");
+  });
+
+  it("locks Add on a type this version cannot connect, with its reason, and keeps the others open", async () => {
+    const calls = setup();
+    mount();
+    fireEvent.click(await byId("int-tab-catalogue"));
+    const linear = await byId("int-cat-add-linear");
+    expect(locked(linear)).toBe(true);
+    expect(linear.getAttribute("data-reason")).toContain("Not available in this version.");
+    expect(locked(await byId("int-cat-add-slack"))).toBe(false);
+    fireEvent.click(linear);
+    expect(document.querySelector("[role=dialog]")).toBeNull();
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("opens the add dialog for someone who may add integrations", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("int-add"));
+    await waitFor(() => expect(document.querySelector("[role=dialog]")).toBeTruthy());
   });
 });

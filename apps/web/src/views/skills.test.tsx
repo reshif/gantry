@@ -9,7 +9,7 @@ import { OverlayProvider } from "../ui/Overlay";
 import SkillsView, { skillsUi } from "./skills";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
-interface Call { method: string; path: string; body: any }
+interface Call { method: string; path: string; body: any; ifMatch?: string }
 
 const person = (id: string, name: string) => ({ id, name, title: "Engineer", email: `${id}@acme.dev`, teams: ["payments"], roles: [{ role: "factory_admin", scope: "factory" }], status: "active", oncall: false, github: "", away: null, version: 2 });
 const PEOPLE = [person("p-asha", "Asha Raman")];
@@ -19,7 +19,7 @@ const RISK = project("risk", "Risk and Compliance");
 const ME = { person: PEOPLE[0], session: { id: "s1", person: "p-asha", method: "sso", device: "Chrome", ip: "10.0.0.5", started: 0, lastSeen: 0, revoked: false }, csrf: "c", org: { id: "acme", name: "Acme", plant: "P", tz: "IST" }, projects: [PAYMENTS, RISK], factory: { killed: null }, config: {} };
 
 const skill = (id: string, name: string, o: object = {}) => ({
-  id, name, desc: `${name} purpose.`, when: "When needed.", owner: "p-asha", body: "Do the thing.", resources: ["checklist.md"], version: "1.2.0", projects: "all",
+  id, name, desc: `${name} purpose.`, when: "When needed.", owner: "p-asha", body: "Do the thing.", resources: ["checklist.md"], version: "1.2.0", rev: 4, projects: "all",
   versions: [{ v: "1.0.0", at: 1, by: "p-asha", note: "Created" }, { v: "1.2.0", at: 2, by: "p-asha", note: "Tightened" }], coverage: { suite: "s1", cases: 10, pass: 9 }, ...o,
 });
 const SKILLS = [skill("sk-review", "Code review"), skill("sk-docs", "Docs writer", { coverage: { suite: null, cases: 0, pass: 0 }, projects: ["payments"] })];
@@ -42,7 +42,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     const u = new URL(url, "http://x");
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, path: u.pathname, body });
+    calls.push({ method, path: u.pathname, body, ifMatch: (init?.headers as Record<string, string> | undefined)?.["If-Match"] });
     if (u.pathname === "/api/v1/can") {
       const checks = (body as { checks: Array<{ action: string }> }).checks;
       return new Response(JSON.stringify({ results: checks.map((c) => (denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
@@ -138,6 +138,7 @@ describe("Skills screen", () => {
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     const w = writes(calls)[0]!;
     expect(w.path).toBe("/api/v1/skills/sk-review");
+    expect(w.ifMatch).toBe("4");
     expect(JSON.stringify(w.body)).toContain("A sharper purpose.");
     expect(JSON.stringify(w.body)).toContain("Clarified");
   });
@@ -157,6 +158,28 @@ describe("Skills screen", () => {
     expect(locked(await byId("sk-proj-all"))).toBe(true);
     fireEvent.click(await byId("sk-tab-agents"));
     expect(locked(await byId("sk-att-ag-build"))).toBe(true);
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("locks attaching to an agent when the viewer may edit skills but not agents, and sends nothing", async () => {
+    const calls = setup({}, ["agent.edit"]);
+    mount();
+    expect(locked(await byId("sk-new"))).toBe(false);
+    fireEvent.click(await byId("sk-tab-agents"));
+    const att = await byId("sk-att-ag-build");
+    await waitFor(() => expect(locked(att)).toBe(true));
+    fireEvent.click(att);
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("locks the definition but not the library when the viewer may edit agents but not skills", async () => {
+    const calls = setup({}, ["skill.edit"]);
+    mount();
+    const save = await byId("sk-save");
+    await waitFor(() => expect(locked(save)).toBe(true));
+    expect(locked(await byId("sk-new"))).toBe(true);
+    expect(((await byId("sk-body")) as HTMLTextAreaElement).disabled).toBe(true);
+    fireEvent.click(save);
     expect(writes(calls)).toHaveLength(0);
   });
 });
