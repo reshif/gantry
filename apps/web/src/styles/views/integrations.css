@@ -18,8 +18,11 @@
 .int-tags { display: flex; gap: 4px; flex-wrap: wrap; padding: 0 var(--s4); }
 
 /* ---------- filters and table ---------- */
-.int-filters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(2, minmax(150px, 1fr)); gap: var(--s3); align-items: end; }
-.int-attn { flex-wrap: wrap; }
+/* a filter bar at the top of a flush panel (Integrations, MCP, API): padded, with a rule under it */
+.panel-body.flush > .filterbar { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+@media (max-width: 640px) { .panel-body.flush > .filterbar { padding: 10px 12px; } .filterbar .searchbox { flex: 1 1 100%; } .filterbar .searchbox .input { width: 100%; } }
+.int-attn { display: flex; gap: var(--s3); align-items: flex-start; flex-wrap: wrap; }
+.int-attn > div { display: grid; gap: 2px; min-width: 0; }
 .int-cell-name { display: flex; gap: var(--s2); align-items: center; min-width: 0; }
 .int-name-btn { font-weight: 600; color: var(--ink); text-align: left; }
 .int-name-btn:hover { color: var(--accent); }
@@ -85,7 +88,6 @@
 }
 @media (max-width: 640px) {
   .int-grid, .int-pick, .int-caps { grid-template-columns: minmax(0, 1fr); }
-  .int-filters { grid-template-columns: minmax(0, 1fr); }
   .int-kv { grid-template-columns: minmax(0, 1fr); }
   .int-kv > div:nth-child(odd) { padding-right: 0; }
 }
@@ -102,6 +104,4 @@
 .int-tile .int-name { font-family: var(--f-body); font-size: var(--t-md); text-transform: none; letter-spacing: 0; font-weight: 600; }
 .int-tile .int-sub { margin-bottom: 0; }
 .int-n { border-color: var(--done); color: var(--done); }
-.int-filters .field { width: auto; }
-.int-filters { grid-template-columns: minmax(220px, 420px) repeat(2, minmax(150px, 220px)); }
 .int-drawer .drawer-scroll { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; overflow-wrap: anywhere; }

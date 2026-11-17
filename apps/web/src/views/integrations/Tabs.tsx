@@ -3,7 +3,7 @@ import { useState } from "react";
 import { INTEGRATION_CATEGORIES, NOTIFY_EVENTS, fmt, type IntegrationInstance } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Btn, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
+import { Btn, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, type Decision } from "../../ui/primitives";
 import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -13,13 +13,15 @@ const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }
 
 interface Nav { q: string; setQ: (v: string) => void; cat: string; setCat: (v: string) => void; status: string; setStatus: (v: string) => void }
 
-function Filters({ nav, withStatus }: { nav: Nav; withStatus: boolean }) {
+function Filters({ nav, withStatus, count }: { nav: Nav; withStatus: boolean; count?: string }) {
   return (
-    <div className="filters int-filters">
-      <Field label="Search" htmlFor="int-q"><input id="int-q" className="input" type="search" value={nav.q} placeholder="Search by name, type or category" onChange={(e) => nav.setQ(e.target.value)} /></Field>
-      <Field label="Category" htmlFor="int-cat"><Select id="int-cat" options={[{ value: "all", label: "All categories" }, ...INTEGRATION_CATEGORIES.map((c) => ({ value: c.id, label: c.name }))]} value={nav.cat} onChange={nav.setCat} /></Field>
-      {withStatus ? <Field label="Status" htmlFor="int-status"><Select id="int-status" options={[{ value: "all", label: "Any status" }, { value: "healthy", label: "Healthy" }, { value: "failing", label: "Failing" }, { value: "disabled", label: "Disabled" }]} value={nav.status} onChange={nav.setStatus} /></Field> : null}
-    </div>
+    <FilterBar label="Filter connections" count={count}>
+      <SearchBox id="int-q" label="Search" placeholder="Search by name, type or category" value={nav.q} onChange={nav.setQ} />
+      <div className="filters int-filters">
+        <Field label="Category" htmlFor="int-cat"><Select id="int-cat" options={[{ value: "all", label: "All categories" }, ...INTEGRATION_CATEGORIES.map((c) => ({ value: c.id, label: c.name }))]} value={nav.cat} onChange={nav.setCat} /></Field>
+        {withStatus ? <Field label="Status" htmlFor="int-status"><Select id="int-status" options={[{ value: "all", label: "Any status" }, { value: "healthy", label: "Healthy" }, { value: "failing", label: "Failing" }, { value: "disabled", label: "Disabled" }]} value={nav.status} onChange={nav.setStatus} /></Field> : null}
+      </div>
+    </FilterBar>
   );
 }
 
@@ -44,10 +46,14 @@ export function ConnectedTab({ nav, openInstance }: { nav: Nav; openInstance: (i
       {bad.length ? (
         <div className="callout callout-warn int-attn" role="note">
           <Icon name="alert" />
-          <span>{bad.length} need attention: {bad.map((i, n) => <span key={i.id}>{n ? ", " : ""}<button type="button" className="linkish" id={`int-attn-${i.id}`} onClick={() => openInstance(i.id)}>{i.name}</button> ({statusOf(i)})</span>)}</span>
+          <div>
+            <strong>{bad.length === 1 ? "1 connection needs attention" : `${bad.length} connections need attention`}</strong>
+            {bad.map((i) => <div key={i.id}><button type="button" className="linkish" id={`int-attn-${i.id}`} onClick={() => openInstance(i.id)}>{i.name}</button> is {statusOf(i)}</div>)}
+          </div>
         </div>
       ) : null}
-      <Filters nav={nav} withStatus />
+      <Panel flush>
+      <Filters nav={nav} withStatus count={`${sorted.length} of ${d.insts.length}`} />
       {!sorted.length ? (
         <Empty title={d.insts.length ? "No connection matches" : "Nothing connected"} text={d.insts.length ? "Change the search or filters." : "Add an integration to start."} />
       ) : (
@@ -83,6 +89,7 @@ export function ConnectedTab({ nav, openInstance }: { nav: Nav; openInstance: (i
           </table>
         </div>
       )}
+      </Panel>
     </div>
   );
 }

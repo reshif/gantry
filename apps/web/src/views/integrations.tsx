@@ -8,7 +8,7 @@ import { useState } from "react";
 import { DAY, type IntegrationInstance } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useDeliveries } from "../api/queries";
-import { Btn, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Btn, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { Dialog } from "../ui/Overlay";
 import { useUI } from "../ui/overlay-context";
@@ -81,9 +81,15 @@ export default function IntegrationsView() {
       <ViewHead
         title="Integrations"
         sub="Where Gantry reads work from and where it sends cards. Several connections per type, each scoped to projects. A new connection stays switched off until you turn it on."
-        meta={[["Connected", qState(d.instsQ, () => String(all.length - off))], ["Failing", qState(d.instsQ, () => String(failing))], ["Disabled", qState(d.instsQ, () => String(off))], ["Types", qState(d.typesQ, () => `${d.types.length} (${customN} custom)`)], ["Failed deliveries 24h", qState(failedQ, () => String(failed))], ...(unrouted ? [["No connection 24h", String(unrouted)] as [string, string]] : [])]}
         actions={<><Btn label="Add integration" kind="primary" icon="plus" id="int-add" guard={add} onClick={() => addDialog(null)} /><Btn label="Build custom integration" icon="tool" id="int-build" guard={add} onClick={() => setTab("custom")} /></>}
       />
+      <StatRow id="int-stats">
+        <Stat label="Connected" value={qState(d.instsQ, () => String(all.length - off))} sub="enabled connections" tone="done" />
+        <Stat label="Failing" value={qState(d.instsQ, () => String(failing))} sub={failing ? "need a look" : "none failing"} tone={failing ? "block" : undefined} />
+        <Stat label="Disabled" value={qState(d.instsQ, () => String(off))} sub="switched off" tone={off ? "wait" : undefined} />
+        <Stat label="Types" value={qState(d.typesQ, () => String(d.types.length))} sub={qState(d.typesQ, () => `in the catalogue, ${customN} custom`)} />
+        <Stat label="Failed deliveries 24h" value={qState(failedQ, () => String(failed))} sub={unrouted ? `${unrouted} more had no connection` : "across all projects"} tone={failed ? "block" : undefined} />
+      </StatRow>
       <Tabs idPrefix="int-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="int-tab-panel" role="tabpanel" aria-labelledby={`int-tab-${tab}`}>
         {tab === "catalogue" ? (
