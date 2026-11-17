@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { applyStationResult, attemptIsCurrent, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
+import type { RepoContext } from "@gantry/domain";
 import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg, PermanentError, TransientError } from "../errors.js";
@@ -77,6 +78,11 @@ async function prepareRun(deps: Deps, a: AttemptInfo, runId: string): Promise<{ 
   });
 }
 
+async function recordRepoContext(deps: Deps, a: AttemptInfo, runId: string, rc: RepoContext | null): Promise<void> {
+  const value = rc ? { ...rc, offeredAt: deps.now().toISOString() } : { commit: null, files: [], hash: null, offeredAt: deps.now().toISOString(), unavailable: true };
+  await withTx(deps.pool, (tx) => tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ repoContext: value })]));
+}
+
 async function markStarted(deps: Deps, a: AttemptInfo, runId: string, startupLeaseMs: number): Promise<void> {
   await withTx(deps.pool, async (tx) => {
     await tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ dispatch: { phase: "started", at: deps.now().toISOString() } })]);
@@ -148,7 +154,10 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
     if (prep.state === "capacity") return await defer(deps, job, a, runId, prep.msg);
     if (a.repo?.full) {
       const commit = await resolveSeedCommit(deps.pool, a.orgId, a.woId, a.repo.id);
-      await deps.broker.seed({ repo: a.repo.full, commit, volume: volumeFor(runId) });
+      const seeded = await deps.broker.seed({ repo: a.repo.full, commit, volume: volumeFor(runId) });
+      // What the repository's convention files said at this commit, recorded on the run before the runner starts: the run spec's prompt is built from it,
+      // and the record (paths, sizes, hashes, what was inlined or withheld) shows later exactly what the agent was offered.
+      await recordRepoContext(deps, a, runId, seeded.repoContext);
     }
     const go = await deps.launcher.start({ ...base, seedComplete: true });
     if (go.state === "capacity") return await defer(deps, job, a, runId, go.msg);

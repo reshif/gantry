@@ -354,14 +354,26 @@ d("agents, skills and instructions (spec 8.7, 10.2, 13.2)", () => {
       await q(`update repos set guidelines = 'Use pnpm. Tests live next to the code.', data = data || '{"baseSha":"${"a".repeat(40)}"}'::jsonb where id = 'payments-api'`);
       const r = await eff("?project=payments&repo=payments-api");
       expect(r.status, JSON.stringify(r.body)).toBe(200);
-      expect(r.body.layers.map((l: any) => [l.key, l.name])).toEqual([["base", "Factory base"], ["project", "Project overlay"], ["agent", "Agent"], ["repo", "Repository guidelines"]]);
+      expect(r.body.layers.map((l: any) => [l.key, l.name])).toEqual([["base", "Factory base"], ["project", "Project overlay"], ["agent", "Agent"], ["repo", "Repo guidelines (Gantry)"]]);
       expect(r.body.layers[0].version).toBe(5);
       expect(r.body.layers[3]).toMatchObject({ text: "Use pnpm. Tests live next to the code.", commit: "a".repeat(40) });
-      expect(r.body.text).toMatch(/^## Factory base\n\n.*\n\n## Project overlay\n\n.*\n\n## Agent\n\n.*\n\n## Repository guidelines\n\nUse pnpm\./s);
+      expect(r.body.text).toMatch(/^## Factory base\n\n.*\n\n## Project overlay\n\n.*\n\n## Agent\n\n.*\n\n## Repo guidelines \(Gantry\)\n\nUse pnpm\./s);
       expect(r.body.hash).toMatch(/^[0-9a-f]{64}$/);
       expect(r.body).toMatchObject({ version: "2.6.1", live: true, project: { id: "payments" }, repo: { id: "payments-api" }, skills: [{ id: "sk-testdesign" }] });
       expect(r.body.layers[2].text).toMatch(/Never modify: infra\/prod\/\*\*/);
       expect(r.body.words).toBeGreaterThan(10);
+    });
+    it("shows the repo's own AGENTS.md status from the last run's manifest, apart from the repo guidelines text", async () => {
+      expect((await eff("?project=payments&repo=payments-api")).body.repoContext).toBeNull();
+      const h = "e".repeat(64);
+      await w.insertWo("WO-ctx-eff", { project: "payments", repo: "payments-api", state: "running", position: "build" });
+      await q(`insert into attempts (org_id, id, wo_id, station, visit, state) values ($1,'at-ctx-eff','WO-ctx-eff','build',1,'running')`, [t.orgId]);
+      await q(`insert into runs (org_id, id, attempt_id, wo_id, state, data) values ($1,'r-ctx-eff',$2,$3,'succeeded',$4::jsonb)`, [t.orgId, "at-ctx-eff", "WO-ctx-eff", JSON.stringify({ repoContext: { commit: "b".repeat(40), hash: h, offeredAt: "2026-11-16T00:00:00.000Z", files: [{ path: "AGENTS.md", bytes: 55, sha256: h, inlined: true, truncated: false, content: "never shown here" }, { path: "CLAUDE.md", bytes: 9, sha256: h, inlined: false, truncated: false, withheld: "secret" }] } })]);
+      const r = await eff("?project=payments&repo=payments-api");
+      expect(r.body.repoContext).toMatchObject({ commit: "b".repeat(40), runId: "r-ctx-eff", files: [{ path: "AGENTS.md", inlined: true }, { path: "CLAUDE.md", withheld: "secret" }] });
+      expect(JSON.stringify(r.body.repoContext)).not.toContain("never shown here");
+      // the guidelines layer is still only the Gantry text
+      expect(r.body.layers.find((l: any) => l.key === "repo").name).toBe("Repo guidelines (Gantry)");
     });
     it("shows a per-project override and changes the hash when any layer changes", async () => {
       const risk = await eff("?project=risk");

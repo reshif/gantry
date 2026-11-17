@@ -1,4 +1,5 @@
 import type { Queryable } from "@gantry/db";
+import { REPO_CONTEXT_LAYER_NAME, RepoContext, renderRepoContext } from "@gantry/domain";
 import { agentConfig } from "./metering.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
 import { planOf, researchHosts, sourcesHandoff } from "../workorders/research.js";
@@ -63,6 +64,17 @@ export async function composeInstructions(db: Queryable, c: RunCtx): Promise<Com
   const { layers } = await composeLayers(db, { orgId: c.orgId, agentId: c.agentId, projectId: c.projectId, repoId: c.repoId, pin, fallbackAgentText: agent.instructions, fallbackOverlay: c.overlay }, av);
   const out = assemble(layers);
   return { text: out.text, hash: out.hash, layers: out.layers.map((l) => ({ name: l.name, hash: l.hash, version: l.version })), used: out.layers };
+}
+
+/**
+ * The repository's convention files as Gantry read them at the pinned commit when it seeded the workspace (recorded on the run by dispatch), framed as repository
+ * data with a stated precedence. Appended after the layers: it informs how to work in the repo and ranks below the factory base, overlay and agent text.
+ * The harness's own CLAUDE.md loader stays disabled, so this is the only way repository conventions reach the model.
+ */
+export function repoContextSection(c: Pick<RunCtx, "runData">): string {
+  const parsed = RepoContext.safeParse(c.runData.repoContext);
+  const body = parsed.success ? renderRepoContext(parsed.data) : "";
+  return body ? `## ${REPO_CONTEXT_LAYER_NAME}\n\n${body}` : "";
 }
 
 async function skillsFor(db: Queryable, c: RunCtx): Promise<SkillOut[]> {
@@ -130,13 +142,16 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
   const costUsd = agentBudget !== undefined && planBudget ? Math.min(agentBudget, planBudget) : (planBudget ?? agentBudget);
   const input = c.runData.input ?? c.attemptData.input ?? (await handoff(db, c));
   const skills = await skillsFor(db, c);
-  const promptManifest = buildManifest("run", composedParts(inst.used, skills), { handoff: input ?? "" });
+  // The repository's own convention files follow the layers; they are a manifest part of their own, so the hash covers them.
+  const repoSection = repoContextSection(c);
+  const instructionsText = [inst.text, repoSection].filter((x) => x !== "").join("\n\n");
+  const promptManifest = buildManifest("run", composedParts(inst.used, skills, repoSection), { handoff: input ?? "" });
   return {
     runId: c.runId,
     adapter,
     station: c.station,
     ...(model ? { model } : {}),
-    instructions: inst.text,
+    instructions: instructionsText,
     instructionsHash: promptManifest.hash,
     promptManifest,
     skills: skills.map((s) => ({ name: s.name, content: s.content })),

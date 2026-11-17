@@ -3,6 +3,7 @@ import { useState } from "react";
 import { fmt, type Repo } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { useAgentEffective, useInstructions, useRepos, useSkills } from "../../api/queries";
+import type { AgentEffective } from "../../api/types";
 import { invalidateSlices } from "../../api/keys";
 import { ops } from "../../api/ops";
 import { Btn, Field, LockNote, Select, type Decision } from "../../ui/primitives";
@@ -58,6 +59,18 @@ export function TextDialog({ o, close }: { o: TextOpts; close: () => void }) {
       ]}
     />
   );
+}
+
+/** The status of the repo's own convention files, from the manifest of the last run seeded from it (not from the guidelines text above). */
+function conventionsLine(rc: AgentEffective["repoContext"] | undefined): string {
+  if (!rc) return "Repo conventions: not read yet. Agents are shown AGENTS.md and CLAUDE.md from the repository when a run starts.";
+  const f = (path: string) => rc.files.find((x) => x.path === path);
+  const one = (path: string): string => {
+    const x = f(path);
+    if (!x) return `${path} not in the repo`;
+    return `${path} ${x.inlined ? "given to agents" : x.withheld === "secret" ? "withheld (contains credential-like text)" : x.withheld ? "listed only (size)" : "listed"} (${x.bytes} bytes)${x.truncated ? ", cut at the size cap" : ""}`;
+  };
+  return `Repo conventions at ${rc.commit.slice(0, 12)}: ${one("AGENTS.md")}; ${one("CLAUDE.md")}.`;
 }
 
 export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
@@ -142,19 +155,20 @@ export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
               <textarea id="ag-instr" className="input" rows={5} disabled={ro} value={d.instructions || ""} onChange={(e) => edit(() => { d.instructions = e.target.value; })} />
             </Field>
           ))}
-          {layer(4, "Repo guidelines", repo ? repo.name : "no repo in this project",
+          {layer(4, "Repo guidelines (Gantry)", repo ? repo.name : "no repo in this project",
             <div>
               {repos.length ? (
                 <Field label="Preview for repo" htmlFor="ag-ctx-repo">
                   <Select id="ag-ctx-repo" value={ui.ctxRepo} options={repos.map((r) => ({ value: r.id, label: r.name }))} onChange={(v) => { ui.ctxRepo = v; rerender(); }} />
                 </Field>
               ) : null}
-              <pre className="ag-layer-text mono small">{repo ? repo.guidelines || "No AGENTS.md yet." : ""}</pre>
-              {repoLayer?.commit ? <div className="small muted mono" id="ag-repo-commit">read at {repoLayer.commit.slice(0, 12)}</div> : null}
+              <pre className="ag-layer-text mono small">{repo ? repo.guidelines || "No guidelines written here yet." : ""}</pre>
+              {repoLayer?.commit ? <div className="small muted mono" id="ag-repo-commit">recorded at {repoLayer.commit.slice(0, 12)}</div> : null}
+              {repo ? <div className="small muted" id="ag-repo-conventions">{conventionsLine(eff?.repoContext)}</div> : null}
             </div>,
             repo ? <Btn label="Edit guidelines" small icon="page" id="ag-edit-guidelines" guard={repoGuard} onClick={() => {
               ui_.open((close) => (
-                <TextDialog close={close} o={{ title: `${repo.name} AGENTS.md`, kicker: "Instructions · layer 4", label: "Repo guidelines", text: repo.guidelines, guard: repoGuard, what: "Repo guidelines",
+                <TextDialog close={close} o={{ title: `${repo.name} repo guidelines`, kicker: "Instructions · layer 4", label: "Repo guidelines (Gantry)", sub: "Your own notes for every agent working in this repo. The repo's AGENTS.md is read from the repository separately; edit it there.", text: repo.guidelines, guard: repoGuard, what: "Repo guidelines",
                   save: async (v) => refreshed(await ops.configureRepo(repo.id, { guidelines: v }, { ifMatch: (repo as { version?: number }).version })) }} />
               ));
             }} /> : null)}

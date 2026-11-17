@@ -336,6 +336,13 @@ export interface AgentEffective {
   tokens: number;
   layers: Array<{ key: "base" | "project" | "agent" | "repo"; name: string; version: number | null; hash: string; text: string; commit?: string | null }>;
   skills: Array<{ id: string; name: string; version: number; label: string; when: string; resources: string[] }>;
+  /** The repository's own convention files as last offered to a run (from the repo itself, not the repo guidelines text). */
+  repoContext?: {
+    commit: string;
+    runId: string;
+    offeredAt: string | null;
+    files: Array<{ path: string; bytes: number; sha256: string; inlined: boolean; truncated: boolean; withheld?: "secret" | "cap" | "too_large" }>;
+  } | null;
 }
 export interface AgentSuite {
   id: string;

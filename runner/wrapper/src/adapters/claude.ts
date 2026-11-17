@@ -52,7 +52,10 @@ export function composeSystemPrompt(spec: RunSpec): string {
  * Builds the harness command line. Isolation of repository-controlled configuration (spec 4.2, test T9):
  *  - `--setting-sources user` with an empty CLAUDE_CONFIG_DIR: project and local settings (hooks, permissions, env) never load;
  *  - `--strict-mcp-config` with an explicit `--mcp-config`: `.mcp.json` in the repo is ignored; only edge-gateway servers are used;
- *  - CLAUDE_CODE_DISABLE_CLAUDE_MDS: the repository guidelines arrive through the composed instructions at the pinned commit;
+ *  - CLAUDE_CODE_DISABLE_CLAUDE_MDS stays on on purpose: the harness's own memory-file loader would read whatever CLAUDE.md sits in the workspace (and user/managed
+ *    files), unrecorded, uncapped, unscanned and only for this harness. Gantry decides instead: the broker reads AGENTS.md / CLAUDE.md at the pinned commit when it
+ *    seeds, scans and caps them, records what was offered on the run, and the run spec's instructions carry them under "Repository context" with a stated
+ *    precedence (factory rails > project overlay > repository conventions > agent defaults). Deterministic, audited, identical for every harness;
  *  - `--disable-slash-commands`: repo-defined commands and skills are not discovered.
  */
 export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJS.ProcessEnv = process.env): ClaudeInvocation {

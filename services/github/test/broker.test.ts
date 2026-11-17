@@ -8,7 +8,8 @@ import { REPO, gitSync, makeRemote, startEnv, type Env } from "./harness.js";
 let env: Env;
 let base = "";
 let n = 0;
-const FILES = { "README.md": "hello\n", "src/a.ts": "export const a = 1;\n", "src/old.ts": "gone soon\n" };
+const FAKE_TOKEN = ["ghp", "_", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"].join(""); // built at run time so no credential-shaped literal sits in the source
+const FILES = { "README.md": "hello\n", "src/a.ts": "export const a = 1;\n", "src/old.ts": "gone soon\n", "AGENTS.md": "# Agents\nTest: uv run pytest\n", "CLAUDE.md": `${"one-line notes ".repeat(200)}Deploy with token ${FAKE_TOKEN}\n` };
 
 beforeAll(async () => { env = await startEnv(); base = await makeRemote(env, FILES); });
 afterAll(() => env.close());
@@ -100,6 +101,18 @@ describe("seed", () => {
     expect(cfg).not.toMatch(/extraheader|Authorization|ghs_|x-access-token/i);
     const mint = env.gh.of("POST", /access_tokens$/).at(-1)!;
     expect(mint.body).toEqual({ repositories: ["payments-api"], permissions: { contents: "read", metadata: "read" } });
+  });
+  it("returns the repository context at the commit: convention files with hash and size, AGENTS.md inlined, a file with a credential-shaped match listed but withheld", async () => {
+    const r = await env.call("POST", "/v1/workspaces/seed", { repo: REPO, commit: base, volume: "ws-ctx" });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const c = r.body.repoContext;
+    expect(c.commit).toBe(base);
+    expect(c.files.map((f: any) => f.path)).toEqual(["AGENTS.md", "CLAUDE.md", "README.md"]);
+    expect(c.files[0]).toMatchObject({ inlined: true, content: FILES["AGENTS.md"], bytes: FILES["AGENTS.md"].length });
+    expect(c.files[1]).toMatchObject({ inlined: false, withheld: "secret", secretHits: [{ line: 1, rule: "github-token" }] }); // the line is over 2000 chars: it is still scanned
+    expect(JSON.stringify(c)).not.toContain(FAKE_TOKEN);
+    expect(c.files[2]).toMatchObject({ inlined: false });
+    expect(c.files[2].content).toBeUndefined();
   });
   it("refuses a commit that does not exist", async () => {
     const r = await env.call("POST", "/v1/workspaces/seed", { repo: REPO, commit: "1".repeat(40), volume: "ws-nope" });

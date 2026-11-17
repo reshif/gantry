@@ -3,13 +3,16 @@
  * taken from the repository, then stream the tree (with its `.git`) into the run's `ws-<id>` volume owned by the runner's uid/gid.
  * The installation token reaches `git` only through the environment of that one child process (an HTTP header); it is never written to disk or to argv.
  */
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { buildRepoContext, CONVENTION_FILES, type RawConventionFile, type RepoContext } from "@gantry/domain";
 import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
 import { git, gitText, GitError } from "./git.js";
 import { GithubApp, splitRepo, toApiError } from "./github.js";
+import { scanText } from "./onboarding.js";
 import { VOLUME_NAME, type WorkspaceStore } from "./workspace.js";
 
 export const SeedBody = z.object({
@@ -39,7 +42,24 @@ export interface SeedDeps {
 
 export const RUNNER_UID = 10001;
 
-export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: true; repo: string; commit: string; volume: string }> {
+/**
+ * The repository's convention files at the seeded commit (AGENTS.md and the like), as a manifest the agent's prompt is built from. Only regular files
+ * inside the checkout are read (a symlink is never followed), nothing is executed, and the secret scan and size caps are applied before anything leaves the broker.
+ */
+export async function readRepoContext(work: string, commit: string): Promise<RepoContext> {
+  const found: RawConventionFile[] = [];
+  for (const f of CONVENTION_FILES) {
+    const full = join(work, f.path);
+    try {
+      const st = await lstat(full);
+      if (!st.isFile() || st.size > 4 * 1024 * 1024) continue;
+      found.push({ path: f.path, content: await readFile(full) });
+    } catch { /* absent */ }
+  }
+  return buildRepoContext(commit, found, { scan: (path, text) => scanText(path, text, { longLines: true }), sha256: (b) => createHash("sha256").update(b).digest("hex") });
+}
+
+export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: true; repo: string; commit: string; volume: string; repoContext: RepoContext }> {
   splitRepo(b.repo);
   const scratch = await mkdtemp(join(d.cfg.scratchDir, "gantry-seed-"));
   const work = join(scratch, "work");
@@ -60,8 +80,9 @@ export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: tru
     await run(["checkout", "--quiet", "--detach", "FETCH_HEAD"]);
     const head = (await gitText(["rev-parse", "HEAD"], { gitBin: d.cfg.gitBin, cwd: work })).trim();
     if (head !== b.commit) throw new BrokerError(502, "fetch_failed", `Fetched ${head}, expected ${b.commit}.`);
+    const repoContext = await readRepoContext(work, head);
     await d.store.seed(b.volume, work, { uid: RUNNER_UID, gid: RUNNER_UID });
-    return { ok: true, repo: b.repo, commit: head, volume: b.volume };
+    return { ok: true, repo: b.repo, commit: head, volume: b.volume, repoContext };
   } finally {
     await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
   }

@@ -1,11 +1,12 @@
 /**
- * Instruction composition (spec 10.2). Four layers, in order: the factory base, the project overlay, the agent, and the repository's guidelines file at the
- * pinned commit. The skills attached to the agent version follow, in order. The composition is pinned when a run is dispatched: the layer versions, the
+ * Instruction composition (spec 10.2). Four layers, in order: the factory base, the project overlay, the agent, and the repo guidelines Gantry keeps for the
+ * repository (`repos.guidelines`, a person-owned text, NOT the repository's own AGENTS.md; that file arrives separately as the run's "Repository context", see
+ * areas/internal/spec.ts) with the commit they were read at recorded next to them. The skills attached to the agent version follow, in order. The composition is pinned when a run is dispatched: the layer versions, the
  * skill versions and the hash go on the attempt's version tuple and on the run, so the run spec, the preview and the audit trail all describe the same text.
  */
 import type { Queryable } from "@gantry/db";
 import { cfgOf, sha256 } from "./config.js";
-import { buildManifest, runnerParts, type ManifestPart, type PromptManifest } from "./manifest.js";
+import { buildManifest, part, runnerParts, type ManifestPart, type PromptManifest } from "./manifest.js";
 
 export interface Layer {
   key: "base" | "project" | "agent" | "repo";
@@ -14,7 +15,7 @@ export interface Layer {
   version: number | null;
   text: string;
   hash: string;
-  /** The commit the repository's guidelines file was read at. */
+  /** The commit the repo guidelines were recorded against. */
   commit?: string | null;
 }
 
@@ -70,7 +71,7 @@ export function agentLayerText(cfg: { instructions: string; guardrails: { paths:
   return parts.filter((p) => p !== "").join("\n\n");
 }
 
-export const LAYER_NAMES: Record<Layer["key"], string> = { base: "Factory base", project: "Project overlay", agent: "Agent", repo: "Repository guidelines" };
+export const LAYER_NAMES: Record<Layer["key"], string> = { base: "Factory base", project: "Project overlay", agent: "Agent", repo: "Repo guidelines (Gantry)" };
 
 export function assemble(layers: Layer[]): Composed {
   const used = layers.filter((l) => l.text.trim() !== "");
@@ -183,9 +184,10 @@ const LAYER_SOURCE: Record<Layer["key"], string> = {
 };
 
 /** The manifest parts of a composed system prompt in the order the model sees them: the used layers, the skills, then what the runner appends. */
-export function composedParts(layers: Layer[], skills: SkillOut[]): ManifestPart[] {
+export function composedParts(layers: Layer[], skills: SkillOut[], repoContext = ""): ManifestPart[] {
   return [
     ...layers.map((l): ManifestPart => ({ kind: "layer", name: l.name, source: LAYER_SOURCE[l.key], version: l.version, sha256: l.hash, bytes: Buffer.byteLength(l.text) })),
+    ...(repoContext ? [part("repo_context", "Repository context", "the repository's convention files at the pinned commit (runs.data.repoContext)", null, repoContext)] : []),
     ...skills.map((k): ManifestPart => ({ kind: "skill", name: k.name, source: `skill_versions ${k.id}`, version: k.version, sha256: k.hash, bytes: k.bytes })),
     ...runnerParts(),
   ];
