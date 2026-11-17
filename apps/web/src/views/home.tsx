@@ -1,43 +1,67 @@
-/** Home (#home): one page for everyone. The API decides which sections a person gets (`home.sections`); this renders what is present, in a fixed order: attention, waiting on you, set up, in motion, projects, health. */
-import { useCan } from "../api/can";
-import { useHome, useMe, useProjects } from "../api/queries";
-import { hasCommand, runCommand } from "../lib/commands";
+/**
+ * Home (#home), the Control Room plant overview: stat row, what needs a person next to the live activity, the belt at a glance next
+ * to throughput, then the projects as a tile grid. Everything is read through the typed hooks; the API decides which sections
+ * a person gets (`home.sections`) and this page renders what is present, never checking a role.
+ */
+import { useMemo } from "react";
 import { fmt } from "@gantry/domain";
-import { Btn, Empty, Stat, StatRow, ViewHead } from "../ui/primitives";
+import { useCan } from "../api/can";
+import { useActivity, useHome, useMe, useProjects } from "../api/queries";
+import { hasCommand, runCommand } from "../lib/commands";
+import { eventRows, eventText, eventTone } from "../lib/eventText";
+import { hashFor, navigate } from "../lib/router";
+import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
+import { useOpenTraveler } from "../shell/useTraveler";
+import { Btn, Chip, Empty } from "../ui/primitives";
+import { useActors } from "../ui/actors";
 import { Async } from "../ui/async";
-import type { HomeFull } from "./home/data";
-import { ApproversWatch, AttentionStrip, FactoryHealth, InMotion, ProjectsSummary, SetupChecklist, WaitingOnYou, openNewProject } from "./home/sections";
-import type { PView } from "./projects/kit";
+import { Bars, Card, CrEmpty, CrIcon, Lamp, ListItem, MiniBeltCr, Page, Stats, type MiniStation, type StatItem } from "../ui/cr";
+import { type HomeFull, goAttention } from "./home/data";
+import { RestoreAction, SetupChecklist, openNewProject } from "./home/sections";
+import { metricsOf, useCatalog, type PView } from "./projects/kit";
 
 export { openNewProject };
+
+const HOUR_MS = 3_600_000;
 
 export default function HomeView() {
   const me = useMe();
   const q = useHome();
-  const projects = ((useProjects().data ?? []) as PView[]).slice();
+  const projectsData: unknown = useProjects().data;
+  const projects = (Array.isArray(projectsData) ? projectsData : []) as PView[];
+  const cat = useCatalog();
+  const prefs = usePrefs();
+  const activity = useActivity();
+  const actors = useActors();
+  const openTraveler = useOpenTraveler();
   const create = useCan("project.create");
   const submit = useCan("wo.submit");
-  const home = q.data as unknown as HomeFull | undefined;
+  const home = q.data as HomeFull | undefined;
+  const events = useMemo(() => eventRows(activity.data), [activity.data]);
+
   if (!me) return null;
   if (!home) {
-    // Loading, refused and failed look the same here as on every other page.
     return (
-      <div className="view hm">
-        <ViewHead title="Home" />
+      <Page eyebrow="Operate" title="Home">
         <Async query={q} what="your home page" id="hm">{() => null}</Async>
-      </div>
+      </Page>
     );
   }
   const s = home.sections ?? {};
   if (s.access === "none") {
     return (
-      <div className="view hm">
-        <ViewHead title="Home" />
+      <Page eyebrow="Operate" title="Home">
         <Empty id="hm-no-access" title="No access yet" text="Your account is signed in but has no role yet. Ask a Factory Admin or Project Admin to give you one." />
-      </div>
+      </Page>
     );
   }
-  // An item shown in Attention is not repeated in Waiting on you (the bell still lists it).
+
+  const nameOf = (id: string | null | undefined) => actors(id).name.replace(" (agent)", "");
+  const hr = new Date().getHours();
+  const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
+  const away = me.person.away && me.person.away.to > Date.now() ? ` Away until ${fmt.istDate(me.person.away.to)}.` : "";
+
+  /* what needs a person: attention items first, then gate and onboarding approvals, then questions; nothing twice */
   const attIds = new Set((s.attention ?? []).map((a) => a.id));
   const waiting = s.waiting
     ? {
@@ -45,47 +69,158 @@ export default function HomeView() {
         conversations: s.waiting.conversations,
       }
     : null;
-  const away = me.person.away && me.person.away.to > Date.now() ? `Away until ${fmt.istDate(me.person.away.to)}.` : "";
   const att = s.attention ?? [];
   const crit = att.filter((a) => a.sev === 0).length;
   const waitingN = waiting ? waiting.approvals.length + waiting.conversations.length : 0;
-  // While the setup checklist is up its active step carries the New project button; the header has it afterwards.
-  const canCreate = !create.pending && create.allowed && !s.setup && !!s.health;
-  // No work order can be submitted before a repo is Ready, so the checklist (which says so) replaces the button until then.
-  const canSubmit = !submit.pending && submit.allowed && !s.setup && hasCommand("newWorkOrder");
-  const factoryWide = !!s.health || !!s.approvers || !!s.setup;
-  const viewerOnly = me.person.roles.length > 0 && me.person.roles.every((g) => g.role === "viewer");
+  const rows = [
+    ...att.map((a) => ({
+      key: a.id,
+      tone: (a.sev === 0 ? "bad" : "warn") as "bad" | "warn",
+      title: a.title,
+      sub: `${a.where}${a.sub ? ` · ${a.sub}` : ""}`,
+      action: a.restore ? <RestoreAction item={a} /> : <Btn label={a.act.label} small kind="primary" onClick={() => goAttention(a.act, openTraveler)} />,
+    })),
+    ...(waiting?.approvals ?? []).map((a, i) => ({
+      key: `ap-${a.wo ?? a.repo}-${i}`,
+      tone: "warn" as const,
+      title: a.repo ? (a.note ? `Onboarding ${a.repoName ?? a.repo}` : `Merge onboarding PR ${a.repoName ?? a.repo}#${a.pr ?? ""}`) : `${a.wo} · ${a.gateLabel ?? a.gate ?? ""} ${a.gateName ?? ""}`.trim(),
+      sub: `${a.title ?? a.note ?? "Checks green"} · ${a.projectName}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`,
+      action: (
+        <Btn
+          label="Review" small kind="primary"
+          onClick={() => {
+            if (a.repo) {
+              if (a.project) setProject(a.project);
+              navigate("onboarding", a.repo);
+            } else if (a.wo) openTraveler(a.wo);
+          }}
+        />
+      ),
+    })),
+    ...(waiting?.conversations ?? []).map((c) => ({
+      key: `cv-${c.wo}`,
+      tone: "warn" as const,
+      title: `${c.wo} · ${c.gate ? `${c.gate.label} ${c.gate.name}` : "questions for you"}`,
+      sub: c.title,
+      action: (
+        <Btn
+          label="Open" small kind="primary"
+          onClick={() => {
+            updatePrefs({ project: c.project, openConversation: c.wo });
+            navigate("conversations");
+          }}
+        />
+      ),
+    })),
+  ];
+
+  /* stats */
   const m = s.motion;
-  const showMotion = !!m && (!s.setup || m.inFlight > 0 || m.recentDone.length > 0 || m.mine.length > 0);
+  const buckets = hourly(events);
+  const statItems: StatItem[] = [];
+  if (m) statItems.push({ l: "On the belt", v: m.inFlight, d: `${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`, tone: "info", spark: buckets });
+  if (waiting || s.attention) statItems.push({ l: "Waiting for a person", v: waitingN, d: waitingN ? "approvals and questions" : "nothing waiting", tone: waitingN ? "warn" : "ok" });
+  if (m) statItems.push({ l: "Released today", v: m.shippedToday, d: `${m.shippedWeek} this week`, tone: "ok" });
+  if (s.attention) statItems.push({ l: "Needs attention", v: att.length, d: crit ? `${crit} critical` : "none critical", tone: crit ? "bad" : att.length ? "warn" : "ok" });
+  if (s.health) statItems.push({ l: "Spend this month", v: `$${s.health.spend.spent.toFixed(2)}`, d: `budget $${s.health.spend.budget.toFixed(2)}`, tone: "agent" });
+
+  /* belt at a glance: stations across, work in progress per station summed over the projects in view */
+  const stations: MiniStation[] = (cat?.stations ?? []).map((st) => {
+    const n = projects.reduce((t, p) => t + (metricsOf(p).byPosition[st.id]?.n ?? 0), 0);
+    const gate = cat?.gates.find((g) => g.after === st.id);
+    const gateWaiting = gate ? projects.reduce((t, p) => t + (metricsOf(p).byGate[gate.id] ?? 0), 0) > 0 : false;
+    // Capacity is each project's configured WIP for the station (coding slots for Build), summed over the projects in view.
+    const slots = Math.max(1, projects.reduce((t, p) => t + (st.id === "build" ? p.flow.slots : (p.flow.stations[st.id]?.wip ?? 0)), 0));
+    return { id: st.id, name: st.name, n, slots, gate: gateWaiting, href: hashFor("floor", null, prefs.project) };
+  });
+
+  const canCreate = !create.pending && create.allowed && !s.setup;
+  const canSubmit = !submit.pending && submit.allowed && !s.setup && hasCommand("newWorkOrder");
+  const feed = events.slice(0, 7);
+
   return (
-    <div className="view hm">
-      <ViewHead
-        title="Home"
-        sub={away || "What needs you, what is moving, and how the factory is doing."}
-        actions={
-          <>
-            {canCreate ? <Btn label="New project" kind="primary" icon="plus" id="hm-new-project" onClick={openNewProject} /> : null}
-            {canSubmit ? <Btn label="New work order" kind={canCreate ? "ghost" : "primary"} icon="plus" id="hm-my-new" onClick={() => void runCommand("newWorkOrder")} /> : null}
-          </>
-        }
-      />
-      {waiting || s.attention || m ? (
-        <StatRow id="hm-stats">
-          {waiting ? <Stat id="hm-stat-waiting" label="Waiting on you" value={String(waitingN)} sub={waitingN ? "Approvals and questions for you" : "Nothing is waiting on you"} {...(waitingN ? { tone: "wait" as const } : {})} /> : null}
-          {s.attention ? <Stat id="hm-stat-attention" label="Needs attention" value={String(att.length)} sub={crit ? `${crit} critical` : "None critical"} {...(crit ? { tone: "block" as const } : {})} /> : null}
-          {m ? <Stat id="hm-stat-flight" label="In flight" value={String(m.inFlight)} sub={`${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`} /> : null}
-          {m ? <Stat id="hm-stat-shipped" label="Shipped this week" value={String(m.shippedWeek)} sub={`${m.shippedToday} today`} /> : null}
-        </StatRow>
-      ) : null}
-      <div className="hm-stack">
-        {s.attention ? <AttentionStrip items={s.attention} /> : null}
-        {waiting ? <WaitingOnYou approvals={waiting.approvals} conversations={waiting.conversations} /> : null}
-        {s.approvers ? <ApproversWatch data={s.approvers} /> : null}
-        {s.setup ? <SetupChecklist setup={s.setup} /> : null}
-        {showMotion && m ? <InMotion motion={m} projects={projects} /> : null}
-        {s.projects ? <ProjectsSummary rows={s.projects} projects={projects} factoryWide={factoryWide} readOnlyNote={viewerOnly} /> : null}
-        {s.health ? <FactoryHealth health={s.health} /> : null}
+    <Page
+      eyebrow="Operate"
+      title={`${greet}, ${me.person.name.split(" ")[0]}`}
+      sub={`Plant overview. Agents propose, people approve.${away}`}
+      cls="hm"
+      acts={
+        <>
+          <a className="btn" href={hashFor("floor", null, prefs.project)}><CrIcon name="floor" />Open floor</a>
+          {canCreate ? <Btn label="New project" icon="plus" id="hm-new-project" onClick={openNewProject} /> : null}
+          {canSubmit ? <Btn label="Submit work order" kind="primary" icon="plus" id="hm-my-new" onClick={() => void runCommand("newWorkOrder")} /> : null}
+        </>
+      }
+    >
+      {s.setup ? <div style={{ marginBottom: 16 }}><SetupChecklist setup={s.setup} /></div> : null}
+      {statItems.length ? <Stats items={statItems} id="hm-stats" /> : null}
+      <div className="grid g-main rows" style={{ marginBottom: 16 }}>
+        <Card title="Needs your attention" flush hint={`${rows.length} open`} acts={<a className="btn sm" href="#inbox">Open inbox</a>} id="hm-attention">
+          {rows.length ? (
+            <div>
+              {rows.slice(0, 5).map((r) => (
+                <ListItem key={r.key} tone={r.tone} title={r.title} sub={r.sub}>{r.action}</ListItem>
+              ))}
+            </div>
+          ) : (
+            <CrEmpty title="Nothing waiting for you" text="Agents are working. You will see approvals here as they appear." icon="check" />
+          )}
+        </Card>
+        <Card title="Live activity" hint="Moves, approvals and completions" id="hm-activity">
+          {feed.length ? (
+            <div className="tl">
+              {feed.map((e) => (
+                <div key={e.id} className={eventTone(e)}>
+                  <div>{eventText(e, cat, nameOf)}</div>
+                  <div className="when">{fmt.ago(e.at, Date.now())}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <CrEmpty title="No recent activity" text="Moves, approvals and completions appear here as they happen." icon="inbox" />
+          )}
+        </Card>
       </div>
-    </div>
+      <div className="grid g-main rows" style={{ marginBottom: 16 }}>
+        <Card title="Belt at a glance" hint="Work orders per station. Dashed line = capacity; amber bar = over it; amber dot = gate waiting" acts={<a className="btn sm" href={hashFor("floor", null, prefs.project)}>Floor</a>} id="hm-belt">
+          <div style={{ padding: "4px 0" }}>{stations.length ? <MiniBeltCr stations={stations} /> : <CrEmpty title="No stations" text="The line has not loaded." icon="floor" />}</div>
+        </Card>
+        <Card title="Throughput, last 24 hours" hint="Station entries per hour" id="hm-throughput">
+          <Bars data={buckets} w={240} h={96} label="Station entries per hour" />
+          <div className="row spread dim mono" style={{ fontSize: 11, margin: "6px 0 0 24px" }}><span>-24h</span><span>-12h</span><span>now</span></div>
+        </Card>
+      </div>
+      {projects.length ? (
+        <Card title="Projects" flush hint={`${projects.length} in view`} id="hm-projects">
+          <div className="proj-grid">
+            {projects.map((p) => {
+              const mt = metricsOf(p);
+              return (
+                <a key={p.id} className="ptile" href={hashFor("project-config", null, p.id)}>
+                  <Lamp tone={p.killed ? "bad" : p.halted ? "warn" : mt.bad ? "bad" : "ok"} />
+                  <div className="main1">
+                    <span className="t1">{p.name}</span>
+                    <span className="t2">{mt.wip} on belt · {mt.bad} blocked</span>
+                  </div>
+                  {p.killed ? <Chip text="Killed" cls="bad" /> : p.halted ? <Chip text="Halted" cls="warn" /> : <span className="mono dim">{p.key}</span>}
+                </a>
+              );
+            })}
+          </div>
+        </Card>
+      ) : null}
+    </Page>
   );
+}
+
+/** Station entries per hour over the last 24 hours (oldest first), from the activity feed. */
+function hourly(events: Array<{ at: number; type: string }>): number[] {
+  const now = Date.now();
+  const out = Array.from({ length: 24 }, () => 0);
+  for (const e of events) {
+    if (e.type !== "wo.enter") continue;
+    const age = Math.floor((now - e.at) / HOUR_MS);
+    if (age >= 0 && age < 24) out[23 - age] = (out[23 - age] ?? 0) + 1;
+  }
+  return out;
 }

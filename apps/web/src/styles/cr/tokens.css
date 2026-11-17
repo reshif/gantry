@@ -1,0 +1,53 @@
+:root,[data-theme=dark]{
+  --font:'Inter Tight',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--s8:32px;--s10:40px;
+  --r:6px;--r-lg:10px;--ctl:32px;--rail:232px;
+  color-scheme:dark;
+  --bg:#0a0d11;--surface:#11161c;--surface-2:#171d25;--raised:#1e2631;--line:#253040;--line-strong:#374659;
+  --text:#e7ecf3;--text-2:#a6b2c2;--text-3:#9aa9bc;
+  --ok:#3fdc97;--warn:#f6b93b;--warn-fill:#f6b93b;--bad:#ff6f6f;--info:#5fb4ff;--agent:#b7a0ff;--idle:#9aa9bc;
+  --accent:#5fb4ff;--on-accent:#06121f;--focus:#8cc8ff;
+  --shadow:0 12px 40px rgba(0,0,0,.55);--glow:0 0 0 1px color-mix(in srgb,currentColor 30%,transparent);
+  --bar:color-mix(in srgb,var(--info) 72%,var(--surface));--belt:#0d1218;--belt-line:#2a3646;--belt-chev:#324257;--scrim:rgba(4,7,10,.66);
+}
+[data-theme=light]{
+  color-scheme:light;
+  --bg:#edf0f4;--surface:#ffffff;--surface-2:#f5f7fa;--raised:#ffffff;--line:#d3dae4;--line-strong:#b4bfcd;
+  --text:#0f1722;--text-2:#44546a;--text-3:#4d5e75;
+  --ok:#0a7045;--warn:#8a5700;--warn-fill:#e8920a;--bad:#c1252c;--info:#1556b0;--agent:#6538cf;--idle:#4d5e75;
+  --accent:#1556b0;--on-accent:#ffffff;--focus:#1556b0;
+  --shadow:0 12px 32px rgba(20,35,60,.18);--glow:none;
+  --bar:color-mix(in srgb,var(--info) 46%,var(--surface));--belt:#e3e8ef;--belt-line:#b9c4d2;--belt-chev:#a9b7c9;--scrim:rgba(15,23,34,.4);
+}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]):not([data-theme=light]){
+  color-scheme:light;
+  --bg:#edf0f4;--surface:#ffffff;--surface-2:#f5f7fa;--raised:#ffffff;--line:#d3dae4;--line-strong:#b4bfcd;
+  --text:#0f1722;--text-2:#44546a;--text-3:#4d5e75;
+  --ok:#0a7045;--warn:#8a5700;--warn-fill:#e8920a;--bad:#c1252c;--info:#1556b0;--agent:#6538cf;--idle:#4d5e75;
+  --accent:#1556b0;--on-accent:#ffffff;--focus:#1556b0;
+  --shadow:0 12px 32px rgba(20,35,60,.18);--glow:none;
+  --bar:color-mix(in srgb,var(--info) 46%,var(--surface));--belt:#e3e8ef;--belt-line:#b9c4d2;--belt-chev:#a9b7c9;--scrim:rgba(15,23,34,.4);
+}}
+
+/* Fonts: Inter Tight (self-hosted, SIL OFL) is the Control Room sans; JetBrains Mono is already declared in ../tokens.css. */
+@font-face{font-family:"Inter Tight";font-style:normal;font-weight:100 900;font-display:swap;src:url("../../assets/fonts/inter-tight-latin-wght-normal.woff2") format("woff2-variations");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+
+/* Bridge: the pre-Control-Room token names resolve to the Control Room palette, in every theme, so views not yet
+   migrated follow the new colours. Same element as the base tokens, so var() resolves against the active theme. */
+:root:root{
+  --f-body:var(--font);--f-display:var(--font);--f-ui:var(--font);--f-mono:var(--mono);
+  --ink:var(--text);--ink-2:var(--text-2);--muted:var(--text-2);--faint:var(--text-3);--fg:var(--text);--fg-2:var(--text-2);--fg-3:var(--text-3);
+  --panel:var(--surface-2);--sunk:var(--bg);--paper-2:var(--bg);--line-2:var(--line-strong);--grid:transparent;
+  --accent-ink:var(--on-accent);--accent-hover:var(--accent);--accent-soft:color-mix(in srgb,var(--accent) 14%,var(--surface));--accent-line:color-mix(in srgb,var(--accent) 40%,var(--surface));
+  --run:var(--info);--run-soft:color-mix(in srgb,var(--info) 16%,var(--surface));
+  --wait:var(--warn);--wait-soft:color-mix(in srgb,var(--warn-fill) 18%,var(--surface));
+  --block:var(--bad);--block-soft:color-mix(in srgb,var(--bad) 16%,var(--surface));
+  --fail:var(--agent);--fail-soft:color-mix(in srgb,var(--agent) 16%,var(--surface));
+  --done:var(--ok);--done-soft:color-mix(in srgb,var(--ok) 16%,var(--surface));
+  --ok-soft:var(--done-soft);--warn-soft:var(--wait-soft);--bad-soft:var(--block-soft);--info-soft:var(--run-soft);
+  --c-bad:var(--bad);--danger:var(--bad);--hover:color-mix(in srgb,var(--text) 6%,transparent);
+  --kill:var(--bad);--kill-soft:var(--block-soft);--gate:var(--warn);--gate-soft:var(--wait-soft);
+  --r1:6px;--r2:var(--r-lg);--r3:var(--r-lg);--r-sm:6px;--control-h:var(--ctl);--topbar-h:48px;
+  --shadow-1:var(--shadow);--shadow-2:var(--shadow);
+}

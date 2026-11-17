@@ -40,3 +40,8 @@ import "./foundation.css";
 import "./system.css";
 import "./views/dossier.css";
 import "./views/home-projects.css";
+
+/* Control Room: the prototype CSS, loaded last. Tokens first, then the shell and component CSS, then the screens. */
+import "./cr/tokens.css";
+import "./cr/app.css";
+import "./cr/screens.css";

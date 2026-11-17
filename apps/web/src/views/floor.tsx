@@ -9,15 +9,21 @@ import { useEffect, useState, type ReactNode } from "react";
 import { DAY, fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
-import { Btn, Empty, Segmented, Stat, StatRow, Status, ViewHead, type Decision, type Tone } from "../ui/primitives";
+import { Btn, Empty, Segmented, Status, type Decision, type Tone } from "../ui/primitives";
+import { Card, Conveyor, CrEmpty, FloorKpis, FloorTools, ListItem, LoadBar, Page, Ticker } from "../ui/cr";
+import { useActors } from "../ui/actors";
+import { useActivity } from "../api/queries";
+import { eventRows, eventText } from "../lib/eventText";
+import { useOpenTraveler } from "../shell/useTraveler";
+import { NO_FILTER, buildBelt, type BeltFilter } from "./floor/conveyor";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { pickProject } from "../lib/routes";
 import { usePrefs } from "../lib/prefs";
 import { makeStopActions } from "../shell/stopActions";
-import { Belt, useBeltStatus } from "./floor/Belt";
+import { useBeltStatus } from "./floor/Belt";
 import { useDrawers } from "./floor/Drawers";
-import { FloorCtx, isLive, since, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
+import { FloorCtx, since, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 
@@ -31,37 +37,32 @@ function useTick(ms: number): void {
   }, [ms]);
 }
 
-function Kpis() {
+function Kpis({ open, ticker }: { open: ReturnType<typeof buildBelt>["open"]; ticker: Array<{ when: string; text: string }> }) {
   const ctx = useFloorCtx();
-  const { project: p, wos, now } = ctx;
-  const live = wos.filter((w) => isLive(w) && w.bay !== "declined");
-  const waiting = live.filter((w) => w.state === "waiting" && !w.bay);
-  const oldest = waiting.reduce((m, w) => Math.max(m, now - since(w)), 0);
-  const shipped7 = wos.filter((w) => w.state === "done" && !w.split && (w.doneAt ?? 0) > now - 7 * DAY).length;
+  const { wos, now } = ctx;
+  const gates = open.filter((w) => w.state === "waiting" && !w.bay && !!ctx.floor.gates.find((g) => g.wo === w.id)).length;
+  const queued = open.filter((w) => w.state === "waiting" && !ctx.floor.gates.some((g) => g.wo === w.id)).length;
+  const stuck = open.filter((w) => w.state === "blocked" || w.state === "failed" || w.bay === "sechold" || w.bay === "person").length;
   const shipped24 = wos.filter((w) => w.state === "done" && !w.split && (w.doneAt ?? 0) > now - DAY).length;
-  const stuck = live.filter((w) => w.state === "blocked" || w.state === "failed" || w.bay === "sechold" || w.bay === "person").length;
-  const slots = ctx.replay ? wos.filter((w) => !w.bay && w.state === "running" && ctx.cat.stations[w.station]?.id === "build").slice(0, p.flow.slots).length : ctx.floor.slots.used;
-  const spendPct = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
-  const killed = wos.filter((w) => w.state === "killed").length;
-  const items: Array<{ k: string; v: string; sub: ReactNode; tone?: "wait" | "block" | "done" }> = [
-    { k: "Work in flight", v: String(live.length), sub: `${live.filter((w) => w.state === "running").length} running now` },
-    { k: "Gates waiting", v: String(waiting.length), sub: waiting.length ? `oldest ${fmt.dur(oldest)}` : "none waiting", ...(waiting.length ? { tone: "wait" as const } : {}) },
-    { k: "Stuck", v: String(stuck), sub: "blocked, failed, held, asking", ...(stuck ? { tone: "block" as const } : {}) },
-    { k: "Coding slots", v: `${slots}/${p.flow.slots}`, sub: slots >= p.flow.slots ? "all busy" : `${p.flow.slots - slots} free` },
-    { k: "Shipped, 7 days", v: String(shipped7), sub: `${shipped24} in 24h, ${wos.filter((w) => w.state === "done" && !w.split).length} in total` },
-    { k: "Spend, month to date", v: fmt.money0(p.budget.mtd), sub: ctx.replay ? "Live figure, not replayed." : <>{`${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)}. `}<a href="#project-config">Set in Project settings</a></>, ...(spendPct >= p.budget.alertAt ? { tone: "wait" as const } : {}) },
-  ];
-  if (killed) items.push({ k: "Killed", v: String(killed), sub: "work orders stopped", tone: "block" });
   return (
-    <StatRow id="floor-kpis">
-      {items.map((x) => <Stat key={x.k} label={x.k} value={x.v} sub={x.sub} {...(x.tone ? { tone: x.tone } : {})} />)}
-    </StatRow>
+    <div className="floor-top" id="floor-kpis">
+      <FloorKpis
+        items={[
+          { l: "On belt", v: open.length },
+          { l: "Queued", v: queued, tone: queued > 8 ? "warn" : undefined },
+          { l: "At gates", v: gates, tone: gates ? "warn" : "ok" },
+          { l: "Blocked", v: stuck, tone: stuck ? "bad" : "ok" },
+          { l: "Shipped 24h", v: shipped24 },
+        ]}
+      />
+      <Ticker items={ticker} />
+    </div>
   );
 }
 
 const statusTone = (cls: string): Tone => (cls.includes("is-killed") ? "block" : cls.includes("is-halted") || cls.includes("is-partial") ? "wait" : cls.includes("is-replay") ? "accent" : "done");
 
-function Header({ replaying, onReplay }: { replaying: boolean; onReplay: (on: boolean) => void }) {
+function Header({ replaying, onReplay, paused, onPause, children }: { replaying: boolean; onReplay: (on: boolean) => void; paused: boolean; onPause: () => void; children: ReactNode }) {
   const ctx = useFloorCtx();
   const ui = useUI();
   const me = useMe();
@@ -97,46 +98,100 @@ function Header({ replaying, onReplay }: { replaying: boolean; onReplay: (on: bo
       killItem,
     ]);
   };
-  const stateLabel = p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Line control";
   return (
-    <div id="floor-head">
-      <ViewHead
-        title={
-          <>
-            {p.name}
-            <span className="vtitle-badge">
-              <Status tone={statusTone(status.cls)} icon={status.icon} id="floor-status">{status.label}</Status>
-            </span>
-          </>
-        }
-        sub={p.desc}
-        actions={
-          <>
-            <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
-            <Btn label={stateLabel} icon={p.killed ? "st-kill" : "halt"} id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" {...(p.halted || p.killed ? { kind: "danger" as const } : {})} />
-            <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
-          </>
-        }
-      />
-    </div>
+    <Page
+      eyebrow={`Operate · ${p.name}`}
+      title={<>Floor<span className="vtitle-badge"> <Status tone={statusTone(status.cls)} icon={status.icon} id="floor-status">{status.label}</Status></span></>}
+      sub="The production line, left to right. Work orders ride the belt; gates are checkpoints where a person decides."
+      cls="view-floor-page"
+      id="floor-head"
+      acts={
+        <>
+          <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
+          <Btn label={paused ? "Resume belt" : "Pause belt"} icon={paused ? "play" : "pause"} id="floor-pause" aria-pressed={paused} onClick={onPause} />
+          <Btn label={p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Halt line"} kind="danger" icon="halt" id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" />
+          <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
+        </>
+      }
+    >
+      {children}
+    </Page>
   );
 }
 
 function FloorBody({ projectId }: { projectId: string }) {
   const ctx = useFloorCtx();
   const drawers = useDrawers(projectId);
+  const openTraveler = useOpenTraveler();
+  const actors = useActors();
+  const activity = useActivity(projectId);
   const rp = ctx.replay;
   const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId, rp, "floor-mode-live");
+  const [paused, setPaused] = useState(false);
+  const [filter, setFilter] = useState<BeltFilter>(NO_FILTER);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   useTick(30_000);
 
+  const agentName = (id: string) => actors(id).name.replace(" (agent)", "");
+  const { stations, released, open } = buildBelt(ctx, agentName, filter);
+  const ticker = eventRows(activity.data).slice(0, 14).map((e) => ({ when: fmt.ago(e.at, Date.now()), text: eventText(e, ctx.cat, (id) => actors(id).name.replace(" (agent)", "")) }));
+
+  /* below the belt: what waits at a gate (oldest first) and where the belt is tight */
+  const gates = open.filter((w) => w.state === "waiting" && !w.bay && ctx.floor.gates.some((g) => g.wo === w.id)).sort((a, b) => since(a) - since(b));
+  const load = stations
+    .map((s) => {
+      const active = s.lane.length;
+      return { s, used: active, wait: s.queue.length };
+    })
+    .sort((a, b) => b.wait - a.wait || b.used / b.s.slots - a.used / a.s.slots)
+    .slice(0, 5);
+  const scale = Math.max(1, ...load.map((x) => x.s.slots + x.wait));
+  const gateOf = (woId: string) => ctx.floor.gates.find((g) => g.wo === woId);
+
   return (
-    <>
-      <Header replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} />
-      <Kpis />
-      <p className="muted small fl-live-note">{rp ? "Replaying recorded history. Nothing here changes the live floor." : "Live: changes from other people and the factory appear as they happen."}</p>
+    <Header replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} paused={paused} onPause={() => setPaused((v) => !v)}>
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
-      <Belt onStation={drawers.station} onGate={drawers.gate} />
-    </>
+      <Kpis open={open} ticker={ticker} />
+      <FloorTools
+        q={filter.q}
+        onQ={(q) => setFilter((f) => ({ ...f, q }))}
+        filters={[
+          { key: "cls", label: "Class", options: ctx.cat.classes.map((c) => [c.id, c.name]) },
+          { key: "pri", label: "Priority", options: [["P0", "P0"], ["P1", "P1"], ["P2", "P2"], ["P3", "P3"]] },
+          { key: "st", label: "State", options: [["running", "Running"], ["queued", "Queued"], ["gate", "At gate"], ["blocked", "Blocked"]] },
+        ]}
+        values={{ cls: filter.cls, pri: filter.pri, st: filter.st }}
+        onFilter={(k, v) => setFilter((f) => ({ ...f, [k]: v }))}
+        onClear={() => setFilter(NO_FILTER)}
+        open={filtersOpen}
+        onToggle={() => setFiltersOpen((o) => !o)}
+      />
+      <Conveyor stations={stations} released={released} paused={paused} onToken={openTraveler} onStation={drawers.station} onGate={drawers.gate} onPile={drawers.station} />
+      <div className="grid g2" style={{ marginTop: 16, alignItems: "start" }}>
+        <Card title="Waiting at gates" flush hint="Oldest first" id="floor-gates">
+          <div className="list">
+            {gates.length ? (
+              gates.slice(0, 5).map((w) => {
+                const g = gateOf(w.id);
+                return (
+                  <ListItem key={w.id} tone="warn" title={`${g?.gate ?? ""} · ${w.title}`} sub={`${w.id} · waiting ${fmt.dur(Math.max(0, ctx.now - since(w)))}`}>
+                    <Btn label="Review" small kind="primary" onClick={() => openTraveler(w.id)} />
+                  </ListItem>
+                );
+              })
+            ) : (
+              <CrEmpty title="No gates waiting" text="Nothing needs a person right now." icon="check" />
+            )}
+          </div>
+        </Card>
+        <Card title="Where the belt is tight" hint="Stations ranked by queue pressure" id="floor-tight">
+          <div className="stack" style={{ gap: 14 }}>
+            {load.map((x) => <LoadBar key={x.s.id} name={x.s.name} used={x.used} slots={x.s.slots} waiting={x.wait} scale={scale} />)}
+            <div className="dim mono" style={{ fontSize: 11 }}>Filled = slots in use. Tinted = waiting. Tick = capacity.</div>
+          </div>
+        </Card>
+      </div>
+    </Header>
   );
 }
 
@@ -157,14 +212,14 @@ export default function FloorView() {
   if (!value) {
     const f = error ? failureOf(error) : null;
     return (
-      <div className="view view-floor">
+      <div className="floor-root">
         {!f ? <Loading id="floor-loading" label="the floor" /> : f.hidden ? <NotVisible id="floor-hidden" what="this floor" reason={f.msg} /> : <LoadFailed id="floor-error" what="the floor" msg={f.msg} onRetry={() => window.location.reload()} />}
       </div>
     );
   }
   return (
     <FloorCtx.Provider value={value as FloorCtxValue}>
-      <div className={`view view-floor${value.replay ? " is-replaying" : ""}`}>
+      <div className={`floor-root${value.replay ? " is-replaying" : ""}`}>
         <FloorBody projectId={projectId} />
       </div>
     </FloorCtx.Provider>

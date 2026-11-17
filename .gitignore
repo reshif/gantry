@@ -13,3 +13,4 @@ deploy/tls/*
 deploy/prod.env
 apps/web/e2e/test-results/
 apps/web/e2e/report/
+apps/web/fidelity/.build/

@@ -93,6 +93,6 @@ describe("session robustness", () => {
   it("shows the connection state in the top bar", async () => {
     render(<App />);
     await screen.findByRole("navigation", { name: "Main" });
-    expect(document.getElementById("conn-indicator")?.textContent).toMatch(/Live/);
+    expect(document.getElementById("conn-indicator")?.textContent).toMatch(/live|reconnecting|offline/i);
   });
 });

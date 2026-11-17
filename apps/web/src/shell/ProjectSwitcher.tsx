@@ -5,6 +5,7 @@ import { isProjectRoute } from "../lib/routes";
 import { hashFor } from "../lib/router";
 import { togglePinnedProject, usePrefs } from "../lib/prefs";
 import { Icon } from "../ui/Icon";
+import { CrIcon } from "../ui/cr";
 import { useUI } from "../ui/overlay-context";
 
 type ProjectLite = Me["projects"][number];
@@ -19,10 +20,11 @@ export function ProjectSwitcher({ me, project, current }: { me: Me; project: Pro
   const status = project ? (project.killed ? "killed" : project.halted ? "halted" : project.status) : null;
   const name = project ? project.name : "Choose a project";
   return (
-    <button ref={ref} type="button" className="proj-btn" id="project-switcher" aria-haspopup="dialog" aria-label={project ? `Project ${project.name}. Switch project` : "Choose a project"} title={name.length > 28 ? name : undefined} onClick={open}>
-      <span className="proj-btn-name">{name}</span>
-      {status === "killed" || status === "halted" ? <span className={`proj-btn-dot st-${status}`} role="img" aria-label={status} title={status} /> : null}
-      <Icon name="down" />
+    <button ref={ref} type="button" className="pill-btn proj-sw" id="project-switcher" aria-haspopup="dialog" aria-label={project ? `Project ${project.name}. Switch project` : "Choose a project"} title={name.length > 28 ? name : undefined} onClick={open}>
+      <CrIcon name="projects" />
+      <span className="ell">{name}</span>
+      {status === "killed" || status === "halted" ? <span className={`lamp ${status === "killed" ? "bad" : "warn"}`} role="img" aria-label={status} title={status} /> : null}
+      <CrIcon name="chevd" />
     </button>
   );
 }

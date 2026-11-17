@@ -3,7 +3,7 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
@@ -44,7 +44,7 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
   const g = guardProps(guard);
   const reason = disabledReason || g["data-reason"];
   const locked = !!disabledReason || g.locked;
-  const className = `btn ${kind ? `btn-${kind}` : ""}${small ? " btn-sm" : ""}${cls ? ` ${cls}` : ""}${locked ? " is-locked" : ""}`;
+  const className = `btn ${kind ? `btn-${kind} ${kind}` : ""}${small ? " btn-sm sm" : ""}${cls ? ` ${cls}` : ""}${locked ? " is-locked" : ""}`;
   const showWhy = locked && !!reason;
   return (
     <button
@@ -316,11 +316,11 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
 
 export function ViewHead({ kicker, title, status, sub, meta, actions }: { kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
   return (
-    <header className="vhead">
+    <header className="vhead ph">
       <div className="vhead-main">
-        {kicker ? <div className="kicker">{kicker}</div> : null}
+        {kicker ? <div className="kicker eyebrow">{kicker}</div> : null}
         {status ? <div className="vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
-        {sub ? <p className="vsub">{sub}</p> : null}
+        {sub ? <p className="vsub sub">{sub}</p> : null}
       </div>
       {meta ? (
         <dl className="titleblock">
@@ -332,7 +332,7 @@ export function ViewHead({ kicker, title, status, sub, meta, actions }: { kicker
           ))}
         </dl>
       ) : null}
-      {actions ? <div className="vhead-actions">{actions}</div> : null}
+      {actions ? <div className="vhead-actions acts">{actions}</div> : null}
     </header>
   );
 }
@@ -340,13 +340,13 @@ export function ViewHead({ kicker, title, status, sub, meta, actions }: { kicker
 /** One stat tile: a quiet label, a big value, an optional note. Put them in <StatRow>. `value` may be the result of qState(). */
 export function Stat({ label, value, sub, tone, icon, id, action }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done"; icon?: string; id?: string; action?: ReactNode }) {
   return (
-    <div className={`stat-tile${tone ? ` stat-${tone}` : ""}`} id={id}>
-      <div className="stat-lbl">
+    <div className={`stat-tile stat${tone ? ` stat-${tone} ${tone === "wait" ? "warn" : tone === "block" ? "bad" : "ok"}` : ""}`} id={id}>
+      <div className="stat-lbl label">
         <span>{label}</span>
         {icon ? <Icon name={icon} /> : null}
       </div>
-      <div className="stat-val">{value}</div>
-      {sub ? <div className="stat-sub">{sub}</div> : null}
+      <div className="stat-val v">{value}</div>
+      {sub ? <div className="stat-sub d">{sub}</div> : null}
       {action ? <div className="stat-act">{action}</div> : null}
     </div>
   );
@@ -355,7 +355,7 @@ export function Stat({ label, value, sub, tone, icon, id, action }: { label: Rea
 /** A single row of equal stat tiles under the page header (two columns on a phone). */
 export function StatRow({ children, id }: { children: ReactNode; id?: string }) {
   return (
-    <div className="stat-row" id={id}>
+    <div className="stat-row stats" id={id} style={{ "--n": Children.toArray(children).length || 1 } as React.CSSProperties}>
       {children}
     </div>
   );

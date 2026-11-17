@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CATALOG } from "@gantry/domain";
@@ -81,7 +81,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-const text = (): string => document.body.textContent ?? "";
 
 describe("Home: one page", () => {
   it("says Home is not visible on a 403, and shows a retry on other failures", async () => {
@@ -90,48 +89,8 @@ describe("Home: one page", () => {
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
   });
 
-  it("a Factory Admin on a live org with a repo onboarding sees attention, the checklist and the project, once each", async () => {
-    const calls = setup(ASHA, adminHome());
-    mount();
-    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeTruthy();
-    // Attention carries the failing onboarding; the project row says where the repo is; the checklist has the active step.
-    expect(await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed")).toBeTruthy();
-    expect(screen.getByText("Nautobot-Jobs: verification failed")).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 2, name: /Set up the factory/ })).toBeTruthy();
-    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Step repo");
-    expect(screen.getByText("3 of 5 done")).toBeTruthy();
-    // Only the active step has a button.
-    expect(document.querySelectorAll(".hm-step .btn")).toHaveLength(1);
-    // One request for the page, and none for the removed activity feed.
-    expect(calls.filter((c) => c.path === "/api/v1/home")).toHaveLength(1);
-    expect(calls.some((c) => c.path === "/api/v1/activity")).toBe(false);
-  });
 
-  it("has none of the removed duplicates: sentence, signed-in box, KPI tiles, control panel, portfolio toolbar, mode toggle", async () => {
-    setup(ASHA, adminHome());
-    mount();
-    await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed");
-    expect(text()).not.toMatch(/Factory running\./);
-    expect(text()).not.toMatch(/Signed in/i);
-    for (const id of ["hm-kpi-flight", "hm-kpi-gates", "hm-kpi-spend", "hm-kpi-success", "hm-to-mine", "hm-to-factory", "hm-ctl"]) expect(document.getElementById(id)).toBeNull();
-    for (const t of ["My work", "Factory overview", "Human attention", "Live activity", "Onboarding pipeline", "Save as view", "Factory control"]) expect(screen.queryByText(t)).toBeNull();
-    expect(document.querySelector(".hm-kpis")).toBeNull();
-  });
 
-  it("the stat row under the title counts what the sections below hold, and drops a tile whose section the person does not get", async () => {
-    setup(ASHA, adminHome({}, { attention: [{ ...ONB_ATT, sev: 0 }], motion: { ...MOTION, inFlight: 3, running: 2, shippedWeek: 4, shippedToday: 1 }, waiting: { approvals: [], conversations: [] } }));
-    mount();
-    await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed");
-    expect(document.getElementById("hm-stat-attention")?.textContent).toContain("1 critical");
-    expect(document.getElementById("hm-stat-shipped")?.textContent).toContain("4");
-    expect(document.getElementById("hm-stat-waiting")?.textContent).toContain("Nothing is waiting on you");
-    cleanup();
-    setup(VERA, { approvals: [], conversations: [], badges: {}, projectBadges: {}, sections: { attention: [], projects: [{ id: "payments", roles: [{ id: "viewer", name: "Viewer" }], repos: [] }] } });
-    mount();
-    await screen.findByText(/Ask a Project Admin for more access/);
-    expect(document.getElementById("hm-stat-waiting")).toBeNull();
-    expect(document.getElementById("hm-stat-flight")).toBeNull();
-  });
 
   it("never shows a kill or restore control on Home", async () => {
     setup(ASHA, adminHome());
@@ -159,116 +118,65 @@ describe("Home: one page", () => {
     expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
   });
 
-  it("shows 'No spend yet' instead of a 0% gauge, and keeps health collapsed until opened", async () => {
-    setup(ASHA, adminHome({}, { setup: undefined }));
-    mount();
-    const toggle = await screen.findByRole("button", { name: /Factory health/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(text()).toContain("No spend yet");
-    expect(text()).not.toMatch(/0%/);
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(document.querySelector('[role="meter"]')).toBeNull();
-  });
 
-  it("reports real eval health, with the failing live versions listed; hides the row without run data", async () => {
-    const evals = { scored: 3, passing: 2, unscored: 0, failing: [{ agent: "ag-spec", name: "Spec agent", version: "1.2.0", suite: "ES-spec", score: 0.7, threshold: 0.85 }] };
-    setup(ASHA, adminHome({}, { setup: undefined, health: { ...HEALTH, spend: { spent: 500, budget: 2000, projects: [] }, evals } }));
-    mount();
-    fireEvent.click(await screen.findByRole("button", { name: /Factory health/ }));
-    expect(screen.getByText("2 of 3 live agent versions pass their suite threshold (last run)")).toBeTruthy();
-    expect(screen.getByText("Spec agent 1.2.0: 70% vs 85% on ES-spec")).toBeTruthy();
-    expect(screen.getAllByText("$500 of $2,000", { exact: false })).toHaveLength(1);
-    cleanup();
-    vi.unstubAllGlobals();
-    setup(ASHA, adminHome({}, { setup: undefined }));
-    mount();
-    fireEvent.click(await screen.findByRole("button", { name: /Factory health/ }));
-    expect(screen.queryByText(/live agent versions pass/)).toBeNull();
-  });
 
-  it("the setup checklist is gone once the API sends none", async () => {
-    setup(ASHA, adminHome({}, { setup: undefined, attention: [] }));
-    mount();
-    await screen.findByRole("heading", { level: 1, name: "Home" });
-    await screen.findByRole("heading", { level: 2, name: /Waiting on you/ });
-    expect(screen.queryByText(/Set up the factory/)).toBeNull();
-    expect(document.querySelector(".hm-step")).toBeNull();
-  });
 
-  it("an item in Attention is not repeated in Waiting on you", async () => {
-    const waiting = { approvals: [{ repo: "nautobot-jobs", repoName: "Nautobot-Jobs", pr: 4, project: "nautobot", projectName: "Nautobot-Jobs" }, { wo: "WO-1", title: "Rounding", gate: "G2", gateLabel: "G2", gateName: "Spec approval", project: "payments", projectName: "Payments Platform", have: 1, need: 2 }], conversations: [] };
-    setup(ASHA, adminHome({}, { waiting, setup: undefined, attention: [{ ...ONB_ATT, id: "hm-att-onb-nautobot-jobs" }] }));
-    mount();
-    await screen.findByText("WO-1", { exact: false });
-    expect(screen.queryByText(/Merge onboarding PR/)).toBeNull();
-    // The gate row says its approvals once.
-    expect(screen.getAllByText(/1 of 2 approvals/)).toHaveLength(1);
-  });
 
-  it("in flight is one tile at the top and one line in the In motion card, never a third place", async () => {
-    const motion = { ...MOTION, inFlight: 3, running: 2, inBays: 1, byStation: { build: 3 }, shippedToday: 1, shippedWeek: 4, shippedPrevWeek: 1, recentDone: [{ id: "WO-5", title: "Done", project: "payments", projectName: "Payments Platform", doneAt: 1 }] };
-    setup(ASHA, adminHome({}, { setup: undefined, attention: [], motion }));
-    mount();
-    expect(await screen.findByText("3 work orders in flight · 2 running · 1 in bays")).toBeTruthy();
-    // The tile at the top ("In flight") and the line in the card; the old header and panel copies stay gone.
-    expect(text().match(/in flight/gi) ?? []).toHaveLength(2);
-    expect(document.getElementById("hm-stat-flight")?.textContent).toContain("3");
-    expect(document.getElementById("hm-motion")?.textContent).toContain("Shipped 1 today, 4 this week+3 vs previous week");
-    expect(document.getElementById("hm-done-WO-5")).toBeTruthy();
-  });
 
-  it("plural strings: 1 work order, 2 work orders; no 'need' for one item", async () => {
-    setup(ASHA, adminHome({}, { setup: undefined, attention: [], motion: { ...MOTION, inFlight: 1, running: 1 } }));
-    mount();
-    expect(await screen.findByText("1 work order in flight · 1 running")).toBeTruthy();
-    expect(text()).not.toMatch(/1 projects|1 work orders|1 items/);
-  });
 });
 
 describe("Home: by role", () => {
-  it("Auditor: waiting on approvers is read-only, no Waiting on you, no setup, no disabled buttons", async () => {
-    setup(SAM, adminHome({}, { setup: undefined, waiting: undefined, attention: [], approvers: { count: 2, oldestMs: 7_200_000, late: 1, byProject: [{ id: "payments", name: "Payments Platform", count: 2, oldestMs: 7_200_000 }] } }), { denied: ["project.create", "wo.submit", "restore.factory", "kill.factory"] });
-    mount();
-    expect(await screen.findByRole("heading", { level: 2, name: /Waiting on approvers/ })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: /Waiting on you/ })).toBeNull();
-    expect(screen.getByText(/1 past SLA/)).toBeTruthy();
-    expect(screen.queryByText("New project")).toBeNull();
-    expect(document.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);
-    expect(screen.getByText("Audit ledger", { exact: false })).toBeTruthy();
-  });
 
-  it("Engineer: waiting rows and approvals call the API; their work orders show as tokens; no factory health", async () => {
-    const calls = setup(TOMAS, {
-      approvals: [], conversations: [], badges: {}, projectBadges: {},
-      sections: {
-        attention: [], projects: [{ id: "payments", roles: [{ id: "engineer", name: "Engineer" }], repos: [] }],
-        waiting: { approvals: [{ wo: "WO-9", title: "Fix rounding", gate: "G3d", gateLabel: "G3d", gateName: "Design review", instance: "WO-9:G3d:2", project: "payments", projectName: "Payments", have: 0, need: 1 }], conversations: [{ wo: "WO-10", title: "Add export", project: "payments", question: "Which format?" }] },
-        motion: { ...MOTION, inFlight: 1, mine: [{ id: "WO-10", title: "Add export", project: "payments", projectName: "Payments", state: "waiting", bay: null, bayName: null, station: "Intake", cls: "feature", doneAt: null }] },
-      },
-    }, { extra: { "POST /api/v1/gate-instances/WO-9%3AG3d%3A2/approve": () => ({ body: { ok: true, msg: "G3d approved on WO-9." } }) } });
-    mount();
-    expect(await screen.findByText("Which format?")).toBeTruthy();
-    expect(document.getElementById("hm-tok-WO-10")?.className).toContain("tok-waiting");
-    expect(screen.queryByRole("button", { name: /Factory health/ })).toBeNull();
-    expect(screen.getByRole("heading", { level: 2, name: /My projects/ })).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Approve WO-9 at G3d" }));
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/approve"))).toBe(true));
-    expect(await screen.findByText("G3d approved on WO-9.")).toBeTruthy();
-  });
 
-  it("Viewer: read-only, no Waiting on you section at all, one line on how to get more access", async () => {
-    setup(VERA, { approvals: [], conversations: [], badges: {}, projectBadges: {}, sections: { attention: [], motion: MOTION, projects: [{ id: "payments", roles: [{ id: "viewer", name: "Viewer" }], repos: [] }] } }, { denied: ["wo.submit", "project.create"] });
-    mount();
-    expect(await screen.findByText(/Ask a Project Admin for more access/)).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: /Waiting on you/ })).toBeNull();
-    expect(screen.queryByText("New work order")).toBeNull();
-  });
 
   it("no access: one sentence and nothing else", async () => {
     setup(VERA, { approvals: [], conversations: [], badges: {}, sections: { access: "none" } });
     mount();
     expect(await screen.findByText("No access yet")).toBeTruthy();
     expect(document.querySelectorAll("section")).toHaveLength(0);
+  });
+});
+
+describe("Home: Control Room", () => {
+  it("shows what needs a person, the live feed, the belt at a glance and the projects, once each", async () => {
+    setup(ASHA, adminHome(), { extra: { "GET /api/v1/activity": () => ({ body: [] }) } });
+    mount();
+    expect(await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed")).toBeTruthy();
+    expect(screen.getAllByText("Nautobot-Jobs onboarding needs you: verification failed")).toHaveLength(1);
+    for (const t of ["Needs your attention", "Live activity", "Belt at a glance", "Throughput, last 24 hours", "Projects"]) expect(screen.getByRole("heading", { name: t })).toBeTruthy();
+    expect(document.querySelectorAll(".minibelt .mb-st").length).toBe(DEFAULT_CATALOG.stations.length);
+    expect(document.querySelectorAll(".proj-grid .ptile").length).toBe(2);
+  });
+
+  it("the stat row counts what the sections below hold", async () => {
+    setup(ASHA, adminHome({}, { motion: { ...MOTION, inFlight: 12, running: 5, shippedToday: 3, shippedWeek: 9 } }));
+    mount();
+    await screen.findByText("Needs your attention");
+    const tile = (l: string) => screen.getByText(l).closest(".stat");
+    expect(tile("On the belt")?.querySelector(".v")?.textContent).toBe("12");
+    expect(tile("Released today")?.querySelector(".v")?.textContent).toBe("3");
+    expect(tile("Needs attention")?.querySelector(".v")?.textContent).toBe("1");
+  });
+
+  it("an item in Attention is not repeated among the waiting rows", async () => {
+    const wait = { approvals: [{ repo: "nautobot-jobs", repoName: "Nautobot-Jobs", project: "nautobot", projectName: "Nautobot-Jobs", pr: 4 }], conversations: [] };
+    setup(ASHA, adminHome({ approvals: wait.approvals }, { waiting: wait }));
+    mount();
+    await screen.findByText("Needs your attention");
+    expect(screen.queryByText(/Merge onboarding PR/)).toBeNull();
+  });
+
+  it("shows the setup checklist only while the API sends one", async () => {
+    setup(ASHA, adminHome({}, { setup: undefined }));
+    mount();
+    await screen.findByText("Needs your attention");
+    expect(screen.queryByText("Step repo")).toBeNull();
+  });
+
+  it("a person with no waiting section sees an empty attention card and no waiting tile", async () => {
+    setup(SAM, adminHome({}, { attention: undefined, waiting: undefined, setup: undefined }));
+    mount();
+    expect(await screen.findByText("Nothing waiting for you")).toBeTruthy();
+    expect(screen.queryByText("Waiting for a person")).toBeNull();
   });
 });

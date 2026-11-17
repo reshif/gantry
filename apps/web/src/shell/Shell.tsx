@@ -17,6 +17,7 @@ import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
+import { StatusBar } from "./StatusBar";
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
@@ -114,18 +115,16 @@ export function Shell({ me }: { me: Me }) {
   const ready = !scoped || (!!project && synced === project.id);
   const killed = !!me.factory.killed;
   return (
-    <div id="app" className={`shell${prefs.navRail ? " nav-rail" : ""}${navOpen ? " nav-open" : ""}`}>
+    <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
       <AppErrorBoundary level="chrome">
         <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
       </AppErrorBoundary>
-      <div className="sysbanner" id="sysbanner" hidden={!killed}>
-        {killed ? <StopBanner projectId={null} /> : null}
-      </div>
       <AppErrorBoundary level="chrome">
         <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
       </AppErrorBoundary>
       <div className="nav-scrim" id="nav-scrim" hidden={!navOpen} onClick={() => setNavOpen(false)} />
       <main className="main" id="main" tabIndex={-1} ref={main}>
+        {killed ? <div className="sysbanner" id="sysbanner"><StopBanner projectId={null} /></div> : null}
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
           {noAccess ? (
@@ -146,6 +145,9 @@ export function Shell({ me }: { me: Me }) {
           ) : null}
         </AppErrorBoundary>
       </main>
+      <AppErrorBoundary level="chrome">
+        <StatusBar />
+      </AppErrorBoundary>
     </div>
   );
 }

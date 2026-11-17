@@ -46,7 +46,7 @@ const SEV = [{ id: "crit", label: "Critical" }, { id: "high", label: "High" }, {
 const SHOWN = 5;
 
 /** Restore for a killed scope, only for people who may (no locked copy for anyone else). */
-function RestoreAction({ item }: { item: AttentionItem }) {
+export function RestoreAction({ item }: { item: AttentionItem }) {
   const ui = useUI();
   const me = useMe();
   const r = item.restore!;
