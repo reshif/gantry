@@ -94,7 +94,7 @@ const fx = await import(join(cache, "fixtures.mjs") + `?t=${Date.now()}`);
 /* ---- servers ---- */
 const py = spawn("python3", ["-m", "http.server", String(PROTO_PORT), "--bind", "127.0.0.1"], { cwd: PROTO_DIR, stdio: "ignore" });
 children.push(py);
-const pv = spawn("npx", ["vite", "preview", "--port", String(REAL_PORT), "--strictPort", "--host", "127.0.0.1"], { cwd: WEB, stdio: "ignore" });
+const pv = spawn(resolve(WEB, "../../node_modules/.bin/vite"), ["preview", "--port", String(REAL_PORT), "--strictPort", "--host", "127.0.0.1"], { cwd: WEB, stdio: "ignore" });
 children.push(pv);
 await Promise.all([waitUp(`http://127.0.0.1:${PROTO_PORT}/index.html`), waitUp(`http://127.0.0.1:${REAL_PORT}/`)]);
 
