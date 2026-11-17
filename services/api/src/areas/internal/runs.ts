@@ -137,6 +137,8 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) on conflict do nothing`,
         [c.orgId, id, c.attemptId, c.woId, c.projectId, b.model, b.inputTokens, b.outputTokens, b.cacheReadTokens, b.cacheWriteTokens, cost, b.latencyMs ?? null, b.traceRef ?? null, book.version, b.vendor ?? null, b.requestId ?? null, b.outcome],
       );
+      // The run shows the model that actually answered (the route may differ from the one pinned when the run was prepared).
+      if (ru.rowCount) await tx.query(`update runs set model_id = $3, updated_at = now() where org_id = $1 and id = $2 and model_id is distinct from $3`, [c.orgId, id, b.model]);
       if (!ru.rowCount) return { msg: "Usage already recorded.", events: [], extra: { duplicate: true, costMicros: cost, priceVersion: book.version }, changes: [] };
       await tx.query(
         `insert into usage_meter (org_id, request_id, run_id, attempt_id, station, agent_id, agent_version, project_id, vendor_id, model_id, input_tokens, output_tokens, cached_tokens, cache_write_tokens, cost_micros, price_version, latency_ms, outcome, trace_ref)

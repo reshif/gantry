@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readGateFor } from "../src/core/read-gates.js";
 import { readBackup, readDrill, redactError, shownDestination, type Probe } from "../src/areas/system/health.js";
 import { systemOverrides } from "../src/routes/system.js";
+import { world } from "./flow-helpers.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 
 const ADMIN = "p-asha";
@@ -129,6 +130,35 @@ d("GET /api/v1/system/health and the dead letter retry", () => {
     expect(b.outbox.dead[0]).toMatchObject({ id, destination: "slack", attempts: 8, lastError: "HTTP 500 from slack" });
     expect(JSON.stringify(b)).not.toContain("never-shown");
     expect(b.jobs.stuck.map((j: { id: string; reason: string }) => [j.id, j.reason]).sort()).toEqual([["j-expired", "lease_expired"], ["j-long", "running_long"]]);
+  });
+
+  it("surfaces failed run starts and dead jobs as problems, with the reason", async () => {
+    const health = async () => (await t.app.inject({ method: "GET", url: "/api/v1/system/health", headers: (await t.session(ADMIN)).headers })).json();
+    await q(`delete from jobs where org_id = $1`, [t.orgId]);
+    await q(`delete from runs where data->>'endedBy' = 'dispatch failed'`);
+    const clean = await health();
+    expect(clean.services.find((s: { id: string }) => s.id === "run-starts").status).toBe("ok");
+    expect(clean.services.find((s: { id: string }) => s.id === "jobs").status).toBe("ok");
+    const wo = "WO-HEALTH1";
+    await world(() => t).insertWo(wo, { position: "spec", state: "failed" });
+    for (let i = 0; i < 3; i++) {
+      await q(`insert into attempts (org_id, id, wo_id, station, visit, state) values ($1, $2, $3, 'spec', $4, 'failed')`, [t.orgId, `a-rs${i}`, wo, 900 + i]);
+      await q(`insert into runs (org_id, id, attempt_id, wo_id, state, ended_at, data) values ($1, $2, $3, $4, 'failed', now(), $5::jsonb)`,
+        [t.orgId, `r-rs${i}`, `a-rs${i}`, wo, JSON.stringify({ endedBy: "dispatch failed", dispatchError: { code: "seed_failed", msg: "The run could not be started: seed failed for https://github.com/acme/x" } })]);
+    }
+    await q(`insert into jobs (org_id, id, kind, status, last_error, completed_at, attempts, max_attempts) values ($1, 'j-dead', 'attempt.dispatch', 'dead', 'workspace seeding failed', now(), 5, 5)`, [t.orgId]);
+    const b = await health();
+    const rs = b.services.find((s: { id: string }) => s.id === "run-starts");
+    expect(rs.status).toBe("down");
+    expect(rs.detail).toContain("3 run starts failed");
+    expect(b.runStarts).toMatchObject({ failed: 3, reasons: [{ code: "seed_failed", count: 3 }] });
+    expect(JSON.stringify(b.runStarts)).not.toContain("github.com");
+    const js = b.services.find((s: { id: string }) => s.id === "jobs");
+    expect(js.status).toBe("degraded");
+    expect(b.jobs.dead).toMatchObject([{ id: "j-dead", kind: "attempt.dispatch", lastError: "workspace seeding failed" }]);
+    // Old failures fall out of the window.
+    await q(`update runs set ended_at = now() - interval '2 hours' where id like 'r-rs%'`);
+    expect((await health()).services.find((s: { id: string }) => s.id === "run-starts").status).toBe("ok");
   });
 
   it("lists at most the 20 newest dead letters", async () => {

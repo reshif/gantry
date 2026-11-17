@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useOpenTraveler } from "../shell/useTraveler";
+import { setTravelerTab } from "./traveler/state";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 import { allow, deny, posts, readsFor, travelerOf, waitingWo } from "./traveler/testkit";
 
@@ -26,11 +27,25 @@ async function show(extra: Parameters<typeof mockApi>[0] = {}, o: Parameters<typ
   return calls;
 }
 
+describe("Traveler drawer in the URL", () => {
+  it("writes the open work order and tab to the URL (F-15) and takes them out when it closes", async () => {
+    await show();
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("traveler")).toBe(W.id));
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("ttab")).toBe("history"));
+    fireEvent.click(document.getElementById("trv-close") as HTMLElement);
+    await waitFor(() => expect(window.location.search).toBe(""));
+    setTravelerTab("journey"); // the tab is remembered across drawers: leave it as the other tests expect it
+  });
+});
+
 describe("Traveler drawer", () => {
   it("shows the position, the waiting gate with its progress and the title block", async () => {
     await show();
     expect(await screen.findByText("Traveler · routing sheet · Payments Platform")).toBeTruthy();
     expect(await screen.findByText(/waiting \(0 of 1\)/)).toBeTruthy();
+    // a waiting gate is worded as what it needs, never as the outcome it waits for ("Spec approved")
+    expect((await screen.findByText(/waiting \(0 of 1\)/)).textContent).toMatch(/^[\w+]+ (Approve|Confirm|Review|Check|Wait|Decide)/);
     expect(screen.getByText("Coding slot")).toBeTruthy();
   });
 

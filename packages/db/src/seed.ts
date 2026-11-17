@@ -150,6 +150,8 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
       await q(`insert into notification_routes (org_id, id, project_id, event, destinations, template, conditions, fields, enabled) values ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb,$8::jsonb,$9)`,
         [org, `${pr.id}:${r.id ?? `NR-${n}`}`, pr.id, r.event, j(r.dest ?? []), r.template ?? "", j(r.cond ?? {}), j(r.fields ?? {}), r.enabled ?? true]);
     }
+    // Month-to-date spend is read from the meter, so the seeded figure is metered too (one row, this month, no vendor).
+    if (pr.budget?.mtd) await q(`insert into usage_meter (org_id, station, project_id, model_id, cost_micros, surface) values ($1,'seed',$2,'seed',$3,'seed')`, [org, pr.id, micros(pr.budget.mtd)]);
     if (pr.budget) await q(`insert into budgets (org_id, project_id, monthly_limit_micros, alert_at) values ($1,$2,$3,$4)`, [org, pr.id, micros(pr.budget.monthly), pr.budget.alertAt ?? 0.8]);
     if (pr.overlay) {
       await q(`insert into instruction_versions (org_id, scope, scope_id, version, body, hash, note, published_at, published_by) values ($1,'project',$2,1,$3,$4,'Seeded', now(), 'system')`, [org, pr.id, pr.overlay, sha(pr.overlay)]);

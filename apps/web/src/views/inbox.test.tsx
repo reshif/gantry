@@ -30,14 +30,45 @@ describe("Inbox", () => {
   it("lists what waits for the person once, grouped by kind, longest wait first", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, ONB], conversations: [CONV] }, attention: [] }) }) });
     mount(<InboxView />);
-    expect(await screen.findByText("Spec approved · G2 on WO-2398")).toBeTruthy();
+    expect(await screen.findByText("Approve spec · G2 on WO-2398")).toBeTruthy();
     expect(document.getElementById("inbox-count")?.textContent).toBe("3");
     expect(screen.getByText("Merge onboarding pull request search-service#3")).toBeTruthy();
     expect(screen.getByText("Which currency?")).toBeTruthy();
     // a filter shows one kind
     fireEvent.click(screen.getByLabelText(/Questions 1/));
-    expect(screen.queryByText("Spec approved · G2 on WO-2398")).toBeNull();
+    expect(screen.queryByText("Approve spec · G2 on WO-2398")).toBeNull();
     expect(screen.getByText("Which currency?")).toBeTruthy();
+  });
+
+  it("lists the brief gate under Gate approvals with a pending title, not under Questions with the classifier line", async () => {
+    const BRIEF_CONV = { wo: "WO-1005", title: "Fix the docs", project: "payments", question: "Classified as Docs (confidence 86%)", gate: { id: "G0G1", label: "G0+G1", name: "Brief confirmed" } };
+    mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [BRIEF_CONV, CONV] }, attention: [] }) }),
+      "GET /api/v1/work-orders/WO-1005": () => ({ body: { id: "WO-1005", project: "payments", version: 1, allowed: { approve: { gate: "G0G1", allowed: true, reason: "", needs: "" } } } }),
+    });
+    mount(<InboxView />);
+    expect(await screen.findByText("Confirm brief · G0+G1 on WO-1005")).toBeTruthy();
+    expect(screen.queryByText(/Classified as Docs/)).toBeNull();
+    expect(document.getElementById("inb-gate-WO-1005-G0G1")?.textContent).toContain("Gate approval");
+    expect(document.getElementById("inb-q-WO-1007")).toBeNull();
+    expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("Question");
+  });
+
+  it("lists a stopped work order with its reason and a Retry the server's decision allows", async () => {
+    const STUCK = { wo: "WO-1005", title: "Fix the docs", project: "payments", question: "The run could not be started: workspace seeding failed", stuck: { state: "failed", station: "spec", reason: "workspace seeding failed", actions: ["retry", "assign"] } };
+    const cs = mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [STUCK] }, attention: [] }) }),
+      "GET /api/v1/work-orders/WO-1005": () => ({ body: { id: "WO-1005", project: "payments", version: 4, allowed: { approve: null, can: { sendback: { allowed: true, reason: "" } } } } }),
+      "POST /api/v1/work-orders/WO-1005/retry": () => ({ body: { ok: true, msg: "WO-1005 is running again." } }),
+    });
+    mount(<InboxView />);
+    expect(await screen.findByText(/workspace seeding failed/)).toBeTruthy();
+    expect(document.getElementById("inb-stuck-WO-1005")?.textContent).toContain("Needs a person");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    await waitFor(() => expect(retry.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(retry);
+    await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-1005/retry")).toBe(true));
+    expect(cs.find((c) => c.path.endsWith("/retry"))!.headers["if-match"]).toBe("4");
   });
 
   it("shows the rule and who else can decide under Show details, read from the server", async () => {

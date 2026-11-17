@@ -97,6 +97,11 @@ async function markStarted(deps: Deps, a: AttemptInfo, runId: string, startupLea
 
 /** The attempt cannot be started and will not be: record a failed station result so the flow engine retries it (bounded) or parks the work order. */
 async function failDispatch(deps: Deps, a: AttemptInfo, runId: string, code: string, msg: string): Promise<unknown> {
+  // The reason stays on the run, so System health can show that runs are not starting and why (before the teardown, which may itself fail).
+  await withTx(deps.pool, (tx) => tx.query(
+    `update runs set data = data || $3::jsonb, ended_at = coalesce(ended_at, now()), updated_at = now() where org_id = $1 and id = $2`,
+    [a.orgId, runId, JSON.stringify({ dispatchError: { code, msg: msg.slice(0, 500) }, endedBy: "dispatch failed" })],
+  )).catch((e) => deps.log.warn({ run: runId, err: errMsg(e) }, "recording the dispatch failure on the run"));
   await teardownRun(deps, a.orgId, runId, "failed", { by: "dispatch failed" }).catch((e) => deps.log.warn({ run: runId, err: errMsg(e) }, "teardown after failed dispatch"));
   // An eval case that cannot start ends with an error on its item; it never touches the flow.
   if (a.woData.eval) return failEvalCase(deps, a, code, msg);
@@ -109,7 +114,7 @@ async function failDispatch(deps: Deps, a: AttemptInfo, runId: string, code: str
     });
     return { onboarding: true, failed: code, ended: end };
   }
-  const out = await withTx(deps.pool, (tx) => applyStationResult(tx, a.attemptId, a.fencing, { status: "failed", summary: msg, error: { code, msg } }));
+  const out = await withTx(deps.pool, (tx) => applyStationResult(tx, a.attemptId, a.fencing, { status: "failed", summary: msg, error: { code, msg, phase: "start" } }));
   return { failed: code, applied: out.applied };
 }
 

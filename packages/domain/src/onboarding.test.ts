@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ALWAYS_REQUIRED, RepoFacts, assess, detectTestCommand, judgeCodeowners, judgeOwners, judgeProtections, judgeRunner, needsDocker, ownersOf, parseCodeowners, planPr, readinessLost, readinessUnknown,
-  judgeCanary, judgeGuidelines, lineDelta, prChecksState, type AssessContext, type PlanContext,
+  judgeCanary, judgeGuidelines, lineDelta, prChecksState, wantsContent, type AssessContext, type PlanContext,
 } from "./onboarding.js";
 
 const SHA = "a".repeat(40);
@@ -27,6 +27,13 @@ const plan = (): PlanContext => ({
 });
 
 const byId = (f: ReturnType<typeof assess>, id: string) => f.find((x) => x.id === id)!;
+
+describe("what the broker reads from a repository", () => {
+  it("includes the README and contributing guide (the Intake agent reads them), and nothing that holds secrets or source", () => {
+    for (const p of ["README.md", "README", "README.rst", "readme.md", "docs/README.md", "CONTRIBUTING.md"]) expect(wantsContent(p), p).toBe(true);
+    for (const p of [".env", "src/README.md", "src/index.ts", "secrets.txt", "README.md.bak"]) expect(wantsContent(p), p).toBe(false);
+  });
+});
 
 describe("assess", () => {
   it("reads real facts: a node repo with no CI, owners or agents file", () => {

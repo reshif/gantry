@@ -56,6 +56,8 @@ export const CONTENT_FILES: readonly RegExp[] = [
   /^(\.github\/|docs\/)?CODEOWNERS$/, /^AGENTS\.md$/, /^\.gantry\/factory\.ya?ml$/, /^package\.json$/, /^Makefile$/, /^go\.mod$/, /^pyproject\.toml$/, /^pytest\.ini$/, /^tox\.ini$/, /^setup\.cfg$/,
   /^Cargo\.toml$/, /^pom\.xml$/, /^build\.gradle(\.kts)?$/, /^\.tool-versions$/, /^\.nvmrc$/, /^\.node-version$/, /^\.python-version$/, /^rust-toolchain(\.toml)?$/, /^requirements[^/]*\.txt$/,
   /^\.github\/workflows\/[^/]+\.ya?ml$/, /^docker-compose[^/]*\.ya?ml$/, /^compose[^/]*\.ya?ml$/,
+  // What a person would read first to understand the repository. Read only; the Intake agent reads them (read_file) to write a brief that fits the code.
+  /^(docs\/)?README(\.(md|markdown|rst|txt))?$/i, /^CONTRIBUTING(\.(md|markdown|rst|txt))?$/i,
 ];
 export const wantsContent = (path: string): boolean => CONTENT_FILES.some((r) => r.test(path));
 

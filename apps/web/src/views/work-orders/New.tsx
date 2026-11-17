@@ -79,6 +79,8 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const repo = repoId && repos.some((r) => r.id === repoId) ? repoId : (repos.find(ready)?.id ?? repos[0]?.id ?? null);
   useEffect(() => {
     key.current = globalThis.crypto.randomUUID();
+    // The inline error describes the form as it was submitted: once a field changes it no longer applies (a title typed after "Give the work order a title" must clear it).
+    setErr("");
   }, [projectId, repo, title, desc, att, cls, prio, source]);
   if (!me || !cat || !project) return null;
   const decision = can[projects.indexOf(project)];

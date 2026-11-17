@@ -19,6 +19,7 @@ import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
+import { useRestoreTraveler } from "./useTraveler";
 
 export function Shell({ me }: { me: Me }) {
   const ui = useUI();
@@ -31,6 +32,7 @@ export function Shell({ me }: { me: Me }) {
   useInstallStepUp();
   useInstallOverrideReason();
   useRegisterNewWorkOrder();
+  useRestoreTraveler();
   const [navOpen, setNavOpen] = useState(false);
   const main = useRef<HTMLElement>(null);
 

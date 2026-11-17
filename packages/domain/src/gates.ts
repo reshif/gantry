@@ -53,6 +53,25 @@ export const gateKindText = (kind: GateKind): string => (kind === "human" ? "per
 /** "Brief confirmed · G0+G1". */
 export const gateTitle = (g: Pick<Gate, "name" | "label">): string => `${g.name} · ${g.label}`;
 
+/**
+ * What a person does at a gate that is still waiting. A gate's name states the outcome ("Spec approved"), which reads as already done on a card that is
+ * still waiting, so waiting cards use this wording ("Approve spec"); the name stays for the done state.
+ */
+const PENDING_NAMES: Record<string, string> = {
+  G0G1: "Confirm brief",
+  G1f: "Check feasibility",
+  G2: "Approve spec",
+  G3d: "Review design",
+  G3G3s: "Approve plan and security",
+  G4: "Wait for green checks",
+  G5: "Review and merge",
+  G6: "Confirm release",
+};
+export const gatePendingName = (g: Pick<Gate, "id" | "name">): string => PENDING_NAMES[g.id] ?? `Approve ${g.name.toLowerCase()}`;
+
+/** "Approve spec · G2": the title of a waiting gate. */
+export const gatePendingTitle = (g: Pick<Gate, "id" | "name" | "label">): string => `${gatePendingName(g)} · ${g.label}`;
+
 const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /**

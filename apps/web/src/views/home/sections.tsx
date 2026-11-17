@@ -151,7 +151,7 @@ export function WaitingOnYou({ approvals, conversations }: { approvals: Approval
                 <div><span className="mono">{w.wo}</span>{" · " + w.title}</div>
                 <div className="muted small">{w.question || "Confirm the brief or answer the open question."}</div>
               </div>
-              <Btn label="Answer" small kind="primary" id={`hm-my-conv-${w.wo}`} aria={`Answer the question on ${w.wo}`} onClick={() => { setProject(w.project); updatePrefs({ openConversation: w.wo }); navigate("conversations"); }} />
+              <Btn label={w.stuck ? "Open" : "Answer"} small kind="primary" id={`hm-my-conv-${w.wo}`} aria={`${w.stuck ? "Open" : "Answer the question on"} ${w.wo}`} onClick={() => { setProject(w.project); updatePrefs({ openConversation: w.wo }); navigate("conversations"); }} />
             </li>
           ))}
         </ul>

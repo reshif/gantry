@@ -315,8 +315,13 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
       // A trailing user turn in history would be followed by the new question: fold them into one message so roles alternate.
       let question = b.text;
       if (merged.length && merged[merged.length - 1]!.role === "user") question = `${merged.pop()!.text}\n\n${b.text}`;
+      // Where the call belongs: a side thread about a work order is metered on its project (factory and project spend include it) but never carries the work-order id, so no work-order cost, history or budget total includes it (owner decision).
+      const woScope = side && chat!.scope.kind === "work_order" ? chat!.scope.id : null;
+      const woProject = woScope && !chat!.projectId ? (await g.pool.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2`, [g.orgId, woScope])).rows[0]?.project_id : undefined;
+      const traceProject = (side ? (chat!.projectId ?? woProject ?? (chat!.scope.kind === "project" ? chat!.scope.id ?? undefined : undefined)) : undefined) ?? current?.id;
       const r = await runConversation({
-        edgeToken: g.config.secrets.edgeToken, system, history: merged, question, ctx, signal: ac.signal, pick, trace: { surface: "console", actor: who.id, project: current?.id },
+        edgeToken: g.config.secrets.edgeToken, system, history: merged, question, ctx, signal: ac.signal, pick,
+        trace: { surface: woScope ? "workorder" : "console", actor: who.id, project: traceProject },
         onText: (delta) => send("text", { delta }),
         onTool: (t) => send("tool", t),
       });

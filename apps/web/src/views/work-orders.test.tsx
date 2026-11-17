@@ -105,6 +105,16 @@ describe("Work orders table", () => {
     expect(Array.from((document.getElementById("wo-views") as HTMLSelectElement).options).map((o) => o.textContent)).toContain("By repo");
   });
 
+  it("words the Gate column as what the gate needs, never as the outcome it waits for", async () => {
+    const failed = { ...wo, id: "WO-3100", state: "failed", station: 2, failReason: "workspace seeding failed", gates: {} } as unknown as typeof WOS[number];
+    mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([failed]) }) });
+    mount(<WorkOrdersView />);
+    expect(await screen.findByText("WO-3100")).toBeTruthy();
+    const cell = Array.from(document.querySelectorAll("#wo-table tbody tr td")).map((td) => td.textContent ?? "");
+    expect(cell.some((t) => /^Next: (Approve|Confirm|Review|Check|Wait)/.test(t)), cell.join(" | ")).toBe(true);
+    expect(cell.some((t) => t === "Spec approved")).toBe(false);
+  });
+
   it("explains an empty result and clears the filters", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([], null, 0) }) });
     mount(<WorkOrdersView />);
@@ -154,6 +164,14 @@ describe("New work order", () => {
     fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
     expect(await screen.findByText(/is halted \(andon\)/)).toBeTruthy();
     expect(screen.getByLabelText("Title")).toBeTruthy();
+  });
+
+  it("clears the inline title error as soon as a title is typed", async () => {
+    await open();
+    fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
+    expect(await screen.findByText("Give the work order a title.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
+    await waitFor(() => expect(screen.queryByText("Give the work order a title.")).toBeNull());
   });
 
   it("locks the submit button with the reason while the factory is killed, and sends nothing", async () => {

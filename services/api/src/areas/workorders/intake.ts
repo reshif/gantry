@@ -103,6 +103,7 @@ export async function parkInto(fx: Fx, w: Wo, bay: string, reason: string): Prom
   if (bayOf(fx.catalog, w)) await leaveBay(fx, w);
   w.data.bayFrom = from;
   w.data.bayReason = reason;
+  delete w.data.bayCause;
   w.data.bayAt = fx.now.getTime();
   w.position = bay;
   w.state = "parked";
@@ -119,6 +120,7 @@ export async function resumeAt(fx: Fx, w: Wo, stationId: string): Promise<void> 
   delete w.data.bayReason;
   delete w.data.bayFrom;
   delete w.data.bayAt;
+  delete w.data.bayCause;
   if (open.rowCount && stationId !== "build") {
     w.position = stationId;
     w.state = "waiting";
