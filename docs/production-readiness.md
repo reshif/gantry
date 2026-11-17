@@ -14,3 +14,16 @@ Done:
 - Tests: `services/edge/test/service-trace.test.ts` (storage, redaction, degraded store, malformed manifest, trace read needs the edge token), `services/api/test/prompt-trace.test.ts` (manifest coverage, header compaction, runner-text drift guard, recorded scope, access by project and by asker, headers of a real work-order session turn, hash covers skills), and the spec test in `internal-runs.test.ts`.
 
 Not done (other tracks or later): a UI to browse a work order's prompt records (the API is there); the wrapper does not yet carry a station-tools instruction on this branch, so that part is absent from manifests until the wrapper adds it (`STATION_TOOLS_INSTRUCTION` in `manifest.ts` is the single place to register it); retention is the object store's, same as run traces, with no separate purge; the compact header form drops per-part rows for very large manifests (the stored trace still holds the whole request).
+
+### Track ctx-prompt-trace: review follow-up
+
+Done:
+- The result-shape part of the run manifest is derived from the delivery endpoint's own schema: `ResultBody` moved to `areas/internal/result-body.ts`, and `RESULT_SCHEMA_TEXT` is `z.toJSONSchema(ResultBody)`. A schema change now changes the manifest hash. Tests: the shape is derived and a changed schema yields different text; a drift guard keeps the station-tools text and the wrapper in step (the part is absent while the wrapper has none, and the test fails if the wrapper starts using `STATION_TOOLS_INSTRUCTION` without the manifest knowing).
+- Serving a spec no longer writes every time: `GET /internal/v1/runs/:id/spec` records the manifest (`run.spec` command) only when the hash or the pinned hash differs from what the run already holds. A test serves twice and checks `runs.updated_at` and the event count do not move.
+- Verification: edge (104), worker dispatch and the API prompt-trace and internal-runs tests pass against a throwaway Postgres container. The API and worker test tsconfigs have type errors in unrelated files (`test/personas-signin.test.ts`, `apps/web/src/lib/demo.ts`), present before this track. The repository defines no lint script or ESLint config, so there was nothing to run. The edge tests use a fake object store; no run against real MinIO or a live gateway was done.
+
+Open at integration (needs the sibling branch par/ctx-session-prompts):
+- Conversational turn manifests record the assembled system text and tool list only, until that branch's `composedParts(...)` is passed as `trace.parts` from the console, work-order and onboarding sessions. Until then a turn does not name its instruction layers or skill versions.
+- This section and the sibling's "Wave 7: agent context is real" section share one heading: merge by hand, keeping both tracks under the one heading. After the merge, check that a repeated spec serve still writes nothing.
+
+Access decision to confirm: console, explain and project-less traces are readable only by the asker; project-scoped traces (work order, run, onboarding of a project) by every `project.view` holder, including other people's questions in a work-order or onboarding session. That follows the brief (work-order conversations are shared project record); if the owner wants per-asker privacy there, it is a one-line change in `routes/prompt-traces.ts`.

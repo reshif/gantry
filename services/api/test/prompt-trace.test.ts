@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 import { withTx } from "@gantry/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { composedParts, pinRunConfig } from "../src/areas/agents/compose.js";
-import { buildManifest, encodeManifest, forHeader, manifestHash, part, RESULT_INSTRUCTION, runnerParts } from "../src/areas/agents/manifest.js";
+import { z } from "zod";
+import { ResultBody } from "../src/areas/internal/result-body.js";
+import { buildManifest, encodeManifest, forHeader, manifestHash, part, RESULT_INSTRUCTION, RESULT_SCHEMA_TEXT, runnerParts, sha256, STATION_TOOLS_INSTRUCTION } from "../src/areas/agents/manifest.js";
 import { configureConsoleEdge, resetConsoleEdge } from "../src/areas/console/model.js";
 import { configureSessionBroker, resetSessionBroker } from "../src/areas/onboarding/session/broker.js";
 import { FakeEdge } from "./console-edge.js";
@@ -44,6 +46,21 @@ describe("prompt manifest (pure)", () => {
     const src = readFileSync(fileURLToPath(new URL("../../../runner/wrapper/src/adapters/claude.ts", import.meta.url)), "utf8");
     expect(src).toContain(RESULT_INSTRUCTION);
     expect(runnerParts().some((p) => p.kind === "result_instruction")).toBe(true);
+  });
+
+  it("derives the result shape from the delivery schema, so a schema change changes the hash", () => {
+    const schema = JSON.parse(RESULT_SCHEMA_TEXT) as { properties: Record<string, unknown> };
+    expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining(["status", "output", "usage", "error", "adapter", "capabilities"]));
+    const changed = z.toJSONSchema(ResultBody.extend({ extra: z.string() }), { io: "input" });
+    expect(JSON.stringify(changed)).not.toBe(RESULT_SCHEMA_TEXT);
+    expect(runnerParts().find((p) => p.kind === "result_schema")?.sha256).toBe(sha256(RESULT_SCHEMA_TEXT));
+  });
+
+  it("registers the station-tools text only when the wrapper carries it (drift guard)", () => {
+    const src = readFileSync(fileURLToPath(new URL("../../../runner/wrapper/src/adapters/claude.ts", import.meta.url)), "utf8");
+    if (STATION_TOOLS_INSTRUCTION) expect(src).toContain(STATION_TOOLS_INSTRUCTION);
+    else expect(src).not.toMatch(/STATION_TOOLS_INSTRUCTION/);
+    expect(runnerParts().some((p) => p.kind === "station_tools")).toBe(Boolean(STATION_TOOLS_INSTRUCTION));
   });
 });
 

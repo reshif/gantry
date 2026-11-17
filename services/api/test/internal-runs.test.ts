@@ -338,6 +338,12 @@ d("internal runs API", () => {
       const stored = (await q(`select data from runs where id = $1`, [r.runId]))[0]!.data;
       expect(stored.promptManifest.hash).toBe(s.instructionsHash);
       expect(stored.promptDrift).toBe(true); // the test tuple was pinned with the placeholder hash 'h'
+      // serving the same spec again writes nothing new (no repeated update, no new audit rows)
+      const stamp = (await q(`select updated_at from runs where id = $1`, [r.runId]))[0]!.updated_at;
+      const rows = Number((await q(`select count(*)::int as n from events`))[0].n);
+      await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token });
+      expect((await q(`select updated_at from runs where id = $1`, [r.runId]))[0]!.updated_at).toEqual(stamp);
+      expect(Number((await q(`select count(*)::int as n from events`))[0].n)).toBe(rows);
       expect(s.toolAllowList.sort()).toEqual(["Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);
       expect(s.input.brief).toEqual({ goal: "ship" });
       // the per-run cost cap (agent budget 2.5) is enforced at authorize

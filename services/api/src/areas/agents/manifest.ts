@@ -5,6 +5,8 @@
  * Gantry supplies the structure here; what the parts say is decided by people and agents.
  */
 import { createHash } from "node:crypto";
+import { z } from "zod";
+import { ResultBody } from "../internal/result-body.js";
 
 export type PartKind = "layer" | "skill" | "station_tools" | "result_instruction" | "result_schema" | "system" | "tools" | "repo_context";
 
@@ -58,8 +60,8 @@ export const RESULT_INSTRUCTION =
 /** The station-tools text the runner adds, when its wrapper has one. Empty for a wrapper without station tools: the part is then recorded as absent, not guessed. */
 export const STATION_TOOLS_INSTRUCTION = "";
 
-/** The shape a station result is checked against (the delivery endpoint's body), as the text the manifest hashes. */
-export const RESULT_SCHEMA_TEXT = JSON.stringify({ status: ["succeeded", "failed", "interrupted"], output: "any", usage: "array", error: { code: "string", msg: "string" }, adapter: "string", capabilities: "any" });
+/** The shape a station result is checked against, derived from the delivery endpoint's own schema (`ResultBody`), so changing the schema changes the manifest hash. */
+export const RESULT_SCHEMA_TEXT = JSON.stringify(z.toJSONSchema(ResultBody, { io: "input" }));
 
 /** The parts the runner appends to every run's system prompt, in the order it appends them. */
 export function runnerParts(): ManifestPart[] {
