@@ -390,7 +390,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             ) : null}
             <textarea id="con-input" ref={input} className="input composer-input" rows={2} placeholder={embed?.agent ? `Ask ${embed.agent.name}` : "Ask or instruct. Type / for commands."} aria-label="Message the factory" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
             <div className="composer-foot">
-              <div className="chips">{embed?.agent ? null : suggestions.slice(0, 3).map((sg, i) => <button type="button" key={sg} className="sugg" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
+              <div className="chips">{embed?.agent ? null : <span className="try-lbl muted small">Try</span>}{embed?.agent ? null : suggestions.slice(0, 3).map((sg, i) => <button type="button" key={sg} className="sugg" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
               {streaming ? (
                 <div className="row gap-sm"><Btn label="Stop" kind="danger" small icon="x" id="con-stop" onClick={() => ac.current?.abort()} /><Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" disabledReason="Wait for the answer or stop it." /></div>
               ) : <Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" />}
@@ -407,7 +407,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             </div>
           </Panel>
           <Panel title={`What ${me.person.name.split(" ")[0]} can do ${cur ? `in ${cur.name}` : ""}`}>
-            <ul className="caps">{CAPS.map(([action, text], i) => { const d = caps[i]!; return <li key={action} className={d.allowed ? "ok" : "no"} tabIndex={0} data-tip={d.reason}><Icon name={d.allowed ? "check" : "lock"} /><span>{text}</span><span className="mono muted small">{action}</span></li>; })}</ul>
+            <ul className="caps">{CAPS.map(([action, text], i) => { const d = caps[i]!; return <li key={action} className={d.allowed ? "ok" : "no"} tabIndex={0} data-tip={d.reason}><Icon name={d.allowed ? "check" : "lock"} /><span>{text}</span></li>; })}</ul>
           </Panel>
           <Panel title="Pinned">
             {pinned.length ? <ul className="pins">{pinned.map((id) => <li key={id}><button type="button" className="linkish" id={`con-pin-${id}`} onClick={() => openTraveler(id)}><span className="mono">{id}</span></button>
