@@ -69,7 +69,7 @@ d("skills in agent versions, the eval gate and the effective preview", () => {
       await q(`update agent_versions set body = body - 'skillVersions' where agent_id = $1`, [ag]);
       await q(`alter table agent_versions enable trigger agent_versions_immutable`);
       expect((await q(`select body from agent_versions where agent_id = $1`, [ag]))[0].body.skillVersions).toBeUndefined();
-      const sql = readFileSync(fileURLToPath(new URL("../../../packages/db/migrations/0041_skill_version_pins.sql", import.meta.url)), "utf8");
+      const sql = readFileSync(fileURLToPath(new URL("../../../packages/db/migrations/0046_skill_version_pins.sql", import.meta.url)), "utf8");
       await q(sql);
       const body = (await q(`select body from agent_versions where agent_id = $1`, [ag]))[0].body;
       expect(body.skillVersions).toEqual({ [sk]: 1 });
