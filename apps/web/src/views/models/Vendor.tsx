@@ -3,7 +3,7 @@ import { useState } from "react";
 import { fmt, type Agent, type Catalog, type Routing, type Vendor } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Btn, Chip, Meter, Select, Toggle } from "../../ui/primitives";
+import { Btn, Chip, Meter, Select, Status, Toggle, reasonText } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { AddModelDialog, ConnectDialog, DisconnectDialog, RemoveModelDialog } from "./Dialogs";
@@ -31,33 +31,34 @@ export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; v
           <div className="kicker">{v.product || (v.custom ? "Custom vendor · OpenAI-compatible" : "Vendor")}</div>
           <h2 className="vendor-name">{v.name}</h2>
         </div>
-        <span className={`health h-${v.connected ? v.health : "offline"}`}>
-          <span className="health-shape" aria-hidden="true" />
-          {v.connected ? v.health : "not connected"}
-        </span>
+        <Status tone={!v.connected ? "neutral" : v.health === "healthy" ? "done" : v.health === "degraded" ? "wait" : "block"}>{v.connected ? v.health.charAt(0).toUpperCase() + v.health.slice(1) : "Not connected"}</Status>
       </div>
-      <dl className="titleblock tb-vendor">
-        <div><dt>Latency p50</dt><dd className="mono">{v.connected && v.latency ? `${v.latency} ms` : "–"}</dd></div>
-        <div><dt>{endpointVendor ? "Endpoint" : "Region"}</dt><dd className="mono" title={endpointVendor ? v.endpoint : v.region}>{(endpointVendor ? v.endpoint : v.region) || "–"}</dd></div>
-        <div><dt>Key</dt><dd className="mono">{v.keyMask || "none"}</dd></div>
-        <div><dt>Spend MTD</dt><dd className="mono">{fmt.money0(v.mtd || 0) + (v.budget ? ` / ${fmt.money0(v.budget)}` : "")}</dd></div>
-      </dl>
-      {v.budget ? (
-        <div className="budget-row md-budget">
-          <span className="small muted">Month to date vs budget</span>
-          <Meter value={v.mtd} max={v.budget} label={`${v.name} spend vs budget`} warnAt={0.8} />
-          <span className={`mono small${pct >= 0.8 ? " warn-text" : ""}`}>{fmt.pct(pct)}</span>
+      <div className="vendor-facts">
+        <dl className="kv tb-vendor">
+          <div><dt>Latency p50</dt><dd className="mono">{v.connected && v.latency ? `${v.latency} ms` : "Not measured yet"}</dd></div>
+          <div><dt>{endpointVendor ? "Endpoint" : "Region"}</dt><dd className="mono" title={endpointVendor ? v.endpoint : v.region}>{(endpointVendor ? v.endpoint : v.region) || "–"}</dd></div>
+          <div><dt>Key</dt><dd className="mono">{v.keyMask || "none"}</dd></div>
+          <div><dt>Spend MTD</dt><dd className="mono">{fmt.money0(v.mtd || 0) + (v.budget ? ` / ${fmt.money0(v.budget)}` : "")}</dd></div>
+        </dl>
+        <div className="vendor-side">
+          {v.budget ? (
+            <div className="budget-row md-budget">
+              <span className="small muted">Month to date vs budget</span>
+              <Meter value={v.mtd} max={v.budget} label={`${v.name} spend vs budget`} warnAt={0.8} />
+              <span className={`mono small${pct >= 0.8 ? " warn-text" : ""}`}>{fmt.pct(pct)}</span>
+            </div>
+          ) : (
+            <div className="budget-row md-budget"><span className="small muted">{v.custom ? "No monthly budget set" : "No per-token cost"}</span></div>
+          )}
+          <p className="residency small">
+            <Icon name="shield" />
+            <span>
+              {v.residency || (v.endpoint ? `Data goes to ${v.endpoint.replace(/^https?:\/\//, "").replace(/\/.*$/, "")}${v.region ? ` in ${v.region}` : ""}. Check where that endpoint runs before routing regulated work to it.` : "No residency information.")}
+              {v.retention && v.retention !== "standard" ? ` Data retention: ${v.retention}.` : ""}
+            </span>
+          </p>
         </div>
-      ) : (
-        <div className="budget-row md-budget"><span className="small muted">{v.custom ? "No monthly budget set" : "No per-token cost"}</span></div>
-      )}
-      <p className="residency small">
-        <Icon name="shield" />
-        <span>
-          {v.residency || (v.endpoint ? `Data goes to ${v.endpoint.replace(/^https?:\/\//, "").replace(/\/.*$/, "")}${v.region ? ` in ${v.region}` : ""}. Check where that endpoint runs before routing regulated work to it.` : "No residency information.")}
-          {v.retention && v.retention !== "standard" ? ` Data retention: ${v.retention}.` : ""}
-        </span>
-      </p>
+      </div>
       {v.custom ? <Qualification v={v} cat={cat} /> : null}
       <div className="table-scroll">
         <table className="table table-compact">
@@ -81,6 +82,7 @@ export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; v
                       {m.id}
                       <Btn small kind="ghost" icon="x" id={`md-rm-${m.id}`} aria={`Remove ${m.name}`} cls="md-rm" guard={removeGuard(m.id, users)} onClick={() => ui.open((close) => <RemoveModelDialog v={v} m={m} close={close} />)} />
                     </div>
+                    {lock && perm.allowed ? <div className="lockwhy small muted"><Icon name="lock" /><span>{reasonText(lock)}</span></div> : null}
                   </td>
                   <td>
                     <Toggle id={`mt-${m.id}`} checked={m.enabled} label={`Enable ${m.name}`} decision={lock} onChange={(on) => void (async () => { const r = await ops.setModelEnabled(m.id, on); ui.toast(r.msg, r.ok ? "ok" : "error"); })()} />

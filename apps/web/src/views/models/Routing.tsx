@@ -8,7 +8,7 @@ import type { Agent, Catalog, Project, Repo, Routing, Vendor } from "@gantry/dom
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useRoutingResolve } from "../../api/queries";
-import { Btn, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { Btn, Empty, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ProjectPolicy } from "./Policy";
@@ -180,35 +180,39 @@ export function RoutingPanel({ routing, vendors, agents, repos, projects, cat }:
   );
 
   return (
-    <Panel title="Routing policy" cls="md-routing">
-      <div className="routing">
-        <LockNote decision={perm} what="Routing" />
-        <div className="routing-grid">
-          <div>
+    <div className="md-routing" id="rt-panel">
+      <LockNote decision={perm} what="Routing" />
+      <div className="md-tb">
+        <div className="md-col">
+          <Panel title="Defaults and overrides" cls="md-routing-defaults">
             <Field label="Factory default model" htmlFor="rt-default" hint="Used by any station without an override and by new agents.">{defaultSel}</Field>
             <h3 className="sub-h">Per-station overrides</h3>
             {overrides}
             <h3 className="sub-h">Per-class overrides</h3>
             <p className="muted small">A work-order class overrides its station. Order: factory default, project, station, class.</p>
             {classTable}
-            <h3 className="sub-h">Fallback order</h3>
+          </Panel>
+          <Panel title="Fallback order">
             <p className="muted small">Tried in order when a model errors, times out or its vendor is down, and only if the project allows a different model. The same model on another allowed vendor is always tried first.</p>
             {fb}
             {addFb}
             {cross}
-          </div>
-          <div>
-            <h3 className="sub-h">Residency and routing rules</h3>
-            {rules}
+          </Panel>
+        </div>
+        <div className="md-col">
+          <Panel title="Residency and routing rules">
+            {r.rules.length ? rules : <Empty icon="globe" title="No residency rules" text="Without a rule, any allowed vendor can serve any repo." />}
             {form}
-            <h3 className="sub-h">Per-project policy</h3>
+          </Panel>
+          <Panel title="Per-project policy">
             <ProjectPolicy routing={r} vendors={vendors} projects={projects} enabled={enabled} change={change} />
-            <h3 className="sub-h">Where would this request go?</h3>
+          </Panel>
+          <Panel title="Where would this request go?">
             <Preview repos={repos} projects={projects} stations={stations.map((s) => ({ value: s.id, label: `${s.no} ${s.name}${s.custom ? ` (${projects.find((p) => p.id === s.project)?.name ?? s.project})` : ""}` }))} stationLabel={stationLabel} />
-          </div>
+          </Panel>
         </div>
       </div>
-    </Panel>
+    </div>
   );
 }
 

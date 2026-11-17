@@ -112,14 +112,14 @@ describe("Models screen (legacy models.js on the real API)", () => {
     expect(a.querySelector("#mt-claude-haiku-5-5")).toBeTruthy();
     expect((a.querySelector("#mt-claude-haiku-5-5") as HTMLInputElement).checked).toBe(false);
     const b = await byId("vendor-bedrock");
-    expect(b.querySelector(".health")?.className).toContain("h-degraded");
+    expect(b.querySelector(".vendor-head .status")?.textContent).toContain("Degraded");
     expect(b.textContent).toContain("Data retention: zero");
     const l = await byId("vendor-local");
     expect(l.classList.contains("is-off")).toBe(true);
-    expect(l.textContent).toContain("not connected");
+    expect(l.textContent).toContain("Not connected");
     expect(l.querySelector("#vendor-connect-local")?.textContent).toContain("Connect Local models");
     expect(document.querySelector(".md-incident")?.textContent).toContain("Amazon Bedrock is degraded (p50 1460 ms)");
-    expect(document.body.textContent).toContain("Vendors connected3 / 4");
+    expect(document.body.textContent).toContain("Vendors connected3 of 4");
     expect(document.getElementById("vendor-test-anthropic")).toBeNull();
   });
 
@@ -250,6 +250,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
 });
 
 describe("routing policy", () => {
+  beforeEach(() => { window.location.hash = "#models/routing"; });
   it("changes the default model with If-Match from the loaded version", async () => {
     const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
     mount();
@@ -358,6 +359,7 @@ describe("routing policy", () => {
 });
 
 describe("prices and budgets", () => {
+  beforeEach(() => { window.location.hash = "#models/prices"; });
   it("lists price versions with their effective dates and publishes a price from a date, with an idempotency key", async () => {
     const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "Price version 3 is in force.", version: 3 }) });
     mount();
@@ -408,16 +410,24 @@ describe("permissions", () => {
   it("without model.edit every control shows why it is locked and nothing is sent", async () => {
     const calls = setup({}, ["model.edit", "project.config"]);
     mount();
-    for (const id of ["md-add-vendor", "vendor-connect-anthropic", "vendor-addmodel-anthropic", "vendor-disc-anthropic", "rr-del-RR-1", "rr-add", "rt-proj-save", "pv-add", "bd-save-payments", "vendor-qual-go-mistral-eu"]) {
-      const el = await byId(id);
-      await waitFor(() => expect(el.getAttribute("data-reason")).toMatch(/Needs Factory Admin\. No role holds/));
-      fireEvent.click(el);
-    }
+    const locked = async (ids: string[]) => {
+      for (const id of ids) {
+        const el = await byId(id);
+        await waitFor(() => expect(el.getAttribute("data-reason")).toMatch(/Needs Factory Admin\. No role holds/));
+        fireEvent.click(el);
+      }
+    };
+    await locked(["md-add-vendor", "vendor-connect-anthropic", "vendor-addmodel-anthropic", "vendor-disc-anthropic", "vendor-qual-go-mistral-eu"]);
     expect((await byId("mt-claude-haiku-5-5")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
+    window.location.hash = "#models/routing";
+    await locked(["rr-del-RR-1", "rr-add", "rt-proj-save"]);
     expect((await byId("rt-default") as HTMLSelectElement).disabled).toBe(true);
     expect((await byId("rt-st-build") as HTMLSelectElement).disabled).toBe(true);
     expect((await byId("rt-fb-rm-0")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
-    expect(document.body.textContent).toContain("Read-only for you: routing.");
+    window.location.hash = "#models/prices";
+    await locked(["pv-add", "bd-save-payments"]);
+    window.location.hash = "#models/routing";
+    await waitFor(() => expect(document.body.textContent).toContain("Read-only for you: routing."));
     expect(writes(calls)).toHaveLength(0);
   });
 });
