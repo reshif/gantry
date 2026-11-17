@@ -153,6 +153,7 @@ export default function SystemView() {
   return (
     <div className="view view-system">
       <ViewHead
+        kicker="Govern"
         title="System health"
         sub="Whether the factory's services are answering, backups are current and restorable, and nothing is waiting on a delivery or job that has stopped moving."
         meta={[

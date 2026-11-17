@@ -49,8 +49,9 @@ export default function SecurityView() {
   return (
     <div className="view view-security">
       <ViewHead
+        kicker="Govern"
         title="Security"
-        sub="Sign-in policy, who can reach Gantry from where, open sessions and the sign-in record. Every change here is audited."
+        sub="Sign-in, sessions and network rules for the whole factory."
         meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", "not enforced"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", qState(sessionsQ, () => String(active))], ["Failed sign-ins 24 h", qState(signinsQ, () => String(fails))]]}
       />
       {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /><ExplainDenial id="sec-explain" action="security.manage" /></div> : null}

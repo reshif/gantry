@@ -97,6 +97,7 @@ describe("People", () => {
   it("lists teams and members, and decides effective permissions from the server's cells", async () => {
     setup();
     mount(<PeopleView />);
+    fireEvent.click(await byId("ppl-tab-teams"));
     expect(await screen.findByText("Asha Raman")).toBeTruthy();
     expect(screen.getByText("Tomas Eriksen")).toBeTruthy();
     expect(screen.getByText("invited")).toBeTruthy();
@@ -222,6 +223,7 @@ describe("Access", () => {
   it("says Not visible to you when the policies read is refused, instead of No policies yet", async () => {
     setup({ "GET /api/v1/policies": () => ({ status: 403, body: { ok: false, msg: "Needs policy.view." } }) });
     mount(<AccessView />);
+    fireEvent.click(await byId("acc-tab-policies"));
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
     expect(screen.queryByText("No policies yet")).toBeNull();
   });
@@ -229,6 +231,7 @@ describe("Access", () => {
   it("renders policies, and the engine-owned ones cannot be edited", async () => {
     setup();
     mount(<AccessView />);
+    fireEvent.click(await byId("acc-tab-policies"));
     expect(await screen.findByText("Release window")).toBeTruthy();
     expect(screen.getByText("Freeze rule")).toBeTruthy();
     const edit110 = document.getElementById("acc-pol-edit-POL-110")!;
@@ -239,20 +242,21 @@ describe("Access", () => {
   it("evaluates through the server simulator and highlights the deciding rule", async () => {
     const calls = setup({ "POST /api/v1/access/simulate": () => ({ body: { ok: true, decision: { allowed: false, reason: "Outside window.", needs: "", rule: { id: "POL-101", name: "Release window", kind: "policy" } }, trace: ["Roles in scope: Engineer.", "Role matrix grants release: no."], week: [{ day0: Date.now(), dow: 1, label: "Mon", cells: Array.from({ length: 24 }, (_, hour) => ({ hour, allowed: hour > 9, rule: "MATRIX", selected: hour === 3 })) }] } }) });
     mount(<AccessView />);
-    await screen.findByText("Release window");
+    fireEvent.click(await byId("acc-tab-check"));
     await waitFor(() => expect((document.getElementById("acc-sim-person") as HTMLSelectElement).value).toBe("p-asha"));
     fireEvent.click(screen.getByText("Evaluate"));
     expect(await screen.findByText("Outside window.")).toBeTruthy();
     const sim = calls.find((c) => c.path === "/api/v1/access/simulate")!;
     expect(sim.body).toMatchObject({ person: "p-asha", action: "release", project: "payments" });
     expect(document.querySelectorAll(".wk-c.is-yes").length).toBeGreaterThan(5);
+    fireEvent.click(await byId("acc-tab-policies"));
     expect(document.getElementById("acc-pol-POL-101")?.className).toContain("is-hl");
   });
 
   it("edits a matrix cell with the matrix version as If-Match", async () => {
     const calls = setup({ "PUT /api/v1/access/matrix/engineer/release": () => ({ body: { ok: true, msg: "Engineer can now release.", version: 5 } }) });
     mount(<AccessView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Roles × actions/ }));
+    await byId("acc-tab-matrix");
     const sw = await screen.findByLabelText("Engineer: Release");
     fireEvent.click(sw);
     await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path === "/api/v1/access/matrix/engineer/release")).toBe(true));
@@ -266,7 +270,7 @@ describe("Access", () => {
   it("shows a stale matrix refusal", async () => {
     setup({ "PUT /api/v1/access/matrix/engineer/release": () => ({ status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } }) });
     mount(<AccessView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Roles × actions/ }));
+    await byId("acc-tab-matrix");
     fireEvent.click(await screen.findByLabelText("Engineer: Release"));
     expect(await screen.findByText(/changed since you loaded it/)).toBeTruthy();
   });
@@ -274,6 +278,7 @@ describe("Access", () => {
   it("adds a policy through the dialog with a preview and the policy body", async () => {
     const calls = setup({ "POST /api/v1/policies": () => ({ body: { ok: true, msg: "POL-111 added.", id: "POL-111", version: 1 } }) });
     mount(<AccessView />);
+    fireEvent.click(await byId("acc-tab-policies"));
     fireEvent.click(await byId("acc-add-policy"));
     fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Weekend hotfix" } });
     expect(document.querySelector(".acc-preview")?.textContent).toContain("may release");
@@ -290,6 +295,7 @@ describe("Access", () => {
       "POST /api/v1/freezes/FRZ-01/end": () => ({ body: { ok: true, msg: "FRZ-01 ended.", version: 2 } }),
     });
     mount(<AccessView />);
+    fireEvent.click(await byId("acc-tab-policies"));
     fireEvent.click(await screen.findByLabelText("Enable POL-101"));
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ enabled: false }));
     // versioned config endpoints refuse a request without If-Match (409 "version required"), so every toggle sends the version it loaded
@@ -303,6 +309,7 @@ describe("Access", () => {
   it("locks everything when policy.edit and role.edit are denied", async () => {
     setup({}, ["policy.edit", "role.edit"]);
     mount(<AccessView />);
+    fireEvent.click(await byId("acc-tab-policies"));
     const add = await byId("acc-add-policy");
     await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
     expect(screen.getByLabelText("Enable POL-101").getAttribute("aria-disabled")).toBe("true");

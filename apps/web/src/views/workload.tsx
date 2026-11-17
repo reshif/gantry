@@ -83,8 +83,8 @@ export default function WorkloadView() {
   );
   return (
     <div className="view view-workload">
-      <ViewHead title="Workload"
-        sub="Human attention is the scarce resource. Who is waited on, how fast they answer, and where one person is the only way through."
+      <ViewHead kicker="Govern" title="Workload"
+        sub="Where work and approvals pile up, for people and for agents."
         actions={controls} />
       <StatRow id="wl-stats">
         <Stat label="Gates waiting" value={String(t.gatesWaiting)} />

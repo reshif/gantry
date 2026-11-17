@@ -141,5 +141,45 @@ export function richGovern(): Record<string, Handler> {
       { id: "POL-102", name: "On-call may stop the line", effect: "allow", enabled: true, roles: ["engineer"], actions: ["kill.project"], where: {}, when: null, oncallOnly: true, extend: true, version: 1 },
     ]);
   ov["freezes"] = (r) => fulfillJson(r, []);
+  ov["security"] = (r) =>
+    fulfillJson(r, { sso: { provider: "Okta", domain: "acme.dev", enforced: true, entity: "https://acme.okta.com/app/gantry" }, mfa: { policy: "admins", methods: ["totp", "webauthn"] }, sessionHours: 12, idleMin: 30, domains: ["acme.dev"], ipAllow: ["203.0.113.0/24", "198.51.100.0/24"], restoreFactoryNeedsTwo: true, killNeedsStepUp: true, stepUpWindowMinutes: 15, githubLogin: false, researchHosts: [], chatCapUsdPerDay: null, version: 3 });
+  ov["sessions"] = (r) =>
+    fulfillJson(r, PEOPLE.slice(0, 8).map((p, i) => ({ id: `s${i}`, person: p[0], method: "sso", device: ["Chrome on macOS", "Firefox on Linux", "Safari on iOS", "Edge on Windows"][i % 4], ip: `203.0.113.${10 + i}`, started: NOW - (i + 1) * 3 * HOUR, lastSeen: NOW - i * 11 * MIN, revoked: false, current: i === 0 })));
+  ov["signins"] = (r) =>
+    fulfillJson(r, PEOPLE.slice(0, 8).map((p, i) => ({ at: NOW - i * 41 * MIN, person: p[0], email: `${p[0].slice(2)}@acme.dev`, method: "sso", outcome: i === 5 ? "failure" : "success", reason: i === 5 ? "MFA code wrong" : "", ip: `203.0.113.${10 + i}`, device: "Chrome on macOS" })));
+  const ACTIONS_E = [["access.role.grant", "person p-hana", "access", "ok"], ["config.route.save", "route NR-2", "config", "ok"], ["auth.signin", "session s3", "auth", "ok"], ["gate.approve", "WO-1004 G5", "approvals", "ok"], ["policy.save", "POL-101", "access", "denied"], ["integration.test", "Slack", "integrations", "ok"], ["wo.submit", "WO-1071", "flow", "ok"], ["api.key.create", "Release dashboard", "api", "ok"], ["security.set", "idleMin", "config", "ok"], ["kill.project", "search", "kill", "ok"]];
+  ov["audit"] = (r) => {
+    const items = Array.from({ length: 30 }, (_, i) => {
+      const a = ACTIONS_E[i % ACTIONS_E.length]!;
+      const who = PEOPLE[i % 12]!;
+      return { id: 5200 - i, seq: 5200 - i, at: NOW - i * 23 * MIN, actor: who[0], actorKind: "human", actorName: who[1], action: a[0], target: a[1], where: "payments", project: "payments", category: a[2], outcome: a[3], via: "web", channel: "web", before: null, after: null, entity: null, digest: "e3b0c44298fc1c14", prev: "9f86d081884c7d65" };
+    });
+    return fulfillJson(r, { items, next: null, total: 5200, summary: { entries: 5200, denied: 14, changes: 212, head: "e3b0c44298fc1c14", categories: { access: 600, config: 900, auth: 1200, flow: 1500, approvals: 700, api: 300 }, topics: {}, facets: { outcomes: ["ok", "denied"], channels: ["web", "api"], actors: PEOPLE.slice(0, 12).map((p) => ({ id: p[0], name: p[1] })) } } });
+  };
+  ov["audit/verify"] = (r) => fulfillJson(r, { ok: true, checked: 5200, head: "e3b0c44298fc1c14" });
+  ov["system/health"] = (r) =>
+    fulfillJson(r, {
+      at: new Date(NOW).toISOString(),
+      services: [["api", "API", 42], ["worker", "Worker", null], ["db", "Database", 6], ["runner", "Runner pool", null], ["edge", "MCP edge", 88], ["stream", "Live stream", 12]].map(([id, name, ms], i) => ({ id, name, status: i === 4 ? "degraded" : "ok", detail: i === 4 ? "p95 4.2 s on discovery" : "healthy", latencyMs: ms, heartbeatAgeSeconds: id === "worker" ? 6 : null })),
+      backup: { status: "ok", at: new Date(NOW - 5 * HOUR).toISOString(), ageHours: 5, set: "nightly-2026-01-15", detail: "Encrypted, verified" },
+      drill: { status: "ok", at: new Date(NOW - 3 * DAY).toISOString(), ageHours: 72, set: "nightly-2026-01-12", seconds: 412, failedChecks: 0, detail: "Restored and checked" },
+      outbox: { counts: { pending: 2, sending: 0, delivered: 1840, dead: 1 }, oldestPendingSeconds: 40, dead: [{ id: "ob-9", destination: "webhook data-platform", scope: "project", attempts: 5, maxAttempts: 5, lastError: "HTTP 503", createdAt: new Date(NOW - 6 * HOUR).toISOString(), failedAt: new Date(NOW - 2 * HOUR).toISOString() }] },
+      jobs: { counts: { queued: 3, running: 4, done: 2210, dead: 0 }, stuck: [], runningLongMinutes: 45, dead: [], deadWindowHours: 24 },
+      runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
+    });
+  ov["workload"] = (r) => {
+    const rows = PEOPLE.filter((p) => p[6] === "active").slice(0, 10).map((p, i) => ({ person: p[0], name: p[1], team: p[4], waiting: (i * 3) % 5, glass: (i * 2) % 4, approvals: 12 + i * 3, perDay: 1.5 + (i % 4) * 0.7, answered: 4 + i, waitN: 10 + i, medianResponseMin: 25 + i * 11, afterHours: i % 3, n: 14 + i, sole: i % 4 === 0 ? 1 : 0, minutes: 120 + i * 35, away: null, oncall: i === 3, waitingGates: [], recent: [] }));
+    return fulfillJson(r, {
+      at: NOW, days: 7, scope: "all", minN: 5, projects: [{ id: "payments", name: "Payments Platform" }, { id: "storefront", name: "Storefront" }], factoryWide: true, ids: [],
+      totals: { gatesWaiting: 7, soleGates: 2, noneGates: 0, timedN: 40, medianWaitMin: 130, acts: 96, afterHours: 11, minutes: 2840 },
+      rows,
+      teams: TEAMS.map((t, i) => ({ team: t.id, name: t.name, people: t.members, waiting: i + 1, approvals: 20 + i * 8, answered: 9 + i, minutes: 600 + i * 120, waitN: 12, medianResponseMin: 40 + i * 15, afterHours: i, n: 20, sole: i % 2 })),
+      byCls: [{ key: "feature", minutes: 1200, workOrders: 18, perWO: 66 }, { key: "bug", minutes: 800, workOrders: 22, perWO: 36 }],
+      byProject: [{ key: "payments", minutes: 1500, workOrders: 20, perWO: 75 }, { key: "storefront", minutes: 900, workOrders: 14, perWO: 64 }],
+      bottlenecks: [{ project: "payments", gate: "G5", decisions: 14, medianWaitMin: 190, open: 3, oldestMin: 300, station: "review", minEligible: 1 }],
+      needsPerson: [],
+      suggestions: [{ key: "s1", kind: "approver", icon: "people", weight: 3, text: "Review and merge on Payments Platform has one eligible approver (Meera Iyer).", action: { id: "wl-sg-1", label: "Open approver rules", type: "config", project: "payments", gate: "G5" } }],
+    });
+  };
   return ov;
 }

@@ -81,8 +81,9 @@ export default function AuditView() {
   return (
     <div className="view view-audit">
       <ViewHead
-        title="Audit"
-        sub="An append-only record of what people, agents, API keys and triggers did, denials included. Each entry carries the digest of the one before it."
+        kicker="Govern"
+        title="Audit ledger"
+        sub="An append-only record of every decision and change. Entries are chained; the chain is verified hourly."
         actions={canVerify ? <Btn label={checking ? "Verifying..." : "Verify chain"} kind="primary" icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify()} /> : undefined}
       />
       <StatRow id="aud-stats">
