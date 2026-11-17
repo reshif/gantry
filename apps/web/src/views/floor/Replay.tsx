@@ -1,13 +1,64 @@
 /** Replay of the floor: scrubber with event marks over the project's event log (legacy floor.js replayBar). The floor itself is rebuilt by the server for the chosen time. */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MIN, fmt, type EventEntry } from "@gantry/domain";
 import { useProjectEvents } from "../../api/queries";
 import { Btn, Segmented, Select } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
-import { setReplay } from "../../lib/prefs";
+import { setReplay, usePrefs } from "../../lib/prefs";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { EV_LABEL, MARK_TYPES, markCls, replayRange, useFloorCtx, type ReplayCtx } from "./kit";
+
+/** The replay the person chose, kept in their preferences so Floor and the Work orders board share it; null while live. */
+export function useReplayBase(projectId: string | null): Omit<ReplayCtx, "state"> | null {
+  const r = usePrefs().replay;
+  if (!r || !projectId) return null;
+  const span: "24h" | "7d" = r.span === "7d" ? "7d" : "24h";
+  const rg = replayRange(span);
+  const from = typeof r.from === "number" ? r.from : rg.from;
+  const to = typeof r.to === "number" ? r.to : rg.to;
+  const at = Math.max(from, Math.min(to, typeof r.at === "number" ? r.at : to));
+  return { at: Math.round(at / MIN) * MIN, span, from, to, speed: typeof r.speed === "number" ? r.speed : 1 };
+}
+
+/** Play, enter and exit for a replay: each play step advances the replay clock, and each step is one read at that time. */
+export function useReplayPlayer(projectId: string, rp: ReplayCtx | null, focusOnExit: string): { playing: boolean; setPlaying: (v: boolean) => void; enter: () => void; exit: () => void } {
+  const [playing, setPlaying] = useState(false);
+  const hasReplay = !!rp;
+  const rpRef = useRef(rp);
+  rpRef.current = rp;
+  useEffect(() => {
+    if (!playing || !hasReplay) return;
+    const t = setInterval(() => {
+      const c = rpRef.current;
+      if (!c) return;
+      const base = c.span === "7d" ? 60 * MIN : 10 * MIN;
+      let next = c.at + base * c.speed * 0.5;
+      if (next >= c.to) {
+        setPlaying(false);
+        next = c.to;
+      }
+      setReplay({ at: next });
+    }, 500);
+    return () => clearInterval(t);
+  }, [playing, hasReplay]);
+  useEffect(() => {
+    if (!rp) setPlaying(false);
+  }, [rp]);
+  useEffect(() => {
+    if (playing && rp && rp.at >= rp.to - MIN) setReplay({ at: rp.from });
+  }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
+  const enter = () => {
+    const rg = replayRange("24h");
+    setReplay({ at: rg.to - 6 * 3_600_000, span: "24h", project: projectId, speed: 1, from: rg.from, to: rg.to });
+  };
+  const exit = () => {
+    setPlaying(false);
+    setReplay(null);
+    setTimeout(() => document.getElementById(focusOnExit)?.focus(), 60);
+  };
+  return { playing, setPlaying, enter, exit };
+}
 
 export const SPEEDS: Record<"24h" | "7d", Array<[number, string]>> = {
   "24h": [[1, "10 min/s"], [4, "40 min/s"], [12, "2 h/s"]],

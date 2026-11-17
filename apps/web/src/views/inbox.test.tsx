@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InboxView from "./inbox";
 import { mockApi, mount, resetApp } from "./floor/testkit";
@@ -74,6 +74,56 @@ describe("Inbox", () => {
     const locked = await screen.findByRole("button", { name: "Approve" });
     await waitFor(() => expect(locked.getAttribute("aria-disabled")).toBe("true"));
     expect(locked.getAttribute("data-reason")).toMatch(/someone else must approve/);
+  });
+
+  it("confirms the brief and declines through the brief's own commands, with the version, and never sends a gate approve or reject", async () => {
+    const BRIEF = { ...GATE, wo: "WO-2400", gate: "G0G1", gateLabel: "G0/G1", gateName: "Brief confirmed" };
+    const tv = { id: "WO-2400", project: "payments", version: 7, allowed: { approve: { gate: "G0G1", allowed: true, reason: "", needs: "" }, can: { decline: { allowed: true, reason: "" } } } };
+    const cs = mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [BRIEF], conversations: [] } }) }),
+      "GET /api/v1/work-orders/WO-2400": () => ({ body: tv }),
+      "POST /api/v1/work-orders/WO-2400/confirm-brief": () => ({ body: { ok: true, msg: "Brief confirmed." } }),
+      "POST /api/v1/work-orders/WO-2400/decline": () => ({ body: { ok: true, msg: "Declined." } }),
+    });
+    mount(<InboxView />);
+    const ok = await screen.findByRole("button", { name: "Confirm brief" });
+    await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(ok);
+    await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2400/confirm-brief")).toBe(true));
+    expect(cs.find((c) => c.path.endsWith("/confirm-brief"))!.headers["if-match"]).toBe("7");
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+    const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
+    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Out of scope" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Decline" }));
+    await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2400/decline")).toBe(true));
+    expect(cs.find((c) => c.path.endsWith("/decline"))!.body).toMatchObject({ reason: "Out of scope" });
+    expect(cs.some((c) => c.path.startsWith("/api/v1/gate-instances/"))).toBe(false);
+  });
+
+  it("keeps the decision buttons locked with a reason until the server has said what this person may do", async () => {
+    mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),
+      "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
+    });
+    mount(<InboxView />);
+    const ok = await screen.findByRole("button", { name: "Approve" });
+    expect(ok.getAttribute("aria-disabled")).toBe("true");
+    expect(ok.getAttribute("data-reason")).toMatch(/Checking/);
+    await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
+  });
+
+  it("names a question's project, and lists one project under one label", async () => {
+    mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, { ...GATE, wo: "WO-1", project: "ops", projectName: "Ops" }], conversations: [CONV] } }) }),
+      "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
+    });
+    mount(<InboxView />);
+    await screen.findByText("Which currency?");
+    const opts = Array.from(document.querySelectorAll<HTMLOptionElement>("#inb-proj option")).map((o) => o.textContent);
+
+    expect(opts).not.toContain("payments");
+    expect(opts.filter((o) => o === "Payments Platform")).toHaveLength(1);
+    expect(screen.queryByText(/listed once/)).toBeNull();
   });
 
   it("says nothing is waiting, and does not say it on a refused read", async () => {

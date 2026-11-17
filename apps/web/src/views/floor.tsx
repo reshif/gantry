@@ -5,20 +5,20 @@
  * Live / Replay switch. Replay rebuilds the floor from the event log at a chosen past time (read-only). All data comes from
  * GET /projects/{id}/floor; every control is a command through the API.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { DAY, MIN, fmt } from "@gantry/domain";
+import { useEffect, useState, type ReactNode } from "react";
+import { DAY, fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
 import { Btn, Empty, Segmented, Stat, StatRow, Status, ViewHead, type Decision, type Tone } from "../ui/primitives";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { pickProject } from "../lib/routes";
-import { setReplay, usePrefs } from "../lib/prefs";
+import { usePrefs } from "../lib/prefs";
 import { makeStopActions } from "../shell/stopActions";
 import { Belt, useBeltStatus } from "./floor/Belt";
 import { useDrawers } from "./floor/Drawers";
-import { FloorCtx, isLive, replayRange, since, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
-import { ReplayBar } from "./floor/Replay";
+import { FloorCtx, isLive, since, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
+import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 
 const REPLAY_LOCK: Decision = { allowed: false, reason: "Replay is showing the past. Go back to live to act.", needs: "" };
@@ -125,45 +125,10 @@ function Header({ replaying, onReplay }: { replaying: boolean; onReplay: (on: bo
 function FloorBody({ projectId }: { projectId: string }) {
   const ctx = useFloorCtx();
   const drawers = useDrawers(projectId);
-  const [playing, setPlaying] = useState(false);
   const rp = ctx.replay;
-  const hasReplay = !!rp;
-  const rpRef = useRef(rp);
-  rpRef.current = rp;
+  const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId, rp, "floor-mode-live");
   useTick(30_000);
 
-  // play: advance the replay clock; each step is one read of the floor at that time
-  useEffect(() => {
-    if (!playing || !hasReplay) return;
-    const t = setInterval(() => {
-      const c = rpRef.current;
-      if (!c) return;
-      const base = c.span === "7d" ? 60 * MIN : 10 * MIN;
-      let next = c.at + base * c.speed * 0.5;
-      if (next >= c.to) {
-        setPlaying(false);
-        next = c.to;
-      }
-      setReplay({ at: next });
-    }, 500);
-    return () => clearInterval(t);
-  }, [playing, hasReplay]);
-  useEffect(() => {
-    if (!rp) setPlaying(false);
-  }, [rp]);
-  useEffect(() => {
-    if (playing && rp && rp.at >= rp.to - MIN) setReplay({ at: rp.from });
-  }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const enter = () => {
-    const rg = replayRange("24h");
-    setReplay({ at: rg.to - 6 * 3_600_000, span: "24h", project: projectId, speed: 1, from: rg.from, to: rg.to });
-  };
-  const exit = () => {
-    setPlaying(false);
-    setReplay(null);
-    setTimeout(() => document.getElementById("floor-mode-live")?.focus(), 60);
-  };
   return (
     <>
       <Header replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} />
@@ -179,17 +144,7 @@ export default function FloorView() {
   const me = useMe();
   const prefs = usePrefs();
   const projectId = me ? pickProject(me, prefs.project) : null;
-  const r = prefs.replay;
-  const rpBase = r && projectId
-    ? (() => {
-        const span: "24h" | "7d" = r.span === "7d" ? "7d" : "24h";
-        const rg = replayRange(span);
-        const from = typeof r.from === "number" ? r.from : rg.from;
-        const to = typeof r.to === "number" ? r.to : rg.to;
-        const at = Math.max(from, Math.min(to, typeof r.at === "number" ? r.at : to));
-        return { at: Math.round(at / MIN) * MIN, span, from, to, speed: typeof r.speed === "number" ? r.speed : 1 };
-      })()
-    : null;
+  const rpBase = useReplayBase(projectId);
   const { value, error } = useFloorState(projectId, rpBase);
   if (!me) return null;
   if (!projectId) {

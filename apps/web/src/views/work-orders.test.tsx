@@ -45,8 +45,8 @@ describe("Work orders table", () => {
     expect(document.querySelectorAll("#wo-table tbody tr")).toHaveLength(3);
     expect(screen.getByText("3 of 5 shown")).toBeTruthy();
     // header sort is server-side: the id column starts descending, a click flips it
-    fireEvent.click(document.getElementById("wo-table-sort-state") as HTMLElement);
-    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "state" && c.query.get("dir") === "asc")).toBe(true));
+    fireEvent.click(document.getElementById("wo-table-sort-where") as HTMLElement);
+    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "where" && c.query.get("dir") === "asc")).toBe(true));
     // filters are sent, "all" is not
     fireEvent.change(document.getElementById("wo-f-cls") as HTMLElement, { target: { value: "bug" } });
     await waitFor(() => expect(lists(calls).some((c) => c.query.get("cls") === "bug")).toBe(true));
@@ -55,6 +55,42 @@ describe("Work orders table", () => {
     fireEvent.click(document.getElementById("wo-table-more") as HTMLElement);
     await waitFor(() => expect(lists(calls).some((c) => c.query.get("cursor") === "c1")).toBe(true));
     expect(await screen.findByText("5 of 5 shown")).toBeTruthy();
+  });
+
+  it("reads every page for the tabs it works out itself, and says when the list is cut short", async () => {
+    const base = WOS[0]!;
+    const many = (n: number, from: number) => Array.from({ length: n }, (_, k) => ({ ...base, id: `WO-${from + k}`, requestedBy: "p-asha" }));
+    let served = 0;
+    const calls = mockApi({
+      "GET /api/v1/projects/payments/work-orders": (c) => {
+        if (c.query.get("limit") === "1") return { body: page([], null, 9000) };
+        served += 1;
+        return { body: page(many(200, served * 1000), `c${served}`, 9000) };
+      },
+    });
+    mount(<WorkOrdersView />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Incidents/ }));
+    await waitFor(() => expect(document.querySelector("#wo-tab-incidents .tab-count")?.textContent).toMatch(/\+$/));
+    await waitFor(() => expect(document.body.textContent).toMatch(/Only the latest 1000 work orders/), { timeout: 5000 });
+    expect(lists(calls).filter((c) => c.query.get("cursor")).length).toBeGreaterThan(3);
+  });
+
+  it("filters by assignee, groups the rows and keeps a saved view", async () => {
+    mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 5) : page(WOS.slice(0, 5), null, 5) }) });
+    mount(<WorkOrdersView />);
+    expect(await screen.findByText("WO-2398")).toBeTruthy();
+    const sel = document.getElementById("wo-f-assignee") as HTMLSelectElement;
+    expect(Array.from(sel.options).map((o) => o.value)).toContain("none");
+    fireEvent.change(document.getElementById("wo-group") as HTMLElement, { target: { value: "repo" } });
+    await waitFor(() => expect(document.querySelectorAll(".wo-group").length).toBeGreaterThan(0));
+    fireEvent.click(document.getElementById("wo-col-by") as HTMLElement);
+    expect(document.querySelectorAll("#wo-table-0 thead th").length).toBeGreaterThan(0);
+    fireEvent.click(document.getElementById("wo-view-save") as HTMLElement);
+    const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
+    fireEvent.change(dlg.querySelector("input,textarea") as HTMLElement, { target: { value: "By repo" } });
+    fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "Save view") as HTMLElement);
+    await waitFor(() => expect(document.getElementById("wo-views")).toBeTruthy());
+    expect(Array.from((document.getElementById("wo-views") as HTMLSelectElement).options).map((o) => o.textContent)).toContain("By repo");
   });
 
   it("explains an empty result and clears the filters", async () => {

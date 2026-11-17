@@ -1,8 +1,9 @@
 /**
  * Work orders (#work-orders): the project's work as a table or a board.
  * The table filters, sorts and pages on the server (GET /projects/{id}/work-orders). The tabs name the groups people ask for first: the
- * server-side ones (everything, in flight, at Intake, shipped, killed) and three that read the latest 200 work orders (mine, waiting on me,
- * incidents). The board is the floor's board (drag, "Move to", swimlanes). The classification card and class override live in
+ * server-side ones (everything, in flight, at Intake, shipped, killed) and three that are worked out here (mine, waiting on me, incidents).
+ * Those three, the Assignee filter and Group by read the work orders page by page up to a limit (CAP), and say so when the project has more.
+ * Columns and saved views are kept per person in this browser (work-orders/saved.ts). The board is the floor's board (drag, "Move to", swimlanes). The classification card and class override live in
  * work-orders/intake.tsx and the New work order dialog in work-orders/New.tsx.
  */
 import { useInfiniteQuery, useQuery, keepPreviousData } from "@tanstack/react-query";
@@ -11,7 +12,8 @@ import { WO_STATES, bayDef, classesOf, flowOf, fmt, gateForWO, woTotals } from "
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
 import { useHome, useMe, useProject } from "../api/queries";
-import { FloorCtx, assigneeOf, useFloorState, useProjectRepos, type FloorCtxValue } from "./floor/kit";
+import { FloorCtx, assigneeOf, useFloorCtx, useFloorState, useProjectRepos, type FloorCtxValue } from "./floor/kit";
+import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { Board } from "./floor/Board";
 import type { Page, WorkOrder } from "../api/types";
 import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Status, Tabs, ViewHead, type Tone } from "../ui/primitives";
@@ -25,6 +27,8 @@ import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { useOpenTraveler } from "../shell/useTraveler";
 import { ClassChip, classOf, useCatalog } from "./projects/kit";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
+import { columnsKey, savedViewsKey, useStored, type GroupBy, type SavedView } from "./work-orders/saved";
+import { useUI } from "../ui/overlay-context";
 
 type TabId = "all" | "mine" | "waiting" | "intake" | "open" | "done" | "incidents" | "killed";
 interface Filters {
@@ -35,11 +39,18 @@ interface Filters {
   prio: string;
   source: string;
   state: string;
+  assignee: string;
 }
-const NONE: Filters = { q: "", cls: "all", where: "all", repo: "all", prio: "all", source: "all", state: "all" };
+const NONE: Filters = { q: "", cls: "all", where: "all", repo: "all", prio: "all", source: "all", state: "all", assignee: "all" };
 const PRIOS = ["P0", "P1", "P2", "P3"];
 const PAGE = 60;
 const SNAPSHOT = 200;
+/** The most work orders read for the views that are worked out here. Beyond it the page says the list is cut short. */
+const CAP = 1000;
+const GROUPS: Array<{ id: GroupBy; label: string }> = [{ id: "none", label: "No grouping" }, { id: "station", label: "Station" }, { id: "repo", label: "Repo" }, { id: "cls", label: "Class" }, { id: "assignee", label: "Assignee" }];
+/** Columns a person can turn on and off. The first (work order) is always shown; the first column already carries class, state and next actor. */
+const OPTIONAL_COLS: Array<[string, string]> = [["cls", "Class"], ["where", "Station / bay"], ["state", "State"], ["next", "Next actor"], ["gate", "Gate"], ["repo", "Repo"], ["prio", "Priority"], ["by", "Requested by"], ["age", "Age"], ["spend", "Spend"]];
+const DEFAULT_HIDDEN = ["cls", "state", "next", "by"];
 
 /** The state each server-side tab asks for. The other tabs read the snapshot. */
 const TAB_STATE: Partial<Record<TabId, string>> = { open: "open", done: "done", killed: "killed" };
@@ -64,17 +75,32 @@ function WoStatus({ state }: { state: string }) {
 
 /** The board is the floor's board; it needs the floor read, which this wrapper loads and hands down. */
 function BoardMode({ projectId }: { projectId: string }) {
-  const { value, error } = useFloorState(projectId, null);
+  const base = useReplayBase(projectId);
+  const { value, error } = useFloorState(projectId, base);
   if (!value) {
     const f = error ? failureOf(error) : null;
     return !f ? <Loading id="wo-board-loading" label="the board" /> : f.hidden ? <NotVisible id="wo-board-hidden" what="this board" reason={f.msg} /> : <LoadFailed id="wo-board-error" what="the board" msg={f.msg} onRetry={() => window.location.reload()} />;
   }
   return (
     <FloorCtx.Provider value={value as FloorCtxValue}>
-      <div className="wo-board">
-        <Board />
-      </div>
+      <BoardBody projectId={projectId} />
     </FloorCtx.Provider>
+  );
+}
+
+/** The board with its Live / Replay switch; a replay shows the board as it was and locks moves. */
+function BoardBody({ projectId }: { projectId: string }) {
+  const ctx = useFloorCtx();
+  const rp = ctx.replay;
+  const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId, rp, "wo-board-mode-live");
+  return (
+    <div className="wo-board">
+      <div className="wo-board-bar">
+        <Segmented name="wo-board-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={rp ? "replay" : "live"} onChange={(v) => (v === "replay" ? enter() : exit())} />
+      </div>
+      {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
+      <Board />
+    </div>
   );
 }
 
@@ -89,8 +115,13 @@ export default function WorkOrdersView() {
   const [f, setF] = useState<Filters>(NONE);
   const [tab, setTab] = useState<TabId>("all");
   const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: "id", dir: -1 });
+  const ui = useUI();
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
+  const [applied, setApplied] = useState("");
   const mode: "table" | "board" = prefs.floorView === "board" ? "board" : "table";
   const projectId = me ? pickProject(me, prefs.project) : null;
+  const [hidden, setHidden] = useStored<string[]>(columnsKey(projectId ?? ""), DEFAULT_HIDDEN);
+  const [saved, setSaved] = useStored<SavedView[]>(savedViewsKey(projectId ?? ""), []);
   const projectQ = useProject(projectId);
   const project = projectQ.data ?? null;
   const repos = useProjectRepos(projectId);
@@ -101,10 +132,14 @@ export default function WorkOrdersView() {
   const state = TAB_STATE[tab] ?? (tab === "intake" ? "open" : f.state);
   const where = tab === "intake" ? "intake" : f.where;
   const serverTab = tab === "all" || tab === "open" || tab === "done" || tab === "killed" || tab === "intake";
-  const params = { q, cls: f.cls, where, repo: f.repo, prio: f.prio, source: f.source, state, sort: sort.k, dir: sort.dir > 0 ? "asc" : "desc" };
+  // Mine, Waiting on me, Incidents, Assignee and Group by are worked out here, so they read every page up to CAP.
+  const clientSide = !serverTab || f.assignee !== "all" || groupBy !== "none";
+  const { assignee: _assignee, ...serverFilters } = f;
+  void _assignee;
+  const params = { q, cls: serverFilters.cls, where, repo: serverFilters.repo, prio: serverFilters.prio, source: serverFilters.source, state, sort: sort.k, dir: sort.dir > 0 ? "asc" : "desc" };
   const list = useInfiniteQuery({
     queryKey: ["workOrders", "table", projectId, params],
-    queryFn: ({ pageParam }) => get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { ...params, limit: serverTab ? PAGE : SNAPSHOT, cursor: pageParam || undefined }),
+    queryFn: ({ pageParam }) => get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { ...params, limit: clientSide ? SNAPSHOT : PAGE, cursor: pageParam || undefined }),
     initialPageParam: "",
     getNextPageParam: (last) => last.next || undefined,
     enabled: !!projectId && mode === "table",
@@ -112,13 +147,20 @@ export default function WorkOrdersView() {
   });
   const loaded = useMemo(() => list.data?.pages.flatMap((p) => p.items) ?? [], [list.data]);
   const waitingIds = useMemo(() => new Set((home?.approvals ?? []).filter((a) => a.project === projectId || !a.project).map((a) => a.wo).filter(Boolean)), [home, projectId]);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = list;
+  useEffect(() => {
+    if (clientSide && hasNextPage && !isFetchingNextPage && loaded.length < CAP) void fetchNextPage();
+  }, [clientSide, hasNextPage, isFetchingNextPage, loaded.length, fetchNextPage]);
+  const cut = clientSide && !!hasNextPage && loaded.length >= CAP;
   const rows = useMemo(() => {
-    if (tab === "mine") return loaded.filter((w) => w.requestedBy === me?.person.id);
-    if (tab === "waiting") return loaded.filter((w) => waitingIds.has(w.id));
-    if (tab === "incidents") return loaded.filter(isIncident);
-    return loaded;
-  }, [loaded, tab, me, waitingIds]);
-  const matched = serverTab ? (list.data?.pages[0]?.total ?? 0) : rows.length;
+    let r = loaded;
+    if (tab === "mine") r = r.filter((w) => w.requestedBy === me?.person.id);
+    else if (tab === "waiting") r = r.filter((w) => waitingIds.has(w.id));
+    else if (tab === "incidents") r = r.filter(isIncident);
+    if (f.assignee !== "all") r = r.filter((w) => (f.assignee === "none" ? !assigneeOf(w) : assigneeOf(w) === f.assignee));
+    return r;
+  }, [loaded, tab, me, waitingIds, f.assignee]);
+  const matched = clientSide ? rows.length : (list.data?.pages[0]?.total ?? 0);
 
   // unfiltered numbers for the tabs and the filter options
   const stat = useQuery({
@@ -130,11 +172,27 @@ export default function WorkOrdersView() {
     },
     enabled: !!projectId,
   });
+  // Every work order up to CAP, for the counts of the tabs that are worked out here.
   const snap = useQuery({
     queryKey: ["workOrders", "snapshot", projectId],
-    queryFn: async () => (await get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { state: "all", limit: SNAPSHOT })).items,
+    queryFn: async () => {
+      const items: WorkOrder[] = [];
+      let cursor: string | undefined;
+      for (let i = 0; i < CAP / SNAPSHOT; i++) {
+        const pg = await get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { state: "all", limit: SNAPSHOT, cursor });
+        items.push(...pg.items);
+        if (!pg.next) return { items, cut: false };
+        cursor = pg.next;
+      }
+      return { items, cut: true };
+    },
     enabled: !!projectId,
   });
+  const assignees = useMemo(() => {
+    const s = new Set<string>(loaded.map(assigneeOf).filter((a): a is string => !!a));
+    if (f.assignee !== "all" && f.assignee !== "none") s.add(f.assignee);
+    return [...s].sort();
+  }, [loaded, f.assignee]);
   const live = useQuery({
     queryKey: ["workOrders", "intake", projectId],
     queryFn: async () => (await get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { state: "open", where: "intake", limit: 200 })).items,
@@ -160,15 +218,16 @@ export default function WorkOrdersView() {
   const set = (k: keyof Filters) => (v: string) => setF((x) => ({ ...x, [k]: v }));
   const clear = () => setF(NONE);
   const block = projectSubmitBlock(me, project, repos);
-  const snapItems = snap.data;
-  const tabs: Array<{ id: TabId; label: string; count: number | null }> = [
+  const snapItems = snap.data?.items;
+  const plus = snap.data?.cut ? "+" : "";
+  const tabs: Array<{ id: TabId; label: string; count: number | string | null }> = [
     { id: "all", label: "All", count: stat.data?.all ?? null },
-    { id: "mine", label: "Mine", count: snapItems ? snapItems.filter((w) => w.requestedBy === me.person.id).length : null },
-    { id: "waiting", label: "Waiting on me", count: snapItems ? snapItems.filter((w) => waitingIds.has(w.id)).length : null },
+    { id: "mine", label: "Mine", count: snapItems ? `${snapItems.filter((w) => w.requestedBy === me.person.id).length}${plus}` : null },
+    { id: "waiting", label: "Waiting on me", count: snapItems ? `${snapItems.filter((w) => waitingIds.has(w.id)).length}${plus}` : null },
     { id: "intake", label: "At Intake", count: stat.data?.intake ?? null },
     { id: "open", label: "In flight", count: stat.data?.open ?? null },
     { id: "done", label: "Shipped", count: stat.data?.done ?? null },
-    { id: "incidents", label: "Incidents", count: snapItems ? snapItems.filter(isIncident).length : null },
+    { id: "incidents", label: "Incidents", count: snapItems ? `${snapItems.filter(isIncident).length}${plus}` : null },
     { id: "killed", label: "Killed", count: stat.data?.killed ?? null },
   ];
   const whereCell = (w: WorkOrder) => {
@@ -206,7 +265,7 @@ export default function WorkOrdersView() {
     const g = gateForWO(cat, project, w);
     return g ? g.name : "None next";
   };
-  const cols: Col<WorkOrder>[] = [
+  const allCols: Col<WorkOrder>[] = [
     {
       key: "id",
       label: "Work order",
@@ -220,6 +279,11 @@ export default function WorkOrdersView() {
               {w.title}
               {w.parent ? <span className="muted small">{` · child of ${w.parent}`}</span> : null}
               {w.children?.length ? <span className="muted small">{` · ${w.children.length} children`}</span> : null}
+            </span>
+            <span className="wo-sub">
+              <ClassChip cls={classOf(cat, project, w.cls)} small />
+              <WoStatus state={w.state} />
+              <span className="muted small">{nextActor(w)}</span>
             </span>
           </span>
         );
@@ -274,7 +338,66 @@ export default function WorkOrdersView() {
       ),
     },
   ];
-  const showCount = serverTab ? `${rows.length} of ${matched} shown` : `${rows.length} shown`;
+  const cols = allCols.filter((c) => c.key === "id" || c.key === "open" || !hidden.includes(c.key));
+  const cutNote = `Only the latest ${CAP} work orders are read for this view, so the project has more. Narrow it with the search or a filter.`;
+  const showCount = clientSide ? `${rows.length} shown` : `${rows.length} of ${matched} shown`;
+  const groupKey = (w: WorkOrder): string => {
+    if (groupBy === "station") return w.bay ? bayDef(cat, w.bay)?.name ?? w.bay : w.state === "done" ? "Shipped" : cat.stations[w.station]?.name ?? "?";
+    if (groupBy === "repo") return w.repo;
+    if (groupBy === "cls") return classOf(cat, project, w.cls).name;
+    const a = assigneeOf(w);
+    return a ? actor(a).name.replace(" (agent)", "") : "Unassigned";
+  };
+  const groups: Array<[string, WorkOrder[]]> = (() => {
+    if (groupBy === "none") return [["", rows]];
+    const m = new Map<string, WorkOrder[]>();
+    for (const w of rows) {
+      const k = groupKey(w);
+      m.set(k, [...(m.get(k) ?? []), w]);
+    }
+    return [...m.entries()].sort((x, y) => x[0].localeCompare(y[0]));
+  })();
+  const applyView = (id: string) => {
+    const v = saved.find((x) => x.id === id);
+    setApplied(id);
+    if (!v) return;
+    setTab(v.tab as TabId);
+    setF({ ...NONE, ...v.filters });
+    setSort(v.sort);
+    setGroupBy(v.groupBy);
+    setHidden(v.hidden);
+  };
+  const saveView = () =>
+    ui.reasonDialog({
+      title: "Save this view",
+      kicker: "Work orders",
+      sub: "Keeps the tab, filters, sort, grouping and columns you have now, for you in this browser.",
+      label: "Name",
+      placeholder: "For example: My P1s",
+      ok: "Save view",
+      min: 2,
+      onOk: (name) => {
+        const id = `v${Date.now().toString(36)}`;
+        setSaved([...saved, { id, name: name.trim(), tab, filters: { ...f }, sort, groupBy, hidden }]);
+        setApplied(id);
+      },
+    });
+  const dropView = () => {
+    setSaved(saved.filter((x) => x.id !== applied));
+    setApplied("");
+  };
+  const tableOf = (items: WorkOrder[], id: string, cap: string) => (
+    <DataTable
+      id={id}
+      caption={cap}
+      columns={cols}
+      rows={items}
+      rowKey={(w) => w.id}
+      onRow={(w) => open(w.id)}
+      sort={{ key: sort.k, dir: sort.dir }}
+      onSort={(s) => setSort({ k: s.key, dir: s.dir })}
+    />
+  );
   return (
     <div className="view view-wide wo-view">
       <div id="wo-head">
@@ -309,7 +432,32 @@ export default function WorkOrdersView() {
           <div className="wo-bar">
             <FilterBar
               label="Filter work orders"
-              actions={filtered ? <Btn label="Clear filters" small kind="ghost" id="wo-clear-top" onClick={clear} /> : null}
+              actions={
+                <>
+                  <Field label="Group by" htmlFor="wo-group">
+                    <Select id="wo-group" options={GROUPS.map((g) => ({ value: g.id, label: g.label }))} value={groupBy} onChange={(v) => setGroupBy(v as GroupBy)} />
+                  </Field>
+                  <details className="wo-cols">
+                    <summary className="btn btn-sm" id="wo-cols-btn"><Icon name="columns" />Columns</summary>
+                    <div className="wo-cols-pop" role="group" aria-label="Columns shown">
+                      {OPTIONAL_COLS.map(([k, label]) => (
+                        <label key={k} className="wo-cols-opt">
+                          <input type="checkbox" id={`wo-col-${k}`} checked={!hidden.includes(k)} onChange={(e) => setHidden(e.target.checked ? hidden.filter((x) => x !== k) : [...hidden, k])} />
+                          {`Show ${label}`}
+                        </label>
+                      ))}
+                    </div>
+                  </details>
+                  {saved.length ? (
+                    <Field label="Saved views" htmlFor="wo-views">
+                      <Select id="wo-views" options={[{ value: "", label: "Choose a view" }, ...saved.map((v) => ({ value: v.id, label: v.name }))]} value={applied} onChange={applyView} />
+                    </Field>
+                  ) : null}
+                  {applied ? <Btn label="Delete view" small kind="ghost" id="wo-view-del" onClick={dropView} /> : null}
+                  <Btn label="Save view" small id="wo-view-save" onClick={saveView} />
+                  {filtered ? <Btn label="Clear filters" small kind="ghost" id="wo-clear-top" onClick={clear} /> : null}
+                </>
+              }
             >
               <SearchBox id="wo-q" value={f.q} onChange={set("q")} placeholder="Id or title" label="Search" />
               <div className="filters wo-filters">
@@ -328,6 +476,9 @@ export default function WorkOrdersView() {
                 <Field label="Source" htmlFor="wo-f-source">
                   <Select id="wo-f-source" options={[{ value: "all", label: "All" }, ...sources.map((s) => ({ value: s, label: s }))]} value={f.source} onChange={set("source")} />
                 </Field>
+                <Field label="Assignee" htmlFor="wo-f-assignee">
+                  <Select id="wo-f-assignee" options={[{ value: "all", label: "Anyone" }, { value: "none", label: "Unassigned" }, ...assignees.map((a) => ({ value: a, label: actor(a).name.replace(" (agent)", "") }))]} value={f.assignee} onChange={set("assignee")} />
+                </Field>
                 <Field label="State" htmlFor="wo-f-state">
                   <Select id="wo-f-state" options={[{ value: "all", label: "All" }, ...Object.keys(WO_STATES).map((k) => ({ value: k, label: (WO_STATES as Record<string, { label: string }>)[k]?.label ?? k }))]} value={f.state} onChange={set("state")} />
                 </Field>
@@ -336,19 +487,17 @@ export default function WorkOrdersView() {
           </div>
           <Async query={list} what="work orders" id="wo-list">{() => rows.length ? (
             <div className="wo-table" id="wo-table-wrap">
-              <DataTable
-                id="wo-table"
-                caption={`Work orders in ${project.name}`}
-                columns={cols}
-                rows={rows}
-                rowKey={(w) => w.id}
-                onRow={(w) => open(w.id)}
-                sort={{ key: sort.k, dir: sort.dir }}
-                onSort={(s) => setSort({ k: s.key, dir: s.dir })}
-              />
+              {groupBy === "none"
+                ? tableOf(rows, "wo-table", `Work orders in ${project.name}`)
+                : groups.map(([g, items], i) => (
+                    <section key={g} className="wo-group" aria-labelledby={`wo-group-h-${i}`}>
+                      <h3 className="wo-group-h" id={`wo-group-h-${i}`}>{g} <span className="muted num">{items.length}</span></h3>
+                      {tableOf(items, `wo-table-${i}`, `Work orders in ${project.name}: ${g}`)}
+                    </section>
+                  ))}
               <div className="wo-foot">
-                <span className="muted small" role="status">{showCount}</span>
-                {serverTab && list.hasNextPage ? <Btn label={`Show ${Math.min(PAGE, matched - rows.length)} more of ${matched - rows.length}`} small id="wo-table-more" onClick={() => void list.fetchNextPage()} /> : null}
+                <span className="muted small" role="status">{cut ? `${showCount}. ${cutNote}` : showCount}</span>
+                {!clientSide && list.hasNextPage ? <Btn label={`Show ${Math.min(PAGE, matched - rows.length)} more of ${matched - rows.length}`} small id="wo-table-more" onClick={() => void list.fetchNextPage()} /> : null}
               </div>
             </div>
           ) : (
@@ -356,7 +505,7 @@ export default function WorkOrdersView() {
               id="wo-empty"
               icon="list"
               title="No work orders match"
-              text={filtered || tab !== "all" ? "Clear the search or filters, or choose another tab." : "Submit the first work order to a Ready repo."}
+              text={cut ? `None of the work orders read match. ${cutNote}` : filtered || tab !== "all" ? "Clear the search or filters, or choose another tab." : "Submit the first work order to a Ready repo."}
               action={filtered ? <Btn label="Clear filters" id="wo-clear" onClick={clear} /> : undefined}
             />
           )}</Async>

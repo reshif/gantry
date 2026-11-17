@@ -1,17 +1,16 @@
 /**
  * Inbox (#inbox): everything that waits for this person, in one list, decided right here. The list is the "waiting on you" part of
  * GET /home: gate approvals (with the rule and who else can decide), onboarding merges, questions agents asked, and the other decisions
- * the server puts in front of this person (trust, learning, MCP and trigger proposals, a factory restore). Each item is listed once;
- * Home links here instead of repeating it. Every decision is a command the server checks (approver rules, separation of duties).
+ * the server puts in front of this person (trust, learning, MCP and trigger proposals, a factory restore). Every decision is a command the server checks (approver rules, separation of duties).
  */
 import { useMemo, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { ops } from "../api/ops";
-import { useHome, useMe, useWorkOrder } from "../api/queries";
+import { useHome, useMe, useProjects } from "../api/queries";
+import { dec, useTravelerWo } from "./traveler/model";
 import { useCan } from "../api/can";
 import { Btn, Empty, Field, Segmented, Select, Status, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
-import { Icon } from "../ui/Icon";
 import { useCommand } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { navigate } from "../lib/router";
@@ -39,19 +38,21 @@ const GROUPS: Array<{ id: Group; label: string; title: string; hint: string; emp
   { id: "other", label: "Other decisions", title: "Other decisions", hint: "Proposals and restores that need a person. A factory restore appears here while the factory is stopped.", empty: "Nothing else is waiting." },
 ];
 
-function useItems(home: HomeFull | undefined): Item[] {
+function useItems(home: HomeFull | undefined, names: Map<string, string>): Item[] {
   return useMemo(() => {
     const s = home?.sections;
     if (!s) return [];
     const out: Item[] = [];
+    const projectNames = new Map(names);
+    for (const a of s.waiting?.approvals ?? []) if (a.project && a.projectName) projectNames.set(a.project, a.projectName);
     for (const a of s.waiting?.approvals ?? []) {
       const base = { project: a.project, projectName: a.projectName, waitMs: a.waitMs ?? 0 };
       out.push(a.repo ? { kind: "onboarding", group: "onboarding", key: `onb-${a.repo}-${a.note ? "n" : "m"}`, ...base, a } : { kind: "gate", group: "gate", key: `gate-${a.wo}-${a.gate}`, ...base, a });
     }
-    for (const c of s.waiting?.conversations ?? []) out.push({ kind: "question", group: "questions", key: `q-${c.wo}`, project: c.project, projectName: "", waitMs: 0, c });
+    for (const c of s.waiting?.conversations ?? []) out.push({ kind: "question", group: "questions", key: `q-${c.wo}`, project: c.project, projectName: projectNames.get(c.project) ?? "", waitMs: 0, c });
     for (const x of s.attention ?? []) if (isDecision(x)) out.push({ kind: "other", group: "other", key: x.id, project: x.act.project ?? "factory", projectName: x.where, waitMs: 0, x });
     return out.sort((p, q) => q.waitMs - p.waitMs);
-  }, [home]);
+  }, [home, names]);
 }
 
 function Row({ id, tag, project, title, sub, status, children, details, actions }: { id: string; tag: string; project: string; title: ReactNode; sub: ReactNode; status?: ReactNode; children?: ReactNode; details?: ReactNode; actions?: ReactNode }) {
@@ -100,7 +101,7 @@ function GateRule({ wo, gate, project }: { wo: string; gate: string; project: st
   );
 }
 
-type Traveler = { allowed?: { approve: (Decision & { gate: string }) | null } };
+const CHECKING: Decision = { allowed: false, reason: "Checking what you may decide here.", needs: "" };
 
 function GateItem({ it }: { it: Extract<Item, { kind: "gate" }> }) {
   const ui = useUI();
@@ -108,10 +109,21 @@ function GateItem({ it }: { it: Extract<Item, { kind: "gate" }> }) {
   const a = it.a;
   const wo = a.wo ?? "";
   const gate = a.gate ?? "";
-  const t = useWorkOrder(wo).data as Traveler | undefined;
-  const dec: Decision | null = t?.allowed?.approve && t.allowed.approve.gate === gate ? { allowed: t.allowed.approve.allowed, reason: t.allowed.approve.reason, needs: t.allowed.approve.needs } : null;
+  const q = useTravelerWo(wo);
+  const t = q.data;
   const brief = gate === "G0G1";
-  const approve = useCommand(() => ops.approveGate(wo, gate), {});
+  const ap = t?.allowed?.approve;
+  // Locked, with the reason, until the server's decision for this person is known; the brief gate has its own decline decision.
+  const base: Decision = !t
+    ? q.isError
+      ? { allowed: false, reason: "Could not check what you may decide. Open the work order to decide there.", needs: "" }
+      : CHECKING
+    : ap && ap.gate === gate
+      ? { allowed: ap.allowed, reason: ap.reason, needs: ap.needs }
+      : { allowed: false, reason: `${wo} is no longer waiting at this gate.`, needs: "" };
+  const decideBack: Decision = brief && t && base.allowed ? dec(t, "decline") : base;
+  const ifm = t ? { ifMatch: t.version } : undefined;
+  const approve = useCommand(() => (brief ? ops.confirmBrief(wo, undefined, ifm) : ops.approveGate(wo, gate, undefined, ifm)), {});
   const back = () =>
     ui.reasonDialog({
       title: brief ? `Decline ${wo}` : `Ask for changes on ${wo}`,
@@ -120,9 +132,9 @@ function GateItem({ it }: { it: Extract<Item, { kind: "gate" }> }) {
       kind: "danger",
       min: 5,
       placeholder: brief ? "Why will the factory not do this?" : "What must change before this passes?",
-      sub: brief ? "The work order moves to Declined." : "The station's agent reworks the step with your reason.",
+      sub: brief ? "The work order moves to Declined and the submitter is told why." : "The station's agent reworks the step with your reason.",
       onOk: async (v) => {
-        const r = await ops.rejectGate(wo, gate, v);
+        const r = brief ? await ops.decline(wo, v, undefined, ifm) : await ops.rejectGate(wo, gate, v, undefined, ifm);
         if (r.ok) ui.toast(r.msg, "ok");
         return r;
       },
@@ -139,8 +151,8 @@ function GateItem({ it }: { it: Extract<Item, { kind: "gate" }> }) {
       details={<GateRule wo={wo} gate={gate} project={it.project} />}
       actions={
         <>
-          <Btn label={verb} kind="primary" icon="check" id={`inb-ok-${wo}-${gate}`} guard={dec} onClick={() => void approve.run()} />
-          <Btn label={brief ? "Decline" : "Ask for changes"} icon={brief ? "x" : "undo"} id={`inb-back-${wo}-${gate}`} guard={dec} onClick={back} />
+          <Btn label={verb} kind="primary" icon="check" id={`inb-ok-${wo}-${gate}`} guard={base} onClick={() => void approve.run()} />
+          <Btn label={brief ? "Decline" : "Ask for changes"} icon={brief ? "x" : "undo"} id={`inb-back-${wo}-${gate}`} guard={decideBack} onClick={back} />
         </>
       }
     >
@@ -170,7 +182,7 @@ function QuestionItem({ it }: { it: Extract<Item, { kind: "question" }> }) {
     <Row
       id={`inb-${it.key}`}
       tag="Question"
-      project=""
+      project={it.projectName}
       title={c.question || "Confirm the brief or answer the open question."}
       sub={`${c.wo} · ${c.title}`}
       status={<Status tone="wait">Waiting</Status>}
@@ -217,15 +229,17 @@ function OtherItem({ it }: { it: Extract<Item, { kind: "other" }> }) {
 export default function InboxView() {
   const q = useHome();
   const home = q.data as unknown as HomeFull | undefined;
-  const items = useItems(home);
+  const projList = useProjects().data;
+  const names = useMemo(() => new Map((projList ?? []).map((p) => [p.id, p.name] as [string, string])), [projList]);
+  const items = useItems(home, names);
   const [group, setGroup] = useState<"all" | Group>("all");
   const [project, setProj] = useState("all");
   const count = (g: Group | "all") => items.filter((i) => g === "all" || i.group === g).length;
   const projects = useMemo(() => {
     const m = new Map<string, string>();
-    for (const i of items) m.set(i.project, i.projectName || i.project);
+    for (const i of items) if (!m.has(i.project) || names.has(i.project)) m.set(i.project, names.get(i.project) ?? (i.projectName || i.project));
     return [...m.entries()];
-  }, [items]);
+  }, [items, names]);
   const shown = items.filter((i) => (group === "all" || i.group === group) && (project === "all" || i.project === project));
   const render = (i: Item): ReactNode =>
     i.kind === "gate" ? <GateItem key={i.key} it={i} /> : i.kind === "onboarding" ? <OnboardingItem key={i.key} it={i} /> : i.kind === "question" ? <QuestionItem key={i.key} it={i} /> : <OtherItem key={i.key} it={i} />;
@@ -264,7 +278,6 @@ export default function InboxView() {
                 );
               })
             )}
-            <p className="hint inb-foot"><Icon name="check" /> Each item is listed once. Home links here instead of repeating it.</p>
           </div>
         )
       }</Async>
