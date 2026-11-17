@@ -156,7 +156,8 @@ export interface ModalProps {
   /** Wrap body and footer in a form with this submit handler. */
   onSubmit?: (e: React.FormEvent) => void;
   children: ReactNode;
-  footer?: ReactNode;
+  /** The footer may be a function of the guarded close, so Cancel-style actions ask before discarding dirty input. */
+  footer?: ReactNode | ((requestClose: () => void) => ReactNode);
 }
 
 export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit, children, footer }: ModalProps) {
@@ -166,12 +167,27 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
   const askingRef = useRef(false);
   askingRef.current = asking;
   const keepBtn = useRef<HTMLDivElement>(null);
+  const beforeAsk = useRef<HTMLElement | null>(null);
+  /** Back to editing: focus returns to the control that had it (else the first field), never the page behind. */
+  const keepEditing = useCallback(() => {
+    setAsking(false);
+    const t = beforeAsk.current;
+    beforeAsk.current = null;
+    setTimeout(() => {
+      const p = panel.current;
+      if (!p) return;
+      if (t && p.contains(t)) t.focus();
+      else p.querySelector<HTMLElement>("input:not([type=hidden]),select,textarea")?.focus();
+    }, 0);
+  }, []);
   const requestClose = useCallback(() => {
     // Escape while the discard question is open answers it with "keep editing"
-    if (askingRef.current) setAsking(false);
-    else if (dirty) setAsking(true);
-    else onClose();
-  }, [dirty, onClose]);
+    if (askingRef.current) keepEditing();
+    else if (dirty) {
+      beforeAsk.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setAsking(true);
+    } else onClose();
+  }, [dirty, onClose, keepEditing]);
   // the question is an alertdialog: move focus into it so it is announced and reachable
   useLayoutEffect(() => {
     if (asking) keepBtn.current?.querySelector<HTMLElement>("button")?.focus();
@@ -184,11 +200,11 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
       {asking ? (
         <div ref={keepBtn} className="dlg-discard" role="alertdialog" aria-labelledby={`discard-${titleId}`}>
           <span id={`discard-${titleId}`}>Discard your unsaved changes?</span>
-          <Btn label="Keep editing" kind="ghost" small onClick={() => setAsking(false)} />
+          <Btn label="Keep editing" kind="ghost" small onClick={keepEditing} />
           <Btn label="Discard" kind="danger" small onClick={onClose} />
         </div>
       ) : null}
-      {footer ? <div className="dlg-foot">{footer}</div> : null}
+      {footer ? <div className="dlg-foot">{typeof footer === "function" ? footer(requestClose) : footer}</div> : null}
     </>
   );
   return (

@@ -10,6 +10,12 @@ function Form({ dirty }: { dirty: boolean }) {
 
 afterEach(() => vi.restoreAllMocks());
 
+const scrimClick = () => {
+  const el = document.querySelector(".scrim")!;
+  fireEvent.pointerDown(el);
+  fireEvent.click(el);
+};
+
 describe("useLeaveGuard on the page", () => {
   it("asks before unload only while dirty", () => {
     const { rerender } = render(<Form dirty={false} />);
@@ -55,14 +61,14 @@ describe("a dirty dialog", () => {
   it("closes straight away when nothing was typed", () => {
     const onClose = vi.fn();
     open(false, onClose);
-    fireEvent.click(document.querySelector(".scrim")!);
+    scrimClick();
     expect(onClose).toHaveBeenCalled();
   });
 
   it("asks before a scrim click, Escape or Cancel discards typed input", () => {
     const onClose = vi.fn();
     open(true, onClose);
-    fireEvent.click(document.querySelector(".scrim")!);
+    scrimClick();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("alertdialog").textContent).toMatch(/unsaved/);
     fireEvent.click(screen.getByText("Keep editing"));
@@ -70,7 +76,7 @@ describe("a dirty dialog", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("alertdialog")).toBeTruthy();
-    fireEvent.click(screen.getByText("Discard changes"));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -78,7 +84,7 @@ describe("a dirty dialog", () => {
     open(true, vi.fn());
     const field = screen.getByLabelText("name");
     field.focus();
-    fireEvent.click(document.querySelector(".scrim")!);
+    scrimClick();
     await waitFor(() => expect(document.activeElement).toBe(screen.getByText("Keep editing").closest("button")));
     fireEvent.click(screen.getByText("Keep editing"));
     await waitFor(() => expect(document.activeElement).toBe(field));
