@@ -90,7 +90,7 @@ authenticator app. Other people are not asked for a code.
   Factory Admin only after signing in with a code. They see the setup screen, press "Set up and sign in", scan the QR code and continue.
 - **GitHub sign-in** cannot show a second factor to Gantry: admins use single sign-on.
 - **Lost device.** Gantry cannot reset it; reset the person's OTP credential in the Keycloak admin console
-  (Users > Credentials) and keep a second admin enrolled. Existing admin sessions end at their next request after upgrading (migration 0047) and sign in again.
+  (Users > Credentials) and keep a second admin enrolled. Existing admin sessions end at their next request after upgrading (migration 0048) and sign in again.
 - **Check once after install.** Sign in as the first admin and confirm the code is asked for and the Factory view opens. If the
   realm was imported before this change, re-import it or set the browser flow to `gantry-browser` by hand.
 - **Development.** `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` (default in `compose.yml` only) waives the check for the seeded demo admin, who has
