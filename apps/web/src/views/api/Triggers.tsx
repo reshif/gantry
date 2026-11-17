@@ -10,7 +10,8 @@ import { classesOf, fmt, type Trigger, type TriggerProposal, type TriggerRun } f
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useProjects, useRepos, useTriggerProposals } from "../../api/queries";
-import { Btn, Empty, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
+import { Btn, Empty, Field, FilterBar, SearchBox, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -330,39 +331,37 @@ export function TriggersTab({ d }: { d: ApiData }) {
   const guard = useCanAny("triggers.edit", d.vis);
   const [sel, setSel] = useState<string | null>(null);
   const [sims, setSims] = useState<Record<string, SimResult>>({});
+  const [q, setQ] = useState("");
   const list = d.triggers;
+  const needle = q.trim().toLowerCase();
+  const shown = list.filter((x) => !needle || `${x.name} ${x.type} ${srcName(x.source, d)}`.toLowerCase().includes(needle));
   const cur = list.find((t) => t.id === sel) ?? list[0] ?? null;
   return (
     <div className="form-grid">
-      <div className="toolbar">
-        <p className="muted">Triggers open work orders from events on connected source control, issue trackers and CI, and from schedules. Every trigger still goes through Intake and the project's gates, and starts switched off.</p>
-        <Btn label="New trigger" kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={setSel} />)} />
-      </div>
-      <div className="api-tsplit">
-        <Panel title="Triggers" flush>
-          <ul className="api-tlist">
-            {list.map((x) => {
-              const last = x.runs[x.runs.length - 1];
-              return (
-                <li key={x.id}>
-                  <button type="button" className={`api-titem${x.id === cur?.id ? " is-selected" : ""}${x.enabled ? "" : " is-off"}`} id={`api-tr-open-${x.id}`} aria-pressed={x.id === cur?.id ? "true" : "false"} onClick={() => setSel(x.id)}>
-                    <Icon name={TTYPES[x.type]?.icon ?? "api"} />
-                    <span className="api-titem-main">
-                      <strong>{x.name}</strong>
-                      <span className="small muted">{`${srcName(x.source, d)} · ${TTYPES[x.type]?.name ?? x.type} · ${d.pname(x.project)}`}</span>
-                      {srcState(x.source, d) === "healthy" ? null : <span className="small neg">{`✕ source ${srcState(x.source, d)}`}</span>}
-                    </span>
-                    <span className="api-titem-meta small">
-                      {x.enabled ? <span className="outcome o-ok">on</span> : <span className="outcome">off</span>}
-                      {x.held ? <span className="outcome o-warn" title="Proposals waiting for a person">{`${x.held} held`}</span> : null}
-                      {last ? <span className="muted">{fmt.ago(last.at, Date.now())}</span> : null}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
+      <FilterBar label="Triggers" count={`${list.length} triggers`} actions={<Btn label="New trigger" kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={setSel} />)} />}>
+        <SearchBox id="api-tr-q" label="Search triggers" placeholder="Search triggers" value={q} onChange={setQ} />
+      </FilterBar>
+      <DataTable
+        id="api-tr-list"
+        caption="Triggers"
+        rows={shown}
+        rowKey={(x) => x.id}
+        rowId={(x) => `api-tr-open-${x.id}`}
+        rowLabel={(x) => `Open ${x.name}`}
+        onRow={(x) => setSel(x.id)}
+        pageSize={10}
+        empty={{ title: "No trigger matches", text: "Change the search." }}
+        columns={[
+          { key: "name", label: "Trigger", sort: (x) => x.name.toLowerCase(), render: (x) => <b className={`ell${x.id === cur?.id ? " sel-mark" : ""}`}>{x.name}</b> },
+          { key: "source", label: "Source", render: (x) => <><span className="tag">{srcName(x.source, d)}</span>{srcState(x.source, d) === "healthy" ? null : <div className="small neg">{`✕ source ${srcState(x.source, d)}`}</div>}</> },
+          { key: "type", label: "Type", hideSmall: true, render: (x) => <span className="tag">{TTYPES[x.type]?.name ?? x.type}</span> },
+          { key: "project", label: "Project", render: (x) => <span className="tag">{d.pname(x.project)}</span> },
+          { key: "runs", label: "Runs", align: "end", sort: (x) => x.runs.length, render: (x) => <span className="mono">{x.runs.length}</span> },
+          { key: "last", label: "Last fired", render: (x) => { const last = x.runs[x.runs.length - 1]; return <span className="mono dim">{last ? fmt.ago(last.at, Date.now()) : "never"}</span>; } },
+          { key: "en", label: "Enabled", render: (x) => <>{x.enabled ? <span className="chip ok">on</span> : <span className="chip idle">off</span>}{x.held ? <span className="chip warn" title="Proposals waiting for a person">{`${x.held} held`}</span> : null}</> },
+        ]}
+      />
+      <div className="api-tdetail">
         {cur ? <Detail key={`${cur.id}:${cur.version ?? 0}`} t={cur} d={d} res={sims[cur.id]} setRes={(r) => setSims((s) => ({ ...s, [cur.id]: r }))} /> : <Empty title="No triggers" text="Create a trigger to open work orders from a connected source." />}
       </div>
     </div>

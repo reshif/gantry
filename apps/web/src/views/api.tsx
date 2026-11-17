@@ -28,8 +28,9 @@ export default function ApiView() {
   return (
     <div className="view cx api-view">
       <ViewHead
-        title="API & triggers"
-        sub="Submit and follow work orders from other systems, and open work from source control, issue trackers, CI and schedules. Triggers are off until you switch them on."
+        kicker="Connect"
+        title="API and triggers"
+        sub="How outside systems create work: scoped API keys and event triggers."
       />
       <StatRow id="api-stats">
         <Stat label="Active keys" value={qState(d.keysQ, () => String(active.length))} sub="not revoked or expired" />

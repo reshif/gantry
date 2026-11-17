@@ -4,7 +4,8 @@ import { DAY, fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { api, get } from "../../api/client";
-import { Btn, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
+import { Btn, Field, FilterBar, LockNote, SearchBox, Select, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { tip } from "../../ui/Tip";
@@ -130,48 +131,43 @@ function RevokeKey({ k, perm, close }: { k: ApiKey; perm: Decision; close: () =>
   );
 }
 
-function KeyRow({ k, pname }: { k: ApiKey; pname: string }) {
+function RevokeBtn({ k }: { k: ApiKey }) {
   const ui = useUI();
-  const who = useActors();
   const perm = dec(useCan("api.keys", { project: k.project }));
-  const gone = k.revoked || k.expired;
-  return (
-    <tr className={gone ? "api-revoked" : ""} id={`api-key-row-${k.id}`}>
-      <td><strong>{k.name}</strong><div className="small muted">{`by ${who(k.by).name}`}</div></td>
-      <td className="mono">{k.prefix}…</td>
-      <td>{pname}</td>
-      <td>{k.actions.map((a) => <span key={a} className="tag">{a}</span>)}</td>
-      <td className="mono small">{fmt.istDate(k.created)}</td>
-      <td className="small">{k.lastUsed ? fmt.ago(k.lastUsed, Date.now()) : "never"}</td>
-      <td>
-        {k.revoked ? <span className="outcome o-denied">⊘ revoked</span> : k.expired ? <span className="outcome o-denied">⊘ expired</span> : <span className="outcome o-ok">✓ active</span>}
-        {!k.revoked && k.expires ? <div className="small muted">{k.expired ? "expired " : "expires "}{fmt.istDate(k.expires)}</div> : null}
-      </td>
-      <td className="num">{k.revoked ? null : <Btn label="Revoke" small kind="ghost" id={`api-key-revoke-${k.id}`} guard={perm} onClick={() => ui.open((c) => <RevokeKey k={k} perm={perm} close={c} />)} />}</td>
-    </tr>
-  );
+  return <Btn label="Revoke" small kind="danger" id={`api-key-revoke-${k.id}`} guard={perm} onClick={() => ui.open((c) => <RevokeKey k={k} perm={perm} close={c} />)} />;
 }
 
 export function KeysTab({ d, onCreated }: { d: ApiData; onCreated: (k: ApiKey) => void }) {
   const ui = useUI();
+  const who = useActors();
   const guard = useCanAny("api.keys", d.vis);
-  const keys = [...d.keys].sort((a, b) => Number(a.revoked) - Number(b.revoked) || b.created - a.created);
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const keys = [...d.keys].sort((a, b) => Number(a.revoked) - Number(b.revoked) || b.created - a.created).filter((k) => !needle || `${k.name} ${k.prefix} ${d.pname(k.project)}`.toLowerCase().includes(needle));
   return (
     <div className="form-grid">
-      <div className="toolbar">
-        <p className="muted">Keys are service accounts scoped to one project and a set of actions. The full key is shown once at creation, and every key expires.</p>
-        <Btn label="Create key" kind="primary" icon="plus" id="api-key-new" guard={guard} onClick={() => ui.open((c) => <CreateKey d={d} close={c} onCreated={onCreated} />)} />
-      </div>
-      <Panel flush>
-        <div className="table-scroll">
-          <table className="table table-compact api-keys">
-            <thead><tr><th>Name</th><th>Key</th><th>Project</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th><span className="sr">Actions</span></th></tr></thead>
-            <tbody>
-              {keys.length ? keys.map((k) => <KeyRow key={k.id} k={k} pname={d.pname(k.project)} />) : <tr><td colSpan={8} className="muted">No keys on your projects.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
+      <FilterBar label="Filter keys" count={`${keys.length} of ${d.keys.length}`} actions={<Btn label="Create key" kind="primary" icon="plus" id="api-key-new" guard={guard} onClick={() => ui.open((c) => <CreateKey d={d} close={c} onCreated={onCreated} />)} />}>
+        <SearchBox id="api-key-q" label="Search keys" placeholder="Search keys" value={q} onChange={setQ} />
+      </FilterBar>
+      <DataTable
+        id="api-keys"
+        caption="API keys"
+        rows={keys}
+        rowKey={(k) => k.id}
+        rowId={(k) => `api-key-row-${k.id}`}
+        pageSize={10}
+        empty={{ title: d.keys.length ? "No key matches" : "No keys on your projects", text: d.keys.length ? "Change the search." : "Create a key to let another system submit work." }}
+        columns={[
+          { key: "name", label: "Name", render: (k) => <><b className="ell">{k.name}</b><div className="small dim">{`by ${who(k.by).name}`}</div></> },
+          { key: "prefix", label: "Key", render: (k) => <span className="mono">{k.prefix}…</span> },
+          { key: "project", label: "Project", render: (k) => <span className="tag">{d.pname(k.project)}</span> },
+          { key: "actions", label: "Actions", hideSmall: true, render: (k) => <>{k.actions.map((a) => <span key={a} className="tag">{a}</span>)}</> },
+          { key: "lastUsed", label: "Last used", render: (k) => <span className="mono dim">{k.lastUsed ? fmt.ago(k.lastUsed, Date.now()) : "never"}</span> },
+          { key: "created", label: "Created", hideSmall: true, render: (k) => <span className="mono dim">{fmt.istDate(k.created)}</span> },
+          { key: "status", label: "Status", render: (k) => <>{k.revoked ? <span className="chip idle">Revoked</span> : k.expired ? <span className="chip idle">Expired</span> : <span className="chip ok">Active</span>}{!k.revoked && k.expires ? <div className="small dim">{k.expired ? "expired " : "expires "}{fmt.istDate(k.expires)}</div> : null}</> },
+          { key: "act", label: "", align: "end", render: (k) => (k.revoked ? null : <RevokeBtn k={k} />) },
+        ]}
+      />
     </div>
   );
 }
