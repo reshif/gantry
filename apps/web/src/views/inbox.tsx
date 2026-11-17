@@ -22,7 +22,6 @@ import { useOpenTraveler } from "../shell/useTraveler";
 import { useGateApprovers } from "./traveler/Approvers";
 import { goAttention, type Approval, type AttentionItem, type Conversation, type HomeFull } from "./home/data";
 
-type Group = "gate" | "onboarding" | "questions" | "stuck" | "other";
 type Item =
   | { kind: "gate"; group: "gate"; key: string; project: string; projectName: string; waitMs: number; a: Approval }
   | { kind: "onboarding"; group: "onboarding"; key: string; project: string; projectName: string; waitMs: number; a: Approval }
