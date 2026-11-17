@@ -313,3 +313,21 @@ describe("People & teams: deactivate", () => {
     expect(btn.getAttribute("aria-description")).toContain("cannot deactivate yourself");
   });
 });
+
+describe("People & teams: one page per person", () => {
+  it("sends older #people/<id> links to the person's own page", async () => {
+    setup();
+    window.location.hash = "#people/p-tomas";
+    mount();
+    await waitFor(() => expect(window.location.hash).toBe("#person/p-tomas"));
+  });
+
+  it("opens a person from a team card, and says so when the id is unknown", async () => {
+    setup();
+    mount();
+    expect((await byId("ppl-mem-payments-p-tomas")).getAttribute("href")).toBe("#person/p-tomas");
+    cleanup();
+    mount("p-nobody");
+    expect((await byId("person-missing")).textContent).toContain("No such person");
+  });
+});

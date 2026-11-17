@@ -133,3 +133,5 @@
 .acct-linklist li { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .acct-linklist li .btn { margin-left: auto; }
 @media (max-width: 560px) { .acct-kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.person-stack .caps-grid { grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); }
+.person-stack .caps li > span { min-width: 0; overflow-wrap: anywhere; }
