@@ -55,6 +55,30 @@ export function decideFor(st: PolicyStateLoaded, principal: Principal | null, ac
   });
 }
 
+/**
+ * Spec 14.3 and the QA review: a request that fails validation must not teach a caller who may not write at all what the body should
+ * look like. Handlers parse their body before they reach command()'s decision point, so the error handler asks this first. It returns the
+ * denial (and the action it was decided for) when the principal holds no right to change anything in any scope: every action other than
+ * the read rights and asking the console is refused for them, factory-wide and in each project. A caller who holds any such right still gets the
+ * validation message, because for them it is the form they are allowed to fill.
+ */
+export async function noWriteRight(req: FastifyRequest): Promise<{ action: string; decision: Decision } | null> {
+  const principal = req.gx.principal;
+  if (!principal) return null;
+  const st = await policyState(req);
+  const writes = st.catalog.actions.filter((a) => !a.id.endsWith(".view") && a.id !== "console.use");
+  const scopes: Scope[] = [{}, ...st.projects.filter((p) => p.status !== "archived").map((p) => ({ project: p.id }))];
+  let first: { action: string; decision: Decision } | null = null;
+  for (const a of writes) {
+    for (const scope of scopes) {
+      const d = decideFor(st, principal, a.id, scope);
+      if (d.allowed) return null;
+      first ??= { action: a.id, decision: d };
+    }
+  }
+  return first;
+}
+
 const deny = (reason: string, id: string, name: string, kind = "apikey", needs = ""): Decision => ({ allowed: false, reason, rule: { kind, id, name }, needs });
 
 /** API keys carry explicit scopes (action ids) and may be bound to one project. Stops apply to them like to anyone. */

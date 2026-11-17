@@ -73,7 +73,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
  * The demo sign-in list publishes every person's name, email and roles to anyone who reaches the sign-in page. It is a local
  * development aid only: refused (the service does not start) when the public URL is not this machine, so it cannot ship by accident.
  */
-function demoAccountsAllowed(on: boolean, publicUrl: string): boolean {
+export function demoAccountsAllowed(on: boolean, publicUrl: string): boolean {
   if (!on) return false;
   const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
   if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost")) return true;

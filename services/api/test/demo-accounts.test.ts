@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { demoAccountsAllowed } from "../src/core/config.js";
 import { demoAccountList, summariseRoles } from "../src/areas/access/demo.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 
@@ -89,5 +90,32 @@ d("publicConfig demo list", () => {
     } finally {
       await t.close();
     }
+  });
+});
+
+describe("the demo sign-in list is an explicit, dev-only switch (GANTRY_DEV_DEMO_ACCOUNTS)", () => {
+  it("is off unless the flag is exactly true, on any URL (so a production container never publishes it by default)", () => {
+    expect(demoAccountsAllowed(false, "https://localhost")).toBe(false);
+    expect(demoAccountsAllowed(false, "https://gantry.example.com")).toBe(false);
+  });
+  it("is allowed for local development on localhost", () => {
+    expect(demoAccountsAllowed(true, "https://localhost")).toBe(true);
+    expect(demoAccountsAllowed(true, "http://127.0.0.1:8000")).toBe(true);
+  });
+  it("refuses to start when switched on for a public URL", () => {
+    expect(() => demoAccountsAllowed(true, "https://gantry.example.com")).toThrow(/local development only/);
+  });
+});
+
+d("publicConfig with the switch off", () => {
+  let t: TestApp;
+  beforeAll(async () => {
+    t = await startApp({ config: { demoAccounts: false } });
+  });
+  afterAll(() => t.close());
+  it("an unauthenticated 401 carries no demo flag and no account list", async () => {
+    const c = await sign(t);
+    expect(c.demoAccounts).toBe(false);
+    expect(c.demoAccountList).toBeUndefined();
   });
 });
