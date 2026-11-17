@@ -15,7 +15,7 @@ d("risk tags on automatic gates", () => {
   afterAll(() => t.close());
   const w = world(() => t);
 
-  const open = (id: string) => w.tx(async (tx) => openGate(await w.fxIn(tx), await lockWo(tx, t.orgId, id), "G4"));
+  const open = (id: string) => w.tx(async (tx) => openGate(await w.fxIn(tx), await lockWo(tx, t.orgId, id), "G4", { checks: [{ name: "Required checks", ok: true }] }));
   const decision = async (id: string) => (await w.q<{ decision: string }>(`select decision from gate_decisions where wo_id = $1`, [id]))[0]?.decision ?? null;
 
   it("an untagged change passes an automatic gate on green checks; a CI, dependency or migration change waits for a person", async () => {

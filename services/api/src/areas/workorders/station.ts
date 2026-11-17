@@ -75,7 +75,8 @@ function absorbOutput(w: Wo, station: string, r: StationResult): { checks: Obser
   }
   const tests = r.observed?.tests ?? (out.tests && typeof out.tests === "object" ? (out.tests as { passed: number; failed: number; added: number }) : null);
   if (tests) w.data.tests = { passed: Number(tests.passed) || 0, failed: Number(tests.failed) || 0, added: Number(tests.added) || 0 };
-  const checks = r.observed?.checks ?? (Array.isArray(out.checks) ? (out.checks as ObservedChecks[]).filter((c) => c && typeof c.name === "string").map((c) => ({ name: c.name, ok: c.ok !== false, ...(c.warn ? { warn: true } : {}) })) : undefined);
+  // Gate checks are system evidence only (worker-observed, or GitHub check runs read when the gate opens). An agent's own `output.checks` is shown but never judged.
+  const checks = r.observed?.checks;
   return { checks, headSha: r.observed?.headSha ?? (typeof out.headSha === "string" ? out.headSha : undefined) };
 }
 
