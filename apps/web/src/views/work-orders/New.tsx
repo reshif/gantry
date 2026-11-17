@@ -3,7 +3,7 @@
  * The submit button is guarded by the server's decision for this person and by the stop and onboarding state; one click makes one
  * work order (the request carries an Idempotency-Key that is kept for retries of the same dialog).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ONBOARD_STAGES, classify, classesOf, route as routeOf, type Project, type Repo } from "@gantry/domain";
 import { useCanMany } from "../../api/can";
 import { ops } from "../../api/ops";
@@ -12,7 +12,7 @@ import { useMe } from "../../api/queries";
 import { useProjectRepos } from "../floor/kit";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
-import { Field, Select } from "../../ui/primitives";
+import { Btn, Field, Select } from "../../ui/primitives";
 import { useCommand } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { registerCommand } from "../../lib/commands";
@@ -53,7 +53,7 @@ export interface NewWoPreset {
   source?: string;
 }
 
-function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose: () => void }) {
+export function NewWorkOrderDialog({ preset, onClose, variant = "dialog", aside }: { preset: NewWoPreset; onClose: () => void; variant?: "dialog" | "page"; aside?: ReactNode }) {
   const ui = useUI();
   const me = useMe();
   const cat = useCatalog();
@@ -118,15 +118,30 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
     if (id) ui.open((close) => <ClassificationCard woId={id} onClose={close} />);
     else ui.toast(r.msg, "ok");
   };
-  return (
-    <Dialog
-      title="New work order"
-      kicker="Intake · S0"
-      wide
-      onClose={onClose}
-      sub="It starts at S0 Intake. The Intake agent classifies it, proposes a route and opens a conversation to complete the brief."
-      body={
-        <div className="form-grid">
+  const previewEl = (
+    <div className="nwo-preview" aria-live="polite">
+      {preview ? (
+        <>
+          <div className="nwo-cls-preview">
+            <span className="muted small">Classifier preview:</span>
+            <ClassChip cls={classOf(cat, fullProject, preview.cls)} />
+            <span className="mono small">{`${Math.round(preview.confidence * 100)}%`}</span>
+            <span className="small">{preview.rationale}</span>
+          </div>
+          <p className="small muted">{`Route: ${routeOf(cat, fullProject, preview.cls).map((s) => cat.stations.find((x) => x.id === s)?.name ?? s).join(" → ")}`}</p>
+        </>
+      ) : (
+        <p className="muted small">The Intake classifier previews the class as you type.</p>
+      )}
+    </div>
+  );
+  const errEl = (
+    <div className="form-err" role="alert">
+      {err}
+    </div>
+  );
+  const fields = (
+    <>
           <div className="form-row">
             <Field label="Project" htmlFor="nwo-project">
               <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
@@ -174,26 +189,35 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
               <Select id="nwo-source" options={[{ value: "web", label: "Web" }, { value: "console", label: "Console" }, { value: "slack", label: "Slack message" }, { value: "github", label: "GitHub issue" }]} value={source} onChange={setSource} />
             </Field>
           </div>
-          <div className="nwo-preview" aria-live="polite">
-            {preview ? (
-              <>
-                <div className="nwo-cls-preview">
-                  <span className="muted small">Classifier preview:</span>
-                  <ClassChip cls={classOf(cat, fullProject, preview.cls)} />
-                  <span className="mono small">{`${Math.round(preview.confidence * 100)}%`}</span>
-                  <span className="small">{preview.rationale}</span>
-                </div>
-                <p className="small muted">{`Route: ${routeOf(cat, fullProject, preview.cls).map((s) => cat.stations.find((x) => x.id === s)?.name ?? s).join(" → ")}`}</p>
-              </>
-            ) : (
-              <p className="muted small">The Intake classifier previews the class as you type.</p>
-            )}
+    </>
+  );
+  if (variant === "page") {
+    // The Console screen (Control Room prototype): the same form and the same submit, laid out as a card beside the route preview.
+    return (
+      <div className="grid g-main">
+        <form className="card" id="conform" noValidate onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+          <div className="card-h"><h2>New work order</h2></div>
+          <div className="card-b stack">{fields}{errEl}</div>
+          <div className="dlg-f">
+            <Btn kind="ghost" label="Reset" id="nwo-reset" onClick={() => { setTitle(""); setDesc(""); setAtt(""); setCls(""); setPrio("auto"); setSource("web"); }} />
+            <Btn kind="primary" type="submit" label={busy ? "Submitting…" : "Submit work order"} id="nwo-submit" guard={block ? { allowed: false, reason: block.reason, needs: block.needs } : null} />
           </div>
-          <div className="form-err" role="alert">
-            {err}
-          </div>
+        </form>
+        <div className="stack">
+          <section className="card"><div className="card-h"><h2>Route preview</h2></div><div className="card-b" id="conprev">{previewEl}</div></section>
+          {aside}
         </div>
-      }
+      </div>
+    );
+  }
+  return (
+    <Dialog
+      title="New work order"
+      kicker="Intake · S0"
+      wide
+      onClose={onClose}
+      sub="It starts at S0 Intake. The Intake agent classifies it, proposes a route and opens a conversation to complete the brief."
+      body={<div className="form-grid">{fields}{previewEl}{errEl}</div>}
       actions={[{ label: "Cancel" }, { label: busy ? "Submitting…" : "Submit work order", kind: "primary", submit: true, id: "nwo-submit", guard: block ? { allowed: false, reason: block.reason, needs: block.needs } : null, onClick: () => void submit() }]}
     />
   );

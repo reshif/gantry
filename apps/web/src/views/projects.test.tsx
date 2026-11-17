@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG, type ApproverRule } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -117,62 +117,35 @@ describe("Projects: portfolio", () => {
     expect(screen.queryByText("No projects yet")).toBeNull();
   });
 
-  it("lists the projects with their health, hides archived ones, and filters", async () => {
+  it("lists the projects as a table, hides archived ones, and filters", async () => {
     setup();
     mount(<ProjectsView />);
     expect(await screen.findByText("Payments Platform")).toBeTruthy();
-    expect(screen.getAllByText("Needs attention").length).toBeGreaterThan(0);
     expect(screen.queryByText("Legacy Checkout")).toBeNull();
-    fireEvent.click(await byId("prj-pf-arch"));
+    fireEvent.change(document.getElementById("prj-st")!, { target: { value: "archived" } });
     expect(await screen.findByText("Legacy Checkout")).toBeTruthy();
-    expect(within(document.getElementById("prj-pf") as HTMLElement).getByText("Unarchive")).toBeTruthy();
-    fireEvent.change(document.getElementById("prj-pf-health")!, { target: { value: "attention" } });
+    fireEvent.change(document.getElementById("prj-st")!, { target: { value: "all" } });
+    fireEvent.change(document.getElementById("prj-reg")!, { target: { value: "yes" } });
     await waitFor(() => expect(screen.queryByText("Payments Platform")).toBeNull());
     expect(screen.getByText("Risk and Compliance")).toBeTruthy();
   });
 
-  it("shows the header counts and disables New project with the reason when the right is missing", async () => {
+  it("shows the stat tiles and disables New project with the reason when the right is missing", async () => {
     setup({}, ["project.create"]);
     mount(<ProjectsView />);
     const btn = await byId("prj-new");
     await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBe("true"));
     expect(btn.getAttribute("data-reason")).toMatch(/Needs Project Admin. No role holds project.create/);
-    expect(screen.getByText("Portfolio").closest("button")?.textContent).toContain("3");
-  });
-
-  it("saves a view to the server, and updates and deletes it with its version", async () => {
-    const calls = setup({
-      "POST /api/v1/saved-views": () => ok({ view: { id: "v-2", name: "Spend", screen: "portfolio", s: {}, version: 1 } }),
-      "PATCH /api/v1/saved-views/v-1": () => ok(),
-      "DELETE /api/v1/saved-views/v-1": () => ok(),
-    });
-    mount(<ProjectsView />);
     await screen.findByText("Payments Platform");
-    fireEvent.click(await byId("prj-pf-view-v-1"));
-    await waitFor(() => expect(document.getElementById("prj-pf-view-v-1")?.getAttribute("aria-selected")).toBe("true"));
-    // the saved view's grouping is applied
-    expect(document.querySelector(".pf-group-h")).toBeTruthy();
-    fireEvent.change(document.getElementById("prj-pf-sort")!, { target: { value: "spend" } });
-    fireEvent.click(await byId("prj-pf-vupd"));
-    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toBe("3"));
-    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ s: { sort: "spend", group: "team" } });
-    fireEvent.click(await byId("prj-pf-vdel"));
-    await waitFor(() => expect(calls.find((c) => c.method === "DELETE")?.headers["if-match"]).toBe("3"));
-    fireEvent.click(await byId("prj-pf-vsave"));
-    fireEvent.change(await byId("pf-view-name"), { target: { value: "Spend" } });
-    fireEvent.click(await byId("pf-view-ok"));
-    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/saved-views")?.body).toMatchObject({ name: "Spend", screen: "portfolio" }));
+    expect(document.getElementById("prj-stats")?.textContent).toContain("Regulated");
   });
 
-  it("offers Rename and Delete only for a saved view, not a built-in one", async () => {
+  it("switches to cards and opens a project's configuration", async () => {
     setup();
     mount(<ProjectsView />);
     await screen.findByText("Payments Platform");
-    expect(document.getElementById("prj-pf-vdel")).toBeNull();
-    expect(document.getElementById("prj-pf-vren")).toBeNull();
-    fireEvent.click(await byId("prj-pf-view-v-1"));
-    expect(await byId("prj-pf-vdel")).toBeTruthy();
-    expect(await byId("prj-pf-vren")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Cards"));
+    expect(document.getElementById("prj-card-risk")).toBeTruthy();
   });
 });
 
@@ -180,7 +153,7 @@ describe("Projects: templates and wizard", () => {
   it("lists templates; built-in ones are read-only, a custom one opens the editor", async () => {
     const calls = setup({ "PATCH /api/v1/templates/tpl-mine": () => ok({ version: 5 }) });
     mount(<ProjectsView />);
-    fireEvent.click(await byId("prj-tab-templates"));
+    fireEvent.click(await screen.findByLabelText("Templates"));
     expect((await byId("prj-tpl-edit-tpl-backend")).getAttribute("data-reason")).toMatch(/Built-in templates are read-only/);
     fireEvent.click(await byId("prj-tpl-edit-tpl-mine"));
     fireEvent.change(await byId("prj-te-name"), { target: { value: "Renamed template" } });
