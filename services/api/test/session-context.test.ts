@@ -201,6 +201,11 @@ d("conversational agents use their configured context", () => {
       const ctx = thread.messages.at(-1).data.context;
       expect(ctx).toMatchObject({ surface: "console", agent: "ag-review" });
       expect((await tuple(ctx.tupleId)).agent_id).toBe("ag-review");
+      // The tuple records the model the edge served, the same one the saved message shows; never an empty one.
+      const served = thread.messages.at(-1).data.model;
+      expect(served).toBeTruthy();
+      expect(ctx.model).toBe(served);
+      expect((await tuple(ctx.tupleId)).model_id).toBe(served);
 
       // Unbinding returns the console to the fixed rules.
       expect((await call(asha, "PUT", "/api/v1/agents/bindings/console", { agent: null })).status).toBe(200);
