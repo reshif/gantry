@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useCan } from "../api/can";
 import { useMe, useProjects, useWorkload } from "../api/queries";
 import type { Workload, WorkloadSuggestion } from "../api/types";
-import { Btn, Chip, Empty, Panel, Segmented, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, Chip, Panel, Segmented, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { BarList } from "../ui/charts";

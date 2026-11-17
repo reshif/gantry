@@ -6,7 +6,7 @@ import globals from "globals";
 import webArchitecture from "./eslint.config.web.js";
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "legacy/**", "undefined/**", ".claude/**", "**/*.d.ts"] },
+  { ignores: ["**/dist/**", "**/.cache/**", "**/node_modules/**", "**/coverage/**", "legacy/**", "undefined/**", ".claude/**", "**/*.d.ts"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

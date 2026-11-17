@@ -55,9 +55,6 @@ export default function EvalsView() {
   if (d.q.data === undefined) return <div className="view view-evals"><ViewHead title="Evals" /><Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
   if (!d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
   const regs = regressionsOf(d);
-  let eligible = 0;
-  let waiting = 0;
-  for (const a of d.agents) for (const v of a.versions) if (v.rc) { waiting++; if (v.eligibility.ok) eligible++; }
   const tab = evalsUi.tab as EvalsTab;
   const body = tab === "suites" ? <SuitesTab d={d} /> : tab === "factory" ? <FactoryTab d={d} /> : <ScorecardsTab d={d} label={label} />;
   const overall = d.extra?.overrideRate ?? 0;
