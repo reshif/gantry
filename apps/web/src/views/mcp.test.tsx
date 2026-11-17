@@ -121,7 +121,7 @@ describe("MCP servers screen", () => {
     mount();
     expect((await screen.findAllByText("Docs wiki")).length).toBeGreaterThan(0);
     const row = await byId("mcp-row-mcp-docs-1a2b");
-    expect(row.textContent).toContain("http · https://mcp.example.net/mcp");
+    expect(row.textContent).toContain("https://mcp.example.net/mcp");
     expect(row.textContent).toContain("Bearer token");
     expect(row.textContent).toContain("1 projects · all repos · 1 agents · 1 stations · all classes");
     expect(row.textContent).toContain("2 R · 1 W");
