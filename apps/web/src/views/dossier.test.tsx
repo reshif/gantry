@@ -39,7 +39,7 @@ describe("Work order page", () => {
     resetApp();
     await show();
     fireEvent.click(document.getElementById("trv-open-conversation") as HTMLElement);
-    await waitFor(() => expect(window.location.hash).toContain("/activity"));
+    await waitFor(() => expect(window.location.hash).toContain("%2Factivity"));
   });
 
   it("says why an action is locked, once per reason, beside the buttons", async () => {

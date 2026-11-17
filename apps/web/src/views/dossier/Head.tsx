@@ -72,7 +72,6 @@ export function DossierHead({ wo, cat, project, session, onActivity }: { wo: TWo
   const st = cat.stations[wo.state === "done" ? cat.stations.length - 1 : wo.station];
   const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;
   const stop = wo.stop;
-  const halt = stop?.mode === "halt" ? stop : null;
   const steps = railOf(wo, cat, project);
   const nobody = session?.next.actor === "nobody" || wo.state === "done";
   const stateLabel = (WO_STATES as Record<string, { label: string }>)[wo.state]?.label ?? wo.state;
@@ -116,7 +115,6 @@ export function DossierHead({ wo, cat, project, session, onActivity }: { wo: TWo
             <div><b>Stopped</b>{` ${stop.reason}${heldByKill ? " It is held in place and resumes on restore." : ""}`}</div>
           </div>
         ) : null}
-        {halt && !stop ? null : null}
         {wo.blockReason ? <div className="callout callout-block"><Icon name="st-block" /><div><b>Blocked</b>{` ${wo.blockReason}`}</div></div> : null}
         {wo.failReason ? <div className="callout callout-fail"><Icon name="st-fail" /><div><b>Failed</b>{` ${wo.failReason}`}</div></div> : null}
         <ActionBar wo={wo} onActivity={onActivity} />

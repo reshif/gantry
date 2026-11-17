@@ -70,9 +70,8 @@ export function Picker({ note }: { note?: string | null }) {
   return (
     <div className="view rec-view rec-picker">
       <ViewHead
-        kicker="Project · Work order record"
         title="Work order records"
-        sub="The whole lifecycle of a work order in one place: request, clarification, agreement, every station, the change itself, tests, merge, approvals and what happened after release. Pick one to open."
+        sub="Everything about one work order in one place, from the request to what happened after release. Pick one to open."
         meta={[["Records", String(total)], ["Shown", String(rows.length)]]}
       />
       {note ? (
