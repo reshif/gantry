@@ -16,6 +16,7 @@ import { useUI } from "../ui/overlay-context";
 import { navigate } from "../lib/router";
 import { useOutcome } from "./govern/data";
 import { useDraft } from "../lib/useDraft";
+import { DraftDot } from "../ui/DraftDot";
 import { useLeaveGuard } from "../lib/useLeaveGuard";
 import { DraftConflictBanner } from "../ui/DraftConflict";
 import { invalidateSlices } from "../api/keys";
@@ -75,7 +76,7 @@ function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] })
                 <tr key={sk.id} className={`row-link${ui.sel === sk.id ? " is-selected" : ""}`} tabIndex={0} id={`sk-row-${sk.id}`} aria-current={ui.sel === sk.id ? "true" : undefined}
                   onClick={() => open(sk.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(sk.id); } }}>
                   <td>
-                    <div><strong>{sk.name}</strong>{sk.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</div><div className="small muted sk-desc">{sk.desc}</div>
+                    <div><strong>{sk.name}</strong><DraftDot scope="skill" id={sk.id} />{sk.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</div><div className="small muted sk-desc">{sk.desc}</div>
                     <div className="small sk-meta">{`${actor(sk.owner).name.replace(" (agent)", "")} · `}{sk.projects === "all" ? "all projects" : sk.projects.length ? `${sk.projects.length} project${sk.projects.length > 1 ? "s" : ""}` : <span className="warn-text">no projects</span>}</div>
                   </td>
                   <td className="mono">{`v${sk.version}`}</td>

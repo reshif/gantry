@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import type { ApiResult } from "../api/client";
-import { clearDrafts, useDraft, type UseDraft } from "./useDraft";
+import { clearDrafts, isDraftDirty, useClearDraftsOnUserSwitch, useDraft, type UseDraft } from "./useDraft";
+import { DraftDot } from "../ui/DraftDot";
 import { DraftConflictBanner } from "../ui/DraftConflict";
 
 type S = { name: string; model: string; tools: string[] };
@@ -93,6 +94,87 @@ describe("useDraft", () => {
     expect(latest(again).values.name).toBe("Kept");
     act(() => clearDrafts());
     expect(latest(again).values.name).toBe(server0.name);
+  });
+});
+
+describe("useDraft while a save is in flight and after it", () => {
+  it("keeps what was typed mid-save dirty and sends only what was sent as saved", async () => {
+    let finish!: (r: Res) => void;
+    const save = vi.fn((..._a: unknown[]) => new Promise<Res>((res) => (finish = res)));
+    const h = setup(server0, 4, save);
+    act(() => latest(h).set("name", "A"));
+    let p!: Promise<unknown>;
+    await act(async () => {
+      p = latest(h).save();
+      await Promise.resolve();
+    });
+    expect(latest(h).saving).toBe(true);
+    act(() => { latest(h).set("name", "AB"); latest(h).set("model", "m9"); });
+    await act(async () => { finish({ ok: true, msg: "", status: 200 }); await p; });
+    expect(latest(h).changedKeys.sort()).toEqual(["model", "name"]);
+    expect(latest(h).values.name).toBe("AB");
+    // the refetch lands with the saved patch only
+    h.rerender({ server: { ...server0, name: "A" }, rev: 5 });
+    expect(latest(h).values).toMatchObject({ name: "AB", model: "m9" });
+    expect(latest(h).conflict).toBeNull();
+    await act(async () => {
+      const again = latest(h).save();
+      finish({ ok: true, msg: "", status: 200 });
+      await again;
+    });
+    expect(save).toHaveBeenLastCalledWith({ name: "AB", model: "m9" }, 5);
+  });
+
+  it("holds the stale server copy off the screen and is syncing until the revision moves", async () => {
+    const h = setup(server0, 4);
+    act(() => latest(h).set("name", "Mine"));
+    await act(async () => void (await latest(h).save()));
+    expect(latest(h).syncing).toBe(true);
+    // a re-render with the old server copy must not revert the saved value
+    h.rerender({ server: server0, rev: 4 });
+    expect(latest(h).values.name).toBe("Mine");
+    expect(latest(h).dirty).toBe(false);
+    let r: { ok: boolean; status?: number } | null = null;
+    act(() => latest(h).set("name", "Again"));
+    await act(async () => void (r = await latest(h).save()));
+    expect(r).toMatchObject({ ok: false, status: 409 });
+    expect(h.save).toHaveBeenCalledTimes(1);
+    h.rerender({ server: { ...server0, name: "Mine" }, rev: 5 });
+    expect(latest(h).syncing).toBe(false);
+    expect(latest(h).values.name).toBe("Again");
+  });
+
+  it("does not absorb a colleague's write that lands between the save and the refetch", async () => {
+    const save = vi.fn(async (..._a: unknown[]): Promise<Res> => ({ ok: true, msg: "", status: 200, rev: 5 }) as Res);
+    const h = setup(server0, 4, save);
+    act(() => latest(h).set("name", "Mine"));
+    await act(async () => void (await latest(h).save()));
+    // the refetch already holds the colleague's later write (rev 6) to the same key
+    h.rerender({ server: { ...server0, name: "Theirs" }, rev: 6 });
+    expect(latest(h).syncing).toBe(false);
+    expect(latest(h).values.name).toBe("Theirs");
+  });
+
+  it("marks a roster row while the draft holds unsent edits", () => {
+    const h = setup(server0, 4);
+    const dot = render(<DraftDot scope="t" id="a1" />);
+    expect(dot.container.querySelector(".draft-dot")).toBeNull();
+    act(() => latest(h).set("name", "X"));
+    expect(dot.container.querySelector(".draft-dot")).not.toBeNull();
+    expect(isDraftDirty("t", "a1")).toBe(true);
+  });
+});
+
+describe("drafts across people", () => {
+  it("clears drafts when a different person signs in, keeps them for the same person", () => {
+    const h = setup(server0, 4);
+    act(() => latest(h).set("name", "Kept"));
+    const w = renderHook((p: { id: string | null }) => useClearDraftsOnUserSwitch(p.id), { initialProps: { id: "u1" as string | null } });
+    w.rerender({ id: null });
+    w.rerender({ id: "u1" });
+    expect(isDraftDirty("t", "a1")).toBe(true);
+    w.rerender({ id: "u2" });
+    expect(isDraftDirty("t", "a1")).toBe(false);
   });
 });
 

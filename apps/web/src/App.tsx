@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, setUnauthorizedHandler } from "./api/client";
 import { bindQueryClient, invalidateSlices } from "./api/keys";
 import { useMeState } from "./api/queries";
+import { useClearDraftsOnUserSwitch } from "./lib/useDraft";
 import { startStream } from "./api/stream";
 import { applyTheme, reducedMotion, usePrefs } from "./lib/prefs";
 import { OverlayProvider } from "./ui/Overlay";
@@ -28,6 +29,7 @@ function Root() {
   const prefs = usePrefs();
   const signedIn = meState.data?.status === "in";
 
+  useClearDraftsOnUserSwitch(meState.data?.status === "in" ? meState.data.me.person.id : null);
   useEffect(() => applyTheme(prefs.theme), [prefs.theme]);
   useEffect(() => {
     document.body.classList.toggle("signed-out", meState.data?.status === "out");

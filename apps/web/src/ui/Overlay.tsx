@@ -8,7 +8,7 @@ import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
 import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
 import { tip } from "./Tip";
-import { DirtyScope, type DirtyScopeApi } from "../lib/useLeaveGuard";
+import { DirtyScope, useLeaveGuard, type DirtyScopeApi } from "../lib/useLeaveGuard";
 import "../lib/data.css";
 
 /* ---------- focus trap ---------- */
@@ -61,7 +61,23 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose: 
   const dirtyIds = useRef(new Set<symbol>());
   const [confirming, setConfirming] = useState(false);
   const scope = useMemo<DirtyScopeApi>(() => ({ mark: (id, d) => void (d ? dirtyIds.current.add(id) : dirtyIds.current.delete(id)) }), []);
-  const onClose = () => (dirtyIds.current.size ? setConfirming(true) : close());
+  const returnTo = useRef<HTMLElement | null>(null);
+  const onClose = () => {
+    if (!dirtyIds.current.size) return close();
+    returnTo.current = document.activeElement as HTMLElement | null;
+    setConfirming(true);
+  };
+  const keepEditing = () => {
+    setConfirming(false);
+    const t = returnTo.current;
+    returnTo.current = null;
+    if (t && panel.current?.contains(t)) setTimeout(() => t.focus(), 0);
+    else setTimeout(() => panel.current?.querySelector<HTMLElement>("input:not([type=hidden]),select,textarea,.dlg-foot button")?.focus(), 0);
+  };
+  const confirmBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (confirming) confirmBox.current?.querySelector<HTMLElement>("#dlg-keep")?.focus();
+  }, [confirming]);
   const titleId = useMemo(() => `dlg-title-${Math.random().toString(36).slice(2, 9)}`, []);
   useRestoreFocus();
   useEffect(() => {
@@ -101,17 +117,17 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose: 
         <form className="dlg-form" noValidate onSubmit={onSubmit}>
           <div className="dlg-body"><DirtyScope.Provider value={scope}>{content}</DirtyScope.Provider></div>
           {confirming ? (
-            <div className="draft-conflict" role="alertdialog" aria-label="Discard your changes?">
+            <div ref={confirmBox} className="draft-conflict" role="alertdialog" aria-label="Discard your changes?">
               <span>You have unsaved input. Discard it and close?</span>
               <span className="draft-conflict-actions">
-                <Btn label="Keep editing" id="dlg-keep" onClick={() => setConfirming(false)} />
+                <Btn label="Keep editing" id="dlg-keep" onClick={keepEditing} />
                 <Btn label="Discard changes" kind="danger" id="dlg-discard" onClick={close} />
               </span>
             </div>
           ) : null}
           <div className="dlg-foot">
             {list.map((a, i) => (
-              <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(close) : onClose())} />
+              <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(onClose) : onClose())} />
             ))}
           </div>
         </form>
@@ -236,6 +252,12 @@ function useSubmit(onClose: () => void) {
   return { err, setErr, run };
 }
 
+/** Marks the enclosing dialog as holding unsaved input while `dirty`. */
+function DirtyMark({ dirty }: { dirty: boolean }) {
+  useLeaveGuard(dirty);
+  return null;
+}
+
 function ReasonView({ o, onClose }: { o: Parameters<UIApi["reasonDialog"]>[0]; onClose: () => void }) {
   const [text, setText] = useState("");
   const { err, setErr, run } = useSubmit(onClose);
@@ -248,6 +270,7 @@ function ReasonView({ o, onClose }: { o: Parameters<UIApi["reasonDialog"]>[0]; o
       onClose={onClose}
       body={
         <div className="form-grid">
+          <DirtyMark dirty={text.trim() !== ""} />
           {o.extra ?? null}
           <Field label={o.label || "Reason"} htmlFor="rsn-text">
             <textarea id="rsn-text" className="input" rows={3} placeholder={o.placeholder || ""} value={text} onChange={(e) => setText(e.target.value)} />
@@ -291,6 +314,7 @@ function TypedView({ o, onClose }: { o: Parameters<UIApi["typedConfirm"]>[0]; on
       onClose={onClose}
       body={
         <div className="form-grid">
+          <DirtyMark dirty={text !== ""} />
           {o.body ?? null}
           <Field label={`Type ${o.phrase} to confirm`} htmlFor="tc-input">
             <input id="tc-input" className="input mono" autoComplete="off" placeholder={o.phrase} value={text} onChange={(e) => setText(e.target.value)} />

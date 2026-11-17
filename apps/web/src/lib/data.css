@@ -7,3 +7,4 @@
 .cmd-error { background: var(--bad-soft); }
 .async-stale > span, .cmd-error > span, .draft-conflict > span { flex: 1 1 18rem; min-width: 0; }
 .draft-conflict-actions { display: flex; gap: var(--s2, 8px); flex-wrap: wrap; }
+.draft-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--wait, #d29a1c); margin-left: var(--s2, 8px); flex: none; vertical-align: middle; }

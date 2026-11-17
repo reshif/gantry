@@ -11,7 +11,7 @@
  * Drafts live in a module store keyed by scope and id, so they survive switching tabs and screens.
  * The session reset must call `clearDrafts()` (sign-out and user switch).
  */
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { ApiResult } from "../api/client";
 
 export type Rev = number | string | null | undefined;
@@ -24,6 +24,11 @@ interface Entry {
   /** The server refused the last save as stale (409/412). */
   rejected: boolean;
   saving: boolean;
+  /**
+   * Set after a successful save: the revision the save was sent against. The server copy the screen still holds is
+   * from before the save, so it is ignored until the revision moves on (the refetch caught up). Until then the draft is 'syncing'.
+   */
+  awaiting?: number | string;
 }
 
 const store = new Map<string, Entry>();
@@ -54,11 +59,24 @@ export function clearDrafts(): void {
   notify();
 }
 export const hasDraft = (scope: string, id: string): boolean => store.has(keyOf(scope, id));
+/** A draft that holds unsent edits (a draft with no edits does not count). */
+export const isDraftDirty = (scope: string, id: string): boolean => {
+  const e = store.get(keyOf(scope, id));
+  return !!e && changedOf(e).length > 0;
+};
+/** Re-renders the caller when any draft changes. */
+export function useDraftVersion(): number {
+  return useSyncExternalStore(subscribe, () => version, () => 0);
+}
 
 const changedOf = (e: Entry): string[] => Object.keys(e.values).filter((k) => !same(e.values[k], e.base[k]));
 
 /** Bring an entry in line with the latest server copy. Returns the keys that changed on both sides (with different values). */
 function sync(e: Entry, server: Record<string, unknown>, rev: Rev): string[] {
+  if (e.awaiting !== undefined) {
+    if (rev === e.awaiting) return [];
+    e.awaiting = undefined;
+  }
   const changed = changedOf(e);
   const behind = e.baseRev !== rev || Object.keys(server).some((k) => !same(e.base[k], server[k]));
   if (!behind) return [];
@@ -105,6 +123,8 @@ export interface UseDraft<T extends Record<string, unknown>> {
   changedKeys: string[];
   conflict: DraftConflict | null;
   saving: boolean;
+  /** A save went through and the screen is still waiting for the server copy to catch up. Saving again waits for it. */
+  syncing: boolean;
   /** Sends only the changed keys. Resolves null when there is nothing to save or a save is running. */
   save: () => Promise<Result | null>;
   /** Keep my value for every conflicting key and rebase on the latest server copy. */
@@ -142,6 +162,7 @@ export function useDraft<T extends Record<string, unknown>>(o: UseDraftOptions<T
     if (!cur || cur.saving) return null;
     const keys = changedOf(cur);
     if (!keys.length) return null;
+    if (cur.awaiting !== undefined) return { ok: false, status: 409, kind: "conflict", msg: "Still syncing your last save. Try again in a moment." };
     if (conflict) return { ok: false, status: 409, kind: "conflict", msg: "Someone changed this while you were editing. Keep your version or load theirs before saving." };
     const patch: Record<string, unknown> = {};
     for (const key of keys) patch[key] = clone(cur.values[key]);
@@ -154,9 +175,14 @@ export function useDraft<T extends Record<string, unknown>>(o: UseDraftOptions<T
       cur.saving = false;
     }
     if (r.ok) {
-      cur.base = clone(cur.values);
-      cur.baseRev = rev;
+      // Only what was sent is saved; anything typed while the request was in flight stays dirty.
+      for (const key of keys) cur.base[key] = clone(patch[key]);
+      const newRev = (r as { rev?: unknown }).rev;
+      cur.baseRev = typeof newRev === "number" || typeof newRev === "string" ? newRev : rev;
+      // The screen's server copy is still the old revision: hold the draft until the refetch brings a newer one.
+      cur.awaiting = rev ?? undefined;
       cur.rejected = false;
+      refresh?.();
     } else if (r.status === 409 || r.status === 412) {
       cur.rejected = true;
       refresh?.();
@@ -172,10 +198,24 @@ export function useDraft<T extends Record<string, unknown>>(o: UseDraftOptions<T
     for (const key of Object.keys(server)) if (!mine.includes(key)) cur.values[key] = clone(server[key]);
     cur.base = clone(server);
     cur.baseRev = rev;
+    cur.awaiting = undefined;
     cur.rejected = false;
     notify();
   };
   const discard = (): void => dropDraft(scope, id);
 
-  return { values: e.values as T, edit, set, dirty: changedKeys.length > 0, changedKeys, conflict, saving: e.saving, save, keepMine, discard };
+  return { values: e.values as T, edit, set, dirty: changedKeys.length > 0, changedKeys, conflict, saving: e.saving, syncing: e.awaiting !== undefined, save, keepMine, discard };
+}
+
+/**
+ * Drafts belong to the person who typed them: when a different person signs in on this browser, start with none.
+ * (The same person signing back in after a session expiry keeps theirs; explicit sign-out clears in `ops.signOut`.)
+ */
+export function useClearDraftsOnUserSwitch(personId: string | null): void {
+  const last = useRef<string | null>(null);
+  useEffect(() => {
+    if (personId === null) return;
+    if (last.current !== null && last.current !== personId) clearDrafts();
+    last.current = personId;
+  }, [personId]);
 }

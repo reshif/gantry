@@ -73,4 +73,35 @@ describe("a dirty dialog", () => {
     fireEvent.click(screen.getByText("Discard changes"));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("moves focus to Keep editing when asked, and back to the field when kept", async () => {
+    open(true, vi.fn());
+    const field = screen.getByLabelText("name");
+    field.focus();
+    fireEvent.click(document.querySelector(".scrim")!);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByText("Keep editing").closest("button")));
+    fireEvent.click(screen.getByText("Keep editing"));
+    await waitFor(() => expect(document.activeElement).toBe(field));
+  });
+
+  it("guards a custom Cancel action through the dirty check", () => {
+    const onClose = vi.fn();
+    const custom = vi.fn((c: () => void) => c());
+    render(<Dialog title="Edit" body={<Form dirty />} onClose={onClose} actions={[{ label: "Back out", onClick: custom }]} />);
+    fireEvent.click(screen.getByText("Back out"));
+    expect(custom).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+  });
+
+  it("arms beforeunload while a dialog form is dirty", () => {
+    const { unmount } = open(true, vi.fn());
+    const ev = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    unmount();
+    const after = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
 });

@@ -17,6 +17,7 @@ import { Spark } from "../ui/charts";
 import { useUI } from "../ui/overlay-context";
 import { useOutcome } from "./govern/data";
 import { useDraft } from "../lib/useDraft";
+import { DraftDot } from "../ui/DraftDot";
 import { useLeaveGuard } from "../lib/useLeaveGuard";
 import { DraftConflictBanner } from "../ui/DraftConflict";
 import { invalidateSlices } from "../api/keys";
@@ -49,7 +50,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
             return (
               <tr key={a.id} className={`row-link${ui.sel === a.id ? " is-selected" : ""}`} tabIndex={0} id={`ag-row-${a.id}`} aria-current={ui.sel === a.id ? "true" : undefined}
                 onClick={() => select(a.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(a.id); } }}>
-                <td data-label="Agent"><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong>{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
+                <td data-label="Agent"><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong><DraftDot scope="agent" id={a.id} />{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
                 <td data-label="Status"><span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span></td>
                 <td data-label="Station" className="nowrap"><span>
                   <span className="mono muted">{station ? `${station.no} ` : ""}</span>{station ? station.name : "Off-belt"}
