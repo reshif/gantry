@@ -47,7 +47,7 @@ const LIST_TABS: Array<{ id: ListTab; label: string; test: (a: AgentRow) => bool
 ];
 
 /** The roster's tab, search and filters live outside the component so they survive opening an agent and coming back. */
-const roster = { tab: "all" as ListTab, q: "", station: "", status: "" };
+const roster = { tab: "all" as ListTab, q: "", station: "", status: "", autonomy: "" };
 const rosterListeners = new Set<() => void>();
 let rosterSnap = { ...roster };
 const setRoster = (p: Partial<typeof roster>): void => { Object.assign(roster, p); rosterSnap = { ...roster }; rosterListeners.forEach((l) => l()); };
@@ -56,7 +56,9 @@ const useRosterState = () => useSyncExternalStore((l) => (rosterListeners.add(l)
 /** The roster: view tabs with counts, a filter bar and one table. A row opens that agent's own page. */
 function Roster({ agents }: { agents: AgentRow[] }) {
   const st = useStations();
-  const { tab, q, station, status } = useRosterState();
+  const { tab, q, station, status, autonomy } = useRosterState();
+  const autonomies = [...new Set(agents.map((a) => a.autonomy))];
+  const setAutonomy = (v: string): void => setRoster({ autonomy: v });
   const setTab = (v: ListTab): void => setRoster({ tab: v });
   const setQ = (v: string): void => setRoster({ q: v });
   const setStation = (v: string): void => setRoster({ station: v });
@@ -66,38 +68,34 @@ function Roster({ agents }: { agents: AgentRow[] }) {
   const inTab = LIST_TABS.find((t) => t.id === tab)!.test;
   const rows = agents.filter((a) => inTab(a)
     && (!station || a.station === station || a.stations.includes(station))
-    && (!status || a.status === status)
+    && (!status || a.status === status) && (!autonomy || a.autonomy === autonomy)
     && (!term || `${a.name} ${a.id} ${a.model}`.toLowerCase().includes(term)));
   const cols: SortCol<AgentRow>[] = [
     { key: "name", label: "Agent", sort: (a) => a.name.toLowerCase(), render: (a) => (
       <span className="ag-who">
         <Avatar id={a.id} size="sm" />
         <span className="ag-who-t">
-          <span className="ag-who-n"><a className="ag-name" href={hashFor("agents", a.id)} onClick={(e) => { e.preventDefault(); open(a); }}>{a.name}</a><DraftDot scope="agent" id={a.id} />{a.builtin ? <Chip text="built-in" /> : null}</span>
-          <span className="mono muted small">{a.id}</span>
+          <span className="ag-who-n"><a className="pri ag-name" href={hashFor("agents", a.id)} onClick={(e) => { e.preventDefault(); open(a); }}>{a.name}</a><DraftDot scope="agent" id={a.id} />{a.builtin ? <Chip text="built-in" /> : null}</span>
+          <span className="sub">{st.find(a.station)?.name ?? "Off-belt"}{a.stations.length > 1 ? ` +${a.stations.length - 1}` : ""}</span>
         </span>
       </span>
     ) },
-    { key: "status", label: "Status", sort: true, render: (a) => <Status tone={a.status === "paused" ? "neutral" : "done"}>{a.status === "paused" ? "Paused" : "Active"}</Status> },
-    { key: "station", label: "Station", sort: (a) => st.find(a.station)?.no ?? "~", render: (a) => {
-      const s = st.find(a.station);
-      return <span className="nowrap"><span className="mono muted">{s ? `${s.no} ` : ""}</span>{s ? s.name : "Off-belt"}{a.stations.length > 1 ? <span className="muted small">{` +${a.stations.length - 1}`}</span> : null}</span>;
-    } },
-    { key: "model", label: "Model chain", sort: true, render: (a) => <span><span className="mono small">{a.model}</span>{a.fallbacks.length ? <span className="muted small">{` +${a.fallbacks.length} fallback${a.fallbacks.length > 1 ? "s" : ""}`}</span> : null}</span> },
-    { key: "version", label: "Version", render: (a) => { const rc = candidates(a); return <span><span className="mono">{a.version}</span>{rc ? <Chip text={`${rc} candidate`} cls="chip-accent ag-rc" /> : null}</span>; } },
-    { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => <span className={`mono${isBelow(a) ? " neg" : ""}`}>{isBelow(a) ? <Icon name="alert" className="ag-below" /> : null}{fmt.pct(a.evalScore)}</span> },
-    { key: "spark", label: "7-day success", align: "end", hideSmall: true, render: (a) => <Spark values={a.spark} min={0.5} max={1} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /> },
-    { key: "spend7d", label: "Spend 7d", sort: true, align: "end", render: (a) => <span className="mono">{fmt.money0(a.spend7d)}</span> },
+    { key: "model", label: "Model", sort: true, render: (a) => <span><span className="mono small">{a.model}</span>{a.fallbacks.length ? <span className="muted small">{` +${a.fallbacks.length}`}</span> : null}</span> },
+    { key: "autonomy", label: "Autonomy", sort: true, render: (a) => <Chip text={a.autonomy} cls={a.autonomy === "auto" ? "info" : a.autonomy === "gate" ? "warn" : "plain"} /> },
+    { key: "version", label: "Version", render: (a) => { const rc = candidates(a); return <span><span className="mono">v{a.version}</span>{rc ? <Chip text={`${rc} candidate`} cls="chip-accent ag-rc" /> : null}</span>; } },
+    { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => <span className={`num mono${isBelow(a) ? " neg" : ""}`}>{isBelow(a) ? <Icon name="alert" className="ag-below" /> : null}{fmt.pct(a.evalScore)}</span> },
+    { key: "spark", label: "7-day", hideSmall: true, render: (a) => <Spark values={a.spark} w={70} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /> },
+    { key: "spend7d", label: "Spend", sort: true, align: "end", render: (a) => <span className="num mono">{fmt.money0(a.spend7d)}</span> },
+    { key: "status", label: "Status", sort: true, render: (a) => <Status tone={a.status === "paused" ? "wait" : "done"}>{a.status === "paused" ? "Paused" : "Active"}</Status> },
   ];
   return (
     <Panel flush cls="ag-roster-panel">
-      <Tabs idPrefix="ag-view" items={LIST_TABS.map((t) => ({ id: t.id, label: t.label, count: agents.filter(t.test).length }))} active={tab} onChange={(t) => setTab(t as ListTab)} />
-      <FilterBar label="Filter agents" count={`${rows.length} of ${agents.length}`}>
-        <SearchBox id="ag-search" value={q} onChange={setQ} placeholder="Search agents" />
-        <div className="filters">
-          <Field label="Station" htmlFor="ag-f-station"><Select id="ag-f-station" value={station} onChange={setStation} options={[{ value: "", label: "all" }, ...st.all.map((s) => ({ value: s.id, label: `${s.no} ${s.name}` }))]} /></Field>
-          <Field label="Status" htmlFor="ag-f-status"><Select id="ag-f-status" value={status} onChange={setStatus} options={[{ value: "", label: "all" }, { value: "active", label: "Active" }, { value: "paused", label: "Paused" }]} /></Field>
-        </div>
+      <FilterBar label="Filter agents" count={`${rows.length === agents.length ? rows.length : `${rows.length} of ${agents.length}`} agent${agents.length === 1 ? "" : "s"}`}>
+        <SearchBox id="ag-search" value={q} onChange={setQ} placeholder="Search…" label="Search agents" />
+        <Field label="Station" htmlFor="ag-f-station"><Select id="ag-f-station" value={station} onChange={setStation} options={[{ value: "", label: "All" }, ...st.all.map((s) => ({ value: s.id, label: `${s.no} ${s.name}` }))]} /></Field>
+        <Field label="Autonomy" htmlFor="ag-f-autonomy"><Select id="ag-f-autonomy" value={autonomy} onChange={setAutonomy} options={[{ value: "", label: "All" }, ...autonomies.map((x) => ({ value: x, label: x }))]} /></Field>
+        <Field label="Status" htmlFor="ag-f-status"><Select id="ag-f-status" value={status} onChange={setStatus} options={[{ value: "", label: "All" }, { value: "active", label: "Active" }, { value: "paused", label: "Paused" }]} /></Field>
+        <Field label="View" htmlFor="ag-f-view"><Select id="ag-f-view" value={tab} onChange={(v) => setTab(v as ListTab)} options={LIST_TABS.map((t) => ({ value: t.id, label: `${t.label} (${agents.filter(t.test).length})` }))} /></Field>
       </FilterBar>
       <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} empty={{ title: "No agents match", text: "Clear a filter or the search to see more." }} />
     </Panel>
@@ -208,7 +206,7 @@ export default function AgentsView() {
     }
   }, [prefs.agent, agents]);
 
-  const sub = "Who staffs each station, on which model, with which instructions, skills and permissions. Every change is a draft, then a version, then a promotion.";
+  const sub = "The workers on the line: who they are, what they may touch, and how they have performed.";
   const create = <Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />;
 
   if (q.data === undefined) {
@@ -241,17 +239,14 @@ export default function AgentsView() {
     return <div className="view view-agents"><Detail a={current} projects={projects} /></div>;
   }
   const active = agents.filter((a) => a.status === "active").length;
-  const cands = agents.reduce((n, a) => n + candidates(a), 0);
-  const below = agents.filter(isBelow).length;
   return (
     <div className="view view-agents">
-      <ViewHead title="Agents" sub={sub} actions={create} />
+      <ViewHead title="Agents" sub={sub} actions={<><Btn label="Evals" onClick={() => navigate("evals")} /><Btn label="Trust ladder" onClick={() => navigate("trust")} />{create}</>} />
       <StatRow id="ag-stats">
-        <Stat label="Agents" value={String(agents.length)} sub="on this factory" />
-        <Stat label="Active" value={`${active} / ${agents.length}`} sub="paused agents queue their work" />
-        <Stat label="Candidates" value={String(cands)} sub="versions waiting for promotion" tone={cands ? "wait" : undefined} />
-        <Stat label="Below threshold" value={String(below)} sub="eval score under the gate" tone={below ? "block" : undefined} />
-        <Stat label="Spend, 7 days" value={fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))} sub="all agents" />
+        <Stat label="Agents" value={String(agents.length)} sub={`${active} active`} />
+        <Stat label="On autopilot" value={String(agents.filter((a) => a.autonomy === "auto").length)} sub="no gate" />
+        <Stat label="Need approval" value={String(agents.filter((a) => a.autonomy === "gate").length)} sub="human gate" tone="wait" />
+        <Stat label="Spend, 7 days" value={fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))} />
       </StatRow>
       <Roster agents={agents} />
     </div>

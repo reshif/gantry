@@ -8,7 +8,7 @@
  * from fidelity/routes.json (default: project routes get /p/payments/). Output, prototype left, real right:
  *   /home/reshif/Downloads/gantry-designs/design-3-blueprint/fidelity/<route>-<w>-<theme>.png
  *
- * Prototype: python3 -m http.server 9403 from the design folder. Real app: `vite build` + `vite preview` on 9530 with every
+ * Prototype: python3 -m http.server 9443 from the design folder. Real app: `vite build` + `vite preview` on 9530 with every
  * /api call answered by e2e/fixtures.ts (mockApi), fed with the prototype's own demo seed (e2e/seed-fixtures.ts), so both
  * sides show the same factory. Fonts are served locally to both sides (no network). One browser, one preview server, one
  * http server, all stopped by PID on exit.
@@ -24,8 +24,8 @@ const WEB = resolve(HERE, "..");
 const PROTO_DIR = "/home/reshif/Downloads/gantry-designs/design-3-blueprint";
 const OUT_DIR = join(PROTO_DIR, "fidelity");
 const PW = "/home/reshif/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
-const PROTO_PORT = 9403;
-const REAL_PORT = 9530;
+const PROTO_PORT = 9443;
+const REAL_PORT = 9534;
 const FONTS = join(WEB, "src/assets/fonts");
 
 const argv = process.argv.slice(2);

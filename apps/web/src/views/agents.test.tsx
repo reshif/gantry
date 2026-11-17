@@ -132,7 +132,7 @@ describe("Agents screen", () => {
     expect(row.textContent).toContain("Builder");
     expect(row.textContent).toContain("Active");
     expect(row.textContent).toContain("claude-opus-5-5");
-    expect(row.textContent).toContain("+1 fallback");
+    expect(row.textContent).toContain("+1");
     expect(row.textContent).toContain("2.6.1");
     expect(row.textContent).toContain("2 candidate");
     expect(row.querySelector(".ag-below")).not.toBeNull();
@@ -141,20 +141,22 @@ describe("Agents screen", () => {
     expect((await byId("ag-row-ag-review")).textContent).toContain("Paused");
     const head = document.getElementById("ag-stats")!.textContent!;
     expect(head).toContain("Agents2");
-    expect(head).toContain("Active1 / 2");
-    expect(head).toContain("Candidates2");
-    expect(head).toContain("Below threshold1");
+    expect(head).toContain("1 active");
+    expect(head).toContain("On autopilot");
+    expect(head).toContain("Need approval");
+    expect(row.textContent).toContain("2 candidate");
+    expect(document.querySelector("#ag-row-ag-review .num")!.className).not.toContain("neg");
   });
 
   it("filters the roster by view tab, station and search, and opens an agent's own page from a row", async () => {
     setup();
     mount(<AgentsView />);
     await byId("ag-row-ag-build");
-    expect(document.getElementById("ag-view-paused")!.textContent).toContain("1");
-    fireEvent.click(document.getElementById("ag-view-paused")!);
+    expect(document.getElementById("ag-f-view")!.textContent).toContain("Paused (1)");
+    fireEvent.change(document.getElementById("ag-f-view")!, { target: { value: "paused" } });
     await waitFor(() => expect(document.getElementById("ag-row-ag-build")).toBeNull());
     expect(document.getElementById("ag-row-ag-review")).not.toBeNull();
-    fireEvent.click(document.getElementById("ag-view-all")!);
+    fireEvent.change(document.getElementById("ag-f-view")!, { target: { value: "all" } });
     fireEvent.change(document.getElementById("ag-search")!, { target: { value: "build" } });
     await waitFor(() => expect(document.getElementById("ag-row-ag-review")).toBeNull());
     fireEvent.click(await byId("ag-row-ag-build"));
@@ -526,10 +528,10 @@ describe("Skills screen", () => {
     expect(head).toContain("Skills3");
     expect(head).toContain("Unused1");
     expect(head).toContain("Eval cases14");
-    fireEvent.click(await byId("sk-view-unused"));
+    fireEvent.change(await byId("sk-f-view"), { target: { value: "unused" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-c")).not.toBeNull();
-    fireEvent.click(await byId("sk-view-all"));
+    fireEvent.change(await byId("sk-f-view"), { target: { value: "all" } });
     fireEvent.change(await byId("sk-search"), { target: { value: "security" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-b")).not.toBeNull();
