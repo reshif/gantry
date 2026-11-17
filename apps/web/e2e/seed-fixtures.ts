@@ -121,7 +121,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "api-config") return seed.api_config;
     if (path === "guidelines") return seed.guidelines;
     if (path === "instructions/base") return seed.instructions;
-    if (path === "access/matrix") return seed.role_matrix;
+    if (path === "access/matrix") return { matrix: seed.role_matrix, roles: seed.catalog.roles, actions: seed.catalog.actions, version: 1 };
     if (path === "trust/cells") return seed.trust;
     if (path === "system/health") {
       const at = new Date(seed.NOW).toISOString();

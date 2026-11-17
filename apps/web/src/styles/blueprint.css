@@ -555,3 +555,4 @@ textarea.input{height:auto;min-height:84px;padding:8px 10px}
 .btn.danger,.btn.btn-danger{background:var(--surface);color:var(--bad);border-color:var(--bad)}.btn.danger:hover,.btn.btn-danger:hover{background:var(--bad-bg);filter:none;opacity:1}
 .row.nowrap{flex-wrap:nowrap}.ppl-find{margin-bottom:12px;max-width:420px}
 .view-workload,.view-workload .panel{min-width:0}.view-workload .wl-main .panel-body{overflow-x:auto}
+.view-access,.view-access .acc-body,.view-access .acc-rules{min-width:0}.view-access .acc-rules{overflow-x:auto}
