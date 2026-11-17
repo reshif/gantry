@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { buildClaudeInvocation, composeSystemPrompt, createClaudeAdapter, extractStructuredOutput, parseStreamLine, usageFromResult } from "../src/adapters/claude.js";
+import { buildClaudeInvocation, builtinTools, toolAllowed, composeSystemPrompt, createClaudeAdapter, extractStructuredOutput, parseStreamLine, usageFromResult } from "../src/adapters/claude.js";
 import { EdgeClient } from "../src/edge.js";
 import { EXIT, runWrapper } from "../src/main.js";
 import { RunSpec } from "../src/spec.js";
@@ -66,6 +66,26 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(sys.indexOf("Base rules.")).toBeLessThan(sys.indexOf("## Skill: git"));
     expect(sys).toBe(composeSystemPrompt(spec));
     expect(flag("--output-format")).toBe("stream-json");
+  });
+
+  it("restricts the built-in tools to the allow-list (not only auto-approves them)", () => {
+    expect(flag("--tools")).toBe("Read,Edit,Bash");
+    const off = flag("--disallowedTools")!.split(",");
+    expect(off).toEqual(expect.arrayContaining(["Agent", "Workflow", "WebFetch", "WebSearch", "Write", "NotebookEdit"]));
+    expect(off).not.toContain("Read");
+    expect(off).not.toContain("Bash");
+    const reviewer = buildClaudeInvocation(RunSpec.parse({ ...spec, toolAllowList: ["Read", "Glob", "Grep"] }), env, {});
+    expect(reviewer.args[reviewer.args.indexOf("--tools") + 1]).toBe("Read,Glob,Grep");
+    expect(reviewer.args[reviewer.args.indexOf("--disallowedTools") + 1]).toContain("Bash");
+    const none = buildClaudeInvocation(RunSpec.parse({ ...spec, toolAllowList: [] }), env, {});
+    expect(none.args[none.args.indexOf("--tools") + 1]).toBe("");
+  });
+
+  it("knows which tool calls an allow-list permits", () => {
+    expect(builtinTools(["Read", "Bash(npm test:*)", "mcp__docs__search"])).toEqual(["Read", "Bash"]);
+    expect(toolAllowed("Read", ["Read"])).toBe(true);
+    expect(toolAllowed("Bash", ["Read", "Glob", "Grep"])).toBe(false);
+    expect(toolAllowed("mcp__gantry__ask", ["Read"])).toBe(true);
   });
 
   it("gives MCP servers the run token as a header, in a file rather than argv", () => {
@@ -162,6 +182,31 @@ describe("process handling with a stand-in harness executable", () => {
     expect(seen.base).toBe(`${edge!.url}/model`);
     expect(seen.cwd).toBe(dir);
     expect(seen.argv).toContain("--strict-mcp-config");
+  });
+
+  it("refuses a tool call outside the allow-list: stops the harness, records the call, fails the run with the reason", async () => {
+    const bin = await fake(`
+      const emit = (o) => console.log(JSON.stringify(o));
+      emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Read", input: { file_path: "a" } }] } });
+      emit({ type: "user", message: { content: [{ type: "tool_result" }] } });
+      emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "ls" } }] } });
+      setInterval(() => undefined, 1000);
+    `);
+    const { code, calls } = await run(bin, { toolAllowList: ["Read", "Glob", "Grep"] });
+    expect(code).toBe(EXIT.delivered);
+    expect(calls.at(-1)!.body).toMatchObject({ status: "failed", error: { code: "tool_not_allowed", msg: expect.stringContaining("Bash") } });
+    const transcript = calls.filter((c) => c.path === "/run/v1/checkpoint").map((c) => JSON.stringify(c.body)).join("");
+    expect(transcript.length).toBeGreaterThan(0);
+  });
+
+  it("lets listed built-ins and MCP tools through", async () => {
+    const bin = await fake(`
+      const emit = (o) => console.log(JSON.stringify(o));
+      emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }, { type: "tool_use", id: "t2", name: "mcp__gantry__ask", input: {} }] } });
+      emit({ type: "result", subtype: "success", is_error: false, result: "{\\"a\\":1}", usage: { input_tokens: 1, output_tokens: 1 } });
+    `);
+    const { calls } = await run(bin, { toolAllowList: ["Read"] });
+    expect(calls.at(-1)!.body).toMatchObject({ status: "succeeded", output: { a: 1 } });
   });
 
   it("fails when the harness exits without a result", async () => {

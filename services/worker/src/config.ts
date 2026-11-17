@@ -37,6 +37,8 @@ export interface WorkerConfig {
   /** Time the result intake keeps the attempt's lease while it publishes. */
   publishLeaseMs: number;
   maxDispatchDeferrals: number;
+  /** Lets a run with no model use the stub adapter (canned output). Tests and local development only; off by default so a missing model is a visible failure. */
+  allowStubAdapter?: boolean;
   dataKey: Buffer | null;
   /** Onboarding and readiness (spec 11.3). */
   /** Name of the Gantry gate check, which is not counted as CI on an onboarding pull request. */
@@ -91,6 +93,7 @@ export async function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): Pr
     startupLeaseMs: int(env.WORKER_STARTUP_LEASE_MS, 180_000),
     publishLeaseMs: int(env.WORKER_PUBLISH_LEASE_MS, 15 * 60_000),
     maxDispatchDeferrals: int(env.WORKER_MAX_DISPATCH_DEFERRALS, 60),
+    allowStubAdapter: env.GANTRY_ALLOW_STUB_ADAPTER === "1",
     dataKey,
     gateCheckName: env.GITHUB_GATE_CHECK_NAME || "Gantry gates",
     runnerToolchains: parseToolchains(env.RUNNER_TOOLCHAINS),

@@ -115,4 +115,27 @@ d("attempt.dispatch and run.result", () => {
     // The prepared network and volume were torn down.
     expect(w.launcher.runs.size).toBe(0);
   });
+
+  it("fails an agent with no model with a clear reason instead of running the stub", async () => {
+    await w.close();
+    w = await startWorld({ cfg: { allowStubAdapter: false } });
+    await w.q(`insert into agents (org_id, id, name, live_version) values ($1,'ag-nomodel','No model',1)`, [w.orgId]);
+    await w.q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-nomodel',1,'{"instructions":"x"}'::jsonb,null,now())`, [w.orgId]);
+    const { attemptId } = await w.workOrderAt("WO-9007", { repo: null, agent: "ag-nomodel" });
+    await w.drain();
+    expect(w.launcher.calls.filter((c) => c.op === "start" && c.body!.seedComplete === true)).toHaveLength(0);
+    const att = (await w.q(`select state, outcome from attempts where id = $1`, [attemptId]))[0];
+    expect(att).toMatchObject({ state: "failed", outcome: "failed" });
+    // the reason is user-visible on the work order
+    const wo = JSON.stringify((await w.q(`select data from work_orders where id = 'WO-9007'`))[0].data);
+    expect(wo).toMatch(/no model/i);
+  });
+
+  it("still runs the stub when stubs are enabled on purpose (tests, local development)", async () => {
+    await w.q(`insert into agents (org_id, id, name, live_version) values ($1,'ag-nomodel','No model',1)`, [w.orgId]);
+    await w.q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-nomodel',1,'{"instructions":"x"}'::jsonb,null,now())`, [w.orgId]);
+    const { runId } = await w.workOrderAt("WO-9008", { repo: null, agent: "ag-nomodel" });
+    await w.drain();
+    expect((await w.q(`select data from runs where id = $1`, [runId]))[0].data).toMatchObject({ adapter: "stub", dispatch: { phase: "started" } });
+  });
 });

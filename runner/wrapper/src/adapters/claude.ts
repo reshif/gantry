@@ -40,6 +40,33 @@ export interface ClaudeInvocation {
 const RESULT_INSTRUCTION =
   "When the work is finished, end your final message with exactly one fenced ```json block holding the station result as a single JSON object. Do not put anything after it.";
 
+/** The harness's built-in tools. Any that is not on the agent's allow-list is also named in `--disallowedTools`, a second rail. */
+export const KNOWN_BUILTIN_TOOLS = [
+  "Agent", "Bash", "Cron", "CronCreate", "CronDelete", "CronList", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "TodoWrite", "WebFetch", "WebSearch", "Workflow", "Write",
+];
+
+const toolBase = (entry: string): string => entry.replace(/\(.*$/s, "").trim();
+
+/** Built-in tool names an allow-list grants. An entry may carry a specifier, `Bash(npm test:*)`, which grants the tool and narrows approval; MCP entries are not built-ins. */
+export function builtinTools(allow: string[]): string[] {
+  return [...new Set(allow.map(toolBase).filter((t) => t !== "" && !t.startsWith("mcp__")))];
+}
+
+/** Whether a tool the model called is permitted: a listed built-in, or an MCP tool (gated by the edge gateway). */
+export function toolAllowed(name: string, allow: string[]): boolean {
+  return name.startsWith("mcp__") || builtinTools(allow).includes(name);
+}
+
+/** Names of the tools an assistant event asks to call. */
+export function toolUses(ev: StreamEvent): string[] {
+  const content = (ev as { message?: { content?: unknown } }).message?.content;
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((b: unknown) => {
+    const x = b as { type?: unknown; name?: unknown };
+    return typeof b === "object" && b !== null && x.type === "tool_use" && typeof x.name === "string" ? [x.name] : [];
+  });
+}
+
 export function composeSystemPrompt(spec: RunSpec): string {
   const parts = [spec.instructions.trim()];
   for (const s of spec.skills) parts.push(`## Skill: ${s.name}\n\n${s.content.trim()}`);
@@ -79,6 +106,11 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
     "--append-system-prompt", composeSystemPrompt(spec),
   ];
   if (spec.model) args.push("--model", spec.model);
+  // `--allowedTools` only pre-approves; it removes nothing. `--tools` is the restriction: the built-in tools the model is offered at all, and
+  // `--disallowedTools` names the rest as a second rail. MCP tools (station tools, registry servers in scope) are gated by the edge and stay.
+  const granted = builtinTools(spec.toolAllowList);
+  args.push("--tools", granted.join(","));
+  args.push("--disallowedTools", KNOWN_BUILTIN_TOOLS.filter((t) => !granted.includes(t)).join(","));
   args.push("--allowedTools", [...narrowShell(spec.toolAllowList), ...STATION_TOOL_NAMES].join(","));
 
   const cloneEnv: Record<string, string> = {};
@@ -266,6 +298,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
       let turn = 0;
       let pending: string[] = [];
       let finalEvent: StreamEvent | undefined;
+      let violation: string | undefined;
       const flush = async () => {
         if (pending.length === 0) return;
         const content = pending.join("\n") + "\n";
@@ -290,6 +323,12 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
         if (!ev) return;
         pending.push(line.trim());
         if (ev.type === "assistant") {
+          // A call outside the allow-list means the harness did not enforce it. Fail closed: the call stays in the transcript, the harness is stopped, the run reports it.
+          const bad = toolUses(ev).find((n) => !toolAllowed(n, spec.toolAllowList));
+          if (bad && !violation) {
+            violation = bad;
+            aborted();
+          }
           turn += 1;
           ctx.setTurn(turn);
         } else if (ev.type === "user") {
@@ -315,6 +354,10 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
       await flush();
       ctx.signal.removeEventListener("abort", aborted);
 
+      if (violation) {
+        const msg = `The agent called ${violation}, which is not on its tool allow-list (${spec.toolAllowList.join(", ") || "none"}). The run was stopped.`;
+        return { status: "failed", usage: finalEvent ? usageFromResult(finalEvent, spec.model) : [], error: { code: "tool_not_allowed", msg } };
+      }
       if (ctx.signal.aborted) return { status: "interrupted", usage: finalEvent ? usageFromResult(finalEvent, spec.model) : [] };
       if (spawnError) return { status: "failed", usage: [], error: { code: "harness_unavailable", msg: `cannot start ${bin}: ${spawnError.message}` } };
       if (!finalEvent) return { status: "failed", usage: [], error: { code: "harness_exit", msg: `harness exited with code ${code} and no result${stderrTail ? `: ${stderrTail.trim()}` : ""}` } };

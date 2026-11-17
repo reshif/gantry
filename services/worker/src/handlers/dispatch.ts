@@ -147,7 +147,11 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
     return { alreadyRunning: true, runId };
   }
 
-  const { token } = await prepareRun(deps, a, runId);
+  const { token, pinned } = await prepareRun(deps, a, runId);
+  // An agent with no model must not quietly run the canned stub: the run fails with the reason, unless stubs were enabled on purpose (tests, local development).
+  if (pinned.adapter === "stub" && !deps.cfg.allowStubAdapter) {
+    return failDispatch(deps, a, runId, "no_model", "This agent has no model, so the run was not started. Choose a model for the agent on the Agents page, then run the station again.");
+  }
   const base = { runId, workspaceRef: `${a.woId}/${a.station}`.slice(0, 200), variant: deps.cfg.runnerVariant, runToken: token };
   try {
     const prep = await deps.launcher.start({ ...base, seedComplete: false });

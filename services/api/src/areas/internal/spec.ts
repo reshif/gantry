@@ -1,5 +1,6 @@
 import type { Queryable } from "@gantry/db";
 import { REPO_CONTEXT_LAYER_NAME, RepoContext, renderRepoContext } from "@gantry/domain";
+import { compactPrevious, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
 import { planOf, researchHosts, sourcesHandoff } from "../workorders/research.js";
@@ -128,8 +129,9 @@ export interface RunSpecOut {
 export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string): Promise<RunSpecOut | { error: string }> {
   const agent = await agentConfig(db, c);
   const model = c.runModel ?? c.tupleModel ?? undefined;
-  const adapter = c.runData.adapter === "stub" || c.runData.adapter === "claude" ? c.runData.adapter : model ? "claude" : "stub";
-  if (adapter === "claude" && !model) return { error: "The claude adapter needs a pinned model." };
+  // No model is never a silent stub: the stub adapter runs only when the run was explicitly marked as one (tests and local development).
+  const adapter = c.runData.adapter === "stub" ? "stub" : "claude";
+  if (adapter === "claude" && !model) return { error: "This agent has no model, so the run cannot start. Choose a model for the agent and run it again." };
   const inst = await composeInstructions(db, c);
   // An onboarding agent step (a hidden carrier) reads the seeded repository and answers: read-only tools, no MCP servers, whatever the agent version's own settings say.
   const carrier = typeof c.woData.onboarding === "object" && c.woData.onboarding !== null;
@@ -191,7 +193,7 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   const sw = swarmOf(c.woData);
   const scouts = !sc && sw?.endedAt && sw.station === c.station ? sw.scouts.map((x) => ({ id: x.id, question: x.question, focus: x.focus, state: x.state, summary: x.summary ?? "" })) : undefined;
   return {
-    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, previous: prior, documents, dialogue, sources, research,
+    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, previous: compactPrevious(prior as StationResultRow[], c.woId), documents, dialogue, sources, research,
     ...(sc ? { scout: { id: sc.id, question: sc.question, focus: sc.focus, note: `You are scout ${sc.id}. Answer only this question, write your findings to research/scout-${sc.id.toLowerCase()}.md with write_document, cite web sources, and end. You cannot send scouts or propose a plan.` } } : {}),
     ...(scouts ? { scouts } : {}),
   };
