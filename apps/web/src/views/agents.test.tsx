@@ -457,6 +457,8 @@ describe("Agents screen", () => {
 });
 
 describe("Skills screen", () => {
+  /** A skill's own page: `#skills/<id>`. */
+  const mountSkill = (id: string) => { window.location.hash = `#skills/${id}`; return mount(<SkillsView />); };
   const sTab = async (id: string) => fireEvent.click(await byId(`sk-tab-${id}`));
 
   it("lists the library with versions, usage and eval coverage, and filters it", async () => {
@@ -470,22 +472,32 @@ describe("Skills screen", () => {
     expect((await byId("sk-row-sk-b")).textContent).toContain("1 project");
     expect((await byId("sk-row-sk-b")).querySelector(".sk-cov")!.className).toContain("sk-cov-none");
     expect((await byId("sk-row-sk-c")).querySelector(".sk-cov")!.className).toContain("sk-cov-low");
-    const head = document.querySelector(".titleblock")!.textContent!;
+    const head = document.getElementById("sk-stats")!.textContent!;
     expect(head).toContain("Skills3");
     expect(head).toContain("Unused1");
     expect(head).toContain("Eval cases14");
-    fireEvent.click(await screen.findByLabelText("Unused"));
+    fireEvent.click(await byId("sk-view-unused"));
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-c")).not.toBeNull();
-    fireEvent.click(await screen.findByLabelText("All"));
+    fireEvent.click(await byId("sk-view-all"));
     fireEvent.change(await byId("sk-search"), { target: { value: "security" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-b")).not.toBeNull();
   });
 
+  it("opens a skill's own page from a row, and says so when the skill is gone", async () => {
+    setup();
+    mount(<SkillsView />);
+    fireEvent.click(await byId("sk-row-sk-b"));
+    expect(window.location.hash).toBe("#skills/sk-b");
+    cleanup();
+    mountSkill("sk-nope");
+    expect(await screen.findByText("No skill with that id")).toBeTruthy();
+  });
+
   it("saves an edit as a new version with the change note, the changed fields only and the skill's version", async () => {
     const calls = setup({ "PATCH /api/v1/skills/sk-a": () => ok() });
-    mount(<SkillsView />);
+    mountSkill("sk-a");
     expect((await byId("sk-save")).textContent).toContain("Save as v1.3.0");
     fireEvent.click(await byId("sk-save"));
     expect(writes(calls, "PATCH")).toHaveLength(0);
@@ -499,7 +511,7 @@ describe("Skills screen", () => {
 
   it("attaches and detaches the skill on agents through the agent endpoint", async () => {
     const calls = setup({ "PUT /api/v1/agents/ag-review/skills/sk-a": () => ok({ msg: "Attached Test design to Reviewer." }), "DELETE /api/v1/agents/ag-build/skills/sk-a": () => ok({ msg: "Detached Test design from Builder." }) });
-    mount(<SkillsView />);
+    mountSkill("sk-a");
     await sTab("agents");
     expect((await byId("sk-att-ag-build") as HTMLInputElement).checked).toBe(true);
     fireEvent.click(await byId("sk-att-ag-review"));
@@ -511,8 +523,7 @@ describe("Skills screen", () => {
 
   it("scopes the skill to projects: all, then per project", async () => {
     const calls = setup({ "PUT /api/v1/skills/sk-b/projects": () => ok() });
-    mount(<SkillsView />);
-    fireEvent.click(await byId("sk-row-sk-b"));
+    mountSkill("sk-b");
     await sTab("projects");
     expect((await byId("sk-proj-payments") as HTMLInputElement).checked).toBe(true);
     expect((document.getElementById("sk-proj-risk") as HTMLInputElement).checked).toBe(false);
@@ -526,16 +537,19 @@ describe("Skills screen", () => {
 
   it("locks the definition, scoping and attach controls for someone without the right", async () => {
     setup({}, ["skill.edit", "agent.edit"]);
-    mount(<SkillsView />);
+    mountSkill("sk-a");
     await waitFor(() => expect(document.querySelector(".lock-note")).not.toBeNull());
     expect(((await byId("sk-name")) as HTMLInputElement).disabled).toBe(true);
-    await waitFor(() => expect(document.getElementById("sk-new")!.getAttribute("aria-disabled")).toBe("true"));
     expect(document.getElementById("sk-save")!.getAttribute("data-reason")).toMatch(/No role holds skill.edit/);
+    cleanup();
+    window.location.hash = "#skills";
+    mount(<SkillsView />);
+    await waitFor(() => expect(document.getElementById("sk-new")!.getAttribute("aria-disabled")).toBe("true"));
   });
 
   it("lists versions and the audit history", async () => {
     setup({ "GET /api/v1/learning/proposals": () => ({ body: [{ id: "LP-1", finding: "F-1", kind: "skill", title: "Tighten test design", owner: "p-asha", status: "proposed", at: NOW, expected: "", change: { skill: "sk-a" }, history: [] }] }) });
-    mount(<SkillsView />);
+    mountSkill("sk-a");
     await sTab("versions");
     expect((await screen.findAllByText("v1.2.0")).length).toBeGreaterThan(0);
     expect(document.querySelectorAll(".sk-vers li")).toHaveLength(2);

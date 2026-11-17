@@ -1,9 +1,11 @@
 /* Skills view. Tokens only. */
-.sk-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--s4); align-items: start; }
-.sk-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-.sk-toolbar .input { flex: 1 1 180px; min-width: 0; }
+.sk-hint { margin: 0 0 8px; font-size: var(--t-md); }
+.sk-lib .tabs { padding: 0 12px; }
+.sk-lib .filterbar { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.sk-name { font-weight: 600; color: var(--ink); text-decoration: none; margin-right: 6px; }
+.sk-name:hover { color: var(--accent); }
 .sk-table td { vertical-align: top; }
-.sk-desc { max-width: 38ch; }
+.sk-desc { max-width: 52ch; }
 .sk-cov { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .sk-cov-bar { width: 46px; height: 6px; background: var(--sunk); border: 1px solid var(--line-strong); display: inline-block; position: relative; }
 .sk-cov-bar > span { display: block; height: 100%; background: var(--done); }
@@ -14,13 +16,10 @@
 .sk-cov-none .sk-cov-bar { border-style: dashed; }
 .sk-cov-none .mono { color: var(--muted); }
 
-.sk-detail { padding: 0; }
-.sk-head { display: grid; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-.sk-title { font-family: var(--f-display); font-size: var(--t-2xl); font-weight: 700; line-height: 1; }
-.sk-tb { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
-.sk-tb dd { white-space: normal; }
-.sk-detail > .lock-note { margin: 12px 16px 0; }
-.sk-detail > .tabs { padding: 0 12px; margin-top: 8px; overflow-x: auto; }
+.sk-detail, .sk-panel, .sk-body, .view-skills { min-width: 0; max-width: 100%; }
+.sk-panel { margin-top: 12px; }
+.sk-panel > .tabs { padding: 0 12px; overflow-x: auto; }
+.sk-detail > .lock-note { margin-top: 12px; }
 .sk-body { padding: 14px 16px; }
 .sk-def .savebar { margin: 14px -16px -14px; }
 .sk-p { margin-bottom: 10px; }
@@ -30,7 +29,6 @@
 .sk-vers li::before { content: ""; position: absolute; left: -6px; top: 13px; width: 10px; height: 10px; background: var(--surface); border: 2px solid var(--line-strong); transform: rotate(45deg); }
 .sk-vers li.is-current::before { background: var(--accent); border-color: var(--accent); }
 
-@media (max-width: 1200px) { .sk-grid { grid-template-columns: minmax(0, 1fr); } }
 .sk-meta { color: var(--ink-2); margin-top: 2px; }
 .view-skills .tag, .view-models .tag { margin-left: 6px; }
 .sk-detail .savebar:not(.is-dirty) { position: static; }
