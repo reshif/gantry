@@ -48,7 +48,7 @@ d("MCP end to end", () => it("registry -> run -> the SDK's MCP client through th
   await w.q(`update projects set config = jsonb_set(config, '{mcp}', $1::jsonb) where id = 'payments'`, [JSON.stringify([id])]);
   await w.q(`insert into work_orders (org_id, id, project_id, title, class, position, state, flow_version) values ($1,'WO-e2e','payments','T','feature','build','running',1)`, [t.orgId]);
   const at = await w.q(`insert into attempts (org_id, id, wo_id, station, visit, state) values ($1,'at-e2e','WO-e2e','build',1,'running') returning fencing::text as f`, [t.orgId]);
-  await w.q(`insert into runs (org_id, id, attempt_id, wo_id, data) values ($1,'run-e2e','at-e2e','WO-e2e','{}')`, [t.orgId]);
+  await w.q(`insert into runs (org_id, id, attempt_id, wo_id, data) values ($1,'run-e2e','at-e2e','WO-e2e','{"adapter":"stub"}')`, [t.orgId]);
   const tk = await withTx(t.db.app, (tx) => issueRunToken(tx, "run-e2e", "at-e2e", at[0].f));
   const spec = (await t.app.inject({ method: "GET", url: "/internal/v1/runs/run-e2e/spec", headers: { authorization: "Bearer edge-token-for-tests", "x-run-token": tk.token } })).json();
   expect(Object.keys(spec.mcpServers)).toEqual(["docs-wiki"]);

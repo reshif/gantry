@@ -58,6 +58,8 @@ const SELF_AUTHORIZING: Record<string, Probe> = {
   "/api/v1/work-orders/:id/sources": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/sources/:ref": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo", ref: "s1" } },
   "/api/v1/work-orders/:id/timeline": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
+  "/api/v1/prompt-calls": { why: "each call is kept only when mayRead() allows it: project.view on the call's project, or the asker for console and project-less calls", expect: "own", query: "?wo=x", check: (b) => expect(b.calls).toEqual([]) },
+  "/api/v1/prompt-traces/:ref": { why: "mayRead() on the call the trace belongs to; anything else is a 404 as if it did not exist", expect: "refuse", params: { ref: "0".repeat(64) } },
   "/api/v1/workspace/inbox": { why: "the inbox lists only conversations the person can read (visible projects, own threads)", expect: "empty" },
   "/api/v1/workspace/agents": { why: "agents offered for a thread; a work order outside the person's projects is a 404", expect: "empty" },
   "/api/v1/workspace/operator": { why: "stuck work is limited to projects where the person may act (decide wo.park); spend by person needs people.view", expect: "empty" },

@@ -18,14 +18,14 @@ describe("prompt manifest (pure)", () => {
 
   it("names every part in order with source, version, hash and size, and the hash covers all of them", () => {
     const parts = composedParts(layers, [skill]);
-    expect(parts.map((p) => p.kind)).toEqual(["layer", "skill", "result_instruction", "result_schema"]);
+    expect(parts.map((p) => p.kind)).toEqual(["layer", "skill", "station_tools", "result_instruction", "result_schema"]);
     expect(parts[0]).toMatchObject({ name: "Agent", version: 2, sha256: "a".repeat(64), bytes: 11 });
     expect(parts[1]).toMatchObject({ name: "Testing", version: 3, source: "skill_versions sk-1", bytes: 9 });
     const base = buildManifest("run", parts, { handoff: { x: 1 } }).hash;
     expect(buildManifest("run", composedParts(layers, [{ ...skill, hash: "c".repeat(64) }])).hash).not.toBe(base); // a skill body changed
     expect(buildManifest("run", composedParts(layers, [{ ...skill, version: 4 }])).hash).not.toBe(base); // a skill version changed
     expect(buildManifest("run", composedParts([{ ...layers[0]!, hash: "d".repeat(64) }], [skill])).hash).not.toBe(base); // an agent layer changed
-    expect(buildManifest("run", [...parts.slice(0, 2), part("result_instruction", "Result instruction", "x", null, "other"), parts[3]!]).hash).not.toBe(base); // the runner's result text changed
+    expect(buildManifest("run", [...parts.slice(0, 3), part("result_instruction", "Result instruction", "x", null, "other"), parts[4]!]).hash).not.toBe(base); // the runner's result text changed
     expect(buildManifest("run", [...parts.slice(0, 3), part("result_schema", "Station result shape", "x", null, "{}")]).hash).not.toBe(base); // the result schema changed
     expect(buildManifest("run", [part("station_tools", "Station tools", "x", null, "tools text"), ...parts]).hash).not.toBe(base); // station tools text added
     expect(buildManifest("run", parts, { handoff: { x: 2 } }).hash).toBe(base); // the handoff is a size only: it is not an instruction
@@ -56,11 +56,15 @@ describe("prompt manifest (pure)", () => {
     expect(runnerParts().find((p) => p.kind === "result_schema")?.sha256).toBe(sha256(RESULT_SCHEMA_TEXT));
   });
 
-  it("registers the station-tools text only when the wrapper carries it (drift guard)", () => {
-    const src = readFileSync(fileURLToPath(new URL("../../../runner/wrapper/src/adapters/claude.ts", import.meta.url)), "utf8");
-    if (STATION_TOOLS_INSTRUCTION) expect(src).toContain(STATION_TOOLS_INSTRUCTION);
-    else expect(src).not.toMatch(/STATION_TOOLS_INSTRUCTION/);
-    expect(runnerParts().some((p) => p.kind === "station_tools")).toBe(Boolean(STATION_TOOLS_INSTRUCTION));
+  it("keeps the station-tools text equal to the wrapper's (drift guard)", () => {
+    const src = readFileSync(fileURLToPath(new URL("../../../runner/wrapper/src/station-tools.ts", import.meta.url)), "utf8");
+    const m = /export const STATION_TOOLS_INSTRUCTION = `([\s\S]*?)`;/.exec(src);
+    expect(m, "the wrapper still exports STATION_TOOLS_INSTRUCTION").not.toBeNull();
+    // evaluate the template literal exactly as the wrapper does (it only holds escaped backticks)
+    expect(STATION_TOOLS_INSTRUCTION).toBe(new Function(`return \`${m![1]}\`;`)());
+    expect(STATION_TOOLS_INSTRUCTION).not.toBe("");
+    const parts = runnerParts().map((p) => p.kind);
+    expect(parts).toEqual(["station_tools", "result_instruction", "result_schema"]);
   });
 });
 

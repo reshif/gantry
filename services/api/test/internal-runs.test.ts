@@ -331,7 +331,7 @@ d("internal runs API", () => {
       expect(s.skills).toEqual([{ name: "Testing skill", content: "Always run tests." }]);
       // the prompt manifest names every part in order, with source, version and hash; its hash is the instruction hash and is recorded on the run
       expect(s.promptManifest.hash).toBe(s.instructionsHash);
-      expect(s.promptManifest.parts.map((p: { kind: string; name: string }) => `${p.kind}:${p.name}`)).toEqual(["layer:Factory base", "layer:Project overlay", "layer:Agent", "skill:Testing skill", "result_instruction:Result instruction", "result_schema:Station result shape"]);
+      expect(s.promptManifest.parts.map((p: { kind: string; name: string }) => `${p.kind}:${p.name}`)).toEqual(["layer:Factory base", "layer:Project overlay", "layer:Agent", "skill:Testing skill", "station_tools:Station tools", "result_instruction:Result instruction", "result_schema:Station result shape"]);
       expect(s.promptManifest.parts[3]).toMatchObject({ version: 1, bytes: "Always run tests.".length, source: "skill_versions sk-w3" });
       expect(s.promptManifest.parts[0]).toMatchObject({ version: 90 });
       expect(s.promptManifest.handoff.bytes).toBeGreaterThan(10);
