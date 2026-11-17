@@ -79,6 +79,23 @@ d("document collaboration", () => {
     expect(await editedByPeople(t.db.app, t.orgId, id)).toEqual([{ doc: "research.md", version: 2, by: "p-meera" }]);
   });
 
+  it("comment text and an edit note are checked for secrets too, and a section with a link or emphasis in its heading is accepted as the picker lists it", async () => {
+    const body = "# Title\n\n## See [the spec](https://x.dev/a) and <b>more</b>\n\nText.\n\n## **Bold** `code` heading ##\n\nText.";
+    const { id, art } = await seed("Secrets and headings", body);
+    const key = `sk-ant-${"a".repeat(30)}`;
+    const c = await w.call("p-tomas", "POST", url(id, art, "comments"), { text: `use ${key}` });
+    expect(c.status).toBe(422);
+    expect(JSON.stringify(c.body)).toContain("API key");
+    expect(await w.q(`select id from wo_doc_comments where wo_id = $1`, [id])).toHaveLength(0);
+    const n = await w.call("p-meera", "POST", url(id, art, "edit"), { markdown: `${body}\nmore`, note: `token ${key}` });
+    expect(n.status).toBe(422);
+    expect(await w.q(`select id from artefacts where wo_id = $1 and version > 1`, [id])).toHaveLength(0);
+    for (const section of ["See [the spec](https://x.dev/a) and <b>more</b>", "Bold code heading"]) {
+      const ok = await w.call("p-tomas", "POST", url(id, art, "comments"), { section, text: "ok" });
+      expect(ok.status, `${section}: ${JSON.stringify(ok.body)}`).toBe(200);
+    }
+  });
+
   it("accepting a version as the station output is an approver's act, attributed, audited, one per document", async () => {
     const { id, art } = await seed("Accept path");
     expect((await w.call("p-tomas", "POST", url(id, art, "accept"), {})).status).toBe(403);

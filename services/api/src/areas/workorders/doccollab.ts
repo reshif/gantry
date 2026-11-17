@@ -5,6 +5,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import type { Queryable, Tx } from "@gantry/db";
+import { docHeadings, headingText } from "@gantry/domain";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import { note, ev } from "./engine.js";
@@ -41,19 +42,7 @@ export async function commentsHandoff(db: Queryable, orgId: string, woId: string
   return (await listDocComments(db, orgId, woId)).filter((c) => c.status === "open").map((c) => ({ document: c.doc, version: c.version, section: c.section || null, comment: c.body, by: c.author }));
 }
 
-const headingsOf = (md: string): string[] => {
-  const out: string[] = [];
-  let fence = false;
-  for (const line of md.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) {
-      fence = !fence;
-      continue;
-    }
-    const m = !fence ? /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line) : null;
-    if (m) out.push(m[1]!.replace(/[`*_~]/g, "").trim());
-  }
-  return out;
-};
+const headingsOf = (md: string): string[] => docHeadings(md).map((h) => h.text);
 
 /** The same key shapes the edge redacts from agent documents: a person's text is checked before it is stored, and refused rather than silently changed. */
 const SECRET_SHAPES: Array<[string, RegExp]> = [
@@ -81,7 +70,8 @@ export async function commentOnDocument(tx: Tx, actor: Actor, woId: string, arte
   if (!d) throw refuse("not_found", "No such document on this work order.");
   const text = b.text.trim();
   if (text.length < 1) throw invalid("Write the comment.");
-  const section = (b.section ?? "").replace(/[`*_~]/g, "").trim();
+  refuseSecrets(text);
+  const section = headingText(b.section ?? "");
   if (section && !headingsOf(d.body ?? "").includes(section)) throw invalid("That section is not in this version of the document.");
   const id = `DC-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   await tx.query(`insert into wo_doc_comments (org_id, id, wo_id, artefact_id, doc, version, section, body, author, created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [fx.orgId, id, w.id, d.id, d.doc, d.version, section, text, by, fx.now]);
@@ -122,11 +112,12 @@ export async function editDocument(tx: Tx, actor: Actor, woId: string, artefactI
   const id = `art-ed-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const { version } = await recordDocument(tx, { orgId: fx.orgId, id, woId: w.id, attemptId: null, station: base.station ?? "", name: base.doc, hash, mediaType: "text/markdown", size: Buffer.byteLength(body), body, author: by, authorKind: "person" });
   const why = (b.note ?? "").trim().slice(0, 500);
+  refuseSecrets(why);
   await addWoMessage(tx, fx.orgId, w.id, "user", by, `Edited ${base.doc} (now version ${version})${why ? `: ${why}` : "."}`, { kind: "answer", cards: [docCard({ id, name: base.doc, version })] }, fx.now);
   ev(fx, w, "document.edit", { doc: base.doc, version, from: base.version, hash, ...(why ? { text: why } : {}) }, { category: "approvals" });
   note(w, fx, by, `Edited ${base.doc} (version ${version}).`);
   await saveWo(tx, fx.orgId, w);
-  return done(fx, `Saved as version ${version}. It is marked as edited by you, and the gate shows that.`, w.project, { id, doc: base.doc, documentVersion: version, version: w.version });
+  return done(fx, `Saved as version ${version}. It is marked as edited by you, and your edit is recorded with the gate decision.`, w.project, { id, doc: base.doc, documentVersion: version, version: w.version });
 }
 
 /** A person accepts one version of a document as what the station produced. One version per document is accepted at a time. */

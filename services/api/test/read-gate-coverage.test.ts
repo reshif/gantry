@@ -49,6 +49,7 @@ const SELF_AUTHORIZING: Record<string, Probe> = {
   "/api/v1/work-orders/:id/record.md": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/record/export": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/gates/:gate/approvers": { why: "scopeOf() then decide(project.view)", expect: "refuse", params: { id: "$wo", gate: "brief" } },
+  "/api/v1/work-orders/:id/document-comments": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/session": { why: "woOf(): visible project and decide(project.view)", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-order-sessions": { why: "list filtered to visible projects", expect: "empty" },
   "/api/v1/repos/:id/onboarding/pr": { why: "repoOf(): the repo's project must be visible", expect: "refuse", params: { id: "$repo" } },
