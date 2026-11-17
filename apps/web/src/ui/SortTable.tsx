@@ -21,12 +21,15 @@ export interface SortState {
 }
 
 /** The one table component; `DataTable` is the same component under its design-system name. */
-export function SortTable<R>({ id, caption, columns, rows, rowKey, onRow, sort, onSort, pageSize, empty }: {
+export function SortTable<R>({ id, caption, columns, rows, rowKey, rowId, rowLabel, onRow, sort, onSort, pageSize, empty }: {
   id?: string;
   caption?: string;
   columns: SortCol<R>[];
   rows: R[];
   rowKey: (r: R) => string;
+  /** Optional DOM id and accessible name for each row. */
+  rowId?: (r: R) => string;
+  rowLabel?: (r: R) => string;
   onRow?: (r: R) => void;
   sort?: SortState | undefined;
   onSort?: (s: SortState) => void;
@@ -73,7 +76,7 @@ export function SortTable<R>({ id, caption, columns, rows, rowKey, onRow, sort, 
           </thead>
           <tbody>
             {list.map((r) => (
-              <tr key={rowKey(r)} data-key={rowKey(r)} {...(onRow ? { tabIndex: 0, onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest("button,a,input,select,textarea")) return; onRow(r); }, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" && e.target === e.currentTarget) onRow(r); } } : {})}>
+              <tr key={rowKey(r)} data-key={rowKey(r)} {...(rowId ? { id: rowId(r) } : {})} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} {...(onRow ? { tabIndex: 0, onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest("button,a,input,select,textarea")) return; onRow(r); }, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" && e.target === e.currentTarget) onRow(r); } } : {})}>
                 {columns.map((c) => (
                   <td key={c.key} data-label={c.label} className={`${c.align === "end" ? "is-end" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
                     {c.render ? c.render(r) : ((r as Record<string, unknown>)[c.key] as ReactNode) ?? ""}
