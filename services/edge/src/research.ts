@@ -10,6 +10,7 @@
  * audit event. The agent gets the text back marked as untrusted data, with the source id to cite.
  */
 import dns from "node:dns";
+import net from "node:net";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { Agent, fetch as ufetch } from "undici";
 import type { ApiClient } from "./api.js";
@@ -51,6 +52,13 @@ export function htmlToText(html: string): { title: string; text: string } {
   t = t.split("\n").map((l) => l.replace(/[ \t\f\v\r]+/g, " ").trim()).filter((l, i, a) => l || (a[i - 1] ?? "") !== "").join("\n").replace(/\n\n(?=- )/g, "\n").trim();
   return { title, text: t };
 }
+
+/**
+ * An address instead of a name (`https://169.254.169.254/`, `https://[::1]/`). undici never calls the DNS lookup for one, so the private-address check in
+ * `publicOnlyAgent` cannot see it; research is for named documentation sites, so every IP literal is refused, on the first request and on every redirect.
+ * (The URL parser has already turned `2130706433` and `0x7f.1` into dotted form.)
+ */
+export const isIpLiteral = (host: string): boolean => net.isIP(host.replace(/^\[|\]$/g, "")) !== 0;
 
 /** A dispatcher whose DNS lookup refuses names that resolve to a private, loopback or link-local address (no SSRF through an allow-listed name). */
 export function publicOnlyAgent(): Agent {
@@ -143,6 +151,7 @@ export function registerResearchRoutes(app: FastifyInstance, deps: ResearchDeps)
     const timer = setTimeout(() => ac.abort(), RESEARCH_LIMITS.timeoutMs);
     try {
       for (let hop = 0; hop <= RESEARCH_LIMITS.maxRedirects; hop++) {
+        if (isIpLiteral(cur.hostname)) return await refuse(reply, a, recordedUrl(cur), { status: 403, msg: `${cur.hostname} is an IP address; only named hosts can be read.${hop ? " (reached by a redirect)" : ""}` });
         if (!hostAllowed(cur.hostname.toLowerCase(), hosts)) return await refuse(reply, a, recordedUrl(cur), { status: 403, msg: `${cur.hostname} is not on this work order's research allow-list.${hop ? " (reached by a redirect)" : ""}` });
         res = await doFetch(cur.toString(), { redirect: "manual", signal: ac.signal, headers: { "user-agent": "GantryResearch/1.0", accept: "text/html,text/plain,text/markdown,application/json;q=0.9,*/*;q=0.1" } });
         if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {

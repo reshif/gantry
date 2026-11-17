@@ -345,6 +345,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
   // MCP gateway (spec 6.4, 12.4): services/edge/src/mcp. The runner sees one endpoint per allowed server; the edge holds the credentials.
   const mcp = registerMcpRoutes(app, {
     cfg, api,
+    knownKeys: () => keys.knownKeys(),
     runAuth: (req) => {
       const token = bearerOf(req);
       const runId = token ? runIdOfToken(token) : null;

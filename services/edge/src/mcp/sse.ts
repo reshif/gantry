@@ -4,8 +4,18 @@ export interface SseEvent {
   data: string;
 }
 
-export async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<SseEvent> {
+/** Thrown when a stream grows past its limit; the reader is cancelled. */
+export class SseLimitError extends Error {
+  constructor(readonly limit: number) {
+    super(`An event larger than ${limit} bytes.`);
+    this.name = "SseLimitError";
+  }
+}
+
+/** `maxEventBytes` bounds one event (and an unterminated line); the stream of a request-bound answer is bounded as a whole by `maxTotalBytes`. */
+export async function* sseEvents(body: ReadableStream<Uint8Array>, limits: { maxEventBytes?: number; maxTotalBytes?: number } = {}): AsyncGenerator<SseEvent> {
   const reader = body.getReader();
+  let total = 0;
   const dec = new TextDecoder();
   let buf = "";
   let event = "";
@@ -13,7 +23,12 @@ export async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerat
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (value) buf += dec.decode(value, { stream: !done });
+      if (value) {
+        total += value.byteLength;
+        if (limits.maxTotalBytes && total > limits.maxTotalBytes) throw new SseLimitError(limits.maxTotalBytes);
+        buf += dec.decode(value, { stream: !done });
+        if (limits.maxEventBytes && buf.length + data.reduce((n, x) => n + x.length, 0) > limits.maxEventBytes) throw new SseLimitError(limits.maxEventBytes);
+      }
       let nl: number;
       while ((nl = buf.search(/\r\n|\n|\r/)) >= 0) {
         if (!done && buf[nl] === "\r" && nl === buf.length - 1) break; // a CR at the end of a chunk may be the first half of CRLF

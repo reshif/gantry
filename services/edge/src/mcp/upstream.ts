@@ -48,8 +48,13 @@ export interface Upstream {
   close(): Promise<void>;
 }
 
+/** The largest answer the edge reads from a registered MCP server (one JSON body, or one stream event). A hostile server cannot fill the edge's memory inside the timeout. */
+export const MAX_RESPONSE_BYTES = 1024 * 1024;
+
 export interface UpstreamOptions {
   timeoutMs: number;
+  /** Cap on one answer from the server (default MAX_RESPONSE_BYTES). */
+  maxBytes?: number;
   /** Refuse loopback, link-local and private addresses (the SSRF guard). */
   blockPrivate: boolean;
   /** One guarded agent per gateway, shared by every session. */
@@ -77,6 +82,27 @@ export const redact = (msg: string, secret?: string | null): string => (secret &
 
 interface Rpc { jsonrpc: "2.0"; id?: number | string; method?: string; params?: unknown; result?: unknown; error?: { code: number; message: string; data?: unknown } }
 
+/** Reads a body as text, stopping (and cancelling the transfer) once it passes `max` bytes. */
+async function readCapped(res: { body: { getReader(): ReadableStreamDefaultReader<Uint8Array> } | null }, max: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) {
+      await reader.cancel().catch(() => undefined);
+      const e = new Error(`The answer is larger than ${max} bytes.`);
+      e.name = "ResponseTooLarge";
+      throw e;
+    }
+    parts.push(value);
+  }
+  return Buffer.concat(parts).toString("utf8");
+}
+
 abstract class Base implements Upstream {
   protocolRevision = "";
   serverName = "";
@@ -87,6 +113,7 @@ abstract class Base implements Upstream {
   protected fail(e: unknown): never {
     if (e instanceof UpstreamError) throw new UpstreamError(redact(e.message, this.t.auth.secret), e.kind, e.status, e.rpc);
     const err = e as { name?: string; message?: string; cause?: { message?: string } };
+    if (err?.name === "SseLimitError" || err?.name === "ResponseTooLarge") throw new UpstreamError(`The server's answer is larger than ${Math.round((this.o.maxBytes ?? MAX_RESPONSE_BYTES) / 1024)} KiB; it was cut off.`, "protocol");
     if (err?.name === "TimeoutError" || err?.name === "AbortError") throw new UpstreamError(`The server did not answer within ${Math.round(this.o.timeoutMs / 1000)} s.`, "timeout");
     throw new UpstreamError(redact(`Could not reach the server: ${err?.cause?.message ?? err?.message ?? String(e)}`, this.t.auth.secret), "network");
   }
@@ -139,7 +166,7 @@ class HttpUpstream extends Base {
     }
     const type = res.headers.get("content-type") ?? "";
     if (type.includes("text/event-stream") && res.body) {
-      for await (const ev of sseEvents(res.body as unknown as ReadableStream<Uint8Array>)) {
+      for await (const ev of sseEvents(res.body as unknown as ReadableStream<Uint8Array>, { maxEventBytes: this.o.maxBytes ?? MAX_RESPONSE_BYTES, maxTotalBytes: 4 * (this.o.maxBytes ?? MAX_RESPONSE_BYTES) })) {
         try {
           const m = JSON.parse(ev.data) as Rpc;
           if (m.id === id && (m.result !== undefined || m.error)) return m;
@@ -151,8 +178,9 @@ class HttpUpstream extends Base {
     }
     let parsed: unknown;
     try {
-      parsed = await res.json();
-    } catch {
+      parsed = JSON.parse(await readCapped(res, this.o.maxBytes ?? MAX_RESPONSE_BYTES));
+    } catch (e) {
+      if ((e as { name?: string })?.name === "ResponseTooLarge") throw e;
       throw new UpstreamError("The server answered with something that is not JSON.", "protocol");
     }
     const list = Array.isArray(parsed) ? (parsed as Rpc[]) : [parsed as Rpc];
@@ -186,7 +214,7 @@ class SseUpstream extends Base {
     }
     void (async () => {
       try {
-        for await (const ev of sseEvents(res.body as unknown as ReadableStream<Uint8Array>)) {
+        for await (const ev of sseEvents(res.body as unknown as ReadableStream<Uint8Array>, { maxEventBytes: this.o.maxBytes ?? MAX_RESPONSE_BYTES })) {
           if (ev.event === "endpoint") {
             const u = new URL(ev.data, this.t.url);
             // The credential goes only where the server was registered.
