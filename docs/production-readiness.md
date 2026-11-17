@@ -229,7 +229,7 @@ Prompt-injection area. Each row names the regression test that fails without the
 
 Owner decisions taken with the safe default:
 
-- **Gates with no evidence wait for a person.** G1f and G4 ship with no approvers (they were automatic), so a work order with no research note, or with no GitHub check runs for its pull request, now waits at the gate until someone with the right decides it, or a Factory Admin overrides. Add approvers to those gates if you want them human-decided; otherwise the flow only moves on real evidence. A check that arrives after the gate opened does not reopen it (a new head commit does).
+- **Gates with no evidence wait for a person.** G1f and G4 ship with no approvers (they were automatic), so a work order with no research note, or with no GitHub check runs for its pull request, now waits at the gate until someone with the right decides it, or a Factory Admin overrides. Add approvers to those gates if you want them human-decided; otherwise the flow only moves on real evidence. A required check that finishes after the gate opened makes an unvoted G4 read the results again, so CI arriving late still lets it pass without a person.
 - **The test shell is a short list of test commands.** An agent that needs another command (for example `make test`) must have it named in an explicit tool allow-list.
 - **Not done:** a deny rule passed to the runner (`--disallowedTools`) as a second layer for forbidden paths, and a `maxDiff` refusal at publish (a diff over the limit goes to a person at the gate instead). `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` has not been checked against the pinned CLI build.
 
