@@ -65,6 +65,8 @@ const SELF_AUTHORIZING: Record<string, Probe> = {
   "/api/v1/workspace/operator": { why: "stuck work is limited to projects where the person may act (decide wo.park); spend by person needs people.view", expect: "empty" },
   "/api/v1/workspace/search": { why: "search results are filtered to what the person can read; a query under two characters is refused", expect: "empty", query: "?q=payments" },
   "/api/v1/workspace/threads/:key/export": { why: "chatAccess / project visibility decide who may read; an unreadable thread is a 404", expect: "refuse", params: { key: "x" } },
+  "/api/v1/work-orders/:id/session/people": { why: "woOf(): visible project, then canTalk on the work order before any name is offered", expect: "refuse", params: { id: "$wo" }, query: "?q=an" },
+  "/api/v1/access-requests": { why: "lists only the projects where the caller holds project.members; an empty set for anyone else", expect: "empty" },
   "/api/v1/work-order-sessions": { why: "list filtered to visible projects", expect: "empty" },
   "/api/v1/repos/:id/onboarding/pr": { why: "repoOf(): the repo's project must be visible", expect: "refuse", params: { id: "$repo" } },
   "/api/v1/repos/:id/onboarding/session": { why: "repoOf(): the repo's project must be visible", expect: "refuse", params: { id: "$repo" } },

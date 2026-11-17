@@ -6,6 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { api, get } from "../../api/client";
+import { qk } from "../../api/keys";
 
 export interface Candidate { id: string; name: string; title: string; access: boolean }
 export interface Picked { id: string; name: string }
@@ -23,7 +24,7 @@ export const mentionIds = (text: string, picked: Picked[]): string[] => [...new 
 
 export const useMentionCandidates = (woId: string, query: string | null) =>
   useQuery({
-    queryKey: ["conversations", "mentionable", woId, query],
+    queryKey: qk.convMentionable(woId, query),
     queryFn: () => get<{ people: Candidate[] }>(api(`work-orders/${encodeURIComponent(woId)}/session/people`), { q: query ?? "" }),
     enabled: !!query,
     staleTime: 30_000,

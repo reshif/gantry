@@ -158,6 +158,7 @@ export const qk = {
   woSource: (wo: string, ref: string) => ["workOrders", "source", wo, ref] as const,
   woTimeline: (wo: string) => ["workOrders", "timeline", wo] as const,
   convSessions: (project: string | null) => ["conversations", "sessions", project] as const,
+  convMentionable: (woId: string, query: string | null) => ["conversations", "mentionable", woId, query] as const,
   wsAgents: (wo: string) => ["workspace", "agents", wo] as const,
   cardPreview: (project: string | null | undefined, event: string, template: string, fields: object, actions: string[] | null) => ["cardPreview", project, event, template, fields, actions] as const,
   notifyPreview: (event: string, project: string) => ["notifications", "preview", event, project] as const,
