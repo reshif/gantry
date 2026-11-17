@@ -117,7 +117,7 @@ async function main() {
         await rc.addInitScript(([t, nowMs]) => { try { localStorage.setItem("gantry.prefs", JSON.stringify({ theme: t, project: "payments", recentProjects: ["payments"], pinnedProjects: [], navRail: false })); } catch { /* ignore */ } void nowMs; }, [theme, NOW]);
         const rp = await rc.newPage();
         await rp.clock.install({ time: new Date(NOW) });
-        await rich.installRich(rp);
+        if (route === "signin") await rich.installSignedOut(rp); else await rich.installRich(rp);
         if (real === null) {
           right = await rp.screenshot({ type: "png" }); // the real app has no equivalent screen (see MAP.md)
         } else {
