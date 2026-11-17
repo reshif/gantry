@@ -224,6 +224,9 @@ function InboxBody({ name, close }: { name: string; close: () => void }) {
           <p>Approvals you may give and questions addressed to you appear here.</p>
         </div>
       )}
+      <div className="pop-foot">
+        <button type="button" className="btn btn-sm" id="inbox-open-page" onClick={() => { close(); navigate("inbox"); }}>Open Inbox</button>
+      </div>
     </div>
   );
 }

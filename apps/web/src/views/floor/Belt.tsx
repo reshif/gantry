@@ -3,15 +3,18 @@
  * between them, ending in Shipped, with the bays (work that left the line) underneath. The line never wraps
  * back on itself, and every gate has room for its full name, state and who must act (docs/ui/design-system.md §1).
  */
-import { Fragment, useState, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { DAY, approvalText, flowOf, gateDef, gateExplain, gateKind, gateKindText, gateStateText, gateTitle, route as routeOf, routeGates as routeGatesOf, fmt, type Gate } from "@gantry/domain";
-import { useAgents, useMcpServers, useMe } from "../../api/queries";
-import { Btn } from "../../ui/primitives";
+import { useAgents, useMe } from "../../api/queries";
+import { Btn, Field, FilterBar, SearchBox, Select } from "../../ui/primitives";
+import { useActors } from "../../ui/actors";
+import { navigate } from "../../lib/router";
+import { useOpenTraveler } from "../../shell/useTraveler";
 import { Icon } from "../../ui/Icon";
 import { updatePrefs, usePrefs } from "../../lib/prefs";
 import { ClassChip, classOf } from "../projects/kit";
 import {
-  FloorCtx, WoToken, bayName, gateHaveNeed, mcpFor, gateOfStation, gateStateOf, isLive, layoutFor, openEntry, since, stationIdx, useFloorCtx, type FWo,
+  FloorCtx, WoToken, assigneeOf, bayName, gateHaveNeed, gateOfStation, gateStateOf, gateText, isLive, layoutFor, openEntry, since, stationIdx, useFloorCtx, type FWo,
 } from "./kit";
 
 /* ---------- gates ---------- */
@@ -60,6 +63,7 @@ export function GateNode({ gid, onOpen, gates }: { gid: string; onOpen: (gid: st
         <span className="gate-shape" aria-hidden="true">
           <span className="gate-count">{gs.state === "waiting" ? String(count) : gs.state === "failing" ? "!" : gs.state === "off" ? "–" : "✓"}</span>
         </span>
+        <span className="fl-gate-short" aria-hidden="true">{g.name.split(" ")[0]}</span>
         <span className="gate-label mono">{g.label}</span>
       </button>
       <span className="fl-gate-cap">
@@ -77,40 +81,7 @@ export function GateNode({ gid, onOpen, gates }: { gid: string; onOpen: (gid: st
   );
 }
 
-/* ---------- stations ---------- */
-
-function Staffing({ sid }: { sid: string }) {
-  const ctx = useFloorCtx();
-  const agents = useAgents().data;
-  const mcp = useMcpServers().data;
-  const st = ctx.cat.stations.find((s) => s.id === sid);
-  if (!st) return null;
-  const ag = agents?.find((a) => a.id === st.agent);
-  const n = mcpFor(ctx.project, sid, mcp).length;
-  const g = gateOfStation(ctx.cat, ctx.project, sid);
-  const human = g && gateKind(ctx.cat, ctx.project, g.id) !== "auto" && (ctx.project.flow.gates[g.id]?.enabled || g.id === "G0G1");
-  return (
-    <div className="fl-staff" title={`Agent: ${ag?.name ?? st.agent}. ${n} MCP servers allowed here.${human && g ? ` ${gateKindText(gateKind(ctx.cat, ctx.project, g.id))} gate: ${g.name}.` : ""}`}>
-      <span className="fl-glyph" title={`Agent: ${ag?.name ?? st.agent}`}>
-        <Icon name="agent" />
-        <span className="sr">Agent </span>
-        {ag?.name ?? st.agent}
-      </span>
-      <span className="fl-glyph" title={`${n} MCP servers allowed here`}>
-        <Icon name="tool" />
-        <span className="sr">MCP servers </span>
-        {String(n)}
-      </span>
-      {human && g ? (
-        <span className="fl-glyph is-human" title={gateExplain(g, gateKind(ctx.cat, ctx.project, g.id))}>
-          <Icon name="human" />
-          <span className="sr">{`${gateKindText(gateKind(ctx.cat, ctx.project, g.id))} gate, `}</span>
-          {g.name}
-        </span>
-      ) : null}
-    </div>
-  );
-}
+/* ---------- the line: stations across, work orders down ---------- */
 
 function haltedRepoName(ctx: ReturnType<typeof useFloorCtx>, w: FWo): string | null {
   const r = ctx.repos.find((x) => x.id === w.repo);
@@ -118,69 +89,132 @@ function haltedRepoName(ctx: ReturnType<typeof useFloorCtx>, w: FWo): string | n
   return r?.halted ? r.name : null;
 }
 
-function StationCard({ sid, onStation, route, name }: { sid: string; onStation: (sid: string) => void; route: string[] | null; name: string }) {
-  const bypassed = !!route && !route.includes(sid);
+/** Column head of one station: name, its limit, who staffs it, what is in it, and the gate after it. */
+function StationHead({ sid, onStation, onGate, gates, bypassed }: { sid: string; onStation: (sid: string) => void; onGate: (gid: string) => void; gates: string[] | null; bypassed: boolean }) {
   const ctx = useFloorCtx();
-  const L = layoutFor(ctx.cat, ctx.project);
+  const agents = useAgents().data;
   const st = ctx.cat.stations.find((s) => s.id === sid);
   const conf = ctx.project.flow.stations[sid];
   if (!st || !conf) return null;
   const i = stationIdx(ctx.cat, sid);
   const here = ctx.wos.filter((w) => w.station === i && !w.bay && w.state !== "done");
   const live = here.filter(isLive);
-  const show = [...live, ...here.filter((w) => w.state === "killed")];
   const over = conf.enabled && live.length > conf.wip;
-  const max = 4;
+  const ag = agents?.find((a) => a.id === st.agent);
+  const g = gateOfStation(ctx.cat, ctx.project, sid);
   const holders = ctx.floor.slots.holders;
+  const slotTotal = ctx.project.flow.slots;
   const busyFor = (n: number): string | null => {
-    if (ctx.replay) {
-      const list = ctx.wos.filter((w) => w.station === stationIdx(ctx.cat, "build") && !w.bay && w.state === "running").slice(0, ctx.project.flow.slots);
-      return list[n - 1]?.id ?? null;
-    }
+    if (ctx.replay) return ctx.wos.filter((w) => w.station === stationIdx(ctx.cat, "build") && !w.bay && w.state === "running").slice(0, slotTotal)[n - 1]?.id ?? null;
     return holders.find((h) => h.slot === n)?.wo ?? null;
   };
   const queued = ctx.wos.filter((x) => x.bay === "queue" && isLive(x)).length;
-  /* Nothing here: a slim row (number, name, wip, agent) with no token area. Stations with work, and the build slots, keep the full card. */
-  const idle = !show.length && sid !== "build";
+  const used = Array.from({ length: slotTotal }, (_, k) => busyFor(k + 1)).filter(Boolean).length;
+  const idle = !live.length && sid !== "build";
   return (
-    <section className={`fl-st${conf.enabled ? "" : " is-off"}${idle ? " is-idle" : ""}${over ? " is-over" : ""}${sid === "build" ? " is-build" : ""}${bypassed ? " is-bypassed" : ""}`} data-station={sid} style={{ "--o": L.order[sid] } as CSSProperties} aria-label={`${st.no} ${st.name}`}>
+    <div className={`fl-st fl-st-col${conf.enabled ? "" : " is-off"}${idle ? " is-idle" : ""}${over ? " is-over" : ""}${sid === "build" ? " is-build" : ""}${bypassed ? " is-bypassed" : ""}`} data-station={sid}>
       <button type="button" className="fl-st-head" id={`floor-st-${sid}`} aria-label={`${st.no} ${st.name}: ${live.length} in progress, limit ${conf.wip}. Open station details`} onClick={() => onStation(sid)}>
         <span className="fl-st-no mono">{st.no}</span>
         <span className="fl-st-name">{st.name}</span>
-        <span className={`fl-wip mono${over ? " is-over" : ""}`}>{conf.enabled ? `${live.length}/${conf.wip}` : "off"}</span>
       </button>
-      <Staffing sid={sid} />
-      {!conf.enabled ? <p className="fl-off">Off in this project. Work passes by.</p> : null}
+      <span className={`fl-wip mono${over ? " is-over" : ""}`} title={over ? "Over the WIP limit" : undefined}>{conf.enabled ? `WIP ${live.length}/${conf.wip}` : "off"}</span>
+      <span className="fl-agent" title={`Agent: ${ag?.name ?? st.agent}`}>{ag?.name ?? st.agent}</span>
+      {!conf.enabled ? <span className="fl-off faint">Off here. Work passes by.</span> : null}
       {sid === "build" && conf.enabled ? (
         <ul className="fl-slots" aria-label="Coding slots">
-          {Array.from({ length: ctx.project.flow.slots }, (_, k) => {
+          {Array.from({ length: slotTotal }, (_, k) => {
             const wo = busyFor(k + 1);
             return (
-              <li key={k} className={`fl-slot${wo ? " is-busy" : ""}`}>
-                <span className="fl-slot-k">{`coding slot ${k + 1} of ${ctx.project.flow.slots}`}</span>
+              <li key={k} className={`fl-slot${wo ? " is-busy" : ""}`} title={`Coding slot ${k + 1} of ${slotTotal}: ${wo ?? "free"}`}>
+                <span className="fl-slot-dot" aria-hidden="true" />
+                <span className="sr fl-slot-k">{`coding slot ${k + 1} of ${slotTotal}`}</span>
                 <span className="mono fl-slot-v">{wo ?? "free"}</span>
               </li>
             );
           })}
-          {queued ? (
-            <li className="fl-slot is-queue">
-              <span className="fl-slot-k">queue</span>
-              <span className="mono fl-slot-v">{`${queued} waiting`}</span>
-            </li>
-          ) : null}
+          <li className="fl-slot-sum faint">{`${used}/${slotTotal}${queued ? ` · ${queued} waiting` : ""}`}</li>
         </ul>
       ) : null}
-      {idle ? null : (
-        <div className="fl-toks">
-          {show.slice(0, max).map((w) => (
-            <WoToken key={w.id} w={w} idPrefix="floor-tok-" halted={haltedRepoName(ctx, w)} />
-          ))}
-          {show.length > max ? <Btn label={`+${show.length - max} more at ${st.name}`} small kind="ghost" id={`floor-more-${sid}`} onClick={() => onStation(sid)} /> : null}
-          {!show.length && conf.enabled ? <p className="fl-idle">idle</p> : null}
-        </div>
-      )}
-      <span className="fl-bypass" aria-hidden="true">{bypassed ? `${name} skips this station` : ""}</span>
-    </section>
+      {idle && conf.enabled ? <span className="fl-idle faint">idle</span> : null}
+      {g ? <GateNode gid={g.id} onOpen={onGate} gates={gates} /> : null}
+    </div>
+  );
+}
+
+type CellKind = "passed" | "now" | "todo" | "skip";
+
+/** One cell of a work order's row: what happened at this station, from the work order's own history. */
+function Cell({ w, sid, route, onGate }: { w: FWo; sid: string; route: string[]; onGate: (gid: string) => void }) {
+  const ctx = useFloorCtx();
+  const actor = useActors();
+  const j = stationIdx(ctx.cat, sid);
+  const g = gateOfStation(ctx.cat, ctx.project, sid);
+  const onRoute = route.includes(sid);
+  const done = w.state === "done";
+  const kind: CellKind = !onRoute ? "skip" : done || j < w.station ? "passed" : j === w.station ? "now" : "todo";
+  const spent = (w.history ?? []).filter((h) => h.station === sid && h.endedAt != null).reduce((n, h) => n + ((h.endedAt ?? 0) - h.startedAt), 0);
+  const gateOn = !!g && ctx.project.flow.gates[g.id] !== undefined && !ctx.project.flow.gates[g.id]?.absent;
+  const gs = g ? w.gates?.[g.id]?.status : undefined;
+  const waitingHere = !!g && (ctx.replay ? w.replayGate === g.id && w.state === "waiting" : gs === "waiting");
+  const gKind = !g || !gateOn ? "" : waitingHere ? "wait" : gs === "failed" ? "fail" : gs === "passed" || (done && onRoute) || (kind === "passed" && !gs) ? "ok" : "todo";
+  const who = assigneeOf(w);
+  const nowText = w.bay ? bayName(ctx.cat, w.bay) : w.state === "running" ? (who ? actor(who).name.replace(" (agent)", "") : "Working") : w.state === "waiting" ? "Waiting" : w.state === "failed" ? "Failed" : w.state === "blocked" ? "Blocked" : w.state === "killed" ? "Killed" : "";
+  const glyph = w.bay ? "st-park" : w.state === "waiting" ? "st-wait" : w.state === "failed" ? "st-fail" : w.state === "blocked" || w.state === "killed" ? "st-block" : "st-run";
+  return (
+    <div className={`fl-cell fl-cell-${kind}`} data-cell={sid}>
+      {kind === "skip" ? <span className="fl-cell-t faint" title="This class does not use this station">–</span> : null}
+      {kind === "passed" ? (
+        <>
+          <span className="fl-cell-g" aria-hidden="true">✓</span>
+          <span className="fl-cell-t faint">{spent ? fmt.dur(spent) : "done"}</span>
+          <span className="sr">{`passed ${ctx.cat.stations[j]?.name ?? sid}`}</span>
+        </>
+      ) : null}
+      {kind === "now" ? (
+        <span className={`fl-cell-now is-${w.bay ? "park" : w.state}`}>
+          <Icon name={glyph} />
+          <span>{nowText}</span>
+        </span>
+      ) : null}
+      {gKind && g ? (
+        <button type="button" className={`fl-dia fl-dia-${gKind}`} aria-label={`${g.name} for ${w.id}: ${gKind === "wait" ? "waiting" : gKind === "fail" ? "failing" : gKind === "ok" ? "passed" : "not reached"}`} data-tip={`${g.name}${gKind === "wait" ? ": waiting" : ""}`} onClick={() => onGate(g.id)}>
+          <span aria-hidden="true">{gKind === "ok" ? "✓" : gKind === "fail" ? "!" : ""}</span>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function WoRow({ w, line, onGate }: { w: FWo; line: string[]; onGate: (gid: string) => void }) {
+  const ctx = useFloorCtx();
+  const open = useOpenTraveler();
+  const actor = useActors();
+  const route = routeOf(ctx.cat, ctx.project, w.cls);
+  const killed = w.state === "killed";
+  const cls = classOf(ctx.cat, ctx.project, w.cls);
+  const gt = gateText(ctx, w);
+  const halted = haltedRepoName(ctx, w);
+  const a = assigneeOf(w);
+  const st = ctx.cat.stations[w.station];
+  return (
+    <li className={`fl-row${killed ? " is-killed" : ""}${halted ? " is-halted" : ""}`} data-wo={w.id}>
+      <div className="fl-row-main">
+        <button type="button" className="fl-row-open" id={`floor-tok-${w.id}`} aria-label={`${w.id}, ${w.title}, ${cls.name}, ${gt.t}`} onClick={() => open(w.id)}>
+          <span className="mono strong fl-row-id">{w.id}</span>
+          <span className="fl-row-title">{w.title}</span>
+        </button>
+        <span className="fl-row-meta">
+          <ClassChip cls={cls} small />
+          <span className={`chip wo-prio wo-prio-${w.priority}`}>{w.priority}</span>
+          <span className={`fl-row-note${gt.c ? ` is-${gt.c}` : ""}`}>{w.state === "running" && a ? `${actor(a).name.replace(" (agent)", "")} working` : gt.t}</span>
+          {halted ? <span className="chip chip-block" title={`${halted} is halted (andon)`}>{`${halted} halted`}</span> : null}
+        </span>
+        <span className="fl-row-where muted small">{w.bay ? bayName(ctx.cat, w.bay) : `At ${st?.name ?? ""}`}</span>
+      </div>
+      <div className="fl-cells">
+        {line.map((sid) => <Cell key={sid} w={w} sid={sid} route={route} onGate={onGate} />)}
+      </div>
+    </li>
   );
 }
 
@@ -244,7 +278,7 @@ function Shipped() {
 
 /* ---------- the belt ---------- */
 
-function useBeltStatus(): { cls: string; label: string; icon: string } {
+export function useBeltStatus(): { cls: string; label: string; icon: string } {
   const ctx = useFloorCtx();
   const me = useMe();
   const p = ctx.project;
@@ -296,88 +330,89 @@ function RoutePill({ id, hover, onHover }: { id: string; hover: string | null; o
 export function Belt({ onStation, onGate }: { onStation: (sid: string) => void; onGate: (gid: string) => void }) {
   const ctx = useFloorCtx();
   const prefs = usePrefs();
-  const me = useMe();
-  const status = useBeltStatus();
   const [hover, setHover] = useState<string | null>(null);
-  const [routesOpen, setRoutesOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [repo, setRepo] = useState("all");
+  const [prio, setPrio] = useState("all");
+  const [routes, setRoutes] = useState(false);
   const p = ctx.project;
   const L = layoutFor(ctx.cat, p);
   const classes = flowOf(ctx.cat, p).classes;
   const activeCls = hover ?? prefs.activeClass;
   const route = activeCls ? routeOf(ctx.cat, p, activeCls) : null;
   const gates = activeCls ? routeGatesOf(ctx.cat, p, activeCls) : null;
-  const name = activeCls ? classOf(ctx.cat, p, activeCls).name : "";
-  const repoHalts = ctx.replay
-    ? Object.keys(ctx.replay.state.haltedRepos).map((id) => ({ name: ctx.repos.find((r) => r.id === id)?.name ?? id, reason: ctx.replay?.state.haltedRepos[id]?.text ?? "" }))
-    : ctx.repos.filter((r) => r.halted).map((r) => ({ name: r.name, reason: r.halted?.reason ?? "" }));
   const line = [...L.top, ...L.bottom];
-
+  const needle = q.trim().toLowerCase();
+  const onLine = ctx.wos
+    .filter((w) => !w.bay && w.state !== "done" && (isLive(w) || w.state === "killed"))
+    .filter((w) => (repo === "all" || w.repo === repo) && (prio === "all" || w.priority === prio) && (!needle || w.id.toLowerCase().includes(needle) || w.title.toLowerCase().includes(needle)))
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
   const legend = (state: string, text: string) => (
     <span key={state} className={`fl-leg gate-${state}`}>
       <span className="fl-leg-d" aria-hidden="true" />
       {text}
     </span>
   );
-  void me;
+  const gatesOn = line.filter((sid) => {
+    const g = gateOfStation(ctx.cat, p, sid);
+    return !!g && !!p.flow.gates[g.id]?.enabled;
+  }).length;
+  const filteredOut = !!needle || repo !== "all" || prio !== "all";
   return (
-    <section className={`fl-belt ${status.cls}${activeCls ? " has-route" : ""}`} id="floor-belt" aria-label={`Belt for ${p.name}. ${status.label}`} data-active={prefs.activeClass ?? ""}>
-      <div className="fl-belt-head">
-        <div className="fl-stamp">
-          <Icon name={status.icon} />
-          <span>{status.label}</span>
-        </div>
-        {repoHalts.length ? (
-          <div className="fl-halts">
-            {repoHalts.map((r) => (
-              <span key={r.name} className="chip chip-block" title={r.reason}>
-                <Icon name="halt" />
-                {` ${r.name} halted`}
-              </span>
-            ))}
+    <section className={`panel fl-belt${activeCls ? " has-route" : ""}`} id="floor-belt" aria-label={`Line for ${p.name}`} data-active={prefs.activeClass ?? ""}>
+      <div className="fl-tools">
+        <FilterBar label="Filter the line" actions={<Btn label="Board and list view" kind="ghost" small id="floor-to-board" onClick={() => { updatePrefs({ floorView: "board" }); navigate("work-orders"); }} />}>
+          <SearchBox id="floor-q" value={q} onChange={setQ} placeholder="Id or title" label="Search the line" />
+          <div className="filters">
+            <Field label="Repo" htmlFor="floor-repo">
+              <Select id="floor-repo" options={[{ value: "all", label: "all" }, ...ctx.repos.map((r) => ({ value: r.id, label: r.name }))]} value={repo} onChange={setRepo} />
+            </Field>
+            <Field label="Priority" htmlFor="floor-prio">
+              <Select id="floor-prio" options={[{ value: "all", label: "any" }, ...["P0", "P1", "P2", "P3"].map((x) => ({ value: x, label: x }))]} value={prio} onChange={setPrio} />
+            </Field>
           </div>
-        ) : null}
+          <Btn label="Routes by class" icon="branch" id="floor-routes-toggle" aria-expanded={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
+        </FilterBar>
         <div className="fl-legend" aria-label="Gate legend">
           {legend("clear", "clear")}
           {legend("waiting", "waiting on people")}
           {legend("failing", "failing")}
           {legend("off", "off")}
+          <span className="faint">Only problems are coloured.</span>
+        </div>
+        {routes || prefs.activeClass ? (
+          <div className="fl-routes" id="floor-routes" role="group" aria-label="Class routes. Hover to preview, select to pin">
+            <span className="fl-routes-l">Routes</span>
+            {classes.map((c) => (
+              <RoutePill key={c.id} id={c.id} hover={hover} onHover={setHover} />
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="fl-grid-wrap">
+        <div className="fl-grid" style={{ "--n": line.length } as CSSProperties}>
+          <div className="fl-head" role="group" aria-label="Stations and gates, in order">
+            <div className="fl-head-lbl">Work order</div>
+            {line.map((sid) => (
+              <StationHead key={sid} sid={sid} onStation={onStation} onGate={onGate} gates={gates} bypassed={!!route && !route.includes(sid)} />
+            ))}
+          </div>
+          <div className="fl-sec-h">
+            <span className="fl-sec-t">On the line</span>
+            <span className="chip mono" id="floor-online-count">{String(onLine.length)}</span>
+          </div>
+          {onLine.length ? (
+            <ol className="fl-rows" aria-label="Work orders on the line">
+              {onLine.map((w) => <WoRow key={w.id} w={w} line={line} onGate={onGate} />)}
+            </ol>
+          ) : (
+            <p className="fl-quiet muted small">{filteredOut ? "No work order on the line matches." : "Nothing is moving through the stations right now."}</p>
+          )}
         </div>
       </div>
-      <div className={`fl-routes${routesOpen ? " is-open" : ""}`} role="group" aria-label="Class routes. Hover to preview, select to pin">
-        <button type="button" className="fl-routes-t" id="floor-routes-toggle" aria-expanded={routesOpen ? "true" : "false"} aria-controls="floor-routes-list" onClick={() => setRoutesOpen((o) => !o)}>
-          <span className="fl-routes-l">Routes</span>
-          <span className="fl-routes-r"><span className="mono fl-routes-c">{activeCls ? `${classes.length} · ${name}` : String(classes.length)}</span><span className="fl-routes-chev" aria-hidden="true" /></span>
-        </button>
-        <span className="fl-routes-l fl-routes-lw">Routes</span>
-        <div className="fl-routes-list" id="floor-routes-list">
-          {classes.map((c) => (
-            <RoutePill key={c.id} id={c.id} hover={hover} onHover={setHover} />
-          ))}
-        </div>
-      </div>
-      <ol className="fl-line" aria-label="Stations and gates, in order">
-        {line.map((sid) => {
-          const g = gateOfStation(ctx.cat, p, sid);
-          return (
-            <Fragment key={sid}>
-              <li className="fl-line-item">
-                <StationCard sid={sid} onStation={onStation} route={route} name={name} />
-              </li>
-              {g ? (
-                <li className="fl-line-item fl-line-gate">
-                  <GateNode gid={g.id} onOpen={onGate} gates={gates} />
-                </li>
-              ) : (
-                <li className="fl-line-item fl-line-link" aria-hidden="true" />
-              )}
-            </Fragment>
-          );
-        })}
-        <li className="fl-line-item">
-          <Shipped />
-        </li>
-      </ol>
+      <Shipped />
       <Bays />
+      <p className="fl-foot faint small">{`${line.filter((sid) => p.flow.stations[sid]?.enabled).length} stations and ${gatesOn} gates on · flow version ${ctx.floor.flowVersion}.`}</p>
     </section>
   );
 }

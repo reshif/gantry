@@ -6,6 +6,7 @@ import "./shared.css";
 import "./views/home.css";
 import "./views/floor.css";
 import "./views/workorders.css";
+import "./views/inbox.css";
 import "./views/conversations.css";
 import "./views/onboarding.css";
 import "./views/onboarding-session.css";

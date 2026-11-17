@@ -198,7 +198,7 @@ export function LockNote({ decision, what }: { decision: Decision | null | undef
 export interface TabItem {
   id: string;
   label: ReactNode;
-  count?: number | null;
+  count?: number | string | null;
 }
 
 export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: TabItem[]; active: string; onChange: (id: string) => void; idPrefix?: string }) {

@@ -146,6 +146,7 @@ export const qk = {
   triggerProposalsBy: (status?: string) => ["triggers", "proposals", status] as const,
   woTable: (project: string | null | undefined, params: object) => ["workOrders", "table", project, params] as const,
   woStats: (project: string | null | undefined) => ["workOrders", "stats", project] as const,
+  woSnapshot: (project: string | null | undefined) => ["workOrders", "snapshot", project] as const,
   woIntake: (project: string | null | undefined) => ["workOrders", "intake", project] as const,
   woRecords: (project: string | null | undefined, params: object) => ["workOrders", "records", project, params] as const,
   woApprovers: (wo: string, gate: string) => ["workOrders", "approvers", wo, gate] as const,

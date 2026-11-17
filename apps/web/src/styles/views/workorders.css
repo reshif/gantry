@@ -1,10 +1,17 @@
 /* Work orders view, classification card and route strip (also used by conversations). Tokens only. */
-.wo-toolbar { align-items: flex-end; }
+.wo-bar .filterbar { align-items: flex-start; }
+.wo-bar .wo-filters { flex: 1 1 0; min-width: 0; }
+.wo-foot { display: flex; justify-content: space-between; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-top: 1px solid var(--line); }
 .wo-filters .input { min-width: 0; }
-.wo-filters .field { min-width: 110px; }
-.wo-filters .field:first-child { min-width: 180px; }
-.wo-count { display: flex; gap: 8px; align-items: center; }
-.wo-table .wo-title { min-width: 220px; max-width: 420px; }
+.wo-panel > .panel-body { padding: 0; }
+.wo-panel .tabs { padding: 0 var(--s4); }
+.wo-bar { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+.wo-main { display: grid; gap: 2px; min-width: 200px; }
+.wo-live { margin-top: var(--s3); color: var(--faint); font-size: var(--t-sm); }
+.wo-board { margin-top: var(--s2); }
+.wo-table .dtable-wrap { border: 0; border-radius: 0; box-shadow: none; }
+.callout-info { border-color: var(--accent-line); background: var(--accent-soft); display: flex; gap: var(--s3); align-items: flex-start; }
+.callout-info > .ic { flex: none; margin-top: 2px; color: var(--accent); }
 .wo-table td { white-space: nowrap; }
 .wo-table td.wo-title { white-space: normal; }
 .wo-r-killed .wo-id, .wo-r-killed .wo-title { text-decoration: line-through; color: var(--kill); }
@@ -14,7 +21,7 @@
 .wo-prio { font-family: var(--f-mono); }
 .wo-prio-P0 { background: var(--fail); color: var(--surface); border-color: var(--fail); font-weight: 700; }
 .wo-prio-P1 { border-color: var(--wait); color: var(--wait); background: var(--wait-soft); font-weight: 600; }
-.wo-intake-note { border-color: var(--accent); background: var(--accent-soft); }
+.wo-intake-note { margin-bottom: var(--s4); }
 
 /* route strip */
 .int-route { list-style: none; display: flex; flex-wrap: wrap; align-items: stretch; gap: 3px; margin: 6px 0; }
@@ -47,7 +54,9 @@
 .int-guess { min-height: 20px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; color: var(--ink-2); }
 
 @media (max-width: 560px) {
-  .wo-filters .field, .wo-filters .field:first-child { min-width: calc(50% - var(--s3)); flex: 1 1 40%; }
+  .wo-bar .wo-filters .field { flex: 1 1 calc(50% - var(--s2)); width: auto; }
+  .wo-bar .searchbox { flex: 1 1 100%; }
+  .wo-bar .searchbox .input { width: 100%; }
   .int-cls-top { gap: var(--s3); }
   .int-rs { padding: 2px 5px; }
   .int-rs-n { font-size: 12px; }
@@ -55,7 +64,7 @@
 .wo-view > * { min-width: 0; }
 
 /* round three: shared data table, record link, custom stations in the route strip */
-.wo-table .wo-title { display: inline-block; min-width: 200px; max-width: 420px; white-space: normal; }
+.wo-table .wo-title { display: inline-block; max-width: 420px; white-space: normal; }
 .wo-id.is-killed, .wo-title.is-killed { text-decoration: line-through; color: var(--kill); }
 .wo-cls { display: inline-flex; align-items: center; white-space: nowrap; }
 .wo-acts { display: inline-flex; gap: 2px; }
@@ -95,3 +104,13 @@
   .wo-acts .icon-btn { width: 44px; height: 44px; }
   .wo-acts .icon-btn .ic { width: 18px; height: 18px; }
 }
+.wo-sub { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: 2px; }
+.wo-board-bar { display: flex; justify-content: flex-end; margin-bottom: var(--s3); }
+.wo-group { border-top: 1px solid var(--line); }
+.wo-group-h { margin: 0; padding: var(--s3) var(--s4) var(--s2); font-size: var(--t-md); }
+.wo-cols { position: relative; align-self: flex-end; }
+.wo-cols > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: var(--s2); }
+.wo-cols > summary::-webkit-details-marker { display: none; }
+.wo-cols-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: grid; gap: var(--s2); padding: var(--s3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--shadow-2); }
+.wo-cols-opt { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); }
+.wo-bar .filterbar-end { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: flex-end; }

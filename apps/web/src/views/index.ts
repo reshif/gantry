@@ -4,6 +4,7 @@ import { lazyRetry } from "../lib/errors/lazyRetry";
 
 export const VIEWS: Record<string, LazyExoticComponent<ComponentType>> = {
   home: lazyRetry(() => import("./home")),
+  inbox: lazyRetry(() => import("./inbox")),
   projects: lazyRetry(() => import("./projects")),
   workspace: lazyRetry(() => import("./workspace")),
   console: lazyRetry(() => import("./workspace")),

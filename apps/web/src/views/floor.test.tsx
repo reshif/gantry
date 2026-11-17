@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { updatePrefs } from "../lib/prefs";
 import FloorView from "./floor";
+import WorkOrdersView from "./work-orders";
 import { NOW, PAYMENTS, WOS, floorRead, mockApi, mount, resetApp, type Call } from "./floor/testkit";
 
 beforeEach(() => {
@@ -39,8 +40,9 @@ describe("Floor: belt", () => {
     expect(document.querySelector('[data-bay="person"] [data-wo="WO-2409"]')).toBeTruthy();
     expect(document.querySelector(".fl-ship-h")?.textContent).toMatch(/Shipped/);
     // figures
-    expect(screen.getByText("Work in flight").nextElementSibling?.textContent).toBe(String(live.length));
-    expect(screen.getByText("Coding slots").nextElementSibling?.textContent).toBe("2/2");
+    const figure = (label: string) => screen.getByText(label).closest(".stat-tile")?.querySelector(".stat-val")?.textContent;
+    expect(figure("Work in flight")).toBe(String(live.length));
+    expect(figure("Coding slots")).toBe("2/2");
   });
 
   it("names each gate first, with its code, kind and how many approvals it needs and from whom", async () => {
@@ -74,7 +76,7 @@ describe("Floor: belt", () => {
     expect(g.querySelector("button.gate")?.getAttribute("aria-label")).toMatch(/turned off in this project/);
   });
 
-  it("renders stations with no work as slim rows and keeps full cards for stations with work", async () => {
+  it("draws a station with no work faintly (name, limit, agent, idle) and keeps the build station's slots", async () => {
     const one = WOS.filter((w) => w.station === 3 && !w.bay).slice(0, 1);
     mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ workOrders: one, gates: [] }) }) });
     mount(<FloorView />);
@@ -83,15 +85,15 @@ describe("Floor: belt", () => {
     const idle = stations.filter((e) => e.classList.contains("is-idle"));
     expect(idle.length).toBeGreaterThan(0);
     for (const e of idle) {
-      expect(e.querySelector(".fl-toks")).toBeNull();
-      expect(e.querySelector(".fl-idle")).toBeNull();
+      expect(e.querySelector(".fl-idle")).toBeTruthy();
       expect(e.querySelector(".fl-st-no")).toBeTruthy();
       expect(e.querySelector(".fl-st-name")).toBeTruthy();
       expect(e.querySelector(".fl-wip")).toBeTruthy();
-      expect(e.querySelector(".fl-staff")?.getAttribute("title")).toMatch(/^Agent: /);
+      expect(e.querySelector(".fl-agent")?.getAttribute("title")).toMatch(/^Agent: /);
     }
-    // a station holding work keeps its full card; the build station keeps its slot list
-    for (const e of stations.filter((x) => x.querySelector(".tok"))) expect(e.classList.contains("is-idle")).toBe(false);
+    // the station holding the work is not idle, and the work order has a row on the line
+    expect(document.querySelector('[data-station="design"]')?.classList.contains("is-idle")).toBe(false);
+    expect(document.querySelectorAll(".fl-row")).toHaveLength(one.filter((w) => w.state !== "done").length);
     expect(document.querySelector('[data-station="build"]')?.classList.contains("is-idle")).toBe(false);
     expect(document.querySelector('[data-station="build"] .fl-slots')).toBeTruthy();
   });
@@ -104,7 +106,6 @@ describe("Floor: belt", () => {
     const st = document.querySelector('[data-station="research"]') as HTMLElement;
     expect(st.classList.contains("is-idle") && st.classList.contains("is-off")).toBe(true);
     expect(st.querySelector(".fl-wip")?.textContent).toBe("off");
-    expect(st.querySelector(".fl-toks")).toBeNull();
   });
 
   it("keeps the gate state and who approves in the markup for clear and off gates", async () => {
@@ -123,6 +124,7 @@ describe("Floor: belt", () => {
     mockApi();
     mount(<FloorView />);
     await screen.findByText("Payments Platform");
+    fireEvent.click(document.getElementById("floor-routes-toggle") as HTMLElement);
     fireEvent.click(document.getElementById("floor-route-docs") as HTMLElement);
     expect(document.getElementById("floor-belt")?.classList.contains("has-route")).toBe(true);
     expect(document.querySelector('[data-station="research"]')?.classList.contains("is-bypassed")).toBe(true);
@@ -130,19 +132,17 @@ describe("Floor: belt", () => {
     expect(document.getElementById("floor-route-docs")?.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("lists routes by short class name with the explanation on the pill and a disclosure that counts them", async () => {
+  it("lists routes by short class name with the explanation on the pill, behind the Routes by class toggle", async () => {
     mockApi();
     mount(<FloorView />);
     await screen.findByText("Payments Platform");
-    const docs = document.getElementById("floor-route-docs") as HTMLElement;
-    expect(docs.querySelector(".fl-route-n")?.textContent).toBe("Docs");
-    expect(docs.getAttribute("aria-label")).toMatch(/^Docs: /);
     const toggle = document.getElementById("floor-routes-toggle") as HTMLElement;
-    expect(toggle.querySelector(".fl-routes-c")?.textContent).toMatch(/^\d+$/);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(document.querySelector(".fl-routes")?.classList.contains("is-open")).toBe(true);
+    const docs = document.getElementById("floor-route-docs") as HTMLElement;
+    expect(docs.querySelector(".fl-route-n")?.textContent).toBe("Docs");
+    expect(docs.getAttribute("aria-label")).toMatch(/^Docs: /);
   });
 
   it("opens the gate drawer, shows who may approve and sends a rejection with its reason to the gate instance", async () => {
@@ -193,12 +193,12 @@ describe("Floor: belt", () => {
   });
 });
 
-describe("Floor: board", () => {
+describe("Work orders: board", () => {
+  beforeEach(() => updatePrefs({ floorView: "board" }));
   it("shows a column per station and bay, cards with their gate text, and filters by class", async () => {
     mockApi();
-    mount(<FloorView />);
-    await screen.findByText("Payments Platform");
-    fireEvent.click(document.querySelector("label[for=floor-view-board]") as HTMLElement);
+    mount(<WorkOrdersView />);
+    await screen.findByText("Add idempotency keys to refund endpoint");
     expect(document.querySelectorAll(".fl-col[data-drop]").length).toBe(9 + 5);
     const card = document.querySelector('[data-wo="WO-2400"].fl-card') as HTMLElement;
     expect(card.querySelector(".fl-gt")?.textContent).toMatch(/Plan and security waiting/);
@@ -214,9 +214,8 @@ describe("Floor: board", () => {
     const calls = mockApi({
       "POST /api/v1/work-orders/WO-2401/move": (c) => (c.body?.dry_run ? { body: { ok: true, msg: "Cannot skip stations.", allowed: false, reason: "Cannot skip stations." } } : { body: { ok: true, msg: "moved" } }),
     });
-    mount(<FloorView />);
-    await screen.findByText("Payments Platform");
-    fireEvent.click(document.querySelector("label[for=floor-view-board]") as HTMLElement);
+    mount(<WorkOrdersView />);
+    await screen.findByText("Emit ledger events for failed payouts");
     const card = document.querySelector('[data-wo="WO-2401"].fl-card') as HTMLElement;
     const target = document.querySelector('[data-drop="close"]') as HTMLElement;
     document.elementFromPoint = vi.fn(() => target.querySelector(".fl-col-cards") ?? target);
@@ -240,9 +239,8 @@ describe("Floor: board", () => {
       }),
       "POST /api/v1/work-orders/WO-2401/move": (c) => (c.body?.dry_run ? undefined : { body: { ok: true, msg: "WO-2401 moved to Security hold." } }),
     });
-    mount(<FloorView />);
-    await screen.findByText("Payments Platform");
-    fireEvent.click(document.querySelector("label[for=floor-view-board]") as HTMLElement);
+    mount(<WorkOrdersView />);
+    await screen.findByText("Emit ledger events for failed payouts");
     fireEvent.click(document.getElementById("floor-move-WO-2401") as HTMLElement);
     const refused = await screen.findByRole("menuitem", { name: /S0 Intake/ });
     expect(refused.getAttribute("aria-disabled")).toBe("true");
@@ -271,14 +269,14 @@ describe("Floor: replay", () => {
     });
     mount(<FloorView />);
     await screen.findByText("Payments Platform");
-    fireEvent.click(document.getElementById("floor-replay-enter") as HTMLElement);
+    fireEvent.click(document.querySelector("label[for=floor-mode-replay]") as HTMLElement);
     const bar = await screen.findByRole("region", { name: "Replay controls" });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/projects/payments/floor" && c.query.has("at"))).toBe(true));
     expect(within(bar).getByText("Replay · not live")).toBeTruthy();
     // acting on the past is locked, with the reason
     expect(document.getElementById("floor-new-wo")?.getAttribute("aria-disabled")).toBe("true");
-    expect(document.getElementById("floor-kill")?.getAttribute("aria-disabled")).toBe("true");
-    expect(document.getElementById("floor-kill")?.getAttribute("data-reason")).toMatch(/Replay is showing the past/);
+    expect(document.getElementById("floor-line")?.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById("floor-line")?.getAttribute("data-reason")).toMatch(/Replay is showing the past/);
     // event marks come from the project's event log
     await waitFor(() => expect(document.querySelectorAll(".fl-mk").length).toBeGreaterThan(0));
     expect(document.querySelector(".fl-rp-axis")?.textContent).toMatch(/events marked/);
@@ -296,7 +294,7 @@ describe("Floor: andon and kill", () => {
     });
     mount(<FloorView />);
     await screen.findByText("Payments Platform");
-    fireEvent.click(document.getElementById("floor-andon") as HTMLElement);
+    fireEvent.click(document.getElementById("floor-line") as HTMLElement);
     fireEvent.click(await screen.findByRole("menuitem", { name: /Halt Payments Platform/ }));
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Duplicate refunds seen" } });
     fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
@@ -304,53 +302,26 @@ describe("Floor: andon and kill", () => {
     expect(bodyOf(calls, "POST", "/api/v1/stops")[0]?.body).toMatchObject({ scope: "project", id: "payments", mode: "halt", reason: "Duplicate refunds seen" });
   });
 
-  it("locks Kill project for someone without the right, with the reason", async () => {
+  it("locks Kill project in the Line control menu for someone without the right, with the reason", async () => {
     mockApi({}, { denied: ["kill.project"] });
     mount(<FloorView />);
     await screen.findByText("Payments Platform");
-    await waitFor(() => expect(document.getElementById("floor-kill")?.getAttribute("aria-disabled")).toBe("true"));
-    expect(document.getElementById("floor-kill")?.getAttribute("data-reason")).toMatch(/Factory Admin/);
-    expect(document.getElementById("floor-kill")?.getAttribute("aria-description")).toMatch(/Factory Admin/);
+    await waitFor(() => expect(document.getElementById("floor-line")).toBeTruthy());
+    fireEvent.click(document.getElementById("floor-line") as HTMLElement);
+    const kill = await screen.findByRole("menuitem", { name: /Kill Payments Platform/ });
+    await waitFor(() => expect(kill.getAttribute("aria-disabled")).toBe("true"));
+    expect(kill.getAttribute("data-reason")).toMatch(/Factory Admin/);
   });
 
-  it("locks the Andon cord for someone who may not halt, instead of opening a menu of locked items", async () => {
+  it("locks Halt in the Line control menu for someone who may not halt, with the reason", async () => {
     mockApi({}, { denied: ["line.halt"] });
     mount(<FloorView />);
     await screen.findByText("Payments Platform");
-    await waitFor(() => expect(document.getElementById("floor-andon")?.getAttribute("aria-disabled")).toBe("true"));
-    fireEvent.click(document.getElementById("floor-andon") as HTMLElement);
-    expect(screen.queryByRole("menuitem", { name: /Halt Payments Platform/ })).toBeNull();
+    await waitFor(() => expect(document.getElementById("floor-line")).toBeTruthy());
+    fireEvent.click(document.getElementById("floor-line") as HTMLElement);
+    const halt = await screen.findByRole("menuitem", { name: /Halt Payments Platform/ });
+    await waitFor(() => expect(halt.getAttribute("aria-disabled")).toBe("true"));
+    expect(halt.getAttribute("data-reason")).toMatch(/No role holds it/);
   });
 });
 
-describe("Floor: list", () => {
-  it("lists every work order and sorts by a column", async () => {
-    mockApi();
-    mount(<FloorView />);
-    await screen.findByText("Payments Platform");
-    fireEvent.click(document.querySelector("label[for=floor-view-list]") as HTMLElement);
-    expect(document.querySelectorAll(".fl-table tbody tr").length).toBe(WOS.length);
-    fireEvent.click(document.getElementById("floor-sort-id") as HTMLElement);
-    const ids = Array.from(document.querySelectorAll(".fl-table tbody tr td:first-child")).map((e) => e.textContent);
-    expect(ids).toEqual([...ids].sort());
-    void PAYMENTS;
-  });
-});
-
-describe("Floor: belt layout contract", () => {
-  const css = readFileSync(["src", "apps/web/src"].map((d) => `${process.cwd()}/${d}/styles/views/floor.css`).find((f) => existsSync(f)) ?? "", "utf8");
-  it("keeps station head columns fixed, caps work-order card width and keeps routes on one line", () => {
-    expect(css).toMatch(/\.fl-st \{ --head-w: 260px; display: grid; grid-template-columns: var\(--head-w\)/);
-    expect(css).toMatch(/\.fl-st-head \{[^}]*grid-template-columns: 2\.25rem minmax\(0, 1fr\) 3\.25rem/);
-    expect(css).toMatch(/\.fl-toks \{[^}]*repeat\(auto-fill, minmax\(240px, 320px\)\)/);
-    expect(css).toMatch(/\.fl-routes-list \{[^}]*flex-wrap: nowrap/);
-    expect(css).toMatch(/@container \(max-width: 1000px\)/);
-    expect(css).toMatch(/\.fl-routes\.is-open \.fl-routes-chev/);
-  });
-  it("shows a chevron cue inside the routes toggle", async () => {
-    mockApi();
-    mount(<FloorView />);
-    await screen.findByText("Payments Platform");
-    expect(document.querySelector("#floor-routes-toggle .fl-routes-chev")).not.toBeNull();
-  });
-});

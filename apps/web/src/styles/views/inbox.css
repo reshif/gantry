@@ -1,0 +1,33 @@
+/* Inbox: one list of everything that waits for the person, grouped by kind. Tokens only. */
+.inb-stack { display: grid; gap: var(--s5); min-width: 0; }
+.inb-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3); }
+.inb-bar .panel-title { display: inline-flex; align-items: center; gap: var(--s2); }
+.inb-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
+.inb-sec { display: grid; gap: var(--s2); }
+.inb-hint { margin: 0 0 var(--s2); }
+.inb-list { display: grid; gap: var(--s3); }
+.inb-row { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); min-width: 0; }
+.inb-top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); padding: var(--s3) var(--s4); }
+.inb-main { min-width: 0; display: grid; gap: 2px; }
+.inb-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.inb-title { font-size: var(--t-base); font-weight: 600; margin: 2px 0 0; overflow-wrap: anywhere; }
+.inb-sub { margin: 0; overflow-wrap: anywhere; }
+.inb-links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s2); }
+.inb-status { flex: none; }
+.inb-details { border-top: 1px solid var(--line); padding: var(--s3) var(--s4); }
+.inb-rule { display: grid; gap: var(--s2); }
+.inb-rule-h { font-family: var(--f-mono); font-size: var(--t-xs); letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.inb-rule p { margin: 0; }
+.inb-rule-acts { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.inb-warn { color: var(--block); }
+.inb-actions { display: flex; flex-wrap: wrap; gap: var(--s2); padding: var(--s3) var(--s4); border-top: 1px solid var(--line); }
+.inb-foot { margin: 0; display: inline-flex; align-items: center; gap: var(--s2); color: var(--faint); font-size: var(--t-sm); }
+.inb-foot .ic { width: 12px; height: 12px; }
+@media (max-width: 560px) {
+  .inb-top { flex-direction: column-reverse; }
+  .inb-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .inb-bar { align-items: stretch; }
+  .inb-filters, .inb-filters .seg { max-width: 100%; }
+  .inb-filters .seg { overflow-x: auto; }
+}
+.pop-foot { padding: var(--s2) var(--s3); border-top: 1px solid var(--line); display: flex; justify-content: flex-end; }

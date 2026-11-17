@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 /** Custom properties that are set at runtime through style props, not in CSS. */
-export const RUNTIME_VARS = new Set(["--heat", "--g", "--v"]);
+export const RUNTIME_VARS = new Set(["--heat", "--g", "--v", "--n"]);
 
 /** [foreground, background, minimum ratio, why]. Text pairs 4.5, non-text 3. */
 const TEXT_ON = ["--bg", "--surface", "--panel", "--sunk"];

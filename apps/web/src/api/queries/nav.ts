@@ -12,5 +12,8 @@ export function useNavBadges(): Record<string, NavBadge> {
   const b: Record<string, NavBadge> = { ...(home.data?.badges ?? {}), ...(project ? byProject[project] ?? {} : {}) };
   // The conversations now live in Agents at work: its item carries their badge.
   if (b.conversations && !b.workspace) b.workspace = b.conversations;
+  // The Inbox counts what waits for this person: gate and onboarding approvals, and questions addressed to them.
+  const waiting = (home.data?.approvals?.length ?? 0) + (home.data?.conversations?.length ?? 0);
+  if (waiting && !b.inbox) b.inbox = { n: waiting, label: `${waiting} waiting for you` };
   return b;
 }
