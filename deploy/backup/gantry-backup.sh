@@ -16,8 +16,12 @@
 # SHA256SUMS. It is written under a .partial name and renamed when complete. Secrets are never in a set: the data_key the
 # database's stored secrets are encrypted with is escrowed separately (deploy/PRODUCTION.md, "Keys").
 set -euo pipefail
+# Sets hold full database dumps: owner-only, never world-readable.
+umask 077
 
 ROOT="${GANTRY_BACKUP_DIR:-/backups}"
+# last-backup.json and last-drill.json (no data, only "when and did it pass") go to their own volume, which is all the API mounts.
+STATUS="${GANTRY_BACKUP_STATUS_DIR:-/status}"
 KEEP="${GANTRY_BACKUP_KEEP:-7}"
 AT="${GANTRY_BACKUP_AT:-02:00}"
 DB="${DATABASE_NAME:-gantry}"
@@ -79,7 +83,7 @@ JSON
   (cd "$dir" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS)
   mv "$dir" "$ROOT/$name"
   log "backup $name: done ($(du -sh "$ROOT/$name" | cut -f1), $objects objects)"
-  printf '{"set":"%s","at":"%s","ok":true}\n' "$name" "$(date -u +%FT%TZ)" >"$ROOT/last-backup.json"
+  printf '{"set":"%s","at":"%s","ok":true}\n' "$name" "$(date -u +%FT%TZ)" >"$STATUS/last-backup.json"
   prune
   if [ -n "${MC_HOST_remote:-}" ]; then
     log "backup $name: copying to remote/${GANTRY_BACKUP_REMOTE}"
@@ -149,7 +153,7 @@ drill() {
 
   local secs=$(( $(date +%s) - started )) result
   result="$( [ "$fails" = 0 ] && echo true || echo false )"
-  printf '{"set":"%s","at":"%s","ok":%s,"seconds":%s,"checks":[%s]}\n' "$name" "$(date -u +%FT%TZ)" "$result" "$secs" "$(IFS=,; echo "${checks[*]}")" | tee "$ROOT/last-drill.json" >"$dir/drill-$t.json"
+  printf '{"set":"%s","at":"%s","ok":%s,"seconds":%s,"checks":[%s]}\n' "$name" "$(date -u +%FT%TZ)" "$result" "$secs" "$(IFS=,; echo "${checks[*]}")" | tee "$STATUS/last-drill.json" >"$dir/drill-$t.json"
   log "drill $name: $( [ "$fails" = 0 ] && echo PASSED || echo "FAILED ($fails)" ) in ${secs}s"
   [ "$fails" = 0 ]
 }
@@ -186,7 +190,7 @@ schedule() {
     local wait; wait="$(secs_until "$AT")"
     log "next backup at $AT UTC (in ${wait}s)"
     sleep "$wait"
-    backup || { log "backup failed"; printf '{"at":"%s","ok":false}\n' "$(date -u +%FT%TZ)" >"$ROOT/last-backup.json"; }
+    backup || { log "backup failed"; printf '{"at":"%s","ok":false}\n' "$(date -u +%FT%TZ)" >"$STATUS/last-backup.json"; }
     if [ "${GANTRY_BACKUP_DRILL:-weekly}" = "daily" ] || { [ "${GANTRY_BACKUP_DRILL:-weekly}" = "weekly" ] && [ "$(date -u +%u)" = "7" ]; }; then drill || true; fi
   done
 }
