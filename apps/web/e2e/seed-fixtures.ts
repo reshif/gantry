@@ -102,7 +102,13 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "suites" || path === "agents/suites") return seed.suites;
     if (path === "evals/runs") return seed.eval_runs;
     if (path === "evals/scorecards") return seed.scorecards;
-    if (path === "audit") return page((seed.audit as Array<Record<string, unknown>>).map((e, i) => ({ digest: `d${String(i).padStart(8, "0")}ffff`, prev: `d${String(i + 1).padStart(8, "0")}ffff`, ...e })));
+    if (path === "audit") {
+      const ppl = new Map((seed.people as Array<{ id: string; name: string }>).map((x) => [x.id, x.name]));
+      const items = (seed.audit as Array<Record<string, any>>).slice().sort((x, y) => y.at - x.at).map((e, i, all) => ({ ...e, seq: e.id, actorKind: String(e.actor).startsWith("p-") ? "human" : "system", actorName: ppl.get(e.actor) ?? e.actor, channel: e.via ?? "web", digest: `d${String(e.id).padStart(8, "0")}ffff`, prev: `d${String(all[i + 1]?.id ?? 0).padStart(8, "0")}ffff` }));
+      const count = (k: string) => items.reduce<Record<string, number>>((m, e) => ({ ...m, [e[k]]: (m[e[k]] ?? 0) + 1 }), {});
+      const cats = count("category");
+      return { items, next: null, total: items.length, summary: { entries: items.length, denied: items.filter((e) => e.outcome === "denied").length, changes: items.filter((e) => e.category === "config").length, head: items[0]?.digest ?? "", categories: cats, topics: {}, facets: { outcomes: Object.keys(count("outcome")), channels: ["web", "api"], actors: Object.keys(count("actor")).map((id) => ({ id, name: ppl.get(id) ?? id })) } } };
+    }
     if (path === "signins") return seed.signins;
     if (path === "sessions") return seed.sessions;
     if (path === "policies") return seed.policies;

@@ -556,3 +556,4 @@ textarea.input{height:auto;min-height:84px;padding:8px 10px}
 .row.nowrap{flex-wrap:nowrap}.ppl-find{margin-bottom:12px;max-width:420px}
 .view-workload,.view-workload .panel{min-width:0}.view-workload .wl-main .panel-body{overflow-x:auto}
 .view-access,.view-access .acc-body,.view-access .acc-rules{min-width:0}.view-access .acc-rules{overflow-x:auto}
+.aud-table td .linkish{color:var(--ink);text-decoration:none;font-weight:500}.aud-table td .linkish:hover{color:var(--accent);text-decoration:underline}

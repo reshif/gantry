@@ -8,7 +8,7 @@ import type { SecuritySettings, Session, SignIn } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useMe, usePeople, useSecurity, useSessions, useSignins } from "../api/queries";
-import { Btn, Field, FilterBar, LockNote, Panel, Segmented, Select, Status, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
+import { Btn, Field, FilterBar, LockNote, Panel, Segmented, Select, Stat, StatRow, Status, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -48,13 +48,15 @@ export default function SecurityView() {
 
   return (
     <div className="view view-security">
-      <ViewHead
-        title="Security"
-        sub="Sign-in policy, who can reach Gantry from where, open sessions and the sign-in record. Every change here is audited."
-        meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", "not enforced"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", qState(sessionsQ, () => String(active))], ["Failed sign-ins 24 h", qState(signinsQ, () => String(fails))]]}
-      />
+      <ViewHead title="Security" sub="Who can sign in, how, and from where." />
+      <StatRow id="sec-stats">
+        <Stat label="SSO" value={sec.sso.enforced ? "Enforced" : "Optional"} sub={sec.sso.provider} tone={sec.sso.enforced ? "done" : "wait"} />
+        <Stat label="MFA" value="Not enforced" sub="recorded only" />
+        <Stat label="Session" value={`${sec.sessionHours} h`} sub={`${sec.idleMin} min idle`} />
+        <Stat label="Failed sign-ins" value={qState(signinsQ, () => String(fails))} sub="last 24 h" tone={fails ? "wait" : undefined} />
+      </StatRow>
       {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /><ExplainDenial id="sec-explain" action="security.manage" /></div> : null}
-      <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in" }, { id: "network", label: "Network" }, { id: "sessions", label: "Sessions", count: active }, { id: "history", label: "History", count: signins.length }, { id: "stop", label: "Emergency stop" }]} />
+      <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Authentication" }, { id: "network", label: "Network" }, { id: "sessions", label: "Sessions", count: active }, { id: "history", label: "History", count: signins.length }, { id: "stop", label: "Emergency stop" }]} />
       <div id="sec-tab-panel" role="tabpanel">
         {tab === "network" ? (
           <>
