@@ -28,7 +28,7 @@ The weaknesses are in the shape of the product:
 - **Operations.** The P0 items are done (Wave 5): CI, production Keycloak, a production profile, backups with a restore
   drill, and versioned, signed images. Still missing:
   - no metrics or alerting
-  - documentation for users and admins (the operator guide exists: `deploy/PRODUCTION.md`)
+  - OpenAPI reference (the operator guide `deploy/PRODUCTION.md` and the user and admin guides in `docs/guide/` exist, done 2026-11-16)
 
 ## Wave 0: security holes found today (done, on the working tree)
 
@@ -211,7 +211,7 @@ Remaining (resource limits, a configurable hostname with real TLS, and the upgra
   - audit export to a SIEM
   - data export and erasure
   - admin tools for dead letters
-  - documentation for users, admins and operators, plus OpenAPI
+  - documentation for users and admins is done (2026-11-16): [docs/guide/](guide/README.md) holds a user guide (work orders, the floor, gates and approvals, talking to agents, onboarding a repo, stopping work) and an admin guide (people, roles and teams, access policies, projects, models and vendors, integrations, notifications, API keys, kill switches, audit, backups), written from the current code. Not done: OpenAPI, screenshots, and a revision once the Wave 2 restyle lands
   - self-hosted fonts
 
 ## Wave 6: security team (2026-11-16)
