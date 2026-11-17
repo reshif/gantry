@@ -25,8 +25,9 @@ for name in api worker migrate launcher edge github web runner keycloak backup; 
     # CI builds with buildx `provenance: mode=max`, which stores the SLSA provenance as an attestation manifest inside the image index, and the
     # signature verified above covers that index digest. So: read the provenance from the index and require that it names this repository as the
     # source (a signed image whose provenance names another repository, or has none, is refused).
-    if ! command -v docker >/dev/null; then prov="provenance NOT checked (docker is required)"; fail=1
-    elif docker buildx imagetools inspect "${ref}${digest:+@$digest}" --format '{{json .Provenance}}' 2>/dev/null | grep -qF "https://github.com/${repo}"; then prov="provenance names $repo"
+    # The match is on the structured source fields and exact (deploy/ci/provenance-names-repo.mjs, tested): `<repo>-fork` or a stray mention does not pass.
+    if ! command -v docker >/dev/null || ! command -v node >/dev/null; then prov="provenance NOT checked (docker and node are required)"; fail=1
+    elif docker buildx imagetools inspect "${ref}${digest:+@$digest}" --format '{{json .Provenance}}' 2>/dev/null | node "$(dirname "$0")/ci/provenance-names-repo.mjs" "$repo"; then prov="provenance names $repo"
     else prov="NO provenance for $repo"; fail=1; fi
     printf 'OK    %-16s %s  (%s, %s)\n' "gantry-$name" "${digest:-?}" "$sbom" "$prov"
   else

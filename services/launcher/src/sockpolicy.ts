@@ -289,6 +289,9 @@ export const isHelper = (labels: Record<string, string> | null | undefined): boo
 export function checkHelperCreate(body: unknown, query: URLSearchParams, helperImage: string, uid = 10001): Decision {
   if (!isObj(body)) return deny("The body is not a JSON object.");
   if ([...query.keys()].some((k) => k !== "name")) return deny("Unexpected create parameters.");
+  // The broker names nothing today; if it ever does, the name stays inside the helper namespace so it can never squat a runner's container name.
+  const names = query.getAll("name");
+  if (names.length > 1 || (names.length === 1 && !/^gantry-ws-helper-[A-Za-z0-9_-]{1,40}$/.test(names[0]!))) return deny("A helper's name, when given, is gantry-ws-helper-<id>.");
   if (body.Image !== helperImage) return deny("The helper image is fixed.");
   const keys = new Set(["Image", "Entrypoint", "Cmd", "User", "NetworkDisabled", "Labels", "HostConfig"]);
   const extra = Object.keys(body).find((k) => !keys.has(k));

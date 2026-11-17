@@ -31,6 +31,8 @@ export function checkUrl(url: string): string {
   return u.toString();
 }
 
+// The upstream MCP credential is issued by the third-party server, not chosen by Gantry, and is only ever sent to it (never used to verify a delivery to
+// us), so it keeps a small minimum: a longer one would reject real tokens. Signing secrets that Gantry verifies with are held to 32+ (integrations).
 export function checkAuth(mode: "none" | "bearer" | "header", header: string | null | undefined, secret: string | null | undefined): { header: string | null } {
   if (mode !== "none" && (!secret || secret.length < 6)) throw invalid(`Enter the secret for ${mode === "bearer" ? "the bearer token" : "the API key"} (6 characters or more).`);
   if (mode === "none" && secret) throw invalid("Auth is None, so there is no secret to store.");
