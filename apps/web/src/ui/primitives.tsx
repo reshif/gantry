@@ -325,8 +325,9 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
 }
 
 /** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
-export function ViewHead({ kicker, title, status, sub, meta, actions }: { kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
-  const route = useHash().id || "home";
+export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: { sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+  const hashId = useHash().id || "home";
+  const route = sheet ?? hashId;
   return (
     <header className="ph vhead">
       <div className="title vhead-main">
@@ -402,9 +403,9 @@ export function SearchBox({ id, value, onChange, placeholder = "Search", label }
 }
 
 /** Prototype .panel: drafting corner marks, a header with the section number (counted by CSS per page), a body. */
-export function Panel({ title, children, cls = "", tools, flush }: { title?: ReactNode; children: ReactNode; cls?: string; tools?: ReactNode; flush?: boolean }) {
+export function Panel({ title, children, cls = "", tools, flush, id }: { title?: ReactNode; children: ReactNode; cls?: string; tools?: ReactNode; flush?: boolean; id?: string }) {
   return (
-    <section className={`panel ${cls}`.trim()} aria-label={typeof title === "string" ? title : undefined}>
+    <section id={id} className={`panel ${cls}`.trim()} aria-label={typeof title === "string" ? title : undefined}>
       {title || tools ? (
         <header className="panel-head">
           {title ? <h2 className="panel-title"><span className="sec" aria-hidden="true" />{title}</h2> : <span />}

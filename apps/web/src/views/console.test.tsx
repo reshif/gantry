@@ -502,7 +502,7 @@ describe("Console model picker", () => {
     for (const id of ["con-threads", "con-new", "con-clear"]) expect(document.getElementById(id)).toBeTruthy();
     await waitFor(() => expect([...document.querySelectorAll(".ctx .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
     expect(document.getElementById("con-open-audit")).toBeTruthy();
-    expect([...document.querySelectorAll(".ctx .panel-title")][0]!.textContent).toMatch(/^What .* can do/);
+    expect([...document.querySelectorAll(".ctx .panel-title")][1]!.textContent).toMatch(/^What .* can do/);
   });
 
   it("the status line sits below the header rule: no negative margin pulls it into the heading", () => {

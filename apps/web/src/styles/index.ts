@@ -28,6 +28,7 @@ import "./views/integrations.css";
 import "./views/notifications.css";
 import "./views/api.css";
 import "./views/console.css";
+import "./views/console-page.css";
 import "./views/traveler.css";
 import "./views/documents.css";
 import "./views/workspace.css";

@@ -94,6 +94,9 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     }
     if (path === "activity") return seed.events;
     if (path === "conversations") return page(conversations);
+    if (path === "workspace/inbox") return { items: [] };
+    if (path === "console/status") return { configured: true, vendor: "anthropic", model: "claude-sonnet-5-5", actionsEnabled: false, canUse: true, retentionDays: 90, tools: [], proposals: [], models: [] };
+    if (path === "console/threads") return { items: [], retentionDays: 90 };
     if (path === "people") return seed.people;
     if (path === "teams") return seed.teams;
     if (path === "templates") return seed.templates;

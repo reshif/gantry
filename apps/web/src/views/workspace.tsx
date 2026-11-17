@@ -9,12 +9,13 @@ import { useMe } from "../api/queries";
 import { anyRole, BUILD_READ } from "../lib/routes";
 import { navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Btn, Empty } from "../ui/primitives";
+import { Btn, Empty, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { WoSessionPage } from "./conversations/Session";
 import { SessionPage } from "./onboarding/Session";
 import { ChatPane, toWorkspace } from "./workspace/ChatPane";
 import { Inbox } from "./workspace/Inbox";
+import { AtWork } from "./workspace/AtWork";
 import { NewChatForm } from "./workspace/NewChat";
 import { OperatorPanel } from "./workspace/Operator";
 import { SearchResults } from "./workspace/Search";
@@ -75,6 +76,16 @@ export default function WorkspaceView() {
   };
 
   if (!me) return <div className="view ws-view" />;
+  // No conversation open: the prototype's "Agents at work" page. Conversations keep their own pane under #workspace/inbox.
+  if (!key) {
+    return (
+      <AtWork needs={needs} actions={<>
+        <Btn kind="primary" icon="plus" label="New chat" id="ws-home-new" onClick={newChat} />
+        <Btn icon="chat" label={needs ? `Conversations · ${needs}` : "Conversations"} id="ws-home-inbox" onClick={() => open("inbox")} />
+        {operator ? <Btn label="Operator view" id="ws-home-op" onClick={() => open("operator")} /> : null}
+      </>} />
+    );
+  }
   const main = q ? <SearchResults q={q} onOpen={(k) => open(k)} onClose={() => setQ(null)} />
     : key === "operator" ? <OperatorPanel onOpen={(k) => open(k)} />
     : key?.startsWith("wo:") ? <WoSessionPage key={key} woId={key.slice(3)} back={() => open(null)} embedded />
@@ -87,6 +98,18 @@ export default function WorkspaceView() {
           action={<div className="ws-home-actions"><Btn kind="primary" icon="plus" label="New chat" id="ws-home-new" onClick={newChat} />{operator ? <Btn label="Operator view" id="ws-home-op" onClick={() => open("operator")} /> : null}</div>} />
       </div>
     );
+  // A factory chat (the Console): the prototype's Console page, the conversation beside what the person can do. The chat list is one click away.
+  if (key === "new") {
+    return (
+      <div className="view view-console-page">
+        <ViewHead sheet="console" title="Console" sub="Ask the factory a question in plain language. Answers are read from live work-order state." actions={<>
+          <Btn icon="chat" label={needs ? `Conversations · ${needs}` : "Conversations"} id="ws-console-inbox" onClick={() => open("inbox")} />
+          <Btn kind="primary" icon="plus" label="New chat" id="ws-console-new" onClick={newChat} />
+        </>} />
+        <ChatPane id={null} item={null} page onThread={(id) => navigate("workspace", id)} />
+      </div>
+    );
+  }
   return (
     <div className="view ws-view">
       <div className="ws-grid">

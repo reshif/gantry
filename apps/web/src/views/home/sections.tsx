@@ -1,6 +1,6 @@
 /** The sections of Home. Each renders only what the API put in `home.sections` (built by the caller's rights); none checks a role. */
-import { useEffect, useState, type ReactNode } from "react";
-import { WO_STATES, fmt } from "@gantry/domain";
+import { useState, type ReactNode } from "react";
+import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useMe } from "../../api/queries";
@@ -8,13 +8,13 @@ import { plural } from "../../lib/plural";
 import { hasCommand, runCommand } from "../../lib/commands";
 import { navigate } from "../../lib/router";
 import { setProject, updatePrefs } from "../../lib/prefs";
-import { Btn, Chip, Meter, Panel, Status } from "../../ui/primitives";
+import { Btn, Chip, Empty, Meter, Panel, Status } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { makeStopActions } from "../../shell/stopActions";
 import { useOpenTraveler } from "../../shell/useTraveler";
-import { ClassChip, HealthChip, MiniBelt, classOf, goProject, metricsOf, useCatalog, type PView } from "../projects/kit";
-import { goAttention, STAGE_NAME, type Approval, type AttentionItem, type Conversation, type HomeSections, type MineWo, type SetupStep } from "./data";
+import { HealthChip, MiniBelt, goProject, metricsOf, useCatalog, type PView } from "../projects/kit";
+import { goAttention, STAGE_NAME, type Approval, type AttentionItem, type Conversation, type HomeSections, type SetupStep } from "./data";
 
 /** From Home to the New project wizard on the Projects screen, once that screen has mounted and registered it. */
 export function openNewProject(): void {
@@ -32,11 +32,9 @@ export function openNewProject(): void {
 /** A Home section is one titled card. `id` stays on the wrapper so the page can link to it. */
 function Section({ id, title, count, tools, cls = "", flush, children }: { id: string; title: string; count?: number | undefined; tools?: ReactNode; cls?: string; flush?: boolean; children: ReactNode }) {
   return (
-    <div id={id} className={`hm-sec ${cls}`}>
-      <Panel title={<>{title}{count !== undefined ? <span className="hm-count">{count}</span> : null}</>} tools={tools} flush={!!flush}>
-        {children}
-      </Panel>
-    </div>
+    <Panel id={id} cls={`hm-sec ${cls}`} title={<>{title}{count !== undefined ? <span className="hm-count">{count}</span> : null}</>} tools={tools} flush={!!flush}>
+      {children}
+    </Panel>
   );
 }
 
@@ -102,11 +100,11 @@ function ApprovalRow({ a }: { a: Approval }) {
   const open = useOpenTraveler();
   if (a.repo) {
     return (
-      <li className="hm-my-row">
-        <Icon name="rocket" className="hm-my-ic" />
-        <div className="hm-my-main">
-          <div>{a.note ? `Onboarding update: ${a.repoName}` : `Merge onboarding PR ${a.repoName}#${a.pr}`}</div>
-          <div className="muted small">{a.note ? `${a.projectName} · ${a.note}` : `${a.projectName} · checks green`}</div>
+      <li>
+        <div className="grow">
+          <div className="row"><span className="mono small">{a.note ? "Onboarding" : "PR"}</span><Chip text={a.repoName ?? a.repo} cls="info" /></div>
+          <div className="trunc">{a.note ? `Onboarding update: ${a.repoName}` : `Merge onboarding PR ${a.repoName}#${a.pr}`}</div>
+          <div className="small muted">{a.note ? `${a.projectName} · ${a.note}` : `${a.projectName} · checks green`}</div>
         </div>
         <Btn label={a.note ? "Open session" : "Open onboarding"} small id={`hm-my-onb-${a.repo}`} aria={`${a.note ? "Open session" : "Open onboarding"} for ${a.repoName}`} onClick={() => { if (a.project) setProject(a.project); navigate("onboarding", a.repo); }} />
       </li>
@@ -120,15 +118,13 @@ function ApprovalRow({ a }: { a: Approval }) {
   };
   const verb = gate === "G6" ? "Confirm release" : "Approve";
   return (
-    <li className="hm-my-row">
-      <span className="gate gate-waiting gate-sm" aria-label={`${a.gateName} (${a.gateLabel}): waiting on approvers`}>
-        <span className="gate-shape" aria-hidden="true"><span className="gate-count">{String(a.need !== undefined ? Math.max(1, a.need - (a.have ?? 0)) : 1)}</span></span>
-      </span>
-      <div className="hm-my-main">
-        <div><span className="mono">{wo}</span>{" · " + a.gateName + " · " + a.gateLabel}</div>
-        <div className="muted small">{`${a.title} · ${a.projectName}${a.need !== undefined ? ` · ${a.have ?? 0} of ${plural(a.need, "approval")}` : ""}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`}</div>
+    <li>
+      <div className="grow">
+        <div className="row"><span className="mono small">{wo}</span><Chip text={a.gateLabel ?? gate} cls="warn" /><span className="small muted">{a.gateName}</span></div>
+        <div className="trunc">{a.title}</div>
+        <div className="small muted">{`${a.projectName}${a.need !== undefined ? ` · ${a.have ?? 0} of ${plural(a.need, "approval")}` : ""}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`}</div>
       </div>
-      <div className="hm-my-acts">
+      <div className="row">
         <Btn label="Review" small kind="ghost" id={`hm-my-open-${wo}-${gate}`} aria={`Review ${wo} at ${a.gateLabel}`} onClick={() => open(wo)} />
         {gate === "G0G1" ? null : <Btn label={verb} small kind="primary" id={`hm-my-ok-${wo}-${gate}`} aria={`${verb} ${wo} at ${a.gateLabel}`} onClick={() => void approve()} />}
       </div>
@@ -140,23 +136,23 @@ export function WaitingOnYou({ approvals, conversations }: { approvals: Approval
   const total = approvals.length + conversations.length;
   const sorted = approvals.slice().sort((a, b) => (b.waitMs ?? 0) - (a.waitMs ?? 0));
   return (
-    <Section id="hm-waiting" title="Waiting on you" count={total} flush={total > 0} tools={total ? <Btn label="Open Inbox" small kind="ghost" id="hm-open-inbox" onClick={() => navigate("inbox")} /> : undefined}>
+    <Section id="hm-waiting" title="Needs you" count={total} flush tools={total ? <Btn label="Open Inbox" small id="hm-open-inbox" onClick={() => navigate("inbox")} /> : undefined}>
       {total ? (
-        <ul className="hm-my-list">
-          {sorted.map((a) => <ApprovalRow key={`${a.wo ?? a.repo}-${a.gate ?? ""}-${a.note ? "n" : ""}`} a={a} />)}
-          {conversations.map((w) => (
-            <li key={w.wo} className="hm-my-row">
-              <Icon name="chat" className="hm-my-ic" />
-              <div className="hm-my-main">
-                <div><span className="mono">{w.wo}</span>{" · " + w.title}</div>
-                <div className="muted small">{w.question || "Confirm the brief or answer the open question."}</div>
+        <ul className="list">
+          {sorted.slice(0, 8).map((a) => <ApprovalRow key={`${a.wo ?? a.repo}-${a.gate ?? ""}-${a.note ? "n" : ""}`} a={a} />)}
+          {conversations.slice(0, Math.max(0, 8 - sorted.length)).map((w) => (
+            <li key={w.wo}>
+              <div className="grow">
+                <div className="row"><span className="mono small">{w.wo}</span><Chip text={w.stuck ? "Needs a person" : "Question"} cls="info" /></div>
+                <div className="trunc">{w.title}</div>
+                <div className="small muted">{w.question || "Confirm the brief or answer the open question."}</div>
               </div>
               <Btn label={w.stuck ? "Open" : "Answer"} small kind="primary" id={`hm-my-conv-${w.wo}`} aria={`${w.stuck ? "Open" : "Answer the question on"} ${w.wo}`} onClick={() => { setProject(w.project); updatePrefs({ openConversation: w.wo }); navigate("conversations"); }} />
             </li>
           ))}
         </ul>
       ) : (
-        <p className="muted hm-quiet">Nothing is waiting on you.</p>
+        <Empty id="hm-quiet" title="You are all caught up" text="Nothing is waiting on you." />
       )}
     </Section>
   );
@@ -216,84 +212,84 @@ export function SetupChecklist({ setup }: { setup: NonNullable<HomeSections["set
 
 /* --------------------------------------------------------- in motion */
 
-function Token({ w, p }: { w: MineWo; p?: PView | undefined }) {
-  const open = useOpenTraveler();
-  const cat = useCatalog();
-  const glyph = (WO_STATES as Record<string, { glyph: string; label: string }>)[w.state] ?? { glyph: "dots", label: w.state };
-  const note = w.state === "running" ? null : w.state === "waiting" ? "waiting on a gate" : w.state === "parked" ? w.bayName ?? "Parked" : w.state === "killed" ? "Killed" : w.state === "blocked" ? "Blocked" : w.state === "failed" ? "Check failed" : w.state === "done" ? "Shipped" : "";
-  return (
-    <button type="button" className={`tok tok-${w.state}`} id={`hm-tok-${w.id}`} data-wo={w.id} aria-label={`${w.id}, ${w.title}, ${glyph.label}${note ? `, ${note}` : ""}`} onClick={() => open(w.id)}>
-      <span className="tok-top">
-        <Icon name={glyph.glyph} className="tok-glyph" />
-        <span className="mono tok-id">{w.id}</span>
-      </span>
-      <span className="tok-title">{w.title}</span>
-      <span className={`tok-foot${w.state === "running" ? "" : " has-note"}`}>
-        {cat && p ? <ClassChip cls={classOf(cat, p, w.cls)} small /> : null}
-        <span className="tok-note">{note}</span>
-      </span>
-    </button>
-  );
-}
-
 export function InMotion({ motion, projects }: { motion: NonNullable<HomeSections["motion"]>; projects: PView[] }) {
   const cat = useCatalog();
-  const open = useOpenTraveler();
   const m = motion;
-  // The belt is the sum of the visible projects' stations: derived from the numbers the Projects list already carries.
+  // The line is the sum of the visible projects' stations: derived from the numbers the Projects list already carries.
   const counts: Record<string, { n: number; blocked: number }> = {};
   for (const p of projects) for (const [k, v] of Object.entries(metricsOf(p).byPosition)) {
     const c = (counts[k] ??= { n: 0, blocked: 0 });
     c.n += v.n;
     c.blocked += v.blocked;
   }
+  for (const [k, n] of Object.entries(m.byStation ?? {})) if (!counts[k]?.n) counts[k] = { n, blocked: counts[k]?.blocked ?? 0 };
   const stations = cat?.stations ?? [];
-  const nonEmpty = stations.filter((s) => (counts[s.id]?.n ?? 0) > 0);
+  const mx = Math.max(1, ...stations.map((s) => counts[s.id]?.n ?? 0));
   const delta = m.shippedWeek - m.shippedPrevWeek;
   return (
-    <Section id="hm-motion" cls="hm-motion" title="In motion" tools={<a href="#floor" className="btn btn-sm btn-ghost" id="hm-open-floor">Open Floor</a>}>
-      {m.inFlight ? (
-        <>
-          <p className="hm-motion-line">{`${plural(m.inFlight, "work order")} in flight · ${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`}</p>
-          {cat ? (
-            <>
-              <div className="hm-belt"><MiniBelt cat={cat} project={null} counts={counts} labels /></div>
-              <ul className="hm-belt-list" aria-label="Work in flight by station">
-                {nonEmpty.map((s) => <li key={s.id}><span>{s.name}</span><span className="mono">{String(counts[s.id]?.n ?? 0)}</span></li>)}
-              </ul>
-            </>
-          ) : null}
-        </>
-      ) : (
-        <p className="muted hm-quiet">No work orders in flight. They appear here once a repo is Ready and work is submitted.</p>
-      )}
-      {m.shippedWeek || m.shippedToday ? (
-        <p className="hm-shipped"><b>Shipped</b> <span>{`${m.shippedToday} today, ${m.shippedWeek} this week`}</span>{m.shippedPrevWeek ? <Status tone={delta >= 0 ? "done" : "wait"}>{`${delta >= 0 ? "+" : "-"}${Math.abs(delta)} vs previous week`}</Status> : null}</p>
-      ) : null}
-      {m.recentDone.length ? (
-        <p className="small hm-recent">
-          <span className="hm-lbl">Recently done </span>
-          {m.recentDone.map((w, i) => (
-            <span key={w.id}>
-              {i ? ", " : ""}
-              <button type="button" className="linkish mono" id={`hm-done-${w.id}`} aria-label={`Open ${w.id}, ${w.title}`} onClick={() => open(w.id)}>{w.id}</button>
-            </span>
-          ))}
-        </p>
-      ) : null}
-      {m.mine.length ? (
-        <div className="hm-mine">
-          <div className="hm-lbl">Your work orders</div>
-          <div className="hm-my-toks">
-            {m.mine.map((w) => (
-              <div key={w.id} className="hm-my-tok">
-                <Token w={w} p={projects.find((x) => x.id === w.project)} />
-                <div className="small muted">{`${w.projectName} · ${w.bay ? w.bayName ?? w.bay : w.station}`}</div>
-              </div>
-            ))}
+    <Section id="hm-motion" cls="hm-motion" title="Line at a glance">
+      {m.inFlight ? <p className="small muted hm-motion-line">{`${plural(m.inFlight, "work order")} in flight · ${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`}</p> : null}
+      {m.inFlight && cat ? (
+        <div className="hbars">
+          <div className="hb-list" aria-label="Work by station">
+            {stations.map((s) => {
+              const c = counts[s.id] ?? { n: 0, blocked: 0 };
+              return (
+                <a key={s.id} className="hb" href="#work-orders" title={`${s.name}: ${c.n}`}>
+                  <span className="hb-n"><span className="mono">{s.no}</span>{" " + s.name}</span>
+                  <span className="hb-bar">
+                    <i style={{ width: `${c.n ? Math.max(3, (c.n / mx) * 100) : 0}%` }} />
+                    {c.blocked ? <i className="bad" style={{ width: `${(c.blocked / mx) * 100}%` }} /> : null}
+                  </span>
+                  <span className="hb-v num">{String(c.n)}</span>
+                </a>
+              );
+            })}
+          </div>
+          <div className="row" style={{ marginTop: 12 }}>
+            <a href="#floor" className="btn" id="hm-open-floor"><Icon name="belt" />Open the Floor</a>
+            <span className="small muted">Bar = work orders at the station; red = stuck.</span>
           </div>
         </div>
+      ) : m.inFlight ? null : (
+        <p className="muted hm-quiet">Nothing is moving yet. Work orders appear here once a repo is Ready and work is submitted.</p>
+      )}
+      {m.shippedWeek || m.shippedToday ? (
+        <p className="hm-shipped small"><b>Shipped</b>{" "}<span>{`${m.shippedToday} today, ${m.shippedWeek} this week`}</span>{m.shippedPrevWeek ? <Status tone={delta >= 0 ? "done" : "wait"}>{`${delta >= 0 ? "+" : "-"}${Math.abs(delta)} vs previous week`}</Status> : null}</p>
       ) : null}
+    </Section>
+  );
+}
+
+/** Recent releases and the person's own work orders, as the prototype's list panel. */
+export function MineAndDone({ motion }: { motion: NonNullable<HomeSections["motion"]> }) {
+  const open = useOpenTraveler();
+  const m = motion;
+  if (!m.recentDone.length && !m.mine.length) return null;
+  return (
+    <Section id="hm-mine" title="Your work orders" flush>
+      <ul className="list">
+        {m.mine.map((w) => (
+          <li key={w.id}>
+            <div className="grow">
+              <div className="row"><span className="mono small">{w.id}</span><Chip text={w.state} cls={w.state === "running" ? "ok" : w.state === "waiting" ? "warn" : w.state === "failed" || w.state === "blocked" ? "bad" : "plain"} /></div>
+              <div className="trunc">{w.title}</div>
+              <div className="small muted">{`${w.projectName} · ${w.bay ? w.bayName ?? w.bay : w.station}`}</div>
+            </div>
+            <Btn label="Open" small id={`hm-tok-${w.id}`} data-wo={w.id} aria={`Open ${w.id}, ${w.title}`} onClick={() => open(w.id)} />
+          </li>
+        ))}
+        {m.recentDone.map((w) => (
+          <li key={w.id}>
+            <div className="grow">
+              <div className="row"><span className="mono small">{w.id}</span><Chip text="Released" cls="ok" /></div>
+              <div className="trunc">{w.title}</div>
+              <div className="small muted">{w.projectName}</div>
+            </div>
+            <Btn label="Open" small kind="ghost" id={`hm-done-${w.id}`} aria={`Open ${w.id}, ${w.title}`} onClick={() => open(w.id)} />
+          </li>
+        ))}
+      </ul>
     </Section>
   );
 }
@@ -312,98 +308,68 @@ export function ProjectsSummary({ rows, projects, factoryWide, readOnlyNote }: {
     .sort((a, b) => (WORST[metricsOf(a.p).health.id] ?? 9) - (WORST[metricsOf(b.p).health.id] ?? 9) || a.p.name.localeCompare(b.p.name));
   if (!list.length) return null;
   return (
-    <section className="hm-projects" id="hm-projects" aria-labelledby="hm-projects-h">
-      <div className="hm-projects-head">
-        <h2 className="panel-title" id="hm-projects-h">{factoryWide ? "Projects" : "My projects"}<span className="hm-count">{list.length}</span></h2>
-        <a href="#projects" className="btn btn-sm btn-ghost" id="hm-all-projects">All projects</a>
-      </div>
-      {readOnlyNote ? <p className="callout hm-viewonly"><Icon name="info" /><span><b>View only. </b>You can view these projects. Ask a Project Admin for more access.</span></p> : null}
-      <ul className="hm-proj-grid">
-        {list.slice(0, LIMIT).map(({ r, p }) => (
-          <li key={p.id} className={`hm-proj hk-card-${metricsOf(p).health.id}`}>
-            <div className="hm-proj-head">
-              <div className="hm-proj-name"><span className="mono hm-key">{p.key}</span><h3>{p.name}</h3></div>
-              <HealthChip p={p} />
-            </div>
-            {r.repos.length ? <p className="small hm-proj-onb">{r.repos.map((x) => `${x.name}: ${(STAGE_NAME[x.stage] ?? x.stage).toLowerCase()}`).join(" · ")}</p> : metricsOf(p).health.detail ? <p className="small hm-proj-detail">{metricsOf(p).health.detail}</p> : null}
-            {r.roles.length ? <p className="small hm-proj-roles"><span className="hm-lbl">Your roles here </span>{r.roles.map((x) => <Chip key={x.id} text={x.name} cls="chip-accent" />)}</p> : null}
-            {cat && !r.repos.length ? <MiniBelt cat={cat} project={p} counts={metricsOf(p).byPosition} onStation={() => goProject(p.id, "floor")} /> : null}
-            <div className="hm-proj-actions">
-              {r.repos.length ? <Btn label="Open onboarding" small kind="primary" id={`hm-proj-onb-${p.id}`} aria={`Open onboarding for ${p.name}`} onClick={() => goProject(p.id, "onboarding")} /> : <Btn label="Floor" small icon="belt" id={`hm-my-floor-${p.id}`} aria={`Open the floor for ${p.name}`} onClick={() => goProject(p.id, "floor")} />}
-              <Btn label="Work orders" small kind="ghost" id={`hm-my-wos-${p.id}`} aria={`Work orders in ${p.name}`} onClick={() => goProject(p.id, "work-orders")} />
-            </div>
-          </li>
-        ))}
-      </ul>
-      {list.length > LIMIT ? <p className="small muted hm-more">{`${list.length - LIMIT} more on the `}<a href="#projects" className="linkish">Projects page</a>.</p> : null}
+    <section className="hm-projects" id="hm-projects">
+      <Panel title={<>{factoryWide ? "Projects" : "My projects"}<span className="hm-count">{list.length}</span></>} tools={<a href="#projects" className="btn sm" id="hm-all-projects">All projects</a>}>
+        {readOnlyNote ? <p className="callout hm-viewonly"><Icon name="info" /><span><b>View only. </b>You can view these projects. Ask a Project Admin for more access.</span></p> : null}
+        <ul className="card-grid hm-proj-grid" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {list.slice(0, LIMIT).map(({ r, p }) => (
+            <li key={p.id} className={`card hm-proj hk-card-${metricsOf(p).health.id}`}>
+              <div className="row">
+                <span className="mono small hm-key" style={{ border: "1px solid var(--accent)", color: "var(--accent)", padding: "0 6px" }}>{p.key}</span>
+                <h3 className="grow">{p.name}</h3>
+                <HealthChip p={p} />
+              </div>
+              {r.repos.length ? <p className="small muted hm-proj-onb">{r.repos.map((x) => `${x.name}: ${(STAGE_NAME[x.stage] ?? x.stage).toLowerCase()}`).join(" · ")}</p> : metricsOf(p).health.detail ? <p className="small muted hm-proj-detail">{metricsOf(p).health.detail}</p> : null}
+              {r.roles.length ? <p className="small hm-proj-roles"><span className="hm-lbl">Your roles here </span>{r.roles.map((x) => <Chip key={x.id} text={x.name} cls="info" />)}</p> : null}
+              {cat && !r.repos.length ? <MiniBelt cat={cat} project={p} counts={metricsOf(p).byPosition} onStation={() => goProject(p.id, "floor")} /> : null}
+              <div className="row">
+                {r.repos.length ? <Btn label="Open onboarding" small kind="primary" id={`hm-proj-onb-${p.id}`} aria={`Open onboarding for ${p.name}`} onClick={() => goProject(p.id, "onboarding")} /> : <Btn label="Floor" small kind="primary" icon="belt" id={`hm-my-floor-${p.id}`} aria={`Open the floor for ${p.name}`} onClick={() => goProject(p.id, "floor")} />}
+                <Btn label="Work orders" small id={`hm-my-wos-${p.id}`} aria={`Work orders in ${p.name}`} onClick={() => goProject(p.id, "work-orders")} />
+              </div>
+            </li>
+          ))}
+        </ul>
+        {list.length > LIMIT ? <p className="small muted hm-more">{`${list.length - LIMIT} more on the `}<a href="#projects" className="linkish">Projects page</a>.</p> : null}
+      </Panel>
     </section>
   );
 }
 
 /* ----------------------------------------------------- factory health */
 
-const OPEN_KEY = "gantry.home.health.open";
-const readOpen = (): boolean => {
-  try {
-    return localStorage.getItem(OPEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-};
-
 export function FactoryHealth({ health }: { health: NonNullable<HomeSections["health"]> }) {
-  const [open, setOpen] = useState(readOpen);
-  useEffect(() => {
-    try {
-      localStorage.setItem(OPEN_KEY, open ? "1" : "0");
-    } catch {
-      /* private window: the state just is not remembered */
-    }
-  }, [open]);
   const { spend, evals } = health;
   const bad = evals?.failing.length ?? 0;
-  const summary = `${spend.spent > 0 ? `${fmt.money0(spend.spent)} of ${fmt.money0(spend.budget)} this month` : "No spend yet"}${evals ? ` · ${evals.passing} of ${evals.scored} live agent versions pass evals` : ""}`;
   return (
-    <section className="panel hm-health" id="hm-health" aria-labelledby="hm-health-h">
-      <h2 className="panel-title hm-health-h" id="hm-health-h">
-        <button type="button" className="hm-health-toggle" id="hm-health-toggle" aria-expanded={open} aria-controls="hm-health-body" onClick={() => setOpen(!open)}>
-          <Icon name="chevron" className={open ? "hm-chev is-open" : "hm-chev"} />
-          <span>Factory health</span>
-          {open ? null : <span className="muted small hm-health-sum">{summary}</span>}
-        </button>
-      </h2>
-      {open ? (
-        <div className="hm-health-body" id="hm-health-body">
-          <div className="hm-health-cols">
-            <div className="hm-health-row">
-              <div className="sub-h">Spend this month</div>
-              {spend.spent > 0 ? (
-                <>
-                  <div>{`${fmt.money0(spend.spent)} of ${fmt.money0(spend.budget)}`}{spend.budget ? <span className="muted">{` (${fmt.pct(spend.spent / spend.budget)})`}</span> : null}</div>
-                  {spend.budget ? <Meter value={spend.spent} max={spend.budget} label="Factory spend this month" warnAt={0.8} /> : null}
-                </>
-              ) : (
-                <div className="muted">No spend yet</div>
-              )}
-            </div>
-            {evals ? (
-              <div className="hm-health-row">
-                <div className="sub-h">Agent evals</div>
-                <div>{`${evals.passing} of ${evals.scored} live agent versions pass their suite threshold (last run)`}</div>
-                {bad ? (
-                  <ul className="hm-eval-fail">
-                    {evals.failing.map((f) => (
-                      <li key={f.agent}><Icon name="alert" /><span>{`${f.name} ${f.version}: ${fmt.pct(f.score)} vs ${fmt.pct(f.threshold)} on ${f.suite}`}</span></li>
-                    ))}
-                  </ul>
-                ) : null}
-                <a href="#evals" className="linkish small">Evals</a>
-              </div>
-            ) : null}
-          </div>
-          {health.audit ? <a href="#audit" className="btn btn-sm hm-audit-link" id="hm-audit-link"><Icon name="ledger" />Audit ledger</a> : null}
+    <Section id="hm-health" cls="hm-health" title="Factory health" tools={health.audit ? <a href="#audit" className="btn sm" id="hm-audit-link"><Icon name="ledger" />Audit ledger</a> : undefined}>
+      <div className="stack">
+        <div className="hm-health-row">
+          <div className="micro">Spend this month</div>
+          {spend.spent > 0 ? (
+            <>
+              <div>{`${fmt.money0(spend.spent)} of ${fmt.money0(spend.budget)}`}{spend.budget ? <span className="muted">{` (${fmt.pct(spend.spent / spend.budget)})`}</span> : null}</div>
+              {spend.budget ? <Meter value={spend.spent} max={spend.budget} label="Factory spend this month" warnAt={0.8} /> : null}
+            </>
+          ) : (
+            <div className="muted">No spend yet</div>
+          )}
         </div>
-      ) : health.audit ? <div className="hm-health-body"><a href="#audit" className="btn btn-sm hm-audit-link" id="hm-audit-link"><Icon name="ledger" />Audit ledger</a></div> : null}
-    </section>
+        {evals ? (
+          <div className="hm-health-row">
+            <div className="micro">Agent evals</div>
+            <div>{`${evals.passing} of ${evals.scored} live agent versions pass their suite threshold (last run)`}</div>
+            {bad ? (
+              <ul className="hm-eval-fail" style={{ listStyle: "none", padding: 0, margin: "6px 0" }}>
+                {evals.failing.map((f) => (
+                  <li key={f.agent} className="row"><Icon name="alert" /><span>{`${f.name} ${f.version}: ${fmt.pct(f.score)} vs ${fmt.pct(f.threshold)} on ${f.suite}`}</span></li>
+                ))}
+              </ul>
+            ) : null}
+            <a href="#evals" className="linkish small">Evals</a>
+          </div>
+        ) : null}
+      </div>
+    </Section>
   );
 }
+

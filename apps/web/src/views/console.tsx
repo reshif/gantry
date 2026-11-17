@@ -65,6 +65,8 @@ export interface ConsoleEmbed {
   threadId: string | null;
   onThread: (id: string) => void;
   header?: ReactNode;
+  /** The Console page: the conversation is drawn as a titled panel beside its context. */
+  page?: boolean;
   aside?: ReactNode;
   readOnly?: string | null;
   agent?: { name: string; about: string } | null;
@@ -358,7 +360,8 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
       {embed ? embed.header : <ViewHead title="Console" status={modeChip} sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you." actions={modePicker} />}
       <div className={`console-grid${embed ? " is-embedded" : ""}`}>
         {embed ? null : <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />}
-        <section className="console-main" aria-label="Conversation">
+        <section className={`console-main${embed?.page ? " panel" : ""}`} aria-label="Conversation">
+          {embed?.page ? <header><h2><span className="sec" aria-hidden="true" />Conversation</h2></header> : null}
           {embed ? null : (
             <div className="con-bar" id="con-bar">
               <div className="con-bar-title"><b>{chatTitle}</b><span className="small muted">{`${threads.data?.items.length ?? 0} saved`}</span></div>
@@ -410,16 +413,16 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
         </section>
         {embed?.aside ?? (
         <aside className="ctx" aria-label="Console context">
+          <Panel title="Pinned work orders">
+            {pinned.length ? <ul className="pins">{pinned.map((id) => <li key={id}><button type="button" className="linkish" id={`con-pin-${id}`} onClick={() => openTraveler(id)}><span className="mono">{id}</span></button>
+              <button type="button" className="icon-btn icon-btn-sm" id={`con-unpin-${id}`} aria-label={`Unpin ${id}`} onClick={() => threadId && void savePinned(threadId, pinned.filter((x) => x !== id)).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) }))}><Icon name="x" /></button></li>)}</ul> : <p className="muted small">Pin a work order from a why card.</p>}
+          </Panel>
           <Panel title={`What ${me.person.name.split(" ")[0]} can do${cur ? ` in ${cur.name}` : ""}`}>
             <div className="con-ctx">
               <Field label="Current project" htmlFor="con-ctx-project"><Select id="con-ctx-project" aria-label="Current project" value={cur?.id ?? ""} onChange={setProject} options={visible.map((x) => ({ value: x.id, label: x.name }))} /></Field>
               {cur ? <div><StateChip state={cur.killed ? "killed" : cur.halted ? "blocked" : "running"} /></div> : null}
             </div>
             <ul className="caps">{CAPS.map(([action, text], i) => { const d = caps[i]!; return <li key={action} className={d.allowed ? "ok" : "no"} tabIndex={0} data-tip={d.reason}><Icon name={d.allowed ? "check" : "lock"} /><span>{text}</span><code className="cap-code mono" title="The permission that governs this action. Admins find it under Govern, Access.">{action}</code></li>; })}</ul>
-          </Panel>
-          <Panel title="Pinned work orders">
-            {pinned.length ? <ul className="pins">{pinned.map((id) => <li key={id}><button type="button" className="linkish" id={`con-pin-${id}`} onClick={() => openTraveler(id)}><span className="mono">{id}</span></button>
-              <button type="button" className="icon-btn icon-btn-sm" id={`con-unpin-${id}`} aria-label={`Unpin ${id}`} onClick={() => threadId && void savePinned(threadId, pinned.filter((x) => x !== id)).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) }))}><Icon name="x" /></button></li>)}</ul> : <p className="muted small">Pin a work order from a why card.</p>}
           </Panel>
           <Panel title="Your console actions">
             {recent.length ? <ul className="mini-log con-log">{recent.map((a) => <li key={a.id}><span className="mono muted">{fmt.ist(a.at)}</span><span>{`${a.action} · ${unmark(a.target)}`}</span><span className={`outcome o-${a.outcome}`}>{a.outcome}</span></li>)}</ul> : <p className="muted small">Actions you confirm here are written to the audit ledger with via console.</p>}

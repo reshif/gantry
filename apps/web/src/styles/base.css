@@ -59,8 +59,6 @@ kbd { font-family: var(--f-mono); font-size: var(--t-xs); border: 1px solid var(
 .btn-sm .ic { width: 14px; height: 14px; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.btn-danger { background: var(--block); border-color: var(--block); color: var(--surface); }
-.btn-danger:hover { filter: brightness(1.08); border-color: var(--block); }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
 .btn-ghost:hover { background: var(--sunk); border-color: transparent; }
 .btn-andon { border-color: var(--block); color: var(--block); background: var(--surface); }

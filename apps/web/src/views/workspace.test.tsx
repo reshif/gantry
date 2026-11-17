@@ -101,7 +101,7 @@ describe("Agents at work", () => {
   };
 
   it("opens on what needs the person, groups the rest by kind, and pins and archives from a row's menu", async () => {
-    window.location.hash = "#workspace";
+    window.location.hash = "#workspace/inbox";
     const calls = show({ "PATCH /api/v1/workspace/threads/wo%3AWO-2": () => ({ body: { ok: true, msg: "Pinned." } }) });
     const inbox = await screen.findByRole("navigation", { name: "Conversations" });
     await waitFor(() => expect(within(inbox).getByRole("tab", { name: /Needs me/ }).getAttribute("aria-selected")).toBe("true"));
@@ -122,7 +122,7 @@ describe("Agents at work", () => {
   });
 
   it("filters by name as the person types, and Enter searches inside messages, documents and sources with the matches marked", async () => {
-    window.location.hash = "#workspace";
+    window.location.hash = "#workspace/inbox";
     show({ "GET /api/v1/workspace/search": (c) => ({ body: { items: c.query.get("q") === "rounding" ? [{ kind: "document", key: "wo:WO-1", ref: "a1", title: "WO-1 · research.md v2", snippet: "the ⟦rounding⟧ is half-up", at: now, rank: 0.5, project: "payments", by: "ag-research" }] : [] } }) });
     const inbox = await screen.findByRole("navigation", { name: "Conversations" });
     fireEvent.click(within(inbox).getByRole("tab", { name: /Active/ }));

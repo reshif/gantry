@@ -1,12 +1,13 @@
 /** Home (#home): one page for everyone. The API decides which sections a person gets (`home.sections`); this renders what is present, in a fixed order: attention, waiting on you, set up, in motion, projects, health. */
 import { useCan } from "../api/can";
 import { useHome, useMe, useProjects } from "../api/queries";
+import { plural } from "../lib/plural";
 import { hasCommand, runCommand } from "../lib/commands";
 import { fmt } from "@gantry/domain";
 import { Btn, Empty, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import type { HomeFull } from "./home/data";
-import { ApproversWatch, AttentionStrip, FactoryHealth, InMotion, ProjectsSummary, SetupChecklist, WaitingOnYou, openNewProject } from "./home/sections";
+import { ApproversWatch, AttentionStrip, FactoryHealth, InMotion, MineAndDone, ProjectsSummary, SetupChecklist, WaitingOnYou, openNewProject } from "./home/sections";
 import type { PView } from "./projects/kit";
 
 export { openNewProject };
@@ -57,11 +58,17 @@ export default function HomeView() {
   const viewerOnly = me.person.roles.length > 0 && me.person.roles.every((g) => g.role === "viewer");
   const m = s.motion;
   const showMotion = !!m && (!s.setup || m.inFlight > 0 || m.recentDone.length > 0 || m.mine.length > 0);
+  const hl = s.health;
+  const evalsPct = hl?.evals && hl.evals.scored ? hl.evals.passing / hl.evals.scored : null;
+  const budgetPct = hl && hl.spend.budget ? hl.spend.spent / hl.spend.budget : 0;
+  const first = me.person.name.split(" ")[0];
+  const greeting = away || (waiting ? `Good day, ${first}. ${plural(waitingN, "work order")} ${waitingN === 1 ? "waits" : "wait"} on a person.` : "What needs you, what is moving, and how the factory is doing.");
+  const hasStats = !!waiting || !!m || !!hl;
   return (
     <div className="view hm">
       <ViewHead
         title="Home"
-        sub={away || "What needs you, what is moving, and how the factory is doing."}
+        sub={greeting}
         actions={
           <>
             {canCreate ? <Btn label="New project" kind="primary" icon="plus" id="hm-new-project" onClick={openNewProject} /> : null}
@@ -69,23 +76,29 @@ export default function HomeView() {
           </>
         }
       />
-      {waiting || s.attention || m ? (
+      {hasStats ? (
         <StatRow id="hm-stats">
-          {waiting ? <Stat id="hm-stat-waiting" label="Waiting on you" value={String(waitingN)} sub={waitingN ? "Approvals and questions for you" : "Nothing is waiting on you"} {...(waitingN ? { tone: "wait" as const } : {})} /> : null}
-          {s.attention ? <Stat id="hm-stat-attention" label="Needs attention" value={String(att.length)} sub={crit ? `${crit} critical` : "None critical"} {...(crit ? { tone: "block" as const } : {})} /> : null}
+          {waiting ? <Stat id="hm-stat-waiting" label="Waiting on you" value={String(waitingN)} sub={waitingN ? "gates and questions for you" : "Nothing is waiting on you"} {...(waitingN ? { tone: "wait" as const } : { tone: "done" as const })} /> : null}
           {m ? <Stat id="hm-stat-flight" label="In flight" value={String(m.inFlight)} sub={`${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`} /> : null}
-          {m ? <Stat id="hm-stat-shipped" label="Shipped this week" value={String(m.shippedWeek)} sub={`${m.shippedToday} today`} /> : null}
+          {m ? <Stat id="hm-stat-shipped" label="Released" value={String(m.shippedWeek)} sub={`this week · ${m.shippedToday} today`} tone="done" /> : null}
+          {evalsPct !== null ? <Stat id="hm-stat-evals" label="Task success" value={fmt.pct(evalsPct)} sub="agent versions passing evals" tone="done" /> : s.attention ? <Stat id="hm-stat-attention" label="Needs attention" value={String(att.length)} sub={crit ? `${crit} critical` : "None critical"} {...(crit ? { tone: "block" as const } : {})} /> : null}
+          {hl && hl.spend.spent > 0 ? <Stat id="hm-stat-spend" label="Spend MTD" value={fmt.money0(hl.spend.spent)} sub={`of ${fmt.money0(hl.spend.budget)} budget`} {...(budgetPct > 0.8 ? { tone: "wait" as const } : {})} /> : null}
         </StatRow>
       ) : null}
-      <div className="hm-stack">
-        {s.attention ? <AttentionStrip items={s.attention} /> : null}
-        {waiting ? <WaitingOnYou approvals={waiting.approvals} conversations={waiting.conversations} /> : null}
-        {s.approvers ? <ApproversWatch data={s.approvers} /> : null}
-        {s.setup ? <SetupChecklist setup={s.setup} /> : null}
-        {showMotion && m ? <InMotion motion={m} projects={projects} /> : null}
-        {s.projects ? <ProjectsSummary rows={s.projects} projects={projects} factoryWide={factoryWide} readOnlyNote={viewerOnly} /> : null}
+      {s.attention ? <AttentionStrip items={s.attention} /> : null}
+      {s.setup ? <SetupChecklist setup={s.setup} /> : null}
+      {waiting || (showMotion && m) ? (
+        <div className="cols w21">
+          {waiting ? <WaitingOnYou approvals={waiting.approvals} conversations={waiting.conversations} /> : null}
+          {showMotion && m ? <InMotion motion={m} projects={projects} /> : null}
+        </div>
+      ) : null}
+      <div className={"cols"} style={{ marginTop: 16 }}>
         {s.health ? <FactoryHealth health={s.health} /> : null}
+        {m ? <MineAndDone motion={m} /> : null}
       </div>
+      {s.approvers ? <div style={{ marginTop: 16 }}><ApproversWatch data={s.approvers} /></div> : null}
+      {s.projects ? <div style={{ marginTop: 16 }}><ProjectsSummary rows={s.projects} projects={projects} factoryWide={factoryWide} readOnlyNote={viewerOnly} /></div> : null}
     </div>
   );
 }
