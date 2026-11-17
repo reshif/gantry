@@ -50,7 +50,7 @@ const headingsOf = (md: string): string[] => {
       continue;
     }
     const m = !fence ? /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line) : null;
-    if (m) out.push(m[1]!.trim());
+    if (m) out.push(m[1]!.replace(/[`*_~]/g, "").trim());
   }
   return out;
 };
@@ -81,7 +81,7 @@ export async function commentOnDocument(tx: Tx, actor: Actor, woId: string, arte
   if (!d) throw refuse("not_found", "No such document on this work order.");
   const text = b.text.trim();
   if (text.length < 1) throw invalid("Write the comment.");
-  const section = (b.section ?? "").trim();
+  const section = (b.section ?? "").replace(/[`*_~]/g, "").trim();
   if (section && !headingsOf(d.body ?? "").includes(section)) throw invalid("That section is not in this version of the document.");
   const id = `DC-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   await tx.query(`insert into wo_doc_comments (org_id, id, wo_id, artefact_id, doc, version, section, body, author, created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [fx.orgId, id, w.id, d.id, d.doc, d.version, section, text, by, fx.now]);

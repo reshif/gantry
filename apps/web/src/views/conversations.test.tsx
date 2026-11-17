@@ -219,6 +219,44 @@ describe("Station questions, assumptions and documents in the session", () => {
     expect(diff.querySelector(".doc-dl.is-del")?.textContent).toContain("Retry lives in sync.py.");
     expect(diff.querySelector(".doc-dl.is-add")?.textContent).toContain("Retry lives in jobs/sync.py.");
   });
+
+  const v1 = { id: "art-1", doc: "research.md", station: "research", version: 1, supersedes: null, authorKind: "agent", authorId: "ag-research", attemptId: "AT1", size: 10, contentHash: "a".repeat(64), createdAt: Date.now() - 5000, acceptedBy: null };
+  const text = "# Research\n\n## Findings\n\nRetry lives in sync.py.\n";
+
+  it("comment on a section, edit the newest version, accept it as the station output", async () => {
+    const ok = (msg: string, extra: object = {}) => () => ({ body: { ok: true, msg, ...extra } });
+    const calls = await showSession(asked(), {
+      [`GET /api/v1/work-orders/${W.id}/documents`]: () => ({ body: { items: [v1] } }),
+      [`GET /api/v1/work-orders/${W.id}/documents/art-1`]: () => ({ body: { ...v1, body: text } }),
+      [`GET /api/v1/work-orders/${W.id}/document-comments`]: () => ({ body: { items: [{ id: "DC-1", artefactId: "art-1", doc: "research.md", version: 1, section: "Findings", body: "Name the file.", author: "p-tomas", status: "open", resolvedBy: null, resolvedAt: null, createdAt: Date.now() }] } }),
+      [`POST /api/v1/work-orders/${W.id}/documents/art-1/comments`]: ok("Comment added."),
+      [`POST /api/v1/work-orders/${W.id}/documents/art-1/edit`]: ok("Saved as version 2.", { id: "art-2" }),
+      [`POST /api/v1/work-orders/${W.id}/documents/art-1/accept`]: ok("Version 1 of research.md is accepted as the station output."),
+      [`POST /api/v1/work-orders/${W.id}/document-comments/DC-1/resolve`]: ok("Comment resolved."),
+    });
+    fireEvent.click(document.getElementById("wos-doc-art-1")!);
+    expect(await screen.findByText("Name the file.")).toBeTruthy();
+    expect(await screen.findByText("Retry lives in sync.py.")).toBeTruthy();
+    // comment on a section of the document
+    const add = document.getElementById("doc-comment-add") as HTMLButtonElement;
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.change(document.getElementById("doc-comment-section")!, { target: { value: "Findings" } });
+    fireEvent.change(document.getElementById("doc-comment-text")!, { target: { value: "Which module?" } });
+    fireEvent.click(add);
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/documents/art-1/comments`)[0]?.body).toEqual({ text: "Which module?", section: "Findings" }));
+    fireEvent.click(document.getElementById("doc-comment-resolve-DC-1")!);
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/document-comments/DC-1/resolve`)).toHaveLength(1));
+    // edit
+    fireEvent.click(document.getElementById("doc-edit")!);
+    const save = document.getElementById("doc-edit-save") as HTMLButtonElement;
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.change(document.getElementById("doc-edit-text")!, { target: { value: `${text}\nIt is in jobs/sync.py.\n` } });
+    fireEvent.click(save);
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/documents/art-1/edit`)[0]?.body).toEqual({ markdown: `${text}\nIt is in jobs/sync.py.\n` }));
+    // accept
+    fireEvent.click(document.getElementById("doc-accept")!);
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/documents/art-1/accept`)).toHaveLength(1));
+  });
 });
 
 describe("Research plan and sources", () => {

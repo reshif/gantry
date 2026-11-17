@@ -117,13 +117,13 @@ function ProposalCard({ m, c, s, agent, send }: { m: WoSessionMessage; c: Propos
 /** Opens a station document in the viewer, in a wide dialog over the conversation. */
 export function useOpenDocument() {
   const ui = useUI();
-  return (woId: string, id?: string) => ui.dialog({ title: "Station documents", kicker: woId, wide: true, body: <DocViewer woId={woId} initial={id} />, actions: [{ label: "Close" }] });
+  return (woId: string, id?: string, project?: string) => ui.dialog({ title: "Station documents", kicker: woId, wide: true, body: <DocViewer woId={woId} initial={id} project={project} />, actions: [{ label: "Close" }] });
 }
 
 function DocLine({ s, c }: { s: WoSession; c: Extract<WoCard, { kind: "document" }> }) {
   const open = useOpenDocument();
   return (
-    <button type="button" className="osx-file wos-doc" id={`wos-doc-${c.id}`} onClick={() => open(s.woId, c.id)}>
+    <button type="button" className="osx-file wos-doc" id={`wos-doc-${c.id}`} onClick={() => open(s.woId, c.id, s.project)}>
       <Icon name="page" />
       <span className="mono">{c.name}</span>
       <span className="muted small">{`version ${c.version}`}</span>
@@ -213,7 +213,7 @@ function SideDialogue({ s }: { s: WoSession }) {
         <section className="wos-side-sec" id="wos-docs">
           <h3 className="sub-h">Documents</h3>
           <ul className="osx-pending">
-            {[...latest.values()].map((d) => <li key={d.doc}><button type="button" className="linkish mono" onClick={() => open(s.woId, d.id)}>{d.doc}</button><span className="small muted">{` · v${d.version}`}</span></li>)}
+            {[...latest.values()].map((d) => <li key={d.doc}><button type="button" className="linkish mono" onClick={() => open(s.woId, d.id, s.project)}>{d.doc}</button><span className="small muted">{` · v${d.version}`}</span></li>)}
           </ul>
         </section>
       ) : null}
