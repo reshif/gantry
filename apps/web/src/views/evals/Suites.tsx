@@ -7,7 +7,8 @@ import { fmt, type Suite } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useActors } from "../../ui/actors";
-import { Btn, Chip, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
+import { Avatar, Btn, Chip, Empty, Field, FilterBar, LockNote, Meter, Panel, SearchBox, Select, type Decision } from "../../ui/primitives";
+import { DataTable, type SortCol } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
@@ -222,36 +223,39 @@ function HeadToHead({ d }: { d: EvalsData }) {
   );
 }
 
+type SuiteTableRow = { su: Suite; agentName: string; agentId: string; cases: number; last: number | null; n: number | null; runs: number };
+
 export function SuitesTab({ d }: { d: EvalsData }) {
   const agentSuite = agentOf(d, evalsUi.agent)?.suite;
+  const [q, setQ] = useState("");
   if (!evalsUi.suite || !suiteOf(d, evalsUi.suite)) evalsUi.suite = (d.suites.find((s) => s.id === agentSuite) ?? d.suites[0])?.id ?? null;
   if (!d.suites.length) return <Empty title="No suites yet" text="Create an agent: it gets a golden set to add cases to." />;
+  const all: SuiteTableRow[] = d.suites.map((su) => {
+    const runs = d.runsOf(su.id);
+    const done = runs.filter((r) => r.status === "completed");
+    const last = done[done.length - 1];
+    const ag = agentOf(d, su.agent);
+    return { su, agentName: ag ? ag.name : su.name, agentId: ag?.id ?? su.agent, cases: su.cases.length, last: last ? last.score : null, n: last ? last.count ?? 0 : null, runs: runs.length };
+  });
+  const term = q.trim().toLowerCase();
+  const rows = all.filter((r) => !term || `${r.su.name} ${r.su.id} ${r.agentName}`.toLowerCase().includes(term));
+  const pick = (r: SuiteTableRow): void => { evalsUi.suite = r.su.id; evalsUi.run = null; evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; rerender(); };
+  const cols: SortCol<SuiteTableRow>[] = [
+    { key: "suite", label: "Suite", sort: (r) => r.su.name.toLowerCase(), render: (r) => <span className="stack" style={{ gap: 0 }}><b className="ell">{r.su.name}</b><span className="mono dim ell" style={{ fontSize: 11 }}>{r.su.id}</span></span> },
+    { key: "agent", label: "Agent", sort: (r) => r.agentName.toLowerCase(), render: (r) => <span className="row nowrap"><Avatar id={r.agentId} size="sm" />{r.agentName}{r.su.builtin ? <Chip text="built-in" cls="agent" /> : null}</span> },
+    { key: "cases", label: "Cases", sort: (r) => r.cases, align: "end", render: (r) => <span className="mono">{r.cases}</span> },
+    { key: "last", label: "Last score", sort: (r) => r.last ?? -1, render: (r) => r.last === null ? <span className="dim">{"\u2013"}</span> : <span className="row nowrap"><span className="mono">{r.last.toFixed(2)}</span><span style={{ width: 100 }}><Meter value={r.last} max={1} label={`${r.su.id} last score`} warnAt={2} /></span><span className="dim mono" style={{ fontSize: 11 }}>{r.last >= r.su.threshold ? "" : "below gate"}</span>{r.n ? <span className="dim mono" style={{ fontSize: 11 }}>{`n=${r.n}`}</span> : null}</span> },
+    { key: "gate", label: "Threshold", sort: (r) => r.su.threshold, align: "end", render: (r) => <span className="mono">{r.su.threshold.toFixed(2)}</span> },
+    { key: "runs", label: "Runs", sort: (r) => r.runs, align: "end", render: (r) => <span className="mono">{r.runs}</span> },
+  ];
   return (
     <div className="ev-suites">
-      <Panel title="Eval suites" flush cls="ev-suites-list">
-        <div className="table-scroll" data-keep-scroll="ev-suites">
-          <table className="table table-compact">
-            <thead><tr>{["Suite", "Cases", "Gate", "Last", "Runs"].map((x, i) => <th key={x} scope="col" className={i >= 1 ? "num" : ""}>{x}</th>)}</tr></thead>
-            <tbody>
-              {d.suites.map((su) => {
-                const runs = d.runsOf(su.id);
-                const done = runs.filter((r) => r.status === "completed");
-                const last = done[done.length - 1];
-                const ag = agentOf(d, su.agent);
-                return (
-                  <tr key={su.id} className={`row-link${evalsUi.suite === su.id ? " is-selected" : ""}`} tabIndex={0} id={`ev-su-${su.id}`} {...rowKeys(() => { evalsUi.suite = su.id; evalsUi.run = null; evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; rerender(); })}>
-                    <td><div className="mono strong ev-suid">{su.id}</div><div className="small muted">{ag ? ag.name : su.name}{su.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</div></td>
-                    <td className="num mono">{su.cases.length}</td>
-                    <td className="num mono">{fmt.pct(su.threshold)}</td>
-                    <td className={`num mono ${last ? (last.score >= su.threshold ? "pos" : "neg") : "muted"}`}>{last ? `${last.score >= su.threshold ? "" : "▼ "}${fmt.pct(last.score)}` : "–"}{last ? <span className="muted small">{` n=${last.count ?? 0}`}</span> : null}</td>
-                    <td className="num mono">{runs.length}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
+      <div className="ev-suites-list" data-keep-scroll="ev-suites">
+        <FilterBar label="Filter suites" count={`${rows.length} of ${all.length}`}>
+          <SearchBox id="ev-search" value={q} onChange={setQ} placeholder="Search suites" />
+        </FilterBar>
+        <DataTable id="ev-su-table" caption="Eval suites" columns={cols} rows={rows} rowKey={(r) => r.su.id} rowId={(r) => `ev-su-${r.su.id}`} onRow={pick} pageSize={12} empty={{ title: "No suites match", text: "Clear the search to see every suite." }} />
+      </div>
       <div className="ev-suites-main"><SuiteDetail d={d} /><HeadToHead d={d} /></div>
     </div>
   );

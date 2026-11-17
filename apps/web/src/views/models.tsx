@@ -21,10 +21,11 @@ import { Callout } from "./models/Callout";
 import { AddVendorDialog } from "./models/Templates";
 import { BudgetsPanel, PricesPanel, VendorBudgets } from "./models/Prices";
 import { RoutingPanel } from "./models/Routing";
+import { ModelCatalog } from "./models/Catalog";
 import { VendorPanel } from "./models/Vendor";
 import { dec } from "./models/kit";
 
-type Tab = "vendors" | "routing" | "prices";
+type Tab = "models" | "vendors" | "routing" | "prices";
 
 export default function ModelsView() {
   const ui = useUI();
@@ -45,14 +46,15 @@ export default function ModelsView() {
   const defaultModel = vendors.flatMap((v) => v.models.map((m) => ({ m, v }))).find((x) => x.m.id === rq.data?.defaultModel);
 
   const hash = useHash();
-  const tab: Tab = hash.id === "models" && (hash.param === "routing" || hash.param === "prices") ? hash.param : "vendors";
-  const setTab = (t: string) => navigate("models", t === "vendors" ? null : t);
+  const tab: Tab = hash.id === "models" && (hash.param === "vendors" || hash.param === "routing" || hash.param === "prices") ? hash.param : "models";
+  const setTab = (t: string) => navigate("models", t === "models" ? null : t);
 
   const scrollTo = (id: string) => setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
 
   return (
     <div className="view view-models">
       <ViewHead
+        kicker="Workforce"
         title="Models"
         sub="Vendors the factory may call, what each costs, where data is processed, and how work is routed between them."
         actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} />}
@@ -63,11 +65,13 @@ export default function ModelsView() {
         <Stat label="Models on" value={qState(vq, () => `${enabledN} of ${allN}`)} />
         <Stat label="Spend this month" value={qState(vq, () => (bud ? `${fmt.money0(mtd)} of ${fmt.money0(bud)}` : fmt.money0(mtd)))} sub="Month to date, against budget" />
       </StatRow>
-      <Tabs idPrefix="md-tab" active={tab} onChange={setTab} items={[{ id: "vendors", label: "Vendors", count: vq.data ? vendors.length : null }, { id: "routing", label: "Routing" }, { id: "prices", label: "Prices and budgets" }]} />
+      <Tabs idPrefix="md-tab" active={tab} onChange={setTab} items={[{ id: "models", label: "Models", count: vq.data ? allN : null }, { id: "vendors", label: "Vendors", count: vq.data ? vendors.length : null }, { id: "routing", label: "Routing" }, { id: "prices", label: "Prices and budgets" }]} />
       <Async query={vq} what="model vendors" id="models">
         {() => (
           <Async query={rq} what="model routing" id="models-routing">
-            {(r) => tab === "vendors" ? (
+            {(r) => tab === "models" ? (
+              <ModelCatalog vendors={vendors} routing={r} agents={agents} />
+            ) : tab === "vendors" ? (
               <>
                 {degraded.length ? (
                   <Callout warn icon="alert" cls="md-incident" role="status">

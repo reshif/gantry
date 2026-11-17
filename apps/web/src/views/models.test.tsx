@@ -92,7 +92,7 @@ const type = (el: HTMLElement, v: string) => fireEvent.change(el, { target: { va
 beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
-  window.location.hash = "";
+  window.location.hash = "#models/vendors";
 });
 afterEach(() => {
   cleanup();
@@ -359,7 +359,7 @@ describe("routing policy", () => {
 });
 
 describe("vendors summary", () => {
-  beforeEach(() => { window.location.hash = "#models"; });
+  beforeEach(() => { window.location.hash = "#models/vendors"; });
   it("counts models on only among connected vendors, and shows a dash where a vendor is not connected", async () => {
     setup({});
     mount();
