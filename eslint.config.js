@@ -3,6 +3,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
+import webArchitecture from "./eslint.config.web.js";
 
 export default tseslint.config(
   { ignores: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "legacy/**", "undefined/**", ".claude/**", "**/*.d.ts"] },
@@ -28,6 +29,7 @@ export default tseslint.config(
     plugins: { "react-hooks": reactHooks },
     rules: { "react-hooks/rules-of-hooks": "error", "react-hooks/exhaustive-deps": "warn" },
   },
+  ...webArchitecture,
   // Tests build fixtures and reach into internals; `any` is allowed there.
   { files: ["**/test/**", "**/*.test.{ts,tsx}", "test/e2e/**"], rules: { "@typescript-eslint/no-explicit-any": "off" } },
   // Browser-side scripts run by playwright (page.evaluate) see the DOM.
