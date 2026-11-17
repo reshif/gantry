@@ -117,7 +117,7 @@ async function shoot(kind, route, w, theme) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: theme, reducedMotion: "reduce", hasTouch: w < 500 });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => console.warn(`[${kind} ${route} pageerror] ${String(e.message).split("\n")[0]}`));
-  page.on("console", (m) => m.type() === "error" && kind === "real" && console.warn(`[real ${route} console] ${m.text().slice(0, 160)}`));
+  page.on("console", (m) => m.type() === "error" && kind === "real" && console.warn(`[real ${route} console] ${m.text().slice(0, 600)}`));
   try {
     if (kind === "proto") {
       await page.route("**/*", async (r) => {

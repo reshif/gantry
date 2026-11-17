@@ -106,6 +106,17 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
       brief: w.brief ?? {}, briefConfirmed: !!w.gates?.G0G1 && w.gates.G0G1.status === "passed", briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false,
     };
   };
+  const approversOf = (w: Seed, gate: string) => {
+    const gd = (cat.gates as Seed[]).find((x) => x.id === gate);
+    return {
+      gate, label: gd?.label ?? gate, name: gd?.name ?? gate, kind: gd?.kind ?? "human",
+      rule: { text: "1 approval from: Line Lead, Project Admin.", required: 1, conditions: [], sod: true },
+      progress: { have: 0, need: 1, approvals: [], unmet: [] }, satisfiable: true, warning: "",
+      eligible: seed.people.slice(0, 3).map((p: Seed) => ({ id: p.id, name: p.name, away: false, oncall: false, why: "Project Admin" })),
+      overrides: [], viewerCanOverride: false,
+      can: { editRule: true, editWhy: "", grantRole: true, grantWhy: "" },
+    };
+  };
   const iso = (t: number | undefined | null) => (t ? new Date(t).toISOString() : null);
   const recordOf = (w: Seed) => ({
     id: w.id, version: 7, project: w.project, repo: w.repo, title: w.title, state: w.state,
@@ -149,7 +160,17 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (seg[0] === "work-orders" && seg[1]) {
       const w = byId.get(seg[1]);
       if (!w) return undefined;
-      return seg[2] === "record" ? recordOf(w) : seg[2] === "session" ? sessionOf(w) : seg[2] === "changes" ? { pullRequests: [], commits: [], files: w.files ?? [], patches: [] } : seg[2] ? undefined : travelerOf(w);
+      return seg[2] === "record" ? recordOf(w) : seg[2] === "gates" && seg[4] === "approvers" ? approversOf(w, seg[3]!) : seg[2] === "session" ? sessionOf(w) : seg[2] === "changes" ? { pullRequests: [], commits: [], files: w.files ?? [], patches: [] } : seg[2] ? undefined : travelerOf(w);
+    }
+    if (path === "work-order-sessions") {
+      const proj = url.searchParams.get("project");
+      return {
+        items: wos.filter((w) => !proj || w.project === proj).map((w) => {
+          const last = w.conv?.messages?.[w.conv.messages.length - 1];
+          const st = (cat.stations as Seed[])[w.station];
+          return { id: w.id, project: w.project, title: w.title, cls: w.cls, station: st?.id ?? "intake", stationName: st?.name ?? "Intake", state: w.state, bay: w.bay ?? null, gate: gateInfo(w)?.id ?? null, agent: st?.agent ?? null, agentName: null, waitingOn: w.state === "waiting" ? "approver" : "agent", latest: last ? { text: last.text, at: last.at, by: last.from, role: "assistant" } : null, unread: false, closed: w.state === "done" || w.state === "killed", started: true, requestedBy: w.requestedBy, createdAt: w.createdAt };
+        }),
+      };
     }
     if (path === "activity") return seed.events;
     if (path === "conversations") return page(conversations);

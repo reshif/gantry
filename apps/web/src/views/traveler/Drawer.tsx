@@ -2,7 +2,7 @@
  * Traveler: the routing sheet that rides with every work order (right-hand drawer), ported from legacy/js/views/traveler.js.
  * Open it with useOpenTraveler(). Position, gates with progress, approve and reject, moves, send back, park, reassign, retry, history.
  */
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import { fmt } from "@gantry/domain";
 import { Btn, Empty, StateChip, Tabs } from "../../ui/primitives";
 import { Async } from "../../ui/async";
@@ -36,10 +36,10 @@ function TravelerGateNotes({ woId, project, onNavigate }: { woId: string; projec
 }
 
 const tb = (k: string, v: string) => (
-  <div key={k}>
+  <Fragment key={k}>
     <dt>{k}</dt>
     <dd>{v}</dd>
-  </div>
+  </Fragment>
 );
 
 export default function TravelerDrawer({ woId, onClose }: { woId: string; onClose?: () => void }) {
@@ -144,7 +144,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
         ) : null}
         {wo.blockReason ? <div className="callout callout-block"><Icon name="st-block" /><span>{wo.blockReason}</span></div> : null}
         {wo.failReason ? <div className="callout callout-fail"><Icon name="st-fail" /><span>{wo.failReason}</span></div> : null}
-        <dl className="titleblock tb-drawer">
+        <dl className="kv tb-drawer">
           {tb("Repo", repoName)}
           {tb("Where", where)}
           {tb("Class", `${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} · ${Math.round(wo.clsConfidence * 100)}%${wo.clsOverridden ? " (overridden)" : ""}`)}
