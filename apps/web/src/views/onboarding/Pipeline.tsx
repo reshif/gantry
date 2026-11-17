@@ -1,10 +1,9 @@
 /** The Pipeline tab: repos per stage, the waiting-for-merge callout, the filter bar and the table of repos. */
 import { useState } from "react";
-import { fmt } from "@gantry/domain";
-import { Empty, FilterBar, Panel, SearchBox, Segmented } from "../../ui/primitives";
+import { Btn, Empty, FilterBar, Panel, SearchBox, Select } from "../../ui/primitives";
 import { DataTable, type Col } from "../../ui/SortTable";
 import { Icon } from "../../ui/Icon";
-import { STAGES, StatusChip, Steps, gaps, isStopped, needsMerge, stageIndex, stageName, status, useIntegrationsFor, useTeamName, type RepoV } from "./kit";
+import { StatusChip, Steps, gaps, isStopped, needsMerge, stageIndex, stageName, status, useIntegrationsFor, useTeamName, type RepoV } from "./kit";
 
 type Filter = "all" | "attention" | "progress" | "ready";
 
@@ -13,9 +12,6 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
   const [q, setQ] = useState("");
   const teamName = useTeamName();
   const { all } = useIntegrationsFor(project);
-  const now = Date.now();
-  const counts = STAGES.map((s) => repos.filter((r) => r.onboarding.stage === s.id).length);
-  const stopped = repos.filter(isStopped).length;
   const sourceName = (r: RepoV): string => (r.source ? all.find((x) => x.inst.id === r.source)?.inst.name ?? "source control" : "GitHub App");
   const text = (r: RepoV): string => [r.name, teamName(r.team), r.lang, status(r).label, stageName(r.onboarding.stage), ...r.tags].join(" ").toLowerCase();
   const list = repos.filter((r) => {
@@ -51,31 +47,11 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
       render: (r) => (r.onboarding.pr ? <span className="mono">{`#${r.onboarding.pr.number}`}<span className="muted">{` · ${r.onboarding.pr.state === "merged" ? "merged" : `checks ${r.onboarding.pr.checks}`}`}</span></span> : <span className="muted">none yet</span>),
     },
     { key: "gaps", label: "Gaps", align: "end", sort: (r) => (r.onboarding.findings.length ? gaps(r).length : -1), render: (r) => (r.onboarding.findings.length ? <span className="mono">{String(gaps(r).length)}</span> : <span className="muted" title="Not assessed yet"><span aria-hidden="true">-</span><span className="sr">Not assessed yet</span></span>) },
-    {
-      key: "time", label: "Time", hideSmall: true,
-      render: (r) => {
-        const o = r.onboarding;
-        return <span className="mono small">{o.stage === "ready" ? (o.readyAt ? `ready ${fmt.ago(o.readyAt, now)}` : "ready") : `started ${fmt.ago(o.startedAt || o.timeline[0]?.at || now, now)}`}</span>;
-      },
-    },
+    { key: "act", label: "", align: "end", render: (r) => <Btn small kind={r.onboarding.stage === "connected" ? "primary" : undefined} id={`onb-open-${r.id}`} label={r.onboarding.stage === "connected" ? "Start" : "Open"} onClick={() => open(r.id)} /> },
   ];
 
   return (
     <div className="onb-pipe">
-      <ol className="onb-strip" aria-label="Repos per onboarding stage">
-        {STAGES.map((s, i) => (
-          <li key={s.id} className={counts[i] ? "has-n" : ""}>
-            <span className="onb-strip-no">{`Stage ${i + 1}`}</span>
-            <span className="onb-strip-n">{String(counts[i])}</span>
-            <span className="onb-strip-l">{s.name}</span>
-          </li>
-        ))}
-        <li className={`onb-strip-off${stopped ? " has-n" : ""}`}>
-          <span className="onb-strip-no">Off belt</span>
-          <span className="onb-strip-n">{String(stopped)}</span>
-          <span className="onb-strip-l">Stopped</span>
-        </li>
-      </ol>
       {waiting.length ? (
         <div className="callout callout-warn onb-callout">
           <Icon name="st-wait" />
@@ -92,11 +68,11 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
       ) : null}
       {repos.length ? (
         <>
-          <FilterBar label="Filter repos" count={`${list.length} of ${repos.length} repos`}>
-            <SearchBox id="onb-search" value={q} onChange={setQ} placeholder="Search repos" />
-            <Segmented name="onb-filter" label="Filter repos" value={filter} onChange={(v) => setFilter(v as Filter)} items={[{ id: "all", label: "All" }, { id: "attention", label: "Needs action" }, { id: "progress", label: "In progress" }, { id: "ready", label: "Ready" }]} />
-          </FilterBar>
-          <Panel flush>
+          <Panel title="Repositories moving to Ready" flush>
+            <FilterBar label="Filter repos" count={`${list.length} of ${repos.length} repos`}>
+              <SearchBox id="onb-search" value={q} onChange={setQ} placeholder="Search..." />
+              <label className="q"><span>Stage</span><Select id="onb-filter" value={filter} onChange={(v) => setFilter(v as Filter)} options={[{ value: "all", label: "All" }, { value: "attention", label: "Needs action" }, { value: "progress", label: "In progress" }, { value: "ready", label: "Ready" }]} /></label>
+            </FilterBar>
             <DataTable<RepoV>
               id="onb-table"
               caption="Repos and their onboarding state"

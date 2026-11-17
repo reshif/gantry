@@ -4,7 +4,7 @@ import { useCan } from "../api/can";
 import { useMe, useProjects, useRepos } from "../api/queries";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { navigate, useHash } from "../lib/router";
-import { Btn, Empty, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { AgentTab } from "./onboarding/Agent";
@@ -40,15 +40,21 @@ export default function OnboardingView() {
   // `#/p/<project>/onboarding/<repo>`: the onboarding session of one repo (the pipeline's rows open it).
   if (hash.param) return <div className="view onb-view"><SessionPage projectId={project.id} repoId={hash.param} back={() => navigate("onboarding", null)} details={() => openRepo(hash.param!)} /></div>;
   const ready = repos.filter((r) => r.onboarding.stage === "ready").length;
+  const waiting = repos.filter((r) => r.onboarding.stage === "connected").length;
   const attention = repos.filter((r) => isStopped(r) || needsMerge(r) || needsPr(r)).length;
   return (
     <div className="view onb-view">
       <ViewHead
         title="Onboarding"
         sub="A repo must reach Ready before anyone can submit work orders to it. Gantry assesses each repo and opens a PR with the changes it needs. The Onboarding Agent adds its judgement and drafts when a model vendor is connected; otherwise the work is rule-based."
-        meta={[["Repos", qState(reposQ, () => String(repos.length))], ["Ready", qState(reposQ, () => `${ready} / ${repos.length}`)], ["In progress", qState(reposQ, () => String(repos.length - ready - attention))], ["Needs action", qState(reposQ, () => String(attention))]]}
         actions={<Btn kind="primary" icon="plus" id="onb-connect" label="Connect repo" guard={connect} onClick={wizard} />}
       />
+      <StatRow>
+        <Stat label="Waiting" value={qState(reposQ, () => String(waiting))} sub="not started" />
+        <Stat label="In progress" value={qState(reposQ, () => String(repos.length - ready - attention))} tone={undefined} sub="moving to Ready" />
+        <Stat label="Ready" value={qState(reposQ, () => `${ready} / ${repos.length}`)} tone="done" sub="repos live" />
+        <Stat label="Needs action" value={qState(reposQ, () => String(attention))} tone={attention ? "wait" : undefined} sub="a person is needed" />
+      </StatRow>
       <div className="onb-tabrow">
         <Tabs idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: repos.length }, { id: "agent", label: "Guidelines" }]} active={tab} onChange={(t) => setTab(t as typeof tab)} />
         <Btn small kind="ghost" icon="agent" id="onb-agent-profile" label="Onboarding agent profile" onClick={() => { updatePrefs({ agent: "ag-onboard" }); navigate("agents"); }} />

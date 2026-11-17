@@ -72,10 +72,8 @@ describe("Onboarding: pipeline", () => {
     mount(<OnboardingView />);
     expect(await screen.findByText("Onboarding")).toBeTruthy();
     expect(document.querySelector(".vhead .kicker")?.textContent).not.toContain("·"); // only the drawing number: the top bar already names the project
-    const meta = Array.from(document.querySelectorAll(".titleblock div")).map((d) => d.textContent);
-    expect(meta).toEqual(["Repos4", "Ready1 / 4", "In progress1", "Needs action2"]); // the buckets do not overlap
-    const strip = Array.from(document.querySelectorAll(".onb-strip li")).map((li) => li.querySelector(".onb-strip-n")?.textContent);
-    expect(strip).toEqual(["1", "0", "0", "1", "0", "0", "1", "1"]); // connected, ..., PR checks, ..., Ready, off belt
+    const stats = Array.from(document.querySelectorAll(".stats .stat .v")).map((d) => d.textContent);
+    expect(stats).toEqual(["1", "1", "1 / 4", "2"]); // waiting, in progress, ready, needs action: the buckets do not overlap
     expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(4);
     const waiting = document.querySelector(".callout-warn")!;
     expect(waiting.textContent).toMatch(/1 onboarding PR is green and waiting for a person to approve and merge: acme\/mobile-app#338/);
@@ -97,17 +95,17 @@ describe("Onboarding: pipeline", () => {
     await byId("onb-row-notifications");
     expect(document.querySelector("#onb-row-notifications .onb-st-openpr")?.textContent).toMatch(/Open the PR/);
     expect(document.querySelector("#onb-row-notif-busy .onb-st-progress")?.textContent).toMatch(/In progress/);
-    const meta = Array.from(document.querySelectorAll(".titleblock div")).map((d) => d.textContent);
-    expect(meta).toEqual(["Repos2", "Ready0 / 2", "In progress1", "Needs action1"]);
+    const stats = Array.from(document.querySelectorAll(".stats .stat .v")).map((d) => d.textContent);
+    expect(stats).toEqual(["0", "1", "0 / 2", "1"]);
   });
 
   it("filters repos, and an empty project says what to do", async () => {
     api([find("web-storefront"), GREEN, find("search-indexer")]);
     mount(<OnboardingView />);
     await byId("onb-row-mobile-app");
-    fireEvent.click(screen.getByLabelText("Needs action"));
+    fireEvent.change(document.getElementById("onb-filter") as HTMLSelectElement, { target: { value: "attention" } });
     await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(2));
-    fireEvent.click(screen.getByLabelText("Ready"));
+    fireEvent.change(document.getElementById("onb-filter") as HTMLSelectElement, { target: { value: "ready" } });
     await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(1));
     cleanup();
     api([]);
