@@ -11,3 +11,4 @@ export * from "./outbox.js";
 export * as idempotency from "./idempotency.js";
 export { canonicalJson, hashBody } from "./idempotency.js";
 export * from "./seed.js";
+export * from "./anchor.js";
