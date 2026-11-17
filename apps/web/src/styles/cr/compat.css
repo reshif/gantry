@@ -11,3 +11,12 @@
 .field .field-label{font:600 12px/16px var(--font);color:var(--text-2)}
 .filterbar.fb{display:grid}
 .empty .empty-icon{width:40px;height:40px}
+/* group D: legacy .dtable header and cell rules lose to the prototype's table, and the search icon sits inside the box */
+.dtable.t thead th{font:600 11px/16px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);background:var(--surface-2);padding:0 var(--s3);height:36px}
+.dtable.t td{padding:0 var(--s3);height:44px}
+.dtable.t th .th-sort{font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit}
+.searchbox.search{display:block;width:100%}
+.searchbox.search .input{width:100%;min-width:0}
+.searchbox.search>.ic{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:16px;height:16px;display:inline-flex}
+.searchbox.search>.ic svg{position:static;width:16px;height:16px}
+@media (max-width:640px){.dtable-sortsel{display:none}}

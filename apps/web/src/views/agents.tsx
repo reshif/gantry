@@ -68,39 +68,36 @@ function Roster({ agents }: { agents: AgentRow[] }) {
     && (!station || a.station === station || a.stations.includes(station))
     && (!status || a.status === status)
     && (!term || `${a.name} ${a.id} ${a.model}`.toLowerCase().includes(term)));
+  const lvl = (a: AgentRow): number => (a.autonomy === "auto" ? 3 : a.autonomy === "gate" ? 2 : 1);
   const cols: SortCol<AgentRow>[] = [
     { key: "name", label: "Agent", sort: (a) => a.name.toLowerCase(), render: (a) => (
-      <span className="ag-who">
+      <span className="row nowrap">
         <Avatar id={a.id} size="sm" />
-        <span className="ag-who-t">
-          <span className="ag-who-n"><a className="ag-name" href={hashFor("agents", a.id)} onClick={(e) => { e.preventDefault(); open(a); }}>{a.name}</a><DraftDot scope="agent" id={a.id} />{a.builtin ? <Chip text="built-in" /> : null}</span>
-          <span className="mono muted small">{a.id}</span>
-        </span>
+        <a className="rl ell" href={hashFor("agents", a.id)} title={a.id} onClick={(e) => { e.preventDefault(); open(a); }}>{a.name}</a><DraftDot scope="agent" id={a.id} />{a.builtin ? <Chip text="built-in" /> : null}
       </span>
     ) },
-    { key: "status", label: "Status", sort: true, render: (a) => <Status tone={a.status === "paused" ? "neutral" : "done"}>{a.status === "paused" ? "Paused" : "Active"}</Status> },
     { key: "station", label: "Station", sort: (a) => st.find(a.station)?.no ?? "~", render: (a) => {
       const s = st.find(a.station);
-      return <span className="nowrap"><span className="mono muted">{s ? `${s.no} ` : ""}</span>{s ? s.name : "Off-belt"}{a.stations.length > 1 ? <span className="muted small">{` +${a.stations.length - 1}`}</span> : null}</span>;
+      return s ? <span className="nowrap">{s.name}{a.stations.length > 1 ? <span className="dim">{` +${a.stations.length - 1}`}</span> : null}</span> : <span className="dim">{"\u2014"}</span>;
     } },
-    { key: "model", label: "Model chain", sort: true, render: (a) => <span><span className="mono small">{a.model}</span>{a.fallbacks.length ? <span className="muted small">{` +${a.fallbacks.length} fallback${a.fallbacks.length > 1 ? "s" : ""}`}</span> : null}</span> },
-    { key: "version", label: "Version", render: (a) => { const rc = candidates(a); return <span><span className="mono">{a.version}</span>{rc ? <Chip text={`${rc} candidate`} cls="chip-accent ag-rc" /> : null}</span>; } },
-    { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => <span className={`mono${isBelow(a) ? " neg" : ""}`}>{isBelow(a) ? <Icon name="alert" className="ag-below" /> : null}{fmt.pct(a.evalScore)}</span> },
-    { key: "spark", label: "7-day success", align: "end", hideSmall: true, render: (a) => <Spark values={a.spark} min={0.5} max={1} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /> },
+    { key: "model", label: "Model", sort: true, render: (a) => <span className="mono ell">{a.model.replace("claude-", "")}{a.fallbacks.length ? <span className="dim">{` +${a.fallbacks.length}`}</span> : null}</span> },
+    { key: "autonomy", label: "Autonomy", sort: (a) => lvl(a), render: (a) => <span className="lvl" style={{ "--l": lvl(a), cursor: "default" } as React.CSSProperties}>{`L${lvl(a)}`}</span> },
+    { key: "version", label: "Version", render: (a) => { const rc = candidates(a); return <span><span className="mono">{a.version}</span>{rc ? <Chip text={`${rc} candidate`} cls="agent" /> : null}</span>; } },
+    { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => Number.isFinite(a.evalScore) ? <span className={`mono${isBelow(a) ? " neg" : ""}`}>{isBelow(a) ? <Icon name="alert" className="ag-below" /> : null}{a.evalScore.toFixed(2)}</span> : <span className="dim">{"\u2014"}</span> },
     { key: "spend7d", label: "Spend 7d", sort: true, align: "end", render: (a) => <span className="mono">{fmt.money0(a.spend7d)}</span> },
+    { key: "status", label: "Status", sort: true, render: (a) => <Status tone={a.status === "paused" ? "neutral" : "run"}>{a.status === "paused" ? "Paused" : "Active"}</Status> },
   ];
+  const stOpts = [{ value: "", label: "Station: all" }, ...st.all.map((s) => ({ value: s.id, label: `Station: ${s.name}` }))];
   return (
-    <Panel flush cls="ag-roster-panel">
-      <Tabs idPrefix="ag-view" items={LIST_TABS.map((t) => ({ id: t.id, label: t.label, count: agents.filter(t.test).length }))} active={tab} onChange={(t) => setTab(t as ListTab)} />
+    <>
       <FilterBar label="Filter agents" count={`${rows.length} of ${agents.length}`}>
         <SearchBox id="ag-search" value={q} onChange={setQ} placeholder="Search agents" />
-        <div className="filters">
-          <Field label="Station" htmlFor="ag-f-station"><Select id="ag-f-station" value={station} onChange={setStation} options={[{ value: "", label: "all" }, ...st.all.map((s) => ({ value: s.id, label: `${s.no} ${s.name}` }))]} /></Field>
-          <Field label="Status" htmlFor="ag-f-status"><Select id="ag-f-status" value={status} onChange={setStatus} options={[{ value: "", label: "all" }, { value: "active", label: "Active" }, { value: "paused", label: "Paused" }]} /></Field>
-        </div>
+        <Select id="ag-f-station" aria-label="Station" value={station} onChange={setStation} options={stOpts} />
+        <Select id="ag-view" aria-label="View" value={tab} onChange={(t) => setTab(t as ListTab)} options={LIST_TABS.map((t) => ({ value: t.id, label: `View: ${t.label} (${agents.filter(t.test).length})` }))} />
+        <Select id="ag-f-status" aria-label="Status" value={status} onChange={setStatus} options={[{ value: "", label: "Status: all" }, { value: "active", label: "Status: Active" }, { value: "paused", label: "Status: Paused" }]} />
       </FilterBar>
-      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} empty={{ title: "No agents match", text: "Clear a filter or the search to see more." }} />
-    </Panel>
+      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} pageSize={12} empty={{ title: "No agents match", text: "Clear a filter or the search to see more." }} />
+    </>
   );
 }
 
@@ -214,7 +211,7 @@ export default function AgentsView() {
   if (q.data === undefined) {
     return (
       <div className="view view-agents">
-        <ViewHead title="Agents" sub={sub} actions={q.isError ? create : undefined} />
+        <ViewHead kicker="Workforce" title="Agents" sub={sub} actions={q.isError ? create : undefined} />
         <Async query={q} what="agents" id="agents">{() => null}</Async>
       </div>
     );
@@ -222,7 +219,7 @@ export default function AgentsView() {
   if (!agents.length) {
     return (
       <div className="view view-agents">
-        <ViewHead title="Agents" sub={sub} actions={create} />
+        <ViewHead kicker="Workforce" title="Agents" sub={sub} actions={create} />
         <Empty title="No agents yet" text="Create the first agent." />
       </div>
     );
@@ -245,13 +242,13 @@ export default function AgentsView() {
   const below = agents.filter(isBelow).length;
   return (
     <div className="view view-agents">
-      <ViewHead title="Agents" sub={sub} actions={create} />
+      <ViewHead kicker="Workforce" title="Agents" sub={sub} actions={create} />
       <StatRow id="ag-stats">
-        <Stat label="Agents" value={String(agents.length)} sub="on this factory" />
-        <Stat label="Active" value={`${active} / ${agents.length}`} sub="paused agents queue their work" />
-        <Stat label="Candidates" value={String(cands)} sub="versions waiting for promotion" tone={cands ? "wait" : undefined} />
-        <Stat label="Below threshold" value={String(below)} sub="eval score under the gate" tone={below ? "block" : undefined} />
-        <Stat label="Spend, 7 days" value={fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))} sub="all agents" />
+        <Stat label="Agents" value={String(agents.length)} />
+        <Stat label="Active" value={`${active} / ${agents.length}`} tone="done" />
+        <Stat label="Candidates" value={String(cands)} tone={cands ? "wait" : undefined} />
+        <Stat label="Below threshold" value={String(below)} tone={below ? "block" : undefined} />
+        <Stat label="Spend, 7 days" value={fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))} />
       </StatRow>
       <Roster agents={agents} />
     </div>
