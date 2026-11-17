@@ -1,6 +1,6 @@
 /** Shared pieces of the MCP screen (legacy views/mcp.js helpers): chips, scope text, and the lists the dialogs and panels draw from. */
 import { classesOf, flowOf, type Catalog, type McpServer, type Project } from "@gantry/domain";
-import { Status, type Decision, type Tone } from "../../ui/primitives";
+import { Chip, Status, type Decision, type Tone } from "../../ui/primitives";
 
 export const SENS = [{ value: "public", label: "Public" }, { value: "internal", label: "Internal" }, { value: "confidential", label: "Confidential" }, { value: "restricted", label: "Restricted" }];
 export const AUTH_MODES = [{ value: "none", label: "None" }, { value: "bearer", label: "Bearer token" }, { value: "header", label: "API key in a header" }];
@@ -9,7 +9,7 @@ export const TRANSPORTS = [{ value: "http", label: "Streamable HTTP" }, { value:
 export const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
 export function Health({ st }: { st: string }) {
-  const tone: Tone = st === "healthy" ? "done" : st === "down" || st === "failing" ? "block" : st === "degraded" ? "wait" : "neutral";
+  const tone: Tone = st === "healthy" ? "done" : st === "failing" ? "block" : st === "degraded" ? "wait" : "neutral";
   return <Status tone={tone}>{st.charAt(0).toUpperCase() + st.slice(1)}</Status>;
 }
 
@@ -19,7 +19,7 @@ export const Rw = ({ write }: { write: boolean }) => (
   </span>
 );
 
-export const SensChip = ({ s }: { s: string }) => <span className={`mcp-sens mcp-sens-${s}`}>{s}</span>;
+export const SensChip = ({ s }: { s: string }) => <Chip text={s.charAt(0).toUpperCase() + s.slice(1)} cls={s === "restricted" ? "chip-block" : s === "confidential" ? "chip-warn" : ""} />;
 
 export const scopeText = (v: "all" | string[] | null | undefined, name: string): string => (v === "all" ? `all ${name}` : !v || !v.length ? `no ${name}` : `${v.length} ${name}`);
 

@@ -10,7 +10,7 @@ import { useState } from "react";
 import { DAY } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useMcpCalls, useMcpServers, useProjects } from "../api/queries";
-import { Btn, Empty, Panel, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
@@ -18,7 +18,7 @@ import { useCatalog } from "./projects/kit";
 import { useAllRepos } from "./govern/data";
 import { AddMcp } from "./mcp/AddDialog";
 import { Detail } from "./mcp/Detail";
-import { Health, SensChip, dec, scopeText } from "./mcp/kit";
+import { Health, SENS, SensChip, dec, scopeText } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
 
 export default function McpView() {
@@ -35,6 +35,11 @@ export default function McpView() {
   const actor = useActors();
   const [tab, setTab] = useState("registry");
   const [sel, setSel] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [health, setHealth] = useState("all");
+  const [sens, setSens] = useState("all");
+  const needle = q.trim().toLowerCase();
+  const shown = servers.filter((m) => (health === "all" || (health === "disabled" ? m.enabled === false : m.health === health)) && (sens === "all" || m.sensitivity === sens) && (!needle || `${m.name} ${m.url} ${m.transport}`.toLowerCase().includes(needle)));
   const current = servers.find((m) => m.id === sel) ?? servers[0] ?? null;
   const actorName = (id: string): string => actor(id).name;
   const day = calls.filter((u) => u.at > Date.now() - DAY).length;
@@ -45,11 +50,18 @@ export default function McpView() {
       {() => (
     <div className="mcp-split">
       <Panel title="Registry" flush>
-        <div className="table-scroll">
+        <FilterBar label="Filter servers" count={`${shown.length} of ${servers.length}`}>
+          <SearchBox id="mcp-q" label="Search" placeholder="Search by name or address" value={q} onChange={setQ} />
+          <div className="filters">
+            <Field label="Health" htmlFor="mcp-f-health"><Select id="mcp-f-health" options={[{ value: "all", label: "Any" }, { value: "healthy", label: "Healthy" }, { value: "degraded", label: "Degraded" }, { value: "failing", label: "Failing" }, { value: "offline", label: "Offline" }, { value: "disabled", label: "Disabled" }]} value={health} onChange={setHealth} /></Field>
+            <Field label="Sensitivity" htmlFor="mcp-f-sens"><Select id="mcp-f-sens" options={[{ value: "all", label: "Any" }, ...SENS]} value={sens} onChange={setSens} /></Field>
+          </div>
+        </FilterBar>
+        {shown.length ? <div className="table-scroll">
           <table className="table table-compact mcp-reg">
             <thead><tr><th>Server and scope</th><th>Health</th><th>Tools</th><th>Sensitivity</th></tr></thead>
             <tbody>
-              {servers.map((m) => {
+              {shown.map((m) => {
                 const w = m.tools.filter((t) => t.write).length;
                 const den = m.tools.filter((t) => !t.allowed).length;
                 return (
@@ -68,7 +80,7 @@ export default function McpView() {
               })}
             </tbody>
           </table>
-        </div>
+        </div> : <Empty title="No server matches" text="Change the search or filters." />}
       </Panel>
       {current ? <Detail key={current.id} srv={current} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} onRemoved={() => setSel(null)} /> : null}
     </div>
@@ -81,9 +93,14 @@ export default function McpView() {
       <ViewHead
         title="MCP servers"
         sub="Tools agents may call, and exactly where. Scope by project, repo, agent, station and work class; deny single tools; write tools need a pre-authorisation at the station. The edge makes every connection and holds every credential."
-        meta={[["Servers", qState(serversQ, (d) => String(d.length))], ["Not healthy", qState(serversQ, (d) => String(d.filter((m) => m.health !== "healthy").length))], ["Write tools", qState(serversQ, () => String(writeTools))], ["Calls 24h", qState(callsQ, () => String(day))]]}
         actions={<Btn label="Add server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} onAdded={(id) => { setSel(id); setTab("registry"); }} />)} />}
       />
+      <StatRow id="mcp-stats">
+        <Stat label="Servers" value={qState(serversQ, (d) => String(d.length))} sub="in the registry" />
+        <Stat label="Not healthy" value={qState(serversQ, (d) => String(d.filter((m) => m.health !== "healthy").length))} sub="degraded, failing or disabled" tone={servers.some((m) => m.health !== "healthy") ? "wait" : undefined} />
+        <Stat label="Write tools" value={qState(serversQ, () => String(writeTools))} sub="across all servers" />
+        <Stat label="Calls 24h" value={qState(callsQ, () => String(day))} sub="from agents" />
+      </StatRow>
       <Tabs idPrefix="mcp-tab" items={[{ id: "registry", label: "Registry", count: servers.length }, { id: "usage", label: "Usage log", count: calls.length }]} active={tab} onChange={setTab} />
       <div id="mcp-tab-panel" role="tabpanel" aria-labelledby={`mcp-tab-${tab}`}>
         {tab === "usage" ? (

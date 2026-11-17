@@ -107,10 +107,10 @@ describe("MCP servers screen", () => {
     expect(row.textContent).toContain("1 projects · all repos · 1 agents · 1 stations · all classes");
     expect(row.textContent).toContain("2 R · 1 W");
     expect(row.textContent).toContain("1 denied");
-    expect(within(row).getByText("internal").className).toContain("mcp-sens-internal");
+    expect(within(row).getByText("Internal")).toBeTruthy();
     expect((await byId("mcp-row-mcp-chg-0001")).textContent).toContain("disabled");
     // header meta
-    const head = document.querySelector(".titleblock")!.textContent!;
+    const head = document.getElementById("mcp-stats")!.textContent!;
     expect(head).toContain("Servers2");
     expect(head).toContain("Write tools2");
     expect(head).toContain("Calls 24h2");
