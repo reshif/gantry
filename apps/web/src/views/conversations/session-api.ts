@@ -14,7 +14,7 @@ export interface WoSessionMessage {
   author: string;
   text: string;
   at: number;
-  data: { cards?: WoCard[]; kind?: string; mode?: "agent" | "rule-based" | "legacy"; model?: string | null; agent?: string; version?: number; stopped?: boolean; chips?: string[] };
+  data: { cards?: WoCard[]; kind?: string; mode?: "agent" | "rule-based" | "legacy"; model?: string | null; agent?: string; version?: number; stopped?: boolean; chips?: string[]; mentions?: Array<{ id: string; name: string; access: boolean }> };
 }
 /** `person`: waiting for someone else (a station asked a particular person or role). */
 export type NextActor = "agent" | "you" | "approver" | "person" | "nobody";
@@ -74,7 +74,7 @@ export const useWoSessions = (project: string | null | undefined) =>
   useQuery({ queryKey: qk.convSessions(project ?? null), queryFn: () => get<{ items: WoSessionRow[] }>(api("work-order-sessions"), project ? { project } : {}), enabled: project !== undefined, refetchInterval: 20_000 });
 
 /** A person's message, or `open` / `continue` (the agent's turn without new words). The answer streams; a rule-based reply comes back as plain JSON. */
-export async function sendWoTurn(woId: string, body: { kind: "message" | "open" | "continue"; text?: string }, on: (e: TurnEvent<WoCard>) => void, signal: AbortSignal): Promise<ApiResult> {
+export async function sendWoTurn(woId: string, body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }, on: (e: TurnEvent<WoCard>) => void, signal: AbortSignal): Promise<ApiResult> {
   const sse = new SseReader();
   const r = await streamCommand(api(`work-orders/${enc(woId)}/session/messages`), body, (chunk) => {
     for (const e of sse.push(chunk)) on(e as unknown as TurnEvent<WoCard>);

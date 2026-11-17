@@ -48,6 +48,8 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
   // A failed delivery of a delivery-failure notice must not notify again, or a dead endpoint would loop.
   if (m.event === "delivery.failed" && after.origEvent === "delivery.failed") return;
   const orgId = e.orgId;
+  // A mention of someone who cannot read the project carries nothing about the work order: only a plain notice to their own address (an admin decides on access).
+  if (m.event === "mention" && after.access === false) return void (await mentionNotice(tx, e, ap, publicUrl, after));
   const projects = e.projectId
     ? [e.projectId]
     : (await tx.query<{ project_id: string }>(`select distinct project_id from notification_routes where org_id = $1 and event = $2 and project_id is not null`, [orgId, m.event])).rows.map((r) => r.project_id);
@@ -81,11 +83,12 @@ export async function produceNotifications(tx: Tx, e: EventInput, ap: AppendedEv
         seen.add(k);
         await emitOne(tx, {
           orgId, eventId: ap.id, event: m.event, mandatory: m.mandatory, project, route: { id: r.id.slice(project.length + 1) || r.id, template: r.template || sample.template, fields: r.fields }, dest: d,
-          repo: repoId, wo: e.woId ?? null, sample: { ...sample, template: r.template || sample.template }, insts, woFacts: wo,
+          repo: repoId, wo: e.woId ?? null, sample: { ...sample, template: r.template || sample.template }, insts, woFacts: wo, mentioned: typeof after.person === "string" ? after.person : null,
         });
         produced++;
       }
     }
+    if (m.event === "mention" && produced === 0) await mentionNotice(tx, e, ap, publicUrl, after);
     if (m.mandatory && produced === 0) await fallbackMandatory(tx, { orgId, eventId: ap.id, event: m.event, project, repoId, woId: e.woId ?? null, sample, insts, woFacts: wo });
   }
 }
@@ -98,6 +101,25 @@ async function fallbackMandatory(tx: Tx, c: { orgId: string; eventId: string; ev
     const target = defaultTarget(inst.typeId, inst.config) || (inst.typeId === "webhook" ? inst.targetId ?? "" : "");
     if (!target && inst.typeId !== "webhook") continue;
     await emitOne(tx, { orgId: c.orgId, eventId: c.eventId, event: c.event, mandatory: true, project: c.project, route: null, dest: { channel: inst.typeId, target, integration: inst.id }, repo: c.repoId, wo: c.woId, sample: c.sample, insts: c.insts, woFacts: c.woFacts });
+  }
+}
+
+/**
+ * The mentioned person's own notice, by email, when no route of the project carries it (or the person cannot read the project, so no route may). It goes through every email
+ * connection open to the project. Without access it says only that a colleague mentioned them; the work order is not named.
+ */
+async function mentionNotice(tx: Tx, e: EventInput, ap: AppendedEvent, publicUrl: string, after: Record<string, unknown>): Promise<void> {
+  const person = typeof after.person === "string" ? after.person : "";
+  const row = person ? (await tx.query<{ email: string; name: string }>(`select email, name from people where org_id = $1 and id = $2 and status = 'active'`, [e.orgId, person])).rows[0] : null;
+  if (!row?.email) return;
+  const by = typeof after.by === "string" ? (await tx.query<{ name: string }>(`select name from people where org_id = $1 and id = $2`, [e.orgId, after.by])).rows[0]?.name ?? "A colleague" : "A colleague";
+  const access = after.access !== false;
+  const source = { type: e.type, category: e.category, after: { ...after, byName: by, personName: row.name, ...(access ? {} : { text: "You were mentioned in a conversation you cannot open yet. A project admin has been asked about access." }) } };
+  const sample = await loadSample(tx, { orgId: e.orgId, publicUrl, event: "mention", projectId: e.projectId ?? null, woId: access ? e.woId ?? null : null, source, at: ap.recordedAt });
+  for (const inst of await loadInstances(tx, e.orgId)) {
+    if (inst.typeId !== "email" || !inst.enabled || !inst.available || !inst.destination) continue;
+    if (inst.projects !== "all" && e.projectId && !inst.projects.includes(e.projectId)) continue;
+    await emitOne(tx, { orgId: e.orgId, eventId: ap.id, event: "mention", mandatory: false, project: e.projectId ?? null, route: null, dest: { channel: "email", target: row.email, integration: inst.id }, repo: null, wo: access ? e.woId ?? null : null, sample, insts: [inst], mentioned: person });
   }
 }
 

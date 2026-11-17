@@ -78,7 +78,7 @@ export function resolveDest(insts: InstInfo[], d: Dest, project: string | null, 
 }
 
 /** Email recipients: addresses as written, or a role keyword (submitter, approvers, project admins) resolved against people and role assignments. */
-export async function resolveRecipients(db: Queryable, orgId: string, target: string, ctx: { project: string | null; woId: string | null; gateId: string | null }): Promise<string[]> {
+export async function resolveRecipients(db: Queryable, orgId: string, target: string, ctx: { project: string | null; woId: string | null; gateId: string | null; mentioned?: string | null }): Promise<string[]> {
   const out = new Set<string>();
   for (const tok of target.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)) {
     if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tok)) {
@@ -102,6 +102,9 @@ export async function resolveRecipients(db: Queryable, orgId: string, target: st
         `select distinct p.email from people p where p.org_id = $1 and p.status = 'active' and (p.id = any($3) or exists (select 1 from effective_role_assignments ra where ra.org_id = p.org_id and ra.person_id = p.id and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id = any($2) and (ra.project_id is null or ra.project_id = $4)))`,
         [orgId, roles, people, ctx.project],
       )).rows) if (r.email) out.add(r.email.toLowerCase());
+    } else if (kw === "mentioned" && ctx.mentioned) {
+      const r = (await db.query<{ email: string }>(`select email from people where org_id = $1 and id = $2 and status = 'active'`, [orgId, ctx.mentioned])).rows[0];
+      if (r?.email) out.add(r.email.toLowerCase());
     } else if (kw === "project admins" || kw === "project admin") {
       for (const r of (await db.query<{ email: string }>(
         `select distinct p.email from people p join effective_role_assignments ra on ra.org_id = p.org_id and ra.person_id = p.id where p.org_id = $1 and p.status = 'active' and ra.revoked_at is null and (ra.expires_at is null or ra.expires_at > now()) and ra.role_id in ('project_admin','factory_admin') and (ra.project_id is null or ra.project_id = $2)`,
