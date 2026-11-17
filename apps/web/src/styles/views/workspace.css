@@ -1,6 +1,6 @@
 /* Agents at work (views/workspace.tsx): the inbox on the left, the conversation in the centre with its own context pane. Tokens only. */
 .view.ws-view { max-width: none; padding: var(--s3) var(--s4) var(--s3); gap: 0; }
-.ws-grid { display: grid; grid-template-columns: clamp(300px, 25vw, 360px) minmax(0, 1fr); gap: var(--s4); height: calc(100dvh - var(--topbar-h, 52px) - 2 * var(--s3)); min-height: 520px; }
+.ws-grid { display: grid; grid-template-columns: clamp(300px, 26vw, 380px) minmax(0, 1fr); gap: var(--s4); height: calc(100dvh - var(--topbar-h, 52px) - 2 * var(--s3)); min-height: 520px; }
 .ws-main { min-width: 0; min-height: 0; overflow-y: auto; }
 .ws-main > .osx { margin: 0; }
 /* A work-order thread fills the centre pane: the messages are the only scroll area; the title row, the status banner and the composer keep their height. */
@@ -64,7 +64,7 @@
 .ws-scope { flex: none; margin-top: 1px; font-family: var(--f-mono); font-size: 10px; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--ink-2); max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-scope.is-factory { border-style: dashed; }
 .ws-row-title { flex: 1; min-width: 0; font-weight: 600; font-size: var(--t-sm); line-height: 1.3; min-height: 2.6em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
-.ws-row-where { min-width: 0; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-row-where { min-width: 0; line-height: 1.3; min-height: 1.3em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
 .ws-row.is-unread .ws-row-title { color: var(--ink); }
 .ws-row-meta { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 16px; flex-wrap: nowrap; color: var(--ink-2); }
 .ws-row-meta .ic { display: inline-flex; }
@@ -73,7 +73,7 @@
 .ws-wait.is-you { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
 .ws-wait.is-agent { color: var(--run); border-color: var(--run-soft); }
 .ws-wait.is-approver, .ws-wait.is-person { color: var(--wait); border-color: var(--wait-soft); }
-.ws-row-t { margin-left: auto; flex: none; font-size: 10px; }
+.ws-row-t { margin-left: auto; flex: none; font-size: 10px; white-space: nowrap; }
 .ws-row-more { position: absolute; right: 2px; top: 6px; opacity: 0; }
 .ws-row:hover .ws-row-more, .ws-row-more:focus-visible, .ws-row.is-current .ws-row-more { opacity: 1; }
 
