@@ -44,7 +44,7 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
           <Select id="mc-vendor" aria-label="Vendor" value={vendor} onChange={setVendor} options={[{ value: "", label: "Vendor: all" }, ...vendors.map((v) => ({ value: v.id, label: `Vendor: ${v.name}` }))]} />
           <Select id="mc-tier" aria-label="Tier" value={tier} onChange={setTier} options={[{ value: "", label: "Tier: all" }, ...tiers.map((t) => ({ value: t, label: `Tier: ${t}` }))]} />
         </FilterBar>
-        <DataTable id="mc-table" caption="Models" columns={cols} rows={rows} rowKey={(m) => m.id} pageSize={12} empty={{ title: "No models match", text: "Clear a filter to see every model." }} />
+        <DataTable id="mc-table" caption="Models" columns={cols} rows={rows} rowKey={(m) => m.id} pageSize={12} pager empty={{ title: "No models match", text: "Clear a filter to see every model." }} />
       </div>
       <Card title="Spend by vendor" hint="Month to date, against budget">
         <div className="stack" style={{ gap: 10 }}>

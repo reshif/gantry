@@ -198,6 +198,7 @@ function PeopleTable({ people, teams, roles, onOpen }: { people: Person[]; teams
         rowKey={(p) => p.id}
         rowId={(p) => `ppl-row-${p.id}`}
         pageSize={12}
+        pager
         sort={{ key: "name", dir: 1 }}
         onRow={(p) => onOpen(p.id)}
         rowLabel={(p) => `${p.name}: open`}

@@ -95,7 +95,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
         <Select id="ag-view" aria-label="View" value={tab} onChange={(t) => setTab(t as ListTab)} options={LIST_TABS.map((t) => ({ value: t.id, label: `View: ${t.label} (${agents.filter(t.test).length})` }))} />
         <Select id="ag-f-status" aria-label="Status" value={status} onChange={setStatus} options={[{ value: "", label: "Status: all" }, { value: "active", label: "Status: Active" }, { value: "paused", label: "Status: Paused" }]} />
       </FilterBar>
-      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} pageSize={12} empty={{ title: "No agents match", text: "Clear a filter or the search to see more." }} />
+      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} pageSize={12} pager empty={{ title: "No agents match", text: "Clear a filter or the search to see more." }} />
     </>
   );
 }

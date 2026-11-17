@@ -400,6 +400,10 @@ export default function WorkOrdersView() {
       columns={cols}
       rows={items}
       rowKey={(w) => w.id}
+      pageSize={12}
+      pager
+      selectable
+      total={clientSide ? undefined : matched}
       onRow={(w) => open(w.id)}
       sort={{ key: sort.k, dir: sort.dir }}
       onSort={(s) => setSort({ k: s.key, dir: s.dir })}
@@ -424,7 +428,7 @@ export default function WorkOrdersView() {
         <ViewHead
           kicker="Operate"
           title="Work orders"
-          sub={`Every work order in ${project.name}, as a table or a board. Open a row for its traveler, or the record icon for the full lifecycle record.`}
+          sub="Every request on the line, across stations. Open one for its full record."
           actions={
             <>
               <Segmented name="wo-mode" label="Table or board" items={[{ id: "table", label: "Table", icon: "list" }, { id: "board", label: "Board", icon: "board" }]} value={mode} onChange={(v) => updatePrefs({ floorView: v })} />

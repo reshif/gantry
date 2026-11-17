@@ -49,6 +49,7 @@ export function ConnectedTab({ nav, openInstance }: { nav: Nav; openInstance: (i
         rowKey={(i) => i.id}
         rowId={(i) => `int-row-${i.id}`}
         pageSize={12}
+        pager
         sort={{ key: "name", dir: 1 }}
         onRow={(i) => openInstance(i.id)}
         rowLabel={(i) => `Open ${i.name}`}

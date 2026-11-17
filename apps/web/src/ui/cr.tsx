@@ -236,7 +236,7 @@ export function Conveyor({ stations, released, paused, onToken, onStation, onGat
                 {gw ? (
                   <div className={`gate ${gw.waiting ? "wait" : "clear"}`}>
                     <button type="button" className="gh" onClick={() => onGate(gw.id)} aria-label={`Gate ${gw.id} ${gw.name}, ${gw.waiting ? `${gw.waiting} waiting for a person` : "clear"}`} title={`${gw.id} · ${gw.name} · ${gw.waiting ? `${gw.waiting} waiting` : "clear"}`}>
-                      <span className={`lamp ${gw.waiting ? "warn pulse" : "ok"}`} /><b>{gw.id}</b><span className="gname">{gw.name}</span><span className="gn">{gw.waiting || ""}</span>
+                      <span className={`lamp ${gw.waiting ? "warn pulse" : "ok"}`} /><b>{gw.id.match(/^G\d+/)?.[0] ?? gw.id}</b><span className="gname">{gw.name}</span><span className="gn">{gw.waiting || ""}</span>
                     </button>
                     <div className="gp" aria-hidden="true" />
                     <div className="gb" aria-hidden="true"><span className="arm" /></div>

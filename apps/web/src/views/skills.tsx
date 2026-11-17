@@ -85,7 +85,7 @@ function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] })
         <SearchBox id="sk-search" value={ui.q} onChange={(v) => { ui.q = v; rerender(); }} placeholder="Search skills" label="Filter skills" />
         <Select id="sk-view" aria-label="View" value={ui.filter} onChange={(t) => { ui.filter = t as SkillView; rerender(); }} options={views.map((v) => ({ value: v.id, label: `View: ${v.label} (${skills.filter(v.test).length})` }))} />
       </FilterBar>
-      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} pageSize={12} empty={{ title: "No skills match", text: "Clear the filter to see the whole library." }} />
+      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} pageSize={12} pager empty={{ title: "No skills match", text: "Clear the filter to see the whole library." }} />
     </>
   );
 }

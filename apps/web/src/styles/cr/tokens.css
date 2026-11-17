@@ -51,3 +51,9 @@
   --r1:6px;--r2:var(--r-lg);--r3:var(--r-lg);--r-sm:6px;--control-h:var(--ctl);--topbar-h:48px;
   --shadow-1:var(--shadow);--shadow-2:var(--shadow);
 }
+
+/* The legacy token file sets --accent with higher-specificity selectors (the system-dark media block and :root[data-theme=dark]); restate the
+   prototype accent at that specificity so primary buttons are the prototype's azure (dark) and navy (light), not the legacy indigo. */
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--accent:#5fb4ff;--accent-hover:#8cc8ff;--accent-ink:#06121f;--accent-soft:color-mix(in srgb,#5fb4ff 14%,transparent);--accent-line:color-mix(in srgb,#5fb4ff 40%,transparent)}}
+:root[data-theme=dark]{--accent:#5fb4ff;--accent-hover:#8cc8ff;--accent-ink:#06121f;--accent-soft:color-mix(in srgb,#5fb4ff 14%,transparent);--accent-line:color-mix(in srgb,#5fb4ff 40%,transparent)}
+:root[data-theme=light]{--accent:#1556b0;--accent-hover:#0f4590;--accent-ink:#ffffff;--accent-soft:color-mix(in srgb,#1556b0 10%,transparent);--accent-line:color-mix(in srgb,#1556b0 35%,transparent)}

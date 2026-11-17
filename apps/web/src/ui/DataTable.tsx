@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -48,6 +48,10 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
   pageSize?: number;
+  /** Prototype pager: "1-12 of 66", Prev, "1 / 6", Next (instead of "Show more"). Needs pageSize. */
+  pager?: boolean;
+  /** A leading checkbox column with select-all (selection is local to the table). */
+  selectable?: boolean;
   empty?: { title: string; text?: string; action?: ReactNode };
   /** Server paging: more rows exist on the server. */
   hasMore?: boolean;
@@ -57,6 +61,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   total?: number;
 }) {
   const uid = useId().replace(/:/g, "");
+  const [page, setPage] = useState(0);
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
   const [shown, setShown] = useState(pageSize ?? 0);
   // a new page size or a different row count (a filter changed) starts the list over at the first page
@@ -64,7 +69,9 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   if (seen !== `${pageSize ?? 0}:${rows.length}`) {
     setSeen(`${pageSize ?? 0}:${rows.length}`);
     setShown(pageSize ?? 0);
+    setPage(0);
   }
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [own1, setOwn1] = useState<string>("");
   const [overflow, setOverflow] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -100,7 +107,13 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
   if (cur && col) list.sort((a, b) => { const x = val(col, a); const y = val(col, b); return (x > y ? 1 : x < y ? -1 : 0) * cur.dir; });
-  const visible = shown ? list.slice(0, shown) : list;
+  const size = pageSize ?? 0;
+  const pages = pager && size ? Math.max(1, Math.ceil(list.length / size)) : 1;
+  const pg = Math.min(page, pages - 1);
+  const visible = pager && size ? list.slice(pg * size, pg * size + size) : shown ? list.slice(0, shown) : list;
+  const allPicked = visible.length > 0 && visible.every((r) => picked.has(rowKey(r)));
+  const togglePick = (k: string): void => setPicked((s0) => { const n = new Set(s0); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const toggleAll = (): void => setPicked((s0) => { const n = new Set(s0); for (const r of visible) { if (allPicked) n.delete(rowKey(r)); else n.add(rowKey(r)); } return n; });
   const pick = (key: string, dir?: 1 | -1): void => {
     const active = cur?.key === key;
     const next: SortState = { key, dir: dir ?? (active ? (cur!.dir === 1 ? -1 : 1) : 1) };
@@ -111,7 +124,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const ownedKeys = new Set(own1 ? own1.split("\u0000") : []);
   const sortable = columns.filter((c) => c.sort);
   const regionProps = overflow ? { role: "region", tabIndex: 0, "aria-label": caption ?? "Table" } : {};
-  const clientMore = shown && rows.length > shown;
+  const clientMore = !pager && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
       {sortable.length ? (
@@ -128,6 +141,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           {caption ? <caption className="sr-only">{caption}</caption> : null}
           <thead>
             <tr>
+              {selectable ? <th scope="col" className="cbcol"><input type="checkbox" className="cb" aria-label="Select all rows on this page" checked={allPicked} onChange={toggleAll} /></th> : null}
               {columns.map((c) => {
                 const active = cur?.key === c.key;
                 return (
@@ -153,6 +167,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   {...(rowId ? { id: rowId(r) } : {})}
                   {...(action ? { onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest(INTERACTIVE)) return; if (onRow) onRow(r); else if (rowHref) window.location.assign(rowHref(r)); } } : {})}
                 >
+                  {selectable ? <td className="cbcol" data-label="Select"><input type="checkbox" className="cb" aria-label={`Select ${key}`} checked={picked.has(key)} onChange={() => togglePick(key)} /></td> : null}
                   {columns.map((c, i) => {
                     const content = c.render ? c.render(r) : ((r as Record<string, unknown>)[c.key] as ReactNode) ?? "";
                     const first = i === 0 && action && !hasOwn;
@@ -173,6 +188,16 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </tbody>
         </table>
       </div>
+      {pager && size ? (
+        <div className="pager">
+          <span role="status">{`${pg * size + 1}–${Math.min(list.length, pg * size + size)} of ${total ?? list.length}`}</span>
+          <span className="row">
+            <button type="button" className="btn sm" id={`${id ?? "dt"}-prev`} disabled={pg <= 0} onClick={() => setPage(pg - 1)}>Prev</button>
+            <span>{`${pg + 1} / ${pages}`}</span>
+            <button type="button" className="btn sm" id={`${id ?? "dt"}-next`} disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next</button>
+          </span>
+        </div>
+      ) : null}
       {clientMore || hasMore ? (
         <div className="dtable-more pager">
           <span className="dtable-count" role="status">{total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>

@@ -68,3 +68,14 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 .signin .auth-panel .auth-h{font:700 20px/28px var(--font)}
 .signin .auth-panel>.btn{height:40px}
 @media (max-width:900px){.signin .auth-brand.art{display:none}}
+/* a long KPI value wraps (and steps down) instead of being clipped with an ellipsis */
+.stat .v.stat-val{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;font-size:clamp(18px,1.9vw,28px);line-height:1.15}
+.dtable th:last-child .th-sort,.dtable thead th{white-space:nowrap}
+/* work order route: the prototype stepper wraps across the card instead of clipping, with no chip borders */
+.dz-strip .pipe-wrap{overflow:visible}
+.dz-strip .pipe{flex-wrap:wrap;row-gap:8px}
+.dz-strip .pipe>li{flex:none}
+.dz-strip .step{border:0;background:none;padding:0 2px;color:var(--text);font-weight:500}
+.dz-strip .step .step-ico{width:18px;height:18px}
+.dz-strip .step-link{display:inline-block;width:14px;height:2px;margin:0 4px;background:var(--line-strong)}
+@media (max-width:640px){.dz-strip .pipe>li{flex:none}}

@@ -254,7 +254,7 @@ export function SuitesTab({ d }: { d: EvalsData }) {
         <FilterBar label="Filter suites" count={`${rows.length} of ${all.length}`}>
           <SearchBox id="ev-search" value={q} onChange={setQ} placeholder="Search suites" />
         </FilterBar>
-        <DataTable id="ev-su-table" caption="Eval suites" columns={cols} rows={rows} rowKey={(r) => r.su.id} rowId={(r) => `ev-su-${r.su.id}`} onRow={pick} pageSize={12} empty={{ title: "No suites match", text: "Clear the search to see every suite." }} />
+        <DataTable id="ev-su-table" caption="Eval suites" columns={cols} rows={rows} rowKey={(r) => r.su.id} rowId={(r) => `ev-su-${r.su.id}`} onRow={pick} pageSize={12} pager empty={{ title: "No suites match", text: "Clear the search to see every suite." }} />
       </div>
       <div className="ev-suites-main"><SuiteDetail d={d} /><HeadToHead d={d} /></div>
     </div>

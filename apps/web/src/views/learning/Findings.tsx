@@ -42,7 +42,7 @@ export function FindingsTab({ findings, proposals, hi, onFocusProposal, onDrafte
         <SearchBox id="ln-search" value={q} onChange={setQ} placeholder="Search findings" />
         <Select id="ln-sig" aria-label="Signal" value={sig} onChange={setSig} options={[{ value: "", label: "Signal: all" }, ...Object.keys(SIGNALS).map((k) => ({ value: k, label: `Signal: ${SIGNALS[k]![0]}` }))]} />
       </FilterBar>
-      <DataTable id="ln-f-table" caption="Findings" columns={cols} rows={list} rowKey={(f) => f.id} rowId={(f) => `ln-f-${f.id}`} pageSize={10} empty={{ title: "No findings", text: "Findings appear when the same kind of signal repeats." }} />
+      <DataTable id="ln-f-table" caption="Findings" columns={cols} rows={list} rowKey={(f) => f.id} rowId={(f) => `ln-f-${f.id}`} pageSize={10} pager empty={{ title: "No findings", text: "Findings appear when the same kind of signal repeats." }} />
     </div>
   );
 }
