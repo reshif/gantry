@@ -214,6 +214,32 @@ Remaining (resource limits, a configurable hostname with real TLS, and the upgra
   - documentation for users, admins and operators, plus OpenAPI
   - self-hosted fonts
 
+## Wave 6: security team (2026-11-16)
+
+Area: data and crypto. Tests are in `services/api/test/data-crypto.test.ts` (the first five fail without their fix) and `packages/db/test/queue.test.ts`.
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| DC1 (P2) | `/auth/callback` with no cookie wrote a permanent hash-chained audit event and a `signins` row per request, with no login. | Anonymous sign-in failures go through the denial sampler (5 per reason and address a minute, 30 per reason). The count left out rides on the next row. The redirect never changes. | `data-crypto.test.ts` |
+| DC2 (P2) | A signed-in person could append unlimited `<action>.denied` rows (the global limit was 600 a minute). | `auditDenial` samples per person: 5 rows a minute per action, 20 across actions, with `suppressedSinceLastRow` on the next row. The 403 is unchanged. | `data-crypto.test.ts` |
+| DC3 (P2) | The internet-facing API mounted the whole backup volume (database dumps, created 0644). | The API mounts a separate `backupstatus` volume that holds only `last-backup.json` and `last-drill.json`. The backup service writes sets with `umask 077`. | compose config |
+| DC4 (P2) | The audit chain is unkeyed and its head is in the same database, so the owner role (or a forged backup) could rewrite or truncate it and still verify. | The API signs the chain head (HMAC-SHA256, key derived from the session key, which the database never holds) every 5 minutes into `GANTRY_AUDIT_ANCHOR_FILE` on the `auditanchors` volume. `GET /audit/verify` requires every checkpoint to match the row now at its seq. | `data-crypto.test.ts` |
+| DC5 (P3) | Keycloak logged no successful logins, resets or admin edits (email and user changes drive identity linking). | Both realms enable events (90 days) and admin events with representation, with the `jboss-logging` listener. | `prod-realm.mjs --check` |
+| DC6 (P2) | The invite token, OIDC code, `id_token_hint` and CSRF token reached the API and Caddy logs in clear. | The API logs the path only for `/auth/*` and `/idp/*`, masks credential query names elsewhere, and redacts `x-csrf-token`. Caddy replaces those query names and `X-Csrf-Token`/`X-Api-Key` in its access log. | `data-crypto.test.ts`, `caddy validate` |
+| DC7 (P3) | An invite email's plaintext one-time link stayed in the outbox row (and every backup) forever. | The link and token are removed from the payload when a row is delivered or dead. | `queue.test.ts` |
+| DC8 (P3) | A vendor-key read wrote no audit event, and decrypt fell back to a ciphertext with no row binding. | Each read is audited (`vendor.key.read`, one row per vendor a minute, with a fingerprint and the count of reads left out). An unbound legacy envelope is read once and re-sealed to its row in the same step. | `data-crypto.test.ts` |
+| DC9 (P3) | The ledger's definer functions had `public` first and `pg_temp` implicit first: a session with TEMP could shadow `event_counters` and forge seq and the head. | Migration 0040 pins `pg_catalog, public, pg_temp`, schema-qualifies the counter, and revokes TEMP on the database from PUBLIC and `gantry_app`. | `data-crypto.test.ts` (fails without the migration) |
+
+Left for the owner, with the safe default in place:
+
+- Postgres TLS (`ssl=on`, `hostssl`, `sslmode=verify-full`) is not set. The traffic stays on the internal Docker network.
+- `gantry_owner` is still a superuser and is shared by migrate and backup. Splitting it into a migrate-only role and a read-only backup role changes the install, so it is not done.
+- Checkpoints cover the chain, not `gate_decisions` (REVOKE-only, unchained). For off-host protection copy the `auditanchors` volume to WORM storage or a SIEM.
+- Keycloak events are kept in Keycloak for 90 days and reach the container log. They are not yet imported into the Gantry ledger. A required MFA action for the production realm would force every user to enrol, so it is not set.
+- Realm import only runs on first start: an existing Keycloak needs the event settings set once in the admin console (Realm settings, Events). Existing backup sets stay 0644 until they rotate out; the API no longer mounts them.
+- The invite link is still a query parameter (now masked in logs). Moving it to a POST exchange changes the emailed link format.
+- Outbox retention (deleting delivered rows after N days) is still open under Wave 5.
+
 ## Decisions for the owner
 
 Answered 2026-11-15:
