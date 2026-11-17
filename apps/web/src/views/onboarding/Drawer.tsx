@@ -270,7 +270,7 @@ export function RepoDrawer({ repoId, projectId, close }: { repoId: string; proje
     <div className="drawer-inner onb-drawer">
       <div className="drawer-head">
         <div>
-          <div className="kicker">{`Onboarding · ${project.name}`}</div>
+          <div className="small muted">Repo onboarding</div>
           <div className="drawer-id"><span className="mono big-id">{r.name}</span><StatusChip r={r} /></div>
           <p className="muted small">{`${r.lang || "Language not read yet"} · owned by ${teamName(r.team)} · stage ${stageName(o.stage)}`}</p>
         </div>

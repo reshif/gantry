@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useCan } from "../api/can";
 import { useMe, useProjects, useRepos } from "../api/queries";
-import { usePrefs } from "../lib/prefs";
+import { updatePrefs, usePrefs } from "../lib/prefs";
 import { navigate, useHash } from "../lib/router";
 import { Btn, Empty, Tabs, ViewHead } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
@@ -49,7 +49,10 @@ export default function OnboardingView() {
         meta={[["Repos", qState(reposQ, () => String(repos.length))], ["Ready", qState(reposQ, () => `${ready} / ${repos.length}`)], ["In progress", qState(reposQ, () => String(repos.length - ready - attention))], ["Needs action", qState(reposQ, () => String(attention))]]}
         actions={<Btn kind="primary" icon="plus" id="onb-connect" label="Connect repo" guard={connect} onClick={wizard} />}
       />
-      <Tabs idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: repos.length }, { id: "agent", label: "Onboarding agent and guidelines" }]} active={tab} onChange={(t) => setTab(t as typeof tab)} />
+      <div className="onb-tabrow">
+        <Tabs idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: repos.length }, { id: "agent", label: "Guidelines" }]} active={tab} onChange={(t) => setTab(t as typeof tab)} />
+        <Btn small kind="ghost" icon="agent" id="onb-agent-profile" label="Onboarding agent profile" onClick={() => { updatePrefs({ agent: "ag-onboard" }); navigate("agents"); }} />
+      </div>
       {tab === "pipeline" ? <Async query={reposQ} what="repos" id="onb-repos">{() => <Pipeline project={project.id} repos={repos} open={(id) => navigate("onboarding", id)} details={openRepo} />}</Async> : <AgentTab project={project} />}
     </div>
   );

@@ -11,7 +11,7 @@ import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { decide, markSeen, sendTurn, useSession, type Session, type SessionMessage } from "./session-api";
-import { stageName, type RepoV } from "./kit";
+import { StatusChip, type RepoV } from "./kit";
 import { QuestionCard, useThreadEnd } from "../session/kit";
 
 type Proposal = Extract<SessionCard, { kind: "proposal" }>;
@@ -198,14 +198,18 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
 
   return (
     <div className="osx" id="osx">
-      <div className="osx-top">
-        <Btn small icon="back" id="osx-back" label="Pipeline" onClick={back} />
-        <h2 className="osx-title mono">{r.name}</h2>
-        <span className="chip">{stageName(o.stage)}</span>
-        <Chip text={ruleBased ? "Rule-based (no agent)" : `Onboarding Agent v${s.agent.mode === "agent" ? s.agent.version : ""}`} cls={ruleBased ? "" : "chip-accent"} />
-        <span className="osx-spacer" />
-        <Btn small id="osx-details" label="Details and settings" onClick={details} />
-      </div>
+      <header className="osx-top">
+        <div className="osx-top-main">
+          <Btn small kind="ghost" icon="back" id="osx-back" label="Pipeline" onClick={back} />
+          <div className="small muted">Repo onboarding</div>
+          <h1 className="vtitle osx-title mono">{r.name}</h1>
+          <div className="osx-top-tags">
+            <StatusChip r={r} />
+            <Chip text={ruleBased ? "Rule-based (no agent)" : `Onboarding Agent v${s.agent.mode === "agent" ? s.agent.version : ""}`} cls={ruleBased ? "" : "chip-accent"} />
+          </div>
+        </div>
+        <div className="vhead-actions"><Btn small id="osx-details" label="Details and settings" onClick={details} /></div>
+      </header>
       <div className="osx-grid">
         <section className="osx-main" aria-label="Conversation">
           <div className="osx-thread" role="log" aria-live="polite" ref={thread}>
@@ -238,7 +242,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
             {ruleBased ? <p className="small muted osx-reason" id="osx-mode-note">{`Connect a model vendor to talk to the Onboarding Agent. ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
           </form>
         </section>
-        <aside className="osx-side" aria-label="Lifecycle">
+        <aside className="osx-side" aria-label="Lifecycle"><h2 className="osx-side-h">Lifecycle</h2>
           <ol className="osx-steps" id="osx-steps">
             {s.steps.map((st) => (
               <li key={st.name} className={`is-${st.state}`} aria-current={st.state === "current" ? "step" : undefined}>
@@ -256,7 +260,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
             <dt>Cost so far</dt><dd className="mono" id="osx-cost">{`${fmt.money(s.costUsd)}${s.agent.mode === "agent" || s.budget.spentUsd ? ` of ${fmt.money(s.budget.limitUsd)} budget` : ""}`}</dd>
             {o.pr ? <><dt>Pull request</dt><dd>{o.pr.url ? <a href={o.pr.url} target="_blank" rel="noreferrer">{`#${o.pr.number}`}</a> : `#${o.pr.number}`}{` · ${o.pr.state === "merged" ? "merged" : `checks ${o.pr.checks}`}`}{s.prNeedsUpdate ? " · needs an update" : ""}</dd></> : null}
           </dl>
-          <h3 className="sub-h">Proposed changes</h3>
+          <h2 className="osx-side-h">Proposed changes</h2>
           {pending.length ? (
             <ul className="osx-pending" id="osx-pending">
               {pending.map(({ m, c }) => (

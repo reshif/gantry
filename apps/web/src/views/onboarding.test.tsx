@@ -76,7 +76,7 @@ describe("Onboarding: pipeline", () => {
     expect(meta).toEqual(["Repos4", "Ready1 / 4", "In progress1", "Needs action2"]); // the buckets do not overlap
     const strip = Array.from(document.querySelectorAll(".onb-strip li")).map((li) => li.querySelector(".onb-strip-n")?.textContent);
     expect(strip).toEqual(["1", "0", "0", "1", "0", "0", "1", "1"]); // connected, ..., PR checks, ..., Ready, off belt
-    expect(document.querySelectorAll("tr.row-link")).toHaveLength(4);
+    expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(4);
     const waiting = document.querySelector(".callout-warn")!;
     expect(waiting.textContent).toMatch(/1 onboarding PR is green and waiting for a person to approve and merge: acme\/mobile-app#338/);
     expect(document.querySelector("#onb-row-search-indexer .onb-st-person")?.textContent).toMatch(/Needs a person/);
@@ -106,9 +106,9 @@ describe("Onboarding: pipeline", () => {
     mount(<OnboardingView />);
     await byId("onb-row-mobile-app");
     fireEvent.click(screen.getByLabelText("Needs action"));
-    await waitFor(() => expect(document.querySelectorAll("tr.row-link")).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(2));
     fireEvent.click(screen.getByLabelText("Ready"));
-    await waitFor(() => expect(document.querySelectorAll("tr.row-link")).toHaveLength(1));
+    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(1));
     cleanup();
     api([]);
     mount(<OnboardingView />);
