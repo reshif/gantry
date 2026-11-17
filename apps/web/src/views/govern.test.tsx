@@ -331,7 +331,7 @@ describe("Security", () => {
   it("keeps the last allowed domain and the one you signed in with", async () => {
     setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Domains and network/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Network/ }));
     const rm = await byId("sec-dom-rm-acme_dev");
     expect(rm.getAttribute("aria-disabled")).toBe("true");
     expect(rm.getAttribute("data-reason")).toContain("lock you out");
@@ -343,7 +343,7 @@ describe("Security", () => {
   it("validates a CIDR before sending", async () => {
     const calls = setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Domains and network/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Network/ }));
     fireEvent.change(await screen.findByLabelText("Address range to allow"), { target: { value: "nope" } });
     fireEvent.click(screen.getByText("Add range"));
     expect(await screen.findByText(/Enter an IPv4 address or CIDR range/)).toBeTruthy();
@@ -353,7 +353,7 @@ describe("Security", () => {
   it("lists sessions and revokes another one; read-only users cannot revoke others", async () => {
     const calls = setup({ "DELETE /api/v1/sessions/s2": () => ({ body: { ok: true, msg: "Session revoked." } }) });
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Active sessions/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Sessions/ }));
     fireEvent.click(await byId("sec-ses-rv-s2"));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/sessions/s2")).toBe(true));
   });
@@ -361,7 +361,7 @@ describe("Security", () => {
   it("shows the sign-in history with failures", async () => {
     setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Sign-in history/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /History/ }));
     expect(await screen.findByText("domain not allowed")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Succeeded"));
     expect(screen.queryByText("domain not allowed")).toBeNull();

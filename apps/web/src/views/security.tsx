@@ -8,13 +8,14 @@ import type { SecuritySettings, Session, SignIn } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useMe, usePeople, useSecurity, useSessions, useSignins } from "../api/queries";
-import { Btn, Field, LockNote, Panel, Segmented, Select, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
+import { Btn, Field, FilterBar, LockNote, Panel, Segmented, Select, Status, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { ExplainDenial } from "./console/ExplainDenial";
 import { lockd, nextVersion, useOutcome, versionOf } from "./govern/data";
 import { inCidr, parseCidr } from "./security/cidr";
+import { StopTab } from "./security/Stop";
 
 const PROVIDERS = ["Okta", "Microsoft Entra ID", "Google Workspace", "OneLogin"];
 const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
@@ -49,11 +50,11 @@ export default function SecurityView() {
     <div className="view view-security">
       <ViewHead
         title="Security"
-        sub="How people get in and how long they stay. Every change here is audited under auth."
+        sub="Sign-in policy, who can reach Gantry from where, open sessions and the sign-in record. Every change here is audited."
         meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", sec.mfa.policy === "all" ? "everyone" : sec.mfa.policy === "admins" ? "admins" : "off"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", qState(sessionsQ, () => String(active))], ["Failed sign-ins 24 h", qState(signinsQ, () => String(fails))]]}
       />
       {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /><ExplainDenial id="sec-explain" action="security.manage" /></div> : null}
-      <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in and sessions" }, { id: "network", label: "Domains and network" }, { id: "sessions", label: "Active sessions", count: active }, { id: "history", label: "Sign-in history", count: signins.length }]} />
+      <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in" }, { id: "network", label: "Network" }, { id: "sessions", label: "Sessions", count: active }, { id: "history", label: "History", count: signins.length }, { id: "stop", label: "Emergency stop" }]} />
       <div id="sec-tab-panel" role="tabpanel">
         {tab === "network" ? (
           <>
@@ -61,10 +62,12 @@ export default function SecurityView() {
             <ResearchPanel perm={perm} sec={sec} />
             <ChatCapPanel perm={perm} sec={sec} />
           </>
+        ) : tab === "stop" ? (
+          <StopTab sec={sec} onSignIn={() => setTab("signin")} />
         ) : tab === "sessions" ? (
-          <Async query={sessionsQ} what="sessions" id="sec-sessions">{() => <Panel><SessionsTab perm={perm} sessions={sessions} sec={sec} currentId={me.session.id} viewerId={me.person.id} /></Panel>}</Async>
+          <Async query={sessionsQ} what="sessions" id="sec-sessions">{() => <SessionsTab perm={perm} sessions={sessions} sec={sec} currentId={me.session.id} viewerId={me.person.id} />}</Async>
         ) : tab === "history" ? (
-          <Async query={signinsQ} what="sign-in history" id="sec-history">{() => <Panel><HistoryTab signins={signins} /></Panel>}</Async>
+          <Async query={signinsQ} what="sign-in history" id="sec-history">{() => <HistoryTab signins={signins} />}</Async>
         ) : (
           <div className="two-col sec-cols">
             <div className="sec-stack"><SsoPanel perm={perm} sec={sec} /><MfaPanel perm={perm} sec={sec} /></div>
@@ -392,18 +395,22 @@ function SessionsTab({ perm, sessions, sec, currentId, viewerId }: { perm: Decis
     void ops.revokeSession(s.id).then((r) => outcome(r));
   };
   return (
-    <div>
-      <div className="toolbar sec-toolbar">
-        <Segmented name="sec-ses-show" label="Sessions shown" value={show} onChange={setShow} items={[{ id: "active", label: `Active (${list.filter((x) => !x.revoked).length})` }, { id: "all", label: `All (${list.length})` }]} />
-        <Btn
-          label="Revoke all other sessions" small kind="danger" icon="logout" id="sec-ses-all"
+    <div className="sec-tabbody">
+      <FilterBar
+        label="Sessions"
+        count={`${rows.length} ${rows.length === 1 ? "session" : "sessions"}`}
+        actions={<Btn
+          label="Revoke all other sessions" kind="danger" icon="logout" id="sec-ses-all"
           guard={!perm.allowed ? perm : !others.length ? lockd("No other active sessions.") : null}
           onClick={() => ui.dialog({
             title: `Revoke ${others.length} sessions?`, kicker: "Sessions", sub: "Everyone except you is signed out and must sign in again.", body: null,
             actions: [{ label: "Cancel" }, { label: `Revoke ${others.length}`, kind: "danger", id: "sec-ses-all-ok", onClick: (close) => void (async () => { let n = 0; for (const x of others) if ((await ops.revokeSession(x.id)).ok) n++; close(); ui.toast(`${n} sessions revoked.`, "ok"); })() }],
           })}
-        />
-      </div>
+        />}
+      >
+        <Segmented name="sec-ses-show" label="Sessions shown" value={show} onChange={setShow} items={[{ id: "active", label: `Active (${list.filter((x) => !x.revoked).length})` }, { id: "all", label: `All (${list.length})` }]} />
+      </FilterBar>
+      <Panel flush>
       <div className="table-scroll" data-keep-scroll="sec-sessions">
         <table className="table table-compact sec-table">
           <thead><tr>{["Person", "Method", "Device", "IP", "Started (IST)", "Last seen", "State", ""].map((x, i) => <th key={i} scope="col">{x}</th>)}</tr></thead>
@@ -418,7 +425,7 @@ function SessionsTab({ perm, sessions, sec, currentId, viewerId }: { perm: Decis
                   <td><Who id={x.person} /></td><td className="mono">{x.method}</td><td>{x.device}</td><td className="mono">{x.ip}</td>
                   <td className="mono nowrap">{`${fmt.istDate(x.started)} ${fmt.ist(x.started)}`}</td>
                   <td className="nowrap">{fmt.ago(x.lastSeen, Date.now())}</td>
-                  <td>{x.revoked ? <span className="sec-st is-ended"><Icon name="x" />Ended</span> : expired ? <span className="sec-st is-exp"><Icon name="clock" />Past lifetime</span> : <span className="sec-st is-live"><Icon name="check" />{isCur ? "This session" : "Active"}</span>}</td>
+                  <td>{x.revoked ? <Status tone="neutral" icon="x">Ended</Status> : expired ? <Status tone="wait" icon="clock">Past lifetime</Status> : isCur ? <Status tone="accent" icon="check">This session</Status> : <Status tone="done" icon="check">Active</Status>}</td>
                   <td><Btn label={isCur ? "Revoke (signs you out)" : "Revoke"} small kind="ghost" icon="logout" id={`sec-ses-rv-${x.id}`} guard={g} onClick={() => revoke(x)} /></td>
                 </tr>
               );
@@ -426,6 +433,7 @@ function SessionsTab({ perm, sessions, sec, currentId, viewerId }: { perm: Decis
           </tbody>
         </table>
       </div>
+      </Panel>
     </div>
   );
 }
@@ -441,12 +449,12 @@ function HistoryTab({ signins }: { signins: SignIn[] }) {
   const fails24 = all.filter((x) => x.outcome === "failure" && Date.now() - x.at < 86400000).length;
   const methods = [...new Set(all.map((x) => x.method))];
   return (
-    <div>
-      <div className="toolbar sec-toolbar">
+    <div className="sec-tabbody">
+      <FilterBar label="Sign-in history" count={`${rows.length} sign-ins · ${fails24} ${fails24 === 1 ? "failure" : "failures"} in the last 24 hours`}>
         <Segmented name="sec-hist" label="Outcome" value={hist} onChange={(v) => { setHist(v); setLimit(40); }} items={[{ id: "all", label: "All" }, { id: "success", label: "Succeeded" }, { id: "failure", label: "Failed" }]} />
         <Field label="Method" htmlFor="sec-hist-method"><Select id="sec-hist-method" value={method} onChange={setMethod} options={[{ value: "all", label: "Any method" }, ...methods.map((m) => ({ value: m, label: m }))]} /></Field>
-        <span className="small muted">{`${rows.length} sign-ins · ${fails24} failures in the last 24 h`}</span>
-      </div>
+      </FilterBar>
+      <Panel flush>
       <div className="table-scroll" data-keep-scroll="sec-hist">
         <table className="table table-compact sec-table">
           <thead><tr>{["When (IST)", "Who", "Method", "Outcome", "Detail", "IP", "Device"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
@@ -456,13 +464,14 @@ function HistoryTab({ signins }: { signins: SignIn[] }) {
                 <td className="mono nowrap">{fmt.iso(x.at)}</td>
                 <td>{x.person ? <Who id={x.person} /> : <span className="mono">{x.email}</span>}</td>
                 <td className="mono">{x.method}</td>
-                <td><span className={`sec-st ${x.outcome === "success" ? "is-live" : "is-fail"}`}><Icon name={x.outcome === "success" ? "check" : "alert"} />{x.outcome === "success" ? "Succeeded" : "Failed"}</span></td>
+                <td>{x.outcome === "success" ? <Status tone="done" icon="check">Succeeded</Status> : <Status tone="fail" icon="alert">Failed</Status>}</td>
                 <td className="small">{x.reason || ""}</td><td className="mono">{x.ip}</td><td className="small">{x.device}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      </Panel>
       {rows.length > limit ? <div className="more"><Btn label="Show more" small id="sec-hist-more" onClick={() => setLimit(limit + 40)} /></div> : null}
     </div>
   );
