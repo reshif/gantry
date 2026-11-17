@@ -2,6 +2,7 @@ import type { Queryable } from "@gantry/db";
 import { REPO_CONTEXT_LAYER_NAME, RepoContext, renderRepoContext } from "@gantry/domain";
 import { compactPrevious, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
+import { testCommandRules } from "../onboarding/testcmd.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
 import { commentsHandoff } from "../workorders/doccollab.js";
 import { planOf, researchHosts, sourcesHandoff } from "../workorders/research.js";
@@ -47,6 +48,15 @@ export function toolAllowList(body: Record<string, unknown>, data: Record<string
     return [...out];
   }
   return READ_TOOLS;
+}
+
+/**
+ * "May run tests" also covers the project's own test command, once a person confirmed it (repo_config.data.testCommands, set in the repository's settings; onboarding
+ * only proposes it). Each becomes `Bash(<command>:*)`. An agent that holds no test command gets none, and nothing here ever adds a bare `Bash`.
+ */
+export function withProjectTests(list: string[], confirmed: unknown): string[] {
+  if (!list.some((t) => (TEST_COMMANDS as string[]).includes(t))) return list;
+  return [...new Set([...list, ...testCommandRules(confirmed)])];
 }
 
 export interface ComposedInstructions {
@@ -149,6 +159,7 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
   const costUsd = agentBudget !== undefined && planBudget ? Math.min(agentBudget, planBudget) : (planBudget ?? agentBudget);
   const input = c.runData.input ?? c.attemptData.input ?? (await handoff(db, c));
   const skills = await skillsFor(db, c);
+  const confirmedTests = carrier || !c.repoId ? null : (await db.query<{ t: unknown }>(`select data->'testCommands' as t from repo_config where org_id = $1 and repo_id = $2`, [c.orgId, c.repoId])).rows[0]?.t;
   // The repository's own convention files follow the layers; they are a manifest part of their own, so the hash covers them.
   const repoSection = repoContextSection(c);
   const instructionsText = [inst.text, repoSection].filter((x) => x !== "").join("\n\n");
@@ -163,7 +174,7 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
     promptManifest,
     skills: skills.map((s) => ({ name: s.name, content: s.content })),
     mcpServers: Object.fromEntries(mcp.map((s) => [mcpKey(s, mcp), { type: "http" as const, url: `${edgeUrl.replace(/\/+$/, "")}/mcp/v1/${encodeURIComponent(s.id)}` }])),
-    toolAllowList: carrier ? READ_TOOLS : toolAllowList(agent.body, draft),
+    toolAllowList: carrier ? READ_TOOLS : withProjectTests(toolAllowList(agent.body, draft), confirmedTests),
     limits: { turns: pos(lim.turns) ?? 40, ...(costUsd ? { costUsd } : {}), wallClockSeconds: pos(lim.wallClockSeconds) ?? 3600 },
     heartbeatSeconds: HEARTBEAT_SECONDS,
     leaseSeconds: LEASE_SECONDS,
@@ -182,9 +193,15 @@ export async function changeFact(db: Queryable, c: RunCtx, prior: StationResultR
     `select after from events where org_id = $1 and wo_id = $2 and type = 'run.published' order by seq desc limit 1`, [c.orgId, c.woId],
   )).rows[0]?.after;
   const commits = Number(ev?.commits ?? 0);
-  if (ev && commits > 0) return { observedBy: "platform", commits, headSha: ev.headSha ?? null, branch: ev.branch ?? null, pullRequest: ev.pr ?? null, diff: "present" };
+  const seed = (c.runData?.seed ?? {}) as { base?: unknown; baseBranch?: unknown };
+  const baseSha = typeof seed.base === "string" && /^[0-9a-f]{40}$/.test(seed.base) ? seed.base : null;
+  // The workspace holds the base commit (the target branch head) next to the head, so the change is read offline: no network git, no token.
+  const base = baseSha
+    ? { baseSha, baseBranch: typeof seed.baseBranch === "string" ? seed.baseBranch : null, diffCommand: `git diff ${baseSha}...${ev?.headSha ?? "HEAD"}`, baseNote: "Your workspace holds the target branch head (baseSha) as well as the work branch head, so the diff above works offline. A checkout with no parent for the head is normal here: the base is baseSha." }
+    : !c.repoId ? {} : { baseSha: null, baseNote: "No base commit could be placed in your workspace, so the change against the target branch cannot be diffed there. Say so rather than judging the head commit alone as if it added every file." };
+  if (ev && commits > 0) return { observedBy: "platform", commits, headSha: ev.headSha ?? null, branch: ev.branch ?? null, pullRequest: ev.pr ?? null, diff: "present", ...base };
   return {
-    observedBy: "platform", commits: 0, headSha: null, diff: "none",
+    observedBy: "platform", commits: 0, headSha: null, diff: "none", ...base,
     note: ev ? "The platform published no commit from Build: the work branch has no change against the base branch. Whatever Build reported, the repository is unchanged, so a criterion about the change cannot pass on this; say so in your result." : "The platform has no record that Build published a commit. Check the repository itself before you pass a criterion about the change.",
   };
 }

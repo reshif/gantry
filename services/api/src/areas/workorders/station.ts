@@ -66,8 +66,9 @@ function absorbOutput(w: Wo, station: string, r: StationResult): { checks: Obser
     if (Array.isArray(out.acceptanceCriteria ?? out.ac)) brief.ac = strs(out.acceptanceCriteria ?? out.ac);
   }
   if (station === "plan" && Array.isArray(out.children)) brief.children = strs(out.children);
-  if (station === "build" || r.observed?.files) {
-    const files = r.observed?.files ?? (Array.isArray(out.files) ? (out.files as Array<{ path: string; additions?: number; deletions?: number }>).filter((f) => f && typeof f.path === "string") : []);
+  // The recorded diff is what the platform saw in the published commits. A Build's own `files` list is shown as its report (outputs) but never becomes the stats.
+  {
+    const files = r.observed?.files ?? [];
     if (files.length) {
       w.data.files = files.map((f) => ({ path: f.path, plus: Number(f.additions) || 0, minus: Number(f.deletions) || 0 }));
       w.data.paths = [...new Set([...(Array.isArray(w.data.paths) ? (w.data.paths as string[]) : []), ...files.map((f) => f.path)])];

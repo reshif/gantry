@@ -1,3 +1,4 @@
+import { MAX_TEST_COMMANDS, checkTestCommand } from "./testcmd.js";
 import { NOTIFY_EVENTS } from "@gantry/domain";
 import { z } from "zod";
 
@@ -38,6 +39,10 @@ export const ConfigBody = z.object({
     tagging: z.enum(["semver-patch", "semver-minor", "calver", "none"]).optional(),
     requiredChecks: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
     protectedPaths: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
+    /** The project's own test commands, confirmed by the person saving this. They become narrow shell permissions for the stations that may run tests. */
+    testCommands: z.array(z.string()).max(MAX_TEST_COMMANDS).superRefine((list, ctx) => {
+      list.forEach((c, i) => { const r = checkTestCommand(c); if (!r.ok) ctx.addIssue({ code: "custom", path: [i], message: r.reason }); });
+    }).transform((list) => list.map((c) => (checkTestCommand(c) as { command: string }).command)).optional(),
   }).strict().optional(),
   via: z.string().optional(),
 }).strict().refine((b) => Object.keys(b).filter((k) => k !== "via").length > 0, "Nothing to change.");

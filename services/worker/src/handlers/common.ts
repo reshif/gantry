@@ -83,6 +83,18 @@ export async function coveringStops(db: Queryable, orgId: string, w: { woId: str
 const SHA = /^[0-9a-f]{40}$/;
 
 /**
+ * The branch whose head is the base of this work order's change, or null when there is no change yet to compare (a first Build, Spec, Plan, onboarding, evals).
+ * With a pull request it is the branch the pull request targets; with only published commits it is the repository's default branch. The broker fetches that
+ * head into the workspace so `git diff <base>...<head>` works offline in the runner.
+ */
+export async function resolveSeedBase(db: Queryable, orgId: string, woId: string, defaultBranch: string): Promise<string | null> {
+  const pr = (await db.query<{ base_branch: string | null }>(`select base_branch from pull_requests where org_id = $1 and wo_id = $2 and state = 'open' and head_sha is not null order by number desc limit 1`, [orgId, woId])).rows[0];
+  if (pr) return pr.base_branch || defaultBranch;
+  const c = (await db.query(`select 1 from commits where org_id = $1 and wo_id = $2 limit 1`, [orgId, woId])).rowCount;
+  return c ? defaultBranch : null;
+}
+
+/**
  * The commit a workspace is seeded at (spec 4.3 step 2): the head of the work order's pull request, else its latest published commit,
  * else the commit recorded for the repository (repo_config.data.baseSha / repos.data.baseSha, written by onboarding and reconciliation).
  */

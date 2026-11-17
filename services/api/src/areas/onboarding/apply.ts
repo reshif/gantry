@@ -56,6 +56,16 @@ export type AssessmentResult =
   | { kind: "blocked"; code: string; msg: string }
   | { kind: "failed"; msg: string };
 
+/**
+ * What the assessment found for "Test command" (`<command> (<source>)`), kept beside the repository's settings as a proposal. It grants nothing: only commands a
+ * person confirmed (`config.testCommands`) reach an agent's allow-list.
+ */
+function proposedTestCommand(findings: ReadonlyArray<{ id: string; ok: boolean; detail?: string | null }>): { testCommandProposed?: { command: string; source: string } } {
+  const f = findings.find((x) => x.id === "test" && x.ok && x.detail);
+  const m = f ? /^(.*?) \((.*)\)$/.exec(f.detail!) : null;
+  return m ? { testCommandProposed: { command: m[1]!, source: m[2]! } } : {};
+}
+
 export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string; runId: string; now: Date; adapter?: string; assessor?: OnboardAssessor; result: AssessmentResult }): Promise<Applied> {
   const c = await current(tx, orgId, o.repoId, o.runId, o.now);
   if (isApplied(c)) return c;
@@ -83,7 +93,7 @@ export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string
     await tx.query(
       `insert into repo_config (org_id, repo_id, default_branch, data) values ($1,$2,$3,$4::jsonb)
        on conflict (org_id, repo_id) do update set default_branch = excluded.default_branch, data = repo_config.data || excluded.data, updated_at = now()`,
-      [orgId, repo.id, r.defaultBranch, JSON.stringify({ baseSha: r.headSha })],
+      [orgId, repo.id, r.defaultBranch, JSON.stringify({ baseSha: r.headSha, ...proposedTestCommand(r.findings) })],
     );
     if (repo.default_branch && repo.default_branch !== r.defaultBranch) stamp(doc, SYSTEM, `The default branch on GitHub is ${r.defaultBranch}, not ${repo.default_branch}. Settings updated.`, o.now);
     await sysEvent(tx, orgId, repo, "onboarding.assess", { actor: who, after: { run: o.runId, findings: r.findings.length, gaps: gaps.length, adapter, assessor, headSha: r.headSha }, occurredAt: o.now });

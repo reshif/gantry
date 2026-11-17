@@ -66,8 +66,11 @@ export function noChangeOutput(output: Record<string, unknown> | null, fact: str
 export async function publishAttempt(deps: Deps, a: AttemptInfo, summary: string): Promise<PublishOutcome | null> {
   if (!a.repo?.full) return null;
   const denyPaths = await forbiddenPaths(deps.pool, a);
+  // A workspace seeded with history (a base to diff against) no longer has the seed commit as its one shallow boundary, so the publisher is told it.
+  const seedCommit = (await deps.pool.query<{ c: string | null }>(`select data->'seed'->>'commit' as c from runs where org_id = $1 and id = $2`, [a.orgId, runIdFor(a.attemptId)])).rows[0]?.c;
   return deps.broker.publish({
     ...(denyPaths.length ? { denyPaths } : {}),
+    ...(seedCommit && /^[0-9a-f]{40}$/.test(seedCommit) ? { base: seedCommit } : {}),
     attemptId: a.attemptId, fencing: a.fencing, repo: a.repo.full, volume: volumeFor(runIdFor(a.attemptId)), branch: `${a.repo.branchPrefix}${a.woId}`,
     baseBranch: a.repo.defaultBranch, title: `${a.woId}: ${a.title}`.slice(0, 250), ...(summary ? { body: summary.slice(0, 60000) } : {}),
   });

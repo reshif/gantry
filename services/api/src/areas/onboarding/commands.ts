@@ -119,17 +119,20 @@ export async function configureRepo(tx: Tx, a: Actor, repoId: string, b: ConfigB
   }
   if (b.config) {
     const c = b.config;
-    const cur = { defaultBranch: repo.default_branch ?? "main", branchPrefix: repo.branch_prefix ?? "gantry/", merge: repo.merge_strategy ?? "squash", tagging: "", requiredChecks: repo.required_checks ?? [], protectedPaths: repo.protected_paths ?? [] };
+    const cur = { defaultBranch: repo.default_branch ?? "main", branchPrefix: repo.branch_prefix ?? "gantry/", merge: repo.merge_strategy ?? "squash", tagging: "", requiredChecks: repo.required_checks ?? [], protectedPaths: repo.protected_paths ?? [], ...(c.testCommands !== undefined ? { testCommands: (await tx.query<{ t: unknown }>(`select data->'testCommands' as t from repo_config where org_id = $1 and repo_id = $2`, [a.orgId, repo.id])).rows[0]?.t ?? [] } : {}) };
     before.config = cur; after.config = { ...cur, ...c };
     const upd = await tx.query(
       `update repo_config set default_branch = coalesce($3, default_branch), branch_prefix = coalesce($4, branch_prefix), merge_strategy = coalesce($5, merge_strategy), tagging = coalesce($6, tagging),
-              required_checks = coalesce($7, required_checks), protected_paths = coalesce($8, protected_paths), version = version + 1, updated_at = now() where org_id = $1 and repo_id = $2`,
-      [a.orgId, repo.id, c.defaultBranch ?? null, c.branchPrefix ?? null, c.merge ?? null, c.tagging ?? null, c.requiredChecks ?? null, c.protectedPaths ?? null],
+              required_checks = coalesce($7, required_checks), protected_paths = coalesce($8, protected_paths),
+              data = case when $9::jsonb is null then data else data || $9::jsonb end, version = version + 1, updated_at = now() where org_id = $1 and repo_id = $2`,
+      [a.orgId, repo.id, c.defaultBranch ?? null, c.branchPrefix ?? null, c.merge ?? null, c.tagging ?? null, c.requiredChecks ?? null, c.protectedPaths ?? null,
+        c.testCommands === undefined ? null : JSON.stringify({ testCommands: c.testCommands, testCommandsConfirmedBy: a.personId ?? a.id, testCommandsConfirmedAt: a.now.toISOString() })],
     );
     if (!upd.rowCount) {
       await tx.query(
-        `insert into repo_config (org_id, repo_id, default_branch, branch_prefix, merge_strategy, tagging, required_checks, protected_paths) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [a.orgId, repo.id, c.defaultBranch ?? "main", c.branchPrefix ?? "gantry/", c.merge ?? "squash", c.tagging ?? "semver-patch", c.requiredChecks ?? [], c.protectedPaths ?? []],
+        `insert into repo_config (org_id, repo_id, default_branch, branch_prefix, merge_strategy, tagging, required_checks, protected_paths, data) values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
+        [a.orgId, repo.id, c.defaultBranch ?? "main", c.branchPrefix ?? "gantry/", c.merge ?? "squash", c.tagging ?? "semver-patch", c.requiredChecks ?? [], c.protectedPaths ?? [],
+          JSON.stringify(c.testCommands === undefined ? {} : { testCommands: c.testCommands, testCommandsConfirmedBy: a.personId ?? a.id, testCommandsConfirmedAt: a.now.toISOString() })],
       );
     }
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Queryable } from "@gantry/db";
-import { changeFact, toolAllowList } from "../src/areas/internal/spec.js";
+import { checkTestCommand, testCommandRules } from "../src/areas/onboarding/testcmd.js";
+import { changeFact, toolAllowList, withProjectTests } from "../src/areas/internal/spec.js";
 
 describe("the run spec's tool allow-list never carries an unrestricted shell", () => {
   it("runTests becomes test commands", () => {
@@ -44,5 +45,34 @@ describe("the handoff states what Build delivered, as a fact (Verify and Review 
     expect(await changeFact(rows({ commits: 2, headSha: "a".repeat(40), pr: 7, branch: "gantry/WO-1" }), ctx("review"), prior)).toMatchObject({ diff: "present", commits: 2, pullRequest: 7 });
     expect(await changeFact(rows({ commits: 0 }), ctx("build"), prior)).toBeNull();
     expect(await changeFact(rows({ commits: 0 }), ctx("plan"), [] as never)).toBeNull();
+  });
+});
+
+describe("the project's confirmed test command", () => {
+  it("is added as a prefix rule only for an agent that may run tests, and never as a bare Bash", () => {
+    const base = toolAllowList({}, { tools: { readRepo: true, runTests: true } });
+    const l = withProjectTests(base, ["make test", "uv  run pytest -q"]);
+    expect(l).toEqual(expect.arrayContaining(["Bash(make test:*)", "Bash(uv run pytest -q:*)"]));
+    expect(l).not.toContain("Bash");
+    expect(withProjectTests(["Read", "Glob"], ["make test"])).toEqual(["Read", "Glob"]);
+    expect(withProjectTests(base, undefined)).toEqual(base);
+  });
+  it("refuses anything that could run arbitrary code", () => {
+    for (const bad of ["bash -c 'x'", "sh test.sh", "make test; rm -rf /", "make test | tee x", "$(curl x)", "env make test", "python -c pass", "git push", "make *", "make ../x", "", "a ".repeat(9)]) {
+      expect(checkTestCommand(bad), bad).toMatchObject({ ok: false });
+    }
+    expect(checkTestCommand("make   test")).toEqual({ ok: true, command: "make test" });
+    expect(testCommandRules(["make test", "bash -c x", "make test", 5])).toEqual(["Bash(make test:*)"]);
+  });
+  it("the handoff gives the base commit and the offline diff command, or says there is none", async () => {
+    const rows = (after: object): Queryable => ({ query: async () => ({ rows: [{ after }] }) }) as unknown as Queryable;
+    const prior = [{ station: "build", outcome: "succeeded", summary: "", body: {} }] as never;
+    const base = "b".repeat(40), head = "a".repeat(40);
+    const withBase = { orgId: "o", woId: "WO-1", station: "review", repoId: "r", runData: { seed: { commit: head, base, baseBranch: "main" } } } as never;
+    expect(await changeFact(rows({ commits: 1, headSha: head }), withBase, prior)).toMatchObject({ baseSha: base, baseBranch: "main", diffCommand: `git diff ${base}...${head}` });
+    const none = { orgId: "o", woId: "WO-1", station: "review", repoId: "r", runData: { seed: { commit: head, base: null, baseBranch: null } } } as never;
+    const f = await changeFact(rows({ commits: 1, headSha: head }), none, prior);
+    expect(f).toMatchObject({ baseSha: null });
+    expect(String(f?.baseNote)).toMatch(/No base commit/);
   });
 });
