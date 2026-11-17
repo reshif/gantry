@@ -1,5 +1,6 @@
 import { verifyChain } from "@gantry/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { principalDenials } from "../src/core/command.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { withVersion } from "./versions.js";
 
@@ -606,6 +607,7 @@ d("people and access", () => {
 
   describe("invariants the server enforces (spec 14.4)", () => {
     it("audits a refusal raised by an invariant, not only decision-point denials", async () => {
+      principalDenials.reset(); // refusals are audited at a bounded rate per person; this test counts rows, so start a fresh window
       const before = (await ev("people.manage.denied")).length;
       const own = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`, { reason: "test grant" });
       expect(own.status).toBe(403);

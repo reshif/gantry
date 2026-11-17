@@ -46,6 +46,11 @@ export class DenialSampler {
     return { audit: true, suppressed };
   }
 
+  /** Forget every window (tests). */
+  reset(): void {
+    this.buckets.clear();
+  }
+
   private bucket(key: string, now: number): Bucket {
     let b = this.buckets.get(key);
     if (!b) {
