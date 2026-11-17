@@ -353,6 +353,26 @@ d("internal runs API", () => {
       // the per-run cost cap (agent budget 2.5) is enforced at authorize
       expect((await authorize(r)).json().allow).toBe(true);
     });
+    it("a run's limits and tool allow-list come from its pinned version, never from the agent's draft", async () => {
+      const o = t.orgId;
+      // the draft (agents.data) has wide limits and an explicit allow-list; the pinned version has neither key
+      await q(`insert into agents (org_id, id, name, station, live_version, data) values ($1,'ag-w3d','W3 draft','build',1,$2::jsonb)`, [o, JSON.stringify({ budget: 2, limits: { turns: 500, wallClockSeconds: 99999 }, toolAllowList: ["Bash", "WebFetch"], tools: { readRepo: true, writeBranch: true, runTests: true } })]);
+      await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-w3d',1,$2::jsonb,'claude-test-1',now())`, [o, JSON.stringify({ instructions: "Read only.", tools: { readRepo: true } })]);
+      await q(`insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,'tup-w3d','ag-w3d',1,'{}','h','1','claude-test-1')`, [o]);
+      const r = await makeRun({ model: null });
+      await q(`update attempts set tuple_id = 'tup-w3d' where id = $1`, [r.attemptId]);
+      const s = (await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json();
+      expect(s.limits).toMatchObject({ turns: 40, wallClockSeconds: 3600 });
+      expect(s.toolAllowList).toEqual(["Read", "Glob", "Grep"]);
+      // a version that does carry limits and an allow-list wins
+      await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-w3d',2,$2::jsonb,'claude-test-1',now())`, [o, JSON.stringify({ instructions: "Read only.", limits: { turns: 7 }, toolAllowList: ["Read"] })]);
+      await q(`insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,'tup-w3e','ag-w3d',2,'{}','h','1','claude-test-1')`, [o]);
+      const r2 = await makeRun({ model: null });
+      await q(`update attempts set tuple_id = 'tup-w3e' where id = $1`, [r2.attemptId]);
+      const s2 = (await call("GET", `/internal/v1/runs/${r2.runId}/spec`, undefined, { ...EDGE, "x-run-token": r2.token })).json();
+      expect(s2.limits.turns).toBe(7);
+      expect(s2.toolAllowList).toEqual(["Read"]);
+    });
     it("serves a stub run its configured output, and refuses without a valid token or under a stop", async () => {
       const r = await makeRun({ model: null, runData: { adapter: "stub", stub: { output: { x: 1 } } } });
       const s = (await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json();

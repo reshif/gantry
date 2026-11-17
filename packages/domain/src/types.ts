@@ -821,6 +821,8 @@ export interface Agent {
   evalScore: number;
   /** Loaded with the built-in starter kit. */
   builtin?: boolean;
+  /** The skills the version on the floor runs with, each at its pinned version label ("" when none is recorded). `skills` is the draft attachments, which can differ until a new version goes live. */
+  liveSkills?: Array<{ id: Id; version: string }>;
 }
 
 export interface SkillVersion {

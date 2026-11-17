@@ -48,7 +48,13 @@ const layers = [
   { key: "agent", name: "Agent", version: 2, hash: "c", text: "Implement the approved plan on a branch." },
   { key: "repo", name: "Repo guidelines (Gantry)", version: null, hash: "d", text: "Use pnpm.", commit: "a".repeat(40) },
 ];
-const EFFECTIVE = { agent: "ag-build", version: "draft", live: false, project: { id: "payments", name: "Payments Platform" }, repo: { id: "payments-api", name: "payments-api" }, text: "x", hash: "e".repeat(64), words: 10, tokens: 20, layers, skills: [] };
+const sections = [
+  ...layers.map((l) => ({ key: l.key, title: l.name, source: "layer", text: l.text, words: 3 })),
+  { key: "skill:sk-a", title: "Skill: Test design v1.2.0", source: "skill", text: "Test design body, in full.", words: 5 },
+  { key: "station-tools", title: "Station tools", source: "runner", text: "## Showing your work: the gantry tools", words: 6 },
+  { key: "result", title: "Result format", source: "runner", text: "End with one fenced json block.", words: 6 },
+];
+const EFFECTIVE = { agent: "ag-build", version: "2.6.1", live: true, draft: false, project: { id: "payments", name: "Payments Platform" }, repo: { id: "payments-api", name: "payments-api" }, text: "x", hash: "e".repeat(64), promptHash: "f".repeat(64), sections, handoff: { first: "Station: <the station the agent works>", json: ["workOrder (id, title, class)"] }, words: 10, tokens: 20, layers, skills: [] };
 const ME = { person: PEOPLE[0], session: { id: "s1", person: "p-asha", method: "sso", device: "Chrome", ip: "1", started: 0, lastSeen: 0, revoked: false }, csrf: "c", org: { id: "acme", name: "Acme", plant: "P", tz: "IST" }, projects: [PAYMENTS, RISK], factory: { killed: null }, config: {} };
 
 function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
@@ -298,29 +304,33 @@ describe("Agents screen", () => {
     expect(document.body.textContent).toContain("Scoped in MCP");
   });
 
-  it("composes the effective instructions from the four layers and shows unsaved agent edits at once", async () => {
-    setup();
-    mountAgent();
-    await tab("instructions");
-    const pre = await byId("ag-effective");
-    await waitFor(() => expect(pre.textContent).toContain("# 1 Factory base (v4)\nBase rules."));
-    expect(pre.textContent).toContain("# 2 Project overlay: Payments Platform\nPayments Platform overlay text.");
-    expect(pre.textContent).toContain("# 3 Agent: Builder 2.6.1\nImplement the approved plan on a branch.");
-    expect(pre.textContent).toContain("Never modify: infra/prod/**. Keep diffs under 800 lines.");
-    expect(pre.textContent).toContain("## Skills, in order\n1. Test design v1.2.0: When Test design.\n2. Security review v1.2.0");
-    expect(pre.textContent).toContain("# 4 Repo guidelines: payments-api\nUse pnpm.");
-    expect(document.getElementById("ag-eff-count")!.textContent).toMatch(/^\d+ words, about \d+ tokens$/);
-    expect(document.getElementById("ag-repo-commit")!.textContent).toBe(`recorded at ${"a".repeat(12)}`);
-    expect(document.getElementById("ag-repo-conventions")!.textContent).toMatch(/Repo conventions: not read yet/);
-    fireEvent.change(await byId("ag-instr"), { target: { value: "A brand new agent text." } });
-    await waitFor(() => expect(pre.textContent).toContain("# 3 Agent: Builder 2.6.1\nA brand new agent text."));
-  });
-
-  it("asks the server for the draft composition of the chosen project and repo", async () => {
+  it("previews the live version: the real layer order, full skill bodies and the runner's own parts", async () => {
     const calls = setup();
     mountAgent();
     await tab("instructions");
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("project") === "payments" && c.query.get("repo") === "payments-api" && c.query.get("version") === "draft")).toBe(true));
+    const pre = await byId("ag-effective");
+    await waitFor(() => expect(pre.textContent).toContain("Base rules."));
+    const titles = [...pre.querySelectorAll("h4")].map((h) => h.firstChild?.textContent ?? "");
+    expect(titles).toEqual(["Factory base", "Project overlay", "Agent", "Repo guidelines (Gantry)", "Skill: Test design v1.2.0", "Station tools", "Result format", "First message"]);
+    expect(pre.textContent).toContain("Test design body, in full.");
+    expect(document.getElementById("ag-eff-station-tools")!.textContent).toContain("added by the runner");
+    expect(document.getElementById("ag-eff-handoff")!.textContent).toContain("Station: <the station the agent works>");
+    expect(document.getElementById("ag-eff-count")!.textContent).toMatch(/^\d+ words, about \d+ tokens$/);
+    expect(document.getElementById("ag-repo-commit")!.textContent).toBe(`recorded at ${"a".repeat(12)}`);
+    expect(document.getElementById("ag-eff-note")!.textContent).toContain("2.6.1");
+    // The default asks for the floor version (no version parameter); the Draft toggle asks for the working copy.
+    expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("version") === null)).toBe(true);
+    expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("version") === "draft")).toBe(false);
+    fireEvent.click(document.getElementById("ag-eff-version-draft")!);
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("version") === "draft")).toBe(true));
+    await waitFor(() => expect(document.getElementById("ag-eff-note")!.textContent).toContain("not live yet"));
+  });
+
+  it("asks the server for the composition of the chosen project and repo", async () => {
+    const calls = setup();
+    mountAgent();
+    await tab("instructions");
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("project") === "payments" && c.query.get("repo") === "payments-api")).toBe(true));
     fireEvent.change(await byId("ag-ctx-project"), { target: { value: "risk" } });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("project") === "risk" && !c.query.get("repo"))).toBe(true));
   });

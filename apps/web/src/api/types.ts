@@ -330,12 +330,17 @@ export interface AgentEffective {
   live: boolean;
   project: { id: string; name: string } | null;
   repo: { id: string; name: string } | null;
+  /** The whole system prompt a run is sent. */
   text: string;
   hash: string;
+  promptHash: string;
+  sections: Array<{ key: string; title: string; source: "layer" | "skill" | "runner"; text: string; words: number }>;
+  handoff: { first: string; json: string[] };
+  draft: boolean;
   words: number;
   tokens: number;
   layers: Array<{ key: "base" | "project" | "agent" | "repo"; name: string; version: number | null; hash: string; text: string; commit?: string | null }>;
-  skills: Array<{ id: string; name: string; version: number; label: string; when: string; resources: string[] }>;
+  skills: Array<{ id: string; name: string; version: number; label: string; when: string; resources: string[]; content: string }>;
   /** The repository's own convention files as last offered to a run (from the repo itself, not the repo guidelines text). */
   repoContext?: {
     commit: string;

@@ -221,12 +221,14 @@ export async function seedDevOrg(tx: Tx, state: SeedState): Promise<{ orgId: str
     const config = { model: a.model ?? "", fallbacks: a.fallbacks ?? [], autonomy: a.autonomy ?? "suggest", tools: a.tools ?? {}, mcp: a.mcp ?? [], stations: a.stations ?? [], projects: a.projects ?? "all", budget: a.budget ?? 0, guardrails: a.guardrails ?? { paths: [], maxDiff: 0 }, suite: a.suite ?? "", instructions: a.instructions ?? "", overrides: a.overrides ?? {} };
     const promoted = versions.flatMap((v, i) => ("rc" in v && v.rc ? [] : [i + 1]));
     await q(`insert into agents (org_id, id, name, station, status, live_version, data) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`, [org, a.id, a.name, a.station ?? null, a.status ?? "active", live, j({ ...config, promoted })]);
+    // Pin every skill to its latest version, as an agent version does when it is cut.
+    const skillVersions = Object.fromEntries((a.skills ?? []).map((id) => [id, Math.max(1, (state.skills ?? []).find((s) => s.id === id)?.versions?.length ?? 1)]));
     for (const [i, v] of versions.entries()) {
       const { stations: _s, projects: _p, suite: _u, ...snap } = config;
       await q(
         `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by)
          values ($1,$2,$3,$4::jsonb,'', $5, $6, $7, coalesce($8::timestamptz, now()), 'system')`,
-        [org, a.id, i + 1, j({ ...snap, skills: a.skills ?? [], label: v.v, diff: "diff" in v ? v.diff : "", suiteScore: "suiteScore" in v ? v.suiteScore : 0, rc: "rc" in v ? !!v.rc : false }), sha(a.instructions ?? ""), a.model ?? null, v.note ?? "", at(v.at)],
+        [org, a.id, i + 1, j({ ...snap, skills: a.skills ?? [], skillVersions, label: v.v, diff: "diff" in v ? v.diff : "", suiteScore: "suiteScore" in v ? v.suiteScore : 0, rc: "rc" in v ? !!v.rc : false }), sha(a.instructions ?? ""), a.model ?? null, v.note ?? "", at(v.at)],
       );
     }
     for (const [i, sk] of (a.skills ?? []).entries()) await q(`insert into agent_skills (org_id, agent_id, skill_id, position) values ($1,$2,$3,$4)`, [org, a.id, sk, i + 1]);

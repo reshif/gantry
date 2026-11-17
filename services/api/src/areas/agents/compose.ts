@@ -157,12 +157,14 @@ export async function resolveSkills(db: Queryable, o: { orgId: string; agentId: 
   const attached = (await db.query<{ skill_id: string; pinned_version: number | null }>(`select skill_id, pinned_version from agent_skills where org_id = $1 and agent_id = $2 order by position, created_at, skill_id`, [o.orgId, o.agentId])).rows;
   const pins = new Map(attached.map((r) => [r.skill_id, r.pinned_version]));
   const ids = Array.isArray(o.body.skills) ? (o.body.skills as unknown[]).filter((x): x is string => typeof x === "string") : attached.map((r) => r.skill_id);
+  const snapVersions = obj(o.body.skillVersions);
   const out: SkillOut[] = [];
   for (const id of ids) {
     const s = (await db.query<{ name: string; projects: unknown; live_version: number | null; data: Record<string, unknown> }>(`select name, projects, live_version, data from skills where org_id = $1 and id = $2`, [o.orgId, id])).rows[0];
     if (!s) continue;
     if (Array.isArray(s.projects) && (!o.projectId || !s.projects.includes(o.projectId))) continue;
-    const tv = o.versions?.[id];
+    // The version the agent version was snapshotted with wins; a snapshot from before skills were pinned falls back to the attachment's pin, then the skill's latest.
+    const tv = o.versions?.[id] ?? snapVersions[id];
     const version = typeof tv === "number" ? tv : pins.get(id) ?? s.live_version;
     if (version === null || version === undefined) continue;
     const v = (await db.query<{ body: unknown }>(`select body from skill_versions where org_id = $1 and skill_id = $2 and version = $3`, [o.orgId, id, version])).rows[0];
@@ -195,6 +197,19 @@ export function instructionParts(layers: Layer[], skills: SkillOut[], repoContex
 /** The parts of a station run's system prompt: the instruction parts, then what the runner appends. */
 export function composedParts(layers: Layer[], skills: SkillOut[], repoContext = ""): ManifestPart[] {
   return [...instructionParts(layers, skills, repoContext), ...runnerParts()];
+}
+
+/** The version each skill is pinned at in a new agent version: the attachment's own pin, else the skill's latest. Skills with no published version are left out. */
+export async function pinSkills(db: Queryable, orgId: string, agentId: string | null, ids: string[]): Promise<Record<string, number>> {
+  const attached = agentId ? (await db.query<{ skill_id: string; pinned_version: number | null }>(`select skill_id, pinned_version from agent_skills where org_id = $1 and agent_id = $2`, [orgId, agentId])).rows : [];
+  const pins = new Map(attached.map((r) => [r.skill_id, r.pinned_version]));
+  const latest = new Map((await db.query<{ id: string; live_version: number | null }>(`select id, live_version from skills where org_id = $1 and id = any($2)`, [orgId, ids])).rows.map((r) => [r.id, r.live_version]));
+  const out: Record<string, number> = {};
+  for (const id of ids) {
+    const v = pins.get(id) ?? latest.get(id) ?? null;
+    if (v !== null) out[id] = v;
+  }
+  return out;
 }
 
 export interface RunPin {

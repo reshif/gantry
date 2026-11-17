@@ -39,6 +39,9 @@
 .ag-eff-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .ag-effective { margin: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line-strong); border-top: 3px solid var(--accent); font-size: var(--t-sm); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 560px; overflow-y: auto;
   background-image: linear-gradient(var(--grid) 1px, transparent 1px); background-size: 100% 20px; }
+.ag-eff-part + .ag-eff-part { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line-strong); }
+.ag-eff-title { margin: 0 0 4px; font-size: var(--t-sm); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.ag-eff-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ag-effective:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* skills */
