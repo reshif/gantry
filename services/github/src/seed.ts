@@ -56,7 +56,7 @@ export async function readRepoContext(work: string, commit: string): Promise<Rep
       found.push({ path: f.path, content: await readFile(full) });
     } catch { /* absent */ }
   }
-  return buildRepoContext(commit, found, { scan: scanText, sha256: (b) => createHash("sha256").update(b).digest("hex") });
+  return buildRepoContext(commit, found, { scan: (path, text) => scanText(path, text, { longLines: true }), sha256: (b) => createHash("sha256").update(b).digest("hex") });
 }
 
 export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: true; repo: string; commit: string; volume: string; repoContext: RepoContext }> {

@@ -36,6 +36,14 @@ describe("scanText", () => {
     expect(hits).toEqual([{ path: "a.ts", line: 2, rule: "github-token" }, { path: "a.ts", line: 3, rule: "private-key" }]);
     expect(JSON.stringify(hits)).not.toContain("x7Kq9");
   });
+  it("skips lines over 2000 chars by default but scans them (chunked, seam-safe) for repo context", () => {
+    const tok = fakeToken();
+    for (const pad of [3000, 1490, 1499]) {
+      const line = `${"x ".repeat(pad / 2)}${tok}${" y".repeat(500)}`;
+      expect(scanText("m.md", line)).toEqual([]);
+      expect(scanText("m.md", line, { longLines: true })).toEqual([{ path: "m.md", line: 1, rule: "github-token" }]);
+    }
+  });
   it("does not flag low-entropy or placeholder assignments", () => {
     expect(scanText("c.ts", 'const password = "aaaaaaaaaaaaaaaaaaaaaaaaaaaa"')).toEqual([]);
     expect(scanText("c.ts", 'const apiKey = "your-api-key-goes-here-1234567890"')).toEqual([]);
