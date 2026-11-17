@@ -63,7 +63,7 @@ export default function EvalsView() {
   const overall = d.extra?.overrideRate ?? 0;
   return (
     <div className="view view-evals">
-      <ViewHead title="Evals" sub="How well each agent does its job, on real work and on its golden-task suite. A version is promoted only on a passing run. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories." />
+      <ViewHead title="Evals" sub="Golden-set suites decide whether an agent version is allowed to serve." />
       <StatRow id="ev-stats">
         <Stat label="Suites" value={String(d.suites.length)} sub={`${d.suites.filter((x) => x.builtin).length} built in`} />
         <Stat label="Runs" value={String(d.runs.length)} sub="all time" />

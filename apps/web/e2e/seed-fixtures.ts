@@ -97,7 +97,8 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "people") return seed.people;
     if (path === "teams") return seed.teams;
     if (path === "templates") return seed.templates;
-    if (path === "agents") return seed.agents;
+    if (path === "agents") return seed.agents.map((a: Seed) => ({ rev: 1, suiteName: a.suite ?? null, threshold: 0.85, ...a, versions: (a.versions ?? []).map((v: Seed) => ({ eligibility: { ok: true, text: "Passes the gate", score: null, suite: a.suite ?? null, threshold: 0.85, needs: "" }, ...v })) }));
+    if (path === "evals/factory") return seed.eval_extra;
     if (path === "skills") return seed.skills;
     if (path === "suites" || path === "agents/suites") return seed.suites;
     if (path === "evals/runs") return seed.eval_runs;
