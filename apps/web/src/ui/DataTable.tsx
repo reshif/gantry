@@ -29,13 +29,15 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
   columns: Col<R>[];
   rows: R[];
   rowKey: (r: R) => string;
+  /** Optional DOM id for each row. */
+  rowId?: (r: R) => string;
   /** Opens the row. Keyboard and screen-reader users reach it through the first cell's button. */
   onRow?: (r: R) => void;
   /** Like onRow but a real link (middle-click, copy address). Wins over onRow for the first cell. */
@@ -46,7 +48,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, onRow, rowHre
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
   pageSize?: number;
-  empty?: { title: string; text?: string };
+  empty?: { title: string; text?: string; action?: ReactNode };
   /** Server paging: more rows exist on the server. */
   hasMore?: boolean;
   onLoadMore?: () => void;
@@ -93,7 +95,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, onRow, rowHre
     if (sig !== own1) setOwn1(sig);
   }, [action, rows, columns, own1, shown]);
 
-  if (!rows.length) return <div className="dtable-wrap" id={id}><Empty title={empty?.title ?? "Nothing here"} text={empty?.text ?? "No rows match."} /></div>;
+  if (!rows.length) return <div className="dtable-wrap" id={id}><Empty title={empty?.title ?? "Nothing here"} text={empty?.text ?? "No rows match."} action={empty?.action} /></div>;
   const val = (c: Col<R>, r: R): number | string => (typeof c.sort === "function" ? c.sort(r) : ((r as Record<string, unknown>)[c.key] as number | string));
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
@@ -148,6 +150,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, onRow, rowHre
                 <tr
                   key={key}
                   data-key={key}
+                  {...(rowId ? { id: rowId(r) } : {})}
                   {...(action ? { onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest(INTERACTIVE)) return; if (onRow) onRow(r); else if (rowHref) window.location.assign(rowHref(r)); } } : {})}
                 >
                   {columns.map((c, i) => {

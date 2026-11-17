@@ -7,7 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { NOTIFY_EVENTS, ONBOARD_STAGES, type IntegrationInstance, type IntegrationType, type NotifyOverride, type Project, type Repo } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { useIntegrationTypes, useIntegrations } from "../../api/queries";
-import { Icon } from "../../ui/Icon";
+import { PipelineRail } from "../../ui/pipeline";
+import { Status as UiStatus, type Tone } from "../../ui/primitives";
 import { useTeams } from "../projects/kit";
 
 export type RepoV = Repo & { version?: number };
@@ -58,12 +59,14 @@ export function status(r: RepoV): Status {
   return { id: "progress", label: "In progress", glyph: "st-run" };
 }
 
+const STATUS_TONE: Record<Status["id"], Tone> = { ready: "done", exception: "wait", person: "block", failed: "fail", merge: "wait", openpr: "wait", progress: "run" };
+
+/** The repo's state as the one shared status badge. The wrapper keeps the `onb-st-<id>` hook. */
 export function StatusChip({ r }: { r: RepoV }) {
   const s = status(r);
   return (
     <span className={`onb-status onb-st-${s.id}`}>
-      <Icon name={s.glyph} />
-      <span>{s.label}</span>
+      <UiStatus tone={STATUS_TONE[s.id]} icon={s.glyph}>{s.label}</UiStatus>
     </span>
   );
 }
@@ -77,18 +80,22 @@ export const BUSY: Record<string, string> = {
   verifying: "Gantry is running the live checks against GitHub.",
 };
 
+/** Where the repo is on the seven stages. Small: a row of marks for tables. Big: the large rail for the repo page. */
 export function Steps({ r, big }: { r: RepoV; big?: boolean }) {
   const idx = stageIndex(r);
   const stop = isStopped(r);
   const ready = r.onboarding.stage === "ready";
+  const label = `Onboarding stage: ${stageName(r.onboarding.stage)} (${idx + 1} of 7)`;
+  const state = (i: number): "done" | "now" | "stop" | "todo" => (i < idx || (ready && i === idx) ? "done" : i === idx ? (stop ? "stop" : "now") : "todo");
+  if (big) return <div className="onb-rail"><PipelineRail label={label} steps={STAGES.map((s, i) => ({ key: s.id, name: s.name, tone: ({ done: "done", now: "run", stop: "warn", todo: "todo" } as const)[state(i)] }))} /></div>;
   return (
-    <ol className={`onb-steps${big ? " is-big" : ""}`} aria-label={`Onboarding stage: ${stageName(r.onboarding.stage)} (${idx + 1} of 7)`}>
+    <ol className="onb-steps" aria-label={label}>
       {STAGES.map((s, i) => {
-        const cls = i < idx || (ready && i === idx) ? "is-done" : i === idx ? (stop ? "is-stop" : "is-now") : "";
+        const st = state(i);
         return (
-          <li key={s.id} className={cls} title={s.name + (cls === "is-done" ? ": done" : cls === "is-now" ? ": current" : cls === "is-stop" ? ": stopped here" : "")}>
-            <span className="onb-step-mark mono" aria-hidden="true">{cls === "is-done" ? "✓" : cls === "is-stop" ? "!" : String(i + 1)}</span>
-            {big ? <span className="onb-step-l">{s.name}</span> : null}
+          <li key={s.id} className={st === "todo" ? "" : `is-${st}`} title={s.name + (st === "done" ? ": done" : st === "now" ? ": current" : st === "stop" ? ": stopped here" : "")}>
+            <span className="onb-step-mark" aria-hidden="true" />
+            <span className="sr">{`${s.name}${st === "done" ? ", done" : st === "now" ? ", current" : st === "stop" ? ", stopped here" : ""}`}</span>
           </li>
         );
       })}

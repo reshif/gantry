@@ -76,7 +76,7 @@ describe("Onboarding: pipeline", () => {
     expect(meta).toEqual(["Repos4", "Ready1 / 4", "In progress1", "Needs action2"]); // the buckets do not overlap
     const strip = Array.from(document.querySelectorAll(".onb-strip li")).map((li) => li.querySelector(".onb-strip-n")?.textContent);
     expect(strip).toEqual(["1", "0", "0", "1", "0", "0", "1", "1"]); // connected, ..., PR checks, ..., Ready, off belt
-    expect(document.querySelectorAll("tr.row-link")).toHaveLength(4);
+    expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(4);
     const waiting = document.querySelector(".callout-warn")!;
     expect(waiting.textContent).toMatch(/1 onboarding PR is green and waiting for a person to approve and merge: acme\/mobile-app#338/);
     expect(document.querySelector("#onb-row-search-indexer .onb-st-person")?.textContent).toMatch(/Needs a person/);
@@ -106,13 +106,51 @@ describe("Onboarding: pipeline", () => {
     mount(<OnboardingView />);
     await byId("onb-row-mobile-app");
     fireEvent.click(screen.getByLabelText("Needs action"));
-    await waitFor(() => expect(document.querySelectorAll("tr.row-link")).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(2));
     fireEvent.click(screen.getByLabelText("Ready"));
-    await waitFor(() => expect(document.querySelectorAll("tr.row-link")).toHaveLength(1));
+    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(1));
     cleanup();
     api([]);
     mount(<OnboardingView />);
     expect(await screen.findByText("No repos yet")).toBeTruthy();
+  });
+
+  it("searching narrows the repos, and an empty result offers Show all which clears the search and the filter", async () => {
+    api([find("web-storefront"), GREEN, find("search-indexer")]);
+    mount(<OnboardingView />);
+    await byId("onb-row-mobile-app");
+    fireEvent.change(document.getElementById("onb-search") as HTMLInputElement, { target: { value: "indexer" } });
+    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(1));
+    fireEvent.change(document.getElementById("onb-search") as HTMLInputElement, { target: { value: "zzz-nothing" } });
+    fireEvent.click(await byId("onb-filter-clear"));
+    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(3));
+    expect((document.getElementById("onb-search") as HTMLInputElement).value).toBe("");
+  });
+
+  it("a repo row opens from its first-cell button, and the table sorts by a header", async () => {
+    api([find("web-storefront"), GREEN, find("search-indexer")]);
+    mount(<OnboardingView />);
+    const row = await byId("onb-row-mobile-app");
+    const order = () => Array.from(document.querySelectorAll(".dtable tbody tr")).map((t) => t.getAttribute("data-key"));
+    fireEvent.click(document.getElementById("onb-table-sort-name")!);
+    const asc = order();
+    expect(asc).toEqual([...asc].sort());
+    fireEvent.click(document.getElementById("onb-table-sort-name")!);
+    expect(order()).toEqual([...asc].reverse());
+    // Keyboard and screen-reader users reach the row through its first-cell button, which Enter and Space activate natively.
+    const open = row.querySelector("button.row-link");
+    expect(open?.getAttribute("aria-label")).toMatch(/^Open the onboarding session for /);
+  });
+
+  it("the Guidelines tab shows the agent's guidelines and the profile button opens the agent", async () => {
+    api([find("web-storefront"), GREEN]);
+    mount(<OnboardingView />);
+    await byId("onb-row-mobile-app");
+    fireEvent.click(document.getElementById("onb-tab-agent")!);
+    await byId("onb-agent-off");
+    expect(document.getElementById("onb-tab-agent")!.getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(document.getElementById("onb-agent-profile")!);
+    await waitFor(() => expect(window.location.hash).toContain("agents"));
   });
 
   it("Connect repo is locked with the server's reason when the person cannot onboard", async () => {

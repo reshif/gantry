@@ -125,7 +125,7 @@ export function ConnectWizard({ project, repos, close, onDone }: { project: Proj
 
   return (
     <Dialog
-      title={`Connect a repo to ${project.name}`} kicker="Onboarding · connect" wide onClose={close}
+      title={`Connect a repo to ${project.name}`} wide onClose={close}
       body={
         <div>
           <ol className="stepper onb-wsteps" aria-label="Steps">
