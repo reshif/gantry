@@ -93,6 +93,28 @@ describe("Work-order session", () => {
     expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)[1]!.body).toMatchObject({ text: "gimme a brief" });
   });
 
+  it("@ offers people by name, says who cannot open the project, and sends only the people still named; a mention that gave no access is noted under the message", async () => {
+    const calls = await showSession(
+      session({ messages: [...session().messages, { id: "wm-9", role: "user", author: "p-tomas", text: "@Lena Okafor please look", at: Date.now(), data: { mentions: [{ id: "p-lena", name: "Lena Okafor", access: false }] } }] }),
+      {
+        [`GET /api/v1/work-orders/${W.id}/session/people`]: () => ({ body: { people: [{ id: "p-lena", name: "Lena Okafor", title: "Designer", access: false }, { id: "p-rui", name: "Lena Rui", title: "", access: true }] } }),
+        [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }),
+      },
+    );
+    expect(await screen.findByText(/Lena Okafor cannot open this project yet\. Mentioning them did not give them access/)).toBeTruthy();
+    const box = screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "hey @Len", selectionStart: 8 } });
+    const list = await screen.findByRole("listbox", { name: "People to mention" });
+    expect(list.textContent).toMatch(/cannot open this project yet/);
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect((screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement).value).toBe("hey @Lena Okafor "));
+    expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(0);
+    fireEvent.change(box, { target: { value: "hey @Lena Okafor can you check?" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
+    expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)[0]!.body).toMatchObject({ kind: "message", text: "hey @Lena Okafor can you check?", mentions: ["p-lena"] });
+  });
+
   it("shows the agent's brief proposal with what changes; Approve runs the decision; Ask for changes continues the dialogue", async () => {
     const path = `/api/v1/work-orders/${W.id}/session/proposals/wm-2/P-1`;
     const calls = await showSession(withProposal(), { [`POST ${path}`]: () => ({ body: { ok: true, msg: "Brief confirmed." } }), [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });

@@ -17,6 +17,7 @@ import { useOpenRecordRoute } from "../record/nav";
 import { Markdown } from "../console/Markdown";
 import { ApproversPanel } from "../traveler/Approvers";
 import { ProgressLine, QuestionCard, useLiveTurn } from "../session/kit";
+import { MentionList, useMentions } from "./Mentions";
 import { decideWo, markWoSeen, sendWoTurn, useWoSession, type WoSession, type WoSessionMessage } from "./session-api";
 
 type Proposal = Extract<WoCard, { kind: "proposal" }>;
@@ -118,10 +119,11 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
   const [draft, setDraft] = useState("");
   const opened = useRef(false);
   const end = useRef<HTMLDivElement>(null);
-  const turn = useRef<{ kind: "message" | "open" | "continue"; text?: string }>({ kind: "open" });
+  const turn = useRef<{ kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }>({ kind: "open" });
   const run = useCallback((on: Parameters<typeof sendWoTurn>[2], signal: AbortSignal) => sendWoTurn(woId, turn.current, on, signal), [woId]);
   const { live, error, start } = useLiveTurn<WoCard>(run, (m) => ui.toast(m, "error"));
-  const send = (body: { kind: "message" | "open" | "continue"; text?: string }) => { turn.current = body; void start(); };
+  const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => { turn.current = body; void start(); };
+  const mentions = useMentions(woId, draft, setDraft, !!s?.can.talk && !live);
 
   const ruleBased = s?.agent.mode === "rule-based";
   const started = !!s && s.messages.some((m) => m.data.kind !== "update" && m.data.mode !== "legacy");
@@ -143,13 +145,13 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
   if (!s) return <div className="osx" aria-busy="true"><p className="muted">Loading the conversation...</p></div>;
 
   const agentName = s.agent.name;
-  const submit = () => { const t = draft.trim(); if (!t) return; setDraft(""); send({ kind: "message", text: t }); };
+  const submit = () => { const t = draft.trim(); if (!t) return; const ids = mentions.ids(); setDraft(""); mentions.reset(); send({ kind: "message", text: t, ...(ids.length ? { mentions: ids } : {}) }); };
   const status = live ? { cls: "is-live", text: `${agentName} is thinking…` }
     : s.wo.closed ? { cls: "is-idle", text: s.next.text }
     : s.next.actor === "you" ? { cls: "is-you", text: ruleBased ? "Waiting for you: answer the question below" : `${agentName} is waiting for you` }
     : s.next.actor === "approver" ? { cls: "is-wait", text: s.next.text }
     : { cls: "is-live", text: s.waiting?.text ?? s.next.text };
-  const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."}` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}: answer, correct it, or ask anything about this work order`;
+  const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."}` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}: answer, correct it, or ask anything about this work order. Type @ to mention a person.`;
   const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : (m.data.agent ?? agentName));
 
   return (
@@ -180,6 +182,7 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
                   {m.data.kind === "update" ? null : <div className="osx-who small strong">{tag(m)}{m.data.mode === "rule-based" ? <span className="muted"> · rule-based</span> : null}</div>}
                   {m.data.kind === "update" ? <p className="osx-event small"><span className="muted">{fmt.stamp(m.at)}</span> {m.text}</p>
                     : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
+                  {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
                   <Cards m={m} s={s} agent={agentName} send={(b) => send(b)} last={m.id === lastId} />
                 </div>
               </div>
@@ -203,7 +206,15 @@ export function WoSessionPage({ woId, back }: { woId: string; back: () => void }
             <div ref={end} />
           </div>
           <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-            <textarea id="wos-input" className="input" rows={2} aria-label={`Message to ${agentName}`} value={draft} placeholder={placeholder} disabled={!s.can.talk || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
+            <div className="wos-compose">
+              <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
+              <textarea
+                id="wos-input" className="input" rows={2} aria-label={`Message to ${agentName}`} value={draft} placeholder={placeholder} disabled={!s.can.talk || !!live}
+                role="combobox" aria-expanded={mentions.open} aria-controls={mentions.listId} aria-autocomplete="list" {...(mentions.open ? { "aria-activedescendant": `${mentions.listId}-${mentions.active}` } : {})}
+                onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)}
+                onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+              />
+            </div>
             <Btn kind="primary" type="submit" id="wos-send" label="Send" disabled={!s.can.talk || !!live || !draft.trim()} />
           </form>
         </section>
