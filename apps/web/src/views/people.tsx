@@ -44,8 +44,6 @@ export default function PeopleView() {
   if (!me) return null;
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
   if (!view.allowed) return <div className="view view-people"><ViewHead title="People & teams" sub="" /><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
-  const admins = people.filter((p) => p.status === "active" && p.roles.some((g) => g.role === "factory_admin"));
-  const invited = people.filter((p) => p.status === "invited").length;
   const noMfa = people.filter((p) => !p.mfa).length;
 
   return (

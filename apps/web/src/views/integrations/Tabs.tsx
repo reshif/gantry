@@ -3,27 +3,15 @@ import { useState } from "react";
 import { INTEGRATION_CATEGORIES, NOTIFY_EVENTS, fmt, type IntegrationInstance } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Btn, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, type Decision } from "../../ui/primitives";
+import { Btn, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
 import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
-import { AUTHS, DirTags, FTYPES, Health, Mark, PAYLOADS, catName, evName, keyOf, scopeText, slug, statusOf, useIntegrationData, usageLine, type TypeRow } from "./kit";
+import { AUTHS, DirTags, FTYPES, Mark, PAYLOADS, catName, evName, keyOf, scopeText, slug, statusOf, useIntegrationData, type TypeRow } from "./kit";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
 interface Nav { q: string; setQ: (v: string) => void; cat: string; setCat: (v: string) => void; status: string; setStatus: (v: string) => void }
-
-function Filters({ nav, withStatus, count }: { nav: Nav; withStatus: boolean; count?: string }) {
-  return (
-    <FilterBar label="Filter connections" count={count}>
-      <SearchBox id="int-q" label="Search" placeholder="Search by name, type or category" value={nav.q} onChange={nav.setQ} />
-      <div className="filters">
-        <Field label="Category" htmlFor="int-cat"><Select id="int-cat" options={[{ value: "all", label: "All categories" }, ...INTEGRATION_CATEGORIES.map((c) => ({ value: c.id, label: c.name }))]} value={nav.cat} onChange={nav.setCat} /></Field>
-        {withStatus ? <Field label="Status" htmlFor="int-status"><Select id="int-status" options={[{ value: "all", label: "Any status" }, { value: "healthy", label: "Healthy" }, { value: "failing", label: "Failing" }, { value: "disabled", label: "Disabled" }]} value={nav.status} onChange={nav.setStatus} /></Field> : null}
-      </div>
-    </FilterBar>
-  );
-}
 
 export function ConnectedTab({ nav, openInstance, onToggle }: { nav: Nav; openInstance: (id: string) => void; onToggle: (i: IntegrationInstance) => void }) {
   const d = useIntegrationData();

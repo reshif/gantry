@@ -7,7 +7,6 @@
  * outcome (a write call without its pre-authorisation is denied) and every "simulated" label: discovery and the calls are real.
  */
 import { useState } from "react";
-import { DAY } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useMcpCalls, useMcpServers, useProjects } from "../api/queries";
 import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Select, Stat, StatRow, Table, Tabs, ViewHead } from "../ui/primitives";
@@ -18,7 +17,7 @@ import { useCatalog } from "./projects/kit";
 import { useAllRepos } from "./govern/data";
 import { AddMcp } from "./mcp/AddDialog";
 import { Detail } from "./mcp/Detail";
-import { Health, SENS, SensChip, dec, scopeText } from "./mcp/kit";
+import { Health, SENS, dec } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
 
 export default function McpView() {
@@ -42,7 +41,6 @@ export default function McpView() {
   const shown = servers.filter((m) => (health === "all" || (health === "disabled" ? m.enabled === false : m.enabled !== false && m.health === health)) && (sens === "all" || m.sensitivity === sens) && (!needle || `${m.name} ${m.url} ${m.transport}`.toLowerCase().includes(needle)));
   const current = servers.find((m) => m.id === sel) ?? null;
   const actorName = (id: string): string => actor(id).name;
-  const day = calls.filter((u) => u.at > Date.now() - DAY).length;
   const notHealthy = servers.filter((m) => m.enabled === false || m.health !== "healthy").length;
   const writeTools = servers.reduce((n, m) => n + m.tools.filter((t) => t.write).length, 0);
 

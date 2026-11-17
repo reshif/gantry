@@ -12,7 +12,7 @@ import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate, useHash } from "../lib/router";
 import { ExplainDenial } from "./console/ExplainDenial";
-import { Avatar, Btn, Empty, LockNote, Panel, Select, Stat, StatRow, Toggle, ViewHead, type Decision } from "../ui/primitives";
+import { Btn, Empty, LockNote, Panel, Select, Stat, StatRow, Toggle, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";

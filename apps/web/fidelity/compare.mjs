@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global document */
 /**
  * Fidelity compare: the Blueprint prototype is the specification; this puts it next to the real app.
  *

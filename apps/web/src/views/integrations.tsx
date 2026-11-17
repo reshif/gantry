@@ -33,7 +33,6 @@ export default function IntegrationsView() {
   const failedDay = failedItems.filter((x) => x.at > Date.now() - DAY);
   // a failure on a connection makes that connection unhealthy; one with no connection is a routing gap, not a broken integration
   const failed = failedDay.filter((x) => x.integration).length;
-  const unrouted = failedDay.length - failed;
 
   const toggleInst = (i: IntegrationInstance): void => {
     if (!i.connected) {

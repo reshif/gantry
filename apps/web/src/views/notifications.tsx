@@ -5,10 +5,9 @@
  * Not ported, on purpose: "Delivery is simulated": a test send and a retry queue a real delivery that the worker sends, and the log shows what happened.
  */
 import { useState } from "react";
-import { navigate } from "../lib/router";
 import { useCan } from "../api/can";
 import { useDeliveries } from "../api/queries";
-import { Btn, Empty, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Empty, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { useProjectRepos } from "./floor/kit";
 import { DeliveriesTab, OverridesTab, TemplatesTab } from "./notifications/Other";
