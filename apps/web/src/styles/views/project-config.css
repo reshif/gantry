@@ -127,3 +127,14 @@ tr.is-custom > th, tr.is-custom > td:first-child { box-shadow: inset 3px 0 0 var
 .pcf-pv-wrap .mseg:not(.is-off):not(.is-new) .mseg-n { visibility: hidden; }
 .pcf-cl-table td.num { white-space: nowrap; }
 .pcf-fixed { white-space: nowrap; }
+
+/* header strip and facts list (new design) */
+.pcf-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
+.pcf-strip > div { min-width: 0; }
+.pcf-strip dt { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); }
+.pcf-strip dd { margin: 2px 0 0; font-size: var(--t-base); font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.pcf-kv { display: grid; margin: 0; }
+.pcf-kv > div { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.pcf-kv dt { color: var(--faint); font-size: var(--t-md); }
+.pcf-kv dd { margin: 0; font-size: var(--t-md); min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .pcf-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -9,7 +9,7 @@ import { navigate, parseHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
 import { usePrefs } from "../lib/prefs";
 import { useActors } from "../ui/actors";
-import { Btn, Empty, Tabs } from "../ui/primitives";
+import { Btn, Empty, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { HealthChip, useCatalog, type PView } from "./projects/kit";
 import { TABS, membersOf, type CfgState } from "./project-config/ctx";
@@ -58,22 +58,22 @@ export default function ProjectConfigView() {
   } as Record<string, React.ReactNode>)[s.tab] ?? <OverviewTab {...props} />;
   return (
     <div className="view pcf">
-      <header className="vhead" id="pcf-head">
-        <div className="vhead-main">
-          <h1 className="vtitle">
-            Project config <HealthChip p={p} />
-          </h1>
-          {p.desc ? <p className="vsub">{p.desc}</p> : null}
-        </div>
-        <dl className="titleblock">
-          {([["Status", p.killed ? "killed" : p.halted ? "halted" : p.status], ["Owner", actor(p.owner).name.replace(" (agent)", "")], ["Slots", String(p.flow.slots)], ["Budget", `${fmt.money0(p.budget.mtd)} / ${fmt.money0(p.budget.monthly)}`]] as const).map(([k, v]) => (
-            <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
-          ))}
-        </dl>
-        <div className="vhead-actions">
-          <Btn icon="belt" kind="ghost" id="pcf-to-floor" label="Open floor" onClick={() => navigate("floor")} />
-        </div>
-      </header>
+      <ViewHead
+        kicker="Project settings"
+        title={<>{p.name} <HealthChip p={p} /></>}
+        sub={p.desc || "No description yet."}
+        actions={
+          <>
+            <Btn icon="belt" id="pcf-to-floor" label="Open floor" onClick={() => navigate("floor")} />
+            <Btn icon="ledger" id="pcf-to-history" label="History" onClick={() => set({ tab: "history" })} />
+          </>
+        }
+      />
+      <dl className="pcf-strip" id="pcf-strip">
+        {([["Status", p.killed ? "Killed" : p.halted ? "Halted" : p.status === "archived" ? "Archived" : p.status.charAt(0).toUpperCase() + p.status.slice(1)], ["Owner", actor(p.owner).name.replace(" (agent)", "")], ["Slots", String(p.flow.slots)], ["Budget", p.budget.monthly ? `${fmt.money0(p.budget.mtd)} / ${fmt.money0(p.budget.monthly)}` : "None set"]] as const).map(([k, v]) => (
+          <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
+        ))}
+      </dl>
       <Tabs idPrefix="pcf-tab" items={TABS.map((t) => ({ id: t[0], label: t[1], count: count(t[0]) }))} active={s.tab} onChange={(id) => set({ tab: id })} />
       <div className="pcf-body" id="pcf-tab-panel" role="tabpanel" aria-labelledby={`pcf-tab-${s.tab}`}>{body}</div>
     </div>

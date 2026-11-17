@@ -38,3 +38,4 @@ import "./app.css";
 import "./foundation.css";
 import "./system.css";
 import "./views/dossier.css";
+import "./views/home-projects.css";
