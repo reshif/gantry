@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
 import { updatePrefs } from "../lib/prefs";
 import FloorView from "./floor";
 import { NOW, PAYMENTS, WOS, floorRead, mockApi, mount, resetApp, type Call } from "./floor/testkit";
@@ -127,6 +128,21 @@ describe("Floor: belt", () => {
     expect(document.querySelector('[data-station="research"]')?.classList.contains("is-bypassed")).toBe(true);
     expect(document.querySelector('[data-station="intake"]')?.classList.contains("is-bypassed")).toBe(false);
     expect(document.getElementById("floor-route-docs")?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("lists routes by short class name with the explanation on the pill and a disclosure that counts them", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByText("Payments Platform");
+    const docs = document.getElementById("floor-route-docs") as HTMLElement;
+    expect(docs.querySelector(".fl-route-n")?.textContent).toBe("Docs");
+    expect(docs.getAttribute("aria-label")).toMatch(/^Docs: /);
+    const toggle = document.getElementById("floor-routes-toggle") as HTMLElement;
+    expect(toggle.querySelector(".fl-routes-c")?.textContent).toMatch(/^\d+$/);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector(".fl-routes")?.classList.contains("is-open")).toBe(true);
   });
 
   it("opens the gate drawer, shows who may approve and sends a rejection with its reason to the gate instance", async () => {
@@ -318,5 +334,23 @@ describe("Floor: list", () => {
     const ids = Array.from(document.querySelectorAll(".fl-table tbody tr td:first-child")).map((e) => e.textContent);
     expect(ids).toEqual([...ids].sort());
     void PAYMENTS;
+  });
+});
+
+describe("Floor: belt layout contract", () => {
+  const css = readFileSync(["src", "apps/web/src"].map((d) => `${process.cwd()}/${d}/styles/views/floor.css`).find((f) => existsSync(f)) ?? "", "utf8");
+  it("keeps station head columns fixed, caps work-order card width and keeps routes on one line", () => {
+    expect(css).toMatch(/\.fl-st \{ --head-w: 260px; display: grid; grid-template-columns: var\(--head-w\)/);
+    expect(css).toMatch(/\.fl-st-head \{[^}]*grid-template-columns: 2\.25rem minmax\(0, 1fr\) 3\.25rem/);
+    expect(css).toMatch(/\.fl-toks \{[^}]*repeat\(auto-fill, minmax\(240px, 320px\)\)/);
+    expect(css).toMatch(/\.fl-routes-list \{[^}]*flex-wrap: nowrap/);
+    expect(css).toMatch(/@container \(max-width: 1000px\)/);
+    expect(css).toMatch(/\.fl-routes\.is-open \.fl-routes-chev/);
+  });
+  it("shows a chevron cue inside the routes toggle", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByText("Payments Platform");
+    expect(document.querySelector("#floor-routes-toggle .fl-routes-chev")).not.toBeNull();
   });
 });

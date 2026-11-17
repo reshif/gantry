@@ -277,6 +277,8 @@ function RoutePill({ id, hover, onHover }: { id: string; hover: string | null; o
       type="button"
       className={`fl-route cls-${c.id}${c.custom && c.token ? ` ${c.token}` : ""}${c.custom ? " is-custom" : ""}${active ? " is-active" : ""}${(hover ?? prefs.activeClass) === id ? " is-hl" : ""}`}
       id={`floor-route-${id}`}
+      title={text}
+      aria-label={text}
       aria-pressed={active ? "true" : "false"}
       data-cls={id}
       onClick={() => updatePrefs((p) => ({ activeClass: p.activeClass === id ? null : id }))}
@@ -286,7 +288,7 @@ function RoutePill({ id, hover, onHover }: { id: string; hover: string | null; o
       onBlur={() => onHover(null)}
     >
       <span className="cls-mark" aria-hidden="true" />
-      <span>{text}</span>
+      <span className="fl-route-n">{c.name}</span>
     </button>
   );
 }
@@ -297,6 +299,7 @@ export function Belt({ onStation, onGate }: { onStation: (sid: string) => void; 
   const me = useMe();
   const status = useBeltStatus();
   const [hover, setHover] = useState<string | null>(null);
+  const [routesOpen, setRoutesOpen] = useState(false);
   const p = ctx.project;
   const L = layoutFor(ctx.cat, p);
   const classes = flowOf(ctx.cat, p).classes;
@@ -340,11 +343,17 @@ export function Belt({ onStation, onGate }: { onStation: (sid: string) => void; 
           {legend("off", "off")}
         </div>
       </div>
-      <div className="fl-routes" role="group" aria-label="Class routes. Hover to preview, select to pin">
-        <span className="fl-routes-l">Routes</span>
-        {classes.map((c) => (
-          <RoutePill key={c.id} id={c.id} hover={hover} onHover={setHover} />
-        ))}
+      <div className={`fl-routes${routesOpen ? " is-open" : ""}`} role="group" aria-label="Class routes. Hover to preview, select to pin">
+        <button type="button" className="fl-routes-t" id="floor-routes-toggle" aria-expanded={routesOpen ? "true" : "false"} aria-controls="floor-routes-list" onClick={() => setRoutesOpen((o) => !o)}>
+          <span className="fl-routes-l">Routes</span>
+          <span className="fl-routes-r"><span className="mono fl-routes-c">{activeCls ? `${classes.length} · ${name}` : String(classes.length)}</span><span className="fl-routes-chev" aria-hidden="true" /></span>
+        </button>
+        <span className="fl-routes-l fl-routes-lw">Routes</span>
+        <div className="fl-routes-list" id="floor-routes-list">
+          {classes.map((c) => (
+            <RoutePill key={c.id} id={c.id} hover={hover} onHover={setHover} />
+          ))}
+        </div>
       </div>
       <ol className="fl-line" aria-label="Stations and gates, in order">
         {line.map((sid) => {

@@ -324,14 +324,15 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 .fl-gate-tr { display: inline-flex; align-items: center; gap: 3px; font-size: var(--t-xs); color: var(--muted); }
 
 /* station row: name block on the left, its work orders flowing to the right */
-.fl-st { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); grid-template-areas: "head toks" "staff toks" "extra toks"; align-items: start; gap: 2px 16px; padding: 8px 12px; border: 1px solid var(--line); border-top: 1px solid var(--line); border-left: 3px solid var(--ink-2); border-radius: var(--r1); box-shadow: none; }
-.fl-st-head { grid-area: head; display: flex; align-items: baseline; gap: 8px; padding: 0; margin: 0; border: 0; cursor: pointer; }
-.fl-st-name { font-size: 18px; white-space: nowrap; }
-.fl-st-head .fl-wip { margin-left: auto; }
+.fl-st { --head-w: 260px; display: grid; grid-template-columns: var(--head-w) minmax(0, 1fr); grid-template-areas: "head toks" "staff toks" "extra toks"; align-items: start; gap: 2px 16px; padding: 8px 12px; border: 1px solid var(--line); border-top: 1px solid var(--line); border-left: 3px solid var(--ink-2); border-radius: var(--r1); box-shadow: none; }
+.fl-st-head { grid-area: head; display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) 3.25rem; grid-template-areas: "no name wip"; align-items: baseline; gap: 0 8px; padding: 0; margin: 0; border: 0; cursor: pointer; text-align: left; }
+.fl-st-name { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-st-head .fl-wip { justify-self: end; text-align: right; min-width: 2.5rem; }
 .fl-staff { grid-area: staff; font-size: var(--t-xs); }
 .fl-st > .fl-off, .fl-st > .fl-slots { grid-area: extra; margin-top: 4px; }
-.fl-toks { grid-area: toks; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; min-height: 32px; }
-.fl-toks .tok { width: 240px; max-width: 100%; }
+.fl-toks { grid-area: toks; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 320px)); gap: 8px; align-content: start; min-height: 32px; }
+.fl-toks .tok { width: 100%; min-width: 0; }
+.fl-toks > .btn, .fl-toks > .fl-idle { grid-column: 1 / -1; justify-self: start; }
 .fl-idle { text-align: left; padding: 6px 0; border: 0; }
 .fl-st:has(.fl-idle) { border-left-color: var(--line-strong); background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .fl-st.is-over { border-left-color: var(--block); }
@@ -339,7 +340,8 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
    Same left edge, border and name column as the full card so the spine, wip counters and gate captions stay aligned. */
 .fl-st.is-idle { grid-template-areas: "head staff"; align-items: center; padding: 5px 12px; min-height: 36px; }
 .fl-st.is-idle .fl-st-head { align-items: center; }
-.fl-st.is-idle .fl-st-name { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+.fl-st.is-idle:not(.is-over) { border-left-color: var(--line-strong); }
+.fl-st.is-idle .fl-st-name { font-weight: 500; color: var(--ink-2); font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
 .fl-st.is-idle .fl-staff { flex-wrap: nowrap; min-width: 0; overflow: hidden; }
 .fl-st.is-idle .fl-glyph { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fl-st.is-idle .fl-glyph:nth-child(n+2), .fl-st.is-idle > .fl-off { display: none; }
@@ -355,10 +357,33 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
   .fl-line { --spine: 18px; padding: 10px 8px 12px; }
   .fl-line::before { left: calc(8px + var(--spine)); }
   .fl-st { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "staff" "extra" "toks"; }
+  .fl-st { --head-w: auto; }
   .fl-st.is-idle { grid-template-columns: minmax(0, 1fr) 7rem; grid-template-areas: "head staff"; gap: 2px 10px; }
   .fl-st.is-idle .fl-st-head { min-width: 0; }
   .fl-st.is-idle .fl-staff { justify-content: flex-end; }
   .fl-toks .tok { width: 100%; }
   .fl-ship-toks { flex: 1 1 100%; display: grid; }
   .fl-ship-toks .tok { width: 100%; min-width: 0; }
+}
+
+/* routes: one line of short class names; a disclosure with a count in narrow belts */
+.fl-routes { flex-wrap: nowrap; }
+.fl-routes-t { display: none; }
+.fl-routes-lw { flex: none; }
+.fl-routes-list { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.fl-routes-r { display: inline-flex; align-items: center; gap: 0; min-width: 0; }
+.fl-routes-chev { display: none; }
+.fl-route { white-space: nowrap; }
+@container (max-width: 1000px) {
+  .fl-routes { flex-direction: column; align-items: stretch; gap: 6px; padding: 4px 8px; }
+  .fl-routes-lw { display: none; }
+  .fl-routes-t { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; width: 100%; padding: 0; background: none; border: 0; text-align: left; cursor: pointer; }
+  .fl-routes-t:hover { color: var(--ink); }
+  .fl-routes-t:hover .fl-routes-c, .fl-routes.is-open .fl-routes-c { color: var(--ink); }
+  .fl-routes-chev { display: inline-block; flex: none; width: 7px; height: 7px; margin-left: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translateY(-2px); transition: transform 120ms; color: var(--ink-2); }
+  .fl-routes.is-open .fl-routes-chev { transform: rotate(-135deg) translate(-1px, -1px); }
+  .fl-routes-t:focus-visible { outline: none; box-shadow: var(--focus); }
+  .fl-routes-c { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fl-routes-list { display: none; flex-wrap: wrap; overflow: visible; padding-bottom: 6px; }
+  .fl-routes.is-open .fl-routes-list { display: flex; }
 }
