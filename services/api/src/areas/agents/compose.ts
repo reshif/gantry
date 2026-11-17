@@ -1,6 +1,7 @@
 /**
- * Instruction composition (spec 10.2). Four layers, in order: the factory base, the project overlay, the agent, and the repository's guidelines file at the
- * pinned commit. The skills attached to the agent version follow, in order. The composition is pinned when a run is dispatched: the layer versions, the
+ * Instruction composition (spec 10.2). Four layers, in order: the factory base, the project overlay, the agent, and the repo guidelines Gantry keeps for the
+ * repository (`repos.guidelines`, a person-owned text, NOT the repository's own AGENTS.md; that file arrives separately as the run's "Repository context", see
+ * areas/internal/spec.ts) with the commit they were read at recorded next to them. The skills attached to the agent version follow, in order. The composition is pinned when a run is dispatched: the layer versions, the
  * skill versions and the hash go on the attempt's version tuple and on the run, so the run spec, the preview and the audit trail all describe the same text.
  */
 import type { Queryable } from "@gantry/db";
@@ -13,7 +14,7 @@ export interface Layer {
   version: number | null;
   text: string;
   hash: string;
-  /** The commit the repository's guidelines file was read at. */
+  /** The commit the repo guidelines were recorded against. */
   commit?: string | null;
 }
 
@@ -66,7 +67,7 @@ export function agentLayerText(cfg: { instructions: string; guardrails: { paths:
   return parts.filter((p) => p !== "").join("\n\n");
 }
 
-export const LAYER_NAMES: Record<Layer["key"], string> = { base: "Factory base", project: "Project overlay", agent: "Agent", repo: "Repository guidelines" };
+export const LAYER_NAMES: Record<Layer["key"], string> = { base: "Factory base", project: "Project overlay", agent: "Agent", repo: "Repo guidelines (Gantry)" };
 
 export function assemble(layers: Layer[]): Composed {
   const used = layers.filter((l) => l.text.trim() !== "");

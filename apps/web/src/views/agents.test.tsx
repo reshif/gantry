@@ -45,7 +45,7 @@ const layers = [
   { key: "base", name: "Factory base", version: 4, hash: "a", text: "Base rules." },
   { key: "project", name: "Project overlay", version: 1, hash: "b", text: "Payments Platform overlay text." },
   { key: "agent", name: "Agent", version: 2, hash: "c", text: "Implement the approved plan on a branch." },
-  { key: "repo", name: "Repository guidelines", version: null, hash: "d", text: "Use pnpm.", commit: "a".repeat(40) },
+  { key: "repo", name: "Repo guidelines (Gantry)", version: null, hash: "d", text: "Use pnpm.", commit: "a".repeat(40) },
 ];
 const EFFECTIVE = { agent: "ag-build", version: "draft", live: false, project: { id: "payments", name: "Payments Platform" }, repo: { id: "payments-api", name: "payments-api" }, text: "x", hash: "e".repeat(64), words: 10, tokens: 20, layers, skills: [] };
 const ME = { person: PEOPLE[0], session: { id: "s1", person: "p-asha", method: "sso", device: "Chrome", ip: "1", started: 0, lastSeen: 0, revoked: false }, csrf: "c", org: { id: "acme", name: "Acme", plant: "P", tz: "IST" }, projects: [PAYMENTS, RISK], factory: { killed: null }, config: {} };
@@ -238,7 +238,8 @@ describe("Agents screen", () => {
     expect(pre.textContent).toContain("## Skills, in order\n1. Test design v1.2.0: When Test design.\n2. Security review v1.2.0");
     expect(pre.textContent).toContain("# 4 Repo guidelines: payments-api\nUse pnpm.");
     expect(document.getElementById("ag-eff-count")!.textContent).toMatch(/^\d+ words, about \d+ tokens$/);
-    expect(document.getElementById("ag-repo-commit")!.textContent).toBe(`read at ${"a".repeat(12)}`);
+    expect(document.getElementById("ag-repo-commit")!.textContent).toBe(`recorded at ${"a".repeat(12)}`);
+    expect(document.getElementById("ag-repo-conventions")!.textContent).toMatch(/Repo conventions: not read yet/);
     fireEvent.change(await byId("ag-instr"), { target: { value: "A brand new agent text." } });
     await waitFor(() => expect(pre.textContent).toContain("# 3 Agent: Builder 2.6.1\nA brand new agent text."));
   });

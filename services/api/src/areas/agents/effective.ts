@@ -1,9 +1,26 @@
 /** The effective instructions preview (spec 8.7, 10.2): exactly what a run of this agent would be given for a project and repository. */
 import type { Queryable } from "@gantry/db";
+import { RepoContext, repoContextRecord } from "@gantry/domain";
 import { notFound, invalid } from "../../core/errors.js";
 import { assemble, composeLayers, loadAgentVersion, projectInfo, resolveSkills, type AgentBody, type Layer } from "./compose.js";
 import { cfgOf, snapshotOf } from "./config.js";
 import { attachedSkills, labelOf, versionRows } from "./store.js";
+
+/** What the repository's own convention files looked like the last time a run was seeded from it (the manifest on that run), without the file text. */
+export type RepoContextSummary = (Omit<ReturnType<typeof repoContextRecord>, "hash"> & { runId: string; offeredAt: string | null }) | null;
+
+async function latestRepoContext(db: Queryable, orgId: string, repoId: string): Promise<RepoContextSummary> {
+  const row = (await db.query<{ id: string; rc: unknown }>(
+    `select r.id, r.data->'repoContext' as rc from runs r join work_orders w on w.org_id = r.org_id and w.id = r.wo_id
+      where r.org_id = $1 and w.repo_id = $2 and r.data->'repoContext'->>'commit' is not null
+      order by r.started_at desc limit 1`,
+    [orgId, repoId],
+  )).rows[0];
+  const p = row ? RepoContext.safeParse(row.rc) : null;
+  if (!row || !p?.success) return null;
+  const { hash: _hash, ...rest } = repoContextRecord(p.data);
+  return { ...rest, runId: row.id, offeredAt: typeof (row.rc as { offeredAt?: unknown }).offeredAt === "string" ? (row.rc as { offeredAt: string }).offeredAt : null };
+}
 
 export interface Effective {
   agent: string;
@@ -18,6 +35,8 @@ export interface Effective {
   tokens: number;
   layers: Array<Pick<Layer, "key" | "name" | "version" | "hash" | "text"> & { commit?: string | null }>;
   skills: Array<{ id: string; name: string; version: number; label: string; when: string; resources: string[] }>;
+  /** The repository's own convention files (AGENTS.md, CLAUDE.md...) as last offered to a run, read from the repository, separate from the repo guidelines layer. Null when no run was seeded from it yet. */
+  repoContext: RepoContextSummary;
 }
 
 export async function effectiveFor(db: Queryable, orgId: string, agentId: string, q: { project?: string | undefined; repo?: string | undefined; version?: string | undefined }): Promise<Effective> {
@@ -56,5 +75,6 @@ export async function effectiveFor(db: Queryable, orgId: string, agentId: string
     text: composed.text, hash: composed.hash, words, tokens: Math.round(composed.text.length / 4),
     layers: composed.layers.map((l) => ({ key: l.key, name: l.name, version: l.version, hash: l.hash, text: l.text, ...(l.commit !== undefined ? { commit: l.commit } : {}) })),
     skills: skills.map((s) => ({ id: s.id, name: s.name, version: s.version, label: s.label, when: s.when, resources: s.resources })),
+    repoContext: repo ? await latestRepoContext(db, orgId, repo.id) : null,
   };
 }

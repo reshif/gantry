@@ -1,4 +1,5 @@
 import type { Queryable } from "@gantry/db";
+import { REPO_CONTEXT_LAYER_NAME, RepoContext, renderRepoContext } from "@gantry/domain";
 import { agentConfig } from "./metering.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
 import { planOf, researchHosts, sourcesHandoff } from "../workorders/research.js";
@@ -49,6 +50,17 @@ export async function composeInstructions(db: Queryable, c: RunCtx): Promise<Com
   const { layers } = await composeLayers(db, { orgId: c.orgId, agentId: c.agentId, projectId: c.projectId, repoId: c.repoId, pin, fallbackAgentText: agent.instructions, fallbackOverlay: c.overlay }, av);
   const out = assemble(layers);
   return { text: out.text, hash: out.hash, layers: out.layers.map((l) => ({ name: l.name, hash: l.hash, version: l.version })) };
+}
+
+/**
+ * The repository's convention files as Gantry read them at the pinned commit when it seeded the workspace (recorded on the run by dispatch), framed as repository
+ * data with a stated precedence. Appended after the layers: it informs how to work in the repo and ranks below the factory base, overlay and agent text.
+ * The harness's own CLAUDE.md loader stays disabled, so this is the only way repository conventions reach the model.
+ */
+export function repoContextSection(c: Pick<RunCtx, "runData">): string {
+  const parsed = RepoContext.safeParse(c.runData.repoContext);
+  const body = parsed.success ? renderRepoContext(parsed.data) : "";
+  return body ? `## ${REPO_CONTEXT_LAYER_NAME}\n\n${body}` : "";
 }
 
 async function skillsFor(db: Queryable, c: RunCtx): Promise<{ name: string; content: string }[]> {
@@ -119,7 +131,7 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
     adapter,
     station: c.station,
     ...(model ? { model } : {}),
-    instructions: inst.text,
+    instructions: [inst.text, repoContextSection(c)].filter((x) => x !== "").join("\n\n"),
     instructionsHash: inst.hash,
     skills: await skillsFor(db, c),
     mcpServers: Object.fromEntries(mcp.map((s) => [mcpKey(s, mcp), { type: "http" as const, url: `${edgeUrl.replace(/\/+$/, "")}/mcp/v1/${encodeURIComponent(s.id)}` }])),

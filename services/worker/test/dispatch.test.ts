@@ -33,6 +33,23 @@ d("attempt.dispatch and run.result", () => {
     expect(att.lease_until).not.toBeNull();
   });
 
+  it("records the repository context the broker read at the seeded commit on the run (paths, sizes, hashes, what was inlined), so the run spec can offer it", async () => {
+    await w.q(`update repos set github_full_name = 'acme/payments-api' where org_id = $1 and id = 'payments-api'`, [w.orgId]);
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"3".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    const h = "d".repeat(64);
+    w.broker.repoContext = { commit: "3".repeat(40), hash: h, files: [{ path: "AGENTS.md", bytes: 12, sha256: h, inlined: true, truncated: false, content: "Test: pytest" }, { path: "CLAUDE.md", bytes: 9, sha256: h, inlined: false, truncated: false, withheld: "secret", secretHits: [{ line: 1, rule: "github-token" }] }] };
+    const { runId } = await w.workOrderAt("WO-9020");
+    await w.drain();
+    const rc = (await w.q(`select data->'repoContext' as rc from runs where id = $1`, [runId]))[0].rc;
+    expect(rc).toMatchObject({ commit: "3".repeat(40), hash: h, files: [{ path: "AGENTS.md", inlined: true, content: "Test: pytest" }, { path: "CLAUDE.md", withheld: "secret" }] });
+    expect(rc.offeredAt).toEqual(expect.any(String));
+    // an older broker that sends none is recorded as unavailable, not as an empty repository
+    w.broker.repoContext = undefined;
+    const { runId: r2 } = await w.workOrderAt("WO-9021");
+    await w.drain();
+    expect((await w.q(`select data->'repoContext' as rc from runs where id = $1`, [r2]))[0].rc).toMatchObject({ unavailable: true, files: [] });
+  });
+
   it("pins the four-layer instruction composition, the skill versions and the version tuple on the run (spec 10.2)", async () => {
     await w.q(`update repos set guidelines = 'Use pnpm.' where org_id = $1 and id = 'payments-api'`, [w.orgId]);
     await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"2".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
@@ -44,7 +61,7 @@ d("attempt.dispatch and run.result", () => {
     expect(tuple.skill_versions).toEqual({ "sk-testdesign": expect.any(Number) });
     // the tuple's instruction hash is the hash of the whole composition, which the run records with its layer versions
     expect(run.composed.hash).toBe(tuple.instruction_hash);
-    expect(run.composed.layers.map((l: { name: string }) => l.name)).toEqual(["Factory base", "Project overlay", "Agent", "Repository guidelines"]);
+    expect(run.composed.layers.map((l: { name: string }) => l.name)).toEqual(["Factory base", "Project overlay", "Agent", "Repo guidelines (Gantry)"]);
     expect(run.composed.layers[0].version).toBe(4);
     expect(run.composed.skills).toEqual([{ id: "sk-testdesign", version: tuple.skill_versions["sk-testdesign"] }]);
     expect(run.composed.tupleId).toBe(tuple.id);
