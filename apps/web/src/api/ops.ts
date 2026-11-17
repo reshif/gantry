@@ -17,6 +17,7 @@
  */
 import { api, del, patch, post, put, command, type ApiResult, type RequestOptions } from "./client";
 import { invalidateSlices } from "./keys";
+import { noteSignedOut } from "../lib/session/session";
 
 type Obj = Record<string, unknown>;
 /** Optimistic concurrency: the entity version from the last read, sent as If-Match. */
@@ -72,6 +73,7 @@ export const ops = {
    * session ends too; the provider redirects back to the app. Without a `logoutUrl`, the app just shows the signed-out screen.
    */
   async signOut(): Promise<ApiResult<{ logoutUrl?: string }>> {
+    noteSignedOut();
     const r = await post<{ logoutUrl?: string }>("/auth/logout");
     if (r.ok && typeof r.logoutUrl === "string" && /^https?:\/\//.test(r.logoutUrl)) {
       window.location.assign(r.logoutUrl);

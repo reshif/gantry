@@ -18,6 +18,8 @@
   /* radii: controls 6, cards 8, dialogs 12 */
   --r1: 6px; --r2: 8px; --r3: 12px; --r: 8px; --r-sm: 6px;
   --control-h: 32px;
+  /* stacking: floating notices sit above the drawer (120) and below dialogs (200) and toasts (300) */
+  --z-banner: 130;
 
   --bg: #fafafa;
   --surface: #ffffff;

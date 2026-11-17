@@ -84,6 +84,21 @@ describe("central step-up", () => {
     expect((await p).ok).toBe(true);
   });
 
+  it("a popup that reads as closed (COOP) shows a soft note, and a late success still completes the change", async () => {
+    const win = { close: vi.fn(), closed: false } as unknown as { close: () => void; closed: boolean };
+    vi.spyOn(window, "open").mockReturnValue(win as unknown as Window);
+    answers = [refusal, okBody];
+    const p = post("/api/v1/x", {});
+    await screen.findByText(/recent sign-in/);
+    fireEvent.click(document.getElementById("stepup-go-popup")!);
+    win.closed = true; // the browser hides the real state of a cross-origin-isolated popup
+    await waitFor(() => expect(document.getElementById("stepup-error")?.textContent).toMatch(/closed before it finished/), { timeout: 3000 });
+    expect(reqs).toHaveLength(1); // nothing was decided yet
+    await tellOpener({ type: STEP_UP_MESSAGE, ok: true }); // the real sign-in finishes later
+    expect((await p).ok).toBe(true);
+    expect(reqs).toHaveLength(2);
+  });
+
   it("never retries twice: a second step-up refusal reaches the caller", async () => {
     vi.spyOn(window, "open").mockReturnValue(popupWin());
     answers = [refusal, refusal];

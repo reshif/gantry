@@ -124,6 +124,12 @@ export function updatePrefs(change: Partial<Prefs> | ((p: Prefs) => Partial<Pref
   for (const fn of [...listeners]) fn();
 }
 
+/** Back to defaults in memory only (a session reset wipes storage itself); keeps memory and storage consistent after sign-out. */
+export function resetPrefsInMemory(): void {
+  state = defaultPrefs();
+  for (const fn of [...listeners]) fn();
+}
+
 /** Test hook: reload from storage. */
 export function reloadPrefs(): void {
   state = load();

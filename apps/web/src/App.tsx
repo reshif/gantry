@@ -1,10 +1,15 @@
 import { useEffect, useMemo } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { ApiError, setUnauthorizedHandler } from "./api/client";
 import { bindQueryClient, invalidateSlices } from "./api/keys";
 import { useMeState } from "./api/queries";
 import { startStream } from "./api/stream";
-import { applyTheme, reducedMotion, usePrefs } from "./lib/prefs";
+import { canBatcher } from "./api/can";
+import { startConnectionWatch } from "./lib/connection/store";
+import { deriveSession, noteUnauthorized, registerSessionReset, useSessionLifecycle } from "./lib/session/session";
+import { ReconnectBanner } from "./lib/session/ReconnectBanner";
+import { AppErrorBoundary } from "./lib/errors/AppErrorBoundary";
+import { applyTheme, reducedMotion, resetPrefsInMemory, usePrefs } from "./lib/prefs";
 import { OverlayProvider } from "./ui/Overlay";
 import { Tip } from "./ui/Tip";
 import { Shell } from "./shell/Shell";
@@ -25,31 +30,44 @@ export function makeQueryClient(): QueryClient {
 
 function Root() {
   const meState = useMeState();
+  const client = useQueryClient();
   const prefs = usePrefs();
-  const signedIn = meState.data?.status === "in";
+  const session = deriveSession(meState);
+  const signedIn = session.state === "in";
+  const me = meState.data?.status === "in" ? meState.data.me : null;
 
+  useSessionLifecycle(client, meState.data);
   useEffect(() => applyTheme(prefs.theme), [prefs.theme]);
   useEffect(() => {
-    document.body.classList.toggle("signed-out", meState.data?.status === "out");
+    document.body.classList.toggle("signed-out", session.state === "out");
     if (reducedMotion()) document.documentElement.setAttribute("data-reduced-motion", "true");
-  }, [meState.data?.status]);
+  }, [session.state]);
 
   // live updates only while signed in
   useEffect(() => (signedIn ? startStream() : undefined), [signedIn]);
+  useEffect(() => startConnectionWatch(), []);
 
-  if (meState.isPending) return <div className="boot">Loading…</div>;
-  if (meState.isError) {
+  // Branch on data FIRST: a failed refetch of /me must never unmount a signed-in app.
+  if (me) {
+    return (
+      <>
+        <Shell key={me.person.id} me={me} />
+        {session.stale ? <ReconnectBanner onRetry={() => void meState.refetch()} retrying={meState.isFetching} /> : null}
+      </>
+    );
+  }
+  if (meState.data?.status === "out") {
+    const err = new URLSearchParams(window.location.search).get("auth_error");
+    return <SignIn config={meState.data.config} error={err} />;
+  }
+  if (session.state === "offline") {
     return (
       <div className="boot" role="alert">
         Gantry could not be reached. <button type="button" className="btn btn-sm" onClick={() => void meState.refetch()}>Try again</button>
       </div>
     );
   }
-  if (meState.data.status === "out") {
-    const err = new URLSearchParams(window.location.search).get("auth_error");
-    return <SignIn config={meState.data.config} error={err} />;
-  }
-  return <Shell me={meState.data.me} />;
+  return <div className="boot">Loading…</div>;
 }
 
 export default function App() {
@@ -60,14 +78,28 @@ export default function App() {
     bindQueryClient(client);
     return () => bindQueryClient(null);
   }, [client]);
+  useEffect(
+    () =>
+      registerSessionReset((reason) => {
+        canBatcher.clear();
+        // storage keeps prefs only across an expiry; otherwise memory must match the wiped storage
+        if (reason !== "expired") resetPrefsInMemory();
+      }),
+    [],
+  );
   useEffect(() => {
-    setUnauthorizedHandler(() => invalidateSlices(["session"]));
+    setUnauthorizedHandler(() => {
+      noteUnauthorized();
+      invalidateSlices(["session"]);
+    });
     return () => setUnauthorizedHandler(null);
   }, []);
   return (
     <QueryClientProvider client={client}>
       <OverlayProvider>
-        <Root />
+        <AppErrorBoundary level="root">
+          <Root />
+        </AppErrorBoundary>
         <Tip />
       </OverlayProvider>
     </QueryClientProvider>
