@@ -9,11 +9,11 @@ import { ops } from "../api/ops";
 import { useHome, useMe, useProjects } from "../api/queries";
 import { dec, useTravelerWo } from "./traveler/model";
 import { useCan } from "../api/can";
-import { Btn, Empty, Field, Segmented, Select, Status, ViewHead, type Decision } from "../ui/primitives";
+import { Btn, Chip, Empty, FilterBar, Panel, SearchBox, Select, Status, Table, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { useCommand } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
-import { navigate } from "../lib/router";
+import { navigate, useHash } from "../lib/router";
 import { setProject, updatePrefs } from "../lib/prefs";
 import { makeStopActions } from "../shell/stopActions";
 import { useOpenTraveler } from "../shell/useTraveler";
@@ -31,14 +31,6 @@ type Item =
 /** Attention items that are decisions for this person, rather than health to look at: a restore, and proposals on the governance pages. */
 const DECISION_ROUTES = new Set(["trust", "learning", "mcp", "api", "integrations"]);
 const isDecision = (x: AttentionItem): boolean => !!x.restore || DECISION_ROUTES.has(x.act.route);
-
-const GROUPS: Array<{ id: Group; label: string; title: string; hint: string; empty: string }> = [
-  { id: "gate", label: "Gate approvals", title: "Gate approvals", hint: "Longest wait first. Approve, or send it back with what must change. The rule and who else can decide are shown on every row.", empty: "No gate approvals waiting." },
-  { id: "onboarding", label: "Onboarding", title: "Onboarding approvals", hint: "Pull requests that wire a repo into Gantry. Open the onboarding session to review the files before the merge.", empty: "No onboarding merges waiting." },
-  { id: "questions", label: "Questions", title: "Questions for you", hint: "Agents ask in the work order's one conversation. Answer there.", empty: "No open questions." },
-  { id: "stuck", label: "Needs a person", title: "Stopped work", hint: "A station failed or could not start, so nothing is working on it. Retry it, or open it to assign another agent.", empty: "Nothing is stopped." },
-  { id: "other", label: "Other decisions", title: "Other decisions", hint: "Proposals and restores that need a person. A factory restore appears here while the factory is stopped.", empty: "Nothing else is waiting." },
-];
 
 function useItems(home: HomeFull | undefined, names: Map<string, string>): Item[] {
   return useMemo(() => {
@@ -68,28 +60,23 @@ function useItems(home: HomeFull | undefined, names: Map<string, string>): Item[
   }, [home, names]);
 }
 
+/** One waiting item as a prototype list row: the work order and a tag, the title, a quiet line, the actions on the right. */
 function Row({ id, tag, project, title, sub, status, children, details, actions }: { id: string; tag: string; project: string; title: ReactNode; sub: ReactNode; status?: ReactNode; children?: ReactNode; details?: ReactNode; actions?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <article className="inb-row" id={id} aria-label={typeof title === "string" ? title : undefined}>
-      <div className="inb-top">
-        <div className="inb-main">
-          <div className="inb-meta">
-            <span className="chip chip-accent">{tag}</span>
-            {project ? <span className="muted small">{project}</span> : null}
-          </div>
-          <h3 className="inb-title">{title}</h3>
-          <p className="muted small inb-sub">{sub}</p>
-          <div className="inb-links">
-            {children}
-            {details ? <Btn label={open ? "Hide details" : "Show details"} small kind="ghost" aria-pressed={open} id={`${id}-details`} onClick={() => setOpen(!open)} /> : null}
-          </div>
+    <li id={id} className="inb-row" aria-label={typeof title === "string" ? title : undefined} style={{ flexWrap: "wrap" }}>
+      <div className="grow">
+        <div className="row"><Chip text={tag} cls="info" />{project ? <span className="small muted">{project}</span> : null}{status}</div>
+        <div className="pri-cell-title">{title}</div>
+        <div className="small muted">{sub}</div>
+        <div className="row">
+          {children}
+          {details ? <Btn label={open ? "Hide details" : "Show details"} small kind="ghost" aria-pressed={open} id={`${id}-details`} onClick={() => setOpen(!open)} /> : null}
         </div>
-        {status ? <div className="inb-status">{status}</div> : null}
       </div>
-      {open && details ? <div className="inb-details">{details}</div> : null}
-      {actions ? <div className="inb-actions">{actions}</div> : null}
-    </article>
+      {actions ? <div className="row inb-actions">{actions}</div> : null}
+      {open && details ? <div className="inb-details" style={{ flexBasis: "100%" }}>{details}</div> : null}
+    </li>
   );
 }
 
@@ -153,24 +140,29 @@ function GateItem({ it }: { it: Extract<Item, { kind: "gate" }> }) {
       },
     });
   const verb = gate === "G6" ? "Confirm release" : brief ? "Confirm brief" : "Approve";
+  const [more, setMore] = useState(false);
+  const id = `inb-${it.key}`;
   return (
-    <Row
-      id={`inb-${it.key}`}
-      tag="Gate approval"
-      project={it.projectName}
-      title={`${gatePendingTitle({ id: gate, name: a.gateName ?? "gate", label: a.gateLabel ?? gate })} on ${wo}`}
-      sub={`${wo} · ${a.title ?? ""}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`}
-      status={<Status tone="wait">Waiting</Status>}
-      details={<GateRule wo={wo} gate={gate} project={it.project} />}
-      actions={
-        <>
-          <Btn label={verb} kind="primary" icon="check" id={`inb-ok-${wo}-${gate}`} guard={base} onClick={() => void approve.run()} />
-          <Btn label={brief ? "Decline" : "Ask for changes"} icon={brief ? "x" : "undo"} id={`inb-back-${wo}-${gate}`} guard={decideBack} onClick={back} />
-        </>
-      }
-    >
-      <Btn label={`Open ${wo}`} small kind="ghost" id={`inb-open-${wo}-${gate}`} onClick={() => open(wo)} />
-    </Row>
+    <>
+      <tr id={id} aria-label={`${gatePendingTitle({ id: gate, name: a.gateName ?? "gate", label: a.gateLabel ?? gate })} on ${wo}`}>
+        <td className="pri-cell" data-l="Work order">
+          <div className="mono">{wo}</div>
+          <span className="sub small muted">{a.title ?? ""}</span>
+        </td>
+        <td data-l="Gate"><Chip text={a.gateLabel ?? gate} cls="warn" /><span className="sub small muted">{gatePendingTitle({ id: gate, name: a.gateName ?? "gate", label: a.gateLabel ?? gate })}</span></td>
+        <td data-l="Project">{it.projectName}</td>
+        <td data-l="Waiting">{a.waitMs ? `${fmt.dur(a.waitMs)} ago` : "now"}</td>
+        <td className="r" data-l="">
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <Btn label={verb} small kind="primary" id={`inb-ok-${wo}-${gate}`} guard={base} onClick={() => void approve.run()} />
+            <Btn label={brief ? "Decline" : "Ask for changes"} small kind="danger" id={`inb-back-${wo}-${gate}`} guard={decideBack} onClick={back} />
+            <Btn label="Open" aria={`Open ${wo}`} small kind="ghost" id={`inb-open-${wo}-${gate}`} onClick={() => open(wo)} />
+            <Btn label={more ? "Hide details" : "Show details"} small kind="ghost" aria-pressed={more} id={`${id}-details`} onClick={() => setMore(!more)} />
+          </div>
+        </td>
+      </tr>
+      {more ? <tr><td colSpan={5}><GateRule wo={wo} gate={gate} project={it.project} /></td></tr> : null}
+    </>
   );
 }
 
@@ -267,59 +259,77 @@ function OtherItem({ it }: { it: Extract<Item, { kind: "other" }> }) {
   );
 }
 
+const TABS: Array<{ id: string; label: string; groups: Group[]; title: string; hint: string; empty: string }> = [
+  { id: "approvals", label: "Approvals", groups: ["gate", "onboarding"], title: "Waiting for a decision", hint: "Longest wait first. Approve, or send it back with what must change. The rule and who else can decide are on every row.", empty: "No approvals waiting. Gate requests appear here as agents finish their work." },
+  { id: "questions", label: "Questions", groups: ["questions"], title: "Agents are asking", hint: "Agents ask in the work order's one conversation. Answer there.", empty: "No open questions. Agents will ask here when they need information." },
+  { id: "blocked", label: "Blocked", groups: ["stuck"], title: "Blocked or failed", hint: "A station failed or could not start, so nothing is working on it. Retry it, or open it to assign another agent.", empty: "Nothing is blocked. The line is flowing." },
+  { id: "proposals", label: "Proposals", groups: ["other"], title: "Other decisions", hint: "Proposals and restores that need a person. A factory restore appears here while the factory is stopped.", empty: "Nothing else is waiting." },
+];
+
 export default function InboxView() {
   const q = useHome();
   const home = q.data as unknown as HomeFull | undefined;
   const projList = useProjects().data;
   const names = useMemo(() => new Map((projList ?? []).map((p) => [p.id, p.name] as [string, string])), [projList]);
   const items = useItems(home, names);
-  const [group, setGroup] = useState<"all" | Group>("all");
+  const param = useHash().param;
+  const tab = TABS.find((t) => t.id === param) ?? TABS[0]!;
   const [project, setProj] = useState("all");
-  const count = (g: Group | "all") => items.filter((i) => g === "all" || i.group === g).length;
+  const [search, setSearch] = useState("");
+  const inTab = (t: (typeof TABS)[number]) => items.filter((i) => t.groups.includes(i.group));
   const projects = useMemo(() => {
     const m = new Map<string, string>();
     for (const i of items) if (!m.has(i.project) || names.has(i.project)) m.set(i.project, names.get(i.project) ?? (i.projectName || i.project));
     return [...m.entries()];
   }, [items, names]);
-  const shown = items.filter((i) => (group === "all" || i.group === group) && (project === "all" || i.project === project));
+  const needle = search.trim().toLowerCase();
+  const textOf = (i: Item): string => (i.kind === "gate" || i.kind === "onboarding" ? `${i.a.wo ?? ""} ${i.a.title ?? ""} ${i.a.repoName ?? ""} ${i.projectName}` : i.kind === "other" ? `${i.x.title} ${i.x.sub}` : `${i.c.wo} ${i.c.title} ${i.c.question ?? ""}`).toLowerCase();
+  const shown = inTab(tab).filter((i) => (project === "all" || i.project === project) && (!needle || textOf(i).includes(needle)));
+  const gates = shown.filter((i): i is Extract<Item, { kind: "gate" }> => i.kind === "gate");
+  const others = shown.filter((i) => i.kind !== "gate");
   const render = (i: Item): ReactNode =>
-    i.kind === "gate" ? <GateItem key={i.key} it={i} /> : i.kind === "onboarding" ? <OnboardingItem key={i.key} it={i} /> : i.kind === "question" ? <QuestionItem key={i.key} it={i} /> : i.kind === "stuck" ? <StuckItem key={i.key} it={i} /> : <OtherItem key={i.key} it={i} />;
+    i.kind === "onboarding" ? <OnboardingItem key={i.key} it={i} /> : i.kind === "question" ? <QuestionItem key={i.key} it={i} /> : i.kind === "stuck" ? <StuckItem key={i.key} it={i} /> : i.kind === "other" ? <OtherItem key={i.key} it={i} /> : null;
   return (
     <div className="view inbox">
-      <ViewHead title="Inbox" sub="Everything that waits for you, in one list. Decide right here." />
+      <ViewHead title="Inbox" sub="Everything that is waiting for a person, in one place. Decide right here." />
       <Async query={q} what="your inbox" id="inbox" isEmpty={() => false}>{() =>
         !items.length ? (
           <Empty id="inbox-empty" icon="mail" title="Nothing is waiting on you" text="Approvals you may give and questions addressed to you appear here, one row each." action={<Btn label="Go to Work orders" id="inbox-to-wo" onClick={() => navigate("work-orders")} />} />
         ) : (
-          <div className="inb-stack">
-            <div className="inb-bar">
-              <h2 className="panel-title">Waiting on you <span className="chip chip-accent mono" id="inbox-count">{count("all")}</span></h2>
-              <div className="inb-filters">
-                <Segmented name="inb-type" label="Filter by type" value={group} onChange={(v) => setGroup(v as "all" | Group)} items={[{ id: "all", label: `All ${count("all")}` }, ...GROUPS.map((g) => ({ id: g.id, label: `${g.label} ${count(g.id)}` }))]} />
-                {projects.length > 1 ? (
-                  <div className="filters">
-                    <Field label="Project" htmlFor="inb-proj">
-                      <Select id="inb-proj" options={[{ value: "all", label: "All projects" }, ...projects.map(([id, name]) => ({ value: id, label: name }))]} value={project} onChange={setProj} />
-                    </Field>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            {!shown.length ? (
-              <Empty icon="filter" title="Nothing matches these filters" text="Choose another type or project." action={<Btn label="Show all" id="inbox-reset" onClick={() => { setGroup("all"); setProj("all"); }} />} />
-            ) : (
-              GROUPS.filter((g) => group === "all" || group === g.id).map((g) => {
-                const rows = shown.filter((i) => i.group === g.id);
-                return (
-                  <section key={g.id} className="inb-sec" aria-labelledby={`inb-h-${g.id}`}>
-                    <h2 className="panel-title" id={`inb-h-${g.id}`}>{g.title} <span className="muted num">{rows.length}</span></h2>
-                    <p className="muted small inb-hint">{g.hint}</p>
-                    {rows.length ? <div className="inb-list">{rows.map(render)}</div> : <p className="muted small">{g.empty}</p>}
-                  </section>
-                );
-              })
-            )}
-          </div>
+          <>
+            <Tabs idPrefix="inbox-tab" active={tab.id} onChange={(id) => navigate("inbox", id === "approvals" ? null : id)} items={TABS.map((t) => ({ id: t.id, label: t.label, count: inTab(t).length }))} />
+            <span className="sr" id="inbox-count">{String(items.length)}</span>
+            <Panel title={tab.title} flush id={`inbox-${tab.id}`}>
+              {inTab(tab).length ? (
+                <>
+                  <FilterBar count={`${shown.length} of ${inTab(tab).length}`}>
+                    <SearchBox id="inbox-search" value={search} onChange={setSearch} placeholder="Search…" label="Search the inbox" />
+                    {projects.length > 1 ? (
+                      <label>
+                        <span>Project</span>
+                        <Select id="inb-proj" options={[{ value: "all", label: "All" }, ...projects.map(([id, name]) => ({ value: id, label: name }))]} value={project} onChange={setProj} />
+                      </label>
+                    ) : null}
+                  </FilterBar>
+                  {!shown.length ? (
+                    <Empty icon="filter" title="Nothing matches these filters" text="Choose another project or search." action={<Btn label="Show all" id="inbox-reset" onClick={() => { setSearch(""); setProj("all"); }} />} />
+                  ) : (
+                    <>
+                      {gates.length ? (
+                        <Table className="cards">
+                          <thead><tr><th>Work order</th><th>Gate</th><th>Project</th><th>Waiting</th><th /></tr></thead>
+                          <tbody>{gates.map((i) => <GateItem key={i.key} it={i} />)}</tbody>
+                        </Table>
+                      ) : null}
+                      {others.length ? <ul className="list">{others.map(render)}</ul> : null}
+                    </>
+                  )}
+                </>
+              ) : (
+                <Empty id={`inbox-${tab.id}-empty`} title={tab.empty.split(". ")[0] ?? tab.empty} text={tab.empty.split(". ").slice(1).join(". ") || tab.hint} />
+              )}
+            </Panel>
+          </>
         )
       }</Async>
     </div>
