@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { useCan } from "../api/can";
 import { useMe, useProjects, useTemplates } from "../api/queries";
 import { usePrefs } from "../lib/prefs";
-import { Btn, Tabs, ViewHead } from "../ui/primitives";
+import { fmt } from "@gantry/domain";
+import { Btn, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { Async, qState } from "../ui/async";
 import { registerCommand } from "../lib/commands";
@@ -32,14 +33,23 @@ export default function ProjectsView() {
   if (!me) return null;
   const live = projects.filter((p) => p.status !== "archived").length;
   const archived = projects.length - live;
-  const killed = projects.filter((p) => p.killed || p.metrics?.health.id === "killed").length;
+  const active = projects.filter((p) => p.status !== "archived");
+  const wip = active.reduce((n, p) => n + (p.metrics?.wip ?? 0), 0);
+  const spent = active.reduce((n, p) => n + p.budget.mtd, 0);
+  const cap = active.reduce((n, p) => n + p.budget.monthly, 0);
+  const regulated = active.filter((p) => p.regulated).length;
   return (
     <div className="view prj">
       <ViewHead
-        title="Projects" sub="Each project is a line in the factory: its own repos, flow, approvers, budget and kill switch."
-        meta={[["Projects", qState(projectsQ, () => String(live))], ["Archived", qState(projectsQ, () => String(archived))], ["Templates", qState(tplsQ, (d) => String(d.length))], ["Killed", qState(projectsQ, () => String(killed))]]}
+        title="Projects" sub="Each project is its own production line with its own flow, gates and budget."
         actions={<Btn kind="primary" icon="plus" id="prj-new" guard={create} label="New project" onClick={() => openWizard()} />}
       />
+      <StatRow id="prj-stats">
+        <Stat label="Projects" value={qState(projectsQ, () => String(live))} sub={`${archived} archived`} tone="done" />
+        <Stat label="In flight" value={qState(projectsQ, () => String(wip))} sub="work orders" />
+        <Stat label="Spend MTD" value={qState(projectsQ, () => fmt.money0(spent))} sub={`of ${fmt.money0(cap)}`} {...(cap && spent / cap > 0.8 ? { tone: "wait" as const } : {})} />
+        <Stat label="Regulated" value={qState(projectsQ, () => String(regulated))} sub="extra gates" {...(regulated ? { tone: "wait" as const } : {})} />
+      </StatRow>
       <Tabs idPrefix="prj-tab" items={[{ id: "projects", label: "Portfolio", count: projects.length }, { id: "templates", label: "Templates", count: tpls.length }]} active={tab} onChange={(id) => setTab(id as typeof tab)} />
       <div role="tabpanel" id="prj-tab-panel" aria-labelledby={`prj-tab-${tab}`}>
         {tab === "templates" ? (
@@ -49,7 +59,7 @@ export default function ProjectsView() {
         ) : (
           <div className="prj-stack">
             <Async query={projectsQ} what="projects" id="prj-pf">
-              {() => <Portfolio ctx="prj-pf" projects={projects} defaultLayout="rows" roles />}
+              {() => <Portfolio ctx="prj-pf" projects={projects} defaultLayout="cards" roles />}
             </Async>
           </div>
         )}

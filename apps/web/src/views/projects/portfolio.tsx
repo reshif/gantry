@@ -8,6 +8,7 @@ import { fmt, type Catalog } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useMe, useSavedViews, useTemplates } from "../../api/queries";
 import { useCan } from "../../api/can";
+import { useActors } from "../../ui/actors";
 import { Btn, Chip, Field, IconBtn, FilterBar, Meter, SearchBox, Segmented, Select, Tabs } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { getPrefs, updatePrefs } from "../../lib/prefs";
@@ -114,71 +115,47 @@ function ProjectActions({ p, ctx }: { p: PView; ctx: string }) {
   );
 }
 
-/** The project card (legacy projectCard in home.js). */
-export function ProjectCard({ cat, r }: { cat: Catalog; r: Row }) {
+/** The project card, as the prototype draws it: key and name, what it builds, flow counts, budget meter, owner, actions. */
+export function ProjectCard({ r }: { cat?: Catalog; r: Row }) {
   const { p, m } = r;
   const hl = m.health;
   const onb = m.onboarding;
   return (
-    <article className={`hm-proj hk-card-${hl.id}`} aria-label={p.name}>
-      <div className="hm-proj-head">
-        <div className="hm-proj-name">
-          <span className="mono hm-key">{p.key}</span>
-          <h3>{p.name}</h3>
-        </div>
-        <HealthChip p={p} />
+    <article className={`card hm-proj hk-card-${hl.id}`} aria-label={p.name}>
+      <div className="row">
+        <span className="mono small hm-key" style={{ border: "1px solid var(--accent)", color: "var(--accent)", padding: "0 6px" }}>{p.key}</span>
+        <h3 className="grow">{p.name}</h3>
       </div>
-      <MiniBelt cat={cat} project={p} counts={m.byPosition} onStation={() => goProject(p.id, "floor")} />
+      <div className="row">
+        {p.regulated ? <Chip text="regulated" cls="warn" /> : null}
+        {hl.id !== "ok" ? <HealthChip p={p} /> : null}
+      </div>
+      {p.desc ? <div className="small muted">{p.desc}</div> : null}
       {hl.detail ? <p className="small hm-proj-detail">{hl.detail}</p> : null}
-      <dl className="hm-proj-facts">
-        <div>
-          <dt>WIP</dt>
-          <dd>
-            {String(m.wip)}
-            <span className="muted">{m.bays ? ` +${m.bays} in bays` : ""}</span>
-          </dd>
-        </div>
-        <div>
-          <dt>Slots</dt>
-          <dd>{`${m.slotsUsed} of ${p.flow.slots}`}</dd>
-        </div>
-        <div className={m.gates ? "is-wait" : ""}>
-          <dt>Approvals</dt>
-          <dd>
-            {String(m.gates)}
-            {m.gates ? <span className="muted">{` · oldest ${fmt.dur(m.oldest)}`}</span> : null}
-          </dd>
-        </div>
-        <div className={onb ? "is-onb" : ""}>
-          <dt>Onboarding</dt>
-          <dd>{onb ? `${onb} repo${onb > 1 ? "s" : ""}` : "all ready"}</dd>
-        </div>
-      </dl>
-      <p className="hm-proj-ins small">
-        <span data-tip={effTip(m)} tabIndex={0}>
-          <span className="hm-lbl">Flow eff. </span>
-          <span className="mono">{effText(m)}</span>
-        </span>
-        <span data-tip={covTip(m)} tabIndex={0}>
-          <span className="hm-lbl">Trust </span>
-          <span className="mono">{covText(m)}</span>
-        </span>
-        <span>
-          <span className="hm-lbl">Spend </span>
-          <span className={`mono${r.spend >= 1 ? " neg" : ""}`}>{p.budget.monthly ? fmt.pct(r.spend) : "no budget"}</span>
-        </span>
-      </p>
+      <div className="row small">
+        <span className="num">{String(m.wip)}</span> in flight{m.bays ? ` +${m.bays} in bays` : ""} · <span className="num">{String(m.gates)}</span> at gates{m.gates ? ` · oldest ${fmt.dur(m.oldest)}` : ""}{onb ? ` · ${onb} repo${onb > 1 ? "s" : ""} onboarding` : ""}
+      </div>
+      {p.budget.monthly ? <Meter value={p.budget.mtd} max={p.budget.monthly} label={`${p.name} spend`} warnAt={p.budget.alertAt} /> : null}
+      <div className="small muted">
+        <span className={r.spend >= 1 ? "neg" : ""}>{p.budget.monthly ? `${fmt.money0(p.budget.mtd)} of ${fmt.money0(p.budget.monthly)}` : "no budget"}</span>
+        {p.owner ? <> · owner <OwnerName id={p.owner} /></> : null}
+      </div>
       {p.status === "archived" ? (
         <ProjectActions p={p} ctx="hm-card" />
       ) : (
-        <div className="hm-proj-actions">
-          <Btn small icon="belt" id={`hm-floor-${p.id}`} aria={`Open the floor for ${p.name}`} label="Floor" onClick={() => goProject(p.id, "floor")} />
-          <Btn small kind="ghost" id={`hm-cfg-${p.id}`} aria={`Configure ${p.name}`} label="Config" onClick={() => goProject(p.id, "project-config")} />
+        <div className="row">
+          <Btn small kind="primary" id={`hm-floor-${p.id}`} aria={`Open the floor for ${p.name}`} label="Open Floor" onClick={() => goProject(p.id, "floor")} />
+          <Btn small id={`hm-cfg-${p.id}`} aria={`Configure ${p.name}`} label="Config" onClick={() => goProject(p.id, "project-config")} />
           {onb ? <Btn small kind="ghost" id={`hm-onb-${p.id}`} aria={`Onboarding for ${p.name}`} label="Onboarding" onClick={() => goProject(p.id, "onboarding")} /> : null}
         </div>
       )}
     </article>
   );
+}
+
+function OwnerName({ id }: { id: string }) {
+  const actor = useActors()(id);
+  return <>{actor.name}</>;
 }
 
 function rowCols(ctx: string, cat: Catalog, withRoles: boolean, myRoles: (id: string) => string[]): Col<Row>[] {
@@ -386,7 +363,7 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
     st.layout === "rows" ? (
       <DataTable id={`${ctx}-t-${g.key}`} caption={`${g.label || "Projects"} portfolio`} columns={cols} rows={g.items} rowKey={(r) => r.p.id} empty={{ title: "No projects", text: "" }} />
     ) : (
-      <ul className="hm-proj-grid">{g.items.map((r) => <li key={r.p.id} style={{ display: "contents" }}><ProjectCard cat={cat} r={r} /></li>)}</ul>
+      <div className="card-grid hm-proj-grid">{g.items.map((r) => <ProjectCard key={r.p.id} r={r} />)}</div>
     );
   const groupHead = (g: { label: string | null; items: Row[] }) => {
     const gates = g.items.reduce((a, r) => a + r.m.gates, 0);
@@ -402,7 +379,7 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
   return (
     <div className={`pf pf-${st.layout}`} id={ctx}>
       <p className="small muted pf-sum" aria-live="polite">{summary}</p>
-      <div className="panel pf-card">
+      <div className={`panel pf-card${st.layout === "cards" ? " pf-cardsbar" : ""}`}>
         <Tabs
           idPrefix={`${ctx}-view`}
           items={[...views.map((v) => ({ id: v.id, label: v.name, count: countFor(v) })), ...(curView ? [] : [{ id: "", label: "Custom view" }])]}
