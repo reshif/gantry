@@ -12,6 +12,7 @@
  */
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { effectiveMatrix } from "@gantry/domain";
 import { command, decide, policyState, readCatalog, readFreezes, readMatrix, readPolicies, refuse } from "../core/index.js";
 import { createFreeze, endFreeze, freezeVersion } from "../areas/access/freezes.js";
 import { matrixVersion, setMatrixCell } from "../areas/access/matrix.js";
@@ -35,7 +36,7 @@ export const accessRoutes: FastifyPluginAsync = async (app) => {
     requirePerson(req);
     const catalog = await readCatalog(g.pool, req.gx.orgId);
     const m = await readMatrix(g.pool, req.gx.orgId, catalog.actions);
-    return { matrix: m.value, roles: catalog.roles, actions: catalog.actions, version: m.version };
+    return { matrix: effectiveMatrix(m.value, catalog.roles, catalog.actions), roles: catalog.roles, actions: catalog.actions, version: m.version };
   });
 
   app.put("/api/v1/access/matrix/:role/:action", async (req) => {
