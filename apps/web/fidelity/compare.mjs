@@ -88,7 +88,7 @@ mkdirSync(cache, { recursive: true });
 const { buildSync } = await import(resolve(WEB, "../../node_modules/esbuild/lib/main.js"));
 buildSync({
   stdin: { contents: `export { mockApi, fulfillJson } from "../../e2e/fixtures"; export { seedResolver, personaFromSeed } from "../../e2e/seed-fixtures";`, resolveDir: cache, sourcefile: "entry.ts", loader: "ts" },
-  bundle: true, format: "esm", platform: "node", outfile: join(cache, "fixtures.mjs"), external: ["@playwright/test"], logLevel: "error",
+  bundle: true, format: "esm", platform: "node", outfile: join(cache, "fixtures.mjs"), banner: { js: "/* eslint-disable */" }, external: ["@playwright/test"], logLevel: "error",
 });
 const fx = await import(join(cache, "fixtures.mjs") + `?t=${Date.now()}`);
 
