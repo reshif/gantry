@@ -196,9 +196,9 @@ d("starter kit in a seeded organisation", () => {
     expect(a.instructions.length).toBeGreaterThan(1000);
     // the seed's skills of the same id are attached, not replaced
     expect((await t.db.admin.query(`select count(*)::int n from skills`)).rows[0].n).toBe(10);
-    expect((await t.db.admin.query(`select count(*)::int n from eval_cases where suite_id = 'SUITE-INTAKE'`)).rows[0].n).toBe(6);
+    expect((await t.db.admin.query(`select count(*)::int n from eval_cases where suite_id = 'SUITE-INTAKE'`)).rows[0].n).toBe(STARTER_KIT.agents.find((x) => x.id === "ag-intake")!.suite.cases.length);
     const r = await w.call("p-asha", "POST", "/api/v1/suites/SUITE-INTAKE/runs", { agent: "ag-intake", version: "1.0.0", model: undefined }, { "idempotency-key": "kit-run-1" });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(r.body).toMatchObject({ ok: true, total: 6 });
+    expect(r.body).toMatchObject({ ok: true, total: STARTER_KIT.agents.find((x) => x.id === "ag-intake")!.suite.cases.length });
   });
 });
