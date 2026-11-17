@@ -17,7 +17,7 @@ d("live fixes: project spend and conversational cost", () => {
 
   it("project spend is all metered spend of the month: station runs, conversational turns and side threads (never the figure the config carried)", async () => {
     await w.q(`update projects set config = config || '{"mtd": 0}'::jsonb where org_id = $1 and id = 'payments'`, [t.orgId]);
-    await w.q(`delete from usage_meter where project_id = 'payments'`);
+    await w.q(`delete from usage_meter where project_id in ('payments','identity')`);
     expect(await mtd("payments")).toBe(0);
     const row = (station: string, micros: number, at = "now()") =>
       w.q(`insert into usage_meter (org_id, station, project_id, model_id, input_tokens, cost_micros, at) values ($1,$2,'payments','m',1,$3,${at})`, [t.orgId, station, micros]);
@@ -37,7 +37,7 @@ d("live fixes: project spend and conversational cost", () => {
     expect(gate / 1e6).toBe(p.budget.mtd);
   });
 
-  it("a conversation on a work order puts its tokens and cost on the station it happened at, and carries the work order and project", async () => {
+  it("a work-order session turn (Intake, the work-order session) puts its tokens and cost on the station it happened at, and carries the work order and project", async () => {
     const id = "WO-LIVE1";
     await w.insertWo(id, { position: "intake", data: { history: [{ station: "intake", startedAt: 1, endedAt: null, tokens: 0, cost: 0 }] } });
     const r = await t.app.inject({ method: "POST", url: "/internal/v1/service-calls/usage", headers: { ...EDGE, "idempotency-key": `lf-${++n}` }, payload: { purpose: "console", requestId: `lf-${n}`, model: "claude-test-1", vendor: "anthropic", inputTokens: 1000, outputTokens: 500, surface: "workorder", project: "payments", woId: id } });
@@ -47,6 +47,19 @@ d("live fixes: project spend and conversational cost", () => {
     const h = (await w.q(`select data->'history' as h from work_orders where id = $1`, [id]))[0].h[0];
     expect(h.tokens).toBe(1500);
     expect(h.cost).toBeCloseTo(m.c / 1e6, 9);
+  });
+
+  it("a side thread about a work order is metered on its project but puts no cost on the work order (no history entry, no wo_id on the meter row)", async () => {
+    const id = "WO-LIVE1B";
+    await w.insertWo(id, { position: "intake", data: { history: [{ station: "intake", startedAt: 1, endedAt: null, tokens: 0, cost: 0 }] } });
+    // The console route sends a side thread with its surface and project but without the work-order id.
+    const r = await t.app.inject({ method: "POST", url: "/internal/v1/service-calls/usage", headers: { ...EDGE, "idempotency-key": `lf-${++n}` }, payload: { purpose: "console", requestId: `lf-side-${n}`, model: "claude-test-1", vendor: "anthropic", inputTokens: 1000, outputTokens: 500, surface: "workorder", project: "payments" } });
+    expect(r.statusCode, r.body).toBe(200);
+    const m = (await w.q(`select surface, project_id, wo_id, cost_micros::int as c from usage_meter where request_id = $1`, [`lf-side-${n}`]))[0];
+    expect(m).toMatchObject({ surface: "workorder", project_id: "payments", wo_id: null });
+    const h = (await w.q(`select data->'history' as h from work_orders where id = $1`, [id]))[0].h[0];
+    expect(h.tokens).toBe(0);
+    expect(h.cost).toBe(0);
   });
 
   it("a work order at the brief gate reaches the person's Home as a gate decision (it carries the gate), not only as a question", async () => {

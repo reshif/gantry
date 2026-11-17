@@ -57,9 +57,9 @@ export const serviceCallRoutes: FastifyPluginAsync = async (app) => {
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
         [req.gx.orgId, b.requestId ?? null, b.purpose, b.vendor ?? null, b.model, b.inputTokens, b.outputTokens, b.cacheReadTokens, b.cacheWriteTokens, cost, book.version, b.latencyMs ?? null, b.outcome, b.purpose === "onboarding" ? "ag-onboard" : null, b.traceRef ?? null, b.surface ?? b.purpose, b.project ?? null, b.woId ?? null, b.actor ?? null, b.turn ?? null, b.promptHash ?? null],
       );
-      // A conversation on a work order (the Intake agent, a side thread) has no run, so its tokens and cost go on the station entry it happened at; the work order's history shows what it cost.
+      // The work order's own session (Intake, the work-order session) has no run, so its tokens and cost go on the station entry it happened at. A side thread (@mention, side chat) carries no work-order id and adds nothing here.
       let onWo = false;
-      if (b.woId && (b.surface === "workorder" || b.purpose === "console")) {
+      if (b.woId && b.surface === "workorder") {
         const w = (await tx.query<{ data: Record<string, unknown> }>(`select data from work_orders where org_id = $1 and id = $2 for update`, [req.gx.orgId, b.woId])).rows[0];
         const h = Array.isArray(w?.data.history) ? (w!.data.history as Array<{ endedAt?: number | null; tokens?: number; cost?: number }>) : [];
         const e = h.slice().reverse().find((x) => !x.endedAt) ?? h[h.length - 1];
