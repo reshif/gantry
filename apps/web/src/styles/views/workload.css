@@ -9,19 +9,16 @@
 .wl-bus .ic { flex: none; margin-top: 2px; color: var(--wait); }
 
 .wl-sugg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
-.wl-sg { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px dotted var(--line); }
-.wl-sg:last-child { border-bottom: 0; }
-.wl-sg-ic { width: 26px; height: 26px; display: inline-grid; place-items: center; border: 1px solid var(--line-strong); background: var(--surface); }
-.wl-sg-ic .ic { width: 14px; height: 14px; }
-.wl-sg-trust .wl-sg-ic { border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft); }
-.wl-sg-delegate .wl-sg-ic { border-style: dashed; color: var(--wait); }
-.wl-sg-approver .wl-sg-ic { transform: rotate(45deg); color: var(--gate); border-color: var(--gate); background: var(--gate-soft); }
-.wl-sg-approver .wl-sg-ic .ic { transform: rotate(-45deg); }
-.wl-sg-main p { margin: 2px 0 0; font-size: var(--t-sm); }
-.wl-sg-main .kicker { display: block; }
+.wl-sg { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.wl-sg:first-child { padding-top: 0; }
+.wl-sg:last-child { border-bottom: 0; padding-bottom: 0; }
+.wl-sg-text { margin: 0; flex: 1 1 280px; min-width: 0; font-size: var(--t-md); }
+.wl-sg > .chip { flex: none; }
+.wl-sg > .btn { flex: none; }
+.wl-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.wl-controls select { max-width: 220px; }
+.wl-bus strong { margin-right: 2px; }
 
-.wl-main > .wl-tabbar { padding: 6px 12px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.wl-main > .wl-tabbar .tabs { border-bottom: 0; }
 .wl-who { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .wl-who .chip .ic { width: 11px; height: 11px; }
 .wl-rate { display: inline-flex; gap: 6px; align-items: baseline; justify-content: flex-end; flex-wrap: wrap; }
@@ -50,9 +47,8 @@
 .wl-dr-actions { flex-wrap: wrap; }
 
 @media (max-width: 640px) {
-  .wl-sg { grid-template-columns: 28px minmax(0, 1fr); }
-  .wl-sg > .btn { grid-column: 2; justify-self: start; }
-  .wl-tools select { max-width: 100%; }
+  .wl-controls { justify-content: flex-start; }
+  .wl-controls select { max-width: 100%; }
   .wl-rate, .wl-insuf, .wl-mincell { justify-content: flex-start; }
 }
 .wl-tools .seg { width: max-content; }

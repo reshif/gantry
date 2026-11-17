@@ -158,9 +158,9 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     mount();
     await byId("wl-sg-sole-p-priya");
     expect(document.querySelectorAll(".wl-sugg-list li")).toHaveLength(5);
-    expect(document.querySelector(".wl-sg-approver .kicker")?.textContent).toBe("Add an approver");
-    expect(document.querySelector(".wl-sg-trust .kicker")?.textContent).toBe("Raise trust");
-    expect(document.querySelector(".wl-sg-delegate .kicker")?.textContent).toBe("Delegate");
+    expect(document.querySelector(".wl-sg-approver .chip")?.textContent).toBe("Add an approver");
+    expect(document.querySelector(".wl-sg-trust .chip")?.textContent).toBe("Raise trust");
+    expect(document.querySelector(".wl-sg-delegate .chip")?.textContent).toBe("Delegate");
     fireEvent.click(await byId("wl-sugg-all"));
     expect(document.querySelectorAll(".wl-sugg-list li")).toHaveLength(6);
     expect(document.getElementById("wl-sugg-all")?.textContent).toBe("Show top 5");

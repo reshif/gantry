@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useCan } from "../api/can";
 import { useMe, useWorkload } from "../api/queries";
 import type { Workload, WorkloadSuggestion } from "../api/types";
-import { Btn, Empty, Field, Segmented, Select, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, Chip, Empty, Panel, Segmented, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { fmt } from "@gantry/domain";
@@ -32,10 +32,11 @@ function SuggestionItem({ s, openDelegate }: { s: WorkloadSuggestion; m: Workloa
     else if (a.type === "person" && a.person) goPerson(a.person);
     else if (a.type === "trust") goTrust(a.project);
   };
+  const label = s.kind === "trust" ? "Raise trust" : s.kind === "delegate" ? "Delegate" : "Add an approver";
   return (
     <li className={`wl-sg wl-sg-${s.kind}`}>
-      <span className="wl-sg-ic" aria-hidden="true"><Icon name={s.icon} /></span>
-      <div className="wl-sg-main"><span className="kicker">{s.kind === "trust" ? "Raise trust" : s.kind === "delegate" ? "Delegate" : "Add an approver"}</span><p>{s.text}</p></div>
+      <Chip text={label} cls={s.kind === "trust" ? "chip-ok" : "chip-accent"} />
+      <p className="wl-sg-text">{s.text}</p>
       <Btn label={a.label} small id={a.id} guard={guard && !guard.allowed ? guard : null} onClick={run} />
     </li>
   );
@@ -72,44 +73,40 @@ export default function WorkloadView() {
     : tab === "minutes" ? <MinutesTab m={m} sorts={sorts} setSort={setSort} openPerson={openPerson} />
     : <PeopleTab m={m} sorts={sorts} setSort={setSort} openPerson={openPerson} />;
   const sugg = m.suggestions;
+  const controls = (
+    <div className="wl-controls">
+      {projSel}
+      <Segmented name="wl-days" label="Window" value={String(days)} onChange={(v) => setDays(+v)} items={[{ id: "1", label: "24 hours" }, { id: "7", label: "7 days" }]} />
+      <span className="wl-snap small muted">{`Snapshot ${fmt.ist(m.at)} IST · ${t.acts} acts`}</span>
+      <Btn label="Refresh" icon="swap" id="wl-refresh" onClick={() => void q.refetch()} />
+    </div>
+  );
   return (
     <div className="view view-workload">
       <ViewHead title="Workload"
-        sub="Human attention is the scarce resource. Who waits on whom, how long, out of hours, and where one person is the only way through. Derived from approvals, brief confirmations and answers in the work order records."
-        meta={[["Gates waiting", String(t.gatesWaiting)], ["Median wait", t.timedN >= MIN_N ? mins(t.medianWaitMin) : t.timedN ? `n=${t.timedN}` : "–"], ["After hours", t.acts >= MIN_N ? fmt.pct(t.afterHours / t.acts) : "–"], ["Human minutes", String(t.minutes)]]} />
-      <div className="toolbar wl-tools">
-        <div className="filters">
-          <Field label="Projects" htmlFor="wl-project">{projSel}</Field>
-          <div className="field"><div className="field-label">Window</div><Segmented name="wl-days" label="Window" value={String(days)} onChange={(v) => setDays(+v)} items={[{ id: "1", label: "24 hours" }, { id: "7", label: "7 days" }]} /></div>
-        </div>
-        <div className="wl-snap small muted">
-          {`Snapshot ${fmt.ist(m.at)} IST · ${t.acts} acts`}
-          <Btn label="Refresh" small kind="ghost" icon="swap" id="wl-refresh" onClick={() => void q.refetch()} />
-        </div>
-      </div>
+        sub="Human attention is the scarce resource. Who is waited on, how fast they answer, and where one person is the only way through."
+        actions={controls} />
+      <StatRow id="wl-stats">
+        <Stat label="Gates waiting" value={String(t.gatesWaiting)} />
+        <Stat label="Median wait" value={t.timedN >= MIN_N ? mins(t.medianWaitMin) : "–"} sub={t.timedN >= MIN_N ? `n=${t.timedN}` : t.timedN ? `Needs ${MIN_N} or more observations (n=${t.timedN})` : undefined} />
+        <Stat label="After hours" value={t.acts >= MIN_N ? fmt.pct(t.afterHours / t.acts) : "–"} sub={t.acts >= MIN_N ? `${t.afterHours} of ${t.acts} acts` : undefined} />
+        <Stat label="Human minutes" value={String(t.minutes)} sub="this window" />
+      </StatRow>
       {t.soleGates || t.noneGates ? (
         <div className="callout callout-warn wl-bus" role="note">
           <Icon name="alert" />
-          <span>{(t.soleGates ? `${t.soleGates} of ${t.gatesWaiting} waiting gates have exactly one eligible approver` : "") + (t.soleGates && t.noneGates ? "; " : "") + (t.noneGates ? `${t.noneGates} have nobody eligible except break-glass` : "")}. That person is the bus factor for that work.</span>
+          <span><strong>Bus factor</strong>{" "}{(t.soleGates ? `${t.soleGates} of ${t.gatesWaiting} waiting gates have exactly one eligible approver` : "") + (t.soleGates && t.noneGates ? "; " : "") + (t.noneGates ? `${t.noneGates} have nobody eligible except break-glass` : "")}. That person is the bus factor for that work.</span>
         </div>
       ) : null}
-      <section className="panel wl-sugg" aria-label="Suggestions">
-        <div className="panel-head">
-          <h2 className="panel-title">Suggestions</h2>
-          {sugg.length > 5 ? <Btn label={allSugg ? "Show top 5" : `Show all ${sugg.length}`} small kind="ghost" id="wl-sugg-all" onClick={() => setAllSugg(!allSugg)} /> : null}
-        </div>
-        <div className="panel-body">
-          {sugg.length ? (
-            <ol className="wl-sugg-list">{sugg.slice(0, allSugg ? sugg.length : 5).map((s) => <SuggestionItem key={s.key} s={s} m={m} openDelegate={openDelegate} />)}</ol>
-          ) : (
-            <Empty id="wl-sugg-empty" icon="check" title="No suggestions" text="No single points of failure, long waits or pending trust proposals in this scope." />
-          )}
-        </div>
-      </section>
+      <Panel title="Suggestions" cls="wl-sugg" tools={sugg.length > 5 ? <Btn label={allSugg ? "Show top 5" : `Show all ${sugg.length}`} small id="wl-sugg-all" onClick={() => setAllSugg(!allSugg)} /> : undefined}>
+        {sugg.length ? (
+          <ol className="wl-sugg-list">{sugg.slice(0, allSugg ? sugg.length : 5).map((s) => <SuggestionItem key={s.key} s={s} m={m} openDelegate={openDelegate} />)}</ol>
+        ) : (
+          <Empty id="wl-sugg-empty" icon="check" title="No suggestions" text="No single points of failure, long waits or pending trust proposals in this scope." />
+        )}
+      </Panel>
+      <Tabs idPrefix="wl-tab" active={tab} onChange={setTab} items={[{ id: "people", label: "People", count: m.rows.length }, { id: "teams", label: "Teams", count: m.teams.length }, { id: "waits", label: "Where work waits", count: m.bottlenecks.filter((b) => b.open).length }, { id: "minutes", label: "Minutes per work order" }]} />
       <section className="panel wl-main" aria-label="Workload detail">
-        <div className="wl-tabbar">
-          <Tabs idPrefix="wl-tab" active={tab} onChange={setTab} items={[{ id: "people", label: "People", count: m.rows.length }, { id: "teams", label: "Teams", count: m.teams.length }, { id: "waits", label: "Where work waits", count: m.bottlenecks.filter((b) => b.open).length }, { id: "minutes", label: "Minutes per work order" }]} />
-        </div>
         <div className="panel-body" id="wl-tab-panel" role="tabpanel">{body}</div>
       </section>
       <p className="footnote">{`Out of hours means outside Mon to Fri 09:00 to 19:00 IST. Rates with fewer than ${MIN_N} observations show the raw count and "insufficient data". Factory Admins can decide any gate as break-glass; those are counted separately and not as eligible approvers.`}</p>
