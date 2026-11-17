@@ -26,16 +26,18 @@ const approvers = {
 };
 const traveler = (allowed: boolean) => ({ id: "WO-2398", project: "payments", allowed: { approve: { gate: "G2", instance: "WO-2398:G2:3", allowed, reason: allowed ? "" : "You wrote this work order; someone else must approve.", needs: "" } } });
 
+/** The row's one Review button opens the decision. */
+const review = async (nth = 0) => { const b = await screen.findAllByRole("button", { name: "Review" }); fireEvent.click(b[nth]!); };
+
 describe("Inbox", () => {
-  it("lists what waits for the person once, grouped by kind, longest wait first", async () => {
+  it("lists approvals in one table and questions on their own tab", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, ONB], conversations: [CONV] }, attention: [] }) }) });
     mount(<InboxView />);
     expect(await screen.findByText("Approve spec · G2 on WO-2398")).toBeTruthy();
     expect(document.getElementById("inbox-count")?.textContent).toBe("3");
     expect(screen.getByText("Merge onboarding pull request search-service#3")).toBeTruthy();
-    expect(screen.getByText("Which currency?")).toBeTruthy();
-    // a filter shows one kind
-    fireEvent.click(screen.getByLabelText(/Questions 1/));
+    expect(screen.queryByText("Which currency?")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
     expect(screen.queryByText("Approve spec · G2 on WO-2398")).toBeNull();
     expect(screen.getByText("Which currency?")).toBeTruthy();
   });
@@ -49,8 +51,8 @@ describe("Inbox", () => {
     mount(<InboxView />);
     expect(await screen.findByText("Confirm brief · G0+G1 on WO-1005")).toBeTruthy();
     expect(screen.queryByText(/Classified as Docs/)).toBeNull();
-    expect(document.getElementById("inb-gate-WO-1005-G0G1")?.textContent).toContain("Gate approval");
-    expect(document.getElementById("inb-q-WO-1007")).toBeNull();
+    expect(document.getElementById("inb-gate-WO-1005-G0G1")?.textContent).toContain("Gate");
+    fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
     expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("Question");
   });
 
@@ -62,8 +64,9 @@ describe("Inbox", () => {
       "POST /api/v1/work-orders/WO-1005/retry": () => ({ body: { ok: true, msg: "WO-1005 is running again." } }),
     });
     mount(<InboxView />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Questions/ }));
     expect(await screen.findByText(/workspace seeding failed/)).toBeTruthy();
-    expect(document.getElementById("inb-stuck-WO-1005")?.textContent).toContain("Needs a person");
+    expect(document.getElementById("inb-stuck-WO-1005")?.textContent).toContain("Failed");
     const retry = await screen.findByRole("button", { name: "Retry" });
     await waitFor(() => expect(retry.getAttribute("aria-disabled")).not.toBe("true"));
     fireEvent.click(retry);
@@ -71,14 +74,14 @@ describe("Inbox", () => {
     expect(cs.find((c) => c.path.endsWith("/retry"))!.headers["if-match"]).toBe("4");
   });
 
-  it("shows the rule and who else can decide under Show details, read from the server", async () => {
+  it("shows the rule and who else can decide in the Review dialog, read from the server", async () => {
     mockApi({
       "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
       "GET /api/v1/work-orders/WO-2398/gates/G2/approvers": () => ({ body: approvers }),
     });
     mount(<InboxView />);
-    fireEvent.click(await screen.findByRole("button", { name: "Show details" }));
+    await review();
     expect(await screen.findByText(/Two approvers from Reviewer or Approver/)).toBeTruthy();
     expect(screen.getByText(/Can decide: Grace Liu/)).toBeTruthy();
   });
@@ -90,6 +93,7 @@ describe("Inbox", () => {
       "POST /api/v1/gate-instances/WO-2398%3AG2%3A3/approve": () => ({ body: { ok: true, msg: "Approved." } }),
     });
     mount(<InboxView />);
+    await review();
     const ok = await screen.findByRole("button", { name: "Approve" });
     await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
     fireEvent.click(ok);
@@ -102,6 +106,7 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(false) }),
     });
     mount(<InboxView />);
+    await review();
     const locked = await screen.findByRole("button", { name: "Approve" });
     await waitFor(() => expect(locked.getAttribute("aria-disabled")).toBe("true"));
     expect(locked.getAttribute("data-reason")).toMatch(/someone else must approve/);
@@ -117,13 +122,15 @@ describe("Inbox", () => {
       "POST /api/v1/work-orders/WO-2400/decline": () => ({ body: { ok: true, msg: "Declined." } }),
     });
     mount(<InboxView />);
+    await review();
     const ok = await screen.findByRole("button", { name: "Confirm brief" });
     await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
     fireEvent.click(ok);
     await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2400/confirm-brief")).toBe(true));
     expect(cs.find((c) => c.path.endsWith("/confirm-brief"))!.headers["if-match"]).toBe("7");
-    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
-    const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
+    await review();
+    fireEvent.click(await screen.findByRole("button", { name: "Decline" }));
+    const dlg = await waitFor(() => { const e = Array.from(document.querySelectorAll<HTMLElement>(".dlg")).pop(); if (!e) throw new Error("no dialog"); return e; });
     fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Out of scope" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Decline" }));
     await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2400/decline")).toBe(true));
@@ -137,6 +144,7 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
     });
     mount(<InboxView />);
+    await review();
     const ok = await screen.findByRole("button", { name: "Approve" });
     expect(ok.getAttribute("aria-disabled")).toBe("true");
     expect(ok.getAttribute("data-reason")).toMatch(/Checking/);
@@ -149,7 +157,7 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
     });
     mount(<InboxView />);
-    await screen.findByText("Which currency?");
+    await screen.findByText("Approve spec · G2 on WO-2398");
     const opts = Array.from(document.querySelectorAll<HTMLOptionElement>("#inb-proj option")).map((o) => o.textContent);
 
     expect(opts).not.toContain("payments");
@@ -160,7 +168,7 @@ describe("Inbox", () => {
   it("says nothing is waiting, and does not say it on a refused read", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [] }, attention: [] }) }) });
     mount(<InboxView />);
-    expect(await screen.findByText("Nothing is waiting on you")).toBeTruthy();
+    expect(await screen.findByText("Inbox zero")).toBeTruthy();
     cleanup();
     vi.unstubAllGlobals();
     mockApi({ "GET /api/v1/home": () => ({ status: 403, body: { ok: false, msg: "Needs a role." } }) });

@@ -18,3 +18,4 @@
 table.t.dtable thead th{font:600 11px/16px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);background:var(--surface-2);padding:0 var(--s3);height:36px}
 table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 .tag{text-transform:none}
+.searchbox.search .in{padding-left:32px}
