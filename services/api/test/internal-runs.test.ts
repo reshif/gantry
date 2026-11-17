@@ -235,6 +235,7 @@ d("internal runs API", () => {
       expect((await call("POST", `/internal/v1/runs/${r.runId}/heartbeat`, { token: r.token, seq: 1 })).json().stop).toBe("halt");
     });
     it("a project monthly budget is enforced at authorize and at usage", async () => {
+      await q(`delete from usage_meter where project_id = 'identity'`); // project spend counts all metered spend: start from none
       await q(`insert into budgets (org_id, project_id, monthly_limit_micros) values ($1,'identity',9000) on conflict (org_id, project_id) do update set monthly_limit_micros = 9000`, [t.orgId]);
       const a = await makeRun({ project: "identity" });
       expect((await authorize(a)).json().allow).toBe(true);
