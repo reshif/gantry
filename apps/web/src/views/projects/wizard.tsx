@@ -1,5 +1,5 @@
 /** New project wizard (legacy projects.js openWizard): template, name and owner, repos, approvers, notifications, review. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fmt, gateExplain, route as domainRoute, type ApproverRule, type Catalog } from "@gantry/domain";
 import { api, get } from "../../api/client";
@@ -44,6 +44,26 @@ interface Wz {
   err: string | null;
 }
 
+const DRAFT_KEY = "gantry.new-project.draft";
+/** What the person typed last time they closed the wizard, for this browser tab only. Anything malformed is ignored. */
+function readDraft(): Partial<Wz> | null {
+  try {
+    const o = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "null") as Partial<Wz> | null;
+    if (!o || typeof o !== "object" || typeof o.name !== "string") return null;
+    return o;
+  } catch {
+    return null;
+  }
+}
+const writeDraft = (w: Wz | null): void => {
+  try {
+    if (w) sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ ...w, err: null }));
+    else sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* storage blocked: the draft just is not kept */
+  }
+};
+
 export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | undefined; projects: PView[]; close: () => void }) {
   const ui = useUI();
   const me = useMe();
@@ -54,10 +74,16 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
   const presets = useProjectPresets();
   const d = useCan("project.create");
   const first = tpls.find((t) => t.id === tplId) ?? tpls[0];
-  const [wz, setWz] = useState<Wz>(() => ({
-    step: 0, tpl: first?.id ?? "", name: "", key: "", desc: "", owner: me?.person.id ?? "", teams: [], budget: 2000, repos: {}, extraRepo: "",
-    approverPreset: first?.approverPreset ?? "standard", fallback: "", notifyPreset: first?.notify ?? "standard", routesOff: {}, err: null,
-  }));
+  const [wz, setWz] = useState<Wz>(() => {
+    const fresh: Wz = {
+      step: 0, tpl: first?.id ?? "", name: "", key: "", desc: "", owner: me?.person.id ?? "", teams: [], budget: 2000, repos: {}, extraRepo: "",
+      approverPreset: first?.approverPreset ?? "standard", fallback: "", notifyPreset: first?.notify ?? "standard", routesOff: {}, err: null,
+    };
+    // A template picked on purpose (Use on a template card) starts fresh; otherwise pick up where the person left off.
+    const d = tplId ? null : readDraft();
+    return d ? { ...fresh, ...d, err: null, tpl: tpls.some((t) => t.id === d.tpl) ? (d.tpl as string) : fresh.tpl } : fresh;
+  });
+  useEffect(() => writeDraft(wz), [wz]);
   const [busy, setBusy] = useState(false);
   if (!cat || !first || !presets) return <Dialog title="New project" kicker="Projects · from a template" wide body={<p className="muted small">Loading…</p>} onClose={close} actions={[{ label: "Cancel", id: "prj-wz-cancel" }]} />;
   const T = tpls.find((t) => t.id === wz.tpl) ?? first;
@@ -111,6 +137,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
     }
     const n = Object.keys(wz.repos).length - failedRepos.length;
     ui.toast(`${r.msg} ${n} repo${n === 1 ? "" : "s"} onboarding.${failedRepos.length ? ` Not connected: ${failedRepos.join("; ")}.` : ""}`, custom.failed.length || failedRepos.length ? "warn" : "ok");
+    writeDraft(null);
     close();
     // the shell keeps the stored project to one in `me`: wait until `me` lists the new project before switching to it
     await getQueryClient()?.refetchQueries({ queryKey: ["me"] });
@@ -121,6 +148,8 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
   const step = STEPS[wz.step]![0];
   if (step === "template") {
     body = (
+      <>
+      <p className="hint">What you type is kept if you close this window.</p>
       <div className="radio-cards prj-wz-tpls" role="radiogroup" aria-label="Template">
         {tpls.map((t) => {
           const id = `prj-wz-tpl-${t.id}`;
@@ -135,6 +164,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
           );
         })}
       </div>
+      </>
     );
   } else if (step === "basics") {
     const keyHint = (idFor(wz.name).replace(/-/g, "").slice(0, 3) || "KEY").toUpperCase();

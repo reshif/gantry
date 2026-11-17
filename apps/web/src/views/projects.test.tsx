@@ -88,7 +88,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
-  try { localStorage.clear(); } catch { /* ignore */ }
+  try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
   reloadPrefs();
   updatePrefs({ project: "payments" });
 });
@@ -187,6 +187,18 @@ describe("Projects: templates and wizard", () => {
     fireEvent.submit(document.querySelector(".dlg-form")!);
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ name: "Renamed template", stationsOff: ["design"], slots: 1 }));
     expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toBe("4");
+  });
+
+  it("keeps what was typed in the wizard when it is closed and opened again, and starts fresh from a template card", async () => {
+    setup();
+    mount(<ProjectsView />);
+    fireEvent.click(await byId("prj-new"));
+    fireEvent.click(await byId("prj-wz-next"));
+    fireEvent.change(await byId("prj-wz-name"), { target: { value: "Half Done" } });
+    fireEvent.click(await byId("prj-wz-cancel"));
+    await waitFor(() => expect(document.getElementById("prj-wz-name")).toBeNull());
+    fireEvent.click(await byId("prj-new"));
+    expect(((await byId("prj-wz-name")) as HTMLInputElement).value).toBe("Half Done");
   });
 
   it("walks the wizard and creates the project with the chosen presets, then connects its repos", async () => {
