@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { useCan } from "../api/can";
 import { ops } from "../api/ops";
 import { useLearningFindings, useLearningProposals, useLearningSettings, useLearningSignals } from "../api/queries";
-import { Btn, LockNote, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, LockNote, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -71,9 +71,15 @@ export default function LearningView() {
     <div className="view view-learning">
       <ViewHead
         title="Learning"
-        sub="What the factory learns from its own outcomes: repeated rejections, send-backs, reverts and misses become proposed changes to skills, guidelines, evals, guardrails, approver rules and routes."
-        meta={[["Open findings", qState(fq, () => String(openFindings))], ["To review", qState(pq, () => String(open))], ["Applied", qState(pq, () => String(proposals.filter((lp) => lp.status === "accepted").length))], ["Verified", qState(pq, () => String(proposals.filter((lp) => lp.status === "verified").length))], ["Signals 7d", qState(sq, () => String(week))]]}
-        actions={settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" small icon={on ? "x" : "check"} id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined} />
+        sub="Rejected, sent-back and reverted work is counted as signals. Repeated signals become findings. A finding can become a proposal that a person reviews."
+        actions={settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" icon={on ? "pause" : "play"} id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined} />
+      <StatRow id="ln-stats">
+        <Stat label="Open findings" value={qState(fq, () => String(openFindings))} />
+        <Stat label="To review" value={qState(pq, () => String(open))} sub="proposals waiting" tone={open ? "wait" : undefined} />
+        <Stat label="Applied" value={qState(pq, () => String(proposals.filter((lp) => lp.status === "accepted").length))} sub="accepted, not yet verified" />
+        <Stat label="Verified" value={qState(pq, () => String(proposals.filter((lp) => lp.status === "verified").length))} sub="measured to work" />
+        <Stat label="Signals, 7 days" value={qState(sq, () => String(week))} />
+      </StatRow>
       {perm.allowed ? null : <LockNote decision={perm} what="Applying learning proposals" />}
       {settings && !on ? (
         <div className="callout callout-warn" role="note" id="ln-off">

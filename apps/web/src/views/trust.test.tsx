@@ -98,13 +98,13 @@ describe("Trust screen: ladder", () => {
     setup();
     mount();
     await byId("tr-matrix");
-    const head = document.querySelector(".titleblock")!.textContent!;
+    const head = document.getElementById("tr-stats")!.textContent!;
     expect(head).toContain("Cells3");
     expect(head).toContain("L3 and up1");
-    expect(head).toContain("Pending1");
+    expect(head).toContain("Pending proposals1");
     expect(head).toContain("Saves if approved2.5/wk");
-    expect(head).toContain("Under trust 7dn=4");
-    expect(head).toContain("Levels above L1off");
+    expect(head).toContain("Under trust, 7 daysn=4");
+    expect(head).toContain("Levels above L1Off");
   });
   it("draws each cell with its level, run count, the level it actually runs at, ceiling and proposal marks, and recent demotion", async () => {
     setup();

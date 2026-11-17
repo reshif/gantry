@@ -2,6 +2,7 @@
 import { DAY, flowOf, fmt, trust, trustAgentFor, type Project, type TrustCell } from "@gantry/domain";
 import { useTrustCells } from "../../api/queries";
 import { Empty } from "../../ui/primitives";
+import { Icon } from "../../ui/Icon";
 import { navigate } from "../../lib/router";
 import { useCatalog } from "../projects/kit";
 import type { AgentRow } from "./kit";
@@ -77,6 +78,34 @@ export function TrustTab({ a, projects }: { a: AgentRow; projects: Project[] }) 
           </div>
         ) : null}
       </section>
+    </div>
+  );
+}
+
+/** One line under the agent's header: where its work is judged, the levels it holds and a way into Trust. */
+export function TrustStrip({ a, projects }: { a: AgentRow; projects: Project[] }) {
+  const tq = useTrustCells();
+  const cat = useCatalog();
+  if (!cat) return null;
+  const gate = cat.gates.find((g) => g.id !== "G0G1" && trustAgentFor({ catalog: cat }, g.id) === a.id);
+  if (!gate) {
+    return (
+      <div className="ag-sum" id="ag-trust-strip"><Icon name="shield" />
+        <span>Trust: <b>not judged at a gate</b>. {a.station ? "Its station feeds an automatic gate." : "This agent is off the line."}</span></div>
+    );
+  }
+  const vis = projects.filter((p) => p.status !== "archived");
+  const cells = (tq.data?.cells ?? []).filter((c) => c.agent === a.id && vis.some((p) => p.id === c.project));
+  const pend = (tq.data?.proposals ?? []).filter((x) => x.status === "pending" && cells.some((c) => c.id === x.cell)).length;
+  const since = Date.now() - 14 * DAY;
+  const dem = cells.reduce((n, c) => n + c.history.filter((e) => e.kind === "demote" && e.at >= since).length, 0);
+  const by = [0, 0, 0, 0, 0];
+  for (const c of cells) by[c.level] = (by[c.level] ?? 0) + 1;
+  const levels = [1, 2, 3, 4].filter((n) => by[n]).map((n) => `L${n} x${by[n]}`).join(" · ");
+  return (
+    <div className="ag-sum" id="ag-trust-strip"><Icon name="shield" />
+      <span>{`Trust at ${gate.label} ${gate.name}: ${levels || "no cells yet"}${cells.length ? ` across ${cells.length} cell${cells.length === 1 ? "" : "s"}` : ""}`}{pend ? <> · <b>{`${pend} pending`}</b></> : null}{dem ? <span className="neg">{` · ${dem} demotion${dem === 1 ? "" : "s"} in 14 days`}</span> : null}</span>
+      <button type="button" className="linkish" id="ag-trust-open" onClick={() => navigate("trust")}>Open in Trust</button>
     </div>
   );
 }

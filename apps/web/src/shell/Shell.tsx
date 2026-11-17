@@ -9,6 +9,7 @@ import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
 import { formatHash, replaceHash, useHash } from "../lib/router";
 import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
+import { useCrumbTailValue } from "../lib/crumb";
 import { Empty } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
@@ -103,7 +104,10 @@ export function Shell({ me }: { me: Me }) {
   const View = VIEWS[routeId] ?? VIEWS.home;
   const noAccess = hasNoAccess(me);
   const shown = denied ?? def;
-  const crumb = scoped ? [def?.title ?? ""] : [...(shown && !["Overview"].includes(shown.group) ? [shown.group] : []), shown?.title ?? "Home"];
+  const crumbTail = useCrumbTailValue();
+  const baseCrumb = scoped ? [def?.title ?? ""] : [...(shown && !["Overview"].includes(shown.group) ? [shown.group] : []), shown?.title ?? "Home"];
+  // a detail page ends the trail with its record; "Agents › Agents › Builder" reads as a stutter, so the title that repeats its group is dropped
+  const crumb = crumbTail && loc.param ? [...(baseCrumb.length > 1 && baseCrumb[0] === baseCrumb[baseCrumb.length - 1] ? baseCrumb.slice(0, -1) : baseCrumb), crumbTail] : baseCrumb;
   const switcherProject = scoped ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
   const ready = !scoped || (!!project && synced === project.id);
   const killed = !!me.factory.killed;

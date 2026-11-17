@@ -7,7 +7,7 @@
 import { fmt } from "@gantry/domain";
 import { useMemo } from "react";
 import { usePrefs } from "../lib/prefs";
-import { Tabs, ViewHead, Empty } from "../ui/primitives";
+import { Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useProjects } from "../api/queries";
@@ -56,14 +56,21 @@ export default function EvalsView() {
   if (!d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
   const regs = regressionsOf(d);
   let eligible = 0;
-  for (const a of d.agents) for (const v of a.versions) if (v.rc && v.eligibility.ok) eligible++;
+  let waiting = 0;
+  for (const a of d.agents) for (const v of a.versions) if (v.rc) { waiting++; if (v.eligibility.ok) eligible++; }
   const tab = evalsUi.tab as EvalsTab;
   const body = tab === "suites" ? <SuitesTab d={d} /> : tab === "factory" ? <FactoryTab d={d} /> : <ScorecardsTab d={d} label={label} />;
   const overall = d.extra?.overrideRate ?? 0;
   return (
     <div className="view view-evals">
-      <ViewHead title="Evals" sub="How well each agent does its job, on golden suites and on live work. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories."
-        meta={[["Suites", String(d.suites.length)], ["Runs", String(d.runs.length)], ["Regressions", String(regs.length)], ["Candidates eligible", String(eligible)], ["Override rate", fmt.pct(overall)]]} />
+      <ViewHead title="Evals" sub="How well each agent does its job, on real work and on its golden-task suite. A version is promoted only on a passing run. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories." />
+      <StatRow id="ev-stats">
+        <Stat label="Suites" value={String(d.suites.length)} sub={`${d.suites.filter((x) => x.builtin).length} built in`} />
+        <Stat label="Runs" value={String(d.runs.length)} sub="all time" />
+        <Stat label="Regressions" value={String(regs.length)} sub="in the last 14 days" tone={regs.length ? "block" : undefined} />
+        <Stat label="Candidates eligible" value={String(eligible)} sub={`of ${waiting} waiting`} tone={eligible ? "done" : undefined} />
+        <Stat label="Human override rate" value={fmt.pct(overall)} sub="gate decisions changed by a person" />
+      </StatRow>
       {regs.length ? (
         <div className="callout callout-fail ev-regs" role="note">
           <Icon name="st-fail" />

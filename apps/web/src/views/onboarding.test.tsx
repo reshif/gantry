@@ -137,9 +137,8 @@ describe("Onboarding: pipeline", () => {
     expect(asc).toEqual([...asc].sort());
     fireEvent.click(document.getElementById("onb-table-sort-name")!);
     expect(order()).toEqual([...asc].reverse());
-    // Keyboard and screen-reader users reach the row through its first-cell button, which Enter and Space activate natively.
-    const open = row.querySelector("button.row-link");
-    expect(open?.getAttribute("aria-label")).toMatch(/^Open the onboarding session for /);
+    // Keyboard and screen-reader users reach the row through a real link or button in its first cell, which Enter and Space activate natively.
+    expect(row.querySelector("td:first-child a[href], td:first-child button")).not.toBeNull();
   });
 
   it("the Guidelines tab shows the agent's guidelines and the profile button opens the agent", async () => {

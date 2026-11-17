@@ -112,9 +112,9 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     expect(document.body.textContent).toContain("To review2");
     expect(document.body.textContent).toContain("Applied2");
     expect(document.body.textContent).toContain("Verified1");
-    expect(document.getElementById("ln-st-open")?.textContent).toBe("2Proposed");
-    expect(document.getElementById("ln-st-accepted")?.textContent).toBe("2Accepted and applied");
-    expect(document.getElementById("ln-st-all")?.textContent).toBe("6All");
+    expect(document.getElementById("ln-st-open")?.textContent).toBe("Proposed2");
+    expect(document.getElementById("ln-st-accepted")?.textContent).toBe("Accepted and applied2");
+    expect(document.getElementById("ln-st-all")?.textContent).toBe("All6");
     expect(card.querySelector(".ln-kind")?.textContent).toBe("Skill edit");
     expect(card.querySelector(".ln-pipe")?.getAttribute("aria-label")).toBe("Status: Proposed");
     expect(card.querySelector(".ln-diff ins")?.textContent).toContain("Always add a Rollback section.");

@@ -4,6 +4,7 @@
  * The server decides every change; the autonomy check here only disables a choice and says why.
  */
 import { useSyncExternalStore, type ReactNode } from "react";
+import { navigate } from "../../lib/router";
 import { fmt, type Agent, type AgentVersion, type Policy, type Project } from "@gantry/domain";
 import { useAudit, useRouting, useVendors } from "../../api/queries";
 import type { AuditEntry } from "../../api/types";
@@ -76,11 +77,12 @@ export const rerender = (): void => {
   listeners.forEach((l) => l());
 };
 export const useAgentsUi = (): number => useSyncExternalStore((l) => (listeners.add(l), () => listeners.delete(l)), () => tick);
-/** Other screens (evals, skills, palette) can ask for an agent. */
+/** Other screens (skills, palette) open an agent: its page, on the tab asked for. */
 export const agentsSelect = (id: string, tab?: string): void => {
   ui.sel = id;
   if (tab) ui.tab = tab;
   rerender();
+  navigate("agents", id);
 };
 
 /* ---------- models and stations ---------- */

@@ -7,7 +7,7 @@
 import { useEffect, useMemo } from "react";
 import { useAgents, useProjects, useTrustCells } from "../api/queries";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Empty, Tabs, ViewHead } from "../ui/primitives";
+import { Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { DemotionsTab, PolicyTab, ProposalsTab } from "./trust/Tabs";
 import { LadderTab, type LadderProps } from "./trust/Ladder";
@@ -61,8 +61,15 @@ export default function TrustView() {
     : <LadderTab p={base} />;
   return (
     <div className="view view-trust">
-      <ViewHead title="Trust" sub="Earned autonomy. Each agent earns a level per work class and project from evidence; people grant it, and regressions take it away automatically. L0 and L1 are enforced; higher levels are off until switched on."
-        meta={[["Cells", String(cells.length)], ["L3 and up", String(unattended)], ["Pending", String(pending.length)], ["Saves if approved", `${Math.round(saved * 10) / 10}/wk`], ["Under trust 7d", cov.total >= 10 ? `${Math.round((cov.auto / cov.total) * 100)}% n=${cov.total}` : `n=${cov.total}`], ["Levels above L1", tr.levelsAboveL1 ? "on" : "off"]]} />
+      <ViewHead title="Trust" sub="How much each agent is trusted at each human gate, per class of work and per project. Trust is earned from clean work and lost fast. L0 and L1 are enforced; higher levels stay off until switched on." />
+      <StatRow id="tr-stats">
+        <Stat label="Cells" value={String(cells.length)} sub="agent, class and project" />
+        <Stat label="L3 and up" value={String(unattended)} sub="decided by checks" />
+        <Stat label="Pending proposals" value={String(pending.length)} sub="waiting for a person" tone={pending.length ? "wait" : undefined} />
+        <Stat label="Saves if approved" value={`${Math.round(saved * 10) / 10}/wk`} sub="human approvals" />
+        <Stat label="Under trust, 7 days" value={cov.total >= 10 ? `${Math.round((cov.auto / cov.total) * 100)}% n=${cov.total}` : `n=${cov.total}`} sub="gate decisions by checks" />
+        <Stat label="Levels above L1" value={tr.levelsAboveL1 ? "On" : "Off"} sub={tr.levelsAboveL1 ? "L2 and L3 can be granted" : "switched off"} />
+      </StatRow>
       <Tabs idPrefix="tr-tab" items={tabs} active={tab} onChange={(t) => { trustUi.tab = t as TrustTab; trustUi.hiProposal = null; rerender(); }} />
       <div id="tr-tab-panel" role="tabpanel" className="tr-panel">{body}</div>
     </div>
