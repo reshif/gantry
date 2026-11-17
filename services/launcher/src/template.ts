@@ -74,6 +74,16 @@ export function proxyUrlFor(proxyUrl: string, runToken: string): string {
  * The fixed runner template (spec 4.1). Nothing here comes from the caller except the id, the image chosen from
  * the allow-list, the labels and the per-run token. There is deliberately no parameter for anything else.
  */
+/**
+ * dockerode's createContainer sends its whole options object as the query string AND as the body (every 4.x release does). The socket proxy
+ * only allows `name` in the query, and a runner's env carries its run token, which must not sit in a URL that gets logged. `_query` and
+ * `_body` are docker-modem's own split: the query is just the name, the body is the rest.
+ */
+export function createRequest<T extends { name?: string }>(o: T): ContainerCreateOptions & { _query: { name?: string }; _body: Omit<T, "name"> } {
+  const { name, ...body } = o;
+  return { _query: name === undefined ? {} : { name }, _body: body };
+}
+
 export function runnerContainerOptions(cfg: LauncherConfig, input: StartRunInput): ContainerCreateOptions {
   const image = cfg.variants.get(input.variant);
   if (image === undefined) throw new Error(`variant ${input.variant} is not allowed`); // validated upstream: a bug if reached

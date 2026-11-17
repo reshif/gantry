@@ -15,6 +15,14 @@ import type { Readable } from "node:stream";
 import { tarDirectory, extractTar } from "./tar.js";
 import { BrokerError } from "./errors.js";
 
+/**
+ * dockerode's createContainer sends its whole options object as the query string as well as the body (every 4.x release does), and the socket proxy
+ * allows only `name` in the query. `_query` and `_body` are docker-modem's own split: nothing in the query, the template in the body.
+ */
+export function createRequest<T extends object>(body: T): Docker.ContainerCreateOptions & { _query: Record<string, never>; _body: T } {
+  return { _query: {}, _body: body };
+}
+
 export interface WorkspaceStore {
   /** Writes the directory tree into the volume's root, owned by uid:gid. */
   seed(volume: string, srcDir: string, o: { uid: number; gid: number }): Promise<void>;
@@ -46,10 +54,10 @@ export class DockerWorkspaceStore implements WorkspaceStore {
 
   private async withHelper<T>(volume: string, readOnly: boolean, fn: (c: Docker.Container) => Promise<T>): Promise<T> {
     await this.assertVolume(volume);
-    const c = await this.docker.createContainer({
+    const c = await this.docker.createContainer(createRequest({
       Image: this.helperImage, Entrypoint: ["/bin/true"], Cmd: [], User: "10001:10001", NetworkDisabled: true, Labels: { "gantry.managed-by": "gantry-github", "gantry.purpose": "workspace-helper" },
       HostConfig: { Binds: [`${volume}:/workspace${readOnly ? ":ro" : ""}`], NetworkMode: "none", ReadonlyRootfs: true, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges"], Memory: 64 * 1024 * 1024, PidsLimit: 16, AutoRemove: false },
-    });
+    }));
     try {
       return await fn(c);
     } finally {

@@ -3,7 +3,7 @@ import type { ContainerInspectInfo, NetworkInspectInfo } from "dockerode";
 import { firstFreeBlock, formatCidr, parseCidr, type Cidr } from "./cidr.js";
 import type { LauncherConfig } from "./config.js";
 import { err, ok, type Result } from "./result.js";
-import { LABEL_MANAGED, LABEL_RUN, LABEL_VARIANT, LABEL_WORKSPACE, MANAGED_BY, names, networkOptions, runLabels, runnerContainerOptions, type StartRunInput } from "./template.js";
+import { LABEL_MANAGED, LABEL_RUN, LABEL_VARIANT, LABEL_WORKSPACE, MANAGED_BY, names, networkOptions, createRequest, runLabels, runnerContainerOptions, type StartRunInput } from "./template.js";
 
 export type LauncherError =
   | { kind: "capacity"; msg: string }
@@ -160,7 +160,7 @@ export class RunManager {
     }
 
     try {
-      const container = await this.docker.createContainer(runnerContainerOptions(this.cfg, input));
+      const container = await this.docker.createContainer(createRequest(runnerContainerOptions(this.cfg, input)));
       await this.attachEdge(names.network(id), edge);
       await container.start();
     } catch (e) {
