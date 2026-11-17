@@ -1,0 +1,145 @@
+# Alert rules for the optional monitoring profile. Each alert says what is wrong and what to do first;
+# the longer runbook is in deploy/PRODUCTION.md ("Monitoring and alerts").
+groups:
+  - name: gantry-availability
+    rules:
+      - alert: GantryServiceDown
+        expr: up{job=~"gantry-.*"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }} is not answering"
+          description: "Prometheus could not scrape {{ $labels.job }} for 2 minutes. Check `docker compose ps` and the service log."
+      - alert: GantryDatabaseUnreachable
+        expr: gantry_database_up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "The API cannot reach its database"
+          description: "Nothing can be saved while this lasts. Check the postgres container and its disk."
+      - alert: GantryWorkerHeartbeatLate
+        expr: gantry_worker_heartbeat_age_seconds > 90
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "No worker has reported for {{ $value | humanizeDuration }}"
+          description: "Jobs, notifications and runs are not being picked up. Restart gantry-worker and read its log."
+      - alert: GantryLauncherNotReachingDocker
+        expr: gantry_launcher_docker_up == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "The run launcher cannot reach Docker"
+          description: "No run can start. Check gantry-sockproxy and the Docker daemon."
+
+  - name: gantry-api
+    rules:
+      - alert: GantryApiErrorRate
+        expr: |
+          sum(rate(gantry_http_requests_total{status="5xx"}[5m]))
+            / clamp_min(sum(rate(gantry_http_requests_total[5m])), 0.001) > 0.05
+          and sum(rate(gantry_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "More than 5% of API requests are failing"
+          description: "Server errors for 5 minutes. Look at `docker compose logs gantry-api` and the database."
+      - alert: GantryApiSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(gantry_http_request_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "The API is slow: 95% of requests take over 2 seconds"
+          description: "Check database load and the worker's queue."
+
+  - name: gantry-work
+    rules:
+      - alert: GantryJobsStuck
+        expr: gantry_jobs_stuck > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} background job(s) look stuck"
+          description: "A running job lost its lease or has run past the long-running limit. The System health page lists them."
+      - alert: GantryQueueBacklog
+        expr: gantry_jobs_oldest_due_seconds > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Work has been waiting {{ $value | humanizeDuration }} for a worker"
+          description: "Jobs are due but not being taken. Check that gantry-worker is running and not saturated."
+      - alert: GantryRunsFailing
+        expr: |
+          gantry_runs_finished_24h{outcome="failed"}
+            / clamp_min(sum(gantry_runs_finished_24h), 1) > 0.5
+          and on() sum(gantry_runs_finished_24h) >= 6
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than half of the runs in the last day failed"
+          description: "Check the runner image, the model vendor status and the edge log."
+
+  - name: gantry-delivery
+    rules:
+      - alert: GantryDeadLetters
+        expr: gantry_outbox_dead_letters > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} notification(s) could not be delivered after every attempt"
+          description: "The System health page lists them with the reason. Fix the integration, then retry them."
+
+  - name: gantry-spend
+    rules:
+      - alert: GantryBudgetHalt
+        expr: gantry_budget_halts_active > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} work order(s) halted at their spending cap"
+          description: "A person with the right can raise the cap and resume the work order."
+      - alert: GantryProjectOverBudget
+        expr: gantry_budget_used_ratio >= 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Project {{ $labels.project }} has used its whole monthly budget"
+          description: "Spend this month is at or over the limit. Review the budget or the project's work."
+      - alert: GantryFactoryHalted
+        expr: gantry_factory_halted == 1
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "The whole factory has been halted for over 30 minutes"
+          description: "Someone halted it on purpose. If that is over, lift the halt from the Floor."
+
+  - name: gantry-backups
+    rules:
+      - alert: GantryBackupStale
+        expr: gantry_backup_age_seconds > 26 * 3600
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "The newest backup is {{ $value | humanizeDuration }} old"
+          description: "A daily backup should never pass 26 hours. Read the gantry-backup log."
+      - alert: GantryBackupFailed
+        expr: gantry_backup_last_ok == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "The last backup attempt failed"
+          description: "Read the gantry-backup log and fix the cause before the next run."
+      - alert: GantryBackupMissing
+        expr: absent(gantry_backup_age_seconds) and on() up{job="gantry-api"} == 1
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "No backup has ever been recorded"
+          description: "The backup service may not be running. Production runs it always; locally start the `backup` profile."
+      - alert: GantryRestoreDrillFailed
+        expr: gantry_restore_drill_last_ok == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "The last restore drill failed"
+          description: "A backup that cannot be restored is not a backup. Read the drill result in the backup log."

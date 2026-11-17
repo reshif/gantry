@@ -161,3 +161,12 @@ services:
     <<: *limits
     mem_limit: 512m
     profiles: !reset []
+
+  # Optional monitoring (--profile monitoring; deploy/PRODUCTION.md, "Monitoring and alerts"): resource limits only.
+  prometheus:
+    <<: *limits
+    mem_limit: 768m
+
+  alertmanager:
+    <<: *limits
+    mem_limit: 128m

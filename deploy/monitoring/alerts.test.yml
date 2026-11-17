@@ -1,0 +1,79 @@
+# Unit tests for alerts.yml. Run: docker run --rm --entrypoint promtool -v "$PWD/deploy/monitoring:/m:ro" prom/prometheus:v3.5.0 test rules /m/alerts.test.yml
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a backup older than 26 hours fires, a fresh one does not
+    interval: 1m
+    input_series:
+      - series: 'gantry_backup_age_seconds{job="gantry-api"}'
+        values: "90000+0x10 100000+0x20"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: GantryBackupStale
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: GantryBackupStale
+        exp_alerts:
+          - exp_labels: { severity: critical, job: gantry-api }
+            exp_annotations:
+              summary: "The newest backup is 1d 3h 46m 40s old"
+              description: "A daily backup should never pass 26 hours. Read the gantry-backup log."
+
+  - name: a service that stops answering fires after two minutes
+    interval: 1m
+    input_series:
+      - series: 'up{job="gantry-worker",instance="gantry-worker:9464"}'
+        values: "1 1 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: GantryServiceDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: GantryServiceDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: gantry-worker, instance: "gantry-worker:9464" }
+            exp_annotations:
+              summary: "gantry-worker is not answering"
+              description: "Prometheus could not scrape gantry-worker for 2 minutes. Check `docker compose ps` and the service log."
+
+  - name: dead letters and budget halts fire
+    interval: 1m
+    input_series:
+      - series: "gantry_outbox_dead_letters"
+        values: "0 2+0x10"
+      - series: "gantry_budget_halts_active"
+        values: "0 1+0x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: GantryDeadLetters
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "2 notification(s) could not be delivered after every attempt"
+              description: "The System health page lists them with the reason. Fix the integration, then retry them."
+      - eval_time: 4m
+        alertname: GantryBudgetHalt
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "1 work order(s) halted at their spending cap"
+              description: "A person with the right can raise the cap and resume the work order."
+
+  - name: a high share of server errors fires only with real traffic
+    interval: 1m
+    input_series:
+      - series: 'gantry_http_requests_total{status="5xx",route="/x"}'
+        values: "0+60x20"
+      - series: 'gantry_http_requests_total{status="2xx",route="/x"}'
+        values: "0+60x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: GantryApiErrorRate
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "More than 5% of API requests are failing"
+              description: "Server errors for 5 minutes. Look at `docker compose logs gantry-api` and the database."

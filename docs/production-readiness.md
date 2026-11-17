@@ -27,7 +27,7 @@ The weaknesses are in the shape of the product:
   - no list of chats and no way to archive them
 - **Operations.** The P0 items are done (Wave 5): CI, production Keycloak, a production profile, backups with a restore
   drill, and versioned, signed images. Still missing:
-  - no metrics or alerting
+  - ~~no metrics or alerting~~ done 2026-11-16: Prometheus metrics on the API, worker and launcher, and an optional monitoring profile (see below)
   - documentation for users and admins (the operator guide exists: `deploy/PRODUCTION.md`)
 
 ## Wave 0: security holes found today (done, on the working tree)
@@ -203,7 +203,7 @@ Remaining (resource limits, a configurable hostname with real TLS, and the upgra
 
 - **P1:**
   - retention jobs for every class in spec 7.4
-  - `/metrics`, `/readyz`, tracing, alert rules and a runbook
+  - `/readyz` and tracing. Done 2026-11-16: `/metrics` on the API, worker and launcher (internal network or metrics token only), an optional `monitoring` compose profile with Prometheus, Alertmanager and tested alert rules (service down, error rate, stuck jobs, backup older than 26 h, dead letters, budget halt), and the runbook in `deploy/PRODUCTION.md` ("Monitoring and alerts")
   - offboarding users and rotating keys (`data_key` re-encryption)
   - a System health view in the UI (backup and drill status are already in `last-backup.json` and `last-drill.json`)
   - point-in-time recovery
