@@ -71,7 +71,7 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
           <Panel title="Repositories moving to Ready" flush>
             <FilterBar label="Filter repos" count={`${list.length} of ${repos.length} repos`}>
               <SearchBox id="onb-search" value={q} onChange={setQ} placeholder="Search..." />
-              <label className="q"><span>Stage</span><Select id="onb-filter" value={filter} onChange={(v) => setFilter(v as Filter)} options={[{ value: "all", label: "All" }, { value: "attention", label: "Needs action" }, { value: "progress", label: "In progress" }, { value: "ready", label: "Ready" }]} /></label>
+              <label className="q" htmlFor="onb-filter"><span>Stage</span><Select id="onb-filter" value={filter} onChange={(v) => setFilter(v as Filter)} options={[{ value: "all", label: "All" }, { value: "attention", label: "Needs action" }, { value: "progress", label: "In progress" }, { value: "ready", label: "Ready" }]} /></label>
             </FilterBar>
             <DataTable<RepoV>
               id="onb-table"
