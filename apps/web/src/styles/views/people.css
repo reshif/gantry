@@ -113,3 +113,23 @@
 .ppl-off-ok { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; }
 .ppl-off-ok .ic { color: var(--done); }
 @media (max-width: 600px) { .ppl-off-list li { grid-template-columns: minmax(0, 1fr); } }
+
+/* Account page */
+.acct-body { display: grid; gap: var(--s4); min-width: 0; }
+.acct-hint { margin: 0 0 12px; }
+.acct-hint-pad { padding: 12px 16px 4px; margin: 0; }
+.acct-who { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; font-size: var(--t-lg); }
+.acct-kv { display: grid; margin: 0; border-top: 1px solid var(--line); }
+.acct-kv > div { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.acct-kv dt { color: var(--muted); font-size: var(--t-sm); }
+.acct-kv dd { margin: 0; overflow-wrap: anywhere; }
+.acct-act { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.acct-setrow { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 0 12px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.acct-setrow-main { display: grid; gap: 2px; flex: 1 1 260px; }
+.acct-setrow-main label { font-weight: 500; }
+.acct-links { display: grid; gap: 12px; }
+.acct-linkhead { display: flex; gap: 8px; align-items: center; }
+.acct-linklist { list-style: none; margin: 0; padding: 0; display: grid; }
+.acct-linklist li { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.acct-linklist li .btn { margin-left: auto; }
+@media (max-width: 560px) { .acct-kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }

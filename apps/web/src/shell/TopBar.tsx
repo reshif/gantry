@@ -1,12 +1,11 @@
 /** Top bar: brand, environment badge, breadcrumb, palette button, status cluster, inbox, user menu. */
 import { useRef } from "react";
-import { ROLES } from "@gantry/domain";
-import { useHome, useSessions } from "../api/queries";
+import { useHome } from "../api/queries";
 import { ops } from "../api/ops";
 import type { Me } from "../api/types";
 import { applyTheme, setProject, updatePrefs, usePrefs, type Theme } from "../lib/prefs";
 import { Icon, Logo } from "../ui/Icon";
-import { Avatar, Btn, Chip, Table } from "../ui/primitives";
+import { Avatar } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { StatusCluster } from "./StatusCluster";
@@ -42,9 +41,7 @@ export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }
     const theme = prefs.theme;
     ui.menu(userRef.current, `${v.name} · ${v.email}`, [
       ...(me.config.demoAccounts ? [{ label: "Environment: local stack · demo accounts on", icon: "info" }, { sep: true }] : []),
-      { label: "Profile", icon: "user", onClick: () => ui.dialog({ title: v.name, kicker: "Profile", body: <ProfileBody me={me} /> }) },
-      { label: "My roles per project", icon: "lock", onClick: () => ui.dialog({ title: "My roles", kicker: "Access", sub: "Roles are granted at factory level or per project. Projects where you hold no role are hidden from you.", body: <RolesBody me={me} /> }) },
-      { label: "My sessions", icon: "key", onClick: () => ui.dialog({ title: "My sessions", kicker: "Security", body: <SessionsBody me={me} /> }) },
+      { label: "Account", icon: "user", onClick: () => navigate("account") },
       { sep: true },
       { label: "Theme: system", icon: "auto", hint: theme === "system" ? "on" : "", onClick: () => setTheme("system") },
       { label: "Theme: light", icon: "sun", hint: theme === "light" ? "on" : "", onClick: () => setTheme("light") },
@@ -93,86 +90,6 @@ export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }
         </button>
       </div>
     </header>
-  );
-}
-
-function ProfileBody({ me }: { me: Me }) {
-  const v = me.person;
-  const rows: Array<[string, string]> = [
-    ["Title", v.title],
-    ["Email", v.email],
-    ["GitHub", v.github || "not linked"],
-    ["Teams", v.teams.join(", ") || "none"],
-    ["On call", v.oncall ? "yes" : "no"],
-    ["Signed in via", me.session.method],
-  ];
-  return (
-    <dl className="titleblock">
-      {rows.map(([k, val]) => (
-        <div key={k}>
-          <dt>{k}</dt>
-          <dd>{val}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function RolesBody({ me }: { me: Me }) {
-  return (
-    <Table compact>
-      <thead>
-        <tr>
-          <th scope="col">Scope</th>
-          <th scope="col">Role</th>
-        </tr>
-      </thead>
-      <tbody>
-        {me.person.roles.map((g, i) => (
-          <tr key={`${g.scope}-${g.role}-${i}`}>
-            <td>{g.scope === "factory" ? "Factory" : (me.projects.find((p) => p.id === g.scope)?.name ?? g.scope)}</td>
-            <td>{ROLES.find((r) => r.id === g.role)?.name ?? g.role}</td>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
-  );
-}
-
-function SessionsBody({ me }: { me: Me }) {
-  const ui = useUI();
-  const q = useSessions();
-  const mine = (q.data ?? []).filter((s) => s.person === me.person.id && !s.revoked);
-  if (q.isPending) return <p className="muted small">Loading sessions…</p>;
-  if (q.isError) return <p className="muted small">Sessions could not be loaded.</p>;
-  return (
-    <ul className="plain-list">
-      {mine.map((s) => {
-        const cur = s.id === me.session.id || s.current;
-        return (
-          <li key={s.id} className="sess-row">
-            <span>
-              <strong>{s.device}</strong>
-              {` · ${s.method} · ${s.ip}`}
-            </span>
-            <span className="muted small">{`since ${new Date(s.started).toLocaleString()}`}</span>
-            {cur ? (
-              <Chip text="this session" cls="chip-accent" />
-            ) : (
-              <Btn
-                label="Revoke"
-                small
-                id={`rev-${s.id}`}
-                onClick={async () => {
-                  const r = await ops.revokeSession(s.id);
-                  ui.toast(r.msg, r.ok ? "ok" : "error");
-                }}
-              />
-            )}
-          </li>
-        );
-      })}
-    </ul>
   );
 }
 

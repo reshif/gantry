@@ -54,6 +54,7 @@ export const ROUTES: readonly RouteDef[] = [
   { id: "api", title: "API & triggers", group: "Connect", icon: "api", perm: "integrations.view", canSee: (me) => anyRole(me, [...FACTORY_READ, "project_admin"]) },
   { id: "people", title: "People & teams", group: "Govern", icon: "people", perm: "people.view", canSee: (me) => anyRole(me, [...FACTORY_READ, "project_admin"]) },
   { id: "person", title: "Person", group: "Govern", icon: "people", nav: false, perm: "people.view", canSee: (me) => anyRole(me, [...FACTORY_READ, "project_admin"]) },
+  { id: "account", title: "Account", group: "Govern", icon: "user", nav: false },
   { id: "workload", title: "Workload", group: "Govern", icon: "workload", perm: "people.view", canSee: (me) => anyRole(me, BUILD_READ) },
   { id: "access", title: "Access", group: "Govern", icon: "lock", perm: "policy.view", canSee: (me) => anyRole(me, FACTORY_READ) },
   { id: "security", title: "Security", group: "Govern", icon: "shield", perm: "policy.view", canSee: (me) => anyRole(me, FACTORY_READ) },
