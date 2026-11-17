@@ -4,7 +4,7 @@
  * and only as `Bash(<command>:*)`: a prefix rule for that one command, never a bare `Bash`. A command that could run arbitrary code (a shell or interpreter
  * with its own `-c`, a network tool, `env`, `sudo`, `git`) is refused here, at confirmation, and again when the run spec is composed.
  */
-const TOKEN = /^[A-Za-z0-9_-][A-Za-z0-9_.\/@=:+-]*$/;
+const TOKEN = /^[A-Za-z0-9_-][A-Za-z0-9_./@=:+-]*$/;
 const REFUSED_FIRST = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "env", "sudo", "su", "doas", "eval", "exec", "xargs", "nohup", "curl", "wget", "nc", "ncat", "ssh", "scp", "rsync", "git", "rm", "mv", "dd", "chmod", "chown", "perl", "ruby", "php", "awk", "sed", "find", "node", "python", "python3", "deno", "bun"]);
 const REFUSED_FLAGS = new Set(["-c", "-e", "-p", "--eval", "--command", "--exec", "-exec", "-m", "--print"]);
 export const MAX_TEST_COMMANDS = 5;
