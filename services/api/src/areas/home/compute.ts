@@ -1,5 +1,6 @@
 import { involved } from "../onboarding/session/updates.js";
 import { involvedInWo } from "../workorders/session/updates.js";
+import { openAccessRequests } from "../workorders/session/mentions.js";
 import { fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { decideFor, readSecurity, type ActiveStop, type PolicyStateLoaded, type Principal } from "../../core/index.js";
@@ -41,6 +42,8 @@ interface Scope {
   vis: Set<string>;
   /** The matrix grants `action` on `project` (or factory-wide when no project), the way `can` picks grants. */
   holds(action: string, project?: string): boolean;
+  /** The factory's policy state, for judging other people's access. */
+  policy: PolicyStateLoaded;
   /** Eval health, when the caller may read agents. */
   evals: EvalHealth | null;
   restore: { approvals: Array<{ by: string; at: number }>; needs: number };
@@ -107,6 +110,11 @@ async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveSt
       const why = o.stage === "failed" ? "verification failed" : o.stage === "person" ? "needs a person" : "PR checks are red";
       add({ id: `hm-att-onb-${r.id}`, sev: 1, icon: "rocket", title: `${r.name} onboarding needs you: ${why}`, where: p.name, sub: o.blocker || "Open the onboarding session to continue.", act: { label: "Open session", route: "onboarding", project: p.id } });
     }
+  }
+  const admin = st.projects.filter((p) => seeProject(p.id) && sc.holds("project.members", p.id)).map((p) => p.id);
+  for (const r of await openAccessRequests(db, orgId, sc.policy, admin)) {
+    const p = st.projects.find((x) => x.id === r.project);
+    add({ id: `hm-att-access-${r.id}`, sev: 2, icon: "human", title: `${r.personName} was mentioned but cannot open ${p?.name ?? r.project}`, where: p?.name ?? r.project, sub: `${r.byName} mentioned them${r.wo ? ` on ${r.wo}` : ""}. Nothing was granted: give them a role or dismiss the request.`, act: { label: "Open people", route: "people", project: r.project } });
   }
   const stationName = (w: HomeWorkOrder): string => st.catalog.stations[w.station]?.name ?? "";
   for (const w of st.workOrders) {
@@ -226,6 +234,20 @@ async function myConversations(db: Queryable, orgId: string, st: Flow, st0: Poli
       order by m.wo_id, m.created_at desc`,
     [orgId, me.id],
   );
+  // A colleague @mentioned this person in a session. It lists once they can read the project (a mention never opens anything) and stops listing when they open the session.
+  const mentions = await db.query<{ wo_id: string; project_id: string; title: string; by_name: string | null; body: string | null }>(
+    `select distinct on (n.wo_id) n.wo_id, w.project_id, w.title, p.name as by_name, m.body
+       from workorder_mentions n join work_orders w on w.org_id = n.org_id and w.id = n.wo_id
+       left join people p on p.org_id = n.org_id and p.id = n.by_person left join workorder_messages m on m.org_id = n.org_id and m.id = n.message_id
+      where n.org_id = $1 and n.person_id = $2 and n.created_at > now() - interval '14 days' and w.state not in ('done','killed') and w.position <> 'declined'
+        and n.created_at > coalesce((select s.seen_at from workorder_session_seen s where s.org_id = n.org_id and s.wo_id = n.wo_id and s.person_id = $2), '-infinity'::timestamptz)
+      order by n.wo_id, n.created_at desc`,
+    [orgId, me.id],
+  );
+  for (const u of mentions.rows) {
+    if (!vis.has(u.project_id) || out.some((x) => x.wo === u.wo_id)) continue;
+    out.push({ wo: u.wo_id, title: u.title, project: u.project_id, question: `${u.by_name ?? "A colleague"} mentioned you: ${(u.body ?? "").slice(0, 140)}`.trim() });
+  }
   for (const u of ups.rows) {
     if (!vis.has(u.project_id) || out.some((x) => x.wo === u.wo_id) || !(await involvedInWo(db, orgId, u.wo_id, u.project_id)).includes(me.id)) continue;
     out.push({ wo: u.wo_id, title: u.title, project: u.project_id, question: u.body.slice(0, 160) });
@@ -323,7 +345,7 @@ export async function computeHome(o: HomeOptions) {
   const sec = fk ? await readSecurity(db, orgId) : null;
   const evals = holds("agents.view") ? await evalHealth(db, orgId) : null;
   const scope: Scope = {
-    me, vis: visIds, holds, evals,
+    me, vis: visIds, holds, evals, policy: st0,
     restore: { approvals: restore.rows.map((r) => ({ by: r.approver, at: ms(r.at) ?? 0 })), needs: sec?.value.restoreFactoryNeedsTwo ? 2 : 1 },
   };
   const items = await attention(db, orgId, st, stops, now, scope);

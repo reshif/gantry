@@ -27,6 +27,8 @@ export interface EmitCtx {
   insts: InstInfo[];
   /** The work order's class and risk, for deciding whether chat may offer an approve button. */
   woFacts?: { cls: string; risk: string | null; position?: string } | null;
+  /** The person a "mention" notification is about: the email keyword "mentioned" reaches them. */
+  mentioned?: string | null;
 }
 
 export type EmitInput = Omit<EmitCtx, "deliveryId"> & { deliveryId?: string; reuseDeliveryId?: string };
@@ -63,7 +65,7 @@ export async function prepare(db: Queryable, c: EmitCtx): Promise<Prepared> {
   if (transport === "slack") {
     payload = { ...common, mode: "post", card: slackBlocks(s, rows, actions), ...(cardKey ? { cardKey } : {}) };
   } else if (transport === "smtp") {
-    const to = await resolveRecipients(db, c.orgId, target, { project: c.project, woId: c.wo, gateId: s.gate?.id ?? null });
+    const to = await resolveRecipients(db, c.orgId, target, { project: c.project, woId: c.wo, gateId: s.gate?.id ?? null, mentioned: c.mentioned ?? null });
     if (!to.length) return { ok: false, error: `no recipient for "${target}"`, resolvedInst: inst };
     const m = emailParts(s, rows, actions, { ...(c.route ? { route: c.route.id } : {}), showLink: fields.link !== false });
     payload = { ...common, to, subject: m.subject, text: m.text, html: m.html };

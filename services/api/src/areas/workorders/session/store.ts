@@ -12,7 +12,7 @@ export interface WoMessage {
   at: number;
   data: {
     cards?: WoCard[]; drafts?: Record<string, unknown>; kind?: string; mode?: "agent" | "rule-based" | "legacy"; model?: string | null; agent?: string; version?: number; station?: string; tools?: string[];
-    costMicros?: number; usage?: unknown; stopped?: boolean; truncated?: boolean; followUp?: string; event?: string; chips?: string[];
+    mentions?: Array<{ id: string; name: string; access: boolean }>; costMicros?: number; usage?: unknown; stopped?: boolean; truncated?: boolean; followUp?: string; event?: string; chips?: string[];
   };
 }
 

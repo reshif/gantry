@@ -5,6 +5,8 @@
  *   POST /api/v1/work-orders/{id}/session/messages                            a person's message (or `open`/`continue`); the agent's answer streams as SSE
  *   POST /api/v1/work-orders/{id}/session/proposals/{mid}/{pid}               approve | changes | discard a proposal card
  *   POST /api/v1/work-orders/{id}/session/seen                                the bell stops listing this session's updates for the caller
+ *   GET  /api/v1/work-orders/{id}/session/people?q=                           people the composer's @ may offer (and whether they can already read the project)
+ *   GET  /api/v1/access-requests, POST /api/v1/access-requests/{id}/dismiss  requests a mention opened for a person without access; the project's admins read and dismiss them
  *
  * The conversation runs on the API in the console's engine (the edge's service gateway, the bounded tool loop, SSE) with the tools of areas/workorders/session/tools.ts and the
  * pinned model of the CURRENT station's agent (the Intake Clerk at Intake). The agent understands, asks and proposes by itself; Gantry supplies observed facts, rails and permission
@@ -12,7 +14,7 @@
  * With no usable model the scripted questionnaire answers instead, labelled "Rule-based (no agent)".
  */
 import { appendEvent, withTx } from "@gantry/db";
-import { SESSION_BUDGET_DEFAULT_USD, WO_AGENT_LABEL, classOf, route, stationDef, visibleProjects, type Catalog, type FlowState, type Project, type WoCard, type WorkOrder } from "@gantry/domain";
+import { can, SESSION_BUDGET_DEFAULT_USD, WO_AGENT_LABEL, classOf, route, stationDef, visibleProjects, type Catalog, type FlowState, type Project, type WoCard, type WorkOrder } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { runConversation, ModelUnavailable, readiness } from "../areas/console/model.js";
@@ -26,14 +28,17 @@ import { confirmAgentBrief } from "../areas/workorders/session/approve.js";
 import { addWoMessage, legacyMessages, listWoMessages, lockWoMessage, newWoMessageId, saveWoMessageData, supersedeWoPending, woSessionSpend, markWoSeen, type WoMessage } from "../areas/workorders/session/store.js";
 import { executeWoTool, stationName, woToolDefs, type WoSessionCtx } from "../areas/workorders/session/tools.js";
 import { openIntakeSessions, scanWoEvents } from "../areas/workorders/session/updates.js";
-import { command, decide, policyState, refuse, type CommandResult } from "../core/index.js";
+import { openAccessRequests, recordMentions, searchMentionable, MAX_MENTIONS, type Mentioned } from "../areas/workorders/session/mentions.js";
+import { command, decide, policyState, refuse, type CommandResult, type EventSpec } from "../core/index.js";
 
 /** Output room for one turn: enough for a full brief (several lists) in a single tool call. */
 export const WO_SESSION_MAX_TOKENS = 16_000;
 
 const Id = z.object({ id: z.string().min(1).max(100) });
 const ProposalParams = z.object({ id: z.string().min(1).max(100), mid: z.string().min(1).max(60), pid: z.string().min(1).max(40) });
-const MessageBody = z.object({ text: z.string().trim().max(6000).optional(), kind: z.enum(["message", "open", "continue"]).default("message") }).strict();
+const MessageBody = z.object({ text: z.string().trim().max(6000).optional(), kind: z.enum(["message", "open", "continue"]).default("message"), mentions: z.array(z.string().min(1).max(100)).max(MAX_MENTIONS).optional() }).strict();
+const PeopleQ = z.object({ q: z.string().trim().min(1).max(60) });
+const AccessQ = z.object({ project: z.string().max(100).optional() });
 const DecisionBody = z.object({ decision: z.enum(["approve", "changes", "discard"]), text: z.string().trim().max(2000).optional() }).strict();
 const ListQ = z.object({ project: z.string().max(100).optional() });
 
@@ -348,21 +353,35 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       const own = row.submitter === who.id;
       if (!atIntake || f0.wo.conv.done) {
         const mid = await withTx(g.pool, async (tx) => {
-          const m = await addWoMessage(tx, g.orgId, id, "user", who.id, b.text!, {}, new Date());
-          return m;
+          const msg = newWoMessageId();
+          const rec = await recordMentions(tx, g.orgId, await policyState(req, tx), { woId: id, project: row.project, messageId: msg, by: who.id, byName: who.name, text: b.text!, ids: b.mentions ?? [], now: new Date() });
+          await addWoMessage(tx, g.orgId, id, "user", who.id, b.text!, rec.mentioned.length ? { mentions: rec.mentioned.map(({ id: pid, name, access }) => ({ id: pid, name, access })) } : {}, new Date(), msg);
+          for (const ev of rec.events) await appendEvent(tx, { orgId: g.orgId, type: ev.type, category: ev.category ?? "flow", actor: who.id, channel: "web", subject: ev.subject, projectId: row.project, woId: id, outcome: "ok", after: ev.after });
+          return msg;
         });
         const sys = await persist(row, "system", "system", atIntake ? `${WO_AGENT_LABEL}: the brief is complete and waits for confirmation. Connect a model vendor to ask for changes in your own words.` : `${WO_AGENT_LABEL}: ${NO_AGENT_WO_TEXT}`, { kind: "no_agent", mode: "rule-based", cards: [] }, who.id, { mode: "rule-based", reason: ag.reason });
         return { ok: true, msg: NO_AGENT_WO_TEXT, mode: "rule-based", reason: ag.reason, messageId: sys, saved: mid };
       }
-      const r = await command(req, { action: own ? null : "wo.answer", scope: scopeOf(row), ifMatch: woVersion(g.orgId, id) }, (tx, a) => postMessage(tx, a, id, { text: b.text!, kind: "answer" }));
+      const r = await command(req, { action: own ? null : "wo.answer", scope: scopeOf(row), ifMatch: woVersion(g.orgId, id) }, async (tx, a) => {
+        const out = await postMessage(tx, a, id, { text: b.text!, kind: "answer" });
+        if (!b.mentions?.length) return out;
+        const rec = await recordMentions(tx, a.orgId, await policyState(req, tx), { woId: id, project: row.project, messageId: newWoMessageId(), by: who.id, byName: who.name, text: b.text!, ids: b.mentions, now: a.now });
+        return { ...out, events: [...out.events, ...rec.events], extra: { ...(out.extra ?? {}), mentioned: rec.mentioned } };
+      });
       return { ...r, mode: "rule-based", reason: ag.reason };
     }
 
     // 1. The person's words are saved first (idempotent on Idempotency-Key); an open question card is marked answered.
     const saved = await command(req, { action: null, scope: scopeOf(row), idempotent: true }, async (tx, a): Promise<CommandResult<Record<string, unknown>>> => {
       let mid: string | null = null;
+      let mentionEvents: EventSpec[] = [];
+      let mentioned: Mentioned[] = [];
       if (b.text && b.kind !== "open") {
-        mid = await addWoMessage(tx, a.orgId, id, "user", who.id, b.text, {}, a.now);
+        mid = newWoMessageId();
+        const rec = await recordMentions(tx, a.orgId, await policyState(req, tx), { woId: id, project: row.project, messageId: mid, by: who.id, byName: who.name, text: b.text, ids: b.mentions ?? [], now: a.now });
+        mentionEvents = rec.events;
+        mentioned = rec.mentioned;
+        await addWoMessage(tx, a.orgId, id, "user", who.id, b.text, mentioned.length ? { mentions: mentioned.map(({ id: pid, name, access }) => ({ id: pid, name, access })) } : {}, a.now, mid);
         const last = (await tx.query<{ id: string; data: WoMessage["data"] }>(`select id, data from workorder_messages where org_id = $1 and wo_id = $2 and id <> $3 and role = 'assistant' order by created_at desc, id desc limit 1 for update`, [a.orgId, id, mid])).rows[0];
         if (last) {
           let changed = false;
@@ -370,7 +389,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
           if (changed) await saveWoMessageData(tx, a.orgId, last.id, last.data);
         }
       }
-      return { msg: "Saved.", events: [{ type: "wo.session.message", category: "flow", subject: { type: "wo", id }, projectId: row.project, woId: id, after: { message: mid, kind: b.kind, chars: b.text?.length ?? 0 } }], extra: { messageId: mid }, changes: ["conversations"], project: row.project };
+      return { msg: "Saved.", events: [{ type: "wo.session.message", category: "flow", subject: { type: "wo", id }, projectId: row.project, woId: id, after: { message: mid, kind: b.kind, chars: b.text?.length ?? 0 } }, ...mentionEvents], extra: { messageId: mid, mentioned }, changes: ["conversations", "home"], project: row.project };
     });
     if (reply.getHeader("idempotent-replayed")) return { ...saved, replayed: true };
     // A person speaking (or opening) is the start the automatic "opened" follow-up would have made: it must not run a second opening turn.
@@ -409,6 +428,43 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     return command(req, { action: null }, async (tx, a): Promise<CommandResult<Record<string, unknown>>> => {
       await markWoSeen(tx, a.orgId, id, who.id);
       return { msg: "Seen.", events: [], changes: ["home"], project: null };
+    });
+  });
+
+  /* ------------------------------------------------------------------ @mention */
+
+  /** The composer's @: people to offer. Only someone who may talk on the work order can ask, and the answer says who cannot read the project yet. */
+  app.get("/api/v1/work-orders/:id/session/people", async (req) => {
+    const { id } = Id.parse(req.params);
+    const { q } = PeopleQ.parse(req.query);
+    const { row, who } = await woOf(req, id);
+    const t = await canTalk(req, row, who);
+    if (!t.allowed) throw refuse("denied", t.reason || "You may not act on this work order.");
+    return { people: await searchMentionable(g.pool, g.orgId, await policyState(req), row.project, q, who.id) };
+  });
+
+  /** Open access requests for the projects the caller administers (project.members). A mention never grants access; this is where it asks. */
+  app.get("/api/v1/access-requests", async (req) => {
+    const who = person(req);
+    const q = AccessQ.parse(req.query);
+    const st = await policyState(req);
+    const mine = q.project ? [q.project] : st.projects.map((p) => p.id);
+    const allowed: string[] = [];
+    for (const p of mine) if (can(st, who.id, "project.members", { project: p }).allowed) allowed.push(p);
+    if (q.project && !allowed.length) throw refuse("denied", (await decide(req, "project.members", { project: q.project })).reason || "You may not manage this project's members.");
+    return { items: await openAccessRequests(g.pool, g.orgId, st, allowed) };
+  });
+
+  /** Dismissing closes the request without granting anything. Granting is the people screen's role change (step-up, audited like any other). */
+  app.post("/api/v1/access-requests/:id/dismiss", async (req) => {
+    const { id } = Id.parse(req.params);
+    person(req);
+    const r = (await g.pool.query<{ project_id: string; person_id: string; status: string }>(`select project_id, person_id, status from access_requests where org_id = $1 and id = $2`, [g.orgId, id])).rows[0];
+    if (!r) throw refuse("not_found", "No such request.");
+    return command(req, { action: "project.members", scope: { project: r.project_id } }, async (tx, a): Promise<CommandResult<Record<string, unknown>>> => {
+      const u = await tx.query(`update access_requests set status = 'dismissed', decided_by = $3, decided_at = $4 where org_id = $1 and id = $2 and status = 'open'`, [a.orgId, id, a.id, a.now]);
+      if (!u.rowCount) throw refuse("conflict", "This request was already closed.");
+      return { msg: "Request dismissed. Nothing was granted.", events: [{ type: "access.request.dismissed", category: "access", subject: { type: "person", id: r.person_id }, projectId: r.project_id, after: { request: id, person: r.person_id } }], changes: ["home"], project: r.project_id };
     });
   });
 

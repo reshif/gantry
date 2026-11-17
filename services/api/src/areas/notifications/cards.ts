@@ -136,6 +136,7 @@ export async function loadSample(db: Queryable, i: SampleInput): Promise<CardSam
     "trust.changed": ["Trust level changed", text || "A trust cell moved on the ladder."],
     "learning.proposed": ["Learning proposal drafted", text || "Gantry grouped recent signals into a proposed improvement."],
     "outcome.recorded": [`Post-release outcome on ${id}`, text || "An outcome was recorded."],
+    mention: [`${who(a.byName) || "Someone"} mentioned ${who(a.personName) || "you"}${id ? ` on ${id}` : " in a conversation"}`, text || "Open the conversation to read it."],
     "delivery.failed": [`A notification could not be delivered`, text || "A delivery ran out of attempts."],
   };
   const [head, body] = H[i.event] ?? [eventName(i.event), text];

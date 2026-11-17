@@ -66,6 +66,8 @@ export function notifyEventFor(e: EventLike): NotifyMapping | null {
       return mk("onboarding.pr");
     case "delivery.failed":
       return mk("delivery.failed");
+    case "wo.mention":
+      return ok ? mk("mention") : null;
     default:
       break;
   }

@@ -971,6 +971,10 @@ export const NOTIFY_EVENTS: ReadonlyArray<{ id: string; name: string }> = [
   {
     id: "delivery.failed",
     name: "Notification delivery failed"
+  },
+  {
+    id: "mention",
+    name: "Someone mentioned a person in a conversation"
   }
 ];
 
