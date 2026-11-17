@@ -16,16 +16,17 @@ import { useRecordData, type SectionId } from "../record/data";
 import { journeyOf, toRecEvent } from "../traveler/model";
 import { Picker } from "../record/Picker";
 import { DossierHead } from "./Head";
+import { Overview } from "./Overview";
 import { Props, waitingOnYou } from "./Props";
 
-export type DossierTab = "document" | "activity";
+export type DossierTab = "overview" | "document" | "activity";
 
 export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
   const d = useRecordData(id);
   const sess = useWoSession(id);
   const session = sess.data;
   const root = useRef<HTMLDivElement>(null);
-  const setTab = useCallback((t: DossierTab) => navigate("record", t === "document" ? id : `${id}/${t}`), [id]);
+  const setTab = useCallback((t: DossierTab) => navigate("record", t === "overview" ? id : `${id}/${t}`), [id]);
   const scroll = (el: HTMLElement | null, focus?: HTMLElement | null) => {
     el?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
     focus?.setAttribute("tabindex", "-1");
@@ -85,13 +86,16 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
     <div className="view rec-view dz" id="dz" ref={root}>
       <DossierHead wo={wo} cat={cat} project={project} session={session} onActivity={() => toActivity()} />
       <div className="dz-tabbar">
-        <Tabs idPrefix="dz-tab" items={[{ id: "document", label: "Document" }, { id: "activity", label: "Activity" }]} active={tab} onChange={(t) => setTab(t as DossierTab)} />
+        <Tabs idPrefix="dz-tab" items={[{ id: "overview", label: "Overview" }, { id: "document", label: "Document" }, { id: "activity", label: "Activity" }]} active={tab} onChange={(t) => setTab(t as DossierTab)} />
         {waiting ? (
           <button type="button" className="dz-tabnote need" onClick={() => (waitingOnYou(wo, cat, session)[0]?.go === "decide" ? decide() : toActivity(waitingOnYou(wo, cat, session)[0]?.target))}>
             <Icon name="check" />{`Waiting on you (${waiting})`}
           </button>
         ) : <span className="dz-tabnote faint"><Icon name="check" />Nothing waits on you</span>}
       </div>
+      {tab === "overview" ? (
+        <div role="tabpanel" aria-labelledby="dz-tab-overview"><Overview wo={wo} rec={rec} cat={cat} project={project} session={session} /></div>
+      ) : (
       <div className="dz-grid">
         <div className="dz-main" role="tabpanel" aria-labelledby={`dz-tab-${tab}`}>
           {tab === "document" ? (
@@ -108,6 +112,7 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
         </div>
         <Props wo={wo} rec={rec} cat={cat} project={project} session={session} onJump={jump} onActivity={toActivity} onDecide={decide} />
       </div>
+      )}
     </div>
   );
 }

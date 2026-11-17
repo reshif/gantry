@@ -7,6 +7,7 @@
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Page } from "@playwright/test";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
+import { woReadOverrides } from "./rich-wo";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
 const MIN = 60_000;
@@ -173,6 +174,7 @@ export function richOverrides(): Record<string, Handler> {
       items = [...items].sort((a, b) => b.createdAt - a.createdAt);
       return fulfillJson(r, { items: items.slice(0, lim), total: items.length, next: null });
     };
+    Object.assign(ov, woReadOverrides(floorFor(p.id).workOrders as never, p.id));
     ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, []);
   }
   ov["activity"] = (r) => fulfillJson(r, events());

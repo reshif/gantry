@@ -17,7 +17,7 @@ import { FloorCtx, assigneeOf, useFloorCtx, useFloorState, useProjectRepos, type
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { Board } from "./floor/Board";
 import type { Page, WorkOrder } from "../api/types";
-import { Btn, Empty, Field, FilterBar, SearchBox, Segmented, Select, Status, Tabs, ViewHead, type Tone } from "../ui/primitives";
+import { Btn, Empty, Field, FilterBar, SearchBox, Segmented, Select, Status, ViewHead, type Tone } from "../ui/primitives";
 import { Async, Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { DataTable, type Col } from "../ui/SortTable";
 import { Icon } from "../ui/Icon";

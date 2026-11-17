@@ -118,3 +118,12 @@
 .dz-chgbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .dz-treebox { padding: 6px 14px 10px; }
 .dz-chg .rec-file { padding-left: 8px; }
+/* prototype anatomy: page header with actions, a status strip card, then tabs */
+.dz-top { display: flex; flex-direction: column; gap: 12px; }
+.dz-ph .acts { flex-wrap: wrap; justify-content: flex-end; }
+.dz-strip .card-b { display: flex; flex-direction: column; gap: 12px; }
+.dz-strip .dz-chips { flex-wrap: wrap; gap: 8px; }
+.dz-strip .dz-rail { border: 0; padding: 0; background: none; }
+.dz-tabbar { position: static; background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; padding: 0; }
+.dz-overview { margin-top: 4px; }
+.dz-top .banner { margin: 0; }
