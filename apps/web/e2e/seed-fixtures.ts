@@ -174,7 +174,16 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     }
     if (path === "activity") return seed.events;
     if (path === "conversations") return page(conversations);
-    if (path === "workspace/inbox") return { items: [] };
+    if (path === "workspace/inbox") {
+      return {
+        items: wos.filter((w) => w.state !== "done" && w.state !== "killed").map((w) => {
+          const last = w.conv?.messages?.[w.conv.messages.length - 1];
+          const st = (cat.stations as Seed[])[w.station];
+          const asks = w.state === "blocked";
+          return { key: `wo:${w.id}`, kind: "primary", scope: { kind: "work_order", id: w.id, label: w.id }, project: w.project, title: w.title, agent: st?.agent ?? null, agentName: null, waitingOn: asks ? "you" : w.state === "waiting" ? "approver" : "agent", unread: false, latest: last ? { text: last.text, at: last.at, by: last.from, role: "assistant" } : null, updatedAt: last?.at ?? w.createdAt, archived: null, pinned: false, mine: false, shared: false, owner: null, visibility: null, spendUsd: null, wo: { cls: w.cls, station: st?.id ?? "intake", stationName: st?.name ?? "Intake", state: w.state, bay: w.bay ?? null, gate: gateInfo(w)?.id ?? null, closed: false } };
+        }),
+      };
+    }
     if (path === "console/status") return { configured: true, vendor: "anthropic", model: "claude-sonnet-5-5", actionsEnabled: false, canUse: true, retentionDays: 90, tools: [], proposals: [], models: [] };
     if (path === "console/threads") return { items: [], retentionDays: 90 };
     if (path === "people") return seed.people;

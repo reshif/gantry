@@ -3,7 +3,8 @@
  * Layout and filters are per signed-in person and remembered in prefs.portfolio (view state, not audited). Saved views are
  * stored on the server (`/saved-views`), so they follow the person across browsers.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { fmt, type Catalog } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useMe, useSavedViews, useTemplates } from "../../api/queries";
@@ -235,9 +236,11 @@ interface PortfolioProps {
   /** "cards" or "rows" on first use. */
   defaultLayout: "cards" | "rows";
   roles?: boolean;
+  /** Prototype layout: layout toggle in the page head, search and a collapsed Filters disclosure above the cards. */
+  compact?: boolean;
 }
 
-export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProps) {
+export function Portfolio({ ctx, projects, defaultLayout, roles, compact }: PortfolioProps) {
   const ui = useUI();
   const me = useMe();
   const who = me?.person.id ?? "anon";
@@ -247,6 +250,8 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
   const saved = useSavedViews().data ?? [];
   const [st, set] = usePfState(who, ctx, defaultLayout);
   const qid = `${ctx}-q`;
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { if (compact) setSlot(document.getElementById(`${ctx}-layout-slot`)); }, [compact, ctx]);
   if (!cat || !me) return null;
 
   const mine: ViewDef[] = saved
@@ -346,6 +351,9 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
   };
 
     const summary = `${shown.length} of ${projects.length} projects${archivedN && !st.archived ? ` · ${archivedN} archived hidden` : ""}${st.group !== "none" ? ` · ${groups.length} groups` : ""} · sorted by ${sorter.label.toLowerCase()}${st.dir > 0 ? "" : ", descending"}.`;
+  const layoutToggle = (
+    <Segmented name={`${ctx}-layout`} items={[{ id: "cards", label: "Cards" }, { id: "rows", label: "Table" }]} value={st.layout} onChange={(v) => setFocus({ layout: v as PfState["layout"] }, `${ctx}-layout-${v}`)} label="Portfolio layout" />
+  );
   const cols = rowCols(ctx, cat, !!roles, myRoles);
 
   // The count on each view tab: how many projects that view would list, before search.
@@ -376,9 +384,17 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
     );
   };
 
-  return (
-    <div className={`pf pf-${st.layout}`} id={ctx}>
-      <p className="small muted pf-sum" aria-live="polite">{summary}</p>
+  const rowsInner = st.layout === "rows" && shown.length ? (
+    <div className="pf-rows pf-card-body">
+      {groups.map((g) => (
+        <section key={g.key} className="pf-group" aria-label={g.label ?? "Projects"}>
+          {g.label ? groupHead(g) : null}
+          {inner(g)}
+        </section>
+      ))}
+    </div>
+  ) : null;
+  const portfolioPanel = (
       <div className={`panel pf-card${st.layout === "cards" ? " pf-cardsbar" : ""}`}>
         <Tabs
           idPrefix={`${ctx}-view`}
@@ -416,12 +432,12 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
                     }} />
                   </>
                 ) : null}
-                <Segmented name={`${ctx}-layout`} items={[{ id: "cards", label: "Cards" }, { id: "rows", label: "Rows" }]} value={st.layout} onChange={(v) => setFocus({ layout: v as PfState["layout"] }, `${ctx}-layout-${v}`)} label="Portfolio layout" />
+                {compact ? null : layoutToggle}
             </>
           }
         >
           <div className="filters">
-            <SearchBox id={qid} value={st.q || ""} onChange={(v) => set({ q: v })} placeholder="Name, key or description" label="Search projects" />
+            {compact ? null : <SearchBox id={qid} value={st.q || ""} onChange={(v) => set({ q: v })} placeholder="Name, key or description" label="Search projects" />}
             <Field label="Health" htmlFor={`${ctx}-health`}>
               <Select id={`${ctx}-health`} options={[{ value: "all", label: "Any" }, ...Object.keys(HEALTH_LABEL).filter((k) => k !== "archived" || st.archived).map((k) => ({ value: k, label: HEALTH_LABEL[k]! }))]} value={st.health} onChange={(v) => setFocus({ health: v }, `${ctx}-health`)} />
             </Field>
@@ -446,17 +462,23 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
             ) : null}
           </div>
         </FilterBar>
-        {st.layout === "rows" && shown.length ? (
-          <div className="pf-rows pf-card-body">
-            {groups.map((g) => (
-              <section key={g.key} className="pf-group" aria-label={g.label ?? "Projects"}>
-                {g.label ? groupHead(g) : null}
-                {inner(g)}
-              </section>
-            ))}
-          </div>
-        ) : null}
+        {compact ? null : rowsInner}
       </div>
+  );
+  return (
+    <div className={`pf pf-${st.layout}`} id={ctx}>
+      {compact && slot ? createPortal(layoutToggle, slot) : null}
+      {compact ? null : <p className="small muted pf-sum" aria-live="polite">{summary}</p>}
+      {compact ? (
+        <div className="pf-compact">
+          <SearchBox id={qid} value={st.q || ""} onChange={(v) => set({ q: v })} placeholder="Search projects by name, key or description" label="Search projects" />
+          <details className="pf-more">
+            <summary>{`Filters, views and sorting · ${summary}`}</summary>
+            {portfolioPanel}
+          </details>
+        </div>
+      ) : portfolioPanel}
+      {compact && rowsInner ? <div className="panel pf-card">{rowsInner}</div> : null}
       {!shown.length ? (
         <EmptyState
           id={`${ctx}-empty`} icon="filter" title={projects.length ? "No projects match" : "No projects yet"}

@@ -28,7 +28,7 @@ export default function WorkspaceView() {
   const prefs = usePrefs();
   // Older links: #conversations/<WO> and #console[/<chat>] open here.
   useEffect(() => {
-    if (hash.id === "conversations") toWorkspace(hash.param ? `wo:${hash.param}` : null);
+    if (hash.id === "conversations") toWorkspace(hash.param ? `wo:${hash.param}` : "inbox");
     else if (hash.id === "console") toWorkspace(hash.param ?? "new");
   }, [hash.id, hash.param]);
   const pending = prefs.openConversation;
@@ -56,6 +56,12 @@ export default function WorkspaceView() {
     const t = window.setTimeout(() => pane.current?.scrollIntoView?.({ block: "start" }), 0);
     return () => window.clearTimeout(t);
   }, [key]);
+
+  // The prototype's Conversations page opens with the first thread selected (wide screens; on a phone the list comes first).
+  const first = key === "inbox" && !q ? (filterInbox(items, cur)[0] ?? items[0] ?? null) : null;
+  useEffect(() => {
+    if (first && !window.matchMedia?.("(max-width: 820px)").matches) navigate("workspace", first.key);
+  }, [first?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const open = (k: string | null) => { setQ(null); navigate("workspace", k); };
   const newChat = () => {
@@ -112,6 +118,7 @@ export default function WorkspaceView() {
   }
   return (
     <div className="view ws-view">
+      <ViewHead sheet="conversations" title="Conversations" sub="The dialogue between people and the agents at each station." actions={<Btn kind="primary" icon="plus" label="New chat" id="ws-conv-new" onClick={newChat} />} />
       <div className="ws-grid">
         <Inbox me={me.person.id} items={items} loading={filter === "archived" ? archived.isLoading : all.isLoading} current={key} filter={cur} onFilter={setFilter} onPick={(k) => open(k)} onNew={newChat} onSearch={(s) => setQ(s)}
           operator={operator ? { show: true, active: key === "operator", onOpen: () => open("operator") } : null} />

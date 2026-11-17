@@ -150,3 +150,5 @@ tr.is-over td { color: var(--fail); }
 .ws-main .wos-status { flex-wrap: nowrap; align-items: flex-start; }
 .ws-main .wos-status .wos-dot { margin-top: 5px; }
 .ws-main .wos-status > span:not(.wos-dot) { min-width: 0; overflow-wrap: anywhere; }
+.ws-view > .vhead ~ .ws-grid { height: calc(100dvh - var(--topbar-h, 52px) - 190px); min-height: 480px; }
+@media (max-width: 820px) { .ws-view > .vhead ~ .ws-grid { height: auto; } }

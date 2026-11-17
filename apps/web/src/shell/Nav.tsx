@@ -69,7 +69,7 @@ export function Nav({ me, current, project, open, onNavigate }: { me: Me; curren
               <h3>{GROUP_LABEL[gname] ?? gname}</h3>
               {items.map((it) => {
                 const bd = badges[it.id];
-                const active = current === it.id || (it.id === "work-orders" && (current === "record" || current === "changes")) || (it.id === "people" && current === "person");
+                const active = current === it.id || (it.id === "work-orders" && (current === "record" || current === "changes" || current === "traveler")) || (it.id === "people" && current === "person");
                 return (
                   <a key={it.id} href={hashFor(it.id, null, it.project ? shown?.id : null)} aria-current={current === it.id || active ? "page" : undefined} onClick={onNavigate}>
                     <Icon name={it.icon} />

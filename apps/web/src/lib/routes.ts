@@ -49,6 +49,7 @@ export const ROUTES: readonly RouteDef[] = [
   { id: "onboarding", title: "Onboarding", group: "Project", icon: "rocket", project: true },
   { id: "project-config", title: "Project config", group: "Project", icon: "filter", project: true },
   { id: "record", title: "Work order", group: "Project", icon: "record", project: true, nav: false },
+  { id: "traveler", title: "Traveler", group: "Project", icon: "record", project: true, nav: false },
   { id: "changes", title: "Changes", group: "Project", icon: "branch", project: true, nav: false },
   { id: "agents", title: "Agents", group: "Agents", icon: "agent", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
   { id: "skills", title: "Skills", group: "Agents", icon: "skill", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },

@@ -42,7 +42,7 @@ export default function ProjectsView() {
     <div className="view prj">
       <ViewHead
         title="Projects" sub="Each project is its own production line with its own flow, gates and budget."
-        actions={<Btn kind="primary" icon="plus" id="prj-new" guard={create} label="New project" onClick={() => openWizard()} />}
+        actions={<><span id="prj-pf-layout-slot" className="prj-layout-slot" /><Btn kind="primary" icon="plus" id="prj-new" guard={create} label="New project" onClick={() => openWizard()} /></>}
       />
       <StatRow id="prj-stats">
         <Stat label="Projects" value={qState(projectsQ, () => String(live))} sub={`${archived} archived`} tone="done" />
@@ -59,7 +59,7 @@ export default function ProjectsView() {
         ) : (
           <div className="prj-stack">
             <Async query={projectsQ} what="projects" id="prj-pf">
-              {() => <Portfolio ctx="prj-pf" projects={projects} defaultLayout="cards" roles />}
+              {() => <Portfolio ctx="prj-pf" projects={projects} defaultLayout="cards" roles compact />}
             </Async>
           </div>
         )}

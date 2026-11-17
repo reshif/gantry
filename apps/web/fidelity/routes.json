@@ -11,11 +11,8 @@
     "dossier",
     "changes"
   ],
-  "rename": {
-    "traveler": "record"
-  },
+  "rename": {},
   "overrides": {
-    "traveler/WO-2400": "?traveler=WO-2400#/p/payments/work-orders",
     "people/p-meera": "#/person/p-meera"
   }
 }
