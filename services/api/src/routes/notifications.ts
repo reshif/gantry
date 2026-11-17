@@ -134,21 +134,37 @@ export const notificationRoutes: FastifyPluginAsync = async (app) => {
   /** Card templates are factory-wide. The action is the project-scoped `notify.edit`, checked in the project the editor is working in; without one, the factory right to manage integrations. */
   const cardSpec = (project: string | null | undefined): CommandSpec => (project ? projectSpec(project) : { action: "integration.edit", scope: {} });
 
+  /**
+   * A card template belongs to the project it was made in (`body.project`), or to the factory when that is empty. Project-scoped `notify.edit`
+   * changes only templates the named project owns; a factory-wide template, or another project's, needs the factory right. An unknown id takes
+   * the factory path too, so a refusal never says whether the id exists.
+   */
+  const editSpec = async (id: string | undefined, project: string | null | undefined): Promise<CommandSpec> => {
+    if (!id) return cardSpec(project);
+    const row = (await g.pool.query<{ owner: string | null }>(`select body ->> 'project' as owner from card_templates where org_id = $1 and id = $2`, [g.orgId, id])).rows[0];
+    return project && row && row.owner === project ? projectSpec(project) : { action: "integration.edit", scope: {} };
+  };
+
   app.post("/api/v1/card-templates", async (req) => {
     const b = CardTemplateBody.parse(req.body);
-    return command(req, { ...cardSpec(b.project), idempotent: !b.id }, (tx, a) => saveCardTemplate(tx, a, b));
+    return command(req, { ...(await editSpec(b.id, b.project)), idempotent: !b.id }, (tx, a) => saveCardTemplate(tx, a, b));
   });
 
   app.delete("/api/v1/card-templates/:id", async (req) => {
     const { id } = IdParam.parse(req.params);
     const q = (req.query ?? {}) as { project?: string };
-    return command(req, cardSpec(q.project), (tx, a) => removeCardTemplate(tx, a, id));
+    return command(req, await editSpec(id, q.project), (tx, a) => removeCardTemplate(tx, a, id));
   });
 
   /** Renders a card without saving or sending it: the same builders the producer uses, so the preview is what goes out. */
   app.post("/api/v1/card-templates/preview", async (req) => {
     const b = PreviewBody.parse(req.body);
     await visible(req, b.project);
+    // A work order is read only through the project it belongs to: another project's id is the same 404 as an unknown one.
+    if (b.wo) {
+      const w = (await g.pool.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2`, [g.orgId, b.wo])).rows[0];
+      if (!w || w.project_id !== b.project) throw refuse("not_found", "No such work order.");
+    }
     const sample = await loadSample(g.pool, { orgId: g.orgId, publicUrl: g.config.publicUrl, event: b.event, projectId: b.project, ...(b.template ? { template: b.template } : {}), ...(b.wo ? { woId: b.wo } : {}) });
     const template = b.template || sample.template;
     const custom = !builtinTemplate(template) ? (await g.pool.query<{ body: { kind?: string; actions?: string[]; fields?: string[] } }>(`select body from card_templates where org_id = $1 and id = $2`, [g.orgId, template])).rows[0]?.body : null;
