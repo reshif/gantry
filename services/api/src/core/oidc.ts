@@ -8,6 +8,8 @@ export interface LoginParams {
   codeVerifier: string;
   loginHint?: string | null;
   stepUp?: boolean;
+  /** Ask the provider for its second-factor level (acr_values), so a Factory Admin signs in with a one-time code. */
+  secondFactor?: boolean;
   idpHint?: string | null;
 }
 
@@ -20,10 +22,25 @@ export interface IdClaims {
   gantryTitle?: string;
   authTime?: number;
   acr?: string;
+  /** Authentication methods the provider says were used (RFC 8176 `amr`), when it issues them. */
+  amr?: string[];
   sid?: string;
   preferredUsername?: string;
   /** The raw ID token, kept (sealed) only to end the provider's session at sign-out as `id_token_hint`. */
   idToken?: string;
+}
+
+/** `amr` values (RFC 8176) that mean something beyond a password was presented. */
+const SECOND_FACTOR_AMR = new Set(["otp", "mfa", "hwk", "swk", "sc", "fpt", "face", "iris", "retina", "vbm", "pop", "webauthn"]);
+export const DEFAULT_MFA_ACR = ["2", "3", "mfa"];
+
+/**
+ * Whether the ID token carries evidence of a second sign-in factor: an `amr` naming one, or an `acr` equal to one of the
+ * realm's second-factor levels. A password alone (acr "1", amr ["pwd"] or nothing) is not evidence.
+ */
+export function hasSecondFactor(c: Pick<IdClaims, "acr" | "amr">, acrValues: readonly string[] = DEFAULT_MFA_ACR): boolean {
+  if (c.amr?.some((m) => SECOND_FACTOR_AMR.has(m.toLowerCase()))) return true;
+  return !!c.acr && acrValues.includes(c.acr);
 }
 
 export interface OidcAdapter {
@@ -88,9 +105,11 @@ export function createOidcAdapter(cfg: Config["oidc"], opts: { allowInsecure?: b
       // A named account (demo card, invite link) must not be satisfied by whoever already holds the identity provider's SSO session:
       // without prompt=login, Keycloak ignores login_hint and silently signs the previous person back in.
       if (p.stepUp || p.loginHint) params.prompt = "login";
-      // Step-up asks for a sign-in that happened now (max_age=0). It proves a fresh password entry, not a second factor: requiring OTP or
-      // WebAuthn is a Keycloak browser-flow setting for the production realm (deploy/PRODUCTION.md), and auth_time is what we verify.
+      // Step-up asks for a sign-in that happened now (max_age=0). It proves a fresh sign-in; whether a second factor was part of it is checked
+      // separately from acr/amr (hasSecondFactor), for Factory Admins.
       if (p.stepUp) params.max_age = "0";
+      // Second factor: Keycloak's step-up flow runs the OTP subflow when a level-2 authentication is requested.
+      if (p.secondFactor) params.acr_values = cfg.mfaAcrValues?.[0] ?? DEFAULT_MFA_ACR[0]!;
       if (p.idpHint) params.kc_idp_hint = p.idpHint;
       return client.buildAuthorizationUrl(c, params);
     },
@@ -103,7 +122,7 @@ export function createOidcAdapter(cfg: Config["oidc"], opts: { allowInsecure?: b
       const n = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
       return {
         sub: k.sub, email: s(k.email)?.toLowerCase(), emailVerified: typeof k.email_verified === "boolean" ? k.email_verified : undefined,
-        name: s(k.name), gantryId: s(k.gantry_id), gantryTitle: s(k.gantry_title), authTime: n(k.auth_time), acr: s(k.acr), sid: s(k.sid), preferredUsername: s(k.preferred_username),
+        name: s(k.name), gantryId: s(k.gantry_id), gantryTitle: s(k.gantry_title), authTime: n(k.auth_time), acr: s(k.acr), amr: Array.isArray(k.amr) ? k.amr.filter((x): x is string => typeof x === "string") : undefined, sid: s(k.sid), preferredUsername: s(k.preferred_username),
         ...(tokens.id_token ? { idToken: tokens.id_token } : {}),
       };
     },

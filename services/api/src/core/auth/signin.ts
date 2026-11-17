@@ -5,6 +5,8 @@ import type { Gantry } from "../context.js";
 import type { IdClaims } from "../oidc.js";
 import { readSecurity } from "../read/index.js";
 import { emailDomainAllowed, ipAllowed } from "../security.js";
+import { hasSecondFactor } from "../oidc.js";
+import { holdsFactoryAdmin, MFA_REQUIRED_MSG } from "./mfa.js";
 import { createSession, refreshAuthTime } from "./sessions.js";
 
 export interface SignInRequest {
@@ -32,6 +34,7 @@ const DENY = {
   account_inactive: "This account is deactivated or suspended.",
   different_person: "That sign-in was a different person, so the change was cancelled. Sign in again as yourself.",
   identity_mismatch: "This account is linked to a different identity at the provider.",
+  mfa_required: MFA_REQUIRED_MSG,
   invite_required: "This account has not been linked to your sign-in yet. Open the invite link from your email to join (it is valid for 14 days), or ask an administrator to invite you again.",
 } as const;
 
@@ -93,6 +96,15 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     if (person && person.idp_subject && person.idp_subject !== claims.sub) return deny("identity_mismatch", person.id);
     // A step-up never switches the held session to another person, and a refusal must leave nothing behind: decide before any write below.
     if (r.stepUpOnly && r.existingSession && (!person || r.existingSession.personId !== person.id)) return deny("different_person", person?.id ?? null);
+    // Factory Admins need a second factor, decided here by the server from the provider's token (acr/amr), not by the provider's flow alone.
+    // Includes the person the bootstrap rule below is about to make Factory Admin. A step-up keeps the factor the session already has.
+    const secondFactor = hasSecondFactor(claims, g.config.oidc.mfaAcrValues);
+    if (!g.config.adminMfaOptional && !secondFactor && !(person && (person.status === "deactivated" || person.status === "suspended"))) {
+      const bootstrap = !!g.config.bootstrapAdminEmail && email === g.config.bootstrapAdminEmail.toLowerCase() && claims.emailVerified === true;
+      const admin = person ? await holdsFactoryAdmin(tx, orgId, person.id) : false;
+      const willBootstrap = !admin && bootstrap && !(await tx.query(`select 1 from role_assignments where org_id = $1 and role_id = 'factory_admin' and scope_type = 'factory' and revoked_at is null limit 1`, [orgId])).rowCount;
+      if (admin || willBootstrap) return deny("mfa_required", person?.id ?? null);
+    }
     if (!person) {
       const id = await freePersonId(tx, orgId, claims.gantryId, claims.preferredUsername ?? email.split("@")[0]!);
       await tx.query(`insert into people (org_id, id, name, title, email, idp_subject, status, last_seen_at) values ($1,$2,$3,$4,$5,$6,'active', now())`, [orgId, id, claims.name ?? email.split("@")[0], claims.gantryTitle ?? "", email, claims.sub]);
@@ -122,12 +134,12 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     const authTime = claims.authTime ? new Date(claims.authTime * 1000) : new Date();
     const ex = r.existingSession;
     if (ex && ex.personId === person.id) {
-      await refreshAuthTime(tx, orgId, ex.id, authTime);
+      await refreshAuthTime(tx, orgId, ex.id, authTime, secondFactor);
       await record("ok", null, person.id, ex.id, "auth.stepup", { authTime: authTime.toISOString() });
       return { ok: true, personId: person.id, sessionId: ex.id, token: null, expiresAt: null, stepUp: true, provisioned };
     }
     const s = await createSession(tx, g.config.secrets.sessionKey, {
-      orgId, personId: person.id, method: r.method, ip: r.ip || null, userAgent: r.userAgent, absoluteHours: sec.sessionHours, authTime, idpSid: claims.sid ?? null, acr: claims.acr ?? null,
+      orgId, personId: person.id, method: r.method, ip: r.ip || null, userAgent: r.userAgent, absoluteHours: sec.sessionHours, authTime, idpSid: claims.sid ?? null, acr: claims.acr ?? null, secondFactor,
     });
     await record("ok", null, person.id, s.id, "auth.signin", { authTime: authTime.toISOString() });
     return { ok: true, personId: person.id, sessionId: s.id, token: s.token, expiresAt: s.expiresAt, stepUp: false, provisioned };

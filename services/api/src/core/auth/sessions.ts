@@ -7,6 +7,8 @@ export interface SessionRow {
   personId: string;
   method: string;
   authTime: number | null;
+  /** The sign-in that made this session presented a second factor (acr/amr evidence at the provider). */
+  secondFactor: boolean;
   createdAt: number;
   expiresAt: number;
   lastSeenAt: number;
@@ -29,6 +31,7 @@ export interface NewSession {
   authTime: Date;
   idpSid?: string | null;
   acr?: string | null;
+  secondFactor?: boolean;
 }
 
 export async function createSession(db: Queryable, key: Buffer, s: NewSession): Promise<{ id: string; token: string; expiresAt: Date }> {
@@ -36,16 +39,16 @@ export async function createSession(db: Queryable, key: Buffer, s: NewSession): 
   const id = `ses-${randomToken(9)}`;
   const expiresAt = new Date(Date.now() + s.absoluteHours * 3600_000);
   await db.query(
-    `insert into sessions (org_id, id, person_id, token_hash, idp_sid, ip, user_agent, expires_at, auth_time, method, acr)
-     values ($1,$2,$3,$4,$5,$6::inet,$7,$8,$9,$10,$11)`,
-    [s.orgId, id, s.personId, tokenHash(key, token), s.idpSid ?? null, s.ip, s.userAgent.slice(0, 300), expiresAt, s.authTime, s.method, s.acr ?? null],
+    `insert into sessions (org_id, id, person_id, token_hash, idp_sid, ip, user_agent, expires_at, auth_time, method, acr, second_factor)
+     values ($1,$2,$3,$4,$5,$6::inet,$7,$8,$9,$10,$11,$12)`,
+    [s.orgId, id, s.personId, tokenHash(key, token), s.idpSid ?? null, s.ip, s.userAgent.slice(0, 300), expiresAt, s.authTime, s.method, s.acr ?? null, s.secondFactor ?? false],
   );
   return { id, token, expiresAt };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- a pg row
 const toRow = (r: Record<string, any>): SessionRow => ({
-  id: r.id, personId: r.person_id, method: r.method, authTime: r.auth_time ? new Date(r.auth_time).getTime() : null,
+  id: r.id, personId: r.person_id, method: r.method, authTime: r.auth_time ? new Date(r.auth_time).getTime() : null, secondFactor: r.second_factor === true,
   createdAt: new Date(r.created_at).getTime(), expiresAt: new Date(r.expires_at).getTime(), lastSeenAt: new Date(r.last_seen_at).getTime(), ip: r.ip,
   personName: r.person_name, personStatus: r.person_status,
 });
@@ -53,7 +56,7 @@ const toRow = (r: Record<string, any>): SessionRow => ({
 /** The live session for a cookie token: not revoked, inside the absolute lifetime and the idle window. Null otherwise. */
 export async function findSession(db: Queryable, key: Buffer, orgId: string, token: string, idleMin: number): Promise<SessionRow | null> {
   const { rows } = await db.query(
-    `select s.id, s.person_id, s.method, s.auth_time, s.created_at, s.expires_at, s.last_seen_at, host(s.ip) as ip, p.name as person_name, p.status as person_status
+    `select s.id, s.person_id, s.method, s.auth_time, s.second_factor, s.created_at, s.expires_at, s.last_seen_at, host(s.ip) as ip, p.name as person_name, p.status as person_status
      from sessions s join people p on p.org_id = s.org_id and p.id = s.person_id
      where s.org_id = $1 and s.token_hash = $2 and s.revoked_at is null and s.expires_at > now() and s.last_seen_at > now() - make_interval(mins => $3::int)`,
     [orgId, tokenHash(key, token), idleMin],
@@ -67,8 +70,8 @@ export async function touchSession(db: Queryable, orgId: string, s: SessionRow):
   await db.query(`update sessions set last_seen_at = now() where org_id = $1 and id = $2`, [orgId, s.id]);
 }
 
-export async function refreshAuthTime(db: Queryable, orgId: string, id: string, authTime: Date): Promise<void> {
-  await db.query(`update sessions set auth_time = $3, last_seen_at = now() where org_id = $1 and id = $2`, [orgId, id, authTime]);
+export async function refreshAuthTime(db: Queryable, orgId: string, id: string, authTime: Date, secondFactor = false): Promise<void> {
+  await db.query(`update sessions set auth_time = $3, second_factor = second_factor or $4, last_seen_at = now() where org_id = $1 and id = $2`, [orgId, id, authTime, secondFactor]);
 }
 
 /** Revokes one session (returns whether it was live) or, with `id` null, every live session of the person. */

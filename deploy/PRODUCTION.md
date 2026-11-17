@@ -16,6 +16,7 @@ local development stack, see [README.md](README.md).
 | Realm | 15 demo accounts with a shared password | no accounts; password policy; `sslRequired: all` |
 | Mail | Mailpit catches everything | your relay, for Gantry and Keycloak |
 | Demo sign-in cards, demo seed | configurable | forced off |
+| Factory Admin second factor | waived by default (`GANTRY_DEV_ADMIN_MFA_OPTIONAL`), so the password-only demo admin works | required, cannot be waived |
 | Backups | on request (`--profile backup`) | always: daily, with a weekly restore drill |
 | Limits | none | memory and process limits on every container |
 
@@ -72,6 +73,29 @@ The production realm has no accounts. Create people in Keycloak, or connect Keyc
 - **The first Factory Admin.** Create (or federate) the person whose email is `GANTRY_BOOTSTRAP_ADMIN_EMAIL`. The first
   time they sign in, they become Factory Admin of an empty organisation and see "Set up the factory". Everyone after
   them gets access only when a Factory Admin invites them or grants them a role.
+
+### Second sign-in factor for Factory Admins
+
+Everyone who holds Factory Admin (directly or through a team) must sign in with a password and a one-time code from an
+authenticator app. Other people are not asked for a code.
+
+- **Who decides.** Gantry does, not Keycloak alone. The API checks the sign-in's ID token for evidence of a second factor
+  (`amr` containing `otp`, `mfa`, `hwk` and so on, or an `acr` of `2`, `3` or `mfa`; change the accepted `acr` values with
+  `OIDC_MFA_ACR_VALUES`, first one is what is requested). A Factory Admin without it is refused at sign-in and on every
+  request, and sees a "Set up two-step sign-in" screen. This holds when a role is granted after sign-in.
+- **What Keycloak does.** The realm's `gantry-browser` flow is a step-up flow: level 1 is the password; level 2 is a TOTP code.
+  Gantry asks for level 2 (`acr_values=2`) when an admin follows the setup screen and on step-up by a session that has it.
+  A person with no authenticator is shown a QR code to scan the first time (required action `CONFIGURE_TOTP`).
+- **First admin.** The `GANTRY_BOOTSTRAP_ADMIN_EMAIL` person is refused on a password-only first sign-in and becomes
+  Factory Admin only after signing in with a code. They see the setup screen, press "Set up and sign in", scan the QR code and continue.
+- **GitHub sign-in** cannot show a second factor to Gantry: admins use single sign-on.
+- **Lost device.** Gantry cannot reset it; reset the person's OTP credential in the Keycloak admin console
+  (Users > Credentials) and keep a second admin enrolled. Existing admin sessions end at their next request after upgrading (migration 0047) and sign in again.
+- **Check once after install.** Sign in as the first admin and confirm the code is asked for and the Factory view opens. If the
+  realm was imported before this change, re-import it or set the browser flow to `gantry-browser` by hand.
+- **Development.** `GANTRY_DEV_ADMIN_MFA_OPTIONAL=true` (default in `compose.yml` only) waives the check for the seeded demo admin, who has
+  a password and no authenticator. The API refuses to start with it on unless `GANTRY_PUBLIC_URL` is localhost, and
+  `compose.prod.yml` sets it to false. I chose the switch over seeding an OTP credential because a seeded secret is shared and guessable.
 
 ## TLS
 
