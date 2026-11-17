@@ -2,6 +2,7 @@ import { createPool } from "@gantry/db";
 import pino from "pino";
 import { ensureBucket } from "./bucket.js";
 import { loadWorkerConfig } from "./config.js";
+import { startMetricsServer } from "./metrics.js";
 import { Worker, buildDeps } from "./worker.js";
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info", redact: ["*.authorization", "*.token", "*.runToken"] });
@@ -13,6 +14,10 @@ pool.on("error", (e) => log.error({ err: e.message }, "idle database client erro
 void ensureBucket(cfg, log);
 const worker = new Worker(buildDeps(pool, cfg, log));
 await worker.start();
+const metricsServer = await startMetricsServer(cfg.metricsPort ?? 0).catch((e: unknown) => {
+  log.error({ err: String(e) }, "metrics endpoint did not start");
+  return null;
+});
 
 let stopping = false;
 const shutdown = async (sig: string): Promise<void> => {
@@ -20,6 +25,7 @@ const shutdown = async (sig: string): Promise<void> => {
   stopping = true;
   log.info({ sig }, "shutting down");
   await worker.stop().catch((e: unknown) => log.error({ err: String(e) }, "shutdown"));
+  metricsServer?.close();
   await pool.end().catch(() => undefined);
   process.exit(0);
 };

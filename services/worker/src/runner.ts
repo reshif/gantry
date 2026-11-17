@@ -1,3 +1,4 @@
+import { jobSeconds, jobsTotal } from "./metrics.js";
 import { claim, complete, fail, fireDue, heartbeat, nextFireAt, withTx, type Job } from "@gantry/db";
 import type { Deps } from "./deps.js";
 import { errMsg, PermanentError } from "./errors.js";
@@ -127,6 +128,11 @@ export class JobRunner {
     const ctl = new AbortController();
     this.aborters.add(ctl);
     let lost = false;
+    const t0 = Date.now();
+    const outcome = (o: "done" | "retried" | "dead" | "lost"): void => {
+      jobsTotal.inc({ kind: job.kind, outcome: o });
+      jobSeconds.observe((Date.now() - t0) / 1000, { kind: job.kind });
+    };
     const hb = setInterval(() => {
       heartbeat(pool, job.id, workerId, cfg.jobLeaseMs).then(
         (ok) => {
@@ -142,14 +148,19 @@ export class JobRunner {
       const h = this.handlers[job.kind];
       if (!h) throw new PermanentError(`no handler for job kind ${job.kind}`, "unknown_kind");
       const result = await h(job, { deps: this.deps, signal: ctl.signal, last: job.attempts >= job.maxAttempts });
-      if (lost) return;
+      if (lost) return outcome("lost");
       const ok = await complete(pool, job.id, workerId, result === undefined ? null : result);
+      outcome(ok ? "done" : "lost");
       if (!ok) log.warn({ job: job.id, kind: job.kind }, "job lease was lost before completion; the result was not recorded");
     } catch (e) {
-      if (lost) return;
+      if (lost) return outcome("lost");
       const permanent = e instanceof PermanentError;
       log.warn({ job: job.id, kind: job.kind, attempt: job.attempts, err: errMsg(e), permanent }, "job failed");
-      await fail(pool, job.id, workerId, errMsg(e), { retry: !permanent }).catch((x) => log.error({ err: errMsg(x) }, "could not record job failure"));
+      const f = await fail(pool, job.id, workerId, errMsg(e), { retry: !permanent }).catch((x) => {
+        log.error({ err: errMsg(x) }, "could not record job failure");
+        return null;
+      });
+      outcome(f === null || f.status === "lost" ? "lost" : f.status === "queued" ? "retried" : "dead");
     } finally {
       clearInterval(hb);
       this.aborters.delete(ctl);

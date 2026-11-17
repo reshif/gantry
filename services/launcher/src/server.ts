@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import { METRICS_CONTENT_TYPE, MetricsRegistry, metricsAllowed } from "@gantry/domain";
 import { z } from "zod";
 import type { LauncherConfig } from "./config.js";
 import type { LauncherError, RunManager } from "./manager.js";
@@ -26,7 +27,8 @@ const STATUS: Record<LauncherError["kind"], number> = {
   docker: 502,
 };
 
-function refuse(reply: FastifyReply, e: LauncherError) {
+function refuse(reply: FastifyReply, e: LauncherError, count?: (kind: string) => void) {
+  count?.(e.kind);
   const body: Record<string, unknown> = { ok: false, kind: e.kind, msg: e.msg };
   if (e.kind === "teardown_incomplete") body.stop = e.stop;
   return reply.code(STATUS[e.kind]).send(body);
@@ -34,7 +36,7 @@ function refuse(reply: FastifyReply, e: LauncherError) {
 
 const stopQuery = z.object({ keepWorkspace: z.enum(["true", "false"]).optional() });
 
-export function buildServer(opts: { cfg: LauncherConfig; manager: RunManager; token: string; logger?: boolean }): FastifyInstance {
+export function buildServer(opts: { cfg: LauncherConfig; manager: RunManager; token: string; /** A second bearer token that may scrape /metrics from outside the internal network. */ metricsToken?: string | null; logger?: boolean }): FastifyInstance {
   const { cfg, manager, token } = opts;
   const app = Fastify({
     logger: opts.logger === false ? false : { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.authorization"] },
@@ -55,9 +57,34 @@ export function buildServer(opts: { cfg: LauncherConfig; manager: RunManager; to
     }
   });
 
-  // Everything except /healthz needs the launcher token.
+  // Request counts and timing, by route pattern. Run starts and refusals are counted by what the launcher answered.
+  const metrics = new MetricsRegistry();
+  const requests = metrics.counter("gantry_launcher_requests_total", "Launcher requests by method, route and status class.");
+  const errors = metrics.counter("gantry_launcher_errors_total", "Launcher requests that ended in a server error (5xx), by route.");
+  const latency = metrics.histogram("gantry_launcher_request_duration_seconds", "Launcher request time in seconds, by route.");
+  const refusals = metrics.counter("gantry_launcher_run_refusals_total", "Run starts or stops the launcher refused, by reason.");
+  const dockerUp = metrics.gauge("gantry_launcher_docker_up", "1 when the launcher can reach Docker.");
+  const active = metrics.gauge("gantry_launcher_runs_active", "Runs the launcher currently holds a container, network or volume for.");
+  const capacity = metrics.gauge("gantry_launcher_run_capacity", "The most runs the launcher will hold at once.");
+  capacity.set(cfg.maxConcurrentRuns);
+  metrics.collect(async () => {
+    const ping = await manager.ping();
+    dockerUp.set(ping ? 1 : 0);
+    if (!ping) return;
+    const l = await manager.list();
+    if (l.ok) active.set(l.value.runs.length);
+  });
+  app.addHook("onResponse", async (req, reply) => {
+    const route = req.routeOptions?.url ?? "unmatched";
+    if (route === "/metrics" || route === "/healthz") return;
+    requests.inc({ method: req.method, route, status: `${Math.floor(reply.statusCode / 100)}xx` });
+    if (reply.statusCode >= 500) errors.inc({ route });
+    latency.observe(reply.elapsedTime / 1000, { route });
+  });
+
+  // Everything except /healthz and /metrics needs the launcher token (/metrics has its own rule below).
   app.addHook("onRequest", async (req, reply) => {
-    if (req.url === "/healthz") return;
+    if (req.url === "/healthz" || req.url === "/metrics") return;
     if (!bearerMatches(req.headers.authorization, token)) {
       return reply.code(401).header("www-authenticate", "Bearer").send({ ok: false, msg: "unauthorized" });
     }
@@ -68,6 +95,14 @@ export function buildServer(opts: { cfg: LauncherConfig; manager: RunManager; to
     return reply.code(up ? 200 : 503).send({ ok: up });
   });
 
+  // Scraped from the internal network or with the metrics (or launcher) token; never through a proxy.
+  app.get("/metrics", async (req, reply) => {
+    if (!metricsAllowed({ remoteAddress: req.socket.remoteAddress, headers: req.headers, tokens: [token, opts.metricsToken] })) {
+      return reply.code(401).header("www-authenticate", "Bearer").send({ ok: false, msg: "unauthorized" });
+    }
+    return reply.header("content-type", METRICS_CONTENT_TYPE).header("cache-control", "no-store").send(await metrics.render());
+  });
+
   // start-run
   app.post("/v1/runs", async (req, reply) => {
     const parsed = startSchema.safeParse(req.body);
@@ -75,7 +110,7 @@ export function buildServer(opts: { cfg: LauncherConfig; manager: RunManager; to
       return reply.code(422).send({ ok: false, msg: "invalid request", issues: parsed.error.issues.map((i) => ({ path: i.path.join("."), msg: i.message })) });
     }
     const r = await manager.start(parsed.data);
-    if (!r.ok) return refuse(reply, r.error);
+    if (!r.ok) return refuse(reply, r.error, (k) => refusals.inc({ reason: k }));
     return reply.code(r.value.state === "running" ? 200 : 201).send({ ok: true, ...r.value });
   });
 
@@ -85,14 +120,14 @@ export function buildServer(opts: { cfg: LauncherConfig; manager: RunManager; to
     const q = stopQuery.safeParse(req.query);
     if (!id.success || !q.success) return reply.code(422).send({ ok: false, msg: "invalid run id or query" });
     const r = await manager.stop(id.data, { keepWorkspace: q.data.keepWorkspace !== "false" });
-    if (!r.ok) return refuse(reply, r.error);
+    if (!r.ok) return refuse(reply, r.error, (k) => refusals.inc({ reason: k }));
     return reply.send({ ok: true, ...r.value });
   });
 
   // list-runs
   app.get("/v1/runs", async (_req, reply) => {
     const r = await manager.list();
-    if (!r.ok) return refuse(reply, r.error);
+    if (!r.ok) return refuse(reply, r.error, (k) => refusals.inc({ reason: k }));
     return reply.send({ ok: true, ...r.value });
   });
 
