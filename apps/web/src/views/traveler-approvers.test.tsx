@@ -56,6 +56,12 @@ describe("Gate approver transparency", () => {
     await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
   });
 
+  it("says when the work order's class has its own count instead of the gate's base", async () => {
+    await show({ [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers({ rule: { text: "Needs 1 approval from Line Lead", required: 1, base: 2, classOverride: 1, sod: true, roles: [], people: [], conditions: [] }, progress: { have: 0, need: 1, approvals: [], unmet: [], onlyRequester: false } }) }) });
+    expect(await screen.findByText("This work order's class needs 1 instead of the gate's base 2.")).toBeTruthy();
+    expect(screen.getByText("0/1")).toBeTruthy();
+  });
+
   it("Edit rule opens Project config on that gate's approvers", async () => {
     await show({ [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers() }) });
     fireEvent.click(await screen.findByRole("button", { name: "Edit rule" }));

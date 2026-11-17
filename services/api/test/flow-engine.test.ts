@@ -271,6 +271,45 @@ d("flow engine: guarantees F1 to F6", () => {
       expect(again.status).toBe(409);
     });
 
+    describe("per-class approvals required", () => {
+      const put = (value: object) => w.call("p-daniel", "PUT", "/api/v1/projects/payments/approvers/G2", { value });
+      it("a work order of the listed class needs 1 while another class keeps the base 2; the audit records the override", async () => {
+        const a = await atGate("Class count listed", "p-tomas", rule());
+        const cls = (await w.get(a.id)).cls as string;
+        const b = await atGate("Class count unlisted", "p-tomas");
+        const ok = await put(rule({ classRequired: { [cls]: 1 } }));
+        expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+        expect(ok.body.msg).toMatch(new RegExp(`Per-class approvals: .*1 \\(base 2\\)`));
+        const ev = (await w.events("approvers.edit")).at(-1)!;
+        expect(ev.after).toMatchObject({ required: 2, classRequired: { [cls]: 1 }, sod: true });
+        expect(ev.before).toMatchObject({ required: 2, classRequired: {} });
+        const listed = await vote("p-priya", a.id, a.gate);
+        expect(listed.body).toMatchObject({ passed: true, have: 1, need: 1 });
+        // the other work order is the same class here, so list a class it does not have to prove the base count applies
+        await put(rule({ classRequired: { [cls === "docs" ? "hotfix" : "docs"]: 1 } }));
+        const base = await vote("p-priya", b.id, b.gate);
+        expect(base.body).toMatchObject({ passed: false, have: 1, need: 2 });
+      });
+      it("the author is still refused when the count is 1", async () => {
+        const a = await atGate("Class count author", "p-meera", rule({ roles: ["line_lead", "reviewer"] }));
+        const cls = (await w.get(a.id)).cls as string;
+        expect((await put(rule({ roles: ["line_lead", "reviewer"], classRequired: { [cls]: 1 } }))).status).toBe(200);
+        const own = await vote("p-meera", a.id, a.gate);
+        expect(own.status).toBe(403);
+        expect(own.body.msg).toMatch(/author/i);
+        expect((await vote("p-priya", a.id, a.gate)).body.passed).toBe(true);
+      });
+      it("rejects 0, negative, above the eligible pool, unknown classes, and any override on G0+G1", async () => {
+        for (const n of [0, -1]) expect((await put(rule({ classRequired: { docs: n } }))).status, String(n)).toBe(422);
+        const many = await put(rule({ classRequired: { docs: 9 } }));
+        expect(many.status).toBe(422);
+        expect(many.body.msg).toMatch(/eligible/);
+        expect((await put(rule({ classRequired: { nope: 1 } }))).status).toBe(422);
+        const g0 = await w.call("p-daniel", "PUT", "/api/v1/projects/payments/approvers/G0G1", { value: rule({ required: 1, classRequired: { docs: 1 } }) });
+        expect(g0.status).toBe(422);
+      });
+    });
+
     it("separation of duties: the author cannot approve; a stale instance id is refused; a reject reworks the station", async () => {
       const { id, gate } = await atGate("SoD and stale", "p-meera", rule({ sod: true, required: 1, roles: ["line_lead", "reviewer"] }));
       const own = await vote("p-meera", id, gate);

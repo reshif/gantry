@@ -1,4 +1,4 @@
-import type { ApproverRule, GateKind, Role } from "@gantry/domain";
+import { classRequiredError, type ApproverRule, type GateKind, type Role } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { invalid } from "../../core/errors.js";
 
@@ -49,6 +49,19 @@ export function checkRule(gateId: string, kind: GateKind, rule: ApproverRule, ct
     for (const [person, roles] of ctx.members) if (roles.some((r) => rule.roles.includes(r))) eligible.add(person);
     if (rule.required > eligible.size) {
       throw invalid(`Needs ${rule.required} approvals but only ${eligible.size} eligible ${eligible.size === 1 ? "person is" : "people are"} in ${projectName}.`);
+    }
+  }
+  // Per-class counts change the COUNT only: never separation of duties, never optional (>= 1), and only where a human count applies.
+  const cr = rule.classRequired;
+  const crErr = classRequiredError(cr, classes);
+  if (crErr) throw invalid(crErr);
+  if (cr && Object.keys(cr).length) {
+    if (kind === "auto") throw invalid("An automatic gate has no approvals to override per class.");
+    if (gateId === "G0G1") throw invalid("G0+G1 needs exactly one confirmation; it has no per-class count.");
+    const pool = new Set<string>(rule.people.filter((p) => ctx.members.has(p)));
+    for (const [person, roles] of ctx.members) if (roles.some((r) => rule.roles.includes(r))) pool.add(person);
+    for (const [cls, n] of Object.entries(cr)) {
+      if (n > pool.size) throw invalid(`${cls} needs ${n} approvals but only ${pool.size} eligible ${pool.size === 1 ? "person is" : "people are"} in ${projectName}.`);
     }
   }
   if (gateId === "G0G1" && rule.required !== 1) throw invalid("G0+G1 needs exactly one confirmation.");

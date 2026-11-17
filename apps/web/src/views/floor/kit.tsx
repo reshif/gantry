@@ -4,7 +4,7 @@
  */
 import { createContext, useContext, useMemo } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { DAY, HOUR, MIN, WO_STATES, bayDef, classesOf, fmt, gateAfter, gateDef, gateForWO, gateKind, type Bay, type Catalog, type EventEntry, type Gate, type Project, type Repo, type StateAt, type WorkOrder } from "@gantry/domain";
+import { DAY, HOUR, MIN, WO_STATES, requiredFor, bayDef, classesOf, fmt, gateAfter, gateDef, gateForWO, gateKind, type Bay, type Catalog, type EventEntry, type Gate, type Project, type Repo, type StateAt, type WorkOrder } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { useRepos } from "../../api/queries";
 
@@ -138,7 +138,7 @@ export function gateStateOf(ctx: FloorCtxValue, gid: string): { state: GateState
 export function gateHaveNeed(ctx: FloorCtxValue, w: WorkOrder, gid: string): { have: number; need: number } {
   const row = ctx.floor.gates.find((x) => x.wo === w.id && x.gate === gid);
   const rule = ctx.project.approvers[gid];
-  return { have: row?.have ?? w.gates?.[gid]?.approvals.length ?? 0, need: row?.need ?? rule?.required ?? 1 };
+  return { have: row?.have ?? w.gates?.[gid]?.approvals.length ?? 0, need: row?.need ?? requiredFor(rule, w.cls) };
 }
 
 /** The label for the gate column of a card or row. */

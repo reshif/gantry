@@ -3,6 +3,7 @@
  * and whether the gate can pass as configured. Read only. A Factory Admin is never listed as an approver of the rule: they may override (break-glass), which is shown apart.
  */
 import { gateDef, gateDecision, gateProgress, conditionsFor, type FlowState } from "./flow.js";
+import { requiredFor } from "./gates.js";
 import { isOnCall, rolesIn } from "./policy.js";
 import type { ApproverRule, Person, Project, WorkOrder } from "./types.js";
 
@@ -12,7 +13,7 @@ export interface GateApprovers {
   label: string;
   name: string;
   /** "Needs 2 approvals from Line Lead or Project Admin · author can't approve". */
-  rule: { text: string; required: number; sod: boolean; roles: Array<{ id: string; name: string }>; people: Array<{ id: string; name: string }>; conditions: string[] };
+  rule: { text: string; required: number; base: number; classOverride: number | null; sod: boolean; roles: Array<{ id: string; name: string }>; people: Array<{ id: string; name: string }>; conditions: string[] };
   progress: { have: number; need: number; approvals: Array<{ by: string; name: string; at: number }>; unmet: string[]; onlyRequester: boolean };
   eligible: EligibleApprover[];
   /** Factory Admins who may approve as a break-glass override (with a reason). */
@@ -25,8 +26,8 @@ const without = (p: Person, role: string): Person => ({ ...p, roles: p.roles.fil
 const list = (xs: string[]): string => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} or ${xs.at(-1)}` : (xs[0] ?? "nobody"));
 
 /** Plain-words rule: "Needs 2 approvals from Line Lead or Project Admin · author can't approve". */
-export function ruleText(rule: Pick<ApproverRule, "roles" | "people" | "required" | "sod">, roleName: (id: string) => string, personName: (id: string) => string): string {
-  const need = Math.max(1, rule.required || 1);
+export function ruleText(rule: Pick<ApproverRule, "roles" | "people" | "required" | "sod" | "classRequired">, roleName: (id: string) => string, personName: (id: string) => string, cls?: string | null): string {
+  const need = requiredFor(rule, cls);
   const from = [...rule.roles.map(roleName), ...rule.people.map(personName)];
   return `Needs ${need} approval${need === 1 ? "" : "s"} from ${list(from)}${rule.sod ? " · the author can't approve" : ""}`;
 }
@@ -68,10 +69,10 @@ export function gateApprovers(state: FlowState, wo: WorkOrder, gateId: string, n
   const need = prog.need;
   const remaining = eligible.filter((e) => !wo.gates[gateId]?.approvals.some((a) => a.by === e.id));
   const satisfiable = prog.have + remaining.length >= need;
-  const text = ruleText(rule, roleName, nameOf);
+  const text = ruleText(rule, roleName, nameOf, wo.cls);
   return {
     gate: gateId, label: g.label, name: g.name,
-    rule: { text, required: need, sod: rule.sod, roles: rule.roles.map((id) => ({ id, name: roleName(id) })), people: rule.people.map((id) => ({ id, name: nameOf(id) })), conditions: conditionsFor(project, wo, gateId).map((c) => c.text) },
+    rule: { text, required: need, base: Math.max(1, rule.required || 1), classOverride: rule.classRequired && Object.prototype.hasOwnProperty.call(rule.classRequired, wo.cls) ? requiredFor(rule, wo.cls) : null, sod: rule.sod, roles: rule.roles.map((id) => ({ id, name: roleName(id) })), people: rule.people.map((id) => ({ id, name: nameOf(id) })), conditions: conditionsFor(project, wo, gateId).map((c) => c.text) },
     progress: { have: prog.have, need, approvals: (wo.gates[gateId]?.approvals ?? []).map((a) => ({ by: a.by, name: nameOf(a.by), at: (a as { at?: number }).at ?? 0 })), unmet: prog.unmet.map((c) => c.text), onlyRequester: prog.onlyRequester },
     eligible, overrides, satisfiable,
     warning: satisfiable ? null : `This gate can't pass as configured: ${remaining.length === 0 && prog.have === 0 ? "nobody is" : `only ${prog.have + remaining.length} ${prog.have + remaining.length === 1 ? "person is" : "people are"}`} eligible and it needs ${need}.`,

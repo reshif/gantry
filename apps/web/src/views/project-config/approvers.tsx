@@ -1,6 +1,6 @@
 /** Project config: Approvers tab, rule editor and away dialog (legacy project-config.js approversTab, ruleEditor, awayDialog). */
 import { useState } from "react";
-import { DAY, fmt, flowOf, type ApproverCondition, type ApproverRule, type Catalog, type Person } from "@gantry/domain";
+import { DAY, fmt, flowOf, requiredFor, type ApproverCondition, type ApproverRule, type Catalog, type Person } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { Dialog } from "../../ui/Overlay";
@@ -75,7 +75,7 @@ export function ApproversTab({ p, cat, people, s, set }: PcProps) {
             {fg.map((x) => {
               const r = p.approvers[x.id];
               const gs = gateState(p, x.id);
-              const sum = x.mode === "auto" ? "Automatic checks" : x.id === "G0G1" ? "Submitter confirms" : r ? `${r.required} of ${r.roles.map((y) => roleName(cat, y)).concat(r.people.map(name)).join(", ") || "nobody"}${r.conditions.length ? ` · ${r.conditions.length} condition${r.conditions.length > 1 ? "s" : ""}` : ""}` : "No rule";
+              const sum = x.mode === "auto" ? "Automatic checks" : x.id === "G0G1" ? "Submitter confirms" : r ? `${r.required}${r.classRequired && Object.keys(r.classRequired).length ? ` (${Object.entries(r.classRequired).map(([c, n]) => `${classOf(cat, p, c).name} ${n}`).join(", ")})` : ""} of ${r.roles.map((y) => roleName(cat, y)).concat(r.people.map(name)).join(", ") || "nobody"}${r.conditions.length ? ` · ${r.conditions.length} condition${r.conditions.length > 1 ? "s" : ""}` : ""}` : "No rule";
               return (
                 <li key={x.id}>
                   <button type="button" id={`pcf-ap-g-${x.id}`} className={`pcf-gate-btn${x.id === g.id ? " is-sel" : ""}`} aria-current={x.id === g.id ? "true" : undefined} onClick={() => set({ gate: x.id })}>
@@ -141,6 +141,10 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
     if (gid !== "G0G1" && r.required < 1) return setErr("A human gate needs at least one approval.");
     if (!r.roles.length && !r.people.length) return setErr("Pick at least one role or named person.");
     if (r.required > elig.length) return setErr(`Needs ${r.required} approvals but only ${elig.length} eligible ${elig.length === 1 ? "person is" : "people are"} in ${p.name}.`);
+    for (const [c, n] of Object.entries(r.classRequired ?? {})) {
+      if (!Number.isInteger(n) || n < 1) return setErr(`Approvals required for ${c} must be at least 1.`);
+      if (n > elig.length) return setErr(`${c} needs ${n} approvals but only ${elig.length} eligible ${elig.length === 1 ? "person is" : "people are"} in ${p.name}.`);
+    }
     if (r.conditions.some((c) => !c.needs.roles.length && !c.needs.people.length)) return setErr("Every condition needs at least one role.");
     const prev = saved?.conditions ?? [];
     const out = clone(r);
@@ -211,6 +215,26 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
             <span>{`of ${elig.length} eligible: `}</span>
             <span className="small">{elig.map((x) => x.name + (x.oncall ? " (on call)" : "") + (x.away && x.away.to > now ? " (away)" : "")).join(", ") || "nobody yet"}</span>
           </div>
+          {gid !== "G0G1" ? (
+            <div className="pcf-cls-counts">
+              <div className="small strong">Approvals required per class</div>
+              <p className="muted small">{`Optional. Changes only the count for that class; a class without its own number needs ${r.required}. The author still cannot approve when the rule says so.`}</p>
+              <ul className="plain-list">
+                {classesOn.map((c) => {
+                  const own = r.classRequired?.[c.id];
+                  return (
+                    <li key={c.id} className="pcf-deleg-row">
+                      <span>{c.name}</span>
+                      <NumInput id={`pcf-ap-cls-${c.id}`} value={own ?? r.required} min={1} max={9} locked={locked} label={`Approvals required for ${c.name}`}
+                        onCommit={(v) => upd((x) => { const m = { ...(x.classRequired ?? {}) }; if (v === x.required) delete m[c.id]; else m[c.id] = v; if (Object.keys(m).length) x.classRequired = m; else delete x.classRequired; })} />
+                      <span className="small muted">{own !== undefined ? `instead of ${r.required}` : "base count"}</span>
+                      {own !== undefined ? <Btn small kind="ghost" id={`pcf-ap-cls-${c.id}-clr`} guard={d} label="Use base" onClick={() => upd((x) => { const m = { ...(x.classRequired ?? {}) }; delete m[c.id]; if (Object.keys(m).length) x.classRequired = m; else delete x.classRequired; })} /> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
           <div className="toggle-row">
             <label htmlFor={sodId}>Author cannot approve (separation of duties)</label>
             <Toggle id={sodId} checked={r.sod} decision={d} onChange={(v) => upd((x) => { x.sod = v; })} />
@@ -305,7 +329,7 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
             <Field label="Changed path" htmlFor="pcf-sc-path"><input id="pcf-sc-path" className="input mono" defaultValue={sc.path} placeholder="/payments/refunds" onBlur={(e) => set({ scen: { ...sc, path: e.target.value.trim() } })} /></Field>
           </div>
           <p className="small" aria-live="polite">
-            {`${r.required} approval${r.required > 1 ? "s" : ""} from ${r.roles.map((x) => roleName(cat, x)).concat(r.people.map(name)).join(", ") || "nobody"}${r.sod ? ", not the author" : ""}${scConds.length ? `; plus: ${scConds.map(condText).join("; ")}` : "; no conditions apply"}.`}
+            {`${requiredFor(r, sc.cls)} approval${requiredFor(r, sc.cls) > 1 ? "s" : ""} from ${r.roles.map((x) => roleName(cat, x)).concat(r.people.map(name)).join(", ") || "nobody"}${r.sod ? ", not the author" : ""}${scConds.length ? `; plus: ${scConds.map(condText).join("; ")}` : "; no conditions apply"}.`}
           </p>
         </fieldset>
         <div className="form-err" role="alert">{err}</div>
