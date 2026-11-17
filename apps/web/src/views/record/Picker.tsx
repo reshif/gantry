@@ -1,4 +1,5 @@
 /** The record picker: every work order the viewer may see, with search, project and stage filters (legacy record.js picker). */
+import { qk } from "../../api/keys";
 import { useInfiniteQuery, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { fmt } from "@gantry/domain";
@@ -36,7 +37,7 @@ export function Picker({ note }: { note?: string | null }) {
   }, [q]);
   const params = { q: dq, sort: sort.k, dir: sort.dir > 0 ? "asc" : "desc", ...(stage === "intake" ? { where: "intake", state: "open" } : stage === "flight" ? { state: "open" } : stage === "done" ? { state: "done" } : stage === "killed" ? { state: "killed" } : {}) };
   const list = useInfiniteQuery({
-    queryKey: ["workOrders", "records", projectId, params],
+    queryKey: qk.woRecords(projectId, params),
     queryFn: ({ pageParam }) => get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { ...params, limit: PAGE, cursor: pageParam || undefined }),
     initialPageParam: "",
     getNextPageParam: (last) => last.next || undefined,

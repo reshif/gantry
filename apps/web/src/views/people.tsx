@@ -2,6 +2,7 @@
  * People & teams (spec 8.9). Port of legacy/js/views/people.js: org tree, member detail with factory role, roles per
  * project, effective permissions (decided by the server's can(), compact cells) and history.
  */
+import { qk } from "../api/keys";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fmt, type Person, type Project, type Role, type Team } from "@gantry/domain";
@@ -223,7 +224,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const actors = useActors();
   const [effProject, setEffProject] = useState("all");
   const [cell, setCell] = useState<{ action: string; project: string } | null>(null);
-  const eff = useQuery({ queryKey: ["people", "effective", p.id], queryFn: () => get<EffectivePermissions>(api(`people/${encodeURIComponent(p.id)}/effective-permissions`)) });
+  const eff = useQuery({ queryKey: qk.effectivePermissions(p.id), queryFn: () => get<EffectivePermissions>(api(`people/${encodeURIComponent(p.id)}/effective-permissions`)) });
   const away = p.away && p.away.to > Date.now() ? p.away : null;
   const visible = projects.filter((x) => x.status !== "archived");
   const frRole = p.roles.find((g) => g.scope === "factory" && !g.via)?.role ?? "";
@@ -427,7 +428,7 @@ function sourceText(sources: string[] | undefined, teams: Record<string, string>
 /** The reason behind one cell: the simulator answers it (same can()). */
 function useSelectedCell(person: string, cell: { action: string; project: string } | null) {
   return useQuery({
-    queryKey: ["people", "cell", person, cell?.action, cell?.project],
+    queryKey: qk.peopleCell(person, cell?.action, cell?.project),
     enabled: !!cell,
     queryFn: async () => {
       const r = await ops.simulateAccess({ person, action: cell!.action, project: cell!.project, time: Date.now() });

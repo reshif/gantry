@@ -2,6 +2,7 @@
  * Shared pieces of the Onboarding screen (legacy onboarding.js helpers): stage and status of a repo, the stepper, the settings draft the wizard and the settings dialog share,
  * and the reads the screen needs beyond the repo list (source integrations, available repositories, the pull request's files).
  */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import { NOTIFY_EVENTS, ONBOARD_STAGES, type IntegrationInstance, type IntegrationType, type NotifyOverride, type Project, type Repo } from "@gantry/domain";
 import { api, get } from "../../api/client";
@@ -136,7 +137,7 @@ export interface AvailableRepos {
 }
 /** Repositories the GitHub App can see and Gantry has not connected yet. */
 export const useAvailableRepos = (projectId: string, enabled: boolean) =>
-  useQuery({ queryKey: ["repos", projectId, "available"], queryFn: () => get<AvailableRepos>(api(`projects/${encodeURIComponent(projectId)}/repos/available`)), enabled, staleTime: 15_000, retry: false });
+  useQuery({ queryKey: qk.reposAvailable(projectId), queryFn: () => get<AvailableRepos>(api(`projects/${encodeURIComponent(projectId)}/repos/available`)), enabled, staleTime: 15_000, retry: false });
 
 export interface PrFiles {
   number: number | null;
@@ -144,7 +145,7 @@ export interface PrFiles {
 }
 /** The onboarding pull request's files with the lines each adds. */
 export const usePrFiles = (repoId: string, enabled: boolean, key: unknown) =>
-  useQuery({ queryKey: ["repos", "pr", repoId, key], queryFn: () => get<PrFiles>(api(`repos/${encodeURIComponent(repoId)}/onboarding/pr`)), enabled, retry: false });
+  useQuery({ queryKey: qk.repoPr(repoId, key), queryFn: () => get<PrFiles>(api(`repos/${encodeURIComponent(repoId)}/onboarding/pr`)), enabled, retry: false });
 
 /* ---------- settings draft (shared by the wizard and the settings dialog) ---------- */
 

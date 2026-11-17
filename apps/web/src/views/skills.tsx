@@ -15,19 +15,23 @@ import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { navigate } from "../lib/router";
 import { useOutcome } from "./govern/data";
+import { useDraft } from "../lib/useDraft";
+import { useLeaveGuard } from "../lib/useLeaveGuard";
+import { DraftConflictBanner } from "../ui/DraftConflict";
+import { invalidateSlices } from "../api/keys";
 import { agentsSelect, EntityHistory, useStations, type AgentRow } from "./agents/kit";
 
 type SkillRow = Skill & { rev: number };
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
 /* screen state, kept across tabs and screens like legacy `ui` */
-const ui = { sel: null as string | null, tab: "def", draft: null as { name: string; desc: string; when: string; body: string; resources: string } | null, draftFor: null as string | null, note: "", q: "", filter: "all" };
+const ui = { sel: null as string | null, tab: "def", note: "", q: "", filter: "all" };
 let tick = 0;
 const listeners = new Set<() => void>();
 const rerender = (): void => { tick++; listeners.forEach((l) => l()); };
 const useSkillsUi = (): number => useSyncExternalStore((l) => (listeners.add(l), () => listeners.delete(l)), () => tick);
 /** Other screens (learning, agents) open a skill. */
-export const skillsSelect = (id: string, tab?: string): void => { ui.sel = id; ui.draft = null; if (tab) ui.tab = tab; rerender(); };
+export const skillsSelect = (id: string, tab?: string): void => { ui.sel = id; ui.note = ""; if (tab) ui.tab = tab; rerender(); };
 
 /** The screen's state, exported so tests can reset it. */
 export const skillsUi = ui;
@@ -54,7 +58,7 @@ function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] })
     if (ui.filter === "lowcov" && covPct(sk) >= 0.85 && sk.coverage.cases) return false;
     return true;
   });
-  const open = (id: string) => { ui.sel = id; ui.draft = null; rerender(); };
+  const open = (id: string) => { ui.sel = id; ui.note = ""; rerender(); };
   return (
     <div>
       <div className="toolbar sk-toolbar">
@@ -91,27 +95,33 @@ function DefTab({ sk, perm }: { sk: SkillRow; perm: Decision }) {
   const out = useOutcome();
   const ro = !perm.allowed;
   const saved = { name: sk.name, desc: sk.desc, when: sk.when, body: sk.body, resources: sk.resources.join("\n") };
-  if (!ui.draft || ui.draftFor !== sk.id) { ui.draft = { ...saved }; ui.draftFor = sk.id; ui.note = ""; }
-  const d = ui.draft;
-  const dirty = JSON.stringify(d) !== JSON.stringify(saved);
+  // Only the keys changed here are sent, with the revision this draft started from; a colleague's edit to the same field is a conflict, never a silent overwrite.
+  const draft = useDraft<typeof saved>({
+    scope: "skill", id: sk.id, server: saved, rev: sk.rev,
+    save: (p, ifMatch) => {
+      const patch: Record<string, unknown> = { ...p };
+      if (typeof p.name === "string") patch.name = p.name.trim();
+      if (typeof p.resources === "string") patch.resources = p.resources.split("\n").map((x) => x.trim()).filter(Boolean);
+      return ops.saveSkill(sk.id, patch, ui.note.trim() || `Edited ${Object.keys(patch).join(", ")}`, { ifMatch });
+    },
+    refresh: () => invalidateSlices(["skills"]),
+  });
+  const d = draft.values;
+  const dirty = draft.dirty;
+  useLeaveGuard(dirty);
   const next = sk.version.split(".").map(Number);
   next[1] = (next[1] ?? 0) + 1;
   next[2] = 0;
   const inp = (id: string, key: keyof typeof saved, rows?: number, ph?: string) => {
-    const set = (v: string) => { d[key] = v; rerender(); };
+    const set = (v: string) => draft.set(key, v);
     return rows
       ? <textarea id={id} className={`input${key === "body" || key === "resources" ? " mono" : ""}`} rows={rows} disabled={ro} placeholder={ph ?? ""} value={d[key]} onChange={(e) => set(e.target.value)} />
       : <input id={id} className="input" disabled={ro} placeholder={ph ?? ""} value={d[key]} onChange={(e) => set(e.target.value)} />;
   };
   const save = () => {
-    const cur = d;
-    if (JSON.stringify(cur) === JSON.stringify(saved)) { out({ ok: true, msg: "Nothing changed.", status: 200 }); return; }
-    if (!cur.name.trim()) { out({ ok: false, msg: "Name the skill.", status: 422 }); return; }
-    const patch: Record<string, unknown> = {};
-    for (const k of ["name", "desc", "when", "body"] as const) if (cur[k] !== sk[k]) patch[k] = k === "name" ? cur[k].trim() : cur[k];
-    const res = cur.resources.split("\n").map((x) => x.trim()).filter(Boolean);
-    if (JSON.stringify(res) !== JSON.stringify(sk.resources)) patch.resources = res;
-    void ops.saveSkill(sk.id, patch, ui.note.trim() || `Edited ${Object.keys(patch).join(", ")}`, { ifMatch: sk.rev }).then((r) => { out(r); if (r.ok) { ui.draft = null; rerender(); } });
+    if (!dirty) { out({ ok: true, msg: "Nothing changed.", status: 200 }); return; }
+    if (!d.name.trim()) { out({ ok: false, msg: "Name the skill.", status: 422 }); return; }
+    void draft.save().then((r) => { if (r) { out(r); if (r.ok) { ui.note = ""; rerender(); } } });
   };
   return (
     <div className="sk-def">
@@ -125,9 +135,10 @@ function DefTab({ sk, perm }: { sk: SkillRow; perm: Decision }) {
           <input id="sk-note" className="input" disabled={ro} placeholder="What changed, in one line" value={ui.note} onChange={(e) => { ui.note = e.target.value; rerender(); }} />
         </Field>
       </div>
+      <DraftConflictBanner id="sk-conflict" conflict={draft.conflict} onKeepMine={draft.keepMine} onDiscard={draft.discard} />
       <div className={`savebar${dirty ? " is-dirty" : ""}`} id="sk-savebar">
         <span className="muted small savebar-text">Every save is a new version with your note.</span>
-        <Btn label="Discard" id="sk-discard" guard={ro ? perm : null} onClick={() => { ui.draft = null; rerender(); }} />
+        <Btn label="Discard" id="sk-discard" guard={ro ? perm : null} onClick={draft.discard} />
         <Btn label={`Save as v${next.join(".")}`} kind="primary" id="sk-save" guard={ro ? perm : null} onClick={save} />
       </div>
     </div>
@@ -288,7 +299,7 @@ function NewSkill({ agents, close }: { agents: AgentRow[]; close: () => void }) 
               if (!r.ok) { setErr(r.msg); return; }
               const created = (r as unknown as { skill?: SkillRow }).skill;
               if (created && f.attach) { const r2 = await ops.attachSkill(f.attach, created.id, true); if (!r2.ok) ui_.toast(r2.msg, "error"); }
-              if (created) { ui.sel = created.id; ui.tab = "def"; ui.draft = null; rerender(); }
+              if (created) { ui.sel = created.id; ui.tab = "def"; rerender(); }
               ui_.toast(r.msg, "ok");
               done();
             });

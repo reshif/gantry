@@ -3,6 +3,7 @@
  * The kill dialog shows what the kill would touch (GET /stops/impact, which needs the kill right) and who is told about it.
  * Every result comes from the API: a refusal is shown inline, never swallowed.
  */
+import { qk } from "../api/keys";
 import { useQueries } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { fmt } from "@gantry/domain";
@@ -31,7 +32,7 @@ interface PreviewItem {
 function useNotifyPreview(event: "kill" | "restore", projectIds: string[]): PreviewItem[] {
   const qs = useQueries({
     queries: projectIds.map((id) => ({
-      queryKey: ["notifications", "preview", event, id],
+      queryKey: qk.notifyPreview(event, id),
       queryFn: () => get<{ items: PreviewItem[] }>(api(`projects/${encodeURIComponent(id)}/routes/preview`), { event }),
       retry: false,
       staleTime: 30_000,

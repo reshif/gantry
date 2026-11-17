@@ -3,13 +3,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
-import { bindQueryClient } from "../api/keys";
+import { bindQueryClient, invalidateSlices } from "../api/keys";
 import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import SkillsView, { skillsUi } from "./skills";
+import { clearDrafts } from "../lib/useDraft";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
-interface Call { method: string; path: string; body: any }
+interface Call { method: string; path: string; body: any; headers?: Record<string, string> }
 
 const person = (id: string, name: string) => ({ id, name, title: "Engineer", email: `${id}@acme.dev`, teams: ["payments"], roles: [{ role: "factory_admin", scope: "factory" }], status: "active", oncall: false, github: "", away: null, version: 2 });
 const PEOPLE = [person("p-asha", "Asha Raman")];
@@ -42,7 +43,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     const u = new URL(url, "http://x");
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, path: u.pathname, body });
+    calls.push({ method, path: u.pathname, body, headers: (init?.headers ?? {}) as Record<string, string> });
     if (u.pathname === "/api/v1/can") {
       const checks = (body as { checks: Array<{ action: string }> }).checks;
       return new Response(JSON.stringify({ results: checks.map((c) => (denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Factory Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
@@ -67,7 +68,8 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
-  Object.assign(skillsUi, { sel: null, tab: "def", draft: null, draftFor: null, note: "", q: "", filter: "all" });
+  clearDrafts();
+  Object.assign(skillsUi, { sel: null, tab: "def", note: "", q: "", filter: "all" });
 });
 afterEach(() => {
   cleanup();
@@ -140,6 +142,40 @@ describe("Skills screen", () => {
     expect(w.path).toBe("/api/v1/skills/sk-review");
     expect(JSON.stringify(w.body)).toContain("A sharper purpose.");
     expect(JSON.stringify(w.body)).toContain("Clarified");
+  });
+
+  it("keeps a colleague's change to a field this person did not touch, and sends only the touched field with the new revision", async () => {
+    let live = skill("sk-review", "Code review", { rev: 1 });
+    const calls = setup({ "GET /api/v1/skills": () => ({ body: [live] }), "PATCH /api/v1/skills/sk-review": () => ({ body: { ok: true, msg: "Saved." } }) });
+    mount();
+    fireEvent.change(await byId("sk-name"), { target: { value: "Code review v2" } });
+    live = skill("sk-review", "Code review", { rev: 2, desc: "A colleague rewrote this." });
+    invalidateSlices(["skills"]);
+    await waitFor(() => expect(((document.getElementById("sk-desc")) as HTMLTextAreaElement).value).toBe("A colleague rewrote this."));
+    expect(document.getElementById("sk-conflict")).toBeNull();
+    expect(((await byId("sk-name")) as HTMLInputElement).value).toBe("Code review v2");
+    fireEvent.click(await byId("sk-save"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    const w = writes(calls)[0]!;
+    expect(Object.keys(w.body.patch)).toEqual(["name"]);
+    expect(String(w.headers?.["If-Match"])).toBe("2");
+  });
+
+  it("stops with a conflict banner when the same field changed on both sides, and sends nothing until a choice is made", async () => {
+    let live = skill("sk-review", "Code review", { rev: 1 });
+    const calls = setup({ "GET /api/v1/skills": () => ({ body: [live] }), "PATCH /api/v1/skills/sk-review": () => ({ body: { ok: true, msg: "Saved." } }) });
+    mount();
+    fireEvent.change(await byId("sk-desc"), { target: { value: "Mine." } });
+    live = skill("sk-review", "Code review", { rev: 2, desc: "Theirs." });
+    invalidateSlices(["skills"]);
+    const banner = await byId("sk-conflict");
+    expect(banner.getAttribute("role")).toBe("alert");
+    fireEvent.click(await byId("sk-save"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(writes(calls)).toHaveLength(0);
+    fireEvent.click(await byId("sk-conflict-theirs"));
+    await waitFor(() => expect(((document.getElementById("sk-desc")) as HTMLTextAreaElement).value).toBe("Theirs."));
+    expect(document.getElementById("sk-conflict")).toBeNull();
   });
 
   it("makes the skill read-only with the reason when the viewer may not edit skills, and sends nothing", async () => {

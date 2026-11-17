@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
-import { bindQueryClient } from "../api/keys";
+import { bindQueryClient, invalidateSlices } from "../api/keys";
 import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
+import { clearDrafts } from "../lib/useDraft";
 import AgentsView from "./agents";
 import SkillsView, { skillsUi } from "./skills";
 import { ui as agentsUi } from "./agents/kit";
@@ -103,8 +104,9 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
-  Object.assign(skillsUi, { sel: null, tab: "def", draft: null, draftFor: null, note: "", q: "", filter: "all" });
-  Object.assign(agentsUi, { sel: null, draft: null, draftFor: null, tab: "config", ctxProject: null, ctxRepo: null, newVer: "", newNote: "" });
+  clearDrafts();
+  Object.assign(skillsUi, { sel: null, tab: "def", note: "", q: "", filter: "all" });
+  Object.assign(agentsUi, { sel: null, tab: "config", ctxProject: null, ctxRepo: null, newVer: "", newNote: "" });
 });
 afterEach(() => {
   cleanup();
@@ -161,6 +163,41 @@ describe("Agents screen", () => {
     expect(c.body.patch.budget).toBe(15);
     expect(c.body.patch.guardrails).toEqual({ paths: ["infra/prod/**"], maxDiff: 600 });
     expect(c.body.note).toBe("tools, budget, guardrails");
+  });
+
+  it("does not revert a colleague's change to a key this person did not touch, and sends the new revision", async () => {
+    let live = { ...BUILD };
+    const calls = setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }), "PATCH /api/v1/agents/ag-build": () => ok() });
+    mount(<AgentsView />);
+    fireEvent.change(await byId("ag-maxdiff"), { target: { value: "600" } });
+    live = { ...BUILD, rev: 8, budget: 20 };
+    invalidateSlices(["agents"]);
+    await waitFor(() => expect(((document.getElementById("ag-budget")) as HTMLInputElement).value).toBe("20"));
+    expect(document.getElementById("ag-conflict")).toBeNull();
+    fireEvent.click(await byId("ag-save"));
+    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
+    const c = writes(calls, "PATCH")[0]!;
+    expect(Object.keys(c.body.patch)).toEqual(["guardrails"]);
+    expect(c.headers["if-match"]).toBe("8");
+  });
+
+  it("shows a conflict instead of saving when the same key changed on both sides", async () => {
+    let live = { ...BUILD };
+    const calls = setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }), "PATCH /api/v1/agents/ag-build": () => ok() });
+    mount(<AgentsView />);
+    fireEvent.change(await byId("ag-budget"), { target: { value: "15" } });
+    live = { ...BUILD, rev: 8, budget: 20 };
+    invalidateSlices(["agents"]);
+    expect((await byId("ag-conflict")).getAttribute("role")).toBe("alert");
+    fireEvent.click(await byId("ag-save"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(writes(calls, "PATCH")).toHaveLength(0);
+    fireEvent.click(await byId("ag-conflict-mine"));
+    await waitFor(() => expect(document.getElementById("ag-conflict")).toBeNull());
+    fireEvent.click(await byId("ag-save"));
+    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
+    expect(writes(calls, "PATCH")[0]!.body.patch).toEqual({ budget: 15 });
+    expect(writes(calls, "PATCH")[0]!.headers["if-match"]).toBe("8");
   });
 
   it("keeps the draft across tabs and discards it on request", async () => {

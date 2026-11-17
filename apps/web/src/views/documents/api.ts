@@ -1,4 +1,5 @@
 /** Station documents and the dialogue log (services/api routes/workorders.ts). Keys start with `workOrders`, so any work-order change refreshes them. */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import { api, get, post, type ApiResult } from "../../api/client";
 import { invalidateSlices } from "../../api/keys";
@@ -56,11 +57,11 @@ export interface Dialogue { questions: StationQuestion[]; assumptions: Assumptio
 
 const enc = encodeURIComponent;
 export const useWoDocuments = (woId: string | null | undefined) =>
-  useQuery({ queryKey: ["workOrders", "documents", woId ?? ""], queryFn: () => get<{ items: DocVersion[] }>(api(`work-orders/${enc(woId ?? "")}/documents`)), enabled: !!woId });
+  useQuery({ queryKey: qk.woDocuments(woId ?? ""), queryFn: () => get<{ items: DocVersion[] }>(api(`work-orders/${enc(woId ?? "")}/documents`)), enabled: !!woId });
 export const useWoDocument = (woId: string, id: string | null | undefined) =>
-  useQuery({ queryKey: ["workOrders", "document", woId, id ?? ""], queryFn: () => get<DocVersion>(api(`work-orders/${enc(woId)}/documents/${enc(id ?? "")}`)), enabled: !!id, staleTime: Infinity });
+  useQuery({ queryKey: qk.woDocument(woId, id ?? ""), queryFn: () => get<DocVersion>(api(`work-orders/${enc(woId)}/documents/${enc(id ?? "")}`)), enabled: !!id, staleTime: Infinity });
 export const useWoDialogue = (woId: string | null | undefined) =>
-  useQuery({ queryKey: ["workOrders", "dialogue", woId ?? ""], queryFn: () => get<Dialogue>(api(`work-orders/${enc(woId ?? "")}/dialogue`)), enabled: !!woId });
+  useQuery({ queryKey: qk.woDialogue(woId ?? ""), queryFn: () => get<Dialogue>(api(`work-orders/${enc(woId ?? "")}/dialogue`)), enabled: !!woId });
 
 export async function answerQuestion(woId: string, qid: string, b: { kind: "answer" | "dont_know" | "not_relevant"; answer?: string }): Promise<ApiResult> {
   const r = await post(api(`work-orders/${enc(woId)}/questions/${enc(qid)}/answer`), b);
@@ -94,9 +95,9 @@ export interface ResearchPlan {
 export interface ResearchState { plan: ResearchPlan | null; allowList: string[]; canDecide: boolean; canApproveUnlisted: boolean }
 
 export const useWoSources = (woId: string | null | undefined) =>
-  useQuery({ queryKey: ["workOrders", "sources", woId ?? ""], queryFn: () => get<{ items: Source[] }>(api(`work-orders/${enc(woId ?? "")}/sources`)), enabled: !!woId });
+  useQuery({ queryKey: qk.woSources(woId ?? ""), queryFn: () => get<{ items: Source[] }>(api(`work-orders/${enc(woId ?? "")}/sources`)), enabled: !!woId });
 export const useWoSource = (woId: string, ref: string | null) =>
-  useQuery({ queryKey: ["workOrders", "source", woId, ref ?? ""], queryFn: () => get<Source>(api(`work-orders/${enc(woId)}/sources/${enc(ref ?? "")}`)), enabled: !!ref, staleTime: Infinity });
+  useQuery({ queryKey: qk.woSource(woId, ref ?? ""), queryFn: () => get<Source>(api(`work-orders/${enc(woId)}/sources/${enc(ref ?? "")}`)), enabled: !!ref, staleTime: Infinity });
 
 export async function decideResearchPlan(woId: string, b: { decision: "approve" | "reject"; hosts?: string[]; web?: boolean; budgetUsd?: number | null; note?: string }): Promise<ApiResult> {
   const r = await post(api(`work-orders/${enc(woId)}/research-plan`), b);
@@ -117,7 +118,7 @@ export interface RunTimeline {
 const live = (runs: RunTimeline[] | undefined) => !!runs?.some((r) => r.state === "running" || r.state === "starting");
 /** Polls while a run is live (every 4 s), not otherwise. */
 export const useWoTimeline = (woId: string | null | undefined) =>
-  useQuery({ queryKey: ["workOrders", "timeline", woId ?? ""], queryFn: () => get<{ runs: RunTimeline[] }>(api(`work-orders/${enc(woId ?? "")}/timeline`)), enabled: !!woId, refetchInterval: (q) => (live(q.state.data?.runs) ? 4000 : false) });
+  useQuery({ queryKey: qk.woTimeline(woId ?? ""), queryFn: () => get<{ runs: RunTimeline[] }>(api(`work-orders/${enc(woId ?? "")}/timeline`)), enabled: !!woId, refetchInterval: (q) => (live(q.state.data?.runs) ? 4000 : false) });
 
 export interface Objection {
   id: string; station: string; attemptId: string | null; raisedBy: string; targetDoc: string; targetStation: string | null; section: string; claim: string; reason: string;

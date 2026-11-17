@@ -8,6 +8,8 @@ import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
 import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
 import { tip } from "./Tip";
+import { DirtyScope, type DirtyScopeApi } from "../lib/useLeaveGuard";
+import "../lib/data.css";
 
 /* ---------- focus trap ---------- */
 
@@ -53,8 +55,13 @@ export interface DialogProps extends Omit<DialogOpts, "onClose"> {
 }
 
 /** A modal dialog. Render it while open; call onClose to dismiss. Also used by ui.dialog(). */
-export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }: DialogProps) {
+export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose: close }: DialogProps) {
   const panel = useRef<HTMLDivElement>(null);
+  // Forms inside mark themselves with useLeaveGuard(dirty); a dismissal (scrim, Escape, X, Cancel) then asks before discarding input.
+  const dirtyIds = useRef(new Set<symbol>());
+  const [confirming, setConfirming] = useState(false);
+  const scope = useMemo<DirtyScopeApi>(() => ({ mark: (id, d) => void (d ? dirtyIds.current.add(id) : dirtyIds.current.delete(id)) }), []);
+  const onClose = () => (dirtyIds.current.size ? setConfirming(true) : close());
   const titleId = useMemo(() => `dlg-title-${Math.random().toString(36).slice(2, 9)}`, []);
   useRestoreFocus();
   useEffect(() => {
@@ -72,9 +79,9 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }
     e.preventDefault();
     if (!submitAction) return;
     if (submitAction.guard && !submitAction.guard.allowed) return;
-    submitAction.onClick?.(onClose);
+    submitAction.onClick?.(close);
   };
-  const content = typeof body === "function" ? body(onClose) : body;
+  const content = typeof body === "function" ? body(close) : body;
   return (
     <div className="dlg-wrap">
       <div className="scrim" onClick={onClose} />
@@ -92,10 +99,19 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }
           </button>
         </div>
         <form className="dlg-form" noValidate onSubmit={onSubmit}>
-          <div className="dlg-body">{content}</div>
+          <div className="dlg-body"><DirtyScope.Provider value={scope}>{content}</DirtyScope.Provider></div>
+          {confirming ? (
+            <div className="draft-conflict" role="alertdialog" aria-label="Discard your changes?">
+              <span>You have unsaved input. Discard it and close?</span>
+              <span className="draft-conflict-actions">
+                <Btn label="Keep editing" id="dlg-keep" onClick={() => setConfirming(false)} />
+                <Btn label="Discard changes" kind="danger" id="dlg-discard" onClick={close} />
+              </span>
+            </div>
+          ) : null}
           <div className="dlg-foot">
             {list.map((a, i) => (
-              <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(onClose) : onClose())} />
+              <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(close) : onClose())} />
             ))}
           </div>
         </form>

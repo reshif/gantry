@@ -3,6 +3,7 @@
  * reaches, a warning when the gate cannot pass as configured, and the ways out (edit the rule, grant a role, approve as a Factory Admin override). Read from
  * GET /work-orders/{id}/gates/{gate}/approvers (default deny: project.view).
  */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import type { GateApprovers } from "@gantry/domain";
 import { api, get } from "../../api/client";
@@ -17,7 +18,7 @@ export interface ApproversRead extends GateApprovers {
   can: { editRule: boolean; editWhy: string; grantRole: boolean; grantWhy: string };
 }
 export const useGateApprovers = (woId: string, gate: string | null | undefined) =>
-  useQuery({ queryKey: ["workOrders", "approvers", woId, gate ?? ""], queryFn: () => get<ApproversRead>(api(`work-orders/${encodeURIComponent(woId)}/gates/${encodeURIComponent(gate ?? "")}/approvers`)), enabled: !!gate });
+  useQuery({ queryKey: qk.woApprovers(woId, gate ?? ""), queryFn: () => get<ApproversRead>(api(`work-orders/${encodeURIComponent(woId)}/gates/${encodeURIComponent(gate ?? "")}/approvers`)), enabled: !!gate });
 
 export function ApproversPanel({ woId, gate, project, onNavigate }: { woId: string; gate: string; project: string; onNavigate?: () => void }) {
   const q = useGateApprovers(woId, gate);

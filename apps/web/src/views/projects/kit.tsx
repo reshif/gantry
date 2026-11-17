@@ -3,7 +3,9 @@
  * class chip, gate diamond, mini belt, health chip, a sortable data table and the catalogue query.
  * Same DOM and classes as legacy.
  */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
+import { useTeams as useTeamsRead } from "../../api/queries";
 import { useState, type ReactNode } from "react";
 import { flowOf, gateExplain, gateStateText, gateTitle, route as routeOf, routeGates as routeGatesOf, type Bay, type Catalog, type Gate, type Project, type Role, type Station, type WorkClass } from "@gantry/domain";
 import { api } from "../../api/client";
@@ -43,7 +45,7 @@ export const metricsOf = (p: PView): Metrics => p.metrics ?? EMPTY_METRICS;
 
 /** The catalogue: built-in plus custom stations, gates, bays, classes, roles and actions. Refetched whenever projects change (a flow edit can append to it). */
 export function useCatalog(): Catalog | null {
-  const q = useQuery({ queryKey: ["projects", "catalog"], queryFn: () => get<Catalog>(api("catalog")), staleTime: 30_000 });
+  const q = useQuery({ queryKey: qk.catalog(), queryFn: () => get<Catalog>(api("catalog")), staleTime: 30_000 });
   return q.data ?? null;
 }
 
@@ -260,7 +262,7 @@ export interface TeamRow {
 }
 /** GET /api/v1/teams (the web has no teams hook of its own). */
 export function useTeams(): TeamRow[] {
-  const q = useQuery({ queryKey: ["teams"], queryFn: () => get<TeamRow[]>(api("teams")), staleTime: 30_000 });
+  const q = useTeamsRead();
   return q.data ?? [];
 }
 

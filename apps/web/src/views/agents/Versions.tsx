@@ -8,6 +8,7 @@ import { Icon } from "../../ui/Icon";
 import { useOutcome } from "../govern/data";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
+import { dropDraft } from "../../lib/useDraft";
 import { evalsFocus } from "../evals/kit";
 import { liveVersion, nextVersion, rerender, same, ui, type AgentRow, type AgentVersionRow } from "./kit";
 
@@ -32,7 +33,7 @@ export function RollbackDialog({ a, ver, live, perm, close }: { a: AgentRow; ver
       actions={[
         { label: "Cancel" },
         { label: "Roll back", kind: "danger", icon: "undo", id: "ag-rollback-ok", guard: perm,
-          onClick: (done) => { void ops.rollbackAgent(a.id, ver.v, { ifMatch: a.rev }).then((r) => { out(r); if (r.ok) { ui.draft = null; rerender(); done(); } }); } },
+          onClick: (done) => { void ops.rollbackAgent(a.id, ver.v, { ifMatch: a.rev }).then((r) => { out(r); if (r.ok) { dropDraft("agent", a.id); rerender(); done(); } }); } },
       ]}
     />
   );

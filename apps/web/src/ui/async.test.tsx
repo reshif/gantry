@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ApiError } from "../api/client";
-import { Async, failureOf, qState, useCommand } from "./async";
+import { Async, failureOf, qState } from "./async";
 import { Empty } from "./primitives";
 
-vi.mock("./overlay-context", () => ({ useUI: () => ({ toast: toastSpy }) }));
-const toastSpy = vi.fn();
+vi.mock("./overlay-context", () => ({ useUI: () => ({ toast: vi.fn() }) }));
+
 
 type Q<T> = { data: T | undefined; error: unknown; isPending: boolean; isError: boolean; refetch: () => Promise<never> };
 const q = <T,>(over: Partial<Q<T>>): any => ({ data: undefined, error: null, isPending: true, isError: false, refetch: vi.fn(), ...over });
@@ -38,36 +38,18 @@ describe("Async", () => {
     expect(screen.getByText("1 rows")).toBeTruthy();
   });
 
+  it("keeps showing the last good copy when a refresh fails, and says it is old with a retry", () => {
+    const query = q({ data: [1], isPending: false, isError: true, error: new ApiError(500, "Database is down.", null) });
+    render(<Async<number[]> query={query} what="rows" id="r">{(d) => <p>{d.length} rows</p>}</Async>);
+    expect(screen.getByText("1 rows")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/last loaded copy of rows.*Database is down/);
+    fireEvent.click(document.getElementById("r-stale-retry")!);
+    expect((query as unknown as { refetch: ReturnType<typeof vi.fn> }).refetch).toHaveBeenCalled();
+  });
+
   it("failureOf and qState keep a hidden number from reading as zero", () => {
     expect(failureOf(new ApiError(403, "", null)).hidden).toBe(true);
     render(<p>{qState(q({ isError: true, error: new ApiError(403, "Nope.", null) }), () => 0)}</p>);
     expect(document.querySelector(".async-stat")?.getAttribute("data-tip")).toMatch(/Not visible to you/);
-  });
-});
-
-describe("useCommand", () => {
-  function Probe({ fn }: { fn: () => Promise<{ ok: boolean; msg: string }> }) {
-    const c = useCommand(fn, { ok: "Saved." });
-    return <button type="button" onClick={() => void c.run()}>{c.busy ? "busy" : "idle"}</button>;
-  }
-
-  it("runs once per click while busy, and toasts the outcome", async () => {
-    let resolve: (v: { ok: boolean; msg: string }) => void = () => undefined;
-    const fn = vi.fn(() => new Promise<{ ok: boolean; msg: string }>((r) => (resolve = r)));
-    render(<Probe fn={fn} />);
-    const b = screen.getByRole("button");
-    fireEvent.click(b);
-    fireEvent.click(b);
-    expect(fn).toHaveBeenCalledTimes(1);
-    expect(b.textContent).toBe("busy");
-    await act(async () => resolve({ ok: true, msg: "" }));
-    expect(b.textContent).toBe("idle");
-    expect(toastSpy).toHaveBeenLastCalledWith("Saved.", "ok");
-  });
-
-  it("toasts the refusal reason", async () => {
-    render(<Probe fn={() => Promise.resolve({ ok: false, msg: "Needs Project Admin." })} />);
-    await act(async () => fireEvent.click(screen.getByRole("button")));
-    expect(toastSpy).toHaveBeenLastCalledWith("Needs Project Admin.", "error");
   });
 });

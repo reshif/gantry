@@ -18,10 +18,38 @@ export interface CommandOk {
   msg: string;
   status: number;
 }
+/** Why a command did not run, in the terms the UI branches on (the bar's refusal mapping). */
+export type RefusalKind =
+  | "unauthenticated" // 401: the session ended
+  | "forbidden" // 403: a rule or role refused
+  | "not_found" // 404
+  | "conflict" // 409 / 412: the entity changed since it was loaded
+  | "invalid" // 422 (and 400)
+  | "rate_limited" // 429
+  | "unreachable" // status 0: not sure it went through
+  | "server" // 5xx
+  | "other";
+
+export function refusalKindOf(status: number): RefusalKind {
+  if (status === 0) return "unreachable";
+  if (status === 401) return "unauthenticated";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "not_found";
+  if (status === 409 || status === 412) return "conflict";
+  if (status === 422 || status === 400) return "invalid";
+  if (status === 429) return "rate_limited";
+  if (status >= 500) return "server";
+  return "other";
+}
+
 export interface CommandRefusal {
   ok: false;
   msg: string;
   status: number;
+  /** Set by the client for every refusal; see `refusalKindOf`. */
+  kind?: RefusalKind;
+  /** 429 only: seconds from Retry-After. */
+  retryAfter?: number;
   /** The rule that refused it (403/409). */
   rule?: RuleRef;
   /** What the person needs to do it (403). */
@@ -139,7 +167,7 @@ function asRecord(v: unknown): Record<string, unknown> {
 
 function refusalFrom(status: number, body: unknown, fallback: string): CommandRefusal {
   const b = asRecord(body);
-  const out: CommandRefusal = { ok: false, msg: typeof b.msg === "string" && b.msg ? b.msg : fallback, status };
+  const out: CommandRefusal = { ok: false, msg: typeof b.msg === "string" && b.msg ? b.msg : fallback, status, kind: refusalKindOf(status) };
   if (b.rule && typeof b.rule === "object") out.rule = b.rule as RuleRef;
   if (typeof b.needs === "string" && b.needs) out.needs = b.needs;
   return out;
@@ -159,6 +187,8 @@ function defaultMessage(status: number): string {
       return "That input is not valid.";
     case 429:
       return "Too many requests. Wait a moment and try again.";
+    case 412:
+      return "This changed since you loaded it. Reload and try again.";
     default:
       return status >= 500 ? "The server could not complete that. Try again." : `Request failed (${status}).`;
   }
@@ -182,8 +212,8 @@ async function attempt<T extends object>(path: string, opts: RequestOptions): Pr
   try {
     res = await send(path, { method: "POST", ...opts });
   } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") return { ok: false, msg: "Cancelled.", status: 0 };
-    return { ok: false, msg: "Could not reach Gantry. Check your connection and try again.", status: 0 };
+    if (e instanceof DOMException && e.name === "AbortError") return { ok: false, msg: "Cancelled.", status: 0, kind: "unreachable" };
+    return { ok: false, msg: "Could not reach Gantry, so it may not have gone through. Check the list before you try again.", status: 0, kind: "unreachable" };
   }
   const body = await readBody(res);
   if (res.status === 401) unauthorizedHandler?.();
@@ -194,7 +224,12 @@ async function attempt<T extends object>(path: string, opts: RequestOptions): Pr
     const { ok: _ok, msg, ...rest } = b;
     return { ...rest, ok: true, msg: typeof msg === "string" ? msg : "", status: res.status } as ApiResult<T>;
   }
-  return refusalFrom(res.status, body, defaultMessage(res.status));
+  const refusal = refusalFrom(res.status, body, defaultMessage(res.status));
+  if (res.status === 429) {
+    const ra = Number(res.headers.get("Retry-After"));
+    if (Number.isFinite(ra) && ra > 0) refusal.retryAfter = Math.ceil(ra);
+  }
+  return refusal;
 }
 
 const isStepUpRefusal = (r: ApiResult<object>): r is CommandRefusal => !r.ok && r.needs === "step_up";
