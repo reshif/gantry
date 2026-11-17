@@ -17,3 +17,4 @@ export { devSeed, SEED_ANCHOR } from "./seed.js";
 export * from "./vendors.js";
 export * from "./starter-kit.js";
 export * from "./gates.js";
+export * from "./metrics.js";

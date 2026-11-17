@@ -21,6 +21,7 @@ import { pinVia } from "./command.js";
 import { readOrg } from "./read/index.js";
 import { loadPolicyState } from "./read/state.js";
 import { ipAllowed, SecurityCache } from "./security.js";
+import { registerMetrics } from "./metrics.js";
 import { Hub } from "./stream.js";
 
 export interface BuildOptions {
@@ -35,6 +36,10 @@ export interface BuildOptions {
   heartbeatMs?: number;
   /** How often open streams re-check their session (default 60 s). */
   sweepMs?: number;
+  /** Bearer tokens that may scrape /metrics from outside the internal network (default: the metrics_token secret, when present). */
+  metricsTokens?: readonly (string | null)[];
+  /** Where the backup service writes its status files (default GANTRY_BACKUPS_DIR, else /backups). */
+  backupsDir?: string;
   /** Registers the product routes (default: ./routes/index). Tests pass their own. */
   routes?: (app: FastifyInstance) => Promise<void> | void;
 }
@@ -111,7 +116,7 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     timeWindow: "1 minute",
     allowList: (req) => {
       const path = canonicalPath(req.url) ?? "";
-      return path === "/healthz" || path.startsWith("/api/v1/stream") || path.startsWith("/internal/v1/");
+      return path === "/healthz" || path === "/metrics" || path.startsWith("/api/v1/stream") || path.startsWith("/internal/v1/");
     },
     keyGenerator: (req) => req.ip,
   });
@@ -147,6 +152,8 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
       return reply.code(503).send({ ok: false, msg: "database unavailable" });
     }
   });
+
+  await registerMetrics(app, { pool, orgId, backupsDir: o.backupsDir ?? process.env.GANTRY_BACKUPS_DIR ?? "/backups", ...(o.metricsTokens ? { tokens: o.metricsTokens } : {}) });
 
   await (o.routes ? o.routes(app) : (await import("../routes/index.js")).registerRoutes(app));
 
