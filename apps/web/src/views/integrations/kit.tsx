@@ -6,7 +6,7 @@ import { useMemo, type ReactNode } from "react";
 import { INTEGRATION_CATEGORIES, NOTIFY_EVENTS, type IntegrationField, type IntegrationInstance, type IntegrationType, type Project, type Repo, type Trigger } from "@gantry/domain";
 import { useDeliveries, useIntegrationTypes, useIntegrations, useProjects, useTriggers } from "../../api/queries";
 import { Icon } from "../../ui/Icon";
-import { Select } from "../../ui/primitives";
+import { Select, Status, type Tone } from "../../ui/primitives";
 import { useAllRepos } from "../govern/data";
 
 export const AUTHS = [
@@ -36,14 +36,10 @@ export const statusOf = (i: IntegrationInstance): "disabled" | "failing" | "offl
 
 const STATUS_WORD: Record<string, string> = { healthy: "Healthy", failing: "Failing", degraded: "Degraded", offline: "Offline", disabled: "Disabled" };
 
+const STATUS_TONE: Record<string, Tone> = { healthy: "done", failing: "block", degraded: "wait", offline: "neutral", disabled: "neutral" };
+
 export function Health({ st }: { st: string }) {
-  const cls = st === "healthy" ? "healthy" : st === "failing" ? "failing" : st === "degraded" ? "degraded" : "offline";
-  return (
-    <span className={`health h-${cls}`}>
-      <span className="health-shape" aria-hidden="true" />
-      {STATUS_WORD[st] ?? st}
-    </span>
-  );
+  return <Status tone={STATUS_TONE[st] ?? "neutral"}>{STATUS_WORD[st] ?? st}</Status>;
 }
 
 export const Mark = ({ icon, small }: { icon?: string; small?: boolean }) => (
