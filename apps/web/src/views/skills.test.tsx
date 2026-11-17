@@ -159,4 +159,22 @@ describe("Skills screen", () => {
     expect(locked(await byId("sk-att-ag-build"))).toBe(true);
     expect(writes(calls)).toHaveLength(0);
   });
+
+  it("shows what the version on the floor runs next to the draft attachment, and says when they differ", async () => {
+    const drift = [{ ...AGENTS[0], version: "1.4.0", skills: [], liveSkills: [{ id: "sk-review", version: "1.2.0" }] }];
+    setup({ "GET /api/v1/agents": () => ({ body: drift }) });
+    mount();
+    fireEvent.click(await byId("sk-tab-agents"));
+    const live = await byId("sk-live-ag-build");
+    expect(live.textContent).toContain("Live 1.4.0 · skill v1.2.0");
+    expect(live.textContent).toContain("Detached in draft: still runs until the next version is promoted.");
+    expect(((await byId("sk-att-ag-build")) as HTMLInputElement).checked).toBe(false);
+    cleanup();
+    setup({ "GET /api/v1/agents": () => ({ body: [{ ...AGENTS[0], version: "1.4.0", skills: ["sk-review"], liveSkills: [] }] }) });
+    mount();
+    fireEvent.click(await byId("sk-tab-agents"));
+    const l2 = await byId("sk-live-ag-build");
+    expect(l2.textContent).toContain("Not used by the live version");
+    expect(l2.textContent).toContain("Attached in draft only: runs after the next version is promoted.");
+  });
 });

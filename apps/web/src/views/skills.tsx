@@ -121,7 +121,7 @@ function DefTab({ sk, perm }: { sk: SkillRow; perm: Decision }) {
         <Field label="When to use" htmlFor="sk-when">{inp("sk-when", "when", 2)}</Field>
         <Field label="Body" htmlFor="sk-body" hint="The instructions the agent loads when the skill applies.">{inp("sk-body", "body", 7)}</Field>
         <Field label="Resources" htmlFor="sk-res" hint="One file name per line. Files ship with the skill.">{inp("sk-res", "resources", 3, "checklist.md")}</Field>
-        <Field label="Change note" htmlFor="sk-note" hint={`Saving creates v${next.join(".")}. Agents pick up the new version on their next work order.`}>
+        <Field label="Change note" htmlFor="sk-note" hint={`Saving creates v${next.join(".")}. It reaches no agent by itself: each agent that runs this skill gets a candidate version, which goes live after its eval suite passes and a person promotes it.`}>
           <input id="sk-note" className="input" disabled={ro} placeholder="What changed, in one line" value={ui.note} onChange={(e) => { ui.note = e.target.value; rerender(); }} />
         </Field>
       </div>
@@ -141,21 +141,23 @@ function AgentsTab({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
   return (
     <div>
       <LockNote decision={perm} what="Attaching skills to agents" />
-      <p className="muted small sk-p">Attaching adds the skill at the end of the agent&apos;s skill order. Reorder in Agents. Each change is saved on the agent and audited.</p>
+      <p className="muted small sk-p">&quot;Runs with&quot; is what the version on the floor uses. &quot;Attached in draft&quot; is the agent&apos;s working copy: changing it is saved on the agent and audited, and reaches runs only in the next version that passes its eval suite.</p>
       <div className="table-scroll">
         <table className="table table-compact">
-          <thead><tr>{["Agent", "Station", "Position", "Suite", "Attached"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
+          <thead><tr>{["Agent", "Station", "Runs with", "Draft position", "Attached in draft"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
           <tbody>
             {agents.map((a) => {
               const pos = a.skills.indexOf(sk.id);
               const station = st.find(a.station);
+              const liveSk = (a.liveSkills ?? []).find((l) => l.id === sk.id);
+              const drift = !!liveSk !== (pos >= 0);
               return (
                 <tr key={a.id}>
                   <td><a href="#agents" className="linkish" id={`sk-ag-link-${a.id}`} onClick={(e) => { e.preventDefault(); agentsSelect(a.id, "skills"); navigate("agents"); }}>{a.name}</a></td>
                   <td className="small">{station ? `${station.no} ${station.name}` : "Off-belt"}</td>
+                  <td className="small" id={`sk-live-${a.id}`}>{liveSk ? <Chip text={liveSk.version ? `Live ${a.version} · skill v${liveSk.version}` : `Live ${a.version}`} cls="chip-ok" /> : <span className="muted">Not used by the live version</span>}{drift ? <div className="small warn-text">{pos >= 0 ? "Attached in draft only: runs after the next version is promoted." : "Detached in draft: still runs until the next version is promoted."}</div> : null}</td>
                   <td className="mono small">{pos >= 0 ? `${pos + 1} of ${a.skills.length}` : "–"}</td>
-                  <td className="mono small">{a.suite}</td>
-                  <td><Toggle id={`sk-att-${a.id}`} checked={pos >= 0} decision={perm} label={`Attach ${sk.name} to ${a.name}`} onChange={(v) => { void ops.attachSkill(a.id, sk.id, v).then((r) => out(r)); }} /></td>
+                  <td><Toggle id={`sk-att-${a.id}`} checked={pos >= 0} decision={perm} label={`Attach ${sk.name} to ${a.name} (draft)`} onChange={(v) => { void ops.attachSkill(a.id, sk.id, v).then((r) => out(r)); }} /></td>
                 </tr>
               );
             })}

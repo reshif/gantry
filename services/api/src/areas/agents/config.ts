@@ -32,8 +32,10 @@ export interface AgentCfg {
   overrides: Record<string, Override>;
 }
 
-/** The keys a version snapshots (with `skills`, held in agent_skills). Staffing (stations, projects), the suite and the name are operational, not versioned. */
-export const VERSIONED_KEYS = ["model", "fallbacks", "autonomy", "tools", "skills", "mcp", "guardrails", "budget", "instructions", "overrides"] as const;
+/**
+ * The keys a version snapshots. `skills` are the ordered skill ids and `skillVersions` the version of each one the agent was tested with: a skill edit never changes what a
+ * version runs, it makes a new candidate version. Staffing (stations, projects), the suite and the name are operational, not versioned. */
+export const VERSIONED_KEYS = ["model", "fallbacks", "autonomy", "tools", "skills", "skillVersions", "mcp", "guardrails", "budget", "instructions", "overrides"] as const;
 export type VersionedKey = (typeof VERSIONED_KEYS)[number];
 
 export const DEFAULT_TOOLS: Record<ToolKey, boolean> = { readRepo: true, writeBranch: false, runTests: false, openPR: false, merge: false, postSlack: true, sendEmail: false, readSecrets: false };
@@ -62,9 +64,9 @@ export function cfgOf(data: Record<string, unknown>, modelFallback = ""): AgentC
   };
 }
 
-/** What a version stores: the versioned keys with the ordered skill ids. */
-export function snapshotOf(c: AgentCfg, skills: string[]): Record<VersionedKey, unknown> {
-  return { model: c.model, fallbacks: c.fallbacks, autonomy: c.autonomy, tools: c.tools, skills, mcp: c.mcp, guardrails: c.guardrails, budget: c.budget, instructions: c.instructions, overrides: c.overrides };
+/** What a version stores: the versioned keys with the ordered skill ids and the version each skill is pinned at. */
+export function snapshotOf(c: AgentCfg, skills: string[], skillVersions: Record<string, number> = {}): Record<VersionedKey, unknown> {
+  return { model: c.model, fallbacks: c.fallbacks, autonomy: c.autonomy, tools: c.tools, skills, skillVersions, mcp: c.mcp, guardrails: c.guardrails, budget: c.budget, instructions: c.instructions, overrides: c.overrides };
 }
 
 /** Which versioned keys differ between two snapshots (a version body may hold fewer keys, as a seeded one does). */

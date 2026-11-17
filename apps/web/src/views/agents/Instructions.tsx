@@ -2,13 +2,13 @@
 import { useState } from "react";
 import { fmt, type Repo } from "@gantry/domain";
 import { useCan } from "../../api/can";
-import { useAgentEffective, useInstructions, useRepos, useSkills } from "../../api/queries";
+import { useAgentEffective, useInstructions, useRepos } from "../../api/queries";
 import { invalidateSlices } from "../../api/keys";
 import { ops } from "../../api/ops";
-import { Btn, Field, LockNote, Select, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Field, LockNote, Segmented, Select, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
-import { agentLayer, rerender, ui, words } from "./kit";
+import { rerender, ui } from "./kit";
 import type { TabProps } from "./Config";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -63,7 +63,6 @@ export function TextDialog({ o, close }: { o: TextOpts; close: () => void }) {
 export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
   const ui_ = useUI();
   const base = useInstructions().data;
-  const skills = useSkills().data ?? [];
   const live = projects.filter((p) => p.status !== "archived");
   if (!ui.ctxProject || !live.some((p) => p.id === ui.ctxProject)) ui.ctxProject = live[0]?.id ?? null;
   const project = live.find((p) => p.id === ui.ctxProject) ?? null;
@@ -71,28 +70,16 @@ export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
   if (ui.ctxRepo && !repos.some((r) => r.id === ui.ctxRepo)) ui.ctxRepo = null;
   if (!ui.ctxRepo && repos[0]) ui.ctxRepo = repos[0].id;
   const repo = repos.find((r) => r.id === ui.ctxRepo) ?? null;
-  const eff = useAgentEffective(a.id, { ...(project ? { project: project.id } : {}), ...(repo ? { repo: repo.id } : {}), version: "draft" }).data;
+  // The preview is what runs: the version on the floor, unless the person asks for the saved working copy.
+  const [draftView, setDraftView] = useState(false);
+  const eff = useAgentEffective(a.id, { ...(project ? { project: project.id } : {}), ...(repo ? { repo: repo.id } : {}), ...(draftView ? { version: "draft" } : {}) }).data;
   const baseGuard = dec(useCan("agent.edit"));
   const ovCan = dec(useCan("project.config", { project: project?.id ?? null }));
   const repoCan = dec(useCan("repo.onboard", { project: repo?.project ?? null }));
   const ovGuard = project ? ovCan : { allowed: false, reason: "Pick a project.", needs: "" };
   const repoGuard = repo ? repoCan : { allowed: false, reason: "Pick a repo.", needs: "" };
 
-  const layerText = (key: string): string => eff?.layers.find((l) => l.key === key)?.text ?? "";
-  const baseV = eff?.layers.find((l) => l.key === "base")?.version ?? base?.baseVersion ?? 0;
-  /** What the agent receives: the server's layers, with this draft's own text in layer 3 (legacy effectiveText). */
-  const text = (() => {
-    if (!eff) return "Composing the effective instructions…";
-    const parts: string[] = [`# 1 Factory base (v${baseV})\n${layerText("base")}`];
-    if (project) parts.push(`# 2 Project overlay: ${project.name}\n${layerText("project") || "(none)"}`);
-    parts.push(agentLayer(a, d, project));
-    if (d.skills.length) {
-      parts.push(`## Skills, in order\n${d.skills.map((id, i) => { const sk = skills.find((x) => x.id === id); return `${i + 1}. ${sk ? `${sk.name} v${sk.version}: ${sk.when}` : id}`; }).join("\n")}`);
-    }
-    if (repo) parts.push(`# 4 Repo guidelines: ${repo.name}\n${layerText("repo") || "(none)"}`);
-    return parts.join("\n\n");
-  })();
-  const count = eff ? `${words(text)} words, about ${fmt.k(Math.round(text.length / 4))} tokens` : "";
+  const count = eff ? `${eff.words} words, about ${fmt.k(eff.tokens)} tokens` : "";
   const repoLayer = eff?.layers.find((l) => l.key === "repo");
 
   const layer = (no: number, title: string, meta: string, body: React.ReactNode, action?: React.ReactNode) => (
@@ -165,8 +152,24 @@ export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
           <h3 className="cfg-h">Effective instructions</h3>
           <span className="mono small muted" id="ag-eff-count">{count}</span>
         </div>
-        <p className="muted small">{`Exactly what ${d.name} receives for ${repo ? repo.name : project ? project.name : "this context"}, including skills and guardrails.`}</p>
-        <pre className="ag-effective mono" id="ag-effective" tabIndex={0} aria-label="Effective instructions">{text}</pre>
+        <Segmented name="ag-eff-version" label="Preview" items={[{ id: "live", label: `Live version${a.version ? ` ${a.version}` : ""}` }, { id: "draft", label: "Draft" }]} value={draftView ? "draft" : "live"} onChange={(v) => setDraftView(v === "draft")} />
+        <p className="muted small" id="ag-eff-note">{draftView
+          ? `The saved working copy of ${d.name}, not live yet: unsaved edits appear here after you save, and skills are the draft attachments at their latest version. Changes reach runs only through a version that passes its eval suite.`
+          : `What ${d.name} ${eff && eff.version ? `${eff.version} ` : ""}is sent for ${repo ? repo.name : project ? project.name : "this context"}: the whole system prompt in the order the runner joins it, with every skill in full at the version this agent version pins.`}</p>
+        {eff ? (
+          <div className="ag-effective mono" id="ag-effective" tabIndex={0} role="region" aria-label="Effective instructions">
+            {eff.sections.map((sec) => (
+              <section key={sec.key} className="ag-eff-part" id={`ag-eff-${sec.key.replace(/[^a-z0-9]+/gi, "-")}`}>
+                <h4 className="ag-eff-title">{sec.title}{sec.source === "runner" ? <Chip text="added by the runner" cls="chip-accent" /> : null}<span className="muted small">{` ${sec.words} words`}</span></h4>
+                <div className="ag-eff-text">{sec.text}</div>
+              </section>
+            ))}
+            <section className="ag-eff-part" id="ag-eff-handoff">
+              <h4 className="ag-eff-title">First message<Chip text="filled per work order" cls="chip-accent" /></h4>
+              <div className="ag-eff-text">{`${eff.handoff.first}\n\n${eff.handoff.json.map((x) => `- ${x}`).join("\n")}`}</div>
+            </section>
+          </div>
+        ) : <p className="muted">Composing the effective instructions…</p>}
       </section>
     </div>
   );

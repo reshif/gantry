@@ -214,6 +214,23 @@ Remaining (resource limits, a configurable hostname with real TLS, and the upgra
   - documentation for users, admins and operators, plus OpenAPI
   - self-hosted fonts
 
+## Wave 7: agent context is real (2026-11-16)
+
+Findings from the agent-context audit: what the Agents and Skills screens said did not match what the model was sent. Agents still decide content themselves; the code supplies structure, pins and safety limits.
+
+- **Skills are pinned by agent versions (done, `ctx-skill-versions`):**
+  - an agent version snapshots `skillVersions` (the version of each skill it was tested with); `resolveSkills` uses them, so a skill save changes no run by itself
+  - saving a skill version (including an approved Learning proposal, which calls the same `saveSkill`) cuts a candidate version of every agent whose floor version has the skill attached: the floor version with that one skill moved to the new version, audited as `agent.version` with `trigger: skill.edit`
+  - the candidate runs the agent's own eval suite and goes live only through the existing promotion gate (EVAL-GATE) and a person; rollback restores the version's pins
+  - a change to a skill's description, when-to-use or resource names (never sent to the model) and a project scope change make no candidate; a skill attached only in the draft joins the next version cut from the draft
+  - migration 0041 backfills `skillVersions` on existing versions to what they would have run with (the attachment's pin, else the skill's latest), so nothing changes for work in flight; it lifts the immutability trigger for that one statement, only adding a key
+- **The screens tell the truth (done):**
+  - Skills > Agents shows, per agent, what the floor version runs (the live skill version) beside the draft attachment and its toggle, and says when the two differ
+  - Agents > Instructions "Effective instructions" defaults to the live version with a Live / Draft toggle; it shows the real order (base, overlay, agent, repo guidelines, each skill in full at its pinned version, station tools text, result format), marks the runner's parts "added by the runner" and describes the first message (the handoff); the API returns the whole prompt and its hash
+  - the runner's texts are copied into `agents/runner-sections.ts` and a test fails if they drift from `runner/wrapper`
+- **Draft no longer leaks into live runs (done):** a run with an agent version reads `limits` and the tool allow-list only from that version; the agent's working copy is read only for a run with no version.
+- **Not done here:** the repo conventions layer, conversational prompts, prompt traces and the `previous` handoff cap are other tracks of this wave; the dev seed's demo agents are not backfilled in code (an existing database is, by 0041); the Skills "Used by" count still counts draft attachments.
+
 ## Decisions for the owner
 
 Answered 2026-11-15:

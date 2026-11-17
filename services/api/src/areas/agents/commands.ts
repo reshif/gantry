@@ -8,6 +8,7 @@ import type { Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
+import { pinSkills } from "./compose.js";
 import { AUTONOMY_LEVELS, autonomyCheck, cfgOf, diffKeys, sha256, slug, snapshotOf, VERSIONED_KEYS, type AgentCfg } from "./config.js";
 import type { AgentPatch, CreateBody } from "./schemas.js";
 import { agentRows, attachedSkills, eligibility, labelOf, readAgents, versionRows, type AgentRow } from "./store.js";
@@ -129,7 +130,7 @@ export async function createAgent(tx: Tx, a: Actor, b: z.infer<typeof CreateBody
   await tx.query(`insert into agents (org_id, id, name, kind, station, status, live_version, data) values ($1,$2,$3,'station',$4,'paused',1,$5::jsonb)`, [a.orgId, id, name, station, json({ ...cfg, promoted: [1] })]);
   await tx.query(
     `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by) values ($1,$2,1,$3::jsonb,'',$4,$5,'Created',now(),$6)`,
-    [a.orgId, id, json({ label: "0.1.0", rc: false, diff: "Created", ...snapshotOf(cfg, skills) }), sha256(cfg.instructions), model || null, a.id],
+    [a.orgId, id, json({ label: "0.1.0", rc: false, diff: "Created", ...snapshotOf(cfg, skills, await pinSkills(tx, a.orgId, null, skills)) }), sha256(cfg.instructions), model || null, a.id],
   );
   await writeSkills(tx, a.orgId, id, skills);
   await tx.query(`insert into suites (org_id, id, name, station, agent_id, data) values ($1,$2,$3,$4,$5,$6::jsonb)`, [a.orgId, cfg.suite, `${name} golden set`, station, id, json({ threshold: 0.85 })]);
@@ -158,7 +159,7 @@ export async function newAgentVersion(tx: Tx, a: Actor, id: string, label: strin
   if (vers.some((v) => labelOf(v) === label)) throw conflict(`${label} already exists.`);
   const cfg = cfgOf(row.data);
   const skills = (await attachedSkills(tx, a.orgId, id)).map((s) => s.skill_id);
-  const body = snapshotOf(cfg, skills);
+  const body = snapshotOf(cfg, skills, await pinSkills(tx, a.orgId, id, skills));
   const live = vers.find((v) => v.version === row.live_version);
   const diff = summary(body, live?.body);
   const n = Math.max(0, ...vers.map((v) => v.version)) + 1;
@@ -206,7 +207,7 @@ export async function rollbackAgent(tx: Tx, a: Actor, id: string, ref: string | 
   if (v.body.rc === true && !promoted.has(v.version)) throw invalid(`${label} was never on the floor, so there is nothing to roll back to. Promote it instead.`);
   const from = vers.find((x) => x.version === row.live_version);
   const data: Record<string, unknown> = { ...row.data };
-  for (const k of VERSIONED_KEYS) if (k !== "skills" && k in v.body) data[k] = v.body[k];
+  for (const k of VERSIONED_KEYS) if (k !== "skills" && k !== "skillVersions" && k in v.body) data[k] = v.body[k];
   await tx.query(`update agents set live_version = $3, data = $4::jsonb, version = version + 1 where org_id = $1 and id = $2`, [a.orgId, id, v.version, json(data)]);
   if (Array.isArray(v.body.skills)) {
     const have = new Set((await tx.query<{ id: string }>(`select id from skills where org_id = $1 and id = any($2)`, [a.orgId, v.body.skills])).rows.map((r) => r.id));

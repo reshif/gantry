@@ -8,6 +8,7 @@
  */
 import { STARTER_KIT, type KitAgent, type KitSkill } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
+import { pinSkills } from "./compose.js";
 import { cfgOf, sha256, snapshotOf, TOOL_KEYS } from "./config.js";
 
 const json = (v: unknown): string => JSON.stringify(v);
@@ -44,7 +45,7 @@ async function loadAgent(db: Queryable, orgId: string, a: KitAgent, skills: Map<
   }
   await db.query(
     `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by) values ($1,$2,1,$3::jsonb,'',$4,$5,$6,now(),'system')`,
-    [orgId, a.id, json({ label: LABEL, rc: false, diff: "", builtin: true, ...snapshotOf(cfg, a.skills) }), sha256(cfg.instructions), a.model, NOTE],
+    [orgId, a.id, json({ label: LABEL, rc: false, diff: "", builtin: true, ...snapshotOf(cfg, a.skills, await pinSkills(db, orgId, null, a.skills)) }), sha256(cfg.instructions), a.model, NOTE],
   );
   for (const [i, id] of a.skills.entries()) await db.query(`insert into agent_skills (org_id, agent_id, skill_id, position) values ($1,$2,$3,$4) on conflict do nothing`, [orgId, a.id, id, i + 1]);
   const su = a.suite;
@@ -85,11 +86,6 @@ export async function upgradeOnboardingAgent(db: Queryable, orgId: string): Prom
   if (JSON.stringify(gr.paths ?? []) !== "[]" && (gr.paths ?? []).length && (gr.paths ?? []).every((p) => /^\.github\/workflows|^\.gantry|CODEOWNERS|^\.github/.test(p))) guardrails.paths = [];
   const cfg = cfgOf({ ...row.data, instructions: kit.instructions, guardrails });
   const promoted = Array.isArray(row.data.promoted) ? (row.data.promoted as number[]) : [1];
-  await db.query(
-    `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by) values ($1,$2,2,$3::jsonb,'',$4,$5,$6,now(),'system')`,
-    [orgId, kit.id, json({ label: "1.1.0", rc: false, diff: "instructions, guardrails", builtin: true, ...snapshotOf(cfg, kit.skills) }), sha256(cfg.instructions), cfg.model, UPGRADE_NOTE],
-  );
-  await db.query(`update agents set live_version = 2, data = $3::jsonb, version = version + 1 where org_id = $1 and id = $2`, [orgId, kit.id, json({ ...row.data, instructions: cfg.instructions, guardrails: cfg.guardrails, promoted: [...promoted, 2] })]);
   const skill = STARTER_KIT.skills.find((s) => s.id === "sk-onboardpr");
   const sk = skill ? (await db.query<{ live_version: number; data: Record<string, unknown> }>(`select live_version, data from skills where org_id = $1 and id = $2`, [orgId, skill.id])).rows[0] : undefined;
   if (skill && sk && sk.live_version === 1 && sk.data.builtin === true) {
@@ -99,6 +95,11 @@ export async function upgradeOnboardingAgent(db: Queryable, orgId: string): Prom
     );
     await db.query(`update skills set live_version = 2, name = $3, description = $4 where org_id = $1 and id = $2`, [orgId, skill.id, skill.name, skill.desc]);
   }
+  await db.query(
+    `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by) values ($1,$2,2,$3::jsonb,'',$4,$5,$6,now(),'system')`,
+    [orgId, kit.id, json({ label: "1.1.0", rc: false, diff: "instructions, guardrails", builtin: true, ...snapshotOf(cfg, kit.skills, await pinSkills(db, orgId, null, kit.skills)) }), sha256(cfg.instructions), cfg.model, UPGRADE_NOTE],
+  );
+  await db.query(`update agents set live_version = 2, data = $3::jsonb, version = version + 1 where org_id = $1 and id = $2`, [orgId, kit.id, json({ ...row.data, instructions: cfg.instructions, guardrails: cfg.guardrails, promoted: [...promoted, 2] })]);
   for (const c of kit.suite.cases.filter((x) => x.id === "ONB-04" || x.id === "ONB-08")) {
     const body = { by: "system", task: c.task, checks: c.checks, repo: null, commit: null, project: null, ...(c.cls ? { cls: c.cls } : {}), ...(c.skill ? { skill: c.skill } : {}), rules: c.rules, builtin: true };
     await db.query(`insert into eval_cases (org_id, id, suite_id, name, body, golden) values ($1,$2,$3,$4,$5::jsonb,false) on conflict (org_id, id) do update set name = excluded.name, body = excluded.body where eval_cases.body->>'builtin' = 'true'`, [orgId, c.id, kit.suite.id, c.name, json(body)]);
