@@ -61,6 +61,8 @@ function ProfileTab({ me }: { me: Me }) {
 
 function AccessTab({ me }: { me: Me }) {
   const roles = me.person.roles;
+  const teams = useTeams().data ?? [];
+  const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
   return (
     <Panel title="My access" flush>
       <p className="muted small acct-hint acct-hint-pad">Roles are granted at factory level or per project. Projects where you hold no role are hidden from you.</p>
@@ -73,7 +75,7 @@ function AccessTab({ me }: { me: Me }) {
                 <tr key={`${g.scope}-${g.role}-${i}`}>
                   <td>{g.scope === "factory" ? "Factory" : me.projects.find((p) => p.id === g.scope)?.name ?? g.scope}</td>
                   <td><span className="chip">{ROLES.find((r) => r.id === g.role)?.name ?? g.role}</span></td>
-                  <td>{(g as { via?: string }).via ? <span className="muted">{`via team ${(g as { via?: string }).via}`}</span> : "Directly"}</td>
+                  <td>{g.via ? <span className="muted">{`via team ${teamName(g.via)}`}</span> : "Directly"}</td>
                 </tr>
               ))}
             </tbody>
