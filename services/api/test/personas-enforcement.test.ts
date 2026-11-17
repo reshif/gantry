@@ -377,8 +377,9 @@ d("demo personas: enforcement on real endpoints", () => {
       ok(0);
     });
     it("Priya's approval is accepted for real and Rui (a viewer) is refused with the audit trail", async () => {
-      await expectDenied("p-rui", "gate.approve", () => w.call("p-rui", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${wo}:${gateId}`)}/approve`, {}));
-      const a = await w.call("p-priya", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${wo}:${gateId}`)}/approve`, {});
+      const gurl = await w.gateUrl(wo, gateId);
+      await expectDenied("p-rui", "gate.approve", () => w.call("p-rui", "POST", gurl, {}));
+      const a = await w.call("p-priya", "POST", gurl, {});
       expect(a.status, JSON.stringify(a.body)).toBe(200);
       expect(a.body.passed).toBe(true);
     });
@@ -389,7 +390,7 @@ d("demo personas: enforcement on real endpoints", () => {
       expect((await w.confirm(id, "p-tomas")).status).toBe(200);
       await w.walk(id, (x) => x.state === "waiting" && !!x.allowed.approve && x.allowed.approve.gate === "G2");
       await setRule({ roles: ["reviewer", "approver", "line_lead", "release_manager", "project_admin"], people: [], required: 2, sod: true, conditions: [], escalateH: 0, fallback: null });
-      const url = `/api/v1/gate-instances/${encodeURIComponent(`${id}:G2`)}/approve`;
+      const url = await w.gateUrl(id, "G2");
       const hidden = await w.call("p-fatima", "POST", url, {}); // a Payments work order is not even visible to Fatima
       expect([403, 404]).toContain(hidden.status);
       expect((await w.get(id)).gates.G2.approvals ?? []).toHaveLength(0);

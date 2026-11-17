@@ -20,6 +20,8 @@ export interface Approval {
   gate?: string;
   gateLabel?: string;
   gateName?: string;
+  /** The exact gate opening shown (`WO-1:G2:3`); a decision names it. */
+  instance?: string;
   project: string;
   projectName: string;
   have?: number;

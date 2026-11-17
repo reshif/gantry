@@ -1,7 +1,7 @@
 /** Gate votes and decisions (spec 9.5): approve, reject and the brief confirmation. Each approver counts once (F6) and a vote is judged by the rule in force at that moment. */
 import { gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
 import type { Actor } from "../../core/command.js";
-import { invalid, refuse, stale } from "../../core/errors.js";
+import { invalid, refuse } from "../../core/errors.js";
 import { closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
 import { appendMessage, closeConversation } from "./conversation.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
@@ -22,11 +22,26 @@ export function actionForGate(catalog: Pick<Catalog, "gates">, gateId: string): 
   return gateDef(catalog as Catalog, gateId)?.action ?? (gateId === "G6" ? "release" : "gate.approve");
 }
 
+/**
+ * A8: a person's approve or reject names the exact opening it decides (`WO-1:G2:3`), so a decision made on a stale screen cannot land on a newer
+ * instance. Without the number the request is refused with 428 and the open instance, so a script can read it and send it back. Runs inside the
+ * command, after the permission check, so it tells nobody what they may not see. Slack buttons and the work-order session pass their own instance.
+ */
+export async function requireGatePin(tx: import("@gantry/db").Tx, orgId: string, woId: string, gateId: string, n: number | null): Promise<number> {
+  if (n !== null) return n;
+  const open = await openInstanceOf(tx, orgId, woId, gateId);
+  const cur = open ? Number(open.id.split(":")[2]) : null;
+  const id = open?.id ?? null;
+  throw refuse("precondition", open
+    ? `Say which opening you are deciding: send the instance id ${id} (POST /api/v1/gate-instances/${id}/approve). ${woId} is waiting at ${gateId} on instance ${cur}.`
+    : `${woId} is not waiting at ${gateId}. Nothing to decide; reload.`, { needs: "gate instance", current: { instance: id, n: cur, gate: gateId, wo: woId } });
+}
+
 /** A stale click (spec 9.5): the instance a card or button refers to is not the open one any more. */
 async function openInstanceFor(fx: Fx, w: Wo, gateId: string, n: number | null) {
   const inst = await openInstanceOf(fx.tx, fx.orgId, w.id, gateId);
   if (!inst || (n !== null && inst.id !== `${w.id}:${gateId}:${n}`)) {
-    throw stale(`${w.id} is no longer waiting at ${gateDef(fx.catalog, gateId)?.label ?? gateId} on that instance. It was decided, sent back or reopened. Reload and try again.`);
+    throw refuse("stale", `${w.id} is no longer waiting at ${gateDef(fx.catalog, gateId)?.label ?? gateId} on that instance. It was decided, sent back or reopened. Reload and try again.`, { current: { instance: inst?.id ?? null, gate: gateId, wo: w.id } });
   }
   return inst;
 }

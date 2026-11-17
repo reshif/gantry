@@ -80,6 +80,11 @@ export function world(getT: () => TestApp) {
   const apply = async (att: { id: string; fencing: string }, result: Record<string, unknown> = { status: "succeeded", summary: "done" }) =>
     (await noteResearch(att), w_tx((tx) => import("../src/areas/workorders/station.js").then((m) => m.applyStationResult(tx, att.id, Number(att.fencing), result as never))));
   const w_tx = tx;
+  /** The exact open opening of a gate (`WO-1:G2:3`): an approve or reject names it (A8). */
+  const gateUrl = async (id: string, gate: string, verb: "approve" | "reject" = "approve") => {
+    const inst = (await q<{ id: string }>(`select id from gate_instances where wo_id = $1 and gate_id = $2 and status = 'open'`, [id, gate]))[0];
+    return `/api/v1/gate-instances/${encodeURIComponent(inst?.id ?? `${id}:${gate}`)}/${verb}`;
+  };
   const APPROVERS = ["p-priya", "p-meera", "p-grace", "p-kenji", "p-daniel", "p-asha", "p-omar"];
   /** Drive a work order (results for running stations, approvals for gates) until `until` holds. */
   const walk = async (id: string, until: (wo: any) => boolean, max = 60) => {
@@ -96,7 +101,7 @@ export function world(getT: () => TestApp) {
       if (wo.state === "waiting" && wo.allowed.approve) {
         let passed = false;
         for (const who of APPROVERS) {
-          const r = await call(who, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${wo.allowed.approve.gate}`)}/approve`, {});
+          const r = await call(who, "POST", await gateUrl(id, wo.allowed.approve.gate), {});
           if (r.status === 200 && r.body.passed) {
             passed = true;
             break;
@@ -121,5 +126,5 @@ export function world(getT: () => TestApp) {
     await walk(id, (wo) => st[wo.station]?.id === sid && wo.state === "running" && !wo.bay);
     return id;
   };
-  return { apply, ciArrives, walk, atStation, APPROVERS, call, q, events, ifm, submit, get, answerAll, confirm, sys, tx, fxIn, liveAttempt, insertWo };
+  return { gateUrl, apply, ciArrives, walk, atStation, APPROVERS, call, q, events, ifm, submit, get, answerAll, confirm, sys, tx, fxIn, liveAttempt, insertWo };
 }

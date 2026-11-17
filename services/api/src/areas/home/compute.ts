@@ -174,6 +174,7 @@ const MERGE_UPDATES: ReadonlySet<string> = new Set(["pr", "checks.green", "check
 async function myApprovals(db: Queryable, orgId: string, st: Flow, st0: PolicyStateLoaded, principal: Principal, me: Person, now: number) {
   const vis = new Set(visibleProjects(st, me.id).map((p) => p.id));
   const out: Array<Record<string, unknown>> = [];
+  const openInst = new Map((await db.query<{ id: string; wo_id: string; gate_id: string }>(`select id, wo_id, gate_id from gate_instances where org_id = $1 and status = 'open'`, [orgId])).rows.map((r) => [`${r.wo_id}:${r.gate_id}`, r.id]));
   for (const w of st.workOrders) {
     if (!vis.has(w.project) || w.bay) continue;
     const p = st.projects.find((x) => x.id === w.project)!;
@@ -181,7 +182,7 @@ async function myApprovals(db: Queryable, orgId: string, st: Flow, st0: PolicySt
       if (gi.status !== "waiting" || !canApprove(st, me.id, w, gid, now)) continue;
       const g = gateDef(st.catalog, gid);
       const prog = gid === "G0G1" ? null : gateProgress(p, w, gid, st.people);
-      out.push({ wo: w.id, title: w.title, gate: gid, gateLabel: g?.label ?? gid, gateName: g?.name ?? gid, project: p.id, projectName: p.name, waitMs: Math.max(0, now - (gi.waitingSince ?? w.waitingSince)), ...(prog ? { have: prog.have, need: prog.need } : {}) });
+      out.push({ wo: w.id, title: w.title, gate: gid, gateLabel: g?.label ?? gid, gateName: g?.name ?? gid, ...(openInst.get(`${w.id}:${gid}`) ? { instance: openInst.get(`${w.id}:${gid}`) } : {}), project: p.id, projectName: p.name, waitMs: Math.max(0, now - (gi.waitingSince ?? w.waitingSince)), ...(prog ? { have: prog.have, need: prog.need } : {}) });
     }
   }
   const prs = await db.query<{ repo_id: string; number: number | null; project_id: string; repo: string }>(

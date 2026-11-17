@@ -12,7 +12,7 @@
  *  - setReplay, openRecord: view state, kept in local prefs (see lib/prefs.ts).
  *
  * Id conventions the server must honour (integration notes):
- *  - gate instance id = `${woId}:${gateId}`           (POST /gate-instances/{id}/approve|reject)
+ *  - gate instance id = `${woId}:${gateId}:${n}`        (POST /gate-instances/{id}/approve|reject)
  *  - stop id          = `${scope}:${targetId}`        (DELETE /stops/{id}, POST /stops/{id}/restore), scope in factory|project|repo|workorder
  */
 import { clearDrafts as clearStoredDrafts } from "./drafts";
@@ -31,6 +31,18 @@ export interface OpenWorkItem { id: string; title?: string; project?: string; st
 type Via = string | undefined;
 
 const enc = encodeURIComponent;
+
+/** The id a decision names: the shown instance when it is a full `WO:G:n`, otherwise the bare gate (the server then answers 428 with the open instance). */
+export const gateInstanceId = (woId: string, gateId: string, instance?: string): string => (instance && instance.startsWith(`${woId}:${gateId}:`) && instance.split(":").length === 3 ? instance : `${woId}:${gateId}`);
+
+/** A gate decision refused as stale (409) or unpinned (428): the screens refetch at once and the person is told what changed and that nothing was decided. */
+async function gateDecided<T extends object>(req: Promise<ApiResult<T>>): Promise<ApiResult<T>> {
+  const r = await req;
+  if (r.ok || (r.status !== 409 && r.status !== 428) || r.rule) return r;
+  invalidateSlices(["workOrders", "trust", "audit"]);
+  const now = typeof r.current?.instance === "string" ? ` It is now at instance ${r.current.instance.split(":")[2] ?? "?"}.` : "";
+  return { ...r, msg: `${r.msg}${now} Nothing was decided. The screen was refreshed; look again and decide.` };
+}
 
 /** Run a request and invalidate `slices` when it succeeded. */
 async function run<T extends object = Obj>(slices: readonly string[], req: Promise<ApiResult<T>>): Promise<ApiResult<T>> {
@@ -106,10 +118,11 @@ export const ops = {
     run(["record", "workOrders"], put(api(`work-orders/${enc(woId)}/record/summary`), { text }, opts(v))),
 
   /* ===== gates ===== */
-  approveGate: (woId: string, gateId: string, via?: Via, v?: Versioned) =>
-    run(["workOrders", "trust"], post(api(`gate-instances/${enc(`${woId}:${gateId}`)}/approve`), { via }, opts(v))),
-  rejectGate: (woId: string, gateId: string, reason: string, via?: Via, v?: Versioned) =>
-    run(["workOrders", "trust"], post(api(`gate-instances/${enc(`${woId}:${gateId}`)}/reject`), { reason, via }, opts(v))),
+  /** `instance` is the exact opening the person was shown (`WO-1:G2:3`, from `allowed.approve.instance` or Home's approvals). The server refuses a decision that does not name it. */
+  approveGate: (woId: string, gateId: string, instance: string | undefined, via?: Via, v?: Versioned) =>
+    gateDecided(run(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/approve`), { via }, opts(v)))),
+  rejectGate: (woId: string, gateId: string, instance: string | undefined, reason: string, via?: Via, v?: Versioned) =>
+    gateDecided(run(["workOrders", "trust"], post(api(`gate-instances/${enc(gateInstanceId(woId, gateId, instance))}/reject`), { reason, via }, opts(v)))),
 
   /* ===== moving work ===== */
   moveTo: (woId: string, target: string, reason?: string, via?: Via, v?: Versioned) =>

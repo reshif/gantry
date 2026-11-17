@@ -63,7 +63,7 @@ d("flow reads: list, traveler, floor and replay, record, home", () => {
     // gate approve and reject: denied and stale
     const v = wo.body.version as number;
     const before = Number((await w.q(`select count(*)::int n from events where outcome = 'denied'`))[0].n);
-    const url = `/api/v1/gate-instances/${encodeURIComponent(`${ids.gate}:${gate}`)}`;
+    const url = (await w.gateUrl(ids.gate, gate)).replace(/\/approve$/, "");
     for (const verb of ["approve", "reject"]) {
       expect((await w.call("p-rui", "POST", `${url}/${verb}`, { reason: "Not convinced by the tests" })).status).toBe(403);
       const st = await w.call("p-priya", "POST", `${url}/${verb}`, { reason: "Not convinced by the tests" }, w.ifm(v + 9));

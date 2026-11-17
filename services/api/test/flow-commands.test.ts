@@ -201,7 +201,7 @@ d("work order commands: denied and stale for every one", () => {
     await t.db.admin.query(`update pull_requests set head_sha = 'def9999aaaa' where id = 'PR-1'`);
     let merging = false;
     for (const who of w.APPROVERS) {
-      const r = await w.call(who, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:G5`)}/approve`, {});
+      const r = await w.call(who, "POST", await w.gateUrl(id, "G5"), {});
       if (r.status === 200 && r.body.passed) {
         merging = true;
         break;

@@ -3,7 +3,7 @@
  *   GET/POST /api/v1/projects/{id}/work-orders, GET /api/v1/work-orders/{id}
  *   GET /api/v1/conversations, POST /api/v1/work-orders/{id}/messages
  *   POST /api/v1/work-orders/{id}/reclassify, /confirm-brief, /decline
- *   POST /api/v1/gate-instances/{id}/approve, /reject            (id = `${woId}:${gateId}`, or `${woId}:${gateId}:${n}` for one exact opening)
+ *   POST /api/v1/gate-instances/{id}/approve, /reject            (id = `${woId}:${gateId}:${n}`, the exact opening decided; without `:n` the answer is 428 with the open instance)
  *   PUT /api/v1/work-orders/{id}/budget       (set or raise the spending cap)
  *   POST /api/v1/work-orders/{id}/move (dry_run), /send-back, /park, /unpark, /reassign, /retry
  *   GET /api/v1/work-orders/{id}/record, record.md, record/export, PUT .../record/summary, GET .../changes
@@ -17,7 +17,7 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { command, decide, policyState, refuse, type CommandSpec } from "../core/index.js";
 import { loadFlow, stateWithPinned } from "../areas/workorders/model.js";
-import { actionForGate, approveGate, parseGateId, rejectGate } from "../areas/workorders/gates.js";
+import { actionForGate, approveGate, parseGateId, rejectGate, requireGatePin } from "../areas/workorders/gates.js";
 import { addFollowup, decline, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
 import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
 import { setWoCap } from "../areas/workorders/budget.js";
@@ -343,13 +343,13 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const { id } = Id.parse(req.params);
     const gi = parseGateId(id);
     const body = z.looseObject({ via: Via, reason: z.string().trim().max(1000).optional() }).parse(req.body ?? {});
-    return command(req, spec(gi.woId, await gateAction(req, gi.gateId, "approve"), await scopeOf(req, gi.woId)), (tx, a) => approveGate(tx, a, gi.woId, gi.gateId, gi.n, { ...(body.via ? { via: body.via } : {}), ...(body.reason ? { reason: body.reason } : {}) }));
+    return command(req, spec(gi.woId, await gateAction(req, gi.gateId, "approve"), await scopeOf(req, gi.woId)), async (tx, a) => approveGate(tx, a, gi.woId, gi.gateId, await requireGatePin(tx, a.orgId, gi.woId, gi.gateId, gi.n), { ...(body.via ? { via: body.via } : {}), ...(body.reason ? { reason: body.reason } : {}) }));
   });
   app.post("/api/v1/gate-instances/:id/reject", async (req) => {
     const { id } = Id.parse(req.params);
     const gi = parseGateId(id);
     const b = ReasonBody.parse(req.body);
-    return command(req, spec(gi.woId, await gateAction(req, gi.gateId, "reject"), await scopeOf(req, gi.woId)), (tx, a) => rejectGate(tx, a, gi.woId, gi.gateId, gi.n, b.reason, b.via));
+    return command(req, spec(gi.woId, await gateAction(req, gi.gateId, "reject"), await scopeOf(req, gi.woId)), async (tx, a) => rejectGate(tx, a, gi.woId, gi.gateId, await requireGatePin(tx, a.orgId, gi.woId, gi.gateId, gi.n), b.reason, b.via));
   });
 
   app.post("/api/v1/work-orders/:id/move", async (req) => {

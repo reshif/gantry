@@ -471,10 +471,13 @@ const PROPOSE: ToolDef[] = [
       if (!gate) return { error: `${id} is not waiting at a gate.` };
       const st = await stateOf(ctx);
       const prog = obj(obj(w.gateProgress)[gate] ?? w.gateProgress);
+      // The decision names the exact opening the person is shown (A8): a stale card cannot land on a newer instance.
+      const opened = str(obj(obj(w.allowed).approve).instance);
+      const instance = opened && opened.split(":").length === 3 ? opened : `${id}:${gate}`;
       return mk(ctx, {
         kind: "approve", title: `Approve ${gate} on ${id}`, summary: String(w.title ?? ""),
         steps: [mark(w.title, 160), ...(typeof prog.have === "number" ? [`Approvals so far: ${prog.have} of ${String(prog.need)}`] : [])],
-        call: { method: "POST", path: `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}`)}/approve`, body: { via: "console" }, idempotent: false },
+        call: { method: "POST", path: `/api/v1/gate-instances/${encodeURIComponent(instance)}/approve`, body: { via: "console" }, idempotent: false },
         perm: { action: actionForGate(st.catalog, gate), project: String(w.project) }, needsReason: null, phrase: null, danger: false, entities: [{ type: "wo", id: id! }], scope: { project: String(w.project), repo: w.repo ? String(w.repo) : null, wo: id! },
       });
     },

@@ -24,7 +24,7 @@ const approvers = {
   viewerCanOverride: false,
   can: { editRule: true, editWhy: "", grantRole: true, grantWhy: "" },
 };
-const traveler = (allowed: boolean) => ({ id: "WO-2398", project: "payments", allowed: { approve: { gate: "G2", allowed, reason: allowed ? "" : "You wrote this work order; someone else must approve.", needs: "" } } });
+const traveler = (allowed: boolean) => ({ id: "WO-2398", project: "payments", allowed: { approve: { gate: "G2", instance: "WO-2398:G2:3", allowed, reason: allowed ? "" : "You wrote this work order; someone else must approve.", needs: "" } } });
 
 describe("Inbox", () => {
   it("lists what waits for the person once, grouped by kind, longest wait first", async () => {
@@ -56,7 +56,7 @@ describe("Inbox", () => {
     const cs = mockApi({
       "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
-      "POST /api/v1/gate-instances/WO-2398%3AG2/approve": () => ({ body: { ok: true, msg: "Approved." } }),
+      "POST /api/v1/gate-instances/WO-2398%3AG2%3A3/approve": () => ({ body: { ok: true, msg: "Approved." } }),
     });
     mount(<InboxView />);
     const ok = await screen.findByRole("button", { name: "Approve" });

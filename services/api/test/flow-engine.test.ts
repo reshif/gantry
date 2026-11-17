@@ -178,8 +178,8 @@ d("flow engine: guarantees F1 to F6", () => {
       const wo = await w.walk(id, (x) => x.state === "waiting" && !!x.allowed.approve && x.allowed.approve.gate === "G2");
       return { id, gate: "G2", version: wo.version as number };
     };
-    const vote = (who: string, id: string, gate: string, verb: "approve" | "reject" = "approve", body: object = {}) =>
-      w.call(who, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}`)}/${verb}`, body);
+    const vote = async (who: string, id: string, gate: string, verb: "approve" | "reject" = "approve", body: object = {}) =>
+      w.call(who, "POST", await w.gateUrl(id, gate, verb), body);
 
     it("F6: a double click counts once; loosening the rule between votes approves nothing by itself", async () => {
       const { id, gate } = await atGate("F6 double approve", "p-tomas", rule());
@@ -246,6 +246,31 @@ d("flow engine: guarantees F1 to F6", () => {
       expect((await w.get(id)).gates[gate].status).not.toBe("waiting");
     });
 
+    it("A8: approve and reject must name the open instance; a bare id is 428 with the instance, a stale number is 409, the right number works", async () => {
+      const { id, gate } = await atGate("Pinned decisions", "p-meera", rule({ required: 1, sod: true, roles: ["line_lead", "reviewer"] }));
+      const bare = (verb: "approve" | "reject") => w.call("p-priya", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}`)}/${verb}`, { reason: "Needs a rework of the refunds" });
+      for (const verb of ["approve", "reject"] as const) {
+        const r = await bare(verb);
+        expect(r.status, JSON.stringify(r.body)).toBe(428);
+        expect(r.body).toMatchObject({ ok: false, needs: "gate instance", current: { instance: `${id}:${gate}:1`, n: 1, gate, wo: id } });
+        expect(r.body.msg).toContain(`${id}:${gate}:1`);
+      }
+      expect((await w.get(id)).state).toBe("waiting"); // nothing was decided
+      // a person who may not decide is refused before anything about the instance is revealed
+      const denied = await w.call("p-rui", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}`)}/approve`, {});
+      expect(denied.status).toBe(403);
+      expect(denied.body.current).toBeUndefined();
+      const stale = await w.call("p-priya", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}:9`)}/approve`, {});
+      expect(stale.status).toBe(409);
+      expect(stale.body.current).toMatchObject({ instance: `${id}:${gate}:1`, gate, wo: id });
+      const ok = await w.call("p-priya", "POST", await w.gateUrl(id, gate), {});
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body.passed).toBe(true);
+      // the decided instance is closed: the same pin is stale now, not a blind approval of whatever opens next
+      const again = await w.call("p-priya", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}:1`)}/approve`, {});
+      expect(again.status).toBe(409);
+    });
+
     it("separation of duties: the author cannot approve; a stale instance id is refused; a reject reworks the station", async () => {
       const { id, gate } = await atGate("SoD and stale", "p-meera", rule({ sod: true, required: 1, roles: ["line_lead", "reviewer"] }));
       const own = await vote("p-meera", id, gate);
@@ -262,7 +287,7 @@ d("flow engine: guarantees F1 to F6", () => {
       expect(wo.gates[gate].rejections[0].reason).toMatch(/refunds/);
       expect((await w.q(`select status, closed_reason from gate_instances where id = $1`, [`${id}:${gate}:1`]))[0]).toMatchObject({ status: "closed", closed_reason: "decision" });
       // the same instance cannot be decided again
-      expect((await vote("p-priya", id, gate)).status).toBe(409);
+      expect((await w.call("p-priya", "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}:1`)}/approve`, {})).status).toBe(409);
     });
   });
 });
