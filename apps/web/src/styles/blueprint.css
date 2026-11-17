@@ -557,3 +557,5 @@ textarea.input{height:auto;min-height:84px;padding:8px 10px}
 .view-workload,.view-workload .panel{min-width:0}.view-workload .wl-main .panel-body{overflow-x:auto}
 .view-access,.view-access .acc-body,.view-access .acc-rules{min-width:0}.view-access .acc-rules{overflow-x:auto}
 .aud-table td .linkish{color:var(--ink);text-decoration:none;font-weight:500}.aud-table td .linkish:hover{color:var(--accent);text-decoration:underline}
+.crumbs{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin-bottom:6px}.crumbs a{color:var(--ink3);text-decoration:underline}
+.person-stack>*{min-width:0}.person-stack .panel{min-width:0;overflow-x:auto}.ppl-badges{display:flex;gap:8px;flex-wrap:wrap}

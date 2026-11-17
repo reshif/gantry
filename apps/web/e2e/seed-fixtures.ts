@@ -147,6 +147,18 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
       const rows = people.map((x, i) => ({ person: x.id, name: x.name, team: x.teams?.[0] ?? null, glass: 0, perDay: (4 + i) / 7, waitN: 6, waiting: i % 3, approvals: 4 + i, answered: i % 4, medianResponseMin: 12 + i, afterHours: i % 2, n: 6, sole: i % 5 === 0 ? 1 : 0, minutes: 30 + i * 5, away: null, oncall: !!x.oncall, waitingGates: [], recent: [] }));
       return { at: seed.NOW, days: 7, scope: "all", minN: 5, projects: [{ id: "payments", name: "Payments Platform" }], factoryWide: true, ids: people.map((x) => x.id), totals: { gatesWaiting: 6, soleGates: 1, noneGates: 0, timedN: 12, medianWaitMin: 42, acts: 64, afterHours: 9, minutes: 520 }, rows, teams: [], byCls: [], byProject: [], bottlenecks: [], needsPerson: [], suggestions: [] };
     }
+    const eff = /^people\/([^/]+)\/effective-permissions$/.exec(path);
+    if (eff) {
+      const person = (seed.people as Array<{ id: string; roles: Array<{ role: string; scope: string }> }>).find((x) => x.id === eff[1]);
+      const projs = (seed.projects as Array<{ id: string; name: string }>).map((x) => ({ id: x.id, name: x.name }));
+      const acts = seed.catalog.actions as Array<{ id: string; name: string; group: string; scope: "project" | "factory" }>;
+      const ok = (a: string, scope: string) => (person?.roles ?? []).some((g) => (g.scope === "factory" || g.scope === scope) && seed.role_matrix[g.role]?.[a]);
+      const cells: Record<string, Record<string, [0 | 1, string]>> = {};
+      for (const pr of projs) { cells[pr.id] = {}; for (const a of acts.filter((x) => x.scope === "project")) cells[pr.id]![a.id] = [ok(a.id, pr.id) ? 1 : 0, "matrix"]; }
+      const factory: Record<string, { allowed: boolean; reason: string; rule: { id: string } }> = {};
+      for (const a of acts.filter((x) => x.scope === "factory")) factory[a.id] = { allowed: ok(a.id, "factory"), reason: "role matrix", rule: { id: "MATRIX" } };
+      return { person: eff[1], at: NOW, projects: projs, actions: acts, cells, rules: { MATRIX: { kind: "matrix", name: "Role matrix" } }, factory };
+    }
     void q;
     return undefined;
   };
