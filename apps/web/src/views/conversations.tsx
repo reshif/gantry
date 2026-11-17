@@ -10,9 +10,10 @@ import { useMe, useProject } from "../api/queries";
 import { pickProject } from "../lib/routes";
 import { navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Btn, Tabs, ViewHead } from "../ui/primitives";
-import { Async, qState } from "../ui/async";
-import { ClassChip, EmptyState, classOf, useCatalog } from "./projects/kit";
+import { Avatar, Btn, SearchBox, Tabs } from "../ui/primitives";
+import { CrEmpty, Page } from "../ui/cr";
+import { Async } from "../ui/async";
+import { EmptyState, useCatalog } from "./projects/kit";
 import { WoSessionPage } from "./conversations/Session";
 import { useWoSessions, type WoSessionRow } from "./conversations/session-api";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
@@ -35,6 +36,7 @@ export default function ConversationsView() {
   const newWoDialog = useNewWorkOrder();
   const q = useWoSessions(projectId ?? undefined);
   const [tab, setTab] = useState<Tab | null>(null);
+  const [search, setSearch] = useState("");
   // A deep link from an older screen (the work orders table, the bell, the record) asks for one conversation: land on its session.
   const pending = prefs.openConversation;
   useEffect(() => {
@@ -51,45 +53,57 @@ export default function ConversationsView() {
       closed: items.filter((w) => w.closed).sort(byLatest),
     };
   }, [items]);
-  if (hash.param) return <div className="view conv-view"><WoSessionPage woId={hash.param} back={() => navigate("conversations", null)} /></div>;
   if (!me || !cat) return <div className="view conv-view" />;
   if (!projectId) return <div className="view"><EmptyState title="No project" text="You do not have a project to show." /></div>;
   if (!project) return <div className="view"><Async query={projectQ} what="this project" id="conv-project">{() => null}</Async></div>;
-  const cur: Tab = tab ?? (groups.waiting.length ? "waiting" : "open");
+  const cur: Tab = tab ?? "open";
   const list = groups[cur];
   const block = projectSubmitBlock(me, project, repos);
-  const unread = items.filter((w) => w.unread).length;
+  const needle = search.trim().toLowerCase();
+  const shown = list.filter((w) => !needle || `${w.title} ${w.id} ${w.agentName ?? ""}`.toLowerCase().includes(needle));
+  // As in the prototype, the first conversation is open on a wide screen until one is picked.
+  const wide = typeof window !== "undefined" && window.innerWidth > 720;
+  const cur2 = hash.param ?? (wide ? (shown[0]?.id ?? null) : null);
   return (
-    <div className="view conv-view">
-      <ViewHead
-        title="Conversations"
-        sub="One conversation per work order, for its whole life, with the agent at its current station. Open one to talk to the agent, review its proposals and see what happened."
-        meta={[["Waiting on me", qState(q, () => String(groups.waiting.length))], ["Open", qState(q, () => String(groups.open.length))], ["Unread", qState(q, () => String(unread))]]}
-        actions={<Btn label="New work order" kind="primary" icon="plus" id="conv-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWoDialog({ project: project.id })} />}
-      />
-      <Tabs idPrefix="conv-tab" items={[{ id: "waiting", label: "Waiting on me", count: groups.waiting.length }, { id: "open", label: "Open", count: groups.open.length }, { id: "closed", label: "Closed", count: groups.closed.length }]} active={cur} onChange={(t) => setTab(t as Tab)} />
-      <Async query={q} what="conversations" id="conv-list">{() => list.length ? (
-        <ul className="wos-list-rows" aria-label="Work-order conversations" data-keep-scroll="conv-list">
-          {list.map((w) => (
-            <li key={w.id}>
-              <button type="button" className={`wos-row${w.unread ? " is-unread" : ""}${w.waitingOn === "you" ? " is-mine" : ""}`} id={`conv-item-${w.id}`} onClick={() => navigate("conversations", w.id)}>
-                <span className="wos-row-top">
-                  <span className="mono strong">{w.id}</span>
-                  <ClassChip cls={classOf(cat, project, w.cls)} small />
-                  <span className="chip">{w.bay ? `Bay · ${w.bay}` : w.stationName}</span>
-                  <span className={`chip wos-wait is-${w.waitingOn}`}>{w.waitingOn === "agent" && w.agentName ? `${w.agentName} working` : WAIT[w.waitingOn]}</span>
-                  {w.unread ? <span className="wos-unread" role="img" aria-label="Unread" /> : null}
-                  <span className="mono muted small wos-row-t">{fmt.ago(w.latest?.at ?? w.createdAt, Date.now())}</span>
-                </span>
-                <span className="wos-row-title">{w.title}</span>
-                <span className="wos-row-last small muted">{w.latest ? `${w.latest.role === "user" ? "You or a teammate" : w.latest.role === "assistant" ? (w.agentName ?? "Agent") : "Gantry"}: ${w.latest.text.replace(/\s+/g, " ").slice(0, 140)}` : w.started ? "" : "The conversation has not started yet."}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <EmptyState id="conv-empty" icon="chat" title={cur === "waiting" ? "Nothing waits on you" : cur === "open" ? "No open conversations" : "Nothing closed yet"} text={cur === "waiting" ? "When an agent asks you something or proposes a brief, the conversation shows here." : "Submit a work order to start a conversation with its Intake agent."} />
-      )}</Async>
-    </div>
+    <Page
+      eyebrow="Operate" title="Conversations" cls="conv-view"
+      sub="Talk to the agent on a work order. Answers are recorded on the record."
+      acts={<Btn label="New work order" kind="primary" icon="plus" id="conv-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWoDialog({ project: project.id })} />}
+    >
+      <div className={`conv${cur2 ? " has" : ""}`}>
+        <div className="card conv-list" hidden={false}>
+          <div className="card-b" style={{ padding: 8 }}>
+            <SearchBox id="conv-q" value={search} onChange={setSearch} placeholder="Search conversations" />
+            <div style={{ marginTop: 8 }}>
+              <Tabs idPrefix="conv-tab" items={[{ id: "waiting", label: "Waiting on me", count: groups.waiting.length }, { id: "open", label: "Open", count: groups.open.length }, { id: "closed", label: "Closed", count: groups.closed.length }]} active={cur} onChange={(t) => setTab(t as Tab)} />
+            </div>
+          </div>
+          <div className="card-b flush" data-keep-scroll="conv-list">
+            <Async query={q} what="conversations" id="conv-list">{() => shown.length ? (
+              <>
+                {shown.map((w) => (
+                  <a key={w.id} className="li click" id={`conv-item-${w.id}`} href={`#/p/${project.id}/conversations/${w.id}`} aria-label={`${w.id} ${w.title}`} style={{ color: "inherit", textDecoration: "none", ...(cur2 === w.id ? { background: "var(--surface-2)" } : {}) }}>
+                    <Avatar id={w.agent} />
+                    <div className="main1">
+                      <span className="t1">{w.title}</span>
+                      <span className="t2">{`${w.agentName ?? "Agent"} · ${w.id} · ${fmt.ago(w.latest?.at ?? w.createdAt, Date.now())}`}</span>
+                      <span className="t2">{w.waitingOn === "agent" && w.agentName ? `${w.agentName} working` : WAIT[w.waitingOn]}</span>
+                    </div>
+                    {w.unread ? <span className="badge hot" role="img" aria-label="Unread">1</span> : null}
+                  </a>
+                ))}
+              </>
+            ) : (
+              <EmptyState id="conv-empty" icon="chat" title={cur === "waiting" ? "Nothing waits on you" : cur === "open" ? "No open conversations" : "Nothing closed yet"} text={cur === "waiting" ? "When an agent asks you something or proposes a brief, the conversation shows here." : "Submit a work order to start a conversation with its Intake agent."} />
+            )}</Async>
+          </div>
+        </div>
+        {cur2 ? (
+          <div className="card conv-thread"><div className="card-b"><WoSessionPage key={cur2} woId={cur2} back={() => navigate("conversations", null)} embedded /></div></div>
+        ) : (
+          <div className="card"><CrEmpty icon="chat" title="Pick a conversation" text="Choose one on the left to read or reply." /></div>
+        )}
+      </div>
+    </Page>
   );
 }

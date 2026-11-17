@@ -19,3 +19,4 @@ table.t.dtable thead th{font:600 11px/16px var(--mono);letter-spacing:.06em;text
 table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 .tag{text-transform:none}
 .searchbox.search .in{padding-left:32px}
+.grid.ws{display:grid;padding-left:0;border-left:0;gap:var(--s4)}

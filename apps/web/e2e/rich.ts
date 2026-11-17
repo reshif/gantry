@@ -193,6 +193,25 @@ export function richOverrides(): Record<string, Handler> {
         projects: [],
       },
     });
+  const sess = (id: string, title: string, agent: string, agentName: string, station: string, stationName: string, waitingOn: string, agoMin: number, text: string, unread: boolean) => ({ id, project: "payments", title, cls: "feature", station, stationName, state: "running", bay: null, gate: null, agent, agentName, waitingOn, latest: { text, at: NOW - agoMin * MIN, by: agent, role: "assistant" }, unread, closed: false, started: true, requestedBy: "p-lead", createdAt: NOW - 6 * HOUR });
+  ov["work-order-sessions"] = (r) => fulfillJson(r, { items: [
+    sess("WO-1006", "Retry limit scope", "ag-spec", "Spec Writer", "spec", "Spec", "you", 40, "Before I commit to a criterion: should the limit apply per merchant or per account?", true),
+    sess("WO-1004", "Review findings on the payout limiter", "ag-review", "Reviewer", "review", "Review and merge", "approver", 120, "Findings are ready for the G5 approver.", false),
+    sess("WO-1025", "New request: bulk refund screen", "ag-intake", "Intake Clerk", "intake", "Intake", "agent", 300, "Classifying: feature, confidence 0.91", false),
+  ] });
+  ov["work-orders/WO-1006/session"] = (r) => fulfillJson(r, {
+    woId: "WO-1006", project: "payments", repo: "payments-api",
+    wo: { id: "WO-1006", title: "Retry limit scope", description: "", cls: "feature", clsName: "Feature", confidence: 0.9, rationale: "", priority: "P2", station: "spec", stationName: "Spec", state: "running", bay: null, gate: null, requestedBy: "p-lead", closed: false },
+    messages: [
+      { id: "m1", role: "assistant", author: "ag-spec", text: "I am writing the spec for the payout rate limit. Before I commit to a criterion: should the limit apply per merchant or per account?", at: NOW - 52 * MIN, data: { kind: "station", mode: "agent" } },
+      { id: "m2", role: "user", author: "p-lead", text: "Per merchant. Accounts are internal.", at: NOW - 47 * MIN, data: {} },
+      { id: "m3", role: "assistant", author: "ag-spec", text: "Thanks. I will state it per merchant with a default of 60 requests a minute and note that it is configurable.", at: NOW - 46 * MIN, data: { kind: "station", mode: "agent" } },
+    ],
+    agent: { mode: "agent", name: "Spec Writer", id: "ag-spec", model: "claude-opus", vendor: "anthropic", version: 3, station: "spec" },
+    budget: { spentUsd: 4.2, limitUsd: 20 }, costUsd: 1.4, can: { talk: true, talkWhy: "", confirm: false, confirmWhy: "" },
+    steps: [], next: { actor: "agent", text: "Spec Writer is working." }, waiting: null,
+    dialogue: { questions: [], assumptions: [], objections: [], askedMe: false }, swarm: null, documents: [], research: { state: "none" }, sources: [], pending: [], brief: {}, briefConfirmed: true, briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false,
+  });
   ov["people"] = (r) => fulfillJson(r, [person("p-admin", "Asha Raman", "Engineering Director", "factory_admin"), person("p-lead", "Meera Iyer", "Tech Lead", "tech_lead"), person("p-reader", "Rae Reader", "Auditor", "auditor")]);
   return ov;
 }
