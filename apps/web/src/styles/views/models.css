@@ -89,3 +89,4 @@
 .view-models .vendor .vendor-name { font-size: 15px; }
 .view-models .vendor .md-mid { display: none; }
 .view-models .vendor .md-id .md-rm { margin-left: 4px; }
+#md-stats .stat-tile:last-child .stat-value, #md-stats .stat-tile:last-child .v { font-size: var(--t-lg, 20px); }

@@ -58,10 +58,10 @@ export default function ModelsView() {
         actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} />}
       />
       <StatRow id="md-stats">
-        <Stat label="Default model" value={qState(rq, (r) => defaultModel?.m.name ?? r.defaultModel ?? "–")} sub={defaultModel ? defaultModel.v.name : undefined} />
-        <Stat label="Vendors connected" value={qState(vq, () => `${vendors.filter((v) => v.connected).length} of ${vendors.length}`)} sub={vendors.some((v) => !v.connected) ? `${vendors.filter((v) => !v.connected).length} not connected` : undefined} />
         <Stat label="Models on" value={qState(vq, () => `${enabledN} of ${allN}`)} />
-        <Stat label="Spend this month" value={qState(vq, () => (bud ? `${fmt.money0(mtd)} of ${fmt.money0(bud)}` : fmt.money0(mtd)))} sub="Month to date, against budget" />
+        <Stat label="Vendors connected" value={qState(vq, () => `${vendors.filter((v) => v.connected).length} of ${vendors.length}`)} sub={vendors.some((v) => !v.connected) ? `${vendors.filter((v) => !v.connected).length} not connected` : undefined} />
+        <Stat label="Spend this month" value={qState(vq, () => fmt.money0(mtd))} sub={bud ? `of ${fmt.money0(bud)} this month` : "month to date"} />
+        <Stat label="Default model" value={qState(rq, (r) => defaultModel?.m.name ?? r.defaultModel ?? "–")} sub={defaultModel ? defaultModel.v.name : undefined} />
       </StatRow>
       <Tabs idPrefix="md-tab" active={tab} onChange={setTab} items={[{ id: "vendors", label: "Vendors", count: vq.data ? vendors.length : null }, { id: "routing", label: "Routing" }, { id: "prices", label: "Prices and budgets" }]} />
       <Async query={vq} what="model vendors" id="models">
