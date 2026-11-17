@@ -20,3 +20,4 @@ export * from "./gates.js";
 export * from "./guardrails.js";
 export * from "./repo-context.js";
 export * from "./metrics.js";
+export * from "./doc-outline.js";

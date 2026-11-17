@@ -51,6 +51,7 @@ const SELF_AUTHORIZING: Record<string, Probe> = {
   "/api/v1/work-orders/:id/record.md": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/record/export": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/gates/:gate/approvers": { why: "scopeOf() then decide(project.view)", expect: "refuse", params: { id: "$wo", gate: "brief" } },
+  "/api/v1/work-orders/:id/document-comments": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/session": { why: "woOf(): visible project and decide(project.view)", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/dialogue": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/documents": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },

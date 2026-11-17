@@ -1,18 +1,22 @@
 /**
  * The station document viewer (agent workspace, Phase 1, G4): every document the station agents wrote on a work order, each with its versions.
- * Rendered markdown with an outline, a version switcher, a line diff against the previous version, Copy and Download. Read-only: documents are
- * the agents' own output; people answer through questions, assumptions and the gates.
+ * Rendered markdown with an outline, a version switcher, a line diff against the previous version, Copy and Download. Documents are the agents' own
+ * output; people steer through questions, assumptions and the gates, and also comment on a section, edit the newest version (saved as a new version in
+ * their name) and accept a version as the station's output (DocComments.tsx).
  */
 import { useEffect, useMemo, useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Btn, Empty } from "../../ui/primitives";
+import { Btn, Empty, type Decision } from "../../ui/primitives";
+import { useCommand } from "../../ui/async";
 import { Async } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { CiteContext, Markdown, outlineOf } from "../../ui/Markdown";
 import { SourceDetail, SourceList } from "./Research";
 import { diffStats, lineDiff } from "../../ui/linediff";
 import { useName } from "../record/bits";
-import { useWoDocument, useWoDocuments, useWoSources, type DocVersion } from "./api";
+import { useCan } from "../../api/can";
+import { DocComments, DocEditor } from "./DocComments";
+import { acceptDocument, useWoDocComments, useWoDocument, useWoDocuments, useWoSources, type DocVersion } from "./api";
 
 const stationLabel = (s: string | null) => (s ? `${s.charAt(0).toUpperCase()}${s.slice(1)}` : "Gantry");
 
@@ -49,7 +53,7 @@ function Diff({ woId, from, to }: { woId: string; from: DocVersion; to: string }
   );
 }
 
-export function DocViewer({ woId, initial }: { woId: string; initial?: string | undefined }) {
+export function DocViewer({ woId, initial, project }: { woId: string; initial?: string | undefined; project?: string | undefined }) {
   const ui = useUI();
   const name = useName();
   const list = useWoDocuments(woId);
@@ -58,6 +62,11 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
   const [compare, setCompare] = useState(false);
   const [source, setSource] = useState<string | null>(null);
   const [showSources, setShowSources] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const mayApprove = useCan("gate.approve", project ? { project } : {});
+  // with no project to ask about, the server decides when the button is pressed
+  const guard: Decision | null = project ? { allowed: mayApprove.allowed, reason: mayApprove.reason, needs: mayApprove.needs } : null;
+  const comments = useWoDocComments(woId).data?.items ?? [];
   const sources = useWoSources(woId).data?.items ?? [];
   // the picked version, or the newest version of the first document
   const all = list.data?.items ?? [];
@@ -69,6 +78,10 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
   // a single top-level title is the document's name, not a section: the outline starts below it
   const outline = useMemo(() => { const o = outlineOf(text, "doc"); return o.filter((h) => h.level === 1).length === 1 ? o.filter((h) => h.level > 1) : o; }, [text]);
   useEffect(() => { if (!prev) setCompare(false); }, [prev]);
+  useEffect(() => { setEditing(false); }, [current?.id]);
+  const accept = useCommand((id: string) => acceptDocument(woId, id));
+  const isNewest = !!current && group?.versions.at(-1)?.id === current.id;
+  const sections = useMemo(() => [...new Set(outline.map((h) => h.text))], [outline]);
 
   if (!list.data) return <Async query={list} what="the documents" id="doc-viewer">{() => null}</Async>;
   if (!docs.length) return <Empty icon="page" title="No documents yet" text="Each station's agent writes its document here when its run ends." />;
@@ -89,7 +102,7 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
           <header className="doc-head">
             <div className="doc-head-t">
               <h3 className="doc-title mono">{current.doc}</h3>
-              <p className="small muted doc-byline">{`Version ${current.version} · written by ${author(current)} at ${stationLabel(current.station)} · ${fmt.stamp(current.createdAt)}`}</p>
+              <p className="small muted doc-byline">{`Version ${current.version} · ${current.authorKind === "person" ? "edited by" : "written by"} ${author(current)}${current.authorKind === "person" ? "" : ` at ${stationLabel(current.station)}`} · ${fmt.stamp(current.createdAt)}${current.acceptedBy ? ` · accepted as station output by ${name(current.acceptedBy)}` : ""}`}</p>
             </div>
             <div className="doc-tools">
               {group && group.versions.length > 1 ? (
@@ -102,6 +115,8 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
               ) : null}
               {prev ? <Btn small id="doc-compare" label={compare ? "Show document" : `Compare with v${prev.version}`} onClick={() => setCompare(!compare)} /> : null}
               {sources.length ? <Btn small id="doc-sources" label={showSources ? "Hide sources" : `Sources (${sources.length})`} onClick={() => { setShowSources(!showSources); setSource(null); }} /> : null}
+              {!current.acceptedBy ? <Btn small kind="primary" id="doc-accept" label="Accept as station output" guard={guard} disabledReason={accept.wait()} onClick={() => void accept.run(current.id)} /> : null}
+              {isNewest && !editing ? <Btn small id="doc-edit" label="Edit" guard={guard} disabled={!text} onClick={() => { setEditing(true); setCompare(false); }} /> : null}
               <Btn small icon="copy" id="doc-copy" label="Copy" disabled={!text} onClick={async () => { try { await navigator.clipboard.writeText(text); ui.toast("Copied as Markdown.", "ok"); } catch { ui.toast("The browser did not allow copying.", "error"); } }} />
               <Btn small icon="down" id="doc-download" label="Download" disabled={!text} onClick={() => download(current.doc, text)} />
             </div>
@@ -115,10 +130,11 @@ export function DocViewer({ woId, initial }: { woId: string; initial?: string | 
             ) : null}
             <div className="doc-body">
               {source ? <SourceDetail woId={woId} refId={source} onClose={() => setSource(null)} /> : showSources ? <section className="src-panel" aria-label="Sources"><SourceList items={sources} pick={(r) => setSource(r)} /></section> : null}
-              {body.data ? (compare && prev ? <Diff woId={woId} from={prev} to={text} /> : <CiteContext.Provider value={(r) => { setSource(r); setShowSources(false); }}><div className="md-doc"><Markdown text={text} idPrefix="doc" /></div></CiteContext.Provider>) : <Async query={body} what="the document" id="doc-body">{() => null}</Async>}
+              {editing && body.data ? <DocEditor woId={woId} version={current} text={text} onDone={(id) => { setEditing(false); if (id) setPicked(id); }} /> : body.data ? (compare && prev ? <Diff woId={woId} from={prev} to={text} /> : <CiteContext.Provider value={(r) => { setSource(r); setShowSources(false); }}><div className="md-doc"><Markdown text={text} idPrefix="doc" /></div></CiteContext.Provider>) : <Async query={body} what="the document" id="doc-body">{() => null}</Async>}
             </div>
           </div>
-          <p className="small muted doc-foot">{`Agent-written. Stored with its hash ${current.contentHash.slice(0, 12)}; secrets are redacted before it is saved.`}</p>
+          <DocComments woId={woId} version={current} sections={sections} items={comments.filter((c) => c.doc === current.doc)} />
+          <p className="small muted doc-foot">{`${current.authorKind === "person" ? "Edited by a person" : "Agent-written"}. Stored with its hash ${current.contentHash.slice(0, 12)}${current.authorKind === "person" ? "." : "; secrets are redacted before it is saved."}`}</p>
         </article>
       ) : null}
     </div>

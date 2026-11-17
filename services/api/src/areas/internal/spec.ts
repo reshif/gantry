@@ -3,6 +3,7 @@ import { REPO_CONTEXT_LAYER_NAME, RepoContext, renderRepoContext } from "@gantry
 import { compactPrevious, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
 import { dialogueHandoff, latestDocuments } from "../workorders/documents.js";
+import { commentsHandoff } from "../workorders/doccollab.js";
 import { planOf, researchHosts, sourcesHandoff } from "../workorders/research.js";
 import { swarmOf } from "../workorders/swarm.js";
 import { readSecurity } from "../../core/read/index.js";
@@ -180,7 +181,7 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   // Phase 1: the documents the earlier stations (and earlier runs of this one) wrote, and what was asked, answered and assumed, so the
   // agent starts from what was settled and does not ask again.
   const documents = await latestDocuments(db, c.orgId, c.woId, { exceptAttempt: c.attemptId });
-  const dialogue = await dialogueHandoff(db, c.orgId, c.woId);
+  const dialogue = { ...(await dialogueHandoff(db, c.orgId, c.woId)), documentComments: await commentsHandoff(db, c.orgId, c.woId) };
   const sources = await sourcesHandoff(db, c.orgId, c.woId);
   const plan = planOf(c.woData);
   const research = {

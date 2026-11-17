@@ -20,6 +20,7 @@ import { revokeRunTokens } from "../internal/tokens.js";
 import { ms } from "../../core/read/rows.js";
 import { readProject } from "../projects/store.js";
 import { afterFinish as trustAfterFinish, demoteForBreach, trustDecision, trustInForce } from "../trust/record.js";
+import { editedByPeople } from "./documents.js";
 import { bayOf, buildWorkOrders, loadFlowDocs, pinnedProject, saveWo, stationIdOf, type Data, type Wo } from "./model.js";
 
 export interface Fx {
@@ -610,7 +611,7 @@ export async function recordDecision(fx: Fx, w: Wo, inst: { id: string; opened_a
       tuple ? JSON.stringify(tuple.skill_versions) : null, tuple?.instruction_hash ?? null, tuple?.model_id ?? null, inst.head_sha ?? pr?.head_sha ?? null,
       JSON.stringify({
         mode: "human", channel: by.channel, via: by.via, reason: o.reason ?? "", reasonCode: decision === "approved" ? "approved" : "rejected", timeToDecideMs: fx.now.getTime() - (ms(inst.opened_at) ?? fx.now.getTime()),
-        voters: votes.map((v) => ({ by: v.voter, vote: v.vote, at: ms(v.at) })), approvals: o.approvals ?? votes.filter((v) => v.vote === "approve").length, riskTags: inst.basis.riskTags ?? [], samplingReason: inst.basis.forcedHuman ? "risk-triggered" : inst.basis.sampled ? "sampled" : "gated", artefactEdited: null, reviewSurface: null, policies, trustLevelNum: lvl.effective, trustGranted: lvl.granted, trustCell: lvl.cellId,
+        voters: votes.map((v) => ({ by: v.voter, vote: v.vote, at: ms(v.at) })), approvals: o.approvals ?? votes.filter((v) => v.vote === "approve").length, riskTags: inst.basis.riskTags ?? [], samplingReason: inst.basis.forcedHuman ? "risk-triggered" : inst.basis.sampled ? "sampled" : "gated", artefactEdited: await editedByPeople(fx.tx, fx.orgId, w.id), reviewSurface: null, policies, trustLevelNum: lvl.effective, trustGranted: lvl.granted, trustCell: lvl.cellId,
         ...(o.override ? { override: true, overrideBy: "factory_admin" } : {}),
       }),
       fx.now,

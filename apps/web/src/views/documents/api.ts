@@ -17,6 +17,7 @@ export interface DocVersion {
   contentHash: string;
   createdAt: number;
   acceptedBy: string | null;
+  acceptedAt?: number | null;
   body?: string;
 }
 
@@ -135,5 +136,32 @@ export async function decideObjection(woId: string, oid: string, b: { decision: 
 export async function stopScout(woId: string, sid: string, reason: string): Promise<ApiResult> {
   const r = await post(api(`work-orders/${enc(woId)}/scouts/${enc(sid)}/stop`), { reason });
   if (r.ok) invalidateSlices(["workOrders", "conversations", "floor"]);
+  return r;
+}
+
+export interface DocComment {
+  id: string; artefactId: string; doc: string; version: number; section: string; body: string; author: string; status: "open" | "resolved"; resolvedBy: string | null; resolvedAt: number | null; createdAt: number;
+}
+export const useWoDocComments = (woId: string | null | undefined) =>
+  useQuery({ queryKey: ["workOrders", "documentComments", woId ?? ""], queryFn: () => get<{ items: DocComment[] }>(api(`work-orders/${enc(woId ?? "")}/document-comments`)), enabled: !!woId });
+
+export async function commentOnDocument(woId: string, artefactId: string, b: { section?: string; text: string }): Promise<ApiResult> {
+  const r = await post(api(`work-orders/${enc(woId)}/documents/${enc(artefactId)}/comments`), b);
+  if (r.ok) invalidateSlices(["workOrders", "conversations"]);
+  return r;
+}
+export async function resolveDocComment(woId: string, cid: string): Promise<ApiResult> {
+  const r = await post(api(`work-orders/${enc(woId)}/document-comments/${enc(cid)}/resolve`), {});
+  if (r.ok) invalidateSlices(["workOrders"]);
+  return r;
+}
+export async function editDocument(woId: string, artefactId: string, b: { markdown: string; note?: string }): Promise<ApiResult> {
+  const r = await post(api(`work-orders/${enc(woId)}/documents/${enc(artefactId)}/edit`), b);
+  if (r.ok) invalidateSlices(["workOrders", "conversations", "audit"]);
+  return r;
+}
+export async function acceptDocument(woId: string, artefactId: string): Promise<ApiResult> {
+  const r = await post(api(`work-orders/${enc(woId)}/documents/${enc(artefactId)}/accept`), {});
+  if (r.ok) invalidateSlices(["workOrders", "conversations", "audit"]);
   return r;
 }

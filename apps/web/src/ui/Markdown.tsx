@@ -6,6 +6,7 @@
  * code, block quotes, tables with a header row, horizontal rules, and inline code, bold, italic, strike-through and links.
  */
 import { ExtLink } from "./ExtLink";
+import { docHeadings } from "@gantry/domain";
 import { createContext, Fragment, useContext, type ReactNode } from "react";
 
 /** Where a citation `[^s3]` goes: the document viewer provides it to open the source; without it a citation is a plain marker. */
@@ -57,21 +58,13 @@ export interface OutlineItem { level: number; text: string; id: string }
 
 /** The document's headings, outside code fences, with the same ids the renderer gives them. */
 export function outlineOf(text: string, idPrefix = "md"): OutlineItem[] {
-  const out: OutlineItem[] = [];
   const seen = new Map<string, number>();
-  let fence = false;
-  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
-    if (FENCE.test(line)) { fence = !fence; continue; }
-    if (fence) continue;
-    const h = HEADING.exec(line);
-    if (!h) continue;
-    const t = h[2]!.replace(/[`*_~]/g, "");
-    const base = slug(t);
+  return docHeadings(text).map((h) => {
+    const base = slug(h.text);
     const n = (seen.get(base) ?? 0) + 1;
     seen.set(base, n);
-    out.push({ level: h[1]!.length, text: t, id: `${idPrefix}-${base}${n > 1 ? `-${n}` : ""}` });
-  }
-  return out;
+    return { level: h.level, text: h.text, id: `${idPrefix}-${base}${n > 1 ? `-${n}` : ""}` };
+  });
 }
 
 const cells = (row: string): string[] => row.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
