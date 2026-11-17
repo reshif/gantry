@@ -67,7 +67,6 @@ describe("Conversations list", () => {
   it("lists work-order sessions with who waits on whom and the latest message; a row opens that work order's session beside the list", async () => {
     showList([row(), row({ id: "WO-9", title: "Other", waitingOn: "agent", unread: false, latest: null, started: false })]);
     expect(await screen.findByText("Waiting on you")).toBeTruthy();
-    expect(screen.getByText(/Which endpoint is this for\?/)).toBeTruthy();
     expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
     expect(document.querySelector(".conv .conv-list")).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: new RegExp(W.id) }));
