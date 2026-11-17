@@ -45,6 +45,7 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
   const reason = disabledReason || g["data-reason"];
   const locked = !!disabledReason || g.locked;
   const className = `btn ${kind ? `btn-${kind}` : ""}${small ? " btn-sm" : ""}${cls ? ` ${cls}` : ""}${locked ? " is-locked" : ""}`;
+  const showWhy = locked && !!reason;
   return (
     <button
       {...rest}
@@ -53,6 +54,8 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
       aria-label={aria}
       // why it is locked, read by screen readers with the control (the tooltip shows it on hover, focus and tap)
       aria-description={locked && reason ? reason : undefined}
+      // the shared tooltip node (ui/Tip) carries this control's reason while it has focus
+      aria-describedby={showWhy ? "tip" : rest["aria-describedby"]}
       aria-disabled={locked ? "true" : undefined}
       data-reason={reason || undefined}
       onClick={(e) => {
@@ -297,6 +300,50 @@ export function ViewHead({ kicker, title, sub, meta, actions }: { kicker?: React
       ) : null}
       {actions ? <div className="vhead-actions">{actions}</div> : null}
     </header>
+  );
+}
+
+/** One stat tile: a quiet label, a big value, an optional note. Put them in <StatRow>. `value` may be the result of qState(). */
+export function Stat({ label, value, sub, tone, icon, id }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done"; icon?: string; id?: string }) {
+  return (
+    <div className={`stat-tile${tone ? ` stat-${tone}` : ""}`} id={id}>
+      <div className="stat-lbl">
+        <span>{label}</span>
+        {icon ? <Icon name={icon} /> : null}
+      </div>
+      <div className="stat-val">{value}</div>
+      {sub ? <div className="stat-sub">{sub}</div> : null}
+    </div>
+  );
+}
+
+/** A single row of equal stat tiles under the page header (two columns on a phone). */
+export function StatRow({ children, id }: { children: ReactNode; id?: string }) {
+  return (
+    <div className="stat-row" id={id}>
+      {children}
+    </div>
+  );
+}
+
+/** The one filter toolbar: filters and search on the left (children), the result count and secondary actions on the right. */
+export function FilterBar({ children, count, actions, label = "Filters" }: { children?: ReactNode; count?: ReactNode; actions?: ReactNode; label?: string }) {
+  return (
+    <div className="filterbar" role="search" aria-label={label}>
+      {children}
+      {count != null ? <span className="filterbar-count" role="status">{count}</span> : null}
+      {actions ? <div className="filterbar-end">{actions}</div> : null}
+    </div>
+  );
+}
+
+/** A search box for a FilterBar: icon inside, labelled for screen readers. */
+export function SearchBox({ id, value, onChange, placeholder = "Search", label }: { id?: string; value: string; onChange: (v: string) => void; placeholder?: string; label?: string }) {
+  return (
+    <span className="searchbox">
+      <Icon name="search" />
+      <input id={id} className="input" type="search" value={value} placeholder={placeholder} aria-label={label ?? placeholder} onChange={(e) => onChange(e.target.value)} />
+    </span>
   );
 }
 

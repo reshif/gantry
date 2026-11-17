@@ -5,7 +5,7 @@
    Every status — work-order state, integration/model/MCP health, project health, status chips —
    is a glyph + word on a soft tone, sentence case, same size and shape. */
 .state, .health, .hk-health, .status {
-  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 6px; border: 0; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 5px; border: 0; border-radius: 5px;
   font-family: var(--f-body); font-size: var(--t-sm); font-weight: 500; line-height: 1.35; text-transform: none; letter-spacing: 0;
   white-space: nowrap; color: var(--ink-2); background: var(--sunk);
 }
@@ -22,7 +22,7 @@
 .tone-run { color: var(--run); background: var(--run-soft); }
 .tone-fail { color: var(--fail); background: var(--fail-soft); }
 /* status chips used as statuses: same tones, no border box */
-.chip-ok, .chip-warn, .chip-block, .chip-accent { border-color: transparent; border-radius: 999px; padding: 1px 8px; }
+.chip-ok, .chip-warn, .chip-block, .chip-accent { border-color: transparent; border-radius: 5px; }
 
 /* ---------- filters: one compact row ----------
    Filters are a toolbar, not a form. Each filter is one 32px box that reads "Label  value", so a row of them stays
