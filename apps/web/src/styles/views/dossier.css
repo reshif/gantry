@@ -118,3 +118,14 @@
 .dz-chgbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .dz-treebox { padding: 6px 14px 10px; }
 .dz-chg .rec-file { padding-left: 8px; }
+
+/* Blueprint: header and tabs are plain page furniture; the side column is panels */
+.dz-head { border: 0; background: none; box-shadow: none; display: block; }
+.dz-head > .ph { margin-bottom: 12px; }
+.dz-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.dz-grid.cols { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.dz-side { position: static; max-height: none; overflow: visible; border: 0; background: none; box-shadow: none; }
+.dz-side .props { display: grid; gap: 16px; }
+.dz-tabbar { position: static; border: 0; background: none; box-shadow: none; padding: 0; border-radius: 0; }
+.dz-rail { margin: 0 0 14px; }
+@media (max-width: 1000px) { .dz-grid.cols { grid-template-columns: minmax(0, 1fr); } }

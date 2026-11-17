@@ -13,7 +13,7 @@ export default function RecordView() {
   const prefs = usePrefs();
   const [rawId = "", rawTab = ""] = (hash.param || "").split("/");
   const id = (rawId || prefs.record || "").toUpperCase() || null;
-  const tab: DossierTab = rawTab === "activity" ? "activity" : "document";
+  const tab: DossierTab = rawTab === "activity" || rawTab === "gates" || rawTab === "runs" ? rawTab : "document";
   // the hash is the address; keep the legacy in-memory pref in step so other screens agree
   useEffect(() => {
     if (id && prefs.record !== id) updatePrefs({ record: id });

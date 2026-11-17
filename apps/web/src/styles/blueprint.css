@@ -548,3 +548,6 @@ textarea.input{height:auto;min-height:84px;padding:8px 10px}
 .dlg-body{overflow-y:auto;min-height:0}
 .dlg-form{min-height:0}
 .drawer{overflow-y:auto}
+/* fidelity B: Field labels inside a filter bar read as the prototype's mono micro labels */
+.fbar .field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fbar .field-label{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
