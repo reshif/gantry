@@ -81,6 +81,28 @@ export async function noWriteRight(req: FastifyRequest): Promise<{ action: strin
   return first;
 }
 
+/**
+ * The per-route write gate (core/write-gate.ts): does this person hold at least one of `actions` somewhere, in the factory or in any live project?
+ * Returns null when they do. A denial that is not the plain matrix refusal (a stop, a freeze, a deny policy) is only ever given to someone who
+ * does hold the right, so it counts as holding it: the handler's own decision says why it cannot be used now. Otherwise the refusal for the first
+ * action, factory-wide, so the message names a right the caller may ask for.
+ */
+export async function lacksEveryRight(req: FastifyRequest, actions: readonly string[]): Promise<{ action: string; decision: Decision } | null> {
+  const principal = req.gx.principal;
+  if (principal?.kind !== "person" || !actions.length) return null;
+  const st = await policyState(req);
+  const scopes: Scope[] = [{}, ...st.projects.filter((p) => p.status !== "archived").map((p) => ({ project: p.id }))];
+  let first: { action: string; decision: Decision } | null = null;
+  for (const action of actions) {
+    for (const scope of scopes) {
+      const d = decideFor(st, principal, action, scope);
+      if (d.allowed || d.rule.kind !== "matrix") return null;
+      if (!first && !scope.project) first = { action, decision: d };
+    }
+  }
+  return first;
+}
+
 const deny = (reason: string, id: string, name: string, kind = "apikey", needs = ""): Decision => ({ allowed: false, reason, rule: { kind, id, name }, needs });
 
 /** API keys carry explicit scopes (action ids) and may be bound to one project. Stops apply to them like to anyone. */
