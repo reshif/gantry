@@ -4,7 +4,7 @@
  * Edits stay in a draft (kept across tabs and screens) until Save; saving writes one audited change. A version is a snapshot of the saved configuration and is immutable.
  * "Run suite" opens Evals, which owns suite runs.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { fmt, type Project } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, usePolicies, useProjects } from "../api/queries";
@@ -12,7 +12,7 @@ import { ops } from "../api/ops";
 import { hashFor, navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { useCrumbTail } from "../lib/crumb";
-import { Async } from "../ui/async";
+import { Async, useCommand } from "../ui/async";
 import { Avatar, Btn, Chip, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, Stat, StatRow, Status, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { DataTable, type SortCol } from "../ui/SortTable";
 import { Icon } from "../ui/Icon";
@@ -25,7 +25,7 @@ import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
 import { InstructionsTab } from "./agents/Instructions";
 import { SkillsTab } from "./agents/SkillsMcp";
 import { VersionsTab } from "./agents/Versions";
-import { TrustTab } from "./agents/Trust";
+import { TrustStrip, TrustTab } from "./agents/Trust";
 import { CreateAgent } from "./agents/Create";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -41,13 +41,21 @@ const LIST_TABS: Array<{ id: ListTab; label: string; test: (a: AgentRow) => bool
   { id: "paused", label: "Paused", test: (a) => a.status === "paused" },
 ];
 
+/** The roster's tab, search and filters live outside the component so they survive opening an agent and coming back. */
+const roster = { tab: "all" as ListTab, q: "", station: "", status: "" };
+const rosterListeners = new Set<() => void>();
+let rosterSnap = { ...roster };
+const setRoster = (p: Partial<typeof roster>): void => { Object.assign(roster, p); rosterSnap = { ...roster }; rosterListeners.forEach((l) => l()); };
+const useRosterState = () => useSyncExternalStore((l) => (rosterListeners.add(l), () => rosterListeners.delete(l)), () => rosterSnap);
+
 /** The roster: view tabs with counts, a filter bar and one table. A row opens that agent's own page. */
 function Roster({ agents }: { agents: AgentRow[] }) {
   const st = useStations();
-  const [tab, setTab] = useState<ListTab>("all");
-  const [q, setQ] = useState("");
-  const [station, setStation] = useState("");
-  const [status, setStatus] = useState("");
+  const { tab, q, station, status } = useRosterState();
+  const setTab = (v: ListTab): void => setRoster({ tab: v });
+  const setQ = (v: string): void => setRoster({ q: v });
+  const setStation = (v: string): void => setRoster({ station: v });
+  const setStatus = (v: string): void => setRoster({ status: v });
   const open = (a: AgentRow): void => navigate("agents", a.id);
   const term = q.trim().toLowerCase();
   const inTab = LIST_TABS.find((t) => t.id === tab)!.test;
@@ -92,7 +100,10 @@ function Roster({ agents }: { agents: AgentRow[] }) {
 }
 
 function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
+  const ui_ = useUI();
   const out = useOutcome();
+  const saveCmd = useCommand((patch: Record<string, unknown>, note: string) => ops.saveAgent(a.id, patch, note, { ifMatch: a.rev }));
+  const statusCmd = useCommand((resume: boolean) => ops.saveAgent(a.id, { status: resume ? "active" : "paused" }, resume ? "resumed" : "paused", { ifMatch: a.rev }), { ok: false });
   const policies = usePolicies().data ?? [];
   const st = useStations();
   const perm = dec(useCan("agent.edit"));
@@ -111,12 +122,12 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
     for (const k of EDIT_KEYS) if (!same(d[k], a[k])) { patch[k] = clone(d[k]); changed.push(k); }
     if (!changed.length) return;
     if (typeof patch.name === "string") patch.name = patch.name.trim();
-    void ops.saveAgent(a.id, patch, changed.join(", "), { ifMatch: a.rev }).then((r) => { out(r); if (r.ok) { ui.draft = null; rerender(); } });
+    void saveCmd.run(patch, changed.join(", ")).then((r) => { if (r?.ok) { ui.draft = null; rerender(); } });
   };
-  const saveGuard: Decision | null = !perm.allowed ? perm : !autoChk.allowed ? { allowed: false, needs: "", reason: autoChk.reason ?? "" } : !dirty ? { allowed: false, needs: "", reason: "No changes to save." } : null;
+  const saveGuard: Decision | null = !perm.allowed ? perm : saveCmd.busy ? { allowed: false, needs: "", reason: "Saving…" } : !autoChk.allowed ? { allowed: false, needs: "", reason: autoChk.reason ?? "" } : !dirty ? { allowed: false, needs: "", reason: "No changes to save." } : null;
   const toggleStatus = () => {
     const resume = a.status === "paused";
-    void ops.saveAgent(a.id, { status: resume ? "active" : "paused" }, resume ? "resumed" : "paused", { ifMatch: a.rev }).then((r) => out(r, resume ? `${a.name} is active.` : `${a.name} is paused. Its stations queue work until it resumes.`));
+    void statusCmd.run(resume).then((r) => { if (r?.ok) ui_.toast(resume ? `${a.name} is active.` : `${a.name} is paused. Its stations queue work until it resumes.`, "ok"); });
   };
   const running = a.running ?? 0;
   const tabs = [
@@ -133,17 +144,22 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
     : <ConfigTab {...tp} />;
   const showSave = ["config", "instructions", "skills", "overrides"].includes(ui.tab);
   const paused = a.status === "paused";
+  const here = st.find(a.station);
+  const after = here ? st.all[st.all.indexOf(here) + 1] : undefined;
+  const nextLine = !here ? "off the line" : after ? `next after this station: ${after.name}` : "last station on the line";
   return (
     <section className="agent-detail" id="agent-detail" aria-label={`${a.name} configuration`}>
+      <a className="back-link" id="ag-back-link" href={hashFor("agents")} onClick={(e) => { e.preventDefault(); navigate("agents"); }}><Icon name="back" />All agents</a>
       <ViewHead
         kicker={`Agent · ${st.label(a.station, projects)}${a.builtin ? " · built-in" : ""}`}
         title={<span className="ag-title"><span>{a.name}</span><Status tone={paused ? "neutral" : "done"}>{paused ? "Paused" : "Active"}</Status></span>}
-        sub={<span className="ad-meta mono">{`${a.version} · ${a.model} · ${running} work order${running === 1 ? "" : "s"} now · ${a.suite ? `${a.suite} ${fmt.pct(a.evalScore)}` : ""}`}</span>}
+        sub={<span className="ad-meta mono">{[a.version, a.model, `${running} work order${running === 1 ? "" : "s"} now`, a.suite ? `${a.suite} ${fmt.pct(a.evalScore)}` : "", nextLine].filter(Boolean).join(" · ")}</span>}
         actions={<>
-          <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} onClick={toggleStatus} />
+          <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving…")} onClick={toggleStatus} />
           <Btn label="Evals" icon="eval" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} />
         </>}
       />
+      <TrustStrip a={a} projects={projects} />
       <LockNote decision={perm} what="Agent configuration" />
       <div className="panel ag-panel">
       <Tabs idPrefix="ag-tab" items={tabs} active={ui.tab} onChange={(t) => { ui.tab = t; rerender(); }} />
@@ -228,7 +244,6 @@ export default function AgentsView() {
         <Stat label="Below threshold" value={String(below)} sub="eval score under the gate" tone={below ? "block" : undefined} />
         <Stat label="Spend, 7 days" value={fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))} sub="all agents" />
       </StatRow>
-      <p className="ag-hint muted">Select a row to open the agent.</p>
       <Roster agents={agents} />
     </div>
   );

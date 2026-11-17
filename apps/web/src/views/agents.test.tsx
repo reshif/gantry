@@ -157,7 +157,9 @@ describe("Agents screen", () => {
     setup();
     mountAgent();
     await byId("agent-detail");
-    expect(document.querySelector(".ad-meta")!.textContent).toBe("2.6.1 · claude-opus-5-5 · 2 work orders now · SUITE-BUILD 80%");
+    expect(document.querySelector(".ad-meta")!.textContent).toBe("2.6.1 · claude-opus-5-5 · 2 work orders now · SUITE-BUILD 80% · next after this station: Verify");
+    expect(document.querySelector(".ad-meta")!.textContent).not.toMatch(/ · $/);
+    expect(document.getElementById("ag-back-link")).toBeTruthy();
     expect(document.getElementById("ag-row-ag-build")).toBeNull();
     cleanup();
     mountAgent("ag-nope");

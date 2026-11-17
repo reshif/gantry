@@ -8,10 +8,11 @@ import { fmt, type Skill } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useLearningProposals, useProjects, useSkills } from "../api/queries";
 import { ops } from "../api/ops";
-import { Async } from "../ui/async";
+import { Async, useCommand } from "../ui/async";
 import { Btn, Chip, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, Stat, StatRow, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
 import { DataTable, type SortCol } from "../ui/SortTable";
 import { Dialog } from "../ui/Overlay";
+import { Icon } from "../ui/Icon";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { hashFor, navigate, useHash } from "../lib/router";
@@ -87,6 +88,7 @@ function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] })
 
 function DefTab({ sk, perm }: { sk: SkillRow; perm: Decision }) {
   const out = useOutcome();
+  const saveCmd = useCommand((patch: Record<string, unknown>, note: string) => ops.saveSkill(sk.id, patch, note, { ifMatch: sk.rev }));
   const ro = !perm.allowed;
   const saved = { name: sk.name, desc: sk.desc, when: sk.when, body: sk.body, resources: sk.resources.join("\n") };
   if (!ui.draft || ui.draftFor !== sk.id) { ui.draft = { ...saved }; ui.draftFor = sk.id; ui.note = ""; }
@@ -109,7 +111,7 @@ function DefTab({ sk, perm }: { sk: SkillRow; perm: Decision }) {
     for (const k of ["name", "desc", "when", "body"] as const) if (cur[k] !== sk[k]) patch[k] = k === "name" ? cur[k].trim() : cur[k];
     const res = cur.resources.split("\n").map((x) => x.trim()).filter(Boolean);
     if (JSON.stringify(res) !== JSON.stringify(sk.resources)) patch.resources = res;
-    void ops.saveSkill(sk.id, patch, ui.note.trim() || `Edited ${Object.keys(patch).join(", ")}`, { ifMatch: sk.rev }).then((r) => { out(r); if (r.ok) { ui.draft = null; rerender(); } });
+    void saveCmd.run(patch, ui.note.trim() || `Edited ${Object.keys(patch).join(", ")}`).then((r) => { if (r?.ok) { ui.draft = null; rerender(); } });
   };
   return (
     <div className="sk-def">
@@ -126,14 +128,14 @@ function DefTab({ sk, perm }: { sk: SkillRow; perm: Decision }) {
       <div className={`savebar${dirty ? " is-dirty" : ""}`} id="sk-savebar">
         <span className="muted small savebar-text">Every save is a new version with your note.</span>
         <Btn label="Discard" id="sk-discard" guard={ro ? perm : null} onClick={() => { ui.draft = null; rerender(); }} />
-        <Btn label={`Save as v${next.join(".")}`} kind="primary" id="sk-save" guard={ro ? perm : null} onClick={save} />
+        <Btn label={`Save as v${next.join(".")}`} kind="primary" id="sk-save" guard={ro ? perm : null} disabledReason={saveCmd.wait("Saving…")} onClick={save} />
       </div>
     </div>
   );
 }
 
 function AgentsTab({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
-  const out = useOutcome();
+  const attach = useCommand((agent: string, on: boolean) => ops.attachSkill(agent, sk.id, on));
   const perm = dec(useCan("agent.edit"));
   const st = useStations();
   return (
@@ -153,7 +155,7 @@ function AgentsTab({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
                   <td className="small">{station ? `${station.no} ${station.name}` : "Off-belt"}</td>
                   <td className="mono small">{pos >= 0 ? `${pos + 1} of ${a.skills.length}` : "–"}</td>
                   <td className="mono small">{a.suite}</td>
-                  <td><Toggle id={`sk-att-${a.id}`} checked={pos >= 0} decision={perm} label={`Attach ${sk.name} to ${a.name}`} onChange={(v) => { void ops.attachSkill(a.id, sk.id, v).then((r) => out(r)); }} /></td>
+                  <td><Toggle id={`sk-att-${a.id}`} checked={pos >= 0} decision={perm} label={`Attach ${sk.name} to ${a.name}`} onChange={(v) => { void attach.run(a.id, v); }} /></td>
                 </tr>
               );
             })}
@@ -165,11 +167,11 @@ function AgentsTab({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
 }
 
 function ProjectsTab({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
-  const out = useOutcome();
+  const setProj = useCommand((v: "all" | string[]) => ops.setSkillProjects(sk.id, v));
   const perm = dec(useCan("skill.edit"));
   const projects = (useProjects().data ?? []).filter((p) => p.status !== "archived");
   const all = sk.projects === "all";
-  const setProjects = (v: "all" | string[]) => { void ops.setSkillProjects(sk.id, v).then((r) => out(r)); };
+  const setProjects = (v: "all" | string[]) => { void setProj.run(v); };
   return (
     <div>
       <LockNote decision={perm} what="Where this skill is enabled" />
@@ -236,6 +238,7 @@ function Detail({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
   const body = ui.tab === "agents" ? <AgentsTab sk={sk} agents={agents} /> : ui.tab === "projects" ? <ProjectsTab sk={sk} agents={agents} /> : ui.tab === "versions" ? <VersionsTab sk={sk} /> : <DefTab sk={sk} perm={perm} />;
   return (
     <section className="sk-detail" id="sk-detail" aria-label={sk.name}>
+      <a className="back-link" id="sk-back-link" href={hashFor("skills")} onClick={(e) => { e.preventDefault(); navigate("skills"); }}><Icon name="back" />All skills</a>
       <ViewHead kicker={`Skill · ${sk.id}${sk.builtin ? " · built-in" : ""}`} title={sk.name} sub={sk.desc} />
       <StatRow id="sk-stats">
         <Stat label="Version" value={<span className="mono">{`v${sk.version}`}</span>} />
@@ -335,7 +338,6 @@ export default function SkillsView() {
         <Stat label="Eval cases" value={String(cases)} sub="covering skills" />
         <Stat label="Pass rate" value={cases ? fmt.pct(pass / cases) : "–"} sub="across those cases" />
       </StatRow>
-      <p className="sk-hint muted">Select a row to open the skill. Low coverage means under 85% pass, or no eval cases.</p>
       <Library skills={skills} agents={agents} />
     </div>
   );

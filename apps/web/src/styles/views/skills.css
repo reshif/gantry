@@ -1,5 +1,4 @@
 /* Skills view. Tokens only. */
-.sk-hint { margin: 0 0 8px; font-size: var(--t-md); }
 .sk-lib .tabs { padding: 0 12px; }
 .sk-lib .filterbar { padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .sk-name { font-weight: 600; color: var(--ink); text-decoration: none; margin-right: 6px; }
