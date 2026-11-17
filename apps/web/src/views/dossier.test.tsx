@@ -12,7 +12,7 @@ afterEach(() => {
 });
 const W = waitingWo;
 
-async function show(extra: Parameters<typeof mockApi>[0] = {}, hash = `#record/${W.id}`) {
+async function show(extra: Parameters<typeof mockApi>[0] = {}, hash = `#record/${W.id}/document`) {
   const calls = mockApi({ ...readsFor(W), ...extra });
   window.location.hash = hash;
   mount(<RecordView />);
@@ -28,8 +28,14 @@ describe("Work order page", () => {
     expect(screen.getByRole("tab", { name: "Document" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("false");
     expect(document.getElementById("trv-open-conversation")).toBeTruthy();
-    expect(document.getElementById("dz-move")).toBeTruthy();
     expect(document.getElementById("dz-more")).toBeTruthy();
+  });
+
+  it("opens on the Overview tab: brief, classification, facts and SLA", async () => {
+    await show({}, `#record/${W.id}`);
+    expect(screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected")).toBe("true");
+    expect(document.getElementById("dz-overview")).toBeTruthy();
+    for (const t of ["Brief", "Classification", "Facts"]) expect(screen.getByRole("heading", { name: t })).toBeTruthy();
   });
 
   it("opens the Activity tab from the address and from the Open conversation button", async () => {
@@ -92,7 +98,8 @@ describe("Changes page", () => {
     mockApi({ ...readsFor(W) });
     window.location.hash = `#changes/${W.id}`;
     mount(<ChangesView />);
-    expect(await screen.findByText(`Changes: ${W.title}`, {}, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Changes" }, { timeout: 4000 })).toBeTruthy();
+    expect(document.getElementById("chg")).toBeTruthy();
     fireEvent.click(document.getElementById("chg-back") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toContain(`record/${W.id}`));
   });

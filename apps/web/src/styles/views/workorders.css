@@ -114,3 +114,17 @@
 .wo-cols-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: grid; gap: var(--s2); padding: var(--s3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--shadow-2); }
 .wo-cols-opt { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); }
 .wo-bar .filterbar-end { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: flex-end; }
+.wo-opts { margin: 0 0 12px; }
+.wo-opts > summary { list-style: none; cursor: pointer; display: inline-flex; }
+.wo-opts > summary::-webkit-details-marker { display: none; }
+.wo-opts-body { margin-top: 8px; padding: 12px; display: grid; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md, 8px); }
+.wo-opts .filters { display: flex; flex-wrap: wrap; gap: 12px; }
+.wo-views { overflow-x: auto; }
+.wo-table .tw { margin-top: 0; }
+.wo-title { max-width: 420px; display: inline-block; vertical-align: bottom; }
+.wo-cls .tag::first-letter { text-transform: uppercase; }
+.wo-view .ph .acts { flex-wrap: wrap; }
+.wo-view .dtable-sortsel { display: none; }
+.wo-views .seg { display: inline-flex; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
+.wo-views .seg .seg-label { white-space: nowrap; flex: none; }
+@media (max-width: 720px) { .wo-view td[data-l="Open"] { display: none !important; } .wo-view .ph .acts { width: 100%; } .wo-view .ph .acts .btn { flex: 1 1 auto; justify-content: center; } .wo-opts > summary { width: 100%; justify-content: center; } }

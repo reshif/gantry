@@ -244,7 +244,7 @@ export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: Tab
 }
 
 /** Radio group styled as buttons. */
-export function Segmented({ name, items, value, onChange, label }: { name: string; items: Array<{ id: string; label: string; icon?: string }>; value: string; onChange: (id: string) => void; label?: string }) {
+export function Segmented({ name, items, value, onChange, label }: { name: string; items: Array<{ id: string; label: string; icon?: string; count?: ReactNode }>; value: string; onChange: (id: string) => void; label?: string }) {
   return (
     <div className="seg seg-radio" role="radiogroup" aria-label={label || name}>
       {items.map((it) => {
@@ -254,6 +254,7 @@ export function Segmented({ name, items, value, onChange, label }: { name: strin
           <label key={`l-${it.id}`} htmlFor={id} className="seg-label">
             {it.icon ? <Icon name={it.icon} /> : null}
             <span>{it.label}</span>
+            {it.count != null ? <span className="badge tab-count">{it.count}</span> : null}
           </label>,
         ];
       })}

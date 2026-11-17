@@ -13,7 +13,7 @@ const W = waitingWo;
 
 async function showRecord(extra: Parameters<typeof mockApi>[0] = {}, o: Parameters<typeof mockApi>[1] = {}) {
   const calls = mockApi({ ...readsFor(W), ...extra }, o);
-  window.location.hash = `#record/${W.id}`;
+  window.location.hash = `#record/${W.id}/document`;
   mount(<RecordView />);
   await screen.findByText("Completeness", {}, { timeout: 4000 });
   return calls;
@@ -99,7 +99,7 @@ describe("Work order record", () => {
     expect(await screen.findByText(WOS[0]!.id)).toBeTruthy();
     cleanup();
     mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: [], next: null, total: 0 } }) });
-    window.location.hash = `#record/${W.id}`;
+    window.location.hash = `#record/${W.id}/document`;
     mount(<RecordView />);
     expect(await screen.findByText(/was not found, or it belongs to a project outside your access/, {}, { timeout: 4000 })).toBeTruthy();
   });

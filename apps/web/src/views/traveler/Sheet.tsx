@@ -1,0 +1,58 @@
+/** The printable routing sheet, laid out like the prototype's Traveler page: title block with barcode, the facts, and a stamp for every station. */
+import { fmt, gateAfter, type Catalog, type Project } from "@gantry/domain";
+import { Btn } from "../../ui/primitives";
+import { Icon } from "../../ui/Icon";
+import { DataTable, type Col } from "../../ui/DataTable";
+import { useActors } from "../../ui/actors";
+import { classOf } from "../projects/kit";
+import { stName, type TWo } from "./model";
+
+type Row = { key: string; station: string; agent: string; at: number | null; dur: number; state: "passed" | "now" | "skipped"; gate: string | null };
+
+export function Sheet({ wo, cat, project }: { wo: TWo; cat: Catalog; project: Project }) {
+  const actor = useActors();
+  const h = [...wo.id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const bars = Array.from({ length: 46 }, (_, i) => ({ x: i * 5, w: 1 + ((h >> (i % 20)) & 3) }));
+  const rows: Row[] = wo.history.map((e, i) => {
+    const g = gateAfter(cat, e.station);
+    const open = !e.endedAt && wo.state !== "done";
+    return { key: `${e.station}-${i}`, station: stName(cat, e.station), agent: actor(e.agent).name.replace(" (agent)", ""), at: e.startedAt, dur: Math.max(0, (e.endedAt ?? e.startedAt) - e.startedAt), state: open ? "now" : "passed", gate: !open && g && wo.gates[g.id]?.status === "passed" ? g.id : null };
+  });
+  const cols: Col<Row>[] = [
+    { key: "station", label: "Station", render: (r) => <b>{r.station}</b> },
+    { key: "agent", label: "Agent" },
+    { key: "at", label: "Arrived", render: (r) => <span className="mono">{r.at ? fmt.stamp(r.at) : ""}</span> },
+    { key: "dur", label: "Time", align: "end", render: (r) => <span className="mono">{r.dur ? fmt.dur(r.dur) : ""}</span> },
+    { key: "stamp", label: "Stamp", render: (r) => (r.state === "now" ? <span className="stamp" style={{ "--c": "var(--info)" } as React.CSSProperties}>In progress</span> : <><span className="stamp">Passed</span>{r.gate ? <>{" "}<span className="tag">{`${r.gate} signed`}</span></> : null}</>) },
+  ];
+  return (
+    <div className="traveler trv-sheet" id="trv-sheet">
+      <div className="row spread" style={{ alignItems: "flex-start", marginBottom: 16 }}>
+        <div>
+          <div className="label">Gantry traveler</div>
+          <h2 style={{ font: "700 28px/36px var(--mono)" }}>{wo.id}</h2>
+          <p style={{ fontWeight: 600, marginTop: 4 }}>{wo.title}</p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <svg width="230" height="34" viewBox="0 0 230 34" role="img" aria-label={`Barcode for ${wo.id}`} style={{ color: "var(--text)" }}>
+            {bars.map((b) => <rect key={b.x} x={b.x} y={0} width={b.w} height={34} fill="currentColor" />)}
+          </svg>
+          <div className="mono dim" style={{ fontSize: 11 }}>{`${wo.id} / ${project.key}`}</div>
+        </div>
+      </div>
+      <dl className="kv" style={{ margin: 0 }}>
+        <dt>Project</dt><dd>{project.name}</dd>
+        <dt>Class</dt><dd>{`${classOf(cat, project, wo.cls).name} · ${wo.priority}`}</dd>
+        <dt>Requested</dt><dd>{`${actor(wo.requestedBy).name} · ${fmt.stamp(wo.createdAt)}`}</dd>
+        <dt>Status</dt><dd>{wo.state}</dd>
+      </dl>
+      <hr />
+      <div className="label" style={{ marginBottom: 8 }}>Station stamps</div>
+      <DataTable id="trv-stamps" caption={`Station stamps of ${wo.id}`} columns={cols} rows={rows} rowKey={(r) => r.key} />
+      <div className="row" style={{ marginTop: 16 }}>
+        <Btn label="Print" kind="primary" icon="dl" id="trv-print" onClick={() => window.print()} />
+        <span className="muted small"><Icon name="page" /> The printable record that follows the work order down the line.</span>
+      </div>
+    </div>
+  );
+}

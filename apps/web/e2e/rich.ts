@@ -7,6 +7,7 @@
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Page } from "@playwright/test";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
+import { woReadOverrides } from "./rich-wo";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
 const MIN = 60_000;
@@ -161,6 +162,19 @@ export function richOverrides(): Record<string, Handler> {
   for (const p of PROJECTS) {
     ov[`projects/${p.id}/floor`] = (r) => fulfillJson(r, floorFor(p.id));
     ov[`projects/${p.id}`] = (r) => fulfillJson(r, { ...project(p, PROJECTS.indexOf(p)), metrics: metrics(PROJECTS.indexOf(p), p.id) });
+    ov[`projects/${p.id}/work-orders`] = (r) => {
+      const u = new URL(r.request().url());
+      const st = u.searchParams.get("state") ?? "all";
+      const q = (u.searchParams.get("q") ?? "").toLowerCase();
+      const lim = Number(u.searchParams.get("limit") ?? 50);
+      let items = floorFor(p.id).workOrders as Array<ReturnType<typeof wo>>;
+      if (st === "open") items = items.filter((w) => w.state !== "done" && w.state !== "killed");
+      else if (st !== "all") items = items.filter((w) => w.state === st);
+      if (q) items = items.filter((w) => (w.id + w.title).toLowerCase().includes(q));
+      items = [...items].sort((a, b) => b.createdAt - a.createdAt);
+      return fulfillJson(r, { items: items.slice(0, lim), total: items.length, next: null });
+    };
+    Object.assign(ov, woReadOverrides(floorFor(p.id).workOrders as never, p.id));
     ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, []);
   }
   ov["activity"] = (r) => fulfillJson(r, events());
