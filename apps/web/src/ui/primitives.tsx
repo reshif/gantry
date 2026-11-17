@@ -304,7 +304,7 @@ export function ViewHead({ kicker, title, sub, meta, actions }: { kicker?: React
 }
 
 /** One stat tile: a quiet label, a big value, an optional note. Put them in <StatRow>. `value` may be the result of qState(). */
-export function Stat({ label, value, sub, tone, icon, id }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done"; icon?: string; id?: string }) {
+export function Stat({ label, value, sub, tone, icon, id, action }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done"; icon?: string; id?: string; action?: ReactNode }) {
   return (
     <div className={`stat-tile${tone ? ` stat-${tone}` : ""}`} id={id}>
       <div className="stat-lbl">
@@ -313,6 +313,7 @@ export function Stat({ label, value, sub, tone, icon, id }: { label: ReactNode; 
       </div>
       <div className="stat-val">{value}</div>
       {sub ? <div className="stat-sub">{sub}</div> : null}
+      {action ? <div className="stat-act">{action}</div> : null}
     </div>
   );
 }

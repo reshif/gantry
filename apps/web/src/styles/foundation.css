@@ -341,3 +341,4 @@ a.step:hover, button.step:hover { background: var(--panel); }
   .dlg-wrap { padding: 8px; }
   .toasts { right: 8px; left: 8px; bottom: 8px; width: auto; }
 }
+.stat-act { margin-top: 2px; }

@@ -17,7 +17,7 @@ function Filters({ nav, withStatus, count }: { nav: Nav; withStatus: boolean; co
   return (
     <FilterBar label="Filter connections" count={count}>
       <SearchBox id="int-q" label="Search" placeholder="Search by name, type or category" value={nav.q} onChange={nav.setQ} />
-      <div className="filters int-filters">
+      <div className="filters">
         <Field label="Category" htmlFor="int-cat"><Select id="int-cat" options={[{ value: "all", label: "All categories" }, ...INTEGRATION_CATEGORIES.map((c) => ({ value: c.id, label: c.name }))]} value={nav.cat} onChange={nav.setCat} /></Field>
         {withStatus ? <Field label="Status" htmlFor="int-status"><Select id="int-status" options={[{ value: "all", label: "Any status" }, { value: "healthy", label: "Healthy" }, { value: "failing", label: "Failing" }, { value: "disabled", label: "Disabled" }]} value={nav.status} onChange={nav.setStatus} /></Field> : null}
       </div>

@@ -39,10 +39,11 @@ export default function McpView() {
   const [health, setHealth] = useState("all");
   const [sens, setSens] = useState("all");
   const needle = q.trim().toLowerCase();
-  const shown = servers.filter((m) => (health === "all" || (health === "disabled" ? m.enabled === false : m.health === health)) && (sens === "all" || m.sensitivity === sens) && (!needle || `${m.name} ${m.url} ${m.transport}`.toLowerCase().includes(needle)));
+  const shown = servers.filter((m) => (health === "all" || (health === "disabled" ? m.enabled === false : m.enabled !== false && m.health === health)) && (sens === "all" || m.sensitivity === sens) && (!needle || `${m.name} ${m.url} ${m.transport}`.toLowerCase().includes(needle)));
   const current = servers.find((m) => m.id === sel) ?? servers[0] ?? null;
   const actorName = (id: string): string => actor(id).name;
   const day = calls.filter((u) => u.at > Date.now() - DAY).length;
+  const notHealthy = servers.filter((m) => m.enabled === false || m.health !== "healthy").length;
   const writeTools = servers.reduce((n, m) => n + m.tools.filter((t) => t.write).length, 0);
 
   const registry = (
@@ -97,7 +98,7 @@ export default function McpView() {
       />
       <StatRow id="mcp-stats">
         <Stat label="Servers" value={qState(serversQ, (d) => String(d.length))} sub="in the registry" />
-        <Stat label="Not healthy" value={qState(serversQ, (d) => String(d.filter((m) => m.health !== "healthy").length))} sub="degraded, failing or disabled" tone={servers.some((m) => m.health !== "healthy") ? "wait" : undefined} />
+        <Stat label="Not healthy" value={qState(serversQ, () => String(notHealthy))} sub={notHealthy ? "degraded, failing, offline or disabled" : "all healthy"} tone={serversQ.data && notHealthy ? "wait" : undefined} />
         <Stat label="Write tools" value={qState(serversQ, () => String(writeTools))} sub="across all servers" />
         <Stat label="Calls 24h" value={qState(callsQ, () => String(day))} sub="from agents" />
       </StatRow>

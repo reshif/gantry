@@ -9,7 +9,7 @@ export const TRANSPORTS = [{ value: "http", label: "Streamable HTTP" }, { value:
 export const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
 export function Health({ st }: { st: string }) {
-  const tone: Tone = st === "healthy" ? "done" : st === "failing" ? "block" : st === "degraded" ? "wait" : "neutral";
+  const tone: Tone = st === "healthy" ? "done" : st === "failing" || st === "down" ? "block" : st === "degraded" ? "wait" : "neutral";
   return <Status tone={tone}>{st.charAt(0).toUpperCase() + st.slice(1)}</Status>;
 }
 
