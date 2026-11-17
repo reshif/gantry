@@ -7,7 +7,7 @@ docker compose -f deploy/compose.yml build gantry-runner       # or:
 docker build -f runner/Dockerfile -t gantry-runner:dev .
 ```
 
-Build args: `NODE_IMAGE` (default `node:22-bookworm-slim`), `CLAUDE_CODE_VERSION` (pinned, default `2.1.311`), `RUNNER_TOOLCHAIN` (`full` installs git, build-essential, python3, jq; `minimal` skips OS packages).
+Build args: `NODE_IMAGE` (default `node:22-bookworm-slim`), `CLAUDE_CODE_VERSION` (overrides the pin in `runner/harness/package.json`, default `2.1.311`; the tree is installed from `runner/harness/package-lock.json` with `npm ci --ignore-scripts`, regenerate it with `runner/harness/relock.sh`; `HARNESS_LOCK=require` fails the build without a lock), `RUNNER_TOOLCHAIN` (`full` installs git, build-essential, python3, jq; `minimal` skips OS packages).
 Add `--secret id=cacert,src=/path/ca.crt` behind a TLS-intercepting proxy.
 
 The image holds no secrets and runs as uid 10001. The launcher gives it `EDGE_URL`, `HTTPS_PROXY`, `GANTRY_RUN_TOKEN` and `GANTRY_RUN_ID` and nothing else. The image's own `ENV` sets git identity, points `core.hooksPath` at `/dev/null` (repository hooks never run when the agent runs git), and puts `HOME` and the npm cache on the `/tmp` tmpfs.
