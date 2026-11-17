@@ -34,6 +34,9 @@ function walk(dir, out = []) {
   return out;
 }
 
+/** Polling in a view: refetchInterval or setInterval occurrences (live data comes from the stream). */
+export const pollingCount = (src) => (src.match(/\b(refetchInterval|setInterval)\b/g) ?? []).length;
+
 /** Run eslint over apps/web/src and return its JSON results (warnings and errors). */
 export function runEslint() {
   let out;
@@ -65,7 +68,7 @@ export function collectCounts() {
   }
   for (const file of walk(join(WEB_SRC, "views"))) {
     if (isTest(file)) continue;
-    const n = (readFileSync(file, "utf8").match(/\b(refetchInterval|setInterval)\b/g) ?? []).length;
+    const n = pollingCount(readFileSync(file, "utf8"));
     for (let i = 0; i < n; i++) add("polling-interval", groupOf(file));
   }
   return counts;

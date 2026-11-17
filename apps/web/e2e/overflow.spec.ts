@@ -1,4 +1,5 @@
 import { PERSONAS, expect, hashOf, mockApi, open, routesFor, test } from "./fixtures";
+import { overflowPx } from "./detectors";
 import { loadKnown, recordOverflow, updating } from "./known";
 
 // No horizontal page overflow (scrollWidth <= innerWidth) at the five layout widths, light and dark (the project).
@@ -11,7 +12,7 @@ for (const w of WIDTHS) {
       await page.setViewportSize({ width: w, height: 800 });
       await mockApi(page, { persona: PERSONAS.admin });
       await open(page, hashOf(route));
-      const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      const over = await overflowPx(page);
       const key = `${route.id}@${w}|${info.project.name}`;
       if (updating()) return recordOverflow(key, over > 0);
       const known = loadKnown().overflow.includes(key);

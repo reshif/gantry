@@ -34,7 +34,13 @@ export const viewImports = {
   ],
 };
 
-const a11yWarn = Object.fromEntries(Object.keys(jsxA11y.flatConfigs.recommended.rules).map((k) => [k, "warn"]));
+// jsx-a11y recommended, severity lowered to warn (the ratchet holds the count) with each rule's own options kept.
+const a11yWarn = Object.fromEntries(
+  Object.entries(jsxA11y.flatConfigs.recommended.rules).flatMap(([k, v]) => {
+    const [level, ...opts] = Array.isArray(v) ? v : [v];
+    return level === "off" || level === 0 ? [] : [[k, ["warn", ...opts]]];
+  }),
+);
 
 const TESTS = ["**/*.test.{ts,tsx}", "**/test/**", "**/e2e/**"];
 

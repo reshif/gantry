@@ -31,23 +31,26 @@ view should reach zero and then flip to an error (Wave 3).
 - **F-01** No raw `<table>`, `<button>`, `<input>`, `<textarea>` or `<select>` in views: use `DataTable`, `Btn` / `IconBtn`, `Field`. Enforced by: `raw-elements`.
 - **F-02** Views do not import `@tanstack/react-query`, `api/client` or `api/ops`: reads go through typed hooks in `api/queries`, writes through `useCommand`. Enforced by: `view-imports`.
 - **F-03** No literal `queryKey` arrays: keys come from the typed key factories. Enforced by: `query-keys`.
-- **F-04** A read renders loading, empty, forbidden, failed and stale states inside `<Async>`; a failed read must never look like an empty list (`.data ?? []`). Enforced by: `read-failures`.
+- **F-04** A read renders loading, empty, forbidden, failed and stale states inside `<Async>`; a failed read must never look like an empty list (`.data ?? []`). Enforced by: `read-failures`, `e2e-failure-paths`.
 - **F-05** No role-name literals: permissions come from server decisions (`useCan` / `useGuard`), never from comparing roles. Enforced by: `role-literals`.
 - **F-06** `ui/`, `lib/` and `api/` never import from `views/`. Enforced by: `ui-layering`.
 - **F-07** `dangerouslySetInnerHTML` only inside `Icon`. Enforced by: `html-injection`.
 - **F-08** No `as unknown as` casts: fix the type. Enforced by: `type-escape`.
-- **F-09** No new polling in views: live data comes from the stream; polling only as `pollWhenStreamDown`. Enforced by: `polling`.
-- **F-10** Accessible by construction: jsx-a11y lint, and axe finds zero serious or critical issues at 390 and 1366 px in light and dark. Enforced by: `a11y-lint`, `e2e-a11y`, `e2e-ci`.
-- **F-11** No horizontal page overflow at 320, 390, 768, 1024 and 1366 px. Enforced by: `e2e-overflow`.
-- **F-12** Failure paths are real states, covered by interception tests (401, 403, 404, 409, 422, 429, 500, offline, chunk 404). Enforced by: `e2e-failure-paths`.
-- **F-13** Persona journeys (sign-in, read-only persona, create and approve) run end to end against mocked API fixtures. Enforced by: `e2e-journeys`.
-- **F-14** Screenshots at 390 and 1366 in light and dark are diffed against committed baselines. Enforced by: `e2e-visual`.
-- **F-15** Tabs, filters, sorting, selection and drawers are in the URL (`useRouteState`). Enforced by: `review-url-state`.
-- **F-16** The lint baseline only shrinks; fewer violations must be locked in the same PR. Enforced by: `lint-ratchet`.
+- **F-09** No new polling in views: live data comes from the stream; polling only as `pollWhenStreamDown`. The scan counts `refetchInterval` and `setInterval` in views and the ratchet holds the count; it does not see other timer styles, so review still looks for them. Enforced by: `polling`, `polling-scan-test`.
+- **F-10** Accessible by construction: jsx-a11y lint, and axe finds no serious or critical issue beyond the listed known ones (`apps/web/e2e/known-issues.json`, a ratchet) at 390 and 1366 px in light and dark. `e2e-canary` seeds a contrast defect and an overflow and proves the detectors catch them. Enforced by: `a11y-lint`, `e2e-a11y`, `e2e-canary`, `e2e-ci`.
+- **F-11** No horizontal page overflow at 320, 390, 768, 1024 and 1366 px (known overflows are listed in `known-issues.json`). Enforced by: `e2e-overflow`, `e2e-canary`.
+- **F-12** Failure paths are real states, covered by interception tests. Covered today: 401 (signed out), 403, 404, 429 and 500 on a read (shown in the main region, with an empty-list contrast test), 500 on `/me`, 409 and 422 on a write (the New project wizard shows the reason inline), and offline. Known gaps, kept as `test.fail` / `test.fixme` so they flip loudly when fixed: a lazy chunk that 404s has no recoverable error yet, and a failed `/me` refetch is not yet proven to keep the app mounted. Enforced by: `e2e-failure-paths`.
+- **F-13** Persona journeys run end to end against mocked API fixtures. Covered today: signed-out sign-in, admin lands signed in, read-only persona is refused every action. Still `test.fixme` (not yet enforced): create a work order, approve a gate, stop and restore with step-up, hostile markdown rendering inert. Enforced by: `e2e-journeys`.
+- **F-14** Screenshots at 390 and 1366 in light and dark are diffed against committed baselines (per platform: `e2e/__screenshots__/<platform>/`). Not blocking yet: the committed baselines were rendered on a developer machine with fallback fonts, so CI runs the diffs as a separate `continue-on-error` step, and `Frontend e2e (Chromium)` is not in branch protection yet. To make it blocking, generate baselines on the CI image (run `npm run e2e:update -w @gantry/web` there, commit `__screenshots__/linux`), then drop `continue-on-error`. Enforced by: `e2e-visual`.
+- **F-15** Tabs, filters, sorting, selection and drawers are in the URL (`useRouteState`). Review-enforced: a ticked item in the PR template, no automated check. Enforced by: `review-url-state`.
+- **F-16** The lint baseline only shrinks; fewer violations must be locked in the same PR (see "Ratchets and merging" below). Enforced by: `lint-ratchet`.
 - **F-17** The per-view definition-of-done report does not regress (`npm run dod` lists which views pass). Enforced by: `dod-report`.
-- **F-18** The entry bundle stays within the measured gzip budget, which only goes down. Enforced by: `bundle-budget`.
+- **F-18** The entry bundle stays within the measured gzip budget, which only goes down (see "Ratchets and merging" below). Enforced by: `bundle-budget`.
 - **F-19** `@gantry/domain` stays tree-shakeable (`"sideEffects": false`, subpath exports). Enforced by: `domain-package`.
-- **F-20** Routing stays the custom hash router; `react-router` is not a dependency. Enforced by: `no-router-dependency`.
+- **F-20** Routing stays the custom hash router; `react-router` is not a dependency (checked in `package.json` files and the lockfile). Enforced by: `no-router-dependency`.
+
+Rules marked review-enforced (G-01 to G-04, F-15) have no automated check: the PR template item is the enforcement, and a
+reviewer ticks it. They are listed so nobody mistakes them for machine-checked.
 
 ## 3. How to run the checks
 
@@ -75,3 +78,20 @@ with no database, identity provider or API.
 - Work in a branch or worktree; do not push to a branch you do not own or touch a running deployment.
 - Primitives live in `apps/web/src/ui`, tokens in `apps/web/src/styles/tokens.css`; change them through their owners (`.github/CODEOWNERS`).
 - Migrate views one at a time; do not restyle a view you are not migrating.
+
+## 5. Ratchets and merging
+
+The lint baseline, the bundle budget and `known-issues.json` are ratchets: they fail when something gets worse, and the lint
+ratchet and the bundle budget also fail when something gets better by more than a little (so the gain is locked in).
+
+- When your branch fixes violations or shrinks the entry, run `node scripts/lint-ratchet.mjs --update` and / or
+  `node scripts/bundle-budget.mjs --update` and commit the file in the same PR.
+- Two PRs that both lower a ratchet conflict in the JSON. After merging the other one, rebase, rerun the `--update` form
+  against your merged tree and commit; never hand-edit a number upward.
+- Gzip sizes differ between Node / zlib versions. Measure the budget on the Node in `.nvmrc` (CI's), not on a newer local
+  Node, or a correct build looks smaller or larger than it is. The slack is 1 kB.
+- `known-issues.json` is regenerated with `npm run e2e:known -w @gantry/web`, never grown by hand; additions go through CODEOWNERS.
+
+E2E server: Playwright builds the app and starts `vite preview`. `E2E_SKIP_BUILD=1` reuses `apps/web/dist`, which is only
+correct when you rebuilt it after your last change (a stale `dist` tests old code). A server already on the port is never
+reused unless you set `E2E_REUSE_SERVER=1`. `GANTRY_E2E_VISUAL=off|only` runs everything but, or only, the screenshot diffs.

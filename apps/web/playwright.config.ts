@@ -33,10 +33,16 @@ function chromiumPath(): string | undefined {
 
 const executablePath = chromiumPath();
 const PORT = Number(process.env.GANTRY_E2E_PORT ?? 4173);
+/**
+ * GANTRY_E2E_VISUAL: "off" runs everything but the screenshot diffs, "only" runs only them, unset runs both. Baselines are
+ * per platform and per font set (a different machine renders text differently), so CI runs the diffs as a separate,
+ * non-blocking step until baselines are generated on the CI image (npm run e2e:update there, commit __screenshots__/linux).
+ */
+const VISUAL = process.env.GANTRY_E2E_VISUAL;
 const matrix = (["light", "dark"] as const).flatMap((scheme) =>
   ([390, 1366] as const).map((w) => ({
     name: `${scheme}-${w}`,
-    testMatch: ["a11y.spec.ts", "visual.spec.ts"],
+    testMatch: VISUAL === "only" ? ["visual.spec.ts"] : VISUAL === "off" ? ["a11y.spec.ts"] : ["a11y.spec.ts", "visual.spec.ts"],
     use: { colorScheme: scheme, viewport: { width: w, height: w === 390 ? 844 : 800 }, hasTouch: w === 390 },
   })),
 );
@@ -44,7 +50,7 @@ const matrix = (["light", "dark"] as const).flatMap((scheme) =>
 export default defineConfig({
   testDir: "./e2e",
   outputDir: "./e2e/test-results",
-  snapshotPathTemplate: "{testDir}/__screenshots__/{projectName}/{arg}{ext}",
+  snapshotPathTemplate: "{testDir}/__screenshots__/{platform}/{projectName}/{arg}{ext}",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -59,14 +65,16 @@ export default defineConfig({
   },
   projects: [
     ...matrix.map(({ name, testMatch, use }) => ({ name, testMatch, use })),
-    ...(["light", "dark"] as const).map((scheme) => ({ name: `layout-${scheme}`, testMatch: "overflow.spec.ts", use: { colorScheme: scheme } })),
-    { name: "behaviour", testMatch: ["failure-paths.spec.ts", "journeys.spec.ts"], use: { colorScheme: "light" as const, viewport: { width: 1366, height: 800 } } },
+    ...(VISUAL === "only" ? [] : (["light", "dark"] as const).map((scheme) => ({ name: `layout-${scheme}`, testMatch: "overflow.spec.ts", use: { colorScheme: scheme } }))),
+    ...(VISUAL === "only" ? [] : [{ name: "behaviour", testMatch: ["failure-paths.spec.ts", "journeys.spec.ts", "canary.spec.ts"], use: { colorScheme: "light" as const, viewport: { width: 1366, height: 800 } } }]),
   ],
   webServer: {
-    // The real production build, served as the nginx image serves it. Set E2E_SKIP_BUILD=1 to reuse apps/web/dist.
+    // The real production build, served as the nginx image serves it. Set E2E_SKIP_BUILD=1 to reuse apps/web/dist (it is then
+    // your job to have rebuilt it: a stale dist tests old code). A server already on the port is never reused unless
+    // E2E_REUSE_SERVER=1, because it may be serving a stale build.
     command: `${process.env.E2E_SKIP_BUILD === "1" ? "" : "npx vite build && "}npx vite preview --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: process.env.E2E_REUSE_SERVER === "1",
     timeout: 180_000,
   },
 });

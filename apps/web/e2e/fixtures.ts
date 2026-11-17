@@ -4,6 +4,7 @@
  * overrides single endpoints to rehearse failure paths.
  */
 import { test as base, expect, type Page, type Route } from "@playwright/test";
+import { DEFAULT_CATALOG } from "@gantry/domain";
 import { ROUTES, canSeeRoute, type RouteDef } from "../src/lib/routes";
 import type { Me } from "../src/api/types";
 
@@ -45,9 +46,27 @@ export interface MockOptions {
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 export const fulfillJson = json;
 
-/** Endpoints whose reply is an object, not a list. Everything else answers an empty list. */
+/** Endpoints whose reply is an object, not a list. */
+const approverRule = { roles: ["tech_lead"], people: [], required: 1, sod: true, conditions: [], escalateH: 24, fallback: null };
 const OBJECTS: Record<string, unknown> = {
   home: { approvals: [], conversations: [], figures: {}, attention: [], badges: {}, factory: { killed: null } },
+  // the real station, gate and class catalogue, so the factory visuals and the project wizard render for real
+  catalog: DEFAULT_CATALOG,
+  "project-presets": {
+    approvers: { standard: { spec: approverRule }, light: { spec: approverRule }, strict: { spec: { ...approverRule, required: 2 } } },
+    routes: { standard: [], light: [], strict: [] },
+  },
+};
+
+/** Lists the app reads on its main routes. A list not named here answers empty: that is the empty state, rehearsed on purpose. */
+const person = (id: string, name: string, title: string, role: string) => ({ id, name, title, email: `${id}@example.test`, teams: ["platform"], roles: [{ role, scope: "factory" }], status: "active", oncall: false, github: id, away: null });
+const LISTS: Record<string, unknown[]> = {
+  people: [person("p-admin", "Asha Raman", "Engineering Director", "factory_admin"), person("p-reader", "Rae Reader", "Auditor", "auditor"), person("p-lead", "Lee Okafor", "Tech Lead", "tech_lead")],
+  teams: [{ id: "platform", name: "Platform", desc: "Shared services and the factory line", members: 3 }],
+  templates: [
+    { id: "standard", name: "Standard service", desc: "Every station, one approver per human gate.", stationsOff: [], gatesOff: [], slots: 3, classesSkip: {}, mcp: [], approverPreset: "standard", notify: "standard", builtIn: true },
+    { id: "lean", name: "Lean library", desc: "Fewer stations for small changes.", stationsOff: ["secure"], gatesOff: [], slots: 2, classesSkip: {}, mcp: [], approverPreset: "light", notify: "light", builtIn: true },
+  ],
 };
 
 /** Fulfil the whole API from fixtures. Returns the list of requests the app made (for assertions). */
@@ -73,6 +92,7 @@ export async function mockApi(page: Page, o: MockOptions = {}): Promise<string[]
     if (path === "stream") return route.fulfill({ status: 200, contentType: "text/event-stream", body: "retry: 600000\n\n" });
     if (url.pathname.startsWith("/auth/")) return route.fulfill({ status: 200, contentType: "text/html", body: "<title>login</title>" });
     if (method === "GET" && path in OBJECTS) return json(route, OBJECTS[path]);
+    if (method === "GET" && path in LISTS) return json(route, LISTS[path]);
     return method === "GET" ? json(route, []) : json(route, { ok: true });
   });
   return seen;

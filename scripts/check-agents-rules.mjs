@@ -41,7 +41,13 @@ export function verifyCheck(id, entry, ctx) {
     }
     case "file": {
       if (!ctx.exists(entry.path)) return `${entry.path} does not exist`;
-      return entry.contains && !ctx.read(entry.path).includes(entry.contains) ? `${entry.path} does not contain "${entry.contains}"` : null;
+      const missing = [entry.contains ?? []].flat().filter((c) => !ctx.read(entry.path).includes(c));
+      return missing.length ? `${entry.path} does not contain ${missing.map((m) => `"${m}"`).join(", ")}` : null;
+    }
+    case "test": {
+      // a test (node:test or Playwright) with this exact name exists in the file; renaming or deleting it breaks the rule
+      if (!ctx.exists(entry.path)) return `${entry.path} does not exist`;
+      return ctx.read(entry.path).includes(`test("${entry.name}"`) || ctx.read(entry.path).includes(`test(\`${entry.name}`) ? null : `${entry.path} has no test named "${entry.name}"`;
     }
     case "review":
       return ctx.exists(".github/pull_request_template.md") && ctx.read(".github/pull_request_template.md").includes(entry.item) ? null : `PR template has no checklist item containing "${entry.item}"`;

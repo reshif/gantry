@@ -7,9 +7,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import { check, entryFiles } from "../bundle-budget.mjs";
-import { parseRules, repoContext, verify } from "../check-agents-rules.mjs";
+import { parseRules, repoContext, verify, verifyCheck } from "../check-agents-rules.mjs";
 import { report } from "../frontend-dod.mjs";
-import { compare, groupOf, ruleIdOf, WEB_SRC } from "../lib/frontend-counts.mjs";
+import { compare, groupOf, pollingCount, ruleIdOf, WEB_SRC } from "../lib/frontend-counts.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -122,7 +122,22 @@ test("agents: the real AGENTS.md has an enforcing, existing check for every rule
   assert.deepEqual(problems, []);
 });
 
+test("polling: refetchInterval and setInterval in a view are counted", () => {
+  assert.equal(pollingCount("useQuery({ refetchInterval: 5000 }); setInterval(f, 10);"), 2);
+  assert.equal(pollingCount("const a = 1; // pollWhenStreamDown"), 0);
+});
+
 test("react-router stays removed from the web app", () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, "apps/web/package.json"), "utf8"));
-  assert.ok(!("react-router" in { ...pkg.dependencies, ...pkg.devDependencies }));
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies, ...JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).devDependencies };
+  assert.deepEqual(Object.keys(deps).filter((d) => d.startsWith("react-router")), []);
+  const lock = readFileSync(join(ROOT, "package-lock.json"), "utf8");
+  assert.ok(!/"node_modules\/react-router(-dom)?"/.test(lock), "react-router is in package-lock.json");
+});
+
+test("agents: a `test` check needs the named test to exist in the file", () => {
+  const c = { read: () => 'test("named one", () => {})', exists: () => true, workflows: () => [] };
+  assert.equal(verifyCheck("x", { kind: "test", path: "t.mjs", name: "named one" }, c), null);
+  assert.match(verifyCheck("x", { kind: "test", path: "t.mjs", name: "other" }, c), /no test named/);
+  assert.match(verifyCheck("x", { kind: "file", path: "t.mjs", contains: ["named one", "missing"] }, c), /missing/);
 });

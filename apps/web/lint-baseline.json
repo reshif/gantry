@@ -59,52 +59,8 @@
       "ui": 3,
       "views/floor": 1
     },
-    "jsx-a11y/control-has-associated-label": {
-      "shell": 4,
-      "ui": 4,
-      "views/access": 15,
-      "views/agents": 21,
-      "views/api": 18,
-      "views/audit": 2,
-      "views/console": 3,
-      "views/conversations": 1,
-      "views/documents": 7,
-      "views/evals": 8,
-      "views/integrations": 20,
-      "views/learning": 4,
-      "views/mcp": 7,
-      "views/models": 25,
-      "views/notifications": 7,
-      "views/onboarding": 14,
-      "views/people": 11,
-      "views/project-config": 27,
-      "views/projects": 15,
-      "views/record": 1,
-      "views/security": 4,
-      "views/skills": 8,
-      "views/traveler": 2,
-      "views/trust": 5,
-      "views/work-orders": 6,
-      "views/workload": 1,
-      "views/workspace": 3
-    },
     "jsx-a11y/interactive-supports-focus": {
       "ui": 1
-    },
-    "jsx-a11y/label-has-for": {
-      "ui": 2,
-      "views/agents": 2,
-      "views/api": 2,
-      "views/conversations": 1,
-      "views/documents": 8,
-      "views/floor": 1,
-      "views/models": 1,
-      "views/notifications": 1,
-      "views/onboarding": 3,
-      "views/project-config": 1,
-      "views/security": 4,
-      "views/skills": 1,
-      "views/trust": 1
     },
     "jsx-a11y/no-autofocus": {
       "shell": 2,
@@ -117,13 +73,6 @@
     "jsx-a11y/no-noninteractive-element-interactions": {
       "shell": 1,
       "ui": 3
-    },
-    "jsx-a11y/no-noninteractive-element-to-interactive-role": {
-      "shell": 2,
-      "ui": 1,
-      "views/console": 2,
-      "views/conversations": 2,
-      "views/evals": 2
     },
     "jsx-a11y/no-noninteractive-tabindex": {
       "ui": 1,

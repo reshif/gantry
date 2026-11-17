@@ -46,19 +46,50 @@ test.fixme("/me refetch failure keeps the signed-in app mounted", async ({ page 
   await expect(page.getByRole("navigation").first()).toBeVisible();
 });
 
+// A failed read is a real state inside the main region: the title says what could not be loaded (or that it is not visible),
+// never a quiet empty list. The contrast test below is what proves the assertion can fail: the same view answered with an empty
+// list shows its empty state and none of these titles.
+const FAILED = /Couldn.t load agents|Not visible to you/;
+
 for (const status of [403, 404, 429, 500]) {
   test(`a read answered ${status} is not shown as an empty list`, async ({ page }) => {
     await mockApi(page, { overrides: { agents: (r) => fulfillJson(r, { ok: false, msg: `status ${status}` }, status) } });
     await open(page, "/#agents");
-    await expect(page.locator("#root")).toContainText(/could not|couldn.t|failed|error|not allowed|not visible|forbidden|try again|too many/i, { timeout: 10_000 });
+    await expect(page.locator("#main").getByText(FAILED)).toBeVisible({ timeout: 10_000 });
   });
 }
 
-test("a write refused with 409 or 422 shows a message and the app stays up", async ({ page }) => {
-  await mockApi(page, { overrides: { "POST projects": (r) => fulfillJson(r, { ok: false, msg: "Version changed", code: "conflict" }, 409) } });
-  await open(page, "/#projects");
-  await expect(page.locator("#root")).toBeVisible();
+test("contrast: the same read answered 200 with an empty list is an empty state, not a failure", async ({ page }) => {
+  await mockApi(page, { overrides: { agents: (r) => fulfillJson(r, []) } });
+  await open(page, "/#agents");
+  await expect(page.locator("#main")).not.toBeEmpty();
+  await expect(page.locator("#main").getByText(FAILED)).toHaveCount(0);
 });
+
+// A write refused by the server (409 conflict, 422 validation) is a value the wizard shows inline in a role=alert, and the app
+// stays up. Drives the real New project wizard to its last step on fixtures, then refuses the POST.
+async function createProjectRefused(page: import("@playwright/test").Page, status: number, msg: string) {
+  let posted = 0;
+  await mockApi(page, { overrides: { "POST projects": (r) => { posted++; return fulfillJson(r, { ok: false, msg, code: status === 409 ? "conflict" : "invalid" }, status); } } });
+  await open(page, "/#projects");
+  await page.locator("#prj-new").click();
+  await page.locator("#prj-wz-next").click();
+  await page.locator("#prj-wz-name").fill("Checkout Platform");
+  await page.locator("#prj-wz-team-add").selectOption({ index: 1 });
+  for (const _ of [1, 2, 3, 4]) await page.locator("#prj-wz-next").click();
+  await page.locator("#prj-wz-create").click();
+  await expect.poll(() => posted).toBe(1);
+  return page.getByRole("alert").filter({ hasText: msg });
+}
+
+for (const [status, msg] of [[409, "Version changed since you opened it"], [422, "Budget must be at least 100"]] as const) {
+  test(`a write refused with ${status} shows the reason inline and the app stays up`, async ({ page }) => {
+    const alert = await createProjectRefused(page, status, msg);
+    await expect(alert).toBeVisible();
+    await expect(page.locator("#prj-wz-create")).toBeEnabled();
+    await expect(page.getByRole("navigation").first()).toBeVisible();
+  });
+}
 
 test("offline: going offline mid-session keeps the shell", async ({ page, context }) => {
   await mockApi(page);
