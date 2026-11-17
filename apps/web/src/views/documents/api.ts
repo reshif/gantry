@@ -143,7 +143,7 @@ export interface DocComment {
   id: string; artefactId: string; doc: string; version: number; section: string; body: string; author: string; status: "open" | "resolved"; resolvedBy: string | null; resolvedAt: number | null; createdAt: number;
 }
 export const useWoDocComments = (woId: string | null | undefined) =>
-  useQuery({ queryKey: ["workOrders", "documentComments", woId ?? ""], queryFn: () => get<{ items: DocComment[] }>(api(`work-orders/${enc(woId ?? "")}/document-comments`)), enabled: !!woId });
+  useQuery({ queryKey: qk.woDocumentComments(woId ?? ""), queryFn: () => get<{ items: DocComment[] }>(api(`work-orders/${enc(woId ?? "")}/document-comments`)), enabled: !!woId });
 
 export async function commentOnDocument(woId: string, artefactId: string, b: { section?: string; text: string }): Promise<ApiResult> {
   const r = await post(api(`work-orders/${enc(woId)}/documents/${enc(artefactId)}/comments`), b);

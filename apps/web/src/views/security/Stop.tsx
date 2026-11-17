@@ -2,6 +2,7 @@
  * Security, Emergency stop: the factory-wide kill and restore (the same dialogs as the status menu), who may do it,
  * and every stop in force right now. Lifted stops stay in the Audit ledger.
  */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import type { SecuritySettings } from "@gantry/domain";
 import { api, get } from "../../api/client";
@@ -27,7 +28,7 @@ export function StopTab({ sec, onSignIn }: { sec: SecuritySettings; onSignIn: ()
   const people = usePeople().data ?? [];
   const kill = dec(useCan("kill.factory"));
   const restore = dec(useCan("restore.factory"));
-  const stops = useQuery({ queryKey: ["factory", "stops"] as const, queryFn: async () => (await get<{ items: StopRow[] }>(api("stops"))).items });
+  const stops = useQuery({ queryKey: qk.factoryStops(), queryFn: async () => (await get<{ items: StopRow[] }>(api("stops"))).items });
   if (!me) return null;
   const killed = me.factory.killed;
   const act = makeStopActions(ui, me);

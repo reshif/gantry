@@ -64,7 +64,9 @@ export function decideFor(st: PolicyStateLoaded, principal: Principal | null, ac
  */
 export async function noWriteRight(req: FastifyRequest): Promise<{ action: string; decision: Decision } | null> {
   const principal = req.gx.principal;
-  if (!principal) return null;
+  // Services answer for their own bodies (/internal/v1 is authenticated by token, not by the matrix); a key holds what its scopes name.
+  if (!principal || principal.kind === "service") return null;
+  if (principal.kind === "apikey" && principal.scopes.some((x) => x === "*" || !x.endsWith(".view"))) return null;
   const st = await policyState(req);
   const writes = st.catalog.actions.filter((a) => !a.id.endsWith(".view") && a.id !== "console.use");
   const scopes: Scope[] = [{}, ...st.projects.filter((p) => p.status !== "archived").map((p) => ({ project: p.id }))];
