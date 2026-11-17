@@ -10,6 +10,7 @@
  *   POST /api/v1/can        batch decision point for disabled controls
  *   GET  /api/v1/stream     server-sent change events
  */
+import type { FastifyRequest } from "fastify";
 import { randomBytes } from "node:crypto";
 import { visibleProjects, type SecuritySettings } from "@gantry/domain";
 import { appendEvent, withTx } from "@gantry/db";
@@ -323,10 +324,11 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     return { results: checks.map((c) => decideFor(st, p, c.action, { project: c.project ?? null, repo: c.repo ?? null, time: c.time ?? now })).map((d) => ({ allowed: d.allowed, reason: d.reason, rule: d.rule, needs: d.needs })) };
   });
 
-  app.get("/api/v1/stream", async (req, reply) => {
+  // Its own budget: a reconnecting tab must not eat the per-IP allowance of ordinary requests, nor the reverse.
+  app.get("/api/v1/stream", { config: { rateLimit: { max: 60, timeWindow: "1 minute", keyGenerator: (r: FastifyRequest) => `stream:${r.ip}` } } }, async (req, reply) => {
     const p = req.gx.principal;
     if (p?.kind !== "person") throw refuse("denied", "The live stream is for signed-in people.");
-    if (!g.hub.hasRoom()) throw refuse("conflict", "Too many live streams are open. Try again shortly.");
+    if (!g.hub.hasRoom(p.id)) throw refuse("conflict", "Too many live streams are open for this account or the factory. Close another tab and retry.");
     const st = await policyState(req);
     const person = await currentPerson(req);
     if (!person) throw refuse("denied", "This account no longer exists.");

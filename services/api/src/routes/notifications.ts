@@ -147,7 +147,10 @@ export const notificationRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/v1/card-templates", async (req) => {
     const b = CardTemplateBody.parse(req.body);
-    return command(req, { ...(await editSpec(b.id, b.project)), idempotent: !b.id }, (tx, a) => saveCardTemplate(tx, a, b));
+    const spec = await editSpec(b.id, b.project);
+    // Only a caller without the factory right is held to "no card other projects use".
+    const projectOnly = b.id ? !(await decide(req, "integration.edit", {})).allowed : false;
+    return command(req, { ...spec, idempotent: !b.id }, (tx, a) => saveCardTemplate(tx, a, b, { projectOnly }));
   });
 
   app.delete("/api/v1/card-templates/:id", async (req) => {

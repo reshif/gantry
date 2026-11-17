@@ -49,7 +49,7 @@ export class Hub {
     private readonly orgId: string,
     private readonly hooks: HubHooks,
     private readonly sweepMs = 60_000,
-    /** Open streams one person may hold (the oldest is closed for a new one) and in all. Every stream costs a policy load on each visibility change. */
+    /** Open streams one person may hold (a further one is refused) and in all. Every stream costs a policy load on each visibility change. */
     private readonly limits: { perPerson: number; total: number } = { perPerson: STREAMS_PER_PERSON, total: STREAMS_TOTAL },
   ) {}
 
@@ -133,14 +133,19 @@ export class Hub {
     );
   }
 
-  /** False when the hub is full: the caller refuses the stream. A person over their own limit loses their oldest stream instead. */
-  hasRoom(): boolean {
-    return this.subs.size < this.limits.total;
+  /**
+   * False when the hub is full or this person already holds their limit: the caller refuses the NEW stream. Evicting the oldest instead
+   * would make a person with more tabs than the limit trade streams forever, each tab reconnecting and closing another.
+   */
+  hasRoom(personId?: string): boolean {
+    if (this.subs.size >= this.limits.total) return false;
+    if (personId === undefined) return true;
+    let n = 0;
+    for (const x of this.subs) if (x.personId === personId) n++;
+    return n < this.limits.perPerson;
   }
 
   add(s: Subscriber): () => void {
-    const mine = [...this.subs].filter((x) => x.personId === s.personId);
-    for (const old of mine.slice(0, Math.max(0, mine.length - this.limits.perPerson + 1))) old.close();
     this.subs.add(s);
     return () => this.subs.delete(s);
   }
