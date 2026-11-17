@@ -7,7 +7,15 @@ export interface Change {
   org: string;
   keys: string[];
   project?: string;
+  /**
+   * People allowed to read the item this change is about (a private chat: its owner and members). Only they receive it; absent, the
+   * project filter alone decides. A change to an item with no project and no audience reaches no one who is not factory-wide.
+   */
+  audience?: string[];
 }
+
+/** Keys that name one item (a chat, work order, delivery): knowing they changed tells a reader the item exists and when it was active. */
+export const ITEM_KEYS: ReadonlySet<string> = new Set(["console", "workspace", "conversations", "workOrders", "floor", "repos", "deliveries"]);
 
 /**
  * Publishes a change inside the caller's transaction. Postgres delivers NOTIFY only when the transaction commits, so a rolled-back
@@ -16,14 +24,24 @@ export interface Change {
 export async function publishChange(db: Queryable, change: Change): Promise<void> {
   const keys = [...new Set(change.keys)];
   if (!keys.length) return;
-  const payload = JSON.stringify({ org: change.org, keys, ...(change.project ? { project: change.project } : {}) });
-  await db.query(`select pg_notify($1, $2)`, [CHANGES_CHANNEL, payload.length > 7500 ? JSON.stringify({ org: change.org, keys: ["*"] }) : payload]);
+  const aud = change.audience ? [...new Set(change.audience)] : undefined;
+  const scope = (a: string[] | undefined) => ({ ...(change.project ? { project: change.project } : {}), ...(a ? { audience: a } : {}) });
+  const payload = JSON.stringify({ org: change.org, keys, ...scope(aud) });
+  if (payload.length <= 7500) {
+    await db.query(`select pg_notify($1, $2)`, [CHANGES_CHANNEL, payload]);
+    return;
+  }
+  // Too big for one NOTIFY: say only that everything may have changed, keeping who it is for (split, so the audience is never widened).
+  const chunks: Array<string[] | undefined> = [];
+  if (aud) for (let i = 0; i < aud.length; i += 50) chunks.push(aud.slice(i, i + 50));
+  else chunks.push(undefined);
+  for (const c of chunks) await db.query(`select pg_notify($1, $2)`, [CHANGES_CHANNEL, JSON.stringify({ org: change.org, keys: ["*"], ...scope(c) })]);
 }
 
 export function parseChange(payload: string | undefined): Change | null {
   try {
     const v = JSON.parse(payload ?? "") as Partial<Change>;
-    if (typeof v.org === "string" && Array.isArray(v.keys)) return { org: v.org, keys: v.keys.filter((k): k is string => typeof k === "string"), ...(typeof v.project === "string" ? { project: v.project } : {}) };
+    if (typeof v.org === "string" && Array.isArray(v.keys)) return { org: v.org, keys: v.keys.filter((k): k is string => typeof k === "string"), ...(typeof v.project === "string" ? { project: v.project } : {}), ...(Array.isArray(v.audience) ? { audience: v.audience.filter((a): a is string => typeof a === "string") } : {}) };
   } catch {
     /* ignore malformed notifications */
   }

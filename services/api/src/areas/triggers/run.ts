@@ -259,7 +259,7 @@ export async function evaluateTrigger(tx: Tx, ctx: RunCtx, row: TriggerRow, inpu
     const sub = await submitWO(tx, actor, projectId, { repo: repo.id, title, description, ...(priority ? { priority } : {}), requestedCls: cls, source, ...(person ? { onBehalfOf: person } : {}) });
     await tx.query("release savepoint trigger_submit");
     const id = String(sub.extra?.id ?? "");
-    await flush(tx, ctx, actor, sub.events, sub.jobs ?? [], sub.changes ?? [], person ?? ctx.onBehalfOf ?? null);
+    await flush(tx, ctx, actor, sub.events, sub.jobs ?? [], sub.changes ?? [], person ?? ctx.onBehalfOf ?? null, projectId);
     const r: RunResult = { outcome: "created", msg: `Created ${id}.`, wo: id, proposal: null, person, reply: render(s.reply, id), recorded: true, would };
     return finish(tx, ctx, row, input, false, o.simulated === true, r, s.reply, source);
   } catch (e) {
@@ -272,7 +272,7 @@ export async function evaluateTrigger(tx: Tx, ctx: RunCtx, row: TriggerRow, inpu
 const render = (reply: string, id: string): string => reply.replace(/\{wo\}/g, id).slice(0, 2000);
 
 /** Appends the events the submission collected under the trigger's identity and enqueues its jobs. */
-async function flush(tx: Tx, ctx: RunCtx, actor: Actor, events: EventSpec[], jobs: JobSpec[], changes: string[], onBehalfOf: string | null): Promise<void> {
+async function flush(tx: Tx, ctx: RunCtx, actor: Actor, events: EventSpec[], jobs: JobSpec[], changes: string[], onBehalfOf: string | null, project: string): Promise<void> {
   for (const e of events) {
     await appendEvent(tx, {
       orgId: ctx.orgId, type: e.type, category: e.category ?? "flow", actor: actor.id, onBehalfOf: e.onBehalfOf ?? onBehalfOf, channel: ctx.channel, subject: e.subject ?? null, projectId: e.projectId ?? null,
@@ -281,7 +281,7 @@ async function flush(tx: Tx, ctx: RunCtx, actor: Actor, events: EventSpec[], job
     });
   }
   for (const j of jobs) await enqueue(tx, { orgId: ctx.orgId, ...j });
-  await publishChange(tx, { org: ctx.orgId, keys: [...new Set(["triggers", "audit", ...changes])] });
+  await publishChange(tx, { org: ctx.orgId, keys: [...new Set(["triggers", "audit", ...changes])], project });
 }
 
 /** Records the run and its event (unless it is a dry run or not worth recording) and returns the result. */

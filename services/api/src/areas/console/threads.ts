@@ -54,6 +54,18 @@ export async function readChat(db: Queryable, orgId: string, id: string, now = n
 }
 
 /**
+ * Who a live change about one chat may reach, by the same rule as reading it (chatAccess): a private chat only its owner and members
+ * (plus `also`, for example a person just removed, who must refetch), a chat shared with its project anyone who sees that project.
+ * A chat that does not exist reaches only `also`.
+ */
+export async function chatReach(db: Queryable, orgId: string, id: string, also: string[] = []): Promise<{ project: string | null; audience?: string[] }> {
+  const t = await readChat(db, orgId, id, new Date(0));
+  if (!t) return { project: null, audience: [...also] };
+  if (t.visibility === "project" && t.projectId) return { project: t.projectId };
+  return { project: t.projectId, audience: [...new Set([t.owner, ...t.members, ...also])] };
+}
+
+/**
  * What a person may do with a chat. Reading needs the chat's project to be visible to them (sharing never widens what someone can see) and either
  * ownership, an invitation, or the chat shared with the project. Posting needs ownership or an invitation, and an active chat.
  */

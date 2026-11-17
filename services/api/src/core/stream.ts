@@ -1,6 +1,6 @@
 import type pg from "pg";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { CHANGES_CHANNEL, parseChange, type Change } from "./changes.js";
+import { CHANGES_CHANNEL, ITEM_KEYS, parseChange, type Change } from "./changes.js";
 
 export interface Subscriber {
   personId: string;
@@ -29,11 +29,22 @@ const VISIBILITY_KEYS = new Set(["people", "projects", "matrix", "roles", "sessi
  */
 const FACTORY_ONLY_KEYS = new Set(["apiKeys", "apiConfig", "security", "signins", "sessions", "chatLinks", "audit", "policies", "freezes"]);
 
-/** The change as one subscriber may see it, or null when there is nothing for them. */
-export function changeFor(ch: Change, visible: Set<string> | "all"): { keys: string[]; project?: string } | null {
-  if (visible === "all") return { keys: ch.keys, ...(ch.project ? { project: ch.project } : {}) };
-  if (ch.project) return visible.has(ch.project) ? { keys: ch.keys, project: ch.project } : null;
-  const keys = ch.keys.filter((k) => !FACTORY_ONLY_KEYS.has(k));
+const PERSONAL_KEYS = new Set(["console", "workspace"]);
+
+/**
+ * The change as one subscriber may see it, or null when there is nothing for them. The same read rules as the item's GET route:
+ * an item with an audience (a private chat) goes only to those people; an item in a project goes to people who see the project;
+ * an item with neither is announced only to factory-wide readers. Factory-wide slices drop the admin-only names for everyone else.
+ */
+export function changeFor(ch: Change, visible: Set<string> | "all", personId?: string): { keys: string[]; project?: string } | null {
+  if (ch.audience && (personId === undefined || !ch.audience.includes(personId))) return null;
+  // Chats are read only by their owner, members or project (never by role alone): without a stated audience or project, fail closed.
+  if (!ch.audience && !ch.project && ch.keys.some((k) => PERSONAL_KEYS.has(k))) ch = { ...ch, keys: ch.keys.filter((k) => !PERSONAL_KEYS.has(k)) };
+  if (!ch.keys.length) return null;
+  if (ch.project) return visible === "all" || visible.has(ch.project) ? { keys: ch.keys, project: ch.project } : null;
+  if (visible === "all") return { keys: ch.keys };
+  // No project: for a person who is not factory-wide, an item key (conversation, work order, delivery...) would reveal an item they cannot place.
+  const keys = ch.keys.filter((k) => !FACTORY_ONLY_KEYS.has(k) && !(ITEM_KEYS.has(k) && !ch.audience));
   return keys.length ? { keys } : null;
 }
 
@@ -129,7 +140,7 @@ export class Hub {
           if (v === null) return s.close();
           s.visible = v;
         }
-        const out = changeFor(ch, s.visible);
+        const out = changeFor(ch, s.visible, s.personId);
         if (out) s.write(`event: change\ndata: ${JSON.stringify(out)}\n\n`);
       }),
     );

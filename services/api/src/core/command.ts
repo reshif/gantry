@@ -57,6 +57,8 @@ export interface CommandResult<X extends object = Record<string, never>> {
   changes?: string[];
   /** Project the change belongs to (default: the command's scope). Absent = factory-wide. */
   project?: string | null;
+  /** Only these people receive the change (a private item: see Change.audience). */
+  audience?: string[];
 }
 
 export interface CommandSpec {
@@ -290,7 +292,7 @@ export async function command<X extends object = Record<string, never>>(
         await idempotency.storeResult(tx, { orgId: g.orgId, scope: route, key: idemHeader }, 200, kept);
       }
       const project = r.project === undefined ? spec.scope?.project ?? undefined : r.project ?? undefined;
-      await publishChange(tx, { org: g.orgId, keys: [...(r.changes ?? (spec.reduced ? ["stops", "factory", "projects", "repos"] : [])), "audit"], ...(project ? { project } : {}) });
+      await publishChange(tx, { org: g.orgId, keys: [...(r.changes ?? (spec.reduced ? ["stops", "factory", "projects", "repos"] : [])), "audit"], ...(project ? { project } : {}), ...(r.audience ? { audience: r.audience } : {}) });
       if (!fallback) loaded = st;
       return { replay: false as const, status: 200, body };
     });
