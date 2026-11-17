@@ -61,7 +61,10 @@ services:
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8079/healthz"]
-    networks: [front, control]
+    networks:
+      front: {}
+      # A fixed address: the API trusts X-Forwarded-For from this one peer only (GANTRY_TRUST_PROXY), not from every container on the network.
+      control: { ipv4_address: 10.89.17.2 }
     depends_on:
       volume-init: { condition: service_completed_successfully }
       gantry-web: { condition: service_healthy }
@@ -103,6 +106,8 @@ services:
       GANTRY_ORG_NAME: ${GANTRY_ORG_NAME:-Gantry}
       # Alias of a GitHub identity provider configured in Keycloak; empty = GitHub sign-in is refused with a clear message.
       OIDC_GITHUB_IDP_ALIAS: ${OIDC_GITHUB_IDP_ALIAS:-}
+      # Only the ingress (Caddy, fixed address on the control network) may state the client address; other containers cannot forge it.
+      GANTRY_TRUST_PROXY: 10.89.17.2
     # The backup service writes last-backup.json and last-drill.json here; the API only reads them (System health).
     volumes:
       - ${GANTRY_BACKUP_VOLUME:-backups}:/backups:ro
@@ -433,6 +438,9 @@ networks:
   control:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 10.89.17.0/24
   launch:
     driver: bridge
     internal: true

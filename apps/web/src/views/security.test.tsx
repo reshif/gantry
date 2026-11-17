@@ -89,6 +89,14 @@ describe("Security screen", () => {
     expect(locked(await byId("sec-sso-domain"))).toBe(false);
   });
 
+  it("says plainly that MFA is not enforced instead of advertising a policy", async () => {
+    setup();
+    mount();
+    expect((await byId("sec-mfa-notice")).textContent).toContain("Not enforced");
+    await waitFor(() => expect(text()).toContain("MFAnot enforced"));
+    expect(text()).not.toContain("MFAadmins");
+  });
+
   it("lists domains, ranges and research hosts on the network tab, and the active sessions and history tabs", async () => {
     setup();
     mount();

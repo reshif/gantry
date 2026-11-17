@@ -8,12 +8,13 @@ export interface Subscriber {
   /** Project ids the person can see, or "all" (factory-wide roles). Refreshed when people, roles or projects change. */
   visible: Set<string> | "all";
   write(chunk: string): boolean;
-  close(): void;
+  /** `superseded`: the person opened more streams than allowed; the client is told so and must not reconnect. */
+  close(reason?: "superseded"): void;
 }
 
 export interface HubHooks {
   /** Recomputes a subscriber's visible projects. Returns null if the person or session is gone (the stream is closed). */
-  refresh(s: Subscriber): Promise<Set<string> | "all" | null>;
+  refresh(s: Subscriber, batch: Map<string, unknown>): Promise<Set<string> | "all" | null>;
 }
 
 export const STREAMS_PER_PERSON = 5;
@@ -56,10 +57,11 @@ export class Hub {
   /** One refresh per person and session for a whole fan-out, not one per open stream. */
   private refresher(): (s: Subscriber) => Promise<Set<string> | "all" | null> {
     const done = new Map<string, Promise<Set<string> | "all" | null>>();
+    const batch = new Map<string, unknown>(); // one policy load per fan-out, shared by every person's refresh
     return (s) => {
       const k = `${s.personId}\u0000${s.sessionId ?? ""}`;
       let p = done.get(k);
-      if (!p) done.set(k, (p = this.hooks.refresh(s)));
+      if (!p) done.set(k, (p = this.hooks.refresh(s, batch)));
       return p;
     };
   }
@@ -176,11 +178,14 @@ export function openStream(req: FastifyRequest, reply: FastifyReply, hub: Hub, s
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
     "x-accel-buffering": "no",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
     "x-request-id": req.id,
   });
   let done = false;
-  const finish = (): void => {
+  const finish = (reason?: "superseded"): void => {
     if (done) return;
+    if (reason === "superseded" && !res.writableEnded) res.write(`event: superseded\ndata: {}\n\n`);
     done = true;
     clearInterval(timer);
     remove();
@@ -189,7 +194,7 @@ export function openStream(req: FastifyRequest, reply: FastifyReply, hub: Hub, s
   const subscriber: Subscriber = { ...sub, write: (c) => !done && res.write(c), close: finish };
   const remove = hub.add(subscriber);
   const timer = setInterval(() => subscriber.write(`: hb\n\n`), heartbeatMs);
-  req.raw.on("close", finish);
-  res.on("error", finish);
+  req.raw.on("close", () => finish());
+  res.on("error", () => finish());
   res.write(`retry: 3000\n: connected\n\n`);
 }

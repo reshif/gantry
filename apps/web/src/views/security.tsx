@@ -50,7 +50,7 @@ export default function SecurityView() {
       <ViewHead
         title="Security"
         sub="How people get in and how long they stay. Every change here is audited under auth."
-        meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", sec.mfa.policy === "all" ? "everyone" : sec.mfa.policy === "admins" ? "admins" : "off"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", qState(sessionsQ, () => String(active))], ["Failed sign-ins 24 h", qState(signinsQ, () => String(fails))]]}
+        meta={[["SSO", sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"], ["MFA", "not enforced"], ["Idle timeout", `${sec.idleMin} min`], ["Active sessions", qState(sessionsQ, () => String(active))], ["Failed sign-ins 24 h", qState(signinsQ, () => String(fails))]]}
       />
       {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /><ExplainDenial id="sec-explain" action="security.manage" /></div> : null}
       <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in and sessions" }, { id: "network", label: "Domains and network" }, { id: "sessions", label: "Active sessions", count: active }, { id: "history", label: "Sign-in history", count: signins.length }]} />
@@ -138,17 +138,17 @@ function SsoPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
 function MfaPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
   const set = useSet(sec);
   const people = usePeople().data ?? [];
-  const me = useMe();
   const opts: Array<[string, string, string]> = [["off", "Nobody", "MFA is optional for everyone."], ["admins", "Admins", "Factory and Project Admins must use MFA."], ["all", "Everyone", "Every person must use MFA."]];
   const methods: Array<[string, string]> = [["totp", "Authenticator app (TOTP)"], ["webauthn", "Security key or passkey (WebAuthn)"], ["sms", "SMS code"]];
   const enrolled = people.filter((p) => p.mfa).length;
   return (
     <Panel title="Multi-factor authentication">
       <div className="form-grid">
-        <div className="radio-cards" role="radiogroup" aria-label="MFA policy">
+        <p className="small muted" role="note" id="sec-mfa-notice"><strong>Not enforced yet.</strong> These choices are recorded but sign-in does not check them: Gantry does not require a second factor itself. Use your identity provider to enforce MFA until this is wired in.</p>
+        <div className="radio-cards" role="radiogroup" aria-label="MFA policy (not enforced)">
           {opts.map((o) => (
             <label key={o[0]} className={`radio-card${perm.allowed ? "" : " is-locked"}`} htmlFor={`sec-mfa-${o[0]}`}>
-              <input type="radio" name="sec-mfa" id={`sec-mfa-${o[0]}`} value={o[0]} checked={sec.mfa.policy === o[0]} disabled={!perm.allowed} onChange={() => void set("mfa.policy", o[0], `MFA required for: ${o[1].toLowerCase()}.`)} />
+              <input type="radio" name="sec-mfa" id={`sec-mfa-${o[0]}`} value={o[0]} checked={sec.mfa.policy === o[0]} disabled={!perm.allowed} onChange={() => void set("mfa.policy", o[0], `MFA preference recorded for: ${o[1].toLowerCase()} (not enforced by Gantry).`)} />
               <span className="rc-t">{o[1]}</span>
               <span className="rc-d muted small">{o[2]}</span>
             </label>
@@ -170,7 +170,7 @@ function MfaPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
           </div>
           <div className="field-hint">SMS is weaker than an app or a key. At least one method stays on.</div>
         </div>
-        <p className="small muted">{`${enrolled} of ${people.length} people enrolled.${me && !me.person.mfa && sec.mfa.policy === "all" ? " You are not enrolled: your next sign-in will ask you to set it up." : ""}`}</p>
+        <p className="small muted">{`${enrolled} of ${people.length} people enrolled.`}</p>
       </div>
     </Panel>
   );
