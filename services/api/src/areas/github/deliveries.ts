@@ -68,12 +68,13 @@ export async function processGithubDelivery(tx: Tx, orgId: string, deliveryId: s
   let m: ReturnType<typeof factsFromWebhook>;
   try { m = factsFromWebhook(d.event_type, payload); } catch (e) { await mark("failed"); return { status: "failed", reason: `unexpected payload shape: ${(e as Error).message.slice(0, 200)}` }; }
   if ("ignore" in m) { await mark("ignored"); return { status: "ignored", reason: m.ignore }; }
-  if (!(await findRepo(tx, orgId, m.facts.repo))) { await mark("ignored"); return { status: "ignored", reason: `repository ${m.facts.repo} is not connected` }; }
+  const repo = await findRepo(tx, orgId, m.facts.repo);
+  if (!repo) { await mark("ignored"); return { status: "ignored", reason: `repository ${m.facts.repo} is not connected` }; }
   const r = await applyFacts(tx, orgId, m.facts, o.now ? { now: o.now } : {});
   for (const e of r.events) {
     await appendEvent(tx, { orgId, type: e.type, category: e.category ?? "integrations", actor: "github", channel: "github", subject: e.subject ?? null, projectId: e.projectId ?? null, woId: e.woId ?? null, outcome: e.outcome ?? "ok", before: e.before, after: { ...(e.after as object | undefined), delivery: deliveryId }, causationId: deliveryId });
   }
-  await publishChange(tx, { org: orgId, keys: [...r.changes, ...(r.events.length ? ["audit"] : [])] });
+  await publishChange(tx, { org: orgId, keys: [...r.changes, ...(r.events.length ? ["audit"] : [])], project: repo.project_id });
   await mark("processed");
   return { status: "processed", applied: r.events.length, drift: r.counts.drift };
 }

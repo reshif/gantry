@@ -20,7 +20,7 @@ import { composeSessionContext, consoleAgent, recordedTurn } from "../areas/sess
 import { completeOnce, consoleFacts, consoleRails, ModelUnavailable, readiness, runConversation, systemPrompt, type Readiness } from "../areas/console/model.js";
 import { consoleModel, setModelPref } from "../areas/console/route.js";
 import { ExplainBody, MessageBody, ModelBody, StatusQuery, PinnedBody, ProposalBody, ProposalParams, SettingsBody, ThreadId, ToolBody, ToolParams } from "../areas/console/schemas.js";
-import { addMessage, chatAccess, deleteThread, ensureThread, listMessages, listThreads, newMessageId, purgeExpired, readChat, renameThread, setPinned, setProposalStatus } from "../areas/console/threads.js";
+import { addMessage, chatAccess, chatReach, deleteThread, ensureThread, listMessages, listThreads, newMessageId, purgeExpired, readChat, renameThread, setPinned, setProposalStatus } from "../areas/console/threads.js";
 import { agentOf, scopeContext, sideSystem } from "../areas/workspace/side.js";
 import { chatSpendMicros } from "../areas/workspace/spend.js";
 import { stationAgentGate, turnCostMicros } from "../areas/session/core.js";
@@ -90,7 +90,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
         if (!m.options.some((o) => o.id === b.model)) throw refuse("invalid", `${b.model} is not available to the console: it must be enabled, on a connected vendor the gateway can call.`);
       }
       await setModelPref(tx, a.orgId, who.id, b.model);
-      return { msg: b.model ? `The console will answer with ${b.model}.` : "The console will use the factory default model.", events: [{ type: "console.model", category: "access", subject: { type: "console", id: "model" }, projectId: null, after: { model: b.model } }], changes: ["console"], project: null };
+      return { msg: b.model ? `The console will answer with ${b.model}.` : "The console will use the factory default model.", events: [{ type: "console.model", category: "access", subject: { type: "console", id: "model" }, projectId: null, after: { model: b.model } }], changes: ["console"], project: null, audience: [who.id] };
     });
   });
 
@@ -128,8 +128,9 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     const who = requirePerson(req);
     const { id } = ThreadId.parse(req.params);
     return command(req, { action: null }, async (tx, a) => {
+      const reach = await chatReach(tx, a.orgId, id);
       if (!(await deleteThread(tx, a.orgId, who.id, id))) throw refuse("not_found", "No such conversation.");
-      return { msg: "Conversation cleared.", events: [{ type: "console.thread.deleted", category: "access", subject: { type: "console_thread", id }, projectId: null }], changes: ["console"], project: null };
+      return { msg: "Conversation cleared.", events: [{ type: "console.thread.deleted", category: "access", subject: { type: "console_thread", id }, projectId: null }], changes: ["console"], ...reach };
     });
   });
 
@@ -140,7 +141,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     const { title } = z.object({ title: z.string().trim().min(1, "Give the conversation a name.").max(120) }).parse(req.body);
     return command(req, { action: null }, async (tx, a) => {
       if (!(await renameThread(tx, a.orgId, who.id, id, title))) throw refuse("not_found", "No such conversation.");
-      return { msg: "Renamed.", events: [], changes: ["console"], project: null, extra: { title } };
+      return { msg: "Renamed.", events: [], changes: ["console"], ...(await chatReach(tx, a.orgId, id)), extra: { title } };
     });
   });
 
@@ -150,7 +151,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     const b = PinnedBody.parse(req.body);
     return command(req, { action: null }, async (tx, a) => {
       if (!(await setPinned(tx, a.orgId, who.id, id, [...new Set(b.pinned)]))) throw refuse("not_found", "No such conversation.");
-      return { msg: "Pins saved.", events: [], changes: ["console"], project: null };
+      return { msg: "Pins saved.", events: [], changes: ["console"], project: null, audience: [who.id] };
     });
   });
 
@@ -160,7 +161,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
     const b = ProposalBody.parse(req.body);
     return command(req, { action: null }, async (tx, a) => {
       if (!(await setProposalStatus(tx, a.orgId, who.id, id, pid, b.status, b.result))) throw refuse("not_found", "No such proposal.");
-      return { msg: "Saved.", events: [], changes: ["console"], project: null };
+      return { msg: "Saved.", events: [], changes: ["console"], project: null, audience: [who.id] };
     });
   });
 
@@ -251,7 +252,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
         msg: "Question saved.",
         // The ledger records that a question was asked and in which thread, never its text.
         events: [{ type: "console.message", category: "access", subject: { type: "console_thread", id: t.id }, projectId: null, after: { thread: t.id, message: messageId, chars: b.text.length, created: t.created, ...(purged ? { expiredThreadsDeleted: purged } : {}) } }],
-        extra: { threadId: t.id, messageId, created: t.created }, changes: ["console"], project: null,
+        extra: { threadId: t.id, messageId, created: t.created }, changes: ["console"], ...(await chatReach(tx, a.orgId, t.id)),
       };
     });
     const threadId = String(saved.threadId);
@@ -274,7 +275,7 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
       const id = newMessageId();
       await command(req, { action: null }, async (tx, a) => {
         await addMessage(tx, a.orgId, threadId, role, text, { ...data, askedBy: who.id }, new Date(), id, side ? (chat!.agentId ?? null) : null);
-        return { msg: "Answer saved.", events: [{ type: "console.answer", category: "access", subject: { type: "console_thread", id: threadId }, projectId: null, after: { thread: threadId, message: id, chars: text.length, ...ev } }], changes: ["console"], project: null };
+        return { msg: "Answer saved.", events: [{ type: "console.answer", category: "access", subject: { type: "console_thread", id: threadId }, projectId: null, after: { thread: threadId, message: id, chars: text.length, ...ev } }], changes: ["console"], ...(await chatReach(tx, a.orgId, threadId)) };
       });
       return id;
     };

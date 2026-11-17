@@ -15,7 +15,7 @@
 import { visibleProjects } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { chatAccess, createScopedThread, listMessages, readChat, type ScopeKind } from "../areas/console/threads.js";
+import { chatAccess, chatReach, createScopedThread, listMessages, readChat, type ScopeKind } from "../areas/console/threads.js";
 import { inbox } from "../areas/workspace/inbox.js";
 import { operatorView } from "../areas/workspace/operator.js";
 import { search, type HitKind } from "../areas/workspace/search.js";
@@ -126,7 +126,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
       return {
         msg: agentName ? `New thread with ${agentName}.` : "New thread.",
         events: [{ type: "thread.created", category: "access", subject: { type: "thread", id: tid }, projectId: project, after: { scope: kind, about: id, agent: b.agent ?? null, visibility } }],
-        changes: ["console", "workspace"], project, extra: { id: tid, key: tid, title, visibility },
+        changes: ["console", "workspace"], ...(await chatReach(tx, a.orgId, tid)), extra: { id: tid, key: tid, title, visibility },
       };
     });
   });
@@ -140,6 +140,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     const chat = isChat ? await readChat(g.pool, g.orgId, key) : null;
     const can = chat ? chatAccess(chat, me.id, sees) : null;
     if (isChat && (!chat || !can?.read)) throw refuse("not_found", "No such conversation.");
+    let keyProject: string | null = chat?.projectId ?? null;
     if (!isChat) {
       const m = /^(wo|repo):(.+)$/.exec(key);
       if (!m) throw refuse("not_found", "No such conversation.");
@@ -147,6 +148,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
         ? (await g.pool.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2`, [g.orgId, m[2]])).rows[0]?.project_id
         : (await g.pool.query<{ project_id: string }>(`select project_id from repos where org_id = $1 and id = $2`, [g.orgId, m[2]])).rows[0]?.project_id;
       if (!project || !sees(project)) throw refuse("not_found", "No such conversation.");
+      keyProject = project;
       if (b.title !== undefined || b.visibility !== undefined) throw refuse("invalid", "A work order's or repository's own thread keeps its name and is always read by its project.");
     }
     if (chat && !can!.owner && (b.title !== undefined || b.visibility !== undefined)) throw refuse("denied", "Only the person who started this conversation can rename or share it.");
@@ -174,7 +176,11 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
         }
       }
       const msg = b.archived === true ? (ownArchive ? "Archived. The conversation is read-only until you unarchive it." : "Moved to your Archived list.") : b.archived === false ? "Back in your inbox." : b.pinned !== undefined ? (b.pinned ? "Pinned." : "Unpinned.") : b.visibility ? (b.visibility === "project" ? "Shared with the project." : "Now private to you and the people you invited.") : "Saved.";
-      return { msg, events: events as never, changes: ["console", "workspace"], project: chat?.projectId ?? null };
+      // Pins and archive are the caller's own (only they hear of it); the owner changing a chat's name or sharing reaches the chat's readers.
+      // A change of sharing reaches the whole project: people who could read it a moment ago must refetch too.
+      const shared = !!chat && can!.owner && b.visibility !== undefined && b.visibility !== chat.visibility;
+      const reach = chat && can!.owner ? (shared ? { project: chat.projectId } : await chatReach(tx, a.orgId, key)) : { project: keyProject, audience: [me.id] };
+      return { msg, events: events as never, changes: ["console", "workspace"], ...reach };
     });
   });
 
@@ -194,7 +200,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     if (chat.projectId && !visibleProjects(st, who.id).some((p) => p.id === chat.projectId)) throw refuse("invalid", `${who.name} cannot see project ${chat.projectId}, so they cannot read a thread about it.`);
     return command(req, { action: null }, async (tx, a) => {
       await tx.query(`insert into thread_members (org_id, thread_id, person_id, added_by) values ($1,$2,$3,$4) on conflict do nothing`, [a.orgId, id, who.id, me.id]);
-      return { msg: `${who.name} can now read and post in this conversation.`, events: [{ type: "thread.member.added", category: "access", subject: { type: "thread", id }, projectId: chat.projectId, after: { person: who.id } }], changes: ["console", "workspace"], project: chat.projectId };
+      return { msg: `${who.name} can now read and post in this conversation.`, events: [{ type: "thread.member.added", category: "access", subject: { type: "thread", id }, projectId: chat.projectId, after: { person: who.id } }], changes: ["console", "workspace"], ...(await chatReach(tx, a.orgId, id)) };
     });
   });
 
@@ -209,7 +215,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
     return command(req, { action: null }, async (tx, a) => {
       const r = await tx.query(`delete from thread_members where org_id = $1 and thread_id = $2 and person_id = $3`, [a.orgId, id, pid]);
       if (!r.rowCount) throw refuse("not_found", "That person is not in this conversation.");
-      return { msg: pid === me.id ? "You left the conversation." : "Removed.", events: [{ type: "thread.member.removed", category: "access", subject: { type: "thread", id }, projectId: chat.projectId, after: { person: pid } }], changes: ["console", "workspace"], project: chat.projectId };
+      return { msg: pid === me.id ? "You left the conversation." : "Removed.", events: [{ type: "thread.member.removed", category: "access", subject: { type: "thread", id }, projectId: chat.projectId, after: { person: pid } }], changes: ["console", "workspace"], ...(await chatReach(tx, a.orgId, id, [pid])) };
     });
   });
 
