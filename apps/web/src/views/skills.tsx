@@ -9,7 +9,7 @@ import { useCan } from "../api/can";
 import { useAgents, useLearningProposals, useProjects, useSkills } from "../api/queries";
 import { ops } from "../api/ops";
 import { Async, useCommand } from "../ui/async";
-import { Btn, Chip, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, Stat, StatRow, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
+import { Btn, Chip, Empty, Field, FilterBar, LockNote, SearchBox, Select, Stat, StatRow, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
 import { DataTable, type SortCol } from "../ui/SortTable";
 import { Dialog } from "../ui/Overlay";
 import { Icon } from "../ui/Icon";

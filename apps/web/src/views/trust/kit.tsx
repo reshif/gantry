@@ -8,8 +8,8 @@ import { updatePrefs } from "../../lib/prefs";
 import { navigate } from "../../lib/router";
 
 export const MIN_RUNS = 5;
-export type TrustTab = "ladder" | "proposals" | "demotions" | "policy";
-export const trustUi = { tab: "ladder" as TrustTab, project: null as string | null, repo: "", sel: null as { agent: string | null; cls: string } | null, propFilter: "pending", demoFilter: "all", hiProposal: null as string | null };
+export type TrustTab = "matrix" | "ladder" | "proposals" | "demotions" | "policy";
+export const trustUi = { tab: "matrix" as TrustTab, project: null as string | null, repo: "", sel: null as { agent: string | null; cls: string } | null, propFilter: "pending", demoFilter: "all", hiProposal: null as string | null };
 let tick = 0;
 const listeners = new Set<() => void>();
 export const rerender = (): void => {

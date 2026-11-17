@@ -20,3 +20,10 @@
 .searchbox.search>.ic{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:16px;height:16px;display:inline-flex}
 .searchbox.search>.ic svg{position:static;width:16px;height:16px}
 @media (max-width:640px){.dtable-sortsel{display:none}}
+.view,.card,.card-b{min-width:0;max-width:100%}
+.view-trust .tabs-w,.view-evals .tabs-w,.view-learning .tabs-w,.view-models .tabs-w{max-width:100%}
+.view{grid-template-columns:minmax(0,1fr)}
+.view>*{min-width:0}
+.switch input.switch-input{position:relative;inset:auto;opacity:1;z-index:auto}
+.switch input.switch-input:checked{background:var(--ok)}
+.switch input.switch-input:checked::after{transform:translateX(12px)}

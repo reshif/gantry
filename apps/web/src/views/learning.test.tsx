@@ -6,7 +6,7 @@ import { canBatcher } from "../api/can";
 import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
-import LearningView from "./learning";
+import LearningView, { learningFocus } from "./learning";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
 interface Call { method: string; path: string; body: any; headers: Record<string, string>; query: URLSearchParams }
@@ -88,6 +88,7 @@ const byId = (id: string) => waitFor(() => { const e = document.getElementById(i
 function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
+  learningFocus({ tab: "proposals" });
   return render(<QueryClientProvider client={qc}><OverlayProvider><LearningView /></OverlayProvider></QueryClientProvider>);
 }
 const writes = (calls: Call[]) => calls.filter((c) => c.method !== "GET" && c.path !== "/api/v1/can");
@@ -242,18 +243,17 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     mount();
     fireEvent.click(await byId("ln-tab-findings"));
     const f1 = await byId("ln-f-F-1");
-    expect(f1.className).toContain("is-open");
     expect(f1.textContent).toContain("Spec agent");
     expect(f1.textContent).toContain("Payments Platform");
-    expect(f1.textContent).toMatch(/Signals3/);
+    expect(f1.textContent).toContain("3 signals");
     expect(f1.textContent).not.toContain("small sample");
     expect((await byId("ln-f-F-2")).textContent).toContain("small sample");
     const f3 = await byId("ln-f-F-3");
     expect(f3.textContent).toContain("Addressed");
     expect(f3.textContent).toContain("All projects");
     expect(f3.querySelector(".entity-chip.is-plain")?.textContent).toBe("RUN-9");
-    expect(Array.from(document.querySelectorAll("#ln-tab-panel .panel")).map((e) => e.id)).toEqual(["ln-f-F-1", "ln-f-F-2", "ln-f-F-3"]);
-    expect((await byId("ln-f-F-1")).textContent).toContain("Proposals: LP-1 (proposed)");
+    expect(Array.from(document.querySelectorAll("#ln-f-table tbody tr")).map((e) => e.id)).toEqual(["ln-f-F-1", "ln-f-F-2", "ln-f-F-3"]);
+    expect((await byId("ln-f-F-1")).textContent).toContain("LP-1 (proposed)");
     fireEvent.click(await byId("ln-refresh"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/learning/findings/refresh" });

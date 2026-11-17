@@ -9,6 +9,12 @@ import { useUI } from "../../ui/overlay-context";
 import { AddModelDialog, ConnectDialog, DisconnectDialog, RemoveModelDialog } from "./Dialogs";
 import { dec, hasEndpoint, no, usedBy } from "./kit";
 
+/** Switches a model on or off through the command and says what happened (shared with the model catalog tab). */
+export function useModelSwitch(): (id: string, on: boolean) => void {
+  const ui = useUI();
+  return (id, on) => void (async () => { const r = await ops.setModelEnabled(id, on); ui.toast(r.msg, r.ok ? "ok" : "error"); })();
+}
+
 export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; vendors: Vendor[]; routing: Routing; agents: Agent[]; cat: Catalog | null }) {
   const ui = useUI();
   const perm = dec(useCan("model.edit"));

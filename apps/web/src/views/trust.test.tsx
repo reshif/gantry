@@ -99,12 +99,11 @@ describe("Trust screen: ladder", () => {
     mount();
     await byId("tr-matrix");
     const head = document.getElementById("tr-stats")!.textContent!;
-    expect(head).toContain("Cells3");
-    expect(head).toContain("L3 and up1");
+    expect(head).toContain("Cells at L3+1");
     expect(head).toContain("Pending proposals1");
-    expect(head).toContain("Saves if approved2.5/wk");
-    expect(head).toContain("Under trust, 7 daysn=4");
-    expect(head).toContain("Levels above L1Off");
+    expect(head).toContain("Active ceilings");
+    expect(head).toContain("Review sample rate");
+    expect(head).toContain("levels above L1 off");
   });
   it("draws each cell with its level, run count, the level it actually runs at, ceiling and proposal marks, and recent demotion", async () => {
     setup();
@@ -371,5 +370,19 @@ describe("Trust screen: a read the person may not make", () => {
     mount();
     await waitFor(() => expect(document.getElementById("trust-hidden")?.textContent).toContain("Not visible to you"));
     expect(document.getElementById("trust-hidden")?.textContent).toContain("trust.view");
+  });
+});
+
+describe("Trust screen: matrix", () => {
+  it("opens on the agent by project matrix and a level opens that project's ladder", async () => {
+    setup();
+    Object.assign(trustUi, { tab: "matrix" });
+    mount();
+    const m = await byId("tr-agent-matrix");
+    const link = m.querySelector("a.lvl") as HTMLElement;
+    expect(link.textContent).toMatch(/^L\d$/);
+    fireEvent.click(link);
+    await byId("tr-matrix");
+    expect(trustUi.tab).toBe("ladder");
   });
 });

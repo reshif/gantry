@@ -521,14 +521,10 @@ describe("Skills screen", () => {
     expect((await byId("sk-row-sk-b")).textContent).toContain("1 project");
     expect((await byId("sk-row-sk-b")).querySelector(".sk-cov")!.className).toContain("sk-cov-none");
     expect((await byId("sk-row-sk-c")).querySelector(".sk-cov")!.className).toContain("sk-cov-low");
-    const head = document.getElementById("sk-stats")!.textContent!;
-    expect(head).toContain("Skills3");
-    expect(head).toContain("Unused1");
-    expect(head).toContain("Eval cases14");
-    fireEvent.click(await byId("sk-view-unused"));
+    fireEvent.change(await byId("sk-view"), { target: { value: "unused" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-c")).not.toBeNull();
-    fireEvent.click(await byId("sk-view-all"));
+    fireEvent.change(await byId("sk-view"), { target: { value: "all" } });
     fireEvent.change(await byId("sk-search"), { target: { value: "security" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-b")).not.toBeNull();

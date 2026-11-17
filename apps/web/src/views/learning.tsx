@@ -31,7 +31,7 @@ export default function LearningView() {
   const signals = sq.data ?? [];
   const settings = useLearningSettings().data;
   const perm = dec(useCan("learning.apply"));
-  const [tab, setTab] = useState("proposals");
+  const [tab, setTab] = useState("findings");
   const [status, setStatus] = useState("open");
   const [hi, setHi] = useState<string | null>(null);
   const [hiFinding, setHiFinding] = useState<string | null>(null);
@@ -47,7 +47,6 @@ export default function LearningView() {
   const on = settings?.proposalsOn ?? false;
   const open = proposals.filter((lp) => lp.status === "proposed").length;
   const openFindings = findings.filter((f) => f.status === "open").length;
-  const week = signals.filter((x) => x.at >= Date.now() - 7 * 86_400_000).length;
   const focusProposal = (id: string): void => { setTab("proposals"); setHi(id); setStatus("all"); };
   const focusFinding = (id: string): void => { setTab("findings"); setHiFinding(id); };
 
@@ -70,6 +69,7 @@ export default function LearningView() {
   return (
     <div className="view view-learning">
       <ViewHead
+        kicker="Workforce"
         title="Learning"
         sub="Rejected, sent-back and reverted work is counted as signals. Repeated signals become findings. A finding can become a proposal that a person reviews."
         actions={settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" icon={on ? "pause" : "play"} id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined} />
@@ -78,7 +78,6 @@ export default function LearningView() {
         <Stat label="To review" value={qState(pq, () => String(open))} sub="proposals waiting" tone={open ? "wait" : undefined} />
         <Stat label="Applied" value={qState(pq, () => String(proposals.filter((lp) => lp.status === "accepted").length))} sub="accepted, not yet verified" />
         <Stat label="Verified" value={qState(pq, () => String(proposals.filter((lp) => lp.status === "verified").length))} sub="measured to work" />
-        <Stat label="Signals, 7 days" value={qState(sq, () => String(week))} />
       </StatRow>
       {perm.allowed ? null : <LockNote decision={perm} what="Applying learning proposals" />}
       {settings && !on ? (
@@ -87,7 +86,7 @@ export default function LearningView() {
           <span>Learning proposals are switched off. Findings and signals keep being recorded from every work order; nothing can be drafted, accepted or verified until a person turns proposals on.</span>
         </div>
       ) : null}
-      <Tabs idPrefix="ln-tab" items={[{ id: "proposals", label: "Proposals", count: open }, { id: "findings", label: "Findings", count: openFindings }, { id: "signals", label: "Signals" }]} active={tab} onChange={(t) => { setTab(t); setHi(null); setHiFinding(null); }} />
+      <Tabs idPrefix="ln-tab" items={[{ id: "findings", label: "Findings", count: openFindings }, { id: "proposals", label: "Proposals", count: open }, { id: "signals", label: "Signals" }]} active={tab} onChange={(t) => { setTab(t); setHi(null); setHiFinding(null); }} />
       <div id="ln-tab-panel" role="tabpanel" className="ln-panel">{body}</div>
     </div>
   );

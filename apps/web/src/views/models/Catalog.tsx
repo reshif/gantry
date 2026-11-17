@@ -1,19 +1,18 @@
 /** The Models tab in the Control Room layout: one table of every model (tier, context, price, used at, enabled) beside spend by vendor. */
 import { useMemo, useState } from "react";
 import { fmt, type Agent, type Routing, type Vendor } from "@gantry/domain";
-import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { Chip, FilterBar, Meter, SearchBox, Select, Toggle, reasonText } from "../../ui/primitives";
 import { Card } from "../../ui/cr";
 import { DataTable, type SortCol } from "../../ui/DataTable";
-import { useUI } from "../../ui/overlay-context";
+import { useModelSwitch } from "./Vendor";
 import { dec, no, usedBy } from "./kit";
 
 type Row = { id: string; name: string; tier: string; context: number; inPrice: number; outPrice: number; enabled: boolean; needsPrice: boolean; invocable: boolean; vendor: Vendor };
 const tierTone = (t: string): string => (t === "frontier" ? "agent" : t === "fast" ? "ok" : "info");
 
 export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; routing: Routing; agents: Agent[] }) {
-  const ui = useUI();
+  const setEnabled = useModelSwitch();
   const perm = dec(useCan("model.edit"));
   const [q, setQ] = useState("");
   const [vendor, setVendor] = useState("");
@@ -32,8 +31,8 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
     { key: "tier", label: "Tier", sort: true, render: (m) => <Chip text={m.tier} cls={tierTone(m.tier)} /> },
     { key: "context", label: "Context", sort: true, align: "end", render: (m) => <span className="mono">{fmt.k(m.context)}</span> },
     { key: "price", label: "In / out per Mtok", sort: (m) => m.outPrice, align: "end", render: (m) => m.needsPrice ? <span className="warn-text">needs a price</span> : <span className="mono">{m.inPrice || m.outPrice ? `$${m.inPrice} / $${m.outPrice}` : "self-hosted"}</span> },
-    { key: "use", label: "Used at", render: (m) => { const u = usedBy(agents, m.id); return u.length ? <span className="row nowrap">{u.slice(0, 1).map((a) => <span key={a.id} className="tag ell" style={{ maxWidth: 96 }}>{a.name}</span>)}{u.length > 1 ? <span className="dim">{`+${u.length - 1}`}</span> : null}</span> : <span className="dim">{"—"}</span>; } },
-    { key: "en", label: "Enabled", render: (m) => <Toggle id={`mc-${m.id}`} checked={m.enabled} label={`Enable ${m.name}`} decision={lockFor(m)} onChange={(on) => void (async () => { const r = await ops.setModelEnabled(m.id, on); ui.toast(r.msg, r.ok ? "ok" : "error"); })()} /> },
+    { key: "use", label: "Used at", render: (m) => { const u = usedBy(agents, m.id); return u.length ? <span className="tag" title={u.map((a) => a.name).join(", ")}>{`${u.length} agent${u.length > 1 ? "s" : ""}`}</span> : <span className="dim">{"\u2014"}</span>; } },
+    { key: "en", label: "Enabled", render: (m) => <Toggle id={`mc-${m.id}`} checked={m.enabled} label={`Enable ${m.name}`} decision={lockFor(m)} onChange={(on) => setEnabled(m.id, on)} /> },
   ];
   const spend = vendors.filter((v) => v.connected);
   const top = Math.max(1, ...spend.map((v) => v.mtd || 0));

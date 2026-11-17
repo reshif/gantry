@@ -12,7 +12,7 @@ import { DataTable, type SortCol } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
-import { PassMark, ScoreN, agentOf, evalsUi, rerender, rowKeys, suiteOf, versionModel, type EvalsData, type RunRow } from "./kit";
+import { PassMark, ScoreN, agentOf, evalsUi, rerender, suiteOf, versionModel, type EvalsData, type RunRow } from "./kit";
 
 const asRules = (c: Suite["cases"][number]): Array<{ kind: string; [k: string]: unknown }> => c.rules ?? [];
 const short = (sha?: string | null): string => (sha ? sha.slice(0, 7) : "");
