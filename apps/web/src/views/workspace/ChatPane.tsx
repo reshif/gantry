@@ -42,7 +42,7 @@ function InviteForm({ exclude, registerSubmit, onSave }: { exclude: string[]; re
   );
 }
 
-export function ChatPane({ id, item, onThread }: { id: string | null; item: InboxItem | null; onThread: (id: string) => void }) {
+export function ChatPane({ id, item, onThread, page }: { id: string | null; item: InboxItem | null; onThread: (id: string) => void; page?: boolean }) {
   const me = useMe();
   const ui = useUI();
   const actor = useActors();
@@ -115,7 +115,7 @@ export function ChatPane({ id, item, onThread }: { id: string | null; item: Inbo
   ) : undefined;
 
   return (
-    <ConsoleView embed={{ threadId: id, onThread, header, ...(aside ? { aside } : {}), readOnly, agent: side ? { name: agentName ?? "Gantry assistant", about } : null, initial: id ? initials.current[id] ?? null : null }} />
+    <ConsoleView embed={{ threadId: id, onThread, header: id ? header : null, ...(page ? { page: true } : {}), ...(aside ? { aside } : {}), readOnly, agent: side ? { name: agentName ?? "Gantry assistant", about } : null, initial: id ? initials.current[id] ?? null : null }} />
   );
 }
 

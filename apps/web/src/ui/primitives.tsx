@@ -325,8 +325,9 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
 }
 
 /** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
-export function ViewHead({ kicker, title, status, sub, meta, actions }: { kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
-  const route = useHash().id || "home";
+export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: { sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+  const hashId = useHash().id || "home";
+  const route = sheet ?? hashId;
   return (
     <header className="ph vhead">
       <div className="title vhead-main">
