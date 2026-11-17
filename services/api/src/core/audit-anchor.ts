@@ -21,10 +21,11 @@ export async function writeAnchor(db: Queryable, orgId: string, file: string, ke
   return a.seq;
 }
 
-export async function checkAnchors(db: Queryable, orgId: string, file: string | null, key: Buffer): Promise<{ checked: number } | { broken: AnchorBreak } | null> {
+export async function checkAnchors(db: Queryable, orgId: string, file: string | null, key: Buffer): Promise<{ checked: number; fileMissing?: boolean } | { broken: AnchorBreak } | null> {
   if (!file) return null;
   const text = await readFile(file, "utf8").catch(() => null);
-  if (text === null) return { checked: 0 };
+  // A file never written (fresh install) and a deleted one look the same here, so the caller is told and decides.
+  if (text === null) return { checked: 0, fileMissing: true };
   const r = await verifyAnchors(db, orgId, key, parseAnchors(text));
   return r.ok ? { checked: r.value.checked } : { broken: r.error };
 }

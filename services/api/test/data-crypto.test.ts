@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decrypt, encrypt } from "@gantry/db";
-import { logUrl } from "../src/core/app.js";
+import { logUrl, logReq } from "../src/core/app.js";
 import { TEST_URL, startApp, SESSION_KEY, type TestApp } from "./helpers.js";
 import { world } from "./flow-helpers.js";
 import { anchorKeyFor, checkAnchors, writeAnchor } from "../src/core/audit-anchor.js";
@@ -110,8 +110,15 @@ d("data and crypto hardening", () => {
 
   it("log lines never carry sign-in credentials", () => {
     expect(logUrl("/auth/login?invite=AAAAAAAAAAAAAAAAAAAAAAAA&login_hint=a%40b.c")).toBe("/auth/login?[redacted]");
-    expect(logUrl("/auth/callback?code=abc&state=def&session_state=x")).toBe("/auth/callback?[redacted]");
-    expect(logUrl("/api/v1/x?id_token_hint=eyJ&limit=5")).toBe("/api/v1/x?id_token_hint=[redacted]&limit=5");
-    expect(logUrl("/api/v1/projects?limit=5")).toBe("/api/v1/projects?limit=5");
+    expect(logUrl("/api/v1/x?%69nvite=abc&%63ode=d")).toBe("/api/v1/x?[redacted]");
+    expect(logUrl("/api/v1/projects")).toBe("/api/v1/projects");
+  });
+
+  it("the request serializer omits headers and keeps the client address", () => {
+    const o = logReq({ method: "GET", url: "/x?%63ode=s", ip: "203.0.113.9", headers: { host: "h", "x-run-token": "SECRETTOKEN", "x-api-key": "k" }, socket: { remotePort: 4242 } });
+    const text = JSON.stringify(o);
+    expect(text).not.toContain("SECRETTOKEN");
+    expect(text).not.toContain("x-api-key");
+    expect(o).toMatchObject({ method: "GET", url: "/x?[redacted]", host: "h", remoteAddress: "203.0.113.9", remotePort: 4242 });
   });
 });

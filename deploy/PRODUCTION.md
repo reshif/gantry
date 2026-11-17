@@ -109,6 +109,12 @@ a host path owned by uid 10001. Sets are written owner-only (`umask 077`). The A
 ledger. The database cannot write that volume. Copy it off the host with the backups (object lock or a SIEM) so a restored or
 rewritten database cannot be paired with a rewritten checkpoint file. Rotating `session_key` invalidates old checkpoints.
 
+To rotate `session_key` (or reset after a restore): first run `GET /api/v1/audit/verify` and confirm the chain is intact, copy
+`audit-anchors.jsonl` off the host as the record of the old key, then stop the API, move the file aside on the `auditanchors`
+volume, change the secret and start the API. It writes a fresh first checkpoint at start. Without that step `/audit/verify`
+reports a break (`bad_mac`) at the first old checkpoint. If the file is missing while the ledger has entries, verify returns
+`anchorFileMissing: true` with a warning instead of passing silently.
+
 - **Off the host.** Put an S3 endpoint in the `backup_remote` secret file as `https://ACCESS_KEY:SECRET@s3.example.com`,
   and the bucket/prefix in `GANTRY_BACKUP_REMOTE`. Each set is then copied there after it is taken. Turn on versioning
   or object lock on that bucket, and expire old sets with the bucket's own lifecycle rule.

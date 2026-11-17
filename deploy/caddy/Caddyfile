@@ -23,7 +23,8 @@ https://{$GANTRY_HOSTNAME:localhost} {
 	log {
 		output stdout
 		# Invite tokens, OIDC codes and id_token_hint travel in query strings, and the CSRF token in a header: none of them belong in a log.
-		# Caddy redacts Authorization and Cookie by default; the rest are replaced here.
+		# Caddy redacts Authorization and Cookie by default; the rest are replaced here. Names are matched after Caddy decodes the query
+		# (so %63ode is caught) and case-sensitively, which matches the API and Keycloak: both ignore ?Code= and ?INVITE=.
 		format filter {
 			wrap json
 			fields {
