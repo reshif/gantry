@@ -448,10 +448,22 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
   const kind = gateKind(fx.catalog, project, gateId);
   const sid = stationIdOf(fx.catalog, w);
   const tags = riskTagsOf({ files: (w.data.files as WorkOrder["files"]) ?? [], paths: (w.data.paths as string[]) ?? [], risk: w.risk ?? "normal" });
+  // Spec 13.3: a change that is over its agent's diff limit or touches a forbidden or protected path is decided by a person, on any gate, and the cell drops to L1.
+  const gr = (w.data.guardrail ?? {}) as { over?: boolean; size?: number; protectedTouched?: string[]; forbiddenTouched?: string[] };
+  const breach = [...(gr.forbiddenTouched ?? []), ...(gr.protectedTouched ?? [])];
+  const guardrailBreach = !!gr.over || breach.length > 0;
+  if (guardrailBreach) await demoteForBreach(fx.tx, fx.orgId, { woId: w.id, kind: "guardrail", gateId, text: gr.over && !breach.length ? `The diff is ${gr.size} lines, over the agent's limit.` : `The change touches guarded paths: ${breach.slice(0, 5).join(", ")}.` }, fx.now, (e) => fx.events.push(e));
   // Evidence comes from the system, never from the agent's own report: checks the worker observed, a person's release, or the GitHub check runs
   // stored for this pull request's head. Nothing else counts, and no evidence is not a pass: an automatic gate then waits for a person.
   let checks: GateCheck[] = o.checks ?? [];
   let evidence: GateEvidence = o.checks ? { source: o.evidence ?? "observed" } : { source: "none" };
+  if (!o.checks && (kind === "auto" || kind === "mixed") && gateId === "G1f") {
+    // Feasibility: judged from what the system holds, a research document a station wrote and no blocking question still open, not from the agent's claim.
+    const note_ = (await fx.tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and station = 'research' and doc is not null limit 1`, [fx.orgId, w.id])).rowCount;
+    const blocking = (await fx.tx.query(`select 1 from wo_questions where org_id = $1 and wo_id = $2 and blocking and status = 'open' limit 1`, [fx.orgId, w.id])).rowCount;
+    checks = [{ name: "Research note attached", ok: !!note_ }, { name: "No blocking unknowns", ok: !blocking }];
+    evidence = { source: "observed" };
+  }
   if (!o.checks && (kind === "auto" || kind === "mixed") && gateId === "G4") {
     const ci = await ciEvidence(fx, w, o.headSha ?? null);
     if (ci) {
@@ -459,7 +471,7 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
       evidence = ci.evidence;
     }
   }
-  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0, checks, evidence, required: Math.max(1, Number(project.approvers[gateId]?.required) || 1) }, now: fx.now });
+  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0 || guardrailBreach, checks, evidence, required: Math.max(1, Number(project.approvers[gateId]?.required) || 1) }, now: fx.now });
   if (kind === "auto" || kind === "mixed") {
     (w.data.gateChecks ??= {})[gateId] = checks;
     const failed = checks.some((c) => !c.ok && !c.warn);
@@ -491,8 +503,9 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
     // Spec 9.5: any risk tag forces a human vote, even on an automatic gate. A change to CI, dependencies, code owners, auth,
     // migrations or the tests it is judged by must not pass on checks the change itself could influence.
     if (kind === "auto" && tags.length) note(w, fx, "system", `${g.label} ${g.name} checks passed; a person must decide because the change touches ${tags.join(", ")}.`);
-    if (kind === "auto" && !tags.length && evidence.source === "none") note(w, fx, "system", `${g.label} ${g.name} has no verified check results to judge, so a person must decide.`);
-    if (kind === "auto" && !tags.length && evidence.source !== "none") {
+    if (kind === "auto" && guardrailBreach && !tags.length) note(w, fx, "system", `${g.label} ${g.name} checks passed; a person must decide because the change breaks a guardrail (${gr.over ? "diff over the limit" : breach.slice(0, 3).join(", ")}).`);
+    if (kind === "auto" && !tags.length && !guardrailBreach && evidence.source === "none") note(w, fx, "system", `${g.label} ${g.name} has no verified check results to judge, so a person must decide.`);
+    if (kind === "auto" && !tags.length && !guardrailBreach && evidence.source !== "none") {
       await closeInstance(fx, instance, "decision");
       await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto", evidence }), fx.now]);
       note(w, fx, "system", `${g.label} ${g.name} passed automatically.`);
@@ -503,8 +516,7 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
   }
   // Spec 13.3: a cell that has earned L2 or L3 (those levels are switched off in a new install) lets this gate pass without a person, except where a person always decides.
   if (kind === "human" || kind === "mixed") {
-    const gr = (w.data.guardrail ?? {}) as { over?: boolean; protectedTouched?: unknown[] };
-    const t = await trustDecision(fx.tx, fx.orgId, fx.catalog, { woId: w.id, gateId, instance, cls: w.cls, project: w.project, repo: w.repo, source: w.source, data: w.data, riskTags: tags, guardrailBreach: !!gr.over || (gr.protectedTouched?.length ?? 0) > 0, now: fx.now });
+    const t = await trustDecision(fx.tx, fx.orgId, fx.catalog, { woId: w.id, gateId, instance, cls: w.cls, project: w.project, repo: w.repo, source: w.source, data: w.data, riskTags: tags, guardrailBreach, now: fx.now });
     if (t.auto) {
       await closeInstance(fx, instance, "decision");
       await fx.tx.query(

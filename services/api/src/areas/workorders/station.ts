@@ -7,7 +7,7 @@
  *   handleFlowTimer     escalation timers (paused while a halt covers the work order)
  * Each flushes its events and jobs with `flushFx` (actor "system"), so the caller only commits.
  */
-import { stationDef } from "@gantry/domain";
+import { evaluateGuardrails, stationDef } from "@gantry/domain";
 import { schedule, type Tx } from "@gantry/db";
 import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, type Fx } from "./engine.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
@@ -81,6 +81,20 @@ function absorbOutput(w: Wo, station: string, r: StationResult): { checks: Obser
 }
 
 /**
+ * Spec 13.3 guardrails, judged in code from the files the system saw (the worker's observed list, else the recorded diff): the agent's forbidden paths
+ * and `maxDiff`, and the repository's protected paths. The result lands on `w.data.guardrail`, which the gate reads (a breach needs a person and
+ * demotes the cell). The prompt telling an agent about its guardrails is advice; this is the check.
+ */
+async function recordGuardrail(tx: Tx, orgId: string, w: Wo, agentId: string): Promise<void> {
+  const files = (Array.isArray(w.data.files) ? (w.data.files as Array<{ path: string; plus?: number; minus?: number }>) : []).filter((f) => f && typeof f.path === "string");
+  if (!files.length) return;
+  const gr = ((await tx.query<{ g: { paths?: unknown; maxDiff?: unknown } | null }>(`select data->'guardrails' as g from agents where org_id = $1 and id = $2`, [orgId, agentId])).rows[0]?.g ?? {}) as { paths?: unknown; maxDiff?: unknown };
+  const prot = (await tx.query<{ p: string[] | null }>(`select c.protected_paths as p from work_orders w join repo_config c on c.org_id = w.org_id and c.repo_id = w.repo_id where w.org_id = $1 and w.id = $2`, [orgId, w.id])).rows[0]?.p ?? [];
+  const found = evaluateGuardrails(files, { forbidden: strs(gr.paths), protectedPaths: prot, maxDiff: Number(gr.maxDiff) || 0 });
+  w.data.guardrail = found;
+}
+
+/**
  * The station's own message in the work order's session: what it said, the documents it wrote and the questions it asked (as cards that read their
  * live state). Posted once per attempt; the event scan then leaves this attempt's "finished" line out.
  */
@@ -93,7 +107,7 @@ function proposedPlan(raw: unknown, station: string, attempt: string, now: Date)
   const budget = typeof p.budgetUsd === "number" && p.budgetUsd > 0 ? Math.min(p.budgetUsd, 100) : null;
   return { status: "proposed", questions, hosts, web: p.web, budgetUsd: budget, why: typeof p.why === "string" ? p.why.slice(0, 1200) : "", station, attempt, proposedAt: now.getTime() };
 }
-const HOST = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+const HOST = /^(?!.*\.\d+$)(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 async function postStationMessage(fx: Fx, w: Wo, station: string, attemptId: string, text: string, questions: QuestionRow[], assumptions = 0, plan = false): Promise<void> {
   const docs = (await fx.tx.query<{ id: string; doc: string; version: number }>(`select id, doc, version from artefacts where org_id = $1 and wo_id = $2 and attempt_id = $3 and doc is not null order by doc`, [fx.orgId, w.id, attemptId])).rows;
@@ -160,6 +174,7 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
   let next = "";
   if (result.status === "succeeded") {
     const { checks, headSha } = absorbOutput(w, sid, result);
+    await recordGuardrail(tx, orgId, w, fx.actor);
     const dl = await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue: asObj(result.output).dialogue, now });
     await postStationMessage(fx, w, sid, attemptId, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${clip(result.summary)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`, dl.questions, dl.assumptions);
     closeEntry(w, fx, "passed", result.summary ?? "");

@@ -40,10 +40,20 @@ async function filesOf(db: Queryable, orgId: string, woId: string, shas: string[
   return rows;
 }
 
+/** The agent's own forbidden paths (agents.data.guardrails.paths): the broker enforces them at publish. */
+async function forbiddenPaths(db: Queryable, a: AttemptInfo): Promise<string[]> {
+  const agent = typeof a.attemptData.agent === "string" ? a.attemptData.agent : null;
+  if (!agent) return [];
+  const g = (await db.query<{ g: { paths?: unknown } | null }>(`select data->'guardrails' as g from agents where org_id = $1 and id = $2`, [a.orgId, agent])).rows[0]?.g;
+  return Array.isArray(g?.paths) ? g.paths.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+}
+
 /** Publishes the attempt's workspace through gantry-github (spec 11.4, step 7). The broker fence-checks the attempt itself. */
 export async function publishAttempt(deps: Deps, a: AttemptInfo, summary: string): Promise<PublishOutcome | null> {
   if (!a.repo?.full) return null;
+  const denyPaths = await forbiddenPaths(deps.pool, a);
   return deps.broker.publish({
+    ...(denyPaths.length ? { denyPaths } : {}),
     attemptId: a.attemptId, fencing: a.fencing, repo: a.repo.full, volume: volumeFor(runIdFor(a.attemptId)), branch: `${a.repo.branchPrefix}${a.woId}`,
     baseBranch: a.repo.defaultBranch, title: `${a.woId}: ${a.title}`.slice(0, 250), ...(summary ? { body: summary.slice(0, 60000) } : {}),
   });

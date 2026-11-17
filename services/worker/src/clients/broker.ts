@@ -11,6 +11,8 @@ export interface PublishRequest {
   title?: string;
   body?: string;
   draft?: boolean;
+  /** The agent's forbidden paths; the broker refuses a commit that touches one (guardrail_breach). */
+  denyPaths?: string[];
 }
 
 export interface PublishResult {
