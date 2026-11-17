@@ -46,7 +46,7 @@ function CovCell({ sk }: { sk: SkillRow }) {
 
 function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] }) {
   const actor = useActors();
-  const usedBy = (id: string) => agents.filter((a) => a.skills.includes(id));
+  const usedBy = (id: string) => agents.filter((a) => a.skills.includes(id) || (a.liveSkills ?? []).some((l) => l.id === id));
   const q = ui.q.trim().toLowerCase();
   const list = skills.filter((sk) => {
     if (q && `${sk.name} ${sk.desc} ${sk.when}`.toLowerCase().indexOf(q) < 0) return false;
@@ -315,7 +315,7 @@ export default function SkillsView() {
   if (!skills.length) return <div className="view view-skills">{head()}<Empty title="No skills yet" text="Create the first skill." /></div>;
   if (!ui.sel || !skills.some((s) => s.id === ui.sel)) ui.sel = skills[0]!.id;
   const current = skills.find((s) => s.id === ui.sel) ?? skills[0]!;
-  const unused = skills.filter((sk) => !agents.some((a) => a.skills.includes(sk.id))).length;
+  const unused = skills.filter((sk) => !agents.some((a) => a.skills.includes(sk.id) || (a.liveSkills ?? []).some((l) => l.id === sk.id))).length;
   const cases = skills.reduce((t, sk) => t + sk.coverage.cases, 0);
   const pass = skills.reduce((t, sk) => t + sk.coverage.pass, 0);
   return (

@@ -175,6 +175,9 @@ d("learning loop (spec 8.7, 13.4)", () => {
     });
     it("applies through the ordinary skill command when someone else accepts, audited twice, with a baseline and a rollback path", async () => {
       const before = await skillText("sk-testdesign");
+      const floor = async () => (await q(`select version, live_version from agents where id = 'ag-build'`, []))[0];
+      const bv = (await q(`select count(*)::int n from agent_versions where agent_id = 'ag-build'`, []))[0].n;
+      const live0 = await floor();
       const r = await post("/api/v1/learning/proposals/LP-1/accept", { note: "Looks right" }, OMAR);
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       expect(r.body.msg).toMatch(/^LP-1 applied\./);
@@ -190,6 +193,13 @@ d("learning loop (spec 8.7, 13.4)", () => {
       expect(edit.actor).toBe(OMAR);
       expect(apply).toMatchObject({ actor: OMAR, subject: { type: "learning", id: "LP-1" }, after: { status: "accepted", result: expect.stringContaining("saved as") } });
       expect(edit.command_id).toBe(apply.command_id);
+      // the approved change reaches runs only as a candidate: one new version, the floor unchanged
+      expect((await q(`select count(*)::int n from agent_versions where agent_id = 'ag-build'`, []))[0].n).toBe(bv + 1);
+      expect((await floor()).live_version).toBe(live0.live_version);
+      const cand = (await q(`select body, published_by from agent_versions where agent_id = 'ag-build' order by version desc limit 1`, []))[0];
+      expect(cand.body).toMatchObject({ rc: true, source: { type: "skill.edit", skill: "sk-testdesign", by: OMAR } });
+      expect(cand.body.skillVersions["sk-testdesign"]).toBe(after.versions.length);
+      expect((await w.events("agent.version")).pop()!.after).toMatchObject({ trigger: "skill.edit", skill: "sk-testdesign" });
     });
     it("is refused the second time, and when the proposal is stale", async () => {
       expect((await post("/api/v1/learning/proposals/LP-1/accept", {}, OMAR)).status).toBe(409);

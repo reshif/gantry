@@ -142,14 +142,18 @@ d("skills in agent versions, the eval gate and the effective preview", () => {
       expect((await agent(ag2)).versions).toHaveLength(1);
     });
 
-    it("an approved Learning proposal for a skill goes through the same candidate path", async () => {
-      const sk = await makeSkill("Learned skill", "Learned body v1.");
-      const ag = await makeAgent("Learner", [sk]);
-      const src = readFileSync(fileURLToPath(new URL("../src/areas/learning/apply.ts", import.meta.url)), "utf8");
-      expect(src).toMatch(/saveSkill\(/);
-      // the apply step calls saveSkill; a saveSkill made by anyone, an approver included, cuts the candidate
-      await editSkill(sk, { body: "Learned body v2." }, "learning proposal");
-      expect((await agent(ag)).versions.map((v: any) => [v.v, v.live])).toEqual([["0.1.0", true], ["0.2.0", false]]);
+    it("an agent whose draft detached the skill still gets a candidate while its live version runs it, and the candidate records its source", async () => {
+      const sk = await makeSkill("Detached skill", "Detached body v1.");
+      const ag = await makeAgent("Detacher", [sk]);
+      await w.call(ADMIN, "DELETE", `/api/v1/agents/${ag}/skills/${sk}`);
+      expect((await agent(ag)).skills).toEqual([]);
+      const r = await editSkill(sk, { body: "Detached body v2." }, "after detach");
+      expect(r.body.candidates).toMatchObject([{ agent: ag, version: "0.2.0" }]);
+      const row = (await q(`select body, published_by from agent_versions where agent_id = $1 and version = 2`, [ag]))[0];
+      expect(row.body.skillVersions).toEqual({ [sk]: 2 });
+      expect(row.body.source).toMatchObject({ type: "skill.edit", skill: sk, version: "1.1.0" });
+      expect(row.published_by).toBe(ADMIN);
+      expect((await agent(ag)).version).toBe("0.1.0");
     });
   });
 

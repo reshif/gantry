@@ -1,6 +1,7 @@
 /**
  * A skill edit is a change to what an agent is told, so it goes through the same gate as an edit to the agent's own text (spec 13.2): saving a skill version cuts a candidate
- * version of every agent whose floor version has the skill attached. The candidate is the floor version with that one skill moved to the new version; nothing changes on the
+ * version of every agent whose floor version (the live version's own snapshot, not the draft attachments) runs the skill. Cutting a candidate changes nothing that runs: promotion keeps
+ * its own permission and the eval gate, so the skill editor's right is enough; the candidate records who edited the skill and the audit event carries the same actor. The candidate is the floor version with that one skill moved to the new version; nothing changes on the
  * floor until the candidate passes the agent's eval suite and a person promotes it. Draft edits on the agent are not swept in.
  */
 import type { Tx } from "@gantry/db";
@@ -24,8 +25,9 @@ function bump(label: string, n: number): string {
 
 export async function cutSkillCandidates(tx: Tx, a: { orgId: string; id: string }, skill: { id: string; name: string; version: number; label: string }, note: string): Promise<{ made: SkillCandidate[]; events: EventSpec[] }> {
   const agents = (await tx.query<{ id: string; name: string; live_version: number | null }>(
-    `select a.id, a.name, a.live_version from agents a join agent_skills s on s.org_id = a.org_id and s.agent_id = a.id and s.skill_id = $2
-      where a.org_id = $1 and a.live_version is not null order by a.created_at, a.id for update of a`,
+    `select a.id, a.name, a.live_version from agents a join agent_versions v on v.org_id = a.org_id and v.agent_id = a.id and v.version = a.live_version
+      where a.org_id = $1 and a.live_version is not null and jsonb_typeof(v.body->'skills') = 'array' and v.body->'skills' @> to_jsonb($2::text)
+      order by a.created_at, a.id for update of a`,
     [a.orgId, skill.id],
   )).rows;
   const made: SkillCandidate[] = [];
@@ -35,7 +37,7 @@ export async function cutSkillCandidates(tx: Tx, a: { orgId: string; id: string 
     const live = vers.find((v) => v.version === ag.live_version);
     if (!live) continue;
     const ids = Array.isArray(live.body.skills) ? (live.body.skills as unknown[]).filter((x): x is string => typeof x === "string") : [];
-    if (!ids.includes(skill.id)) continue; // attached in the draft only: the next version cut from the draft picks the skill up
+    if (!ids.includes(skill.id)) continue;
     const was = typeof live.body.skillVersions === "object" && live.body.skillVersions ? (live.body.skillVersions as Record<string, number>) : {};
     const body = { ...live.body, skillVersions: { ...was, [skill.id]: skill.version } };
     let label = bump(labelOf(live), live.version);
@@ -45,7 +47,7 @@ export async function cutSkillCandidates(tx: Tx, a: { orgId: string; id: string 
     await tx.query(
       `insert into agent_versions (org_id, agent_id, version, body, harness_version, instruction_hash, model_id, note, published_at, published_by)
        select org_id, agent_id, $3, $4::jsonb, harness_version, instruction_hash, model_id, $5, now(), $6 from agent_versions where org_id = $1 and agent_id = $2 and version = $7`,
-      [a.orgId, ag.id, n, json({ ...body, label, rc: true, diff }), `${skill.name} ${skill.label}: ${note}`, a.id, live.version],
+      [a.orgId, ag.id, n, json({ ...body, label, rc: true, diff, source: { type: "skill.edit", skill: skill.id, version: skill.label, by: a.id } }), `${skill.name} ${skill.label}: ${note}`, a.id, live.version],
     );
     await tx.query(`update agents set version = version + 1 where org_id = $1 and id = $2`, [a.orgId, ag.id]);
     made.push({ agent: ag.id, name: ag.name, version: label, n });
