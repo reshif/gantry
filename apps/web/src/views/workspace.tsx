@@ -21,6 +21,9 @@ import { OperatorPanel } from "./workspace/Operator";
 import { SearchResults } from "./workspace/Search";
 import { createThread, filterInbox, useInbox, type InboxFilter } from "./workspace/api";
 
+/** Set when the Conversations link sent the person here: the first thread opens by itself (once). */
+let openFirstOnce = false;
+
 export default function WorkspaceView() {
   const hash = useHash();
   const me = useMe();
@@ -28,7 +31,7 @@ export default function WorkspaceView() {
   const prefs = usePrefs();
   // Older links: #conversations/<WO> and #console[/<chat>] open here.
   useEffect(() => {
-    if (hash.id === "conversations") toWorkspace(hash.param ? `wo:${hash.param}` : "inbox");
+    if (hash.id === "conversations") { openFirstOnce = !hash.param; toWorkspace(hash.param ? `wo:${hash.param}` : "inbox"); }
     else if (hash.id === "console") toWorkspace(hash.param ?? "new");
   }, [hash.id, hash.param]);
   const pending = prefs.openConversation;
@@ -58,9 +61,11 @@ export default function WorkspaceView() {
   }, [key]);
 
   // The prototype's Conversations page opens with the first thread selected (wide screens; on a phone the list comes first).
-  const first = key === "inbox" && !q ? (filterInbox(items, cur)[0] ?? items[0] ?? null) : null;
+  const first = key === "inbox" && openFirstOnce && !q ? (filterInbox(items, cur)[0] ?? items[0] ?? null) : null;
   useEffect(() => {
-    if (first && !window.matchMedia?.("(max-width: 820px)").matches) navigate("workspace", first.key);
+    if (!first) return;
+    openFirstOnce = false;
+    if (!window.matchMedia?.("(max-width: 820px)").matches) navigate("workspace", first.key);
   }, [first?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const open = (k: string | null) => { setQ(null); navigate("workspace", k); };

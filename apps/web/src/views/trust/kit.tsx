@@ -9,7 +9,7 @@ import { navigate } from "../../lib/router";
 
 export const MIN_RUNS = 5;
 export type TrustTab = "ladder" | "proposals" | "demotions" | "policy";
-export const trustUi = { tab: "ladder" as TrustTab, project: null as string | null, repo: "", sel: null as { agent: string | null; cls: string } | null, propFilter: "pending", demoFilter: "all", hiProposal: null as string | null };
+export const trustUi = { tab: "ladder" as TrustTab, project: null as string | null, repo: "", sel: null as { agent: string | null; cls: string } | null, propFilter: "pending", demoFilter: "all", hiProposal: null as string | null, view: "list" as "list" | "matrix" };
 let tick = 0;
 const listeners = new Set<() => void>();
 export const rerender = (): void => {

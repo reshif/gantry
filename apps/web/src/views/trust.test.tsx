@@ -85,7 +85,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
-  Object.assign(trustUi, { tab: "ladder", project: null, repo: "", sel: null, propFilter: "pending", demoFilter: "all", hiProposal: null });
+  Object.assign(trustUi, { tab: "ladder", project: null, repo: "", sel: null, propFilter: "pending", demoFilter: "all", hiProposal: null, view: "matrix" });
   updatePrefs({ project: "payments", trustFocus: null } as never);
 });
 afterEach(() => {
@@ -101,10 +101,9 @@ describe("Trust screen: ladder", () => {
     const head = document.getElementById("tr-stats")!.textContent!;
     expect(head).toContain("Cells3");
     expect(head).toContain("L3 and up1");
-    expect(head).toContain("Pending proposals1");
-    expect(head).toContain("Saves if approved2.5/wk");
-    expect(head).toContain("Under trust, 7 daysn=4");
-    expect(head).toContain("Levels above L1Off");
+    expect(head).toContain("Proposals1");
+    expect(head).toContain("Sample raten=4");
+    expect(document.body.textContent).toContain("Levels above L1 are switched off.");
   });
   it("draws each cell with its level, run count, the level it actually runs at, ceiling and proposal marks, and recent demotion", async () => {
     setup();

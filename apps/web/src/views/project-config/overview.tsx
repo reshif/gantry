@@ -50,7 +50,7 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
             <textarea id="pcf-desc" className="input" rows={2} disabled={locked} value={desc} onChange={(e) => set({ text: { ...s.text, desc: e.target.value } })} />
           </Field>
           <Field label="Instructions overlay" htmlFor="pcf-overlay" hint="Added to every agent's instructions for this project, after the factory base and before per-repo guidelines.">
-            <textarea id="pcf-overlay" className="input mono" rows={5} disabled={locked} value={overlay} onChange={(e) => set({ text: { ...s.text, overlay: e.target.value } })} />
+            <textarea id="pcf-overlay" className="input mono" rows={3} disabled={locked} value={overlay} onChange={(e) => set({ text: { ...s.text, overlay: e.target.value } })} />
           </Field>
             <Field label="Owner" htmlFor="pcf-owner" hint="The owner is the default fallback approver and gets budget alerts.">
               <Select id="pcf-owner" disabled={locked} options={owners.map((x) => ({ value: x.id, label: `${x.name} · ${x.title}` }))} value={p.owner} onChange={async (v) => res(await ops.setProject(p.id, "owner", v, { ifMatch: p.version }), `Owner is now ${actor(v).name.replace(" (agent)", "")}.`)} />

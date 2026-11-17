@@ -44,7 +44,6 @@ export default function TrustView() {
   if (!tr || !cat) return <div className="view view-trust"><ViewHead title="Trust" /><Async query={all} what="trust levels" id="trust">{() => null}</Async></div>;
   const proj = projects.find((p) => p.id === project)!;
   const pending = proposals.filter((x) => x.status === "pending");
-  const saved = pending.reduce((t, x) => t + (x.savedPerWeek || 0), 0);
   const dem7 = cells.reduce((n, c) => n + (c.history || []).filter((e) => (e.kind === "demote" || (e.kind === "grant" && e.from != null && e.to < e.from)) && e.at >= Date.now() - 7 * DAY).length, 0);
   const cov = Object.values(tr.coverage ?? {}).reduce((a, c) => ({ total: a.total + c.total, auto: a.auto + c.auto }), { total: 0, auto: 0 });
   const unattended = cells.filter((c) => c.level >= 3).length;
@@ -65,10 +64,8 @@ export default function TrustView() {
       <StatRow id="tr-stats">
         <Stat label="Cells" value={String(cells.length)} sub="agent, class and project" />
         <Stat label="L3 and up" value={String(unattended)} sub="decided by checks" />
-        <Stat label="Pending proposals" value={String(pending.length)} sub="waiting for a person" tone={pending.length ? "wait" : undefined} />
-        <Stat label="Saves if approved" value={`${Math.round(saved * 10) / 10}/wk`} sub="human approvals" />
-        <Stat label="Under trust, 7 days" value={cov.total >= 10 ? `${Math.round((cov.auto / cov.total) * 100)}% n=${cov.total}` : `n=${cov.total}`} sub="gate decisions by checks" />
-        <Stat label="Levels above L1" value={tr.levelsAboveL1 ? "On" : "Off"} sub={tr.levelsAboveL1 ? "L2 and L3 can be granted" : "switched off"} />
+        <Stat label="Proposals" value={String(pending.length)} sub="awaiting you" tone={pending.length ? "wait" : undefined} />
+        <Stat label="Sample rate" value={cov.total >= 10 ? `${Math.round((cov.auto / cov.total) * 100)}%` : `n=${cov.total}`} sub="gate decisions under trust, 7 days" />
       </StatRow>
       <Tabs idPrefix="tr-tab" items={tabs} active={tab} onChange={(t) => { trustUi.tab = t as TrustTab; trustUi.hiProposal = null; rerender(); }} />
       <div id="tr-tab-panel" role="tabpanel" className="tr-panel">{body}</div>

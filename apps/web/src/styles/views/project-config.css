@@ -138,3 +138,8 @@ tr.is-custom > th, tr.is-custom > td:first-child { box-shadow: inset 3px 0 0 var
 .pcf-kv dt { color: var(--faint); font-size: var(--t-md); }
 .pcf-kv dd { margin: 0; font-size: var(--t-md); min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .pcf-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Summary as the prototype's key/value list: one column, label left, value right. */
+.pcf .kv { grid-template-columns: minmax(0, 1fr); }
+.pcf .kv > div { display: grid; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr); border-bottom: 1px dotted var(--line); }
+.pcf .kv > div > dt, .pcf .kv > div > dd { border-bottom: 0; }

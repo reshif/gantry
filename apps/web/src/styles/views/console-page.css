@@ -14,3 +14,18 @@
   .view-console-page .console-grid.is-embedded .ctx { display: flex; }
   .view-console-page .console-main { height: auto; min-height: 420px; }
 }
+
+/* Prototype Console: empty state centred in the conversation, chips above a one-line input with Send beside it. */
+.view-console-page .console-main > .con-mode-line { order: 3; border-bottom: 0; border-top: 1px solid var(--line); color: var(--muted); }
+.view-console-page .console-main .thread { order: 1; }
+.view-console-page .console-main .composer { order: 2; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s2); align-items: center; border-top: 0; }
+.view-console-page .composer-foot { display: contents; }
+.view-console-page .composer-foot .chips { grid-column: 1 / -1; order: -1; }
+.view-console-page .composer .slash-menu { grid-column: 1 / -1; }
+.view-console-page .composer-input { min-height: 38px; height: 38px; resize: none; }
+.con-empty { display: grid; justify-items: center; gap: 6px; padding: 72px 16px 0; text-align: center; color: var(--accent); }
+.con-empty h3 { color: var(--ink); font-size: var(--t-md, 15px); }
+.con-empty .icon { width: 36px; height: 36px; }
+.con-more { margin-top: var(--s3); }
+.con-more > summary { cursor: pointer; color: var(--muted); font-size: var(--t-sm); padding: 4px 0 var(--s2); }
+.con-more[open] > :not(summary) { margin-bottom: var(--s3); }

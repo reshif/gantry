@@ -8,11 +8,11 @@ import { useQuery } from "@tanstack/react-query";
 import { fmt, type Person, type Project, type Role } from "@gantry/domain";
 import { api, get } from "../api/client";
 import { ops } from "../api/ops";
-import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
+import { useAccessMatrix, useMe, usePeople, useProjects, useWorkOrders } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate, useHash } from "../lib/router";
 import { ExplainDenial } from "./console/ExplainDenial";
-import { Btn, Empty, LockNote, Panel, Select, Stat, StatRow, Toggle, ViewHead, type Decision } from "../ui/primitives";
+import { Btn, Empty, LockNote, Panel, Select, StateChip, Stat, StatRow, Toggle, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -216,6 +216,8 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         </Panel>
       </div>
 
+      <RequestedWos personId={p.id} project={direct.find((g) => g.scope && g.scope !== "factory")?.scope ?? projects[0]?.id ?? null} />
+
       <Panel title="Roles per project" flush>
         <p className="muted small ppl-hint ppl-hint-pad">One person can hold different roles in each project. A role granted by a team shows as "via team" and is changed on the team. A switch is locked where you cannot manage that project's members.</p>
         <div className="table-scroll" data-keep-scroll="ppl-proles">
@@ -416,3 +418,25 @@ function sessionStorageSet(k: string, v: string): void {
   }
 }
 
+
+/** The prototype's "Open work orders requested": what this person has asked for and not yet seen shipped (read from one project they hold a role on). */
+function RequestedWos({ personId, project }: { personId: string; project: string | null }) {
+  const q = useWorkOrders(project, { limit: 100 });
+  const list = (q.data ? (Array.isArray(q.data) ? q.data : q.data.items) : []).filter((w) => w.requestedBy === personId && w.state !== "done" && w.state !== "killed");
+  if (!project) return null;
+  return (
+    <Panel title="Open work orders requested" flush id="ppl-requested">
+      {list.length ? (
+        <ul className="list">
+          {list.slice(0, 8).map((w) => (
+            <li key={w.id}>
+              <span className="mono">{w.id}</span>
+              <div className="grow">{w.title}</div>
+              <StateChip state={w.state} />
+            </li>
+          ))}
+        </ul>
+      ) : <p className="muted small ppl-hint-pad">{q.isLoading ? "Loading." : "Nothing open."}</p>}
+    </Panel>
+  );
+}

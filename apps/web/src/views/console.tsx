@@ -355,6 +355,29 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const modePicker = hasModels && st ? <ModelPicker st={st} busy={streaming} /> : null;
   const chatTitle = threadId ? threads.data?.items.find((t) => t.id === threadId)?.title ?? "Conversation" : "New conversation";
   const nameOf = (m: Msg) => (m.role === "user" ? (m.by && m.by !== meId ? actorOf(m.by).name : me.person.name) : embed?.agent?.name ?? "Gantry");
+  const ctxPanels = (
+    <>
+          <Panel title={`What ${me.person.name.split(" ")[0]} can do${cur ? ` in ${cur.name}` : ""}`}>
+            <div className="con-ctx">
+              <Field label="Current project" htmlFor="con-ctx-project"><Select id="con-ctx-project" aria-label="Current project" value={cur?.id ?? ""} onChange={setProject} options={visible.map((x) => ({ value: x.id, label: x.name }))} /></Field>
+              {cur ? <div><StateChip state={cur.killed ? "killed" : cur.halted ? "blocked" : "running"} /></div> : null}
+            </div>
+            <ul className="caps">{CAPS.map(([action, text], i) => { const d = caps[i]!; return <li key={action} className={d.allowed ? "ok" : "no"} tabIndex={0} data-tip={d.reason}><Icon name={d.allowed ? "check" : "lock"} /><span>{text}</span><code className="cap-code mono" title="The permission that governs this action. Admins find it under Govern, Access.">{action}</code></li>; })}</ul>
+          </Panel>
+          <Panel title="Your console actions">
+            {recent.length ? <ul className="mini-log con-log">{recent.map((a) => <li key={a.id}><span className="mono muted">{fmt.ist(a.at)}</span><span>{`${a.action} · ${unmark(a.target)}`}</span><span className={`outcome o-${a.outcome}`}>{a.outcome}</span></li>)}</ul> : <p className="muted small">Actions you confirm here are written to the audit ledger with via console.</p>}
+            <div className="con-audit-link"><Btn label="Open in the audit log" small icon="shield" id="con-open-audit" onClick={() => navigate("audit", "console")} /></div>
+          </Panel>
+          <Panel title="What the console can do for you">
+            <ul className="caps" id="con-rights">
+              {(st?.proposals ?? []).map((p) => <li key={p.kind} id={`con-right-${p.kind}`} className={p.allowed ? "ok" : "no"} tabIndex={0} data-tip={p.reason}><Icon name={p.allowed ? "check" : "lock"} /><span>{`Propose: ${p.does}`}</span><span className="small muted">{p.allowed ? "allowed" : p.needs || p.reason}</span></li>)}
+            </ul>
+            {st && st.proposals && !st.proposals.some((p) => p.allowed) ? <p className="muted small" id="con-readonly">Your console is read-only: it can answer questions but not propose changes. Ask a Factory Admin for a console right.</p> : null}
+            <p className="muted small">Confirming a card also needs the underlying right (for example submit work orders on that project).</p>
+            {st?.isFactoryAdmin ? <a href="#access" id="con-manage-perms" onClick={(e) => { e.preventDefault(); navigate("access"); }}>Manage console permissions: Govern, Access (Console group)</a> : null}
+          </Panel>
+    </>
+  );
   return (
     <div className={embed ? "view-console ws-chat" : "view view-console"}>
       {embed ? embed.header : <ViewHead title="Console" status={modeChip} sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you." actions={modePicker} />}
@@ -372,7 +395,13 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
           )}
           {embed?.agent ? null : <p className="con-mode-line small" id="con-mode-reason">{embed ? modeChip : <Icon name={st?.configured ? "check" : "dots"} />}<span>{modeLine}</span>{embed ? <span className="con-mode-pick">{modePicker}</span> : null}{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>}
           <div className="thread" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
-            {msgs.map((m) => (
+            {embed?.page && msgs.length === 1 && msgs[0]!.mode === "pending" && !streaming ? (
+              <div className="con-empty" id="con-empty">
+                <Icon name="inbox" />
+                <h3>Ask anything about the line</h3>
+                <p className="muted small">Try one of the suggestions below.</p>
+              </div>
+            ) : msgs.map((m) => (
               <div className={`msg msg-${m.role}`} key={m.id}>
                 <div className="msg-who">
                   {m.role === "user" ? <Avatar id={m.by} size="sm" /> : <span className="av av-factory av-sm" aria-hidden="true">{embed?.agent ? embed.agent.name.slice(0, 1) : "G"}</span>}
@@ -401,9 +430,9 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
                 {slash.map((x, i) => <li key={x.cmd} role="option" id={`con-slash-${i}`} className={i === idx ? "is-active" : ""} aria-selected={i === idx} onMouseDown={(e) => { e.preventDefault(); toDraft(x.cmd); }}><span className="mono">{x.cmd.trim()}</span><span className="muted">{x.hint}</span></li>)}
               </ul>
             ) : null}
-            <textarea id="con-input" ref={input} className="input composer-input" rows={2} placeholder={embed?.agent ? `Ask ${embed.agent.name}` : "Ask or instruct. Type / for commands."} aria-label="Message the factory" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
+            <textarea id="con-input" ref={input} className="input composer-input" rows={embed?.page ? 1 : 2} placeholder={embed?.agent ? `Ask ${embed.agent.name}` : embed?.page ? "Ask the factory: \"what is blocked?\", \"status of WO-2417\"…" : "Ask or instruct. Type / for commands."} aria-label="Message the factory" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
             <div className="composer-foot">
-              <div className="chips">{embed?.agent ? null : <span className="try-lbl muted small">Try</span>}{embed?.agent ? null : suggestions.slice(0, 3).map((sg, i) => <button type="button" key={sg} className="sugg" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
+              <div className="chips">{embed?.agent ? null : <span className="try-lbl muted small">Try</span>}{embed?.agent ? null : suggestions.slice(0, embed?.page ? 4 : 3).map((sg, i) => <button type="button" key={sg} className="sugg" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
               {streaming ? (
                 <div className="row gap-sm"><Btn label="Stop" kind="danger" small icon="x" id="con-stop" onClick={() => ac.current?.abort()} /><Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" disabledReason="Wait for the answer or stop it." /></div>
               ) : <Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" />}
@@ -417,25 +446,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             {pinned.length ? <ul className="pins">{pinned.map((id) => <li key={id}><button type="button" className="linkish" id={`con-pin-${id}`} onClick={() => openTraveler(id)}><span className="mono">{id}</span></button>
               <button type="button" className="icon-btn icon-btn-sm" id={`con-unpin-${id}`} aria-label={`Unpin ${id}`} onClick={() => threadId && void savePinned(threadId, pinned.filter((x) => x !== id)).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) }))}><Icon name="x" /></button></li>)}</ul> : <p className="muted small">Pin a work order from a why card.</p>}
           </Panel>
-          <Panel title={`What ${me.person.name.split(" ")[0]} can do${cur ? ` in ${cur.name}` : ""}`}>
-            <div className="con-ctx">
-              <Field label="Current project" htmlFor="con-ctx-project"><Select id="con-ctx-project" aria-label="Current project" value={cur?.id ?? ""} onChange={setProject} options={visible.map((x) => ({ value: x.id, label: x.name }))} /></Field>
-              {cur ? <div><StateChip state={cur.killed ? "killed" : cur.halted ? "blocked" : "running"} /></div> : null}
-            </div>
-            <ul className="caps">{CAPS.map(([action, text], i) => { const d = caps[i]!; return <li key={action} className={d.allowed ? "ok" : "no"} tabIndex={0} data-tip={d.reason}><Icon name={d.allowed ? "check" : "lock"} /><span>{text}</span><code className="cap-code mono" title="The permission that governs this action. Admins find it under Govern, Access.">{action}</code></li>; })}</ul>
-          </Panel>
-          <Panel title="Your console actions">
-            {recent.length ? <ul className="mini-log con-log">{recent.map((a) => <li key={a.id}><span className="mono muted">{fmt.ist(a.at)}</span><span>{`${a.action} · ${unmark(a.target)}`}</span><span className={`outcome o-${a.outcome}`}>{a.outcome}</span></li>)}</ul> : <p className="muted small">Actions you confirm here are written to the audit ledger with via console.</p>}
-            <div className="con-audit-link"><Btn label="Open in the audit log" small icon="shield" id="con-open-audit" onClick={() => navigate("audit", "console")} /></div>
-          </Panel>
-          <Panel title="What the console can do for you">
-            <ul className="caps" id="con-rights">
-              {(st?.proposals ?? []).map((p) => <li key={p.kind} id={`con-right-${p.kind}`} className={p.allowed ? "ok" : "no"} tabIndex={0} data-tip={p.reason}><Icon name={p.allowed ? "check" : "lock"} /><span>{`Propose: ${p.does}`}</span><span className="small muted">{p.allowed ? "allowed" : p.needs || p.reason}</span></li>)}
-            </ul>
-            {st && st.proposals && !st.proposals.some((p) => p.allowed) ? <p className="muted small" id="con-readonly">Your console is read-only: it can answer questions but not propose changes. Ask a Factory Admin for a console right.</p> : null}
-            <p className="muted small">Confirming a card also needs the underlying right (for example submit work orders on that project).</p>
-            {st?.isFactoryAdmin ? <a href="#access" id="con-manage-perms" onClick={(e) => { e.preventDefault(); navigate("access"); }}>Manage console permissions: Govern, Access (Console group)</a> : null}
-          </Panel>
+          {embed?.page ? <details className="con-more"><summary>What you and the console can do here</summary>{ctxPanels}</details> : ctxPanels}
           <p className="footnote">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Work order, issue and repository text is passed as untrusted data. Slash commands read the same tools directly and never need a model. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
         </aside>
         )}

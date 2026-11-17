@@ -5,7 +5,8 @@ import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useWorkOrders } from "../../api/queries";
 import { openRecordRoute } from "../../lib/router";
-import { Avatar, Btn, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
+import { Avatar, Btn, Empty, Field, LockNote, Panel, Segmented, Select, type Decision } from "../../ui/primitives";
+import { DataTable, type Col } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
@@ -52,6 +53,25 @@ function Matrix({ p, rows }: { p: LadderProps; rows: LadderRow[] }) {
       </table>
     </div>
   );
+}
+
+interface ListRow { id: string; agent: string; cls: string; cell: CellOut }
+
+/** The prototype's Ladder: one flat row per agent and class with its level, clean runs and since; Demote opens the cell. */
+function LadderList({ p, rows }: { p: LadderProps; rows: LadderRow[] }) {
+  const classes = flowOf(p.cat, p.project).classes;
+  const list: ListRow[] = [];
+  for (const cl of classes) for (const r of rows) { const { cell } = cellFor(p, r.agent, cl.id); if (!cell.virtual) list.push({ id: `${r.agent}-${cl.id}`, agent: r.agent, cls: cl.id, cell }); }
+  const cols: Array<Col<ListRow>> = [
+    { key: "agent", label: "Agent", sort: (r) => p.agentName(r.agent), render: (r) => p.agentName(r.agent) },
+    { key: "cls", label: "Class", sort: (r) => p.clsName(r.cls), render: (r) => p.clsName(r.cls) },
+    { key: "project", label: "Project", render: () => p.project.name },
+    { key: "level", label: "Level", sort: (r) => r.cell.effective, render: (r) => <LevelTag level={r.cell.effective} /> },
+    { key: "clean", label: "Clean runs", align: "end", sort: (r) => r.cell.evidence.cleanRuns, render: (r) => String(r.cell.evidence.cleanRuns) },
+    { key: "since", label: "Since", sort: (r) => r.cell.since, render: (r) => (r.cell.since ? fmt.istDate(r.cell.since) : "—") },
+    { key: "act", label: "", align: "end", render: (r) => <Btn small label="Change level" id={`tr-row-${r.agent}-${r.cls}`} aria={`Change level of ${p.agentName(r.agent)}, ${p.clsName(r.cls)}`} onClick={() => { trustUi.sel = { agent: r.agent, cls: r.cls }; rerender(); setTimeout(() => document.getElementById("tr-detail")?.scrollIntoView?.({ block: "start", behavior: "smooth" }), 30); }} /> },
+  ];
+  return <DataTable id="tr-list" caption={`Trust cells of ${p.project.name}`} columns={cols} rows={list} rowKey={(r) => r.id} pageSize={12} empty={{ title: "No cells yet", text: "A person sets the first level, or the system proposes one when the criteria are met." }} />;
 }
 
 function CellButton({ p, r, cls }: { p: LadderProps; r: LadderRow; cls: { id: string; name: string } }) {
@@ -306,13 +326,15 @@ export function LadderTab({ p }: { p: LadderProps }) {
   const rows = ladderRows(p.cat, p.project, p.cells);
   return (
     <div className="tr-ladder">
-      <div className="callout info tr-levels" role="note"><span><strong>How levels work</strong>{" "}{[0, 1, 2, 3].map((n) => `${code(n)} ${lv(n).desc}`).join(". ")}. Ceilings cap a level regardless of record.</span></div>
+      <div className="callout info tr-levels" role="note"><span><strong>How levels work</strong>{" "}{[0, 1, 2, 3].map((n) => `${code(n)} ${lv(n).desc}`).join(". ")}. Ceilings cap a level regardless of record.{p.switchOn ? "" : " Levels above L1 are switched off."}</span></div>
       <div className="toolbar tr-toolbar">
         <Field label="Project" htmlFor="tr-project"><Select id="tr-project" value={p.project.id} options={p.projects.map((x) => ({ value: x.id, label: x.name + (x.regulated ? " (regulated)" : "") }))} onChange={(v) => { trustUi.project = v; trustUi.repo = ""; trustUi.sel = null; rerender(); }} /></Field>
         <Field label="Repo" htmlFor="tr-repo"><Select id="tr-repo" value={trustUi.repo} options={[{ value: "", label: "All repos (project cells)" }, ...rs.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => { trustUi.repo = v; rerender(); }} /></Field>
         <p className="small muted tr-toolbar-note">{trustUi.repo ? "Showing repo cells where they exist; other cells fall back to the project cell (marked proj)." : "Cells are agent × class on this project. A repo cell overrides the project cell."}</p>
       </div>
-      <Panel title={`Ladder · ${p.project.name}`} flush cls="tr-matrix-panel"><div><Matrix p={p} rows={rows} /><Legend /></div></Panel>
+      <Panel title={trustUi.view === "list" ? "Where each agent stands" : `Ladder · ${p.project.name}`} flush cls="tr-matrix-panel" tools={<Segmented name="tr-view" label="Ladder layout" items={[{ id: "list", label: "List" }, { id: "matrix", label: "Matrix" }]} value={trustUi.view} onChange={(v) => { trustUi.view = v as "list" | "matrix"; rerender(); }} />}>
+        <div>{trustUi.view === "list" ? <LadderList p={p} rows={rows} /> : <><Matrix p={p} rows={rows} /><Legend /></>}</div>
+      </Panel>
       <div className="tr-ladder-grid"><Detail p={p} rows={rows} /><Projection p={p} rows={rows} /></div>
     </div>
   );
