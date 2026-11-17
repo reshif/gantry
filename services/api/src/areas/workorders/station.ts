@@ -16,6 +16,7 @@ import { recordDialogue, type QuestionRow } from "./documents.js";
 import type { ResearchPlan } from "./research.js";
 import { applyScoutResult, scoutRequest, startSwarm } from "./swarm.js";
 import { addWoMessage, updateId } from "./session/store.js";
+import { isResearchHost } from "../../core/research-host.js";
 
 /** The whole summary goes in the thread (lists truncate their own previews); the cap only guards against a runaway output. */
 const clip = (t: string): string => (t.length > 8000 ? `${t.slice(0, 8000)}…` : t);
@@ -88,11 +89,10 @@ function proposedPlan(raw: unknown, station: string, attempt: string, now: Date)
   const p = asObj(raw);
   const questions = strs(p.questions).map((q) => q.trim().slice(0, 300)).filter(Boolean).slice(0, 12);
   if (!questions.length || typeof p.web !== "boolean") return null;
-  const hosts = p.web ? strs(p.hosts).map((h) => h.trim().toLowerCase()).filter((h) => HOST.test(h)).slice(0, 20) : [];
+  const hosts = p.web ? strs(p.hosts).map((h) => h.trim().toLowerCase()).filter(isResearchHost).slice(0, 20) : [];
   const budget = typeof p.budgetUsd === "number" && p.budgetUsd > 0 ? Math.min(p.budgetUsd, 100) : null;
   return { status: "proposed", questions, hosts, web: p.web, budgetUsd: budget, why: typeof p.why === "string" ? p.why.slice(0, 1200) : "", station, attempt, proposedAt: now.getTime() };
 }
-const HOST = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 async function postStationMessage(fx: Fx, w: Wo, station: string, attemptId: string, text: string, questions: QuestionRow[], assumptions = 0, plan = false): Promise<void> {
   const docs = (await fx.tx.query<{ id: string; doc: string; version: number }>(`select id, doc, version from artefacts where org_id = $1 and wo_id = $2 and attempt_id = $3 and doc is not null order by doc`, [fx.orgId, w.id, attemptId])).rows;

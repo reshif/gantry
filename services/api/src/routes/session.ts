@@ -26,6 +26,7 @@ import { invalid, notFound, refuse } from "../core/errors.js";
 import { readOrg, readProjects, readSecurity } from "../core/read/index.js";
 import { publicConfig } from "../core/app.js";
 import { openStream } from "../core/stream.js";
+import { isResearchHost } from "../core/research-host.js";
 
 const OIDC_COOKIE = "gantry_oidc";
 /** The provider's ID token, sealed, kept only to end the provider session at sign-out (path /auth, never sent to the API). */
@@ -61,7 +62,7 @@ const SecuritySchema = z.object({
   killNeedsStepUp: z.boolean(),
   stepUpWindowMinutes: z.number().int().min(5).max(60).optional(),
   githubLogin: z.boolean(),
-  researchHosts: z.array(z.string().max(253).regex(/^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/)).max(200).optional(),
+  researchHosts: z.array(z.string().max(253).refine(isResearchHost, "A research host must be a DNS name, not an IP address.")).max(200).optional(),
   chatCapUsdPerDay: z.number().min(0).max(100_000).nullable().optional(),
 });
 

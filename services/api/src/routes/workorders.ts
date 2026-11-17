@@ -11,6 +11,7 @@
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4): the decision point, audit of success and denial, state and event in one
  * transaction, `If-Match` against the locked row, idempotent creates. Reads return the legacy shapes.
  */
+import { isResearchHost } from "../core/research-host.js";
 import { gateApprovers, visibleProjects } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -38,8 +39,7 @@ const SId = z.object({ sid: z.string().regex(/^[A-Z]$/) });
 const ObjectionBody = z.object({ decision: z.enum(["upheld", "overruled"]), note: z.string().max(1000).optional() });
 const StopScoutBody = z.object({ reason: z.string().max(300).optional() }).default({});
 const RefParam = z.object({ ref: z.string().regex(/^s\d{1,6}$/) });
-const HostRe = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
-const PlanBody = z.object({ decision: z.enum(["approve", "reject"]), hosts: z.array(z.string().max(253).regex(HostRe)).max(20).optional(), web: z.boolean().optional(), budgetUsd: z.number().positive().max(100).nullable().optional(), note: z.string().max(1000).optional() });
+const PlanBody = z.object({ decision: z.enum(["approve", "reject"]), hosts: z.array(z.string().max(253).refine(isResearchHost, "A research host must be a DNS name, not an IP address.")).max(20).optional(), web: z.boolean().optional(), budgetUsd: z.number().positive().max(100).nullable().optional(), note: z.string().max(1000).optional() });
 const AnswerBody = z.object({ kind: z.enum(["answer", "dont_know", "not_relevant"]).default("answer"), answer: z.string().max(4000).optional() });
 const AssumptionBody = z.object({ status: z.enum(["confirmed", "corrected"]), note: z.string().max(2000).optional() });
 const Via = z.string().max(20).optional();

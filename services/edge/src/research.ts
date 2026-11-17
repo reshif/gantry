@@ -10,8 +10,9 @@
  * audit event. The agent gets the text back marked as untrusted data, with the source id to cite.
  */
 import dns from "node:dns";
+import net from "node:net";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { Agent, fetch as ufetch } from "undici";
+import { Agent, buildConnector, fetch as ufetch } from "undici";
 import type { ApiClient } from "./api.js";
 import { hostAllowed, isPrivateAddress } from "./proxy.js";
 import { scanText } from "./secrets-scan.js";
@@ -52,24 +53,41 @@ export function htmlToText(html: string): { title: string; text: string } {
   return { title, text: t };
 }
 
-/** A dispatcher whose DNS lookup refuses names that resolve to a private, loopback or link-local address (no SSRF through an allow-listed name). */
+/** True for an IP literal in any URL host form (`1.2.3.4`, `[::1]`); the WHATWG parser has already folded `2130706433` and `0x7f.1` into dotted form. */
+export const isIpHost = (hostname: string): boolean => net.isIP(hostname.replace(/^\[|\]$/g, "")) !== 0;
+
+/**
+ * A dispatcher that refuses private, loopback and link-local destinations. Node never calls `lookup` for an IP literal, so the DNS check alone
+ * misses `https://127.0.0.1/`; the connector below refuses a literal before any socket is opened and checks the connected peer address as well.
+ */
 export function publicOnlyAgent(): Agent {
-  return new Agent({
-    connect: {
-      lookup: (hostname, options, cb) => {
-        dns.lookup(hostname, { ...options, all: true }, (err, addrs) => {
-          if (err) return cb(err, "", 4);
-          const list = (addrs as unknown as dns.LookupAddress[]) ?? [];
-          if (!list.length || list.some((a) => isPrivateAddress(a.address))) return cb(Object.assign(new Error(`${hostname} resolves to a private address`), { code: "EPRIVATE" }), "", 4);
-          const first = list[0]!;
-          // undici asks with `all`; answer in the form it asked for
-          if ((options as { all?: boolean }).all) return (cb as unknown as (e: null, a: dns.LookupAddress[]) => void)(null, list);
-          cb(null, first.address, first.family);
-        });
-      },
+  const base = buildConnector({
+    timeout: 10_000,
+    lookup: (hostname, options, cb) => {
+      dns.lookup(hostname, { ...options, all: true }, (err, addrs) => {
+        if (err) return cb(err, "", 4);
+        const list = (addrs as unknown as dns.LookupAddress[]) ?? [];
+        if (!list.length || list.some((a) => isPrivateAddress(a.address))) return cb(Object.assign(new Error(`${hostname} resolves to a private address`), { code: "EPRIVATE" }), "", 4);
+        const first = list[0]!;
+        // undici asks with `all`; answer in the form it asked for
+        if ((options as { all?: boolean }).all) return (cb as unknown as (e: null, a: dns.LookupAddress[]) => void)(null, list);
+        cb(null, first.address, first.family);
+      });
     },
-    connectTimeout: 10_000,
   });
+  const connect: buildConnector.connector = (opts, cb) => {
+    if (isIpHost(opts.hostname)) return cb(Object.assign(new Error("Research reads named hosts only, not IP addresses."), { code: "EIPLITERAL" }), null);
+    base(opts, (err, socket) => {
+      if (err || !socket) return cb(err, null);
+      const peer = socket.remoteAddress;
+      if (!peer || isPrivateAddress(peer)) {
+        socket.destroy();
+        return cb(Object.assign(new Error(`${opts.hostname} connected to a private address`), { code: "EPRIVATE" }), null);
+      }
+      cb(null, socket);
+    });
+  };
+  return new Agent({ connect, connectTimeout: 10_000 });
 }
 
 export interface ResearchDeps {
@@ -129,6 +147,7 @@ export function registerResearchRoutes(app: FastifyInstance, deps: ResearchDeps)
     if (url.protocol !== "https:") return refuse(reply, a, raw, { status: 422, msg: "Only https:// pages can be read." });
     if (url.username || url.password) return refuse(reply, a, raw, { status: 422, msg: "URLs with credentials are not allowed." });
     url.hash = "";
+    if (isIpHost(url.hostname)) return refuse(reply, a, raw, { status: 403, msg: "Research reads named hosts only, not IP addresses." });
     if (url.port && url.port !== "443") return refuse(reply, a, raw, { status: 403, msg: "Only the standard HTTPS port is allowed." });
 
     const allow = await deps.api.call("POST", `/internal/v1/runs/${encodeURIComponent(a.runId)}/research/hosts`, { token: a.token });
@@ -143,6 +162,7 @@ export function registerResearchRoutes(app: FastifyInstance, deps: ResearchDeps)
     const timer = setTimeout(() => ac.abort(), RESEARCH_LIMITS.timeoutMs);
     try {
       for (let hop = 0; hop <= RESEARCH_LIMITS.maxRedirects; hop++) {
+        if (isIpHost(cur.hostname)) return await refuse(reply, a, recordedUrl(cur), { status: 403, msg: `Research reads named hosts only, not IP addresses.${hop ? " (reached by a redirect)" : ""}` });
         if (!hostAllowed(cur.hostname.toLowerCase(), hosts)) return await refuse(reply, a, recordedUrl(cur), { status: 403, msg: `${cur.hostname} is not on this work order's research allow-list.${hop ? " (reached by a redirect)" : ""}` });
         res = await doFetch(cur.toString(), { redirect: "manual", signal: ac.signal, headers: { "user-agent": "GantryResearch/1.0", accept: "text/html,text/plain,text/markdown,application/json;q=0.9,*/*;q=0.1" } });
         if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
