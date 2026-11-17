@@ -3,13 +3,11 @@
  * History and Danger zone. Ported from legacy/js/views/project-config.js. Every change goes through ops, which call the API.
  */
 import { useEffect, useRef, useState } from "react";
-import { fmt } from "@gantry/domain";
 import { useMe, usePeople, useProjects } from "../api/queries";
 import { navigate, parseHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
-import { usePrefs } from "../lib/prefs";
-import { useActors } from "../ui/actors";
-import { Btn, Empty, Tabs, ViewHead } from "../ui/primitives";
+import { updatePrefs, usePrefs } from "../lib/prefs";
+import { Btn, Empty, Select, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { HealthChip, useCatalog, type PView } from "./projects/kit";
 import { TABS, membersOf, type CfgState } from "./project-config/ctx";
@@ -33,7 +31,6 @@ export default function ProjectConfigView() {
   const projects = (projectsQ.data ?? []) as PView[];
   const people = usePeople().data ?? [];
   const cat = useCatalog();
-  const actor = useActors();
   const pid = pickProject(me, prefs.project);
   const p = projects.find((x) => x.id === pid) ?? null;
   const [s, setS] = useState<CfgState>(fresh);
@@ -59,21 +56,16 @@ export default function ProjectConfigView() {
   return (
     <div className="view pcf">
       <ViewHead
-        kicker="Project settings"
-        title={<>{p.name} <HealthChip p={p} /></>}
-        sub={p.desc || "No description yet."}
+        title="Project config"
+        sub={<>{`${p.name} · ${p.key} `}<HealthChip p={p} /></>}
         actions={
           <>
+            <Select id="pcf-project" style={{ width: 200 }} aria-label="Project" value={p.id} options={projects.map((x) => ({ value: x.id, label: x.name }))} onChange={(v) => { updatePrefs({ project: v }); navigate("project-config"); }} />
             <Btn icon="belt" id="pcf-to-floor" label="Open floor" onClick={() => navigate("floor")} />
             <Btn icon="ledger" id="pcf-to-history" label="History" onClick={() => set({ tab: "history" })} />
           </>
         }
       />
-      <dl className="pcf-strip" id="pcf-strip">
-        {([["Status", p.killed ? "Killed" : p.halted ? "Halted" : p.status === "archived" ? "Archived" : p.status.charAt(0).toUpperCase() + p.status.slice(1)], ["Owner", actor(p.owner).name.replace(" (agent)", "")], ["Slots", String(p.flow.slots)], ["Budget", p.budget.monthly ? `${fmt.money0(p.budget.mtd)} / ${fmt.money0(p.budget.monthly)}` : "None set"]] as const).map(([k, v]) => (
-          <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
-        ))}
-      </dl>
       <Tabs idPrefix="pcf-tab" items={TABS.map((t) => ({ id: t[0], label: t[1], count: count(t[0]) }))} active={s.tab} onChange={(id) => set({ tab: id })} />
       <div className="pcf-body" id="pcf-tab-panel" role="tabpanel" aria-labelledby={`pcf-tab-${s.tab}`}>{body}</div>
     </div>
