@@ -3,7 +3,7 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
@@ -136,17 +136,51 @@ export function Select({ id, options, value, onChange, ...rest }: { id: string; 
   );
 }
 
-/** Label + control + hint. Pass the control's id as `htmlFor`. */
-export function Field({ label, htmlFor, hint, children }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
+/**
+ * Label + control + description + error, wired for assistive tech.
+ *  - When the child is one element (an input, textarea, Select ...) Field gives it an id (its own, or one it generates),
+ *    `aria-describedby` pointing at the description and error, `aria-invalid` while there is an error, and `aria-required`.
+ *  - With several children, pass the control's id as `htmlFor`; the description and error then describe the whole group.
+ * `hint` and `description` are the same slot. The error is spoken when it appears (role="alert").
+ */
+export function Field({ label, htmlFor, hint, description, error, required, children }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; description?: ReactNode; error?: ReactNode; required?: boolean; children: ReactNode }) {
+  const gen = useFieldId("fld");
+  const desc = description ?? hint;
+  const el = isValidElement(children) ? (children as ReactElement<Record<string, unknown>>) : null;
+  // wire the child only when it is a native control, or a component that names its own id (so unknown props never leak into custom controls)
+  const only = el && (typeof el.type === "string" ? ["input", "textarea", "select"].includes(el.type) : typeof el.props.id === "string") ? el : null;
+  const ownId = typeof only?.props.id === "string" ? (only.props.id as string) : undefined;
+  const controlId = ownId ?? htmlFor ?? gen;
+  const descId = desc ? `desc-${controlId}` : undefined;
+  const errId = error ? `err-${controlId}` : undefined;
+  const describedBy = [only?.props["aria-describedby"] as string | undefined, descId, errId].filter(Boolean).join(" ") || undefined;
+  const control = only
+    ? cloneElement(only, {
+        id: controlId,
+        ...(describedBy ? { "aria-describedby": describedBy } : {}),
+        ...(error ? { "aria-invalid": true } : {}),
+        ...(required ? { "aria-required": true } : {}),
+      })
+    : children;
+  const groupProps = !only && (descId || errId) ? { role: "group", "aria-labelledby": `lbl-${controlId}`, "aria-describedby": [descId, errId].filter(Boolean).join(" ") } : {};
   return (
-    <div className="field">
-      <label className="field-label" htmlFor={htmlFor}>
+    <div className="field" {...groupProps}>
+      <label className="field-label" id={`lbl-${controlId}`} htmlFor={controlId}>
         {label}
+        {required ? <span className="field-req" aria-hidden="true"> *</span> : null}
       </label>
-      {children}
-      {hint ? <div className="field-hint">{hint}</div> : null}
+      {control}
+      {desc ? <div className="field-hint" id={descId}>{desc}</div> : null}
+      {error ? <div className="field-error" id={errId} role="alert">{error}</div> : null}
     </div>
   );
+}
+
+/** Moves focus to the first control inside `root` marked aria-invalid (call after a failed submit). Returns whether one was found. */
+export function focusFirstInvalid(root: ParentNode): boolean {
+  const el = root.querySelector<HTMLElement>('[aria-invalid="true"]');
+  el?.focus();
+  return !!el;
 }
 
 export function LockNote({ decision, what }: { decision: Decision | null | undefined; what?: string }) {

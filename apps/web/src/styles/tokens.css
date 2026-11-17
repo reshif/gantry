@@ -2,6 +2,11 @@
    Light palette in bare :root, dark redefined twice (system preference unless forced light, and explicit data-theme="dark").
    Older token names (--ink, --muted, --line-strong, --r1 ...) keep working: they are the primary names; the short
    preview names (--fg, --ok ...) are aliases. Do not redefine --panel or --muted with a different meaning. */
+/* Self-hosted variable fonts (SIL OFL, licences in src/assets/fonts). Latin subset; other scripts fall back to the system stack.
+   No third-party request, so nothing render-blocks on an external origin. */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/inter-latin-wght-normal.woff2") format("woff2-variations"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 800; font-display: swap; src: url("../assets/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+
 :root {
   color-scheme: light;
   --f-body: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -28,7 +33,7 @@
   --ink: #09090b;
   --ink-2: #3f3f46;
   --muted: #52525b;
-  --faint: #71717a;
+  --faint: #63636b;
   --line: #e4e4e7;
   --line-strong: #d4d4d8;
   --grid: rgba(79, 70, 229, 0.06);
@@ -50,7 +55,7 @@
   /* work classes: categorical, each chip also carries its name */
   --cls-feature: #2b54c9; --cls-bug: #b2462c; --cls-hotfix: #c2185b; --cls-epic: #6b3fa0; --cls-chore: #5f6c7b;
   --cls-refactor: #00796b; --cls-security: #a31515; --cls-docs: #4e7a1e; --cls-spike: #8a6100;
-  --kill: #7a0d0d; --kill-soft: #f3d9d9; --gate: #b26a00; --gate-soft: #fdecc8;
+  --kill: #7a0d0d; --kill-soft: #f3d9d9; --gate: #8f5400; --gate-soft: #fdecc8;
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-2: 0 12px 32px rgb(0 0 0 / 0.2), 0 2px 6px rgb(0 0 0 / 0.08);
   --scrim: rgba(9, 9, 11, 0.45);
@@ -61,6 +66,31 @@
   --ok: var(--done); --ok-soft: var(--done-soft); --warn: var(--wait); --warn-soft: var(--wait-soft);
   --bad: var(--block); --bad-soft: var(--block-soft); --info: var(--run); --info-soft: var(--run-soft);
   --idle: #a1a1aa; --shadow: var(--shadow-1);
+
+  /* ---- tokens added by the production pass (frontend-production-bar.md W0-2) ----
+     Aliases that views already referenced without a definition: they now follow the theme. */
+  --surface-2: var(--panel);
+  --paper-2: var(--sunk);
+  --hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --c-bad: var(--block);
+  --danger: var(--block);
+  --text: var(--ink);
+  --mono: var(--f-mono);
+  --topbar-h: 52px;
+
+  /* focus: a box-shadow ring plus a transparent outline, so forced-colors mode still draws a ring */
+  --focus-ring: var(--focus);
+  --focus-outline: 2px solid transparent;
+
+  /* layers (low to high). Use these instead of literal z-index values above 5. */
+  --z-sticky: 10; --z-nav-scrim: 105; --z-nav: 110; --z-drawer: 120; --z-popover-shield: 150; --z-popover: 160; --z-modal: 200; --z-toast: 300; --z-tooltip: 400; --z-drag: 1000;
+  /* motion: reduced-motion zeroes these */
+  --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 280ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* target sizes: 24px is the floor (WCAG 2.5.8, the CI gate); primary controls grow to 44px on coarse pointers */
+  --target-min: 24px; --target-coarse: 44px;
+  /* breakpoints are documented here because custom properties cannot be used inside @media:
+     phone 390, tablet 768, laptop 1024, desktop 1366. Use these four (min or max) and no others in new CSS. */
 }
 
 @media (prefers-color-scheme: dark) {

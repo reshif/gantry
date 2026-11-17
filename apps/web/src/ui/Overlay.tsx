@@ -10,6 +10,7 @@ import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type Toas
 import { tip } from "./Tip";
 import { DirtyScope, useLeaveGuard, type DirtyScopeApi } from "../lib/useLeaveGuard";
 import "../lib/data.css";
+import { Modal, useModalLayer, useScrimClose } from "./Modal";
 
 /* ---------- focus trap ---------- */
 
@@ -38,101 +39,35 @@ function trapKeys(getContainer: () => HTMLElement | null, onEsc: () => void) {
   };
 }
 
-/** Remembers the element focused before mount and restores it on unmount. */
-function useRestoreFocus() {
-  useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
-    return () => {
-      if (prev && prev.focus && document.body.contains(prev)) prev.focus();
-    };
-  }, []);
-}
-
 /* ---------- Dialog (declarative) ---------- */
 
 export interface DialogProps extends Omit<DialogOpts, "onClose"> {
   onClose: () => void;
 }
 
-/** A modal dialog. Render it while open; call onClose to dismiss. Also used by ui.dialog(). */
-export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose: close }: DialogProps) {
-  const panel = useRef<HTMLDivElement>(null);
-  // Forms inside mark themselves with useLeaveGuard(dirty); a dismissal (scrim, Escape, X, Cancel) then asks before discarding input.
+/** A modal dialog (see ui/Modal for the layer rules). Render it while open; call onClose to dismiss. Also used by ui.dialog(). */
+export function Dialog({ title, kicker, sub, wide, cls, dirty, body, actions, onClose }: DialogProps) {
+  // Forms inside mark themselves with useLeaveGuard(dirty); the dialog is dirty while any of them is, so every dismissal asks first.
   const dirtyIds = useRef(new Set<symbol>());
-  const [confirming, setConfirming] = useState(false);
-  const scope = useMemo<DirtyScopeApi>(() => ({ mark: (id, d) => void (d ? dirtyIds.current.add(id) : dirtyIds.current.delete(id)) }), []);
-  const returnTo = useRef<HTMLElement | null>(null);
-  const onClose = () => {
-    if (!dirtyIds.current.size) return close();
-    returnTo.current = document.activeElement as HTMLElement | null;
-    setConfirming(true);
-  };
-  const keepEditing = () => {
-    setConfirming(false);
-    const t = returnTo.current;
-    returnTo.current = null;
-    if (t && panel.current?.contains(t)) setTimeout(() => t.focus(), 0);
-    else setTimeout(() => panel.current?.querySelector<HTMLElement>("input:not([type=hidden]),select,textarea,.dlg-foot button")?.focus(), 0);
-  };
-  const confirmBox = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (confirming) confirmBox.current?.querySelector<HTMLElement>("#dlg-keep")?.focus();
-  }, [confirming]);
-  const titleId = useMemo(() => `dlg-title-${Math.random().toString(36).slice(2, 9)}`, []);
-  useRestoreFocus();
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const p = panel.current;
-      if (!p) return;
-      const f = p.querySelector<HTMLElement>("input:not([type=hidden]):not([type=checkbox]),select,textarea") ?? p.querySelector<HTMLElement>(".dlg-foot .btn-primary") ?? p.querySelector<HTMLElement>("button");
-      f?.focus();
-    }, 20);
-    return () => clearTimeout(t);
-  }, []);
+  const [marked, setMarked] = useState(false);
+  const scope = useMemo<DirtyScopeApi>(() => ({ mark: (id, d) => { if (d) dirtyIds.current.add(id); else dirtyIds.current.delete(id); setMarked(dirtyIds.current.size > 0); } }), []);
   const list: DialogAction[] = actions ?? [{ label: "Close", kind: "ghost" }];
   const submitAction = list.find((a) => a.submit);
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!submitAction) return;
     if (submitAction.guard && !submitAction.guard.allowed) return;
-    submitAction.onClick?.(close);
+    submitAction.onClick?.(onClose);
   };
-  const content = typeof body === "function" ? body(close) : body;
+  const content = typeof body === "function" ? body(onClose) : body;
   return (
-    <div className="dlg-wrap">
-      <div className="scrim" onClick={onClose} />
-      <div ref={panel} className={`dlg${wide ? " dlg-wide" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={trapKeys(() => panel.current, onClose)}>
-        <div className="dlg-head">
-          <div>
-            {kicker ? <div className="kicker">{kicker}</div> : null}
-            <h2 id={titleId} className="dlg-title">
-              {title}
-            </h2>
-            {sub ? <p className="dlg-sub">{sub}</p> : null}
-          </div>
-          <button type="button" className="icon-btn" aria-label="Close dialog" onClick={onClose}>
-            <Icon name="x" />
-          </button>
-        </div>
-        <form className="dlg-form" noValidate onSubmit={onSubmit}>
-          <div className="dlg-body"><DirtyScope.Provider value={scope}>{content}</DirtyScope.Provider></div>
-          {confirming ? (
-            <div ref={confirmBox} className="draft-conflict" role="alertdialog" aria-label="Discard your changes?">
-              <span>You have unsaved input. Discard it and close?</span>
-              <span className="draft-conflict-actions">
-                <Btn label="Keep editing" id="dlg-keep" onClick={keepEditing} />
-                <Btn label="Discard changes" kind="danger" id="dlg-discard" onClick={close} />
-              </span>
-            </div>
-          ) : null}
-          <div className="dlg-foot">
-            {list.map((a, i) => (
-              <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(onClose) : onClose())} />
-            ))}
-          </div>
-        </form>
-      </div>
-    </div>
+    <Modal title={title} kicker={kicker} sub={sub} wide={wide} cls={cls} dirty={dirty || marked} onClose={onClose} onSubmit={onSubmit}
+      footer={list.map((a, i) => (
+        <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(onClose) : onClose())} />
+      ))}
+    >
+      <DirtyScope.Provider value={scope}>{content}</DirtyScope.Provider>
+    </Modal>
   );
 }
 
@@ -140,15 +75,12 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose: 
 
 function DrawerView({ render, onClose }: { render: (close: () => void) => ReactNode; onClose: () => void }) {
   const panel = useRef<HTMLElement>(null);
-  useRestoreFocus();
-  useEffect(() => {
-    const t = setTimeout(() => panel.current?.querySelector<HTMLElement>(".drawer-close")?.focus(), 20);
-    return () => clearTimeout(t);
-  }, []);
+  useModalLayer({ ref: panel, requestClose: onClose, initialFocus: (p) => p.querySelector<HTMLElement>(".drawer-close") });
+  const scrim = useScrimClose(onClose);
   return (
     <div className="drawer-wrap">
-      <div className="scrim" onClick={onClose} />
-      <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-label="Details" onKeyDown={trapKeys(() => panel.current, onClose)}>
+      <div className="scrim" {...scrim} />
+      <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-label="Details">
         {render(onClose)}
       </aside>
     </div>
@@ -495,8 +427,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
           <Fragment2 key={s.id} item={s} onClose={() => setStack((l) => l.filter((x) => x.id !== s.id))} />
         ))}
       </div>
-      <div id="layer-pop">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
-      <div className="toasts" id="toasts" role="status" aria-live="polite">
+      <div id="layer-pop" data-inert-exempt="">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
+      <div className="toasts" id="toasts" role="status" aria-live="polite" data-inert-exempt="">
         {toasts.map((t) => (
           <div key={t.id} className={`toast toast-${t.kind}${t.out ? " out" : ""}`}>
             <Icon name={t.kind === "error" ? "alert" : t.kind === "warn" ? "halt" : "check"} />
