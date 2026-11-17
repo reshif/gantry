@@ -11,3 +11,6 @@
 .field .field-label{font:600 12px/16px var(--font);color:var(--text-2)}
 .filterbar.fb{display:grid}
 .empty .empty-icon{width:40px;height:40px}
+/* legacy .tag lowercased its text; the prototype shows it as written */
+.tag{text-transform:none}
+.fb .searchbox{display:block}.fb .searchbox .input{width:100%;min-width:0;padding-left:32px}

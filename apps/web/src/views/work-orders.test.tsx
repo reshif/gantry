@@ -32,7 +32,7 @@ describe("Work orders table", () => {
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
     expect(screen.queryByText("No work orders match")).toBeNull();
     // the tabs carry no count at all while the read is refused, never a 0
-    expect(document.querySelectorAll("#wo-tab-all .tab-count, #wo-tab-shipped .tab-count")).toHaveLength(0);
+    expect(document.querySelectorAll('label[for="wo-tab-all"] .tab-count, label[for="wo-tab-shipped"] .tab-count')).toHaveLength(0);
   });
 
   it("asks the server for the sorted, filtered page and pages with the cursor", async () => {
@@ -81,8 +81,8 @@ describe("Work orders table", () => {
       },
     });
     mount(<WorkOrdersView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Incidents/ }));
-    await waitFor(() => expect(document.querySelector("#wo-tab-incidents .tab-count")?.textContent).toMatch(/\+$/));
+    fireEvent.click(await screen.findByRole("radio", { name: /Incidents/ }));
+    await waitFor(() => expect(document.querySelector('label[for="wo-tab-incidents"] .tab-count')?.textContent).toMatch(/\+$/));
     await waitFor(() => expect(document.body.textContent).toMatch(/Only the latest 1000 work orders/), { timeout: 5000 });
     expect(lists(calls).filter((c) => c.query.get("cursor")).length).toBeGreaterThan(3);
   }, 20_000);
@@ -110,6 +110,7 @@ describe("Work orders table", () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([failed]) }) });
     mount(<WorkOrdersView />);
     expect(await screen.findByText("WO-3100")).toBeTruthy();
+    fireEvent.click(document.getElementById("wo-col-gate") as HTMLElement); // the Gate column is optional now
     const cell = Array.from(document.querySelectorAll("#wo-table tbody tr td")).map((td) => td.textContent ?? "");
     expect(cell.some((t) => /^Next: (Approve|Confirm|Review|Check|Wait)/.test(t)), cell.join(" | ")).toBe(true);
     expect(cell.some((t) => t === "Spec approved")).toBe(false);
