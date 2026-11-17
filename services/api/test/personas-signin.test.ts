@@ -45,6 +45,9 @@ describe("demo cards, Keycloak realm and seed agree", () => {
   it("the realm has a TOTP step-up flow, but no demo user has an authenticator: the demo cards stay password-only", () => {
     expect(realm.otpPolicyType).toBe("totp");
     expect(realm.browserFlow).toBe("gantry-browser");
+    // the custom browser flow replaces Keycloak's default, so it must keep the provider redirector (GitHub sign-in uses kc_idp_hint) and the SSO cookie
+    const top = (realm as unknown as { authenticationFlows: { alias: string; authenticationExecutions: { authenticator?: string }[] }[] }).authenticationFlows.find((f) => f.alias === "gantry-browser")!;
+    expect(top.authenticationExecutions.map((e) => e.authenticator)).toEqual(expect.arrayContaining(["auth-cookie", "identity-provider-redirector"]));
     for (const u of realm.users) {
       expect(u.requiredActions ?? [], u.username).toEqual([]);
       expect(u.credentials.map((c) => c.type), u.username).toEqual(["password"]);

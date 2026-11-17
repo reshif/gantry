@@ -39,6 +39,7 @@
       "alias": "gantry-browser", "description": "Browser sign-in with step-up: password at level 1; a one-time code (TOTP) at level 2, which Gantry requests (acr_values=2) for Factory Admins", "providerId": "basic-flow", "topLevel": true, "builtIn": false,
       "authenticationExecutions": [
         { "authenticator": "auth-cookie", "authenticatorFlow": false, "requirement": "ALTERNATIVE", "priority": 10, "userSetupAllowed": false },
+        { "authenticator": "identity-provider-redirector", "authenticatorFlow": false, "requirement": "ALTERNATIVE", "priority": 15, "userSetupAllowed": false },
         { "authenticatorFlow": true, "requirement": "ALTERNATIVE", "priority": 20, "flowAlias": "gantry-browser-forms", "userSetupAllowed": false }
       ]
     },

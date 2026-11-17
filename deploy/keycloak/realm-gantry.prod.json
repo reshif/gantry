@@ -73,6 +73,13 @@
           "userSetupAllowed": false
         },
         {
+          "authenticator": "identity-provider-redirector",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 15,
+          "userSetupAllowed": false
+        },
+        {
           "authenticatorFlow": true,
           "requirement": "ALTERNATIVE",
           "priority": 20,
