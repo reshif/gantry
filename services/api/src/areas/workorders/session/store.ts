@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Queryable, Tx } from "@gantry/db";
 import type { WoCard } from "@gantry/domain";
+import { publishChange } from "../../../core/changes.js";
 import { convIdOf } from "../model.js";
 
 export interface WoMessage {
@@ -44,8 +45,16 @@ export async function legacyMessages(db: Queryable, orgId: string, woId: string)
   }));
 }
 
+/** Tells the live channel the session changed (a message, a card's status). Only people who can see the work order's project receive it. */
+export async function announceWoSession(tx: Tx, orgId: string, woId: string): Promise<void> {
+  const { rows } = await tx.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2`, [orgId, woId]);
+  const project = rows[0]?.project_id;
+  if (project) await publishChange(tx, { org: orgId, keys: ["conversations"], project });
+}
+
 export async function addWoMessage(tx: Tx, orgId: string, woId: string, role: WoMessage["role"], author: string, text: string, data: WoMessage["data"], now: Date, id = newWoMessageId()): Promise<string> {
   await tx.query(`insert into workorder_messages (org_id, id, wo_id, role, author, body, data, created_at, updated_at) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$8)`, [orgId, id, woId, role, author, text, JSON.stringify(data), now]);
+  await announceWoSession(tx, orgId, woId);
   return id;
 }
 
