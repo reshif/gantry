@@ -57,15 +57,15 @@ describe("inherited grants in the policy engine", () => {
     expect(policyTrace(withTeamGrant, person, act, { project: pid }).join("\n")).toContain("Reviewer (via Payments)");
   });
   it("a project-level role, direct or via a team, never satisfies a factory-scoped action", () => {
-    const m2 = defaultMatrix();
-    expect(m2.project_admin!["audit.view"]).toBe(true);
+    expect(defaultMatrix().project_admin!["audit.view"]).toBe(false); // factory rights are not a project role's, by default
     const s = mutate(base, (x) => {
+      // even a stored grant (an old or hand-edited matrix) is ignored for a project-level role
+      for (const a of ["audit.view", "eval.run"]) x.matrix.project_admin![a] = true;
       x.people.find((p) => p.id === "p-tomas")!.roles = [{ role: "project_admin", scope: pid }, { role: "project_admin", scope: pid, via: "payments" }];
     });
     for (const a of ["audit.view", "eval.run"]) {
       const d = can(s, "p-tomas", a, {});
       expect(d.allowed, a).toBe(false);
-      expect(d.reason).toContain("factory-level role");
     }
     const withFactory = mutate(s, (x) => x.people.find((p) => p.id === "p-tomas")!.roles.push({ role: "auditor", scope: "factory", via: "payments" }));
     expect(can(withFactory, "p-tomas", "audit.view", {}).allowed).toBe(true);

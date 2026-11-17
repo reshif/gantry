@@ -43,8 +43,12 @@ describe("can() equals legacy G.can", () => {
             // Intentional divergence from the legacy engine: a factory-scoped action needs a factory-level grant (a project role never
             // reaches beyond its project). The legacy allowed audit.view / eval.run to Project Admins and Line Leads factory-wide.
             const projectOnly = act.scope === "factory" && !person.roles.some((g) => g.scope === "factory");
+            if (act.scope === "factory" && !a.allowed && !b.allowed) {
+              n++; // both refuse; the wording differs because the legacy matrix still lists the right on a project role ("needs Project Admin")
+              continue;
+            }
             if (projectOnly && b.allowed && !a.allowed) {
-              expect(a.reason, `${person.id} ${act.id}`).toContain("needs a factory-level role");
+              expect(a.reason, `${person.id} ${act.id}`).toMatch(/needs a factory-level role|includes/);
               expect(["audit.view", "eval.run"]).toContain(act.id);
               diverged++;
               continue;

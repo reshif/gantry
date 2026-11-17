@@ -2,7 +2,7 @@ import { involved } from "../onboarding/session/updates.js";
 import { involvedInWo } from "../workorders/session/updates.js";
 import { asksMe } from "../workorders/asked.js";
 import { openAccessRequests } from "../workorders/session/mentions.js";
-import { fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
+import { fmt, gateDecision, gateDef, gateProgress, istToday, istTime, isFactoryAdmin, roleHolds, rolesIn, visibleProjects, type Person, type Project, type Repo } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { decideFor, readSecurity, type ActiveStop, type PolicyStateLoaded, type Principal } from "../../core/index.js";
 import { ms, num } from "../../core/read/rows.js";
@@ -322,7 +322,7 @@ export async function computeHome(o: HomeOptions) {
   const holds = (action: string, project?: string): boolean => {
     const act = st.catalog.actions.find((a) => a.id === action);
     const grants = me.roles.filter((g) => g.scope === "factory" || (act?.scope !== "factory" && (act?.scope !== "project" || !project || g.scope === project)));
-    return grants.some((g) => st.matrix[g.role]?.[action]);
+    return grants.some((g) => roleHolds(st, g.role, action));
   };
   const out: Record<string, unknown> = { approvals, conversations, badges: {} as Record<string, unknown>, projectBadges: {} as Record<string, Record<string, unknown>> };
 

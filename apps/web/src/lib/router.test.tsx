@@ -74,6 +74,13 @@ describe("route table", () => {
     expect(canSeeRoute("access", admin)).toBe(true);
     expect(canSeeRoute("trust", meWith([{ role: "approver", scope: "payments" }]))).toBe(true);
     expect(canSeeRoute("home", eng)).toBe(true);
+    // Factory-wide pages follow the server: factory-level roles at factory scope only, never a project admin (display only; the server decides).
+    const pa = meWith([{ role: "project_admin", scope: "payments" }]);
+    for (const id of ["access", "security", "system", "models"]) {
+      expect(canSeeRoute(id, pa), id).toBe(false);
+      expect(canSeeRoute(id, meWith([{ role: "project_admin", scope: "factory" }])), id).toBe(false);
+      for (const role of ["factory_admin", "auditor", "factory_manager", "security_reviewer"]) expect(canSeeRoute(id, meWith([{ role, scope: "factory" }])), `${id} ${role}`).toBe(true);
+    }
   });
   it("hides project routes when no project is visible", () => {
     expect(canSeeRoute("floor", meWith([{ role: "factory_admin", scope: "factory" }], []))).toBe(false);

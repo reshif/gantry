@@ -1,7 +1,7 @@
 import type {
   Action, Away, Catalog, Freeze, KillInfo, HaltInfo, Matrix, Org, Person, Policy, Project, ProjectFlow, Repo, Role, SecuritySettings, Team, Template,
 } from "@gantry/domain";
-import { ACTIONS, DEFAULT_CATALOG, defaultMatrix } from "@gantry/domain";
+import { ACTIONS, DEFAULT_CATALOG, actionScopeOf, defaultMatrix } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { ms, num, obj, reads } from "./rows.js";
 
@@ -268,6 +268,10 @@ export async function readCatalog(db: Queryable, orgId: string, org?: OrgRow): P
     bays: pick("bays", DEFAULT_CATALOG.bays),
     classes: pick("classes", DEFAULT_CATALOG.classes),
     roles: roles.length ? roles : DEFAULT_CATALOG.roles,
-    actions: pick("actions", DEFAULT_CATALOG.actions),
+    // The scope of a built-in action is fixed by the code, not by an org's stored copy (which once carried the Read rights as project scope).
+    actions: pick<Action>("actions", [...DEFAULT_CATALOG.actions]).map((a) => {
+      const scope = actionScopeOf([], a.id);
+      return scope && scope !== a.scope ? { ...a, scope } : a;
+    }),
   };
 }
