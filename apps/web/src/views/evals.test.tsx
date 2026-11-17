@@ -122,8 +122,8 @@ describe("Evals screen: scorecards", () => {
     await byId("ev-ag-ag-build");
     const head = document.getElementById("ev-stats")!.textContent!;
     expect(head).toContain("Suites2");
-    expect(head).toContain("Runs2");
-    expect(head).toContain("Candidates eligible1");
+    expect(head).toContain("Below threshold");
+    expect(head).toContain("Passing");
   });
   it("blocks promotion with the reason until the suite passed, and promotes an eligible candidate with the agent's version", async () => {
     const calls = setup({ "POST /api/v1/agents/ag-build/versions/2.8.0-rc1/promote": () => ({ body: { ok: true, msg: "Builder 2.8.0-rc1 is on the floor." } }) });
@@ -176,7 +176,8 @@ describe("Evals screen: suites and runs", () => {
     mount();
     await openSuites();
     const row = await byId("ev-su-SUITE-BUILD");
-    expect(row.textContent).toContain("▼ 50%");
+    expect(row.textContent).toContain("0.50");
+    expect(row.textContent).toContain("below gate");
     expect(row.textContent).toContain("n=6");
     expect(row.textContent).toContain("6");
     fireEvent.click(await byId("ev-run-RUN-1"));

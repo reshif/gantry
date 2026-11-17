@@ -26,3 +26,19 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 /* legacy .tag lowercased its text; the prototype shows it as written */
 .tag{text-transform:none}
 .fb .searchbox{display:block}.fb .searchbox .input{width:100%;min-width:0;padding-left:32px}
+/* group D: legacy .dtable header and cell rules lose to the prototype's table, and the search icon sits inside the box */
+.dtable.t thead th{font:600 11px/16px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);background:var(--surface-2);padding:0 var(--s3);height:36px}
+.dtable.t td{padding:0 var(--s3);height:44px}
+.dtable.t th .th-sort{font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit}
+.searchbox.search{display:block;width:100%}
+.searchbox.search .input{width:100%;min-width:0}
+.searchbox.search>.ic{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:16px;height:16px;display:inline-flex}
+.searchbox.search>.ic svg{position:static;width:16px;height:16px}
+@media (max-width:640px){.dtable-sortsel{display:none}}
+.view,.card,.card-b{min-width:0;max-width:100%}
+.view-trust .tabs-w,.view-evals .tabs-w,.view-learning .tabs-w,.view-models .tabs-w{max-width:100%}
+.view{grid-template-columns:minmax(0,1fr)}
+.view>*{min-width:0}
+.switch input.switch-input{position:relative;inset:auto;opacity:1;z-index:auto}
+.switch input.switch-input:checked{background:var(--ok)}
+.switch input.switch-input:checked::after{transform:translateX(12px)}

@@ -92,7 +92,7 @@ const type = (el: HTMLElement, v: string) => fireEvent.change(el, { target: { va
 beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
-  window.location.hash = "";
+  window.location.hash = "#models/vendors";
 });
 afterEach(() => {
   cleanup();
@@ -100,6 +100,15 @@ afterEach(() => {
 });
 
 describe("Models screen (legacy models.js on the real API)", () => {
+  it("opens on the model catalog: one table of every model with tier, price, used at and a switch", async () => {
+    setup();
+    window.location.hash = "#models";
+    mount();
+    const t = await byId("mc-table");
+    expect(t.textContent).toContain("Claude Haiku");
+    expect(t.querySelector("#mc-claude-haiku-5-5")).toBeTruthy();
+    expect(document.getElementById("vendor-anthropic")).toBeNull();
+  });
   it("shows the vendor hub: health from real calls, key mask, residency, models and the title block", async () => {
     setup();
     mount();
@@ -359,7 +368,7 @@ describe("routing policy", () => {
 });
 
 describe("vendors summary", () => {
-  beforeEach(() => { window.location.hash = "#models"; });
+  beforeEach(() => { window.location.hash = "#models/vendors"; });
   it("counts models on only among connected vendors, and shows a dash where a vendor is not connected", async () => {
     setup({});
     mount();

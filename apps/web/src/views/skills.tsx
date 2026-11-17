@@ -9,7 +9,7 @@ import { useCan } from "../api/can";
 import { useAgents, useLearningProposals, useProjects, useSkills } from "../api/queries";
 import { ops } from "../api/ops";
 import { Async, useCommand } from "../ui/async";
-import { Btn, Chip, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, Stat, StatRow, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
+import { Btn, Chip, Empty, Field, FilterBar, LockNote, SearchBox, Select, Stat, StatRow, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
 import { DataTable, type SortCol } from "../ui/SortTable";
 import { Dialog } from "../ui/Overlay";
 import { Icon } from "../ui/Icon";
@@ -69,25 +69,24 @@ function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] })
   const open = (sk: SkillRow) => navigate("skills", sk.id);
   const cols: SortCol<SkillRow>[] = [
     { key: "name", label: "Skill", sort: (sk) => sk.name.toLowerCase(), render: (sk) => (
-      <div>
-        <div><a className="sk-name" href={hashFor("skills", sk.id)} onClick={(e) => { e.preventDefault(); open(sk); }}>{sk.name}</a><DraftDot scope="skill" id={sk.id} />{sk.builtin ? <Chip text="built-in" /> : null}</div>
-        <div className="small muted sk-desc">{sk.desc}</div>
-        <div className="small sk-meta">{`Owner: ${actor(sk.owner).name.replace(" (agent)", "")}`}</div>
+      <div className="sk-cell">
+        <div className="row"><a className="rl ell sk-name" href={hashFor("skills", sk.id)} onClick={(e) => { e.preventDefault(); open(sk); }}>{sk.name}</a><DraftDot scope="skill" id={sk.id} />{sk.builtin ? <Chip text="built-in" /> : null}</div>
+        <span className="dim ell" style={{ fontSize: 12 }} title={`Owner: ${actor(sk.owner).name.replace(" (agent)", "")}`}>{sk.desc}</span>
       </div>
     ) },
     { key: "projects", label: "Projects", render: (sk) => sk.projects === "all" ? "all projects" : sk.projects.length ? `${sk.projects.length} project${sk.projects.length > 1 ? "s" : ""}` : <span className="warn-text">no projects</span> },
     { key: "version", label: "Version", render: (sk) => <span className="mono">{`v${sk.version}`}</span> },
-    { key: "used", label: "Used by", sort: (sk) => usedBy(sk.id).length, align: "end", render: (sk) => { const n = usedBy(sk.id).length; return <span className={`mono${n ? "" : " muted"}`}>{String(n)}</span>; } },
+    { key: "used", label: "Used by", sort: (sk) => usedBy(sk.id).length, render: (sk) => { const u = usedBy(sk.id); return u.length ? <span className="row nowrap">{u.map((a) => <span key={a.id} className="tag">{a.name}</span>)}</span> : <span className="dim">{"\u2014"}</span>; } },
     { key: "cov", label: "Eval coverage", sort: (sk) => covPct(sk), render: (sk) => <CovCell sk={sk} /> },
   ];
   return (
-    <Panel flush cls="sk-lib">
-      <Tabs idPrefix="sk-view" items={views.map((v) => ({ id: v.id, label: v.label, count: skills.filter(v.test).length }))} active={ui.filter} onChange={(t) => { ui.filter = t; rerender(); }} />
+    <>
       <FilterBar label="Filter skills" count={`${list.length} of ${skills.length}`}>
-        <SearchBox id="sk-search" value={ui.q} onChange={(v) => { ui.q = v; rerender(); }} placeholder="Filter by name or purpose" label="Filter skills" />
+        <SearchBox id="sk-search" value={ui.q} onChange={(v) => { ui.q = v; rerender(); }} placeholder="Search skills" label="Filter skills" />
+        <Select id="sk-view" aria-label="View" value={ui.filter} onChange={(t) => { ui.filter = t as SkillView; rerender(); }} options={views.map((v) => ({ value: v.id, label: `View: ${v.label} (${skills.filter(v.test).length})` }))} />
       </FilterBar>
-      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} empty={{ title: "No skills match", text: "Clear the filter to see the whole library." }} />
-    </Panel>
+      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} pageSize={12} empty={{ title: "No skills match", text: "Clear the filter to see the whole library." }} />
+    </>
   );
 }
 
@@ -324,8 +323,8 @@ export default function SkillsView() {
   useCrumbTail(wanted ? skills.find((s) => s.id === wanted)?.name : null);
   const sub = "Reusable know-how attached to agents. A skill is text plus a version, so a change to it is a reviewed edit, not a code change.";
   const newBtn = <Btn label="New skill" kind="primary" icon="plus" id="sk-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill agents={agents} close={close} />)} />;
-  if (q.data === undefined) return <div className="view view-skills"><ViewHead title="Skills" sub={sub} actions={newBtn} /><Async query={q} what="skills" id="skills">{() => null}</Async></div>;
-  if (!skills.length) return <div className="view view-skills"><ViewHead title="Skills" sub={sub} actions={newBtn} /><Empty title="No skills yet" text="Create the first skill." /></div>;
+  if (q.data === undefined) return <div className="view view-skills"><ViewHead kicker="Workforce" title="Skills" sub={sub} actions={newBtn} /><Async query={q} what="skills" id="skills">{() => null}</Async></div>;
+  if (!skills.length) return <div className="view view-skills"><ViewHead kicker="Workforce" title="Skills" sub={sub} actions={newBtn} /><Empty title="No skills yet" text="Create the first skill." /></div>;
   if (wanted) {
     const current = skills.find((s) => s.id === wanted);
     if (!current) {
@@ -339,18 +338,9 @@ export default function SkillsView() {
     ui.sel = current.id;
     return <div className="view view-skills"><Detail sk={current} agents={agents} /></div>;
   }
-  const unused = skills.filter((sk) => !agents.some((a) => a.skills.includes(sk.id) || (a.liveSkills ?? []).some((l) => l.id === sk.id))).length;
-  const cases = skills.reduce((t, sk) => t + sk.coverage.cases, 0);
-  const pass = skills.reduce((t, sk) => t + sk.coverage.pass, 0);
   return (
     <div className="view view-skills">
-      <ViewHead title="Skills" sub={sub} actions={newBtn} />
-      <StatRow id="sk-stats">
-        <Stat label="Skills" value={String(skills.length)} sub="in the library" />
-        <Stat label="Unused" value={String(unused)} sub="not attached to any agent" tone={unused ? "wait" : undefined} />
-        <Stat label="Eval cases" value={String(cases)} sub="covering skills" />
-        <Stat label="Pass rate" value={cases ? fmt.pct(pass / cases) : "–"} sub="across those cases" />
-      </StatRow>
+      <ViewHead kicker="Workforce" title="Skills" sub={sub} actions={newBtn} />
       <Library skills={skills} agents={agents} />
     </div>
   );

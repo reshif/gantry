@@ -10,6 +10,7 @@ import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { DemotionsTab, PolicyTab, ProposalsTab } from "./trust/Tabs";
+import { MatrixTab } from "./trust/Matrix";
 import { LadderTab, type LadderProps } from "./trust/Ladder";
 import { rerender, trustFocus, trustUi, useTrustUi, type CellOut, type TrustTab } from "./trust/kit";
 import { useCatalog } from "./projects/kit";
@@ -44,9 +45,7 @@ export default function TrustView() {
   if (!tr || !cat) return <div className="view view-trust"><ViewHead title="Trust" /><Async query={all} what="trust levels" id="trust">{() => null}</Async></div>;
   const proj = projects.find((p) => p.id === project)!;
   const pending = proposals.filter((x) => x.status === "pending");
-  const saved = pending.reduce((t, x) => t + (x.savedPerWeek || 0), 0);
   const dem7 = cells.reduce((n, c) => n + (c.history || []).filter((e) => (e.kind === "demote" || (e.kind === "grant" && e.from != null && e.to < e.from)) && e.at >= Date.now() - 7 * DAY).length, 0);
-  const cov = Object.values(tr.coverage ?? {}).reduce((a, c) => ({ total: a.total + c.total, auto: a.auto + c.auto }), { total: 0, auto: 0 });
   const unattended = cells.filter((c) => c.level >= 3).length;
   const ladderCells = (lad.data?.cells ?? cells.filter((c) => c.project === project)) as CellOut[];
   const base: LadderProps = {
@@ -54,21 +53,20 @@ export default function TrustView() {
     coverage: tr.coverage?.[proj.id] ?? { total: 0, auto: 0 }, agentName, clsName,
   };
   const tab = trustUi.tab as TrustTab;
-  const tabs = [{ id: "ladder", label: "Ladder" }, { id: "proposals", label: "Proposals", count: pending.length }, { id: "demotions", label: "Demotions", count: dem7 }, { id: "policy", label: "Ceilings and criteria" }];
-  const body = tab === "proposals" ? <ProposalsTab p={base} cells={cells} proposals={proposals} />
+  const tabs = [{ id: "matrix", label: "Matrix" }, { id: "ladder", label: "Ladder" }, { id: "proposals", label: "Proposals", count: pending.length }, { id: "demotions", label: "Demotions", count: dem7 }, { id: "policy", label: "Ceilings and criteria" }];
+  const body = tab === "matrix" ? <MatrixTab cells={cells} projects={projects} agents={(agentsData ?? []).map((a) => ({ id: a.id, name: a.name }))} />
+    : tab === "proposals" ? <ProposalsTab p={base} cells={cells} proposals={proposals} />
     : tab === "demotions" ? <DemotionsTab cells={cells} projects={projects} p={{ ...base, cells }} />
     : tab === "policy" ? <PolicyTab p={{ ...base, cells, ...({ ceilings: tr.ceilings, criteriaVersion: tr.criteriaVersion ?? 0 } as object) } as LadderProps & { criteriaVersion: number }} cells={cells} projects={projects} />
     : <LadderTab p={base} />;
   return (
     <div className="view view-trust">
-      <ViewHead title="Trust" sub="How much each agent is trusted at each human gate, per class of work and per project. Trust is earned from clean work and lost fast. L0 and L1 are enforced; higher levels stay off until switched on." />
+      <ViewHead kicker="Workforce" title="Trust" sub="How much each agent may do without a person, earned by evidence and capped by policy. L0 and L1 are enforced; higher levels stay off until switched on." />
       <StatRow id="tr-stats">
-        <Stat label="Cells" value={String(cells.length)} sub="agent, class and project" />
-        <Stat label="L3 and up" value={String(unattended)} sub="decided by checks" />
+        <Stat label="Cells at L3+" value={String(unattended)} sub="decided by checks" />
         <Stat label="Pending proposals" value={String(pending.length)} sub="waiting for a person" tone={pending.length ? "wait" : undefined} />
-        <Stat label="Saves if approved" value={`${Math.round(saved * 10) / 10}/wk`} sub="human approvals" />
-        <Stat label="Under trust, 7 days" value={cov.total >= 10 ? `${Math.round((cov.auto / cov.total) * 100)}% n=${cov.total}` : `n=${cov.total}`} sub="gate decisions by checks" />
-        <Stat label="Levels above L1" value={tr.levelsAboveL1 ? "On" : "Off"} sub={tr.levelsAboveL1 ? "L2 and L3 can be granted" : "switched off"} />
+        <Stat label="Active ceilings" value={String(tr.ceilings.filter((c) => c.enabled).length)} />
+        <Stat label="Review sample rate" value={`${Math.round(tr.sampleRate * 100)}%`} sub={tr.levelsAboveL1 ? "levels above L1 on" : "levels above L1 off"} />
       </StatRow>
       <Tabs idPrefix="tr-tab" items={tabs} active={tab} onChange={(t) => { trustUi.tab = t as TrustTab; trustUi.hiProposal = null; rerender(); }} />
       <div id="tr-tab-panel" role="tabpanel" className="tr-panel">{body}</div>

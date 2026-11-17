@@ -55,21 +55,17 @@ export default function EvalsView() {
   if (d.q.data === undefined) return <div className="view view-evals"><ViewHead title="Evals" /><Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
   if (!d.agents.length) return <div className="view view-evals"><ViewHead title="Evals" /><Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
   const regs = regressionsOf(d);
-  let eligible = 0;
-  let waiting = 0;
-  for (const a of d.agents) for (const v of a.versions) if (v.rc) { waiting++; if (v.eligibility.ok) eligible++; }
   const tab = evalsUi.tab as EvalsTab;
   const body = tab === "suites" ? <SuitesTab d={d} /> : tab === "factory" ? <FactoryTab d={d} /> : <ScorecardsTab d={d} label={label} />;
-  const overall = d.extra?.overrideRate ?? 0;
+  const passing = d.suites.filter((su) => { const done = d.runsOf(su.id).filter((r) => r.status === "completed"); const last = done[done.length - 1]; return !!last && last.score >= su.threshold; }).length;
   return (
     <div className="view view-evals">
-      <ViewHead title="Evals" sub="How well each agent does its job, on real work and on its golden-task suite. A version is promoted only on a passing run. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories." />
+      <ViewHead kicker="Workforce" title="Evals" sub="Golden-set suites that decide whether an agent change may go live. Suite runs use the same runtime as work, in sandboxes with no write access to real repositories." />
       <StatRow id="ev-stats">
-        <Stat label="Suites" value={String(d.suites.length)} sub={`${d.suites.filter((x) => x.builtin).length} built in`} />
-        <Stat label="Runs" value={String(d.runs.length)} sub="all time" />
-        <Stat label="Regressions" value={String(regs.length)} sub="in the last 14 days" tone={regs.length ? "block" : undefined} />
-        <Stat label="Candidates eligible" value={String(eligible)} sub={`of ${waiting} waiting`} tone={eligible ? "done" : undefined} />
-        <Stat label="Human override rate" value={fmt.pct(overall)} sub="gate decisions changed by a person" />
+        <Stat label="Suites" value={String(d.suites.length)} />
+        <Stat label="Passing" value={String(passing)} tone="done" />
+        <Stat label="Below threshold" value={String(d.suites.length - passing)} tone={d.suites.length - passing ? "block" : undefined} />
+        <Stat label="Runs, 7 days" value={String(d.runs.filter((r) => r.at > Date.now() - 7 * DAY).length)} />
       </StatRow>
       {regs.length ? (
         <div className="callout callout-fail ev-regs" role="note">
@@ -89,7 +85,7 @@ export default function EvalsView() {
           </div>
         </div>
       ) : null}
-      <Tabs idPrefix="ev-tab" items={[{ id: "agents", label: "Scorecards" }, { id: "suites", label: "Suites and runs", count: d.suites.length }, { id: "factory", label: "Factory-wide" }]} active={tab} onChange={(t) => { evalsUi.tab = t as EvalsTab; rerender(); }} />
+      <Tabs idPrefix="ev-tab" items={[{ id: "suites", label: "Suites and runs", count: d.suites.length }, { id: "agents", label: "Scorecards" }, { id: "factory", label: "Factory-wide" }]} active={tab} onChange={(t) => { evalsUi.tab = t as EvalsTab; rerender(); }} />
       {body}
     </div>
   );

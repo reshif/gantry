@@ -29,7 +29,7 @@
 .ev-promo .chip { margin-left: 6px; }
 
 /* suites */
-.ev-suites { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+.ev-suites { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); align-items: start; }
 .ev-suites-main { display: grid; gap: var(--s4); min-width: 0; }
 .ev-suite .run-bar .field { width: 220px; max-width: 100%; }
 .ev-run-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
