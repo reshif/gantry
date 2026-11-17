@@ -97,6 +97,25 @@ describe("MCP servers screen", () => {
     expect(screen.queryByText("No MCP servers yet")).toBeNull();
   });
 
+  it("maps a 'down' health to the failing tone", async () => {
+    const { Health } = await import("./mcp/kit");
+    const { container } = render(<Health st="down" />);
+    expect(container.querySelector(".tone-block")).toBeTruthy();
+  });
+
+  it("keeps Disabled out of the Healthy filter and counts a disabled server as not healthy", async () => {
+    setup();
+    mount();
+    await byId("mcp-row-mcp-chg-0001");
+    expect(document.getElementById("mcp-stats")!.textContent).toMatch(/Not healthy1degraded, failing, offline or disabled/);
+    fireEvent.change(document.getElementById("mcp-f-health")!, { target: { value: "healthy" } });
+    expect(document.getElementById("mcp-row-mcp-chg-0001")).toBeNull();
+    expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeTruthy();
+    fireEvent.change(document.getElementById("mcp-f-health")!, { target: { value: "disabled" } });
+    expect(document.getElementById("mcp-row-mcp-chg-0001")).toBeTruthy();
+    expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeNull();
+  });
+
   it("lists the registry with health, tool counts, sensitivity and the scope line, and shows the first server's detail", async () => {
     setup();
     mount();
@@ -107,10 +126,10 @@ describe("MCP servers screen", () => {
     expect(row.textContent).toContain("1 projects · all repos · 1 agents · 1 stations · all classes");
     expect(row.textContent).toContain("2 R · 1 W");
     expect(row.textContent).toContain("1 denied");
-    expect(within(row).getByText("internal").className).toContain("mcp-sens-internal");
+    expect(within(row).getByText("Internal")).toBeTruthy();
     expect((await byId("mcp-row-mcp-chg-0001")).textContent).toContain("disabled");
     // header meta
-    const head = document.querySelector(".titleblock")!.textContent!;
+    const head = document.getElementById("mcp-stats")!.textContent!;
     expect(head).toContain("Servers2");
     expect(head).toContain("Write tools2");
     expect(head).toContain("Calls 24h2");

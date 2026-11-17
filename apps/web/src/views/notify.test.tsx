@@ -232,6 +232,9 @@ describe("Notifications", () => {
     const kill = (await byId("nt-en-NR-2")) as HTMLInputElement;
     expect(kill.getAttribute("aria-disabled")).toBe("true");
     expect(kill.getAttribute("data-reason")).toMatch(/cannot be switched off/i);
+    expect(document.getElementById("nt-stats")!.textContent).not.toMatch(/top-bar switcher|enabled and total/);
+    fireEvent.click(document.getElementById("nt-go-log")!);
+    expect(document.getElementById("nt-tab-log")!.getAttribute("aria-selected")).toBe("true");
     expect(document.body.textContent).not.toMatch(/simulated/i);
   });
 
@@ -297,7 +300,7 @@ describe("Notifications", () => {
   it("the delivery log shows failures with their reason and retries one", async () => {
     const calls = setup({ "POST /api/v1/deliveries/DLV-9/retry": () => ({ body: { ok: true, msg: "Queued again. The delivery log shows the outcome." } }) });
     mount(<NotificationsView />);
-    fireEvent.click(await screen.findByText(/Delivery log/));
+    fireEvent.click(await byId("nt-tab-log"));
     const row = await byId("nt-dl-DLV-9");
     expect(within(row).getByText(/channel_not_found/)).toBeTruthy();
     expect(within(row).getByText("✕ failed")).toBeTruthy();

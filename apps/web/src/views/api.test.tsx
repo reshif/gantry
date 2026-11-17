@@ -101,7 +101,7 @@ describe("API & triggers: keys", () => {
     expect(within(await byId("api-key-row-key-2")).getByText("⊘ revoked")).toBeTruthy();
     expect(within(await byId("api-key-row-key-3")).getByText("⊘ expired")).toBeTruthy();
     expect(document.getElementById("api-key-revoke-key-2")).toBeNull(); // nothing to revoke
-    const meta = document.querySelector(".vhead-meta, .vhead")!.textContent ?? "";
+    const meta = document.getElementById("api-stats")!.textContent ?? "";
     expect(meta).toMatch(/Active keys\s*1/);
     expect(meta).toMatch(/Requests 24h\s*2/);
     expect(meta).toMatch(/Rate limited 24h\s*1/);

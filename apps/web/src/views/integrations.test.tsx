@@ -82,7 +82,7 @@ describe("Integrations screen", () => {
     expect(table.textContent).toContain("Disabled");
     expect(table.textContent).toContain("Payments Platform");
     expect(document.getElementById("int-attn-int-gh-1")?.textContent).toBe("GitHub org");
-    expect(text()).toContain("Types3 (0 custom)");
+    expect(text()).toContain("Types3in the catalogue, 0 custom");
     expect(locked(await byId("int-add"))).toBe(false);
   });
 

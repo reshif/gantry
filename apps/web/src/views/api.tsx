@@ -5,7 +5,7 @@
  * the conversation endpoint (not in the public API), and the Ed25519 and HMAC-SHA512 signing choices (the delivery implements HMAC-SHA256 only).
  */
 import { useState } from "react";
-import { Tabs, ViewHead } from "../ui/primitives";
+import { Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { KeysTab } from "./api/Keys";
 import { LimitsTab } from "./api/Limits";
 import { LogTab } from "./api/Log";
@@ -30,8 +30,13 @@ export default function ApiView() {
       <ViewHead
         title="API & triggers"
         sub="Submit and follow work orders from other systems, and open work from source control, issue trackers, CI and schedules. Triggers are off until you switch them on."
-        meta={[["Active keys", qState(d.keysQ, () => String(active.length))], ["Requests 24h", qState(d.logQ, () => String(d.last24h))], ["Rate limited 24h", qState(d.logQ, () => String(d.limited24h))], ["Triggers on", qState(d.trigQ, () => `${on.length} of ${d.triggers.length}`)]]}
       />
+      <StatRow id="api-stats">
+        <Stat label="Active keys" value={qState(d.keysQ, () => String(active.length))} sub="not revoked or expired" />
+        <Stat label="Requests 24h" value={qState(d.logQ, () => String(d.last24h))} sub="to the API" />
+        <Stat label="Rate limited 24h" value={qState(d.logQ, () => String(d.limited24h))} sub="refused for going over the limit" tone={d.limited24h ? "wait" : undefined} />
+        <Stat label="Triggers on" value={qState(d.trigQ, () => `${on.length} of ${d.triggers.length}`)} sub="switched on" />
+      </StatRow>
       <Tabs idPrefix="api-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="api-tab-panel" role="tabpanel" aria-labelledby={`api-tab-${tab}`}>
         {tab === "ref" ? <RefTab d={d} /> : tab === "play" ? <PlayTab d={d} /> : tab === "log" ? (
