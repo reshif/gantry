@@ -70,4 +70,8 @@
 }
 .md-routing .rule-card { border-left-width: 1px; border-color: var(--line); border-radius: var(--r1); background: var(--surface); }
 .md-routing .md-rule-form { border-radius: var(--r1); }
-@media (max-width: 560px) { .view-models .stat-val { font-size: 20px; white-space: normal; overflow-wrap: anywhere; } }
+@media (max-width: 560px) { .view-models .stat-val { white-space: normal; overflow-wrap: anywhere; } }
+.md-price-in { max-width: 110px; }
+.md-vb-meter { min-width: 140px; }
+#pv-form .md-price-form { margin-top: 12px; }
+@media (max-width: 560px) { .md-price-in { max-width: 84px; } #pv-edit td:first-child { min-width: 150px; } }

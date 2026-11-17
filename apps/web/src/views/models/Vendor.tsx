@@ -35,7 +35,7 @@ export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; v
       </div>
       <div className="vendor-facts">
         <dl className="kv tb-vendor">
-          <div><dt>Latency p50</dt><dd className="mono">{v.connected && v.latency ? `${v.latency} ms` : "Not measured yet"}</dd></div>
+          <div><dt>Latency p50</dt><dd className="mono">{!v.connected ? "–" : v.latency ? `${v.latency} ms` : "Not measured yet"}</dd></div>
           <div><dt>{endpointVendor ? "Endpoint" : "Region"}</dt><dd className="mono" title={endpointVendor ? v.endpoint : v.region}>{(endpointVendor ? v.endpoint : v.region) || "–"}</dd></div>
           <div><dt>Key</dt><dd className="mono">{v.keyMask || "none"}</dd></div>
           <div><dt>Spend MTD</dt><dd className="mono">{fmt.money0(v.mtd || 0) + (v.budget ? ` / ${fmt.money0(v.budget)}` : "")}</dd></div>

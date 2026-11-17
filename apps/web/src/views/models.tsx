@@ -19,7 +19,7 @@ import { useCatalog } from "./projects/kit";
 import { useAllRepos } from "./govern/data";
 import { Callout } from "./models/Callout";
 import { AddVendorDialog } from "./models/Templates";
-import { BudgetsPanel, PricesPanel } from "./models/Prices";
+import { BudgetsPanel, PricesPanel, VendorBudgets } from "./models/Prices";
 import { RoutingPanel } from "./models/Routing";
 import { VendorPanel } from "./models/Vendor";
 import { dec } from "./models/kit";
@@ -39,7 +39,7 @@ export default function ModelsView() {
 
   const mtd = vendors.reduce((t, v) => t + (v.mtd || 0), 0);
   const bud = vendors.reduce((t, v) => t + (v.budget || 0), 0);
-  const allN = vendors.reduce((t, v) => t + v.models.length, 0);
+  const allN = vendors.reduce((t, v) => t + (v.connected ? v.models.length : 0), 0);
   const enabledN = vendors.reduce((t, v) => t + (v.connected ? v.models.filter((m) => m.enabled).length : 0), 0);
   const degraded = vendors.filter((v) => v.connected && v.health !== "healthy");
   const defaultModel = vendors.flatMap((v) => v.models.map((m) => ({ m, v }))).find((x) => x.m.id === rq.data?.defaultModel);
@@ -83,6 +83,7 @@ export default function ModelsView() {
             ) : (
               <div className="md-stack">
                 <PricesPanel vendors={vendors} />
+                <VendorBudgets vendors={vendors} />
                 <BudgetsPanel projects={projects} />
               </div>
             )}
