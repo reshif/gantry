@@ -13,6 +13,7 @@ import "./views/wosession.css";
 import "./views/project-config.css";
 import "./views/projects.css";
 import "./views/people.css";
+import "./views/signin.css";
 import "./views/access.css";
 import "./views/security.css";
 import "./views/audit.css";

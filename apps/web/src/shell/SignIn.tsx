@@ -31,15 +31,16 @@ export function SignIn({ config, error }: { config: PublicConfig | null; error?:
               </li>
             ))}
           </ol>
-          <p className="auth-demo-note">
-            <Icon name="alert" />
+          <p className="auth-note">Gantry shows nothing until you are signed in. After you sign in, you go back to the page you asked for.</p>
+          <p className="auth-note auth-demo-note">
+            <Icon name={demo ? "alert" : "key"} />
             <span>{demo ? "Development sign-in is on: seeded demo accounts can sign in. Use this only on a local stack." : "Sign-in is handled by your organisation's identity provider."}</span>
           </p>
         </section>
-        <section className="auth-panel" aria-label="Sign in">
+        <section className="auth-panel" aria-labelledby="auth-h">
           <div>
-            <div className="kicker">Sign in</div>
-            <h2 className="auth-h">{config?.orgName ?? "Gantry"}</h2>
+            <h1 className="auth-h" id="auth-h">{`Sign in to ${config?.orgName ?? "Gantry"}`}</h1>
+            <p className="muted auth-sub">{demo ? "Choose how to sign in. Demo accounts are listed below." : "Choose how to sign in."}</p>
           </div>
           {error ? (
             <div className="callout callout-block" role="alert">
@@ -54,7 +55,7 @@ export function SignIn({ config, error }: { config: PublicConfig | null; error?:
           <Btn label="Continue with GitHub" id="auth-gh" icon="github" disabledReason={config?.githubLogin === false ? "GitHub sign-in is turned off in Security settings." : null} onClick={() => go("github")} />
           {demo ? (
             <div className="auth-demo">
-              <h3 className="sub-h">Demo accounts · one click, development only</h3>
+              <h2 className="auth-demo-h">Demo accounts<span>one click, development only</span></h2>
               <ul className="demo-list">
                 {accounts.map((d) => (
                   <li key={d.id}>
