@@ -31,8 +31,8 @@ describe("Work orders table", () => {
     mount(<WorkOrdersView />);
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
     expect(screen.queryByText("No work orders match")).toBeNull();
-    const shipped = Array.from(document.querySelectorAll(".titleblock div")).find((d) => d.textContent?.startsWith("Shipped"));
-    expect(shipped?.querySelector(".async-stat")).toBeTruthy();
+    // the tabs carry no count at all while the read is refused, never a 0
+    expect(document.querySelectorAll("#wo-tab-all .tab-count, #wo-tab-shipped .tab-count")).toHaveLength(0);
   });
 
   it("asks the server for the sorted, filtered page and pages with the cursor", async () => {
@@ -45,8 +45,8 @@ describe("Work orders table", () => {
     expect(document.querySelectorAll("#wo-table tbody tr")).toHaveLength(3);
     expect(screen.getByText("3 of 5 shown")).toBeTruthy();
     // header sort is server-side: the id column starts descending, a click flips it
-    fireEvent.click(document.getElementById("wo-sort-title") as HTMLElement);
-    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "title" && c.query.get("dir") === "asc")).toBe(true));
+    fireEvent.click(document.getElementById("wo-table-sort-state") as HTMLElement);
+    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "state" && c.query.get("dir") === "asc")).toBe(true));
     // filters are sent, "all" is not
     fireEvent.change(document.getElementById("wo-f-cls") as HTMLElement, { target: { value: "bug" } });
     await waitFor(() => expect(lists(calls).some((c) => c.query.get("cls") === "bug")).toBe(true));
