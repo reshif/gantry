@@ -61,6 +61,29 @@ describe("governed web research", () => {
     expect(s3.objects.get(`/gantry-test/sha256/${src.contentHash}`)!.toString()).toBe(b.text);
   });
 
+  it("refuses an IP literal even when it is on the allow-list, directly or by redirect (the DNS guard never sees one)", async () => {
+    api.override = (r) => {
+      if (r.url.endsWith("/research/hosts")) return [200, { ok: true, hosts: ["169.254.169.254", "127.0.0.1", "[::1]", "docs.nautobot.com"] }];
+      if (r.url.endsWith("/research/source")) return [200, { ok: true, ref: "s1" }];
+      return undefined;
+    };
+    for (const u of ["https://169.254.169.254/latest/meta-data/", "https://127.0.0.1/", "https://[::1]/", "https://2130706433/", "https://0x7f.1/"]) {
+      const r = await research({ url: u });
+      expect(r.status, u).toBe(403);
+      expect((await r.json()).msg, u).toMatch(/IP address/);
+    }
+    pages["https://docs.nautobot.com/go"] = { status: 302, location: "https://169.254.169.254/latest/meta-data/" };
+    const red = await research({ url: "https://docs.nautobot.com/go" });
+    expect(red.status).toBe(403);
+    expect((await red.json()).msg).toMatch(/IP address.*redirect/);
+    expect(fetched).toEqual(["https://docs.nautobot.com/go"]);
+  });
+
+  it("the real public-only agent cannot be steered at a loopback server by name, and isIpLiteral covers both families", async () => {
+    const { isIpLiteral } = await import("../src/research.js");
+    expect([isIpLiteral("10.0.0.5"), isIpLiteral("[fd00::1]"), isIpLiteral("docs.nautobot.com"), isIpLiteral("a.1")]).toEqual([true, true, false, false]);
+  });
+
   it("refuses hosts off the list, including through a redirect, and non-https or non-text; refusals are recorded", async () => {
     expect((await research({ url: "https://evil.example.com/x" })).status).toBe(403);
     expect((await research({ url: "http://docs.nautobot.com/x" })).status).toBe(422);

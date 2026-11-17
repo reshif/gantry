@@ -13,16 +13,27 @@ const HEARTBEAT_SECONDS = 15;
 export const LEASE_SECONDS = HEARTBEAT_SECONDS * 6;
 
 const READ_TOOLS = ["Read", "Glob", "Grep"];
+/** "May run tests" is a set of test commands, never a bare `Bash`: an unrestricted shell would run whatever injected text asks for. Mirrors runner/wrapper/src/tools.ts. */
+export const TEST_COMMANDS = ["Bash(npm test:*)", "Bash(npm run test:*)", "Bash(npx vitest:*)", "Bash(npx jest:*)", "Bash(pnpm test:*)", "Bash(yarn test:*)", "Bash(pytest:*)", "Bash(python -m pytest:*)", "Bash(go test:*)", "Bash(cargo test:*)"];
+const UNRESTRICTED_SHELL = /^Bash(?:\(\s*(?:\*+|:\*+)?\s*\))?$/;
 const TOOL_NAMES: Record<string, string[]> = {
   readRepo: READ_TOOLS,
   writeBranch: ["Edit", "Write", "NotebookEdit"],
-  runTests: ["Bash"],
+  runTests: TEST_COMMANDS,
 };
 
 /** The tool allow-list: an explicit list on the agent version wins, then the legacy tools flags, then read-only. */
 export function toolAllowList(body: Record<string, unknown>, data: Record<string, unknown>): string[] {
   const explicit = body.toolAllowList ?? data.toolAllowList;
-  if (Array.isArray(explicit)) return explicit.filter((t): t is string => typeof t === "string" && t.length > 0);
+  if (Array.isArray(explicit)) {
+    const out = new Set<string>();
+    for (const t of explicit) {
+      if (typeof t !== "string" || !t) continue;
+      if (UNRESTRICTED_SHELL.test(t.trim())) for (const c of TEST_COMMANDS) out.add(c);
+      else out.add(t);
+    }
+    return [...out];
+  }
   const flags = (body.tools ?? data.tools) as Record<string, unknown> | undefined;
   if (flags && typeof flags === "object") {
     const out = new Set<string>();

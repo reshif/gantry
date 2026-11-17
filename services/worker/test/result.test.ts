@@ -21,6 +21,8 @@ d("run.result, publish and teardown", () => {
     const a = await w.workOrderAt("WO-9101", { station: "research", repo: null });
     await w.drain();
     expect(w.launcher.runs.has(a.runId)).toBe(true);
+    // The research station wrote its note (G1f judges that document, not the agent's claim).
+    await w.q(`insert into artefacts (org_id, id, wo_id, attempt_id, kind, name, content_hash, media_type, size_bytes, station, doc, version, author_kind, body) values ($1,'art-9101',$2,$3,'document','research.md',$4,'text/markdown',1,'research','research.md',1,'agent','note')`, [w.orgId, "WO-9101", a.attemptId, "0".repeat(64)]);
     await deliverResult(w, a, "WO-9101", "research", "succeeded", { findings: [] });
     await w.drain();
     expect((await w.q(`select state, outcome from attempts where id = $1`, [a.attemptId]))[0].state).toBe("succeeded");
@@ -48,6 +50,20 @@ d("run.result, publish and teardown", () => {
     expect(wo.data.outputs.build._labels.systemObserved).toContain("headSha");
     expect((await w.q(`select count(*)::int as n from events where type = 'run.published'`))[0].n).toBe(1);
     expect((await w.q(`select state from attempts where id = $1`, [a.attemptId]))[0].state).toBe("succeeded");
+  });
+
+  it("passes the agent's forbidden paths to the broker, and a guardrail breach fails the station without applying it", async () => {
+    const agent = (await w.q(`select id from agents order by id limit 1`))[0].id;
+    const a = await w.workOrderAt("WO-9105", { station: "build", github: true, agent });
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"1".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    await w.q(`update agents set data = jsonb_set(data, '{guardrails}', '{"paths":["infra/**",".github/workflows/**"],"maxDiff":0}'::jsonb) where id = $1`, [agent]);
+    await w.drain();
+    w.broker.publishResponse = { status: 422, body: { ok: false, code: "guardrail_breach", msg: "infra/main.tf is on the agent's forbidden paths" } };
+    await deliverResult(w, a, "WO-9105", "build", "succeeded", { commits: ["x"] });
+    await w.drain();
+    const pub = w.broker.calls.find((c) => c.op === "publish")!;
+    expect(pub.body.denyPaths).toEqual(["infra/**", ".github/workflows/**"]);
+    expect((await w.q(`select state from attempts where id = $1`, [a.attemptId]))[0].state).toBe("failed");
   });
 
   it("a workspace the broker refuses (non-linear history) fails the station instead of losing the work", async () => {

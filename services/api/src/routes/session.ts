@@ -63,7 +63,7 @@ const SecuritySchema = z.object({
   killNeedsStepUp: z.boolean(),
   stepUpWindowMinutes: z.number().int().min(5).max(60).optional(),
   githubLogin: z.boolean(),
-  researchHosts: z.array(z.string().max(253).regex(/^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/)).max(200).optional(),
+  researchHosts: z.array(z.string().max(253).regex(/^(?!.*\.\d+$)(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/)).max(200).optional(),
   chatCapUsdPerDay: z.number().min(0).max(100_000).nullable().optional(),
 });
 

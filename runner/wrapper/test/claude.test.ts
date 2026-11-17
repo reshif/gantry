@@ -46,6 +46,15 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(inv.env).not.toHaveProperty("ANTHROPIC_API_KEY");
   });
 
+  it("never hands the model an unrestricted shell, and scrubs credentials from tool subprocesses", () => {
+    const wide = buildClaudeInvocation(RunSpec.parse({ adapter: "claude", station: "build", model: "m", toolAllowList: ["Read", "Bash", "Bash(*)"] }), env, { PATH: "/usr/bin" });
+    const allowed = wide.args[wide.args.indexOf("--allowedTools") + 1]!.split(",");
+    expect(allowed).not.toContain("Bash");
+    expect(allowed).not.toContain("Bash(*)");
+    expect(allowed).toContain("Bash(npm test:*)");
+    expect(inv.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
+  });
+
   it("passes limits, model, tools and composed instructions explicitly", () => {
     expect(flag("--max-turns")).toBe("12");
     expect(flag("--model")).toBe("claude-sonnet-4-5-20250929");

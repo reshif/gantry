@@ -53,10 +53,11 @@ d("flow: submit, intake, confirm", () => {
       seen.push(`${wo.station}:${wo.state}`);
       const att = await w.liveAttempt(id);
       if (wo.state === "running" && att) {
-        const rr = await w.tx((tx) => import("../src/areas/workorders/station.js").then((m) => m.applyStationResult(tx, att.id, Number(att.fencing), { status: "succeeded", summary: `${att.station} done`, usage: { tokens: 1000, costUsd: 0.01 } })));
+        const rr = await w.apply(att, { status: "succeeded", summary: `${att.station} done`, usage: { tokens: 1000, costUsd: 0.01 } });
         expect(rr.applied, JSON.stringify(rr)).toBe(true);
         continue;
       }
+      if (wo.state === "waiting" && (await w.ciArrives(id))) continue;
       if (wo.state === "waiting" && wo.allowed.approve) {
         let passed = false;
         for (const who of approvers) {

@@ -136,7 +136,7 @@ async function unparkInner(fx: Fx, actor: Actor, w: Wo, reason?: string): Promis
     delete w.data.bayFrom;
     delete w.data.bayAt;
     w.position = back;
-    await openGate(fx, w, "G3G3s", { project, checks });
+    await openGate(fx, w, "G3G3s", { project, checks, evidence: "person" });
   } else {
     await resumeAt(fx, w, back);
   }

@@ -158,6 +158,18 @@ describe("publish", () => {
     expect(f.pullRequests[0]).toMatchObject({ number: r.body.pullRequest.number, headSha: r.body.headSha, headBranch: "gantry/WO-1", state: "open" });
   });
 
+  it("refuses a commit that touches a path the agent was forbidden to modify, before anything is written to GitHub", async () => {
+    const w = await workspace();
+    await commitTwo(w.dir);
+    env.gh.requests.length = 0;
+    const r = await publish(w, { denyPaths: ["src/**", "docs/"] });
+    expect(r.status, JSON.stringify(r.body)).toBe(422);
+    expect(r.body).toMatchObject({ code: "guardrail_breach", path: "src/b.ts" });
+    expect(env.gh.writes()).toHaveLength(0);
+    const ok = await publish(w, { denyPaths: ["infra/**"] });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+  });
+
   it("never executes anything from the workspace: hostile repo config and hooks are not read", async () => {
     const w = await workspace();
     await commitTwo(w.dir);
