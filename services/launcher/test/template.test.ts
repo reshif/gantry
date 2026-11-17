@@ -46,10 +46,11 @@ describe("runner template (spec 4.1)", () => {
     expect(h.Mounts).toEqual([{ Type: "volume", Source: "ws-r1", Target: "/workspace", ReadOnly: false }]);
   });
 
-  it("passes exactly four environment variables", () => {
+  it("passes exactly three environment variables, none of them secret", () => {
     const keys = (o.Env ?? []).map((e) => e.split("=")[0]).sort();
-    expect(keys).toEqual(["EDGE_URL", "GANTRY_RUN_ID", "GANTRY_RUN_TOKEN", "HTTPS_PROXY"]);
-    expect(o.Env?.find((e) => e.startsWith("HTTPS_PROXY="))).toMatch(/^HTTPS_PROXY=http:\/\/run:[^@]+@gantry-edge:8444$/);
+    expect(keys).toEqual(["EDGE_URL", "GANTRY_RUN_ID", "HTTPS_PROXY"]);
+    expect(o.Env?.find((e) => e.startsWith("HTTPS_PROXY="))).toMatch(/^HTTPS_PROXY=http:\/\/gantry-edge:8444$/);
+    expect(JSON.stringify(o)).not.toContain(input.runToken);
     expect(o.Env).toContain("EDGE_URL=http://gantry-edge:8443");
   });
 

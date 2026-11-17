@@ -23,7 +23,7 @@ describe("socket proxy: routes", () => {
     }
   });
   it("refuses everything else: exec, build, image pulls, swarm, plugins, attach, the host's own info", () => {
-    for (const [m, p] of [["POST", "/containers/abc/exec"], ["POST", "/exec/x/start"], ["POST", "/build"], ["POST", "/images/create?fromImage=evil"], ["POST", "/swarm/init"], ["POST", "/plugins/pull"], ["POST", "/containers/abc/attach"], ["PUT", "/containers/abc/archive"], ["GET", "/containers/abc/archive?path=/"], ["POST", "/containers/abc/update"], ["GET", "/info"]] as const) {
+    for (const [m, p] of [["POST", "/containers/abc/exec"], ["POST", "/exec/x/start"], ["POST", "/build"], ["POST", "/images/create?fromImage=evil"], ["POST", "/swarm/init"], ["POST", "/plugins/pull"], ["POST", "/containers/abc/attach"], ["PUT", "/containers/abc/archive/x"], ["PUT", "/containers/abc/start"], ["GET", "/containers/abc/archive?path=/"], ["POST", "/containers/abc/update"], ["GET", "/info"]] as const) {
       expect(route(m, p).decision.ok, `${m} ${p}`).toBe(false);
     }
   });

@@ -4,6 +4,7 @@ import { createClaudeAdapter } from "./adapters/claude.js";
 import { stubAdapter } from "./adapters/stub.js";
 import { EdgeClient, type Checkpoint, type RunResult } from "./edge.js";
 import { readEnv, type RunEnv } from "./env.js";
+import { takeToken } from "./token.js";
 import { readLog, resetLog, STATION_DIR } from "./station-tools.js";
 import type { RunSpec } from "./spec.js";
 
@@ -144,13 +145,18 @@ export async function handOver(o: AdapterOutcome, dir: string, station: string, 
 }
 
 async function main(): Promise<number> {
-  const env = readEnv();
+  // First thing, before anything else starts: read the token file and unlink it. After this the token is only in this process's memory.
+  const tok = await takeToken();
+  if (!tok.ok) {
+    console.error(`[wrapper] ${tok.error}`);
+    return 2;
+  }
+  const env = readEnv(tok.value);
   if (!env.ok) {
     console.error(`[wrapper] bad environment: ${env.error}`);
     return 2;
   }
-  // The wrapper keeps the token in memory only (RunEnv). Whatever it spawns inherits an environment without it.
-  delete process.env.GANTRY_RUN_TOKEN;
+  // The wrapper keeps the token in memory only (RunEnv): not in its environment, not in a file, not in argv.
   return runWrapper({ env: env.value, edge: new EdgeClient(env.value) });
 }
 

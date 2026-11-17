@@ -3,7 +3,7 @@ import type { ContainerInspectInfo, NetworkInspectInfo } from "dockerode";
 import { firstFreeBlock, formatCidr, parseCidr, type Cidr } from "./cidr.js";
 import type { LauncherConfig } from "./config.js";
 import { err, ok, type Result } from "./result.js";
-import { LABEL_MANAGED, LABEL_RUN, LABEL_VARIANT, LABEL_WORKSPACE, MANAGED_BY, names, networkOptions, createRequest, runLabels, runnerContainerOptions, type StartRunInput } from "./template.js";
+import { LABEL_MANAGED, LABEL_RUN, LABEL_VARIANT, LABEL_WORKSPACE, MANAGED_BY, names, networkOptions, createRequest, runLabels, runnerContainerOptions, tokenArchive, WORKSPACE_PATH, type StartRunInput } from "./template.js";
 
 export type LauncherError =
   | { kind: "capacity"; msg: string }
@@ -161,6 +161,8 @@ export class RunManager {
 
     try {
       const container = await this.docker.createContainer(createRequest(runnerContainerOptions(this.cfg, input)));
+      // The token goes into the workspace volume as a file the wrapper reads and unlinks first thing; it is never in the create body or the environment.
+      await container.putArchive(tokenArchive(input.runToken, this.cfg.limits.uid, this.cfg.limits.gid), { path: WORKSPACE_PATH });
       await this.attachEdge(names.network(id), edge);
       await container.start();
     } catch (e) {

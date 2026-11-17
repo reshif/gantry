@@ -13,7 +13,7 @@
  * RUNNER_CPUS (ceilings a runner create must state and stay under), GITHUB_HELPER_IMAGE (workspace profile).
  */
 import http from "node:http";
-import { checkConnect, checkContainer, checkHelperCreate, checkList, checkNetwork, checkVolume, isHelper, managed, route, routeWorkspace, slimNetworks, type Decision, type RunnerLimits } from "./sockpolicy.js";
+import { checkConnect, checkContainer, checkHelperCreate, checkList, checkNetwork, checkTokenArchive, checkVolume, isHelper, managed, route, routeWorkspace, slimNetworks, type Decision, type RunnerLimits } from "./sockpolicy.js";
 import { LABEL_MANAGED } from "./template.js";
 
 const SOCKET = process.env.DOCKER_SOCKET || "/var/run/docker.sock";
@@ -31,6 +31,7 @@ const limits: RunnerLimits = {
   nanoCpus: Math.round(Number(process.env.RUNNER_CPUS || 2) * 1e9),
 };
 const MAX_BODY = 256 * 1024;
+const MAX_ARCHIVE = 8 * 1024;
 const images = new Set(
   (process.env.RUNNER_VARIANTS || "base=gantry-runner:dev")
     .split(",")
@@ -139,13 +140,13 @@ function forward(req: http.IncomingMessage, res: http.ServerResponse, body: Buff
   else req.pipe(up);
 }
 
-function readBody(req: http.IncomingMessage): Promise<Buffer | null> {
+function readBody(req: http.IncomingMessage, max = MAX_BODY): Promise<Buffer | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let n = 0;
     req.on("data", (c: Buffer) => {
       n += c.length;
-      if (n > MAX_BODY) {
+      if (n > max) {
         req.destroy();
         resolve(null);
       } else chunks.push(c);
@@ -213,6 +214,13 @@ function launcherHandler(req: http.IncomingMessage, res: http.ServerResponse): v
     if (r.owned) {
       const own = await ownedBy(r.owned.kind, r.owned.id, r.owned.edgeOk === true);
       if (own !== "missing" && !own.ok) return refuse(res, method, url, own.why);
+    }
+    if (r.body === "archive") {
+      const raw = await readBody(req, MAX_ARCHIVE);
+      if (!raw) return refuse(res, method, url, "The archive is too large or could not be read.");
+      const ad = checkTokenArchive(q, raw);
+      if (!ad.ok) return refuse(res, method, url, ad.why);
+      return forward(req, res, raw);
     }
     if (!r.body) return forward(req, res, null, r.list === "networks" ? slimNetworks : undefined);
     const pb = (await parseBody(req, res, method, url)) as { raw: Buffer; parsed: unknown } | undefined;

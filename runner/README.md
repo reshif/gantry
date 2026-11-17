@@ -10,11 +10,11 @@ docker build -f runner/Dockerfile -t gantry-runner:dev .
 Build args: `NODE_IMAGE` (default `node:22-bookworm-slim`), `CLAUDE_CODE_VERSION` (overrides the pin in `runner/harness/package.json`, default `2.1.311`; the tree is installed from `runner/harness/package-lock.json` with `npm ci --ignore-scripts`, regenerate it with `runner/harness/relock.sh`; `HARNESS_LOCK=require` fails the build without a lock), `RUNNER_TOOLCHAIN` (`full` installs git, build-essential, python3, jq; `minimal` skips OS packages).
 Add `--secret id=cacert,src=/path/ca.crt` behind a TLS-intercepting proxy.
 
-The image holds no secrets and runs as uid 10001. The launcher gives it `EDGE_URL`, `HTTPS_PROXY`, `GANTRY_RUN_TOKEN` and `GANTRY_RUN_ID` and nothing else. The image's own `ENV` sets git identity, points `core.hooksPath` at `/dev/null` (repository hooks never run when the agent runs git), and puts `HOME` and the npm cache on the `/tmp` tmpfs.
+The image holds no secrets and runs as uid 10001. The launcher gives it `EDGE_URL`, a credential-free `HTTPS_PROXY` and `GANTRY_RUN_ID` and nothing else; the run token arrives as `/workspace/.gantry-run-token`, which the wrapper reads and unlinks first thing (it is never in the environment). The image's own `ENV` sets git identity, points `core.hooksPath` at `/dev/null` (repository hooks never run when the agent runs git), and puts `HOME` and the npm cache on the `/tmp` tmpfs.
 
 ## Wrapper (`runner/wrapper`)
 
-1. `GET $EDGE_URL/run/v1/spec` with `Authorization: Bearer $GANTRY_RUN_TOKEN` (zod-validated, see `src/spec.ts`).
+1. `GET $EDGE_URL/run/v1/spec` with `Authorization: Bearer <run token>` (zod-validated, see `src/spec.ts`).
 2. Heartbeat `POST /run/v1/heartbeat` every `spec.heartbeatSeconds` (default 15) with `{runId, at, seq, phase, turn?}`.
 3. Run the adapter chosen by `spec.adapter`:
    - `stub`: deterministic station result built from the spec, no model (`spec.stub.output` returns a given object verbatim; `spec.stub.failWith` forces a failure).

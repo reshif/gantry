@@ -109,7 +109,12 @@ d("launcher against real Docker", () => {
     expect(hc.Tmpfs["/tmp"]).toMatch(/noexec/);
     expect(c.Mounts.map((m: { Type: string; Name: string; Destination: string }) => [m.Type, m.Name, m.Destination])).toEqual([["volume", "ws-it1", "/workspace"]]);
     const env = (c.Config.Env as string[]).map((e) => e.split("=")[0]);
-    for (const k of ["EDGE_URL", "HTTPS_PROXY", "GANTRY_RUN_TOKEN", "GANTRY_RUN_ID"]) expect(env).toContain(k);
+    for (const k of ["EDGE_URL", "HTTPS_PROXY", "GANTRY_RUN_ID"]) expect(env).toContain(k);
+    expect(env).not.toContain("GANTRY_RUN_TOKEN");
+    expect(JSON.stringify(c.Config.Env)).not.toContain(RUN_TOKEN);
+    // The token arrived as a file in the workspace volume (copied into the created container, through a read-only root), owned by the runner uid, mode 0400.
+    expect(sh("exec", "gantry-runner-it1", "cat", "/workspace/.gantry-run-token")).toBe(RUN_TOKEN);
+    expect(sh("exec", "gantry-runner-it1", "stat", "-c", "%a %u:%g", "/workspace/.gantry-run-token").trim()).toBe("400 10001:10001");
     expect(Object.keys(c.NetworkSettings.Networks)).toEqual(["run-it1"]);
 
     const net = JSON.parse(sh("network", "inspect", "run-it1"))[0];
