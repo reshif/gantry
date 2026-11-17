@@ -304,12 +304,22 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
   popRef.current = pop;
   drawerRef.current = drawer;
 
+  const toastTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = toastTimers.current;
+    return () => { for (const t of timers) clearTimeout(t); timers.clear(); };
+  }, []);
   const toast = useCallback((text: string, kind: ToastKind = "info", action?: ToastAction) => {
     const id = seq.current++;
     setToasts((l) => [...l, { id, text, kind, out: false, action }].slice(-3));
-    setTimeout(() => {
+    const timers = toastTimers.current;
+    const later = (fn: () => void, ms: number): void => {
+      const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
+      timers.add(t);
+    };
+    later(() => {
       setToasts((l) => l.map((t) => (t.id === id ? { ...t, out: true } : t)));
-      setTimeout(() => setToasts((l) => l.filter((t) => t.id !== id)), 300);
+      later(() => setToasts((l) => l.filter((t) => t.id !== id)), 300);
     }, action ? 10_000 : 4600);
   }, []);
 

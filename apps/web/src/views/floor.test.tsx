@@ -1,6 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
 import { updatePrefs } from "../lib/prefs";
 import FloorView from "./floor";
 import WorkOrdersView from "./work-orders";
