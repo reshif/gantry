@@ -55,12 +55,18 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, onRow, rowHre
   total?: number;
 }) {
   const uid = useId().replace(/:/g, "");
-  const [own, setOwn] = useState<SortState | undefined>(undefined);
+  const [own, setOwn] = useState<SortState | null | undefined>(undefined);
   const [shown, setShown] = useState(pageSize ?? 0);
+  // a new page size or a different row count (a filter changed) starts the list over at the first page
+  const [seen, setSeen] = useState(`${pageSize ?? 0}:${rows.length}`);
+  if (seen !== `${pageSize ?? 0}:${rows.length}`) {
+    setSeen(`${pageSize ?? 0}:${rows.length}`);
+    setShown(pageSize ?? 0);
+  }
   const [own1, setOwn1] = useState<string>("");
   const [overflow, setOverflow] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
-  const cur = own ?? sort;
+  const cur = own === null ? undefined : (own ?? sort);
   const action = !!(onRow || rowHref);
 
   // keep the scroll region focusable only while it actually scrolls
@@ -109,7 +115,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, onRow, rowHre
       {sortable.length ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
-          <select className="input" value={cur?.key ?? ""} onChange={(e) => e.target.value && pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1)}>
+          <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>
             <option value="">Default order</option>
             {sortable.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>

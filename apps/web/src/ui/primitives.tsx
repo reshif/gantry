@@ -147,8 +147,8 @@ export function Field({ label, htmlFor, hint, description, error, required, chil
   const gen = useFieldId("fld");
   const desc = description ?? hint;
   const el = isValidElement(children) ? (children as ReactElement<Record<string, unknown>>) : null;
-  // wire the child only when it is a control (or a component that renders one) and the caller did not point htmlFor elsewhere
-  const only = el && (typeof el.type !== "string" || ["input", "textarea", "select"].includes(el.type)) && (!htmlFor || typeof el.props.id === "string") ? el : null;
+  // wire the child only when it is a native control, or a component that names its own id (so unknown props never leak into custom controls)
+  const only = el && (typeof el.type === "string" ? ["input", "textarea", "select"].includes(el.type) : typeof el.props.id === "string") ? el : null;
   const ownId = typeof only?.props.id === "string" ? (only.props.id as string) : undefined;
   const controlId = ownId ?? htmlFor ?? gen;
   const descId = desc ? `desc-${controlId}` : undefined;

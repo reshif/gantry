@@ -413,7 +413,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
           <Fragment2 key={s.id} item={s} onClose={() => setStack((l) => l.filter((x) => x.id !== s.id))} />
         ))}
       </div>
-      <div id="layer-pop">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
+      <div id="layer-pop" data-inert-exempt="">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
       <div className="toasts" id="toasts" role="status" aria-live="polite" data-inert-exempt="">
         {toasts.map((t) => (
           <div key={t.id} className={`toast toast-${t.kind}${t.out ? " out" : ""}`}>

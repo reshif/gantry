@@ -15,6 +15,31 @@ import { Btn } from "./primitives";
 const FOCUSABLE = 'a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex="-1"])';
 const EXEMPT = "[data-inert-exempt]";
 
+/** Popovers and menus live in #layer-pop, outside the dialog; keys pressed inside them belong to them, not to the layer underneath. */
+const inPopover = (t: EventTarget | null): boolean => t instanceof Element && !!t.closest("#layer-pop");
+
+/**
+ * The last few elements that took focus. An autoFocus child of a dialog takes focus before the layout effect runs,
+ * so document.activeElement is no longer the opener by then; the opener is the most recent one outside the panel.
+ */
+const recentFocus: HTMLElement[] = [];
+if (typeof document !== "undefined") {
+  document.addEventListener("focusin", (e) => {
+    if (!(e.target instanceof HTMLElement)) return;
+    const i = recentFocus.indexOf(e.target);
+    if (i >= 0) recentFocus.splice(i, 1);
+    recentFocus.push(e.target);
+    if (recentFocus.length > 8) recentFocus.shift();
+  }, true);
+}
+function findOpener(panel: HTMLElement): HTMLElement | null {
+  for (let i = recentFocus.length - 1; i >= 0; i--) {
+    const el = recentFocus[i]!;
+    if (el.isConnected && !panel.contains(el) && el !== document.body) return el;
+  }
+  return null;
+}
+
 /** Open layers, bottom to top. Only the last one handles keys. */
 const layers: HTMLElement[] = [];
 
@@ -54,7 +79,7 @@ export function useModalLayer({ ref, requestClose, initialFocus }: ModalLayerOpt
   useLayoutEffect(() => {
     const panel = ref.current;
     if (!panel) return undefined;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const opener = findOpener(panel);
     // the layer root is the panel's wrapper, so the scrim stays inside the live region
     const root = panel.parentElement ?? panel;
     const undo = inertOutside(root);
@@ -66,7 +91,7 @@ export function useModalLayer({ ref, requestClose, initialFocus }: ModalLayerOpt
       panel.focus();
     }
     const onKey = (e: KeyboardEvent) => {
-      if (layers[layers.length - 1] !== panel) return;
+      if (layers[layers.length - 1] !== panel || inPopover(e.target)) return;
       if (e.key === "Escape" && !e.defaultPrevented) {
         e.stopPropagation();
         close.current();
@@ -138,17 +163,26 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
   const panel = useRef<HTMLDivElement>(null);
   const titleId = `dlg-title-${useId().replace(/:/g, "")}`;
   const [asking, setAsking] = useState(false);
+  const askingRef = useRef(false);
+  askingRef.current = asking;
+  const keepBtn = useRef<HTMLDivElement>(null);
   const requestClose = useCallback(() => {
-    if (dirty) setAsking(true);
+    // Escape while the discard question is open answers it with "keep editing"
+    if (askingRef.current) setAsking(false);
+    else if (dirty) setAsking(true);
     else onClose();
   }, [dirty, onClose]);
+  // the question is an alertdialog: move focus into it so it is announced and reachable
+  useLayoutEffect(() => {
+    if (asking) keepBtn.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [asking]);
   useModalLayer({ ref: panel, requestClose });
   const scrim = useScrimClose(requestClose);
   const inner = (
     <>
       <div className="dlg-body">{children}</div>
       {asking ? (
-        <div className="dlg-discard" role="alertdialog" aria-labelledby={`discard-${titleId}`}>
+        <div ref={keepBtn} className="dlg-discard" role="alertdialog" aria-labelledby={`discard-${titleId}`}>
           <span id={`discard-${titleId}`}>Discard your unsaved changes?</span>
           <Btn label="Keep editing" kind="ghost" small onClick={() => setAsking(false)} />
           <Btn label="Discard" kind="danger" small onClick={onClose} />
