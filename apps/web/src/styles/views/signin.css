@@ -23,4 +23,4 @@
   .auth-wrap .auth-brand { position: static; min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); padding: 24px 20px; gap: 12px; }
   .auth-panel { padding: 24px 20px; }
 }
-.auth-steps { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--s-2, 8px); font-size: var(--t-sm); max-width: 46ch; }
+.auth-steps { margin: 0; padding-left: 1.25rem; display: grid; gap: 8px; font-size: var(--t-sm); max-width: 46ch; }
