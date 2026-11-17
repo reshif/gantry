@@ -158,6 +158,7 @@ describe("People & teams: a member's roles and where permissions come from", () 
   it("marks effective-permission cells with their source", async () => {
     setup();
     mount("p-tomas");
+    fireEvent.click(await byId("person-tab-access"));
     const cell = await byId(`ppl-eff-payments-${gate.id.replace(/\./g, "_")}`);
     expect(cell.getAttribute("data-tip")).toContain("Role via Payments.");
     expect(cell.textContent).toContain("allowed, via Payments");

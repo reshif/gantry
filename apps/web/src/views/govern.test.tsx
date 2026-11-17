@@ -104,6 +104,7 @@ describe("People", () => {
     cleanup();
     window.location.hash = "#person/p-asha";
     mount(<PersonView />);
+    fireEvent.click(await byId("person-tab-access"));
     expect(await screen.findByRole("heading", { name: "Asha Raman" })).toBeTruthy();
     const yes = await screen.findByText("Submit work order");
     expect(yes.closest("tr")?.querySelector(".eff-cell.is-yes")).toBeTruthy();
@@ -115,6 +116,7 @@ describe("People", () => {
     setup({ "POST /api/v1/access/simulate": () => ({ body: { ok: true, decision: { allowed: false, reason: "Outside the release window.", needs: "Wait for Monday", rule: { id: "POL-101", name: "Release window", kind: "policy" } }, trace: [], week: [] } }) });
     window.location.hash = "#person/p-asha";
     mount(<PersonView />);
+    fireEvent.click(await byId("person-tab-access"));
     const cell = await waitFor(() => {
       const c = document.getElementById("ppl-eff-payments-release");
       if (!c) throw new Error("no cell");

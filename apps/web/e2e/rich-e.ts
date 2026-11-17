@@ -134,6 +134,21 @@ export function richGovern(): Record<string, Handler> {
   const ov: Record<string, Handler> = {};
   ov["people"] = (r) => fulfillJson(r, PEOPLE.map(person));
   ov["teams"] = (r) => fulfillJson(r, TEAMS);
+  for (const pe of PEOPLE) {
+    ov[`people/${pe[0]}/effective-permissions`] = (r) => {
+      const projs = [{ id: "payments", name: "Payments Platform" }, { id: "storefront", name: "Storefront" }];
+      const acts = ACTIONS.slice(0, 12).map((a) => ({ id: a.id, name: a.name, group: a.group, scope: a.scope }));
+      const m = matrixE().matrix[pe[3]] ?? {};
+      const cells: Record<string, Record<string, [0 | 1, string, string[]?]>> = {};
+      for (const a of acts) {
+        cells[a.id] = {};
+        for (const pr of projs) cells[a.id]![pr.id] = [m[a.id] ? 1 : 0, "MATRIX", ["direct"]];
+      }
+      const factory: Record<string, { allowed: boolean; reason: string; rule: { id: string; name?: string } }> = {};
+      for (const a of ACTIONS.filter((x) => x.scope === "factory").slice(0, 6)) factory[a.id] = { allowed: !!m[a.id], reason: m[a.id] ? "Granted by the role." : "The role does not include it.", rule: { id: "MATRIX" } };
+      return fulfillJson(r, { person: pe[0], at: NOW, projects: projs, actions: acts, cells, teams: { [pe[4]]: TEAMS.find((t) => t.id === pe[4])?.name ?? pe[4] }, grants: [{ role: pe[3], roleName: ROLES.find((x) => x.id === pe[3])?.name ?? pe[3], scope: "factory", via: null }], rules: { MATRIX: { kind: "matrix", name: "Role matrix" } }, factory });
+    };
+  }
   ov["access/matrix"] = (r) => fulfillJson(r, matrixE());
   ov["policies"] = (r) =>
     fulfillJson(r, [

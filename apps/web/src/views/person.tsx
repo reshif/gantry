@@ -12,7 +12,7 @@ import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate, useHash } from "../lib/router";
 import { ExplainDenial } from "./console/ExplainDenial";
-import { Avatar, Btn, Empty, LockNote, Panel, Select, Toggle, type Decision } from "../ui/primitives";
+import { Avatar, Btn, Empty, LockNote, Panel, Select, Tabs, Toggle, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -94,6 +94,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const outcome = useOutcome();
   const actors = useActors();
   const [effProject, setEffProject] = useState("all");
+  const [tab, setTab] = useState("profile");
   const [cell, setCell] = useState<{ action: string; project: string } | null>(null);
   const eff = useQuery({ queryKey: qk.effectivePermissions(p.id), queryFn: () => get<EffectivePermissions>(api(`people/${encodeURIComponent(p.id)}/effective-permissions`)) });
   const away = p.away && p.away.to > Date.now() ? p.away : null;
@@ -165,32 +166,41 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
 
   return (
     <div className="person-stack" aria-label={p.name}>
-      <section className="panel member-detail person-head" aria-label={p.name}>
-        <div className="person-top">
-          <Avatar id={p.id} size="lg" />
-          <div className="ppl-who">
-            <div className="person-kicker">{stateWord}</div>
-            <h1 className="vtitle person-name">{p.name}</h1>
-            <div className="ad-meta">{`${p.title || "No title yet"} · ${teamNames} · `}<span className="mono">{p.email}</span>{p.github ? <span>{` · GitHub `}<span className="mono">{p.github}</span></span> : " · GitHub not linked"}</div>
-            <div className="ppl-badges">
-              {off ? <span className="chip chip-muted"><Icon name="lock" />deactivated</span> : null}
-              <span className={`chip${p.mfa ? " chip-ok" : " chip-warn"}`}><Icon name="shield" />{p.mfa ? "MFA enrolled" : "No MFA"}</span>
-              {p.oncall ? <span className="chip chip-accent" data-tip="On call for at least one project, or a Factory Admin (always on call). Project admins set who is on call in Project config." tabIndex={0}><Icon name="clock" />On call</span> : null}
-              {away ? <span className="chip chip-warn"><Icon name="swap" />{`Away until ${fmt.istDate(away.to)}, delegate ${actors(away.delegate).name}`}</span> : null}
-            </div>
-          </div>
-        </div>
-        <div className="person-actions">
-          {p.status === "invited" ? <Btn label="Mark invite accepted" icon="check" id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
-          <Btn label="Edit teams" icon="teams" id="ppl-teams" guard={perm} onClick={openTeams} />
-          <Btn label="History" icon="ledger" id="ppl-history-jump" onClick={() => document.getElementById("ppl-history")?.scrollIntoView?.({ block: "start", behavior: "smooth" })} />
-          {off
-            ? <Btn label="Reactivate" icon="check" id="ppl-reactivate" guard={perm} onClick={() => offboard.reactivate(p)} />
-            : <Btn label="Deactivate" kind="danger" icon="lock" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
-        </div>
-      </section>
-
+      <ViewHead
+        kicker="Govern · Person"
+        title={p.name}
+        sub={`${p.title || "No title yet"} · ${teamNames}`}
+        actions={(
+          <>
+            {p.status === "invited" ? <Btn label="Mark invite accepted" icon="check" id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
+            <Btn label="Edit teams" icon="teams" id="ppl-teams" guard={perm} onClick={openTeams} />
+            <Btn label="History" icon="ledger" id="ppl-history-jump" onClick={() => setTab("activity")} />
+            {off
+              ? <Btn label="Reactivate" icon="check" id="ppl-reactivate" guard={perm} onClick={() => offboard.reactivate(p)} />
+              : <Btn label="Deactivate" kind="danger" icon="lock" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
+          </>
+        )}
+      />
+      <div className="row ppl-badges" style={{ marginBottom: 16 }}>
+        <Avatar id={p.id} size="lg" />
+        <span className={`chip ${p.status === "active" ? "ok" : p.status === "invited" ? "info" : "idle"}`}>{stateWord}</span>
+        {direct.slice(0, 2).map((g) => <span key={`${g.role}-${g.scope}`} className="chip info plain">{roleName(g.role)}</span>)}
+        <span className={`chip ${p.mfa ? "ok" : "warn"}`}>{p.mfa ? "MFA enrolled" : "No MFA"}</span>
+        {p.oncall ? <span className="chip agent" data-tip="On call for at least one project, or a Factory Admin (always on call). Project admins set who is on call in Project config." tabIndex={0}>on call</span> : null}
+        {away ? <span className="chip warn">{`Away until ${fmt.istDate(away.to)}, delegate ${actors(away.delegate).name}`}</span> : null}
+      </div>
+      <Tabs idPrefix="person-tab" items={[{ id: "profile", label: "Profile" }, { id: "access", label: "Access" }, { id: "activity", label: "Activity" }]} active={tab} onChange={setTab} />
+      {tab === "profile" ? (
       <div className="gv-two gv-top">
+        <Panel title="Profile">
+          <dl className="kv" id="ppl-profile">
+            <dt>Email</dt><dd className="mono">{p.email}</dd>
+            <dt>Title</dt><dd>{p.title || "No title yet"}</dd>
+            <dt>Team</dt><dd>{teamNames}</dd>
+            <dt>MFA</dt><dd>{p.mfa ? "On" : "Off"}</dd>
+            <dt>GitHub</dt><dd className="mono">{p.github || "not linked"}</dd>
+          </dl>
+        </Panel>
         <Panel title="Roles held">
           <div className="ppl-held" id="ppl-held">
             <div>
@@ -220,7 +230,8 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
           </div>
         </Panel>
       </div>
-
+      ) : null}
+      {tab === "access" ? (<>
       <Panel title="Roles per project" flush>
         <p className="muted small ppl-hint ppl-hint-pad">One person can hold different roles in each project. A role granted by a team shows as "via team" and is changed on the team. A switch is locked where you cannot manage that project's members.</p>
         <div className="table-scroll" data-keep-scroll="ppl-proles">
@@ -279,10 +290,14 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         )}</Async>
       </Panel>
 
+      </>) : null}
+
+      {tab === "activity" ? (
       <Panel title="History" cls="person-history">
         <span id="ppl-history" className="person-anchor" />
         <HistoryList id={p.id} limit={8} />
       </Panel>
+      ) : null}
     </div>
   );
 }
