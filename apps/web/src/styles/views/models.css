@@ -75,3 +75,17 @@
 .md-vb-meter { min-width: 140px; }
 #pv-form .md-price-form { margin-top: 12px; }
 @media (max-width: 560px) { .md-price-in { max-width: 84px; } #pv-edit td:first-child { min-width: 150px; } }
+
+/* blueprint: vendor cards in a grid, models as toggle rows */
+.view-models .vendor-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.view-models .vendor .md-models { display: flex; flex-direction: column; }
+.view-models .vendor .md-model { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dotted var(--line); }
+.view-models .vendor .md-model-main { min-width: 0; }
+.view-models .vendor .md-actions { margin-top: auto; padding-top: 6px; }
+.view-models .vendor .md-kv { grid-template-columns: minmax(80px, auto) minmax(0, 1fr); }
+.view-models .vendor .md-kv dd { text-align: right; }
+.view-models .vendor .vendor-head { padding: 0; border: 0; }
+.view-models .vendor .residency { padding: 0; display: block; }
+.view-models .vendor .vendor-name { font-size: 15px; }
+.view-models .vendor .md-mid { display: none; }
+.view-models .vendor .md-id .md-rm { margin-left: 4px; }

@@ -6,13 +6,14 @@ import { ops } from "../../api/ops";
 import { useLearningFindings, useTrustCells } from "../../api/queries";
 import { navigate } from "../../lib/router";
 import { updatePrefs } from "../../lib/prefs";
-import { Avatar, Btn, Chip, Empty, LockNote, Panel, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Empty, LockNote, Panel, type Decision } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { AreaChart, Spark } from "../../ui/charts";
 import { useUI } from "../../ui/overlay-context";
 import type { AgentRow, AgentVersionRow } from "../agents/kit";
 import { useOutcome } from "../govern/data";
-import { MIN_N, agentOf, evalsUi, metricHas, rerender, rowKeys, suiteOf, weekLabels, weeksOf, type EvalsData } from "./kit";
+import { MIN_N, agentOf, evalsUi, metricHas, rerender, suiteOf, weekLabels, weeksOf, type EvalsData } from "./kit";
 
 const METRICS: Array<[keyof import("@gantry/domain").Scorecard, string, "pct" | "money" | "min" | "n", boolean]> = [
   ["taskSuccess", "Task success", "pct", true], ["firstPass", "First-pass approval", "pct", true], ["testPass", "Test pass", "pct", true], ["rework", "Rework", "pct", false],
@@ -115,22 +116,16 @@ export function ScorecardsTab({ d, label }: { d: EvalsData; label: (c: { agent: 
   for (const x of d.agents) for (const v of x.versions) if (v.rc) candidates.push([x, v]);
   return (
     <div className="ev-agents">
-      <Panel title="Agents" flush cls="ev-aglist-panel">
-        <ul className="ev-aglist" role="listbox" aria-label="Agents">
-          {d.agents.map((x) => {
-            const s = d.suites.find((u) => u.id === x.suite);
-            const k = d.scorecards[x.id];
-            const below = !!s && x.evalScore < s.threshold;
-            return (
-              <li key={x.id} role="option" tabIndex={0} id={`ev-ag-${x.id}`} className={`ev-agitem${evalsUi.agent === x.id ? " is-on" : ""}`} aria-selected={evalsUi.agent === x.id ? "true" : "false"}
-                {...rowKeys(() => { evalsUi.agent = x.id; rerender(); })}>
-                <span className="who"><Avatar id={x.id} size="sm" /><span className="ev-agname">{x.name}</span></span>
-                {k && weeksOf(k, []).idx.length >= 2 ? <Spark values={weeksOf(k, []).success} min={0.5} max={1} w={60} h={18} label={`${x.name} success trend`} /> : null}
-                <span className={`mono small${below ? " neg" : ""}`}>{below ? "▼ " : ""}{fmt.pct(x.evalScore)}</span>
-              </li>
-            );
-          })}
-        </ul>
+      <Panel title="Agent scorecards" flush cls="ev-aglist-panel">
+        <DataTable id="ev-scorecards" caption="Agent scorecards" rows={d.agents} rowKey={(x) => x.id} rowId={(x) => `ev-ag-${x.id}`} onRow={(x) => { evalsUi.agent = x.id; rerender(); }}
+          columns={[
+            { key: "name", label: "Agent", sort: (x) => x.name.toLowerCase(), render: (x) => { const su2 = d.suites.find((u) => u.id === x.suite); const below = !!su2 && x.evalScore < su2.threshold; return <span><span className={`pri${evalsUi.agent === x.id ? " is-on" : ""}`}>{evalsUi.agent === x.id ? "▸ " : ""}{x.name}</span><span className={`sub mono${below ? " neg" : ""}`}>{`Suite ${below ? "▼ " : ""}${fmt.pct(x.evalScore)}`}</span></span>; } },
+            { key: "ts", label: "Task success", align: "end", sort: (x) => d.scorecards[x.id]?.taskSuccess ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "taskSuccess") ? fmt.pct(d.scorecards[x.id]!.taskSuccess) : fmt.pct(x.evalScore)}</span> },
+            { key: "fp", label: "First pass", align: "end", sort: (x) => d.scorecards[x.id]?.firstPass ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "firstPass") ? fmt.pct(d.scorecards[x.id]!.firstPass) : "–"}</span> },
+            { key: "rw", label: "Rework", align: "end", sort: (x) => d.scorecards[x.id]?.rework ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "rework") ? fmt.pct(d.scorecards[x.id]!.rework) : "–"}</span> },
+            { key: "cost", label: "Cost / WO", align: "end", sort: (x) => d.scorecards[x.id]?.costPerWO ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "costPerWO") ? fmt.money(d.scorecards[x.id]!.costPerWO) : "–"}</span> },
+            { key: "trend", label: "8-week trend", hideSmall: true, render: (x) => { const k = d.scorecards[x.id]; return k && weeksOf(k, []).idx.length >= 2 ? <Spark values={weeksOf(k, []).success} w={90} h={24} label={`${x.name} success trend`} /> : <span className="muted">–</span>; } },
+          ]} />
       </Panel>
       <div className="ev-agmain">
         <Panel title={`${a.name} scorecard`} tools={<Btn label="Open suite" small icon="eval" id="ev-open-suite" onClick={() => { evalsUi.tab = "suites"; evalsUi.suite = a.suite; evalsUi.run = null; evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; rerender(); }} />}>

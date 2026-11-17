@@ -108,7 +108,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
     expect(a.textContent).toContain("sk-ant-••••••••3f9a");
     expect(a.textContent).toContain("$4,182 / $9,000");
     expect(a.querySelector(".md-def")?.textContent).toBe("factory default");
-    expect(within(a).getByText("Used by")).toBeTruthy();
+    expect(within(a).getAllByText(/^Used by/).length).toBeGreaterThan(0);
     expect(a.querySelector("#mt-claude-haiku-5-5")).toBeTruthy();
     expect((a.querySelector("#mt-claude-haiku-5-5") as HTMLInputElement).checked).toBe(false);
     const b = await byId("vendor-bedrock");

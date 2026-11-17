@@ -102,7 +102,7 @@ describe("Skills screen", () => {
     setup();
     mount();
     await byId("sk-row-sk-review");
-    fireEvent.click(await byId("sk-view-unused"));
+    fireEvent.change(await byId("sk-f-view"), { target: { value: "unused" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-review")).toBeNull());
     expect(document.getElementById("sk-row-sk-docs")).toBeTruthy();
     fireEvent.change(await byId("sk-search"), { target: { value: "zzz" } });

@@ -71,7 +71,7 @@ export default function LearningView() {
     <div className="view view-learning">
       <ViewHead
         title="Learning"
-        sub="Rejected, sent-back and reverted work is counted as signals. Repeated signals become findings. A finding can become a proposal that a person reviews."
+        sub="The factory reads its own rejections and overrides, then proposes how to improve. People decide."
         actions={settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" icon={on ? "pause" : "play"} id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined} />
       <StatRow id="ln-stats">
         <Stat label="Open findings" value={qState(fq, () => String(openFindings))} />

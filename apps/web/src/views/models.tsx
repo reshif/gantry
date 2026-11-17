@@ -54,7 +54,7 @@ export default function ModelsView() {
     <div className="view view-models">
       <ViewHead
         title="Models"
-        sub="Vendors the factory may call, what each costs, where data is processed, and how work is routed between them."
+        sub="Vendors, routing and what each station spends."
         actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} />}
       />
       <StatRow id="md-stats">
@@ -74,7 +74,7 @@ export default function ModelsView() {
                     {`${degraded.map((v) => `${v.name} is ${v.health}${v.latency ? ` (p50 ${v.latency} ms)` : ""}.`).join(" ")} Calls to it fall back to the same model on another allowed vendor when it errors.`}
                   </Callout>
                 ) : null}
-                <div className="vendor-grid">
+                <div className="card-grid vendor-grid">
                   {vendors.map((v) => <VendorPanel key={v.id} v={v} vendors={vendors} routing={r} agents={agents} cat={cat} />)}
                 </div>
               </>

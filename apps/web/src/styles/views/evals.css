@@ -6,7 +6,7 @@
 .ev-p { margin-bottom: 10px; }
 
 /* scorecards */
-.ev-agents { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--s4); align-items: start; }
+.ev-agents { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); align-items: start; }
 .ev-agmain { display: grid; gap: var(--s4); min-width: 0; }
 .ev-aglist { list-style: none; display: grid; max-height: 760px; overflow-y: auto; }
 .ev-agitem { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); cursor: pointer; border-left: 3px solid transparent; }

@@ -61,7 +61,7 @@ export default function TrustView() {
     : <LadderTab p={base} />;
   return (
     <div className="view view-trust">
-      <ViewHead title="Trust" sub="How much each agent is trusted at each human gate, per class of work and per project. Trust is earned from clean work and lost fast. L0 and L1 are enforced; higher levels stay off until switched on." />
+      <ViewHead title="Trust" sub="How much autonomy each agent has earned, per class of work and project." />
       <StatRow id="tr-stats">
         <Stat label="Cells" value={String(cells.length)} sub="agent, class and project" />
         <Stat label="L3 and up" value={String(unattended)} sub="decided by checks" />

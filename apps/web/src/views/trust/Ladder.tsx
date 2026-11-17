@@ -306,6 +306,7 @@ export function LadderTab({ p }: { p: LadderProps }) {
   const rows = ladderRows(p.cat, p.project, p.cells);
   return (
     <div className="tr-ladder">
+      <div className="callout info tr-levels" role="note"><span><strong>How levels work</strong>{" "}{[0, 1, 2, 3].map((n) => `${code(n)} ${lv(n).desc}`).join(". ")}. Ceilings cap a level regardless of record.</span></div>
       <div className="toolbar tr-toolbar">
         <Field label="Project" htmlFor="tr-project"><Select id="tr-project" value={p.project.id} options={p.projects.map((x) => ({ value: x.id, label: x.name + (x.regulated ? " (regulated)" : "") }))} onChange={(v) => { trustUi.project = v; trustUi.repo = ""; trustUi.sel = null; rerender(); }} /></Field>
         <Field label="Repo" htmlFor="tr-repo"><Select id="tr-repo" value={trustUi.repo} options={[{ value: "", label: "All repos (project cells)" }, ...rs.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => { trustUi.repo = v; rerender(); }} /></Field>
