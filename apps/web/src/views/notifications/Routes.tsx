@@ -1,6 +1,7 @@
 /** The Routes tab: routes of one project (event, destinations, card, conditions), the route editor and the card designer (legacy routesTab, editor, designer). */
 import { useEffect, useMemo, useState } from "react";
 import { ops } from "../../api/ops";
+import { DataTable } from "../../ui/DataTable";
 import { Btn, Empty, Field, LockNote, Panel, Segmented, Select, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -47,33 +48,33 @@ export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
     <div className="nt-routes">
       <div className="nt-split">
         <Panel title={`Routes on ${p.name}`} flush tools={<Btn label="Add route" small icon="plus" kind="primary" id="nt-add" guard={perm} onClick={() => select("new")} />}>
-          <div className="table-scroll">
-            <table className="table table-compact nt-table">
-              <thead><tr><th>On</th><th>Event</th><th>Destinations</th><th>Card</th><th>Conditions</th></tr></thead>
-              <tbody>
-                {list.length ? list.map((r) => {
-                  const c = condText(r);
-                  return (
-                    <tr key={r.id} className={`row-link${sel === r.id ? " is-selected" : ""}${r.enabled ? "" : " nt-off"}`} id={`nt-row-${r.id}`} onClick={(e) => { if ((e.target as HTMLElement).closest("button,input,.switch")) return; select(r.id); }}>
-                      <td><Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={!perm.allowed ? perm : r.event === "kill" || r.event === "restore" ? { allowed: false, reason: "Kill and restore notifications cannot be switched off." } : null} label={`Route ${r.id} enabled`} onChange={(v) => void toggleRoute(r, v)} /></td>
-                      <td><button type="button" className="linkish nt-ev" id={`nt-open-${r.id}`} onClick={() => select(r.id)}><span className="mono small">{r.id}</span> {evName(r.event)}</button></td>
-                      <td>
-                        <ul className="nt-dests">
+          <DataTable
+            id="nt-table"
+            caption={`Routes on ${p.name}`}
+            rows={list}
+            rowKey={(r) => r.id}
+            rowId={(r) => `nt-row-${r.id}`}
+            onRow={(r) => select(r.id)}
+            rowLabel={(r) => `Open route ${r.id} ${evName(r.event)}`}
+            empty={{ title: "No routes yet", text: "Add a route to start." }}
+            columns={[
+              { key: "on", label: "On", render: (r) => (
+                <Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={!perm.allowed ? perm : r.event === "kill" || r.event === "restore" ? { allowed: false, reason: "Kill and restore notifications cannot be switched off." } : null} label={`Route ${r.id} enabled`} onChange={(v) => void toggleRoute(r, v)} />
+              ) },
+              { key: "event", label: "Event", render: (r) => <b className="nt-ev" id={`nt-open-${r.id}`}><span className="mono small">{r.id}</span> {evName(r.event)}</b> },
+              { key: "dest", label: "Destinations", render: (r) => (
+                <ul className="nt-dests">
                           {r.dest.map((d, i) => {
                             const inst = nt.instOf(d);
                             const st = instState(inst);
                             return <li key={i}><Icon name={chanIcon(inst?.type ?? d.channel)} /><span className="nt-dest-inst small">{inst ? inst.name : d.channel}</span><span className="mono">{d.target}</span>{st !== "healthy" ? <span className="nt-dest-bad" title={st}>✕ {st}</span> : null}</li>;
                           })}
                         </ul>
-                      </td>
-                      <td>{nt.tplInfo(r.template).name}</td>
-                      <td className="small">{c.length ? c.join(" · ") : <span className="muted">always</span>}</td>
-                    </tr>
-                  );
-                }) : <tr><td colSpan={5} className="muted">No routes yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
+              ) },
+              { key: "card", label: "Card", hideSmall: true, render: (r) => nt.tplInfo(r.template).name },
+              { key: "cond", label: "Conditions", hideSmall: true, render: (r) => { const c = condText(r); return <span className="small">{c.length ? c.join(" · ") : <span className="dim">always</span>}</span>; } },
+            ]}
+          />
         </Panel>
         <Editor p={p} nt={nt} perm={perm} cur={cur} draft={draft} setDraft={setDraft} onSaved={select} />
       </div>

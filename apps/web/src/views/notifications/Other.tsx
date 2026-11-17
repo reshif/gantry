@@ -5,7 +5,8 @@ import { fmt, type Delivery, type Project } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { useDeliveries } from "../../api/queries";
 import { ops } from "../../api/ops";
-import { Btn, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
+import { Btn, Empty, Field, FilterBar, LockNote, SearchBox, Panel, Select, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useOpenTraveler } from "../../shell/useTraveler";
@@ -97,7 +98,8 @@ export function DeliveriesTab({ p, nt }: { p: Project; nt: Nt }) {
   const [limit, setLimit] = useState(40);
   const q = useDeliveries({ project: p.id, limit, ...(f.status !== "all" ? { status: f.status } : {}), ...(f.integration !== "all" ? { integration: f.integration } : {}), ...(f.event !== "all" ? { event: f.event } : {}) });
   const page = Array.isArray(q.data) ? { items: q.data, next: null } : q.data ?? { items: [] as Delivery[], next: null };
-  const list = page.items;
+  const [sq, setSq] = useState("");
+  const list = page.items.filter((d) => !sq.trim() || `${d.id} ${d.event} ${d.target} ${d.wo ?? ""}`.toLowerCase().includes(sq.trim().toLowerCase()));
   const failedQ = useDeliveries({ project: p.id, status: "failed", limit: 200 });
   const failed = (Array.isArray(failedQ.data) ? failedQ.data : failedQ.data?.items ?? []).length;
   const instName = (d: Delivery): string => { const ii = d.integration ? nt.insts.find((i) => i.id === d.integration) : nt.instOf({ channel: d.channel, target: d.target }); return ii ? ii.name : `${d.channel}${d.integration ? " (removed)" : ""}`; };
@@ -107,41 +109,31 @@ export function DeliveriesTab({ p, nt }: { p: Project; nt: Nt }) {
   };
   return (
     <div className="form-grid">
-      <div className="toolbar">
-        <div className="filters">
-          <Field label="Status" htmlFor="nt-dl-status"><Select id="nt-dl-status" options={[{ value: "all", label: "All" }, { value: "delivered", label: "Delivered" }, { value: "pending", label: "Pending" }, { value: "failed", label: "Failed" }]} value={f.status} onChange={(v) => { setF({ ...f, status: v }); setLimit(40); }} /></Field>
-          <Field label="Connection" htmlFor="nt-dl-channel"><Select id="nt-dl-channel" options={[{ value: "all", label: "All" }, ...nt.destInsts.map((c) => ({ value: c.id, label: c.name }))]} value={f.integration} onChange={(v) => { setF({ ...f, integration: v }); setLimit(40); }} /></Field>
-          <Field label="Event" htmlFor="nt-dl-event"><Select id="nt-dl-event" options={[{ value: "all", label: "All" }, ...events()]} value={f.event} onChange={(v) => { setF({ ...f, event: v }); setLimit(40); }} /></Field>
-        </div>
-        <div className="kv-row">
-          <div><div className="kv-k">Shown</div><div className="kv-v mono">{qState(q, () => String(list.length))}</div></div>
-          <div><div className="kv-k">Failed</div><div className={`kv-v mono${failed ? " neg" : ""}`}>{qState(failedQ, () => String(failed))}</div></div>
-        </div>
-      </div>
+      <FilterBar label="Filter deliveries" count={<>{qState(q, () => String(list.length))} shown · <span className={failed ? "neg" : ""}>{qState(failedQ, () => String(failed))} failed</span></>}>
+        <SearchBox id="nt-dl-q" label="Search deliveries" placeholder="Search deliveries" value={sq} onChange={setSq} />
+        <Select id="nt-dl-status" aria-label="Status" options={[{ value: "all", label: "Status: all" }, { value: "delivered", label: "Delivered" }, { value: "pending", label: "Pending" }, { value: "failed", label: "Failed" }]} value={f.status} onChange={(v) => { setF({ ...f, status: v }); setLimit(40); }} />
+        <Select id="nt-dl-channel" aria-label="Connection" options={[{ value: "all", label: "Connection: all" }, ...nt.destInsts.map((c) => ({ value: c.id, label: c.name }))]} value={f.integration} onChange={(v) => { setF({ ...f, integration: v }); setLimit(40); }} />
+        <Select id="nt-dl-event" aria-label="Event" options={[{ value: "all", label: "Event: all" }, ...events()]} value={f.event} onChange={(v) => { setF({ ...f, event: v }); setLimit(40); }} />
+      </FilterBar>
       <Async query={q} what="the delivery log" id="nt-dl">{() => (
-      <Panel flush>
-        <div className="table-scroll">
-          <table className="table table-compact nt-dl">
-            <thead><tr><th>Time (IST)</th><th>Id</th><th>Event</th><th>Connection</th><th>Target</th><th>Work order</th><th>Status</th><th className="num">Tries</th><th>Error</th><th><span className="sr">Retry</span></th></tr></thead>
-            <tbody>
-              {list.length ? list.map((d) => (
-                <tr key={d.id} id={`nt-dl-${d.id}`}>
-                  <td className="mono">{fmt.istDate(d.at)} {fmt.ist(d.at)}</td>
-                  <td className="mono">{d.id}{d.test ? <span className="tag nt-testtag">test</span> : null}</td>
-                  <td>{evName(d.event)}</td>
-                  <td><Icon name={chanIcon(d.channel)} /> {instName(d)}</td>
-                  <td className="mono">{d.target}</td>
-                  <td>{d.wo ? <button type="button" className="linkish mono" id={`nt-dl-wo-${d.id}`} onClick={() => openTraveler(d.wo!)}>{d.wo}</button> : <span className="muted">–</span>}</td>
-                  <td><span className={`outcome o-${d.status === "failed" ? "failed" : "ok"}`}>{d.status === "failed" ? (d.state === "failed" && d.attempts > 0 ? "↻ retrying" : "✕ failed") : d.status === "pending" ? "… pending" : "✓ delivered"}</span></td>
-                  <td className="num mono">{d.attempts}</td>
-                  <td className="small nt-err">{d.error || ""}</td>
-                  <td className="num">{d.status === "failed" ? <Btn label="Retry" small icon="refresh" id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : null}</td>
-                </tr>
-              )) : <tr><td colSpan={10} className="muted">No deliveries match these filters.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
+      <DataTable
+        id="nt-dl-table"
+        caption="Delivery log"
+        rows={list}
+        rowKey={(d) => d.id}
+        rowId={(d) => `nt-dl-${d.id}`}
+        empty={{ title: "No deliveries match", text: "Change the filters." }}
+        columns={[
+          { key: "id", label: "ID", render: (d) => <span className="mono">{d.id}{d.test ? <span className="tag nt-testtag">test</span> : null}</span> },
+          { key: "at", label: "When", render: (d) => <span className="mono dim">{fmt.istDate(d.at)} {fmt.ist(d.at)}</span> },
+          { key: "event", label: "Event", render: (d) => evName(d.event) },
+          { key: "conn", label: "Connection", hideSmall: true, render: (d) => <><Icon name={chanIcon(d.channel)} /> {instName(d)}</> },
+          { key: "target", label: "Target", render: (d) => <span className="mono ell">{d.target}</span> },
+          { key: "wo", label: "Work order", hideSmall: true, render: (d) => (d.wo ? <Btn label={d.wo} small kind="ghost" id={`nt-dl-wo-${d.id}`} onClick={() => openTraveler(d.wo!)} /> : <span className="dim">–</span>) },
+          { key: "st", label: "Status", render: (d) => <><span className={`chip ${d.status === "failed" ? (d.state === "failed" && d.attempts > 0 ? "warn" : "bad") : d.status === "pending" ? "info" : "ok"}`}>{d.status === "failed" ? (d.state === "failed" && d.attempts > 0 ? "retrying" : "failed") : d.status === "pending" ? "pending" : "delivered"}</span>{d.error ? <div className="small nt-err dim">{d.error}</div> : null}</> },
+          { key: "act", label: "", align: "end", render: (d) => (d.status === "failed" ? <Btn label="Retry" small icon="refresh" id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : null) },
+        ]}
+      />
       )}</Async>
       {page.next ? <div className="more"><Btn label="Show 40 more" id="nt-dl-more" onClick={() => setLimit(limit + 40)} /></div> : null}
       <LockNote decision={perm} what={`Retries on ${p.name}`} />

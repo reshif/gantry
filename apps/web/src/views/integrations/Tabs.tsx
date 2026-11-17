@@ -56,7 +56,7 @@ export function ConnectedTab({ nav, openInstance }: { nav: Nav; openInstance: (i
         columns={[
           { key: "name", label: "Integration", sort: (i) => i.name.toLowerCase(), render: (i) => <b className="ell" id={`int-open-${i.id}`}>{i.name}</b> },
           { key: "category", label: "Type", sort: (i) => d.typeOf(i).name, hideSmall: true, render: (i) => <span className="tag">{d.typeOf(i).id}</span> },
-          { key: "scope", label: "Projects", sort: (i) => (i.projects === "all" ? "" : scopeText(i, d.pname)), render: (i) => <span className="ell">{i.projects === "all" ? "all" : i.projects.map((p) => d.pname(p)).join(", ")}</span> },
+          { key: "scope", label: "Projects", sort: (i) => (i.projects === "all" ? "" : scopeText(i, d.pname)), render: (i) => <span className="ell">{i.projects === "all" ? "All projects" : i.projects.map((p) => d.pname(p)).join(", ")}</span> },
           { key: "sync", label: "Last sync", sort: (i) => -i.lastSync, render: (i) => <span className="mono dim">{fmt.ago(i.lastSync, Date.now())}</span> },
           { key: "status", label: "Status", sort: (i) => statusOf(i), render: (i) => <Health st={statusOf(i)} /> },
         ]}

@@ -303,7 +303,7 @@ describe("Notifications", () => {
     fireEvent.click(await byId("nt-tab-log"));
     const row = await byId("nt-dl-DLV-9");
     expect(within(row).getByText(/channel_not_found/)).toBeTruthy();
-    expect(within(row).getByText("✕ failed")).toBeTruthy();
+    expect(within(row).getByText("failed")).toBeTruthy();
     expect(document.getElementById("nt-retry-DLV-8")).toBeNull(); // a delivered one is not retried
     fireEvent.click(await byId("nt-retry-DLV-9"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/deliveries/DLV-9/retry" && c.method === "POST")).toBe(true));

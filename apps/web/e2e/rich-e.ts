@@ -14,8 +14,28 @@ const inst = (id: string, type: string, name: string, projects: "all" | string[]
   id, type, name, config: {}, secretMask: "••••a91c", status, connected, projects, lastSync: NOW - ago, createdBy: "p-admin", createdAt: NOW - 40 * DAY, version: 1,
 });
 
+const cond = { classes: [] as string[], priority: [] as string[], hours: "any" };
+const fields = { title: true, repo: true, class: true, priority: true, approvers: true, link: true };
+/** Notification routes of a project (the project fixture and the routes endpoint both serve them). */
+export const routesE = [
+  { id: "NR-1", event: "gate.waiting", dest: [{ channel: "slack", target: "#factory-gates", integration: "i3" }], template: "gate", cond, enabled: true, fields },
+  { id: "NR-2", event: "blocked", dest: [{ channel: "paging", target: "oncall", integration: "i6" }, { channel: "slack", target: "#factory-gates", integration: "i3" }], template: "incident", cond: { ...cond, priority: ["P0", "P1"] }, enabled: true, fields },
+  { id: "NR-3", event: "released", dest: [{ channel: "email", target: "ops@acme.dev", integration: "i5" }], template: "release", cond: { ...cond, hours: "business" }, enabled: false, fields },
+  { id: "NR-4", event: "question", dest: [{ channel: "slack", target: "#factory-gates", integration: "i3" }], template: "question", cond, enabled: true, fields },
+];
+
 export function richGroupE(): Record<string, Handler> {
   const ov: Record<string, Handler> = {};
+  ov["projects/payments/routes"] = (r) => fulfillJson(r, routesE.map((x) => ({ ...x, version: 1 })));
+  ov["POST card-templates/preview"] = (r) =>
+    fulfillJson(r, {
+      ok: true,
+      sample: { event: "gate.waiting", template: "gate", tone: "wait", head: "Gate G5 is waiting", body: "Add idempotency keys to refund endpoint needs 1 more approval.", woId: "WO-1004", title: "Add idempotency keys to refund endpoint", repo: "acme/payments-api", cls: "feature", clsName: "Feature", prio: "P1", approvers: "Meera Iyer", gate: { id: "G5", label: "G5", name: "Review and merge" }, instance: null, link: "https://gantry.example/wo/WO-1004", project: { id: "payments", key: "PAY", name: "Payments Platform" }, at: NOW },
+      rows: [["Work order", "WO-1004"], ["Class", "Feature"], ["Priority", "P1"]],
+      actions: ["approve", "reject", "open"],
+      webhook: {},
+      email: { subject: "Gate G5 is waiting", text: "", html: "" },
+    });
   ov["integration-types"] = (r) => fulfillJson(r, INTEGRATION_TYPES.map((t) => ({ ...t, available: t.available ?? true })));
   ov["integrations"] = (r) =>
     fulfillJson(r, [

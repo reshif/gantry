@@ -7,7 +7,7 @@
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Page } from "@playwright/test";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
-import { richGroupE } from "./rich-e";
+import { richGroupE, routesE } from "./rich-e";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
 const MIN = 60_000;
@@ -86,7 +86,7 @@ function agents() {
 
 function project(p: (typeof PROJECTS)[number], i: number) {
   return {
-    id: p.id, name: p.name, key: p.key, status: "active", teams: ["platform"], owner: "p-admin", template: "standard", regulated: i % 2 === 0, desc: p.desc, flow: flow(), approvers: {}, notifications: [], mcp: [],
+    id: p.id, name: p.name, key: p.key, status: "active", teams: ["platform"], owner: "p-admin", template: "standard", regulated: i % 2 === 0, desc: p.desc, flow: flow(), approvers: {}, notifications: routesE, mcp: [],
     budget: { monthly: 4000, mtd: 1280 + i * 190, alertAt: 0.8 }, created: NOW - 90 * DAY,
     halted: "halted" in p && p.halted ? { by: "p-admin", at: NOW - 3 * HOUR, reason: "Relevance regression under investigation" } : null, killed: null, overlay: "", version: 3,
   };
