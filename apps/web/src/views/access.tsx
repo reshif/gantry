@@ -6,9 +6,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useAccessMatrix, useFreezes, useMe, usePeople, usePolicies, useProjects } from "../api/queries";
-import { Btn, Empty, LockNote, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Btn, Empty, LockNote, Panel, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import type { UseQueryResult } from "@tanstack/react-query";
+import { Icon } from "../ui/Icon";
 import { useOutcome, useAllRepos } from "./govern/data";
 import { FreezeList, useFreezeDialog } from "./access/Freezes";
 import { MatrixTable } from "./access/Matrix";
@@ -46,6 +47,7 @@ export default function AccessView() {
   const [evaluated, setEvaluated] = useState<Evaluated | null>(null);
   const [hl, setHl] = useState<string | null>(null);
   const [newRole, setNewRole] = useState<string | null>(null);
+  const [fromPeople, setFromPeople] = useState<string | null>(null);
 
   // Legacy opened on Kenji releasing payments-api; use it when the seeded org is there, otherwise ask about the viewer.
   const defaults = useCallback((): Sim => {
@@ -84,6 +86,7 @@ export default function AccessView() {
       const q = JSON.parse(raw) as Partial<Sim>;
       const s = { ...defaults(), ...q, repo: q.repo ?? "" };
       setSim(s);
+      setFromPeople(s.person);
       void evaluate(s);
     } catch {
       /* no handover */
@@ -126,14 +129,29 @@ export default function AccessView() {
     setTimeout(() => document.getElementById(`acc-mx-col-${id}`)?.scrollIntoView({ block: "nearest", inline: "center" }), 80);
   };
 
+  const fromName = fromPeople ? people.find((p) => p.id === fromPeople)?.name ?? fromPeople : null;
+  const matrixTab = tab === "matrix";
+
   return (
     <div className="view view-access">
       <ViewHead
         title="Access"
-        sub="Who can do what, where and when. Roles grant actions per project; policies narrow or extend them by project, hour and on-call status; freezes override everything for release."
-        meta={[["Roles", qState(mQ, () => String(roles.length) + (custom ? ` (${custom} custom)` : ""))], ["Actions", qState(mQ, () => String(actions.length))], ["Policies on", qState(policiesQ, () => String(policies.filter((p) => p.enabled).length))], ["Freezes active", qState(freezesQ, () => String(activeFz))]]}
+        sub="Who may do what, where and when. Roles grant actions per project; policies narrow or extend them by project, hour and on-call status; freezes override everything for release."
       />
       <LockNote decision={perm} what="The role matrix, policies and freezes" />
+      {fromName ? (
+        <div className="callout acc-from" id="acc-from-people" role="status">
+          <Icon name="info" />
+          <div><strong>Opened from People</strong><span>{` The simulator is asking the same question as the cell you picked for ${fromName}.`}</span></div>
+          <Btn label="Dismiss" small id="acc-from-dismiss" onClick={() => setFromPeople(null)} />
+        </div>
+      ) : null}
+      <StatRow id="acc-stats">
+        <Stat label="Roles" value={qState(mQ, () => String(roles.length))} sub={custom ? `${custom} custom` : undefined} />
+        <Stat label="Actions" value={qState(mQ, () => String(actions.length))} />
+        <Stat label="Policies on" value={qState(policiesQ, () => String(policies.filter((p) => p.enabled).length))} sub={policiesQ.data ? `of ${policies.length}` : undefined} />
+        <Stat label="Freezes active" value={qState(freezesQ, () => String(activeFz))} tone={activeFz ? "block" : undefined} />
+      </StatRow>
       {mQ.isError && !m ? (
         <section className="panel" aria-label="Policy simulator"><div className="panel-body"><Async query={mQ} what="the access matrix" id="acc-matrix">{() => null}</Async></div></section>
       ) : (
@@ -142,37 +160,34 @@ export default function AccessView() {
           onEvaluate={(s) => void evaluate(s)} onShowRule={setTab} presetsList={presets(people, projects, repos)}
         />
       )}
-      <section className="panel acc-rules" aria-label="Rules">
-        <div className="acc-tabbar">
-          <Tabs
-            idPrefix="acc-tab"
-            active={tab}
-            onChange={setTab}
-            items={[{ id: "policies", label: "Policies", count: policies.length }, { id: "freezes", label: "Freezes", count: freezes.length }, { id: "matrix", label: "Roles × actions" }, { id: "roles", label: "Roles", count: roles.length }]}
+      <div className="acc-tabbar">
+        <Tabs
+          idPrefix="acc-tab"
+          active={tab}
+          onChange={setTab}
+          items={[{ id: "policies", label: "Policies", count: policies.length }, { id: "freezes", label: "Freezes", count: freezes.length }, { id: "matrix", label: "Roles × actions" }, { id: "roles", label: "Roles", count: roles.length }]}
+        />
+        <div className="acc-tab-tools">{tools}</div>
+      </div>
+      <div className="acc-body" id="acc-tab-panel" role="tabpanel">
+        <Async query={(tab === "freezes" ? freezesQ : tab === "policies" ? policiesQ : mQ) as UseQueryResult<unknown>} what={tab === "freezes" ? "freezes" : tab === "policies" ? "policies" : "the access matrix"} id="acc">{() => (
+        matrixTab ? <Panel flush cls="acc-rules"><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} hl={hl} evaluated={evaluated} people={people} newRole={newRole} /></Panel>
+        : tab === "freezes" ? <FreezeList freezes={freezes} repos={repos} hlFreeze={evaluated && (evaluated.result.decision.rule as { freeze?: string }).freeze ? (evaluated.result.decision.rule as { freeze?: string }).freeze! : null} />
+        : tab === "roles" ? <Panel flush cls="acc-rules"><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /></Panel>
+        : (
+          <PolicyCards
+            policies={policies} hl={hl} people={people} onEdit={openPolicy}
+            onSimulate={(p, who) => {
+              const proj = p.where.projects?.[0] ?? projects[0]?.id ?? "";
+              const s: Sim = { person: who?.id ?? me.person.id, action: p.actions[0] ?? "release", project: proj, repo: "", ...nowIst() };
+              setSim(s);
+              void evaluate(s);
+              window.scrollTo({ top: 0 });
+            }}
           />
-          <div className="acc-tab-tools">{tools}</div>
-        </div>
-        <div className={`panel-body${tab === "matrix" ? " flush" : ""}`} id="acc-tab-panel" role="tabpanel">
-          <Async query={(tab === "freezes" ? freezesQ : tab === "policies" ? policiesQ : mQ) as UseQueryResult<unknown>} what={tab === "freezes" ? "freezes" : tab === "policies" ? "policies" : "the access matrix"} id="acc">{() => (
-          tab === "matrix" ? <MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} hl={hl} evaluated={evaluated} people={people} newRole={newRole} />
-          : tab === "freezes" ? <FreezeList freezes={freezes} repos={repos} hlFreeze={evaluated && (evaluated.result.decision.rule as { freeze?: string }).freeze ? (evaluated.result.decision.rule as { freeze?: string }).freeze! : null} />
-          : tab === "roles" ? <RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} />
-          : (
-            <PolicyCards
-              policies={policies} hl={hl} people={people} onEdit={openPolicy}
-              onSimulate={(p, who) => {
-                const proj = p.where.projects?.[0] ?? projects[0]?.id ?? "";
-                const s: Sim = { person: who?.id ?? me.person.id, action: p.actions[0] ?? "release", project: proj, repo: "", ...nowIst() };
-                setSim(s);
-                void evaluate(s);
-                window.scrollTo({ top: 0 });
-              }}
-            />
-          )
-          )}</Async>
-        </div>
-      </section>
+        )
+        )}</Async>
+      </div>
     </div>
   );
 }
-
