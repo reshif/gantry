@@ -329,6 +329,21 @@ d("internal runs API", () => {
       expect(s.instructions).toBe("## Factory base\n\nFactory rules.\n\n## Project overlay\n\nPayments overlay.\n\n## Agent\n\nAgent says build.");
       expect(s.instructionsHash).toMatch(/^[0-9a-f]{64}$/);
       expect(s.skills).toEqual([{ name: "Testing skill", content: "Always run tests." }]);
+      // the prompt manifest names every part in order, with source, version and hash; its hash is the instruction hash and is recorded on the run
+      expect(s.promptManifest.hash).toBe(s.instructionsHash);
+      expect(s.promptManifest.parts.map((p: { kind: string; name: string }) => `${p.kind}:${p.name}`)).toEqual(["layer:Factory base", "layer:Project overlay", "layer:Agent", "skill:Testing skill", "result_instruction:Result instruction", "result_schema:Station result shape"]);
+      expect(s.promptManifest.parts[3]).toMatchObject({ version: 1, bytes: "Always run tests.".length, source: "skill_versions sk-w3" });
+      expect(s.promptManifest.parts[0]).toMatchObject({ version: 90 });
+      expect(s.promptManifest.handoff.bytes).toBeGreaterThan(10);
+      const stored = (await q(`select data from runs where id = $1`, [r.runId]))[0]!.data;
+      expect(stored.promptManifest.hash).toBe(s.instructionsHash);
+      expect(stored.promptDrift).toBe(true); // the test tuple was pinned with the placeholder hash 'h'
+      // serving the same spec again writes nothing new (no repeated update, no new audit rows)
+      const stamp = (await q(`select updated_at from runs where id = $1`, [r.runId]))[0]!.updated_at;
+      const rows = Number((await q(`select count(*)::int as n from events`))[0].n);
+      await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token });
+      expect((await q(`select updated_at from runs where id = $1`, [r.runId]))[0]!.updated_at).toEqual(stamp);
+      expect(Number((await q(`select count(*)::int as n from events`))[0].n)).toBe(rows);
       // "may run tests" is a set of test commands, never a bare shell
       expect(s.toolAllowList).not.toContain("Bash");
       expect(s.toolAllowList.filter((t: string) => !t.startsWith("Bash(")).sort()).toEqual(["Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);

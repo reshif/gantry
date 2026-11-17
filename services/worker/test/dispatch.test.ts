@@ -43,7 +43,8 @@ d("attempt.dispatch and run.result", () => {
     expect(tuple).toMatchObject({ agent_id: "ag-build", agent_version: 2 });
     expect(tuple.skill_versions).toEqual({ "sk-testdesign": expect.any(Number) });
     // the tuple's instruction hash is the hash of the whole composition, which the run records with its layer versions
-    expect(run.composed.hash).toBe(tuple.instruction_hash);
+    expect(run.promptManifest.hash).toBe(tuple.instruction_hash); // covers the skills and the runner text too, not only the layers
+    expect(run.composed.hash).not.toBe(tuple.instruction_hash);
     expect(run.composed.layers.map((l: { name: string }) => l.name)).toEqual(["Factory base", "Project overlay", "Agent", "Repository guidelines"]);
     expect(run.composed.layers[0].version).toBe(4);
     expect(run.composed.skills).toEqual([{ id: "sk-testdesign", version: tuple.skill_versions["sk-testdesign"] }]);

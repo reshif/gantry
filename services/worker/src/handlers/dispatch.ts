@@ -48,7 +48,7 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
     for (const s of skills) if (s.version !== null) skillVersions[s.skill_id] = s.version;
   }
   const model = evalModel || run?.modelOverride || v.model_id || (typeof v.body.model === "string" ? v.body.model : null);
-  const instruction = run?.composed.hash ?? v.instruction_hash ?? sha(typeof v.body.instructions === "string" ? v.body.instructions : "");
+  const instruction = run?.manifest.hash ?? v.instruction_hash ?? sha(typeof v.body.instructions === "string" ? v.body.instructions : "");
   const id = `tup-${sha([agentId, ag.live_version, instruction, v.harness_version, model ?? "", JSON.stringify(skillVersions)].join("\0")).slice(0, 20)}`;
   await tx.query(
     `insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
@@ -58,7 +58,7 @@ async function pinTuple(tx: Tx, a: AttemptInfo): Promise<Pinned> {
   await tx.query(`update attempts set tuple_id = $3, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, a.attemptId, id]);
   const lim = (v.body.limits ?? ag.data.limits ?? {}) as { wallClockSeconds?: unknown };
   const wall = typeof lim.wallClockSeconds === "number" && Number.isInteger(lim.wallClockSeconds) && lim.wallClockSeconds > 0 ? lim.wallClockSeconds : 3600;
-  const record = run ? { instructionPin: run.pin, composed: { hash: run.composed.hash, layers: run.composed.layers.map((l) => ({ name: l.name, version: l.version, hash: l.hash })), skills: run.skills.map((x) => ({ id: x.id, version: x.version })), agentVersion: ag.live_version, tupleId: id } } : null;
+  const record = run ? { instructionPin: run.pin, promptManifest: run.manifest, composed: { hash: run.composed.hash, layers: run.composed.layers.map((l) => ({ name: l.name, version: l.version, hash: l.hash })), skills: run.skills.map((x) => ({ id: x.id, version: x.version })), agentVersion: ag.live_version, tupleId: id } } : null;
   return { tupleId: id, model: model && model !== "" ? model : null, adapter: model ? "claude" : "stub", wallClockSeconds: wall, record };
 }
 

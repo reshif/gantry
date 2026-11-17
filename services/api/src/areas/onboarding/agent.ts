@@ -57,7 +57,7 @@ export async function onboardingAgentGate(db: Queryable, orgId: string, repo: { 
     [orgId, repo.project_id, repo.id],
   )).rows[0];
   if (stop) return { usable: false, reason: `${stop.mode === "kill" ? "A kill" : "A halt"} at ${stop.scope_type} scope is in force.` };
-  return { usable: true, pin: { agent: ONBOARD_AGENT, version: ag.live_version, model: res.pick.model, vendor: res.pick.vendor, skills: run?.skillVersions ?? {}, instructionsHash: run?.composed.hash ?? "" } };
+  return { usable: true, pin: { agent: ONBOARD_AGENT, version: ag.live_version, model: res.pick.model, vendor: res.pick.vendor, skills: run?.skillVersions ?? {}, instructionsHash: run?.manifest.hash ?? "" } };
 }
 
 /** Wall-clock the collector gives an agent step before it stops the run and falls back. */

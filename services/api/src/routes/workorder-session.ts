@@ -247,7 +247,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const r = await runConversation({
       edgeToken: g.config.secrets.edgeToken, purpose: "console", pick: { model: o.ag.pin.model, project: o.row.project }, maxTokens: WO_SESSION_MAX_TOKENS, maxSteps: 8,
       system: system({ agent: o.ag.agentName, station: stationName(f.catalog, o.ag.station), purpose: stationDef(f.catalog, o.ag.station)?.purpose ?? "", wo: o.row.id, project: f.project.name, person: o.who.name, canConfirm: o.canConfirm, atIntake, cls: classOf(f.catalog, f.project, f.wo.cls).name }),
-      history: hist, question, signal: o.signal,
+      history: hist, question, signal: o.signal, trace: { surface: "workorder", actor: o.who.id, project: o.row.project, woId: o.row.id },
       toolset: { defs, execute: async (name, input) => {
         const before = ctx.cards.length;
         const out = await executeWoTool(ctx, name, input);

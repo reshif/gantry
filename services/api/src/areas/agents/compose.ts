@@ -5,6 +5,7 @@
  */
 import type { Queryable } from "@gantry/db";
 import { cfgOf, sha256 } from "./config.js";
+import { buildManifest, runnerParts, type ManifestPart, type PromptManifest } from "./manifest.js";
 
 export interface Layer {
   key: "base" | "project" | "agent" | "repo";
@@ -25,6 +26,9 @@ export interface SkillOut {
   when: string;
   content: string;
   resources: string[];
+  /** Hash and size of the skill's body (computed even when `content` is left out), so the prompt manifest can name it. */
+  hash: string;
+  bytes: number;
 }
 
 /** What a run was dispatched with. Stored on `runs.data.instructionPin`. */
@@ -165,13 +169,31 @@ export async function resolveSkills(db: Queryable, o: { orgId: string; agentId: 
     const b = obj(v.body);
     out.push({
       id, name: s.name, version, label: typeof b.label === "string" ? b.label : `${version}`, when: typeof b.when === "string" ? b.when : typeof s.data.when === "string" ? s.data.when : "",
-      content: o.withContent === false ? "" : bodyText(v.body), resources: Array.isArray(b.resources) ? (b.resources as unknown[]).filter((x): x is string => typeof x === "string") : [],
+      content: o.withContent === false ? "" : bodyText(v.body), hash: sha256(bodyText(v.body)), bytes: Buffer.byteLength(bodyText(v.body)), resources: Array.isArray(b.resources) ? (b.resources as unknown[]).filter((x): x is string => typeof x === "string") : [],
     });
   }
   return out;
 }
 
+const LAYER_SOURCE: Record<Layer["key"], string> = {
+  base: "instruction_versions (scope base)",
+  project: "instruction_versions (scope project) or projects.overlay",
+  agent: "agent_versions.body.instructions, overrides and guardrails",
+  repo: "repos.guidelines (a person's text; the commit is where it was last read)",
+};
+
+/** The manifest parts of a composed system prompt in the order the model sees them: the used layers, the skills, then what the runner appends. */
+export function composedParts(layers: Layer[], skills: SkillOut[]): ManifestPart[] {
+  return [
+    ...layers.map((l): ManifestPart => ({ kind: "layer", name: l.name, source: LAYER_SOURCE[l.key], version: l.version, sha256: l.hash, bytes: Buffer.byteLength(l.text) })),
+    ...skills.map((k): ManifestPart => ({ kind: "skill", name: k.name, source: `skill_versions ${k.id}`, version: k.version, sha256: k.hash, bytes: k.bytes })),
+    ...runnerParts(),
+  ];
+}
+
 export interface RunPin {
+  /** What the run is given, part by part; `manifest.hash` is the version tuple's instruction hash. */
+  manifest: PromptManifest;
   /** The model this project's override pins for the agent, if any (overrides are part of the version). */
   modelOverride: string | null;
   composed: Composed;
@@ -191,5 +213,6 @@ export async function pinRunConfig(db: Queryable, o: { orgId: string; agentId: s
   if (pin.guidelines && o.commit) pin.guidelines = { ...pin.guidelines, commit: o.commit };
   const withCommit = layers.map((l) => (l.key === "repo" && o.commit ? { ...l, commit: o.commit } : l));
   const skills = await resolveSkills(db, { orgId: o.orgId, agentId: o.agentId, body: av.body, projectId: o.projectId, withContent: false });
-  return { modelOverride: versionCfg(av).overrides[o.projectId]?.model ?? null, composed: assemble(withCommit), pin, skillVersions: Object.fromEntries(skills.map((s) => [s.id, s.version])), skills };
+  const composed = assemble(withCommit);
+  return { manifest: buildManifest("run", composedParts(composed.layers, skills)), modelOverride: versionCfg(av).overrides[o.projectId]?.model ?? null, composed, pin, skillVersions: Object.fromEntries(skills.map((s) => [s.id, s.version])), skills };
 }

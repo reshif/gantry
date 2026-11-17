@@ -10,11 +10,11 @@ import { composeRunSpec, LEASE_SECONDS, mcpServersInScope } from "./spec.js";
 import { budgetBreach, costMicros, currentPrices } from "./metering.js";
 import { resolveRoute } from "./route.js";
 import { runEgressHosts, systemEgressHosts } from "./egress.js";
+import { ResultBody, Token } from "./result-body.js";
 import { findRunToken, type TokenRow } from "./tokens.js";
 import { recordDocument } from "../workorders/documents.js";
 import { recordSource, researchHosts } from "../workorders/research.js";
 
-const Token = z.string().min(20).max(700);
 const RunParams = z.object({ id: z.string().min(1).max(200) });
 const runId = (req: FastifyRequest): string => RunParams.parse(req.params).id;
 const nonneg = z.number().int().nonnegative().max(2 ** 53 - 1);
@@ -61,15 +61,6 @@ const SourceBody = z.object({
   why: z.string().max(500).default(""), excerpt: z.string().max(70_000).default(""),
 });
 const RefusedBody = z.object({ token: Token, url: z.string().max(4000), reason: z.string().max(500) });
-const ResultBody = z.looseObject({
-  token: Token,
-  status: z.enum(["succeeded", "failed", "interrupted", "needs_person"]),
-  output: z.unknown().optional(),
-  usage: z.array(z.looseObject({ model: z.string() })).default([]),
-  error: z.object({ code: z.string(), msg: z.string() }).optional(),
-  adapter: z.string().max(100),
-  capabilities: z.unknown().optional(),
-});
 const McpBody = z.object({ token: Token, server: z.string().min(1).max(200), tool: z.string().min(1).max(300), argsHash: z.string().regex(/^[0-9a-f]{64}$/).optional(), definitionHash: z.string().min(1).max(200).optional() });
 const EgressBody = z.object({ token: Token });
 const EgressDeniedBody = z.object({ runId: z.string().min(1).max(200).optional(), token: z.string().max(700).optional(), caller: z.enum(["run", "system"]), host: z.string().min(1).max(300), port: z.number().int().min(0).max(65535), reason: z.string().max(500) });
@@ -339,6 +330,15 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     if (d) throw refusalFor(d);
     const spec = await composeRunSpec(g.pool, c, edgeUrl());
     if ("error" in spec) throw refuse("invalid", spec.error);
+    // What this run was actually given: the manifest at spec time (parts, versions, hashes, handoff size). `pinnedHash` is what dispatch pinned on the tuple;
+    // a difference means a layer or skill moved between dispatch and start, and the audit can see it. A repeated serve of the same spec writes nothing.
+    const pinned = c.instructionHash;
+    if (c.runData.promptHash !== spec.promptManifest.hash || c.runData.pinnedHash !== pinned) {
+      await command(req, svc("run.spec"), async (tx): Promise<CommandResult<Record<string, unknown>>> => {
+        await tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [c.orgId, id, JSON.stringify({ promptManifest: spec.promptManifest, promptHash: spec.promptManifest.hash, pinnedHash: pinned, promptDrift: pinned !== null && pinned !== spec.promptManifest.hash })]);
+        return { msg: "Prompt manifest recorded.", events: [], extra: {}, changes: [] };
+      });
+    }
     return spec;
   });
 
