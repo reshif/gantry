@@ -504,10 +504,10 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/v1/work-orders/:id/session/seen", async (req) => {
     const { id } = Id.parse(req.params);
-    const { who } = await woOf(req, id);
+    const { who, row } = await woOf(req, id);
     return command(req, { action: null }, async (tx, a): Promise<CommandResult<Record<string, unknown>>> => {
       await markWoSeen(tx, a.orgId, id, who.id);
-      return { msg: "Seen.", events: [], changes: ["home"], project: null };
+      return { msg: "Seen.", events: [], changes: ["home", "conversations"], project: row.project };
     });
   });
 
