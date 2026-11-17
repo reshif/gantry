@@ -54,7 +54,9 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
   return calls;
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-function mount() {
+/** The library, or one skill's own page (`#skills/<id>`) when an id is given. */
+function mount(skill?: string) {
+  window.location.hash = skill ? `#skills/${skill}` : "#skills";
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><SkillsView /></OverlayProvider></QueryClientProvider>);
@@ -85,8 +87,12 @@ describe("Skills screen", () => {
     expect((await byId("sk-row-sk-docs")).textContent).toContain("none");
     expect(text()).toContain("Skills2");
     expect(text()).toContain("Pass rate90%");
-    expect(((await byId("sk-name")) as HTMLInputElement).value).toBe("Code review");
     expect(locked(await byId("sk-new"))).toBe(false);
+    fireEvent.click(row);
+    expect(window.location.hash).toBe("#skills/sk-review");
+    cleanup();
+    mount("sk-review");
+    expect(((await byId("sk-name")) as HTMLInputElement).value).toBe("Code review");
     expect(document.getElementById("sk-save")?.textContent).toContain("Save as v1.3.0");
   });
 
@@ -94,11 +100,11 @@ describe("Skills screen", () => {
     setup();
     mount();
     await byId("sk-row-sk-review");
-    fireEvent.click(document.querySelector("input[name=sk-filter][value=unused]") as HTMLElement);
+    fireEvent.click(await byId("sk-view-unused"));
     await waitFor(() => expect(document.getElementById("sk-row-sk-review")).toBeNull());
     expect(document.getElementById("sk-row-sk-docs")).toBeTruthy();
     fireEvent.change(await byId("sk-search"), { target: { value: "zzz" } });
-    expect((await byId("sk-empty")).textContent).toContain("No skills match");
+    expect((await byId("sk-lib")).textContent).toContain("No skills match");
   });
 
   it("shows the empty state when the library has no skills, and still offers a new skill", async () => {
@@ -131,7 +137,7 @@ describe("Skills screen", () => {
 
   it("saves an edit as a new version with the version it read and the change note", async () => {
     const calls = setup({ "PATCH /api/v1/skills/sk-review": () => ({ body: { ok: true, msg: "Saved." } }) });
-    mount();
+    mount("sk-review");
     fireEvent.change(await byId("sk-desc"), { target: { value: "A sharper purpose." } });
     fireEvent.change(await byId("sk-note"), { target: { value: "Clarified" } });
     fireEvent.click(await byId("sk-save"));
@@ -144,11 +150,10 @@ describe("Skills screen", () => {
 
   it("makes the skill read-only with the reason when the viewer may not edit skills, and sends nothing", async () => {
     const calls = setup({}, ["skill.edit", "agent.edit"]);
-    mount();
+    mount("sk-review");
     const save = await byId("sk-save");
     await waitFor(() => expect(locked(save)).toBe(true));
     expect(save.getAttribute("data-reason")).toMatch(/Factory Admin/);
-    expect(locked(await byId("sk-new"))).toBe(true);
     for (const id of ["sk-name", "sk-desc", "sk-when", "sk-body", "sk-res", "sk-note"]) expect(((await byId(id)) as HTMLInputElement).disabled).toBe(true);
     expect(locked(await byId("sk-discard"))).toBe(true);
     expect(document.querySelector(".lock-note")?.textContent).toContain("Read-only for you");
@@ -157,6 +162,9 @@ describe("Skills screen", () => {
     expect(locked(await byId("sk-proj-all"))).toBe(true);
     fireEvent.click(await byId("sk-tab-agents"));
     expect(locked(await byId("sk-att-ag-build"))).toBe(true);
+    cleanup();
+    mount();
+    await waitFor(() => expect(locked(document.getElementById("sk-new")!)).toBe(true));
     expect(writes(calls)).toHaveLength(0);
   });
 });

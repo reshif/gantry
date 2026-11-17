@@ -120,7 +120,7 @@ describe("Evals screen: scorecards", () => {
     setup();
     mount();
     await byId("ev-ag-ag-build");
-    const head = document.querySelector(".titleblock")!.textContent!;
+    const head = document.getElementById("ev-stats")!.textContent!;
     expect(head).toContain("Suites2");
     expect(head).toContain("Runs2");
     expect(head).toContain("Candidates eligible1");

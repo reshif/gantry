@@ -11,11 +11,12 @@
 .tr-rungs { display: inline-grid; grid-template-rows: repeat(4, 3px); gap: 2px; width: 12px; flex: none; transform: scaleY(-1); }
 .tr-rung { display: block; background: var(--line); border-radius: 1px; }
 .tr-rung.is-on { background: currentColor; }
-.lvl-0 { --lv: var(--faint); --lv-soft: var(--sunk); }
-.lvl-1 { --lv: var(--ink-2); --lv-soft: var(--panel); }
-.lvl-2 { --lv: var(--wait); --lv-soft: var(--wait-soft); }
-.lvl-3 { --lv: var(--run); --lv-soft: var(--run-soft); }
-.lvl-4 { --lv: var(--done); --lv-soft: var(--done-soft); }
+/* level colours: L0 stopped (red), L1 the default (grey), L2 checks plus a spot check (blue), L3 checks decide (green), L4 never granted (accent) */
+.lvl-0 { --lv: var(--block); --lv-soft: var(--block-soft); }
+.lvl-1 { --lv: var(--ink-2); --lv-soft: var(--sunk); }
+.lvl-2 { --lv: var(--run); --lv-soft: var(--run-soft); }
+.lvl-3 { --lv: var(--done); --lv-soft: var(--done-soft); }
+.lvl-4 { --lv: var(--accent); --lv-soft: var(--accent-soft); }
 .tr-lvl { display: inline-flex; align-items: center; gap: 5px; color: var(--lv); font-size: var(--t-sm); white-space: nowrap; }
 .tr-lvl .mono { font-weight: 600; }
 .tr-lvl-name { color: var(--ink-2); }
@@ -33,12 +34,12 @@
 .tr-rowh .who { display: flex; align-items: center; gap: 6px; }
 .tr-rowh .mono { display: block; margin-top: 2px; }
 .tr-matrix tr.is-off .tr-rowh { opacity: 0.6; }
-.tr-cell { display: grid; gap: 1px; width: 100%; min-width: 64px; padding: 5px 6px; border: 1px solid var(--line); border-left: 3px solid var(--lv); border-radius: var(--r1); background: var(--lv-soft); color: var(--ink); cursor: pointer; text-align: left; font: inherit; }
+.tr-cell { display: grid; gap: 1px; width: 100%; min-width: 64px; padding: 5px 6px; border: 1px solid transparent; border-radius: var(--r1); background: var(--lv-soft); color: var(--ink); cursor: pointer; text-align: left; font: inherit; }
 .tr-cell:hover { border-color: var(--lv); }
 .tr-cell:focus-visible { outline: none; box-shadow: var(--focus); }
 .tr-cell.is-on { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
-.tr-cell.is-virtual { background: var(--surface); border-style: dashed; border-left-style: solid; }
-.tr-cell.is-inherited { border-style: dotted; border-left-style: solid; }
+.tr-cell.is-virtual { background: var(--surface); border: 1px dashed var(--line-strong); }
+.tr-cell.is-inherited { border: 1px dotted var(--lv); }
 .tr-cell-top { display: flex; align-items: center; gap: 5px; color: var(--lv); }
 .tr-cell-l { font-weight: 700; font-size: var(--t-md); color: var(--ink); }
 .tr-cap-eff { font-size: var(--t-xs); color: var(--wait); }

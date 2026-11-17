@@ -98,9 +98,9 @@
 .ag-trust-cells { display: flex; flex-wrap: wrap; gap: 4px; }
 .ag-trust-cell { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 7px; border: 1px solid var(--line); border-left: 3px solid var(--faint); border-radius: var(--r1); background: var(--surface); font: inherit; font-size: var(--t-sm); color: var(--ink); cursor: pointer; }
 .ag-trust-cell:focus-visible { outline: none; box-shadow: var(--focus); }
-.ag-trust-cell.lvl-2 { border-left-color: var(--wait); background: var(--wait-soft); }
-.ag-trust-cell.lvl-3 { border-left-color: var(--run); background: var(--run-soft); }
-.ag-trust-cell.lvl-4 { border-left-color: var(--done); background: var(--done-soft); }
+.ag-trust-cell.lvl-2 { border-left-color: var(--run); background: var(--run-soft); }
+.ag-trust-cell.lvl-3 { border-left-color: var(--done); background: var(--done-soft); }
+.ag-trust-cell.lvl-4 { border-left-color: var(--accent); background: var(--accent-soft); }
 .ag-trust-cell.lvl-0 { border-style: dashed; }
 .ag-trust-k { color: var(--ink-2); }
 .ag-trust-up { color: var(--accent); }

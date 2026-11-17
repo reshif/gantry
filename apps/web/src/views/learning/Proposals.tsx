@@ -41,13 +41,13 @@ export function ProposalsTab({ proposals, status, setStatus, hi, onFocusFinding 
         {items.map(([k, label]) => (
           <li key={k}>
             <button type="button" className={`ln-strip-b${status === k ? " is-on" : ""}`} id={`ln-st-${k}`} aria-pressed={status === k ? "true" : "false"} onClick={() => setStatus(k)}>
-              <span className="ln-strip-n">{String(counts[k])}</span><span>{label}</span>
+              <span>{label}</span><span className="ln-strip-n">{String(counts[k])}</span>
             </button>
           </li>
         ))}
         <li>
           <button type="button" className={`ln-strip-b${status === "all" ? " is-on" : ""}`} id="ln-st-all" aria-pressed={status === "all" ? "true" : "false"} onClick={() => setStatus("all")}>
-            <span className="ln-strip-n">{String(all.length)}</span><span>All</span>
+            <span>All</span><span className="ln-strip-n">{String(all.length)}</span>
           </button>
         </li>
       </ol>
