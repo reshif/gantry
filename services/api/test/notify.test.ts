@@ -224,7 +224,7 @@ d("notifications (spec 12.2): routes, producer, deliveries, cards", () => {
     // The worker posted it: record what Slack answered (the worker test covers the posting itself).
     await w.q(`update deliveries set status = 'sent', message_ref = '{"channel":"C0123","ts":"1700000000.000001"}' where id = $1`, [posted.id]);
     const approver = (await Promise.all(w.APPROVERS.map(async (p) => ({ p, ok: !!(await w.get(id, p)).allowed.approve })))).find((x) => x.ok)!.p;
-    const r = await w.call(approver, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:G2`)}/approve`, {});
+    const r = await w.call(approver, "POST", await w.gateUrl(id, "G2"), {});
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const upd = (await w.q(`select o.payload, o.destination from outbox o join events e on e.id = o.event_id where e.type = 'gate.decision' and e.wo_id = $1 and o.destination like '%:update'`, [id]));
     expect(upd).toHaveLength(1);

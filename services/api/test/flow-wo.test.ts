@@ -61,7 +61,7 @@ d("flow: submit, intake, confirm", () => {
       if (wo.state === "waiting" && wo.allowed.approve) {
         let passed = false;
         for (const who of approvers) {
-          const r = await w.call(who, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${wo.allowed.approve.gate}`)}/approve`, {});
+          const r = await w.call(who, "POST", await w.gateUrl(id, wo.allowed.approve.gate), {});
           if (r.status === 200 && r.body.passed) {
             passed = true;
             break;

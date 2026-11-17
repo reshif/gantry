@@ -243,10 +243,10 @@ describe("Home: by role", () => {
       approvals: [], conversations: [], badges: {}, projectBadges: {},
       sections: {
         attention: [], projects: [{ id: "payments", roles: [{ id: "engineer", name: "Engineer" }], repos: [] }],
-        waiting: { approvals: [{ wo: "WO-9", title: "Fix rounding", gate: "G3d", gateLabel: "G3d", gateName: "Design review", project: "payments", projectName: "Payments", have: 0, need: 1 }], conversations: [{ wo: "WO-10", title: "Add export", project: "payments", question: "Which format?" }] },
+        waiting: { approvals: [{ wo: "WO-9", title: "Fix rounding", gate: "G3d", gateLabel: "G3d", gateName: "Design review", instance: "WO-9:G3d:2", project: "payments", projectName: "Payments", have: 0, need: 1 }], conversations: [{ wo: "WO-10", title: "Add export", project: "payments", question: "Which format?" }] },
         motion: { ...MOTION, inFlight: 1, mine: [{ id: "WO-10", title: "Add export", project: "payments", projectName: "Payments", state: "waiting", bay: null, bayName: null, station: "Intake", cls: "feature", doneAt: null }] },
       },
-    }, { extra: { "POST /api/v1/gate-instances/WO-9%3AG3d/approve": () => ({ body: { ok: true, msg: "G3d approved on WO-9." } }) } });
+    }, { extra: { "POST /api/v1/gate-instances/WO-9%3AG3d%3A2/approve": () => ({ body: { ok: true, msg: "G3d approved on WO-9." } }) } });
     mount();
     expect(await screen.findByText("Which format?")).toBeTruthy();
     expect(document.getElementById("hm-tok-WO-10")?.className).toContain("tok-waiting");

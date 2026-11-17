@@ -68,7 +68,7 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
       guard: dA,
       group: "decide",
       ...(!dA.allowed ? { why: `${dA.reason}${dA.needs ? ` Needs: ${dA.needs}.` : ""}` } : {}),
-      onClick: () => void (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, undefined, ifm)).then((r) => res(r)),
+      onClick: () => void (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm)).then((r) => res(r)),
     });
     const dR: TDecision = g.id === "G0G1" ? (stop ? no(stopWhy) : dec(wo, "decline")) : ap;
     out.push({
@@ -88,7 +88,7 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
           sub: g.id === "G0G1" ? "The work order moves to Declined and the submitter is told why." : `The station's agent reworks ${stName(cat, stationId)} with your reason.`,
           placeholder: g.id === "G0G1" ? "Why will the factory not do this?" : "What must change before this passes?",
           onOk: async (v) => {
-            const r = g.id === "G0G1" ? await ops.decline(wo.id, v, undefined, ifm) : await ops.rejectGate(wo.id, g.id, v, undefined, ifm);
+            const r = g.id === "G0G1" ? await ops.decline(wo.id, v, undefined, ifm) : await ops.rejectGate(wo.id, g.id, ap.instance, v, undefined, ifm);
             if (r.ok) ui.toast(r.msg, "ok");
             return r;
           },

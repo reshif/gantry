@@ -321,7 +321,7 @@ d("station documents and dialogue", () => {
     const gate = wo.allowed.approve?.gate;
     if (gate) {
       for (const who of w.APPROVERS) {
-        const g = await w.call(who, "POST", `/api/v1/gate-instances/${encodeURIComponent(`${id}:${gate}`)}/approve`, {});
+        const g = await w.call(who, "POST", await w.gateUrl(id, gate), {});
         if (g.status === 200) break;
       }
       const evs = (await w.events("gate.decision")).filter((e: { wo_id: string }) => e.wo_id === id);

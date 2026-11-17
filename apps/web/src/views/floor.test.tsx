@@ -147,7 +147,7 @@ describe("Floor: belt", () => {
   it("opens the gate drawer, shows who may approve and sends a rejection with its reason to the gate instance", async () => {
     const calls = mockApi({
       "GET /api/v1/work-orders/WO-2408": () => ({ body: { ...WOS.find((w) => w.id === "WO-2408"), version: 3, allowed: { approve: { allowed: true, reason: "Approver rule allows Line Lead.", needs: "", gate: "G3d", instance: "WO-2408:G3d:1" }, moves: {}, can: {} } } }),
-      "POST /api/v1/gate-instances/WO-2408%3AG3d/reject": () => ({ body: { ok: true, msg: "G3d rejected; WO-2408 is reworking Design." } }),
+      "POST /api/v1/gate-instances/WO-2408%3AG3d%3A1/reject": () => ({ body: { ok: true, msg: "G3d rejected; WO-2408 is reworking Design." } }),
     });
     mount(<FloorView />);
     await screen.findByText("Payments Platform");
@@ -162,8 +162,8 @@ describe("Floor: belt", () => {
     expect(await screen.findByText(/at least 5 characters/)).toBeTruthy();
     fireEvent.change(reason, { target: { value: "Needs the export format agreed" } });
     fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
-    await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d/reject")).toHaveLength(1));
-    expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d/reject")[0]?.body).toMatchObject({ reason: "Needs the export format agreed" });
+    await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/reject")).toHaveLength(1));
+    expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/reject")[0]?.body).toMatchObject({ reason: "Needs the export format agreed" });
   });
 
   it("locks Approve with the server's reason when this person may not approve (separation of duties)", async () => {
@@ -181,13 +181,15 @@ describe("Floor: belt", () => {
   it("shows a stale approval as the server's refusal, not as success", async () => {
     mockApi({
       "GET /api/v1/work-orders/WO-2408": () => ({ body: { ...WOS.find((w) => w.id === "WO-2408"), version: 3, allowed: { approve: { allowed: true, reason: "ok", needs: "", gate: "G3d", instance: "WO-2408:G3d:1" }, moves: {}, can: {} } } }),
-      "POST /api/v1/gate-instances/WO-2408%3AG3d/approve": () => ({ status: 409, body: { ok: false, msg: "WO-2408 is not waiting at G3d." } }),
+      "POST /api/v1/gate-instances/WO-2408%3AG3d%3A1/approve": () => ({ status: 409, body: { ok: false, msg: "WO-2408 is not waiting at G3d.", current: { instance: "WO-2408:G3d:2", gate: "G3d", wo: "WO-2408" } } }),
     });
     mount(<FloorView />);
     await screen.findByText("Payments Platform");
     fireEvent.click(document.getElementById("floor-gate-G3d") as HTMLElement);
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(await screen.findByText("WO-2408 is not waiting at G3d.")).toBeTruthy();
+    const approve = await screen.findByRole("button", { name: "Approve" });
+    await waitFor(() => expect(approve.getAttribute("aria-disabled")).toBeNull()); // the instance shown is known before a decision can be sent
+    fireEvent.click(approve);
+    expect(await screen.findByText(/WO-2408 is not waiting at G3d\. It is now at instance 2\. Nothing was decided/)).toBeTruthy();
     expect(document.querySelector(".toast-ok")).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ import { Btn } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
+import { useTravelerWo } from "./model";
 
 export interface ApproversRead extends GateApprovers {
   viewerCanOverride: boolean;
@@ -23,6 +24,7 @@ export const useGateApprovers = (woId: string, gate: string | null | undefined) 
 export function ApproversPanel({ woId, gate, project, onNavigate }: { woId: string; gate: string; project: string; onNavigate?: () => void }) {
   const q = useGateApprovers(woId, gate);
   const ui = useUI();
+  const wo = useTravelerWo(woId).data;
   const a = q.data;
   if (!a) return <Async query={q} what="who may approve this gate" id="apr" rows={2}>{() => null}</Async>;
   const go = (route: string, param?: string) => { onNavigate?.(); navigate(route, param ?? null, route === "project-config" ? project : undefined); };
@@ -39,7 +41,7 @@ export function ApproversPanel({ woId, gate, project, onNavigate }: { woId: stri
       <div className="osx-actions">
         <Btn small id="apr-edit-rule" label="Edit rule" disabled={!a.can.editRule} disabledReason={!a.can.editRule ? a.can.editWhy || "You may not edit approver rules." : undefined} onClick={() => go("project-config", `approvers/${gate}`)} />
         <Btn small id="apr-grant" label="Grant a role" disabled={!a.can.grantRole} disabledReason={!a.can.grantRole ? a.can.grantWhy || "You may not grant roles." : undefined} onClick={() => go("people")} />
-        {a.viewerCanOverride ? <Btn small kind="primary" id="apr-override" label="Approve as override" onClick={async () => { const r = await ops.approveGate(woId, gate); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}
+        {a.viewerCanOverride ? <Btn small kind="primary" id="apr-override" label="Approve as override" onClick={async () => { const r = await ops.approveGate(woId, gate, wo?.allowed.approve?.gate === gate ? wo.allowed.approve.instance : undefined); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}
       </div>
     </section>
   );

@@ -123,7 +123,7 @@ function GateItem({ it }: { it: Extract<Item, { kind: "gate" }> }) {
       : { allowed: false, reason: `${wo} is no longer waiting at this gate.`, needs: "" };
   const decideBack: Decision = brief && t && base.allowed ? dec(t, "decline") : base;
   const ifm = t ? { ifMatch: t.version } : undefined;
-  const approve = useCommand(() => (brief ? ops.confirmBrief(wo, undefined, ifm) : ops.approveGate(wo, gate, undefined, ifm)), {});
+  const approve = useCommand(() => (brief ? ops.confirmBrief(wo, undefined, ifm) : ops.approveGate(wo, gate, ap?.instance ?? a.instance, undefined, ifm)), {});
   const back = () =>
     ui.reasonDialog({
       title: brief ? `Decline ${wo}` : `Ask for changes on ${wo}`,
@@ -134,7 +134,7 @@ function GateItem({ it }: { it: Extract<Item, { kind: "gate" }> }) {
       placeholder: brief ? "Why will the factory not do this?" : "What must change before this passes?",
       sub: brief ? "The work order moves to Declined and the submitter is told why." : "The station's agent reworks the step with your reason.",
       onOk: async (v) => {
-        const r = brief ? await ops.decline(wo, v, undefined, ifm) : await ops.rejectGate(wo, gate, v, undefined, ifm);
+        const r = brief ? await ops.decline(wo, v, undefined, ifm) : await ops.rejectGate(wo, gate, ap?.instance ?? a.instance, v, undefined, ifm);
         if (r.ok) ui.toast(r.msg, "ok");
         return r;
       },

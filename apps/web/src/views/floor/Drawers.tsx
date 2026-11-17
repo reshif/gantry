@@ -75,13 +75,13 @@ function GateRowActions({ w, gid }: { w: WorkOrder; gid: string }) {
   const ctx = useFloorCtx();
   const t = useWorkOrder(w.id).data as Traveler | undefined;
   const lock: Decision | null = ctx.replay ? { allowed: false, reason: "Replay is showing the past. Go back to live to act.", needs: "" } : null;
-  const dec: Decision | null = lock ?? (t?.allowed?.approve && t.allowed.approve.gate === gid ? { allowed: t.allowed.approve.allowed, reason: t.allowed.approve.reason, needs: t.allowed.approve.needs } : null);
+  const dec: Decision | null = lock ?? (!t ? { allowed: false, reason: "Checking what you may decide here.", needs: "" } : t.allowed?.approve && t.allowed.approve.gate === gid ? { allowed: t.allowed.approve.allowed, reason: t.allowed.approve.reason, needs: t.allowed.approve.needs } : null);
   const g = gateDef(ctx.cat, gid) as Gate;
   const brief = gid === "G0G1";
   const done = (r: { ok: boolean; msg: string }) => ui.toast(r.msg, r.ok ? "ok" : "error");
   return (
     <span className="fl-gate-acts">
-      <Btn label={brief ? "Confirm brief" : gid === "G6" ? "Confirm release" : "Approve"} small kind="primary" icon="check" id={`floor-gapp-${w.id}`} guard={dec} onClick={async () => done(await ops.approveGate(w.id, gid))} />
+      <Btn label={brief ? "Confirm brief" : gid === "G6" ? "Confirm release" : "Approve"} small kind="primary" icon="check" id={`floor-gapp-${w.id}`} guard={dec} onClick={async () => done(await ops.approveGate(w.id, gid, t?.allowed?.approve?.instance))} />
       <Btn
         label={brief ? "Decline" : "Reject"}
         small
@@ -98,7 +98,7 @@ function GateRowActions({ w, gid }: { w: WorkOrder; gid: string }) {
             placeholder: brief ? "Why will the factory not do this?" : "What must change before this passes?",
             sub: brief ? "The work order moves to Declined." : "The station's agent reworks the step with your reason.",
             onOk: async (v) => {
-              const r = await ops.rejectGate(w.id, gid, v);
+              const r = await ops.rejectGate(w.id, gid, t?.allowed?.approve?.instance, v);
               if (r.ok) ui.toast(r.msg, "ok");
               return r;
             },

@@ -35,12 +35,12 @@ describe("Traveler drawer", () => {
   });
 
   it("approves the waiting gate with the work order version in If-Match", async () => {
-    const calls = await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`]: () => ({ body: { ok: true, msg: "Approved." } }) });
+    const calls = await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`]: () => ({ body: { ok: true, msg: "Approved." } }) });
     const btn = await screen.findByRole("button", { name: /Approve/ });
     expect(btn.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(btn);
-    await waitFor(() => expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`)).toHaveLength(1));
-    expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`)[0]!.headers["if-match"]).toBe("7");
+    await waitFor(() => expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`)).toHaveLength(1));
+    expect(posts(calls, `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`)[0]!.headers["if-match"]).toBe("7");
     expect(await screen.findByText("Approved.")).toBeTruthy();
   });
 
@@ -54,9 +54,14 @@ describe("Traveler drawer", () => {
   });
 
   it("shows a stale refusal from the server instead of pretending it worked", async () => {
-    await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`]: () => ({ status: 409, body: { ok: false, msg: `${W.id} changed since you opened it. Reload and try again.` } }) });
-    fireEvent.click(await screen.findByRole("button", { name: /Approve/ }));
-    expect(await screen.findByText(/changed since you opened it/)).toBeTruthy();
+    const calls = await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`]: () => ({ status: 409, body: { ok: false, msg: `${W.id} is no longer waiting at ${gate} on that instance.`, current: { instance: `${W.id}:${gate}:2`, gate, wo: W.id } } }) });
+    await screen.findByRole("button", { name: /Approve/ });
+    const reads = () => calls.filter((c) => c.method === "GET" && c.path === `/api/v1/work-orders/${W.id}`).length;
+    const before = reads();
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
+    // The person is told what changed and that nothing was decided, and the screen refetches.
+    expect(await screen.findByText(/no longer waiting.*It is now at instance 2\. Nothing was decided\. The screen was refreshed/)).toBeTruthy();
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
   });
 
   it("refuses moves while a stop covers the work order and says why", async () => {
@@ -83,7 +88,7 @@ describe("Traveler drawer", () => {
   });
 
   it("rejects a gate with a reason of at least five characters", async () => {
-    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/reject`;
+    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/reject`;
     const calls = await show({ [`POST ${path}`]: () => ({ body: { ok: true, msg: "Rejected." } }) });
     fireEvent.click(await screen.findByRole("button", { name: /Reject/ }));
     const ta = await screen.findByPlaceholderText("What must change before this passes?");

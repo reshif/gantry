@@ -23,7 +23,7 @@ export type RefusalKind =
   | "unauthenticated" // 401: the session ended
   | "forbidden" // 403: a rule or role refused
   | "not_found" // 404
-  | "conflict" // 409 / 412: the entity changed since it was loaded
+  | "conflict" // 409 / 412 / 428: the entity changed since it was loaded, or the request did not name what it decides
   | "invalid" // 422 (and 400)
   | "rate_limited" // 429
   | "unreachable" // status 0: not sure it went through
@@ -35,7 +35,7 @@ export function refusalKindOf(status: number): RefusalKind {
   if (status === 401) return "unauthenticated";
   if (status === 403) return "forbidden";
   if (status === 404) return "not_found";
-  if (status === 409 || status === 412) return "conflict";
+  if (status === 409 || status === 412 || status === 428) return "conflict";
   if (status === 422 || status === 400) return "invalid";
   if (status === 429) return "rate_limited";
   if (status >= 500) return "server";
@@ -54,6 +54,8 @@ export interface CommandRefusal {
   rule?: RuleRef;
   /** What the person needs to do it (403). */
   needs?: string;
+  /** 409/428: what is true now (for a gate decision, the open instance), so the screen can refresh and say what changed. */
+  current?: Record<string, unknown>;
 }
 /** `{ ok, msg, ...extra }`: the result shape of every command, as the legacy G.ops returned. */
 export type ApiResult<T extends object = Record<string, unknown>> = (CommandOk & T) | CommandRefusal;
@@ -179,6 +181,7 @@ function refusalFrom(status: number, body: unknown, fallback: string): CommandRe
   const out: CommandRefusal = { ok: false, msg: typeof b.msg === "string" && b.msg ? b.msg : fallback, status, kind: refusalKindOf(status) };
   if (b.rule && typeof b.rule === "object") out.rule = b.rule as RuleRef;
   if (typeof b.needs === "string" && b.needs) out.needs = b.needs;
+  if (b.current && typeof b.current === "object") out.current = b.current as Record<string, unknown>;
   return out;
 }
 

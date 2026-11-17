@@ -38,7 +38,7 @@ const approvers = (over: Record<string, unknown> = {}) => ({
 
 describe("Gate approver transparency", () => {
   it("shows the rule in plain words, progress, the eligible people and a warning when the gate cannot pass; the locked Approve says why inline; Approve as override uses the ordinary approve call", async () => {
-    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}`)}/approve`;
+    const path = `/api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/approve`;
     const calls = await show({
       [`GET /api/v1/work-orders/${W.id}`]: () => ({ body: travelerOf(W, {}, { approve: deny("Separation of duties: the author cannot approve.", "Someone other than the author") }) }),
       [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers() }),

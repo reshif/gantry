@@ -115,7 +115,7 @@ function ApprovalRow({ a }: { a: Approval }) {
   const wo = a.wo ?? "";
   const gate = a.gate ?? "";
   const approve = async () => {
-    const r = await ops.approveGate(wo, gate);
+    const r = await ops.approveGate(wo, gate, a.instance);
     ui.toast(r.msg, r.ok ? "ok" : "error");
   };
   const verb = gate === "G6" ? "Confirm release" : "Approve";
