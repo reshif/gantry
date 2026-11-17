@@ -1,0 +1,6 @@
+{
+  "project": "payments",
+  "projectRoutes": ["floor", "work-orders", "conversations", "onboarding", "project-config", "record", "traveler", "dossier", "changes"],
+  "rename": { "traveler": "record" },
+  "overrides": {}
+}

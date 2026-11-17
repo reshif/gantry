@@ -41,6 +41,11 @@ export interface MockOptions {
   persona?: Persona | null;
   /** Path (after /api/v1/, no query) or "METHOD path" -> handler. Wins over the defaults. */
   overrides?: Record<string, Handler>;
+  /**
+   * Computed answers for parameterised paths (`projects/p1/floor`). Return undefined to fall through to the defaults.
+   * The fidelity compare tool (fidelity/compare.mjs) feeds the whole demo seed through this.
+   */
+  resolve?: (method: string, path: string, url: URL) => unknown;
 }
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -84,6 +89,8 @@ export async function mockApi(page: Page, o: MockOptions = {}): Promise<string[]
     seen.push(`${method} ${path}`);
     const h = o.overrides?.[`${method} ${path}`] ?? o.overrides?.[path];
     if (h) return h(route);
+    const computed = o.resolve?.(method, path, url);
+    if (computed !== undefined) return json(route, computed);
     if (path === "me") return persona ? json(route, persona.me) : json(route, { ok: false, msg: "Not signed in", config: { demoAccounts: false } }, 401);
     if (path === "can") {
       const checks = (route.request().postDataJSON() as { checks: Array<{ action: string }> }).checks;
