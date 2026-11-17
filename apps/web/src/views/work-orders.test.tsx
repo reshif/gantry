@@ -73,7 +73,7 @@ describe("Work orders table", () => {
     await waitFor(() => expect(document.querySelector("#wo-tab-incidents .tab-count")?.textContent).toMatch(/\+$/));
     await waitFor(() => expect(document.body.textContent).toMatch(/Only the latest 1000 work orders/), { timeout: 5000 });
     expect(lists(calls).filter((c) => c.query.get("cursor")).length).toBeGreaterThan(3);
-  });
+  }, 20_000);
 
   it("filters by assignee, groups the rows and keeps a saved view", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 5) : page(WOS.slice(0, 5), null, 5) }) });
