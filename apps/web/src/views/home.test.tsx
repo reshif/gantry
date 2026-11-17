@@ -99,7 +99,7 @@ describe("Home: one page", () => {
     expect(screen.getByText("Nautobot-Jobs: verification failed")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: /Set up the factory/ })).toBeTruthy();
     expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Step repo");
-    expect(screen.getByText("3 of 5")).toBeTruthy();
+    expect(screen.getByText("3 of 5 done")).toBeTruthy();
     // Only the active step has a button.
     expect(document.querySelectorAll(".hm-step .btn")).toHaveLength(1);
     // One request for the page, and none for the removed activity feed.
@@ -116,6 +116,21 @@ describe("Home: one page", () => {
     for (const id of ["hm-kpi-flight", "hm-kpi-gates", "hm-kpi-spend", "hm-kpi-success", "hm-to-mine", "hm-to-factory", "hm-ctl"]) expect(document.getElementById(id)).toBeNull();
     for (const t of ["My work", "Factory overview", "Human attention", "Live activity", "Onboarding pipeline", "Save as view", "Factory control"]) expect(screen.queryByText(t)).toBeNull();
     expect(document.querySelector(".hm-kpis")).toBeNull();
+  });
+
+  it("the stat row under the title counts what the sections below hold, and drops a tile whose section the person does not get", async () => {
+    setup(ASHA, adminHome({}, { attention: [{ ...ONB_ATT, sev: 0 }], motion: { ...MOTION, inFlight: 3, running: 2, shippedWeek: 4, shippedToday: 1 }, waiting: { approvals: [], conversations: [] } }));
+    mount();
+    await screen.findByText("Nautobot-Jobs onboarding needs you: verification failed");
+    expect(document.getElementById("hm-stat-attention")?.textContent).toContain("1 critical");
+    expect(document.getElementById("hm-stat-shipped")?.textContent).toContain("4");
+    expect(document.getElementById("hm-stat-waiting")?.textContent).toContain("Nothing is waiting on you");
+    cleanup();
+    setup(VERA, { approvals: [], conversations: [], badges: {}, projectBadges: {}, sections: { attention: [], projects: [{ id: "payments", roles: [{ id: "viewer", name: "Viewer" }], repos: [] }] } });
+    mount();
+    await screen.findByText(/Ask a Project Admin for more access/);
+    expect(document.getElementById("hm-stat-waiting")).toBeNull();
+    expect(document.getElementById("hm-stat-flight")).toBeNull();
   });
 
   it("never shows a kill or restore control on Home", async () => {
@@ -191,13 +206,15 @@ describe("Home: one page", () => {
     expect(screen.getAllByText(/1 of 2 approvals/)).toHaveLength(1);
   });
 
-  it("each count appears once: in flight is one line, not a tile plus a header plus a panel", async () => {
+  it("in flight is one tile at the top and one line in the In motion card, never a third place", async () => {
     const motion = { ...MOTION, inFlight: 3, running: 2, inBays: 1, byStation: { build: 3 }, shippedToday: 1, shippedWeek: 4, shippedPrevWeek: 1, recentDone: [{ id: "WO-5", title: "Done", project: "payments", projectName: "Payments Platform", doneAt: 1 }] };
     setup(ASHA, adminHome({}, { setup: undefined, attention: [], motion }));
     mount();
     expect(await screen.findByText("3 work orders in flight · 2 running · 1 in bays")).toBeTruthy();
-    expect(text().match(/in flight/g) ?? []).toHaveLength(1);
-    expect(screen.getByText("Shipped: 1 today, 4 this week (+3 vs previous week)")).toBeTruthy();
+    // The tile at the top ("In flight") and the line in the card; the old header and panel copies stay gone.
+    expect(text().match(/in flight/gi) ?? []).toHaveLength(2);
+    expect(document.getElementById("hm-stat-flight")?.textContent).toContain("3");
+    expect(document.getElementById("hm-motion")?.textContent).toContain("Shipped 1 today, 4 this week+3 vs previous week");
     expect(document.getElementById("hm-done-WO-5")).toBeTruthy();
   });
 

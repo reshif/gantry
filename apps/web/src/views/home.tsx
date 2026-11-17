@@ -3,7 +3,7 @@ import { useCan } from "../api/can";
 import { useHome, useMe, useProjects } from "../api/queries";
 import { hasCommand, runCommand } from "../lib/commands";
 import { fmt } from "@gantry/domain";
-import { Btn, Empty, ViewHead } from "../ui/primitives";
+import { Btn, Empty, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import type { HomeFull } from "./home/data";
 import { ApproversWatch, AttentionStrip, FactoryHealth, InMotion, ProjectsSummary, SetupChecklist, WaitingOnYou, openNewProject } from "./home/sections";
@@ -46,6 +46,9 @@ export default function HomeView() {
       }
     : null;
   const away = me.person.away && me.person.away.to > Date.now() ? `Away until ${fmt.istDate(me.person.away.to)}.` : "";
+  const att = s.attention ?? [];
+  const crit = att.filter((a) => a.sev === 0).length;
+  const waitingN = waiting ? waiting.approvals.length + waiting.conversations.length : 0;
   // While the setup checklist is up its active step carries the New project button; the header has it afterwards.
   const canCreate = !create.pending && create.allowed && !s.setup && !!s.health;
   // No work order can be submitted before a repo is Ready, so the checklist (which says so) replaces the button until then.
@@ -58,7 +61,7 @@ export default function HomeView() {
     <div className="view hm">
       <ViewHead
         title="Home"
-        sub={away || undefined}
+        sub={away || "What needs you, what is moving, and how the factory is doing."}
         actions={
           <>
             {canCreate ? <Btn label="New project" kind="primary" icon="plus" id="hm-new-project" onClick={openNewProject} /> : null}
@@ -66,22 +69,23 @@ export default function HomeView() {
           </>
         }
       />
+      {waiting || s.attention || m ? (
+        <StatRow id="hm-stats">
+          {waiting ? <Stat id="hm-stat-waiting" label="Waiting on you" value={String(waitingN)} sub={waitingN ? "Approvals and questions for you" : "Nothing is waiting on you"} {...(waitingN ? { tone: "wait" as const } : {})} /> : null}
+          {s.attention ? <Stat id="hm-stat-attention" label="Needs attention" value={String(att.length)} sub={crit ? `${crit} critical` : "None critical"} {...(crit ? { tone: "block" as const } : {})} /> : null}
+          {m ? <Stat id="hm-stat-flight" label="In flight" value={String(m.inFlight)} sub={`${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`} /> : null}
+          {m ? <Stat id="hm-stat-shipped" label="Shipped this week" value={String(m.shippedWeek)} sub={`${m.shippedToday} today`} /> : null}
+        </StatRow>
+      ) : null}
       <div className="hm-stack">
         {s.attention ? <AttentionStrip items={s.attention} /> : null}
-        <div className={`hm-two${s.setup || (waiting && s.approvers) ? "" : " is-one"}`}>
-          {waiting ? <WaitingOnYou approvals={waiting.approvals} conversations={waiting.conversations} /> : null}
-          {s.approvers ? <ApproversWatch data={s.approvers} /> : null}
-          {s.setup ? <SetupChecklist setup={s.setup} /> : null}
-        </div>
-        {showMotion || s.projects?.length ? (
-          <div className={`hm-two${showMotion && m && s.projects ? "" : " is-one"}`}>
-            {showMotion && m ? <InMotion motion={m} projects={projects} /> : null}
-            {s.projects ? <ProjectsSummary rows={s.projects} projects={projects} factoryWide={factoryWide} readOnlyNote={viewerOnly} /> : null}
-          </div>
-        ) : null}
+        {waiting ? <WaitingOnYou approvals={waiting.approvals} conversations={waiting.conversations} /> : null}
+        {s.approvers ? <ApproversWatch data={s.approvers} /> : null}
+        {s.setup ? <SetupChecklist setup={s.setup} /> : null}
+        {showMotion && m ? <InMotion motion={m} projects={projects} /> : null}
+        {s.projects ? <ProjectsSummary rows={s.projects} projects={projects} factoryWide={factoryWide} readOnlyNote={viewerOnly} /> : null}
         {s.health ? <FactoryHealth health={s.health} /> : null}
       </div>
     </div>
   );
 }
-

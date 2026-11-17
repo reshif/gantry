@@ -8,7 +8,7 @@ import { plural } from "../../lib/plural";
 import { hasCommand, runCommand } from "../../lib/commands";
 import { navigate } from "../../lib/router";
 import { setProject, updatePrefs } from "../../lib/prefs";
-import { Btn, Chip, Meter } from "../../ui/primitives";
+import { Btn, Chip, Meter, Panel, Status } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { makeStopActions } from "../../shell/stopActions";
@@ -29,15 +29,14 @@ export function openNewProject(): void {
   }, 50);
 }
 
-function Section({ id, title, count, tools, cls = "", children }: { id: string; title: string; count?: number | undefined; tools?: ReactNode; cls?: string; children: ReactNode }) {
+/** A Home section is one titled card. `id` stays on the wrapper so the page can link to it. */
+function Section({ id, title, count, tools, cls = "", flush, children }: { id: string; title: string; count?: number | undefined; tools?: ReactNode; cls?: string; flush?: boolean; children: ReactNode }) {
   return (
-    <section className={`hm-sec ${cls}`} aria-labelledby={`${id}-h`} id={id}>
-      <div className="hm-sec-head">
-        <h2 className="panel-title" id={`${id}-h`}>{title}{count !== undefined ? <span className="hm-count mono">{` ${count}`}</span> : null}</h2>
-        {tools ?? null}
-      </div>
-      {children}
-    </section>
+    <div id={id} className={`hm-sec ${cls}`}>
+      <Panel title={<>{title}{count !== undefined ? <span className="hm-count">{count}</span> : null}</>} tools={tools} flush={!!flush}>
+        {children}
+      </Panel>
+    </div>
   );
 }
 
@@ -72,7 +71,7 @@ export function AttentionStrip({ items }: { items: AttentionItem[] }) {
   const shown = all ? items : items.slice(0, SHOWN);
   const crit = items.filter((x) => x.sev === 0).length;
   return (
-    <Section id="hm-attention" title="Needs attention" count={items.length} cls="hm-att-sec">
+    <Section id="hm-attention" title="Needs attention" count={items.length} flush tools={items.length > SHOWN ? <Btn label={all ? `Show the top ${SHOWN}` : `Show all ${items.length}`} small kind="ghost" id="hm-att-more" aria={all ? undefined : `Show all ${plural(items.length, "attention item")}`} onClick={() => setAll(!all)} /> : null}>
       {crit ? <p className="sr" role="status">{`${plural(crit, "critical item")}.`}</p> : null}
       <ol className="hm-att">
         {shown.map((x) => {
@@ -92,7 +91,6 @@ export function AttentionStrip({ items }: { items: AttentionItem[] }) {
           );
         })}
       </ol>
-      {items.length > SHOWN ? <Btn label={all ? `Show the top ${SHOWN}` : `Show all ${items.length}`} small kind="ghost" id="hm-att-more" aria={all ? undefined : `Show all ${plural(items.length, "attention item")}`} onClick={() => setAll(!all)} /> : null}
     </Section>
   );
 }
@@ -142,7 +140,7 @@ export function WaitingOnYou({ approvals, conversations }: { approvals: Approval
   const total = approvals.length + conversations.length;
   const sorted = approvals.slice().sort((a, b) => (b.waitMs ?? 0) - (a.waitMs ?? 0));
   return (
-    <Section id="hm-waiting" title="Waiting on you" count={total}>
+    <Section id="hm-waiting" title="Waiting on you" count={total} flush={total > 0}>
       {total ? (
         <ul className="hm-my-list">
           {sorted.map((a) => <ApprovalRow key={`${a.wo ?? a.repo}-${a.gate ?? ""}-${a.note ? "n" : ""}`} a={a} />)}
@@ -158,7 +156,7 @@ export function WaitingOnYou({ approvals, conversations }: { approvals: Approval
           ))}
         </ul>
       ) : (
-        <p className="muted small hm-quiet">Nothing is waiting on you.</p>
+        <p className="muted hm-quiet">Nothing is waiting on you.</p>
       )}
     </Section>
   );
@@ -167,10 +165,10 @@ export function WaitingOnYou({ approvals, conversations }: { approvals: Approval
 /** The Auditor's read-only view of the human bottleneck: who the factory is waiting on, never a button that decides. */
 export function ApproversWatch({ data }: { data: NonNullable<HomeSections["approvers"]> }) {
   return (
-    <Section id="hm-approvers" title="Waiting on approvers" count={data.count}>
+    <Section id="hm-approvers" title="Waiting on approvers" count={data.count} flush={data.count > 0}>
       {data.count ? (
         <>
-          <p className="small">{`Oldest ${fmt.dur(data.oldestMs)}${data.late ? ` · ${data.late} past SLA` : ""}.`}</p>
+          <p className="small hm-pad">{`Oldest ${fmt.dur(data.oldestMs)}${data.late ? ` · ${data.late} past SLA` : ""}.`}</p>
           <ul className="hm-my-list">
             {data.byProject.map((p) => (
               <li key={p.id} className="hm-my-row hm-plain-row">
@@ -181,7 +179,7 @@ export function ApproversWatch({ data }: { data: NonNullable<HomeSections["appro
           </ul>
         </>
       ) : (
-        <p className="muted small hm-quiet">No gate is waiting on an approver.</p>
+        <p className="muted hm-quiet">No gate is waiting on an approver.</p>
       )}
     </Section>
   );
@@ -199,7 +197,7 @@ export function SetupChecklist({ setup }: { setup: NonNullable<HomeSections["set
   };
   const label: Record<SetupStep["id"], string> = { github: "Connect", vendor: "Add a vendor", project: "New project", repo: "Open onboarding", "work-order": "New work order" };
   return (
-    <Section id="hm-setup" title="Set up the factory" tools={<span className="mono small muted">{`${setup.done} of ${setup.total}`}</span>} cls="hm-setup">
+    <Section id="hm-setup" title="Set up the factory" tools={<span className="muted small">{`${setup.done} of ${setup.total} done`}</span>} cls="hm-setup" flush>
       <ol className="hm-steps">
         {setup.steps.map((s, i) => (
           <li key={s.id} className={`hm-step is-${s.state}`} {...(s.state === "active" ? { "aria-current": "step" as const } : {})}>
@@ -253,10 +251,10 @@ export function InMotion({ motion, projects }: { motion: NonNullable<HomeSection
   const nonEmpty = stations.filter((s) => (counts[s.id]?.n ?? 0) > 0);
   const delta = m.shippedWeek - m.shippedPrevWeek;
   return (
-    <Section id="hm-motion" title="In motion">
+    <Section id="hm-motion" cls="hm-motion" title="In motion" tools={<a href="#floor" className="btn btn-sm btn-ghost" id="hm-open-floor">Open Floor</a>}>
       {m.inFlight ? (
         <>
-          <p className="small hm-motion-line">{`${plural(m.inFlight, "work order")} in flight · ${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`}</p>
+          <p className="hm-motion-line">{`${plural(m.inFlight, "work order")} in flight · ${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`}</p>
           {cat ? (
             <>
               <div className="hm-belt"><MiniBelt cat={cat} project={null} counts={counts} labels /></div>
@@ -267,14 +265,14 @@ export function InMotion({ motion, projects }: { motion: NonNullable<HomeSection
           ) : null}
         </>
       ) : (
-        <p className="muted small hm-quiet">No work orders in flight. They appear here once a repo is Ready and work is submitted.</p>
+        <p className="muted hm-quiet">No work orders in flight. They appear here once a repo is Ready and work is submitted.</p>
       )}
       {m.shippedWeek || m.shippedToday ? (
-        <p className="small hm-shipped">{`Shipped: ${m.shippedToday} today, ${m.shippedWeek} this week`}{m.shippedPrevWeek ? ` (${delta >= 0 ? "+" : "-"}${Math.abs(delta)} vs previous week)` : ""}</p>
+        <p className="hm-shipped"><b>Shipped</b> <span>{`${m.shippedToday} today, ${m.shippedWeek} this week`}</span>{m.shippedPrevWeek ? <Status tone={delta >= 0 ? "done" : "wait"}>{`${delta >= 0 ? "+" : "-"}${Math.abs(delta)} vs previous week`}</Status> : null}</p>
       ) : null}
       {m.recentDone.length ? (
         <p className="small hm-recent">
-          <span className="kv-k">Recently done </span>
+          <span className="hm-lbl">Recently done </span>
           {m.recentDone.map((w, i) => (
             <span key={w.id}>
               {i ? ", " : ""}
@@ -285,7 +283,7 @@ export function InMotion({ motion, projects }: { motion: NonNullable<HomeSection
       ) : null}
       {m.mine.length ? (
         <div className="hm-mine">
-          <div className="sub-h">Your work orders</div>
+          <div className="hm-lbl">Your work orders</div>
           <div className="hm-my-toks">
             {m.mine.map((w) => (
               <div key={w.id} className="hm-my-tok">
@@ -305,6 +303,7 @@ export function InMotion({ motion, projects }: { motion: NonNullable<HomeSection
 const WORST: Record<string, number> = { killed: 0, halted: 1, attention: 2, onboarding: 3, new: 4, ok: 5, archived: 6 };
 const LIMIT = 6;
 
+/** The projects a person works in, as cards in a grid: worst health first. The grid sits on the page, each card is the card. */
 export function ProjectsSummary({ rows, projects, factoryWide, readOnlyNote }: { rows: NonNullable<HomeSections["projects"]>; projects: PView[]; factoryWide: boolean; readOnlyNote: boolean }) {
   const cat = useCatalog();
   const list = rows
@@ -313,27 +312,31 @@ export function ProjectsSummary({ rows, projects, factoryWide, readOnlyNote }: {
     .sort((a, b) => (WORST[metricsOf(a.p).health.id] ?? 9) - (WORST[metricsOf(b.p).health.id] ?? 9) || a.p.name.localeCompare(b.p.name));
   if (!list.length) return null;
   return (
-    <Section id="hm-projects" title={factoryWide ? "Projects" : "My projects"} count={list.length} tools={<a href="#projects" className="linkish small" id="hm-all-projects">All projects</a>}>
-      <ul className="hm-my-projs">
+    <section className="hm-projects" id="hm-projects" aria-labelledby="hm-projects-h">
+      <div className="hm-projects-head">
+        <h2 className="panel-title" id="hm-projects-h">{factoryWide ? "Projects" : "My projects"}<span className="hm-count">{list.length}</span></h2>
+        <a href="#projects" className="btn btn-sm btn-ghost" id="hm-all-projects">All projects</a>
+      </div>
+      {readOnlyNote ? <p className="callout hm-viewonly"><Icon name="info" /><span><b>View only. </b>You can view these projects. Ask a Project Admin for more access.</span></p> : null}
+      <ul className="hm-proj-grid">
         {list.slice(0, LIMIT).map(({ r, p }) => (
-          <li key={p.id} className="hm-my-proj">
+          <li key={p.id} className={`hm-proj hk-card-${metricsOf(p).health.id}`}>
             <div className="hm-proj-head">
               <div className="hm-proj-name"><span className="mono hm-key">{p.key}</span><h3>{p.name}</h3></div>
               <HealthChip p={p} />
             </div>
-            {r.repos.length ? <div className="small hm-proj-onb">{r.repos.map((x) => `${x.name}: ${(STAGE_NAME[x.stage] ?? x.stage).toLowerCase()}`).join(" · ")}</div> : null}
-            {r.roles.length ? <div className="small"><span className="kv-k">Your roles here </span>{r.roles.map((x) => <Chip key={x.id} text={x.name} cls="chip-accent" />)}</div> : null}
+            {r.repos.length ? <p className="small hm-proj-onb">{r.repos.map((x) => `${x.name}: ${(STAGE_NAME[x.stage] ?? x.stage).toLowerCase()}`).join(" · ")}</p> : metricsOf(p).health.detail ? <p className="small hm-proj-detail">{metricsOf(p).health.detail}</p> : null}
+            {r.roles.length ? <p className="small hm-proj-roles"><span className="hm-lbl">Your roles here </span>{r.roles.map((x) => <Chip key={x.id} text={x.name} cls="chip-accent" />)}</p> : null}
             {cat && !r.repos.length ? <MiniBelt cat={cat} project={p} counts={metricsOf(p).byPosition} onStation={() => goProject(p.id, "floor")} /> : null}
             <div className="hm-proj-actions">
-              {r.repos.length ? <Btn label="Open onboarding" small id={`hm-proj-onb-${p.id}`} aria={`Open onboarding for ${p.name}`} onClick={() => goProject(p.id, "onboarding")} /> : <Btn label="Floor" small icon="belt" id={`hm-my-floor-${p.id}`} aria={`Open the floor for ${p.name}`} onClick={() => goProject(p.id, "floor")} />}
+              {r.repos.length ? <Btn label="Open onboarding" small kind="primary" id={`hm-proj-onb-${p.id}`} aria={`Open onboarding for ${p.name}`} onClick={() => goProject(p.id, "onboarding")} /> : <Btn label="Floor" small icon="belt" id={`hm-my-floor-${p.id}`} aria={`Open the floor for ${p.name}`} onClick={() => goProject(p.id, "floor")} />}
               <Btn label="Work orders" small kind="ghost" id={`hm-my-wos-${p.id}`} aria={`Work orders in ${p.name}`} onClick={() => goProject(p.id, "work-orders")} />
             </div>
           </li>
         ))}
       </ul>
-      {list.length > LIMIT ? <p className="small muted">{`${list.length - LIMIT} more on the Projects page.`}</p> : null}
-      {readOnlyNote ? <p className="small muted hm-quiet">You can view these projects. Ask a Project Admin for more access.</p> : null}
-    </Section>
+      {list.length > LIMIT ? <p className="small muted hm-more">{`${list.length - LIMIT} more on the `}<a href="#projects" className="linkish">Projects page</a>.</p> : null}
+    </section>
   );
 }
 
@@ -361,7 +364,7 @@ export function FactoryHealth({ health }: { health: NonNullable<HomeSections["he
   const bad = evals?.failing.length ?? 0;
   const summary = `${spend.spent > 0 ? `${fmt.money0(spend.spent)} of ${fmt.money0(spend.budget)} this month` : "No spend yet"}${evals ? ` · ${evals.passing} of ${evals.scored} live agent versions pass evals` : ""}`;
   return (
-    <section className="hm-sec hm-health" id="hm-health" aria-labelledby="hm-health-h">
+    <section className="panel hm-health" id="hm-health" aria-labelledby="hm-health-h">
       <h2 className="panel-title hm-health-h" id="hm-health-h">
         <button type="button" className="hm-health-toggle" id="hm-health-toggle" aria-expanded={open} aria-controls="hm-health-body" onClick={() => setOpen(!open)}>
           <Icon name="chevron" className={open ? "hm-chev is-open" : "hm-chev"} />
@@ -371,34 +374,36 @@ export function FactoryHealth({ health }: { health: NonNullable<HomeSections["he
       </h2>
       {open ? (
         <div className="hm-health-body" id="hm-health-body">
-          <div className="hm-health-row">
-            <div className="sub-h">Spend this month</div>
-            {spend.spent > 0 ? (
-              <>
-                <div>{`${fmt.money0(spend.spent)} of ${fmt.money0(spend.budget)}`}{spend.budget ? <span className="muted">{` (${fmt.pct(spend.spent / spend.budget)})`}</span> : null}</div>
-                {spend.budget ? <Meter value={spend.spent} max={spend.budget} label="Factory spend this month" warnAt={0.8} /> : null}
-              </>
-            ) : (
-              <div className="muted">No spend yet</div>
-            )}
-          </div>
-          {evals ? (
+          <div className="hm-health-cols">
             <div className="hm-health-row">
-              <div className="sub-h">Agent evals</div>
-              <div>{`${evals.passing} of ${evals.scored} live agent versions pass their suite threshold (last run)`}</div>
-              {bad ? (
-                <ul className="hm-eval-fail">
-                  {evals.failing.map((f) => (
-                    <li key={f.agent}><Icon name="alert" /><span>{`${f.name} ${f.version}: ${fmt.pct(f.score)} vs ${fmt.pct(f.threshold)} on ${f.suite}`}</span></li>
-                  ))}
-                </ul>
-              ) : null}
-              <a href="#evals" className="linkish small">Evals</a>
+              <div className="sub-h">Spend this month</div>
+              {spend.spent > 0 ? (
+                <>
+                  <div>{`${fmt.money0(spend.spent)} of ${fmt.money0(spend.budget)}`}{spend.budget ? <span className="muted">{` (${fmt.pct(spend.spent / spend.budget)})`}</span> : null}</div>
+                  {spend.budget ? <Meter value={spend.spent} max={spend.budget} label="Factory spend this month" warnAt={0.8} /> : null}
+                </>
+              ) : (
+                <div className="muted">No spend yet</div>
+              )}
             </div>
-          ) : null}
+            {evals ? (
+              <div className="hm-health-row">
+                <div className="sub-h">Agent evals</div>
+                <div>{`${evals.passing} of ${evals.scored} live agent versions pass their suite threshold (last run)`}</div>
+                {bad ? (
+                  <ul className="hm-eval-fail">
+                    {evals.failing.map((f) => (
+                      <li key={f.agent}><Icon name="alert" /><span>{`${f.name} ${f.version}: ${fmt.pct(f.score)} vs ${fmt.pct(f.threshold)} on ${f.suite}`}</span></li>
+                    ))}
+                  </ul>
+                ) : null}
+                <a href="#evals" className="linkish small">Evals</a>
+              </div>
+            ) : null}
+          </div>
+          {health.audit ? <a href="#audit" className="btn btn-sm hm-audit-link" id="hm-audit-link"><Icon name="ledger" />Audit ledger</a> : null}
         </div>
-      ) : null}
-      {health.audit ? <a href="#audit" className="linkish small hm-audit-link" id="hm-audit-link">Audit ledger</a> : null}
+      ) : health.audit ? <div className="hm-health-body"><a href="#audit" className="btn btn-sm hm-audit-link" id="hm-audit-link"><Icon name="ledger" />Audit ledger</a></div> : null}
     </section>
   );
 }

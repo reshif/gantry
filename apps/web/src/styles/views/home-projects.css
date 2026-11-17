@@ -1,0 +1,118 @@
+/* Home, Projects and Project settings: layout that belongs to these screens only. Buttons, tables, chips, tabs and
+   dialogs come from foundation.css; this file uses tokens, never hex values. Prefixes: hm- (home), hk- (health), pf- (portfolio), prj- (projects), pcf- (settings). */
+
+/* ---------- home: one column of cards ---------- */
+.hm-stack { display: grid; gap: var(--s4); min-width: 0; }
+.hm-sec { min-width: 0; }
+.hm-count { margin-left: 8px; padding: 0 7px; border-radius: 999px; background: var(--panel); color: var(--muted); font-size: var(--t-sm); font-weight: 500; }
+.hm-quiet { margin: 0; }
+.hm-pad { margin: 0; padding: 12px 16px 4px; }
+.hm-lbl { font-size: var(--t-sm); color: var(--faint); letter-spacing: 0; text-transform: none; }
+.hm-sec .panel-head { border-bottom: 1px solid var(--line); }
+
+/* needs attention and waiting on you: rows that touch the card edges */
+.hm-att, .hm-my-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.hm-att-item, .hm-my-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.hm-att-item:last-child, .hm-my-row:last-child { border-bottom: 0; }
+.hm-att-item { border-left: 3px solid transparent; padding-left: 13px; }
+.hm-att-item.hm-sev-crit { border-left-color: var(--block); }
+.hm-att-item.hm-sev-high { border-left-color: var(--wait); }
+.hm-att-item.hm-sev-watch { border-left-color: var(--run); }
+.hm-att-ic .ic, .hm-my-ic { width: 18px; height: 18px; }
+.hm-sev-crit .hm-att-ic { color: var(--block); }
+.hm-sev-high .hm-att-ic { color: var(--wait); }
+.hm-sev-watch .hm-att-ic { color: var(--run); }
+.hm-att-t { font-weight: 600; font-size: var(--t-md); }
+.hm-att-w { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.hm-att-acts, .hm-my-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.hm-my-ic { color: var(--wait); }
+.hm-my-main { min-width: 0; font-size: var(--t-md); overflow-wrap: anywhere; }
+.hm-plain-row { grid-template-columns: minmax(0, 1fr) auto; }
+
+/* set up the factory */
+.hm-steps { list-style: none; margin: 0; padding: 8px; display: grid; gap: 2px; }
+.hm-step { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--r1); }
+.hm-step.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.hm-step.is-todo { color: var(--muted); }
+.hm-step .hm-step-n { width: 22px; height: 22px; display: grid; place-items: center; border: 1.5px solid var(--line-strong); border-radius: 50%; font-size: var(--t-xs); font-weight: 600; flex: none; }
+.hm-step.is-active .hm-step-n { border-color: var(--accent); color: var(--accent); }
+.hm-step.is-done .hm-step-n { background: var(--done); border-color: var(--done); color: var(--surface); }
+.hm-step-n .ic { width: 13px; height: 13px; }
+.hm-step-t { font-weight: 600; }
+
+/* in motion */
+.hm-motion .panel-body { display: grid; gap: var(--s3); }
+.hm-motion-line, .hm-shipped, .hm-recent { margin: 0; }
+.hm-shipped { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hm-belt { min-width: 0; }
+.hm-belt-list { display: none; list-style: none; margin: 0; padding: 0; gap: 2px; }
+.hm-belt-list li { display: flex; justify-content: space-between; gap: var(--s2); border-bottom: 1px solid var(--line); padding: 4px 0; }
+.hm-mine { display: grid; gap: var(--s2); }
+.hm-my-toks { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s2); }
+.hm-my-tok { display: grid; gap: 3px; min-width: 0; }
+.hm-my-tok .tok { width: 100%; }
+
+/* projects: a heading row, then cards */
+.hm-projects { display: grid; gap: var(--s3); align-content: start; min-width: 0; }
+.hm-projects-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.hm-viewonly { display: flex; align-items: flex-start; gap: 8px; margin: 0; }
+.hm-more { margin: 0; }
+
+/* project card: shared by Home and the Portfolio */
+.hm-proj-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3); }
+.hm-proj { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--shadow-1); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.hk-card-killed { border-color: var(--block); }
+.hk-card-halted { border-color: var(--wait); }
+.hk-card-archived { opacity: 0.8; }
+.hm-proj-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s2); min-width: 0; }
+.hm-proj-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.hm-proj-name h3 { font-size: var(--t-base); font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; overflow-wrap: anywhere; min-width: 0; }
+.hm-key { font-size: var(--t-xs); color: var(--muted); border: 1px solid var(--line-strong); padding: 0 5px; border-radius: 4px; background: var(--surface); }
+.hm-proj-detail, .hm-proj-onb { margin: 0; color: var(--muted); }
+.hm-proj-onb { color: var(--block); }
+.hm-proj-roles { margin: 0; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.hm-proj-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.hm-proj-facts > div { min-width: 0; }
+.hm-proj-facts dt { font-size: var(--t-xs); color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.hm-proj-facts dd { margin: 0; font-size: var(--t-md); font-weight: 600; font-variant-numeric: tabular-nums; }
+.hm-proj-facts dd .muted { font-weight: 400; font-size: var(--t-xs); }
+.hm-proj-facts .is-wait dd { color: var(--wait); }
+.hm-proj-facts .is-onb dd { color: var(--accent); }
+.hm-proj-ins { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; color: var(--muted); }
+.hm-proj-ins > span { white-space: nowrap; }
+.hm-proj-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 4px; }
+.hm-proj .mbelt .mseg { height: 24px; }
+
+/* factory health */
+.hm-health-h { margin: 0; }
+.hm-health-toggle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; min-height: 48px; padding: 12px 16px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-transform: inherit; letter-spacing: inherit; }
+.hm-health-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.hm-chev { width: 14px; height: 14px; transition: transform 0.12s; }
+.hm-chev.is-open { transform: rotate(90deg); }
+.hm-health-sum { font-weight: 400; }
+.hm-health-body { display: grid; gap: var(--s3); padding: 0 16px 16px; border-top: 1px solid var(--line); }
+.hm-health-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s5); }
+.hm-health-row { display: grid; gap: 4px; align-content: start; }
+.hm-health-body .hm-audit-link { justify-self: start; }
+.hm-health-body:not(:has(.hm-health-cols)) { border-top: 0; padding-top: 0; }
+.hm-eval-fail { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; color: var(--block); }
+.hm-eval-fail li { display: flex; gap: 6px; align-items: center; }
+.hm-eval-fail .ic { width: 14px; height: 14px; flex: none; }
+
+@media (max-width: 1100px) {
+  .hm-proj-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .hm-proj-grid { grid-template-columns: minmax(0, 1fr); }
+  .hm-health-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .hm-belt { display: none; }
+  .hm-belt-list { display: grid; }
+  .hm-my-row, .hm-att-item { grid-template-columns: 24px minmax(0, 1fr); }
+  .hm-my-acts, .hm-att-acts { grid-column: 1 / -1; justify-content: flex-start; }
+  .hm-my-acts .btn, .hm-att-acts .btn, .hm-step .btn, .hm-proj-actions .btn { min-height: 44px; }
+  .hm-step { grid-template-columns: 24px minmax(0, 1fr); }
+  .hm-step .btn { grid-column: 1 / -1; }
+  .hm-proj-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
