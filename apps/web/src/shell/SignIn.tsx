@@ -14,7 +14,7 @@ function MfaSetup() {
   const sp = new URLSearchParams({ mfa: "1" });
   if (window.location.hash.length > 1) sp.set("return_to", `/${window.location.hash}`);
   return (
-    <section className="auth-panel" aria-labelledby="mfa-h" id="auth-mfa">
+    <section className="auth-panel box" aria-labelledby="mfa-h" id="auth-mfa">
       <div>
         <h1 className="auth-h" id="mfa-h">Set up two-step sign-in</h1>
         <p className="muted auth-sub">Factory Admins can stop the line and change who may do what, so they sign in with a password and a one-time code.</p>
@@ -35,30 +35,34 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
   const accounts = config?.demoAccountList?.length ? config.demoAccountList : DEMO_ACCOUNTS;
   const go = (method: "sso" | "github") => window.location.assign(loginUrl(method));
   return (
-    <div id="auth" className="auth">
-      <div className="auth-wrap">
-        <section className="auth-brand" aria-label="About Gantry">
-          <div className="auth-logo">
+    <div id="auth" className="auth signin">
+        <section className="auth-brand art" aria-label="About Gantry">
+          <div className="auth-logo row" style={{ gap: 12 }}>
             <Logo />
-            <span className="brand-name">Gantry</span>
+            <b className="brand-name" style={{ fontSize: 18, letterSpacing: ".04em" }}>GANTRY</b>
           </div>
-          <h1 className="auth-title">Software factory</h1>
-          <p className="auth-lede">Run AI coding agents against your repos. People hold the gates, decide who can do what, and can stop the line at any time.</p>
-          <ol className="auth-belt" aria-label="Stations">
-            {STATIONS.map((s) => (
-              <li key={s.id}>
-                <span className="mono">{s.no}</span>
-                {s.name}
-              </li>
-            ))}
-          </ol>
-          <p className="auth-note">Gantry shows nothing until you are signed in. After you sign in, you go back to the page you asked for.</p>
-          <p className="auth-note auth-demo-note">
-            <Icon name={demo ? "alert" : "key"} />
-            <span>{demo ? "Development sign-in is on: seeded demo accounts can sign in. Use this only on a local stack." : "Sign-in is handled by your organisation's identity provider."}</span>
-          </p>
+          <div>
+            <div className="label">Control room</div>
+            <h1 className="auth-title" style={{ font: "700 36px/44px var(--font)", maxWidth: "14ch", margin: "8px 0" }}>Agents propose. People approve.</h1>
+            <p className="auth-lede muted" style={{ maxWidth: "40ch" }}>Sign in to run the line: watch work travel the belt, decide at gates and keep every change on the record.</p>
+          </div>
+          <div>
+            <ol className="auth-belt" aria-label="Stations">
+              {STATIONS.map((s) => (
+                <li key={s.id}>
+                  <span className="mono">{s.no}</span>
+                  {s.name}
+                </li>
+              ))}
+            </ol>
+            <p className="auth-note auth-demo-note">
+              <Icon name={demo ? "alert" : "key"} />
+              <span>{demo ? "Development sign-in is on: seeded demo accounts can sign in. Use this only on a local stack." : "Sign-in is handled by your organisation's identity provider. You return to the page you asked for."}</span>
+            </p>
+          </div>
         </section>
-        {needs === "mfa_setup" ? <MfaSetup /> : <section className="auth-panel" aria-labelledby="auth-h">
+        <div className="form">
+        {needs === "mfa_setup" ? <MfaSetup /> : <section className="auth-panel box" aria-labelledby="auth-h">
           <div>
             <h1 className="auth-h" id="auth-h">{`Sign in to ${config?.orgName ?? "Gantry"}`}</h1>
             <p className="muted auth-sub">{demo ? "Choose how to sign in. Demo accounts are listed below." : "Choose how to sign in."}</p>
@@ -100,7 +104,7 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
             </div>
           ) : null}
         </section>}
-      </div>
+        </div>
     </div>
   );
 }

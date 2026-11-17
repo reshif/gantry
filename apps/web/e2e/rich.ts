@@ -203,3 +203,8 @@ export function richOverrides(): Record<string, Handler> {
 export async function installRich(page: Page): Promise<void> {
   await mockApi(page, { persona: PERSONAS.admin, overrides: richOverrides() });
 }
+
+/** Signed-out API for the sign-in screen: /me answers 401, nothing else is needed. */
+export async function installSignedOut(page: Page): Promise<void> {
+  await mockApi(page, { persona: null });
+}
