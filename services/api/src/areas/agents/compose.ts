@@ -184,13 +184,17 @@ const LAYER_SOURCE: Record<Layer["key"], string> = {
 };
 
 /** The manifest parts of a composed system prompt in the order the model sees them: the used layers, the skills, then what the runner appends. */
-export function composedParts(layers: Layer[], skills: SkillOut[], repoContext = ""): ManifestPart[] {
+export function instructionParts(layers: Layer[], skills: SkillOut[], repoContext = ""): ManifestPart[] {
   return [
     ...layers.map((l): ManifestPart => ({ kind: "layer", name: l.name, source: LAYER_SOURCE[l.key], version: l.version, sha256: l.hash, bytes: Buffer.byteLength(l.text) })),
     ...(repoContext ? [part("repo_context", "Repository context", "the repository's convention files at the pinned commit (runs.data.repoContext)", null, repoContext)] : []),
     ...skills.map((k): ManifestPart => ({ kind: "skill", name: k.name, source: `skill_versions ${k.id}`, version: k.version, sha256: k.hash, bytes: k.bytes })),
-    ...runnerParts(),
   ];
+}
+
+/** The parts of a station run's system prompt: the instruction parts, then what the runner appends. */
+export function composedParts(layers: Layer[], skills: SkillOut[], repoContext = ""): ManifestPart[] {
+  return [...instructionParts(layers, skills, repoContext), ...runnerParts()];
 }
 
 export interface RunPin {

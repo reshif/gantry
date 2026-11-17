@@ -326,6 +326,24 @@ Supply-chain area. Wave 1 item 8 said `gantry-sockproxy` was the only holder of 
 
 ## Wave 7: agent context is real (2026-11-16)
 
+### Track ctx-session-prompts
+
+Track ctx-session-prompts. Audit finding P0 #2: the conversational surfaces ignored their configured agents.
+
+Done:
+- One composer. `areas/session/context.ts` composes a conversational turn's system prompt with the same layers as a station run (factory base, project overlay, the agent's live version instructions and guardrails, repo guidelines where a repo is in scope), then the agent's skills at their live versions, then two code-owned sections: the facts of the conversation (who, which work order or repository) and the fixed rules (evidence labelling, card and tool protocol, untrusted-data note, answer caps). The hardcoded interview and onboarding playbooks were removed from code; the Intake Clerk, the station agent and the Onboarding Agent decide how to interview, ask and author from their own instructions and skills.
+- Bindings. Intake interview and work-order session: the agent of the work order's current station (or its per-work-order override). Onboarding session: the Onboarding Agent. Console: a configurable binding (`session_bindings`, migration 0042), unbound by default, in which case the console runs on Gantry's fixed text alone and the Agents page says so. `GET /api/v1/agents/bindings` and `PUT /api/v1/agents/bindings/console` (needs `agent.edit`, audited as `agent.binding`); shown and editable under Agents > Instructions > "Where agents talk".
+- Tuples. Every conversational turn records an `agent_version_tuples` row (harness `session`): agent version, skill versions, instruction hash (the layers' hash, comparable with station runs) and model. The saved message carries `data.context` (surface, agent, version, skill versions, instruction hash, prompt hash, tuple id, layer versions) and the audit event carries the same ids. The prompt hash covers the full system text.
+- Tests: `services/api/test/session-context.test.ts` covers Intake, a station-agent override, the onboarding session, the console (unbound and bound) and the binding rights and audit.
+
+Not done (other tracks or later): a stored copy of the prompt text per turn (ctx-prompt-trace), skill versions frozen with agent versions (ctx-skill-versions), repo convention files (ctx-repo-conventions), the console "explain" call (a fixed one-shot, no agent), binding the onboarding and station surfaces to a different agent from the UI (they follow the flow and the Onboarding Agent).
+
+Review fixes (same track):
+- The console records its tuple after the call, with the model the edge served (the planned model if none came back, never an empty one). Work-order and onboarding turns use the pinned model.
+- A tuple that cannot be written is no longer swallowed: the work-order and onboarding turns do not run (the person sees a plain message and the failure is logged); the console leaves the tuple id off the saved message and logs it. A message never references a tuple with no row.
+- Side threads (a chat about a work order, repository or project) keep their own agent framing in `areas/workspace/side.ts`; they are read-only and not yet on the composer. Listed as a follow-up.
+- Migration renumbered 0034 -> 0043 at integration (0034-0042 are taken by other tracks) (0034-0041 are taken by other tracks). Web test added for the Bindings panel.
+
 ### Track ctx-run-rails
 
 Findings from the agent context audit (P2 items 8, 9 and 10). Each is a rail around the agent; none decides what an agent concludes.

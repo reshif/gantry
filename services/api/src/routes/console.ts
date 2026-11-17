@@ -16,7 +16,8 @@ import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest 
 import { command, decide, policyState, refuse } from "../core/index.js";
 import { THREAD_RETENTION_DAYS } from "../areas/console/config.js";
 import { allowedTools, consoleRights, missingRightText, type ConsoleRights } from "../areas/console/rights.js";
-import { completeOnce, ModelUnavailable, readiness, runConversation, systemPrompt, type Readiness } from "../areas/console/model.js";
+import { composeSessionContext, consoleAgent, recordedTurn } from "../areas/session/context.js";
+import { completeOnce, consoleFacts, consoleRails, ModelUnavailable, readiness, runConversation, systemPrompt, type Readiness } from "../areas/console/model.js";
 import { consoleModel, setModelPref } from "../areas/console/route.js";
 import { ExplainBody, MessageBody, ModelBody, StatusQuery, PinnedBody, ProposalBody, ProposalParams, SettingsBody, ThreadId, ToolBody, ToolParams } from "../areas/console/schemas.js";
 import { addMessage, chatAccess, deleteThread, ensureThread, listMessages, listThreads, newMessageId, purgeExpired, readChat, renameThread, setPinned, setProposalStatus } from "../areas/console/threads.js";
@@ -302,9 +303,14 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
         if (last && last.role === h.role) last.text += `\n${h.text}`;
         else merged.push({ ...h });
       }
+      const promptIn = { person: who.name, roles: (me?.roles ?? []).map((r) => `${r.role} @ ${r.scope}`), projects: vis.map((p) => `${p.id} (${p.name})`), current: current ? `${current.id} (${current.name})` : null, may: rights.proposals.filter((p) => p.allowed).map((p) => ({ tool: p.tool, does: p.does })), mayNot: rights.proposals.filter((p) => !p.allowed).map((p) => ({ does: p.does, right: p.name })), now: new Date() };
+      // The agent bound to the console (Agents > Where agents talk) speaks with its own instructions and skills, composed like a station run; with none bound, Gantry's fixed text alone.
+      // Side threads keep their own agent framing (areas/workspace/side.ts). The tuple is recorded after the call, with the model the edge served.
+      const bound = side ? null : await consoleAgent(g.pool, g.orgId);
+      const sc = bound ? await composeSessionContext(g.pool, { orgId: g.orgId, surface: "console", agentId: bound.id, model: pick.model ?? mc.effective ?? "", projectId: mProject ?? null, repoId: null, facts: consoleFacts(promptIn), rails: consoleRails(promptIn) }) : null;
       const system = side
         ? sideSystem({ agent: sideAgent, scope: chat!.scope, context: await scopeContext(g.pool, g.orgId, chat!.scope, st.catalog.bays), person: who.name, projects: vis.map((p) => `${p.id} (${p.name})`), now: new Date() })
-        : systemPrompt({ person: who.name, roles: (me?.roles ?? []).map((r) => `${r.role} @ ${r.scope}`), projects: vis.map((p) => `${p.id} (${p.name})`), current: current ? `${current.id} (${current.name})` : null, may: rights.proposals.filter((p) => p.allowed).map((p) => ({ tool: p.tool, does: p.does })), mayNot: rights.proposals.filter((p) => !p.allowed).map((p) => ({ does: p.does, right: p.name })), now: new Date() });
+        : sc ? sc.system : systemPrompt(promptIn);
       // A trailing user turn in history would be followed by the new question: fold them into one message so roles alternate.
       let question = b.text;
       if (merged.length && merged[merged.length - 1]!.role === "user") question = `${merged.pop()!.text}\n\n${b.text}`;
@@ -316,8 +322,10 @@ export const consoleRoutes: FastifyPluginAsync = async (app) => {
       const cited = mentioned(r.text, ctx);
       const text = r.text || (r.stopped ? "" : "The model returned no text.");
       const costMicros = r.model ? await turnCostMicros(g.pool, g.orgId, r.model, r.usage) : 0;
-      const id = await persist("assistant", text, { mode: "model", model: r.model, cited, proposals: ctx.proposals, tools: ctx.used, usage: r.usage, costMicros, ...(sideAgent ? { agent: sideAgent.id, agentName: sideAgent.name } : {}), ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}) }, {
-        mode: "model", model: r.model, tools: ctx.used, proposals: ctx.proposals.length, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, ...(r.stopped ? { stopped: true } : {}),
+      // Record what the turn actually ran with: the served model, not the one wanted. If the tuple cannot be written, log it and leave the id off the message rather than point at a row that does not exist.
+      const turn = sc ? await recordedTurn(g.pool, g.orgId, sc.turn, r.model, (m) => req.log.error({ err: m }, "session tuple not recorded")) : null;
+      const id = await persist("assistant", text, { mode: "model", model: r.model, ...(turn ? { context: turn } : {}), cited, proposals: ctx.proposals, tools: ctx.used, usage: r.usage, costMicros, ...(sideAgent ? { agent: sideAgent.id, agentName: sideAgent.name } : {}), ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}) }, {
+        mode: "model", model: r.model, ...(turn ? { agent: turn.agent, version: turn.agentVersion, skills: turn.skillVersions, instructionHash: turn.instructionHash, promptHash: turn.promptHash, tuple: turn.tupleId } : {}), tools: ctx.used, proposals: ctx.proposals.length, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, ...(r.stopped ? { stopped: true } : {}),
       });
       for (const p of ctx.proposals) send("proposal", { messageId: id, proposal: p });
       send("done", { messageId: id, text, mode: "model", model: r.model, cited, proposals: ctx.proposals, tools: ctx.used, usage: r.usage, stopped: r.stopped });

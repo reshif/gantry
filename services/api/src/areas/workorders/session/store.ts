@@ -4,6 +4,8 @@ import type { Queryable, Tx } from "@gantry/db";
 import type { WoCard } from "@gantry/domain";
 import { convIdOf } from "../model.js";
 
+import type { TurnContext } from "../../session/context.js";
+
 export interface WoMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -13,6 +15,8 @@ export interface WoMessage {
   data: {
     cards?: WoCard[]; drafts?: Record<string, unknown>; kind?: string; mode?: "agent" | "rule-based" | "legacy"; model?: string | null; agent?: string; version?: number; station?: string; tools?: string[];
     costMicros?: number; usage?: unknown; stopped?: boolean; truncated?: boolean; followUp?: string; event?: string; chips?: string[];
+    /** What the turn was composed from: agent version, skill versions, instruction and prompt hashes, tuple. */
+    context?: TurnContext;
   };
 }
 

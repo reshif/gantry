@@ -9,6 +9,7 @@ import { ops } from "../../api/ops";
 import { Btn, Field, LockNote, Select, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
+import { BindingsPanel } from "./Bindings";
 import { agentLayer, rerender, ui, words } from "./kit";
 import type { TabProps } from "./Config";
 
@@ -182,6 +183,7 @@ export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
         <p className="muted small">{`Exactly what ${d.name} receives for ${repo ? repo.name : project ? project.name : "this context"}, including skills and guardrails.`}</p>
         <pre className="ag-effective mono" id="ag-effective" tabIndex={0} aria-label="Effective instructions">{text}</pre>
       </section>
+      <BindingsPanel />
     </div>
   );
 }

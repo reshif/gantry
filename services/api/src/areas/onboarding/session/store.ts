@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { Queryable, Tx } from "@gantry/db";
 import type { SessionCard } from "@gantry/domain";
 
+import type { TurnContext } from "../../session/context.js";
+
 export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -10,7 +12,7 @@ export interface SessionMessage {
   text: string;
   at: number;
   runId: string | null;
-  data: { cards?: SessionCard[]; drafts?: Record<string, unknown>; kind?: string; mode?: "agent" | "rule-based"; model?: string | null; tools?: string[]; costMicros?: number; usage?: unknown; stopped?: boolean; truncated?: boolean };
+  data: { cards?: SessionCard[]; drafts?: Record<string, unknown>; kind?: string; mode?: "agent" | "rule-based"; model?: string | null; tools?: string[]; costMicros?: number; usage?: unknown; stopped?: boolean; truncated?: boolean; context?: TurnContext };
 }
 
 export const newSessionMessageId = (): string => `om-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
