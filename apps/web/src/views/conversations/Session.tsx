@@ -223,7 +223,7 @@ function SideDialogue({ s }: { s: WoSession }) {
 
 /* ------------------------------------------------------------------ the page ---- */
 
-export function WoSessionPage({ woId, back, embedded }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean }) {
+export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean }) {
   const q = useWoSession(woId);
   const s = q.data;
   const ui = useUI();
@@ -278,8 +278,8 @@ export function WoSessionPage({ woId, back, embedded }: { woId: string; back: ()
   const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
 
   return (
-    <div className="osx wos" id="wos" data-wo={s.woId}>
-      <div className="osx-top">
+    <div className={`osx wos${bare ? " is-bare" : ""}`} id="wos" data-wo={s.woId}>
+      {bare ? null : <div className="osx-top">
         {embedded ? null : <Btn small icon="back" id="wos-back" label="Conversations" onClick={back} />}
         <h2 className="osx-title"><span className="mono">{s.wo.id}</span> {s.wo.title}</h2>
         <span className="chip">{s.wo.clsName}</span>
@@ -288,7 +288,7 @@ export function WoSessionPage({ woId, back, embedded }: { woId: string; back: ()
         <span className="osx-spacer" />
         <Btn small id="wos-traveler" label="Traveler" onClick={() => openTraveler(s.woId)} />
         <Btn small icon="record" id="wos-record" label="Full record" onClick={() => openRecord(s.woId, s.project)} />
-      </div>
+      </div>}
       <div className="osx-grid">
         <section className="osx-main" aria-label={`Conversation ${s.woId}`}>
           <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite">
