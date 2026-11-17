@@ -117,7 +117,7 @@
 .wo-opts { margin: 0 0 12px; }
 .wo-opts > summary { list-style: none; cursor: pointer; display: inline-flex; }
 .wo-opts > summary::-webkit-details-marker { display: none; }
-.wo-opts-body { margin-top: 8px; padding: 12px; display: grid; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md, 8px); }
+.wo-opts-body { margin-top: 8px; padding: 12px; display: grid; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
 .wo-opts .filters { display: flex; flex-wrap: wrap; gap: 12px; }
 .wo-views { overflow-x: auto; }
 .wo-table .tw { margin-top: 0; }
