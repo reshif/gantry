@@ -20,3 +20,4 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 .tag{text-transform:none}
 .searchbox.search .in{padding-left:32px}
 .grid.ws{display:grid;padding-left:0;border-left:0;gap:var(--s4)}
+.searchbox.search>.ic{position:absolute;left:10px;top:8px;width:16px;height:16px;display:block;pointer-events:none}.searchbox.search>.ic svg{position:static;width:16px;height:16px}
