@@ -8,6 +8,7 @@ import type { FastifyRequest } from "fastify";
 import { publishChange } from "./changes.js";
 import { decideFor, refuseDecision, stepUpSatisfied, type Scope } from "./decide.js";
 import { Refusal, refuse } from "./errors.js";
+import { checkDeclared } from "./write-gate.js";
 import { readApiSettings } from "../areas/apikeys/config.js";
 import { readSecurity } from "./read/index.js";
 import { loadPolicyState } from "./read/state.js";
@@ -198,6 +199,7 @@ export async function command<X extends object = Record<string, never>>(
   // Spec 5.3: creates from API keys and other non-browser callers must carry an Idempotency-Key, so a retried request cannot create twice. Browser sessions send one automatically.
   if (spec.idempotent && !idemHeader && principal.kind === "apikey") throw refuse("invalid", "Creates through the API need an Idempotency-Key header, so a retry cannot create twice.", { needs: "Idempotency-Key" });
   if (idemHeader && (idemHeader.length > 200 || /[\r\n]/.test(idemHeader))) throw refuse("invalid", "Idempotency-Key is too long.");
+  await checkDeclared(req, spec.action);
   const route = `${principal.kind}:${principal.id}:${req.method} ${req.routeOptions?.url ?? req.url}`;
 
   // The public API's idempotency window is a setting (spec 12.5); people get the 24 hours of the column default.

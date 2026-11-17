@@ -2,6 +2,7 @@ import { gantryError, httpStatusFor, refusalBody, type GantryError, type RuleRef
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { ZodError } from "zod";
 import { noWriteRight, refuseDecision } from "./decide.js";
+import { declaredDenial } from "./write-gate.js";
 import type { FastifyRequest } from "fastify";
 
 type Kind = GantryError["kind"];
@@ -36,10 +37,12 @@ const zodMsg = (e: ZodError): string => `Invalid request: ${e.issues.slice(0, 3)
  */
 async function deniedBeforeValidation(req: FastifyRequest): Promise<Refusal | null> {
   if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return null;
-  const found = await noWriteRight(req).catch(() => null);
+  // A route that declares its rights (core/write-gate.ts) is judged by them; any other write route, by whether the caller may change anything at all.
+  const found = (await declaredDenial(req).catch(() => null)) ?? (await noWriteRight(req).catch(() => null));
+  const scope = found && "scope" in found ? found.scope : undefined;
   if (!found) return null;
   const { auditDenial } = await import("./command.js");
-  await auditDenial(req, { action: found.action }, found.decision).catch(() => undefined);
+  await auditDenial(req, { action: found.action, ...(scope ? { scope } : {}) }, found.decision).catch(() => undefined);
   return refuseDecision(found.decision);
 }
 

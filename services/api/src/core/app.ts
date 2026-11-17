@@ -16,6 +16,7 @@ import type { Config } from "./config.js";
 import type { Gantry, Principal } from "./context.js";
 import { safeEqual } from "./crypto.js";
 import { installErrorHandler } from "./errors.js";
+import { enforceWriteGate } from "./write-gate.js";
 import { createOidcAdapter, type OidcAdapter } from "./oidc.js";
 import { canonicalPath } from "./paths.js";
 import { pinVia } from "./command.js";
@@ -155,6 +156,8 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
 
   // The audit channel comes from the transport: a client-sent `via` is pinned to what the caller may claim.
   app.addHook("preHandler", async (req) => pinVia(req));
+  // Authorisation before validation: a write route's declared rights are checked before its handler reads anything (core/write-gate.ts).
+  app.addHook("preHandler", enforceWriteGate);
 
   app.addHook("onResponse", logApiRequest);
 

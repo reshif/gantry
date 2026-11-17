@@ -272,7 +272,7 @@ d("demo personas: enforcement on real endpoints", () => {
       const h = await stop("p-tomas", { scope: "project", id: "payments", mode: "halt", reason: "Flaky integration tests" });
       expect(h.status, JSON.stringify(h.body)).toBe(200);
       await expectDenied("p-tomas", "line.resume", () => lift("p-tomas", "project:payments"));
-      expect((await lift("p-fatima", "project:payments")).status).toBe(404); // no role on Payments: the project does not reveal itself
+      expect((await lift("p-fatima", "project:payments")).status).toBe(403); // holds no resume right anywhere: refused before the project is looked up, so it does not reveal itself either
       expect((await lift("p-meera", "project:payments")).status).toBe(200);
     });
     it("Tomás cannot halt Storefront (not his project)", async () => {
