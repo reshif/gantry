@@ -7,9 +7,9 @@ import type { Person, Project, Role, Team } from "@gantry/domain";
 import { useAccessMatrix, useMe, usePeople, useProjects, useSecurity } from "../api/queries";
 import { useCan } from "../api/can";
 import { hashFor, navigate, replaceHash, useHash } from "../lib/router";
-import { Avatar, Btn, Chip, Empty, LockNote, Panel, SearchBox, Stat, StatRow, ViewHead, type Decision } from "../ui/primitives";
+import { Avatar, Btn, Chip, Empty, LockNote, Panel, SearchBox, Select, Field, FilterBar, Stat, StatRow, Table, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
-import { Icon, Logo } from "../ui/Icon";
+import { Icon } from "../ui/Icon";
 import { useAllRepos, useTeams } from "./govern/data";
 import { useInviteDialog } from "./people/InviteDialog";
 import { useTeamDialogs } from "./people/TeamDialog";
@@ -31,6 +31,7 @@ export default function PeopleView() {
   const perm = dec(useCan("people.manage"));
   const view = dec(useCan("people.view"));
   const [q, setQ] = useState("");
+  const [tab, setTab] = useState("people");
   const sec = useSecurity(); // the allowed invite domains, when this person may read the security settings (the server checks them anyway)
   const goPerson = (id: string) => navigate("person", id);
   const invite = useInviteDialog({ perm, teams, projects: projects as Project[], roles, domains: sec.data?.domains ?? [], onDone: goPerson });
@@ -45,38 +46,33 @@ export default function PeopleView() {
   if (!view.allowed) return <div className="view view-people"><ViewHead title="People & teams" sub="" /><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
   const admins = people.filter((p) => p.status === "active" && p.roles.some((g) => g.role === "factory_admin"));
   const invited = people.filter((p) => p.status === "invited").length;
-  const org = me.org;
+  const noMfa = people.filter((p) => !p.mfa).length;
 
   return (
     <div className="view view-people">
       <ViewHead
         title="People & teams"
-        sub={<span id="ppl-defaults"><strong>Default for new people: no access until granted.</strong> A person's effective roles are their own grants plus the grants of their teams.</span>}
-        actions={<><Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} /><Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /></>}
+        sub="Everyone with access, what they can do, and who is on call."
+        actions={<><Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /><Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} /></>}
       />
       <StatRow id="ppl-stats">
-        <Stat label="People" value={qState(peopleQ, () => String(people.length))} />
+        <Stat label="People" value={qState(peopleQ, () => String(people.length))} sub={`${people.filter((p) => p.status === "active").length} active`} />
+        <Stat label="On call" value={qState(peopleQ, () => String(people.filter((p) => p.oncall).length))} tone="done" />
+        <Stat label="Without MFA" value={qState(peopleQ, () => String(noMfa))} tone={noMfa ? "wait" : "done"} />
         <Stat label="Teams" value={qState(teamsQ, () => String(teams.length))} />
-        <Stat label="Factory Admins" value={qState(peopleQ, () => String(admins.length))} sub="active" />
-        <Stat label="Custom roles" value={String(roles.filter((r) => r.custom).length)} />
-        <Stat label="Invites pending" value={qState(peopleQ, () => String(invited))} tone={invited ? "wait" : undefined} />
       </StatRow>
       <LockNote decision={perm} what="Invites, teams and roles" />
-      <Async query={peopleQ} what="people" id="ppl">{() => (
-        <>
-          <section className="panel ppl-org" aria-label="Organisation">
-            <div className="ppl-org-head">
-              <span className="ppl-org-mark" aria-hidden="true"><Logo /></span>
-              <div className="ppl-org-name">
-                <strong>{org?.name ?? ""}</strong>
-                <span className="muted small">{`Organisation${org?.plant ? ` · ${org.plant}` : ""} · ${people.length} ${people.length === 1 ? "person" : "people"}`}</span>
-              </div>
-              <SearchBox id="ppl-q" value={q} onChange={setQ} placeholder="Find a person, role or project" label="Find a person" />
-            </div>
-          </section>
-          <OrgTree people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} q={q} perm={perm} invite={invite} teamDlg={teamDlg} />
-        </>
-      )}</Async>
+      <Tabs idPrefix="ppl-tab" active={tab} onChange={setTab} items={[{ id: "people", label: "People", count: people.length }, { id: "teams", label: "Teams", count: teams.length }]} />
+      <div id="ppl-tab-panel" role="tabpanel" aria-labelledby={`ppl-tab-${tab}`}>
+        <Async query={peopleQ} what="people" id="ppl">{() => tab === "teams" ? (
+          <>
+            <div className="ppl-find"><SearchBox id="ppl-q" value={q} onChange={setQ} placeholder="Find a person, role or project" label="Find a person" /></div>
+            <OrgTree people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} q={q} perm={perm} invite={invite} teamDlg={teamDlg} />
+          </>
+        ) : (
+          <PeopleTable people={people} teams={teams} roles={roles} />
+        )}</Async>
+      </div>
     </div>
   );
 }
@@ -163,5 +159,47 @@ function OrgTree({ people, teams, projects, repos, roles, q, perm, invite, teamD
         </Panel>
       ) : null}
     </div>
+  );
+}
+
+function PeopleTable({ people, teams, roles }: { people: Person[]; teams: Team[]; roles: Role[] }) {
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("all");
+  const [team, setTeam] = useState("all");
+  const [role, setRole] = useState("all");
+  const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
+  const s = q.trim().toLowerCase();
+  const shown = people.filter((p) => (status === "all" || p.status === status) && (team === "all" || (p.teams ?? []).includes(team)) && (role === "all" || p.roles.some((g) => g.role === role)) && (!s || `${p.name} ${p.email} ${p.title}`.toLowerCase().includes(s)));
+  return (
+    <Panel flush>
+      <FilterBar label="Filter people" count={`${shown.length} ${shown.length === 1 ? "person" : "persons"}`}>
+        <SearchBox id="ppl-tq" value={q} onChange={setQ} placeholder="Search..." label="Search people" />
+        <Field label="Status" htmlFor="ppl-f-status"><Select id="ppl-f-status" options={[{ value: "all", label: "All" }, { value: "active", label: "Active" }, { value: "invited", label: "Invited" }, { value: "deactivated", label: "Deactivated" }]} value={status} onChange={setStatus} /></Field>
+        <Field label="Team" htmlFor="ppl-f-team"><Select id="ppl-f-team" options={[{ value: "all", label: "All" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} value={team} onChange={setTeam} /></Field>
+        <Field label="Role" htmlFor="ppl-f-role"><Select id="ppl-f-role" options={[{ value: "all", label: "All" }, ...roles.map((r) => ({ value: r.id, label: r.name }))]} value={role} onChange={setRole} /></Field>
+      </FilterBar>
+      {shown.length ? (
+        <Table>
+          <thead><tr><th>Person</th><th>Roles</th><th>Teams</th><th>MFA</th><th>On call</th><th>Status</th></tr></thead>
+          <tbody>
+            {shown.map((p) => (
+              <tr key={p.id} className="row-link" id={`ppl-row-${p.id}`} onClick={() => navigate("person", p.id)}>
+                <td>
+                  <div className="row nowrap">
+                    <Avatar id={p.id} />
+                    <div><a className="pri" href={hashFor("person", p.id)} onClick={(e) => e.stopPropagation()}>{p.name}</a><span className="sub">{p.title}</span></div>
+                  </div>
+                </td>
+                <td><div className="row">{p.roles.length ? p.roles.slice(0, 2).map((g, i) => <span key={i} className="chip plain">{roleName(g.role)}</span>) : <span className="chip warn">No roles</span>}</div></td>
+                <td>{(p.teams ?? []).map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "-"}</td>
+                <td><span className={`chip ${p.mfa ? "ok" : "warn"}`}>{p.mfa ? "on" : "off"}</span></td>
+                <td>{p.oncall ? <span className="chip info">on call</span> : "-"}</td>
+                <td><span className={`chip ${p.status === "active" ? "ok" : p.status === "invited" ? "info" : "plain"}`}>{p.status}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      ) : <Empty title="Nobody matches" text="Change the search or filters." />}
+    </Panel>
   );
 }

@@ -102,7 +102,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "suites" || path === "agents/suites") return seed.suites;
     if (path === "evals/runs") return seed.eval_runs;
     if (path === "evals/scorecards") return seed.scorecards;
-    if (path === "audit") return page(seed.audit);
+    if (path === "audit") return page((seed.audit as Array<Record<string, unknown>>).map((e, i) => ({ digest: `d${String(i).padStart(8, "0")}ffff`, prev: `d${String(i + 1).padStart(8, "0")}ffff`, ...e })));
     if (path === "signins") return seed.signins;
     if (path === "sessions") return seed.sessions;
     if (path === "policies") return seed.policies;
@@ -123,6 +123,24 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "instructions/base") return seed.instructions;
     if (path === "access/matrix") return seed.role_matrix;
     if (path === "trust/cells") return seed.trust;
+    if (path === "system/health") {
+      const at = new Date(seed.NOW).toISOString();
+      const svc = (id: string, name: string, status: "ok" | "degraded", detail: string) => ({ id, name, status, detail, latencyMs: 40 });
+      return {
+        at,
+        services: [svc("api", "API gateway", "ok", "p95 212 ms"), svc("worker", "Worker pool", "ok", "6 of 6 workers"), svc("db", "Postgres", "ok", "replica lag 0.4 s"), svc("queue", "Job queue", "degraded", "2 dead letters")],
+        backup: { status: "ok", at, ageHours: 6, set: "nightly-0412", detail: "verified" },
+        drill: { status: "ok", at, ageHours: 40, set: "nightly-0410", seconds: 840, failedChecks: 0, detail: "restore drill passed" },
+        outbox: { counts: { pending: 1, sending: 0, delivered: 220, dead: 2 }, oldestPendingSeconds: 30, dead: [{ id: "dl-1", destination: "slack #gates", scope: "project", attempts: 5, maxAttempts: 5, lastError: "channel_not_found", createdAt: at, failedAt: at }] },
+        jobs: { counts: { queued: 2, running: 3, done: 480, dead: 0 }, stuck: [], runningLongMinutes: 180, dead: [], deadWindowHours: 24 },
+        runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
+      };
+    }
+    if (path === "workload") {
+      const people = (seed.people as Array<{ id: string; name: string; status: string; oncall?: boolean; teams?: string[] }>).filter((x) => x.status === "active");
+      const rows = people.map((x, i) => ({ person: x.id, name: x.name, team: x.teams?.[0] ?? null, glass: 0, perDay: (4 + i) / 7, waitN: 6, waiting: i % 3, approvals: 4 + i, answered: i % 4, medianResponseMin: 12 + i, afterHours: i % 2, n: 6, sole: i % 5 === 0 ? 1 : 0, minutes: 30 + i * 5, away: null, oncall: !!x.oncall, waitingGates: [], recent: [] }));
+      return { at: seed.NOW, days: 7, scope: "all", minN: 5, projects: [{ id: "payments", name: "Payments Platform" }], factoryWide: true, ids: people.map((x) => x.id), totals: { gatesWaiting: 6, soleGates: 1, noneGates: 0, timedN: 12, medianWaitMin: 42, acts: 64, afterHours: 9, minutes: 520 }, rows, teams: [], byCls: [], byProject: [], bottlenecks: [], needsPerson: [], suggestions: [] };
+    }
     void q;
     return undefined;
   };
