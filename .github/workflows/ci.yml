@@ -55,6 +55,12 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # Frontend gates (AGENTS.md): the architecture-lint ratchet, the per-view definition-of-done report, the entry
+      # bundle budget (measured from the build above) and the check that every rule in AGENTS.md has an enforcement.
+      - run: npm run lint:ratchet
+      - run: npm run dod
+      - run: npm run check:bundle
+      - run: npm run check:agents
       - name: Runner wrapper
         working-directory: runner/wrapper
         run: |

@@ -1,0 +1,23 @@
+# Review ownership. Branch protection should require code owner review (deploy/ci/branch-protection.sh).
+# The last matching pattern wins.
+*                                   @reshif
+
+# The engineering rules and the gates that enforce them.
+/AGENTS.md                          @reshif
+/eslint.config.js                   @reshif
+/eslint.config.web.js               @reshif
+/scripts/                           @reshif
+/.github/                           @reshif
+/apps/web/lint-baseline.json        @reshif
+/apps/web/bundle-budget.json        @reshif
+
+# Frontend foundations: primitives, tokens, shell and the data layer.
+/apps/web/src/ui/                   @reshif
+/apps/web/src/styles/tokens.css     @reshif
+/apps/web/src/shell/                @reshif
+/apps/web/src/api/                  @reshif
+/apps/web/e2e/                      @reshif
+
+# Shared domain contract and security-sensitive policy.
+/packages/domain/                   @reshif
+/deploy/                            @reshif

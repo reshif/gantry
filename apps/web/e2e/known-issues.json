@@ -1,0 +1,17 @@
+{
+  "a11y": {
+    "admin|api|dark-390": [
+      "scrollable-region-focusable"
+    ],
+    "admin|api|light-390": [
+      "scrollable-region-focusable"
+    ],
+    "reader|api|dark-390": [
+      "scrollable-region-focusable"
+    ],
+    "reader|api|light-390": [
+      "scrollable-region-focusable"
+    ]
+  },
+  "overflow": []
+}

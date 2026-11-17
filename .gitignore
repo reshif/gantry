@@ -11,3 +11,5 @@ deploy/secrets/*
 deploy/tls/*
 !deploy/tls/README.md
 deploy/prod.env
+apps/web/e2e/test-results/
+apps/web/e2e/report/
