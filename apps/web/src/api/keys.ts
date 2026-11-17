@@ -98,6 +98,7 @@ export const qk = {
   skills: () => ["skills"] as const,
   vendors: () => ["vendors"] as const,
   routing: () => ["routing"] as const,
+  routingVersions: () => ["routing", "versions"] as const,
   routingResolve: (q: object) => ["routing", "resolve", q] as const,
   prices: () => ["vendors", "prices"] as const,
   budgets: () => ["vendors", "budgets"] as const,

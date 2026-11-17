@@ -3,7 +3,7 @@
  *   GET/POST /api/v1/vendors, PATCH /api/v1/vendors/{id}, POST /api/v1/vendors/{id}/qualify
  *   GET /api/v1/vendor-templates, POST /api/v1/vendors/from-template, POST /api/v1/vendors/{id}/discover
  *   POST/DELETE /api/v1/models, PATCH /api/v1/models/{id}
- *   GET/PUT /api/v1/routing, GET /api/v1/routing/resolve?station=&repo=&project=&class=
+ *   GET/PUT /api/v1/routing, GET /api/v1/routing/versions, GET /api/v1/routing/resolve?station=&repo=&project=&class=
  *   GET/POST /api/v1/prices, GET /api/v1/prices/quote
  *   GET /api/v1/budgets, PUT /api/v1/budgets/{project}
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4). Only `model.edit` changes vendors, models, routing and prices.
@@ -50,6 +50,14 @@ export const modelRoutes: FastifyPluginAsync = async (app) => {
   app.get("/api/v1/routing", async (req) => {
     requirePerson(req);
     return loadRouting(g.pool, g.orgId);
+  });
+
+  /** Every published routing version, newest first: who published it, when, and the change note. Read-only history. */
+  app.get("/api/v1/routing/versions", async (req) => {
+    requirePerson(req);
+    const { rows } = await g.pool.query<{ version: number; published_at: Date; published_by: string | null; note: string | null }>(
+      `select version, published_at, published_by, note from routing_versions where org_id = $1 and published_at is not null order by version desc limit 50`, [g.orgId]);
+    return rows.map((r) => ({ version: r.version, publishedAt: r.published_at.toISOString(), publishedBy: r.published_by, note: r.note ?? "" }));
   });
 
   /** Where would a request go? The same resolver the edge uses at authorize time. */
