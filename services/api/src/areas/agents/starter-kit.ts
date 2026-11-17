@@ -6,7 +6,7 @@
  * instruction, a new agent version, a changed model or a deleted case survives every restart, and an org with its own agents (the dev seed, or a restored backup)
  * gets nothing added. Nothing is invented: no metrics, runs or trust cells. Trust starts where it always does, with no cell: L1 applies until evidence earns more.
  */
-import { STARTER_KIT, type KitAgent, type KitSkill } from "@gantry/domain";
+import { KIT_VERSION, STARTER_KIT, type KitAgent, type KitCase, type KitSkill } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { cfgOf, sha256, snapshotOf, TOOL_KEYS } from "./config.js";
 
@@ -48,12 +48,46 @@ async function loadAgent(db: Queryable, orgId: string, a: KitAgent, skills: Map<
   );
   for (const [i, id] of a.skills.entries()) await db.query(`insert into agent_skills (org_id, agent_id, skill_id, position) values ($1,$2,$3,$4) on conflict do nothing`, [orgId, a.id, id, i + 1]);
   const su = a.suite;
-  await db.query(`insert into suites (org_id, id, name, station, agent_id, data) values ($1,$2,$3,$4,$5,$6::jsonb) on conflict (org_id, id) do nothing`, [orgId, su.id, su.name, su.station, a.id, json({ threshold: su.threshold, builtin: true })]);
-  for (const c of su.cases) {
-    const body = { by: "system", task: c.task, checks: c.checks, repo: null, commit: null, project: null, ...(c.cls ? { cls: c.cls } : {}), ...(c.skill ? { skill: c.skill } : {}), rules: c.rules, builtin: true };
-    await db.query(`insert into eval_cases (org_id, id, suite_id, name, body, golden) values ($1,$2,$3,$4,$5::jsonb,false) on conflict (org_id, id) do nothing`, [orgId, c.id, su.id, c.name, json(body)]);
-  }
+  await db.query(`insert into suites (org_id, id, name, station, agent_id, data) values ($1,$2,$3,$4,$5,$6::jsonb) on conflict (org_id, id) do nothing`, [orgId, su.id, su.name, su.station, a.id, json({ threshold: su.threshold, builtin: true, kit: KIT_VERSION })]);
+  for (const c of su.cases) await insertCase(db, orgId, su.id, c);
   return true;
+}
+
+const caseBody = (c: KitCase) => ({ by: "system", task: c.task, checks: c.checks, repo: null, commit: null, project: null, ...(c.cls ? { cls: c.cls } : {}), ...(c.skill ? { skill: c.skill } : {}), rules: c.rules, builtin: true });
+
+async function insertCase(db: Queryable, orgId: string, suiteId: string, c: KitCase): Promise<void> {
+  await db.query(`insert into eval_cases (org_id, id, suite_id, name, body, golden) values ($1,$2,$3,$4,$5::jsonb,false) on conflict (org_id, id) do nothing`, [orgId, c.id, suiteId, c.name, json(caseBody(c))]);
+}
+
+/** Version strings are x.y.z: true when a is older than b. */
+const older = (a: string, b: string): boolean => {
+  const x = a.split(".").map(Number);
+  const y = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0);
+  return false;
+};
+
+/**
+ * Adds the cases a newer kit brought to an organisation's built-in suites (the first kit shipped without the CITE, ASK, ASSUME and prompt-injection cases).
+ * A built-in suite records the kit version it was last brought to (a suite from before that record is on 1.1.0); only cases newer than that are added, once,
+ * so a case a person deleted or edited never comes back or changes, and a suite a person created or an agent they replaced is not touched.
+ * Returns the number of cases added.
+ */
+export async function addNewKitCases(db: Queryable, orgId: string): Promise<number> {
+  let added = 0;
+  for (const a of STARTER_KIT.agents) {
+    const su = a.suite;
+    const row = (await db.query<{ data: Record<string, unknown> }>(`select data from suites where org_id = $1 and id = $2 and agent_id = $3 for update`, [orgId, su.id, a.id])).rows[0];
+    if (!row || row.data.builtin !== true) continue;
+    const at = typeof row.data.kit === "string" ? row.data.kit : "1.1.0";
+    if (!older(at, KIT_VERSION)) continue;
+    for (const c of su.cases.filter((x) => x.since && older(at, x.since))) {
+      await insertCase(db, orgId, su.id, c);
+      added++;
+    }
+    await db.query(`update suites set data = data || $3::jsonb where org_id = $1 and id = $2`, [orgId, su.id, json({ kit: KIT_VERSION })]);
+  }
+  return added;
 }
 
 /** Loads every bundle whose agent is missing. Returns the ids of the agents loaded. Safe to call on every start. */

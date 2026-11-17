@@ -5,7 +5,7 @@ import type { Config } from "./config.js";
 import { DEFAULT_SECURITY } from "./read/index.js";
 import { seedDemoAudit } from "../areas/audit/seed.js";
 import { ensureDefaultModel } from "../areas/models/default.js";
-import { loadStarterKit, upgradeOnboardingAgent } from "../areas/agents/starter-kit.js";
+import { addNewKitCases, loadStarterKit, upgradeOnboardingAgent } from "../areas/agents/starter-kit.js";
 
 export interface BootResult {
   orgId: string;
@@ -61,6 +61,8 @@ export async function bootstrapOrg(pool: pg.Pool, config: Pick<Config, "orgSlug"
     const kit = await loadStarterKit(tx, id);
     if (kit.length) log?.info({ agents: kit }, "starter kit loaded");
     if (await upgradeOnboardingAgent(tx, id)) log?.info({ agent: "ag-onboard" }, "onboarding agent upgraded to the authoring instructions (version 2)");
+    const newCases = await addNewKitCases(tx, id);
+    if (newCases) log?.info({ cases: newCases }, "starter kit: new eval cases added to the built-in suites");
     await tx.query(
       `insert into role_matrix_versions (org_id, version, matrix, note, published_at, published_by)
        select $1, 1, $2::jsonb, 'Built-in defaults', now(), 'system' where not exists (select 1 from role_matrix_versions where org_id = $1)`,
