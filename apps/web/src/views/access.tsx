@@ -42,7 +42,9 @@ export default function AccessView() {
   const actions = useMemo(() => m?.actions ?? [], [m]);
   const matrix = m?.matrix ?? {};
 
-  const [tab, setTab] = useState("policies");
+  const [tab, setTab] = useState("matrix");
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   const [sim, setSim] = useState<Sim | null>(null);
   const [evaluated, setEvaluated] = useState<Evaluated | null>(null);
   const [hl, setHl] = useState<string | null>(null);
@@ -69,7 +71,7 @@ export default function AccessView() {
       setEvaluated({ sim: s, t, result });
       const rule = result.decision.rule as { kind: string; id: string; freeze?: string };
       setHl(rule.kind === "matrix" ? "MATRIX" : rule.id);
-      if (jump) setTab(rule.freeze ? "freezes" : rule.kind === "policy" ? "policies" : "matrix");
+      if (jump && tabRef.current !== "check") setTab(rule.freeze ? "freezes" : rule.kind === "policy" ? "policies" : "matrix");
     },
     [actions, outcome],
   );
@@ -120,6 +122,7 @@ export default function AccessView() {
   const custom = roles.filter((r) => r.custom).length;
   const tools =
     tab === "freezes" ? <Btn label="Schedule freeze" small icon="clock" id="acc-add-freeze" guard={perm} onClick={openFreeze} />
+    : tab === "check" ? null
     : tab === "policies" ? <Btn label="Add policy" small icon="plus" id="acc-add-policy" guard={perm} onClick={() => openPolicy(null)} />
     : <Btn label="Add role" small icon="plus" id="acc-add-role" guard={rperm} onClick={() => openRole(null)} />;
 
@@ -135,8 +138,9 @@ export default function AccessView() {
   return (
     <div className="view view-access">
       <ViewHead
+        kicker="Govern"
         title="Access"
-        sub="Who may do what, where and when. Roles grant actions per project; policies narrow or extend them by project, hour and on-call status; freezes override everything for release."
+        sub="What each role may do, which policies add conditions, and a way to test a decision."
       />
       <LockNote decision={perm} what="The role matrix, policies and freezes" />
       {fromName ? (
@@ -152,24 +156,26 @@ export default function AccessView() {
         <Stat label="Policies on" value={qState(policiesQ, () => String(policies.filter((p) => p.enabled).length))} sub={policiesQ.data ? `of ${policies.length}` : undefined} />
         <Stat label="Freezes active" value={qState(freezesQ, () => String(activeFz))} tone={activeFz ? "block" : undefined} />
       </StatRow>
-      {mQ.isError && !m ? (
+      <div className="acc-tabbar">
+        <Tabs
+          idPrefix="acc-tab"
+          active={tab}
+          onChange={setTab}
+          items={[{ id: "matrix", label: "Matrix" }, { id: "policies", label: "Policies", count: policies.length }, { id: "freezes", label: "Freezes", count: freezes.length }, { id: "roles", label: "Roles", count: roles.length }, { id: "check", label: "Check access" }]}
+        />
+        <div className="acc-tab-tools">{tools}</div>
+      </div>
+      <div className="acc-body" id="acc-tab-panel" role="tabpanel">
+        {tab === "check" ? (
+      mQ.isError && !m ? (
         <section className="panel" aria-label="Policy simulator"><div className="panel-body"><Async query={mQ} what="the access matrix" id="acc-matrix">{() => null}</Async></div></section>
       ) : (
         <Simulator
           people={people} projects={projects} repos={repos} actions={actions} sim={cur} setSim={setSim} evaluated={evaluated}
           onEvaluate={(s) => void evaluate(s)} onShowRule={setTab} presetsList={presets(people, projects, repos)}
         />
-      )}
-      <div className="acc-tabbar">
-        <Tabs
-          idPrefix="acc-tab"
-          active={tab}
-          onChange={setTab}
-          items={[{ id: "policies", label: "Policies", count: policies.length }, { id: "freezes", label: "Freezes", count: freezes.length }, { id: "matrix", label: "Roles × actions" }, { id: "roles", label: "Roles", count: roles.length }]}
-        />
-        <div className="acc-tab-tools">{tools}</div>
-      </div>
-      <div className="acc-body" id="acc-tab-panel" role="tabpanel">
+      )
+        ) : (
         <Async query={(tab === "freezes" ? freezesQ : tab === "policies" ? policiesQ : mQ) as UseQueryResult<unknown>} what={tab === "freezes" ? "freezes" : tab === "policies" ? "policies" : "the access matrix"} id="acc">{() => (
         matrixTab ? <Panel flush cls="acc-rules"><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} hl={hl} evaluated={evaluated} people={people} newRole={newRole} /></Panel>
         : tab === "freezes" ? <FreezeList freezes={freezes} repos={repos} hlFreeze={evaluated && (evaluated.result.decision.rule as { freeze?: string }).freeze ? (evaluated.result.decision.rule as { freeze?: string }).freeze! : null} />
@@ -187,6 +193,7 @@ export default function AccessView() {
           />
         )
         )}</Async>
+        )}
       </div>
     </div>
   );

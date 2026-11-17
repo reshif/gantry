@@ -2,7 +2,7 @@
  * Group E (connect and govern) fixtures for the fidelity harness: integrations, MCP servers, API keys, triggers and deliveries,
  * in the shape of the Control Room prototype's sample data. Merged into richOverrides(); changes no e2e default.
  */
-import { INTEGRATION_TYPES } from "@gantry/domain";
+import { ACTIONS, INTEGRATION_TYPES, ROLES } from "@gantry/domain";
 import { fulfillJson, type Handler } from "./fixtures";
 
 const NOW = Date.parse("2026-01-15T10:00:00Z");
@@ -84,5 +84,62 @@ export function richGroupE(): Record<string, Handler> {
   const ch = ["slack", "email", "paging", "teams", "webhook"];
   ov["deliveries"] = (r) =>
     fulfillJson(r, Array.from({ length: 14 }, (_, i) => ({ id: `DLV-${5112 - i}`, at: NOW - i * 17 * MIN, project: "payments", event: ev[i % 5], channel: ch[i % 5], target: ["#factory-gates", "ops@acme.dev", "oncall", "#risk", "https://hooks.acme.dev/g"][i % 5], status: i % 6 === 3 ? "failed" : "delivered", attempts: 1, error: i % 6 === 3 ? "HTTP 503" : "", state: i % 6 === 3 ? "failed" : "sent" })));
+  Object.assign(ov, richGovern());
+  return ov;
+}
+
+const TEAMS = [
+  { id: "platform", name: "Platform", desc: "Shared services and the factory line", members: 6 },
+  { id: "growth", name: "Growth", desc: "Storefront and mobile", members: 4 },
+  { id: "payments", name: "Payments", desc: "Ledger, payouts and refunds", members: 5 },
+  { id: "data", name: "Data", desc: "Data platform and search", members: 3 },
+];
+const PEOPLE: Array<[string, string, string, string, string, boolean, string]> = [
+  ["p-admin", "Asha Raman", "Head of Engineering", "factory_admin", "platform", true, "active"],
+  ["p-arjun", "Arjun Mehta", "Frontend Engineer", "engineer", "growth", false, "active"],
+  ["p-chloe", "Chloe Martin", "Engineering Lead, Growth", "line_lead", "growth", true, "active"],
+  ["p-daniel", "Daniel Okafor", "Factory Manager", "project_admin", "platform", true, "active"],
+  ["p-diego", "Diego Alvarez", "Engineering Manager, Data", "line_lead", "data", true, "active"],
+  ["p-fatima", "Fatima Zahra", "Senior Engineer", "reviewer", "payments", true, "active"],
+  ["p-grace", "Grace Liu", "Security Engineer", "approver", "platform", true, "active"],
+  ["p-hana", "Hana Sato", "Engineering Lead, Mobile", "project_admin", "growth", true, "invited"],
+  ["p-ines", "Ines Moreau", "Engineering Lead, Internal Tools", "project_admin", "platform", false, "active"],
+  ["p-kenji", "Kenji Watanabe", "Release Manager", "release_manager", "platform", true, "active"],
+  ["p-kwame", "Kwame Mensah", "Engineering Lead, Partners", "project_admin", "payments", true, "active"],
+  ["p-lena", "Lena Fischer", "Engineering Lead, Platform", "project_admin", "platform", true, "active"],
+  ["p-meera", "Meera Iyer", "Tech Lead", "line_lead", "payments", true, "active"],
+  ["p-noor", "Noor Haddad", "Compliance Analyst", "auditor", "data", false, "active"],
+  ["p-omar", "Omar Siddiqui", "QA Engineer", "engineer", "payments", true, "active"],
+  ["p-priya", "Priya Nair", "On-call Engineer", "engineer", "platform", true, "active"],
+  ["p-rui", "Rui Costa", "Contractor", "viewer", "growth", false, "deactivated"],
+  ["p-sara", "Sara Lindqvist", "Product Manager", "viewer", "growth", true, "active"],
+  ["p-tomas", "Tomas Novak", "Backend Engineer", "engineer", "data", true, "active"],
+  ["p-uma", "Uma Patel", "Support Engineer", "engineer", "payments", true, "active"],
+];
+const person = (r: (typeof PEOPLE)[number]) => ({ id: r[0], name: r[1], title: r[2], email: `${r[0].slice(2)}@acme.dev`, teams: [r[4]], roles: [{ role: r[3], scope: "factory" }], status: r[6], oncall: r[0] === "p-priya", github: r[0].slice(2), away: null, mfa: r[5], version: 1 });
+
+function matrixE() {
+  const matrix: Record<string, Record<string, boolean>> = {};
+  for (const ro of ROLES) {
+    matrix[ro.id] = {};
+    ACTIONS.forEach((a, i) => {
+      const on = ro.id === "factory_admin" ? true : ro.id === "auditor" ? a.id === "audit.read" || a.id === "project.view" : ro.id === "viewer" ? a.id === "project.view" : ro.level === "factory" ? false : a.scope === "project" && (i + ro.id.length) % 3 !== 0;
+      matrix[ro.id]![a.id] = on;
+    });
+  }
+  return { matrix, roles: ROLES, actions: ACTIONS, version: 7 };
+}
+
+export function richGovern(): Record<string, Handler> {
+  const ov: Record<string, Handler> = {};
+  ov["people"] = (r) => fulfillJson(r, PEOPLE.map(person));
+  ov["teams"] = (r) => fulfillJson(r, TEAMS);
+  ov["access/matrix"] = (r) => fulfillJson(r, matrixE());
+  ov["policies"] = (r) =>
+    fulfillJson(r, [
+      { id: "POL-101", name: "Release window", effect: "deny", enabled: true, roles: ["release_manager", "project_admin"], actions: ["release"], where: { projects: ["payments"] }, when: { days: [0, 6], from: "00:00", to: "23:59" }, oncallOnly: false, version: 1 },
+      { id: "POL-102", name: "On-call may stop the line", effect: "allow", enabled: true, roles: ["engineer"], actions: ["kill.project"], where: {}, when: null, oncallOnly: true, extend: true, version: 1 },
+    ]);
+  ov["freezes"] = (r) => fulfillJson(r, []);
   return ov;
 }

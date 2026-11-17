@@ -25,3 +25,6 @@
 .stats>.stat{min-width:0}.stat .d{overflow-wrap:anywhere}
 @media (max-width:640px){.ph .acts .btn{min-width:0;white-space:normal;height:auto;min-height:36px}.page{min-width:0}}
 .view>*,.form-grid>*{min-width:0}
+.switch input.switch-input{position:relative;inset:auto;opacity:1;z-index:auto}
+.switch.is-locked input.switch-input{opacity:.55;cursor:not-allowed}
+.matrix td.mx-cell{vertical-align:middle}
