@@ -22,6 +22,7 @@ export interface DocumentRow {
   contentHash: string;
   createdAt: number;
   acceptedBy: string | null;
+  acceptedAt: number | null;
   body?: string;
 }
 
@@ -61,7 +62,7 @@ export interface AssumptionRow {
 /** A station run's document: the next version of its name on this work order. */
 export async function recordDocument(
   tx: Tx,
-  d: { orgId: string; id: string; woId: string; attemptId: string | null; station: string; name: string; hash: string; mediaType: string; size: number; body: string; author: string | null; authorKind?: "agent" | "person" },
+  d: { orgId: string; id: string; woId: string; attemptId: string | null; station: string | null; name: string; hash: string; mediaType: string; size: number; body: string; author: string | null; authorKind?: "agent" | "person" },
 ): Promise<{ id: string; version: number }> {
   // One writer at a time per document name: the advisory lock makes "max + 1" safe without a sequence per document.
   await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`doc:${d.orgId}:${d.woId}:${d.name}`]);
@@ -78,14 +79,14 @@ export async function recordDocument(
 const docRow = (r: Record<string, unknown>, withBody: boolean): DocumentRow => ({
   id: String(r.id), doc: String(r.doc), station: (r.station as string | null) ?? null, version: Number(r.version), supersedes: (r.supersedes as string | null) ?? null,
   authorKind: r.author_kind as DocumentRow["authorKind"], authorId: (r.author_id as string | null) ?? null, attemptId: (r.attempt_id as string | null) ?? null,
-  size: Number(r.size_bytes), contentHash: String(r.content_hash), createdAt: (r.created_at as Date).getTime(), acceptedBy: (r.accepted_by as string | null) ?? null,
+  size: Number(r.size_bytes), contentHash: String(r.content_hash), createdAt: (r.created_at as Date).getTime(), acceptedBy: (r.accepted_by as string | null) ?? null, acceptedAt: r.accepted_at ? (r.accepted_at as Date).getTime() : null,
   ...(withBody ? { body: String(r.body ?? "") } : {}),
 });
 
 /** Every version of every document on the work order (no bodies), oldest first. */
 export async function listDocuments(db: Queryable, orgId: string, woId: string): Promise<DocumentRow[]> {
   const { rows } = await db.query(
-    `select id, doc, station, version, supersedes, author_kind, author_id, attempt_id, size_bytes, content_hash, created_at, accepted_by from artefacts where org_id = $1 and wo_id = $2 and doc is not null order by created_at, doc, version`,
+    `select id, doc, station, version, supersedes, author_kind, author_id, attempt_id, size_bytes, content_hash, created_at, accepted_by, accepted_at from artefacts where org_id = $1 and wo_id = $2 and doc is not null order by created_at, doc, version`,
     [orgId, woId],
   );
   return rows.map((r) => docRow(r, false));
@@ -93,28 +94,38 @@ export async function listDocuments(db: Queryable, orgId: string, woId: string):
 
 export async function readDocument(db: Queryable, orgId: string, woId: string, id: string): Promise<DocumentRow | null> {
   const { rows } = await db.query(
-    `select id, doc, station, version, supersedes, author_kind, author_id, attempt_id, size_bytes, content_hash, created_at, accepted_by, body from artefacts where org_id = $1 and wo_id = $2 and id = $3 and doc is not null`,
+    `select id, doc, station, version, supersedes, author_kind, author_id, attempt_id, size_bytes, content_hash, created_at, accepted_by, accepted_at, body from artefacts where org_id = $1 and wo_id = $2 and id = $3 and doc is not null`,
     [orgId, woId, id],
   );
   return rows[0] ? docRow(rows[0], true) : null;
 }
 
 /** The latest version of each document, with its text, for the station handoff. Bodies are capped so a handoff stays a handoff. */
-export async function latestDocuments(db: Queryable, orgId: string, woId: string, o: { exceptAttempt?: string; perDoc?: number; total?: number } = {}): Promise<Array<{ name: string; station: string | null; version: number; markdown: string; truncated: boolean }>> {
-  const { rows } = await db.query<{ doc: string; station: string | null; version: number; body: string | null }>(
-    `select distinct on (doc) doc, station, version, body from artefacts where org_id = $1 and wo_id = $2 and doc is not null and ($3::text is null or attempt_id is distinct from $3) order by doc, version desc`,
+export async function latestDocuments(db: Queryable, orgId: string, woId: string, o: { exceptAttempt?: string; perDoc?: number; total?: number } = {}): Promise<Array<{ name: string; station: string | null; version: number; markdown: string; truncated: boolean; editedByPerson?: boolean }>> {
+  const { rows } = await db.query<{ doc: string; station: string | null; version: number; body: string | null; author_kind: string; accepted_by: string | null }>(
+    `select distinct on (doc) doc, station, version, body, author_kind from artefacts where org_id = $1 and wo_id = $2 and doc is not null and ($3::text is null or attempt_id is distinct from $3) order by doc, version desc`,
     [orgId, woId, o.exceptAttempt ?? null],
   );
   const perDoc = o.perDoc ?? 40_000;
   let left = o.total ?? 160_000;
-  const out: Array<{ name: string; station: string | null; version: number; markdown: string; truncated: boolean }> = [];
+  const out: Array<{ name: string; station: string | null; version: number; markdown: string; truncated: boolean; editedByPerson?: boolean }> = [];
   for (const r of rows) {
     const text = r.body ?? "";
     const take = Math.max(0, Math.min(perDoc, left, text.length));
     left -= take;
-    out.push({ name: r.doc, station: r.station, version: r.version, markdown: text.slice(0, take), truncated: take < text.length });
+    out.push({ name: r.doc, station: r.station, version: r.version, markdown: text.slice(0, take), truncated: take < text.length, ...(r.author_kind === "person" ? { editedByPerson: true } : {}) });
   }
   return out;
+}
+
+/** The documents whose latest version a person wrote, for the gate decision ("edited before approval"). Null when nobody edited anything. */
+export async function editedByPeople(db: Queryable, orgId: string, woId: string): Promise<Array<{ doc: string; version: number; by: string | null }> | null> {
+  const { rows } = await db.query<{ doc: string; version: number; author_id: string | null; author_kind: string }>(
+    `select distinct on (doc) doc, version, author_id, author_kind from artefacts where org_id = $1 and wo_id = $2 and doc is not null order by doc, version desc`,
+    [orgId, woId],
+  );
+  const out = rows.filter((r) => r.author_kind === "person").map((r) => ({ doc: r.doc, version: r.version, by: r.author_id }));
+  return out.length ? out : null;
 }
 
 const qRow = (r: Record<string, unknown>): QuestionRow => ({

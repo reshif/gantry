@@ -23,6 +23,7 @@ import { setWoCap } from "../areas/workorders/budget.js";
 import { keyCreator } from "../areas/apikeys/store.js";
 import { woVersion, readWoRow } from "../areas/workorders/model.js";
 import { listDialogue, listDocuments, readDocument } from "../areas/workorders/documents.js";
+import { acceptDocument, commentOnDocument, editDocument, listDocComments, resolveDocComment } from "../areas/workorders/doccollab.js";
 import { answerStationQuestion, decideAssumption, decideObjection, decideResearchPlan } from "../areas/workorders/dialogue.js";
 import { stopScout } from "../areas/workorders/swarm.js";
 import { listSources, readSource } from "../areas/workorders/research.js";
@@ -42,6 +43,9 @@ const HostRe = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0
 const PlanBody = z.object({ decision: z.enum(["approve", "reject"]), hosts: z.array(z.string().max(253).regex(HostRe)).max(20).optional(), web: z.boolean().optional(), budgetUsd: z.number().positive().max(100).nullable().optional(), note: z.string().max(1000).optional() });
 const AnswerBody = z.object({ kind: z.enum(["answer", "dont_know", "not_relevant"]).default("answer"), answer: z.string().max(4000).optional() });
 const AssumptionBody = z.object({ status: z.enum(["confirmed", "corrected"]), note: z.string().max(2000).optional() });
+const DocCommentBody = z.object({ section: z.string().max(200).optional(), text: z.string().min(1).max(4000) });
+const DocEditBody = z.object({ markdown: z.string().min(1).max(200_000), note: z.string().max(500).optional() });
+const CId = z.object({ cid: z.string().min(1).max(200) });
 const Via = z.string().max(20).optional();
 const Reason = z.string().max(2000);
 
@@ -159,6 +163,40 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const d = await readDocument(g.pool, req.gx.orgId, id, doc);
     if (!d) throw refuse("not_found", "No such document on this work order.");
     return d;
+  });
+  app.get("/api/v1/work-orders/:id/document-comments", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    await scopeOf(req, id);
+    return { items: await listDocComments(g.pool, req.gx.orgId, id) };
+  });
+  /* People's side of a document (`:doc` is the version's id): comment on a section, edit it into a new version, accept it as the station's output. */
+  app.post("/api/v1/work-orders/:id/documents/:doc/comments", { config: { apiKey: "wo.answer" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    const { doc } = DocId.parse(req.params);
+    const b = DocCommentBody.parse(req.body);
+    const s = await scopeOf(req, id);
+    const own = req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
+    return command(req, spec(id, own ? null : "wo.answer", s), (tx, a) => commentOnDocument(tx, a, id, doc, { text: b.text, ...(b.section !== undefined ? { section: b.section } : {}) }));
+  });
+  app.post("/api/v1/work-orders/:id/document-comments/:cid/resolve", { config: { apiKey: "wo.answer" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    const { cid } = CId.parse(req.params);
+    const s = await scopeOf(req, id);
+    const own = req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
+    return command(req, spec(id, own ? null : "wo.answer", s), (tx, a) => resolveDocComment(tx, a, id, cid));
+  });
+  app.post("/api/v1/work-orders/:id/documents/:doc/edit", async (req) => {
+    const { id } = Id.parse(req.params);
+    const { doc } = DocId.parse(req.params);
+    const b = DocEditBody.parse(req.body);
+    const s = await scopeOf(req, id);
+    return command(req, spec(id, "gate.approve", s), (tx, a) => editDocument(tx, a, id, doc, { markdown: b.markdown, ...(b.note !== undefined ? { note: b.note } : {}) }));
+  });
+  app.post("/api/v1/work-orders/:id/documents/:doc/accept", async (req) => {
+    const { id } = Id.parse(req.params);
+    const { doc } = DocId.parse(req.params);
+    const s = await scopeOf(req, id);
+    return command(req, spec(id, "gate.approve", s), (tx, a) => acceptDocument(tx, a, id, doc));
   });
   app.get("/api/v1/work-orders/:id/dialogue", { config: { apiKey: "wo.read" } }, async (req) => {
     const { id } = Id.parse(req.params);
