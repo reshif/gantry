@@ -28,7 +28,7 @@ export function ProjectSwitcher({ me, project, current }: { me: Me; project: Pro
 }
 
 /** Pages that keep their meaning in another project; the rest land on that project's Floor. */
-const keepRoute = (r: string): string => (r === "record" ? "work-orders" : r === "conversations" ? "conversations" : r);
+const keepRoute = (r: string): string => ((r === "record" || r === "changes") ? "work-orders" : r === "conversations" ? "conversations" : r);
 
 function SwitcherList({ me, currentId, route, close }: { me: Me; currentId: string | null; route: string; close: () => void }) {
   const prefs = usePrefs();

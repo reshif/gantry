@@ -40,7 +40,7 @@ export function parseHash(hash: string): RouteLocation {
 
 export function formatHash(id: string, param?: string | null, project?: string | null): string {
   const pre = project ? `#/p/${encodeURIComponent(project)}/` : "#";
-  return param ? `${pre}${id}/${encodeURIComponent(param)}` : `${pre}${id}`;
+  return param ? `${pre}${id}/${param.split("/").map(encodeURIComponent).join("/")}` : `${pre}${id}`;
 }
 
 /** The hash for a route id: project routes get the current project (last chosen) unless one is given. */

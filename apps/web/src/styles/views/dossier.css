@@ -80,9 +80,11 @@
 
 /* the conversation inside the page */
 .dz-main .osx.is-bare { display: block; }
-.dz-main .osx.is-bare .osx-grid { display: flex; flex-direction: column; gap: 16px; }
-.dz-main .osx.is-bare .osx-main { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); padding: 14px 16px; }
-.dz-main .osx.is-bare .osx-side { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); padding: 14px 16px; width: auto; }
+.dz-main .osx.is-bare .osx-grid { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+.dz-main .osx.is-bare .osx-main { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
+.dz-main .osx.is-bare .osx-thread { max-height: none; }
+.dz-main .osx.is-bare .osx-side { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); padding: 14px 16px; }
+.dz-main .osx.is-bare .osx-side { order: 0; }
 .dz-main .osx.is-bare .osx-side > .osx-facts:first-of-type, .dz-main .osx.is-bare .osx-steps { display: none; }
 
 /* the changes page */
@@ -108,3 +110,11 @@
   .dz-actions .btn { flex: 1 1 auto; justify-content: center; }
   .dz-tabbar { padding: 0 8px; }
 }
+
+.dz-chg .dz-prov { margin-top: 8px; }
+.dz-chg .rec-guard { margin: 12px 0 0; border: 0; padding: 0; background: none; }
+.dz-plan { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.dz-acs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.dz-chgbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dz-treebox { padding: 6px 14px 10px; }
+.dz-chg .rec-file { padding-left: 8px; }

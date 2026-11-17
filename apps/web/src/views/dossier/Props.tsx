@@ -1,5 +1,5 @@
 /** The side column of a work order page: its properties, what waits on the viewer, the brief as it stands, the outline of the document and the export. */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { fmt, type Catalog, type Project } from "@gantry/domain";
 import { Btn, Chip, StateChip, Who } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
@@ -40,9 +40,11 @@ export function Props({ wo, rec, cat, project, session, onJump, onActivity, onDe
   const wait = waitingOnYou(wo, cat, session);
   const b = wo.brief;
   const ruleBased = session?.agent.mode === "rule-based";
+  // on a narrow screen the properties start folded, so the document comes first
+  const [open2, setOpen2] = useState(() => { try { return !window.matchMedia("(max-width: 1100px)").matches; } catch { return true; } });
   return (
     <aside className="dz-side" aria-label="Properties" id="dz-side">
-      <details className="dz-props" open>
+      <details className="dz-props" open={open2} onToggle={(e) => setOpen2(e.currentTarget.open)}>
         <summary>Properties</summary>
         <div className="props">
           <section>
