@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { appendEvent, withTx, type Tx } from "@gantry/db";
+import { DenialSampler } from "../denial-sampler.js";
 import type { Gantry } from "../context.js";
 import type { IdClaims } from "../oidc.js";
 import { readSecurity } from "../read/index.js";
@@ -143,19 +144,20 @@ async function freePersonId(tx: Tx, orgId: string, claimed: string | undefined, 
   }
 }
 
-const failureSampler = new DenialSampler();
-
 /**
- * A sign-in that never got as far as an identity (bad state, IdP error). Recorded so the history shows it, but sampled per source:
- * anyone can hit these endpoints without credentials, so one ledger row per request would let them grow the chain. The first few per
- * minute are written (the next one reports how many were left out); a missing state cookie names no identity and gets no ledger event.
+ * Failed sign-ins with no identity are reachable by anyone on the internet, and the ledger is append-only, so they are sampled:
+ * per reason and source address 5 rows a minute, 30 per reason overall; the rest are counted and the next row carries the count.
+ * The HTTP answer never changes. Sign-in failures that carry a person (see `signIn`) are not anonymous and are always recorded.
  */
+export const anonymousSigninFailures = new DenialSampler(5, 30);
+
+/** A sign-in that never got as far as an identity (bad state, IdP error). Recorded (sampled) so the history shows it. */
 export async function recordSignInFailure(g: Gantry, r: Pick<SignInRequest, "ip" | "userAgent" | "requestId" | "method">, reason: string): Promise<void> {
-  const sample = failureSampler.sample(`signin:${reason}`, r.ip || "unknown");
+  const sample = anonymousSigninFailures.sample(`signin:${reason}`, r.ip || "unknown");
   if (!sample.audit) return;
   await withTx(g.pool, async (tx) => {
     await tx.query(`insert into signins (org_id, person_id, method, outcome, reason, source_ip, user_agent) values ($1,null,$2,'failed',$3,$4::inet,$5)`, [g.orgId, r.method, reason, r.ip || null, r.userAgent.slice(0, 300)]);
-    if (reason === "state_missing") return;
-    await appendEvent(tx, { orgId: g.orgId, type: "auth.signin_failed", category: "auth", actor: "anonymous", channel: "web", outcome: "failed", rule: `SIGNIN-${reason.toUpperCase()}`, after: { method: r.method, reason, ...(sample.suppressed ? { suppressed: sample.suppressed } : {}) }, sourceIp: r.ip || null, requestId: r.requestId });
+    if (reason === "state_missing") return; // a missing state cookie names no identity and gets no ledger event
+    await appendEvent(tx, { orgId: g.orgId, type: "auth.signin_failed", category: "auth", actor: "anonymous", channel: "web", outcome: "failed", rule: `SIGNIN-${reason.toUpperCase()}`, after: { method: r.method, reason, ...(sample.suppressed ? { suppressedSinceLastRow: sample.suppressed } : {}) }, sourceIp: r.ip || null, requestId: r.requestId });
   });
 }

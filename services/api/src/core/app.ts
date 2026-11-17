@@ -54,6 +54,19 @@ export async function publicConfig(app: FastifyInstance): Promise<{ demoAccounts
   return { demoAccounts: g.config.demoAccounts, githubLogin: !!sec.value.githubLogin && !!g.oidc.githubIdp, ...(org ? { orgName: org.name } : {}), ...(demoAccountList ? { demoAccountList } : {}) };
 }
 
+/** A URL as it may be logged: the path only. Every query is credential-bearing or attacker-chosen (names may be percent-encoded), so none is kept. */
+export function logUrl(url: string | undefined): string | undefined {
+  if (!url) return url;
+  const i = url.indexOf("?");
+  return i < 0 ? url : `${url.slice(0, i)}?[redacted]`;
+}
+
+/** The request as it is logged. Headers are left out on purpose (credential headers such as x-run-token, x-api-key and webhook signatures); the fields mirror Fastify's default serializer. */
+export function logReq(r: { method?: string; url?: string; ip?: string; headers?: Record<string, unknown>; socket?: { remotePort?: number } }): Record<string, unknown> {
+  const v = r.headers?.["accept-version"];
+  return { method: r.method, url: logUrl(r.url), version: typeof v === "string" ? v : undefined, host: r.headers?.host, remoteAddress: r.ip, remotePort: r.socket?.remotePort };
+}
+
 /**
  * The Fastify app: request id, rate limit, error mapping, authentication (session cookie + CSRF, API-key bearer, service tokens),
  * the live-update hub and the product routes. Stateless: every replica serves any request.
@@ -61,7 +74,12 @@ export async function publicConfig(app: FastifyInstance): Promise<{ demoAccounts
 export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
   const { pool, config, orgId } = o;
   const app = Fastify({
-    logger: o.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.authorization", "req.headers.cookie", "res.headers['set-cookie']"] },
+    logger: o.logger ?? {
+      level: process.env.LOG_LEVEL ?? "info",
+      redact: ["req.headers.authorization", "req.headers.cookie", "req.headers['x-csrf-token']", "res.headers['set-cookie']"],
+      // Sign-in links carry credentials in the query (invite token, OIDC code and state, id_token_hint), so the log keeps the path only.
+      serializers: { req: (r: { method?: string; url?: string; host?: string; remoteAddress?: string; remotePort?: number; headers?: unknown }) => ({ method: r.method, url: logUrl(r.url), host: r.host, remoteAddress: r.remoteAddress, remotePort: r.remotePort, headers: r.headers }) },
+    },
     trustProxy: config.trustProxy,
     genReqId: (req) => {
       const h = req.headers["x-request-id"];

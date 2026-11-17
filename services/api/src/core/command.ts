@@ -1,4 +1,5 @@
 import { auditCategoryFor, needsStepUp, type Decision } from "@gantry/domain";
+import { DenialSampler } from "./denial-sampler.js";
 import {
   appendEvent, enqueue, enqueueOutbox, idempotency, withTx,
   type EventCategory, type EventChannel, type EventOutcome, type EventSubject, type Tx,
@@ -315,18 +316,25 @@ export function stopCommand<X extends object = Record<string, never>>(
   return command(req, { ...spec, reduced: true }, fn);
 }
 
+/** Denials of signed-in callers: `hook` is the caller, `source` the action, so the per-hook cap is per caller. */
+export const principalDenials = new DenialSampler(5, 20);
+
 /** Records a denial in its own transaction (the command's transaction rolled back). */
 export async function auditDenial(req: FastifyRequest, spec: { action: string | null; scope?: Scope }, d: Decision): Promise<void> {
   const g = req.server.gantry;
   const p = req.gx.principal;
   if (!p) return;
+  // The ledger is append-only, so a signed-in caller cannot be allowed one permanent row per refused request: per person, 5 rows a minute
+  // for each action and 20 across actions; the rest are counted and the next row carries the count. The 403 itself never changes.
+  const sample = principalDenials.sample(p.kind === "apikey" ? `apikey:${p.id}` : p.id, spec.action ?? "self");
+  if (!sample.audit) return;
   const via = bodyVia(req);
   const channel: EventChannel = p.kind === "apikey" ? "api" : p.kind === "service" ? "system" : ((via as EventChannel | null) ?? "web");
   await withTx(g.pool, (tx) =>
     appendEvent(tx, {
       orgId: g.orgId, type: `${spec.action ?? "self"}.denied`, category: auditCategoryFor(spec.action ?? "self") as EventCategory, actor: p.kind === "apikey" ? `apikey:${p.id}` : p.id,
       onBehalfOf: via && via !== "web" && p.kind === "person" ? p.id : null, channel, subject: { type: "action", id: spec.action ?? "self" }, projectId: spec.scope?.project ?? null, woId: spec.scope?.wo ?? null,
-      outcome: "denied", rule: d.rule.id, after: { reason: d.reason, rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) }, commandId: req.gx.requestId, sessionId: p.kind === "person" ? p.sessionId : null,
+      outcome: "denied", rule: d.rule.id, after: { reason: d.reason, rule: d.rule, ...(d.needs ? { needs: d.needs } : {}), ...(sample.suppressed ? { suppressedSinceLastRow: sample.suppressed } : {}) }, commandId: req.gx.requestId, sessionId: p.kind === "person" ? p.sessionId : null,
       sourceIp: req.gx.ip || null, requestId: req.gx.requestId,
     }),
   );

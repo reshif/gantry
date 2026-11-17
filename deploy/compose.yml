@@ -98,6 +98,7 @@ services:
       # Connection tests for chat and webhook integrations leave through the edge allow-list, like deliveries do.
       GANTRY_EGRESS_PROXY: http://gantry-edge:8444
       # Off by default: when true, the sign-in page lists every person's name, email and roles. Local development only (refused unless the public URL is localhost).
+      GANTRY_AUDIT_ANCHOR_FILE: /anchors/audit-anchors.jsonl
       GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-false}
       # Off by default: the org starts empty and the first sign-in with GANTRY_BOOTSTRAP_ADMIN_EMAIL becomes Factory Admin.
       # GANTRY_DEV_SEED=true loads the legacy demo data (people, projects, repos, policies) once, for development and demos only.
@@ -108,12 +109,16 @@ services:
       OIDC_GITHUB_IDP_ALIAS: ${OIDC_GITHUB_IDP_ALIAS:-}
       # Only the ingress (Caddy, fixed address on the control network) may state the client address; other containers cannot forge it.
       GANTRY_TRUST_PROXY: 10.89.17.2
-    # The backup service writes last-backup.json and last-drill.json here; the API only reads them (System health).
+    # The backup service writes last-backup.json and last-drill.json to this small status volume; the API only reads them (System health).
+    # It never mounts the volume that holds the database dumps.
     volumes:
-      - ${GANTRY_BACKUP_VOLUME:-backups}:/backups:ro
+      - backupstatus:/backups:ro
+      # Signed checkpoints of the audit chain head, on a volume the database never sees (GANTRY_AUDIT_ANCHOR_FILE).
+      - auditanchors:/anchors
     secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret]
     depends_on:
       gantry-migrate: { condition: service_completed_successfully }
+      volume-init: { condition: service_completed_successfully }
       minio: { condition: service_healthy }
     healthcheck:
       <<: *http-check
@@ -424,9 +429,10 @@ services:
     secrets: [db_owner_password, minio_root_password, backup_remote]
     volumes:
       - ${GANTRY_BACKUP_VOLUME:-backups}:/backups
+      - backupstatus:/status
     healthcheck:
       # Healthy while the newest backup succeeded and is less than 26 hours old.
-      test: ["CMD-SHELL", "grep -q '\"ok\":true' /backups/last-backup.json && [ -n \"$$(find /backups/last-backup.json -mmin -1560)\" ]"]
+      test: ["CMD-SHELL", "grep -q '\"ok\":true' /status/last-backup.json && [ -n \"$$(find /status/last-backup.json -mmin -1560)\" ]"]
       interval: 5m
       timeout: 10s
       retries: 1
@@ -446,11 +452,13 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: "no"
-    command: ["sh", "-c", "chown 10001:10001 /vol/objdata /vol/caddydata /vol/backups"]
+    command: ["sh", "-c", "chown 10001:10001 /vol/objdata /vol/caddydata /vol/backups /vol/backupstatus /vol/auditanchors"]
     volumes:
       - objdata:/vol/objdata
       - caddydata:/vol/caddydata
       - ${GANTRY_BACKUP_VOLUME:-backups}:/vol/backups
+      - backupstatus:/vol/backupstatus
+      - auditanchors:/vol/auditanchors
     networks: [control]
 
   # Build-only: `docker compose -f deploy/compose.yml build gantry-runner` produces the image the launcher starts runs from.
@@ -490,6 +498,8 @@ volumes:
   caddydata:
   kcdata:
   backups:
+  backupstatus:
+  auditanchors:
 
 secrets:
   db_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/db_password" }

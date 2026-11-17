@@ -7,6 +7,7 @@
  */
 import { visibleProjects } from "@gantry/domain";
 import { verifyChain } from "@gantry/db";
+import { anchorKeyFor, checkAnchors } from "../core/audit-anchor.js";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { decideFor, notFound, policyState, refuse } from "../core/index.js";
@@ -40,7 +41,12 @@ export const auditRoutes: FastifyPluginAsync = async (app) => {
   app.get("/api/v1/audit/verify", async (req) => {
     await requireVerifier(req);
     const r = await verifyChain(g.pool, req.gx.orgId);
-    if (r.ok) return { ok: true, checked: r.value.count, headSeq: r.value.headSeq, head: r.value.headHash, msg: `Chain intact: ${r.value.count} entries verified.` };
+    if (r.ok) {
+      // The chain is unkeyed and its head is in the same database, so it is also held to the signed checkpoints kept outside it.
+      const a = await checkAnchors(g.pool, req.gx.orgId, g.config.auditAnchorFile, anchorKeyFor(g.config.secrets.sessionKey));
+      if (a && "broken" in a) return { ok: false, checked: 0, anchorBroken: a.broken, msg: `The chain no longer matches a signed checkpoint at entry ${a.broken.seq} (${a.broken.kind.replace(/_/g, " ")}).` };
+      return { ok: true, checked: r.value.count, headSeq: r.value.headSeq, head: r.value.headHash, ...(a ? { checkpoints: a.checked } : {}), ...(a && "fileMissing" in a ? { anchorFileMissing: true } : {}), msg: `Chain intact: ${r.value.count} entries verified${a ? `, ${a.checked} signed checkpoints match` : ""}.${a && "fileMissing" in a && r.value.count > 0 ? " Warning: the checkpoint file is missing, so the chain is not held to any signed checkpoint." : ""}` };
+    }
     return { ok: false, checked: 0, broken: r.error, msg: `The chain is broken at entry ${r.error.seq} (${r.error.kind.replace(/_/g, " ")}).` };
   });
 
