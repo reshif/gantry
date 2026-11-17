@@ -17,10 +17,10 @@ export function AtWork({ needs, actions }: { needs: number; actions: ReactNode }
   const prefs = usePrefs();
   const wosQ = useWorkOrders(prefs.project);
   const cat = useCatalog();
-  const home = useHome().data as unknown as HomeFull | undefined;
-  const agents = (agentsQ.data ?? []).filter((a) => a.station);
-  const raw = wosQ.data as unknown;
-  const wos = (Array.isArray(raw) ? raw : ((raw as { items?: unknown[] } | undefined)?.items ?? [])) as Array<{ id: string; title: string; state: string; station: number; progress: number; history: Array<{ tokens: number }> }>;
+  const home: HomeFull | undefined = useHome().data as HomeFull | undefined;
+  const agents = agentsQ.data ? agentsQ.data.filter((a) => a.station) : [];
+  const raw = wosQ.data;
+  const wos = Array.isArray(raw) ? raw : raw ? raw.items : [];
   const running = wos.filter((w) => w.state === "running");
   const agentOf = (w: { station: number }): string | undefined => cat?.stations[w.station]?.agent;
   const jobsOf = (id: string) => running.filter((w) => agentOf(w) === id);

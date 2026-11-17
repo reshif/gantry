@@ -305,7 +305,7 @@ export default function InboxView() {
                   <FilterBar count={`${shown.length} of ${inTab(tab).length}`}>
                     <SearchBox id="inbox-search" value={search} onChange={setSearch} placeholder="Search…" label="Search the inbox" />
                     {projects.length > 1 ? (
-                      <label>
+                      <label htmlFor="inb-proj">
                         <span>Project</span>
                         <Select id="inb-proj" options={[{ value: "all", label: "All" }, ...projects.map(([id, name]) => ({ value: id, label: name }))]} value={project} onChange={setProj} />
                       </label>
