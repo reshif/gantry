@@ -8,7 +8,8 @@ export interface Subscriber {
   /** Project ids the person can see, or "all" (factory-wide roles). Refreshed when people, roles or projects change. */
   visible: Set<string> | "all";
   write(chunk: string): boolean;
-  close(): void;
+  /** `superseded`: the person opened more streams than allowed; the client is told so and must not reconnect. */
+  close(reason?: "superseded"): void;
 }
 
 export interface HubHooks {
@@ -117,7 +118,7 @@ export class Hub {
 
   add(s: Subscriber): () => void {
     const mine = [...this.subs].filter((x) => x.personId === s.personId); // insertion order: oldest first
-    for (const old of mine.slice(0, Math.max(0, mine.length - (Hub.MAX_STREAMS_PER_PERSON - 1)))) old.close();
+    for (const old of mine.slice(0, Math.max(0, mine.length - (Hub.MAX_STREAMS_PER_PERSON - 1)))) old.close("superseded");
     this.subs.add(s);
     return () => this.subs.delete(s);
   }
@@ -153,8 +154,9 @@ export function openStream(req: FastifyRequest, reply: FastifyReply, hub: Hub, s
     "x-request-id": req.id,
   });
   let done = false;
-  const finish = (): void => {
+  const finish = (reason?: "superseded"): void => {
     if (done) return;
+    if (reason === "superseded" && !res.writableEnded) res.write(`event: superseded\ndata: {}\n\n`);
     done = true;
     clearInterval(timer);
     remove();
@@ -163,7 +165,7 @@ export function openStream(req: FastifyRequest, reply: FastifyReply, hub: Hub, s
   const subscriber: Subscriber = { ...sub, write: (c) => !done && res.write(c), close: finish };
   const remove = hub.add(subscriber);
   const timer = setInterval(() => subscriber.write(`: hb\n\n`), heartbeatMs);
-  req.raw.on("close", finish);
-  res.on("error", finish);
+  req.raw.on("close", () => finish());
+  res.on("error", () => finish());
   res.write(`retry: 3000\n: connected\n\n`);
 }

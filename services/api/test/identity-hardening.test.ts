@@ -5,7 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { signIn, recordSignInFailure } from "../src/core/auth/signin.js";
 import { ipAllowed, validIpEntry } from "../src/core/security.js";
-import { Hub, type Subscriber } from "../src/core/stream.js";
+import { Hub, openStream, type Subscriber } from "../src/core/stream.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 
 const d = TEST_URL ? describe : describe.skip;
@@ -38,6 +38,21 @@ describe("stream hub", () => {
     expect(mine.filter((s) => s.closed).length).toBe(3);
     expect(mine.slice(0, 3).every((s) => s.closed)).toBe(true);
     expect(other.closed).toBe(false);
+  });
+  it("tells the evicted stream it was superseded (so the client does not retry), and adds hardening headers", () => {
+    const written: string[] = [];
+    let head: Record<string, string> = {};
+    let ended = false;
+    const raw = { writeHead: (_c: number, h: Record<string, string>) => { head = h; }, write: (c: string) => { written.push(c); return true; }, end: () => { ended = true; }, on: () => undefined, get writableEnded() { return ended; } };
+    const reply = { hijack: () => undefined, raw };
+    const rq = { id: "r1", raw: { on: () => undefined } };
+    const hub = new Hub({} as never, "o", { refresh: async () => "all" });
+    openStream(rq as never, reply as never, hub, { personId: "p-a", sessionId: null, visible: "all" }, 1e9);
+    expect(head["x-content-type-options"]).toBe("nosniff");
+    expect(head["content-security-policy"]).toContain("default-src 'none'");
+    for (let i = 0; i < Hub.MAX_STREAMS_PER_PERSON; i++) hub.add(sub("p-a"));
+    expect(written.join("")).toContain("event: superseded");
+    expect(ended).toBe(true);
   });
   it("loads policy once per sweep, however many streams are open", async () => {
     let loads = 0;

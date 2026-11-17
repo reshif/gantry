@@ -40,7 +40,7 @@ function fakeSource() {
     onopen: null,
     onerror: null,
   } as unknown as EventSourceLike & { onopen: (() => void) | null; onerror: (() => void) | null };
-  return { es, emit: (data: string) => handlers.change?.({ data } as MessageEvent) };
+  return { es, emit: (data: string) => handlers.change?.({ data } as MessageEvent), fire: (t: string) => handlers[t]?.({ data: "{}" } as MessageEvent) };
 }
 
 describe("startStream", () => {
@@ -55,6 +55,22 @@ describe("startStream", () => {
     expect(keys).toEqual(expect.arrayContaining(["workOrders", "floor", "home"]));
     stop();
     bindQueryClient(null);
+  });
+
+  it("does not reconnect after the server says the stream was superseded", () => {
+    const sources: ReturnType<typeof fakeSource>[] = [];
+    const timers: Array<{ fn: () => void; ms: number }> = [];
+    const stop = startStream({
+      create: () => { const s = fakeSource(); sources.push(s); return s.es; },
+      setTimer: (fn, ms) => { timers.push({ fn, ms }); return 0 as unknown as ReturnType<typeof setTimeout>; },
+      clearTimer: () => undefined,
+    });
+    sources[0]!.fire("superseded");
+    expect(sources[0]!.es.close).toHaveBeenCalled();
+    (sources[0]!.es.onerror as () => void)();
+    expect(timers).toHaveLength(0);
+    expect(sources).toHaveLength(1);
+    stop();
   });
 
   it("clears the can() cache when a decision input changes", () => {

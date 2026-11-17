@@ -72,6 +72,13 @@ export function startStream(o: StreamOptions = {}): () => void {
       invalidateSlices(parsed.keys);
       o.onChange?.(parsed);
     });
+    // The server capped this person's open streams and closed this one: do not reconnect, or tabs would evict each other in a loop.
+    // Polling keeps the page current; a reload opens a fresh stream.
+    src.addEventListener("superseded", () => {
+      stopped = true;
+      src.close();
+      if (es === src) es = null;
+    });
     src.onerror = () => {
       src.close();
       if (es === src) es = null;
