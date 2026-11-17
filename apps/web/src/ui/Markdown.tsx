@@ -5,6 +5,7 @@
  * A GitHub-flavoured subset: headings (with anchors for an outline), paragraphs, bullet, numbered and task lists (one level of nesting), fenced
  * code, block quotes, tables with a header row, horizontal rules, and inline code, bold, italic, strike-through and links.
  */
+import { ExtLink } from "./ExtLink";
 import { createContext, Fragment, useContext, type ReactNode } from "react";
 
 /** Where a citation `[^s3]` goes: the document viewer provides it to open the source; without it a citation is a plain marker. */
@@ -32,7 +33,7 @@ export function inline(src: string, key = "i"): ReactNode[] {
     else if (m[6] !== undefined) out.push(<Cite key={k} refId={m[6]} />);
     else if (SAFE_HREF.test(m[8]!)) {
       const href = m[8]!;
-      out.push(<a key={k} href={href} {...(href.startsWith("#") ? {} : { target: "_blank" })} rel="noopener noreferrer nofollow">{inline(m[7]!, k)}</a>);
+      out.push(href.startsWith("#") ? <a key={k} href={href}>{inline(m[7]!, k)}</a> : <ExtLink key={k} href={href}>{inline(m[7]!, k)}</ExtLink>);
     } else out.push(m[0]);
     last = m.index + m[0].length;
   }

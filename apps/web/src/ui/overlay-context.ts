@@ -28,6 +28,8 @@ export interface DialogOpts {
   wide?: boolean;
   /** Extra class on the dialog panel (e.g. "dlg-palette"). */
   cls?: string;
+  /** True while the body holds unsaved input: Escape, scrim and close ask before discarding. */
+  dirty?: boolean;
   body: ReactNode | ((close: () => void) => ReactNode);
   actions?: DialogAction[];
   onClose?: () => void;

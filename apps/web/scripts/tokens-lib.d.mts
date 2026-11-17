@@ -1,0 +1,10 @@
+export const RUNTIME_VARS: Set<string>;
+export const PAIRS: Array<[string, string, number, string]>;
+export function declarations(body: string): Record<string, string>;
+export function parseThemes(src: string): { raw: Record<string, Record<string, string>>; light: Record<string, string>; darkMedia: Record<string, string>; darkAttr: Record<string, string> };
+export function resolve(vars: Record<string, string>, name: string): string | undefined;
+export function ratio(a: string | undefined, b: string | undefined): number | null;
+export function contrastFailures(src: string): Array<{ theme: string; fg: string; bg: string; ratio: number; min: number; why: string; unresolved?: boolean }>;
+export function darkBlocksDiff(src: string): string[];
+export function undefinedVars(srcDir: string): Array<{ file: string; name: string }>;
+export function runChecks(srcDir: string): { contrast: ReturnType<typeof contrastFailures>; darkDiff: string[]; undefinedVars: ReturnType<typeof undefinedVars> };

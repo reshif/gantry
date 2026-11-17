@@ -66,3 +66,58 @@
 .empty-state .empty-icon { color: var(--faint); }
 .empty-state .empty-icon .ic, .empty-state .empty-icon svg { width: 22px; height: 22px; }
 .async-stat .ic, .async-stat svg { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* ---------- production pass: targets, focus, motion (tokens.css) ---------- */
+/* 24px is the floor everywhere (WCAG 2.5.8). Small controls that were shorter now reach it without growing visually much. */
+.btn, .icon-btn, .th-sort, .tab, .seg-label, .mseg, .chip-x, .toast-x, .menu-item { min-height: var(--target-min); }
+.icon-btn, .icon-btn-sm, .toast-x { min-width: var(--target-min); }
+input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; margin: 4px; }
+/* primary controls get a comfortable 44px target on touch screens; dense table and chip controls stay at the floor */
+@media (pointer: coarse) {
+  .btn:not(.btn-sm), .icon-btn:not(.icon-btn-sm), .tab, .menu-item { min-height: var(--target-coarse); }
+  .icon-btn:not(.icon-btn-sm) { min-width: var(--target-coarse); }
+}
+/* focus is always visible and survives forced-colors: ring from the token, plus a real (transparent) outline */
+:focus-visible { outline-offset: 2px; }
+@media (forced-colors: active) { :focus-visible { outline: 2px solid Highlight; } }
+@media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; } }
+
+/* ---------- Field: description, error ---------- */
+.field-error { color: var(--block); font-size: var(--t-sm); font-weight: 500; }
+.field-req { color: var(--block); }
+.input[aria-invalid="true"] { border-color: var(--block); }
+
+/* ---------- ExtLink ---------- */
+.ext-link { text-decoration: underline; text-underline-offset: 2px; }
+.ext-ic { display: inline-block; width: 12px; height: 12px; margin-left: 3px; vertical-align: -1px; flex: none; opacity: 0.8; }
+.ext-host { color: var(--muted); font-size: 0.92em; }
+
+/* ---------- Modal: discard step ---------- */
+.dlg-discard { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin: 0 18px 8px; padding: 8px 10px; border-radius: var(--r1); background: var(--wait-soft); color: var(--wait); font-size: var(--t-md); font-weight: 500; }
+.dlg-discard > span { flex: 1 1 auto; }
+
+/* ---------- DataTable ---------- */
+/* the first-cell control: a real button/link stretched over the cell, so the whole first cell is the target and the row text is its name */
+.dtable td { position: relative; }
+.dtable .row-link { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer; border-radius: 0; z-index: 0; }
+.dtable .cell-content { position: relative; z-index: 1; pointer-events: none; }
+.dtable .cell-content a, .dtable .cell-content button, .dtable .cell-content input, .dtable .cell-content select, .dtable .cell-content [role="button"] { pointer-events: auto; }
+.dtable .row-link:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.dtable tbody tr:focus-visible { box-shadow: none; }
+/* scroll region: focusable only while it scrolls; edge shadows hint at hidden columns (pure CSS, no JS) */
+.dtable-scroll.is-overflow { background:
+  linear-gradient(to right, var(--surface), transparent 24px) left / 24px 100% no-repeat local,
+  linear-gradient(to left, var(--surface), transparent 24px) right / 24px 100% no-repeat local,
+  linear-gradient(to right, var(--line), transparent) left / 8px 100% no-repeat scroll,
+  linear-gradient(to left, var(--line), transparent) right / 8px 100% no-repeat scroll; }
+.dtable-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dtable-more { display: flex; align-items: center; gap: var(--s3); }
+.dtable-count { color: var(--muted); font-size: var(--t-sm); }
+/* the sort picker replaces the (hidden) header row in the card layout */
+.dtable-sortsel { display: none; align-items: center; gap: var(--s2); margin-bottom: var(--s2); color: var(--muted); font-size: var(--t-sm); }
+.dtable-sortsel .input { width: auto; flex: 1; }
+@media (max-width: 640px) {
+  .dtable-sortsel { display: flex; }
+  .dtable .row-link { inset: 0; }
+  .dtable td:first-child { position: relative; }
+}

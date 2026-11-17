@@ -8,6 +8,7 @@ import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
 import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
 import { tip } from "./Tip";
+import { Modal, useModalLayer, useScrimClose } from "./Modal";
 
 /* ---------- focus trap ---------- */
 
@@ -36,36 +37,14 @@ function trapKeys(getContainer: () => HTMLElement | null, onEsc: () => void) {
   };
 }
 
-/** Remembers the element focused before mount and restores it on unmount. */
-function useRestoreFocus() {
-  useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
-    return () => {
-      if (prev && prev.focus && document.body.contains(prev)) prev.focus();
-    };
-  }, []);
-}
-
 /* ---------- Dialog (declarative) ---------- */
 
 export interface DialogProps extends Omit<DialogOpts, "onClose"> {
   onClose: () => void;
 }
 
-/** A modal dialog. Render it while open; call onClose to dismiss. Also used by ui.dialog(). */
-export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }: DialogProps) {
-  const panel = useRef<HTMLDivElement>(null);
-  const titleId = useMemo(() => `dlg-title-${Math.random().toString(36).slice(2, 9)}`, []);
-  useRestoreFocus();
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const p = panel.current;
-      if (!p) return;
-      const f = p.querySelector<HTMLElement>("input:not([type=hidden]):not([type=checkbox]),select,textarea") ?? p.querySelector<HTMLElement>(".dlg-foot .btn-primary") ?? p.querySelector<HTMLElement>("button");
-      f?.focus();
-    }, 20);
-    return () => clearTimeout(t);
-  }, []);
+/** A modal dialog (see ui/Modal for the layer rules). Render it while open; call onClose to dismiss. Also used by ui.dialog(). */
+export function Dialog({ title, kicker, sub, wide, cls, dirty, body, actions, onClose }: DialogProps) {
   const list: DialogAction[] = actions ?? [{ label: "Close", kind: "ghost" }];
   const submitAction = list.find((a) => a.submit);
   const onSubmit = (e: FormEvent) => {
@@ -76,31 +55,13 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }
   };
   const content = typeof body === "function" ? body(onClose) : body;
   return (
-    <div className="dlg-wrap">
-      <div className="scrim" onClick={onClose} />
-      <div ref={panel} className={`dlg${wide ? " dlg-wide" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={trapKeys(() => panel.current, onClose)}>
-        <div className="dlg-head">
-          <div>
-            {kicker ? <div className="kicker">{kicker}</div> : null}
-            <h2 id={titleId} className="dlg-title">
-              {title}
-            </h2>
-            {sub ? <p className="dlg-sub">{sub}</p> : null}
-          </div>
-          <button type="button" className="icon-btn" aria-label="Close dialog" onClick={onClose}>
-            <Icon name="x" />
-          </button>
-        </div>
-        <form className="dlg-form" noValidate onSubmit={onSubmit}>
-          <div className="dlg-body">{content}</div>
-          <div className="dlg-foot">
-            {list.map((a, i) => (
-              <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(onClose) : onClose())} />
-            ))}
-          </div>
-        </form>
-      </div>
-    </div>
+    <Modal title={title} kicker={kicker} sub={sub} wide={wide} cls={cls} dirty={dirty} onClose={onClose} onSubmit={onSubmit}
+      footer={list.map((a, i) => (
+        <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(onClose) : onClose())} />
+      ))}
+    >
+      {content}
+    </Modal>
   );
 }
 
@@ -108,15 +69,12 @@ export function Dialog({ title, kicker, sub, wide, cls, body, actions, onClose }
 
 function DrawerView({ render, onClose }: { render: (close: () => void) => ReactNode; onClose: () => void }) {
   const panel = useRef<HTMLElement>(null);
-  useRestoreFocus();
-  useEffect(() => {
-    const t = setTimeout(() => panel.current?.querySelector<HTMLElement>(".drawer-close")?.focus(), 20);
-    return () => clearTimeout(t);
-  }, []);
+  useModalLayer({ ref: panel, requestClose: onClose, initialFocus: (p) => p.querySelector<HTMLElement>(".drawer-close") });
+  const scrim = useScrimClose(onClose);
   return (
     <div className="drawer-wrap">
-      <div className="scrim" onClick={onClose} />
-      <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-label="Details" onKeyDown={trapKeys(() => panel.current, onClose)}>
+      <div className="scrim" {...scrim} />
+      <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-label="Details">
         {render(onClose)}
       </aside>
     </div>
@@ -456,7 +414,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
         ))}
       </div>
       <div id="layer-pop">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
-      <div className="toasts" id="toasts" role="status" aria-live="polite">
+      <div className="toasts" id="toasts" role="status" aria-live="polite" data-inert-exempt="">
         {toasts.map((t) => (
           <div key={t.id} className={`toast toast-${t.kind}${t.out ? " out" : ""}`}>
             <Icon name={t.kind === "error" ? "alert" : t.kind === "warn" ? "halt" : "check"} />
