@@ -95,6 +95,11 @@ function mount(el: React.ReactElement) {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider>{el}</OverlayProvider></QueryClientProvider>);
 }
+/** An agent's own page: `#agents/<id>`. */
+function mountAgent(id = "ag-build") {
+  window.location.hash = `#agents/${id}`;
+  return mount(<AgentsView />);
+}
 const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra } });
 const writes = (calls: Call[], method: string) => calls.filter((c) => c.method === method && c.path !== "/api/v1/can");
 const tab = async (id: string) => fireEvent.click(await byId(`ag-tab-${id}`));
@@ -126,25 +131,50 @@ describe("Agents screen", () => {
     expect(row.textContent).toContain("80%");
     expect(row.textContent).toContain("$612");
     expect((await byId("ag-row-ag-review")).textContent).toContain("Paused");
-    const head = document.querySelector(".titleblock")!.textContent!;
+    const head = document.getElementById("ag-stats")!.textContent!;
     expect(head).toContain("Agents2");
     expect(head).toContain("Active1 / 2");
     expect(head).toContain("Candidates2");
     expect(head).toContain("Below threshold1");
+  });
+
+  it("filters the roster by view tab, station and search, and opens an agent's own page from a row", async () => {
+    setup();
+    mount(<AgentsView />);
+    await byId("ag-row-ag-build");
+    expect(document.getElementById("ag-view-paused")!.textContent).toContain("1");
+    fireEvent.click(document.getElementById("ag-view-paused")!);
+    await waitFor(() => expect(document.getElementById("ag-row-ag-build")).toBeNull());
+    expect(document.getElementById("ag-row-ag-review")).not.toBeNull();
+    fireEvent.click(document.getElementById("ag-view-all")!);
+    fireEvent.change(document.getElementById("ag-search")!, { target: { value: "build" } });
+    await waitFor(() => expect(document.getElementById("ag-row-ag-review")).toBeNull());
+    fireEvent.click(await byId("ag-row-ag-build"));
+    expect(window.location.hash).toBe("#agents/ag-build");
+  });
+
+  it("shows one agent on its own page with its header line, and says so when the agent is gone", async () => {
+    setup();
+    mountAgent();
+    await byId("agent-detail");
     expect(document.querySelector(".ad-meta")!.textContent).toBe("2.6.1 · claude-opus-5-5 · 2 work orders now · SUITE-BUILD 80%");
+    expect(document.getElementById("ag-row-ag-build")).toBeNull();
+    cleanup();
+    mountAgent("ag-nope");
+    expect(await screen.findByText("No agent with that id")).toBeTruthy();
   });
 
   it("labels every roster cell with its column so the phone layout can stack them", async () => {
     setup();
     mount(<AgentsView />);
     const row = await byId("ag-row-ag-build");
-    const heads = [...document.querySelectorAll(".ag-roster thead th")].map((h) => h.textContent);
+    const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent);
     expect([...row.querySelectorAll("td")].map((c) => c.getAttribute("data-label"))).toEqual(heads);
   });
 
   it("edits the configuration in a draft and saves one audited PATCH with the agent's version and only the changed keys", async () => {
     const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
-    mount(<AgentsView />);
+    mountAgent();
     const budget = (await byId("ag-budget")) as HTMLInputElement;
     expect(document.getElementById("ag-savebar")!.className).not.toContain("is-dirty");
     expect(document.getElementById("ag-save")!.getAttribute("data-reason")).toBe("No changes to save.");
@@ -165,7 +195,7 @@ describe("Agents screen", () => {
 
   it("keeps the draft across tabs and discards it on request", async () => {
     setup();
-    mount(<AgentsView />);
+    mountAgent();
     fireEvent.change(await byId("ag-budget"), { target: { value: "33" } });
     await tab("overrides");
     await tab("config");
@@ -176,7 +206,7 @@ describe("Agents screen", () => {
 
   it("blocks autonomy on a regulated project with POL-112, naming the project", async () => {
     setup();
-    mount(<AgentsView />);
+    mountAgent();
     const auto = (await byId("ag-aut-auto")) as HTMLInputElement;
     expect(auto.disabled).toBe(true);
     expect(auto.closest("label")!.getAttribute("data-reason")).toMatch(/POL-112: no autonomous agents from Plan onward on regulated projects \(Risk and Compliance\)/);
@@ -190,18 +220,21 @@ describe("Agents screen", () => {
 
   it("a person without the right sees every control locked with the reason, and the create button too", async () => {
     setup({}, ["agent.edit"]);
-    mount(<AgentsView />);
+    mountAgent();
     await waitFor(() => expect(document.querySelector(".lock-note")).not.toBeNull());
     expect(document.querySelector(".lock-note")!.textContent).toContain("Read-only for you: agent configuration");
     expect(((await byId("ag-name")) as HTMLInputElement).disabled).toBe(true);
+    expect(document.getElementById("ag-pause")!.getAttribute("aria-disabled")).toBe("true");
+    cleanup();
+    window.location.hash = "#agents";
+    mount(<AgentsView />);
     await waitFor(() => expect(document.getElementById("agent-create")!.getAttribute("aria-disabled")).toBe("true"));
     expect(document.getElementById("agent-create")!.getAttribute("data-reason")).toMatch(/Needs Factory Admin/);
-    expect(document.getElementById("ag-pause")!.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("pauses an agent through a save with its version", async () => {
     const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
-    mount(<AgentsView />);
+    mountAgent();
     fireEvent.click(await byId("ag-pause"));
     await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
     expect(writes(calls, "PATCH")[0]).toMatchObject({ body: { patch: { status: "paused" }, note: "paused" }, headers: { "if-match": "7" } });
@@ -209,7 +242,7 @@ describe("Agents screen", () => {
 
   it("reorders, detaches and attaches skills in the draft, then saves the new order", async () => {
     const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
-    mount(<AgentsView />);
+    mountAgent();
     await tab("skills");
     expect(document.querySelectorAll(".ag-skill-chain li")).toHaveLength(2);
     expect((await byId("ag-sk-up-sk-a")).getAttribute("data-reason")).toBe("Already first.");
@@ -228,7 +261,7 @@ describe("Agents screen", () => {
 
   it("composes the effective instructions from the four layers and shows unsaved agent edits at once", async () => {
     setup();
-    mount(<AgentsView />);
+    mountAgent();
     await tab("instructions");
     const pre = await byId("ag-effective");
     await waitFor(() => expect(pre.textContent).toContain("# 1 Factory base (v4)\nBase rules."));
@@ -245,7 +278,7 @@ describe("Agents screen", () => {
 
   it("asks the server for the draft composition of the chosen project and repo", async () => {
     const calls = setup();
-    mount(<AgentsView />);
+    mountAgent();
     await tab("instructions");
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("project") === "payments" && c.query.get("repo") === "payments-api" && c.query.get("version") === "draft")).toBe(true));
     fireEvent.change(await byId("ag-ctx-project"), { target: { value: "risk" } });
@@ -254,7 +287,7 @@ describe("Agents screen", () => {
 
   it("edits the factory base with the base version as If-Match and refuses an empty text inline", async () => {
     const calls = setup({ "PUT /api/v1/instructions/base": () => ok({ version: 5 }) });
-    mount(<AgentsView />);
+    mountAgent();
     await tab("instructions");
     fireEvent.click(await byId("ag-edit-base"));
     const ta = (await byId("ag-txt-edit")) as HTMLTextAreaElement;
@@ -271,7 +304,7 @@ describe("Agents screen", () => {
 
   it("shows a refusal from the server inside the dialog (stale base)", async () => {
     setup({ "PUT /api/v1/instructions/base": () => ({ status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } }) });
-    mount(<AgentsView />);
+    mountAgent();
     await tab("instructions");
     fireEvent.click(await byId("ag-edit-base"));
     fireEvent.change(await byId("ag-txt-edit"), { target: { value: "New base rules that are long enough." } });
@@ -281,7 +314,7 @@ describe("Agents screen", () => {
 
   it("saves the project overlay and the repo guidelines through their own endpoints", async () => {
     const calls = setup({ "PATCH /api/v1/projects/payments/config": () => ok(), "PATCH /api/v1/repos/payments-api/config": () => ok() });
-    mount(<AgentsView />);
+    mountAgent();
     await tab("instructions");
     fireEvent.click(await byId("ag-edit-overlay"));
     fireEvent.change(await byId("ag-txt-edit"), { target: { value: "Overlay v2" } });
@@ -298,7 +331,7 @@ describe("Agents screen", () => {
 
   it("creates a candidate version from the saved configuration (only when nothing is unsaved), with a suggested label", async () => {
     const calls = setup({ "POST /api/v1/agents/ag-build/versions": () => ok() });
-    mount(<AgentsView />);
+    mountAgent();
     await tab("versions");
     const label = (await byId("ag-newver")) as HTMLInputElement;
     expect(label.value).toBe("2.7.0-rc2");
@@ -315,7 +348,7 @@ describe("Agents screen", () => {
 
   it("locks promotion with the eval gate's reason, and promotes an eligible candidate", async () => {
     const calls = setup({ "POST /api/v1/agents/ag-build/versions/2.8.0-rc1/promote": () => ok() });
-    mount(<AgentsView />);
+    mountAgent();
     await tab("versions");
     const blocked = await byId("ag-promote-270rc1");
     expect(blocked.getAttribute("aria-disabled")).toBe("true");
@@ -336,7 +369,7 @@ describe("Agents screen", () => {
 
   it("shows a promotion refusal from the server as an error toast", async () => {
     setup({ "POST /api/v1/agents/ag-build/versions/2.8.0-rc1/promote": () => ({ status: 403, body: { ok: false, msg: "Blocked: Blocked: 70% vs 85% on SUITE-BUILD.", needs: "Needs SUITE-BUILD at 85% or better" } }) });
-    mount(<AgentsView />);
+    mountAgent();
     await tab("versions");
     fireEvent.click(await byId("ag-promote-280rc1"));
     await screen.findByText(/Blocked: Blocked: 70% vs 85%/);
@@ -344,7 +377,7 @@ describe("Agents screen", () => {
 
   it("rolls back through a confirmation that names both versions", async () => {
     const calls = setup({ "POST /api/v1/agents/ag-build/rollback": () => ok() });
-    mount(<AgentsView />);
+    mountAgent();
     await tab("versions");
     fireEvent.click(await byId("ag-rollback-250"));
     const dlg = await screen.findByRole("dialog");
@@ -357,7 +390,7 @@ describe("Agents screen", () => {
 
   it("shows the agent's audit history", async () => {
     setup();
-    mount(<AgentsView />);
+    mountAgent();
     await tab("history");
     await waitFor(() => expect(document.querySelector(".ag-hist .history li")).not.toBeNull());
     expect(document.querySelector(".ag-hist .history li")!.textContent).toContain("agent.edit");
@@ -365,7 +398,7 @@ describe("Agents screen", () => {
 
   it("explains that an agent no human gate judges has no trust level", async () => {
     setup();
-    mount(<AgentsView />);
+    mountAgent();
     await tab("trust");
     expect((await screen.findByText("Not judged at a gate")).closest("section")!.textContent).toContain("Builder does not staff the station before a human gate");
   });
@@ -373,8 +406,7 @@ describe("Agents screen", () => {
   it("shows trust levels by class for an agent a gate judges, with proposals and demotions, linking to Trust", async () => {
     const cell = { id: "ag-review|feature|payments", agent: "ag-review", cls: "feature", project: "payments", repo: null, level: 3, since: NOW, cleanRuns: 4, history: [{ at: NOW - 86_400_000, from: 3, to: 2, by: "system", kind: "demote", reason: "Reverted release" }] };
     setup({ "GET /api/v1/trust/cells": () => ok({ sampleRate: 5, criteria: {}, ceilings: [{ id: "C1", text: "x", max: 2, enabled: true, when: { regulated: false } }], cells: [cell], proposals: [{ id: "TP-1", cell: cell.id, from: 3, to: 4, at: NOW, status: "pending" }], nextProposal: 2, seededAt: 0 }) });
-    mount(<AgentsView />);
-    fireEvent.click(await byId("ag-row-ag-review"));
+    mountAgent("ag-review");
     await tab("trust");
     const btn = await byId("ag-trust-payments-feature");
     expect(btn.textContent).toContain("L3");

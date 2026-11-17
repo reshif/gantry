@@ -151,7 +151,7 @@ function AgentsTab({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
               const station = st.find(a.station);
               return (
                 <tr key={a.id}>
-                  <td><a href="#agents" className="linkish" id={`sk-ag-link-${a.id}`} onClick={(e) => { e.preventDefault(); agentsSelect(a.id, "skills"); navigate("agents"); }}>{a.name}</a></td>
+                  <td><a href="#agents" className="linkish" id={`sk-ag-link-${a.id}`} onClick={(e) => { e.preventDefault(); agentsSelect(a.id, "skills"); }}>{a.name}</a></td>
                   <td className="small">{station ? `${station.no} ${station.name}` : "Off-belt"}</td>
                   <td className="mono small">{pos >= 0 ? `${pos + 1} of ${a.skills.length}` : "–"}</td>
                   <td className="mono small">{a.suite}</td>

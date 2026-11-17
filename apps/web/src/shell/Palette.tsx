@@ -59,7 +59,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
       items.push({ key: `record:${w.id}`, kind: "Record", label: `${w.id} full record`, hint: w.title, run: () => { setProject(w.project); openRecordRoute(w.id); } });
     }
     for (const r of repos ?? []) items.push({ key: `repo:${r.id}`, kind: "Repo", label: r.name, hint: `${cp?.name ?? ""} · ${r.onboarding.stage}`, run: () => { if (cp) setProject(cp.id); navigate("onboarding"); } });
-    if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, kind: "Agent", label: a.name, hint: a.model, run: () => { updatePrefs({ agent: a.id }); navigate("agents"); } });
+    if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, kind: "Agent", label: a.name, hint: a.model, run: () => { navigate("agents", a.id); } });
     if (hasCommand("newWorkOrder")) items.push({ kind: "Action", label: "Submit a work order", hint: "Intake", guard: guard(3), run: () => void runCommand("newWorkOrder") });
     if (cp) {
       items.push({ kind: "Action", label: `${cp.halted ? "Resume " : "Halt "}${cp.name}`, hint: "andon", guard: guard(0), run: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) });

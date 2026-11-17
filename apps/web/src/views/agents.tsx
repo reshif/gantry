@@ -1,21 +1,25 @@
 /**
- * Agents (spec 8.7, 10.2, 13.2). Port of legacy/js/views/agents.js against /api/v1/agents: roster, deep configuration, layered instructions with the effective preview,
- * ordered skills, model chain, autonomy, tools, MCP, staffing, budget, guardrails, per-project overrides, versions with eval-gated promotion and rollback, trust, history, create flow.
+ * Agents (spec 8.7, 10.2, 13.2) against /api/v1/agents. Two pages: the roster (`#agents`) and one agent (`#agents/<id>`) with its layered instructions, ordered skills,
+ * model chain, autonomy, tools, MCP, staffing, budget, guardrails, per-project overrides, versions with eval-gated promotion and rollback, trust, history, and the create flow.
  * Edits stay in a draft (kept across tabs and screens) until Save; saving writes one audited change. A version is a snapshot of the saved configuration and is immutable.
- * Not ported, on purpose: nothing from the legacy screen is simulation; "Run suite" opens Evals, which owns suite runs.
+ * "Run suite" opens Evals, which owns suite runs.
  */
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fmt, type Project } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, usePolicies, useProjects } from "../api/queries";
 import { ops } from "../api/ops";
+import { hashFor, navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
+import { useCrumbTail } from "../lib/crumb";
 import { Async } from "../ui/async";
-import { Avatar, Btn, Chip, Empty, LockNote, Panel, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Avatar, Btn, Chip, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, Stat, StatRow, Status, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { DataTable, type SortCol } from "../ui/SortTable";
 import { Icon } from "../ui/Icon";
 import { Spark } from "../ui/charts";
 import { useUI } from "../ui/overlay-context";
 import { useOutcome } from "./govern/data";
+import { evalsFocus } from "./evals/kit";
 import { EDIT_KEYS, EntityHistory, clone, pick, rerender, same, ui, useAgentsUi, useStations, autonomyCheck, type AgentRow, type Draft } from "./agents/kit";
 import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
 import { InstructionsTab } from "./agents/Instructions";
@@ -26,47 +30,68 @@ import { CreateAgent } from "./agents/Create";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
+type ListTab = "all" | "station" | "candidate" | "below" | "paused";
+const isBelow = (a: AgentRow): boolean => a.threshold != null && a.evalScore < a.threshold;
+const candidates = (a: AgentRow): number => a.versions.filter((v) => v.rc).length;
+const LIST_TABS: Array<{ id: ListTab; label: string; test: (a: AgentRow) => boolean }> = [
+  { id: "all", label: "All", test: () => true },
+  { id: "station", label: "Station agents", test: (a) => !!a.station },
+  { id: "candidate", label: "Has candidate", test: (a) => candidates(a) > 0 },
+  { id: "below", label: "Below threshold", test: isBelow },
+  { id: "paused", label: "Paused", test: (a) => a.status === "paused" },
+];
+
+/** The roster: view tabs with counts, a filter bar and one table. A row opens that agent's own page. */
 function Roster({ agents }: { agents: AgentRow[] }) {
   const st = useStations();
-  const select = (id: string) => {
-    ui.sel = id;
-    ui.draft = null;
-    rerender();
-    setTimeout(() => { const d = document.getElementById("agent-detail"); if (d && d.getBoundingClientRect().top > window.innerHeight * 0.6) d.scrollIntoView?.({ block: "start", behavior: "smooth" }); }, 40);
-  };
+  const [tab, setTab] = useState<ListTab>("all");
+  const [q, setQ] = useState("");
+  const [station, setStation] = useState("");
+  const [status, setStatus] = useState("");
+  const open = (a: AgentRow): void => navigate("agents", a.id);
+  const term = q.trim().toLowerCase();
+  const inTab = LIST_TABS.find((t) => t.id === tab)!.test;
+  const rows = agents.filter((a) => inTab(a)
+    && (!station || a.station === station || a.stations.includes(station))
+    && (!status || a.status === status)
+    && (!term || `${a.name} ${a.id} ${a.model}`.toLowerCase().includes(term)));
+  const cols: SortCol<AgentRow>[] = [
+    { key: "name", label: "Agent", sort: (a) => a.name.toLowerCase(), render: (a) => (
+      <span className="ag-who">
+        <Avatar id={a.id} size="sm" />
+        <span className="ag-who-t">
+          <span className="ag-who-n"><a className="ag-name" href={hashFor("agents", a.id)} onClick={(e) => { e.preventDefault(); open(a); }}>{a.name}</a>{a.builtin ? <Chip text="built-in" /> : null}</span>
+          <span className="mono muted small">{a.id}</span>
+        </span>
+      </span>
+    ) },
+    { key: "status", label: "Status", sort: true, render: (a) => <Status tone={a.status === "paused" ? "neutral" : "done"}>{a.status === "paused" ? "Paused" : "Active"}</Status> },
+    { key: "station", label: "Station", sort: (a) => st.find(a.station)?.no ?? "~", render: (a) => {
+      const s = st.find(a.station);
+      return <span className="nowrap"><span className="mono muted">{s ? `${s.no} ` : ""}</span>{s ? s.name : "Off-belt"}{a.stations.length > 1 ? <span className="muted small">{` +${a.stations.length - 1}`}</span> : null}</span>;
+    } },
+    { key: "model", label: "Model chain", sort: true, render: (a) => <span><span className="mono small">{a.model}</span>{a.fallbacks.length ? <span className="muted small">{` +${a.fallbacks.length} fallback${a.fallbacks.length > 1 ? "s" : ""}`}</span> : null}</span> },
+    { key: "version", label: "Version", render: (a) => { const rc = candidates(a); return <span><span className="mono">{a.version}</span>{rc ? <Chip text={`${rc} candidate`} cls="chip-accent ag-rc" /> : null}</span>; } },
+    { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => <span className={`mono${isBelow(a) ? " neg" : ""}`}>{isBelow(a) ? <Icon name="alert" className="ag-below" /> : null}{fmt.pct(a.evalScore)}</span> },
+    { key: "spark", label: "7-day success", align: "end", hideSmall: true, render: (a) => <Spark values={a.spark} min={0.5} max={1} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /> },
+    { key: "spend7d", label: "Spend 7d", sort: true, align: "end", render: (a) => <span className="mono">{fmt.money0(a.spend7d)}</span> },
+  ];
   return (
-    <div className="table-scroll" data-keep-scroll="agents-roster">
-      <table className="table ag-roster">
-        <thead><tr>{["Agent", "Status", "Station", "Model chain", "Version", "Eval", "7-day success", "Spend 7d"].map((x, i) => <th key={x} scope="col" className={i >= 5 ? "num" : ""}>{x}</th>)}</tr></thead>
-        <tbody>
-          {agents.map((a) => {
-            const below = a.threshold != null && a.evalScore < a.threshold;
-            const rc = a.versions.filter((v) => v.rc).length;
-            const station = st.find(a.station);
-            return (
-              <tr key={a.id} className={`row-link${ui.sel === a.id ? " is-selected" : ""}`} tabIndex={0} id={`ag-row-${a.id}`} aria-current={ui.sel === a.id ? "true" : undefined}
-                onClick={() => select(a.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(a.id); } }}>
-                <td data-label="Agent"><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong>{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
-                <td data-label="Status"><span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span></td>
-                <td data-label="Station" className="nowrap"><span>
-                  <span className="mono muted">{station ? `${station.no} ` : ""}</span>{station ? station.name : "Off-belt"}
-                  {a.stations.length > 1 ? <span className="muted small">{` +${a.stations.length - 1}`}</span> : null}
-                </span></td>
-                <td data-label="Model chain"><span><span className="mono small">{a.model}</span>{a.fallbacks.length ? <span className="muted small">{` +${a.fallbacks.length} fallback${a.fallbacks.length > 1 ? "s" : ""}`}</span> : null}</span></td>
-                <td data-label="Version"><span><span className="mono">{a.version}</span>{rc ? <span className="chip ag-rc">{`${rc} candidate`}</span> : null}</span></td>
-                <td data-label="Eval" className={`num mono${below ? " neg" : ""}`}><span>{below ? <Icon name="alert" className="ag-below" /> : null}{fmt.pct(a.evalScore)}</span></td>
-                <td data-label="7-day success" className="num"><Spark values={a.spark} min={0.5} max={1} label={`7-day success, latest ${fmt.pct(a.spark[a.spark.length - 1] ?? 0)}`} /></td>
-                <td data-label="Spend 7d" className="num mono">{fmt.money0(a.spend7d)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <Panel flush cls="ag-roster-panel">
+      <Tabs idPrefix="ag-view" items={LIST_TABS.map((t) => ({ id: t.id, label: t.label, count: agents.filter(t.test).length }))} active={tab} onChange={(t) => setTab(t as ListTab)} />
+      <FilterBar label="Filter agents" count={`${rows.length} of ${agents.length}`}>
+        <SearchBox id="ag-search" value={q} onChange={setQ} placeholder="Search agents" />
+        <div className="filters">
+          <Field label="Station" htmlFor="ag-f-station"><Select id="ag-f-station" value={station} onChange={setStation} options={[{ value: "", label: "all" }, ...st.all.map((s) => ({ value: s.id, label: `${s.no} ${s.name}` }))]} /></Field>
+          <Field label="Status" htmlFor="ag-f-status"><Select id="ag-f-status" value={status} onChange={setStatus} options={[{ value: "", label: "all" }, { value: "active", label: "Active" }, { value: "paused", label: "Paused" }]} /></Field>
+        </div>
+      </FilterBar>
+      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} empty={{ title: "No agents match", text: "Clear a filter or the search to see more." }} />
+    </Panel>
   );
 }
 
-function Detail({ a, agents, projects }: { a: AgentRow; agents: AgentRow[]; projects: Project[] }) {
+function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const out = useOutcome();
   const policies = usePolicies().data ?? [];
   const st = useStations();
@@ -107,24 +132,22 @@ function Detail({ a, agents, projects }: { a: AgentRow; agents: AgentRow[]; proj
     : ui.tab === "history" ? <div className="ag-hist"><EntityHistory type="agent" id={a.id} limit={40} /></div>
     : <ConfigTab {...tp} />;
   const showSave = ["config", "instructions", "skills", "overrides"].includes(ui.tab);
-  void agents;
+  const paused = a.status === "paused";
   return (
-    <section className="agent-detail panel" id="agent-detail" aria-label={`${a.name} configuration`}>
-      <div className="ad-head">
-        <Avatar id={a.id} size="lg" />
-        <div className="ad-main">
-          <div className="kicker">{`Agent · ${st.label(a.station, projects)}${a.builtin ? " · built-in" : ""}`}</div>
-          <h2 className="ad-title">{a.name}</h2>
-          <div className="ad-meta mono">{`${a.version} · ${a.model} · ${running} work order${running === 1 ? "" : "s"} now · ${a.suite ? `${a.suite} ${fmt.pct(a.evalScore)}` : ""}`}</div>
-        </div>
-        <div className="ad-tools">
-          <span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span>
-          <Btn label={a.status === "paused" ? "Resume agent" : "Pause agent"} small icon={a.status === "paused" ? "play" : "pause"} id="ag-pause" guard={perm} onClick={toggleStatus} />
-        </div>
-      </div>
+    <section className="agent-detail" id="agent-detail" aria-label={`${a.name} configuration`}>
+      <ViewHead
+        kicker={`Agent · ${st.label(a.station, projects)}${a.builtin ? " · built-in" : ""}`}
+        title={<span className="ag-title"><span>{a.name}</span><Status tone={paused ? "neutral" : "done"}>{paused ? "Paused" : "Active"}</Status></span>}
+        sub={<span className="ad-meta mono">{`${a.version} · ${a.model} · ${running} work order${running === 1 ? "" : "s"} now · ${a.suite ? `${a.suite} ${fmt.pct(a.evalScore)}` : ""}`}</span>}
+        actions={<>
+          <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} onClick={toggleStatus} />
+          <Btn label="Evals" icon="eval" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} />
+        </>}
+      />
       <LockNote decision={perm} what="Agent configuration" />
+      <div className="panel ag-panel">
       <Tabs idPrefix="ag-tab" items={tabs} active={ui.tab} onChange={(t) => { ui.tab = t; rerender(); }} />
-      {body}
+      <div className="ag-body">{body}</div>
       {showSave ? (
         <div className={`savebar${dirty ? " is-dirty" : ""}`} id="ag-savebar">
           <span className="muted small savebar-text">Edits stay in a draft while you switch tabs or screens. Saving writes one audited change.</span>
@@ -132,6 +155,7 @@ function Detail({ a, agents, projects }: { a: AgentRow; agents: AgentRow[]; proj
           <Btn label="Save agent" kind="primary" id="ag-save" guard={saveGuard} onClick={save} />
         </div>
       ) : null}
+      </div>
     </section>
   );
 }
@@ -140,22 +164,28 @@ export default function AgentsView() {
   useAgentsUi();
   const ui_ = useUI();
   const prefs = usePrefs();
+  const route = useHash();
   const q = useAgents();
   const agents = useMemo(() => (q.data ?? []) as unknown as AgentRow[], [q.data]);
   const projects = (useProjects().data ?? []) as Project[];
   const policies = usePolicies().data ?? [];
   const perm = dec(useCan("agent.edit"));
+  const wanted = route.id === "agents" ? route.param : null;
+  useCrumbTail(wanted ? agents.find((a) => a.id === wanted)?.name : null);
 
-  // Another screen asked for an agent (prefs.agent): select it once.
+  // Another screen asked for an agent (prefs.agent): open its page once.
   useEffect(() => {
     if (prefs.agent && agents.some((a) => a.id === prefs.agent)) {
-      if (ui.sel !== prefs.agent) { ui.sel = prefs.agent; ui.draft = null; rerender(); }
+      const id = prefs.agent;
       updatePrefs({ agent: null });
+      ui.draft = null;
+      navigate("agents", id);
     }
   }, [prefs.agent, agents]);
 
-  const sub = "Who staffs each station, on which model, with which instructions, skills and permissions.";
+  const sub = "Who staffs each station, on which model, with which instructions, skills and permissions. Every change is a draft, then a version, then a promotion.";
   const create = <Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />;
+
   if (q.data === undefined) {
     return (
       <div className="view view-agents">
@@ -172,18 +202,34 @@ export default function AgentsView() {
       </div>
     );
   }
-  if (!ui.sel || !agents.some((a) => a.id === ui.sel)) ui.sel = agents[0]!.id;
-  const current = agents.find((a) => a.id === ui.sel) ?? agents[0]!;
+  if (wanted) {
+    const current = agents.find((a) => a.id === wanted);
+    if (!current) {
+      return (
+        <div className="view view-agents">
+          <ViewHead title="Agent not found" sub="This agent does not exist, or it was removed." />
+          <Empty title="No agent with that id" text="Pick one from the roster." action={<Btn label="Back to agents" icon="back" id="ag-back" onClick={() => navigate("agents")} />} />
+        </div>
+      );
+    }
+    ui.sel = current.id;
+    return <div className="view view-agents"><Detail a={current} projects={projects} /></div>;
+  }
   const active = agents.filter((a) => a.status === "active").length;
-  const cands = agents.reduce((n, a) => n + a.versions.filter((v) => v.rc).length, 0);
-  const below = agents.filter((a) => a.threshold != null && a.evalScore < a.threshold).length;
+  const cands = agents.reduce((n, a) => n + candidates(a), 0);
+  const below = agents.filter(isBelow).length;
   return (
     <div className="view view-agents">
-      <ViewHead title="Agents" sub={sub}
-        meta={[["Agents", String(agents.length)], ["Active", `${active} / ${agents.length}`], ["Candidates", String(cands)], ["Below threshold", String(below)], ["Spend 7d", fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))]]}
-        actions={create} />
-      <Panel title="Roster" flush tools={<span className="muted small">Select a row to configure</span>}><Roster agents={agents} /></Panel>
-      <Detail a={current} agents={agents} projects={projects} />
+      <ViewHead title="Agents" sub={sub} actions={create} />
+      <StatRow id="ag-stats">
+        <Stat label="Agents" value={String(agents.length)} sub="on this factory" />
+        <Stat label="Active" value={`${active} / ${agents.length}`} sub="paused agents queue their work" />
+        <Stat label="Candidates" value={String(cands)} sub="versions waiting for promotion" tone={cands ? "wait" : undefined} />
+        <Stat label="Below threshold" value={String(below)} sub="eval score under the gate" tone={below ? "block" : undefined} />
+        <Stat label="Spend, 7 days" value={fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))} sub="all agents" />
+      </StatRow>
+      <p className="ag-hint muted">Select a row to open the agent.</p>
+      <Roster agents={agents} />
     </div>
   );
 }
