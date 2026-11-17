@@ -128,7 +128,7 @@ export function isPrivateAddress(addr: string): boolean {
   return false;
 }
 
-type Caller = { kind: "run"; runId: string; token: string } | { kind: "system" } | { kind: "none" };
+type Caller = { kind: "run"; runId: string; token: string; src: string } | { kind: "system" } | { kind: "none" };
 
 interface AllowEntry {
   hosts: string[];
@@ -166,7 +166,7 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
       const cred = Buffer.from(m[1]!, "base64").toString("utf8");
       const token = cred.slice(cred.indexOf(":") + 1);
       const runId = runIdOfToken(token);
-      return runId ? { kind: "run", runId, token } : { kind: "bad" };
+      return runId ? { kind: "run", runId, token, src: req.socket.remoteAddress ?? "" } : { kind: "bad" };
     }
     const ip = req.socket.remoteAddress ?? "";
     return inCidr(ip, cfg.runSubnet) ? { kind: "none" } : { kind: "system" };
@@ -187,12 +187,13 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
   }
 
   const reportDenied = (c: Caller, host: string, port: number, reason: string): void => {
-    const key = `${c.kind === "run" ? c.runId : c.kind}|${host}:${port}`;
+    // Keyed by source address too: the run id comes from an unauthenticated token, so another run forging it must not spend this run's budget.
+    const who = c.kind === "run" ? `${c.src}|${c.runId}` : c.kind;
+    const key = `${who}|${host}:${port}`;
     const now = Date.now();
     if ((reported.get(key) ?? 0) > now - 60_000) return;
     reported.set(key, now);
     if (reported.size > 5000) reported.delete(reported.keys().next().value as string);
-    const who = c.kind === "run" ? c.runId : c.kind;
     let b = budget.get(who);
     if (!b || b.since <= now - 60_000) budget.set(who, (b = { since: now, used: 0 }));
     if (b.used >= lim.deniedEventsPerMinute) {
@@ -294,7 +295,8 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
     const port = Number(m[3]);
     // Reserve a tunnel slot before the (slow) admit and connect, so a burst of opens cannot overshoot the per-run cap.
     const who = callerOf(req);
-    const slot = who.kind === "run" ? who.runId : null;
+    // Keyed by (source address, run id): the token is not validated yet, so a forged run id from another run network lands in its own bucket.
+    const slot = who.kind === "run" ? `${who.src}|${who.runId}` : null;
     if (slot !== null) {
       if ((holding.get(slot) ?? 0) >= lim.maxTunnelsPerRun) {
         metrics.tunnelRefused++;
@@ -314,6 +316,8 @@ export function buildProxy(deps: ProxyDeps): { server: http.Server; metrics: Pro
     }
     const addr = await admit(req, host, port, deny);
     if (!addr) return;
+    // The client may have reset while admit was pending (its slot is already released): do not open an uncounted upstream.
+    if (clientSocket.destroyed) return;
     const upstream = net.connect({ host: addr, port });
     upstream.setTimeout(300_000, () => upstream.destroy());
     // An absolute lifetime as well: the idle timeout alone lets a keepalive stream live forever.

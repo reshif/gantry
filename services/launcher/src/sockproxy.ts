@@ -205,7 +205,7 @@ function launcherHandler(req: http.IncomingMessage, res: http.ServerResponse): v
     const r = route(method, url);
     if (!r.decision.ok) return refuse(res, method, url, r.decision.why);
     const q = new URLSearchParams(url.split("?")[1] ?? "");
-    if (r.image !== undefined && !images.has(decodeURIComponent(r.image))) return refuse(res, method, url, "Only the allowed runner images may be inspected.");
+    if (r.image !== undefined && !images.has(r.image)) return refuse(res, method, url, "Only the allowed runner images may be inspected.");
     if (r.list === "containers" || r.list === "volumes") {
       const ld = checkList(r.list, q, EDGE_SERVICE);
       if (!ld.ok) return refuse(res, method, url, ld.why);

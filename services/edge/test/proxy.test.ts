@@ -263,6 +263,50 @@ describe("forward proxy", () => {
       b.destroy();
     });
 
+    it("keys the caps on the source address, so a forged token naming another run cannot spend that run's tunnel slots or denied-event budget", async () => {
+      await startProxy(undefined, undefined, { maxTunnelsPerRun: 2, deniedEventsPerMinute: 3 });
+      const raw = (from: string, target: string): Promise<{ sk: net.Socket; status: () => number }> => new Promise((resolve) => {
+        const sk = net.connect({ host: "127.0.0.1", port: pxPort, localAddress: from });
+        let buf = "";
+        sk.on("error", () => undefined);
+        sk.on("data", (d) => (buf += d.toString()));
+        sk.on("connect", () => {
+          sk.write(`CONNECT ${target} HTTP/1.1\r\nHost: x\r\nProxy-Authorization: ${basic(TOKEN)}\r\n\r\n`);
+          const t = setInterval(() => { if (buf.includes("\r\n\r\n")) { clearInterval(t); resolve({ sk, status: () => Number(/^HTTP\/1\.1 (\d+)/.exec(buf)?.[1] ?? 0) }); } }, 10);
+        });
+      });
+      // The "attacker" (127.0.0.2) presents run A's id and fills its own bucket.
+      const held = [await raw("127.0.0.2", `registry.npmjs.org:${echoPort}`), await raw("127.0.0.2", `registry.npmjs.org:${echoPort}`)];
+      expect((await raw("127.0.0.2", `registry.npmjs.org:${echoPort}`)).status()).toBe(429);
+      // Run A's real address is unaffected.
+      const real = await raw("127.0.0.1", `registry.npmjs.org:${echoPort}`);
+      expect(real.status()).toBe(200);
+      // Forged denials do not use up the victim's denied-event budget.
+      api.calls.length = 0;
+      for (let i = 0; i < 6; i++) (await raw("127.0.0.2", `forged${i}.example.com:${echoPort}`)).sk.destroy();
+      (await raw("127.0.0.1", `real.example.com:${echoPort}`)).sk.destroy();
+      await new Promise((r) => setTimeout(r, 100));
+      const hosts = api.of("/egress/denied").map((c) => (JSON.parse(c.body) as { host: string }).host);
+      expect(hosts).toContain("real.example.com");
+      for (const h of held) h.sk.destroy();
+      real.sk.destroy();
+    });
+
+    it("opens no upstream, and holds no slot, when the client resets while admit is pending", async () => {
+      let connections = 0;
+      echo.on("connection", () => connections++);
+      await startProxy(undefined, async () => { await new Promise((r) => setTimeout(r, 150)); return "127.0.0.1"; }, { maxTunnelsPerRun: 1 });
+      const sk = net.connect(pxPort, "127.0.0.1");
+      sk.on("error", () => undefined);
+      await new Promise<void>((r) => sk.on("connect", r));
+      sk.write(`CONNECT registry.npmjs.org:${echoPort} HTTP/1.1\r\nHost: x\r\nProxy-Authorization: ${basic(TOKEN)}\r\n\r\n`);
+      await new Promise((r) => setTimeout(r, 30));
+      sk.resetAndDestroy();
+      await new Promise((r) => setTimeout(r, 400));
+      expect(connections).toBe(0);
+      await startProxy();
+    });
+
     it("ends a tunnel at its absolute lifetime even while traffic keeps it busy", async () => {
       await startProxy(undefined, undefined, { tunnelLifetimeMs: 300 });
       const sk = net.connect(pxPort, "127.0.0.1");

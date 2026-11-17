@@ -13,6 +13,10 @@ const tpl = () => JSON.parse(JSON.stringify(runnerContainerOptions(cfg, input)))
 const withHost = (patch: Record<string, unknown>) => { const o = tpl(); Object.assign(o.HostConfig, patch); return o; };
 
 describe("socket proxy: routes", () => {
+  it("hands the image name over decoded exactly once", () => {
+    expect(route("GET", "/images/gantry-runner%2541/json").image).toBe("gantry-runner%41");
+    expect(route("GET", "/images/gantry-runner:dev/json").image).toBe("gantry-runner:dev");
+  });
   it("allows the launcher's own calls, with or without an API version prefix", () => {
     for (const [m, p] of [["GET", "/_ping"], ["GET", "/v1.43/containers/json?all=1&filters=x"], ["POST", "/v1.43/containers/create?name=gantry-runner-r1"], ["POST", "/containers/abc/start"], ["DELETE", "/volumes/ws-r1"], ["POST", "/networks/run-r1/connect"], ["GET", "/images/gantry-runner:dev/json"]] as const) {
       expect(route(m, p).decision.ok, `${m} ${p}`).toBe(true);
