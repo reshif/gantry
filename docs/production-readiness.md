@@ -214,6 +214,31 @@ Remaining (resource limits, a configurable hostname with real TLS, and the upgra
   - documentation for users, admins and operators, plus OpenAPI
   - self-hosted fonts
 
+## Wave 6: security team (2026-11-16)
+
+Area "authz". Tests are in `services/api/test/authz-wave6.test.ts`; every one fails without its fix.
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| A1 (P1) | Turning off the Verify or Review station dropped G4 and G5 from the route, past the I1 and regulated locks, with no step-up. | A station that carries a locked gate cannot be turned off (`setEnabled`). A class cannot skip such a station, and a class gate list must keep every locked gate (`assertRouteKeepsLockedGates`, on add, edit and replace). Turning any station off now needs a fresh sign-in. | `authz-wave6.test.ts` (flow locks) |
+| A2 (high) | G2, G3d and G5 could be set to automatic. With `checks: []` they passed the moment they opened. | `gateModeLock` (domain, shared with the web UI): a gate a person decides, and G5 always, cannot go to automatic or mixed. A regulated project has no automatic gate. Any move off "human" needs a fresh sign-in. | same, plus `projects.test.ts` |
+| A3 (P2) | `POST /card-templates/preview` read any work order in the org by id. | The work order must belong to the authorised project; anything else is 404. | same |
+| A4 (P3) | Project `notify.edit` could overwrite or delete factory-wide card templates. | The owner is `body.project`. Project `notify.edit` edits only templates its project owns. Factory-wide or another project's templates, and unknown ids, need `integration.edit` (one 403, no existence oracle). | same |
+| A5 (medium) | `GET /agents/:id/effective` took `repo` with no project check, so it exposed other projects' repo guidelines, and drafts and old versions to any project reader. | The repo's project must be visible to the caller and match `project`; otherwise 404. `version=` needs `agents.view`. | same |
+| A6 (P3) | MCP write pre-authorisation had no separation of duties. | The requester of a work order cannot pre-authorise writes for it. A `server/*` grant needs the server switched on. | same |
+| A7 (P3) | Stop commands resolved the target before authorising, so 403 vs 404 revealed which ids exist. | Unknown and not-visible targets are the same 404 on set, lift, restore and impact. | same |
+| A9 (P3) | Step-up is a password re-entry. | Step-up sends `max_age=0`. The "strong sign-in" wording is corrected. A second factor is a Keycloak realm setting, not yet enforced (below). | `oidc.test.ts` |
+| A10 (P3) | No cap on `/api/v1/stream`, which was also exempt from the rate limit. | 5 streams per person (the oldest closes), 2000 in all, one policy refresh per person per fan-out, and the stream is rate-limited like other routes. | same |
+
+Not done, needing an owner decision:
+
+- **A8 (gate approve pins no instance).** Requiring `If-Match` or `:n` on approve and reject breaks the web client, whose home, floor and approver buttons send neither. The client must carry the instance first.
+- **A9 second factor.** Requiring OTP or WebAuthn, plus `acr`/`amr` checks, is a production-realm change for Factory Admins.
+- **A6 co-signing.** Only the requester is refused so far. An n-of-m rule for MCP grants is a product decision.
+- **A10 broadcast.** Console and workspace changes still reach everyone as keys only.
+
+Regulated projects now keep every station that carries a gate. This is stricter than before.
+
 ## Decisions for the owner
 
 Answered 2026-11-15:
