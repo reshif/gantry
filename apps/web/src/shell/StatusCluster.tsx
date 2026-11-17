@@ -42,18 +42,15 @@ export function StatusCluster() {
     <button
       ref={btn}
       type="button"
-      className={`status-cluster is-${s.factory}`}
+      className={`btn sm ghost status-cluster is-${s.factory}`}
       id="status-cluster"
       aria-haspopup="dialog"
       aria-expanded="false"
       aria-label={`Factory ${stateText.toLowerCase()}. ${s.clock} IST, ${s.shift}. ${s.activeFreezes.length ? `${s.activeFreezes.length} freeze active. ` : ""}Show change windows and freezes.`}
       onClick={() => btn.current && ui.popover(btn.current, (close) => <StatusPopover s={s} replayAt={prefs.replay?.at} close={close} />)}
     >
-      <span className="sc-state">
-        <span className="sc-dot" aria-hidden="true" />
-        <span className="sc-label">{stateText}</span>
-        {s.activeFreezes.length ? <Icon name="lock" /> : null}
-      </span>
+      <span className={`chip ${s.factory === "killed" ? "bad" : s.factory === "replay" ? "info" : "ok"}`}>{stateText}</span>
+      {s.activeFreezes.length ? <Icon name="lock" /> : null}
     </button>
   );
 }

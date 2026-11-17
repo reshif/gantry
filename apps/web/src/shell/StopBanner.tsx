@@ -13,7 +13,7 @@ export function StopBanner({ projectId }: { projectId?: string | null }) {
   if (f) {
     const approvals = f.restoreApprovals?.length ?? 0;
     return (
-      <div className="stop-banner is-kill" role="alert">
+      <div className="banner stop-banner is-kill" role="alert">
         <Icon name="st-kill" />
         <div>
           <strong>FACTORY KILLED</strong>
@@ -24,7 +24,7 @@ export function StopBanner({ projectId }: { projectId?: string | null }) {
   }
   if (p?.killed) {
     return (
-      <div className="stop-banner is-kill" role="alert">
+      <div className="banner stop-banner is-kill" role="alert">
         <Icon name="st-kill" />
         <div>
           <strong>PROJECT KILLED</strong>
@@ -35,7 +35,7 @@ export function StopBanner({ projectId }: { projectId?: string | null }) {
   }
   if (p?.halted) {
     return (
-      <div className="stop-banner is-halt" role="status">
+      <div className="banner stop-banner is-halt" role="status">
         <Icon name="halt" />
         <div>
           <strong>HALTED</strong>

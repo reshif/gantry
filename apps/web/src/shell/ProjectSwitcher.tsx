@@ -19,8 +19,10 @@ export function ProjectSwitcher({ me, project, current }: { me: Me; project: Pro
   const status = project ? (project.killed ? "killed" : project.halted ? "halted" : project.status) : null;
   const name = project ? project.name : "Choose a project";
   return (
-    <button ref={ref} type="button" className="proj-btn" id="project-switcher" aria-haspopup="dialog" aria-label={project ? `Project ${project.name}. Switch project` : "Choose a project"} title={name.length > 28 ? name : undefined} onClick={open}>
-      <span className="proj-btn-name">{name}</span>
+    <button ref={ref} type="button" className="btn proj-btn" id="project-switcher" aria-haspopup="dialog" aria-label={project ? `Project ${project.name}. Switch project` : "Choose a project"} title={name.length > 28 ? name : undefined} onClick={open}>
+      <Icon name="folder" />
+      <span className="trunc pn-full proj-btn-name" style={{ maxWidth: 150 }}>{name}</span>
+      <span className="pn-short">{project?.key ?? "All"}</span>
       {status === "killed" || status === "halted" ? <span className={`proj-btn-dot st-${status}`} role="img" aria-label={status} title={status} /> : null}
       <Icon name="down" />
     </button>

@@ -65,3 +65,6 @@ reference (map to `docs/ui`, no route).
 | system ("System health") | `#/system` | system queries | not in seed | none |
 | signin | `shell/SignIn` (MFA screen kept) | session | `/api/v1/me` 401 | none |
 | states: empty, loading, error, no-access, 404 | `ui/async`, `RouteSkeleton`, error boundaries | n/a | overrides | none |
+
+
+> REQUIRED: also read apps/web/fidelity/KEEP.md. Every working feature listed there must survive the rebuild of its screen, styled in the prototype language.

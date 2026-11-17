@@ -196,7 +196,7 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
   const scrim = useScrimClose(requestClose);
   const inner = (
     <>
-      <div className="dlg-body">{children}</div>
+      <div className="body dlg-body">{children}</div>
       {asking ? (
         <div ref={keepBtn} className="dlg-discard" role="alertdialog" aria-labelledby={`discard-${titleId}`}>
           <span id={`discard-${titleId}`}>Discard your unsaved changes?</span>
@@ -204,23 +204,23 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
           <Btn label="Discard" kind="danger" small onClick={onClose} />
         </div>
       ) : null}
-      {footer ? <div className="dlg-foot">{typeof footer === "function" ? footer(requestClose) : footer}</div> : null}
+      {footer ? <footer className="dlg-foot">{typeof footer === "function" ? footer(requestClose) : footer}</footer> : null}
     </>
   );
   return (
     <div className="dlg-wrap">
       <div className="scrim" {...scrim} />
-      <div ref={panel} className={`dlg${wide ? " dlg-wide" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <div className="dlg-head">
+      <div ref={panel} className={`dlg${wide ? " wide dlg-wide" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <header className="dlg-head">
           <div>
-            {kicker ? <div className="kicker">{kicker}</div> : null}
+            {kicker ? <div className="micro">{kicker}</div> : null}
             <h2 id={titleId} className="dlg-title">{title}</h2>
-            {sub ? <p className="dlg-sub">{sub}</p> : null}
+            {sub ? <p className="dlg-sub small muted">{sub}</p> : null}
           </div>
-          <button type="button" className="icon-btn" aria-label="Close dialog" onClick={requestClose}>
+          <button type="button" className="btn icon ghost" aria-label="Close dialog" onClick={requestClose}>
             <Icon name="x" />
           </button>
-        </div>
+        </header>
         {onSubmit ? <form className="dlg-form" noValidate onSubmit={onSubmit}>{inner}</form> : <div className="dlg-form">{inner}</div>}
       </div>
     </div>

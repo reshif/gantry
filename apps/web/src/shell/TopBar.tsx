@@ -4,7 +4,7 @@ import { useHome } from "../api/queries";
 import { ops } from "../api/ops";
 import type { Me } from "../api/types";
 import { applyTheme, setProject, updatePrefs, usePrefs, type Theme } from "../lib/prefs";
-import { Icon, Logo } from "../ui/Icon";
+import { Icon } from "../ui/Icon";
 import { Avatar } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -12,11 +12,10 @@ import { StatusCluster } from "./StatusCluster";
 import { ConnectionIndicator } from "../lib/connection/ConnectionIndicator";
 import { useOpenTraveler } from "./useTraveler";
 import { navigate } from "../lib/router";
-import { isProjectRoute } from "../lib/routes";
 
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform || "");
 
-export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }: { me: Me; crumb: string[]; project: Me["projects"][number] | null; current: string; onOpenNav: () => void; onOpenPalette: () => void }) {
+export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me: Me; project: Me["projects"][number] | null; current: string; onOpenNav: () => void; onOpenPalette: () => void }) {
   const ui = useUI();
   const prefs = usePrefs();
   const home = useHome().data;
@@ -58,40 +57,42 @@ export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }
     ui.popover(inboxRef.current, (close) => <InboxBody name={v.name} close={close} />);
   };
 
+  const themeRef = useRef<HTMLButtonElement>(null);
+  const openTheme = () => {
+    if (!themeRef.current) return;
+    ui.menu(themeRef.current, "Theme", [
+      { label: "System", icon: "grid", hint: prefs.theme === "system" ? "on" : "", onClick: () => setTheme("system") },
+      { label: "Light · paper drawing", icon: "sun", hint: prefs.theme === "light" ? "on" : "", onClick: () => setTheme("light") },
+      { label: "Dark · blueprint", icon: "moon", hint: prefs.theme === "dark" ? "on" : "", onClick: () => setTheme("dark") },
+    ]);
+  };
+  const dark = prefs.theme === "dark" || (prefs.theme === "system" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
+
   return (
-    <header className="topbar" id="topbar">
-      <button type="button" className="icon-btn nav-toggle" aria-label="Toggle navigation" aria-controls="nav" onClick={onOpenNav}>
+    <header className="top" id="topbar" role="banner">
+      <button type="button" className="btn icon ghost burger" aria-label="Open navigation" aria-controls="side" onClick={onOpenNav}>
         <Icon name="menu" />
       </button>
-      <a href="#home" className="brand">
-        <Logo />
-        <span className="brand-name">Gantry</span>
-        {me.config.demoAccounts ? <span className="dev-dot" role="img" aria-label="Non-production: local stack, demo accounts on" title="Non-production: local stack, demo accounts on" /> : null}
-      </a>
       <ProjectSwitcher me={me} project={project} current={current} />
-      <nav className={`crumb${isProjectRoute(current) ? "" : " crumb-factory"}`} id="crumb" aria-label="Breadcrumb">
-        {crumb.map((c, i) => (
-          <span key={i} className={i === crumb.length - 1 ? "crumb-cur" : "crumb-part"} aria-current={i === crumb.length - 1 ? "page" : undefined}>{c}</span>
-        ))}
-      </nav>
-      <button type="button" className="palette-btn" id="palette-btn" onClick={onOpenPalette} aria-label="Open command palette">
+      <button type="button" className="search-btn palette-btn" id="palette-btn" onClick={onOpenPalette} aria-label="Open command palette">
         <Icon name="search" />
-        <span className="palette-label">Search</span>
+        <span className="t palette-label">Search or jump to…</span>
         <kbd>{isMac() ? "⌘K" : "Ctrl K"}</kbd>
       </button>
-      <div className="top-right">
-        <ConnectionIndicator />
-        <StatusCluster />
-        <button ref={inboxRef} type="button" className="icon-btn inbox-btn" id="inbox-btn" aria-label={`Waiting for you: ${n}`} aria-haspopup="dialog" aria-expanded="false" onClick={openInbox}>
-          <Icon name="bell" />
-          {n ? <span className="inbox-count mono">{String(n)}</span> : null}
-        </button>
-        <button ref={userRef} type="button" className="user-btn" id="user-menu" aria-haspopup="menu" aria-label={`Account menu for ${v.name}`} aria-expanded="false" title={me.config.demoAccounts ? `${v.name} · non-production: local stack, demo accounts on` : v.name} onClick={openUserMenu}>
-          <Avatar id={v.id} size="sm" />
-          {me.config.demoAccounts ? <span className="env-dot" aria-hidden="true" /> : null}
-          <Icon name="down" />
-        </button>
-      </div>
+      <div className="grow" />
+      <ConnectionIndicator />
+      <StatusCluster />
+      <button ref={inboxRef} type="button" className="btn icon ghost inbox-btn" id="inbox-btn" aria-label={`Waiting for you: ${n}`} aria-haspopup="dialog" aria-expanded="false" onClick={openInbox}>
+        <Icon name="bell" />
+        {n ? <span className="inbox-count mono" aria-hidden="true" /> : null}
+      </button>
+      <button ref={themeRef} type="button" className="btn icon ghost" aria-label={`Theme: ${prefs.theme}. Click to change`} title={`Theme: ${prefs.theme}`} aria-haspopup="menu" onClick={openTheme}>
+        <Icon name={dark ? "moon" : "sun"} />
+      </button>
+      <button ref={userRef} type="button" className="btn ghost user-btn" id="user-menu" aria-haspopup="menu" aria-label={`Account menu for ${v.name}`} aria-expanded="false" title={me.config.demoAccounts ? `${v.name} · non-production: local stack, demo accounts on` : v.name} onClick={openUserMenu}>
+        <Avatar id={v.id} size="sm" />
+        <span className="trunc small" style={{ maxWidth: 110 }}>{v.name.split(" ")[0]}</span>
+      </button>
     </header>
   );
 }

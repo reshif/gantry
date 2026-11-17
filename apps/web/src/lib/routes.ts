@@ -38,8 +38,8 @@ export const BUILD_READ = [...FACTORY_READ, "project_admin", "line_lead"] as con
 
 export const ROUTES: readonly RouteDef[] = [
   { id: "home", title: "Home", group: "Overview", icon: "home" },
-  { id: "inbox", title: "Inbox", group: "Overview", icon: "mail" },
-  { id: "projects", title: "Projects", group: "Overview", icon: "project" },
+  { id: "inbox", title: "Inbox", group: "Overview", icon: "inbox" },
+  { id: "projects", title: "Projects", group: "Overview", icon: "folder" },
   { id: "workspace", title: "Agents at work", group: "Overview", icon: "chat" },
   // The Console and Conversations now live in the workspace; their links still work and land there.
   { id: "console", title: "Console", group: "Overview", icon: "console", nav: false },
@@ -67,7 +67,8 @@ export const ROUTES: readonly RouteDef[] = [
   { id: "access", title: "Access", group: "Govern", icon: "lock", perm: "policy.view", canSee: (me) => factoryRole(me) },
   { id: "security", title: "Security", group: "Govern", icon: "shield", perm: "policy.view", canSee: (me) => factoryRole(me) },
   { id: "audit", title: "Audit", group: "Govern", icon: "ledger", perm: "audit.view", canSee: (me, ctx) => ctx.canAudit === true || anyRole(me, ["project_admin"]) || (ctx.canAudit === undefined && anyRole(me, FACTORY_READ)) },
-  { id: "system", title: "System health", group: "Govern", icon: "server", perm: "integrations.view", canSee: (me) => factoryRole(me) },
+  { id: "system", title: "System health", group: "Govern", icon: "pulse", perm: "integrations.view", canSee: (me) => factoryRole(me) },
+  { id: "design-system", title: "Design system", group: "Reference", icon: "grid" },
 ];
 
 /** Read actions behind each nav route, asked once per session. */
@@ -76,7 +77,7 @@ export const ROUTE_PERMS: ReadonlyArray<{ id: string; action: string }> = ROUTES
 /** A person with no grants at all: only their own profile is readable. */
 export const hasNoAccess = (me: Me): boolean => !me.projects.length && !me.person.roles.length;
 
-export const NAV_GROUPS = ["Overview", "Project", "Agents", "Connect", "Govern"] as const;
+export const NAV_GROUPS = ["Overview", "Project", "Agents", "Connect", "Govern", "Reference"] as const;
 
 export const isProjectRoute = (id: string): boolean => !!ROUTES.find((r) => r.id === id)?.project;
 

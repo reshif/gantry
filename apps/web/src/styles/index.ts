@@ -3,6 +3,7 @@ import "./tokens.css";
 import "./base.css";
 import "./views.css";
 import "./shared.css";
+import "./blueprint.css";
 import "./views/home.css";
 import "./views/floor.css";
 import "./views/workorders.css";

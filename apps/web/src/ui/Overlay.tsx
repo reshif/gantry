@@ -80,7 +80,7 @@ function DrawerView({ render, onClose }: { render: (close: () => void) => ReactN
   return (
     <div className="drawer-wrap">
       <div className="scrim" {...scrim} />
-      <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-label="Details">
+      <aside ref={panel} className="drw drawer" role="dialog" aria-modal="true" aria-label="Details">
         {render(onClose)}
       </aside>
     </div>
@@ -446,7 +446,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
             {t.action ? (
               <button
                 type="button"
-                className="btn btn-sm btn-ghost toast-act"
+                className="btn sm ghost toast-act"
                 id={t.action.id}
                 onClick={() => {
                   setToasts((l) => l.filter((x) => x.id !== t.id));

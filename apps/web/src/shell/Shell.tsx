@@ -8,8 +8,7 @@ import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
 import { formatHash, replaceHash, useHash } from "../lib/router";
-import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
-import { useCrumbTailValue } from "../lib/crumb";
+import { setProject, usePrefs } from "../lib/prefs";
 import { Empty } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
@@ -97,35 +96,24 @@ export function Shell({ me }: { me: Me }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [openPalette, navOpen]);
 
-  const toggleNav = () => {
-    let wide = true;
-    try { wide = window.matchMedia("(min-width: 861px)").matches; } catch { /* assume desktop */ }
-    if (wide) updatePrefs({ navRail: !prefs.navRail });
-    else setNavOpen((o) => !o);
-  };
+  const toggleNav = () => setNavOpen((o) => !o);
   const View = VIEWS[routeId] ?? VIEWS.home;
   const noAccess = hasNoAccess(me);
-  const shown = denied ?? def;
-  const crumbTail = useCrumbTailValue();
-  const baseCrumb = scoped ? [def?.title ?? ""] : [...(shown && !["Overview"].includes(shown.group) ? [shown.group] : []), shown?.title ?? "Home"];
-  // a detail page ends the trail with its record; "Agents › Agents › Builder" reads as a stutter, so the title that repeats its group is dropped
-  const crumb = crumbTail && loc.param ? [...(baseCrumb.length > 1 && baseCrumb[0] === baseCrumb[baseCrumb.length - 1] ? baseCrumb.slice(0, -1) : baseCrumb), crumbTail] : baseCrumb;
   const switcherProject = scoped ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
   const ready = !scoped || (!!project && synced === project.id);
   const killed = !!me.factory.killed;
   return (
-    <div id="app" className={`shell${prefs.navRail ? " nav-rail" : ""}${navOpen ? " nav-open" : ""}`}>
+    <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
       <AppErrorBoundary level="chrome">
-        <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
+        <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} open={navOpen} onNavigate={() => setNavOpen(false)} />
       </AppErrorBoundary>
-      <div className="sysbanner" id="sysbanner" hidden={!killed}>
-        {killed ? <StopBanner projectId={null} /> : null}
-      </div>
+      {navOpen ? <div className="scrim nav" id="nav-scrim" onClick={() => setNavOpen(false)} /> : null}
+      <div className="main">
       <AppErrorBoundary level="chrome">
-        <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
+        <TopBar me={me} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
       </AppErrorBoundary>
-      <div className="nav-scrim" id="nav-scrim" hidden={!navOpen} onClick={() => setNavOpen(false)} />
-      <main className="main" id="main" tabIndex={-1} ref={main}>
+      {killed ? <StopBanner projectId={null} /> : null}
+      <main className="content" id="main" tabIndex={-1} ref={main}>
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
           {noAccess ? (
@@ -146,6 +134,7 @@ export function Shell({ me }: { me: Me }) {
           ) : null}
         </AppErrorBoundary>
       </main>
+      </div>
     </div>
   );
 }

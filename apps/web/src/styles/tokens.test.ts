@@ -23,7 +23,7 @@ describe("design tokens", () => {
   it("resolves the aliases views relied on without defining", () => {
     const { light } = parseThemes(tokens);
     for (const n of ["--surface-2", "--hover", "--c-bad", "--danger", "--paper-2", "--text", "--mono", "--topbar-h", "--focus-ring", "--z-modal", "--dur-base", "--target-min"]) expect(light[n], n).toBeTruthy();
-    expect(resolve(light, "--c-bad")).toBe(light["--block"]);
+    expect(resolve(light, "--c-bad")).toBe(resolve(light, "--block"));
   });
 
   it("--faint is readable text on every surface in light mode", () => {
@@ -37,12 +37,12 @@ describe("design tokens", () => {
       expect(ratio("#777777", "#ffffff")).toBeCloseTo(4.48, 1);
     });
     it("flags a pair that fails, so a regression in tokens.css is caught", () => {
-      const bad = tokens.replace("--faint: #63636b;", "--faint: #a1a1aa;");
+      const bad = tokens.replace("--ink3:#566478;", "--ink3:#d0d5dc;");
       expect(contrastFailures(bad).some((f) => f.fg === "--faint" && f.theme === "light")).toBe(true);
     });
     it("flags dark blocks that drift", () => {
-      const bad = tokens.replace(/(:root\[data-theme="dark"\] \{[\s\S]*?--faint: )#8a8a94/, "$1#999999");
-      expect(darkBlocksDiff(bad)).toContain("--faint");
+      const bad = tokens.replace(/(:root\[data-theme="dark"\] \{[\s\S]*?--ink3:)#93aed1/, "$1#999999");
+      expect(darkBlocksDiff(bad)).toContain("--ink3");
     });
   });
 });

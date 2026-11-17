@@ -126,7 +126,7 @@ describe("signed in", () => {
     window.location.hash = "#floor";
     render(<App />);
     const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(Array.from(nav.querySelectorAll(".nav-group-name")).map((e) => e.textContent)).toEqual(["Overview", "Project", "Agents", "Connect", "Govern"]);
+    expect(Array.from(nav.querySelectorAll(".nav h3")).map((e) => e.textContent)).toEqual(["Overview", "Project line", "Agents", "Connect", "Govern", "Reference"]);
     expect(within(nav).getByText("Access")).toBeTruthy();
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
     expect(await screen.findByText("Couldn't load the floor")).toBeTruthy(); // the shared failed state (ui/async)
@@ -156,51 +156,10 @@ describe("signed in", () => {
       "/api/v1/people": () => ({ body: [person([])] }),
     });
     render(<App />);
-    expect((await screen.findByText("FACTORY KILLED")).closest(".stop-banner")?.className).toContain("is-kill");
-    expect(document.getElementById("sysbanner")?.hasAttribute("hidden")).toBe(false);
+    expect((await screen.findByText("FACTORY KILLED")).closest(".banner")?.className).toContain("is-kill");
   });
 
   const homeApi = () => mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
-  const headers = (nav: HTMLElement) => Array.from(nav.querySelectorAll<HTMLButtonElement>(".nav-group-btn"));
-
-  it("shows every nav group open, remembers a collapsed group and keeps the current page's group open", async () => {
-    sessionStorage.clear();
-    localStorage.removeItem("gantry.navClosed");
-    homeApi();
-    window.location.hash = "#home";
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    const open = () => headers(nav).filter((h) => h.getAttribute("aria-expanded") === "true").map((h) => h.id);
-    expect(open()).toEqual(["navg-overview-btn", "navg-agents-btn", "navg-connect-btn", "navg-govern-btn"]);
-    expect(within(nav).getByText("Skills")).toBeTruthy();
-    const [overview, , agents] = headers(nav) as [HTMLButtonElement, HTMLButtonElement, HTMLButtonElement];
-    fireEvent.click(agents);
-    expect(agents.getAttribute("aria-expanded")).toBe("false");
-    expect(JSON.parse(localStorage.getItem("gantry.navClosed") || "[]")).toEqual(["Agents"]);
-    fireEvent.click(overview); // the current page's group cannot be collapsed
-    expect(overview.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(agents);
-    fireEvent.click(within(nav).getByText("Skills"));
-    await waitFor(() => expect(window.location.hash).toBe("#skills"));
-    expect(agents.getAttribute("aria-expanded")).toBe("true");
-    localStorage.removeItem("gantry.navClosed");
-  });
-
-  it("marks the group of the current page and moves between headers with arrow keys", async () => {
-    sessionStorage.clear();
-    homeApi();
-    window.location.hash = "#/p/payments/floor";
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    const hs = headers(nav);
-    await waitFor(() => expect(headers(nav).filter((h) => h.dataset.activeGroup === "true").map((h) => h.id)).toEqual(["navg-project-btn"]));
-    expect(nav.querySelector("#navg-project-btn")?.getAttribute("aria-expanded")).toBe("true");
-    hs[0]!.focus();
-    fireEvent.keyDown(hs[0]!, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(hs[1]);
-    fireEvent.keyDown(hs[1]!, { key: "End" });
-    expect(document.activeElement).toBe(hs[hs.length - 1]);
-  });
 
   it("puts the one project switcher in the top bar after the logo, none in the sidebar", async () => {
     sessionStorage.clear();
@@ -215,12 +174,10 @@ describe("signed in", () => {
     expect(nav.querySelector("#project-switcher")).toBeNull();
     const sw = top.querySelector("#project-switcher") as HTMLElement;
     expect(sw).toBeTruthy();
-    expect(top.querySelector(".brand")?.compareDocumentPosition(sw)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(nav.querySelector(".brand")).toBeTruthy(); // the mark and name live on the sidebar sheet
     expect(within(nav).queryByText("All projects")).toBeNull();
-    expect(nav.querySelector("#navg-project-btn")?.textContent).not.toContain("Payments");
     act(() => { window.location.hash = "#/p/payments/floor"; });
     await waitFor(() => expect(top.querySelector("#project-switcher")?.textContent).toContain("Payments Platform"));
-    expect(document.querySelector("#crumb")?.textContent).toBe("Floor"); // page path only, no project name
   });
 
   it("keeps the top bar calm: no demo pill, compact status, avatar-only user, Search field", async () => {
@@ -230,49 +187,12 @@ describe("signed in", () => {
     await screen.findByRole("navigation", { name: "Main" });
     const top = document.querySelector("#topbar") as HTMLElement;
     expect(top.textContent).not.toContain("Demo accounts on");
-    expect(top.querySelector(".dev-dot")).toBeTruthy();
-    // at phone width the brand is hidden; the non-production marker rides on the account button, still reachable via its title
+    // the non-production marker rides on the account button, reachable via its title
     const acct = top.querySelector("#user-menu") as HTMLElement;
-    expect(acct.querySelector(".env-dot")).toBeTruthy();
     expect(acct.title).toContain("non-production");
     expect(top.querySelector("#status-cluster")?.textContent).toBe("Running");
     expect(top.querySelector(".user-name")).toBeNull();
-    expect(top.querySelector(".palette-label")?.textContent).toBe("Search");
-  });
-
-  it("icon rail shows only the five group buttons; a group opens a flyout of its items; one toggle", async () => {
-    sessionStorage.clear();
-    homeApi();
-    window.location.hash = "#/p/payments/floor";
-    updatePrefs({ navRail: true });
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(nav.querySelector("#nav-rail-toggle")).toBeNull();
-    expect(nav.querySelectorAll("a.nav-link").length).toBe(0);
-    const hs = Array.from(nav.querySelectorAll<HTMLButtonElement>(".nav-group-btn"));
-    expect(hs.map((h) => h.getAttribute("aria-label"))).toEqual(["Overview", "Project", "Agents", "Connect", "Govern"]);
-    expect(hs.filter((h) => h.dataset.activeGroup === "true").map((h) => h.id)).toEqual(["navg-project-btn"]);
-    expect(hs.every((h) => h.getAttribute("aria-haspopup") === "menu")).toBe(true);
-    fireEvent.click(hs[2]!);
-    expect(hs[2]!.getAttribute("aria-expanded")).toBe("true");
-    const menu = await screen.findByRole("menu", { name: "Agents" });
-    expect(within(menu).getAllByRole("menuitem").map((e) => e.textContent)).toContain("Skills");
-    // the single toggle is the top-bar menu button
-    fireEvent.click(screen.getByLabelText("Toggle navigation"));
-    expect(getPrefs().navRail).toBe(false);
-  });
-
-  it("disables the PROJECT group and asks to choose a project when none is selected", async () => {
-    sessionStorage.clear();
-    homeApi();
-    window.location.hash = "#home";
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(document.querySelector("#project-switcher")?.textContent).toBe("Choose a project");
-    const h = nav.querySelector("#navg-project-btn") as HTMLButtonElement;
-    expect(h.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(h);
-    expect(h.getAttribute("aria-expanded")).toBe("false");
+    expect(top.querySelector(".palette-label")?.textContent).toBe("Search or jump to…");
   });
 
   it("switches project from the sidebar switcher and keeps the page", async () => {
