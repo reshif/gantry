@@ -94,6 +94,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     }
     if (path === "activity") return seed.events;
     if (path === "conversations") return page(conversations);
+    if (path === "workspace/inbox") return { items: [] };
     if (path === "people") return seed.people;
     if (path === "teams") return seed.teams;
     if (path === "templates") return seed.templates;

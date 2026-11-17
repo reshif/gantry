@@ -15,6 +15,7 @@ import { WoSessionPage } from "./conversations/Session";
 import { SessionPage } from "./onboarding/Session";
 import { ChatPane, toWorkspace } from "./workspace/ChatPane";
 import { Inbox } from "./workspace/Inbox";
+import { AtWork } from "./workspace/AtWork";
 import { NewChatForm } from "./workspace/NewChat";
 import { OperatorPanel } from "./workspace/Operator";
 import { SearchResults } from "./workspace/Search";
@@ -75,6 +76,16 @@ export default function WorkspaceView() {
   };
 
   if (!me) return <div className="view ws-view" />;
+  // No conversation open: the prototype's "Agents at work" page. Conversations keep their own pane under #workspace/inbox.
+  if (!key) {
+    return (
+      <AtWork needs={needs} actions={<>
+        <Btn kind="primary" icon="plus" label="New chat" id="ws-home-new" onClick={newChat} />
+        <Btn icon="chat" label={needs ? `Conversations · ${needs}` : "Conversations"} id="ws-home-inbox" onClick={() => open("inbox")} />
+        {operator ? <Btn label="Operator view" id="ws-home-op" onClick={() => open("operator")} /> : null}
+      </>} />
+    );
+  }
   const main = q ? <SearchResults q={q} onOpen={(k) => open(k)} onClose={() => setQ(null)} />
     : key === "operator" ? <OperatorPanel onOpen={(k) => open(k)} />
     : key?.startsWith("wo:") ? <WoSessionPage key={key} woId={key.slice(3)} back={() => open(null)} embedded />
