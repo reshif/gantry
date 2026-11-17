@@ -333,7 +333,7 @@ d("internal runs API", () => {
       expect(s.toolAllowList).not.toContain("Bash");
       expect(s.toolAllowList.filter((t: string) => !t.startsWith("Bash(")).sort()).toEqual(["Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);
       expect(s.toolAllowList).toContain("Bash(npm test:*)");
-      expect(s.toolAllowList.filter((t: string) => t.startsWith("Bash(")).every((t: string) => /^Bash\((npm|npx|pnpm|yarn|pytest|python|go|cargo) /.test(t))).toBe(true);
+      expect(s.toolAllowList.filter((t: string) => t.startsWith("Bash(")).every((t: string) => /^Bash\((npm|npx|pnpm|yarn|pytest|python|go|cargo)[ :]/.test(t))).toBe(true);
       expect(s.input.brief).toEqual({ goal: "ship" });
       // the per-run cost cap (agent budget 2.5) is enforced at authorize
       expect((await authorize(r)).json().allow).toBe(true);

@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import type { Tx } from "@gantry/db";
 import type { EventSpec } from "../../core/command.js";
-import { recordMerged, recordNewHead } from "../workorders/station.js";
+import { recheckAutoGate, recordMerged, recordNewHead } from "../workorders/station.js";
 import type { CheckFact, GithubFacts, IssueFact, PublishedCommitFact, PullRequestFact, ReviewFact } from "./facts.js";
 
 export const sha256 = (b: Buffer | string): string => createHash("sha256").update(b).digest("hex");
@@ -82,9 +82,15 @@ export async function applyFacts(tx: Tx, orgId: string, f: GithubFacts, o: { now
     if (r.changed) touched.add("workOrders");
   }
 
+  const settled = new Set<string>();
   for (const c of f.checks) {
     const ev = await storeCheck(tx, orgId, repo.id, c);
-    if (ev) { out.events.push({ ...ev, projectId: repo.project_id, subject: sub }); out.counts.checks++; touched.add("workOrders"); }
+    if (ev) { out.events.push({ ...ev, projectId: repo.project_id, subject: sub }); out.counts.checks++; touched.add("workOrders"); if (c.status === "completed") settled.add(c.headSha); }
+  }
+  // A finished check is evidence for an automatic gate that is waiting on this head (G4 reads the real CI results).
+  for (const sha of settled) {
+    const prs = (await tx.query<{ wo_id: string }>(`select wo_id from pull_requests where org_id = $1 and repo_id = $2 and head_sha = $3 and state = 'open' and wo_id is not null`, [orgId, repo.id, sha])).rows;
+    for (const p of prs) if ((await recheckAutoGate(tx, orgId, p.wo_id, sha, o.now ? { now: o.now } : {})).reopened) touched.add("workOrders");
   }
 
   for (const rv of f.reviews) {

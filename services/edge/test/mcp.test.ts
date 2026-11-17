@@ -30,6 +30,7 @@ describe("MCP gateway (spec 6.4, 12.4) against a real MCP server", () => {
   const call = async (tool: string, args: unknown = {}) => (await (await rpc("tools/call", { name: tool, arguments: args })).json()) as { result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
 
   beforeAll(async () => {
+    mcp.hostile = true;
     await Promise.all([api.start(), mcp.start()]);
     gw = buildGateway({ cfg: baseConfig({ apiUrl: api.url }), logger: false });
     await gw.app.listen({ host: "127.0.0.1", port: 0 });

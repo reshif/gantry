@@ -310,6 +310,26 @@ export async function recordNewHead(tx: Tx, orgId: string, woId: string, headSha
   return { reopened: gate };
 }
 
+/**
+ * A required check finished on a pull request's head: an open automatic G4 that was waiting for evidence (or judged an earlier result) reads the
+ * CI results again. Nobody has voted on it (an automatic gate with a vote is a person's decision now), and a person who is deciding stays free to.
+ */
+export async function recheckAutoGate(tx: Tx, orgId: string, woId: string, headSha: string, o: { now?: Date } = {}): Promise<{ reopened: boolean }> {
+  const open = (await tx.query<{ id: string }>(
+    `select id from gate_instances where org_id = $1 and wo_id = $2 and status = 'open' and gate_id = 'G4' and coalesce(basis->'evidence'->>'source', 'none') in ('none', 'github')
+       and not exists (select 1 from gate_votes v where v.org_id = gate_instances.org_id and v.gate_instance_id = gate_instances.id) and (head_sha is null or head_sha = $3)`,
+    [orgId, woId, headSha],
+  )).rows;
+  if (!open.length) return { reopened: false };
+  const w = await lockWo(tx, orgId, woId);
+  const fx = await fxFor(tx, orgId, "system", o.now ?? new Date());
+  await closeOpenInstances(fx, woId, "new_head");
+  await openGate(fx, w, "G4", { headSha });
+  await saveWo(tx, orgId, w);
+  await flushFx(fx);
+  return { reopened: true };
+}
+
 /** `flow.timer` jobs. Escalation: the open gate instance gets an escalation event (the worker's notifier turns it into a message); a halt pauses it by pushing the timer back. */
 export async function handleFlowTimer(tx: Tx, p: { kind: "escalation" | "soak" | "lease_expiry"; woId?: string; gateInstanceId?: string }, o: { now?: Date } = {}): Promise<{ handled: boolean; note: string }> {
   const now = o.now ?? new Date();

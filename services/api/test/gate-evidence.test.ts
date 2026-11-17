@@ -3,6 +3,7 @@ import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { world } from "./flow-helpers.js";
 import { openGate } from "../src/areas/workorders/engine.js";
 import { lockWo } from "../src/areas/workorders/model.js";
+import { applyStationResult } from "../src/areas/workorders/station.js";
 
 const d = TEST_URL ? describe : describe.skip;
 
@@ -52,12 +53,24 @@ d("automatic gates need real evidence", () => {
     expect(dec?.detail.evidence).toMatchObject({ source: "github", headSha: "sha9204", githubCheckIds: ["16204"] });
   });
 
+  it("a gate waiting for evidence reads the CI results when they arrive, and a person's vote is never overridden", async () => {
+    const { recheckAutoGate } = await import("../src/areas/workorders/station.js");
+    await w.insertWo("WO-9205", { position: "build", state: "running", data: { files: [{ path: "src/e.ts" }] } });
+    await open("WO-9205");
+    expect(await decision("WO-9205")).toBeNull();
+    await pr("WO-9205", 9205, "sha9205", ["ci/test"], [["ci/test", "completed", "success"]]);
+    expect((await w.tx((tx) => recheckAutoGate(tx, t.orgId, "WO-9205", "sha9205"))).reopened).toBe(true);
+    expect((await decision("WO-9205"))?.decision).toBe("auto_passed");
+    expect((await w.tx((tx) => recheckAutoGate(tx, t.orgId, "WO-9205", "sha9205"))).reopened).toBe(false);
+  });
+
   it("an agent-reported all-green output.checks cannot pass an automatic gate (G1f)", async () => {
     const id = await w.atStation("research", "Agent claims green");
     const att = await w.liveAttempt(id);
-    const r = await w.apply(att!, { status: "succeeded", summary: "done", output: { checks: [{ name: "Research note attached", ok: true }, { name: "No blocking unknowns", ok: true }] } });
+    const r = await w.tx((tx) => applyStationResult(tx, att!.id, Number(att!.fencing), { status: "succeeded", summary: "done", output: { checks: [{ name: "Research note attached", ok: true }, { name: "No blocking unknowns", ok: true }] } } as never));
     expect(r.applied).toBe(true);
-    expect(await decision(id)).toBeNull();
-    expect((await w.get(id)).state).toBe("waiting");
+    // the station wrote no research note, so the claim is not believed: the gate fails on what the system holds
+    expect((await decision(id))?.decision).toBe("auto_failed");
+    expect((await w.get(id)).state).toBe("failed");
   });
 });
