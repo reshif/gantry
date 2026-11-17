@@ -109,5 +109,10 @@ describe("socket proxy: workspace profile (gantry-github)", () => {
     ["no memory limit", helper({}, { Memory: undefined })],
     ["env", helper({ Env: ["A=b"] })],
   ];
+  it("keeps a helper's name out of the runner namespace", () => {
+    for (const n of ["gantry-runner-r1", "gantry-ws-helper-", "other", "gantry-ws-helper-a/b"]) expect(checkHelperCreate(helper(), new URLSearchParams({ name: n }), "gantry-github:dev").ok, n).toBe(false);
+    expect(checkHelperCreate(helper(), new URLSearchParams({ name: "gantry-ws-helper-r1" }), "gantry-github:dev").ok).toBe(true);
+    expect(checkHelperCreate(helper(), new URLSearchParams("name=gantry-ws-helper-a&name=gantry-runner-b"), "gantry-github:dev").ok).toBe(false);
+  });
   for (const [what, body] of badHelper) it(`refuses a helper with ${what}`, () => expect(checkHelperCreate(body, nq, "gantry-github:dev").ok, what).toBe(false));
 });

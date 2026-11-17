@@ -1,0 +1,9 @@
+{
+  "name": "gantry-runner-harness",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The agent harness installed into the runner image. The exact version is pinned here and the whole tree is pinned, with integrity hashes, by package-lock.json (see relock.sh).",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.311"
+  }
+}

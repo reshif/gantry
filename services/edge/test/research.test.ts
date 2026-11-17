@@ -45,6 +45,35 @@ describe("governed web research", () => {
     };
   });
 
+  it("refuses an IP-literal host even when an approved plan lists it (the DNS guard never sees literals)", async () => {
+    api.override = (r) => (r.url.endsWith("/research/hosts") ? [200, { ok: true, hosts: ["127.0.0.1", "10.0.0.5", "169.254.169.254", "*.example.org"] }] : r.url.endsWith("/research/source") ? [200, { ok: true, ref: "s1" }] : undefined);
+    for (const u of ["https://127.0.0.1/", "https://10.0.0.5/x", "https://169.254.169.254/latest", "https://2130706433/", "https://[::1]/", "https://0x7f.1/"]) {
+      const r = await research({ url: u });
+      expect(r.status, u).toBe(403);
+    }
+    expect(fetched).toEqual([]);
+  });
+
+  it("refuses a redirect to an allow-listed IP literal", async () => {
+    api.override = (r) => (r.url.endsWith("/research/hosts") ? [200, { ok: true, hosts: ["docs.nautobot.com", "127.0.0.1"] }] : undefined);
+    pages["https://docs.nautobot.com/r"] = { status: 302, location: "https://127.0.0.1/secret" };
+    const r = await research({ url: "https://docs.nautobot.com/r" });
+    expect(r.status).toBe(403);
+    expect(fetched).toEqual(["https://docs.nautobot.com/r"]);
+  });
+
+  it("the production dispatcher never opens a socket to an IP literal", async () => {
+    const net = await import("node:net");
+    const { fetch: ufetch } = await import("undici");
+    let accepted = 0;
+    const srv = net.createServer((c) => { accepted++; c.destroy(); });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const port = (srv.address() as { port: number }).port;
+    await expect(ufetch(`https://127.0.0.1:${port}/`, { dispatcher: publicOnlyAgent() })).rejects.toBeTruthy();
+    expect(accepted).toBe(0);
+    await new Promise((r) => srv.close(r));
+  });
+
   it("fetches an allow-listed page, turns it into text, redacts secrets, snapshots it and records the source", async () => {
     pages["https://docs.nautobot.com/jobs?token=abc&page=2"] = { body: "<html><head><title>Jobs</title><script>evil()</script></head><body><h2>Retry</h2><p>Use &amp; retry. key AKIAABCDEFGHIJKLMNOP</p></body></html>" };
     const r = await research({ url: "https://docs.nautobot.com/jobs?token=abc&page=2#x", why: "how jobs retry" });

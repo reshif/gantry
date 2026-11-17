@@ -4,6 +4,7 @@
  * real GitHub (through gantry-github), Slack, SMTP email and a signed outbound webhook. The catalogue lists the rest as not yet available.
  * Custom types are limited to a signed webhook in and templated HTTP out.
  */
+import { randomBytes } from "node:crypto";
 import { INTEGRATION_TYPES, type IntegrationField, type IntegrationType } from "@gantry/domain";
 
 export type Capability = "notify" | "interactive" | "trigger_source" | "identity";
@@ -99,14 +100,33 @@ export const CUSTOM_CATEGORIES = ["chat", "email", "issues", "ci", "paging", "we
 
 export const typeCapabilities = (t: Pick<IntegrationType, "source" | "destination">): Capability[] => [...(t.destination ? (["notify"] as const) : []), ...(t.source ? (["trigger_source"] as const) : [])];
 
+/**
+ * Secrets that Gantry verifies deliveries with (the GitHub webhook secret, a Slack or hook signing secret) or signs with are chosen by an admin,
+ * and a captured HMAC lets an attacker brute-force a short one offline and then forge deliveries. They need real entropy. Tokens issued by a
+ * third party stay at the small minimum because Gantry cannot choose them.
+ */
+export const SIGNING_SECRET_MIN = 32;
+/** A long but patterned value ("a" x 32, "abab...") has little entropy: it needs at least this many distinct characters. */
+export const SIGNING_SECRET_MIN_DISTINCT = 8;
+export const weakSigningSecret = (v: string): boolean => new Set(v).size < SIGNING_SECRET_MIN_DISTINCT;
+/** A fresh random signing secret (256 bits, hex) for a form's "generate" button or an operator script. */
+export const generateSigningSecret = (): string => randomBytes(32).toString("hex");
+const SIGNING_KEYS: ReadonlySet<string> = new Set(["webhookSecret", "signingSecret", "secret"]);
+const secretMin = (t: Pick<IntegrationType, "fields"> & { source?: boolean }, key: string): number => {
+  const firstSecret = t.fields.find((x) => x.type === "secret")?.key;
+  return SIGNING_KEYS.has(key) || (t.source === true && firstSecret === key) ? SIGNING_SECRET_MIN : 6;
+};
+
 /** Config validation by the type's schema. Returns the first problem, as a sentence the form shows. */
-export function validateConfig(t: Pick<IntegrationType, "fields">, config: Record<string, unknown>, secrets: Record<string, string>, o: { needSecret: boolean }): string | null {
+export function validateConfig(t: Pick<IntegrationType, "fields"> & { source?: boolean }, config: Record<string, unknown>, secrets: Record<string, string>, o: { needSecret: boolean }): string | null {
   for (const fld of t.fields) {
     if (fld.type === "bool") continue;
     if (fld.type === "secret") {
       const v = (secrets[fld.key] ?? "").trim();
       if (o.needSecret && fld.required !== false && !v) return `Add the ${fld.label.toLowerCase()}.`;
-      if (v && v.length < 6) return `${fld.label} looks too short.`;
+      const min = secretMin(t, fld.key);
+      if (v && v.length < min) return min > 6 ? `${fld.label} must be at least ${min} characters (use a random value, for example the output of \`openssl rand -hex 32\`).` : `${fld.label} looks too short.`;
+      if (v && min > 6 && weakSigningSecret(v)) return `${fld.label} is too repetitive: use a random value, for example the output of \`openssl rand -hex 32\`.`;
       continue;
     }
     const raw = config[fld.key];

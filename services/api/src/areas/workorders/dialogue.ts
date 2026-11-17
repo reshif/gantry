@@ -18,6 +18,7 @@ import { resumeAt } from "./intake.js";
 import { saveWo, type Wo } from "./model.js";
 import { lockAssumption, lockObjection, lockQuestion } from "./documents.js";
 import { addWoMessage } from "./session/store.js";
+import { isResearchHost } from "../../core/research-host.js";
 
 export type AnswerKind = "answer" | "dont_know" | "not_relevant";
 const KIND_TEXT: Record<AnswerKind, string> = { answer: "", dont_know: "I don't know.", not_relevant: "Not relevant to this work." };
@@ -86,6 +87,8 @@ export async function decideResearchPlan(tx: Tx, actor: Actor, woId: string, b: 
   } else {
     const web = b.web ?? plan.web;
     const hosts = web ? [...new Set((b.hosts ?? plan.hosts).map((h) => h.trim().toLowerCase()).filter(Boolean))] : [];
+    const bad = hosts.filter((h) => !isResearchHost(h));
+    if (bad.length) throw invalid(`${bad.join(", ")} must be DNS names, not IP addresses.`);
     if (web && !hosts.length) throw invalid("Approve at least one host, or approve the plan without the web.");
     const listed = new Set((await readSecurity(tx, fx.orgId)).value.researchHosts ?? []);
     const unlisted = hosts.filter((h) => !listed.has(h));
