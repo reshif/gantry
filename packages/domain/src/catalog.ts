@@ -1616,6 +1616,30 @@ export const READ_ACTIONS = ["people.view", "policy.view", "agents.view", "model
 /** Project rights a Factory Manager does not get by default: the ones that administer access rather than operate the line. */
 const FACTORY_MANAGER_EXCLUDED: ReadonlySet<string> = new Set(["project.members", "approvers.edit", "trust.grant", "api.keys"]);
 
+/**
+ * Factory-scope rights belong to factory-level roles only (owner decision 2026-11-17). The scope of a built-in action is fixed by this
+ * catalogue, whatever an org's stored copy says (a stale copy once carried the Read rights as project scope); a custom action keeps its own.
+ */
+export function actionScopeOf(actions: readonly Action[], id: string): Action["scope"] | undefined {
+  return ACTIONS.find((a) => a.id === id)?.scope ?? actions.find((a) => a.id === id)?.scope;
+}
+
+/** May this role hold this right at all? A project-level role can never hold a factory-scope right: matrix cell, grant and resolution all ignore it. */
+export function roleMayHold(roles: readonly Role[], actions: readonly Action[], roleId: string, actionId: string): boolean {
+  const level = (roles.find((r) => r.id === roleId) ?? ROLES.find((r) => r.id === roleId))?.level;
+  return !(level === "project" && actionScopeOf(actions, actionId) === "factory");
+}
+
+/** The matrix with every factory-scope right removed from project-level roles: what resolution acts on, whatever is stored. */
+export function effectiveMatrix(matrix: Matrix, roles: readonly Role[], actions: readonly Action[]): Matrix {
+  const out: Matrix = {};
+  for (const [role, cells] of Object.entries(matrix)) {
+    out[role] = {};
+    for (const [a, v] of Object.entries(cells)) out[role]![a] = v && roleMayHold(roles, actions, role, a);
+  }
+  return out;
+}
+
 /** The default role-by-action matrix (legacy `matrix()`), built over the given actions. */
 export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
   const only = (list: string[]): Record<string, boolean> => {
@@ -1625,7 +1649,7 @@ export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
   };
   // Console propose rights are never a default of anyone but Factory Admin: a Factory Admin grants them to the roles and teams they choose.
   const projectActions = actions.filter((a) => a.scope === "project" && !a.id.startsWith("console.")).map((a) => a.id);
-  return {
+  return effectiveMatrix({
     factory_admin: only(actions.map((a) => a.id)),
     // Default deny (spec 14.3): reading anything beyond a project one holds is itself a right. The "Read" actions are factory-scoped (they need
     // a factory-level role such as Auditor or a custom one); a person with no grants reads nothing but their own profile.
@@ -1649,7 +1673,7 @@ export function defaultMatrix(actions: readonly Action[] = ACTIONS): Matrix {
     approver: only(["project.view", "wo.answer", "gate.approve", CONSOLE_USE]),
     release_manager: only(["project.view", "wo.answer", "gate.approve", "release", "line.halt", "line.resume", "onboarding.merge", "outcome.record", CONSOLE_USE]),
     viewer: only(["project.view", CONSOLE_USE]),
-  };
+  }, ROLES, actions);
 }
 
 /** Station/gate/bay/class/role/action lookups over a catalogue. */

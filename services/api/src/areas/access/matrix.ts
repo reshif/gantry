@@ -21,7 +21,7 @@ export async function setMatrixCell(tx: Tx, orgId: string, by: string, roleId: s
     throw refuse("denied", `You hold ${role.name}, so you cannot add rights to it. Ask a Factory Admin.`, { needs: "factory_admin" });
   const cur = await readMatrix(tx, orgId, st.catalog.actions);
   const before = !!cur.value[roleId]?.[actionId];
-  const checked = checkMatrixEdit(cur.value, await readPeople(tx, orgId), { role: roleId, action: actionId, value: on });
+  const checked = checkMatrixEdit(cur.value, await readPeople(tx, orgId), { role: roleId, action: actionId, value: on }, st.catalog);
   if (!checked.ok) throw new Refusal(checked.error);
   if (before === on) return { msg: `${role.name} already ${on ? "can" : "cannot"} ${action.name.toLowerCase()}.`, events: [], extra: { version: cur.version }, changes: ["matrix"], project: null };
   const next: Matrix = { ...cur.value, [roleId]: { ...(cur.value[roleId] ?? {}), [actionId]: on } };

@@ -26,6 +26,12 @@ export interface RouteCtx {
 
 export const anyRole = (me: Me, roles: readonly string[]): boolean => me.person.roles.some((g) => roles.includes(g.role));
 
+/**
+ * Factory-wide pages (Access, Security, System health, Models with vendors, prices, budgets and routing) are for factory-level roles
+ * only, held at factory scope: the same rule the server applies (a factory-scope right never reaches a project role). Display only.
+ */
+export const factoryRole = (me: Me, roles: readonly string[] = FACTORY_READ): boolean => me.person.roles.some((g) => g.scope === "factory" && roles.includes(g.role));
+
 /** Factory-level roles that read the factory registers (the route rules are display only; the read rights decide). */
 export const FACTORY_READ = ["factory_admin", "auditor", "factory_manager", "security_reviewer"] as const;
 export const BUILD_READ = [...FACTORY_READ, "project_admin", "line_lead"] as const;
@@ -46,7 +52,7 @@ export const ROUTES: readonly RouteDef[] = [
   { id: "changes", title: "Changes", group: "Project", icon: "branch", project: true, nav: false },
   { id: "agents", title: "Agents", group: "Agents", icon: "agent", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
   { id: "skills", title: "Skills", group: "Agents", icon: "skill", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
-  { id: "models", title: "Models", group: "Agents", icon: "model", perm: "models.view", canSee: (me) => anyRole(me, BUILD_READ) },
+  { id: "models", title: "Models", group: "Agents", icon: "model", perm: "models.view", canSee: (me) => factoryRole(me) },
   { id: "evals", title: "Evals", group: "Agents", icon: "eval", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
   { id: "trust", title: "Trust", group: "Agents", icon: "trust", perm: "agents.view", canSee: (me) => anyRole(me, [...BUILD_READ, "approver", "release_manager"]) },
   { id: "learning", title: "Learning", group: "Agents", icon: "learn", perm: "agents.view", canSee: (me) => anyRole(me, BUILD_READ) },
@@ -58,10 +64,10 @@ export const ROUTES: readonly RouteDef[] = [
   { id: "person", title: "Person", group: "Govern", icon: "people", nav: false, perm: "people.view", canSee: (me) => anyRole(me, [...FACTORY_READ, "project_admin"]) },
   { id: "account", title: "Account", group: "Govern", icon: "user", nav: false },
   { id: "workload", title: "Workload", group: "Govern", icon: "workload", perm: "people.view", canSee: (me) => anyRole(me, BUILD_READ) },
-  { id: "access", title: "Access", group: "Govern", icon: "lock", perm: "policy.view", canSee: (me) => anyRole(me, FACTORY_READ) },
-  { id: "security", title: "Security", group: "Govern", icon: "shield", perm: "policy.view", canSee: (me) => anyRole(me, FACTORY_READ) },
+  { id: "access", title: "Access", group: "Govern", icon: "lock", perm: "policy.view", canSee: (me) => factoryRole(me) },
+  { id: "security", title: "Security", group: "Govern", icon: "shield", perm: "policy.view", canSee: (me) => factoryRole(me) },
   { id: "audit", title: "Audit", group: "Govern", icon: "ledger", perm: "audit.view", canSee: (me, ctx) => ctx.canAudit === true || anyRole(me, ["project_admin"]) || (ctx.canAudit === undefined && anyRole(me, FACTORY_READ)) },
-  { id: "system", title: "System health", group: "Govern", icon: "server", perm: "integrations.view", canSee: (me) => anyRole(me, FACTORY_READ) },
+  { id: "system", title: "System health", group: "Govern", icon: "server", perm: "integrations.view", canSee: (me) => factoryRole(me) },
 ];
 
 /** Read actions behind each nav route, asked once per session. */

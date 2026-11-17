@@ -53,8 +53,9 @@ export function MatrixTable({ matrix, version, roles, actions, hl, evaluated, pe
                 <tr key={a.id} className={`${hlAction === a.id ? "is-hl" : ""}${a.group === "Stops" ? " mx-stop" : ""}`} id={`acc-mx-row-${a.id.replace(".", "_")}`}>
                   <th scope="row"><span>{a.name}</span><span className="mono muted mx-aid">{a.id + (a.scope === "factory" ? " · factory" : "")}</span></th>
                   {roles.map((ro) => {
-                    const on = !!matrix[ro.id]?.[a.id];
-                    const d: Decision | null = !perm.allowed ? perm : LOCKED_ON.has(`${ro.id}:${a.id}`) ? lockd(`${ro.name} always keeps '${a.name.toLowerCase()}' so nobody is locked out.`) : null;
+                    const factoryOnly = ro.level !== "factory" && a.scope === "factory";
+                    const on = !!matrix[ro.id]?.[a.id] && !factoryOnly;
+                    const d: Decision | null = !perm.allowed ? perm : factoryOnly ? lockd(`${ro.name} is a project-level role: '${a.name.toLowerCase()}' is a factory-wide right, held by factory-level roles only.`) : LOCKED_ON.has(`${ro.id}:${a.id}`) ? lockd(`${ro.name} always keeps '${a.name.toLowerCase()}' so nobody is locked out.`) : null;
                     return (
                       <td key={ro.id} className={`mx-cell${on ? " is-on" : ""}${ro.custom ? " is-custom" : ""}${hlAction === a.id && hlRoles.includes(ro.id) ? " is-hl" : ""}`}>
                         <MatrixToggle id={`acc-mx-${ro.id}-${a.id.replace(".", "_")}`} on={on} decision={d} label={`${ro.name}: ${a.name}`} onChange={async (v) => void outcome(await ops.setMatrix(ro.id, a.id, v, version !== undefined ? { ifMatch: version } : undefined))} />

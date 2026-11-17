@@ -1,4 +1,4 @@
-import { checkRoleDelete, type Matrix, type Role } from "@gantry/domain";
+import { checkRoleDelete, roleMayHold, type Matrix, type Role } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import { conflict, invalid, notFound, Refusal } from "../../core/errors.js";
 import type { CommandResult } from "../../core/command.js";
@@ -27,7 +27,9 @@ export async function addRole(tx: Tx, orgId: string, by: string, body: z.infer<t
   if (!base) throw invalid("Unknown base role.");
   await tx.query(`insert into roles (org_id, id, name, level, builtin, description, data) values ($1,$2,$3,$4,false,$5,$6::jsonb)`, [orgId, id, body.name, body.level, body.desc, JSON.stringify({ base: baseId })]);
   const cur = await readMatrix(tx, orgId, st.catalog.actions);
-  await publishMatrix(tx, orgId, { ...cur.value, [id]: { ...(cur.value[baseId] ?? {}) } }, `Role ${id} cloned from ${baseId}`, by);
+  // A project-level role never inherits a factory-wide right from the role it is cloned from.
+  const row = Object.fromEntries(Object.entries(cur.value[baseId] ?? {}).map(([a, v]) => [a, v && roleMayHold([{ id, name: body.name, level: body.level }], st.catalog.actions, id, a)]));
+  await publishMatrix(tx, orgId, { ...cur.value, [id]: row }, `Role ${id} cloned from ${baseId}`, by);
   const role = roleOf({ id, name: body.name, level: body.level, desc: body.desc, base: baseId, version: 1 });
   return {
     msg: `${body.name} created with the rights of ${base.name}. Adjust them in the matrix.`,
