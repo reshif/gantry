@@ -196,6 +196,15 @@ d("wave 6 authz: flow locks, card templates, effective instructions, stops, gran
       expect(hidden.body.msg).toBe(unknown.body.msg);
     });
 
+    it("only a Factory Admin pre-authorises MCP writes; a project admin is refused, and a wildcard is flagged in the ledger", async () => {
+      await w.insertWo("WO-grant-10", { project: "payments", position: "build", state: "running" });
+      await w.q(`insert into attempts (org_id, id, wo_id, station, visit, state) values ($1,'at-grant-10','WO-grant-10','build',1,'running')`, [t.orgId]);
+      const no = await w.call(DANIEL, "POST", "/api/v1/mcp/grants", { wo: "WO-grant-10", tools: ["any/x"] }, { "idempotency-key": "grant-pa-1" });
+      expect(no.status).toBe(403);
+      expect(String(no.body.msg)).toMatch(/Factory Admin/);
+      expect((await w.q(`select data from attempts where id = 'at-grant-10'`))[0].data.writeGrants ?? null).toBeNull();
+    });
+
     it("the requester of a work order cannot pre-authorise writes for it", async () => {
       await w.insertWo("WO-grant-9", { project: "payments", position: "build", state: "running", requestedBy: ASHA });
       await w.q(`insert into attempts (org_id, id, wo_id, station, visit, state) values ($1,'at-grant-9','WO-grant-9','build',1,'running')`, [t.orgId]);

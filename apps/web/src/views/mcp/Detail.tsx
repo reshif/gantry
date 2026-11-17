@@ -11,7 +11,7 @@ import { useUI } from "../../ui/overlay-context";
 import { Health, Rw, SENS, classesFor, dec, draftOf, projectsIn, stationsFor, type ScopeDraft } from "./kit";
 import { UsageTable } from "./Usage";
 
-const WRITE_ALWAYS: Decision = { allowed: false, reason: "Write tools always need a station pre-authorisation for the work order and attempt. There is no switch to turn it off." };
+const WRITE_ALWAYS: Decision = { allowed: false, reason: "Write tools always need a station pre-authorisation for the work order and attempt. There is no switch to turn it off. Only a Factory Admin can grant it." };
 
 function ScopeGroup({ k, label, items, d, ro, allowAll, set }: { k: keyof ScopeDraft; label: string; items: Array<{ id: string; label: string; mono?: boolean }>; d: ScopeDraft; ro: boolean; allowAll: boolean; set: (next: ScopeDraft) => void }) {
   const all = d[k] === "all";
@@ -136,7 +136,7 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName, on
           <div className="form-row mcp-row">
             <Field label="Sensitivity" htmlFor="mcp-sens"><Select id="mcp-sens" options={SENS} value={srv.sensitivity} disabled={ro} onChange={(x) => void ops.updateMCP(srv.id, { sensitivity: x }, v).then((r) => show(r, `${srv.name} is now ${x}.`))} /></Field>
             <div className="toggle-row mcp-wg">
-              <div><strong>Write tools need a pre-authorisation</strong><div className="muted small">{strict ? "Confidential and restricted servers: " : ""}Each write call needs the station's pre-authorisation for the work order and attempt, and is never retried.</div></div>
+              <div><strong>Write tools need a pre-authorisation</strong><div className="muted small">{strict ? "Confidential and restricted servers: " : ""}Each write call needs the station's pre-authorisation for the work order and attempt, and is never retried. Only a Factory Admin can grant it.</div></div>
               <Toggle id="mcp-writegate" checked label="Write tools need a pre-authorisation" decision={WRITE_ALWAYS} />
             </div>
           </div>
