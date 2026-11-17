@@ -141,6 +141,8 @@ button.mseg:hover, button.mseg:focus-visible { box-shadow: inset 0 0 0 2px var(-
 .menu { list-style: none; padding: 4px 0; }
 .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px; border: 0; background: none; text-align: left; color: var(--ink); }
 .menu-item:hover, .menu-item:focus-visible { background: var(--accent-soft); outline: none; }
+.menu-item-danger:not(.is-locked) { color: var(--block); }
+.menu-item-danger:not(.is-locked):hover, .menu-item-danger:not(.is-locked):focus-visible { background: var(--block-soft); }
 .menu-item.is-locked { color: var(--faint); cursor: not-allowed; }
 .menu-l { flex: 1; }
 .menu-h { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--muted); }

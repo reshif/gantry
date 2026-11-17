@@ -14,6 +14,7 @@ export const VIEWS: Record<string, LazyExoticComponent<ComponentType>> = {
   onboarding: lazyRetry(() => import("./onboarding")),
   "project-config": lazyRetry(() => import("./project-config")),
   record: lazyRetry(() => import("./record")),
+  changes: lazyRetry(() => import("./changes")),
   agents: lazyRetry(() => import("./agents")),
   skills: lazyRetry(() => import("./skills")),
   models: lazyRetry(() => import("./models")),

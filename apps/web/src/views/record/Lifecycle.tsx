@@ -7,6 +7,7 @@ import { Loading, NotVisible, failureOf } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { reducedMotion } from "../../lib/prefs";
+import { navigate } from "../../lib/router";
 import { useOpenRecordRoute } from "./nav";
 import { journeyOf, stName, toRecEvent, type RecEvent, type TWo } from "../traveler/model";
 import { Fold, useName } from "./bits";
@@ -193,7 +194,33 @@ function sectionBody(id: SectionId, c: Ctx): ReactNode {
 }
 
 export function Sections({ c }: { c: Ctx }) {
-  const { rec, pre, compact } = c;
+  const { rec, pre, compact, doc } = c;
+  if (doc) {
+    return (
+      <article className="dz-doc" aria-label="Work order document">
+        {SECTIONS.map((s, i) => (
+          <section key={s.id} className="dz-sec" id={`${pre}sec-${s.id}`} aria-labelledby={`${pre}sec-${s.id}-h`}>
+            <details open>
+              <summary>
+                <h2 className="rec-sec-title" id={`${pre}sec-${s.id}-h`}>
+                  <span className="dz-n mono">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="dz-t">{s.label}</span>
+                </h2>
+                {rec.completeness.sections[s.id] ? null : <span className="chip dz-meta">no data yet</span>}
+                <span className="dz-chev" aria-hidden="true"><Icon name="down" /></span>
+              </summary>
+              <div className="dz-sbody">
+                {sectionBody(s.id, c)}
+                {s.id === "changes" && rec.completeness.sections.changes ? (
+                  <div className="dz-actions"><Btn label="Open full review (file tree, diff, commits)" kind="primary" small icon="branch" id={`${pre}open-changes`} onClick={() => navigate("changes", c.wo.id, c.wo.project)} /></div>
+                ) : null}
+              </div>
+            </details>
+          </section>
+        ))}
+      </article>
+    );
+  }
   return (
     <>
       {SECTIONS.map((s, i) => {

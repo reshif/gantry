@@ -1,0 +1,120 @@
+/* The work order page (#record/<WO>): header card, tabs, document card, properties column, and the changes page. Tokens only. */
+.dz { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dz > * { min-width: 0; }
+.dz-head { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
+.dz-head > .body { display: flex; flex-direction: column; gap: 14px; padding: 14px 18px 16px; }
+.dz-back { display: flex; align-items: center; gap: 10px; font-size: var(--t-md); flex-wrap: wrap; row-gap: 4px; }
+.dz-back a { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.dz-back a:hover { color: var(--ink); }
+.grow { flex: 1; }
+.dz-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dz-id { font-weight: 600; color: var(--muted); }
+.dz-title h1 { font-size: var(--t-title); line-height: 1.25; margin: 8px 0 6px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.dz-stline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: var(--t-md); }
+.dz-rail { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: var(--r2); padding: 10px 12px; background: var(--bg); min-width: 0; }
+.dz-rail .pipe-wrap { max-width: 100%; }
+.dz-next { font-size: var(--t-md); }
+.dz-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dz-lockline { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; color: var(--faint); }
+.dz-lockline .ic { width: 12px; height: 12px; margin-top: 3px; flex: none; }
+.dz-head .callout { display: flex; gap: 10px; align-items: flex-start; font-size: var(--t-md); }
+.dz-head .callout .ic { margin-top: 2px; flex: none; }
+.dz-head .callout b { margin-right: 4px; }
+.dz-head .trv-why { margin: 0; }
+
+.dz-tabbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); }
+.dz-tabbar .tabs { border-bottom: 0; flex: 0 1 auto; min-width: 0; }
+.dz-tabbar .tab { padding: 12px 12px 10px; margin-bottom: 0; }
+.dz-tabnote { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; border: 0; background: none; padding: 0; white-space: nowrap; color: var(--faint); }
+.dz-tabnote .ic { width: 13px; height: 13px; }
+.dz-tabnote.need { color: var(--wait); font-weight: 600; cursor: pointer; }
+
+.dz-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+.dz-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dz-side { position: sticky; top: 64px; max-height: calc(100dvh - 80px); overflow-y: auto; border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
+.dz-props > summary { list-style: none; cursor: pointer; padding: 10px 14px; font-weight: 600; border-bottom: 1px solid var(--line); display: none; }
+.dz-props > summary::-webkit-details-marker { display: none; }
+.dz-props .props { padding: 14px; display: flex; flex-direction: column; gap: 18px; }
+.dz-lab { margin: 0 0 6px; font-family: var(--f-mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+.dz-kv { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.dz-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; font-size: var(--t-md); align-items: baseline; }
+.dz-row dt { color: var(--faint); }
+.dz-row dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.dz-cls { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dz-none { margin: 0; color: var(--faint); font-size: var(--t-md); }
+.dz-wy-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dz-wy { display: flex; gap: 6px; align-items: flex-start; text-align: left; font-size: var(--t-md); color: var(--accent); background: none; border: 0; padding: 3px 0; }
+.dz-wy .ic { width: 14px; height: 14px; margin-top: 2px; flex: none; }
+.dz-bb { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; font-size: var(--t-md); }
+.dz-exp { display: flex; flex-wrap: wrap; gap: 6px; }
+.dz-side .rec-meter { border: 0; padding: 0; background: none; }
+.dz-side .rec-meter-top { display: none; }
+.dz-side .rec-meter-bar { margin-bottom: 6px; }
+
+/* the document: one card, sections that fold */
+.dz-doc { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); min-width: 0; }
+.dz-sec { border-bottom: 1px solid var(--line); scroll-margin-top: 64px; min-width: 0; }
+.dz-sec:last-child { border-bottom: 0; }
+.dz-sec > details > summary { display: flex; align-items: center; gap: 10px; padding: 12px 18px; cursor: pointer; list-style: none; }
+.dz-sec > details > summary::-webkit-details-marker { display: none; }
+.dz-sec h2 { display: flex; align-items: baseline; gap: 10px; font-size: var(--t-panel); margin: 0; font-weight: 600; }
+.dz-sec h2.rec-sec-title { padding: 0; border: 0; background: none; font-size: var(--t-panel); }
+.dz-sec h2:focus { outline: none; }
+.dz-sec h2:focus-visible { box-shadow: 0 0 0 2px var(--accent); border-radius: 4px; }
+.dz-n { font-family: var(--f-mono); font-size: 11.5px; color: var(--faint); font-weight: 400; }
+.dz-t { font-family: var(--f-body); }
+.dz-meta { margin-left: 4px; }
+.dz-chev { margin-left: auto; color: var(--faint); display: inline-flex; transition: transform 0.15s; }
+.dz-sec details:not([open]) .dz-chev { transform: rotate(-90deg); }
+.dz-sbody { padding: 2px 18px 18px; display: flex; flex-direction: column; gap: 14px; max-width: 86ch; min-width: 0; overflow-wrap: anywhere; }
+.dz-sbody > * { min-width: 0; }
+.dz-sbody .rec-kvs, .dz-sbody .rec-facts { border: 0; display: flex; flex-direction: column; gap: 6px; }
+.dz-sbody .rec-kv { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px; padding: 0; border: 0; align-items: baseline; }
+.dz-sbody .rec-kv dt { font-family: var(--f-body); font-size: var(--t-md); letter-spacing: 0; text-transform: none; color: var(--faint); }
+.dz-sbody .rec-kv dd { margin: 0; }
+.dz-sbody .rec-lede { font-size: var(--t-lg); }
+.dz-replay { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); }
+.dz-replay > summary { padding: 8px 14px; cursor: pointer; font-size: var(--t-md); color: var(--muted); }
+.dz-replay[open] > summary { border-bottom: 1px solid var(--line); }
+.dz-replay .rec-scrub { border: 0; }
+
+/* the conversation inside the page */
+.dz-main .osx.is-bare { display: block; }
+.dz-main .osx.is-bare .osx-grid { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+.dz-main .osx.is-bare .osx-main { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
+.dz-main .osx.is-bare .osx-thread { max-height: none; }
+.dz-main .osx.is-bare .osx-side { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); padding: 14px 16px; }
+.dz-main .osx.is-bare .osx-side { order: 0; }
+.dz-main .osx.is-bare .osx-side > .osx-facts:first-of-type, .dz-main .osx.is-bare .osx-steps { display: none; }
+
+/* the changes page */
+.dz-chg { display: flex; flex-direction: column; gap: 16px; }
+.dz-counts { display: flex; gap: 28px; flex-wrap: wrap; }
+.dz-counts > div { display: flex; flex-direction: column; }
+.dz-counts b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.dz-counts span { font-size: var(--t-sm); color: var(--faint); }
+.dz-chg .num-ok { color: var(--done); } .dz-chg .num-bad { color: var(--block); }
+.dz-chg .dz-tree { padding: 0; }
+
+@media (max-width: 1100px) {
+  .dz-grid { grid-template-columns: minmax(0, 1fr); }
+  .dz-side { position: static; max-height: none; order: -1; }
+  .dz-props > summary { display: block; }
+  .dz-props:not([open]) .props { display: none; }
+}
+@media (max-width: 640px) {
+  .dz-title h1 { font-size: var(--t-xl); }
+  .dz-head > .body { padding: 12px; }
+  .dz-sbody, .dz-sec > details > summary { padding-inline: 12px; }
+  .dz-sbody .rec-kv { grid-template-columns: 96px minmax(0, 1fr); }
+  .dz-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .dz-tabbar { padding: 0 8px; }
+}
+
+.dz-chg .dz-prov { margin-top: 8px; }
+.dz-chg .rec-guard { margin: 12px 0 0; border: 0; padding: 0; background: none; }
+.dz-plan { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.dz-acs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.dz-chgbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dz-treebox { padding: 6px 14px 10px; }
+.dz-chg .rec-file { padding-left: 8px; }

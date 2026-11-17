@@ -22,6 +22,10 @@ export interface Ctx {
   cat: Catalog;
   pre: string;
   compact: boolean;
+  /** The work order page: sections sit in one document card and fold. */
+  doc?: boolean;
+  /** The changes page: counts, plan and files as separate panels. */
+  page?: boolean;
 }
 
 

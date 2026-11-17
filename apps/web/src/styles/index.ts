@@ -37,3 +37,4 @@ import "./views/system.css";
 import "./app.css";
 import "./foundation.css";
 import "./system.css";
+import "./views/dossier.css";
