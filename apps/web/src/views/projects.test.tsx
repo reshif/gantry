@@ -148,8 +148,8 @@ describe("Projects: portfolio", () => {
     });
     mount(<ProjectsView />);
     await screen.findByText("Payments Platform");
-    fireEvent.change(await byId("prj-pf-view"), { target: { value: "v-1" } });
-    await waitFor(() => expect((document.getElementById("prj-pf-view") as HTMLSelectElement).value).toBe("v-1"));
+    fireEvent.click(await byId("prj-pf-view-v-1"));
+    await waitFor(() => expect(document.getElementById("prj-pf-view-v-1")?.getAttribute("aria-selected")).toBe("true"));
     // the saved view's grouping is applied
     expect(document.querySelector(".pf-group-h")).toBeTruthy();
     fireEvent.change(document.getElementById("prj-pf-sort")!, { target: { value: "spend" } });
@@ -170,7 +170,7 @@ describe("Projects: portfolio", () => {
     await screen.findByText("Payments Platform");
     expect(document.getElementById("prj-pf-vdel")).toBeNull();
     expect(document.getElementById("prj-pf-vren")).toBeNull();
-    fireEvent.change(await byId("prj-pf-view"), { target: { value: "v-1" } });
+    fireEvent.click(await byId("prj-pf-view-v-1"));
     expect(await byId("prj-pf-vdel")).toBeTruthy();
     expect(await byId("prj-pf-vren")).toBeTruthy();
   });

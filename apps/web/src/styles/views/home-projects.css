@@ -116,3 +116,41 @@
   .hm-step .btn { grid-column: 1 / -1; }
   .hm-proj-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ---------- projects: the portfolio card ---------- */
+.pf { display: grid; gap: var(--s3); min-width: 0; }
+.pf-sum { margin: 0; }
+.pf-card { overflow: hidden; }
+.pf-card > .tabs { padding: 0 8px; margin: 0; border-bottom: 1px solid var(--line); }
+.pf-card .filterbar { padding: 12px 16px; }
+.pf-card .filterbar-end { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-left: auto; }
+.pf-card .filterbar + .pf-card-body { border-top: 1px solid var(--line); }
+.pf-dir { width: 28px; height: 30px; border: 0; border-left: 1px solid var(--line); border-radius: 0; }
+.pf-groups { display: grid; gap: var(--s4); min-width: 0; }
+.pf-group { display: grid; gap: var(--s2); min-width: 0; }
+.pf-group-h { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s2); flex-wrap: wrap; font-size: var(--t-base); font-weight: 600; padding: 12px 16px 0; }
+.pf-groups > .pf-group > .pf-group-h { padding: 0; }
+.pf-card-body .pf-group { gap: 0; }
+.pf-card-body .pf-group + .pf-group { border-top: 1px solid var(--line); }
+.pf-card-body .dtable { border: 0; border-radius: 0; box-shadow: none; }
+.pf-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.pf-name .hm-key { flex: none; }
+.pf-name-btn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--ink); text-align: left; cursor: pointer; }
+.pf-name-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
+.pf-roles { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.pf-rows .mono { font-family: var(--f-body); font-variant-numeric: tabular-nums; }
+.pf-reg { color: var(--accent); }
+.pf-detail { max-width: 18em; }
+.pf-belt { min-width: 130px; width: 100%; }
+.pf-belt .mseg { height: 16px; min-width: 6px; font-size: 9px; }
+.pf-belt .mseg-n { display: none; }
+.pf-spend { display: grid; gap: 3px; min-width: 110px; }
+.pf-spend .meter { height: 5px; }
+.pf-acts { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.pf-rows .dtable td { vertical-align: middle; }
+.pf-rows .dtable td.is-end > .mono > .muted.small, .pf-rows .dtable td.is-end > span > .muted.small { display: block; white-space: nowrap; }
+.pf-rows .dtable th, .pf-rows .dtable td { padding-left: 10px; padding-right: 10px; }
+@media (max-width: 560px) {
+  .pf-card .filterbar-end { margin-left: 0; }
+  .pf-acts { justify-content: flex-start; }
+}

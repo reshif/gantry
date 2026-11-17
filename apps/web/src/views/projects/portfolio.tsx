@@ -8,7 +8,7 @@ import { fmt, type Catalog } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useMe, useSavedViews, useTemplates } from "../../api/queries";
 import { useCan } from "../../api/can";
-import { Btn, Field, IconBtn, Meter, Segmented, Select } from "../../ui/primitives";
+import { Btn, Chip, Field, IconBtn, FilterBar, Meter, SearchBox, Segmented, Select, Tabs } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { getPrefs, updatePrefs } from "../../lib/prefs";
 import { DataTable, EmptyState, HealthChip, MiniBelt, goProject, metricsOf, useCatalog, useTeams, type Col, type PView } from "./kit";
@@ -156,15 +156,15 @@ export function ProjectCard({ cat, r }: { cat: Catalog; r: Row }) {
       </dl>
       <p className="hm-proj-ins small">
         <span data-tip={effTip(m)} tabIndex={0}>
-          <span className="kv-k">Flow eff. </span>
+          <span className="hm-lbl">Flow eff. </span>
           <span className="mono">{effText(m)}</span>
         </span>
         <span data-tip={covTip(m)} tabIndex={0}>
-          <span className="kv-k">Trust </span>
+          <span className="hm-lbl">Trust </span>
           <span className="mono">{covText(m)}</span>
         </span>
         <span>
-          <span className="kv-k">Spend </span>
+          <span className="hm-lbl">Spend </span>
           <span className={`mono${r.spend >= 1 ? " neg" : ""}`}>{p.budget.monthly ? fmt.pct(r.spend) : "no budget"}</span>
         </span>
       </p>
@@ -188,7 +188,7 @@ function rowCols(ctx: string, cat: Catalog, withRoles: boolean, myRoles: (id: st
       render: ({ p }) => (
         <div className="pf-name">
           <span className="mono hm-key">{p.key}</span>
-          <button type="button" className="linkish pf-name-btn" id={`${ctx}-open-${p.id}`} onClick={() => goProject(p.id, p.status === "archived" ? "project-config" : "floor")}>
+          <button type="button" className="pf-name-btn" id={`${ctx}-open-${p.id}`} onClick={() => goProject(p.id, p.status === "archived" ? "project-config" : "floor")}>
             {p.name}
           </button>
           {p.regulated ? <span className="tag pf-reg">regulated</span> : null}
@@ -244,7 +244,7 @@ function rowCols(ctx: string, cat: Catalog, withRoles: boolean, myRoles: (id: st
       key: "roles", label: "Your roles", hideSmall: true,
       render: ({ p }) => {
         const r = myRoles(p.id);
-        return r.length ? <span className="small">{r.join(", ")}</span> : <span className="muted small">none</span>;
+        return r.length ? <span className="pf-roles">{r.slice(0, 2).map((x) => <Chip key={x} text={x} />)}{r.length > 2 ? <span className="muted small">{`+${r.length - 2}`}</span> : null}</span> : <span className="muted small">none</span>;
       },
     });
   }
@@ -371,55 +371,80 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
     const summary = `${shown.length} of ${projects.length} projects${archivedN && !st.archived ? ` · ${archivedN} archived hidden` : ""}${st.group !== "none" ? ` · ${groups.length} groups` : ""} · sorted by ${sorter.label.toLowerCase()}${st.dir > 0 ? "" : ", descending"}.`;
   const cols = rowCols(ctx, cat, !!roles, myRoles);
 
+  // The count on each view tab: how many projects that view would list, before search.
+  const countFor = (v: ViewDef): number =>
+    projects.filter((p) => {
+      const m = metricsOf(p);
+      const f = { ...st, ...(v.s as Partial<PfState>) };
+      if (!f.archived && p.status === "archived") return false;
+      if (f.health !== "all" && m.health.id !== f.health) return false;
+      if (f.team !== "all" && !p.teams.includes(f.team)) return false;
+      return f.tpl === "all" || p.template === f.tpl;
+    }).length;
+
+  const inner = (g: { key: string; label: string | null; items: Row[] }) =>
+    st.layout === "rows" ? (
+      <DataTable id={`${ctx}-t-${g.key}`} caption={`${g.label || "Projects"} portfolio`} columns={cols} rows={g.items} rowKey={(r) => r.p.id} empty={{ title: "No projects", text: "" }} />
+    ) : (
+      <ul className="hm-proj-grid">{g.items.map((r) => <li key={r.p.id} style={{ display: "contents" }}><ProjectCard cat={cat} r={r} /></li>)}</ul>
+    );
+  const groupHead = (g: { label: string | null; items: Row[] }) => {
+    const gates = g.items.reduce((a, r) => a + r.m.gates, 0);
+    const wip = g.items.reduce((a, r) => a + r.m.wip, 0);
+    return (
+      <h3 className="pf-group-h">
+        <span>{g.label}</span>
+        <span className="small muted">{`${g.items.length} project${g.items.length > 1 ? "s" : ""} · ${wip} WIP · ${gates} gate${gates === 1 ? "" : "s"} waiting`}</span>
+      </h3>
+    );
+  };
+
   return (
     <div className={`pf pf-${st.layout}`} id={ctx}>
-      <div className="pf-toolbar">
-        <div className="pf-bar">
-          <div className="filters pf-bar-l">
-            <Field label="View" htmlFor={`${ctx}-view`}>
-              <Select
-                id={`${ctx}-view`}
-                                                options={[...views.map((v) => ({ value: v.id, label: v.name + (v.builtIn ? "" : " (saved)") })), ...(curView ? [] : [{ value: "", label: "Custom view" }])]}
-                value={curView ? st.view : ""}
-                onChange={(id) => {
-                  const v = views.find((x) => x.id === id);
-                  if (!v) return;
-                  applyView(v);
-                  setTimeout(() => document.getElementById(`${ctx}-view`)?.focus(), 40);
-                }}
-            />
-            </Field>
-            {modified ? <span className="status tone-wait pf-mod">Changed</span> : null}
-            {curView && !curView.builtIn && modified ? (
-              <Btn small id={`${ctx}-vupd`} label={`Update ${curView.name}`} onClick={async () => {
-                const s: Record<string, unknown> = {};
-                for (const k of VIEW_KEYS) s[k] = st[k];
-                const r = await ops.updateSavedView(curView.id, { s }, { ifMatch: curView.version });
-                ui.toast(r.ok ? `View ${curView.name} updated.` : r.msg, r.ok ? "ok" : "error");
-              }} />
-            ) : null}
-            <Btn small kind="ghost" icon="plus" id={`${ctx}-vsave`} label="Save view" onClick={() => viewDialog("new")} />
-            {curView && !curView.builtIn ? (
-              <>
-                <Btn small kind="ghost" id={`${ctx}-vren`} label="Rename" onClick={() => viewDialog("rename")} />
-                <Btn small kind="ghost" icon="x" id={`${ctx}-vdel`} label="Delete" onClick={async () => {
-                  const r = await ops.deleteSavedView(curView.id, { ifMatch: curView.version });
-                  if (!r.ok) return void ui.toast(r.msg, "error");
-                  set({ ...(PF_BUILTIN[0]!.s as Partial<PfState>), view: "v-all" });
-                  ui.toast(`View ${curView.name} deleted.`, "ok");
-                }} />
-              </>
-            ) : null}
-          </div>
-          <div className="pf-bar-r pf-layout">
-            <Segmented name={`${ctx}-layout`} items={[{ id: "cards", label: "Cards" }, { id: "rows", label: "Rows" }]} value={st.layout} onChange={(v) => setFocus({ layout: v as PfState["layout"] }, `${ctx}-layout-${v}`)} label="Portfolio layout" />
-          </div>
-        </div>
-        <div className="pf-bar">
-          <div className="filters pf-bar-l">
-            <Field label="Search" htmlFor={qid}>
-              <input id={qid} className="input" type="search" placeholder="Name, key or description" value={st.q || ""} onChange={(e) => set({ q: e.target.value })} />
-            </Field>
+      <p className="small muted pf-sum" aria-live="polite">{summary}</p>
+      <div className="panel pf-card">
+        <Tabs
+          idPrefix={`${ctx}-view`}
+          items={[...views.map((v) => ({ id: v.id, label: v.name, count: countFor(v) })), ...(curView ? [] : [{ id: "", label: "Custom view" }])]}
+          active={curView ? st.view : ""}
+          onChange={(id) => {
+            const v = views.find((x) => x.id === id);
+            if (!v) return;
+            applyView(v);
+            setTimeout(() => document.getElementById(`${ctx}-view-${id}`)?.focus(), 40);
+          }}
+        />
+        <FilterBar
+          label="Filter projects"
+          actions={
+            <>
+              {modified ? <span className="status tone-wait pf-mod">Changed</span> : null}
+                {curView && !curView.builtIn && modified ? (
+                  <Btn small id={`${ctx}-vupd`} label={`Update ${curView.name}`} onClick={async () => {
+                    const s: Record<string, unknown> = {};
+                    for (const k of VIEW_KEYS) s[k] = st[k];
+                    const r = await ops.updateSavedView(curView.id, { s }, { ifMatch: curView.version });
+                    ui.toast(r.ok ? `View ${curView.name} updated.` : r.msg, r.ok ? "ok" : "error");
+                  }} />
+                ) : null}
+                <Btn small kind="ghost" icon="plus" id={`${ctx}-vsave`} label="Save as view" onClick={() => viewDialog("new")} />
+                {curView && !curView.builtIn ? (
+                  <>
+                    <Btn small kind="ghost" id={`${ctx}-vren`} label="Rename" onClick={() => viewDialog("rename")} />
+                    <Btn small kind="ghost" icon="x" id={`${ctx}-vdel`} label="Delete" onClick={async () => {
+                      const r = await ops.deleteSavedView(curView.id, { ifMatch: curView.version });
+                      if (!r.ok) return void ui.toast(r.msg, "error");
+                      set({ ...(PF_BUILTIN[0]!.s as Partial<PfState>), view: "v-all" });
+                      ui.toast(`View ${curView.name} deleted.`, "ok");
+                    }} />
+                  </>
+                ) : null}
+                <Segmented name={`${ctx}-layout`} items={[{ id: "cards", label: "Cards" }, { id: "rows", label: "Rows" }]} value={st.layout} onChange={(v) => setFocus({ layout: v as PfState["layout"] }, `${ctx}-layout-${v}`)} label="Portfolio layout" />
+            </>
+          }
+        >
+          <div className="filters">
+            <SearchBox id={qid} value={st.q || ""} onChange={(v) => set({ q: v })} placeholder="Name, key or description" label="Search projects" />
             <Field label="Health" htmlFor={`${ctx}-health`}>
               <Select id={`${ctx}-health`} options={[{ value: "all", label: "Any" }, ...Object.keys(HEALTH_LABEL).filter((k) => k !== "archived" || st.archived).map((k) => ({ value: k, label: HEALTH_LABEL[k]! }))]} value={st.health} onChange={(v) => setFocus({ health: v }, `${ctx}-health`)} />
             </Field>
@@ -429,14 +454,6 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
             <Field label="Template" htmlFor={`${ctx}-tpl`}>
               <Select id={`${ctx}-tpl`} options={[{ value: "all", label: "Any" }, ...tpls.map((t) => ({ value: t.id, label: t.name }))]} value={st.tpl} onChange={(v) => setFocus({ tpl: v }, `${ctx}-tpl`)} />
             </Field>
-            {archivedN ? (
-              <label className="check field-check" htmlFor={`${ctx}-arch`}>
-                <input type="checkbox" id={`${ctx}-arch`} checked={!!st.archived} onChange={(e) => setFocus({ archived: e.target.checked }, `${ctx}-arch`)} />
-                {`Show ${archivedN} archived`}
-              </label>
-            ) : null}
-          </div>
-          <div className="filters pf-bar-r">
             <Field label="Group" htmlFor={`${ctx}-group`}>
               <Select id={`${ctx}-group`} options={GROUPS.map((g) => ({ value: g.id, label: g.id === "none" ? "None" : g.label }))} value={st.group} onChange={(v) => setFocus({ group: v }, `${ctx}-group`)} />
             </Field>
@@ -444,40 +461,45 @@ export function Portfolio({ ctx, projects, defaultLayout, roles }: PortfolioProp
               <Select id={`${ctx}-sort`} options={SORTS.map((s) => ({ value: s.id, label: s.label }))} value={st.sort} onChange={(v) => setFocus({ sort: v }, `${ctx}-sort`)} />
               <IconBtn icon={st.dir > 0 ? "up" : "down"} id={`${ctx}-dir`} className="pf-dir" label={`Sort ${st.dir > 0 ? "ascending" : "descending"}. Select to flip.`} title={st.dir > 0 ? "Ascending" : "Descending"} onClick={() => setFocus({ dir: (st.dir > 0 ? -1 : 1) as 1 | -1 }, `${ctx}-dir`)} />
             </Field>
+            {archivedN ? (
+              <label className="check field-check" htmlFor={`${ctx}-arch`}>
+                <input type="checkbox" id={`${ctx}-arch`} checked={!!st.archived} onChange={(e) => setFocus({ archived: e.target.checked }, `${ctx}-arch`)} />
+                {`Show ${archivedN} archived`}
+              </label>
+            ) : null}
           </div>
-        </div>
+        </FilterBar>
+        {st.layout === "rows" && shown.length ? (
+          <div className="pf-rows pf-card-body">
+            {groups.map((g) => (
+              <section key={g.key} className="pf-group" aria-label={g.label ?? "Projects"}>
+                {g.label ? groupHead(g) : null}
+                {inner(g)}
+              </section>
+            ))}
+          </div>
+        ) : null}
       </div>
-      <p className="small muted pf-sum" aria-live="polite">{summary}</p>
       {!shown.length ? (
         <EmptyState
           id={`${ctx}-empty`} icon="filter" title={projects.length ? "No projects match" : "No projects yet"}
           text={projects.length ? "Clear the search or the filters, or show archived projects." : "Create one from a template."}
           action={projects.length ? <Btn small id={`${ctx}-clear`} label="Clear filters" onClick={() => set({ q: "", health: "all", team: "all", tpl: "all" })} /> : null}
         />
-      ) : (
-        <div className={`pf-groups${st.layout === "rows" ? " pf-rows" : ""}`}>
-          {groups.map((g) => {
-            const inner =
-              st.layout === "rows" ? (
-                <DataTable id={`${ctx}-t-${g.key}`} caption={`${g.label || "Projects"} portfolio`} columns={cols} rows={g.items} rowKey={(r) => r.p.id} empty={{ title: "No projects", text: "" }} />
-              ) : (
-                <div className="hm-proj-grid">{g.items.map((r) => <ProjectCard key={r.p.id} cat={cat} r={r} />)}</div>
-              );
-            if (!g.label) return <div key={g.key} style={{ display: "contents" }}>{inner}</div>;
-            const gates = g.items.reduce((a, r) => a + r.m.gates, 0);
-            const wip = g.items.reduce((a, r) => a + r.m.wip, 0);
-            return (
+      ) : st.layout === "cards" ? (
+        <div className="pf-groups">
+          {groups.map((g) =>
+            g.label ? (
               <section key={g.key} className="pf-group" aria-label={g.label}>
-                <h3 className="pf-group-h">
-                  <span>{g.label}</span>
-                  <span className="mono small muted">{`${g.items.length} project${g.items.length > 1 ? "s" : ""} · ${wip} WIP · ${gates} gate${gates === 1 ? "" : "s"} waiting`}</span>
-                </h3>
-                {inner}
+                {groupHead(g)}
+                {inner(g)}
               </section>
-            );
-          })}
+            ) : (
+              <div key={g.key} style={{ display: "contents" }}>{inner(g)}</div>
+            ),
+          )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
