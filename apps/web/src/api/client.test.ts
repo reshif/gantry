@@ -127,6 +127,7 @@ describe("ops mapping", () => {
     expect(loginUrl("sso")).toBe("/auth/login?method=sso");
     expect(loginUrl("github")).toBe("/auth/login?method=github");
     expect(loginUrl("sso", "asha@acme.dev")).toBe("/auth/login?login_hint=asha%40acme.dev");
+    expect(loginUrl("sso", undefined, "#/floor")).toBe("/auth/login?method=sso&return_to=%2F%23%2Ffloor");
   });
 });
 

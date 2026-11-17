@@ -5,7 +5,7 @@ import { fmt } from "@gantry/domain";
 import { useHash } from "../lib/router";
 import { useAuditVerify, useMe, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
-import { Btn, Empty, Field, Select, ViewHead } from "../ui/primitives";
+import { Btn, Empty, Field, FilterBar, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -36,6 +36,8 @@ export default function AuditView() {
     if (asConsole && myId) setF((x) => ({ ...x, via: "console", actor: myId }));
   }, [asConsole, myId]);
   const [typed, setTyped] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState<{ ok: boolean; msg: string; at: number } | null>(null);
   const q = useDebounced(typed, 250);
   const filters = useMemo(() => ({ ...f, q }), [f, q]);
   const feed = useAuditFeed(filters);
@@ -64,20 +66,38 @@ export default function AuditView() {
   const scoped = !perm.pending && !perm.allowed;
 
   const runVerify = async () => {
+    setChecking(true);
     const r = await verify.refetch();
+    setChecking(false);
     const d = r.data as { ok: boolean; msg?: string } | undefined;
-    if (d) ui.toast(d.msg ?? (d.ok ? "Chain intact." : "The chain is broken."), d.ok ? "ok" : "error");
-    else ui.toast("The chain could not be verified.", "error");
+    const res = d ? { ok: d.ok, msg: d.msg ?? (d.ok ? "Chain intact." : "The chain is broken."), at: Date.now() } : { ok: false, msg: "The chain could not be verified.", at: Date.now() };
+    setChecked(res);
+    ui.toast(res.msg, res.ok ? "ok" : "error");
   };
+  // The ledger views: the same filters as below, one click away.
+  const view = f.outcome === "denied" ? "denied" : f.cat === "config" ? "config" : f.outcome === "all" && f.cat === "all" ? "all" : "";
+  const pickView = (id: string) => set(id === "denied" ? { outcome: "denied", cat: "all" } : id === "config" ? { cat: "config", outcome: "all" } : { cat: "all", outcome: "all" });
 
   return (
     <div className="view view-audit">
       <ViewHead
         title="Audit"
-        sub="Append-only ledger of every human, agent, API key and trigger action, including denied attempts. Nothing here can be edited or deleted."
-        meta={[["Entries", qState(feed, () => String(sum?.entries ?? 0))], ["Denied", qState(feed, () => String(sum?.denied ?? 0))], ["Config changes", qState(feed, () => String(sum?.changes ?? 0))], ...(feed.data === undefined || sum?.head ? [["Head digest", qState(feed, () => (sum?.head ?? "").slice(0, 8))] as [string, React.ReactNode]] : [])]}
-        actions={canVerify ? <Btn label="Verify chain" kind="ghost" icon="shield" id="aud-verify" onClick={() => void runVerify()} /> : undefined}
+        sub="An append-only record of what people, agents, API keys and triggers did, denials included. Each entry carries the digest of the one before it."
+        actions={canVerify ? <Btn label={checking ? "Verifying..." : "Verify chain"} kind="primary" icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify()} /> : undefined}
       />
+      <StatRow id="aud-stats">
+        <Stat label="Entries" value={qState(feed, () => String(sum?.entries ?? 0))} />
+        <Stat label="Denied" value={qState(feed, () => String(sum?.denied ?? 0))} />
+        <Stat label="Config changes" value={qState(feed, () => String(sum?.changes ?? 0))} />
+        {feed.data === undefined || sum?.head ? <Stat label="Head digest" value={qState(feed, () => (sum?.head ?? "").slice(0, 8))} /> : null}
+      </StatRow>
+      {checked ? (
+        <div className={`callout aud-verified ${checked.ok ? "callout-ok" : "callout-block"}`} role="status" id="aud-verified">
+          <Icon name={checked.ok ? "shield" : "alert"} />
+          <div><strong>{checked.ok ? "No break found" : "The chain is broken"}</strong><span>{` ${checked.msg} Checked ${fmt.stamp(checked.at)}.`}</span></div>
+          <Btn label="Dismiss" small id="aud-verified-dismiss" onClick={() => setChecked(null)} />
+        </div>
+      ) : null}
       {scoped ? (
         <div className="lock-note" role="note">
           <Icon name="lock" />
@@ -103,27 +123,29 @@ export default function AuditView() {
           </button>
         ))}
       </div>
-      <div className="toolbar aud-filters">
-        <div className="filters">
-          <Field label="Search" htmlFor="aud-q">
-            <input id="aud-q" className="input" type="search" placeholder="Actor, action, target, value" value={typed} autoComplete="off" onChange={(e) => setTyped(e.target.value)} />
-          </Field>
-          <Field label="Project" htmlFor="aud-project">
-            <Select id="aud-project" value={f.project} onChange={(v) => set({ project: v })} options={[{ value: "all", label: "All projects" }, { value: "factory", label: "Factory-wide only" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]} />
-          </Field>
-          <Field label="Actor" htmlFor="aud-actor"><Select id="aud-actor" value={f.actor} onChange={(v) => set({ actor: v })} options={actorOpts} /></Field>
-          <Field label="Outcome" htmlFor="aud-outcome"><Select id="aud-outcome" value={f.outcome} onChange={(v) => set({ outcome: v })} options={[{ value: "all", label: "Any outcome" }, ...(sum?.facets.outcomes ?? []).map((k) => ({ value: k, label: k }))]} /></Field>
-          <Field label="Via" htmlFor="aud-via"><Select id="aud-via" value={f.via} onChange={(v) => set({ via: v })} options={[{ value: "all", label: "Any channel" }, ...(sum?.facets.channels ?? []).map((k) => ({ value: k, label: k }))]} /></Field>
-          <label className="check aud-chk" htmlFor="aud-changes">
-            <input type="checkbox" id="aud-changes" checked={f.changes} onChange={(e) => set({ changes: e.target.checked })} />
-            Only entries with before/after
-          </label>
-        </div>
-        <div className="aud-count">
-          <span className="mono">{String(total)}</span>{" matching"}
-          {dirty ? <Btn label="Clear filters" small kind="ghost" id="aud-clear" onClick={clear} /> : null}
-        </div>
-      </div>
+      <section className="panel aud-panel" aria-label="Ledger">
+        <Tabs idPrefix="aud-view" active={view} onChange={pickView} items={[{ id: "all", label: "All entries", count: sum?.entries ?? 0 }, { id: "denied", label: "Denied", count: sum?.denied ?? 0 }, { id: "config", label: "Config changes", count: sum?.changes ?? 0 }]} />
+        <FilterBar
+          label="Ledger filters"
+          count={<><span className="mono">{String(total)}</span>{" matching"}</>}
+          actions={dirty ? <Btn label="Clear filters" small id="aud-clear" onClick={clear} /> : undefined}
+        >
+          <div className="filters aud-filters">
+            <Field label="Search" htmlFor="aud-q">
+              <input id="aud-q" className="input" type="search" placeholder="Actor, action, target, value" value={typed} autoComplete="off" onChange={(e) => setTyped(e.target.value)} />
+            </Field>
+            <Field label="Project" htmlFor="aud-project">
+              <Select id="aud-project" value={f.project} onChange={(v) => set({ project: v })} options={[{ value: "all", label: "All projects" }, { value: "factory", label: "Factory-wide only" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]} />
+            </Field>
+            <Field label="Actor" htmlFor="aud-actor"><Select id="aud-actor" value={f.actor} onChange={(v) => set({ actor: v })} options={actorOpts} /></Field>
+            <Field label="Outcome" htmlFor="aud-outcome"><Select id="aud-outcome" value={f.outcome} onChange={(v) => set({ outcome: v })} options={[{ value: "all", label: "Any outcome" }, ...(sum?.facets.outcomes ?? []).map((k) => ({ value: k, label: k }))]} /></Field>
+            <Field label="Via" htmlFor="aud-via"><Select id="aud-via" value={f.via} onChange={(v) => set({ via: v })} options={[{ value: "all", label: "Any channel" }, ...(sum?.facets.channels ?? []).map((k) => ({ value: k, label: k }))]} /></Field>
+            <label className="check aud-chk" htmlFor="aud-changes">
+              <input type="checkbox" id="aud-changes" checked={f.changes} onChange={(e) => set({ changes: e.target.checked })} />
+              Only entries with before/after
+            </label>
+          </div>
+        </FilterBar>
       <Async
         query={feed}
         what="the audit ledger"
@@ -155,6 +177,7 @@ export default function AuditView() {
           </table>
         </div>
       )}</Async>
+      </section>
       {feed.hasNextPage ? (
         <div className="more">
           <Btn label={`Show ${Math.min(PAGE, total - rows.length)} more`} id="aud-more" onClick={() => void feed.fetchNextPage()} />

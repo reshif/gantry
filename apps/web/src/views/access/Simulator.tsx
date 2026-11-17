@@ -109,6 +109,7 @@ export function Simulator({ people, projects, repos, actions, sim, setSim, evalu
   const rule = rd?.rule as { freeze?: string } | undefined;
   return (
     <Panel title="Policy simulator" cls="panel-sim">
+      <p className="muted small acc-sim-hint">Could this person do this, there, then? The answer is asked again whenever the matrix, a policy, a freeze or the people change.</p>
       <div className="acc-sim">
         <div>
           <form
@@ -127,7 +128,7 @@ export function Simulator({ people, projects, repos, actions, sim, setSim, evalu
             <Field label="Time (IST)" htmlFor="acc-sim-time"><input id="acc-sim-time" className="input mono" type="time" value={sim.time} onChange={(e) => setSim({ ...sim, time: e.target.value })} /></Field>
             <div className="sim-go">
               <Btn label="Evaluate" kind="primary" type="submit" icon="play" id="acc-sim-run" />
-              <Btn label="Use now" kind="ghost" id="acc-sim-now" onClick={() => setSim({ ...sim, ...nowIst() })} />
+              <Btn label="Use now" id="acc-sim-now" onClick={() => setSim({ ...sim, ...nowIst() })} />
             </div>
           </form>
           {presetsList.length ? (
@@ -162,7 +163,7 @@ export function Simulator({ people, projects, repos, actions, sim, setSim, evalu
             <WeekStrip r={r} />
           </div>
         ) : (
-          <div className="acc-out"><p className="muted small">Pick a person, action, project or repo and an IST time, then evaluate. The deciding rule is highlighted in the tabs below, and the week strip shows when the answer changes.</p></div>
+          <div className="acc-out"><p className="muted small acc-sim-empty">Pick a person, action, project or repo and an IST time, then evaluate. The deciding rule is highlighted in the tabs below, and the week strip shows when the answer changes.</p></div>
         )}
       </div>
     </Panel>

@@ -216,3 +216,25 @@ describe("Security screen", () => {
     expect(writes(calls)).toHaveLength(0);
   });
 });
+
+describe("Security screen: emergency stop tab", () => {
+  it("offers the factory kill with who may do it, lists the stops in force, and warns when a restore could not be approved", async () => {
+    setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0]] }), "GET /api/v1/stops": () => ({ body: { items: [{ id: "project:payments", row: "r1", scope: "project", mode: "halt", reason: "Flaky tests", inFlight: null, by: "p-asha", at: NOW - 60000, version: 1, fencing: 1 }] } }) });
+    mount();
+    fireEvent.click(await byId("sec-tab-stop"));
+    expect(locked(await byId("sec-stop-kill"))).toBe(false);
+    expect((await byId("sec-stop-warn")).textContent).toContain("a restore could not be approved");
+    await waitFor(() => expect(document.getElementById("sec-stops-table")?.textContent).toContain("Flaky tests"));
+    expect(text()).toContain("Needs two different Factory Admins and a fresh sign-in.");
+  });
+
+  it("locks the kill with the server's reason when kill.factory is denied", async () => {
+    setup({ "GET /api/v1/stops": () => ({ body: { items: [] } }) }, ["kill.factory"]);
+    mount();
+    fireEvent.click(await byId("sec-tab-stop"));
+    const kill = await byId("sec-stop-kill");
+    await waitFor(() => expect(locked(kill)).toBe(true));
+    expect(kill.getAttribute("data-reason")).toContain("No role holds kill.factory");
+    await waitFor(() => expect(text()).toContain("Nothing is stopped right now."));
+  });
+});

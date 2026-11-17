@@ -36,3 +36,18 @@
   .sec-idle-demo .btn { width: 100%; justify-content: center; }
 }
 .sec-lock { display: grid; gap: 6px; margin-bottom: var(--s3); } .sec-lock .lock-note { margin: 0; }
+
+/* tab bodies and the emergency stop tab */
+.sec-tabbody { display: grid; gap: var(--s3); min-width: 0; }
+.sec-stop { display: grid; gap: var(--s4); }
+.sec-stop .panel-body { display: grid; gap: var(--s3); }
+.sec-stop-sub, .sec-stop-foot { margin: 0; }
+.sec-stop .panel-body.flush { gap: 0; }
+.sec-stop-none { margin: 0; padding: 16px; }
+.sec-stop-foot { padding: 12px 16px; border-top: 1px solid var(--line); }
+.sec-stop-act { display: flex; gap: 8px; flex-wrap: wrap; }
+.sec-kv { display: grid; gap: 0; margin: 0; border-top: 1px solid var(--line); }
+.sec-kv > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.sec-kv dt { color: var(--muted); font-size: var(--t-sm); }
+.sec-kv dd { margin: 0; }
+@media (max-width: 560px) { .sec-kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }

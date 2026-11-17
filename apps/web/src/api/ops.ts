@@ -353,15 +353,16 @@ export const ops = {
 
 export type Ops = typeof ops;
 
-/** GET /auth/login target for a sign-in method (spec 14.1). `loginHint` is the email of a demo account. */
 /** Fresh sign-in for a step-up (spec 14.1), coming back to the same screen: the hash route travels as `return_to`. */
 export function stepUpUrl(hash: string = typeof window === "undefined" ? "" : window.location.hash): string {
   return `/auth/login?step_up=1&return_to=${encodeURIComponent(`/${hash}`)}`;
 }
 
-export function loginUrl(method: "sso" | "github", loginHint?: string): string {
+/** GET /auth/login target for a sign-in method (spec 14.1). `loginHint` is the email of a demo account. The hash route travels as `return_to` (a same-origin path the server re-validates), so sign-in lands on the page asked for. */
+export function loginUrl(method: "sso" | "github", loginHint?: string, hash: string = typeof window === "undefined" ? "" : window.location.hash): string {
   const sp = new URLSearchParams();
   if (loginHint) sp.set("login_hint", loginHint);
   else sp.set("method", method);
+  if (hash.length > 1) sp.set("return_to", `/${hash}`);
   return `/auth/login?${sp.toString()}`;
 }

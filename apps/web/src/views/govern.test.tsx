@@ -6,6 +6,7 @@ import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import PeopleView from "./people";
+import PersonView from "./person";
 import AccessView from "./access";
 import SecurityView from "./security";
 
@@ -96,9 +97,13 @@ describe("People", () => {
   it("lists teams and members, and decides effective permissions from the server's cells", async () => {
     setup();
     mount(<PeopleView />);
-    expect(await screen.findByRole("heading", { name: "Asha Raman" })).toBeTruthy();
+    expect(await screen.findByText("Asha Raman")).toBeTruthy();
     expect(screen.getByText("Tomas Eriksen")).toBeTruthy();
     expect(screen.getByText("invited")).toBeTruthy();
+    cleanup();
+    window.location.hash = "#person/p-asha";
+    mount(<PersonView />);
+    expect(await screen.findByRole("heading", { name: "Asha Raman" })).toBeTruthy();
     const yes = await screen.findByText("Submit work order");
     expect(yes.closest("tr")?.querySelector(".eff-cell.is-yes")).toBeTruthy();
     const rel = screen.getByText("Release").closest("tr")!;
@@ -107,7 +112,8 @@ describe("People", () => {
 
   it("shows the reason for a cell from the simulator", async () => {
     setup({ "POST /api/v1/access/simulate": () => ({ body: { ok: true, decision: { allowed: false, reason: "Outside the release window.", needs: "Wait for Monday", rule: { id: "POL-101", name: "Release window", kind: "policy" } }, trace: [], week: [] } }) });
-    mount(<PeopleView />);
+    window.location.hash = "#person/p-asha";
+    mount(<PersonView />);
     const cell = await waitFor(() => {
       const c = document.getElementById("ppl-eff-payments-release");
       if (!c) throw new Error("no cell");
@@ -183,8 +189,8 @@ describe("People", () => {
 
   it("a step-up refusal nobody resolved is shown as its message (the shell's prompt handles the rest)", async () => {
     setup({ "PUT /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ status: 403, body: { ok: false, msg: "Sign in again to confirm this change.", needs: "step_up" } }) });
-    mount(<PeopleView />);
-    fireEvent.click(await byId("ppl-mem-platform-p-tomas"));
+    window.location.hash = "#person/p-tomas";
+    mount(<PersonView />);
     const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "factory_admin" } });
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Covering for Asha" } });
@@ -197,8 +203,8 @@ describe("People", () => {
       "PUT /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ body: { ok: true, msg: "Granted Factory Admin to Tomas Eriksen.", version: 2 } }),
       "DELETE /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ body: { ok: true, msg: "Removed Factory Admin from Tomas Eriksen.", version: 3 } }),
     });
-    mount(<PeopleView />);
-    fireEvent.click(await byId("ppl-mem-platform-p-tomas"));
+    window.location.hash = "#person/p-tomas";
+    mount(<PersonView />);
     const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "factory_admin" } });
     expect(await screen.findByText(/A factory role applies on every project/)).toBeTruthy();
@@ -325,7 +331,7 @@ describe("Security", () => {
   it("keeps the last allowed domain and the one you signed in with", async () => {
     setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Domains and network/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Network/ }));
     const rm = await byId("sec-dom-rm-acme_dev");
     expect(rm.getAttribute("aria-disabled")).toBe("true");
     expect(rm.getAttribute("data-reason")).toContain("lock you out");
@@ -337,7 +343,7 @@ describe("Security", () => {
   it("validates a CIDR before sending", async () => {
     const calls = setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Domains and network/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Network/ }));
     fireEvent.change(await screen.findByLabelText("Address range to allow"), { target: { value: "nope" } });
     fireEvent.click(screen.getByText("Add range"));
     expect(await screen.findByText(/Enter an IPv4 address or CIDR range/)).toBeTruthy();
@@ -347,7 +353,7 @@ describe("Security", () => {
   it("lists sessions and revokes another one; read-only users cannot revoke others", async () => {
     const calls = setup({ "DELETE /api/v1/sessions/s2": () => ({ body: { ok: true, msg: "Session revoked." } }) });
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Active sessions/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Sessions/ }));
     fireEvent.click(await byId("sec-ses-rv-s2"));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/sessions/s2")).toBe(true));
   });
@@ -355,7 +361,7 @@ describe("Security", () => {
   it("shows the sign-in history with failures", async () => {
     setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Sign-in history/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /History/ }));
     expect(await screen.findByText("domain not allowed")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Succeeded"));
     expect(screen.queryByText("domain not allowed")).toBeNull();
