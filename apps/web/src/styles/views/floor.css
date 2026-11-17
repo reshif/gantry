@@ -383,3 +383,9 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 }
 
 @media (max-width: 560px) { .vhead-actions .seg { align-self: flex-start; width: auto; } }
+.f-bypass{opacity:.35}
+.floorpg .fl-live-note{display:none}
+.fl-facts{display:flex;flex-wrap:wrap;gap:4px 28px;margin:-6px 0 14px;align-items:baseline}
+.fl-facts b{color:var(--ink);font-size:14px}.fl-facts b.warn{color:var(--warn)}
+.floorpg .vhead .vtitle-badge{margin-left:10px}
+.f-valve.off{opacity:.45}.f-valve.off circle{stroke-dasharray:3 2}
