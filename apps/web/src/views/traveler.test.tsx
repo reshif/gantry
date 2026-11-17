@@ -165,6 +165,14 @@ describe("Traveler drawer", () => {
     expect(screen.getByText("Floor log")).toBeTruthy();
   });
 
+  it("shows the printable routing sheet with a stamp for every station and a Print button", async () => {
+    await show({}, {}, "sheet");
+    expect(await screen.findByText("Station stamps")).toBeTruthy();
+    expect(document.getElementById("trv-sheet")?.textContent).toContain(W.id);
+    expect(document.getElementById("trv-print")).toBeTruthy();
+    expect(document.querySelectorAll("#trv-stamps tbody tr").length).toBeGreaterThan(0);
+  });
+
   it("explains a work order the viewer cannot see", async () => {
     mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }) });
     mount(<Opener />);

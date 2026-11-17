@@ -14,6 +14,7 @@ import { Lifecycle } from "../record/Lifecycle";
 import { useOpenRecordRoute } from "../record/nav";
 import { Actions } from "./Actions";
 import { Journey } from "./Journey";
+import { Sheet } from "./Sheet";
 import { ArtefactsTab, BriefTab, HistoryTab } from "./Tabs";
 import { bayLabel, stName, stNo, useTravelerWo } from "./model";
 import { setTravelerTab, useTravelerTab } from "./state";
@@ -90,9 +91,10 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
     { id: "run", label: "Run" },
     { id: "artefacts", label: "Artefacts" },
     { id: "history", label: "History" },
+    { id: "sheet", label: "Sheet" },
   ];
   const body =
-    tab === "lifecycle" ? <Lifecycle woId={wo.id} compact /> : tab === "brief" ? <BriefTab wo={wo} cat={cat} /> : tab === "documents" ? <DocViewer woId={wo.id} project={wo.project} /> : tab === "run" ? <RunTimelineView woId={wo.id} /> : tab === "artefacts" ? <ArtefactsTab wo={wo} project={project} /> : tab === "history" ? <HistoryTab wo={wo} /> : <Journey wo={wo} project={project} cat={cat} />;
+    tab === "sheet" ? <Sheet wo={wo} cat={cat} project={project} /> : tab === "lifecycle" ? <Lifecycle woId={wo.id} compact /> : tab === "brief" ? <BriefTab wo={wo} cat={cat} /> : tab === "documents" ? <DocViewer woId={wo.id} project={wo.project} /> : tab === "run" ? <RunTimelineView woId={wo.id} /> : tab === "artefacts" ? <ArtefactsTab wo={wo} project={project} /> : tab === "history" ? <HistoryTab wo={wo} /> : <Journey wo={wo} project={project} cat={cat} />;
   /** The gate the viewer may approve right now (not the intake gate); the approvers panel and the open-items card share it. */
   const gateG = wo.allowed.approve && !wo.bay && wo.state === "waiting" && wo.allowed.approve.gate !== "G0G1" ? wo.allowed.approve.gate : null;
   const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;

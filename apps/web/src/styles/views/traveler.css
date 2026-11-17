@@ -99,3 +99,9 @@
 .trv-dec-trust .ic { color: var(--done); }
 .trv-after { margin-top: 12px; display: grid; gap: 6px; }
 .trv-after .checklist li { flex-wrap: wrap; }
+/* the traveler needs more room than the prototype's 520px drawer: its journey rows and tiles were drawn for 640 */
+.drawer:has(.trv-drawer) { width: min(640px, 100%); }
+.trv-drawer .drawer-scroll { min-width: 0; overflow-x: hidden; }
+.trv-drawer .tb-drawer .v, .trv-drawer .titleblock dd { font-size: 14px; line-height: 20px; white-space: normal; overflow-wrap: anywhere; }
+.trv-sheet { max-width: none; padding: var(--s4); }
+@media print { .drawer-head, .drawer-s, .tabs-w, .trv-sheet .btn { display: none !important; } }
