@@ -2,7 +2,8 @@ import type { Queryable } from "@gantry/db";
 import { agentConfig } from "./metering.js";
 import type { RunCtx } from "./context.js";
 import { scopeVerdict, type ScopeRow } from "../mcp/scope.js";
-import { assemble, composeLayers, loadAgentVersion, resolveSkills, type InstructionPin } from "../agents/compose.js";
+import { assemble, composedParts, composeLayers, loadAgentVersion, resolveSkills, type InstructionPin, type Layer, type SkillOut } from "../agents/compose.js";
+import { buildManifest, type PromptManifest } from "../agents/manifest.js";
 
 const HEARTBEAT_SECONDS = 15;
 /** The lease a heartbeat grants: six missed heartbeats (spec 4.3 step 5). */
@@ -32,6 +33,8 @@ export interface ComposedInstructions {
   text: string;
   hash: string;
   layers: { name: string; hash: string; version?: number | null }[];
+  /** The layers that were used (non-empty), with their text, for the prompt manifest. */
+  used: Layer[];
 }
 
 /**
@@ -44,14 +47,13 @@ export async function composeInstructions(db: Queryable, c: RunCtx): Promise<Com
   const pin = c.runData.instructionPin && typeof c.runData.instructionPin === "object" ? (c.runData.instructionPin as InstructionPin) : null;
   const { layers } = await composeLayers(db, { orgId: c.orgId, agentId: c.agentId, projectId: c.projectId, repoId: c.repoId, pin, fallbackAgentText: agent.instructions, fallbackOverlay: c.overlay }, av);
   const out = assemble(layers);
-  return { text: out.text, hash: out.hash, layers: out.layers.map((l) => ({ name: l.name, hash: l.hash, version: l.version })) };
+  return { text: out.text, hash: out.hash, layers: out.layers.map((l) => ({ name: l.name, hash: l.hash, version: l.version })), used: out.layers };
 }
 
-async function skillsFor(db: Queryable, c: RunCtx): Promise<{ name: string; content: string }[]> {
+async function skillsFor(db: Queryable, c: RunCtx): Promise<SkillOut[]> {
   if (!c.agentId) return [];
   const av = await loadAgentVersion(db, c.orgId, c.agentId, c.agentVersion);
-  const skills = await resolveSkills(db, { orgId: c.orgId, agentId: c.agentId, body: av?.body ?? {}, projectId: c.projectId, versions: c.skillVersions });
-  return skills.map((s) => ({ name: s.name, content: s.content }));
+  return resolveSkills(db, { orgId: c.orgId, agentId: c.agentId, body: av?.body ?? {}, projectId: c.projectId, versions: c.skillVersions });
 }
 
 /** Enabled MCP servers whose scope covers this run: project (and the project's own enable list), repo, agent, station and work class (spec 12.4). */
@@ -83,6 +85,8 @@ export interface RunSpecOut {
   model?: string;
   instructions: string;
   instructionsHash: string;
+  /** Everything the system prompt is made of, in order, with versions and hashes; `promptManifest.hash` covers all of it. */
+  promptManifest: PromptManifest;
   skills: { name: string; content: string }[];
   mcpServers: Record<string, { type: "http"; url: string }>;
   toolAllowList: string[];
@@ -107,14 +111,17 @@ export async function composeRunSpec(db: Queryable, c: RunCtx, edgeUrl: string):
   const pos = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : undefined);
   const costUsd = typeof agent.budgetUsd === "number" && agent.budgetUsd > 0 ? agent.budgetUsd : undefined;
   const input = c.runData.input ?? c.attemptData.input ?? (await handoff(db, c));
+  const skills = await skillsFor(db, c);
+  const promptManifest = buildManifest("run", composedParts(inst.used, skills), { handoff: input ?? "" });
   return {
     runId: c.runId,
     adapter,
     station: c.station,
     ...(model ? { model } : {}),
     instructions: inst.text,
-    instructionsHash: inst.hash,
-    skills: await skillsFor(db, c),
+    instructionsHash: promptManifest.hash,
+    promptManifest,
+    skills: skills.map((s) => ({ name: s.name, content: s.content })),
     mcpServers: Object.fromEntries(mcp.map((s) => [mcpKey(s, mcp), { type: "http" as const, url: `${edgeUrl.replace(/\/+$/, "")}/mcp/v1/${encodeURIComponent(s.id)}` }])),
     toolAllowList: carrier ? READ_TOOLS : toolAllowList(agent.body, agent.data),
     limits: { turns: pos(lim.turns) ?? 40, ...(costUsd ? { costUsd } : {}), wallClockSeconds: pos(lim.wallClockSeconds) ?? 3600 },

@@ -432,7 +432,7 @@ export function buildGateway(deps: GatewayDeps): Gateway {
   });
 
   // Model calls for the console and "explain why not" (spec 12.6): the API calls with the edge token, the key stays here.
-  const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f, track });
+  const service = registerServiceRoutes({ app, cfg, api, keys, limiter, fetchImpl: f, track, store, maxTraceBytes: cfg.maxTraceBytes });
 
   return { app, metrics, mcp, service, keys, limiter, api, store, drain: async () => void (await Promise.allSettled([...pending])) };
 }

@@ -117,7 +117,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
       // for the full proposal: at 1,800 tokens the call was cut mid-tool-use and nothing came back. Cost stays bounded by the agent budget.
       edgeToken: g.config.secrets.edgeToken, purpose: "onboarding", maxTokens: ONBOARDING_MAX_TOKENS, maxSteps: 8,
       system: system({ repo: o.repo.name, project: o.repo.project_id, stage: o.doc.stage, person: o.who.name, canMerge: o.canMerge, pinned: true }),
-      history: hist, question, signal: o.signal,
+      history: hist, question, signal: o.signal, trace: { surface: "onboarding", actor: o.who.id, project: o.repo.project_id ?? undefined },
       toolset: { defs: sessionToolDefs(), execute: async (name, input) => {
         const before = ctx.cards.length;
         const out = await executeSessionTool(ctx, name, input);

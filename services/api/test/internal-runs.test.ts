@@ -329,6 +329,15 @@ d("internal runs API", () => {
       expect(s.instructions).toBe("## Factory base\n\nFactory rules.\n\n## Project overlay\n\nPayments overlay.\n\n## Agent\n\nAgent says build.");
       expect(s.instructionsHash).toMatch(/^[0-9a-f]{64}$/);
       expect(s.skills).toEqual([{ name: "Testing skill", content: "Always run tests." }]);
+      // the prompt manifest names every part in order, with source, version and hash; its hash is the instruction hash and is recorded on the run
+      expect(s.promptManifest.hash).toBe(s.instructionsHash);
+      expect(s.promptManifest.parts.map((p: { kind: string; name: string }) => `${p.kind}:${p.name}`)).toEqual(["layer:Factory base", "layer:Project overlay", "layer:Agent", "skill:Testing skill", "result_instruction:Result instruction", "result_schema:Station result shape"]);
+      expect(s.promptManifest.parts[3]).toMatchObject({ version: 1, bytes: "Always run tests.".length, source: "skill_versions sk-w3" });
+      expect(s.promptManifest.parts[0]).toMatchObject({ version: 90 });
+      expect(s.promptManifest.handoff.bytes).toBeGreaterThan(10);
+      const stored = (await q(`select data from runs where id = $1`, [r.runId]))[0]!.data;
+      expect(stored.promptManifest.hash).toBe(s.instructionsHash);
+      expect(stored.promptDrift).toBe(true); // the test tuple was pinned with the placeholder hash 'h'
       expect(s.toolAllowList.sort()).toEqual(["Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);
       expect(s.input.brief).toEqual({ goal: "ship" });
       // the per-run cost cap (agent budget 2.5) is enforced at authorize

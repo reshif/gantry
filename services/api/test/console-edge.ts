@@ -12,6 +12,8 @@ export class FakeEdge {
   /** Every /ready request URL (with its query: the chosen model and project). */
   readyUrls: string[] = [];
   script: Turn[] = [];
+  /** Stored traces by sha256 hex (what the edge's `GET /service/v1/trace/{hash}` serves). */
+  traces = new Map<string, unknown>();
   calls: Array<{ url: string; headers: http.IncomingHttpHeaders; body: Record<string, unknown> }> = [];
   /** Consulted when the script is empty (the live harness answers by what was asked). */
   respond: ((body: Record<string, unknown>) => Turn | undefined) | undefined;
@@ -38,6 +40,12 @@ export class FakeEdge {
     if (req.headers.authorization !== "Bearer edge-token-for-tests") {
       res.writeHead(401, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ ok: false }));
+    }
+    const tm = /^\/service\/v1\/trace\/([0-9a-f]{64})$/.exec(req.url ?? "");
+    if (tm) {
+      const t = this.traces.get(tm[1]!);
+      res.writeHead(t ? 200 : 404, { "content-type": "application/json" });
+      return void res.end(JSON.stringify(t ?? { ok: false }));
     }
     if ((req.url ?? "").split("?")[0] === "/service/v1/ready") {
       this.readyUrls.push(req.url ?? "");

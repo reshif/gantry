@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { S3Config } from "./config.js";
 
 /** Content-addressed object store (spec 7.4): sha256/<hash>. */
 export interface ObjectStore {
   put(content: Buffer | string, contentType: string): Promise<string>;
+  /** The stored bytes for a `sha256/<hash>` key, or null when there is no such object. */
+  get(key: string): Promise<Buffer | null>;
 }
 
 export const sha256 = (b: Buffer | string): string => createHash("sha256").update(b).digest("hex");
@@ -30,11 +32,25 @@ export class S3ObjectStore implements ObjectStore {
     await this.c.send(new PutObjectCommand({ Bucket: this.cfg.bucket, Key: key, Body: body, ContentType: contentType }), { abortSignal: AbortSignal.timeout(10_000) });
     return key;
   }
+
+  async get(key: string): Promise<Buffer | null> {
+    if (!/^sha256\/[0-9a-f]{64}$/.test(key)) return null;
+    try {
+      const r = await this.c.send(new GetObjectCommand({ Bucket: this.cfg.bucket, Key: key }), { abortSignal: AbortSignal.timeout(10_000) });
+      return r.Body ? Buffer.from(await r.Body.transformToByteArray()) : null;
+    } catch (e) {
+      if ((e as { name?: string }).name === "NoSuchKey" || (e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return null;
+      throw e;
+    }
+  }
 }
 
 /** An unconfigured store: every put fails, so callers take their fail-closed or degraded path. */
 export class NoObjectStore implements ObjectStore {
   async put(): Promise<string> {
+    throw new Error("object storage is not configured");
+  }
+  async get(): Promise<Buffer | null> {
     throw new Error("object storage is not configured");
   }
 }

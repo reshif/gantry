@@ -20,6 +20,14 @@ const UsageBody = z.object({
   cacheWriteTokens: nonneg.default(0),
   latencyMs: nonneg.optional(),
   outcome: z.enum(["ok", "error", "refused"]).default("ok"),
+  /** The stored trace of the call (sha256/<hash>) and where the call belongs: who may read the trace is decided from these. */
+  traceRef: z.string().regex(/^sha256\/[0-9a-f]{64}$/).optional(),
+  surface: z.enum(["console", "explain", "onboarding", "workorder"]).optional(),
+  project: z.string().min(1).max(100).optional(),
+  woId: z.string().min(1).max(100).optional(),
+  actor: z.string().min(1).max(100).optional(),
+  turn: z.string().min(1).max(100).optional(),
+  promptHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
 /**
@@ -45,9 +53,9 @@ export const serviceCallRoutes: FastifyPluginAsync = async (app) => {
       const cost = costMicros(book.prices[b.model], { inputTokens: b.inputTokens, outputTokens: b.outputTokens, cacheReadTokens: b.cacheReadTokens, cacheWriteTokens: b.cacheWriteTokens });
       // station = the purpose, so spend by the console is visible next to the stations' and counts toward the vendor's health.
       const r = await tx.query(
-        `insert into usage_meter (org_id, request_id, station, vendor_id, model_id, input_tokens, output_tokens, cached_tokens, cache_write_tokens, cost_micros, price_version, latency_ms, outcome, agent_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-        [req.gx.orgId, b.requestId ?? null, b.purpose, b.vendor ?? null, b.model, b.inputTokens, b.outputTokens, b.cacheReadTokens, b.cacheWriteTokens, cost, book.version, b.latencyMs ?? null, b.outcome, b.purpose === "onboarding" ? "ag-onboard" : null],
+        `insert into usage_meter (org_id, request_id, station, vendor_id, model_id, input_tokens, output_tokens, cached_tokens, cache_write_tokens, cost_micros, price_version, latency_ms, outcome, agent_id, trace_ref, surface, project_id, wo_id, actor_id, turn_id, prompt_hash)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+        [req.gx.orgId, b.requestId ?? null, b.purpose, b.vendor ?? null, b.model, b.inputTokens, b.outputTokens, b.cacheReadTokens, b.cacheWriteTokens, cost, book.version, b.latencyMs ?? null, b.outcome, b.purpose === "onboarding" ? "ag-onboard" : null, b.traceRef ?? null, b.surface ?? b.purpose, b.project ?? null, b.woId ?? null, b.actor ?? null, b.turn ?? null, b.promptHash ?? null],
       );
       return { msg: "Usage recorded.", events: [], extra: { costMicros: cost, priceVersion: book.version, rows: r.rowCount ?? 0 }, changes: ["models"] };
     });
