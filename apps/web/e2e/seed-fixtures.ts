@@ -123,7 +123,11 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "guidelines") return seed.guidelines;
     if (path === "instructions/base") return seed.instructions;
     if (path === "access/matrix") return seed.role_matrix;
-    if (path === "trust/cells") return seed.trust;
+    if (path === "learning/findings") return seed.learning?.findings ?? [];
+    if (path === "learning/proposals") return (seed.learning?.proposals ?? []).map((x: Seed) => ({ ...x, status: x.status === "adopted" ? "accepted" : x.status }));
+    if (path === "learning/settings") return { proposalsOn: true, otherDeciders: 2 };
+    if (path === "learning/signals") return [];
+    if (path === "trust/cells") return { levelsAboveL1: true, minRuns: 5, soakDays: 7, maxGrantable: 3, ...seed.trust, cells: (seed.trust?.cells ?? []).map((c: Seed) => ({ rev: 1, gate: null, pending: null, effective: c.level, projection: 2, meets: { ok: false, next: Math.min(4, c.level + 1), missing: [] }, ceiling: { max: 4, ids: [] }, evidence: { runs: c.cleanRuns + 1, cleanRuns: c.cleanRuns, evalScore: 0.9, rework: 0.08, incidents: 0, incidentWos: [] }, ...c })), proposals: (seed.trust?.proposals ?? []).map((p: Seed) => ({ ...p, status: p.status === "approved" ? "accepted" : p.status })) };
     void q;
     return undefined;
   };
