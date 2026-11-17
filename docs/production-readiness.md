@@ -214,6 +214,25 @@ Remaining (resource limits, a configurable hostname with real TLS, and the upgra
   - documentation for users, admins and operators, plus OpenAPI
   - self-hosted fonts
 
+## Wave 6: security team (2026-11-16)
+
+Prompt-injection area. Each row names the regression test that fails without the fix.
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| PI1 (P1) | Automatic gates (G1f, G3G3s, G4) passed on checks the agent reported about itself, and a missing report counted as a pass. Real GitHub check runs were never consulted. | An automatic gate judges system evidence only: worker-observed checks, a person's release, the GitHub check runs stored for the pull request head (G4: the repository's required checks; a failed one fails the gate, a missing or running one is no evidence), or the research document and open questions the system holds (G1f). The agent's `output.checks` is shown, never judged. No evidence means the gate waits for a person, and the instance and decision record the source and the GitHub check ids. | `gate-evidence.test.ts`, `gate-risk.test.ts` |
+| PI2 (P2) | Agent guardrails (forbidden paths, `maxDiff`) and the repository's `protected_paths` were prompt text only; nothing ever wrote `w.data.guardrail`. | Checked in code from observed files (`evaluateGuardrails` in the domain package). gantry-github refuses to publish a commit that touches an agent-forbidden path (`guardrail_breach`, before anything is written to GitHub). The API records `w.data.guardrail` (over, size, forbidden and protected paths) when a station result arrives. A breach sends any gate, automatic ones included, to a person, and demotes the cell to L1. | `guardrails.test.ts`, `guardrails.test.ts` (domain), `broker.test.ts` |
+| PI3 (P2) | The MCP rug-pull check failed open: if the live definition could not be read, no hash was sent and the call went ahead. | Fail closed. The edge retries a transient failure to read the definition, then refuses. The API denies any call with no `definitionHash` (the server stays enabled). The call goes out on the session that produced the hash, and a reopened session must show the same definition. | `mcp.test.ts` (edge), `internal-runs.test.ts` |
+| PI4 (P2/P3) | `runTests` gave the agent an unrestricted `Bash`, holding the run token in its environment. | `runTests` maps to test commands (`Bash(npm test:*)`, `npx vitest`, `pytest`, `go test`, `cargo test` and so on). A bare or wildcard `Bash` in an explicit allow-list is narrowed by both the API and the runner. The harness is told to scrub credentials from tool subprocesses (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`). | `spec-tools.test.ts`, `claude.test.ts`, `internal-runs.test.ts` |
+| PI5 (P3) | The research fetch's private-address guard never ran for an IP-literal host (the DNS lookup is skipped). | Every IP-literal host is refused on the first request and on each redirect; research hosts that end in a number are no longer accepted by the plan, the security setting or the runner. | `research.test.ts`, `station-tools.test.ts` |
+| PI6 (P2/P3) | MCP tool results reached the model unscanned, unmarked and unbounded; call arguments were not scanned. | Answers from a server are capped (1 MiB per body or stream event). Results are redacted of secret-shaped values and bounded (100,000 characters of text), with a first block marking them as untrusted data. Tool descriptions and input schemas are bounded. A call whose arguments carry a credential is not sent. | `mcp.test.ts` (edge) |
+
+Owner decisions taken with the safe default:
+
+- **Gates with no evidence wait for a person.** G1f and G4 ship with no approvers (they were automatic), so a work order with no research note, or with no GitHub check runs for its pull request, now waits at the gate until someone with the right decides it, or a Factory Admin overrides. Add approvers to those gates if you want them human-decided; otherwise the flow only moves on real evidence. A check that arrives after the gate opened does not reopen it (a new head commit does).
+- **The test shell is a short list of test commands.** An agent that needs another command (for example `make test`) must have it named in an explicit tool allow-list.
+- **Not done:** a deny rule passed to the runner (`--disallowedTools`) as a second layer for forbidden paths, and a `maxDiff` refusal at publish (a diff over the limit goes to a person at the gate instead). `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` has not been checked against the pinned CLI build.
+
 ## Decisions for the owner
 
 Answered 2026-11-15:
