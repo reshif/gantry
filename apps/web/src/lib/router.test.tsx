@@ -58,9 +58,9 @@ describe("useHash", () => {
 });
 
 describe("route table", () => {
-  it("has the 24 legacy routes in legacy order, and Agents at work before them in Overview", () => {
+  it("has the 24 legacy routes in legacy order, and Inbox and Agents at work before them in Overview", () => {
     expect(ROUTES.map((r) => r.id)).toEqual([
-      "home", "projects", "workspace", "console", "floor", "work-orders", "conversations", "onboarding", "project-config", "record", "agents", "skills", "models",
+      "home", "inbox", "projects", "workspace", "console", "floor", "work-orders", "conversations", "onboarding", "project-config", "record", "agents", "skills", "models",
       "evals", "trust", "learning", "integrations", "notifications", "mcp", "api", "people", "workload", "access", "security", "audit", "system",
     ]);
   });

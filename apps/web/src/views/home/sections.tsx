@@ -142,7 +142,7 @@ export function WaitingOnYou({ approvals, conversations }: { approvals: Approval
   const total = approvals.length + conversations.length;
   const sorted = approvals.slice().sort((a, b) => (b.waitMs ?? 0) - (a.waitMs ?? 0));
   return (
-    <Section id="hm-waiting" title="Waiting on you" count={total}>
+    <Section id="hm-waiting" title="Waiting on you" count={total} tools={total ? <Btn label="Open Inbox" small kind="ghost" id="hm-open-inbox" onClick={() => navigate("inbox")} /> : undefined}>
       {total ? (
         <ul className="hm-my-list">
           {sorted.map((a) => <ApprovalRow key={`${a.wo ?? a.repo}-${a.gate ?? ""}-${a.note ? "n" : ""}`} a={a} />)}

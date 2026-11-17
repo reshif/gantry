@@ -32,6 +32,7 @@ export const BUILD_READ = [...FACTORY_READ, "project_admin", "line_lead"] as con
 
 export const ROUTES: readonly RouteDef[] = [
   { id: "home", title: "Home", group: "Overview", icon: "home" },
+  { id: "inbox", title: "Inbox", group: "Overview", icon: "mail" },
   { id: "projects", title: "Projects", group: "Overview", icon: "project" },
   { id: "workspace", title: "Agents at work", group: "Overview", icon: "chat" },
   // The Console and Conversations now live in the workspace; their links still work and land there.
