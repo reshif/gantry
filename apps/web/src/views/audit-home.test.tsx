@@ -90,12 +90,12 @@ describe("Audit", () => {
     const stat = (label: string) => Array.from(document.querySelectorAll("#aud-stats .stat-tile")).find((t) => t.querySelector(".stat-lbl")?.textContent === label)?.querySelector(".stat-val")?.textContent;
     expect(stat("Head digest")).toBe("cccccccc");
     expect(stat("Denied")).toBe("1");
-    expect(document.querySelectorAll("tr.aud-row")).toHaveLength(3);
-    expect(document.querySelector(".o-row-denied .outcome")?.textContent).toBe("denied");
+    expect(document.querySelectorAll("tr[id^=aud-row-]")).toHaveLength(3);
+    expect(Array.from(document.querySelectorAll("tr[id^=aud-row-] .chip")).map((c) => c.textContent)).toContain("denied");
     expect(document.querySelectorAll(".aud-has-diff")).toHaveLength(1);
-    expect(document.getElementById("aud-cat-access")?.textContent).toContain("2");
+    expect((document.getElementById("aud-cat") as HTMLSelectElement).textContent).toContain("Access (2)");
     // Clicking a category narrows server-side.
-    fireEvent.click(document.getElementById("aud-cat-config")!);
+    fireEvent.change(document.getElementById("aud-cat")!, { target: { value: "config" } });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("category") === "config")).toBe(true));
     // Auditors get the verify button; the note about a limited view is absent.
     expect(document.getElementById("aud-verify")).toBeTruthy();
@@ -117,10 +117,10 @@ describe("Audit", () => {
     });
     mount(<AuditView />);
     await screen.findByText("Compliance Officer");
-    fireEvent.click(document.getElementById("aud-more")!);
-    await waitFor(() => expect(document.querySelectorAll("tr.aud-row")).toHaveLength(2));
+    fireEvent.click(document.getElementById("aud-ledger-more")!);
+    await waitFor(() => expect(document.querySelectorAll("tr[id^=aud-row-]")).toHaveLength(2));
     expect(calls.filter((c) => c.path === "/api/v1/audit").pop()?.query.get("cursor")).toBe("2");
-    expect(document.getElementById("aud-more")).toBeNull();
+    expect(document.getElementById("aud-ledger-more")).toBeNull();
   });
 
   it("opens the detail drawer with the field diff, chain digests and history", async () => {

@@ -2,9 +2,10 @@
  * System health (Govern). What is running, whether backups and the restore drill are current, deliveries that gave up (dead letters, with a retry),
  * and jobs that look stuck. Read from GET /api/v1/system/health; the one command is requeueing a dead delivery (audited on the server).
  */
+import { useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";
-import { Btn, Empty, Panel, Status, Table, ViewHead, type Tone } from "../../ui/primitives";
+import { Btn, Empty, Panel, Stat, StatRow, Status, Table, Tabs, ViewHead, type Tone } from "../../ui/primitives";
 import { Async, qState, useCommand } from "../../ui/async";
 import { dec } from "../mcp/kit";
 import { retryDeadLetter, useSystemHealth, type BackupStatus, type DeadLetter, type DrillStatus, type ServiceHealth, type StuckJob, type SystemHealth } from "./data";
@@ -34,20 +35,6 @@ const when = (iso: string | null): string => (iso && Number.isFinite(Date.parse(
 const ageText = (h: number | null): string => (h === null ? "–" : h < 1 ? "<1h ago" : h < 48 ? `${Math.round(h)}h ago` : `${Math.floor(h / 24)}d ago`);
 
 const ageShort = (sec: number): string => (sec < 120 ? `${sec} s` : sec < 7200 ? `${Math.round(sec / 60)} min` : `${Math.round(sec / 3600)} h`);
-
-function ServiceRow({ s }: { s: ServiceHealth }) {
-  const t = SERVICE_TONE[s.status];
-  return (
-    <li className="sys-row" data-service={s.id}>
-      <span className="sys-name">{s.name}</span>
-      <Status tone={t.tone}>{t.label}</Status>
-      <span className="sys-detail muted small">{s.detail}</span>
-      <span className="sys-ms mono small muted" title={s.heartbeatAgeSeconds != null ? "Time since the last heartbeat" : undefined}>
-        {s.heartbeatAgeSeconds != null ? ageShort(s.heartbeatAgeSeconds) : s.latencyMs === null ? "" : `${s.latencyMs} ms`}
-      </span>
-    </li>
-  );
-}
 
 function BackupPanel({ b, d }: { b: BackupStatus; d: DrillStatus }) {
   const bt = BACKUP_TONE[b.status];
@@ -146,35 +133,54 @@ function JobsPanel({ h }: { h: SystemHealth }) {
   );
 }
 
+function ServiceCard({ s }: { s: ServiceHealth }) {
+  const t = SERVICE_TONE[s.status];
+  return (
+    <section className="card" data-service={s.id}>
+      <div className="card-b stack" style={{ gap: 10 }}>
+        <div className="row spread">
+          <h3 className="ell">{s.name}</h3>
+          <Status tone={t.tone}>{t.label}</Status>
+        </div>
+        <div className="uptime" aria-hidden="true">
+          <svg viewBox="0 0 200 16" width="100%" height="16" preserveAspectRatio="none">
+            {Array.from({ length: 40 }, (_, i) => <rect key={i} x={i * 5} y={0} width={3.5} height={16} rx={1} fill={`var(--${s.status === "ok" ? "ok" : s.status === "degraded" ? "warn" : s.status === "down" ? "bad" : "idle"})`} opacity={0.85} />)}
+          </svg>
+        </div>
+        <div className="row spread small">
+          <span className="dim ell">{s.detail}</span>
+          <span className="mono dim" title={s.heartbeatAgeSeconds != null ? "Time since the last heartbeat" : undefined}>{s.heartbeatAgeSeconds != null ? ageShort(s.heartbeatAgeSeconds) : s.latencyMs === null ? "" : `${s.latencyMs} ms`}</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function SystemView() {
   const q = useSystemHealth();
   const h = q.data;
+  const [tab, setTab] = useState("services");
   const up = h ? h.services.filter((s) => s.status === "ok").length : 0;
+  const worker = h?.services.find((s) => s.id === "worker");
   return (
     <div className="view view-system">
       <ViewHead
         kicker="Govern"
         title="System health"
-        sub="Whether the factory's services are answering, backups are current and restorable, and nothing is waiting on a delivery or job that has stopped moving."
-        meta={[
-          ["Services up", qState(q, (d) => `${up} of ${d.services.length}`)],
-          ["Last backup", qState(q, (d) => ageText(d.backup.ageHours))],
-          ["Dead letters", qState(q, (d) => fmt.num(d.outbox.counts.dead))],
-          ["Stuck jobs", qState(q, (d) => fmt.num(d.jobs.stuck.length))],
-        ]}
+        sub="Services, worker heartbeat, backups, outbox and stuck work."
         actions={<Btn small icon="refresh" label="Refresh" id="sys-refresh" onClick={() => void q.refetch()} />}
       />
+      <StatRow id="sys-stats">
+        <Stat label="Worker heartbeat" value={qState(q, () => (worker?.heartbeatAgeSeconds != null ? ageShort(worker.heartbeatAgeSeconds) : "–"))} sub="last tick" />
+        <Stat label="Services up" value={qState(q, (d) => `${up} of ${d.services.length}`)} sub={h ? `backup ${ageText(h.backup.ageHours)}` : undefined} tone={h && up < h.services.length ? "wait" : "done"} />
+        <Stat label="Dead letters" value={qState(q, (d) => fmt.num(d.outbox.counts.dead))} tone={h && h.outbox.counts.dead ? "wait" : undefined} />
+        <Stat label="Stuck jobs" value={qState(q, (d) => fmt.num(d.jobs.stuck.length))} tone={h && h.jobs.stuck.length ? "wait" : undefined} />
+      </StatRow>
+      <Tabs idPrefix="sys-tab" active={tab} onChange={setTab} items={[{ id: "services", label: "Services" }, { id: "backups", label: "Backups and drill" }, { id: "outbox", label: "Outbox", count: h?.outbox.counts.dead ?? 0 }, { id: "jobs", label: "Stuck jobs", count: h?.jobs.stuck.length ?? 0 }]} />
       <Async query={q} what="system health" id="sys">
-        {(d) => (
-          <div className="sys-grid">
-            <Panel title="Services" cls="sys-services">
-              <ul className="sys-list" aria-label="Services">{d.services.map((s) => <ServiceRow key={s.id} s={s} />)}</ul>
-            </Panel>
-            <BackupPanel b={d.backup} d={d.drill} />
-            <OutboxPanel h={d} />
-            <JobsPanel h={d} />
-          </div>
-        )}
+        {(d) => (tab === "backups" ? <BackupPanel b={d.backup} d={d.drill} /> : tab === "outbox" ? <OutboxPanel h={d} /> : tab === "jobs" ? <JobsPanel h={d} /> : (
+          <div className="grid g4 rows" aria-label="Services">{d.services.map((s) => <ServiceCard key={s.id} s={s} />)}</div>
+        ))}
       </Async>
     </div>
   );

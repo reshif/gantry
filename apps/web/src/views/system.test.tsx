@@ -58,14 +58,19 @@ describe("System health view", () => {
   it("shows services, the stale-backup warning, an unknown drill, dead letters and stuck jobs", async () => {
     setup();
     mount();
-    await byId("sys-stale");
-    expect(document.getElementById("sys-stale")?.textContent).toContain("over 26 hours old");
+    await byId("sys-stats");
+    await waitFor(() => expect(document.querySelector("[data-service='launcher']")).toBeTruthy());
     expect(document.querySelector("[data-service='launcher']")?.textContent).toContain("Down");
     expect(document.querySelector("[data-service='github']")?.textContent).toContain("Degraded");
     expect(document.querySelector("[data-service='api']")?.textContent).toContain("Up");
+    fireEvent.click(await byId("sys-tab-backups"));
+    await byId("sys-stale");
+    expect(document.getElementById("sys-stale")?.textContent).toContain("over 26 hours old");
     expect(document.getElementById("sys-backup")?.textContent).toContain("Stale");
     expect(document.getElementById("sys-drill")?.textContent).toContain("Not run yet");
+    fireEvent.click(await byId("sys-tab-outbox"));
     expect(document.querySelector("tr[data-key='ob-1']")?.textContent).toContain("HTTP 500 from slack");
+    fireEvent.click(await byId("sys-tab-jobs"));
     expect(document.querySelector("tr[data-key='j1']")?.textContent).toContain("Lease expired");
     expect(document.body.textContent).toContain("Services up2 of 4");
   });
@@ -73,14 +78,18 @@ describe("System health view", () => {
   it("shows no stale warning for a current backup and says nothing is stuck or dead", async () => {
     setup({ health: { ...HEALTH, backup: { ...HEALTH.backup, status: "ok", ageHours: 3 }, outbox: { ...HEALTH.outbox, counts: { ...HEALTH.outbox.counts, dead: 0 }, dead: [] }, jobs: { ...HEALTH.jobs, stuck: [] } } });
     mount();
+    fireEvent.click(await byId("sys-tab-outbox"));
     await byId("sys-dead-empty");
+    fireEvent.click(await byId("sys-tab-jobs"));
     await byId("sys-stuck-empty");
+    fireEvent.click(await byId("sys-tab-backups"));
     expect(document.getElementById("sys-stale")).toBeNull();
   });
 
   it("retries one dead letter with a POST", async () => {
     const calls = setup();
     mount();
+    fireEvent.click(await byId("sys-tab-outbox"));
     fireEvent.click(await byId("sys-retry-ob-1"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/system/outbox/ob-1/retry")).toBe(true));
   });
@@ -88,6 +97,7 @@ describe("System health view", () => {
   it("locks Retry for someone who may not edit integrations", async () => {
     const calls = setup({ denied: ["integration.edit"] });
     mount();
+    fireEvent.click(await byId("sys-tab-outbox"));
     const b = await byId("sys-retry-ob-1");
     await waitFor(() => expect(b.getAttribute("aria-disabled")).toBe("true"));
     fireEvent.click(b);
