@@ -38,8 +38,9 @@ export default function NotificationsView() {
   return (
     <div className="view cx nt-view">
       <ViewHead
+        kicker="Connect"
         title="Notifications"
-        sub="Which events reach which people, through which connection, with which card. Per project, with repo overrides. Every notification comes from a committed event and is delivered at least once."
+        sub="Choose which events reach which channels, and check that they arrived."
       />
       <StatRow id="nt-stats">
         <Stat label="Project" value={p.name} sub={`${repos.length} ${repos.length === 1 ? "repo" : "repos"}`} action={<Btn label="Browse" small kind="ghost" id="nt-go-projects" aria={`Browse ${p.name} in Projects`} onClick={() => navigate("projects")} />} />

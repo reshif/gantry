@@ -42,3 +42,29 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 .switch input.switch-input{position:relative;inset:auto;opacity:1;z-index:auto}
 .switch input.switch-input:checked{background:var(--ok)}
 .switch input.switch-input:checked::after{transform:translateX(12px)}
+/* DataTable / SearchBox keep legacy classes; draw the header and the search icon like the prototype's .t th and .search */
+@media (min-width:641px){
+.dtable.t thead th{font:600 11px/16px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);padding:0 var(--s3);height:36px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.dtable.t thead th .th-sort{color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit}
+.dtable.t thead th .th-sort.is-active{color:var(--text)}
+}
+.searchbox.search .ic{left:10px;top:8px;width:16px;height:16px;color:var(--text-3)}
+.searchbox.search .input{padding-left:32px;min-width:0;width:100%}
+.searchbox.search{display:block}
+.searchbox.search .ic{position:absolute;left:10px;top:8px;width:16px;height:16px;color:var(--text-3)}
+.searchbox.search .ic svg{position:static;width:16px;height:16px}
+.stats>.stat{min-width:0}.stat .d{overflow-wrap:anywhere}
+@media (max-width:640px){.ph .acts .btn{min-width:0;white-space:normal;height:auto;min-height:36px}.page{min-width:0}}
+.view>*,.form-grid>*{min-width:0}
+.switch input.switch-input{position:relative;inset:auto;opacity:1;z-index:auto}
+.switch.is-locked input.switch-input{opacity:.55;cursor:not-allowed}
+.matrix td.mx-cell{vertical-align:middle}
+/* sign-in: the prototype's two-panel layout drawn over the legacy auth markup */
+.auth.signin{display:grid;min-height:100dvh}
+.signin .auth-brand.art{background:var(--belt);border:0;border-right:1px solid var(--line);padding:var(--s10);display:flex;flex-direction:column;justify-content:space-between;gap:var(--s6);position:relative;overflow:hidden}
+.signin .auth-brand .auth-demo-note{margin-top:var(--s4);color:var(--text-3)}
+.signin .form{display:flex;align-items:center;justify-content:center;padding:var(--s6);background:var(--bg)}
+.signin .auth-panel.box{width:min(380px,100%);background:none;padding:0;display:flex;flex-direction:column;gap:var(--s4)}
+.signin .auth-panel .auth-h{font:700 20px/28px var(--font)}
+.signin .auth-panel>.btn{height:40px}
+@media (max-width:900px){.signin .auth-brand.art{display:none}}

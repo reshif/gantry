@@ -1,0 +1,200 @@
+/**
+ * Group E (connect and govern) fixtures for the fidelity harness: integrations, MCP servers, API keys, triggers and deliveries,
+ * in the shape of the Control Room prototype's sample data. Merged into richOverrides(); changes no e2e default.
+ */
+import { ACTIONS, INTEGRATION_TYPES, ROLES } from "@gantry/domain";
+import { fulfillJson, type Handler } from "./fixtures";
+
+const NOW = Date.parse("2026-01-15T10:00:00Z");
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+
+const inst = (id: string, type: string, name: string, projects: "all" | string[], ago: number, status = "healthy", connected = true) => ({
+  id, type, name, config: {}, secretMask: "••••a91c", status, connected, projects, lastSync: NOW - ago, createdBy: "p-admin", createdAt: NOW - 40 * DAY, version: 1,
+});
+
+const cond = { classes: [] as string[], priority: [] as string[], hours: "any" };
+const fields = { title: true, repo: true, class: true, priority: true, approvers: true, link: true };
+/** Notification routes of a project (the project fixture and the routes endpoint both serve them). */
+export const routesE = [
+  { id: "NR-1", event: "gate.waiting", dest: [{ channel: "slack", target: "#factory-gates", integration: "i3" }], template: "gate", cond, enabled: true, fields },
+  { id: "NR-2", event: "blocked", dest: [{ channel: "paging", target: "oncall", integration: "i6" }, { channel: "slack", target: "#factory-gates", integration: "i3" }], template: "incident", cond: { ...cond, priority: ["P0", "P1"] }, enabled: true, fields },
+  { id: "NR-3", event: "released", dest: [{ channel: "email", target: "ops@acme.dev", integration: "i5" }], template: "release", cond: { ...cond, hours: "business" }, enabled: false, fields },
+  { id: "NR-4", event: "question", dest: [{ channel: "slack", target: "#factory-gates", integration: "i3" }], template: "question", cond, enabled: true, fields },
+];
+
+export function richGroupE(): Record<string, Handler> {
+  const ov: Record<string, Handler> = {};
+  ov["projects/payments/routes"] = (r) => fulfillJson(r, routesE.map((x) => ({ ...x, version: 1 })));
+  ov["POST card-templates/preview"] = (r) =>
+    fulfillJson(r, {
+      ok: true,
+      sample: { event: "gate.waiting", template: "gate", tone: "wait", head: "Gate G5 is waiting", body: "Add idempotency keys to refund endpoint needs 1 more approval.", woId: "WO-1004", title: "Add idempotency keys to refund endpoint", repo: "acme/payments-api", cls: "feature", clsName: "Feature", prio: "P1", approvers: "Meera Iyer", gate: { id: "G5", label: "G5", name: "Review and merge" }, instance: null, link: "https://gantry.example/wo/WO-1004", project: { id: "payments", key: "PAY", name: "Payments Platform" }, at: NOW },
+      rows: [["Work order", "WO-1004"], ["Class", "Feature"], ["Priority", "P1"]],
+      actions: ["approve", "reject", "open"],
+      webhook: {},
+      email: { subject: "Gate G5 is waiting", text: "", html: "" },
+    });
+  ov["integration-types"] = (r) => fulfillJson(r, INTEGRATION_TYPES.map((t) => ({ ...t, available: t.available ?? true })));
+  ov["integrations"] = (r) =>
+    fulfillJson(r, [
+      inst("i1", "github", "GitHub (acme)", "all", 60 * MIN),
+      inst("i2", "github", "GitHub Enterprise (internal)", ["internal-tools", "partner-api"], 62 * MIN),
+      inst("i3", "slack", "Slack", "all", 13 * MIN),
+      inst("i4", "teams", "Microsoft Teams", ["risk"], 11 * MIN, "failing"),
+      inst("i5", "email", "Email (SMTP)", "all", 5 * MIN),
+      inst("i6", "paging", "On-call paging", "all", 32 * MIN),
+      inst("i7", "webhook", "Signed webhook", ["data-platform"], 27 * MIN, "failing"),
+      inst("i8", "jira", "Jira-style tracker", ["payments", "storefront"], 58 * MIN),
+      inst("i9", "ci", "CI runner (generic)", "all", 18 * MIN, "healthy", false),
+    ]);
+  const tool = (name: string, write: boolean, allowed = true) => ({ name, write, allowed, hint: write ? "write" : "read", description: name, hash: "h-" + name });
+  const mcp = (id: string, name: string, url: string, sens: string, tools: ReturnType<typeof tool>[], health = "healthy") => ({
+    id, name, transport: "http", url, auth: "oauth", authMask: "••••", health, sensitivity: sens, writeGate: true, tools, authMode: "bearer", protocolRevision: "2025-06-18", enabled: true, version: 1, projects: "all", repos: "all", agents: "all",
+  });
+  ov["mcp/servers"] = (r) =>
+    fulfillJson(r, [
+      mcp("m1", "Code search", "https://mcp.acme.dev/code-search", "internal", [tool("search_symbols", false), tool("read_file", false), tool("list_refs", false)]),
+      mcp("m2", "Issue tracker", "https://mcp.acme.dev/issues", "internal", [tool("get_issue", false), tool("comment", true), tool("transition", true, false)], "degraded"),
+      mcp("m3", "Secrets vault", "https://mcp.acme.dev/vault", "restricted", [tool("read_secret", true, false)]),
+      mcp("m4", "Docs", "https://mcp.acme.dev/docs", "public", [tool("search_docs", false), tool("get_page", false)]),
+    ]);
+  const key = (id: string, name: string, project: string, actions: string[], created: number, used: number | null, revoked = false) => ({ id, name, prefix: "gk_live_" + id.slice(-1) + "x2f…", project, actions, created: NOW - created, lastUsed: used === null ? null : NOW - used, revoked, by: "p-admin" });
+  ov["api-keys"] = (r) =>
+    fulfillJson(r, [
+      key("k1", "Release dashboard", "payments", ["wo.submit", "wo.read"], 30 * DAY, 2 * HOUR),
+      key("k2", "Support bot", "storefront", ["wo.read"], 20 * DAY, 3 * DAY),
+      key("k3", "CI release hook", "payments", ["wo.submit"], 12 * DAY, 40 * MIN),
+      key("k4", "Old import script", "identity", ["wo.submit"], 80 * DAY, 60 * DAY, true),
+    ]);
+  ov["api-config"] = (r) => fulfillJson(r, { rateLimit: 600, burst: 60, idempotencyHours: 24, webhookSigning: "hmac-sha256", triggersEnabled: true });
+  const trig = (id: string, name: string, project: string, type: string, enabled: boolean, n: number) => ({
+    id, project, type, name, enabled, who: "org", reply: "Thanks. Gantry opened {wo}.", dedupe: true, repos: "all",
+    runs: Array.from({ length: n }, (_, i) => ({ at: NOW - (i + 1) * 6 * HOUR, outcome: "created", wo: `WO-10${10 + i}`, source: `acme/${project}#${800 + i * 37}` })),
+  });
+  ov["triggers"] = (r) =>
+    fulfillJson(r, [
+      trig("TR-1", "Label ready-for-gantry", "payments", "issue", true, 6),
+      trig("TR-2", "Comment /gantry build", "storefront", "comment", true, 3),
+      trig("TR-3", "Nightly dependency sweep", "payments", "schedule", true, 9),
+      trig("TR-4", "CI red on main", "identity", "ci", false, 0),
+    ]);
+  const ev = ["gate.waiting", "stuck", "wo.done", "question", "gate.decided"];
+  const ch = ["slack", "email", "paging", "teams", "webhook"];
+  ov["deliveries"] = (r) =>
+    fulfillJson(r, Array.from({ length: 14 }, (_, i) => ({ id: `DLV-${5112 - i}`, at: NOW - i * 17 * MIN, project: "payments", event: ev[i % 5], channel: ch[i % 5], target: ["#factory-gates", "ops@acme.dev", "oncall", "#risk", "https://hooks.acme.dev/g"][i % 5], status: i % 6 === 3 ? "failed" : "delivered", attempts: 1, error: i % 6 === 3 ? "HTTP 503" : "", state: i % 6 === 3 ? "failed" : "sent" })));
+  Object.assign(ov, richGovern());
+  return ov;
+}
+
+const TEAMS = [
+  { id: "platform", name: "Platform", desc: "Shared services and the factory line", members: 6 },
+  { id: "growth", name: "Growth", desc: "Storefront and mobile", members: 4 },
+  { id: "payments", name: "Payments", desc: "Ledger, payouts and refunds", members: 5 },
+  { id: "data", name: "Data", desc: "Data platform and search", members: 3 },
+];
+const PEOPLE: Array<[string, string, string, string, string, boolean, string]> = [
+  ["p-admin", "Asha Raman", "Head of Engineering", "factory_admin", "platform", true, "active"],
+  ["p-arjun", "Arjun Mehta", "Frontend Engineer", "engineer", "growth", false, "active"],
+  ["p-chloe", "Chloe Martin", "Engineering Lead, Growth", "line_lead", "growth", true, "active"],
+  ["p-daniel", "Daniel Okafor", "Factory Manager", "project_admin", "platform", true, "active"],
+  ["p-diego", "Diego Alvarez", "Engineering Manager, Data", "line_lead", "data", true, "active"],
+  ["p-fatima", "Fatima Zahra", "Senior Engineer", "reviewer", "payments", true, "active"],
+  ["p-grace", "Grace Liu", "Security Engineer", "approver", "platform", true, "active"],
+  ["p-hana", "Hana Sato", "Engineering Lead, Mobile", "project_admin", "growth", true, "invited"],
+  ["p-ines", "Ines Moreau", "Engineering Lead, Internal Tools", "project_admin", "platform", false, "active"],
+  ["p-kenji", "Kenji Watanabe", "Release Manager", "release_manager", "platform", true, "active"],
+  ["p-kwame", "Kwame Mensah", "Engineering Lead, Partners", "project_admin", "payments", true, "active"],
+  ["p-lena", "Lena Fischer", "Engineering Lead, Platform", "project_admin", "platform", true, "active"],
+  ["p-meera", "Meera Iyer", "Tech Lead", "line_lead", "payments", true, "active"],
+  ["p-noor", "Noor Haddad", "Compliance Analyst", "auditor", "data", false, "active"],
+  ["p-omar", "Omar Siddiqui", "QA Engineer", "engineer", "payments", true, "active"],
+  ["p-priya", "Priya Nair", "On-call Engineer", "engineer", "platform", true, "active"],
+  ["p-rui", "Rui Costa", "Contractor", "viewer", "growth", false, "deactivated"],
+  ["p-sara", "Sara Lindqvist", "Product Manager", "viewer", "growth", true, "active"],
+  ["p-tomas", "Tomas Novak", "Backend Engineer", "engineer", "data", true, "active"],
+  ["p-uma", "Uma Patel", "Support Engineer", "engineer", "payments", true, "active"],
+];
+const person = (r: (typeof PEOPLE)[number]) => ({ id: r[0], name: r[1], title: r[2], email: `${r[0].slice(2)}@acme.dev`, teams: [r[4]], roles: [{ role: r[3], scope: "factory" }], status: r[6], oncall: r[0] === "p-priya", github: r[0].slice(2), away: null, mfa: r[5], version: 1 });
+
+function matrixE() {
+  const matrix: Record<string, Record<string, boolean>> = {};
+  for (const ro of ROLES) {
+    matrix[ro.id] = {};
+    ACTIONS.forEach((a, i) => {
+      const on = ro.id === "factory_admin" ? true : ro.id === "auditor" ? a.id === "audit.read" || a.id === "project.view" : ro.id === "viewer" ? a.id === "project.view" : ro.level === "factory" ? false : a.scope === "project" && (i + ro.id.length) % 3 !== 0;
+      matrix[ro.id]![a.id] = on;
+    });
+  }
+  return { matrix, roles: ROLES, actions: ACTIONS, version: 7 };
+}
+
+export function richGovern(): Record<string, Handler> {
+  const ov: Record<string, Handler> = {};
+  ov["people"] = (r) => fulfillJson(r, PEOPLE.map(person));
+  ov["teams"] = (r) => fulfillJson(r, TEAMS);
+  for (const pe of PEOPLE) {
+    ov[`people/${pe[0]}/effective-permissions`] = (r) => {
+      const projs = [{ id: "payments", name: "Payments Platform" }, { id: "storefront", name: "Storefront" }];
+      const acts = ACTIONS.slice(0, 12).map((a) => ({ id: a.id, name: a.name, group: a.group, scope: a.scope }));
+      const m = matrixE().matrix[pe[3]] ?? {};
+      const cells: Record<string, Record<string, [0 | 1, string, string[]?]>> = {};
+      for (const a of acts) {
+        cells[a.id] = {};
+        for (const pr of projs) cells[a.id]![pr.id] = [m[a.id] ? 1 : 0, "MATRIX", ["direct"]];
+      }
+      const factory: Record<string, { allowed: boolean; reason: string; rule: { id: string; name?: string } }> = {};
+      for (const a of ACTIONS.filter((x) => x.scope === "factory").slice(0, 6)) factory[a.id] = { allowed: !!m[a.id], reason: m[a.id] ? "Granted by the role." : "The role does not include it.", rule: { id: "MATRIX" } };
+      return fulfillJson(r, { person: pe[0], at: NOW, projects: projs, actions: acts, cells, teams: { [pe[4]]: TEAMS.find((t) => t.id === pe[4])?.name ?? pe[4] }, grants: [{ role: pe[3], roleName: ROLES.find((x) => x.id === pe[3])?.name ?? pe[3], scope: "factory", via: null }], rules: { MATRIX: { kind: "matrix", name: "Role matrix" } }, factory });
+    };
+  }
+  ov["access/matrix"] = (r) => fulfillJson(r, matrixE());
+  ov["policies"] = (r) =>
+    fulfillJson(r, [
+      { id: "POL-101", name: "Release window", effect: "deny", enabled: true, roles: ["release_manager", "project_admin"], actions: ["release"], where: { projects: ["payments"] }, when: { days: [0, 6], from: "00:00", to: "23:59" }, oncallOnly: false, version: 1 },
+      { id: "POL-102", name: "On-call may stop the line", effect: "allow", enabled: true, roles: ["engineer"], actions: ["kill.project"], where: {}, when: null, oncallOnly: true, extend: true, version: 1 },
+    ]);
+  ov["freezes"] = (r) => fulfillJson(r, []);
+  ov["security"] = (r) =>
+    fulfillJson(r, { sso: { provider: "Okta", domain: "acme.dev", enforced: true, entity: "https://acme.okta.com/app/gantry" }, mfa: { policy: "admins", methods: ["totp", "webauthn"] }, sessionHours: 12, idleMin: 30, domains: ["acme.dev"], ipAllow: ["203.0.113.0/24", "198.51.100.0/24"], restoreFactoryNeedsTwo: true, killNeedsStepUp: true, stepUpWindowMinutes: 15, githubLogin: false, researchHosts: [], chatCapUsdPerDay: null, version: 3 });
+  ov["sessions"] = (r) =>
+    fulfillJson(r, PEOPLE.slice(0, 8).map((p, i) => ({ id: `s${i}`, person: p[0], method: "sso", device: ["Chrome on macOS", "Firefox on Linux", "Safari on iOS", "Edge on Windows"][i % 4], ip: `203.0.113.${10 + i}`, started: NOW - (i + 1) * 3 * HOUR, lastSeen: NOW - i * 11 * MIN, revoked: false, current: i === 0 })));
+  ov["signins"] = (r) =>
+    fulfillJson(r, PEOPLE.slice(0, 8).map((p, i) => ({ at: NOW - i * 41 * MIN, person: p[0], email: `${p[0].slice(2)}@acme.dev`, method: "sso", outcome: i === 5 ? "failure" : "success", reason: i === 5 ? "MFA code wrong" : "", ip: `203.0.113.${10 + i}`, device: "Chrome on macOS" })));
+  const ACTIONS_E = [["access.role.grant", "person p-hana", "access", "ok"], ["config.route.save", "route NR-2", "config", "ok"], ["auth.signin", "session s3", "auth", "ok"], ["gate.approve", "WO-1004 G5", "approvals", "ok"], ["policy.save", "POL-101", "access", "denied"], ["integration.test", "Slack", "integrations", "ok"], ["wo.submit", "WO-1071", "flow", "ok"], ["api.key.create", "Release dashboard", "api", "ok"], ["security.set", "idleMin", "config", "ok"], ["kill.project", "search", "kill", "ok"]];
+  ov["audit"] = (r) => {
+    const items = Array.from({ length: 30 }, (_, i) => {
+      const a = ACTIONS_E[i % ACTIONS_E.length]!;
+      const who = PEOPLE[i % 12]!;
+      return { id: 5200 - i, seq: 5200 - i, at: NOW - i * 23 * MIN, actor: who[0], actorKind: "human", actorName: who[1], action: a[0], target: a[1], where: "payments", project: "payments", category: a[2], outcome: a[3], via: "web", channel: "web", before: null, after: null, entity: null, digest: "e3b0c44298fc1c14", prev: "9f86d081884c7d65" };
+    });
+    return fulfillJson(r, { items, next: null, total: 5200, summary: { entries: 5200, denied: 14, changes: 212, head: "e3b0c44298fc1c14", categories: { access: 600, config: 900, auth: 1200, flow: 1500, approvals: 700, api: 300 }, topics: {}, facets: { outcomes: ["ok", "denied"], channels: ["web", "api"], actors: PEOPLE.slice(0, 12).map((p) => ({ id: p[0], name: p[1] })) } } });
+  };
+  ov["audit/verify"] = (r) => fulfillJson(r, { ok: true, checked: 5200, head: "e3b0c44298fc1c14" });
+  ov["system/health"] = (r) =>
+    fulfillJson(r, {
+      at: new Date(NOW).toISOString(),
+      services: [["api", "API", 42], ["worker", "Worker", null], ["db", "Database", 6], ["runner", "Runner pool", null], ["edge", "MCP edge", 88], ["stream", "Live stream", 12]].map(([id, name, ms], i) => ({ id, name, status: i === 4 ? "degraded" : "ok", detail: i === 4 ? "p95 4.2 s on discovery" : "healthy", latencyMs: ms, heartbeatAgeSeconds: id === "worker" ? 6 : null })),
+      backup: { status: "ok", at: new Date(NOW - 5 * HOUR).toISOString(), ageHours: 5, set: "nightly-2026-01-15", detail: "Encrypted, verified" },
+      drill: { status: "ok", at: new Date(NOW - 3 * DAY).toISOString(), ageHours: 72, set: "nightly-2026-01-12", seconds: 412, failedChecks: 0, detail: "Restored and checked" },
+      outbox: { counts: { pending: 2, sending: 0, delivered: 1840, dead: 1 }, oldestPendingSeconds: 40, dead: [{ id: "ob-9", destination: "webhook data-platform", scope: "project", attempts: 5, maxAttempts: 5, lastError: "HTTP 503", createdAt: new Date(NOW - 6 * HOUR).toISOString(), failedAt: new Date(NOW - 2 * HOUR).toISOString() }] },
+      jobs: { counts: { queued: 3, running: 4, done: 2210, dead: 0 }, stuck: [], runningLongMinutes: 45, dead: [], deadWindowHours: 24 },
+      runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
+    });
+  ov["workload"] = (r) => {
+    const rows = PEOPLE.filter((p) => p[6] === "active").slice(0, 10).map((p, i) => ({ person: p[0], name: p[1], team: p[4], waiting: (i * 3) % 5, glass: (i * 2) % 4, approvals: 12 + i * 3, perDay: 1.5 + (i % 4) * 0.7, answered: 4 + i, waitN: 10 + i, medianResponseMin: 25 + i * 11, afterHours: i % 3, n: 14 + i, sole: i % 4 === 0 ? 1 : 0, minutes: 120 + i * 35, away: null, oncall: i === 3, waitingGates: [], recent: [] }));
+    return fulfillJson(r, {
+      at: NOW, days: 7, scope: "all", minN: 5, projects: [{ id: "payments", name: "Payments Platform" }, { id: "storefront", name: "Storefront" }], factoryWide: true, ids: [],
+      totals: { gatesWaiting: 7, soleGates: 2, noneGates: 0, timedN: 40, medianWaitMin: 130, acts: 96, afterHours: 11, minutes: 2840 },
+      rows,
+      teams: TEAMS.map((t, i) => ({ team: t.id, name: t.name, people: t.members, waiting: i + 1, approvals: 20 + i * 8, answered: 9 + i, minutes: 600 + i * 120, waitN: 12, medianResponseMin: 40 + i * 15, afterHours: i, n: 20, sole: i % 2 })),
+      byCls: [{ key: "feature", minutes: 1200, workOrders: 18, perWO: 66 }, { key: "bug", minutes: 800, workOrders: 22, perWO: 36 }],
+      byProject: [{ key: "payments", minutes: 1500, workOrders: 20, perWO: 75 }, { key: "storefront", minutes: 900, workOrders: 14, perWO: 64 }],
+      bottlenecks: [{ project: "payments", gate: "G5", decisions: 14, medianWaitMin: 190, open: 3, oldestMin: 300, station: "review", minEligible: 1 }],
+      needsPerson: [],
+      suggestions: [{ key: "s1", kind: "approver", icon: "people", weight: 3, text: "Review and merge on Payments Platform has one eligible approver (Meera Iyer).", action: { id: "wl-sg-1", label: "Open approver rules", type: "config", project: "payments", gate: "G5" } }],
+    });
+  };
+  return ov;
+}

@@ -90,16 +90,16 @@ describe("API & triggers: keys", () => {
   it("lists keys with their prefix, scope, status and expiry, and counts what is live", async () => {
     setup();
     mount();
-    expect(await screen.findByRole("heading", { name: "API & triggers" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "API and triggers" })).toBeTruthy();
     const row = await byId("api-key-row-key-1");
     expect(within(row).getByText("Jira bridge")).toBeTruthy();
     expect(within(row).getByText("gk_7hq2c91x…")).toBeTruthy();
     expect(within(row).getByText("Payments Platform")).toBeTruthy();
     expect(within(row).getByText("wo.submit")).toBeTruthy();
-    expect(within(row).getByText("✓ active")).toBeTruthy();
+    expect(within(row).getByText("Active")).toBeTruthy();
     expect(within(row).getByText(/^expires /)).toBeTruthy();
-    expect(within(await byId("api-key-row-key-2")).getByText("⊘ revoked")).toBeTruthy();
-    expect(within(await byId("api-key-row-key-3")).getByText("⊘ expired")).toBeTruthy();
+    expect(within(await byId("api-key-row-key-2")).getByText("Revoked")).toBeTruthy();
+    expect(within(await byId("api-key-row-key-3")).getByText("Expired")).toBeTruthy();
     expect(document.getElementById("api-key-revoke-key-2")).toBeNull(); // nothing to revoke
     const meta = document.getElementById("api-stats")!.textContent ?? "";
     expect(meta).toMatch(/Active keys\s*1/);
@@ -253,7 +253,7 @@ describe("API & triggers: triggers", () => {
     mount();
     await tab("triggers");
     const item = await byId("api-tr-open-TR-1");
-    expect(item.textContent).toContain("Acme GitHub · Issue with label · Payments Platform");
+    for (const w of ["Acme GitHub", "Issue with label", "Payments Platform"]) expect(item.textContent).toContain(w);
     expect(item.textContent).toContain("off");
     expect((await byId("api-tr-master")).textContent).toMatch(/switched off for the organisation/);
     expect(screen.getByText("✓ created")).toBeTruthy();

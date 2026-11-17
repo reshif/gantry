@@ -5,12 +5,13 @@ import { fmt } from "@gantry/domain";
 import { useHash } from "../lib/router";
 import { useAuditVerify, useMe, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
-import { Btn, Empty, Field, FilterBar, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { DataTable } from "../ui/DataTable";
+import { Btn, Empty, FilterBar, SearchBox, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { ActorCell, AuditDrawer, CatChip } from "./audit/Detail";
-import { CAT_ICON, CAT_NAME, NO_FILTERS, PAGE, TOPICS, useAuditFeed, type AuditRow, type Filters } from "./audit/data";
+import { CAT_NAME, NO_FILTERS, TOPICS, useAuditFeed, type AuditRow, type Filters } from "./audit/data";
 
 const BASE_CATS = ["auth", "access", "flow", "onboarding", "approvals", "config", "integrations", "api", "agents", "kill"];
 
@@ -58,7 +59,6 @@ export default function AuditView() {
   const open = (seq: number) => ui.drawer.open(`audit:${seq}`, (close) => <AuditDrawer seq={seq} projectName={projectName} close={close} />);
 
   const cats = [...BASE_CATS, ...Object.keys(sum?.categories ?? {}).filter((c) => !BASE_CATS.includes(c))];
-  const allCount = Object.values(sum?.categories ?? {}).reduce((a, b) => a + b, 0);
   const actorOpts = [
     { value: "all", label: "Anyone" }, { value: "human", label: "People" }, { value: "agent", label: "Agents" }, { value: "system", label: "API keys, triggers, system" },
     ...(sum?.facets.actors ?? []).map((a) => ({ value: a.id, label: a.name })),
@@ -81,8 +81,9 @@ export default function AuditView() {
   return (
     <div className="view view-audit">
       <ViewHead
-        title="Audit"
-        sub="An append-only record of what people, agents, API keys and triggers did, denials included. Each entry carries the digest of the one before it."
+        kicker="Govern"
+        title="Audit ledger"
+        sub="An append-only record of every decision and change. Entries are chained; the chain is verified hourly."
         actions={canVerify ? <Btn label={checking ? "Verifying..." : "Verify chain"} kind="primary" icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify()} /> : undefined}
       />
       <StatRow id="aud-stats">
@@ -104,48 +105,26 @@ export default function AuditView() {
           <span>You see entries for your own projects and your own actions. The full ledger needs the audit.view right (Factory Admin or Auditor).</span>
         </div>
       ) : null}
-      <div className="aud-cats" role="group" aria-label="Category">
-        {[{ id: "all", name: "All", n: allCount }, ...cats.filter((c) => BASE_CATS.includes(c) || (sum?.categories[c] ?? 0) > 0).map((c) => ({ id: c, name: CAT_NAME[c] ?? c, n: sum?.categories[c] ?? 0 }))].map((x) => (
-          <button key={x.id} type="button" id={`aud-cat-${x.id}`} className={`aud-catbtn aud-cat-${x.id}${f.cat === x.id ? " is-on" : ""}`} aria-pressed={f.cat === x.id} onClick={() => set({ cat: x.id })}>
-            {x.id !== "all" ? <Icon name={CAT_ICON[x.id] ?? "dots"} /> : null}
-            <span>{x.name}</span>
-            <span className="mono aud-n">{String(x.n)}</span>
-          </button>
-        ))}
-      </div>
-      <div className="aud-topics" role="group" aria-label="Round-three topic">
-        <span className="kicker">Topic</span>
-        {[{ id: "all", name: "Any", icon: "" }, ...TOPICS].map((t) => (
-          <button key={t.id} type="button" id={`aud-topic-${t.id}`} className={`aud-topic${f.topic === t.id ? " is-on" : ""}`} aria-pressed={f.topic === t.id} onClick={() => set({ topic: t.id })}>
-            {t.icon ? <Icon name={t.icon} /> : null}
-            <span>{t.name}</span>
-            {t.id !== "all" ? <span className="mono aud-n">{String(sum?.topics[t.id] ?? 0)}</span> : null}
-          </button>
-        ))}
-      </div>
-      <section className="panel aud-panel" aria-label="Ledger">
-        <Tabs idPrefix="aud-view" active={view} onChange={pickView} items={[{ id: "all", label: "All entries", count: sum?.entries ?? 0 }, { id: "denied", label: "Denied", count: sum?.denied ?? 0 }, { id: "config", label: "Config changes", count: sum?.changes ?? 0 }]} />
-        <FilterBar
-          label="Ledger filters"
-          count={<><span className="mono">{String(total)}</span>{" matching"}</>}
-          actions={dirty ? <Btn label="Clear filters" small id="aud-clear" onClick={clear} /> : undefined}
-        >
-          <div className="filters aud-filters">
-            <Field label="Search" htmlFor="aud-q">
-              <input id="aud-q" className="input" type="search" placeholder="Actor, action, target, value" value={typed} autoComplete="off" onChange={(e) => setTyped(e.target.value)} />
-            </Field>
-            <Field label="Project" htmlFor="aud-project">
-              <Select id="aud-project" value={f.project} onChange={(v) => set({ project: v })} options={[{ value: "all", label: "All projects" }, { value: "factory", label: "Factory-wide only" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]} />
-            </Field>
-            <Field label="Actor" htmlFor="aud-actor"><Select id="aud-actor" value={f.actor} onChange={(v) => set({ actor: v })} options={actorOpts} /></Field>
-            <Field label="Outcome" htmlFor="aud-outcome"><Select id="aud-outcome" value={f.outcome} onChange={(v) => set({ outcome: v })} options={[{ value: "all", label: "Any outcome" }, ...(sum?.facets.outcomes ?? []).map((k) => ({ value: k, label: k }))]} /></Field>
-            <Field label="Via" htmlFor="aud-via"><Select id="aud-via" value={f.via} onChange={(v) => set({ via: v })} options={[{ value: "all", label: "Any channel" }, ...(sum?.facets.channels ?? []).map((k) => ({ value: k, label: k }))]} /></Field>
-            <label className="check aud-chk" htmlFor="aud-changes">
-              <input type="checkbox" id="aud-changes" checked={f.changes} onChange={(e) => set({ changes: e.target.checked })} />
-              Only entries with before/after
-            </label>
-          </div>
-        </FilterBar>
+      <Tabs idPrefix="aud-view" active={view} onChange={pickView} items={[{ id: "all", label: "All entries", count: sum?.entries ?? 0 }, { id: "denied", label: "Denied", count: sum?.denied ?? 0 }, { id: "config", label: "Config changes", count: sum?.changes ?? 0 }]} />
+      <FilterBar
+        label="Ledger filters"
+        count={<><span className="mono">{String(total)}</span>{" matching"}</>}
+        actions={<>
+          <label className="check aud-chk" htmlFor="aud-changes">
+            <input type="checkbox" id="aud-changes" checked={f.changes} onChange={(e) => set({ changes: e.target.checked })} />
+            Only with before/after
+          </label>
+          {dirty ? <Btn label="Clear filters" small kind="ghost" id="aud-clear" onClick={clear} /> : null}
+        </>}
+      >
+        <SearchBox id="aud-q" label="Search" placeholder="Search action, target, person" value={typed} onChange={setTyped} />
+        <Select id="aud-cat" aria-label="Category" value={f.cat} onChange={(v) => set({ cat: v })} options={[{ value: "all", label: "Category: all" }, ...cats.filter((c) => BASE_CATS.includes(c) || (sum?.categories[c] ?? 0) > 0).map((c) => ({ value: c, label: `${CAT_NAME[c] ?? c} (${sum?.categories[c] ?? 0})` }))]} />
+        <Select id="aud-outcome" aria-label="Outcome" value={f.outcome} onChange={(v) => set({ outcome: v })} options={[{ value: "all", label: "Outcome: all" }, ...(sum?.facets.outcomes ?? []).map((k) => ({ value: k, label: k }))]} />
+        <Select id="aud-actor" aria-label="Actor" value={f.actor} onChange={(v) => set({ actor: v })} options={actorOpts.map((o) => (o.value === "all" ? { ...o, label: "Actor: all" } : o))} />
+        <Select id="aud-project" aria-label="Project" value={f.project} onChange={(v) => set({ project: v })} options={[{ value: "all", label: "Project: all" }, { value: "factory", label: "Factory-wide only" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]} />
+        <Select id="aud-via" aria-label="Channel" value={f.via} onChange={(v) => set({ via: v })} options={[{ value: "all", label: "Channel: all" }, ...(sum?.facets.channels ?? []).map((k) => ({ value: k, label: k }))]} />
+        <Select id="aud-topic" aria-label="Topic" value={f.topic} onChange={(v) => set({ topic: v })} options={[{ value: "all", label: "Topic: all" }, ...TOPICS.map((t) => ({ value: t.id, label: `${t.name} (${sum?.topics[t.id] ?? 0})` }))]} />
+      </FilterBar>
       <Async
         query={feed}
         what="the audit ledger"
@@ -153,36 +132,31 @@ export default function AuditView() {
         isEmpty={(d) => !d.pages.some((pg) => pg.items.length)}
         empty={<Empty id="aud-empty" icon="ledger" title={dirty ? "No entries match" : "The ledger is empty"} text={dirty ? "Clear the filters to see the full ledger." : "Every change, denial and sign-in is written here as it happens."} />}
       >{() => (
-        <div className="table-scroll ledger" data-keep-scroll="aud-ledger">
-          <table className="table table-compact aud-table">
-            <thead>
-              <tr>{["#", "When (IST)", "Actor", "Category", "Action", "Target", "Project", "Outcome", "Change", "Digest"].map((x) => <th key={x} scope="col">{x}</th>)}</tr>
-            </thead>
-            <tbody>
-              {rows.map((e) => (
-                <tr key={e.seq} className={`row-link aud-row o-row-${e.outcome}`} onClick={() => open(e.seq)}>
-                  <td className="mono muted"><button type="button" className="linkish mono" id={`aud-row-${e.seq}`} aria-label={`Open audit entry ${e.seq}: ${e.action}`}>{String(e.seq)}</button></td>
-                  <td className="mono nowrap">{fmt.iso(e.at)}</td>
-                  <td><ActorCell id={e.actor} name={e.actorName} /></td>
-                  <td><CatChip c={e.category} /></td>
-                  <td className="mono">{e.action}</td>
-                  <td className="cell-title aud-target">{e.target}</td>
-                  <td className="small">{e.project ? projectName(e.project) : <span className="muted">factory</span>}</td>
-                  <td><span className={`outcome o-${e.outcome}`}>{e.outcome}</span></td>
-                  <td>{e.before != null || e.after != null ? <span className="aud-has-diff" title="Has before/after"><Icon name="swap" />diff</span> : null}</td>
-                  <td className="mono muted digest" data-tip={`prev ${e.prev.slice(0, 8)}`}>{e.digest.slice(0, 8)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          id="aud-ledger"
+          caption="Audit ledger"
+          rows={rows}
+          rowKey={(e) => String(e.seq)}
+          rowId={(e) => `aud-row-${e.seq}`}
+          onRow={(e) => open(e.seq)}
+          rowLabel={(e) => `Open audit entry ${e.seq}: ${e.action}`}
+          hasMore={!!feed.hasNextPage}
+          onLoadMore={() => void feed.fetchNextPage()}
+          loadingMore={feed.isFetchingNextPage}
+          total={total}
+          columns={[
+            { key: "seq", label: "#", render: (e) => <span className="mono dim">{String(e.seq)}</span> },
+            { key: "at", label: "When", render: (e) => <span className="mono nowrap">{fmt.iso(e.at)}</span> },
+            { key: "actor", label: "Actor", render: (e) => <ActorCell id={e.actor} name={e.actorName} /> },
+            { key: "action", label: "Action", render: (e) => <span className="mono">{e.action}</span> },
+            { key: "target", label: "Target", hideSmall: true, render: (e) => <span className="ell aud-target">{e.target}</span> },
+            { key: "project", label: "Project", hideSmall: true, render: (e) => (e.project ? <span className="tag">{projectName(e.project)}</span> : <span className="dim">factory</span>) },
+            { key: "cat", label: "Category", hideSmall: true, render: (e) => <CatChip c={e.category} /> },
+            { key: "outcome", label: "Outcome", render: (e) => <><span className={`chip ${e.outcome === "ok" ? "ok" : e.outcome === "denied" ? "bad" : "warn"}`}>{e.outcome}</span>{e.before != null || e.after != null ? <span className="aud-has-diff" title="Has before/after"><Icon name="swap" />diff</span> : null}</> },
+            { key: "digest", label: "Digest", hideSmall: true, render: (e) => <span className="mono dim digest" data-tip={`prev ${e.prev.slice(0, 8)}`}>{e.digest.slice(0, 8)}</span> },
+          ]}
+        />
       )}</Async>
-      </section>
-      {feed.hasNextPage ? (
-        <div className="more">
-          <Btn label={`Show ${Math.min(PAGE, total - rows.length)} more`} id="aud-more" onClick={() => void feed.fetchNextPage()} />
-        </div>
-      ) : null}
       <p className="footnote">Each entry carries a SHA-256 digest of its fields and the digest before it, written by the database. Any edit or removal breaks every digest after it, and Verify chain finds the first break.</p>
     </div>
   );

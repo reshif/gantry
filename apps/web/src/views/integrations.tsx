@@ -79,16 +79,16 @@ export default function IntegrationsView() {
   return (
     <div className="view cx int-view">
       <ViewHead
+        kicker="Connect"
         title="Integrations"
-        sub="Where Gantry reads work from and where it sends cards. Several connections per type, each scoped to projects. A new connection stays switched off until you turn it on."
+        sub="Source control, chat, trackers, paging and webhooks that the line talks to."
         actions={<><Btn label="Add integration" kind="primary" icon="plus" id="int-add" guard={add} onClick={() => addDialog(null)} /><Btn label="Build custom integration" icon="tool" id="int-build" guard={add} onClick={() => setTab("custom")} /></>}
       />
       <StatRow id="int-stats">
-        <Stat label="Connected" value={qState(d.instsQ, () => String(all.length - off))} sub="enabled connections" tone="done" />
-        <Stat label="Failing" value={qState(d.instsQ, () => String(failing))} sub={failing ? "need a look" : "none failing"} tone={failing ? "block" : undefined} />
+        <Stat label="Connected" value={qState(d.instsQ, () => String(all.length))} sub={`${customN} custom types`} />
+        <Stat label="Healthy" value={qState(d.instsQ, () => String(all.filter((i) => statusOf(i) === "healthy").length))} sub="enabled and reachable" tone="done" />
         <Stat label="Disabled" value={qState(d.instsQ, () => String(off))} sub="switched off" tone={off ? "wait" : undefined} />
-        <Stat label="Types" value={qState(d.typesQ, () => String(d.types.length))} sub={qState(d.typesQ, () => `in the catalogue, ${customN} custom`)} />
-        <Stat label="Failed deliveries 24h" value={qState(failedQ, () => String(failed))} sub={unrouted ? `${unrouted} more had no connection` : "across all projects"} tone={failed ? "block" : undefined} />
+        <Stat label="Failing" value={qState(d.instsQ, () => String(failing))} sub={unrouted || failed ? `${failed + unrouted} failed deliveries 24h` : failing ? "need a look" : "none failing"} tone={failing ? "block" : undefined} />
       </StatRow>
       <Tabs idPrefix="int-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="int-tab-panel" role="tabpanel" aria-labelledby={`int-tab-${tab}`}>

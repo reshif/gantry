@@ -9,6 +9,7 @@ import type { Page } from "@playwright/test";
 import { workforceOverrides } from "./rich-workforce";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
 import { woReadOverrides } from "./rich-wo";
+import { richGroupE, routesE } from "./rich-e";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
 const MIN = 60_000;
@@ -87,7 +88,7 @@ function agents() {
 
 function project(p: (typeof PROJECTS)[number], i: number) {
   return {
-    id: p.id, name: p.name, key: p.key, status: "active", teams: ["platform"], owner: "p-admin", template: "standard", regulated: i % 2 === 0, desc: p.desc, flow: flow(), approvers: {}, notifications: [], mcp: [],
+    id: p.id, name: p.name, key: p.key, status: "active", teams: ["platform"], owner: "p-admin", template: "standard", regulated: i % 2 === 0, desc: p.desc, flow: flow(), approvers: {}, notifications: routesE, mcp: [],
     budget: { monthly: 4000, mtd: 1280 + i * 190, alertAt: 0.8 }, created: NOW - 90 * DAY,
     halted: "halted" in p && p.halted ? { by: "p-admin", at: NOW - 3 * HOUR, reason: "Relevance regression under investigation" } : null, killed: null, overlay: "", version: 3,
   };
@@ -249,10 +250,16 @@ export function richOverrides(): Record<string, Handler> {
   });
   ov["people"] = (r) => fulfillJson(r, [person("p-admin", "Asha Raman", "Engineering Director", "factory_admin"), person("p-lead", "Meera Iyer", "Tech Lead", "tech_lead"), person("p-reader", "Rae Reader", "Auditor", "auditor")]);
   Object.assign(ov, workforceOverrides());
+  Object.assign(ov, richGroupE());
   return ov;
 }
 
 /** Install the API fixtures for the fidelity harness on a page: the admin persona and the rich plant above. */
 export async function installRich(page: Page): Promise<void> {
   await mockApi(page, { persona: PERSONAS.admin, overrides: richOverrides() });
+}
+
+/** Signed-out API for the sign-in screen: /me answers 401, nothing else is needed. */
+export async function installSignedOut(page: Page): Promise<void> {
+  await mockApi(page, { persona: null });
 }
