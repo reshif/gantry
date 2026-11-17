@@ -22,20 +22,20 @@ export default function ApiView() {
   const active = d.keys.filter((k) => !k.revoked && !k.expired);
   const on = d.triggers.filter((t) => t.enabled);
   const tabs = [
-    { id: "keys", label: "Keys", count: active.length }, { id: "ref", label: "Endpoints" }, { id: "play", label: "Playground" },
-    { id: "log", label: "Request log", count: d.last24h }, { id: "triggers", label: "Triggers", count: d.triggers.length }, { id: "limits", label: "Limits" },
+    { id: "keys", label: "Keys", count: active.length }, { id: "triggers", label: "Triggers", count: d.triggers.length }, { id: "ref", label: "Reference" },
+    { id: "log", label: "Request log", count: d.last24h }, { id: "limits", label: "Limits" }, { id: "play", label: "Playground" },
   ];
   return (
     <div className="view cx api-view">
       <ViewHead
         title="API & triggers"
-        sub="Submit and follow work orders from other systems, and open work from source control, issue trackers, CI and schedules. Triggers are off until you switch them on."
+        sub="Programmatic ways to put work on the line."
       />
       <StatRow id="api-stats">
-        <Stat label="Active keys" value={qState(d.keysQ, () => String(active.length))} sub="not revoked or expired" />
-        <Stat label="Requests 24h" value={qState(d.logQ, () => String(d.last24h))} sub="to the API" />
-        <Stat label="Rate limited 24h" value={qState(d.logQ, () => String(d.limited24h))} sub="refused for going over the limit" tone={d.limited24h ? "wait" : undefined} />
-        <Stat label="Triggers on" value={qState(d.trigQ, () => `${on.length} of ${d.triggers.length}`)} sub="switched on" />
+        <Stat label="Active keys" value={qState(d.keysQ, () => String(active.length))} sub={`of ${d.keys.length}`} />
+        <Stat label="Triggers on" value={qState(d.trigQ, () => String(on.length))} sub={`of ${d.triggers.length}`} tone="done" />
+        <Stat label="Requests, 24 h" value={qState(d.logQ, () => String(d.last24h))} sub={`${d.log.filter((x) => x.status >= 400).length} errors, ${d.limited24h} rate limited`} tone={d.log.some((x) => x.status >= 400) ? "wait" : undefined} />
+        <Stat label="Rate limit" value={d.cfg ? `${d.cfg.rateLimit}/min` : "n/a"} />
       </StatRow>
       <Tabs idPrefix="api-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="api-tab-panel" role="tabpanel" aria-labelledby={`api-tab-${tab}`}>

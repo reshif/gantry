@@ -67,7 +67,7 @@ describe("System health view", () => {
     expect(document.getElementById("sys-drill")?.textContent).toContain("Not run yet");
     expect(document.querySelector("tr[data-key='ob-1']")?.textContent).toContain("HTTP 500 from slack");
     expect(document.querySelector("tr[data-key='j1']")?.textContent).toContain("Lease expired");
-    expect(document.body.textContent).toContain("Services up2 of 4");
+    expect(document.body.textContent).toContain("Services2/4healthy");
   });
 
   it("shows no stale warning for a current backup and says nothing is stuck or dead", async () => {

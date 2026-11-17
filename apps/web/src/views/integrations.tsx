@@ -5,7 +5,7 @@
  * Not ported, on purpose: the simulated connection test and its footnote. The test calls the service for real.
  */
 import { useState } from "react";
-import { DAY, type IntegrationInstance } from "@gantry/domain";
+import { DAY, INTEGRATION_CATEGORIES, type IntegrationInstance } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useDeliveries } from "../api/queries";
 import { Btn, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
@@ -35,6 +35,13 @@ export default function IntegrationsView() {
   const failed = failedDay.filter((x) => x.integration).length;
   const unrouted = failedDay.length - failed;
 
+  const toggleInst = (i: IntegrationInstance): void => {
+    if (!i.connected) {
+      void ops.updateIntegration(i.id, { connected: true }, i.version !== undefined ? { ifMatch: i.version } : undefined).then((r) => ui.toast(r.ok ? `${i.name} enabled.` : r.msg, r.ok ? "ok" : "error"));
+      return;
+    }
+    ui.open((c) => <ToggleIntegration inst={i} close={c} />);
+  };
   const openInstance = (id: string): void => {
     ui.drawer.open(`int:${id}`, (close) => (
       <InstanceDrawer
@@ -80,15 +87,14 @@ export default function IntegrationsView() {
     <div className="view cx int-view">
       <ViewHead
         title="Integrations"
-        sub="Where Gantry reads work from and where it sends cards. Several connections per type, each scoped to projects. A new connection stays switched off until you turn it on."
+        sub="Where Gantry reads requests from and writes results to."
         actions={<><Btn label="Add integration" kind="primary" icon="plus" id="int-add" guard={add} onClick={() => addDialog(null)} /><Btn label="Build custom integration" icon="tool" id="int-build" guard={add} onClick={() => setTab("custom")} /></>}
       />
       <StatRow id="int-stats">
-        <Stat label="Connected" value={qState(d.instsQ, () => String(all.length - off))} sub="enabled connections" tone="done" />
-        <Stat label="Failing" value={qState(d.instsQ, () => String(failing))} sub={failing ? "need a look" : "none failing"} tone={failing ? "block" : undefined} />
-        <Stat label="Disabled" value={qState(d.instsQ, () => String(off))} sub="switched off" tone={off ? "wait" : undefined} />
-        <Stat label="Types" value={qState(d.typesQ, () => String(d.types.length))} sub={qState(d.typesQ, () => `in the catalogue, ${customN} custom`)} />
-        <Stat label="Failed deliveries 24h" value={qState(failedQ, () => String(failed))} sub={unrouted ? `${unrouted} more had no connection` : "across all projects"} tone={failed ? "block" : undefined} />
+        <Stat label="Connected" value={qState(d.instsQ, () => String(all.length - off))} sub={`of ${all.length}`} tone="done" />
+        <Stat label="Needs attention" value={qState(d.instsQ, () => String(failing + off + failed))} sub={failing + failed ? "need a look" : off ? "switched off" : "all well"} tone={failing + off + failed ? "wait" : undefined} />
+        <Stat label="Catalogue" value={qState(d.typesQ, () => String(d.types.length))} sub={qState(d.typesQ, () => `types, ${customN} custom`)} />
+        <Stat label="Categories" value={String(INTEGRATION_CATEGORIES.length)} />
       </StatRow>
       <Tabs idPrefix="int-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="int-tab-panel" role="tabpanel" aria-labelledby={`int-tab-${tab}`}>
@@ -97,7 +103,7 @@ export default function IntegrationsView() {
         ) : tab === "custom" ? (
           <Async query={d.typesQ} what="custom integration types" id="int-custom">{() => <CustomTab onAddInstance={addDialog} openType={openType} />}</Async>
         ) : (
-          <Async query={d.instsQ} what="connected integrations" id="int">{() => <ConnectedTab nav={nav} openInstance={openInstance} />}</Async>
+          <Async query={d.instsQ} what="connected integrations" id="int">{() => <ConnectedTab nav={nav} openInstance={openInstance} onToggle={toggleInst} />}</Async>
         )}
       </div>
     </div>

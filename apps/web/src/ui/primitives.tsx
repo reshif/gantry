@@ -99,7 +99,7 @@ export function Toggle({ id, checked, onChange, decision, label }: { id: string;
         type="checkbox"
         role="switch"
         id={id}
-        className={`switch-input${g.locked ? " is-locked" : ""}`}
+        className={`sw switch-input${g.locked ? " is-locked" : ""}`}
         checked={checked}
         aria-label={label}
         aria-disabled={g["aria-disabled"]}
@@ -114,7 +114,6 @@ export function Toggle({ id, checked, onChange, decision, label }: { id: string;
           if (!g.locked) onChange?.(e.target.checked);
         }}
       />
-      <span className="switch-track" aria-hidden="true" />
     </span>
   );
 }

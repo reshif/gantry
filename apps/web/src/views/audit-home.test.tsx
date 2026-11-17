@@ -91,11 +91,10 @@ describe("Audit", () => {
     expect(stat("Head digest")).toBe("cccccccc");
     expect(stat("Denied")).toBe("1");
     expect(document.querySelectorAll("tr.aud-row")).toHaveLength(3);
-    expect(document.querySelector(".o-row-denied .outcome")?.textContent).toBe("denied");
+    expect(document.querySelector(".o-row-denied td:last-child .chip")?.textContent).toBe("denied");
     expect(document.querySelectorAll(".aud-has-diff")).toHaveLength(1);
-    expect(document.getElementById("aud-cat-access")?.textContent).toContain("2");
     // Clicking a category narrows server-side.
-    fireEvent.click(document.getElementById("aud-cat-config")!);
+    fireEvent.change(document.getElementById("aud-category")!, { target: { value: "config" } });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("category") === "config")).toBe(true));
     // Auditors get the verify button; the note about a limited view is absent.
     expect(document.getElementById("aud-verify")).toBeTruthy();

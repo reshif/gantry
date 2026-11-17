@@ -84,13 +84,13 @@ export default function WorkloadView() {
   return (
     <div className="view view-workload">
       <ViewHead title="Workload"
-        sub="Human attention is the scarce resource. Who is waited on, how fast they answer, and where one person is the only way through."
-        actions={controls} />
+        sub="Who is carrying the approvals, and where the queue is building up." />
+      {controls}
       <StatRow id="wl-stats">
-        <Stat label="Gates waiting" value={String(t.gatesWaiting)} />
+        <Stat label="Approvals waiting" value={String(t.gatesWaiting)} sub="across people" tone={t.gatesWaiting > 10 ? "wait" : undefined} />
+        <Stat label="On call" value={String(m.rows.filter((r) => r.oncall).length)} />
         <Stat label="Median wait" value={t.timedN >= MIN_N ? mins(t.medianWaitMin) : "–"} sub={t.timedN >= MIN_N ? `n=${t.timedN}` : t.timedN ? `Needs ${MIN_N} or more observations (n=${t.timedN})` : undefined} />
         <Stat label="After hours" value={t.acts >= MIN_N ? fmt.pct(t.afterHours / t.acts) : "–"} sub={t.acts >= MIN_N ? `${t.afterHours} of ${t.acts} acts` : undefined} />
-        <Stat label="Human minutes" value={String(t.minutes)} sub="this window" />
       </StatRow>
       {t.soleGates || t.noneGates ? (
         <div className="callout callout-warn wl-bus" role="note">

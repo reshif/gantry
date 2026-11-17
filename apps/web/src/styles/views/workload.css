@@ -15,7 +15,7 @@
 .wl-sg-text { margin: 0; flex: 1 1 280px; min-width: 0; font-size: var(--t-md); }
 .wl-sg > .chip { flex: none; }
 .wl-sg > .btn { flex: none; }
-.wl-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.wl-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-start; margin-bottom: 12px; }
 .wl-controls select { max-width: 220px; }
 .wl-bus strong { margin-right: 2px; }
 
@@ -28,7 +28,7 @@
 .wl-warn { color: var(--wait); font-weight: 600; }
 .wl-insuf { display: inline-flex; gap: 6px; align-items: baseline; flex-wrap: wrap; justify-content: flex-end; color: var(--muted); }
 .wl-insuf-l { font-size: 10px; font-family: var(--f-mono); text-transform: uppercase; letter-spacing: 0.04em; border: 1px dashed var(--line-strong); padding: 0 4px; border-radius: 2px; }
-.wl-mincell { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.wl-mincell { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-start; margin-bottom: 12px; }
 .wl-bar { display: inline-block; width: 60px; height: 6px; background: var(--sunk); border: 1px solid var(--line); }
 .wl-bar > span { display: block; height: 100%; background: var(--accent); }
 .wl-gate { display: inline-flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }

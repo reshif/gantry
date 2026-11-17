@@ -81,10 +81,9 @@ describe("Security screen", () => {
     expect((await byId("sec-sso-enforced") as HTMLInputElement).checked).toBe(true);
     expect((await byId("sec-gh") as HTMLInputElement).checked).toBe(false);
     expect(((await byId("sec-idle")) as HTMLSelectElement).value).toBe("30");
-    await waitFor(() => expect(text()).toContain("Active sessions2"));
-    expect(text()).toContain("Okta, required");
-    expect(text()).toContain("Idle timeout30 min");
-    expect(text()).toContain("Failed sign-ins 24 h1");
+    await waitFor(() => expect(text()).toContain("SSOEnforcedOkta"));
+    expect(text()).toContain("30 min idle");
+    expect(text()).toContain("Failed sign-ins1last 24 h");
     expect(document.querySelector(".lock-note")).toBeNull();
     expect(locked(await byId("sec-sso-domain"))).toBe(false);
   });
@@ -93,8 +92,8 @@ describe("Security screen", () => {
     setup();
     mount();
     expect((await byId("sec-mfa-notice")).textContent).toContain("Not enforced");
-    await waitFor(() => expect(text()).toContain("MFAnot enforced"));
-    expect(text()).not.toContain("MFAadmins");
+    await waitFor(() => expect(text()).toContain("MFANot enforcedrecorded only"));
+    expect(text()).not.toContain("MFAAdmins");
   });
 
   it("lists domains, ranges and research hosts on the network tab, and the active sessions and history tabs", async () => {

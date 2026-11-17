@@ -4,7 +4,7 @@
  */
 import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";
-import { Btn, Empty, Panel, Status, Table, ViewHead, type Tone } from "../../ui/primitives";
+import { Btn, Empty, Panel, Stat, StatRow, Status, Table, ViewHead, type Tone } from "../../ui/primitives";
 import { Async, qState, useCommand } from "../../ui/async";
 import { dec } from "../mcp/kit";
 import { retryDeadLetter, useSystemHealth, type BackupStatus, type DeadLetter, type DrillStatus, type ServiceHealth, type StuckJob, type SystemHealth } from "./data";
@@ -154,15 +154,15 @@ export default function SystemView() {
     <div className="view view-system">
       <ViewHead
         title="System health"
-        sub="Whether the factory's services are answering, backups are current and restorable, and nothing is waiting on a delivery or job that has stopped moving."
-        meta={[
-          ["Services up", qState(q, (d) => `${up} of ${d.services.length}`)],
-          ["Last backup", qState(q, (d) => ageText(d.backup.ageHours))],
-          ["Dead letters", qState(q, (d) => fmt.num(d.outbox.counts.dead))],
-          ["Stuck jobs", qState(q, (d) => fmt.num(d.jobs.stuck.length))],
-        ]}
+        sub="Is the factory itself running well? Services, workers, backups and stuck work."
         actions={<Btn small icon="refresh" label="Refresh" id="sys-refresh" onClick={() => void q.refetch()} />}
       />
+      <StatRow id="sys-stats">
+        <Stat label="Services" value={qState(q, (d) => `${up}/${d.services.length}`)} sub="healthy" tone={h && up < h.services.length ? "wait" : "done"} />
+        <Stat label="Dead letters" value={qState(q, (d) => fmt.num(d.outbox.counts.dead))} sub="outbox" tone={h && h.outbox.counts.dead ? "block" : "done"} />
+        <Stat label="Stuck jobs" value={qState(q, (d) => fmt.num(d.jobs.stuck.length))} tone={h && h.jobs.stuck.length ? "wait" : "done"} />
+        <Stat label="Last backup" value={qState(q, (d) => ageText(d.backup.ageHours))} tone="done" />
+      </StatRow>
       <Async query={q} what="system health" id="sys">
         {(d) => (
           <div className="sys-grid">

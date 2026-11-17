@@ -138,7 +138,7 @@ export function usePreview(project: string | null | undefined, o: { event: strin
 /** The buttons a card shows for one destination: approve only where that connection allows approving from chat, and never on email. */
 export function actionsFor(pv: Preview, fields: Partial<Fields>, channel: string, inst: IntegrationInstance | null): { list: string[]; note: string | null } {
   if (!fieldOn(fields, "actions")) return { list: [], note: "Action buttons are off for this route." };
-  let list = pv.actions.slice();
+  let list = (pv.actions ?? []).slice();
   let note: string | null = null;
   const can = inst?.config.approve === true;
   if (list.includes("approve") && !can) {

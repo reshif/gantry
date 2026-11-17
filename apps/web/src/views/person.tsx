@@ -12,7 +12,7 @@ import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate, useHash } from "../lib/router";
 import { ExplainDenial } from "./console/ExplainDenial";
-import { Avatar, Btn, Empty, LockNote, Panel, Select, Toggle, type Decision } from "../ui/primitives";
+import { Avatar, Btn, Empty, LockNote, Panel, Select, Stat, StatRow, Toggle, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -165,30 +165,25 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
 
   return (
     <div className="person-stack" aria-label={p.name}>
-      <section className="panel member-detail person-head" aria-label={p.name}>
-        <div className="person-top">
-          <Avatar id={p.id} size="lg" />
-          <div className="ppl-who">
-            <div className="person-kicker">{stateWord}</div>
-            <h1 className="vtitle person-name">{p.name}</h1>
-            <div className="ad-meta">{`${p.title || "No title yet"} · ${teamNames} · `}<span className="mono">{p.email}</span>{p.github ? <span>{` · GitHub `}<span className="mono">{p.github}</span></span> : " · GitHub not linked"}</div>
-            <div className="ppl-badges">
-              {off ? <span className="chip chip-muted"><Icon name="lock" />deactivated</span> : null}
-              <span className={`chip${p.mfa ? " chip-ok" : " chip-warn"}`}><Icon name="shield" />{p.mfa ? "MFA enrolled" : "No MFA"}</span>
-              {p.oncall ? <span className="chip chip-accent" data-tip="On call for at least one project, or a Factory Admin (always on call). Project admins set who is on call in Project config." tabIndex={0}><Icon name="clock" />On call</span> : null}
-              {away ? <span className="chip chip-warn"><Icon name="swap" />{`Away until ${fmt.istDate(away.to)}, delegate ${actors(away.delegate).name}`}</span> : null}
-            </div>
-          </div>
-        </div>
-        <div className="person-actions">
+      <ViewHead
+        title={p.name}
+        sub={<>{`${p.title || "No title yet"} · `}<span className="mono">{p.email}</span>{p.github ? <span>{` · GitHub `}<span className="mono">{p.github}</span></span> : " · GitHub not linked"}</>}
+        actions={<>
           {p.status === "invited" ? <Btn label="Mark invite accepted" icon="check" id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
           <Btn label="Edit teams" icon="teams" id="ppl-teams" guard={perm} onClick={openTeams} />
           <Btn label="History" icon="ledger" id="ppl-history-jump" onClick={() => document.getElementById("ppl-history")?.scrollIntoView?.({ block: "start", behavior: "smooth" })} />
           {off
             ? <Btn label="Reactivate" icon="check" id="ppl-reactivate" guard={perm} onClick={() => offboard.reactivate(p)} />
-            : <Btn label="Deactivate" kind="danger" icon="lock" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
-        </div>
-      </section>
+            : <Btn label="Deactivate" kind="danger" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
+        </>}
+      />
+      <StatRow id="ppl-stats">
+        <Stat label="Status" value={stateWord.toLowerCase()} tone={p.status === "active" ? "done" : "wait"} />
+        <Stat label="MFA" value={p.mfa ? "On" : "Off"} tone={p.mfa ? "done" : "wait"} />
+        <Stat label="Teams" value={String((p.teams ?? []).length)} sub={teamNames} />
+        <Stat label="On call" value={p.oncall ? "Yes" : "No"} />
+      </StatRow>
+      {away ? <div className="ppl-badges"><span className="chip warn">{`Away until ${fmt.istDate(away.to)}, delegate ${actors(away.delegate).name}`}</span></div> : null}
 
       <div className="gv-two gv-top">
         <Panel title="Roles held">

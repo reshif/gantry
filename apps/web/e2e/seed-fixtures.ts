@@ -186,7 +186,13 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "suites" || path === "agents/suites") return seed.suites;
     if (path === "evals/runs") return seed.eval_runs;
     if (path === "evals/scorecards") return seed.scorecards;
-    if (path === "audit") return page(seed.audit);
+    if (path === "audit") {
+      const ppl = new Map((seed.people as Array<{ id: string; name: string }>).map((x) => [x.id, x.name]));
+      const items = (seed.audit as Array<Record<string, any>>).slice().sort((x, y) => y.at - x.at).map((e, i, all) => ({ ...e, seq: e.id, actorKind: String(e.actor).startsWith("p-") ? "human" : "system", actorName: ppl.get(e.actor) ?? e.actor, channel: e.via ?? "web", digest: `d${String(e.id).padStart(8, "0")}ffff`, prev: `d${String(all[i + 1]?.id ?? 0).padStart(8, "0")}ffff` }));
+      const count = (k: string) => items.reduce<Record<string, number>>((m, e) => ({ ...m, [e[k]]: (m[e[k]] ?? 0) + 1 }), {});
+      const cats = count("category");
+      return { items, next: null, total: items.length, summary: { entries: items.length, denied: items.filter((e) => e.outcome === "denied").length, changes: items.filter((e) => e.category === "config").length, head: items[0]?.digest ?? "", categories: cats, topics: {}, facets: { outcomes: Object.keys(count("outcome")), channels: ["web", "api"], actors: Object.keys(count("actor")).map((id) => ({ id, name: ppl.get(id) ?? id })) } } };
+    }
     if (path === "signins") return seed.signins;
     if (path === "sessions") return seed.sessions;
     if (path === "policies") return seed.policies;
@@ -205,12 +211,42 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "api-config") return seed.api_config;
     if (path === "guidelines") return seed.guidelines;
     if (path === "instructions/base") return seed.instructions;
-    if (path === "access/matrix") return seed.role_matrix;
     if (path === "learning/findings") return seed.learning?.findings ?? [];
     if (path === "learning/proposals") return (seed.learning?.proposals ?? []).map((x: Seed) => ({ ...x, status: x.status === "adopted" ? "accepted" : x.status }));
     if (path === "learning/settings") return { proposalsOn: true, otherDeciders: 2 };
     if (path === "learning/signals") return [];
     if (path === "trust/cells") return { levelsAboveL1: true, minRuns: 5, soakDays: 7, maxGrantable: 3, ...seed.trust, cells: (seed.trust?.cells ?? []).map((c: Seed) => ({ rev: 1, gate: null, pending: null, effective: c.level, projection: 2, meets: { ok: false, next: Math.min(4, c.level + 1), missing: [] }, ceiling: { max: 4, ids: [] }, evidence: { runs: c.cleanRuns + 1, cleanRuns: c.cleanRuns, evalScore: 0.9, rework: 0.08, incidents: 0, incidentWos: [] }, ...c })), proposals: (seed.trust?.proposals ?? []).map((p: Seed) => ({ ...p, status: p.status === "approved" ? "accepted" : p.status })) };
+    if (path === "access/matrix") return { matrix: seed.role_matrix, roles: seed.catalog.roles, actions: seed.catalog.actions, version: 1 };
+    if (path === "system/health") {
+      const at = new Date(seed.NOW).toISOString();
+      const svc = (id: string, name: string, status: "ok" | "degraded", detail: string) => ({ id, name, status, detail, latencyMs: 40 });
+      return {
+        at,
+        services: [svc("api", "API gateway", "ok", "p95 212 ms"), svc("worker", "Worker pool", "ok", "6 of 6 workers"), svc("db", "Postgres", "ok", "replica lag 0.4 s"), svc("queue", "Job queue", "degraded", "2 dead letters")],
+        backup: { status: "ok", at, ageHours: 6, set: "nightly-0412", detail: "verified" },
+        drill: { status: "ok", at, ageHours: 40, set: "nightly-0410", seconds: 840, failedChecks: 0, detail: "restore drill passed" },
+        outbox: { counts: { pending: 1, sending: 0, delivered: 220, dead: 2 }, oldestPendingSeconds: 30, dead: [{ id: "dl-1", destination: "slack #gates", scope: "project", attempts: 5, maxAttempts: 5, lastError: "channel_not_found", createdAt: at, failedAt: at }] },
+        jobs: { counts: { queued: 2, running: 3, done: 480, dead: 0 }, stuck: [], runningLongMinutes: 180, dead: [], deadWindowHours: 24 },
+        runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
+      };
+    }
+    if (path === "workload") {
+      const people = (seed.people as Array<{ id: string; name: string; status: string; oncall?: boolean; teams?: string[] }>).filter((x) => x.status === "active");
+      const rows = people.map((x, i) => ({ person: x.id, name: x.name, team: x.teams?.[0] ?? null, glass: 0, perDay: (4 + i) / 7, waitN: 6, waiting: i % 3, approvals: 4 + i, answered: i % 4, medianResponseMin: 12 + i, afterHours: i % 2, n: 6, sole: i % 5 === 0 ? 1 : 0, minutes: 30 + i * 5, away: null, oncall: !!x.oncall, waitingGates: [], recent: [] }));
+      return { at: seed.NOW, days: 7, scope: "all", minN: 5, projects: [{ id: "payments", name: "Payments Platform" }], factoryWide: true, ids: people.map((x) => x.id), totals: { gatesWaiting: 6, soleGates: 1, noneGates: 0, timedN: 12, medianWaitMin: 42, acts: 64, afterHours: 9, minutes: 520 }, rows, teams: [], byCls: [], byProject: [], bottlenecks: [], needsPerson: [], suggestions: [] };
+    }
+    const eff = /^people\/([^/]+)\/effective-permissions$/.exec(path);
+    if (eff) {
+      const person = (seed.people as Array<{ id: string; roles: Array<{ role: string; scope: string }> }>).find((x) => x.id === eff[1]);
+      const projs = (seed.projects as Array<{ id: string; name: string }>).map((x) => ({ id: x.id, name: x.name }));
+      const acts = seed.catalog.actions as Array<{ id: string; name: string; group: string; scope: "project" | "factory" }>;
+      const ok = (a: string, scope: string) => (person?.roles ?? []).some((g) => (g.scope === "factory" || g.scope === scope) && seed.role_matrix[g.role]?.[a]);
+      const cells: Record<string, Record<string, [0 | 1, string]>> = {};
+      for (const pr of projs) { cells[pr.id] = {}; for (const a of acts.filter((x) => x.scope === "project")) cells[pr.id]![a.id] = [ok(a.id, pr.id) ? 1 : 0, "matrix"]; }
+      const factory: Record<string, { allowed: boolean; reason: string; rule: { id: string } }> = {};
+      for (const a of acts.filter((x) => x.scope === "factory")) factory[a.id] = { allowed: ok(a.id, "factory"), reason: "role matrix", rule: { id: "MATRIX" } };
+      return { person: eff[1], at: NOW, projects: projs, actions: acts, cells, rules: { MATRIX: { kind: "matrix", name: "Role matrix" } }, factory };
+    }
     void q;
     return undefined;
   };

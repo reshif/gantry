@@ -93,18 +93,18 @@ describe("API & triggers: keys", () => {
     expect(await screen.findByRole("heading", { name: "API & triggers" })).toBeTruthy();
     const row = await byId("api-key-row-key-1");
     expect(within(row).getByText("Jira bridge")).toBeTruthy();
-    expect(within(row).getByText("gk_7hq2c91x…")).toBeTruthy();
+    expect(within(row).getByText(/gk_7hq2c91x…/)).toBeTruthy();
     expect(within(row).getByText("Payments Platform")).toBeTruthy();
     expect(within(row).getByText("wo.submit")).toBeTruthy();
-    expect(within(row).getByText("✓ active")).toBeTruthy();
+    expect(within(row).getByText("active")).toBeTruthy();
     expect(within(row).getByText(/^expires /)).toBeTruthy();
-    expect(within(await byId("api-key-row-key-2")).getByText("⊘ revoked")).toBeTruthy();
-    expect(within(await byId("api-key-row-key-3")).getByText("⊘ expired")).toBeTruthy();
+    expect(within(await byId("api-key-row-key-2")).getByText("revoked")).toBeTruthy();
+    expect(within(await byId("api-key-row-key-3")).getByText("expired")).toBeTruthy();
     expect(document.getElementById("api-key-revoke-key-2")).toBeNull(); // nothing to revoke
     const meta = document.getElementById("api-stats")!.textContent ?? "";
     expect(meta).toMatch(/Active keys\s*1/);
-    expect(meta).toMatch(/Requests 24h\s*2/);
-    expect(meta).toMatch(/Rate limited 24h\s*1/);
+    expect(meta).toMatch(/Requests, 24 h\s*2/);
+    expect(meta).toMatch(/1 rate limited/);
     expect(document.body.textContent).not.toMatch(/local sample logic|simulated/i);
   });
 
@@ -165,7 +165,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
     const curl = (await byId("api-ref-copy-0")).closest(".api-code")!.querySelector("pre")!.textContent!;
     expect(curl).toContain("-H \"Authorization: Bearer $GANTRY_KEY\"");
     expect(curl).toContain("Idempotency-Key");
-    expect(screen.getByText("60/min")).toBeTruthy();
+    expect(screen.getAllByText("60/min").length).toBeGreaterThan(0);
     expect((await byId("api-ref-hook")).closest(".api-code")!.querySelector("pre")!.textContent).toContain("/hooks/trigger/<connection id>");
     expect((await byId("api-ref-sig")).closest(".api-code")!.querySelector("pre")!.textContent).toContain("X-Gantry-Signature");
   });

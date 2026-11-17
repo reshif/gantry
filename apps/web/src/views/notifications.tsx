@@ -26,6 +26,8 @@ export default function NotificationsView() {
   const ovN = repos.reduce((n, r) => n + (r.notifyOverrides ?? []).length, 0);
   const failedQ = useDeliveries({ project: p?.id ?? "", status: "failed", limit: 200 });
   const failed = p ? (Array.isArray(failedQ.data) ? failedQ.data : failedQ.data?.items ?? []).length : 0;
+  const deliveredQ = useDeliveries({ project: p?.id ?? "", status: "delivered", limit: 200 });
+  const delivered = p ? (Array.isArray(deliveredQ.data) ? deliveredQ.data : deliveredQ.data?.items ?? []).length : 0;
   if (!nt.me) return null;
   if (!p) {
     return (
@@ -39,21 +41,19 @@ export default function NotificationsView() {
     <div className="view cx nt-view">
       <ViewHead
         title="Notifications"
-        sub="Which events reach which people, through which connection, with which card. Per project, with repo overrides. Every notification comes from a committed event and is delivered at least once."
+        sub={`Routes, cards and the delivery log for ${p.name}.`}
       />
       <StatRow id="nt-stats">
-        <Stat label="Project" value={p.name} sub={`${repos.length} ${repos.length === 1 ? "repo" : "repos"}`} action={<Btn label="Browse" small kind="ghost" id="nt-go-projects" aria={`Browse ${p.name} in Projects`} onClick={() => navigate("projects")} />} />
-        <Stat label="Routes" value={`${p.notifications.filter((r) => r.enabled).length} on / ${p.notifications.length}`} sub={p.notifications.length ? `${p.notifications.filter((r) => !r.enabled).length} switched off` : "none yet"} />
-        <Stat label="Connections" value={String(nt.destInsts.length)} sub="open to this project" action={<Btn label="Integrations" small kind="ghost" id="nt-go-int" onClick={() => navigate("integrations")} />} />
-        <Stat label="Failed deliveries" value={qState(failedQ, () => String(failed))} sub="in the delivery log" tone={failed ? "block" : undefined} action={<Btn label="Delivery log" small kind="ghost" id="nt-go-log" onClick={() => setTab("log")} />} />
-        <Stat label="Edit rights" value={perm.allowed ? "yes" : "read-only"} sub={perm.allowed ? "you can change routes" : perm.needs ? `needs ${perm.needs}` : "ask a project admin"} />
+        <Stat label="Routes" value={String(p.notifications.length)} sub={`${p.notifications.filter((r) => r.enabled).length} on`} />
+        <Stat label="Delivered" value={qState(deliveredQ, () => String(delivered))} sub="last 24 h" tone="done" />
+        <Stat label="Failed" value={qState(failedQ, () => String(failed))} sub="need a retry" tone={failed ? "block" : undefined} />
+        <Stat label="Channels" value={String(new Set(p.notifications.flatMap((r) => r.dest.map((d) => d.channel))).size)} />
       </StatRow>
-      {nt.visible.length > 1 ? <p className="muted small nt-switch">Switch project in the top bar to edit another project's routes.</p> : null}
       <Tabs idPrefix="nt-tab" active={tab} onChange={setTab} items={[
         { id: "routes", label: "Routes", count: p.notifications.length },
         { id: "templates", label: "Card templates", count: Object.keys(TPL).length + nt.customCards.length },
         { id: "overrides", label: "Repo overrides", count: ovN },
-        { id: "log", label: failed ? `Delivery log (${failed} failed)` : "Delivery log" },
+        { id: "log", label: "Delivery log", count: delivered + failed },
       ]} />
       <div id="nt-tab-panel" role="tabpanel" aria-labelledby={`nt-tab-${tab}`}>
         {tab === "overrides" ? <OverridesTab p={p} nt={nt} /> : tab === "log" ? <DeliveriesTab p={p} nt={nt} /> : tab === "templates" ? <TemplatesTab p={p} nt={nt} perm={perm} /> : <RoutesTab key={p.id} p={p} nt={nt} perm={perm} />}
