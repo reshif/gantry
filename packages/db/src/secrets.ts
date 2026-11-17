@@ -34,3 +34,13 @@ export async function readSecret(name: string, env: NodeJS.ProcessEnv = process.
   if (value.length === 0) throw new SecretError(name, "empty");
   return value;
 }
+
+/** Like readSecret, but an absent or empty secret is `null` (an optional feature that is simply off). */
+export async function readSecretOptional(name: string, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+  try {
+    return await readSecret(name, env);
+  } catch (e) {
+    if (e instanceof SecretError && (e.reason === "missing" || e.reason === "empty")) return null;
+    throw e;
+  }
+}

@@ -55,6 +55,8 @@ export interface WorkerConfig {
   onboardingCollectEveryMs?: number;
   /** How long a verification waits for CI to report a check on the canary. */
   canaryWaitMs?: number;
+  /** Port of the worker's /metrics (0 turns it off). */
+  metricsPort?: number;
 }
 
 const int = (v: string | undefined, d: number): number => {
@@ -100,5 +102,6 @@ export async function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): Pr
     readinessEveryMs: int(env.WORKER_READINESS_EVERY_MS, 6 * 3600_000),
     canaryEveryMs: int(env.WORKER_CANARY_EVERY_MS, 24 * 3600_000),
     canaryWaitMs: int(env.WORKER_CANARY_WAIT_MS, 120_000),
+    metricsPort: int(env.WORKER_METRICS_PORT, 9464),
   };
 }

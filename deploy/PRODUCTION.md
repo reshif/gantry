@@ -130,7 +130,7 @@ reports a break (`bad_mac`) at the first old checkpoint. If the file is missing 
   docker compose $P exec gantry-backup gantry-backup.sh drill
   ```
 
-- **Health.** The container turns unhealthy when the newest backup failed or is more than 26 hours old. Alert on it.
+- **Health.** The container turns unhealthy when the newest backup failed or is more than 26 hours old. The monitoring profile alerts on it (`GantryBackupStale`).
 - **Recovery point and time.** You can lose up to 24 hours of work (one set a day). Restoring took under a minute on a
   test install, plus a minute for the services to start; it grows with the size of the data. Point-in-time recovery
   (WAL archiving) is not set up.
@@ -147,6 +147,70 @@ docker compose $P up -d                                                        #
 ```
 
 The restore checks the set's checksums first. It refuses while anything is still connected to the databases.
+
+## Monitoring and alerts
+
+The API, the worker and the launcher each serve Prometheus metrics. An optional profile adds Prometheus and Alertmanager
+with alert rules, so a stuck queue, a stale backup or a dead service reaches you before a user notices.
+
+```sh
+docker compose $P --profile monitoring up -d
+```
+
+- **Prometheus** is at `http://127.0.0.1:9090` and **Alertmanager** at `http://127.0.0.1:9093`, on the host's loopback
+  only (`GANTRY_PROMETHEUS_PORT`, `GANTRY_ALERTMANAGER_PORT`). Reach them with an SSH tunnel. Metrics are kept
+  `GANTRY_METRICS_RETENTION` long (default 30 days) on the `promdata` volume.
+- **Who can scrape.** `/metrics` is never served through the site. Each service answers a peer on the internal Docker
+  networks that did not come through a proxy, and anyone holding the metrics token. To scrape from another host, create
+  the secret `metrics_token` (`openssl rand -hex 32 > $GANTRY_SECRETS_DIR/metrics_token`), add it to the `secrets:` list
+  of `gantry-api`, `gantry-worker` and `gantry-launcher` in an override file, publish the port you need, and send
+  `Authorization: Bearer <token>`. Without the secret, only the internal network is allowed.
+- **Where the metrics come from.** The API serves `/metrics` on port 8000, the worker on 9464 (`WORKER_METRICS_PORT`,
+  0 turns it off) and the launcher on 9100.
+
+What is measured:
+
+| Metric | Meaning |
+|---|---|
+| `gantry_http_requests_total`, `gantry_http_errors_total`, `gantry_http_request_duration_seconds` | API request rate, server errors and latency, by route pattern |
+| `gantry_jobs`, `gantry_jobs_queue_depth`, `gantry_jobs_oldest_due_seconds`, `gantry_jobs_stuck` | Background jobs by status, work waiting for a worker, jobs that lost their lease or ran too long |
+| `gantry_worker_jobs_total`, `gantry_worker_job_duration_seconds`, `gantry_worker_heartbeat_age_seconds` | What the worker finished (done, retried, dead, lost) and whether it is alive |
+| `gantry_runs_finished_24h` | Runs that ended in the last 24 hours, by outcome |
+| `gantry_spend_month_micros`, `gantry_budget_used_ratio`, `gantry_budget_halts_active` | Model spend this month, each project's share of its budget, work orders halted at their cap |
+| `gantry_outbox`, `gantry_outbox_dead_letters`, `gantry_worker_deliveries_total` | Notifications by status, ones that failed every attempt, deliveries by transport |
+| `gantry_backup_age_seconds`, `gantry_backup_last_ok`, `gantry_restore_drill_last_ok` | The newest backup's age and result, the last restore drill |
+| `gantry_launcher_runs_active`, `gantry_launcher_run_refusals_total`, `gantry_launcher_docker_up` | Runs the launcher holds, starts it refused, whether Docker answers |
+
+Alert rules are in `deploy/monitoring/alerts.yml` (tested with `promtool test rules`, see `alerts.test.yml`):
+
+| Alert | Fires when | First thing to do |
+|---|---|---|
+| `GantryServiceDown` | API, worker or launcher not scraped for 2 minutes | `docker compose $P ps`, then the service log |
+| `GantryDatabaseUnreachable` | The API cannot reach Postgres for 2 minutes | Check the postgres container and its disk |
+| `GantryWorkerHeartbeatLate` | No worker heartbeat for 90 seconds | Restart `gantry-worker`, read its log |
+| `GantryApiErrorRate` | More than 5% of API requests fail (5xx) for 5 minutes | `docker compose $P logs gantry-api` |
+| `GantryJobsStuck` | A job lost its lease or ran past the limit for 10 minutes | The System health page lists the jobs |
+| `GantryQueueBacklog` | Due work waited over 5 minutes for 5 minutes | Is the worker running and not saturated? |
+| `GantryDeadLetters` | A notification failed every attempt, for 5 minutes | System health lists them; fix the integration, retry |
+| `GantryBudgetHalt` | A work order is halted at its spending cap | Raise the cap or leave it halted |
+| `GantryBackupStale` | The newest backup is over 26 hours old | `docker compose $P logs gantry-backup` |
+| `GantryBackupFailed` | The last backup attempt failed | Same, before the next run |
+
+The file also has alerts for a slow API, a launcher that cannot reach Docker, failing runs, projects over budget, a
+halted factory, a missing backup status and a failed restore drill.
+
+**Being told.** Alertmanager starts with no receiver: alerts are kept and shown in its page. Edit
+`deploy/monitoring/alertmanager.yml` to add an email, Slack or webhook receiver under `default` (see the Alertmanager
+configuration reference), then `docker compose $P --profile monitoring restart alertmanager`. Mail and chat go out
+through the `egress` network; Alertmanager has no access to your secrets, so put any password in the file and keep it
+out of version control.
+
+Check the rules after editing them:
+
+```sh
+docker run --rm --entrypoint promtool -v "$PWD/deploy/monitoring:/m:ro" prom/prometheus:v3.5.0 check rules /m/alerts.yml
+docker run --rm --entrypoint promtool -v "$PWD/deploy/monitoring:/m:ro" prom/prometheus:v3.5.0 test rules /m/alerts.test.yml
+```
 
 ## Keys
 

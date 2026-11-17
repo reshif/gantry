@@ -1,0 +1,18 @@
+# Alertmanager for the optional monitoring profile. Out of the box alerts are kept and shown at http://127.0.0.1:9093
+# (host loopback only). To be told, give `default` a receiver (email, Slack, a webhook): see deploy/PRODUCTION.md,
+# "Monitoring and alerts", and https://prometheus.io/docs/alerting/latest/configuration/.
+route:
+  receiver: default
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: default
+
+inhibit_rules:
+  # When a service is down, its follow-on symptoms are noise.
+  - source_matchers: [alertname="GantryServiceDown"]
+    target_matchers: [severity=~"warning|info"]
+    equal: []

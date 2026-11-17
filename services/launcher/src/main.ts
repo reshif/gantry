@@ -1,4 +1,5 @@
 import Docker from "dockerode";
+import { readFile } from "node:fs/promises";
 import { loadConfig, readToken } from "./config.js";
 import { RunManager } from "./manager.js";
 import { buildServer } from "./server.js";
@@ -17,7 +18,9 @@ async function main(): Promise<number> {
   // Through the socket proxy when configured (compose does): the launcher then never holds the host's Docker socket.
   const docker = new Docker(cfg.value.dockerProxy ? { protocol: "http", host: cfg.value.dockerProxy.host, port: cfg.value.dockerProxy.port } : cfg.value.dockerSocket ? { socketPath: cfg.value.dockerSocket } : undefined);
   const manager = new RunManager(docker, cfg.value);
-  const app = buildServer({ cfg: cfg.value, manager, token: token.value });
+  // Optional: when the metrics_token secret exists, a scraper outside the internal network may use it.
+  const metricsToken = await readFile(process.env.METRICS_TOKEN_FILE || "/run/secrets/metrics_token", "utf8").then((t) => t.replace(/\r?\n$/, "") || null, () => null);
+  const app = buildServer({ cfg: cfg.value, manager, token: token.value, metricsToken });
 
   const shutdown = () => {
     void app.close().then(() => process.exit(0));

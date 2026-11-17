@@ -4,6 +4,7 @@ import { publishChange, slackPost, slackUpdate, SLACK_API } from "@gantry/api/co
 import { z } from "zod";
 import type { Deps } from "../deps.js";
 import { errMsg, PermanentError, TransientError } from "../errors.js";
+import { deliveriesTotal, transportOf as transportName } from "../metrics.js";
 import { smtpMailer, type Mailer } from "./smtp.js";
 
 /**
@@ -159,6 +160,7 @@ export class OutboxDispatcher {
     try {
       const out = await this.send(item);
       await markDelivered(deps.pool, item.id, deps.workerId);
+      deliveriesTotal.inc({ transport: transportName(item.destination), outcome: "sent" });
       if (out.note) await deps.pool.query(`update outbox set last_error = $2 where id = $1`, [item.id, out.note]);
       if (deliveryId) {
         if (update) await this.logUpdate(deliveryId, item, null);
@@ -176,10 +178,12 @@ export class OutboxDispatcher {
         );
         deps.log.warn({ outbox: item.id, destination: item.destination, err: msg }, "delivery dead-lettered");
         dead = true;
+        deliveriesTotal.inc({ transport: transportName(item.destination), outcome: "dead" });
       } else {
         const st = await markFailed(deps.pool, item.id, deps.workerId, msg);
         deps.log.warn({ outbox: item.id, destination: item.destination, attempt: item.attempts, status: st, err: msg }, "delivery failed");
         dead = st === "dead";
+        deliveriesTotal.inc({ transport: transportName(item.destination), outcome: dead ? "dead" : "retried" });
       }
       if (deliveryId) {
         if (update) await this.logUpdate(deliveryId, item, msg);
