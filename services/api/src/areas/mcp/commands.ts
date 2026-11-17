@@ -298,6 +298,8 @@ export async function grantWrites(tx: Tx, a: Actor, b: z.infer<typeof GrantBody>
   // Separation of duties: the person who asked for the work does not also pre-authorise what writes to outside systems for it.
   const requester = (await tx.query<{ submitter: string | null }>(`select submitter from work_orders where org_id = $1 and id = $2`, [a.orgId, b.wo])).rows[0]?.submitter ?? null;
   if (requester && (requester === a.personId || requester === a.id)) throw refuse("denied", `${b.wo} was requested by you. Another approver pre-authorises its write tools.`);
+  // A whole-server grant is flagged in the ledger so a reviewer can find it.
+  const wildcard = b.tools.filter((g) => g.endsWith("/*"));
   for (const g of b.tools) {
     const [server, tool] = g.split("/", 2) as [string, string];
     const srv = (await tx.query<{ enabled: boolean }>(`select enabled from mcp_servers where org_id = $1 and id = $2`, [a.orgId, server])).rows[0];
@@ -314,7 +316,7 @@ export async function grantWrites(tx: Tx, a: Actor, b: z.infer<typeof GrantBody>
   await tx.query(`update attempts set data = jsonb_set(data, '{writeGrants}', $3::jsonb), updated_at = now() where org_id = $1 and id = $2`, [a.orgId, att.id, json(next)]);
   return {
     msg: `Write tools pre-authorised for ${b.wo} at ${att.station}: ${b.tools.join(", ")}.`, changes: ["mcp"], project: null,
-    events: [{ type: "mcp.grant", category: cat, subject: { type: "attempt", id: att.id }, woId: b.wo, after: { attempt: att.id, station: att.station, grants: b.tools } }],
+    events: [{ type: "mcp.grant", category: cat, subject: { type: "attempt", id: att.id }, woId: b.wo, after: { attempt: att.id, station: att.station, grants: b.tools, ...(wildcard.length ? { wildcard } : {}) } }],
     extra: { attempt: att.id, station: att.station, grants: next },
   };
 }

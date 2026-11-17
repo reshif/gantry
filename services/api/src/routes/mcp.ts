@@ -132,6 +132,11 @@ export const mcpRoutes: FastifyPluginAsync = async (app) => {
       await decide(req, "gate.approve", {}).then((d) => { if (!d.allowed) throw refuse("denied", "Not permitted."); });
       throw refuse("not_found", "No such work order.");
     }
+    // Owner decision (audit A6): only a Factory Admin grants an agent access to an MCP tool. The server decides; the UI only displays it.
+    const me = who?.kind === "person" ? st?.people.find((x) => x.id === who.id) : null;
+    if (!me?.roles.some((r) => r.role === "factory_admin" && r.scope === "factory")) {
+      throw refuse("denied", "Only a Factory Admin can pre-authorise an agent's write tools.", { needs: "A Factory Admin to grant this" });
+    }
     return command(req, { action: "gate.approve", scope: { project: wo.project_id, repo: wo.repo_id, wo: b.wo }, stepUp: true, idempotent: true }, (tx, a) => grantWrites(tx, a, b));
   });
 

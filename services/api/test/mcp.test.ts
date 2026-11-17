@@ -269,6 +269,10 @@ d("MCP registry (spec 8.8, 12.4)", () => {
     expect(ok.body).toMatchObject({ attempt: "at-mcp-1", station: "build", grants: [`${id}/update_page`] });
     expect((await w.q(`select data from attempts where id = 'at-mcp-1'`))[0].data.writeGrants).toEqual([`${id}/update_page`]);
     expect((await evs("mcp.grant")).at(-1)).toMatchObject({ wo_id: "WO-mcp-1" });
+    expect((await g("p-daniel", {})).status).toBe(403);
+    const wild = await g(ADMIN, { tools: [`${id}/*`] });
+    expect(wild.status, JSON.stringify(wild.body)).toBe(200);
+    expect((await evs("mcp.grant")).at(-1)!.after).toMatchObject({ wildcard: [`${id}/*`] });
     await w.q(`update attempts set state = 'succeeded' where id = 'at-mcp-1'`);
     expect((await g(ADMIN, {})).status).toBe(409);
   });

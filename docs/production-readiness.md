@@ -225,7 +225,7 @@ Area "authz". Tests are in `services/api/test/authz-wave6.test.ts`; every one fa
 | A3 (P2) | `POST /card-templates/preview` read any work order in the org by id. | The work order must belong to the authorised project; anything else is 404. | same |
 | A4 (P3) | Project `notify.edit` could overwrite or delete factory-wide card templates. | The owner is `body.project`. Project `notify.edit` edits only templates its project owns, and not one that another project's routes or repo overrides use (409; a factory admin can). Factory-wide or another project's templates, and unknown ids, need `integration.edit` (one 403, no existence oracle). | same |
 | A5 (medium) | `GET /agents/:id/effective` took `repo` with no project check, so it exposed other projects' repo guidelines, and drafts and old versions to any project reader. | The repo's project must be visible to the caller and match `project`; otherwise 404. `version=` needs `agents.view`. | same |
-| A6 (P3) | MCP write pre-authorisation had no separation of duties. | The requester of a work order cannot pre-authorise writes for it. A `server/*` grant needs the server switched on. Pre-authorising needs a fresh sign-in (step-up). | same |
+| A6 (P3) | MCP write pre-authorisation had no separation of duties. | Only a Factory Admin can pre-authorise an agent's MCP writes (decided on the server; the UI only says so). The requester of a work order still cannot pre-authorise writes for it. A `server/*` grant needs the server switched on and is flagged `wildcard` in the audit ledger. Pre-authorising needs a fresh sign-in (step-up). There is no revoke endpoint today; a grant ends with its attempt. | same |
 | A7 (P3) | Stop commands resolved the target before authorising, so 403 vs 404 revealed which ids exist. | Unknown and not-visible targets are the same 404 on set, lift, restore and impact, and on `POST /mcp/grants`. | same |
 | A11 (P2) | Plan and security (G3G3s) could be set to automatic in a non-regulated project; locked gates already stored as automatic or mixed kept the I1 bypass. | `gateModeLock` allows only person or checks-then-person on G3G3s. `gateKind` ignores a stored non-human mode on a gate a person must decide, and migration 0040 resets stored `gate_modes`. | `authz-wave6.test.ts` |
 | A9 (P3) | Step-up is a password re-entry. | Step-up sends `max_age=0`. The "strong sign-in" wording is corrected. A second factor is a Keycloak realm setting, not yet enforced (below). | `oidc.test.ts` |
@@ -235,7 +235,7 @@ Not done, needing an owner decision:
 
 - **A8 (gate approve pins no instance).** Requiring `If-Match` or `:n` on approve and reject breaks the web client, whose home, floor and approver buttons send neither. The client must carry the instance first.
 - **A9 second factor.** Requiring OTP or WebAuthn, plus `acr`/`amr` checks, is a production-realm change for Factory Admins.
-- **A6 co-signing.** Only the requester is refused and step-up is required; a `server/*` wildcard is still allowed. An n-of-m rule for MCP grants is a product decision.
+- **A6 co-signing.** Granting is limited to Factory Admins (wildcard included, flagged in the ledger). An n-of-m rule for MCP grants is a product decision.
 - **A10 broadcast.** Console and workspace changes still reach everyone as keys only.
 
 Regulated projects now keep every station that carries a gate. This is stricter than before.
