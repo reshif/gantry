@@ -114,3 +114,9 @@
 .wo-cols-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: grid; gap: var(--s2); padding: var(--s3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--shadow-2); }
 .wo-cols-opt { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); }
 .wo-bar .filterbar-end { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: flex-end; }
+
+/* Blueprint: the register is stats, one panel, one filter row */
+.wo-more{padding:6px 14px;border-bottom:1px solid var(--line);background:var(--surface2)}
+.wo-more>summary{cursor:pointer;color:var(--ink3);padding:4px 0}
+.wo-more-row{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:end;padding:8px 0 10px}
+.wo-bar{padding:0}

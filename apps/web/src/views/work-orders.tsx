@@ -17,7 +17,7 @@ import { FloorCtx, assigneeOf, useFloorCtx, useFloorState, useProjectRepos, type
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { Board } from "./floor/Board";
 import type { Page, WorkOrder } from "../api/types";
-import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Status, Tabs, ViewHead, type Tone } from "../ui/primitives";
+import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, Status, Tabs, ViewHead, type Tone } from "../ui/primitives";
 import { Async, Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { DataTable, type Col } from "../ui/SortTable";
 import { Icon } from "../ui/Icon";
@@ -60,8 +60,8 @@ const SNAPSHOT = 200;
 const CAP = 1000;
 const GROUPS: Array<{ id: GroupBy; label: string }> = [{ id: "none", label: "No grouping" }, { id: "station", label: "Station" }, { id: "repo", label: "Repo" }, { id: "cls", label: "Class" }, { id: "assignee", label: "Assignee" }];
 /** Columns a person can turn on and off. The first (work order) is always shown; the first column already carries class, state and next actor. */
-const OPTIONAL_COLS: Array<[string, string]> = [["cls", "Class"], ["where", "Station / bay"], ["state", "State"], ["next", "Next actor"], ["gate", "Gate"], ["repo", "Repo"], ["prio", "Priority"], ["by", "Requested by"], ["age", "Age"], ["spend", "Spend"]];
-const DEFAULT_HIDDEN = ["cls", "state", "next", "by"];
+const OPTIONAL_COLS: Array<[string, string]> = [["cls", "Class"], ["where", "Station / bay"], ["state", "State"], ["next", "Next actor"], ["gate", "Gate"], ["repo", "Project / repo"], ["prio", "Priority"], ["by", "Requested by"], ["age", "Age"], ["spend", "Spend"]];
+const DEFAULT_HIDDEN = ["next", "gate", "spend"];
 
 /** The state each server-side tab asks for. The other tabs read the snapshot. */
 const TAB_STATE: Partial<Record<TabId, string>> = { open: "open", done: "done", killed: "killed" };
@@ -125,7 +125,7 @@ export default function WorkOrdersView() {
   const home = useHome().data;
   const [f, setF] = useState<Filters>(NONE);
   const [tab, setTab] = useState<TabId>("all");
-  const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: "id", dir: -1 });
+  const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: "age", dir: 1 });
   const ui = useUI();
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [applied, setApplied] = useState("");
@@ -285,22 +285,20 @@ export default function WorkOrdersView() {
       render: (w) => {
         const killed = w.state === "killed";
         return (
-          <span className="wo-main">
-            <span className={`mono strong wo-id${killed ? " is-killed" : ""}`}>{w.id}</span>
-            <span className={`wo-title${killed ? " is-killed" : ""}`}>
+          <span className="wo-main pri-cell">
+            <b className={`mono strong wo-id pri${killed ? " is-killed" : ""}`}>{w.id}</b>
+            <span className={`wo-title sub trunc${killed ? " is-killed" : ""}`}>
               {w.title}
               {w.parent ? <span className="muted small">{` · child of ${w.parent}`}</span> : null}
               {w.children?.length ? <span className="muted small">{` · ${w.children.length} children`}</span> : null}
-            </span>
-            <span className="wo-sub">
-              <ClassChip cls={classOf(cat, project, w.cls)} small />
-              <WoStatus state={w.state} />
-              <span className="muted small">{nextActor(w)}</span>
             </span>
           </span>
         );
       },
     },
+    { key: "repo", label: "Project / repo", sort: (w) => w.repo, render: (w) => <span className="pri-cell"><span>{project.name}</span><span className="sub mono">{w.repo}</span></span> },
+    { key: "where", label: "Station / bay", sort: (w) => (w.bay ? 100 : 0) + w.station, render: whereCell },
+    { key: "state", label: "State", sort: (w) => w.state, render: (w) => <WoStatus state={w.state} /> },
     {
       key: "cls",
       label: "Class",
@@ -316,24 +314,21 @@ export default function WorkOrdersView() {
         </span>
       ),
     },
-    { key: "where", label: "Station / bay", sort: (w) => (w.bay ? 100 : 0) + w.station, render: whereCell },
-    { key: "state", label: "State", sort: (w) => w.state, render: (w) => <WoStatus state={w.state} /> },
-    { key: "next", label: "Next actor", hideSmall: true, render: (w) => <span className="small">{nextActor(w)}</span> },
-    { key: "gate", label: "Gate", hideSmall: true, render: (w) => <span className="small muted">{gateCell(w)}</span> },
-    { key: "repo", label: "Repo", hideSmall: true, render: (w) => <span className="mono small">{w.repo}</span> },
     { key: "prio", label: "Pri", sort: (w) => w.priority, render: (w) => <span className={`chip wo-prio wo-prio-${w.priority}`}>{w.priority}</span> },
+    { key: "age", label: "Created", sort: (w) => -w.createdAt, render: (w) => <span style={{ whiteSpace: "nowrap" }}>{`${fmt.dur(Date.now() - w.createdAt)} ago`}</span> },
     {
       key: "by",
-      label: "Requested",
+      label: "By",
       hideSmall: true,
       render: (w) => (
         <span className="small wo-by">
-          {actor(w.requestedBy).name}
+          {actor(w.requestedBy).name.split(" ")[0]}
           <span className="muted">{` via ${w.source}`}</span>
         </span>
       ),
     },
-    { key: "age", label: "Age", align: "end", sort: (w) => -w.createdAt, render: (w) => <span className="mono">{fmt.dur(Date.now() - w.createdAt)}</span> },
+    { key: "next", label: "Next actor", hideSmall: true, render: (w) => <span className="small">{nextActor(w)}</span> },
+    { key: "gate", label: "Gate", hideSmall: true, render: (w) => <span className="small muted">{gateCell(w)}</span> },
     { key: "spend", label: "Spend", align: "end", hideSmall: true, render: (w) => <span className="mono">{fmt.money(woTotals(w).cost)}</span> },
     {
       key: "open",
@@ -415,16 +410,22 @@ export default function WorkOrdersView() {
       <div id="wo-head">
         <ViewHead
           title="Work orders"
-          sub={`Every work order in ${project.name}, as a table or a board. Open a row for its traveler, or the record icon for the full lifecycle record.`}
+          sub="The full register of requests and where each one stands."
           actions={
             <>
-              <Segmented name="wo-mode" label="Table or board" items={[{ id: "table", label: "Table", icon: "list" }, { id: "board", label: "Board", icon: "board" }]} value={mode} onChange={(v) => updatePrefs({ floorView: v })} />
+              <Segmented name="wo-mode" label="Table or board" items={[{ id: "table", label: "List" }, { id: "board", label: "Board" }]} value={mode} onChange={(v) => updatePrefs({ floorView: v })} />
               <Btn label="All records" icon="record" id="wo-records" onClick={() => { updatePrefs({ record: null }); navigate("record"); }} />
               <Btn label="New work order" kind="primary" icon="plus" id="wo-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWo({ project: project.id })} />
             </>
           }
         />
       </div>
+      <StatRow id="wo-stats">
+        <Stat label="Open" value={String(stat.data?.open ?? "…")} tone="done" />
+        <Stat label="At gates" value={snapItems ? String(snapItems.filter((w) => w.state === "waiting").length) : "…"} tone="wait" />
+        <Stat label="Stuck" value={snapItems ? String(snapItems.filter((w) => w.state === "blocked" || w.state === "failed").length) : "…"} tone="block" />
+        <Stat label="Done" value={String(stat.data?.done ?? "…")} tone="done" />
+      </StatRow>
       {atIntake.length ? (
         <div className="callout callout-info wo-intake-note">
           <Icon name="chat" />
@@ -439,51 +440,29 @@ export default function WorkOrdersView() {
       {mode === "board" ? (
         <BoardMode projectId={projectId} />
       ) : (
-        <Panel flush cls="wo-panel">
+        <Panel title="All work orders" flush cls="wo-panel">
           <Tabs items={tabs.map((t) => ({ id: t.id, label: t.label, count: t.count }))} active={tab} onChange={(id) => setTab(id as TabId)} idPrefix="wo-tab" />
           <div className="wo-bar">
-            <FilterBar
-              label="Filter work orders"
-              actions={
-                <>
-                  <Field label="Group by" htmlFor="wo-group">
-                    <Select id="wo-group" options={GROUPS.map((g) => ({ value: g.id, label: g.label }))} value={groupBy} onChange={(v) => setGroupBy(v as GroupBy)} />
-                  </Field>
-                  <details className="wo-cols">
-                    <summary className="btn btn-sm" id="wo-cols-btn"><Icon name="columns" />Columns</summary>
-                    <div className="wo-cols-pop" role="group" aria-label="Columns shown">
-                      {OPTIONAL_COLS.map(([k, label]) => (
-                        <label key={k} className="wo-cols-opt">
-                          <input type="checkbox" id={`wo-col-${k}`} checked={!hidden.includes(k)} onChange={(e) => setHidden(e.target.checked ? hidden.filter((x) => x !== k) : [...hidden, k])} />
-                          {`Show ${label}`}
-                        </label>
-                      ))}
-                    </div>
-                  </details>
-                  {saved.length ? (
-                    <Field label="Saved views" htmlFor="wo-views">
-                      <Select id="wo-views" options={[{ value: "", label: "Choose a view" }, ...saved.map((v) => ({ value: v.id, label: v.name }))]} value={applied} onChange={applyView} />
-                    </Field>
-                  ) : null}
-                  {applied ? <Btn label="Delete view" small kind="ghost" id="wo-view-del" onClick={dropView} /> : null}
-                  <Btn label="Save view" small id="wo-view-save" onClick={saveView} />
-                  {filtered ? <Btn label="Clear filters" small kind="ghost" id="wo-clear-top" onClick={clear} /> : null}
-                </>
-              }
-            >
-              <SearchBox id="wo-q" value={f.q} onChange={set("q")} placeholder="Id or title" label="Search" />
-              <div className="filters wo-filters">
-                <Field label="Class" htmlFor="wo-f-cls">
-                  <Select id="wo-f-cls" options={[{ value: "all", label: "All" }, ...classesOf(cat, project).map((c) => ({ value: c.id, label: c.name + (c.custom ? " (custom)" : "") }))]} value={f.cls} onChange={set("cls")} />
-                </Field>
+            <FilterBar label="Filter work orders" count={showCount} actions={filtered ? <Btn label="Clear filters" small kind="ghost" id="wo-clear-top" onClick={clear} /> : undefined}>
+              <SearchBox id="wo-q" value={f.q} onChange={set("q")} placeholder="Search id or title" label="Search" />
+              <Field label="State" htmlFor="wo-f-state">
+                <Select id="wo-f-state" options={[{ value: "all", label: "All" }, ...Object.keys(WO_STATES).map((k) => ({ value: k, label: (WO_STATES as Record<string, { label: string }>)[k]?.label ?? k }))]} value={f.state} onChange={set("state")} />
+              </Field>
+              <Field label="Station or bay" htmlFor="wo-f-where">
+                <Select id="wo-f-where" options={[{ value: "all", label: "All" }, ...fl.stations.map((s) => ({ value: s.id, label: `${s.no} ${s.name}${s.enabled ? "" : " (off)"}` })), ...fl.bays.map((b) => ({ value: b.id, label: `Bay: ${b.name}` }))]} value={f.where} onChange={set("where")} />
+              </Field>
+              <Field label="Class" htmlFor="wo-f-cls">
+                <Select id="wo-f-cls" options={[{ value: "all", label: "All" }, ...classesOf(cat, project).map((c) => ({ value: c.id, label: c.name + (c.custom ? " (custom)" : "") }))]} value={f.cls} onChange={set("cls")} />
+              </Field>
+              <Field label="Priority" htmlFor="wo-f-prio">
+                <Select id="wo-f-prio" options={[{ value: "all", label: "All" }, ...PRIOS.map((p) => ({ value: p, label: p }))]} value={f.prio} onChange={set("prio")} />
+              </Field>
+            </FilterBar>
+            <details className="wo-more" open={f.repo !== "all" || f.source !== "all" || f.assignee !== "all" || groupBy !== "none" || !!applied}>
+              <summary className="micro" id="wo-more-btn">More filters, grouping, columns and saved views</summary>
+              <div className="wo-more-row">
                 <Field label="Repo" htmlFor="wo-f-repo">
                   <Select id="wo-f-repo" options={[{ value: "all", label: "All" }, ...repos.map((r) => ({ value: r.id, label: r.name }))]} value={f.repo} onChange={set("repo")} />
-                </Field>
-                <Field label="Priority" htmlFor="wo-f-prio">
-                  <Select id="wo-f-prio" options={[{ value: "all", label: "All" }, ...PRIOS.map((p) => ({ value: p, label: p }))]} value={f.prio} onChange={set("prio")} />
-                </Field>
-                <Field label="Station or bay" htmlFor="wo-f-where">
-                  <Select id="wo-f-where" options={[{ value: "all", label: "All" }, ...fl.stations.map((s) => ({ value: s.id, label: `${s.no} ${s.name}${s.enabled ? "" : " (off)"}` })), ...fl.bays.map((b) => ({ value: b.id, label: `Bay: ${b.name}` }))]} value={f.where} onChange={set("where")} />
                 </Field>
                 <Field label="Source" htmlFor="wo-f-source">
                   <Select id="wo-f-source" options={[{ value: "all", label: "All" }, ...sources.map((s) => ({ value: s, label: s }))]} value={f.source} onChange={set("source")} />
@@ -491,11 +470,29 @@ export default function WorkOrdersView() {
                 <Field label="Assignee" htmlFor="wo-f-assignee">
                   <Select id="wo-f-assignee" options={[{ value: "all", label: "Anyone" }, { value: "none", label: "Unassigned" }, ...assignees.map((a) => ({ value: a, label: actor(a).name.replace(" (agent)", "") }))]} value={f.assignee} onChange={set("assignee")} />
                 </Field>
-                <Field label="State" htmlFor="wo-f-state">
-                  <Select id="wo-f-state" options={[{ value: "all", label: "All" }, ...Object.keys(WO_STATES).map((k) => ({ value: k, label: (WO_STATES as Record<string, { label: string }>)[k]?.label ?? k }))]} value={f.state} onChange={set("state")} />
+                <Field label="Group by" htmlFor="wo-group">
+                  <Select id="wo-group" options={GROUPS.map((g) => ({ value: g.id, label: g.label }))} value={groupBy} onChange={(v) => setGroupBy(v as GroupBy)} />
                 </Field>
+                {saved.length ? (
+                  <Field label="Saved views" htmlFor="wo-views">
+                    <Select id="wo-views" options={[{ value: "", label: "Choose a view" }, ...saved.map((v) => ({ value: v.id, label: v.name }))]} value={applied} onChange={applyView} />
+                  </Field>
+                ) : null}
+                <details className="wo-cols">
+                  <summary className="btn btn-sm sm" id="wo-cols-btn"><Icon name="columns" />Columns</summary>
+                  <div className="wo-cols-pop" role="group" aria-label="Columns shown">
+                    {OPTIONAL_COLS.map(([k, label]) => (
+                      <label key={k} className="wo-cols-opt">
+                        <input type="checkbox" id={`wo-col-${k}`} checked={!hidden.includes(k)} onChange={(e) => setHidden(e.target.checked ? hidden.filter((x) => x !== k) : [...hidden, k])} />
+                        {`Show ${label}`}
+                      </label>
+                    ))}
+                  </div>
+                </details>
+                {applied ? <Btn label="Delete view" small kind="ghost" id="wo-view-del" onClick={dropView} /> : null}
+                <Btn label="Save view" small id="wo-view-save" onClick={saveView} />
               </div>
-            </FilterBar>
+            </details>
     <div className="wo-sortm">
       <Field label="Sort by" htmlFor="wo-sort-select">
         <div className="wo-sortm-row">
@@ -518,7 +515,7 @@ export default function WorkOrdersView() {
                     </section>
                   ))}
               <div className="wo-foot">
-                <span className="muted small" role="status">{cut ? `${showCount}. ${cutNote}` : showCount}</span>
+                {cut ? <span className="muted small">{cutNote}</span> : null}
                 {!clientSide && list.hasNextPage ? <Btn label={`Show ${Math.min(PAGE, matched - rows.length)} more of ${matched - rows.length}`} small id="wo-table-more" onClick={() => void list.fetchNextPage()} /> : null}
               </div>
             </div>

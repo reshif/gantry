@@ -67,6 +67,76 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     },
   };
   const slim = (w: Seed) => w;
+  // The traveler read adds what the server computes for the viewer (may approve, may move, gate progress); the record read is the lifecycle record.
+  const allow = { allowed: true, reason: "", needs: "" };
+  const routeOf = (w: Seed): string[] => {
+    const skips: string[] = ((cat.classes as Seed[] | undefined)?.find((c) => c.id === w.cls)?.skips as string[] | undefined) ?? [];
+    return (cat.stations as Seed[]).map((x) => x.id as string).filter((id) => !skips.includes(id));
+  };
+  const travelerOf = (w: Seed) => {
+    const g = gateInfo(w);
+    const moves: Record<string, unknown> = {};
+    for (const id of routeOf(w)) moves[id] = { allowed: true, reason: "", kind: "back" };
+    for (const b of (cat.bays as Seed[]) ?? []) moves[b.id] = { allowed: true, reason: `Moves to ${b.name}.`, kind: "park" };
+    const can: Record<string, unknown> = {};
+    for (const k of ["answer", "classify", "decline", "park", "sendback", "reassign", "move", "confirm", "summary", "edit", "kill"]) can[k] = allow;
+    const gateProgress: Record<string, unknown> = {};
+    for (const k of Object.keys(w.gates ?? {})) gateProgress[k] = { have: 0, need: 1, unmet: [], conds: [], onlyRequester: false, passes: false };
+    const approve = g && w.state === "waiting" && !w.bay ? { ...allow, gate: g.id, instance: `${w.id}:${g.id}:1` } : null;
+    return { ...w, version: 7, gateProgress, allowed: { approve, moves, can }, stop: null, route: routeOf(w) };
+  };
+  const sessionOf = (w: Seed) => {
+    const st = (cat.stations as Seed[])[w.station];
+    const g = gateInfo(w);
+    const gd = g ? (cat.gates as Seed[]).find((x) => x.id === g.id) : null;
+    const rt = routeOf(w);
+    const ci = rt.indexOf(st?.id);
+    return {
+      woId: w.id, project: w.project, repo: w.repo,
+      wo: { id: w.id, title: w.title, description: w.description ?? "", cls: w.cls, clsName: w.cls, confidence: w.clsConfidence ?? 0, rationale: w.clsRationale ?? "", priority: w.priority, station: st?.id ?? "intake", stationName: st?.name ?? "Intake", state: w.state, bay: w.bay ?? null, gate: gd ? { id: gd.id, label: gd.label, name: gd.name, purpose: gd.purpose } : null, requestedBy: w.requestedBy, closed: w.state === "done" || w.state === "killed" },
+      messages: (w.conv?.messages ?? []).map((m: Seed, i: number) => ({ id: `m${i}`, role: m.from === w.requestedBy ? "user" : "assistant", author: m.from, text: m.text, at: m.at, data: {} })),
+      agent: { mode: "rule-based", name: "Intake Clerk", id: st?.agent ?? "ag-intake", reason: "Rule-based intake", label: "Rule-based", station: st?.id ?? "intake" },
+      budget: { spentUsd: 0, limitUsd: 5 }, costUsd: 0,
+      can: { talk: true, talkWhy: "", confirm: true, confirmWhy: "", park: true, parkWhy: "" },
+      steps: rt.map((id, i) => ({ id, name: ((cat.stations as Seed[]).find((x) => x.id === id)?.name as string) ?? id, state: i < ci || w.state === "done" ? "done" : i === ci ? "current" : "todo" })),
+      next: { actor: w.state === "waiting" ? "approver" : "agent", text: w.state === "waiting" ? "An approver decides the gate." : "An agent is working." },
+      waiting: w.state === "waiting" ? { text: "Waiting at a gate.", kind: "gate" } : null,
+      dialogue: { questions: [], assumptions: [], objections: [], askedMe: false },
+      swarm: null, documents: [], research: { plan: null, allowList: [], canDecide: false, canApproveUnlisted: false }, sources: [], pending: [],
+      brief: w.brief ?? {}, briefConfirmed: !!w.gates?.G0G1 && w.gates.G0G1.status === "passed", briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false,
+    };
+  };
+  const approversOf = (w: Seed, gate: string) => {
+    const gd = (cat.gates as Seed[]).find((x) => x.id === gate);
+    return {
+      gate, label: gd?.label ?? gate, name: gd?.name ?? gate, kind: gd?.kind ?? "human",
+      rule: { text: "1 approval from: Line Lead, Project Admin.", required: 1, conditions: [], sod: true },
+      progress: { have: 0, need: 1, approvals: [], unmet: [] }, satisfiable: true, warning: "",
+      eligible: seed.people.slice(0, 3).map((p: Seed) => ({ id: p.id, name: p.name, away: false, oncall: false, why: "Project Admin" })),
+      overrides: [], viewerCanOverride: false,
+      can: { editRule: true, editWhy: "", grantRole: true, grantWhy: "" },
+    };
+  };
+  const iso = (t: number | undefined | null) => (t ? new Date(t).toISOString() : null);
+  const recordOf = (w: Seed) => ({
+    id: w.id, version: 7, project: w.project, repo: w.repo, title: w.title, state: w.state,
+    request: { text: w.description || w.title, by: w.requestedBy, via: w.source ?? "ui", at: w.createdAt, attachments: [] },
+    classification: { predicted: w.clsSuggested ?? w.cls, final: w.cls, confidence: w.clsConfidence ?? 0, rationale: w.clsRationale ?? "", requested: null, overridden: null },
+    route: routeOf(w), flowVersion: 1, clarification: w.conv?.messages ?? [], briefVersions: w.briefVersions ?? [], brief: w.brief, criteria: w.criteria ?? [],
+    journey: w.history ?? [],
+    gates: Object.entries((w.gates ?? {}) as Record<string, Seed>).map(([k, g]) => ({
+      id: `${w.id}:${k}:1`, gate: k, station: (cat.gates as Seed[]).find((x) => x.id === k)?.after ?? null, status: g.status === "passed" ? "closed" : "open", closedReason: g.status === "passed" ? "approved" : null, headSha: null, openedAt: iso(g.waitingSince), closedAt: null,
+      pinned: { flowVersion: 1, ruleVersion: 1, policyVersion: null }, basis: { required: 1 },
+      votes: [...(g.approvals ?? []), ...(g.rejections ?? [])].map((a: Seed) => ({ by: a.by, vote: g.rejections?.includes(a) ? "reject" : "approve", comment: a.note ?? "", at: iso(a.at), via: "ui", role: null })),
+      decision: g.status === "passed" ? { decision: "approved", decided_by: g.approvals?.[0]?.by ?? null, rule: null, trust_level: null, detail: { mode: g.decision?.mode ?? "human" }, at: iso(g.approvals?.[0]?.at) } : null,
+    })),
+    sendbacks: w.sendbacks ?? [], bayStays: [], attempts: [], results: [], runs: [],
+    code: { pullRequests: w.pr ? [{ number: w.pr.number, state: w.pr.state, draft: false, headSha: null, title: w.title, url: null, mergedAt: null }] : [], commits: (w.commits ?? []).map((c: Seed) => ({ sha: c.hash, message: c.message, author: c.agent, at: null })), files: w.files ?? [], diff: w.diff ?? { plus: 0, minus: 0, files: 0 }, tests: w.tests ?? { passed: 0, failed: 0, added: 0 } },
+    outcomes: [], totals: { tokens: (w.history ?? []).reduce((a: number, x: Seed) => a + (x.tokens || 0), 0), cost: (w.history ?? []).reduce((a: number, x: Seed) => a + (x.cost || 0), 0) },
+    completeness: { sections: { summary: true, request: true, clarification: true, agreement: !!w.brief, stations: true, changes: !!w.files?.length, verification: false, merge: false, approvals: false, after: false, timeline: true }, done: 5, total: 11 },
+    summary: { generated: `${w.title}. ${w.state === "waiting" ? "It is waiting at a gate." : "It is on the line."}`, written: null },
+    events: (w.log ?? []).map((l: Seed, i: number) => ({ seq: i + 1, at: new Date(l.at).toISOString(), type: "wo.log", by: l.who, outcome: "ok", detail: { text: l.text } })),
+  });
   return (method, path, url) => {
     if (method !== "GET") return undefined;
     const seg = path.split("/");
@@ -90,7 +160,17 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (seg[0] === "work-orders" && seg[1]) {
       const w = byId.get(seg[1]);
       if (!w) return undefined;
-      return seg[2] === "record" ? { wo: w, workOrder: w, project: seed.projects.find((p: Seed) => p.id === w.project) } : w;
+      return seg[2] === "record" ? recordOf(w) : seg[2] === "gates" && seg[4] === "approvers" ? approversOf(w, seg[3]!) : seg[2] === "session" ? sessionOf(w) : seg[2] === "changes" ? { pullRequests: [], commits: [], files: w.files ?? [], patches: [] } : seg[2] ? undefined : travelerOf(w);
+    }
+    if (path === "work-order-sessions") {
+      const proj = url.searchParams.get("project");
+      return {
+        items: wos.filter((w) => !proj || w.project === proj).map((w) => {
+          const last = w.conv?.messages?.[w.conv.messages.length - 1];
+          const st = (cat.stations as Seed[])[w.station];
+          return { id: w.id, project: w.project, title: w.title, cls: w.cls, station: st?.id ?? "intake", stationName: st?.name ?? "Intake", state: w.state, bay: w.bay ?? null, gate: gateInfo(w)?.id ?? null, agent: st?.agent ?? null, agentName: null, waitingOn: w.state === "waiting" ? "approver" : "agent", latest: last ? { text: last.text, at: last.at, by: last.from, role: "assistant" } : null, unread: false, closed: w.state === "done" || w.state === "killed", started: true, requestedBy: w.requestedBy, createdAt: w.createdAt };
+        }),
+      };
     }
     if (path === "activity") return seed.events;
     if (path === "conversations") return page(conversations);

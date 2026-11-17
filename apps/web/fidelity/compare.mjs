@@ -24,8 +24,8 @@ const WEB = resolve(HERE, "..");
 const PROTO_DIR = "/home/reshif/Downloads/gantry-designs/design-3-blueprint";
 const OUT_DIR = join(PROTO_DIR, "fidelity");
 const PW = "/home/reshif/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
-const PROTO_PORT = 9403;
-const REAL_PORT = 9530;
+const PROTO_PORT = 9423;
+const REAL_PORT = 9532;
 const FONTS = join(WEB, "src/assets/fonts");
 
 const argv = process.argv.slice(2);
@@ -117,7 +117,7 @@ async function shoot(kind, route, w, theme) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: theme, reducedMotion: "reduce", hasTouch: w < 500 });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => console.warn(`[${kind} ${route} pageerror] ${String(e.message).split("\n")[0]}`));
-  page.on("console", (m) => m.type() === "error" && kind === "real" && console.warn(`[real ${route} console] ${m.text().slice(0, 160)}`));
+  page.on("console", (m) => m.type() === "error" && kind === "real" && console.warn(`[real ${route} console] ${m.text().slice(0, 600)}`));
   try {
     if (kind === "proto") {
       await page.route("**/*", async (r) => {

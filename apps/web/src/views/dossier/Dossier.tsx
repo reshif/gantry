@@ -17,8 +17,9 @@ import { journeyOf, toRecEvent } from "../traveler/model";
 import { Picker } from "../record/Picker";
 import { DossierHead } from "./Head";
 import { Props, waitingOnYou } from "./Props";
+import { BriefPanel, CriteriaPanel, GatesPanel, PlanPanel, RunsPanel } from "./Panels";
 
-export type DossierTab = "document" | "activity";
+export type DossierTab = "document" | "activity" | "gates" | "runs";
 
 export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
   const d = useRecordData(id);
@@ -85,28 +86,35 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
     <div className="view rec-view dz" id="dz" ref={root}>
       <DossierHead wo={wo} cat={cat} project={project} session={session} onActivity={() => toActivity()} />
       <div className="dz-tabbar">
-        <Tabs idPrefix="dz-tab" items={[{ id: "document", label: "Document" }, { id: "activity", label: "Activity" }]} active={tab} onChange={(t) => setTab(t as DossierTab)} />
+        <Tabs idPrefix="dz-tab" items={[{ id: "document", label: "Document" }, { id: "activity", label: "Activity", count: wo.log?.length ?? 0 }, { id: "gates", label: "Gates", count: Object.keys(wo.gates ?? {}).length }, { id: "runs", label: "Runs", count: wo.history.length }]} active={tab} onChange={(t) => setTab(t as DossierTab)} />
         {waiting ? (
           <button type="button" className="dz-tabnote need" onClick={() => (waitingOnYou(wo, cat, session)[0]?.go === "decide" ? decide() : toActivity(waitingOnYou(wo, cat, session)[0]?.target))}>
             <Icon name="check" />{`Waiting on you (${waiting})`}
           </button>
         ) : <span className="dz-tabnote faint"><Icon name="check" />Nothing waits on you</span>}
       </div>
-      <div className="dz-grid">
-        <div className="dz-main" role="tabpanel" aria-labelledby={`dz-tab-${tab}`}>
+      <div className={`dz-grid${tab === "document" || tab === "activity" ? " cols w21" : ""}`}>
+        <div className="dz-main stack" role="tabpanel" aria-labelledby={`dz-tab-${tab}`}>
           {tab === "document" ? (
             <>
+              <BriefPanel wo={wo} />
+              <CriteriaPanel wo={wo} />
+              <PlanPanel wo={wo} />
               <details className="dz-replay">
                 <summary>Step through this work order&apos;s history</summary>
                 <Scrubber c={c} events={events} pre="rec-" />
               </details>
               <Sections c={c} />
             </>
+          ) : tab === "gates" ? (
+            <GatesPanel wo={wo} cat={cat} />
+          ) : tab === "runs" ? (
+            <RunsPanel wo={wo} cat={cat} />
           ) : (
             <WoSessionPage woId={id} bare back={() => setTab("document")} />
           )}
         </div>
-        <Props wo={wo} rec={rec} cat={cat} project={project} session={session} onJump={jump} onActivity={toActivity} onDecide={decide} />
+        {tab === "document" || tab === "activity" ? <Props wo={wo} rec={rec} cat={cat} project={project} session={session} onJump={jump} onActivity={toActivity} onDecide={decide} /> : null}
       </div>
     </div>
   );

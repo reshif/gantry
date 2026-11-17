@@ -9,6 +9,7 @@ import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
+import { useOpenTraveler } from "../../shell/useTraveler";
 import { canSeeRoute } from "../../lib/routes";
 import { useMe } from "../../api/queries";
 import { FloorCtx, WoToken, gateHaveNeed, gateOfStation, isLive, mcpFor, since, stationIdx, useFloorCtx, useFloorValue } from "./kit";
@@ -344,6 +345,33 @@ export function StationDrawer({ sid, close, onGate }: { sid: string; close: () =
   );
 }
 
+/** OUT: the work orders that cleared the last gate (prototype "Released" drawer). */
+export function ReleasedDrawer({ close }: { close: () => void }) {
+  const ctx = useFloorCtx();
+  const open = useOpenTraveler();
+  const done = ctx.wos.filter((w) => w.state === "done" && !w.split).sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
+  return (
+    <div className="drawer-inner">
+      <Head kicker={`Out · ${ctx.project.name}`} id={<span className="mono big-id">OUT</span>} title="Released" close={close} label="Close released work orders" />
+      <div className="drawer-scroll">
+        <p className="drawer-desc">Work orders that cleared the last gate.</p>
+        {done.length ? (
+          <ul className="list" id="floor-released">
+            {done.slice(0, 20).map((w) => (
+              <li key={w.id}>
+                <Btn label={w.id} kind="ghost" small onClick={() => { close(); open(w.id); }} />
+                <span className="grow trunc">{w.title}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted small">Nothing released yet. Released work orders collect here.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Keeps the two drawers hopping between each other without a stale closure. */
 export function useDrawers(projectId: string | null) {
   const ui = useUI();
@@ -355,6 +383,14 @@ export function useDrawers(projectId: string | null) {
       ui.drawer.open(`station:${sid}`, (close) => (
         <DrawerRoot projectId={projectId}>
           <StationDrawer sid={sid} close={close} onGate={api.gate} />
+        </DrawerRoot>
+      ));
+    },
+    out: (): void => {
+      if (!projectId) return;
+      ui.drawer.open("out", (close) => (
+        <DrawerRoot projectId={projectId}>
+          <ReleasedDrawer close={close} />
         </DrawerRoot>
       ));
     },

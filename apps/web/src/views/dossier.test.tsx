@@ -26,19 +26,22 @@ describe("Work order page", () => {
     expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
     expect(screen.getByRole("list", { name: new RegExp(`Route of ${W.id}`) })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Document" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("false");
-    expect(document.getElementById("trv-open-conversation")).toBeTruthy();
-    expect(document.getElementById("dz-move")).toBeTruthy();
-    expect(document.getElementById("dz-more")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /^Activity/ }).getAttribute("aria-selected")).toBe("false");
+    // Traveler and Changes sit beside the decision; everything else is in one Actions menu
+    expect(document.getElementById("rec-traveler")).toBeTruthy();
+    expect(document.getElementById("rec-changes")).toBeTruthy();
+    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
+    expect(await screen.findByRole("menuitem", { name: /Open conversation/ })).toBeTruthy();
   });
 
   it("opens the Activity tab from the address and from the Open conversation button", async () => {
     await show({}, `#record/${W.id}/activity`);
-    expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: /^Activity/ }).getAttribute("aria-selected")).toBe("true");
     cleanup();
     resetApp();
     await show();
-    fireEvent.click(document.getElementById("trv-open-conversation") as HTMLElement);
+    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Open conversation/ }));
     await waitFor(() => expect(window.location.hash).toContain("%2Factivity"));
   });
 
@@ -92,7 +95,7 @@ describe("Changes page", () => {
     mockApi({ ...readsFor(W) });
     window.location.hash = `#changes/${W.id}`;
     mount(<ChangesView />);
-    expect(await screen.findByText(`Changes: ${W.title}`, {}, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: `Changes · ${W.id}` }, { timeout: 4000 })).toBeTruthy();
     fireEvent.click(document.getElementById("chg-back") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toContain(`record/${W.id}`));
   });
