@@ -184,7 +184,11 @@ d("prompt records of conversational calls", () => {
     const sid = a.skills[0]!.id;
     await q(`insert into skill_versions (org_id, skill_id, version, body, published_at) values ($1,$2,99,$3::jsonb,now())`, [t.orgId, sid, JSON.stringify({ body: "A changed skill body." })]);
     await q(`update skills set live_version = 99 where org_id = $1 and id = $2`, [t.orgId, sid]);
-    const b = (await pin())!;
+    // A skill edit alone changes nothing a version ran with (migration 0046); the version that pins the new skill version does.
+    const pinned = (await pin())!;
+    expect(pinned.manifest.hash).toBe(a.manifest.hash);
+    await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) select org_id, agent_id, 99, jsonb_set(body, '{skillVersions}', $3::jsonb), model_id, now() from agent_versions where org_id = $1 and agent_id = $2 and version = 1`, [t.orgId, "ag-build", JSON.stringify({ [sid]: 99 })]);
+    const b = (await withTx(t.db.app, (tx) => pinRunConfig(tx, { orgId: t.orgId, agentId: "ag-build", agentVersion: 99, projectId: "payments", repoId: "payments-api" })))!;
     expect(b.composed.hash).toBe(a.composed.hash); // the old hash could not see this change
     expect(b.manifest.hash).not.toBe(a.manifest.hash);
     expect(b.manifest.parts.find((p) => p.kind === "skill")).toMatchObject({ version: 99, bytes: "A changed skill body.".length });

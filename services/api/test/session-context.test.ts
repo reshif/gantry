@@ -35,13 +35,7 @@ d("conversational agents use their configured context", () => {
 
   /** Gives an agent's live version a recognisable instruction text, and one of its skills a recognisable body. */
   const mark = async (agent: string, text: string, skill?: { id: string; text: string }) => {
-    await q(
-      `insert into agent_versions (org_id, agent_id, version, body, model_id, published_at)
-       select org_id, agent_id, (select max(version) + 1 from agent_versions where org_id = $1 and agent_id = $2), jsonb_set(body, '{instructions}', to_jsonb($3::text)), model_id, now()
-         from agent_versions where org_id = $1 and agent_id = $2 and version = (select live_version from agents where org_id = $1 and id = $2)`,
-      [t.orgId, agent, text],
-    );
-    await q(`update agents set live_version = (select max(version) from agent_versions where org_id = $1 and agent_id = $2), data = jsonb_set(data, '{promoted}', coalesce(data->'promoted', '[]'::jsonb) || to_jsonb((select max(version) from agent_versions where org_id = $1 and agent_id = $2))) where org_id = $1 and id = $2`, [t.orgId, agent]);
+    // A skill edit is pinned by the agent version that carries it (body.skillVersions, migration 0046): publish the skill version first, then pin it in the new agent version.
     if (skill) {
       await q(
         `insert into skill_versions (org_id, skill_id, version, body, published_at)
@@ -51,6 +45,14 @@ d("conversational agents use their configured context", () => {
       );
       await q(`update skills set live_version = (select max(version) from skill_versions where org_id = $1 and skill_id = $2) where org_id = $1 and id = $2`, [t.orgId, skill.id]);
     }
+    await q(
+      `insert into agent_versions (org_id, agent_id, version, body, model_id, published_at)
+       select org_id, agent_id, (select max(version) + 1 from agent_versions where org_id = $1 and agent_id = $2),
+              jsonb_set(jsonb_set(body, '{instructions}', to_jsonb($3::text)), '{skillVersions}', coalesce(body->'skillVersions', '{}'::jsonb) || coalesce((select jsonb_build_object($4::text, live_version) from skills where org_id = $1 and id = $4 and $4::text is not null), '{}'::jsonb)), model_id, now()
+         from agent_versions where org_id = $1 and agent_id = $2 and version = (select live_version from agents where org_id = $1 and id = $2)`,
+      [t.orgId, agent, text, skill?.id ?? null],
+    );
+    await q(`update agents set live_version = (select max(version) from agent_versions where org_id = $1 and agent_id = $2), data = jsonb_set(data, '{promoted}', coalesce(data->'promoted', '[]'::jsonb) || to_jsonb((select max(version) from agent_versions where org_id = $1 and agent_id = $2))) where org_id = $1 and id = $2`, [t.orgId, agent]);
   };
   const tuple = async (id: string) => (await q(`select * from agent_version_tuples where org_id = $1 and id = $2`, [t.orgId, id]))[0];
 
