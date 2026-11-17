@@ -127,3 +127,4 @@
 .dz-tabbar { position: static; background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; padding: 0; }
 .dz-overview { margin-top: 4px; }
 .dz-top .banner { margin: 0; }
+.dz-tabbar { flex-wrap: wrap; }
