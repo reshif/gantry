@@ -39,7 +39,8 @@
 /* ---------- top bar additions ---------- */
 .proj-switch { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 12px; border-left: 1px solid var(--line); }
 .proj-switch select { max-width: 240px; }
-.user-btn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid transparent; background: none; border-radius: var(--r2); color: var(--ink); }
+.user-btn { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid transparent; background: none; border-radius: var(--r2); color: var(--ink); }
+.env-dot { display: none; position: absolute; top: 1px; right: 1px; width: 7px; height: 7px; border-radius: 50%; background: var(--wait); box-shadow: 0 0 0 1.5px var(--surface); }
 .user-btn:hover { background: var(--sunk); }
 .user-btn .ic { width: 12px; height: 12px; }
 .nav-proj { display: block; color: var(--ink-2); text-transform: none; letter-spacing: 0; font-family: var(--f-body); font-size: var(--t-sm); margin-top: 2px; }
@@ -47,8 +48,9 @@
 @media (max-width: 860px) { .proj-switch .viewing-l { display: none; } .proj-switch { border-left: 0; padding-left: 0; } .proj-switch select { max-width: 150px; } .user-name { display: none; } }
 @media (max-width: 560px) {
   /* the project name is the most useful thing in the bar: give it the free width, drop the mark, status text and search label first */
-  .brand .logo, .brand .brand-name { display: none; }
-  .brand:not(:has(.dev-dot)) { display: none; }
+  /* the non-production marker moves from the brand to the account button, which keeps the menu's Environment line */
+  .topbar .brand { display: none; }
+  .env-dot { display: inline-block; }
   .palette-label { display: none; }
   .palette-btn { margin-left: 0; }
 }

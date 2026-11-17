@@ -87,8 +87,9 @@ export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }
           <Icon name="bell" />
           {n ? <span className="inbox-count mono">{String(n)}</span> : null}
         </button>
-        <button ref={userRef} type="button" className="user-btn" id="user-menu" aria-haspopup="menu" aria-label={`Account menu for ${v.name}`} aria-expanded="false" title={v.name} onClick={openUserMenu}>
+        <button ref={userRef} type="button" className="user-btn" id="user-menu" aria-haspopup="menu" aria-label={`Account menu for ${v.name}`} aria-expanded="false" title={me.config.demoAccounts ? `${v.name} · non-production: local stack, demo accounts on` : v.name} onClick={openUserMenu}>
           <Avatar id={v.id} size="sm" />
+          {me.config.demoAccounts ? <span className="env-dot" aria-hidden="true" /> : null}
           <Icon name="down" />
         </button>
       </div>

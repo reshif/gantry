@@ -223,6 +223,10 @@ describe("signed in", () => {
     const top = document.querySelector("#topbar") as HTMLElement;
     expect(top.textContent).not.toContain("Demo accounts on");
     expect(top.querySelector(".dev-dot")).toBeTruthy();
+    // at phone width the brand is hidden; the non-production marker rides on the account button, still reachable via its title
+    const acct = top.querySelector("#user-menu") as HTMLElement;
+    expect(acct.querySelector(".env-dot")).toBeTruthy();
+    expect(acct.title).toContain("non-production");
     expect(top.querySelector("#status-cluster")?.textContent).toBe("Running");
     expect(top.querySelector(".user-name")).toBeNull();
     expect(top.querySelector(".palette-label")?.textContent).toBe("Search");
