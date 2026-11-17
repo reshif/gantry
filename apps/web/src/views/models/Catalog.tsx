@@ -32,7 +32,7 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
     { key: "context", label: "Context", sort: true, align: "end", render: (m) => <span className="mono">{fmt.k(m.context)}</span> },
     { key: "price", label: "In / out per Mtok", sort: (m) => m.outPrice, align: "end", render: (m) => m.needsPrice ? <span className="warn-text">needs a price</span> : <span className="mono">{m.inPrice || m.outPrice ? `$${m.inPrice} / $${m.outPrice}` : "self-hosted"}</span> },
     { key: "use", label: "Used at", render: (m) => { const u = usedBy(agents, m.id); return u.length ? <span className="tag" title={u.map((a) => a.name).join(", ")}>{`${u.length} agent${u.length > 1 ? "s" : ""}`}</span> : <span className="dim">{"\u2014"}</span>; } },
-    { key: "en", label: "Enabled", render: (m) => <Toggle id={`mc-${m.id}`} checked={m.enabled} label={`Enable ${m.name}`} decision={lockFor(m)} onChange={(on) => setEnabled(m.id, on)} /> },
+    { key: "en", label: "On", render: (m) => <Toggle id={`mc-${m.id}`} checked={m.enabled} label={`Enable ${m.name}`} decision={lockFor(m)} onChange={(on) => setEnabled(m.id, on)} /> },
   ];
   const spend = vendors.filter((v) => v.connected);
   const top = Math.max(1, ...spend.map((v) => v.mtd || 0));

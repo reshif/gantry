@@ -66,7 +66,7 @@ describe("signed out", () => {
     await screen.findByText("Continue with SSO");
     expect(screen.getByText("Continue with GitHub")).toBeTruthy();
     expect(screen.queryByText(/Demo accounts/)).toBeNull();
-    expect(document.querySelector(".auth-belt li")).toBeTruthy(); // stations from the catalogue
+    expect(document.querySelector(".auth-preview .tok")).toBeTruthy(); // the belt-card preview of the prototype
   });
 
   it("shows the guided two-step setup screen when the server says a Factory Admin needs a second factor", async () => {

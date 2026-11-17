@@ -23,13 +23,12 @@ export function railOf(wo: TWo, cat: Catalog, project: Project): PipelineStep[] 
     else if (idx < cur) state = visited ? "passed" : "skip";
     else if (idx === cur) state = wo.state === "running" ? "running" : wo.state === "failed" || wo.state === "killed" ? "failed" : wo.state === "blocked" || wo.bay ? "warn" : gi?.status === "waiting" ? "passed" : "waiting";
     else if (!wo.route.includes(st.id)) state = "skip";
-    const t = spent(wo, st.id);
     let gate: PipelineStep["gate"];
     if (g && wo.route.includes(st.id)) {
       const gs: GateState = !gi ? "todo" : gi.status === "waiting" ? "wait" : gi.status === "passed" ? "passed" : "todo";
       gate = { state: gs, label: `${g.label} ${g.name}` };
     }
-    const step: PipelineStep = { key: st.id, name: t ? `${st.name} · ${t}` : st.name, state };
+    const step: PipelineStep = { key: st.id, name: st.name, state };
     if (gate) step.gate = gate;
     return step;
   });

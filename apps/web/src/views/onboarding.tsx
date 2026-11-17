@@ -26,7 +26,7 @@ export default function OnboardingView() {
   const reposQ = useRepos(project?.id);
   const repos = (reposQ.data ?? []) as RepoV[];
   const connect = useCan("repo.onboard", { project: project?.id });
-  const [tab, setTab] = useState<"wizard" | "pipeline" | "agent">(() => { const t = new URLSearchParams(window.location.search).get("tab"); return t === "wizard" || t === "agent" ? t : "pipeline"; });
+  const [tab, setTab] = useState<"wizard" | "pipeline" | "agent">(() => { const t = new URLSearchParams(window.location.search).get("tab"); return t === "pipeline" || t === "agent" ? t : "wizard"; });
   const openRepo = (repoId: string, dtab?: string) => {
     if (!project) return;
     if (dtab) rememberTab(repoId, dtab);

@@ -79,3 +79,4 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 .dz-strip .step .step-ico{width:18px;height:18px}
 .dz-strip .step-link{display:inline-block;width:14px;height:2px;margin:0 4px;background:var(--line-strong)}
 @media (max-width:640px){.dz-strip .pipe>li{flex:none}}
+.dz-ph>div:first-child{flex:1 1 300px;min-width:0}.dz-ph .acts{flex:0 0 auto}

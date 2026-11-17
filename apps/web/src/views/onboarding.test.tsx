@@ -32,6 +32,7 @@ const GUIDELINES = { version: 3, by: "p-daniel", at: NOW - 86_400_000, items: SE
 beforeEach(() => {
   resetApp();
   updatePrefs({ project: "storefront" });
+  window.history.replaceState(null, "", "/?tab=pipeline");
 });
 afterEach(() => {
   cleanup();
@@ -108,6 +109,14 @@ describe("Onboarding: pipeline", () => {
     api([]);
     mount(<OnboardingView />);
     expect(await screen.findByText("No repos yet")).toBeTruthy();
+  });
+
+  it("opens on the Wizard tab, as the prototype does, unless the URL names a tab", async () => {
+    window.history.replaceState(null, "", "/");
+    api([find("web-storefront")]);
+    mount(<OnboardingView />);
+    await waitFor(() => expect(document.getElementById("onb-tab-wizard")?.getAttribute("aria-selected")).toBe("true"));
+    expect(document.getElementById("onb-repos")).toBeNull();
   });
 
   it("searching narrows the repos, and an empty result offers Show all which clears the search and the filter", async () => {

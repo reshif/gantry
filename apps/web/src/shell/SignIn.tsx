@@ -2,7 +2,6 @@
  * Sign-in screen (legacy auth.js). Sign-in is delegated to the identity provider: the buttons leave
  * the SPA for /auth/login. Demo accounts appear only when the API config says demoAccounts is on.
  */
-import { STATIONS } from "@gantry/domain";
 import type { PublicConfig } from "../api/types";
 import { loginUrlWithReturn as loginUrl } from "../lib/session/returnTo";
 import { DEMO_ACCOUNTS } from "../lib/demo";
@@ -47,14 +46,10 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
             <p className="auth-lede muted" style={{ maxWidth: "40ch" }}>Sign in to run the line: watch work travel the belt, decide at gates and keep every change on the record.</p>
           </div>
           <div>
-            <ol className="auth-belt" aria-label="Stations">
-              {STATIONS.map((s) => (
-                <li key={s.id}>
-                  <span className="mono">{s.no}</span>
-                  {s.name}
-                </li>
-              ))}
-            </ol>
+            <div className="belt-card auth-preview" aria-hidden="true" style={{ padding: 12, display: "flex", alignItems: "center" }}>
+              <span className="tok tok-running" style={{ width: 110 }}><span className="tok-top"><span className="tok-id mono">WO-1004</span><span className="tok-time">P1</span></span></span>
+              <span className="tok tok-waiting" style={{ width: 110, marginLeft: 80 }}><span className="tok-top"><span className="tok-id mono">WO-1021 ⏸</span><span className="tok-time">P2</span></span></span>
+            </div>
             <p className="auth-note auth-demo-note">
               <Icon name={demo ? "alert" : "key"} />
               <span>{demo ? "Development sign-in is on: seeded demo accounts can sign in. Use this only on a local stack." : "Sign-in is handled by your organisation's identity provider. You return to the page you asked for."}</span>

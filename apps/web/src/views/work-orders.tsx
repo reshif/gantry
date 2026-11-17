@@ -540,7 +540,6 @@ export default function WorkOrdersView() {
           )}</Async>
         </div>
       )}
-      <p className="hint wo-live">Updates live as work moves.</p>
     </div>
   );
 }

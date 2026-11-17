@@ -228,7 +228,8 @@ type SuiteTableRow = { su: Suite; agentName: string; agentId: string; cases: num
 export function SuitesTab({ d }: { d: EvalsData }) {
   const agentSuite = agentOf(d, evalsUi.agent)?.suite;
   const [q, setQ] = useState("");
-  if (!evalsUi.suite || !suiteOf(d, evalsUi.suite)) evalsUi.suite = (d.suites.find((s) => s.id === agentSuite) ?? d.suites[0])?.id ?? null;
+  if (evalsUi.suite && !suiteOf(d, evalsUi.suite)) evalsUi.suite = null;
+  if (!evalsUi.suite && agentSuite && suiteOf(d, agentSuite)) evalsUi.suite = agentSuite;
   if (!d.suites.length) return <Empty title="No suites yet" text="Create an agent: it gets a golden set to add cases to." />;
   const all: SuiteTableRow[] = d.suites.map((su) => {
     const runs = d.runsOf(su.id);
@@ -256,7 +257,7 @@ export function SuitesTab({ d }: { d: EvalsData }) {
         </FilterBar>
         <DataTable id="ev-su-table" caption="Eval suites" columns={cols} rows={rows} rowKey={(r) => r.su.id} rowId={(r) => `ev-su-${r.su.id}`} onRow={pick} pageSize={12} pager empty={{ title: "No suites match", text: "Clear the search to see every suite." }} />
       </div>
-      <div className="ev-suites-main"><SuiteDetail d={d} /><HeadToHead d={d} /></div>
+      {evalsUi.suite ? <div className="ev-suites-main"><SuiteDetail d={d} /><HeadToHead d={d} /></div> : null}
     </div>
   );
 }
