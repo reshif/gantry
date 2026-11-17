@@ -4,15 +4,14 @@
  *  - `Async` wraps one read. While it loads it shows a quiet placeholder. A 403 says "Not visible to you",
  *    never an empty list or a 0. Any other failure says what failed and offers Try again. An empty
  *    result shows the screen's own empty state. Only real data reaches `children`.
- *  - `useCommand` wraps one write. It holds the busy flag, refuses a second click while the first is
- *    running, and toasts the server's answer (the refusal's reason when it was refused).
+ *  - `useCommand` (lib/useCommand) wraps one write; re-exported here.
  *  - `qState` gives a header stat the same honesty: "…" while loading, "–" with the reason when hidden or failed.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
+import "../lib/data.css";
 import { Icon } from "./Icon";
-import { useUI } from "./overlay-context";
 import { Btn, Empty } from "./primitives";
 
 /** Why a read failed, in words for the person looking at the screen. */
@@ -79,8 +78,15 @@ export function Async<T>({ query, what, isEmpty = defaultEmpty, empty, id, rows,
     return f.hidden ? <NotVisible id={id ? `${id}-hidden` : undefined} what={what} reason={f.msg} /> : <LoadFailed id={id ? `${id}-error` : undefined} what={what} msg={f.msg} onRetry={() => void query.refetch()} />;
   }
   if (query.data === undefined) return <Loading id={id ? `${id}-loading` : undefined} label={what} rows={rows} />;
-  if (empty !== undefined && isEmpty(query.data)) return <>{empty}</>;
-  return <>{children(query.data)}</>;
+  const stale = query.isError ? failureOf(query.error) : null;
+  const strip = stale ? (
+    <div className="async-stale" role="alert" id={id ? `${id}-stale` : undefined}>
+      <span>{`Showing the last loaded copy of ${what}. Couldn't refresh: ${stale.msg}`}</span>
+      <Btn small icon="refresh" label="Try again" id={id ? `${id}-stale-retry` : undefined} onClick={() => void query.refetch()} />
+    </div>
+  ) : null;
+  if (empty !== undefined && isEmpty(query.data)) return <>{strip}{empty}</>;
+  return <>{strip}{children(query.data)}</>;
 }
 
 /** A header stat value that is honest about a read that is loading, hidden or failed. */
@@ -97,43 +103,5 @@ export function qState<T>(q: Pick<UseQueryResult<T>, "data" | "error" | "isError
   return <span className="muted async-stat">…</span>;
 }
 
-type Result = { ok: boolean; msg: string };
-interface CommandOptions<R extends Result> {
-  /** Toast shown when it worked. Defaults to the server's message; `false` shows nothing. */
-  ok?: string | false | ((r: R) => string | false);
-  /** Toast the refusal (default). Turn off when the screen shows the reason inline. */
-  toastFail?: boolean;
-}
-
-/**
- * One write: `const save = useCommand((v) => ops.saveThing(v), { ok: "Saved." })`, then `save.run(v)`, `save.busy`.
- * A second run while one is in flight is refused, not queued, so a double click can't submit twice.
- */
-export function useCommand<A extends unknown[], R extends Result>(fn: (...args: A) => Promise<R>, o: CommandOptions<R> = {}) {
-  const ui = useUI();
-  const [busy, setBusy] = useState(false);
-  const [last, setLast] = useState<R | null>(null);
-  const inFlight = useRef(false);
-  const live = useRef(true);
-  useEffect(() => () => void (live.current = false), []);
-  const run = async (...args: A): Promise<R | null> => {
-    if (inFlight.current) return null;
-    inFlight.current = true;
-    setBusy(true);
-    try {
-      const r = await fn(...args);
-      if (live.current) setLast(r);
-      if (r.ok) {
-        const m = typeof o.ok === "function" ? o.ok(r) : o.ok === undefined ? r.msg : o.ok;
-        if (m) ui.toast(m, "ok");
-      } else if (o.toastFail !== false) ui.toast(r.msg, "error");
-      return r;
-    } finally {
-      inFlight.current = false;
-      if (live.current) setBusy(false);
-    }
-  };
-  /** A refusal reason for a button while this command runs: `<Btn disabledReason={save.wait("Saving…")}>`. */
-  const wait = (why = "Wait for the last change to finish."): string | null => (busy ? why : null);
-  return { run, busy, last, wait };
-}
+/** The one write path lives in lib/useCommand (TanStack useMutation); re-exported so existing imports keep working. */
+export { useCommand } from "../lib/useCommand";

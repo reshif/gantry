@@ -3,15 +3,15 @@
  * (one call per visible project), a policy-state shim so the domain's policy wording works on API data, and the
  * result handler that turns a refused command into a toast (and a step-up redirect when the server asks for one).
  */
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { policyText, type Catalog, type Policy, type PolicyState, type Repo, type Team } from "@gantry/domain";
+import { policyText, type Catalog, type Policy, type PolicyState, type Repo } from "@gantry/domain";
 import { api, get, type ApiResult } from "../../api/client";
 import { useAccessMatrix, useMe, usePeople, usePolicies } from "../../api/queries";
 import { qk } from "../../api/keys";
 import { useUI } from "../../ui/overlay-context";
 
-export const useTeams = () => useQuery({ queryKey: ["teams"] as const, queryFn: () => get<Team[]>(api("teams")) });
+export { useTeams } from "../../api/queries";
 
 /** Every repo in the projects the viewer can see. A project whose repo list cannot be read contributes nothing. */
 export function useAllRepos(): { repos: Repo[]; pending: boolean } {

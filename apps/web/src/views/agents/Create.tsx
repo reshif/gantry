@@ -7,6 +7,7 @@ import { Field, LockNote, Select, Toggle, type Decision } from "../../ui/primiti
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
+import { DirtyMark } from "../../ui/DirtyMark";
 import { AUTONOMY, TEMPLATES, TOOLS, autonomyCheck, rerender, ui, useModels, useStations, type AgentRow, type Tools } from "./kit";
 
 const STEPS = ["Template", "Model", "Permissions", "Staffing", "Review"];
@@ -41,6 +42,7 @@ export function CreateAgent({ agents, projects, policies, perm, close }: { agent
 
   const body = (
     <div className="ag-create">
+      <DirtyMark dirty={JSON.stringify(d) !== JSON.stringify(tplInit("builder"))} />
       <LockNote decision={perm} what="Creating agents" />
       <ol className="stepper">{STEPS.map((n, i) => <li key={n} className={i === step ? "is-on" : i < step ? "is-done" : ""}><span className="mono">{String(i + 1)}</span>{n}</li>)}</ol>
       {step === 0 ? (
@@ -157,7 +159,7 @@ export function CreateAgent({ agents, projects, policies, perm, close }: { agent
     void ops.createAgent({ name: d.name.trim(), station: d.station, model: d.model, fallbacks: d.fallbacks, autonomy: d.autonomy, tools: d.tools, stations, projects: d.projects, budget: d.budget, instructions: d.instructions, skills: d.skills }).then((r) => {
       if (!r.ok) { setErr(r.msg); return; }
       const created = (r as unknown as { agent?: AgentRow }).agent;
-      if (created) { ui.sel = created.id; ui.draft = null; ui.tab = "config"; rerender(); }
+      if (created) { ui.sel = created.id; ui.tab = "config"; rerender(); }
       ui_.toast(r.msg, "ok");
       done();
     });

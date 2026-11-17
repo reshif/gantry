@@ -1,4 +1,5 @@
 /** New project wizard (legacy projects.js openWizard): template, name and owner, repos, approvers, notifications, review. */
+import { qk } from "../../api/keys";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fmt, gateExplain, route as domainRoute, type ApproverRule, type Catalog } from "@gantry/domain";
@@ -23,7 +24,7 @@ const PRESET: Record<string, string> = {
 const idFor = (n: string) => n.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 export function useProjectPresets(): Presets | null {
-  return useQuery({ queryKey: ["templates", "presets"], queryFn: () => get<Presets>(api("project-presets")), staleTime: 60_000 }).data ?? null;
+  return useQuery({ queryKey: qk.presets(), queryFn: () => get<Presets>(api("project-presets")), staleTime: 60_000 }).data ?? null;
 }
 
 interface Wz {
@@ -113,7 +114,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
     ui.toast(`${r.msg} ${n} repo${n === 1 ? "" : "s"} onboarding.${failedRepos.length ? ` Not connected: ${failedRepos.join("; ")}.` : ""}`, custom.failed.length || failedRepos.length ? "warn" : "ok");
     close();
     // the shell keeps the stored project to one in `me`: wait until `me` lists the new project before switching to it
-    await getQueryClient()?.refetchQueries({ queryKey: ["me"] });
+    await getQueryClient()?.refetchQueries({ queryKey: qk.me() });
     goProject(project.id, "project-config");
   };
 

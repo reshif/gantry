@@ -1,3 +1,4 @@
+import { qk } from "../../api/keys";
 import { useState, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
 import type { Person, Project, WorkOrder } from "@gantry/domain";
@@ -75,7 +76,7 @@ export function DeactivateForm({ p, projects, roleName, perm, onDone, registerSu
   const sessQ = useSessions({ all: true });
   const lists = useQueries({
     queries: projects.map((pr) => ({
-      queryKey: ["workOrders", "list", pr.id, { offboard: p.id }],
+      queryKey: qk.workOrders(pr.id, { offboard: p.id }),
       queryFn: async () => {
         const r = await get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(pr.id)}/work-orders`), {});
         return Array.isArray(r) ? r : r.items;

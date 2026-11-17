@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { ApiError, setUnauthorizedHandler } from "./api/client";
 import { bindQueryClient, invalidateSlices } from "./api/keys";
 import { useMeState } from "./api/queries";
+import { useClearDraftsOnUserSwitch } from "./lib/useDraft";
 import { startStream } from "./api/stream";
 import { canBatcher } from "./api/can";
 import { startConnectionWatch } from "./lib/connection/store";
@@ -37,6 +38,7 @@ function Root() {
   const me = meState.data?.status === "in" ? meState.data.me : null;
 
   useSessionLifecycle(client, meState.data);
+  useClearDraftsOnUserSwitch(meState.data?.status === "in" ? meState.data.me.person.id : null);
   useEffect(() => applyTheme(prefs.theme), [prefs.theme]);
   useEffect(() => {
     document.body.classList.toggle("signed-out", session.state === "out");

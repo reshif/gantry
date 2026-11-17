@@ -3,6 +3,7 @@
  * (Slack, Teams, email, webhook). Previews are drawn from the server's rendering (`POST /card-templates/preview`), which uses the same builders the producer
  * uses, so what shows here is what goes out. Nothing is sent by a preview.
  */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import { CARD_ACTIONS, CARD_DEFAULTS, CARD_TEMPLATES, NOTIFY_EVENTS, fmt, type CardTemplate, type IntegrationInstance, type NotificationRoute, type Project } from "@gantry/domain";
 import { ops } from "../../api/ops";
@@ -123,7 +124,7 @@ export interface Preview { sample: PreviewSample; rows: Array<[string, string]>;
 
 export function usePreview(project: string | null | undefined, o: { event: string; template: string; fields: Partial<Fields>; actions?: string[] | undefined }) {
   return useQuery({
-    queryKey: ["cardPreview", project, o.event, o.template, o.fields, o.actions ?? null],
+    queryKey: qk.cardPreview(project, o.event, o.template, o.fields, o.actions ?? null),
     enabled: !!project,
     queryFn: async () => {
       const r = await ops.previewCardTemplate({ project, event: o.event, template: o.template, fields: o.fields, ...(o.actions ? { actions: o.actions } : {}) });

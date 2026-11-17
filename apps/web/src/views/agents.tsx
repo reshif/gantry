@@ -16,7 +16,12 @@ import { Icon } from "../ui/Icon";
 import { Spark } from "../ui/charts";
 import { useUI } from "../ui/overlay-context";
 import { useOutcome } from "./govern/data";
-import { EDIT_KEYS, EntityHistory, clone, pick, rerender, same, ui, useAgentsUi, useStations, autonomyCheck, type AgentRow, type Draft } from "./agents/kit";
+import { useDraft } from "../lib/useDraft";
+import { DraftDot } from "../ui/DraftDot";
+import { useLeaveGuard } from "../lib/useLeaveGuard";
+import { DraftConflictBanner } from "../ui/DraftConflict";
+import { invalidateSlices } from "../api/keys";
+import { EntityHistory, pick, rerender, ui, useAgentsUi, useStations, autonomyCheck, type AgentRow, type Draft } from "./agents/kit";
 import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
 import { InstructionsTab } from "./agents/Instructions";
 import { SkillsTab } from "./agents/SkillsMcp";
@@ -30,7 +35,6 @@ function Roster({ agents }: { agents: AgentRow[] }) {
   const st = useStations();
   const select = (id: string) => {
     ui.sel = id;
-    ui.draft = null;
     rerender();
     setTimeout(() => { const d = document.getElementById("agent-detail"); if (d && d.getBoundingClientRect().top > window.innerHeight * 0.6) d.scrollIntoView?.({ block: "start", behavior: "smooth" }); }, 40);
   };
@@ -46,7 +50,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
             return (
               <tr key={a.id} className={`row-link${ui.sel === a.id ? " is-selected" : ""}`} tabIndex={0} id={`ag-row-${a.id}`} aria-current={ui.sel === a.id ? "true" : undefined}
                 onClick={() => select(a.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(a.id); } }}>
-                <td data-label="Agent"><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong>{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
+                <td data-label="Agent"><span className="who"><Avatar id={a.id} size="sm" /><strong>{a.name}</strong><DraftDot scope="agent" id={a.id} />{a.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</span></td>
                 <td data-label="Status"><span className={`dot-status s-${a.status}`}>{a.status === "paused" ? "Paused" : "Active"}</span></td>
                 <td data-label="Station" className="nowrap"><span>
                   <span className="mono muted">{station ? `${station.no} ` : ""}</span>{station ? station.name : "Off-belt"}
@@ -73,20 +77,25 @@ function Detail({ a, agents, projects }: { a: AgentRow; agents: AgentRow[]; proj
   const perm = dec(useCan("agent.edit"));
   const ro = !perm.allowed;
   const saved = pick(a);
-  if (!ui.draft || ui.draftFor !== a.id) { ui.draft = clone(saved); ui.draftFor = a.id; }
-  const d = ui.draft as Draft;
-  const dirty = !same(d, saved);
+  // The draft remembers the revision it started from and sends only the keys changed here: a colleague's change to another key is kept, to the same key is a conflict.
+  const draft = useDraft<Draft>({
+    scope: "agent", id: a.id, server: saved, rev: a.rev,
+    save: (p, ifMatch) => {
+      const patch: Record<string, unknown> = { ...p };
+      if (typeof patch.name === "string") patch.name = patch.name.trim();
+      return ops.saveAgent(a.id, patch, Object.keys(patch).join(", "), { ifMatch });
+    },
+    refresh: () => invalidateSlices(["agents"]),
+  });
+  const d = draft.values;
+  const dirty = draft.dirty;
+  useLeaveGuard(dirty);
   const autoChk = autonomyCheck(policies, projects, { station: a.station, projects: d.projects }, d.autonomy);
-  const edit = (fn: () => void): void => { fn(); rerender(); };
+  const edit = (fn: () => void): void => draft.edit(() => fn());
   const save = () => {
     if (!d.name.trim()) { out({ ok: false, msg: "The agent needs a name.", status: 422 }); return; }
     if (!d.stations.length) { out({ ok: false, msg: "Pick at least one station the agent may staff.", status: 422 }); return; }
-    const patch: Record<string, unknown> = {};
-    const changed: string[] = [];
-    for (const k of EDIT_KEYS) if (!same(d[k], a[k])) { patch[k] = clone(d[k]); changed.push(k); }
-    if (!changed.length) return;
-    if (typeof patch.name === "string") patch.name = patch.name.trim();
-    void ops.saveAgent(a.id, patch, changed.join(", "), { ifMatch: a.rev }).then((r) => { out(r); if (r.ok) { ui.draft = null; rerender(); } });
+    void draft.save().then((r) => { if (r) out(r); });
   };
   const saveGuard: Decision | null = !perm.allowed ? perm : !autoChk.allowed ? { allowed: false, needs: "", reason: autoChk.reason ?? "" } : !dirty ? { allowed: false, needs: "", reason: "No changes to save." } : null;
   const toggleStatus = () => {
@@ -125,10 +134,11 @@ function Detail({ a, agents, projects }: { a: AgentRow; agents: AgentRow[]; proj
       <LockNote decision={perm} what="Agent configuration" />
       <Tabs idPrefix="ag-tab" items={tabs} active={ui.tab} onChange={(t) => { ui.tab = t; rerender(); }} />
       {body}
+      {showSave ? <DraftConflictBanner id="ag-conflict" conflict={draft.conflict} onKeepMine={draft.keepMine} onDiscard={draft.discard} /> : null}
       {showSave ? (
         <div className={`savebar${dirty ? " is-dirty" : ""}`} id="ag-savebar">
           <span className="muted small savebar-text">Edits stay in a draft while you switch tabs or screens. Saving writes one audited change.</span>
-          <Btn label="Discard" id="ag-discard" guard={!perm.allowed ? perm : null} onClick={() => { ui.draft = null; rerender(); }} />
+          <Btn label="Discard" id="ag-discard" guard={!perm.allowed ? perm : null} onClick={draft.discard} />
           <Btn label="Save agent" kind="primary" id="ag-save" guard={saveGuard} onClick={save} />
         </div>
       ) : null}
@@ -149,7 +159,7 @@ export default function AgentsView() {
   // Another screen asked for an agent (prefs.agent): select it once.
   useEffect(() => {
     if (prefs.agent && agents.some((a) => a.id === prefs.agent)) {
-      if (ui.sel !== prefs.agent) { ui.sel = prefs.agent; ui.draft = null; rerender(); }
+      if (ui.sel !== prefs.agent) { ui.sel = prefs.agent; rerender(); }
       updatePrefs({ agent: null });
     }
   }, [prefs.agent, agents]);

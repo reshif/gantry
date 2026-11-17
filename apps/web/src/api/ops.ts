@@ -18,6 +18,7 @@
 import { api, del, patch, post, put, command, type ApiResult, type RequestOptions } from "./client";
 import { invalidateSlices } from "./keys";
 import { noteSignedOut } from "../lib/session/session";
+import { clearDrafts } from "../lib/useDraft";
 
 type Obj = Record<string, unknown>;
 /** Optimistic concurrency: the entity version from the last read, sent as If-Match. */
@@ -75,6 +76,7 @@ export const ops = {
   async signOut(): Promise<ApiResult<{ logoutUrl?: string }>> {
     noteSignedOut();
     const r = await post<{ logoutUrl?: string }>("/auth/logout");
+    if (r.ok) clearDrafts(); // the next person on this browser must not see this one's unsent edits
     if (r.ok && typeof r.logoutUrl === "string" && /^https?:\/\//.test(r.logoutUrl)) {
       window.location.assign(r.logoutUrl);
       return r;

@@ -1,4 +1,5 @@
 /** System health data: GET /api/v1/system/health and the dead letter retry. Shapes mirror services/api/src/areas/system/health.ts. */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import { api, get, post, type ApiResult } from "../../api/client";
 import { invalidateSlices } from "../../api/keys";
@@ -20,7 +21,7 @@ export interface SystemHealth {
 
 /** Refreshes itself every 30 s: this page is for watching. */
 export const useSystemHealth = () =>
-  useQuery({ queryKey: ["system", "health"], queryFn: () => get<SystemHealth>(api("system/health")), refetchInterval: 30_000, staleTime: 10_000 });
+  useQuery({ queryKey: qk.systemHealth(), queryFn: () => get<SystemHealth>(api("system/health")), refetchInterval: 30_000, staleTime: 10_000 });
 
 export async function retryDeadLetter(id: string): Promise<ApiResult> {
   const r = await post(api(`system/outbox/${encodeURIComponent(id)}/retry`));

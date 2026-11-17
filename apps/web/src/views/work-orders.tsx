@@ -3,6 +3,7 @@
  * Filtering, sorting and paging run on the server (GET /projects/{id}/work-orders); the classification card and class
  * override dialog live in work-orders/intake.tsx and the New work order dialog in work-orders/New.tsx.
  */
+import { qk } from "../api/keys";
 import { useInfiniteQuery, useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { WO_STATES, bayDef, classesOf, flowOf, fmt, woTotals } from "@gantry/domain";
@@ -72,7 +73,7 @@ export default function WorkOrdersView() {
 
   const params = { q, cls: f.cls, where: f.where, repo: f.repo, prio: f.prio, source: f.source, state: f.state, sort: sort.k, dir: sort.dir > 0 ? "asc" : "desc" };
   const list = useInfiniteQuery({
-    queryKey: ["workOrders", "table", projectId, params],
+    queryKey: qk.woTable(projectId, params),
     queryFn: ({ pageParam }) => get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { ...params, limit: PAGE, cursor: pageParam || undefined }),
     initialPageParam: "",
     getNextPageParam: (last) => last.next || undefined,
@@ -84,7 +85,7 @@ export default function WorkOrdersView() {
 
   // unfiltered numbers for the header and the filter options
   const stat = useQuery({
-    queryKey: ["workOrders", "stats", projectId],
+    queryKey: qk.woStats(projectId),
     queryFn: async () => {
       const one = async (state: string) => (await get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { state, limit: 1 })).total ?? 0;
       const [all, open, done, killed] = await Promise.all([one("all"), one("open"), one("done"), one("killed")]);
@@ -93,7 +94,7 @@ export default function WorkOrdersView() {
     enabled: !!projectId,
   });
   const live = useQuery({
-    queryKey: ["workOrders", "intake", projectId],
+    queryKey: qk.woIntake(projectId),
     queryFn: async () => (await get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { state: "open", where: "intake", limit: 200 })).items,
     enabled: !!projectId,
   });

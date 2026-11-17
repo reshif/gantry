@@ -1,4 +1,5 @@
 /** Work-order session API (services/api/src/routes/workorder-session.ts). Keys start with `workOrders` / `conversations`, so every change to a work order refreshes the session too. */
+import { qk } from "../../api/keys";
 import { useQuery } from "@tanstack/react-query";
 import type { Brief, WoCard } from "@gantry/domain";
 import { api, get, post, streamCommand, type ApiResult } from "../../api/client";
@@ -70,7 +71,7 @@ export const woSessionKey = (woId: string) => ["workOrders", "session", woId] as
 export const useWoSession = (woId: string | null | undefined) =>
   useQuery({ queryKey: woSessionKey(woId ?? ""), queryFn: () => get<WoSession>(api(`work-orders/${enc(woId ?? "")}/session`)), enabled: !!woId, refetchInterval: 15_000 });
 export const useWoSessions = (project: string | null | undefined) =>
-  useQuery({ queryKey: ["conversations", "sessions", project ?? null], queryFn: () => get<{ items: WoSessionRow[] }>(api("work-order-sessions"), project ? { project } : {}), enabled: project !== undefined, refetchInterval: 20_000 });
+  useQuery({ queryKey: qk.convSessions(project ?? null), queryFn: () => get<{ items: WoSessionRow[] }>(api("work-order-sessions"), project ? { project } : {}), enabled: project !== undefined, refetchInterval: 20_000 });
 
 /** A person's message, or `open` / `continue` (the agent's turn without new words). The answer streams; a rule-based reply comes back as plain JSON. */
 export async function sendWoTurn(woId: string, body: { kind: "message" | "open" | "continue"; text?: string }, on: (e: TurnEvent<WoCard>) => void, signal: AbortSignal): Promise<ApiResult> {
