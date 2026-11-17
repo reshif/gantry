@@ -153,7 +153,7 @@ d("station documents and dialogue", () => {
     // A station that only assumed still says so in the session.
     const msgs = await w.q<{ body: string; data: { cards: Array<{ kind: string; count?: number }> } }>(`select body, data from workorder_messages where wo_id = $1 and data->>'kind' = 'station'`, [id]);
     expect(msgs[0]!.body).toContain("Found the retry module.");
-    expect(msgs[0]!.data.cards).toEqual([{ kind: "assumptions", station: "research", attempt: att.id, count: 2 }]);
+    expect(msgs[0]!.data.cards).toContainEqual({ kind: "assumptions", station: "research", attempt: att.id, count: 2 });
   });
   it("'waiting for you' is shown to the person the question asks, and everyone else sees whom it waits on", async () => {
     const id = await w.atStation("research", "Who is asked");

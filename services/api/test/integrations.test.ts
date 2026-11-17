@@ -122,7 +122,7 @@ d("integrations (spec 8.8, 12.1)", () => {
     const hook = await new Double().start();
     hook.on("/in", () => [200, { ok: true }]);
     try {
-      const secret = "whsec" + "_".repeat(1) + "x".repeat(40);
+      const secret = "whsec" + "_".repeat(1) + "x7Kq2mZp9Rt4".repeat(3);
       const r = await w.call(ADMIN, "POST", "/api/v1/integrations", { type: "webhook", name: "Audit lake", config: { url: `${hook.url}/in`, format: "json" }, secrets: { secret }, targetId: "audit-lake", projects: ["payments"] });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       const inst = r.body.integration as Record<string, any>;

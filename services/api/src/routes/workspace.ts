@@ -67,7 +67,9 @@ export const workspaceRoutes: FastifyPluginAsync = async (app) => {
   app.get("/api/v1/workspace/agents", async (req) => {
     const me = person(req);
     const wo = z.object({ wo: z.string().max(100).optional() }).parse(req.query).wo;
-    const { st, sees } = await seen(req, me.id);
+    const { st, sees, projects } = await seen(req, me.id);
+    // Default deny: the agent roster is only offered to someone who holds a role on at least one project.
+    if (projects.length === 0) return { items: [] };
     let project: string | null = null;
     if (wo) {
       project = (await g.pool.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2`, [g.orgId, wo])).rows[0]?.project_id ?? null;

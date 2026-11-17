@@ -129,7 +129,7 @@ export async function updateInstance(tx: Tx, a: Actor, dataKey: Buffer | null, i
   const incoming = secretsOf(t, b);
   const config = b.config ? { ...cfg, ...cleanConfig(t, { ...cfg, ...b.config }) } : cfg;
   if (b.config) for (const f of t.fields) if (f.type !== "secret" && f.key in b.config && (b.config[f.key] === "" || b.config[f.key] == null)) delete (config as Record<string, unknown>)[f.key];
-  const bad = validateConfig(t, config, { ...Object.fromEntries(t.fields.filter((f) => f.type === "secret").map((f) => [f.key, "x".repeat(SIGNING_SECRET_MIN)])), ...incoming }, { needSecret: false });
+  const bad = validateConfig(t, config, { ...Object.fromEntries(t.fields.filter((f) => f.type === "secret").map((f) => [f.key, "abcdefghijklmnopqrstuvwxyz0123456789".repeat(Math.ceil(SIGNING_SECRET_MIN / 36)).slice(0, Math.max(SIGNING_SECRET_MIN, 36))])), ...incoming }, { needSecret: false });
   if (bad) throw invalid(bad);
   let enc = row.secret_enc;
   let maskText = row.secret_mask ?? "";

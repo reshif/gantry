@@ -4,7 +4,6 @@ import { DenialSampler } from "../denial-sampler.js";
 import type { Gantry } from "../context.js";
 import type { IdClaims } from "../oidc.js";
 import { readSecurity } from "../read/index.js";
-import { DenialSampler } from "../denial-sampler.js";
 import { emailDomainAllowed, ipAllowed } from "../security.js";
 import { createSession, refreshAuthTime } from "./sessions.js";
 

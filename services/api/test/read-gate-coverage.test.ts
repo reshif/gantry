@@ -23,6 +23,8 @@ type Probe = {
   params?: Record<string, string>;
   /** Routes that cannot be called in-process (a long-lived stream): the reason it is not probed. */
   skip?: string;
+  /** Query string appended to the probe URL (for routes that require one). */
+  query?: string;
 };
 
 const REFUSED = [401, 403, 404];
@@ -50,6 +52,17 @@ const SELF_AUTHORIZING: Record<string, Probe> = {
   "/api/v1/work-orders/:id/record/export": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/gates/:gate/approvers": { why: "scopeOf() then decide(project.view)", expect: "refuse", params: { id: "$wo", gate: "brief" } },
   "/api/v1/work-orders/:id/session": { why: "woOf(): visible project and decide(project.view)", expect: "refuse", params: { id: "$wo" } },
+  "/api/v1/work-orders/:id/dialogue": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
+  "/api/v1/work-orders/:id/documents": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
+  "/api/v1/work-orders/:id/documents/:doc": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo", doc: "x" } },
+  "/api/v1/work-orders/:id/sources": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
+  "/api/v1/work-orders/:id/sources/:ref": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo", ref: "s1" } },
+  "/api/v1/work-orders/:id/timeline": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
+  "/api/v1/workspace/inbox": { why: "the inbox lists only conversations the person can read (visible projects, own threads)", expect: "empty" },
+  "/api/v1/workspace/agents": { why: "agents offered for a thread; a work order outside the person's projects is a 404", expect: "empty" },
+  "/api/v1/workspace/operator": { why: "stuck work is limited to projects where the person may act (decide wo.park); spend by person needs people.view", expect: "empty" },
+  "/api/v1/workspace/search": { why: "search results are filtered to what the person can read; a query under two characters is refused", expect: "empty", query: "?q=payments" },
+  "/api/v1/workspace/threads/:key/export": { why: "chatAccess / project visibility decide who may read; an unreadable thread is a 404", expect: "refuse", params: { key: "x" } },
   "/api/v1/work-order-sessions": { why: "list filtered to visible projects", expect: "empty" },
   "/api/v1/repos/:id/onboarding/pr": { why: "repoOf(): the repo's project must be visible", expect: "refuse", params: { id: "$repo" } },
   "/api/v1/repos/:id/onboarding/session": { why: "repoOf(): the repo's project must be visible", expect: "refuse", params: { id: "$repo" } },
@@ -117,7 +130,7 @@ d("every GET under /api/v1 is gated or explicitly self-authorizing", () => {
 
     for (const [pattern, probe] of Object.entries(SELF_AUTHORIZING)) {
       if (probe.skip) continue;
-      const url = pattern.replace(/:([A-Za-z]+)/g, (_m, k: string) => ids[probe.params?.[k] ?? ""] ?? probe.params?.[k] ?? "x");
+      const url = pattern.replace(/:([A-Za-z]+)/g, (_m, k: string) => ids[probe.params?.[k] ?? ""] ?? probe.params?.[k] ?? "x") + (probe.query ?? "");
       const res = await t.app.inject({ method: "GET", url, headers: s.headers });
       const label = `${pattern} -> ${url} (${res.statusCode})`;
       if (probe.expect === "refuse") {

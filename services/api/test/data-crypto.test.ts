@@ -31,7 +31,8 @@ d("data and crypto hardening", () => {
     }
     expect(await count(`select count(*) n from events where type = 'auth.signin_failed' and actor = 'anonymous'`)).toBeLessThanOrEqual(5);
     expect(await count(`select count(*) n from signins where outcome = 'failed' and reason = 'state_missing'`)).toBeLessThanOrEqual(5);
-    expect(await count(`select count(*) n from events where type = 'auth.signin_failed'`)).toBeGreaterThanOrEqual(1);
+    // A missing state cookie names no identity: it is recorded as a sign-in row only, no ledger event.
+    expect(await count(`select count(*) n from signins where outcome = 'failed' and reason = 'state_missing'`)).toBeGreaterThanOrEqual(1);
   });
 
   it("a signed-in person's refused requests write a bounded number of rows, and every answer is still 403", async () => {

@@ -299,7 +299,7 @@ d("people and access", () => {
       expect((await find("p-sam")).teams).toEqual(["security"]);
     });
     it("refuses adding yourself to a team with a factory role you lack; others need a fresh sign-in", async () => {
-      expect((await call(admin, "POST", "/api/v1/teams/data/roles", { role: "auditor", scope: "factory" })).status).toBe(200);
+      { const r0 = await call(admin, "POST", "/api/v1/teams/data/roles", { role: "auditor", scope: "factory", reason: "test grant" }); expect(r0.status, JSON.stringify(r0.body)).toBe(200); }
       const me = (await find(admin)).teams as string[];
       const self = await call(admin, "PUT", `/api/v1/people/${admin}/teams`, { teams: [...me, "data"] });
       expect(self.status).toBe(403);
@@ -657,7 +657,7 @@ d("people and access", () => {
     it("a non-admin with people.manage cannot invite a Factory Admin; non-factory invites carry no reason in the audit", async () => {
       const role = await call(admin, "POST", "/api/v1/roles", { name: "People Keeper", level: "factory", base: "factory_admin" });
       expect(role.status).toBe(200);
-      expect((await call(admin, "PUT", `/api/v1/people/p-sam/factory-roles/${role.body.role?.id ?? role.body.id}`)).status).toBe(200);
+      expect((await call(admin, "PUT", `/api/v1/people/p-sam/factory-roles/${role.body.role?.id ?? role.body.id}`, { reason: "test grant" })).status).toBe(200);
       const body = (roles: unknown[], extra: Record<string, unknown> = {}) => ({ name: "Keeper Test", email: `k${Math.random().toString(36).slice(2, 8)}@acme.dev`, roles, ...extra });
       const r = await call("p-sam", "POST", "/api/v1/invites", body([{ role: "factory_admin", scope: "factory" }], { reason: "Needs full administration" }));
       expect(r.status).toBe(403);

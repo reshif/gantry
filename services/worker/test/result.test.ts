@@ -62,7 +62,7 @@ d("run.result, publish and teardown", () => {
     await deliverResult(w, a, "WO-9105", "build", "succeeded", { commits: ["x"] });
     await w.drain();
     const pub = w.broker.calls.find((c) => c.op === "publish")!;
-    expect(pub.body.denyPaths).toEqual(["infra/**", ".github/workflows/**"]);
+    expect(pub.body?.denyPaths).toEqual(["infra/**", ".github/workflows/**"]);
     expect((await w.q(`select state from attempts where id = $1`, [a.attemptId]))[0].state).toBe("failed");
   });
 

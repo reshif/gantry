@@ -143,7 +143,7 @@ d("notifications (spec 12.2): routes, producer, deliveries, cards", () => {
       const still = await w.call(MGR, "POST", `/api/v1/deliveries/${dl.id}/retry`);
       expect(still.status).toBe(409);
       expect(still.body.msg).toMatch(/failed again/i);
-      const a = await w.call("p-asha", "POST", "/api/v1/integrations", { type: "webhook", name: "Audit lake", config: { url: `${hook.url}/in`, format: "json" }, secrets: { secret: "whsec_" + "k".repeat(40) }, targetId: "audit-lake", enable: true });
+      const a = await w.call("p-asha", "POST", "/api/v1/integrations", { type: "webhook", name: "Audit lake", config: { url: `${hook.url}/in`, format: "json" }, secrets: { secret: "whsec_" + "k7Kq2mZp9Rt4".repeat(3) }, targetId: "audit-lake", enable: true });
       expect(a.status, JSON.stringify(a.body)).toBe(200);
       expect((await w.call("p-rui", "POST", `/api/v1/deliveries/${dl.id}/retry`)).status).toBe(403);
       const ok = await w.call(MGR, "POST", `/api/v1/deliveries/${dl.id}/retry`);
