@@ -34,7 +34,7 @@ export default function ApiView() {
       <StatRow id="api-stats">
         <Stat label="Active keys" value={qState(d.keysQ, () => String(active.length))} sub={`of ${d.keys.length}`} />
         <Stat label="Triggers on" value={qState(d.trigQ, () => String(on.length))} sub={`of ${d.triggers.length}`} tone="done" />
-        <Stat label="Requests, 24 h" value={qState(d.logQ, () => String(d.last24h))} sub={`${d.log.filter((x) => x.status >= 400).length} errors`} tone={d.log.some((x) => x.status >= 400) ? "wait" : undefined} />
+        <Stat label="Requests, 24 h" value={qState(d.logQ, () => String(d.last24h))} sub={`${d.log.filter((x) => x.status >= 400).length} errors, ${d.limited24h} rate limited`} tone={d.log.some((x) => x.status >= 400) ? "wait" : undefined} />
         <Stat label="Rate limit" value={d.cfg ? `${d.cfg.rateLimit}/min` : "n/a"} />
       </StatRow>
       <Tabs idPrefix="api-tab" items={tabs} active={tab} onChange={setTab} />

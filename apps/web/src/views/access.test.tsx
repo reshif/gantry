@@ -49,12 +49,13 @@ describe("Access screen: load failure", () => {
   it("says the access matrix failed to load, with a retry, instead of an empty simulator", async () => {
     const hits = setup(() => new Response(JSON.stringify({ ok: false, msg: "Database is down." }), { status: 500 }));
     mount();
-    const err = await byId("acc-matrix-error");
+    fireEvent.click(await byId("acc-tab-check"));
+    const err = await byId("acc-error");
     expect(err.textContent).toContain("Couldn't load the access matrix");
     expect(err.textContent).toContain("Database is down.");
     expect(document.getElementById("acc-sim-form")).toBeNull();
     const before = hits.matrix;
-    fireEvent.click(await byId("acc-matrix-error-retry"));
+    fireEvent.click(await byId("acc-error-retry"));
     await waitFor(() => expect(hits.matrix).toBeGreaterThan(before));
   });
 });

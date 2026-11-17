@@ -66,6 +66,7 @@ export default function PeopleView() {
       <div id="ppl-tab-panel" role="tabpanel" aria-labelledby={`ppl-tab-${tab}`}>
         <Async query={peopleQ} what="people" id="ppl">{() => tab === "teams" ? (
           <>
+            <p className="muted small" id="ppl-defaults"><strong>Default for new people: no access until granted.</strong> A person's effective roles are their own grants plus the grants of their teams.</p>
             <div className="ppl-find"><SearchBox id="ppl-q" value={q} onChange={setQ} placeholder="Find a person, role or project" label="Find a person" /></div>
             <OrgTree people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} q={q} perm={perm} invite={invite} teamDlg={teamDlg} />
           </>

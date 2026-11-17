@@ -78,11 +78,11 @@ describe("Integrations screen", () => {
     const table = await byId("int-table");
     expect(table.textContent).toContain("Slack (production)");
     expect(table.textContent).toContain("GitHub org");
-    expect(table.textContent).toContain("Failing");
-    expect(table.textContent).toContain("Disabled");
+    expect(table.textContent).toContain("failing");
+    expect(table.textContent).toContain("disabled");
     expect(table.textContent).toContain("Payments Platform");
     expect(document.getElementById("int-attn-int-gh-1")?.textContent).toBe("GitHub org");
-    expect(text()).toContain("Types3in the catalogue, 0 custom");
+    expect(text()).toContain("Catalogue3types, 0 custom");
     expect(locked(await byId("int-add"))).toBe(false);
   });
 

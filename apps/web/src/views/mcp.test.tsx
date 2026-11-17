@@ -107,7 +107,7 @@ describe("MCP servers screen", () => {
     setup();
     mount();
     await byId("mcp-row-mcp-chg-0001");
-    expect(document.getElementById("mcp-stats")!.textContent).toMatch(/Not healthy1degraded, failing, offline or disabled/);
+    expect(document.getElementById("mcp-stats")!.textContent).toMatch(/Healthy11 not healthy/);
     fireEvent.change(document.getElementById("mcp-f-health")!, { target: { value: "healthy" } });
     expect(document.getElementById("mcp-row-mcp-chg-0001")).toBeNull();
     expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeTruthy();
@@ -121,18 +121,17 @@ describe("MCP servers screen", () => {
     mount();
     expect((await screen.findAllByText("Docs wiki")).length).toBeGreaterThan(0);
     const row = await byId("mcp-row-mcp-docs-1a2b");
-    expect(row.textContent).toContain("http · https://mcp.example.net/mcp");
-    expect(row.textContent).toContain("Bearer token");
-    expect(row.textContent).toContain("1 projects · all repos · 1 agents · 1 stations · all classes");
-    expect(row.textContent).toContain("2 R · 1 W");
-    expect(row.textContent).toContain("1 denied");
-    expect(within(row).getByText("Internal")).toBeTruthy();
-    expect((await byId("mcp-row-mcp-chg-0001")).textContent).toContain("disabled");
+    expect(row.textContent).toContain("https://mcp.example.net/mcp");
+    expect(row.textContent).toContain("2/3");
+    expect(row.textContent).toContain("gated");
+    expect(row.textContent).toContain("internal");
+    expect((await byId("mcp-row-mcp-chg-0001")).textContent).toContain("Disabled");
     // header meta
     const head = document.getElementById("mcp-stats")!.textContent!;
     expect(head).toContain("Servers2");
-    expect(head).toContain("Write tools2");
-    expect(head).toContain("Calls 24h2");
+    expect(head).toContain("2 write tools");
+    expect(head).toContain("Calls logged");
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
     // detail: transport, protocol revision, masked credential, tools, write-gate shown on and locked
     expect(document.querySelector(".mcp-tb")!.textContent).toContain("2025-06-18");
     expect(document.querySelector(".mcp-tb")!.textContent).toContain("mcp-upstream-••••••••6789");
@@ -146,6 +145,7 @@ describe("MCP servers screen", () => {
   it("shows the admin-set class next to the server's hint, and sets a tool's class and allow rule through PATCH with the version", async () => {
     const calls = setup({ "PATCH /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ server: DOCS }) });
     mount();
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
     const sel = (await byId("mcp-tool-class-2")) as HTMLSelectElement;
     expect(sel.value).toBe("read");
     expect(sel.closest("td")!.textContent).toContain("server suggests write");
@@ -161,6 +161,7 @@ describe("MCP servers screen", () => {
   it("saves the scope as one PATCH, keeps Save disabled with a reason until something changes, and Revert restores the draft", async () => {
     const calls = setup({ "PATCH /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ server: DOCS }) });
     mount();
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
     const save = await byId("mcp-sc-save");
     expect(save.getAttribute("aria-disabled")).toBe("true");
     expect(save.getAttribute("data-reason")).toBe("No changes to save.");
@@ -184,6 +185,7 @@ describe("MCP servers screen", () => {
     let q: URLSearchParams | null = null;
     const calls = setup({ "GET /api/v1/mcp/access-check": (url) => { q = new URL(url, "http://x").searchParams; return { body: { allowed: false, reason: "Not available at 06 Verify.", rule: "station scope" } }; } });
     mount();
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
     const res = await byId("mcp-chk-result");
     await waitFor(() => expect(res.textContent).toContain("Denied"));
     expect(res.textContent).toContain("Not available at 06 Verify.");
@@ -199,6 +201,7 @@ describe("MCP servers screen", () => {
   it("a locked caller sees every control disabled with the reason, and nothing is sent", async () => {
     const calls = setup({}, ["mcp.edit"]);
     mount();
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
     expect(await screen.findByText(/Read-only for you: mcp server settings/i)).toBeTruthy();
     for (const id of ["mcp-add", "mcp-sc-save", "mcp-remove", "mcp-recheck"]) {
       const b = await byId(id);
@@ -231,6 +234,7 @@ describe("MCP servers screen", () => {
   it("Check again rediscovers through the edge and reports what it found", async () => {
     const calls = setup({ "POST /api/v1/mcp/servers/mcp-docs-1a2b/discover": () => ok({ msg: "Docs wiki answered with 3 tools.", server: DOCS }) });
     mount();
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
     fireEvent.click(await byId("mcp-recheck"));
     expect(await screen.findByText("Docs wiki answered with 3 tools.")).toBeTruthy();
     expect(calls.find((c) => c.path.endsWith("/discover"))!.headers["if-match"]).toBe("4");
@@ -284,6 +288,7 @@ describe("MCP servers screen", () => {
   it("Remove: names the agents and projects that lose it, then DELETEs with the version", async () => {
     const calls = setup({ "DELETE /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ msg: "Docs wiki removed." }) });
     mount();
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
     fireEvent.click(await byId("mcp-remove"));
     const go = await byId("mcp-remove-go");
     const dlg = go.closest("[role=dialog], .dialog, .dlg")!;

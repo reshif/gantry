@@ -146,7 +146,7 @@ export default function AuditView() {
                   <td className="mono nowrap"><button type="button" className="linkish mono" id={`aud-row-${e.seq}`} aria-label={`Open audit entry ${e.seq}: ${e.action}`}>{fmt.stamp(e.at)}</button></td>
                   <td><ActorCell id={e.actor} name={e.actorName} /></td>
                   <td className="mono"><b>{e.action}</b></td>
-                  <td className="aud-target">{e.target}</td>
+                  <td className="aud-target">{e.target}{e.before != null || e.after != null ? <span className="aud-has-diff" title="Has before/after"> <Icon name="swap" />diff</span> : null}</td>
                   <td><span className="chip plain">{CAT_NAME[e.category] ?? e.category}</span></td>
                   <td><span className={`chip ${e.outcome === "ok" ? "ok" : e.outcome === "denied" || e.outcome === "failed" || e.outcome === "blocked" ? "bad" : "warn"}`}>{e.outcome}</span></td>
                 </tr>
