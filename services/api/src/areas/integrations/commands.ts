@@ -7,7 +7,7 @@ import type { IntegrationType } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { conflict, invalid, notFound } from "../../core/errors.js";
-import { BUILTIN_IDS, cleanConfig, validateConfig, type ConnectorType } from "./connectors.js";
+import { BUILTIN_IDS, SIGNING_SECRET_MIN, cleanConfig, validateConfig, type ConnectorType } from "./connectors.js";
 import { type TestResult } from "./ops.js";
 import { open, seal, type SecretSet } from "./secrets.js";
 import { instanceFromRow, metaOf, readInstanceRow, readType, slug, typeFromRow, usageOf, type InstanceRow, type Meta } from "./store.js";
@@ -129,7 +129,7 @@ export async function updateInstance(tx: Tx, a: Actor, dataKey: Buffer | null, i
   const incoming = secretsOf(t, b);
   const config = b.config ? { ...cfg, ...cleanConfig(t, { ...cfg, ...b.config }) } : cfg;
   if (b.config) for (const f of t.fields) if (f.type !== "secret" && f.key in b.config && (b.config[f.key] === "" || b.config[f.key] == null)) delete (config as Record<string, unknown>)[f.key];
-  const bad = validateConfig(t, config, { ...Object.fromEntries(t.fields.filter((f) => f.type === "secret").map((f) => [f.key, "x".repeat(8)])), ...incoming }, { needSecret: false });
+  const bad = validateConfig(t, config, { ...Object.fromEntries(t.fields.filter((f) => f.type === "secret").map((f) => [f.key, "x".repeat(SIGNING_SECRET_MIN)])), ...incoming }, { needSecret: false });
   if (bad) throw invalid(bad);
   let enc = row.secret_enc;
   let maskText = row.secret_mask ?? "";
