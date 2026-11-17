@@ -42,21 +42,16 @@ describe("demo cards, Keycloak realm and seed agree", () => {
   it("realm users that are not in the cards still map to real seed people (no orphan identity)", () => {
     for (const u of realm.users) expect(seed.people.some((p) => p.id === u.attributes.gantry_id?.[0] && p.email === u.email), u.username).toBe(true);
   });
-  it("FINDING: local Keycloak has no second factor, so the cards' 'MFA step' is only a fresh password sign-in", () => {
-    // no OTP policy, no required actions on any user, no custom browser flow, no authenticationFlows, only password credentials
-    expect(realm.otpPolicyType).toBeUndefined();
-    expect(realm.authenticationFlows).toBeUndefined();
-    expect(realm.browserFlow).toBeUndefined();
-    expect(realm.requiredActions).toBeUndefined();
+  it("the realm has a TOTP step-up flow, but no demo user has an authenticator: the demo cards stay password-only", () => {
+    expect(realm.otpPolicyType).toBe("totp");
+    expect(realm.browserFlow).toBe("gantry-browser");
     for (const u of realm.users) {
       expect(u.requiredActions ?? [], u.username).toEqual([]);
       expect(u.credentials.map((c) => c.type), u.username).toEqual(["password"]);
     }
-    // no card may promise an MFA step the realm cannot deliver (the old static cards did for Asha, Daniel, Lena and Omar)
+    // so no card may promise an MFA step, and the dev stack waives the Factory Admin factor (GANTRY_DEV_ADMIN_MFA_OPTIONAL) for the demo admin
     expect(DEMO_ACCOUNTS.filter((a) => /MFA/i.test(a.note + a.role)).map((a) => a.id)).toEqual([]);
-    // the seed still flags these four as mfa:true although no second factor exists
     for (const id of ["p-asha", "p-daniel", "p-lena", "p-omar"]) expect((seed.people.find((p) => p.id === id) as { mfa?: boolean }).mfa).toBe(true);
-    // the API never reads mfa/acr to decide anything; step-up is the age of the sign-in only (services/api/src/core/decide.ts stepUpSatisfied)
   });
 });
 

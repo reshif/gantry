@@ -59,8 +59,9 @@ function Root() {
     );
   }
   if (meState.data?.status === "out") {
-    const err = new URLSearchParams(window.location.search).get("auth_error");
-    return <SignIn config={meState.data.config} error={err} />;
+    const qs = new URLSearchParams(window.location.search);
+    const needs = qs.get("auth_needs") ?? meState.data.needs ?? null;
+    return <SignIn config={meState.data.config} error={qs.get("auth_error")} needs={needs} />;
   }
   if (session.state === "offline") {
     return (

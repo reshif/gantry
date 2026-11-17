@@ -21,6 +21,49 @@
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
   "accessCodeLifespan": 60,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "browserFlow": "gantry-browser",
+  "requiredActions": [
+    { "alias": "CONFIGURE_TOTP", "name": "Configure OTP", "providerId": "CONFIGURE_TOTP", "enabled": true, "defaultAction": false, "priority": 10 }
+  ],
+  "authenticatorConfig": [
+    { "alias": "gantry-loa-1", "config": { "loa-condition-level": "1", "loa-store-in-user-session": "true", "loa-max-age": "36000" } },
+    { "alias": "gantry-loa-2", "config": { "loa-condition-level": "2", "loa-store-in-user-session": "true", "loa-max-age": "36000" } }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "gantry-browser", "description": "Browser sign-in with step-up: password at level 1; a one-time code (TOTP) at level 2, which Gantry requests (acr_values=2) for Factory Admins", "providerId": "basic-flow", "topLevel": true, "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-cookie", "authenticatorFlow": false, "requirement": "ALTERNATIVE", "priority": 10, "userSetupAllowed": false },
+        { "authenticatorFlow": true, "requirement": "ALTERNATIVE", "priority": 20, "flowAlias": "gantry-browser-forms", "userSetupAllowed": false }
+      ]
+    },
+    {
+      "alias": "gantry-browser-forms", "description": "Level subflows: each runs only when its level is the one being asked for", "providerId": "basic-flow", "topLevel": false, "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticatorFlow": true, "requirement": "CONDITIONAL", "priority": 10, "flowAlias": "gantry-level-1", "userSetupAllowed": false },
+        { "authenticatorFlow": true, "requirement": "CONDITIONAL", "priority": 20, "flowAlias": "gantry-level-2", "userSetupAllowed": false }
+      ]
+    },
+    {
+      "alias": "gantry-level-1", "description": "Level 1: username and password", "providerId": "basic-flow", "topLevel": false, "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "conditional-level-of-authentication", "authenticatorConfig": "gantry-loa-1", "authenticatorFlow": false, "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false },
+        { "authenticator": "auth-username-password-form", "authenticatorFlow": false, "requirement": "REQUIRED", "priority": 20, "userSetupAllowed": false }
+      ]
+    },
+    {
+      "alias": "gantry-level-2", "description": "Level 2: one-time code. A person with no authenticator yet is walked through setting one up (CONFIGURE_TOTP)", "providerId": "basic-flow", "topLevel": false, "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "conditional-level-of-authentication", "authenticatorConfig": "gantry-loa-2", "authenticatorFlow": false, "requirement": "REQUIRED", "priority": 10, "userSetupAllowed": false },
+        { "authenticator": "auth-otp-form", "authenticatorFlow": false, "requirement": "REQUIRED", "priority": 20, "userSetupAllowed": false }
+      ]
+    }
+  ],
   "clients": [
     {
       "clientId": "gantry-web",

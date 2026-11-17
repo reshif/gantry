@@ -69,6 +69,14 @@ describe("signed out", () => {
     expect(document.querySelector(".auth-belt li")).toBeTruthy(); // stations from the catalogue
   });
 
+  it("shows the guided two-step setup screen when the server says a Factory Admin needs a second factor", async () => {
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Factory Admins sign in with two steps.", needs: "mfa_setup", config: { demoAccounts: false } } }) });
+    render(<App />);
+    await screen.findByText("Set up two-step sign-in");
+    expect(document.getElementById("auth-mfa-go")).toBeTruthy();
+    expect(screen.queryByText("Continue with GitHub")).toBeNull();
+  });
+
   it("lists demo accounts only when config.demoAccounts is on, each linking with login_hint", async () => {
     mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Sign in.", config: { demoAccounts: true } } }) });
     render(<App />);

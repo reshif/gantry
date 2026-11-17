@@ -50,6 +50,7 @@ services:
     mem_limit: 1g
     environment:
       GANTRY_DEV_DEMO_ACCOUNTS: "false"
+      GANTRY_DEV_ADMIN_MFA_OPTIONAL: "false"
       GANTRY_DEV_SEED: "false"
       GANTRY_BOOTSTRAP_ADMIN_EMAIL: ${GANTRY_BOOTSTRAP_ADMIN_EMAIL:?set GANTRY_BOOTSTRAP_ADMIN_EMAIL to the email of the first Factory Admin}
       SMTP_HOST: ${GANTRY_SMTP_HOST:?set GANTRY_SMTP_HOST to your mail relay}

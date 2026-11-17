@@ -10,6 +10,7 @@ import { ApiSettingsCache } from "../areas/apikeys/config.js";
 import { gateApiKey, logApiRequest, noteRejectedKey } from "../areas/apikeys/gate.js";
 import { authenticateApiKey } from "./auth/apikeys.js";
 import { authenticateService } from "./auth/service.js";
+import { holdsFactoryAdmin, mfaRefusal } from "./auth/mfa.js";
 import { csrfFor, findSession, revokeSessions, touchSession } from "./auth/sessions.js";
 import type { Config } from "./config.js";
 import type { Gantry, Principal } from "./context.js";
@@ -226,6 +227,12 @@ async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import(
   if (s.personStatus !== "active") {
     await revokeSessions(g.pool, g.orgId, s.personId, null, "system").catch(() => undefined);
     return unauth("This account is not active.", true);
+  }
+  // A Factory Admin's session must come from a sign-in with a second factor. Checked on every request, not only at sign-in, because the
+  // role can be granted after the session began. The 401 says what to do; the session is kept so the guided screen can still reach /me.
+  if (!s.secondFactor && !g.config.adminMfaOptional && (await holdsFactoryAdmin(g.pool, g.orgId, s.personId))) {
+    await reply.code(401).send({ ...mfaRefusal, config: await publicConfig(app).catch(() => ({ demoAccounts: g.config.demoAccounts, githubLogin: false })) });
+    return;
   }
   // Mutating requests from a browser must carry the session-bound CSRF token, and an Origin (when sent) must be ours.
   if (!SAFE.has(req.method)) {

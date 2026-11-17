@@ -9,9 +9,15 @@ export interface Config {
   publicUrl: string;
   cookieSecure: boolean;
   sessionCookie: string;
-  oidc: { issuer: string; internalUrl: string | null; clientId: string; clientSecret: string; githubIdpAlias: string | null };
+  oidc: {
+    issuer: string; internalUrl: string | null; clientId: string; clientSecret: string; githubIdpAlias: string | null;
+    /** ID-token `acr` values that prove a second factor (the realm's level-2 authentication). The first one is what a second-factor sign-in requests. */
+    mfaAcrValues?: string[];
+  };
   devSeed: boolean;
   demoAccounts: boolean;
+  /** Development only (GANTRY_DEV_ADMIN_MFA_OPTIONAL): lets a Factory Admin work without a second sign-in factor. Always false off localhost. */
+  adminMfaOptional: boolean;
   bootstrapAdminEmail: string | null;
   /**
    * Which peers may set X-Forwarded-For (Fastify trustProxy). Default: loopback and private networks only (the ingress on the
@@ -56,9 +62,11 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
       clientId: need("OIDC_CLIENT_ID"),
       clientSecret,
       githubIdpAlias: env.OIDC_GITHUB_IDP_ALIAS || null,
+      mfaAcrValues: (env.OIDC_MFA_ACR_VALUES ?? "2,3,mfa").split(",").map((x) => x.trim()).filter(Boolean),
     },
     devSeed: env.GANTRY_DEV_SEED === "true",
     demoAccounts: demoAccountsAllowed(env.GANTRY_DEV_DEMO_ACCOUNTS === "true", publicUrl),
+    adminMfaOptional: adminMfaOptionalAllowed(env.GANTRY_DEV_ADMIN_MFA_OPTIONAL === "true", publicUrl),
     bootstrapAdminEmail: env.GANTRY_BOOTSTRAP_ADMIN_EMAIL ? env.GANTRY_BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase() : null,
     trustProxy: trustProxyFrom(env.GANTRY_TRUST_PROXY),
     auditAnchorFile: env.GANTRY_AUDIT_ANCHOR_FILE || null,
@@ -78,6 +86,17 @@ export function demoAccountsAllowed(on: boolean, publicUrl: string): boolean {
   const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
   if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost")) return true;
   throw new Error(`GANTRY_DEV_DEMO_ACCOUNTS=true is for local development only; GANTRY_PUBLIC_URL (${publicUrl}) is not localhost. Unset it.`);
+}
+
+/**
+ * GANTRY_DEV_ADMIN_MFA_OPTIONAL=true waives the second sign-in factor Factory Admins otherwise need, so the seeded demo admin (asha,
+ * password only) can work on a local stack. Same pattern as GANTRY_DEV_DEMO_ACCOUNTS: the service refuses to start when the public URL is not this machine.
+ */
+export function adminMfaOptionalAllowed(on: boolean, publicUrl: string): boolean {
+  if (!on) return false;
+  const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
+  if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost")) return true;
+  throw new Error(`GANTRY_DEV_ADMIN_MFA_OPTIONAL=true is for local development only; GANTRY_PUBLIC_URL (${publicUrl}) is not localhost. Unset it: Factory Admins must use a second sign-in factor.`);
 }
 
 /** GANTRY_TRUST_PROXY: unset -> "loopback, uniquelocal"; "false" -> false; anything else -> that address or CIDR list. "true" (trust any peer) is refused. */

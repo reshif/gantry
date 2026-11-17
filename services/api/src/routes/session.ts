@@ -97,12 +97,12 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
   /** Popup step-up: the app serves a tiny result page (the API's CSP forbids inline script) that posts to its opener and closes. */
   const popupDone = (reply: import("fastify").FastifyReply, ok: boolean, error?: string) =>
     reply.redirect(`/?step_up_popup=${ok ? "ok" : "error"}${error ? `&msg=${encodeURIComponent(error)}` : ""}`, 302);
-  const toApp = (reply: import("fastify").FastifyReply, to: string, error?: string) => reply.redirect(error ? `/?auth_error=${encodeURIComponent(error)}` : to, 302);
+  const toApp = (reply: import("fastify").FastifyReply, to: string, error?: string, needs?: string) => reply.redirect(error ? `/?auth_error=${encodeURIComponent(error)}${needs ? `&auth_needs=${needs}` : ""}` : to, 302);
 
   /* ------------------------------------------------------------ sign-in */
 
   app.get("/auth/login", authRate, async (req, reply) => {
-    const q = z.object({ method: z.enum(["sso", "github"]).optional(), login_hint: z.string().max(254).optional(), step_up: z.string().optional(), popup: z.string().optional(), return_to: z.string().max(500).optional(), invite: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/).optional() }).safeParse(req.query);
+    const q = z.object({ method: z.enum(["sso", "github"]).optional(), login_hint: z.string().max(254).optional(), step_up: z.string().optional(), mfa: z.string().optional(), popup: z.string().optional(), return_to: z.string().max(500).optional(), invite: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/).optional() }).safeParse(req.query);
     if (!q.success) return toApp(reply, "/", "The sign-in link is not valid.");
     const method = q.data.method ?? "sso";
     const meta = { ip: req.ip, userAgent: String(req.headers["user-agent"] ?? ""), requestId: req.id, method };
@@ -115,12 +115,19 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       }
       idpHint = g.oidc.githubIdp;
     }
+    // Ask for the provider's second-factor level when the person is setting it up (mfa=1), and on a step-up by a session that already has one.
+    let secondFactor = q.data.mfa === "1";
+    if (!secondFactor && q.data.step_up === "1") {
+      const held = req.cookies[g.config.sessionCookie];
+      const hs = held ? await findSession(g.pool, g.config.secrets.sessionKey, g.orgId, held, (await g.security.get()).value.idleMin) : null;
+      secondFactor = !!hs?.secondFactor;
+    }
     const state = randomBytes(24).toString("base64url");
     const nonce = randomBytes(24).toString("base64url");
     const verifier = randomBytes(48).toString("base64url");
     let url: URL;
     try {
-      url = await g.oidc.authorizationUrl({ redirectUri, state, nonce, codeVerifier: verifier, loginHint: q.data.login_hint ?? null, stepUp: q.data.step_up === "1", idpHint });
+      url = await g.oidc.authorizationUrl({ redirectUri, state, nonce, codeVerifier: verifier, loginHint: q.data.login_hint ?? null, stepUp: q.data.step_up === "1", idpHint, secondFactor });
     } catch (e) {
       req.log.error({ err: e }, "OIDC discovery failed");
       return toApp(reply, "/", "The identity provider is not reachable. Try again shortly.");
@@ -154,7 +161,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
       if (s) existing = { id: s.id, personId: s.personId };
     }
     const r = await signIn(g, claims, { ...meta, existingSession: existing, stepUpOnly: st.stepUp, ...(st.invite ? { inviteToken: st.invite } : {}) });
-    if (!r.ok) return st.popup ? popupDone(reply, false, r.msg) : toApp(reply, "/", r.msg);
+    if (!r.ok) return st.popup ? popupDone(reply, false, r.msg) : toApp(reply, "/", r.msg, r.reason === "mfa_required" ? "mfa_setup" : undefined);
     if (r.token && r.expiresAt) reply.setCookie(g.config.sessionCookie, r.token, { path: "/", httpOnly: true, sameSite: "lax", secure: g.config.cookieSecure, expires: r.expiresAt });
     if (claims.idToken) reply.setCookie(IDT_COOKIE, seal({ t: claims.idToken }, idtKey, "id-token"), { ...cookieOpts, ...(r.expiresAt ? { expires: r.expiresAt } : { maxAge: 12 * 3600 }) });
     await withTx(g.pool, (tx) => publishChange(tx, { org: g.orgId, keys: ["signins", "sessions", ...(r.provisioned ? ["people"] : [])] })).catch(() => undefined);

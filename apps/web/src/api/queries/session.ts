@@ -10,7 +10,7 @@ const SECURITY = ["security.manage", "policy.view"] as const;
 
 /* ---------- session ---------- */
 
-export type MeState = { status: "in"; me: Me } | { status: "out"; config: PublicConfig | null; reason: string };
+export type MeState = { status: "in"; me: Me } | { status: "out"; config: PublicConfig | null; reason: string; needs?: string };
 
 /** GET /api/v1/me. A 401 is a normal answer (nobody signed in), not an error; its body may carry the public config. */
 export async function fetchMe(): Promise<MeState> {
@@ -24,8 +24,8 @@ export async function fetchMe(): Promise<MeState> {
   if (res.status === 401) {
     noteUnauthorized(); // an expiry found by a /me refetch alone is still an expiry (drafts and layout choices are kept)
     setCsrfToken(null);
-    const b = (body ?? {}) as { config?: PublicConfig; msg?: string };
-    return { status: "out", config: b.config ?? null, reason: b.msg ?? "" };
+    const b = (body ?? {}) as { config?: PublicConfig; msg?: string; needs?: string };
+    return { status: "out", config: b.config ?? null, reason: b.msg ?? "", ...(b.needs ? { needs: b.needs } : {}) };
   }
   if (!res.ok) throw new ApiError(res.status, "Could not load your session.", body);
   const me = body as Me;

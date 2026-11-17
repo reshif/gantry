@@ -106,7 +106,7 @@ export function refuseDecision(d: Decision): Refusal {
 
 /**
  * Spec 14.1: a fresh sign-in for kill, restore, policy, role, security and key operations. "Fresh" means auth_time is inside the window.
- * It is a password re-entry unless the identity provider's browser flow requires a second factor (OTP, WebAuthn); we do not check acr or amr.
+ * It is a fresh sign-in; a Factory Admin session also needs a second factor (core/auth/mfa.ts), which a step-up keeps asking for.
  */
 export function stepUpSatisfied(req: FastifyRequest, maxAgeSec = 300): boolean {
   const s = req.gx.session;

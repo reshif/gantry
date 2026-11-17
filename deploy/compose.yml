@@ -100,6 +100,10 @@ services:
       # Off by default: when true, the sign-in page lists every person's name, email and roles. Local development only (refused unless the public URL is localhost).
       GANTRY_AUDIT_ANCHOR_FILE: /anchors/audit-anchors.jsonl
       GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-false}
+      # Factory Admins must sign in with a second factor (OTP at the identity provider, checked by the API from acr/amr). The seeded demo
+      # users are password-only, so this development stack waives it by default. Local development only: the API refuses to start with
+      # it on when the public URL is not localhost. compose.prod.yml forces it off. Set it to false here to try the real flow.
+      GANTRY_DEV_ADMIN_MFA_OPTIONAL: ${GANTRY_DEV_ADMIN_MFA_OPTIONAL:-true}
       # Off by default: the org starts empty and the first sign-in with GANTRY_BOOTSTRAP_ADMIN_EMAIL becomes Factory Admin.
       # GANTRY_DEV_SEED=true loads the legacy demo data (people, projects, repos, policies) once, for development and demos only.
       GANTRY_DEV_SEED: ${GANTRY_DEV_SEED:-false}

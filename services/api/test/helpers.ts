@@ -67,7 +67,7 @@ export function testConfig(over: Partial<Config> = {}): Config {
   return {
     orgSlug: "acme", orgName: "Acme Test", publicUrl: "https://gantry.test", cookieSecure: true, sessionCookie: "__Host-gantry_session",
     oidc: { issuer: "http://127.0.0.1:1/unused", internalUrl: null, clientId: "gantry-web", clientSecret: "secret", githubIdpAlias: null },
-    devSeed: true, demoAccounts: true, bootstrapAdminEmail: null, trustProxy: false, auditAnchorFile: null, host: "127.0.0.1", port: 0,
+    devSeed: true, demoAccounts: true, adminMfaOptional: true, bootstrapAdminEmail: null, trustProxy: false, auditAnchorFile: null, host: "127.0.0.1", port: 0,
     secrets: { sessionKey: SESSION_KEY, dataKey: null, edgeToken: "edge-token-for-tests", githubToken: "github-token-for-tests" },
     ...over,
   };

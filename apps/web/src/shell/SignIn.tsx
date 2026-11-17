@@ -9,7 +9,28 @@ import { DEMO_ACCOUNTS } from "../lib/demo";
 import { Icon, Logo } from "../ui/Icon";
 import { Btn } from "../ui/primitives";
 
-export function SignIn({ config, error }: { config: PublicConfig | null; error?: string | null }) {
+/** The guided screen for a Factory Admin whose sign-in had no second factor (the server answered `needs: "mfa_setup"`). */
+function MfaSetup() {
+  const sp = new URLSearchParams({ mfa: "1" });
+  if (window.location.hash.length > 1) sp.set("return_to", `/${window.location.hash}`);
+  return (
+    <section className="auth-panel" aria-labelledby="mfa-h" id="auth-mfa">
+      <div>
+        <h1 className="auth-h" id="mfa-h">Set up two-step sign-in</h1>
+        <p className="muted auth-sub">Factory Admins can stop the line and change who may do what, so they sign in with a password and a one-time code.</p>
+      </div>
+      <ol className="auth-steps">
+        <li>Install an authenticator app on your phone (any app that makes six-digit codes).</li>
+        <li>Continue below and sign in. Your identity provider shows a QR code the first time: scan it and enter the code it gives you.</li>
+        <li>Next time, you enter the code from the app after your password.</li>
+      </ol>
+      <Btn label="Set up and sign in" kind="primary" id="auth-mfa-go" icon="key" onClick={() => window.location.assign(`/auth/login?${sp.toString()}`)} />
+      <p className="muted small">If you have lost your authenticator app, ask another Factory Admin or your identity provider's administrator to reset it.</p>
+    </section>
+  );
+}
+
+export function SignIn({ config, error, needs }: { config: PublicConfig | null; error?: string | null; needs?: string | null }) {
   const demo = !!config?.demoAccounts;
   const accounts = config?.demoAccountList?.length ? config.demoAccountList : DEMO_ACCOUNTS;
   const go = (method: "sso" | "github") => window.location.assign(loginUrl(method));
@@ -37,7 +58,7 @@ export function SignIn({ config, error }: { config: PublicConfig | null; error?:
             <span>{demo ? "Development sign-in is on: seeded demo accounts can sign in. Use this only on a local stack." : "Sign-in is handled by your organisation's identity provider."}</span>
           </p>
         </section>
-        <section className="auth-panel" aria-labelledby="auth-h">
+        {needs === "mfa_setup" ? <MfaSetup /> : <section className="auth-panel" aria-labelledby="auth-h">
           <div>
             <h1 className="auth-h" id="auth-h">{`Sign in to ${config?.orgName ?? "Gantry"}`}</h1>
             <p className="muted auth-sub">{demo ? "Choose how to sign in. Demo accounts are listed below." : "Choose how to sign in."}</p>
@@ -78,7 +99,7 @@ export function SignIn({ config, error }: { config: PublicConfig | null; error?:
               </ul>
             </div>
           ) : null}
-        </section>
+        </section>}
       </div>
     </div>
   );
