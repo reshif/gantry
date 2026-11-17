@@ -15,7 +15,7 @@ export interface Change {
 }
 
 /** Keys that name one item (a chat, work order, delivery): knowing they changed tells a reader the item exists and when it was active. */
-export const ITEM_KEYS: ReadonlySet<string> = new Set(["console", "workspace", "conversations", "workOrders", "floor", "repos", "deliveries"]);
+export const ITEM_KEYS: ReadonlySet<string> = new Set(["console", "workspace", "conversations", "workOrders", "floor", "repos", "deliveries", "triggers"]);
 
 /**
  * Publishes a change inside the caller's transaction. Postgres delivers NOTIFY only when the transaction commits, so a rolled-back
@@ -27,7 +27,7 @@ export async function publishChange(db: Queryable, change: Change): Promise<void
   const aud = change.audience ? [...new Set(change.audience)] : undefined;
   const scope = (a: string[] | undefined) => ({ ...(change.project ? { project: change.project } : {}), ...(a ? { audience: a } : {}) });
   const payload = JSON.stringify({ org: change.org, keys, ...scope(aud) });
-  if (payload.length <= 7500) {
+  if (Buffer.byteLength(payload) <= 7500) {
     await db.query(`select pg_notify($1, $2)`, [CHANGES_CHANNEL, payload]);
     return;
   }
@@ -40,7 +40,10 @@ export async function publishChange(db: Queryable, change: Change): Promise<void
 
 export function parseChange(payload: string | undefined): Change | null {
   try {
-    const v = JSON.parse(payload ?? "") as Partial<Change>;
+    const v = JSON.parse(payload ?? "") as Partial<Change> & { audience?: unknown; project?: unknown };
+    // A scope that is present but malformed must narrow, never widen: it reaches no one rather than everyone.
+    const badScope = (v.audience !== undefined && !Array.isArray(v.audience)) || (v.project !== undefined && typeof v.project !== "string");
+    if (typeof v.org === "string" && Array.isArray(v.keys) && badScope) return { org: v.org, keys: v.keys.filter((k): k is string => typeof k === "string"), audience: [] };
     if (typeof v.org === "string" && Array.isArray(v.keys)) return { org: v.org, keys: v.keys.filter((k): k is string => typeof k === "string"), ...(typeof v.project === "string" ? { project: v.project } : {}), ...(Array.isArray(v.audience) ? { audience: v.audience.filter((a): a is string => typeof a === "string") } : {}) };
   } catch {
     /* ignore malformed notifications */

@@ -1,7 +1,7 @@
 import { withTx } from "@gantry/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { changeFor } from "../src/core/stream.js";
-import { publishChange } from "../src/core/changes.js";
+import { changeFor, Hub, type Subscriber } from "../src/core/stream.js";
+import { parseChange, publishChange } from "../src/core/changes.js";
 import { addWoMessage } from "../src/areas/workorders/session/store.js";
 import { world } from "./flow-helpers.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
@@ -58,6 +58,49 @@ describe("changeFor (pure)", () => {
     expect(changeFor(ch(["workOrders", "floor", "agents"]), new Set(["p1"]), "a")).toEqual({ keys: ["agents"] });
     expect(changeFor(ch(["workOrders"]), new Set(["p1"]), "a")).toBeNull();
     expect(changeFor(ch(["workOrders"]), "all", "a")).toEqual({ keys: ["workOrders"] });
+  });
+});
+
+describe("scope that fails closed", () => {
+  const sub = (visible: Set<string> | "all"): Subscriber & { got: string[]; closed: boolean } => {
+    const o = { personId: "a", sessionId: null, visible, got: [] as string[], closed: false, write(c: string) { o.got.push(c); return true; }, close() { o.closed = true; } };
+    return o;
+  };
+  it("a private chat change never carries admin-only names to a person who is not factory-wide, even in its project", () => {
+    expect(changeFor({ org: "o", keys: ["console", "audit"], project: "p1", audience: ["a"] }, new Set(["p1"]), "a")).toEqual({ keys: ["console"], project: "p1" });
+    expect(changeFor({ org: "o", keys: ["savedViews", "audit"], audience: ["a"] }, new Set(), "a")).toEqual({ keys: ["savedViews"] });
+    expect(changeFor({ org: "o", keys: ["audit"], audience: ["a"] }, new Set(), "a")).toBeNull();
+    expect(changeFor({ org: "o", keys: ["triggers"] }, new Set(["p1"]), "a")).toBeNull();
+  });
+  it("a notification whose scope is present but malformed reaches no one", () => {
+    expect(parseChange(JSON.stringify({ org: "o", keys: ["console"], audience: "a" }))).toEqual({ org: "o", keys: ["console"], audience: [] });
+    expect(parseChange(JSON.stringify({ org: "o", keys: ["console"], project: 7 }))).toEqual({ org: "o", keys: ["console"], audience: [] });
+    expect(changeFor(parseChange(JSON.stringify({ org: "o", keys: ["console"], audience: "a" }))!, "all", "a")).toBeNull();
+  });
+  it("an older visibility refresh that finishes late does not overwrite a newer one", async () => {
+    const resolvers: Array<(v: Set<string>) => void> = [];
+    const hub = new Hub(null as never, "o", { refresh: () => new Promise((res) => resolvers.push(res)) });
+    const s = sub(new Set(["p1"]));
+    hub.add(s);
+    const first = hub.dispatch({ org: "o", keys: ["people"] }); // started before the role was removed
+    const second = hub.dispatch({ org: "o", keys: ["people"] }); // started after
+    await new Promise((r) => setTimeout(r, 10));
+    resolvers[1]!(new Set()); // the newer result arrives first: access removed
+    await second;
+    resolvers[0]!(new Set(["p1"])); // the stale one arrives late
+    await first;
+    expect(s.visible).toEqual(new Set());
+    s.got.length = 0;
+    await hub.dispatch({ org: "o", keys: ["workOrders"], project: "p1" }).catch(() => undefined);
+    expect(s.got).toHaveLength(0);
+  });
+  it("a refresh that fails after a visibility change closes the stream instead of keeping the old access", async () => {
+    const hub = new Hub(null as never, "o", { refresh: async () => { throw new Error("db down"); } });
+    const s = sub(new Set(["p1"]));
+    hub.add(s);
+    await hub.dispatch({ org: "o", keys: ["matrix"] });
+    expect(s.closed).toBe(true);
+    expect(s.got).toHaveLength(0);
   });
 });
 
@@ -179,5 +222,33 @@ d("live change events are scoped to people who may read the item", () => {
     expect(r.statusCode).toBe(200);
     expect(await until(() => kenji.ended)).toBe(true);
     lena.close();
+  });
+
+  it("an oversized notification keeps its audience and project, and a personal saved view stays personal", async () => {
+    const c = await t.db.admin.connect();
+    const seen: string[] = [];
+    c.on("notification", (m) => seen.push(m.payload ?? ""));
+    await c.query("LISTEN gantry_changes");
+    const audience = Array.from({ length: 1000 }, (_, i) => `p-someone-${i}`);
+    await withTx(t.db.admin as never, (tx) => publishChange(tx, { org: t.orgId, keys: ["console", "workspace"], project: "payments", audience }));
+    expect(await until(() => seen.length >= 1)).toBe(true);
+    await settle();
+    const parsed = seen.map((x) => JSON.parse(x) as { keys: string[]; project?: string; audience?: string[] }).filter((x) => x.audience?.[0]?.startsWith("p-someone-"));
+    await c.query("UNLISTEN *");
+    c.release();
+    expect(parsed.every((x) => x.keys[0] === "*" && x.project === "payments" && Array.isArray(x.audience) && x.audience.length <= 50)).toBe(true);
+    expect(new Set(parsed.flatMap((x) => x.audience!)).size).toBe(1000);
+
+    const tomas = await open("p-tomas");
+    const asha = await open("p-asha");
+    const r = await w.call("p-tomas", "POST", "/api/v1/saved-views", { screen: "portfolio", name: "Mine only", s: {} });
+    expect(r.status).toBe(200);
+    {
+      expect(await until(() => tomas.changes().some((x) => x.keys.includes("savedViews")))).toBe(true);
+      await settle();
+      expect(asha.changes().some((x) => x.keys.includes("savedViews"))).toBe(false);
+    }
+    tomas.close();
+    asha.close();
   });
 });

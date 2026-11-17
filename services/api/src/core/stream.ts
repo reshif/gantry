@@ -7,6 +7,8 @@ export interface Subscriber {
   sessionId: string | null;
   /** Project ids the person can see, or "all" (factory-wide roles). Refreshed when people, roles or projects change. */
   visible: Set<string> | "all";
+  /** Generation of the refresh that produced `visible`: an older refresh finishing late never overwrites a newer one. */
+  visGen?: number;
   write(chunk: string): boolean;
   /** `superseded`: the person opened more streams than allowed; the client is told so and must not reconnect. */
   close(reason?: "superseded"): void;
@@ -20,7 +22,7 @@ export interface HubHooks {
 export const STREAMS_PER_PERSON = 5;
 export const STREAMS_TOTAL = 2000;
 
-const VISIBILITY_KEYS = new Set(["people", "projects", "matrix", "roles", "session", "sessions", "factory", "*"]);
+const VISIBILITY_KEYS = new Set(["people", "projects", "matrix", "roles", "teams", "session", "sessions", "factory", "*"]);
 
 /**
  * Slices only factory-wide readers (Factory Admin, Auditor, Security Reviewer) can read. A factory-wide change (no project)
@@ -38,6 +40,8 @@ const PERSONAL_KEYS = new Set(["console", "workspace"]);
  */
 export function changeFor(ch: Change, visible: Set<string> | "all", personId?: string): { keys: string[]; project?: string } | null {
   if (ch.audience && (personId === undefined || !ch.audience.includes(personId))) return null;
+  // An audience-scoped change (a private chat, a personal view) never carries admin-only names (the ledger tick every command adds) to people who are not factory-wide.
+  if (ch.audience && visible !== "all") ch = { ...ch, keys: ch.keys.filter((k) => !FACTORY_ONLY_KEYS.has(k)) };
   // Chats are read only by their owner, members or project (never by role alone): without a stated audience or project, fail closed.
   if (!ch.audience && !ch.project && ch.keys.some((k) => PERSONAL_KEYS.has(k))) ch = { ...ch, keys: ch.keys.filter((k) => !PERSONAL_KEYS.has(k)) };
   if (!ch.keys.length) return null;
@@ -55,6 +59,7 @@ export class Hub {
   private closed = false;
   private retry: NodeJS.Timeout | null = null;
   private sweeper: NodeJS.Timeout | null = null;
+  private gen = 0;
 
   constructor(
     private readonly pool: pg.Pool,
@@ -66,15 +71,23 @@ export class Hub {
   ) {}
 
   /** One refresh per person and session for a whole fan-out, not one per open stream. */
-  private refresher(): (s: Subscriber) => Promise<Set<string> | "all" | null> {
+  private refresher(): ((s: Subscriber) => Promise<Set<string> | "all" | null>) & { gen: number } {
+    const gen = ++this.gen;
     const done = new Map<string, Promise<Set<string> | "all" | null>>();
     const batch = new Map<string, unknown>(); // one policy load per fan-out, shared by every person's refresh
-    return (s) => {
+    return Object.assign((s: Subscriber) => {
       const k = `${s.personId}\u0000${s.sessionId ?? ""}`;
       let p = done.get(k);
       if (!p) done.set(k, (p = this.hooks.refresh(s, batch)));
       return p;
-    };
+    }, { gen });
+  }
+
+  /** Applies a refresh unless a newer one already did (fan-outs run concurrently and may finish out of order). */
+  private apply(s: Subscriber, v: Set<string> | "all", gen: number): void {
+    if ((s.visGen ?? 0) > gen) return;
+    s.visGen = gen;
+    s.visible = v;
   }
 
   get size(): number {
@@ -94,7 +107,7 @@ export class Hub {
       [...this.subs].map(async (s) => {
         const v = await refresh(s).catch(() => s.visible);
         if (v === null) s.close();
-        else s.visible = v;
+        else this.apply(s, v, refresh.gen);
       }),
     );
   }
@@ -136,9 +149,10 @@ export class Hub {
     await Promise.all(
       [...this.subs].map(async (s) => {
         if (needsRefresh) {
-          const v = await refresh(s).catch(() => s.visible);
+          // A refresh that fails after a role, matrix or people change must not leave the old (possibly wider) visibility in force: close, the client reconnects and is checked afresh.
+          const v = await refresh(s).catch(() => null);
           if (v === null) return s.close();
-          s.visible = v;
+          this.apply(s, v, refresh.gen);
         }
         const out = changeFor(ch, s.visible, s.personId);
         if (out) s.write(`event: change\ndata: ${JSON.stringify(out)}\n\n`);

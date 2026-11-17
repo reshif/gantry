@@ -60,7 +60,8 @@ export async function trustEvaluate(job: Job, ctx: HandlerCtx): Promise<unknown>
   return withTx(ctx.deps.pool, async (tx) => {
     const events: Array<Parameters<Parameters<typeof evaluateAllTrust>[3]>[0]> = [];
     const out = await evaluateAllTrust(tx, job.orgId, ctx.deps.now(), (e) => events.push(e));
-    if (events.length) await publishChange(tx, { org: job.orgId, keys: ["trust", "audit"] });
+    // Each change reaches only the people who see its project; one with no project reaches factory-wide readers alone.
+    for (const project of new Set(events.map((e) => e.projectId ?? null))) await publishChange(tx, { org: job.orgId, keys: ["trust", "audit"], ...(project ? { project } : {}) });
     for (const e of events) {
       await recordEvent(tx, { orgId: job.orgId, type: e.type, category: e.category ?? "trust", subject: e.subject ?? null, projectId: e.projectId ?? null, before: e.before, after: e.after, outcome: e.outcome ?? "ok" });
     }

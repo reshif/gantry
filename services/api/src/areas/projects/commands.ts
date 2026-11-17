@@ -516,7 +516,7 @@ export async function createView(tx: Tx, a: Actor, body: z.infer<typeof ViewCrea
     throw e;
   }
   const view = (await listViews(tx, a.orgId, who)).find((v) => v.id === id)!;
-  return { msg: `View ${name} saved.`, events: [{ type: "view.save", category: "config", subject: { type: "saved_view", id }, after: name, projectId: null }], extra: { view }, changes: ["savedViews"], project: null };
+  return { msg: `View ${name} saved.`, events: [{ type: "view.save", category: "config", subject: { type: "saved_view", id }, after: name, projectId: null }], extra: { view }, changes: ["savedViews"], project: null, audience: [who] };
 }
 
 export async function updateView(tx: Tx, a: Actor, id: string, patch: z.infer<typeof ViewPatch>): Promise<Out<{ view: SavedViewOut }>> {
@@ -536,7 +536,7 @@ export async function updateView(tx: Tx, a: Actor, id: string, patch: z.infer<ty
   }
   const view = (await listViews(tx, a.orgId, who)).find((v) => v.id === id)!;
   const renamed = name !== row.name;
-  return { msg: renamed ? `View renamed to ${name}.` : `View ${name} updated.`, events: [{ type: "view.edit", category: "config", subject: { type: "saved_view", id }, before: row.name, after: name, projectId: null }], extra: { view }, changes: ["savedViews"], project: null };
+  return { msg: renamed ? `View renamed to ${name}.` : `View ${name} updated.`, events: [{ type: "view.edit", category: "config", subject: { type: "saved_view", id }, before: row.name, after: name, projectId: null }], extra: { view }, changes: ["savedViews"], project: null, audience: [who] };
 }
 
 export async function deleteView(tx: Tx, a: Actor, id: string): Promise<Out> {
@@ -545,7 +545,7 @@ export async function deleteView(tx: Tx, a: Actor, id: string): Promise<Out> {
   if (!row) throw notFound("No such saved view.");
   if (a.ifMatch !== null && a.ifMatch !== row.version) throw refuse("stale", "This changed since you loaded it. Reload and try again.");
   await tx.query(`delete from saved_views where org_id = $1 and id = $2`, [a.orgId, id]);
-  return { msg: `View ${row.name} deleted.`, events: [{ type: "view.delete", category: "config", subject: { type: "saved_view", id }, before: row.name, projectId: null }], changes: ["savedViews"], project: null };
+  return { msg: `View ${row.name} deleted.`, events: [{ type: "view.delete", category: "config", subject: { type: "saved_view", id }, before: row.name, projectId: null }], changes: ["savedViews"], project: null, audience: [who] };
 }
 
 export { parseConfigEdit };
