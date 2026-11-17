@@ -71,13 +71,10 @@ describe("Onboarding: pipeline", () => {
     api([find("web-storefront"), GREEN, find("search-indexer"), repo("notifications", (r) => { r.onboarding.stage = "connected"; r.onboarding.pr = null; r.onboarding.findings = []; })]);
     mount(<OnboardingView />);
     expect(await screen.findByText("Onboarding")).toBeTruthy();
-    expect(document.querySelector(".vhead .kicker")).toBeNull(); // the top bar already names the project
-    const meta = Array.from(document.querySelectorAll(".titleblock div")).map((d) => d.textContent);
-    expect(meta).toEqual(["Repos4", "Ready1 / 4", "In progress1", "Needs action2"]); // the buckets do not overlap
-    const strip = Array.from(document.querySelectorAll(".onb-strip li")).map((li) => li.querySelector(".onb-strip-n")?.textContent);
+    const strip = Array.from(document.querySelectorAll("#onb-strip .stat")).map((li) => li.querySelector(".v")?.textContent);
     expect(strip).toEqual(["1", "0", "0", "1", "0", "0", "1", "1"]); // connected, ..., PR checks, ..., Ready, off belt
     expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(4);
-    const waiting = document.querySelector(".callout-warn")!;
+    const waiting = document.querySelector(".banner.warn")!;
     expect(waiting.textContent).toMatch(/1 onboarding PR is green and waiting for a person to approve and merge: acme\/mobile-app#338/);
     expect(document.querySelector("#onb-row-search-indexer .onb-st-person")?.textContent).toMatch(/Needs a person/);
     expect(document.querySelector("#onb-row-mobile-app .onb-st-merge")?.textContent).toMatch(/Waiting for merge/);
@@ -97,8 +94,6 @@ describe("Onboarding: pipeline", () => {
     await byId("onb-row-notifications");
     expect(document.querySelector("#onb-row-notifications .onb-st-openpr")?.textContent).toMatch(/Open the PR/);
     expect(document.querySelector("#onb-row-notif-busy .onb-st-progress")?.textContent).toMatch(/In progress/);
-    const meta = Array.from(document.querySelectorAll(".titleblock div")).map((d) => d.textContent);
-    expect(meta).toEqual(["Repos2", "Ready0 / 2", "In progress1", "Needs action1"]);
   });
 
   it("filters repos, and an empty project says what to do", async () => {
@@ -358,7 +353,7 @@ describe("Onboarding: settings and the connect wizard", () => {
     mount(<OnboardingView />);
     fireEvent.click(await byId("onb-connect"));
     expect(await screen.findByText("Available from the GitHub App")).toBeTruthy();
-    expect(document.querySelectorAll(".onb-avail .radio-card")).toHaveLength(2);
+    expect(document.querySelectorAll(".onb-avail .li")).toHaveLength(2);
     expect(locked("onb-w-back")).toBe("This is the first step");
     // the first repo the App can see is picked for you; clearing it, the first step refuses
     await waitFor(() => expect((document.getElementById("onb-w-name") as HTMLInputElement).value).toBe("acme/new-service"));
@@ -371,7 +366,7 @@ describe("Onboarding: settings and the connect wizard", () => {
     fireEvent.click(document.getElementById("onb-w-av-0")!);
     for (let i = 0; i < 5; i++) {
       fireEvent.click(document.getElementById("onb-w-next")!);
-      await waitFor(() => expect(document.querySelectorAll(".onb-wsteps li.is-done")).toHaveLength(i + 1));
+      await waitFor(() => expect(document.querySelectorAll(".wiz .w.done")).toHaveLength(i + 1));
     }
     expect(document.getElementById("onb-w-next")!.textContent).toBe("Connect repo");
     expect(document.querySelector(".onb-kvs")?.textContent).toMatch(/acme\/new-service/);

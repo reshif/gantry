@@ -11,3 +11,6 @@
 .field .field-label{font:600 12px/16px var(--font);color:var(--text-2)}
 .filterbar.fb{display:grid}
 .empty .empty-icon{width:40px;height:40px}
+
+/* SearchBox inside a FilterBar: block box so the prototype's absolute icon sits inside the input */
+.searchbox.search{display:block}.searchbox.search .in{width:100%;min-width:0}.searchbox.search .ic{position:absolute;top:50%;left:10px;transform:translateY(-50%);width:16px;height:16px;display:grid;place-items:center}.searchbox.search .ic svg{position:static;transform:none;width:16px;height:16px}
