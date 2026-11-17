@@ -402,8 +402,8 @@ export interface GateEvidence { source: GateEvidenceSource; headSha?: string; gi
 const CI_PASS = new Set(["success", "neutral", "skipped"]);
 
 /**
- * The real CI results for a work order's pull request head (spec 9.5, G4 "Required checks"): the repository's required checks, or every check on
- * the head when none are required. A completed check that did not succeed fails the gate; a required check that is missing or still running is
+ * The real CI results for a work order's pull request head (spec 9.5, G4 "Required checks"): the repository's required checks; with none configured
+ * there is no complete set to judge, so there is no evidence. A completed check that did not succeed fails the gate; a required check that is missing or still running is
  * no evidence yet (null), so the gate waits for a person. Fails closed.
  */
 async function ciEvidence(fx: Fx, w: Wo, headSha: string | null): Promise<{ checks: GateCheck[]; evidence: GateEvidence } | null> {
@@ -412,8 +412,9 @@ async function ciEvidence(fx: Fx, w: Wo, headSha: string | null): Promise<{ chec
   if (!pr || !sha) return null;
   const rows = (await fx.tx.query<{ name: string; status: string; conclusion: string | null; github_id: string | null }>(`select name, status, conclusion, github_id::text from checks where org_id = $1 and repo_id = $2 and head_sha = $3`, [fx.orgId, pr.repo_id, sha])).rows;
   const required = (await fx.tx.query<{ required_checks: string[] }>(`select required_checks from repo_config where org_id = $1 and repo_id = $2`, [fx.orgId, pr.repo_id])).rows[0]?.required_checks ?? [];
-  const names = required.length ? required : [...new Set(rows.map((r) => r.name))];
-  if (!names.length) return null;
+  // Without required checks there is no way to know the set is complete (a fast check may report before the others exist), so a person decides.
+  if (!required.length) return null;
+  const names = required;
   const checks: GateCheck[] = [];
   const ids: Array<number | string> = [];
   let unsettled = false;
@@ -455,16 +456,18 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
   if (guardrailBreach) await demoteForBreach(fx.tx, fx.orgId, { woId: w.id, kind: "guardrail", gateId, text: gr.over && !breach.length ? `The diff is ${gr.size} lines, over the agent's limit.` : `The change touches guarded paths: ${breach.slice(0, 5).join(", ")}.` }, fx.now, (e) => fx.events.push(e));
   // Evidence comes from the system, never from the agent's own report: checks the worker observed, a person's release, or the GitHub check runs
   // stored for this pull request's head. Nothing else counts, and no evidence is not a pass: an automatic gate then waits for a person.
-  let checks: GateCheck[] = o.checks ?? [];
-  let evidence: GateEvidence = o.checks ? { source: o.evidence ?? "observed" } : { source: "none" };
-  if (!o.checks && (kind === "auto" || kind === "mixed") && gateId === "G1f") {
+  // An empty list is not observed evidence: an automatic gate with zero checks must never pass on it.
+  const given = o.checks?.length ? o.checks : undefined;
+  let checks: GateCheck[] = given ?? [];
+  let evidence: GateEvidence = given ? { source: o.evidence ?? "observed" } : { source: "none" };
+  if (!given && (kind === "auto" || kind === "mixed") && gateId === "G1f") {
     // Feasibility: judged from what the system holds, a research document a station wrote and no blocking question still open, not from the agent's claim.
     const note_ = (await fx.tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and station = 'research' and doc is not null limit 1`, [fx.orgId, w.id])).rowCount;
     const blocking = (await fx.tx.query(`select 1 from wo_questions where org_id = $1 and wo_id = $2 and blocking and status = 'open' limit 1`, [fx.orgId, w.id])).rowCount;
     checks = [{ name: "Research note attached", ok: !!note_ }, { name: "No blocking unknowns", ok: !blocking }];
     evidence = { source: "observed" };
   }
-  if (!o.checks && (kind === "auto" || kind === "mixed") && gateId === "G4") {
+  if (!given && (kind === "auto" || kind === "mixed") && gateId === "G4") {
     const ci = await ciEvidence(fx, w, o.headSha ?? null);
     if (ci) {
       checks = ci.checks;

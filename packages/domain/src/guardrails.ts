@@ -7,13 +7,17 @@
 
 const cache = new Map<string, RegExp>();
 
-/** A glob: `**` crosses directories, `*` and `?` stay inside one. A pattern with no glob characters matches the path itself and everything under it. */
+/** A glob: `**` crosses directories, `*` and `?` stay inside one. A pattern with no slash matches at any depth; one with no glob characters matches the path itself and everything under it. */
 export function pathMatches(path: string, pattern: string): boolean {
   const p = path.replace(/^\.?\/+/, "").toLowerCase();
+  const rooted = /^\.?\/+/.test(pattern.trim());
   let g = pattern.trim().replace(/^\.?\/+/, "").toLowerCase();
   if (!g) return false;
   const dir = g.endsWith("/");
   if (dir) g = g.slice(0, -1);
+  if (!g) return false;
+  // Gitignore style: a pattern with no slash matches at any depth (`.env`, `*.pem`, `package.json`).
+  if (!rooted && !g.includes("/") && !g.startsWith("**")) g = `**/${g}`;
   let re = cache.get(g);
   if (!re) {
     let src = "";

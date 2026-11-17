@@ -64,6 +64,21 @@ d("automatic gates need real evidence", () => {
     expect((await w.tx((tx) => recheckAutoGate(tx, t.orgId, "WO-9205", "sha9205"))).reopened).toBe(false);
   });
 
+  it("no required checks configured: a lone completed check is not enough, a person decides", async () => {
+    await w.insertWo("WO-9206", { position: "build", state: "running", data: { files: [{ path: "src/f.ts" }] } });
+    await pr("WO-9206", 9206, "sha9206", [], [["ci/fast", "completed", "success"]]);
+    await open("WO-9206");
+    expect(await decision("WO-9206")).toBeNull();
+    expect((await w.get("WO-9206")).state).toBe("waiting");
+  });
+
+  it("an empty observed checks list is not evidence", async () => {
+    await w.insertWo("WO-9207", { position: "build", state: "running", data: { files: [{ path: "src/g.ts" }] } });
+    await open("WO-9207", { checks: [] });
+    expect(await decision("WO-9207")).toBeNull();
+    expect((await w.get("WO-9207")).state).toBe("waiting");
+  });
+
   it("an agent-reported all-green output.checks cannot pass an automatic gate (G1f)", async () => {
     const id = await w.atStation("research", "Agent claims green");
     const att = await w.liveAttempt(id);
