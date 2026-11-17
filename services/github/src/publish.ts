@@ -11,6 +11,7 @@
 import { mkdtemp, rm, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { pathMatches } from "@gantry/domain";
 import type { ApiClient } from "./api.js";
 import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
@@ -32,6 +33,8 @@ export const PublishBody = z.object({
   title: z.string().min(1).max(250).optional(),
   body: z.string().max(60000).optional(),
   draft: z.boolean().optional(),
+  /** Paths the agent must never modify (its guardrails). A commit that touches one is refused before anything is written to GitHub. */
+  denyPaths: z.array(z.string().min(1).max(300)).max(200).optional(),
 }).strict();
 export type PublishBody = z.infer<typeof PublishBody>;
 
@@ -153,6 +156,14 @@ export async function publishWorkspace(d: PublishDeps, b: PublishBody): Promise<
         changes, files: changes.map((c) => ({ path: c.path, status: STATUS_WORD[c.status], ...(stats.get(c.path) ?? { additions: 0, deletions: 0 }) })), patch, patchTruncated,
       });
       prev = sha;
+    }
+
+    // Guardrails in code, not prose: a change to a path the agent was forbidden to touch is never published, whatever the agent was told or talked into.
+    if (b.denyPaths?.length) {
+      for (const lc of commits) {
+        const bad = lc.changes.find((ch) => b.denyPaths!.some((pat) => pathMatches(ch.path, pat)));
+        if (bad) throw new BrokerError(422, "guardrail_breach", `${bad.path} is on the agent's forbidden paths (commit ${lc.sha.slice(0, 7)}); nothing was published.`, { path: bad.path });
+      }
     }
 
     // Symlinks and submodules are not published: a symlink could point anywhere once checked out, and a submodule pins code the broker never reviewed.

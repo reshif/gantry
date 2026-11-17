@@ -7,7 +7,7 @@
  *   handleFlowTimer     escalation timers (paused while a halt covers the work order)
  * Each flushes its events and jobs with `flushFx` (actor "system"), so the caller only commits.
  */
-import { stationDef } from "@gantry/domain";
+import { evaluateGuardrails, stationDef } from "@gantry/domain";
 import { schedule, type Tx } from "@gantry/db";
 import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, type Fx } from "./engine.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
@@ -16,6 +16,7 @@ import { recordDialogue, type QuestionRow } from "./documents.js";
 import type { ResearchPlan } from "./research.js";
 import { applyScoutResult, scoutRequest, startSwarm } from "./swarm.js";
 import { addWoMessage, updateId } from "./session/store.js";
+import { isResearchHost } from "../../core/research-host.js";
 
 /** The whole summary goes in the thread (lists truncate their own previews); the cap only guards against a runaway output. */
 const clip = (t: string): string => (t.length > 8000 ? `${t.slice(0, 8000)}…` : t);
@@ -75,8 +76,23 @@ function absorbOutput(w: Wo, station: string, r: StationResult): { checks: Obser
   }
   const tests = r.observed?.tests ?? (out.tests && typeof out.tests === "object" ? (out.tests as { passed: number; failed: number; added: number }) : null);
   if (tests) w.data.tests = { passed: Number(tests.passed) || 0, failed: Number(tests.failed) || 0, added: Number(tests.added) || 0 };
-  const checks = r.observed?.checks ?? (Array.isArray(out.checks) ? (out.checks as ObservedChecks[]).filter((c) => c && typeof c.name === "string").map((c) => ({ name: c.name, ok: c.ok !== false, ...(c.warn ? { warn: true } : {}) })) : undefined);
+  // Gate checks are system evidence only (worker-observed, or GitHub check runs read when the gate opens). An agent's own `output.checks` is shown but never judged.
+  const checks = r.observed?.checks;
   return { checks, headSha: r.observed?.headSha ?? (typeof out.headSha === "string" ? out.headSha : undefined) };
+}
+
+/**
+ * Spec 13.3 guardrails, judged in code from the files the system saw (the worker's observed list, else the recorded diff): the agent's forbidden paths
+ * and `maxDiff`, and the repository's protected paths. The result lands on `w.data.guardrail`, which the gate reads (a breach needs a person and
+ * demotes the cell). The prompt telling an agent about its guardrails is advice; this is the check.
+ */
+async function recordGuardrail(tx: Tx, orgId: string, w: Wo, agentId: string): Promise<void> {
+  const files = (Array.isArray(w.data.files) ? (w.data.files as Array<{ path: string; plus?: number; minus?: number }>) : []).filter((f) => f && typeof f.path === "string");
+  if (!files.length) return;
+  const gr = ((await tx.query<{ g: { paths?: unknown; maxDiff?: unknown } | null }>(`select data->'guardrails' as g from agents where org_id = $1 and id = $2`, [orgId, agentId])).rows[0]?.g ?? {}) as { paths?: unknown; maxDiff?: unknown };
+  const prot = (await tx.query<{ p: string[] | null }>(`select c.protected_paths as p from work_orders w join repo_config c on c.org_id = w.org_id and c.repo_id = w.repo_id where w.org_id = $1 and w.id = $2`, [orgId, w.id])).rows[0]?.p ?? [];
+  const found = evaluateGuardrails(files, { forbidden: strs(gr.paths), protectedPaths: prot, maxDiff: Number(gr.maxDiff) || 0 });
+  w.data.guardrail = found;
 }
 
 /**
@@ -88,11 +104,10 @@ function proposedPlan(raw: unknown, station: string, attempt: string, now: Date)
   const p = asObj(raw);
   const questions = strs(p.questions).map((q) => q.trim().slice(0, 300)).filter(Boolean).slice(0, 12);
   if (!questions.length || typeof p.web !== "boolean") return null;
-  const hosts = p.web ? strs(p.hosts).map((h) => h.trim().toLowerCase()).filter((h) => HOST.test(h)).slice(0, 20) : [];
+  const hosts = p.web ? strs(p.hosts).map((h) => h.trim().toLowerCase()).filter(isResearchHost).slice(0, 20) : [];
   const budget = typeof p.budgetUsd === "number" && p.budgetUsd > 0 ? Math.min(p.budgetUsd, 100) : null;
   return { status: "proposed", questions, hosts, web: p.web, budgetUsd: budget, why: typeof p.why === "string" ? p.why.slice(0, 1200) : "", station, attempt, proposedAt: now.getTime() };
 }
-const HOST = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 async function postStationMessage(fx: Fx, w: Wo, station: string, attemptId: string, text: string, questions: QuestionRow[], assumptions = 0, plan = false): Promise<void> {
   const docs = (await fx.tx.query<{ id: string; doc: string; version: number }>(`select id, doc, version from artefacts where org_id = $1 and wo_id = $2 and attempt_id = $3 and doc is not null order by doc`, [fx.orgId, w.id, attemptId])).rows;
@@ -159,6 +174,7 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
   let next = "";
   if (result.status === "succeeded") {
     const { checks, headSha } = absorbOutput(w, sid, result);
+    await recordGuardrail(tx, orgId, w, fx.actor);
     const dl = await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue: asObj(result.output).dialogue, now });
     await postStationMessage(fx, w, sid, attemptId, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${clip(result.summary)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`, dl.questions, dl.assumptions);
     closeEntry(w, fx, "passed", result.summary ?? "");
@@ -292,6 +308,26 @@ export async function recordNewHead(tx: Tx, orgId: string, woId: string, headSha
   await saveWo(tx, orgId, w);
   await flushFx(fx);
   return { reopened: gate };
+}
+
+/**
+ * A required check finished on a pull request's head: an open automatic G4 that was waiting for evidence (or judged an earlier result) reads the
+ * CI results again. Nobody has voted on it (an automatic gate with a vote is a person's decision now), and a person who is deciding stays free to.
+ */
+export async function recheckAutoGate(tx: Tx, orgId: string, woId: string, headSha: string, o: { now?: Date } = {}): Promise<{ reopened: boolean }> {
+  const open = (await tx.query<{ id: string }>(
+    `select id from gate_instances where org_id = $1 and wo_id = $2 and status = 'open' and gate_id = 'G4' and coalesce(basis->'evidence'->>'source', 'none') in ('none', 'github')
+       and not exists (select 1 from gate_votes v where v.org_id = gate_instances.org_id and v.gate_instance_id = gate_instances.id) and (head_sha is null or head_sha = $3)`,
+    [orgId, woId, headSha],
+  )).rows;
+  if (!open.length) return { reopened: false };
+  const w = await lockWo(tx, orgId, woId);
+  const fx = await fxFor(tx, orgId, "system", o.now ?? new Date());
+  await closeOpenInstances(fx, woId, "new_head");
+  await openGate(fx, w, "G4", { headSha });
+  await saveWo(tx, orgId, w);
+  await flushFx(fx);
+  return { reopened: true };
 }
 
 /** `flow.timer` jobs. Escalation: the open gate instance gets an escalation event (the worker's notifier turns it into a message); a halt pauses it by pushing the timer back. */

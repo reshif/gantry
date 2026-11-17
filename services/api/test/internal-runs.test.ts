@@ -329,7 +329,11 @@ d("internal runs API", () => {
       expect(s.instructions).toBe("## Factory base\n\nFactory rules.\n\n## Project overlay\n\nPayments overlay.\n\n## Agent\n\nAgent says build.");
       expect(s.instructionsHash).toMatch(/^[0-9a-f]{64}$/);
       expect(s.skills).toEqual([{ name: "Testing skill", content: "Always run tests." }]);
-      expect(s.toolAllowList.sort()).toEqual(["Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);
+      // "may run tests" is a set of test commands, never a bare shell
+      expect(s.toolAllowList).not.toContain("Bash");
+      expect(s.toolAllowList.filter((t: string) => !t.startsWith("Bash(")).sort()).toEqual(["Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);
+      expect(s.toolAllowList).toContain("Bash(npm test:*)");
+      expect(s.toolAllowList.filter((t: string) => t.startsWith("Bash(")).every((t: string) => /^Bash\((npm|npx|pnpm|yarn|pytest|python|go|cargo)[ :]/.test(t))).toBe(true);
       expect(s.input.brief).toEqual({ goal: "ship" });
       // the per-run cost cap (agent budget 2.5) is enforced at authorize
       expect((await authorize(r)).json().allow).toBe(true);
@@ -349,7 +353,9 @@ d("internal runs API", () => {
   });
 
   describe("mcp-authorize", () => {
-    const mcp = (r: Made, body: object) => call("POST", `/internal/v1/runs/${r.runId}/mcp-authorize`, { token: r.token, server: "w3-mcp", tool: "search", ...body });
+    const HASHES: Record<string, string> = { search: "h1", delete: "h2", hidden: "h3" };
+    // The edge always sends the live definition hash; a call without one is refused (see the fail-closed test below).
+    const mcp = (r: Made, body: { tool?: string } & Record<string, unknown>) => call("POST", `/internal/v1/runs/${r.runId}/mcp-authorize`, { token: r.token, server: "w3-mcp", tool: "search", definitionHash: HASHES[body.tool ?? "search"] ?? "hx", ...body });
     beforeAll(async () => {
       const o = t.orgId;
       await q(`insert into mcp_servers (org_id, id, name, url) values ($1,'w3-mcp','docs','https://mcp.example.net/sse')`, [o]);
@@ -393,6 +399,13 @@ d("internal runs API", () => {
       expect((await q(`select pending_hash from mcp_tools where server_id = 'w3-mcp' and name = 'search'`))[0].pending_hash).toBe("changed");
       await q(`update mcp_servers set enabled = true where id = 'w3-mcp'`);
       await q(`update mcp_tools set pending_hash = null where server_id = 'w3-mcp'`);
+    });
+    it("fails closed when the edge could not read the live definition: no hash, no call", async () => {
+      const r = await makeRun();
+      expect((await mcp(r, { definitionHash: undefined })).json()).toMatchObject({ allow: false, code: "definition" });
+      const g = await makeRun({ attemptData: { writeGrants: ["w3-mcp/delete"] } });
+      expect((await mcp(g, { tool: "delete", definitionHash: undefined })).json()).toMatchObject({ allow: false, code: "definition" });
+      expect((await q(`select enabled from mcp_servers where id = 'w3-mcp'`))[0]).toMatchObject({ enabled: true });
     });
     it("is refused under a stop", async () => {
       const r = await makeRun();

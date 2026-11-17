@@ -11,6 +11,7 @@
 import { enqueue } from "@gantry/db";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { Refusal } from "../core/errors.js";
 import { decide, policyState, refuse, refuseDecision, stopCommand, type CommandSpec } from "../core/index.js";
 import { job } from "../core/jobs-contract.js";
 import { visibleProjects } from "@gantry/domain";
@@ -37,6 +38,25 @@ const scopeOf = (t: StopTarget): CommandSpec["scope"] => ({ project: t.project, 
 export const stopRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
 
+  /**
+   * The target of a stop, looked up for the caller: one the person cannot see is the same 404 as one that does not exist, so a refusal
+   * (403) never confirms that a project, repo or work order id is real. Factory-wide stops have no target to hide.
+   */
+  async function resolveFor(req: FastifyRequest, scopeIn: string, id: string | null | undefined): Promise<StopTarget> {
+    const noun = ({ project: "project", repo: "repo", workorder: "work order", wo: "work order" } as Record<string, string>)[scopeIn] ?? "target";
+    const t = await resolveTarget(g.pool, req.gx.orgId, scopeIn, id).catch((err: unknown) => {
+      if (err instanceof Refusal && err.error.kind === "not_found") throw refuse("not_found", `No such ${noun}.`);
+      throw err;
+    });
+    const who = req.gx.principal;
+    if (t.scope !== "factory" && who?.kind === "person") {
+      // I7: when the policy tables cannot be read, the stop still decides from the break-glass snapshot (decide), so visibility is not checked here.
+      const st = await policyState(req).catch(() => null);
+      if (st && !visibleProjects(st, who.id).some((x) => x.id === t.project)) throw refuse("not_found", `No such ${noun}.`);
+    }
+    return t;
+  }
+
   /** Post-commit, failure-tolerant: the stop is already true in `stops`. */
   async function enforceLater(req: FastifyRequest, rowId: string, t: StopTarget, mode: "halt" | "kill", version: number): Promise<{ enqueued: boolean }> {
     try {
@@ -51,7 +71,7 @@ export const stopRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/api/v1/stops", async (req) => {
     const b = SetBody.parse(req.body);
-    const t = await resolveTarget(g.pool, req.gx.orgId, b.scope, b.id);
+    const t = await resolveFor(req, b.scope, b.id);
     const impact = b.mode === "kill" ? await stopImpact(g.pool, req.gx.orgId, t).catch(() => null) : null;
     const r = await stopCommand(req, { action: stopAction(b.mode, t.scope), scope: scopeOf(t), idempotent: true }, (tx, a) => setStop(tx, a, t, { mode: b.mode, reason: b.reason, inFlight: b.inFlight ?? null, confirmText: b.confirmText ?? null }));
     const enf = await enforceLater(req, String(r.stop), t, b.mode, 1);
@@ -63,7 +83,7 @@ export const stopRoutes: FastifyPluginAsync = async (app) => {
     const { id } = Id.parse(req.params);
     const b = LiftBody.parse(req.body ?? {});
     const p = parseStopId(id);
-    const t = await resolveTarget(g.pool, req.gx.orgId, p.scope, p.target);
+    const t = await resolveFor(req, p.scope, p.target);
     const r = await stopCommand(req, { action: stopAction("resume", t.scope), scope: scopeOf(t) }, (tx, a) => resumeStop(tx, a, t, b.reason ? { reason: b.reason } : {}));
     const enf = await enforceLater(req, String(r.stop), t, "halt", Number(r.version ?? 2));
     return { ...r, enforcement: enf.enqueued ? "queued" : "pending" };
@@ -73,7 +93,7 @@ export const stopRoutes: FastifyPluginAsync = async (app) => {
     const { id } = Id.parse(req.params);
     const b = RestoreBody.parse(req.body ?? {});
     const p = parseStopId(id);
-    const t = await resolveTarget(g.pool, req.gx.orgId, p.scope, p.target);
+    const t = await resolveFor(req, p.scope, p.target);
     const r = await stopCommand(req, { action: stopAction("restore", t.scope), scope: scopeOf(t) }, (tx, a) => restoreStop(tx, a, t, b.reason));
     if (r.pending) return r;
     const enf = await enforceLater(req, String(r.stop), t, "kill", Number(r.version ?? 2));
@@ -84,7 +104,7 @@ export const stopRoutes: FastifyPluginAsync = async (app) => {
     const q = z.object({ scope: z.enum(["factory", "project", "repo", "workorder", "wo"]), id: z.string().max(100).optional() }).parse(req.query);
     const principal = req.gx.principal;
     if (principal?.kind !== "person") throw refuse("denied", "The kill dialog is for signed-in people.");
-    const t = await resolveTarget(g.pool, req.gx.orgId, q.scope, q.id);
+    const t = await resolveFor(req, q.scope, q.id);
     const d = await decide(req, stopAction("kill", scopeFromApi(q.scope)), scopeOf(t));
     if (!d.allowed) throw refuseDecision(d);
     const { list: _list, ...counts } = await stopImpact(g.pool, req.gx.orgId, t);

@@ -140,7 +140,15 @@ export async function retryDelivery(tx: Tx, a: Actor, publicUrl: string, deliver
 
 /* ------------------------------------------------------------------ card templates */
 
-export async function saveCardTemplate(tx: Tx, a: Actor, b: z.infer<typeof CardTemplateBody>): Promise<Cmd> {
+/** The projects (other than `owner`) whose routes or repo overrides point at a card. */
+async function otherProjectsUsing(tx: Tx, orgId: string, id: string, owner: string | null): Promise<string[]> {
+  const routes = (await tx.query<{ project_id: string }>(`select distinct project_id from notification_routes where org_id = $1 and template = $2`, [orgId, id])).rows.map((r) => r.project_id);
+  const ovr = (await tx.query<{ project_id: string }>(`select distinct r.project_id from repos r, jsonb_array_elements(coalesce(r.data -> 'notifyOverrides', '[]'::jsonb)) o where r.org_id = $1 and o ->> 'template' = $2`, [orgId, id])).rows.map((r) => r.project_id);
+  return [...new Set([...routes, ...ovr])].filter((p) => p && p !== owner);
+}
+
+/** `projectOnly`: the caller holds only the project's `notify.edit`, so a card that other projects' routes use is not theirs to change. */
+export async function saveCardTemplate(tx: Tx, a: Actor, b: z.infer<typeof CardTemplateBody>, o: { projectOnly?: boolean } = {}): Promise<Cmd> {
   if (!b.name) throw invalid("Name the card.");
   if (!CARD_TEMPLATES[b.kind]) throw invalid("Pick what the card is for.");
   const bad = b.actions.filter((x) => !CARD_ACTIONS[x]);
@@ -151,6 +159,10 @@ export async function saveCardTemplate(tx: Tx, a: Actor, b: z.infer<typeof CardT
   if (id) {
     const ex = (await tx.query<{ name: string; body: unknown; version: number }>(`select name, body, version from card_templates where org_id = $1 and id = $2 for update`, [a.orgId, id])).rows[0];
     if (!ex) throw notFound("No such card template.");
+    if (o.projectOnly) {
+      const others = await otherProjectsUsing(tx, a.orgId, id, b.project ?? null);
+      if (others.length) throw conflict(`Also used by ${others.join(", ")}. Ask a factory admin to change a card other projects use.`);
+    }
     before = { name: ex.name, ...(ex.body as object) };
     await tx.query(`update card_templates set name = $3, body = $4::jsonb, version = version + 1, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, id, b.name, json(body)]);
   } else {

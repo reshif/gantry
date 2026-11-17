@@ -4,6 +4,7 @@
  * (N of M, author cannot approve, risk tags force human), slots, queue order, submit guard and move rules.
  */
 import { DEFAULT_CATALOG, ONBOARD_STAGES, RISK_TAG_RULES } from "./catalog.js";
+import { gateModeLock } from "./gates.js";
 import { HOUR } from "./format.js";
 import { actorName, can, effectiveStop, findPerson, findProject, findRepo, isOnCall, rolesIn } from "./policy.js";
 import type { PolicyState } from "./policy.js";
@@ -147,7 +148,10 @@ export function gateKind(c: Catalog, project: Project | null | undefined, gateId
   const g = gateDef(c, gateId);
   if (!g) return "human";
   const cfg = project?.flow?.gates[gateId];
-  return cfg?.mode || g.kind;
+  const mode = cfg?.mode || g.kind;
+  // Runtime guard: a mode stored before a lock existed (or written around the API) never lowers a gate a person must decide. (The regulated-project rule is enforced on edits only.)
+  if (cfg?.mode && mode !== "human" && gateModeLock(g, mode, null) !== null) return "human";
+  return mode;
 }
 
 /* ------------------------------------------------------------------ classification ------ */

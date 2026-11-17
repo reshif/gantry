@@ -394,6 +394,44 @@ export async function advance(fx: Fx, w: Wo, by: string, project?: Project): Pro
   await enterStation(fx, w, next, { project: p });
 }
 
+export type GateCheck = { name: string; ok: boolean; warn?: boolean; note?: string };
+export type GateEvidenceSource = "observed" | "person" | "github" | "none";
+/** Where an automatic gate's checks came from, recorded on the instance and its decision (GitHub check ids make the verdict traceable). */
+export interface GateEvidence { source: GateEvidenceSource; headSha?: string; githubCheckIds?: Array<number | string> }
+
+const CI_PASS = new Set(["success", "neutral", "skipped"]);
+
+/**
+ * The real CI results for a work order's pull request head (spec 9.5, G4 "Required checks"): the repository's required checks; with none configured
+ * there is no complete set to judge, so there is no evidence. A completed check that did not succeed fails the gate; a required check that is missing or still running is
+ * no evidence yet (null), so the gate waits for a person. Fails closed.
+ */
+async function ciEvidence(fx: Fx, w: Wo, headSha: string | null): Promise<{ checks: GateCheck[]; evidence: GateEvidence } | null> {
+  const pr = (await fx.tx.query<{ repo_id: string; head_sha: string | null }>(`select repo_id, head_sha from pull_requests where org_id = $1 and wo_id = $2 and state = 'open' order by number desc limit 1`, [fx.orgId, w.id])).rows[0];
+  const sha = headSha ?? pr?.head_sha ?? null;
+  if (!pr || !sha) return null;
+  const rows = (await fx.tx.query<{ name: string; status: string; conclusion: string | null; github_id: string | null }>(`select name, status, conclusion, github_id::text from checks where org_id = $1 and repo_id = $2 and head_sha = $3`, [fx.orgId, pr.repo_id, sha])).rows;
+  const required = (await fx.tx.query<{ required_checks: string[] }>(`select required_checks from repo_config where org_id = $1 and repo_id = $2`, [fx.orgId, pr.repo_id])).rows[0]?.required_checks ?? [];
+  // Without required checks there is no way to know the set is complete (a fast check may report before the others exist), so a person decides.
+  if (!required.length) return null;
+  const names = required;
+  const checks: GateCheck[] = [];
+  const ids: Array<number | string> = [];
+  let unsettled = false;
+  for (const name of names) {
+    const r = rows.find((x) => x.name === name);
+    if (!r || r.status !== "completed") {
+      unsettled = true;
+      continue;
+    }
+    if (r.github_id) ids.push(r.github_id);
+    const ok = !!r.conclusion && CI_PASS.has(r.conclusion);
+    checks.push({ name, ok, note: `GitHub check ${r.github_id ?? "?"}: ${r.conclusion ?? "no conclusion"}` });
+  }
+  if (!checks.some((c) => !c.ok) && unsettled) return null;
+  return { checks, evidence: { source: "github", headSha: sha, githubCheckIds: ids } };
+}
+
 /** A station finished: run the gate behind it, if the class passes one, otherwise advance. `checks` are the observed results for automatic and mixed gates. */
 export async function arriveAtGate(fx: Fx, w: Wo, by: string, o: { checks?: Array<{ name: string; ok: boolean; warn?: boolean; note?: string }>; headSha?: string | null; project?: Project } = {}): Promise<void> {
   const project = o.project ?? (await pinned(fx, w));
@@ -404,21 +442,45 @@ export async function arriveAtGate(fx: Fx, w: Wo, by: string, o: { checks?: Arra
 }
 
 /** Opens a gate instance and, for automatic and mixed gates, judges the checks (spec 9.5). Trust levels above L1 are off by default, so a human gate always waits. */
-export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Project; checks?: Array<{ name: string; ok: boolean; warn?: boolean; note?: string }>; headSha?: string | null } = {}): Promise<void> {
+export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Project; checks?: Array<{ name: string; ok: boolean; warn?: boolean; note?: string }>; headSha?: string | null; evidence?: GateEvidenceSource } = {}): Promise<void> {
   const project = o.project ?? (await pinned(fx, w));
   const g = gateDef(fx.catalog, gateId);
   if (!g) throw new Error(`unknown gate ${gateId}`);
   const kind = gateKind(fx.catalog, project, gateId);
   const sid = stationIdOf(fx.catalog, w);
   const tags = riskTagsOf({ files: (w.data.files as WorkOrder["files"]) ?? [], paths: (w.data.paths as string[]) ?? [], risk: w.risk ?? "normal" });
-  const checks: Array<{ name: string; ok: boolean; warn?: boolean; note?: string }> = o.checks ?? (Array.isArray((w.data.gateChecks ?? {})[gateId]) ? (w.data.gateChecks[gateId] as Array<{ name: string; ok: boolean }>) : g.checks.map((c) => ({ name: c, ok: true })));
-  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0, checks, required: Math.max(1, Number(project.approvers[gateId]?.required) || 1) }, now: fx.now });
+  // Spec 13.3: a change that is over its agent's diff limit or touches a forbidden or protected path is decided by a person, on any gate, and the cell drops to L1.
+  const gr = (w.data.guardrail ?? {}) as { over?: boolean; size?: number; protectedTouched?: string[]; forbiddenTouched?: string[] };
+  const breach = [...(gr.forbiddenTouched ?? []), ...(gr.protectedTouched ?? [])];
+  const guardrailBreach = !!gr.over || breach.length > 0;
+  if (guardrailBreach) await demoteForBreach(fx.tx, fx.orgId, { woId: w.id, kind: "guardrail", gateId, text: gr.over && !breach.length ? `The diff is ${gr.size} lines, over the agent's limit.` : `The change touches guarded paths: ${breach.slice(0, 5).join(", ")}.` }, fx.now, (e) => fx.events.push(e));
+  // Evidence comes from the system, never from the agent's own report: checks the worker observed, a person's release, or the GitHub check runs
+  // stored for this pull request's head. Nothing else counts, and no evidence is not a pass: an automatic gate then waits for a person.
+  // An empty list is not observed evidence: an automatic gate with zero checks must never pass on it.
+  const given = o.checks?.length ? o.checks : undefined;
+  let checks: GateCheck[] = given ?? [];
+  let evidence: GateEvidence = given ? { source: o.evidence ?? "observed" } : { source: "none" };
+  if (!given && (kind === "auto" || kind === "mixed") && gateId === "G1f") {
+    // Feasibility: judged from what the system holds, a research document a station wrote and no blocking question still open, not from the agent's claim.
+    const note_ = (await fx.tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and station = 'research' and doc is not null limit 1`, [fx.orgId, w.id])).rowCount;
+    const blocking = (await fx.tx.query(`select 1 from wo_questions where org_id = $1 and wo_id = $2 and blocking and status = 'open' limit 1`, [fx.orgId, w.id])).rowCount;
+    checks = [{ name: "Research note attached", ok: !!note_ }, { name: "No blocking unknowns", ok: !blocking }];
+    evidence = { source: "observed" };
+  }
+  if (!given && (kind === "auto" || kind === "mixed") && gateId === "G4") {
+    const ci = await ciEvidence(fx, w, o.headSha ?? null);
+    if (ci) {
+      checks = ci.checks;
+      evidence = ci.evidence;
+    }
+  }
+  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0 || guardrailBreach, checks, evidence, required: Math.max(1, Number(project.approvers[gateId]?.required) || 1) }, now: fx.now });
   if (kind === "auto" || kind === "mixed") {
     (w.data.gateChecks ??= {})[gateId] = checks;
     const failed = checks.some((c) => !c.ok && !c.warn);
     if (failed) {
       await closeInstance(fx, instance, "decision");
-      await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_failed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto" }), fx.now]);
+      await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_failed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto", evidence }), fx.now]);
       (w.data.gateStatus ??= {})[gateId] = "failed";
       closeEntry(w, fx, `failed at ${g.label}`);
       if (gateId === "G3G3s") {
@@ -444,9 +506,11 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
     // Spec 9.5: any risk tag forces a human vote, even on an automatic gate. A change to CI, dependencies, code owners, auth,
     // migrations or the tests it is judged by must not pass on checks the change itself could influence.
     if (kind === "auto" && tags.length) note(w, fx, "system", `${g.label} ${g.name} checks passed; a person must decide because the change touches ${tags.join(", ")}.`);
-    if (kind === "auto" && !tags.length) {
+    if (kind === "auto" && guardrailBreach && !tags.length) note(w, fx, "system", `${g.label} ${g.name} checks passed; a person must decide because the change breaks a guardrail (${gr.over ? "diff over the limit" : breach.slice(0, 3).join(", ")}).`);
+    if (kind === "auto" && !tags.length && !guardrailBreach && evidence.source === "none") note(w, fx, "system", `${g.label} ${g.name} has no verified check results to judge, so a person must decide.`);
+    if (kind === "auto" && !tags.length && !guardrailBreach && evidence.source !== "none") {
       await closeInstance(fx, instance, "decision");
-      await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto" }), fx.now]);
+      await fx.tx.query(`insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7::jsonb,$8)`, [fx.orgId, `GD-${instance}`, instance, w.id, `AUTO-${gateId}`, w.flowVersion, JSON.stringify({ checks, mode: "auto", evidence }), fx.now]);
       note(w, fx, "system", `${g.label} ${g.name} passed automatically.`);
       ev(fx, w, "gate.decision", { gate: gateId, mode: "auto", trust: null }, { category: "approvals" });
       closeEntry(w, fx, "passed");
@@ -455,8 +519,7 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
   }
   // Spec 13.3: a cell that has earned L2 or L3 (those levels are switched off in a new install) lets this gate pass without a person, except where a person always decides.
   if (kind === "human" || kind === "mixed") {
-    const gr = (w.data.guardrail ?? {}) as { over?: boolean; protectedTouched?: unknown[] };
-    const t = await trustDecision(fx.tx, fx.orgId, fx.catalog, { woId: w.id, gateId, instance, cls: w.cls, project: w.project, repo: w.repo, source: w.source, data: w.data, riskTags: tags, guardrailBreach: !!gr.over || (gr.protectedTouched?.length ?? 0) > 0, now: fx.now });
+    const t = await trustDecision(fx.tx, fx.orgId, fx.catalog, { woId: w.id, gateId, instance, cls: w.cls, project: w.project, repo: w.repo, source: w.source, data: w.data, riskTags: tags, guardrailBreach, now: fx.now });
     if (t.auto) {
       await closeInstance(fx, instance, "decision");
       await fx.tx.query(

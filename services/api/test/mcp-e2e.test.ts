@@ -61,7 +61,8 @@ d("MCP end to end", () => it("registry -> run -> the SDK's MCP client through th
   expect(tools).toEqual(["explode", "search"]); // update_page is allowed but needs a pre-authorisation this attempt does not hold
 
   const r1 = (await client.callTool({ name: "search", arguments: { query: "refunds" } })) as { content: Array<{ text: string }>; isError?: boolean };
-  expect(r1.content[0]!.text).toBe("results for refunds");
+  expect(r1.content[0]!.text).toMatch(/Untrusted data returned by MCP server/);
+  expect(r1.content[1]!.text).toBe("results for refunds");
   expect(mcp.seen.every((s: { authorization?: string }) => s.authorization === `Bearer ${SECRET}`)).toBe(true);
 
   const denied = (await client.callTool({ name: "update_page", arguments: { id: "p", body: "b" } })) as { content: Array<{ text: string }>; isError?: boolean };
@@ -73,7 +74,7 @@ d("MCP end to end", () => it("registry -> run -> the SDK's MCP client through th
   expect((await w.call("p-asha", "POST", "/api/v1/mcp/grants", { wo: "WO-e2e", tools: [`${id}/update_page`] }, { "idempotency-key": "k1" })).status).toBe(200);
   expect((await client.listTools()).tools.map((x) => x.name).sort()).toEqual(["explode", "search", "update_page"]);
   const w1 = (await client.callTool({ name: "update_page", arguments: { id: "p", body: "b" } })) as { content: Array<{ text: string }> };
-  expect(w1.content[0]!.text).toBe("updated p");
+  expect(w1.content[1]!.text).toBe("updated p");
   expect(mcp.calls.filter((c: { tool: string }) => c.tool === "update_page")).toHaveLength(1);
 
   const rows = await w.q(`select tool, outcome, args_hash, wo_id, agent_id, station, latency_ms from mcp_calls order by id`);
@@ -99,6 +100,6 @@ d("MCP end to end", () => it("registry -> run -> the SDK's MCP client through th
   const ok = await w.call("p-asha", "POST", `/api/v1/mcp/servers/${id}/approve`, {});
   expect(ok.status, JSON.stringify(ok.body)).toBe(200);
   const after = (await client.callTool({ name: "search", arguments: { query: "again" } })) as { content: Array<{ text: string }> };
-  expect(after.content[0]!.text).toBe("results for again");
+  expect(after.content[1]!.text).toBe("results for again");
   await client.close();
 }, 60_000));

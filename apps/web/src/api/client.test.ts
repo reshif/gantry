@@ -129,3 +129,24 @@ describe("ops mapping", () => {
     expect(loginUrl("sso", "asha@acme.dev")).toBe("/auth/login?login_hint=asha%40acme.dev");
   });
 });
+
+describe("background marker for the idle clock", () => {
+  it("reads after a minute without input carry X-Gantry-Background; input clears it; writes never carry it", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch(() => ({ body: {} }));
+      await get("/api/v1/x");
+      expect(header(calls[0], "X-Gantry-Background")).toBeUndefined();
+      vi.advanceTimersByTime(61_000);
+      await get("/api/v1/x");
+      expect(header(calls[1], "X-Gantry-Background")).toBe("1");
+      await command("/api/v1/x", { method: "POST", body: {} });
+      expect(header(calls[calls.length - 1], "X-Gantry-Background")).toBeUndefined();
+      window.dispatchEvent(new Event("pointerdown"));
+      await get("/api/v1/x");
+      expect(header(calls[calls.length - 1], "X-Gantry-Background")).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

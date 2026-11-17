@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { appendEvent, withTx, type Tx } from "@gantry/db";
+import { DenialSampler } from "../denial-sampler.js";
 import type { Gantry } from "../context.js";
 import type { IdClaims } from "../oidc.js";
 import { readSecurity } from "../read/index.js";
+import { DenialSampler } from "../denial-sampler.js";
 import { emailDomainAllowed, ipAllowed } from "../security.js";
 import { createSession, refreshAuthTime } from "./sessions.js";
 
@@ -31,7 +33,7 @@ const DENY = {
   account_inactive: "This account is deactivated or suspended.",
   different_person: "That sign-in was a different person, so the change was cancelled. Sign in again as yourself.",
   identity_mismatch: "This account is linked to a different identity at the provider.",
-  invite_required: "You've been invited to Gantry. Open the invite link from your email to join; it is valid for 14 days.",
+  invite_required: "This account has not been linked to your sign-in yet. Open the invite link from your email to join (it is valid for 14 days), or ask an administrator to invite you again.",
 } as const;
 
 const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "user";
@@ -74,9 +76,10 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
     let inviteId: string | null = null;
     if (!person) {
       const byEmail = (await find(`select ${cols} from people where org_id = $1 and lower(email) = $2`, [orgId, email])) ?? null;
-      // An invited person nobody has claimed yet is linked only with the invite's one-time token: the address alone does not
-      // prove the caller is the invitee (an account at the provider could hold that address). The token is single-use.
-      if (byEmail && byEmail.status === "invited" && !byEmail.idp_subject) {
+      // A person nobody has linked yet (no provider subject) is never claimed by address alone: the address does not prove the caller
+      // is that person (an account at the provider could hold it). An invitee needs the invite's single-use token; anyone else
+      // unlinked (accepted without signing in, seeded, imported) is linked only by an identity the provider asserts by Gantry id.
+      if (byEmail && !byEmail.idp_subject && (byEmail.status === "invited" || byEmail.status === "active")) {
         const hash = r.inviteToken ? createHash("sha256").update(r.inviteToken).digest("hex") : null;
         const inv = hash ? (await tx.query<{ id: string }>(`select id from invites where org_id = $1 and lower(email) = $2 and token_hash = $3 and status = 'pending' and expires_at > now() for update`, [orgId, email, hash])).rows[0] : undefined;
         if (!inv) return deny("invite_required", byEmail.id);
@@ -89,6 +92,8 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
 
     let provisioned = false;
     if (person && person.idp_subject && person.idp_subject !== claims.sub) return deny("identity_mismatch", person.id);
+    // A step-up never switches the held session to another person, and a refusal must leave nothing behind: decide before any write below.
+    if (r.stepUpOnly && r.existingSession && (!person || r.existingSession.personId !== person.id)) return deny("different_person", person?.id ?? null);
     if (!person) {
       const id = await freePersonId(tx, orgId, claims.gantryId, claims.preferredUsername ?? email.split("@")[0]!);
       await tx.query(`insert into people (org_id, id, name, title, email, idp_subject, status, last_seen_at) values ($1,$2,$3,$4,$5,$6,'active', now())`, [orgId, id, claims.name ?? email.split("@")[0], claims.gantryTitle ?? "", email, claims.sub]);
@@ -117,7 +122,6 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
 
     const authTime = claims.authTime ? new Date(claims.authTime * 1000) : new Date();
     const ex = r.existingSession;
-    if (r.stepUpOnly && ex && ex.personId !== person.id) return deny("different_person", person.id);
     if (ex && ex.personId === person.id) {
       await refreshAuthTime(tx, orgId, ex.id, authTime);
       await record("ok", null, person.id, ex.id, "auth.stepup", { authTime: authTime.toISOString() });
@@ -140,10 +144,20 @@ async function freePersonId(tx: Tx, orgId: string, claimed: string | undefined, 
   }
 }
 
-/** A sign-in that never got as far as an identity (bad state, IdP error). Recorded so the history shows it. */
+/**
+ * Failed sign-ins with no identity are reachable by anyone on the internet, and the ledger is append-only, so they are sampled:
+ * per reason and source address 5 rows a minute, 30 per reason overall; the rest are counted and the next row carries the count.
+ * The HTTP answer never changes. Sign-in failures that carry a person (see `signIn`) are not anonymous and are always recorded.
+ */
+export const anonymousSigninFailures = new DenialSampler(5, 30);
+
+/** A sign-in that never got as far as an identity (bad state, IdP error). Recorded (sampled) so the history shows it. */
 export async function recordSignInFailure(g: Gantry, r: Pick<SignInRequest, "ip" | "userAgent" | "requestId" | "method">, reason: string): Promise<void> {
+  const sample = anonymousSigninFailures.sample(`signin:${reason}`, r.ip || "unknown");
+  if (!sample.audit) return;
   await withTx(g.pool, async (tx) => {
     await tx.query(`insert into signins (org_id, person_id, method, outcome, reason, source_ip, user_agent) values ($1,null,$2,'failed',$3,$4::inet,$5)`, [g.orgId, r.method, reason, r.ip || null, r.userAgent.slice(0, 300)]);
-    await appendEvent(tx, { orgId: g.orgId, type: "auth.signin_failed", category: "auth", actor: "anonymous", channel: "web", outcome: "failed", rule: `SIGNIN-${reason.toUpperCase()}`, after: { method: r.method, reason }, sourceIp: r.ip || null, requestId: r.requestId });
+    if (reason === "state_missing") return; // a missing state cookie names no identity and gets no ledger event
+    await appendEvent(tx, { orgId: g.orgId, type: "auth.signin_failed", category: "auth", actor: "anonymous", channel: "web", outcome: "failed", rule: `SIGNIN-${reason.toUpperCase()}`, after: { method: r.method, reason, ...(sample.suppressed ? { suppressedSinceLastRow: sample.suppressed } : {}) }, sourceIp: r.ip || null, requestId: r.requestId });
   });
 }

@@ -85,6 +85,9 @@ export async function acceptInvite(tx: Tx, orgId: string, id: string): Promise<C
   await lockOrgConfig(tx, orgId);
   const p = await personIn(tx, orgId, id);
   if (p.status !== "invited") throw conflict(`${p.name} is already ${p.status === "active" ? "active" : p.status}.`);
+  // 'active' must imply 'linked': without a provider subject, activating would leave an account any identity with this address could claim.
+  const linked = (await tx.query(`select idp_subject is not null as linked from people where org_id = $1 and id = $2`, [orgId, id])).rows[0]?.linked === true;
+  if (!linked) throw conflict(`${p.name} has not signed in yet. They accept by opening the invite link from their email; the invite stays pending until then.`);
   const title = p.title === "Invited" ? (await stateIn(tx, orgId)).catalog.roles.find((r) => r.id === p.roles[0]?.role)?.name ?? "Member" : p.title;
   await tx.query(`update people set status = 'active', title = $3 where org_id = $1 and id = $2`, [orgId, id, title]);
   await tx.query(`update invites set status = 'accepted', accepted_at = now(), updated_at = now() where org_id = $1 and id = $2 and status = 'pending'`, [orgId, id]);

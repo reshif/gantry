@@ -7,7 +7,7 @@
  */
 import { visibleProjects } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { command, policyState, refuse } from "../core/index.js";
+import { command, decide, policyState, refuse } from "../core/index.js";
 import { attachSkill, baseInstructions, createAgent, newAgentVersion, promoteAgent, rollbackAgent, saveAgent, saveInstructions } from "../areas/agents/commands.js";
 import { effectiveFor } from "../areas/agents/effective.js";
 import { CreateBody, EffectiveQuery, IdParam, InstructionsBody, NewVersionBody, RollbackBody, SaveBody, SkillParam, VersionParam } from "../areas/agents/schemas.js";
@@ -50,10 +50,16 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
     const who = requirePerson(req);
     const { id } = IdParam.parse(req.params);
     const q = EffectiveQuery.parse(req.query);
-    if (q.project) {
-      const st = await policyState(req);
-      if (!visibleProjects(st, who).some((x) => x.id === q.project)) throw refuse("not_found", "No such project.");
+    const st = await policyState(req);
+    const visible = (project: string): boolean => visibleProjects(st, who).some((x) => x.id === project);
+    if (q.project && !visible(q.project)) throw refuse("not_found", "No such project.");
+    // A repo is read through a project the person can see: a repo of another project, or an unknown one, is the same 404.
+    if (q.repo) {
+      const r = (await g.pool.query<{ project_id: string }>(`select project_id from repos where org_id = $1 and id = $2`, [g.orgId, q.repo])).rows[0];
+      if (!r || !visible(r.project_id) || (q.project && r.project_id !== q.project)) throw refuse("not_found", "No such repo.");
     }
+    // The saved draft and past versions are the agent's own configuration: reading them needs the agents register, not just a project role.
+    if (q.version && !(await decide(req, "agents.view", {})).allowed) throw refuse("denied", "Reading a draft or an earlier version of an agent needs the agents register.");
     return effectiveFor(g.pool, g.orgId, id, q);
   });
 

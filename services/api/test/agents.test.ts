@@ -384,7 +384,7 @@ d("agents, skills and instructions (spec 8.7, 10.2, 13.2)", () => {
     it("hides projects the viewer cannot see, and refuses a repo of another project", async () => {
       expect((await eff("?project=payments", NOBODY)).status).toBe(200);
       expect((await eff("?project=identity", NOBODY)).status).toBe(404);
-      expect((await eff("?project=risk&repo=payments-api")).status).toBe(422);
+      expect((await eff("?project=risk&repo=payments-api")).status).toBe(404);
       expect((await w.call(ADMIN, "GET", "/api/v1/agents/ag-nope/effective")).status).toBe(404);
     });
 

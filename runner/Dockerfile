@@ -23,9 +23,28 @@ RUN --mount=type=secret,id=cacert,required=false \
     if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
     npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
+# The agent harness (pinned release, unverified against a live model: see runner/README.md), installed from runner/harness/package-lock.json
+# (exact versions and integrity hashes for the whole tree) with `npm ci --ignore-scripts`: no transitive package runs code at build time and the
+# tree changes only when the lock does. HARNESS_LOCK=require (CI, releases) fails the build when there is no lock; `allow` (the default, until a
+# maintainer commits the lock with runner/harness/relock.sh) falls back to an unlocked install of the pinned top-level version and says so.
+FROM ${NODE_IMAGE} AS harness
+ARG CLAUDE_CODE_VERSION=
+ARG HARNESS_LOCK=allow
+WORKDIR /opt/harness
+COPY runner/harness/ ./
+RUN --mount=type=secret,id=cacert,required=false \
+    if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
+    if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --ignore-scripts --no-audit --no-fund; \
+    elif [ "$HARNESS_LOCK" = "require" ]; then \
+      echo "runner/harness/package-lock.json is missing: run runner/harness/relock.sh and commit it" >&2; exit 1; \
+    else \
+      echo "WARNING: no runner/harness/package-lock.json; the harness's transitive tree is resolved fresh and its install scripts run" >&2; \
+      npm install --omit=dev --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION:-$(node -p "require('./package.json').dependencies['@anthropic-ai/claude-code']")}"; \
+    fi; \
+    npm cache clean --force
+
 FROM ${NODE_IMAGE}
-# Pinned harness release (stable channel at the time of writing). Unverified against a live model: see runner/README.md.
-ARG CLAUDE_CODE_VERSION=2.1.311
 # `full` installs git and the common build tools. `minimal` skips the OS packages (for hosts that cannot reach the
 # Debian mirrors at build time); a minimal image has no git, so it cannot run build stations.
 ARG RUNNER_TOOLCHAIN=full
@@ -35,9 +54,8 @@ RUN if [ "$RUNNER_TOOLCHAIN" = "full" ]; then \
       && apt-get install -y --no-install-recommends git ca-certificates build-essential python3 pkg-config jq \
       && rm -rf /var/lib/apt/lists/*; \
     fi
-RUN --mount=type=secret,id=cacert,required=false \
-    if [ -f /run/secrets/cacert ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/cacert; fi; \
-    npm install -g --no-audit --no-fund @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
+COPY --from=harness /opt/harness /opt/harness
+RUN ln -s /opt/harness/node_modules/.bin/claude /usr/local/bin/claude && claude --version
 RUN groupadd -g 10001 runner \
  && useradd -u 10001 -g 10001 -M -d /workspace -s /usr/sbin/nologin runner \
  && mkdir -p /workspace && chown 10001:10001 /workspace

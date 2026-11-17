@@ -7,7 +7,8 @@
  * The edge makes every connection to a server (it holds the credentials and sits on the egress network); the API asks it over /mcp-admin/v1.
  */
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { command, decide, refuse, type CommandSpec } from "../core/index.js";
+import { visibleProjects } from "@gantry/domain";
+import { command, decide, policyState, refuse, type CommandSpec } from "../core/index.js";
 import { checkAccess } from "../areas/mcp/access.js";
 import { addServer, applyDiscovery, checkAuth, checkUrl, grantWrites, patchServer, recordDiscovery, removeServer } from "../areas/mcp/commands.js";
 import { discoverTools, type Discovery, type EdgeTarget } from "../areas/mcp/edge-client.js";
@@ -121,8 +122,17 @@ export const mcpRoutes: FastifyPluginAsync = async (app) => {
   app.post("/api/v1/mcp/grants", async (req) => {
     const b = GrantBody.parse(req.body);
     const wo = (await g.pool.query<{ project_id: string; repo_id: string | null }>(`select project_id, repo_id from work_orders where org_id = $1 and id = $2`, [g.orgId, b.wo])).rows[0];
-    if (!wo) throw refuse("not_found", `No such work order ${b.wo}.`);
-    return command(req, { action: "gate.approve", scope: { project: wo.project_id, repo: wo.repo_id, wo: b.wo }, idempotent: true }, (tx, a) => grantWrites(tx, a, b));
+    // An id the caller cannot see is the same 404 as one that does not exist (as for stops); one they can see but may not approve is a 403.
+    // Pre-authorising writes needs a fresh sign-in.
+    const who = req.gx.principal;
+    const st = who?.kind === "person" ? await policyState(req).catch(() => null) : null;
+    const seen = !!wo && (who?.kind !== "person" || !st || visibleProjects(st, who.id).some((x) => x.id === wo.project_id));
+    if (!wo || !seen) {
+      // Decided before answering, so a caller with no approve right anywhere gets the 403, not a hint about the id.
+      await decide(req, "gate.approve", {}).then((d) => { if (!d.allowed) throw refuse("denied", "Not permitted."); });
+      throw refuse("not_found", "No such work order.");
+    }
+    return command(req, { action: "gate.approve", scope: { project: wo.project_id, repo: wo.repo_id, wo: b.wo }, stepUp: true, idempotent: true }, (tx, a) => grantWrites(tx, a, b));
   });
 
   // Read helper kept for the screen after a command: one server by id.

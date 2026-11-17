@@ -33,6 +33,21 @@ export function gateLock(gate: Pick<Gate, "id">, project?: Pick<Project, "regula
   return { locked: false, reason: "" };
 }
 
+/**
+ * Why a gate may not move to `mode` in this project, or null. A gate that a person decides (no automatic checks behind it) never
+ * becomes automatic or mixed: with no checks, "automatic" means "passes the moment it opens". A regulated project has no automatic gates.
+ */
+export function gateModeLock(gate: Pick<Gate, "id" | "kind" | "checks">, mode: GateKind, project?: { regulated?: boolean } | null): string | null {
+  if (mode === "human") return null;
+  if (gate.id === "G5") return ALWAYS_ON_GATES.G5 ?? "A merge needs a human review (invariant I1).";
+  if (gate.id === "G0G1") return "Brief confirmed (G0+G1) is always confirmed by a person.";
+  if (gate.id === "G3G3s" && mode !== "mixed") return "Plan and security (G3+G3s) always keeps a person's approval; only checks-then-a-person is allowed.";
+  if (gate.id === "G6" && mode === "auto") return "Release confirmation always needs a person.";
+  if (gate.kind === "human" && !(gate.checks && gate.checks.length)) return `${gate.id} has no automatic checks, so it would pass the moment it opens. It stays a person's decision.`;
+  if (mode === "auto" && project?.regulated) return "Regulated projects keep a person on every gate.";
+  return null;
+}
+
 export const gateKindText = (kind: GateKind): string => (kind === "human" ? "person" : kind === "auto" ? "automatic" : "person + automatic");
 
 /** "Brief confirmed · G0+G1". */

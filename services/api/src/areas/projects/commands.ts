@@ -209,7 +209,7 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
         const busy = await openWorkOrders(tx, org, projectId, { position: edit.id });
         if (busy) throw conflict(`${busy} work order${busy > 1 ? "s are" : " is"} at ${draft.catalog.stations.find((s) => s.id === edit.id)?.name ?? edit.id}. Move ${busy > 1 ? "them" : "it"} first.`);
       }
-      before = setEnabled(draft, "stations", edit.id, edit.value).before;
+      before = setEnabled(draft, "stations", edit.id, edit.value, { regulated: !!row.regulated }).before;
       after = edit.value;
       break;
     }
@@ -227,7 +227,7 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       after = edit.value;
       break;
     case "classes": {
-      const r = replaceClasses(draft, edit.value, await openByClass(tx, org, projectId));
+      const r = replaceClasses(draft, edit.value, await openByClass(tx, org, projectId), { regulated: !!row.regulated });
       before = r.before.map((c) => c.id);
       after = r.after;
       break;
@@ -244,7 +244,7 @@ const modeText = (m: string): string => (m === "auto" ? "automatic" : m === "mix
 export async function changeGateMode(tx: Tx, a: Actor, projectId: string, gateId: string, mode: string): Promise<Out<{ version: number; flowVersion: number }>> {
   await lockProject(tx, a.orgId, projectId, a.ifMatch);
   const { draft, project } = await loadDraft(tx, a.orgId, projectId);
-  const r = setGateMode(draft, gateId, mode);
+  const r = setGateMode(draft, gateId, mode, { regulated: !!project.regulated });
   const flowVersion = await persistDraft(tx, a.orgId, draft, a.id, `${r.gate.name} (${r.gate.label}) mode`);
   const version = Number((await tx.query(`select version from projects where org_id = $1 and id = $2`, [a.orgId, projectId])).rows[0].version);
   return {
@@ -315,15 +315,15 @@ export function addBayCmd(tx: Tx, a: Actor, projectId: string, body: z.infer<typ
 
 export function addClassCmd(tx: Tx, a: Actor, projectId: string, body: z.infer<typeof ClassBody>) {
   return flowCommand(tx, a, projectId, "Add class", (d, project) => {
-    const c = addClass(d, body.def as Parameters<typeof addClass>[1]);
+    const c = addClass(d, body.def as Parameters<typeof addClass>[1], { regulated: !!project.regulated });
     return { msg: `${c.name} added to ${project.name}.`, events: [evt("class.add", projectId, { type: "class", id: c.id }, undefined, c)], extra: { cls: c } };
   });
 }
 
 export function updateClassCmd(tx: Tx, a: Actor, projectId: string, classId: string, patch: z.infer<typeof ClassPatch>) {
-  return flowCommand(tx, a, projectId, "Edit class", async (d) => {
+  return flowCommand(tx, a, projectId, "Edit class", async (d, project) => {
     const open = await openWorkOrders(tx, a.orgId, projectId, { cls: classId });
-    const r = updateClass(d, classId, patch as Partial<WorkClass>, open);
+    const r = updateClass(d, classId, patch as Partial<WorkClass>, open, { regulated: !!project.regulated });
     return { msg: `${r.after.name} saved.`, events: [evt("class.edit", projectId, { type: "class", id: classId }, r.before, r.after)], extra: {} };
   });
 }

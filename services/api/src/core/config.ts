@@ -19,6 +19,8 @@ export interface Config {
    * allow-list, rate limits and audit use. `false` trusts nobody; a list of addresses or CIDRs pins the ingress.
    */
   trustProxy: boolean | string;
+  /** File that receives signed audit-head checkpoints (GANTRY_AUDIT_ANCHOR_FILE); null = off. */
+  auditAnchorFile: string | null;
   host: string;
   port: number;
   secrets: { sessionKey: Buffer; dataKey: Buffer | null; edgeToken: string; githubToken: string };
@@ -59,6 +61,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     demoAccounts: demoAccountsAllowed(env.GANTRY_DEV_DEMO_ACCOUNTS === "true", publicUrl),
     bootstrapAdminEmail: env.GANTRY_BOOTSTRAP_ADMIN_EMAIL ? env.GANTRY_BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase() : null,
     trustProxy: trustProxyFrom(env.GANTRY_TRUST_PROXY),
+    auditAnchorFile: env.GANTRY_AUDIT_ANCHOR_FILE || null,
     host: env.HOST || "0.0.0.0",
     port: env.PORT ? Number(env.PORT) : 8000,
     secrets: { sessionKey: Buffer.from(sessionKey, "utf8"), dataKey, edgeToken, githubToken },

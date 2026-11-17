@@ -10,12 +10,14 @@
  *   POST /api/v1/can        batch decision point for disabled controls
  *   GET  /api/v1/stream     server-sent change events
  */
+import type { FastifyRequest } from "fastify";
 import { randomBytes } from "node:crypto";
 import { visibleProjects, type SecuritySettings } from "@gantry/domain";
 import { appendEvent, withTx } from "@gantry/db";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { recordSignInFailure, signIn } from "../core/auth/signin.js";
+import { validIpEntry } from "../core/security.js";
 import { csrfFor, findSession, listSessions, revokeSessions } from "../core/auth/sessions.js";
 import { publishChange } from "../core/changes.js";
 import { command } from "../core/command.js";
@@ -26,6 +28,7 @@ import { invalid, notFound, refuse } from "../core/errors.js";
 import { readOrg, readProjects, readSecurity } from "../core/read/index.js";
 import { publicConfig } from "../core/app.js";
 import { openStream } from "../core/stream.js";
+import { isResearchHost } from "../core/research-host.js";
 
 const OIDC_COOKIE = "gantry_oidc";
 /** The provider's ID token, sealed, kept only to end the provider session at sign-out (path /auth, never sent to the API). */
@@ -56,12 +59,12 @@ const SecuritySchema = z.object({
   sessionHours: z.number().int().min(1).max(24 * 30),
   idleMin: z.number().int().min(1).max(24 * 60),
   domains: z.array(z.string().max(200)).max(100),
-  ipAllow: z.array(z.string().max(100)).max(200),
+  ipAllow: z.array(z.string().max(100).refine(validIpEntry, "not an IP address or CIDR range")).max(200),
   restoreFactoryNeedsTwo: z.boolean(),
   killNeedsStepUp: z.boolean(),
   stepUpWindowMinutes: z.number().int().min(5).max(60).optional(),
   githubLogin: z.boolean(),
-  researchHosts: z.array(z.string().max(253).regex(/^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/)).max(200).optional(),
+  researchHosts: z.array(z.string().max(253).refine(isResearchHost, "A research host must be a DNS name, not an IP address.")).max(200).optional(),
   chatCapUsdPerDay: z.number().min(0).max(100_000).nullable().optional(),
 });
 
@@ -288,7 +291,10 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
         const next = setPath(cur.value, body.path, body.value);
         if (!next) throw invalid(`There is no security setting called ${body.path}.`);
         const parsed = SecuritySchema.safeParse(next);
-        if (!parsed.success) throw invalid(`That value is not valid for ${body.path}.`);
+        if (!parsed.success) {
+          const bad = body.path === "ipAllow" && Array.isArray(body.value) ? body.value.filter((x) => typeof x !== "string" || !validIpEntry(x)).slice(0, 3).map((x) => JSON.stringify(String(x).slice(0, 60))) : [];
+          throw invalid(bad.length ? `Not an IP address or CIDR range: ${bad.join(", ")}.` : `That value is not valid for ${body.path}.`);
+        }
         const before = getPath(cur.value, body.path);
         const after = getPath(parsed.data, body.path);
         // Locking yourself out: an IP list that excludes the caller is refused.
@@ -323,9 +329,11 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     return { results: checks.map((c) => decideFor(st, p, c.action, { project: c.project ?? null, repo: c.repo ?? null, time: c.time ?? now })).map((d) => ({ allowed: d.allowed, reason: d.reason, rule: d.rule, needs: d.needs })) };
   });
 
-  app.get("/api/v1/stream", async (req, reply) => {
+  // Its own budget: a reconnecting tab must not eat the per-IP allowance of ordinary requests, nor the reverse.
+  app.get("/api/v1/stream", { config: { rateLimit: { max: 60, timeWindow: "1 minute", keyGenerator: (r: FastifyRequest) => `stream:${r.ip}` } } }, async (req, reply) => {
     const p = req.gx.principal;
     if (p?.kind !== "person") throw refuse("denied", "The live stream is for signed-in people.");
+    if (!g.hub.hasRoom(p.id)) throw refuse("conflict", "Too many live streams are open for this account or the factory. Close another tab and retry.");
     const st = await policyState(req);
     const person = await currentPerson(req);
     if (!person) throw refuse("denied", "This account no longer exists.");

@@ -305,7 +305,9 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       if (!(await mcpServersInScope(tx, c)).some((s) => s.id === b.server)) return deny("scope", `MCP server ${srv.name} is not in scope for this project, repository, agent and station.`, c);
       const tool = (await tx.query<{ allowed: boolean; tool_class: "read" | "write"; definition_hash: string }>(`select allowed, tool_class, definition_hash from mcp_tools where org_id = $1 and server_id = $2 and name = $3`, [c.orgId, b.server, b.tool])).rows[0];
       if (!tool) return deny("tool", `Tool ${b.tool} is not registered on ${srv.name}.`, c);
-      if (b.definitionHash && b.definitionHash !== tool.definition_hash) {
+      // Spec 12.4, fail closed: a call whose live definition the edge could not read (server down, or the tool missing from its own listing) is not allowed.
+      if (!b.definitionHash) return deny("definition", `The live definition of ${b.tool} could not be verified, so the call was not allowed.`, c);
+      if (b.definitionHash !== tool.definition_hash) {
         // Spec 12.4: a changed tool definition disables the server until an admin re-approves it.
         await tx.query(`update mcp_servers set enabled = false, disabled_reason = $3, version = version + 1 where org_id = $1 and id = $2`, [c.orgId, b.server, `Definition of ${b.tool} changed`]);
         await tx.query(`update mcp_tools set pending_hash = $4, updated_at = now() where org_id = $1 and server_id = $2 and name = $3`, [c.orgId, b.server, b.tool, b.definitionHash]);

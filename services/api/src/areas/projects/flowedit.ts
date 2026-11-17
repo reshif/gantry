@@ -1,4 +1,4 @@
-import { gateLock, type ApproverRule, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type Station, type WorkClass } from "@gantry/domain";
+import { gateLock, gateModeLock, type ApproverRule, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type Station, type WorkClass } from "@gantry/domain";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 
 /**
@@ -158,9 +158,18 @@ export function addBay(d: FlowDraft, def: { id?: string | undefined; name: strin
   return b;
 }
 
+/** A class route may not drop a locked gate: not by skipping its station, and not by leaving it out of a gate list. */
+export function assertRouteKeepsLockedGates(d: FlowDraft, c: { name: string; skips?: string[] | undefined; gates?: string[] | undefined }, o: { regulated?: boolean } = {}): void {
+  for (const g of d.catalog.gates) {
+    if (g.id === "G0G1" || !gateLive(d, g.id) || !gateLock(g, o).locked) continue;
+    if (c.skips?.includes(g.after)) throw conflict(`${c.name} cannot skip ${station(d, g.after)?.name ?? g.after}: it carries ${g.name} (${g.label}). ${gateLock(g, o).reason}`);
+    if (c.gates && c.gates.length && !c.gates.includes(g.id)) throw conflict(`${c.name} must keep ${g.name} (${g.label}) on its route. ${gateLock(g, o).reason}`);
+  }
+}
+
 export type ClassDef = Partial<Omit<WorkClass, "id" | "name">> & { id?: string | undefined; name: string };
 
-export function addClass(d: FlowDraft, def: ClassDef): WorkClass {
+export function addClass(d: FlowDraft, def: ClassDef, o: { regulated?: boolean } = {}): WorkClass {
   const name = def.name.trim();
   if (!name) throw invalid("Name the work class.");
   const id = def.id || slug(name);
@@ -168,6 +177,7 @@ export function addClass(d: FlowDraft, def: ClassDef): WorkClass {
   if (d.flow.classes.some((c) => c.id === id)) throw conflict(`This project already has ${name}.`);
   const bad = (def.skips ?? []).filter((s) => s === "intake" || s === "close" || !present(d, s));
   if (bad.length) throw invalid(`Can't skip ${bad.join(", ")}.`);
+  assertRouteKeepsLockedGates(d, { name, skips: def.skips, gates: def.gates }, o);
   const c: WorkClass = { skips: [], priority: "P2", slaH: 72, est: "M", token: "cls-chore", shape: "bar", hints: [], gates: [], enabled: true, ...clone(def), id, name, custom: true, project: d.projectId };
   if (!d.catalog.classes.some((x) => x.id === id)) {
     d.catalog.classes.push(clone(c));
@@ -178,12 +188,16 @@ export function addClass(d: FlowDraft, def: ClassDef): WorkClass {
 }
 
 /** `open`: open work orders using the class. Turning a class off while work is in it is refused (spec 14.4). */
-export function updateClass(d: FlowDraft, clsId: string, patch: Partial<WorkClass>, open: number): { before: WorkClass; after: WorkClass } {
+export function updateClass(d: FlowDraft, clsId: string, patch: Partial<WorkClass>, open: number, o: { regulated?: boolean } = {}): { before: WorkClass; after: WorkClass } {
   const c = d.flow.classes.find((x) => x.id === clsId);
   if (!c) throw invalid("No such class in this project.");
   if (patch.enabled === false && open) throw conflict(`Open work orders use ${c.name}. Reclassify or finish them first.`);
   if (patch.skips?.some((s) => s === "intake" || s === "close")) throw invalid("Intake and Close can't be skipped.");
   if (patch.skips?.some((s) => !present(d, s))) throw invalid("A skipped station is not in this flow.");
+  if (patch.skips || patch.gates) {
+    const added = (patch.skips ?? []).filter((s) => !c.skips.includes(s));
+    assertRouteKeepsLockedGates(d, { name: c.name, skips: added, gates: patch.gates }, o);
+  }
   const before = clone(c);
   Object.assign(c, clone(patch));
   const g = d.catalog.classes.find((x) => x.id === clsId);
@@ -197,12 +211,12 @@ export function updateClass(d: FlowDraft, clsId: string, patch: Partial<WorkClas
 
 const MODES: readonly GateKind[] = ["auto", "human", "mixed"];
 
-export function setGateMode(d: FlowDraft, gateId: string, mode: string): { before: GateKind; after: GateKind; gate: Gate } {
+export function setGateMode(d: FlowDraft, gateId: string, mode: string, o: { regulated?: boolean } = {}): { before: GateKind; after: GateKind; gate: Gate } {
   const g = gate(d, gateId);
   if (!g || !gateLive(d, gateId)) throw invalid("Unknown project or gate.");
   if (!MODES.includes(mode as GateKind)) throw invalid("Mode is auto, human or mixed.");
-  if (gateId === "G0G1" && mode !== "human") throw invalid("Brief confirmed (G0+G1) is always confirmed by a person.");
-  if (gateId === "G6" && mode === "auto") throw invalid("Release confirmation always needs a person.");
+  const refusal = gateModeLock(g, mode as GateKind, o);
+  if (refusal) throw invalid(refusal);
   const cfg = d.flow.gates[gateId]!;
   const before = cfg.mode || g.kind;
   cfg.mode = mode as GateKind;
@@ -221,6 +235,11 @@ export function setEnabled(d: FlowDraft, kind: "stations" | "gates", id: string,
   const def = kind === "stations" ? station(d, id) : gate(d, id);
   if (!cfg || cfg.absent || !def) throw invalid(`This project has no ${kind === "stations" ? "station" : "gate"} ${id}.`);
   if (kind === "stations" && id === "intake" && !on) throw conflict("Intake is always on: every work order starts there.");
+  if (kind === "stations" && !on) {
+    // A station's gate leaves the route with it: a locked gate keeps its station on.
+    const lockedGate = d.catalog.gates.find((g) => g.after === id && gateLive(d, g.id) && gateLock(g, o).locked);
+    if (lockedGate) throw conflict(`${(def as Station).name} cannot be turned off: it carries ${lockedGate.name} (${lockedGate.label}). ${gateLock(lockedGate, o).reason}`);
+  }
   if (kind === "gates" && !on) {
     const lock = gateLock(def as Gate, o);
     if (lock.locked) throw conflict(`${(def as Gate).name} (${(def as Gate).label}) cannot be turned off. ${lock.reason}`);
@@ -240,13 +259,15 @@ export function setWip(d: FlowDraft, stationId: string, wip: number): { name: st
 }
 
 /** The whole class list replaced (route edits, reset to template). Classes cannot disappear or turn off while open work uses them. */
-export function replaceClasses(d: FlowDraft, next: WorkClass[], openByClass: Record<string, number>): { before: WorkClass[]; after: WorkClass[] } {
+export function replaceClasses(d: FlowDraft, next: WorkClass[], openByClass: Record<string, number>, o: { regulated?: boolean } = {}): { before: WorkClass[]; after: WorkClass[] } {
   const ids = new Set<string>();
   for (const c of next) {
     if (ids.has(c.id)) throw invalid(`Class ${c.id} appears twice.`);
     ids.add(c.id);
     // Only a route that changed is checked: a built-in class may already end early (Spike skips Close).
     const cur = d.flow.classes.find((x) => x.id === c.id);
+    if (!cur || JSON.stringify(cur.gates ?? []) !== JSON.stringify(c.gates ?? [])) assertRouteKeepsLockedGates(d, { name: c.name, skips: [], gates: c.gates }, o);
+    assertRouteKeepsLockedGates(d, { name: c.name, skips: c.skips.filter((x) => !cur?.skips.includes(x)) }, o);
     if (cur && JSON.stringify(cur.skips) === JSON.stringify(c.skips)) continue;
     if (c.skips.some((s) => s === "intake" || s === "close")) throw invalid("Intake and Close can't be skipped.");
     if (c.skips.some((s) => !present(d, s))) throw invalid(`${c.name} skips a station that is not in this flow.`);

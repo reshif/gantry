@@ -18,6 +18,12 @@ Object.assign(realm, {
   sslRequired: "all",
   registrationAllowed: false,
   bruteForceProtected: true,
+  // IdP-side logins, failures, resets and admin edits (email and user changes drive Gantry identity linking) are recorded and kept 90 days.
+  eventsEnabled: true,
+  eventsExpiration: 7776000,
+  eventsListeners: ["jboss-logging"],
+  adminEventsEnabled: true,
+  adminEventsDetailsEnabled: true,
   passwordPolicy: "length(12) and notUsername and notEmail and passwordHistory(5)",
   // Password reset and email verification mail. The relay is the same one Gantry uses.
   smtpServer: {

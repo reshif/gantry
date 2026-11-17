@@ -61,7 +61,10 @@ services:
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8079/healthz"]
-    networks: [front, control]
+    networks:
+      front: {}
+      # A fixed address: the API trusts X-Forwarded-For from this one peer only (GANTRY_TRUST_PROXY), not from every container on the network.
+      control: { ipv4_address: 10.89.17.2 }
     depends_on:
       volume-init: { condition: service_completed_successfully }
       gantry-web: { condition: service_healthy }
@@ -95,6 +98,7 @@ services:
       # Connection tests for chat and webhook integrations leave through the edge allow-list, like deliveries do.
       GANTRY_EGRESS_PROXY: http://gantry-edge:8444
       # Off by default: when true, the sign-in page lists every person's name, email and roles. Local development only (refused unless the public URL is localhost).
+      GANTRY_AUDIT_ANCHOR_FILE: /anchors/audit-anchors.jsonl
       GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-false}
       # Off by default: the org starts empty and the first sign-in with GANTRY_BOOTSTRAP_ADMIN_EMAIL becomes Factory Admin.
       # GANTRY_DEV_SEED=true loads the legacy demo data (people, projects, repos, policies) once, for development and demos only.
@@ -103,12 +107,18 @@ services:
       GANTRY_ORG_NAME: ${GANTRY_ORG_NAME:-Gantry}
       # Alias of a GitHub identity provider configured in Keycloak; empty = GitHub sign-in is refused with a clear message.
       OIDC_GITHUB_IDP_ALIAS: ${OIDC_GITHUB_IDP_ALIAS:-}
-    # The backup service writes last-backup.json and last-drill.json here; the API only reads them (System health).
+      # Only the ingress (Caddy, fixed address on the control network) may state the client address; other containers cannot forge it.
+      GANTRY_TRUST_PROXY: 10.89.17.2
+    # The backup service writes last-backup.json and last-drill.json to this small status volume; the API only reads them (System health).
+    # It never mounts the volume that holds the database dumps.
     volumes:
-      - ${GANTRY_BACKUP_VOLUME:-backups}:/backups:ro
+      - backupstatus:/backups:ro
+      # Signed checkpoints of the audit chain head, on a volume the database never sees (GANTRY_AUDIT_ANCHOR_FILE).
+      - auditanchors:/anchors
     secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret]
     depends_on:
       gantry-migrate: { condition: service_completed_successfully }
+      volume-init: { condition: service_completed_successfully }
       minio: { condition: service_healthy }
     healthcheck:
       <<: *http-check
@@ -162,6 +172,7 @@ services:
       SOCKPROXY_PORT: "2375"
       RUNNER_VARIANTS: ${RUNNER_VARIANTS:-base=${GANTRY_IMAGE_PREFIX:-}gantry-runner:${GANTRY_VERSION:-dev}}
       EDGE_COMPOSE_SERVICE: gantry-edge
+      EDGE_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-gantry}
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     healthcheck:
@@ -171,6 +182,28 @@ services:
       retries: 3
       start_period: 5s
     networks: [dockerapi]
+
+  # The workspace profile of the same proxy, for gantry-github only: it allows the broker's never-started helper container (fixed image,
+  # no network, one ws-<id> volume), its archive calls and its removal, and nothing else (sockpolicy.ts routeWorkspace). The broker
+  # no longer mounts the Docker socket. deploy/ci/compose-socket.mjs fails CI if any other service does.
+  gantry-sockproxy-ws:
+    <<: *hardened
+    image: ${GANTRY_IMAGE_PREFIX:-}gantry-launcher:${GANTRY_VERSION:-dev}
+    command: ["node", "dist/sockproxy.js"]
+    group_add: ["${DOCKER_GID:-999}"]
+    environment:
+      SOCKPROXY_PROFILE: workspace
+      SOCKPROXY_PORT: "2376"
+      GITHUB_HELPER_IMAGE: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2376/_ping').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks: [wsapi]
 
   gantry-launcher:
     <<: *hardened
@@ -210,6 +243,11 @@ services:
       # Must match the launcher's RUN_SUBNET_POOL: a caller from this range must present its run token to the proxy.
       EDGE_RUN_SUBNET: ${RUN_SUBNET_POOL:-10.213.0.0/16}
     secrets: [data_key, edge_token, vendor_keys.json, minio_root_password]
+    # The edge is shared by every run and the model gateway: bound what one run's traffic can take (the per-run caps are in proxy.ts).
+    mem_limit: ${GANTRY_EDGE_MEMORY:-768m}
+    pids_limit: 512
+    ulimits:
+      nofile: { soft: 8192, hard: 8192 }
     depends_on:
       gantry-api: { condition: service_healthy }
     healthcheck:
@@ -222,21 +260,22 @@ services:
     <<: *hardened
     build: { context: .., dockerfile: services/github/Dockerfile }
     image: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
-    # The broker seeds and reads ws-<id> volumes through the Docker API (services/github/src/workspace.ts); the socket is root-equivalent (spec 5.5).
-    group_add: ["${DOCKER_GID:-999}"]
+    # The broker seeds and reads ws-<id> volumes through the Docker API (services/github/src/workspace.ts). It holds no Docker socket (it is
+    # root-equivalent, and this process parses repository data an agent controls and holds the App key): it reaches the narrow workspace
+    # profile of the socket proxy instead.
     environment:
       GANTRY_API_URL: http://gantry-api:8000
       GANTRY_ORG_ID: ${GANTRY_ORG_ID:-acme}
       GITHUB_HELPER_IMAGE: ${GANTRY_IMAGE_PREFIX:-}gantry-github:${GANTRY_VERSION:-dev}
+      DOCKER_PROXY_URL: http://gantry-sockproxy-ws:2376
     secrets: [data_key, github_token, github_app.pem, github_app.json]
-    volumes:
-      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     depends_on:
       gantry-api: { condition: service_healthy }
+      gantry-sockproxy-ws: { condition: service_healthy }
     healthcheck:
       <<: *http-check
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9200/healthz"]
-    networks: [control, egress]
+    networks: [control, egress, wsapi]
 
   # ---- pulled images --------------------------------------------------------------------------------------------
   postgres:
@@ -390,9 +429,10 @@ services:
     secrets: [db_owner_password, minio_root_password, backup_remote]
     volumes:
       - ${GANTRY_BACKUP_VOLUME:-backups}:/backups
+      - backupstatus:/status
     healthcheck:
       # Healthy while the newest backup succeeded and is less than 26 hours old.
-      test: ["CMD-SHELL", "grep -q '\"ok\":true' /backups/last-backup.json && [ -n \"$$(find /backups/last-backup.json -mmin -1560)\" ]"]
+      test: ["CMD-SHELL", "grep -q '\"ok\":true' /status/last-backup.json && [ -n \"$$(find /status/last-backup.json -mmin -1560)\" ]"]
       interval: 5m
       timeout: 10s
       retries: 1
@@ -412,11 +452,13 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: "no"
-    command: ["sh", "-c", "chown 10001:10001 /vol/objdata /vol/caddydata /vol/backups"]
+    command: ["sh", "-c", "chown 10001:10001 /vol/objdata /vol/caddydata /vol/backups /vol/backupstatus /vol/auditanchors"]
     volumes:
       - objdata:/vol/objdata
       - caddydata:/vol/caddydata
       - ${GANTRY_BACKUP_VOLUME:-backups}:/vol/backups
+      - backupstatus:/vol/backupstatus
+      - auditanchors:/vol/auditanchors
     networks: [control]
 
   # Build-only: `docker compose -f deploy/compose.yml build gantry-runner` produces the image the launcher starts runs from.
@@ -433,11 +475,18 @@ networks:
   control:
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: 10.89.17.0/24
   launch:
     driver: bridge
     internal: true
   # Launcher <-> socket proxy only.
   dockerapi:
+    driver: bridge
+    internal: true
+  # Broker <-> workspace socket proxy only.
+  wsapi:
     driver: bridge
     internal: true
   egress:
@@ -449,6 +498,8 @@ volumes:
   caddydata:
   kcdata:
   backups:
+  backupstatus:
+  auditanchors:
 
 secrets:
   db_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/db_password" }

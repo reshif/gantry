@@ -1,5 +1,6 @@
 import { verifyChain } from "@gantry/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { principalDenials } from "../src/core/command.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { withVersion } from "./versions.js";
 
@@ -209,6 +210,12 @@ d("people and access", () => {
     it("accept: denied, stale, then active", async () => {
       expect((await call(engineer, "POST", `/api/v1/invites/${inviteId}/accept`)).status).toBe(403);
       expect((await call(admin, "POST", `/api/v1/invites/${inviteId}/accept`, undefined, { "if-match": "999" })).status).toBe(409);
+      // Regression: an administrator cannot activate a person nobody has linked (it would leave the account open to address-only claiming).
+      const unlinked = await call(admin, "POST", `/api/v1/invites/${inviteId}/accept`);
+      expect(unlinked.status).toBe(409);
+      expect((await find(inviteId)).status).toBe("invited");
+      expect((await t.db.admin.query(`select status from invites where id = $1`, [inviteId])).rows[0].status).toBe("pending");
+      await t.db.admin.query(`update people set idp_subject = 'kc-invitee' where id = $1`, [inviteId]);
       const v = (await find(inviteId)).version;
       const ok = await call(admin, "POST", `/api/v1/invites/${inviteId}/accept`, undefined, { "if-match": String(v) });
       expect(ok.status).toBe(200);
@@ -606,6 +613,7 @@ d("people and access", () => {
 
   describe("invariants the server enforces (spec 14.4)", () => {
     it("audits a refusal raised by an invariant, not only decision-point denials", async () => {
+      principalDenials.reset(); // refusals are audited at a bounded rate per person; this test counts rows, so start a fresh window
       const before = (await ev("people.manage.denied")).length;
       const own = await call(admin, "DELETE", `/api/v1/people/${admin}/factory-roles/factory_admin`, { reason: "test grant" });
       expect(own.status).toBe(403);

@@ -272,15 +272,16 @@ d("demo personas: enforcement on real endpoints", () => {
       const h = await stop("p-tomas", { scope: "project", id: "payments", mode: "halt", reason: "Flaky integration tests" });
       expect(h.status, JSON.stringify(h.body)).toBe(200);
       await expectDenied("p-tomas", "line.resume", () => lift("p-tomas", "project:payments"));
-      await expectDenied("p-fatima", "line.resume", () => lift("p-fatima", "project:payments"));
+      expect((await lift("p-fatima", "project:payments")).status).toBe(404); // no role on Payments: the project does not reveal itself
       expect((await lift("p-meera", "project:payments")).status).toBe(200);
     });
     it("Tomás cannot halt Storefront (not his project)", async () => {
-      await expectDenied("p-tomas", "line.halt", () => stop("p-tomas", { scope: "project", id: "storefront", mode: "halt", reason: "Flaky integration tests" }));
+      // another project's id answers like an unknown one (no existence oracle)
+      expect((await stop("p-tomas", { scope: "project", id: "storefront", mode: "halt", reason: "Flaky integration tests" })).status).toBe(404);
     });
     it("Lena (Project Admin, fresh sign-in) kills and restores Identity, and cannot touch Payments", async () => {
       const name = await projectName("identity");
-      await expectDenied("p-lena", "kill.project", () => stop("p-lena", { scope: "project", id: "payments", mode: "kill", reason: "Bad release suspected", confirmText: "Payments Platform" }));
+      expect((await stop("p-lena", { scope: "project", id: "payments", mode: "kill", reason: "Bad release suspected", confirmText: "Payments Platform" })).status).toBe(404);
       const k = await stop("p-lena", { scope: "project", id: "identity", mode: "kill", reason: "Bad release suspected", confirmText: name, inFlight: "hold" });
       expect(k.status, JSON.stringify(k.body)).toBe(200);
       expect((await restore("p-lena", "project:identity")).status).toBe(200);
