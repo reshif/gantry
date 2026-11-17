@@ -245,7 +245,7 @@ export async function callTool(name: string, args: unknown, dir = STATION_DIR): 
   if (process.env.GANTRY_STATION_ROLE === "scout" && name === "propose_research_plan") return refuse("A scout cannot propose a plan.");
   return refuse(`No such tool ${name}.`);
 }
-const HOST = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+const HOST = /^(?!.*\.\d+$)(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 // ---- stdio MCP server ---------------------------------------------------------------------------------------
 

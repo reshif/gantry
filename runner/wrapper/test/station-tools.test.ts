@@ -81,7 +81,7 @@ describe("station tools", () => {
 
   it("a research plan ends the run for approval; web_fetch goes through the edge and frames the page as untrusted", async () => {
     const d = await dir();
-    expect((await callTool("propose_research_plan", { questions: ["How do Nautobot jobs retry?"], hosts: ["docs.nautobot.com", "not a host"], web: true, budgetUsd: 2, why: "The repo has no retry helper." }, d)).isError).toBe(false);
+    expect((await callTool("propose_research_plan", { questions: ["How do Nautobot jobs retry?"], hosts: ["docs.nautobot.com", "not a host", "169.254.169.254", "10.0.0.5", "*.10.0.0.5"], web: true, budgetUsd: 2, why: "The repo has no retry helper." }, d)).isError).toBe(false);
     expect((await readLog(d)).plan).toEqual({ questions: ["How do Nautobot jobs retry?"], hosts: ["docs.nautobot.com"], web: true, budgetUsd: 2, why: "The repo has no retry helper." });
     const out = await handOver({ status: "succeeded", output: { summary: "" }, usage: [] }, d, "research", async () => undefined, 1, () => undefined);
     expect(out.status).toBe("needs_person");
