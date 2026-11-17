@@ -95,7 +95,7 @@ describe("Changes page", () => {
     mockApi({ ...readsFor(W) });
     window.location.hash = `#changes/${W.id}`;
     mount(<ChangesView />);
-    expect(await screen.findByText(`Changes: ${W.title}`, {}, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: `Changes · ${W.id}` }, { timeout: 4000 })).toBeTruthy();
     fireEvent.click(document.getElementById("chg-back") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toContain(`record/${W.id}`));
   });

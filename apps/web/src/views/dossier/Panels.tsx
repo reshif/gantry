@@ -8,7 +8,7 @@ import type { TWo } from "../traveler/model";
 const label = (k: string): string => k.replace(/([A-Z])/g, " $1");
 
 export function BriefPanel({ wo }: { wo: TWo }) {
-  const b = wo.brief as unknown as Record<string, unknown> | undefined;
+  const b: Record<string, unknown> | undefined = { ...wo.brief };
   const entries = Object.entries(b ?? {}).filter(([k, v]) => k !== "route" && v && (!Array.isArray(v) || v.length));
   return (
     <Panel title="Brief">
