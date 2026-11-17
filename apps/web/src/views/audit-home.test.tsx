@@ -87,8 +87,9 @@ describe("Audit", () => {
     });
     mount(<AuditView />);
     expect(await screen.findByText("policy.edit.denied")).toBeTruthy();
-    expect(screen.getByText("Head digest").nextElementSibling?.textContent).toBe("cccccccc");
-    expect(screen.getByText("Denied").nextElementSibling?.textContent).toBe("1");
+    const stat = (label: string) => Array.from(document.querySelectorAll("#aud-stats .stat-tile")).find((t) => t.querySelector(".stat-lbl")?.textContent === label)?.querySelector(".stat-val")?.textContent;
+    expect(stat("Head digest")).toBe("cccccccc");
+    expect(stat("Denied")).toBe("1");
     expect(document.querySelectorAll("tr.aud-row")).toHaveLength(3);
     expect(document.querySelector(".o-row-denied .outcome")?.textContent).toBe("denied");
     expect(document.querySelectorAll(".aud-has-diff")).toHaveLength(1);
