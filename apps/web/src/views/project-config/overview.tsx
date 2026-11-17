@@ -41,9 +41,9 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
   const gates = cat.gates.filter((g) => p.flow.gates[g.id] && !p.flow.gates[g.id]!.absent).length;
   void m;
   return (
-    <div className="two-col">
-      <div className="pcf-stack">
-      <Panel title="About this project">
+    <div className="pcf-stack">
+      <div className="cols">
+      <Panel title="Details">
         <div className="form-grid">
           <LockNote decision={d} what="Project details" />
           <Field label="Description" htmlFor="pcf-desc">
@@ -52,6 +52,9 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
           <Field label="Instructions overlay" htmlFor="pcf-overlay" hint="Added to every agent's instructions for this project, after the factory base and before per-repo guidelines.">
             <textarea id="pcf-overlay" className="input mono" rows={5} disabled={locked} value={overlay} onChange={(e) => set({ text: { ...s.text, overlay: e.target.value } })} />
           </Field>
+            <Field label="Owner" htmlFor="pcf-owner" hint="The owner is the default fallback approver and gets budget alerts.">
+              <Select id="pcf-owner" disabled={locked} options={owners.map((x) => ({ value: x.id, label: `${x.name} · ${x.title}` }))} value={p.owner} onChange={async (v) => res(await ops.setProject(p.id, "owner", v, { ifMatch: p.version }), `Owner is now ${actor(v).name.replace(" (agent)", "")}.`)} />
+            </Field>
           <div className="form-actions">
             <Btn kind="primary" id="pcf-ov-save" guard={d} label="Save details" onClick={async () => {
               if (!dirty) return void ui.toast("No changes to save.", "info");
@@ -70,6 +73,28 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
           </div>
         </div>
       </Panel>
+        <Panel title="Summary">
+          <div className="form-grid">
+            <dl className="kv">
+              <div><dt>Key</dt><dd className="mono">{p.key}</dd></div>
+              <div><dt>Status</dt><dd>{p.status === "archived" ? "Archived" : p.killed ? "Killed" : p.halted ? "Halted" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</dd></div>
+              <div><dt>Template</dt><dd>{tpl ? tpl.name : p.template}</dd></div>
+              <div><dt>Regulated</dt><dd>{p.regulated ? "Yes" : "No"}</dd></div>
+              <div><dt>Teams</dt><dd>{p.teams.map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "None"}</dd></div>
+              <div><dt>Owner</dt><dd>{actor(p.owner).name.replace(" (agent)", "")}</dd></div>
+              <div><dt>Slots</dt><dd>{String(p.flow.slots)}</dd></div>
+              <div><dt>Budget</dt><dd>{p.budget.monthly ? `${fmt.money0(p.budget.mtd)} / ${fmt.money0(p.budget.monthly)}` : "None set"}</dd></div>
+              <div><dt>Created</dt><dd>{fmt.istDate(p.created)}</dd></div>
+            </dl>
+            <div className="pcf-belt-row"><MiniBelt cat={cat} project={p} counts={metricsOf(p).byPosition} /></div>
+            <p className="small" id="pcf-flow-sum">
+              {`${stations} stations, ${gates} gates, ${p.flow.bays.length} bays, ${p.flow.classes.length} work classes. `}
+              {custom.length ? <span><span className="hm-lbl">Custom </span>{`${custom.join(", ")}.`}</span> : <span className="muted">No custom entries.</span>}
+            </p>
+          </div>
+        </Panel>
+      </div>
+      <div className="cols">
         <Panel title="Repos" tools={<Btn small kind="ghost" id="pcf-to-onb" label="Onboarding" onClick={() => navigate("onboarding")} />}>
           {repos.length ? (
             <ul className="plain-list pcf-repos">
@@ -95,28 +120,6 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
           <div className="form-grid">
             <p className="small muted">Save this project's stations, gates, bays, slots and class routes as a template for new projects, custom entries included.</p>
             <div><Btn icon="copy" id="pcf-save-tpl" guard={td} label="Save as template" onClick={() => saveAs(p)} /></div>
-          </div>
-        </Panel>
-      </div>
-      <div className="pcf-stack">
-        <Panel title="Facts">
-          <div className="form-grid">
-            <dl className="pcf-kv">
-              <div><dt>Key</dt><dd className="mono">{p.key}</dd></div>
-              <div><dt>Status</dt><dd>{p.status === "archived" ? "Archived" : p.killed ? "Killed" : p.halted ? "Halted" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</dd></div>
-              <div><dt>Template</dt><dd>{tpl ? tpl.name : p.template}</dd></div>
-              <div><dt>Regulated</dt><dd>{p.regulated ? "Yes" : "No"}</dd></div>
-              <div><dt>Teams</dt><dd>{p.teams.map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "None"}</dd></div>
-              <div><dt>Created</dt><dd>{fmt.istDate(p.created)}</dd></div>
-            </dl>
-            <Field label="Owner" htmlFor="pcf-owner" hint="The owner is the default fallback approver and gets budget alerts.">
-              <Select id="pcf-owner" disabled={locked} options={owners.map((x) => ({ value: x.id, label: `${x.name} · ${x.title}` }))} value={p.owner} onChange={async (v) => res(await ops.setProject(p.id, "owner", v, { ifMatch: p.version }), `Owner is now ${actor(v).name.replace(" (agent)", "")}.`)} />
-            </Field>
-            <div className="pcf-belt-row"><MiniBelt cat={cat} project={p} counts={metricsOf(p).byPosition} /></div>
-            <p className="small" id="pcf-flow-sum">
-              {`${stations} stations, ${gates} gates, ${p.flow.bays.length} bays, ${p.flow.classes.length} work classes. `}
-              {custom.length ? <span><span className="hm-lbl">Custom </span>{`${custom.join(", ")}.`}</span> : <span className="muted">No custom entries.</span>}
-            </p>
           </div>
         </Panel>
       </div>
