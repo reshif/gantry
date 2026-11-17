@@ -1,9 +1,9 @@
 /** The Pipeline tab: repos per stage, the waiting-for-merge callout, the filter bar and the table of repos. */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Empty, FilterBar, Panel, SearchBox, Segmented } from "../../ui/primitives";
+import { Empty, FilterBar, SearchBox, Segmented } from "../../ui/primitives";
 import { DataTable, type Col } from "../../ui/SortTable";
-import { Icon } from "../../ui/Icon";
+import { CrIcon, Stats } from "../../ui/cr";
 import { STAGES, StatusChip, Steps, gaps, isStopped, needsMerge, stageIndex, stageName, status, useIntegrationsFor, useTeamName, type RepoV } from "./kit";
 
 type Filter = "all" | "attention" | "progress" | "ready";
@@ -30,8 +30,8 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
       key: "name", label: "Repo", sort: (r) => r.name,
       render: (r) => (
         <div className="onb-repo">
-          <span className="mono strong">{r.name}</span>
-          <button type="button" className="linkish small" id={`onb-detail-${r.id}`} onClick={(e) => { e.stopPropagation(); details(r.id); }}>Details</button>
+          <span className="row nowrap"><span className="mono strong rl">{r.name}</span>
+          <button type="button" className="linkish small" id={`onb-detail-${r.id}`} onClick={(e) => { e.stopPropagation(); details(r.id); }}>Details</button></span>
           <span className="muted small">{`${r.lang || "Language not read yet"} · ${teamName(r.team)} · ${sourceName(r)}${r.tags.length ? ` · ${r.tags.join(", ")}` : ""}`}</span>
         </div>
       ),
@@ -62,24 +62,11 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
 
   return (
     <div className="onb-pipe">
-      <ol className="onb-strip" aria-label="Repos per onboarding stage">
-        {STAGES.map((s, i) => (
-          <li key={s.id} className={counts[i] ? "has-n" : ""}>
-            <span className="onb-strip-no">{`Stage ${i + 1}`}</span>
-            <span className="onb-strip-n">{String(counts[i])}</span>
-            <span className="onb-strip-l">{s.name}</span>
-          </li>
-        ))}
-        <li className={`onb-strip-off${stopped ? " has-n" : ""}`}>
-          <span className="onb-strip-no">Off belt</span>
-          <span className="onb-strip-n">{String(stopped)}</span>
-          <span className="onb-strip-l">Stopped</span>
-        </li>
-      </ol>
+      <Stats id="onb-strip" items={[...STAGES.map((s, i) => ({ l: `${i + 1} · ${s.name}`, v: String(counts[i]), tone: (counts[i] ? "info" : undefined) as "info" | undefined })), { l: "Off belt", v: String(stopped), d: "Stopped", tone: (stopped ? "bad" : undefined) as "bad" | undefined }]} />
       {waiting.length ? (
-        <div className="callout callout-warn onb-callout">
-          <Icon name="st-wait" />
-          <div>
+        <div className="banner warn onb-callout">
+          <CrIcon name="warn" />
+          <div className="grow">
             <strong>{`${waiting.length} onboarding PR${waiting.length > 1 ? "s are" : " is"} green and waiting for a person to approve and merge: `}</strong>
             {waiting.map((r, i) => (
               <span key={r.id}>
@@ -96,7 +83,6 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
             <SearchBox id="onb-search" value={q} onChange={setQ} placeholder="Search repos" />
             <Segmented name="onb-filter" label="Filter repos" value={filter} onChange={(v) => setFilter(v as Filter)} items={[{ id: "all", label: "All" }, { id: "attention", label: "Needs action" }, { id: "progress", label: "In progress" }, { id: "ready", label: "Ready" }]} />
           </FilterBar>
-          <Panel flush>
             <DataTable<RepoV>
               id="onb-table"
               caption="Repos and their onboarding state"
@@ -110,7 +96,6 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
               pageSize={8}
               empty={{ title: "No repos match", text: "Pick another filter, or clear the search.", action: <button type="button" className="btn btn-sm" id="onb-filter-clear" onClick={() => { setFilter("all"); setQ(""); }}>Show all</button> }}
             />
-          </Panel>
         </>
       ) : (
         <Empty id="onb-empty" icon="folder" title="No repos yet" text="Connect a repo the GitHub App is installed on to start onboarding." />

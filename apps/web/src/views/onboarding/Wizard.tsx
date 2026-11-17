@@ -4,15 +4,15 @@ import type { Project } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useMcpServers } from "../../api/queries";
-import { Dialog } from "../../ui/Overlay";
-import { Field, LockNote } from "../../ui/primitives";
+import { Card } from "../../ui/cr";
+import { Btn, Field, LockNote } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { draftFrom, orgOf, patchFrom, useAvailableRepos, useIntegrationsFor, useTeamName, type Draft, type RepoV } from "./kit";
 import { SecConventions, SecMCP, SecOwnership, SecSource, SecTriggers } from "./Settings";
 
 const WSTEPS = ["Repo", "Ownership", "MCP", "Triggers", "Conventions", "Review"];
 
-export function ConnectWizard({ project, repos, close, onDone }: { project: Project; repos: RepoV[]; close: () => void; onDone: (repoId: string) => void }) {
+export function ConnectWizard({ project, repos, onCancel, onDone }: { project: Project; repos: RepoV[]; onCancel: () => void; onDone: (repoId: string) => void }) {
   const ui = useUI();
   const dec = useCan("repo.onboard", { project: project.id });
   const teamName = useTeamName();
@@ -46,7 +46,7 @@ export function ConnectWizard({ project, repos, close, onDone }: { project: Proj
     return null;
   };
 
-  const next = async (done: () => void) => {
+  const next = async () => {
     const v = validate();
     if (v) return setErr(v);
     setErr("");
@@ -61,7 +61,8 @@ export function ConnectWizard({ project, repos, close, onDone }: { project: Proj
     const y = await ops.configureRepo(repo.id, patchFrom(d), repo.version !== undefined ? { ifMatch: repo.version } : undefined);
     setBusy(false);
     ui.toast(`${x.msg}${y.ok ? " Settings saved." : ` Settings not saved: ${y.msg}`}`, y.ok ? "ok" : "warn");
-    done();
+    setD(draftFrom(null, project, dests));
+    setStep(0);
     onDone(repo.id);
   };
 
@@ -77,12 +78,12 @@ export function ConnectWizard({ project, repos, close, onDone }: { project: Proj
           <div className="field">
             <div className="field-label">Available from the GitHub App</div>
             {available.length ? (
-              <div className="radio-cards onb-avail">
+              <div className="list onb-avail" style={{ border: "1px solid var(--line)", borderRadius: 6 }}>
                 {available.map((a, i) => (
-                  <label key={a.repo} className="radio-card" htmlFor={`onb-w-av-${i}`}>
-                    <input type="radio" name="onb-w-avail" id={`onb-w-av-${i}`} checked={d.name === a.repo} onChange={() => set({ name: a.repo })} />
-                    <span className="rc-t mono">{a.repo}</span>
-                    <span className="rc-d">{a.lang}</span>
+                  <label key={a.repo} className="li click" htmlFor={`onb-w-av-${i}`}>
+                    <input type="radio" className="cb" name="onb-w-avail" id={`onb-w-av-${i}`} checked={d.name === a.repo} onChange={() => set({ name: a.repo })} />
+                    <span className="main1"><span className="t1 mono">{a.repo}</span><span className="t2">{`${a.lang} · default branch main`}</span></span>
+                    <span className="tag">{a.lang}</span>
                   </label>
                 ))}
               </div>
@@ -123,29 +124,29 @@ export function ConnectWizard({ project, repos, close, onDone }: { project: Proj
     );
   }
 
+  const titles = ["Choose a repository", "Ownership", "MCP servers", "Triggers", "Conventions", "Review and connect"];
   return (
-    <Dialog
-      title={`Connect a repo to ${project.name}`} wide onClose={close}
-      body={
-        <div>
-          <ol className="stepper onb-wsteps" aria-label="Steps">
-            {WSTEPS.map((s, i) => (
-              <li key={s} className={i === step ? "is-on" : i < step ? "is-done" : ""} aria-current={i === step ? "step" : undefined}>
-                <span className="mono">{i < step ? "✓" : String(i + 1)}</span>
-                {s}
-              </li>
-            ))}
-          </ol>
-          <LockNote decision={dec} what="Connecting repos" />
-          {sec}
-          <div className="form-err" role="alert">{err}</div>
-        </div>
-      }
-      actions={[
-        { label: "Cancel" },
-        { label: "Back", id: "onb-w-back", ...(step === 0 ? { guard: { allowed: false, reason: "This is the first step" } } : {}), onClick: () => { if (step > 0) { setErr(""); setStep(step - 1); } } },
-        { label: busy ? "Connecting…" : step === WSTEPS.length - 1 ? "Connect repo" : "Next", kind: "primary", submit: true, id: "onb-w-next", guard: dec, onClick: (done) => void next(done) },
-      ]}
-    />
+    <>
+      <div className="wiz" role="list" aria-label="Steps">
+        {WSTEPS.map((s, i) => (
+          <span key={s} role="listitem" className={`w ${i === step ? "cur" : i < step ? "done" : ""}`} aria-current={i === step ? "step" : undefined}>
+            <i>{i < step ? "✓" : String(i + 1)}</i>
+            {s}
+          </span>
+        ))}
+      </div>
+      <Card title={titles[step] ?? ""} hint={step === 0 ? `Connected through ${src?.name ?? "the GitHub App"}` : undefined}>
+        <LockNote decision={dec} what="Connecting repos" />
+        {sec}
+        <div className="form-err" role="alert">{err}</div>
+      </Card>
+      <div className="row spread" style={{ marginTop: 16 }}>
+        <span className="row">
+          <Btn label="Cancel" onClick={onCancel} />
+          <Btn label="Back" id="onb-w-back" {...(step === 0 ? { guard: { allowed: false, reason: "This is the first step" } } : {})} onClick={() => { if (step > 0) { setErr(""); setStep(step - 1); } }} />
+        </span>
+        <Btn kind="primary" label={busy ? "Connecting…" : step === WSTEPS.length - 1 ? "Connect repo" : "Continue"} id="onb-w-next" guard={dec} onClick={() => void next()} />
+      </div>
+    </>
   );
 }

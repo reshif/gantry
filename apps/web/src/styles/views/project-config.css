@@ -5,7 +5,7 @@
 .pcf-num { width: 76px; }
 .pcf-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pcf-belt-row { padding-top: 4px; }
-.pcf-repos li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; border-bottom: 1px dotted var(--line); padding: 3px 0; }
+.pcf-repos li { flex-wrap: nowrap; }
 .pcf-stage { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); text-transform: capitalize; color: var(--accent); }
 .pcf-stage .ic { width: 13px; height: 13px; }
 .pcf-stage-ready { color: var(--done); }

@@ -154,6 +154,26 @@ function metrics(i: number, projectId: string) {
   return { wip: specs.length, bays: 0, gates: Object.values(byGate).reduce((a, b) => a + b, 0), oldest: 5 * HOUR, late: 0, eff: 0.82, effN: 12, cov: { total: 8, auto: 3, share: 0.3 }, bad, haltedRepos: 0, byPosition, byClass: {}, byGate, slotsUsed: 4, onboarding: 0, health: { id: i === 6 ? "halted" : bad ? "attention" : "ok", label: i === 6 ? "Halted" : bad ? "Needs attention" : "Healthy", icon: "st-done" } };
 }
 
+/** Repos of the payments project at every onboarding stage (the onboarding and project-config screens). */
+function reposFor(project: string) {
+  const mk = (name: string, lang: string, stage: string, extra: Record<string, unknown> = {}, findings = 6, gapsN = 0) => ({
+    id: name.split("/")[1], name, project, team: "platform", tags: lang === "Go" ? ["regulated"] : [], lang, halted: null,
+    config: { defaultBranch: "main", branchPrefix: "gantry/", merge: "squash", tagging: "semver", requiredChecks: ["ci/test", "ci/lint"], protectedPaths: [".github/workflows/**", "CODEOWNERS"] },
+    mcp: [], notifyOverrides: [], triggers: true, guidelines: "", source: undefined, version: 1,
+    onboarding: {
+      stage, startedAt: NOW - 3 * DAY, readyAt: stage === "ready" ? NOW - 2 * DAY : undefined, exception: null, timeline: [{ at: NOW - 3 * DAY, who: "p-admin", text: "Connected" }], busy: null, verification: null,
+      findings: stage === "connected" ? [] : Array.from({ length: findings }, (_, i) => ({ id: `f${i}`, check: ["Tests run in CI", "Coverage reported", "CODEOWNERS present", "Secrets scan", "Branch protection", "Guidelines file"][i % 6], ok: i >= gapsN, sev: "medium", fix: "Add the file", file: i < gapsN ? "CODEOWNERS" : null })),
+      pr: ["pr_opened", "pr_checks", "pr_merged", "verified", "ready"].includes(stage) ? { number: 3, title: "Onboard to Gantry", branch: "gantry/onboarding", files: [{ path: ".github/workflows/gantry.yml", plus: 80, minus: 0, finding: "f0" }, { path: "CODEOWNERS", plus: 4, minus: 1, finding: "f2" }, { path: "gantry/guidelines.md", plus: 120, minus: 0, finding: "f5" }], checks: stage === "pr_opened" ? "running" : "green", state: ["pr_merged", "verified", "ready"].includes(stage) ? "merged" : "open", reviewers: [], mergedBy: null } : null,
+      ...extra,
+    },
+  });
+  return [
+    mk("acme/payments-api", "Go", "ready"), mk("acme/ledger-sync", "Go", "ready"), mk("acme/merchant-portal", "TypeScript", "ready"),
+    mk("acme/refund-worker", "Python", "pr_checks", {}, 6, 2), mk("acme/payout-batch", "Java", "assessed", {}, 6, 3),
+    mk("acme/notify-worker", "Python", "connected"), mk("acme/fraud-rules", "Rust", "person", { blocker: "Needs a person to pick the default branch" }, 6, 2),
+  ];
+}
+
 export function richOverrides(): Record<string, Handler> {
   const ov: Record<string, Handler> = {};
   const me = { ...PERSONAS.admin.me, projects: PROJECTS.map((p, i) => ({ id: p.id, name: p.name, key: p.key, status: "active", halted: "halted" in p && p.halted ? { by: "p-admin", at: NOW - 3 * HOUR, reason: "x" } : null, killed: null, order: i })) };
@@ -175,7 +195,7 @@ export function richOverrides(): Record<string, Handler> {
       return fulfillJson(r, { items: items.slice(0, lim), total: items.length, next: null });
     };
     Object.assign(ov, woReadOverrides(floorFor(p.id).workOrders as never, p.id));
-    ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, []);
+    ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, p.id === "payments" ? reposFor(p.id) : []);
   }
   ov["activity"] = (r) => fulfillJson(r, events());
   ov["agents"] = (r) => fulfillJson(r, agents());

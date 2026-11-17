@@ -7,6 +7,7 @@ import { useMe, useRepos } from "../../api/queries";
 import { navigate } from "../../lib/router";
 import { Btn, Chip, Empty, Field, LockNote, Panel, Select, Who } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
+import { Stats } from "../../ui/cr";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { MiniBelt, metricsOf, projectRoles, roleName, useRes, useTeams } from "../projects/kit";
@@ -39,10 +40,9 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
   const ui = useUI();
   const stations = p.flow.order.length;
   const gates = cat.gates.filter((g) => p.flow.gates[g.id] && !p.flow.gates[g.id]!.absent).length;
-  void m;
   return (
-    <div className="two-col">
-      <div className="pcf-stack">
+    <div className="grid g-main2">
+      <div className="stack">
       <Panel title="About this project">
         <div className="form-grid">
           <LockNote decision={d} what="Project details" />
@@ -70,14 +70,23 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
           </div>
         </div>
       </Panel>
-        <Panel title="Repos" tools={<Btn small kind="ghost" id="pcf-to-onb" label="Onboarding" onClick={() => navigate("onboarding")} />}>
+        <Panel title="Reuse">
+          <div className="form-grid">
+            <p className="small muted">Save this project's stations, gates, bays, slots and class routes as a template for new projects, custom entries included.</p>
+            <div><Btn icon="copy" id="pcf-save-tpl" guard={td} label="Save as template" onClick={() => saveAs(p)} /></div>
+          </div>
+        </Panel>
+      </div>
+      <div className="stack">
+        <Stats items={[{ l: "On belt", v: String(m.wip), tone: "info" }, { l: "Blocked", v: String(m.bad), tone: m.bad ? "bad" : "ok" }]} />
+        <Panel flush title="Repos" tools={<Btn small kind="ghost" id="pcf-to-onb" label="Onboarding" onClick={() => navigate("onboarding")} />}>
           {repos.length ? (
-            <ul className="plain-list pcf-repos">
+            <ul className="list pcf-repos">
               {repos.map((r) => {
                 const st = r.onboarding?.stage ?? "connected";
                 return (
-                  <li key={r.id}>
-                    <span className="mono">{r.name}</span>
+                  <li key={r.id} className="li">
+                    <span className="mono" style={{ flex: 1 }}>{r.name}</span>
                     <span className={`pcf-stage pcf-stage-${st}`}>
                       <Icon name={st === "ready" ? "st-done" : st === "failed" || st === "person" ? "alert" : "rocket"} />
                       {st === "ready" ? "Ready" : st === "person" ? "Needs a person" : st.replace("_", " ")}
@@ -91,14 +100,6 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
             <Empty title="No repos yet" text="Connect a repo in Onboarding. It must be Ready before work orders can target it." />
           )}
         </Panel>
-        <Panel title="Reuse">
-          <div className="form-grid">
-            <p className="small muted">Save this project's stations, gates, bays, slots and class routes as a template for new projects, custom entries included.</p>
-            <div><Btn icon="copy" id="pcf-save-tpl" guard={td} label="Save as template" onClick={() => saveAs(p)} /></div>
-          </div>
-        </Panel>
-      </div>
-      <div className="pcf-stack">
         <Panel title="Facts">
           <div className="form-grid">
             <dl className="pcf-kv">
