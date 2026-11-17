@@ -42,6 +42,8 @@ export interface GithubConfig {
   /** Poll only when the API has repos; 0 disables the loop (tests, or when webhooks arrive). */
   helperImage: string;
   dockerSocket: string;
+  /** The workspace socket proxy (gantry-sockproxy-ws). When set it is used instead of the socket. */
+  dockerProxy?: { host: string; port: number };
   /** Scratch space for clones and object copies. */
   scratchDir: string;
   /** Name of the Gantry gate check (spec 11.2). */
@@ -61,6 +63,7 @@ const Env = z.object({
   GITHUB_POLL_INTERVAL_MS: z.coerce.number().int().nonnegative().default(30_000),
   GITHUB_HELPER_IMAGE: z.string().default("gantry-github:dev"),
   DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
+  DOCKER_PROXY_URL: z.string().url().optional(),
   GITHUB_SCRATCH_DIR: z.string().default("/tmp"),
   GITHUB_GATE_CHECK_NAME: z.string().default("Gantry gates"),
   GITHUB_ISSUE_LABEL: z.string().default("gantry"),
@@ -92,5 +95,6 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     writesPerMinute: e.GITHUB_WRITES_PER_MINUTE, writeBurst: e.GITHUB_WRITE_BURST, pollIntervalMs: e.GITHUB_POLL_INTERVAL_MS,
     helperImage: e.GITHUB_HELPER_IMAGE, dockerSocket: e.DOCKER_SOCKET, scratchDir: e.GITHUB_SCRATCH_DIR, gateCheckName: e.GITHUB_GATE_CHECK_NAME,
     maxWorkspaceBytes: 1024 * 1024 * 1024, maxPatchBytes: 2 * 1024 * 1024, maxCommitsPerPublish: 200, issueLabel: e.GITHUB_ISSUE_LABEL, gitBin: e.GITHUB_GIT_BIN,
+    ...(e.DOCKER_PROXY_URL ? { dockerProxy: { host: new URL(e.DOCKER_PROXY_URL).hostname, port: Number(new URL(e.DOCKER_PROXY_URL).port || 2376) } } : {}),
   };
 }
