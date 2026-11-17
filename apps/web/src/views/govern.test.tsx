@@ -6,6 +6,7 @@ import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import PeopleView from "./people";
+import PersonView from "./person";
 import AccessView from "./access";
 import SecurityView from "./security";
 
@@ -96,9 +97,13 @@ describe("People", () => {
   it("lists teams and members, and decides effective permissions from the server's cells", async () => {
     setup();
     mount(<PeopleView />);
-    expect(await screen.findByRole("heading", { name: "Asha Raman" })).toBeTruthy();
+    expect(await screen.findByText("Asha Raman")).toBeTruthy();
     expect(screen.getByText("Tomas Eriksen")).toBeTruthy();
     expect(screen.getByText("invited")).toBeTruthy();
+    cleanup();
+    window.location.hash = "#person/p-asha";
+    mount(<PersonView />);
+    expect(await screen.findByRole("heading", { name: "Asha Raman" })).toBeTruthy();
     const yes = await screen.findByText("Submit work order");
     expect(yes.closest("tr")?.querySelector(".eff-cell.is-yes")).toBeTruthy();
     const rel = screen.getByText("Release").closest("tr")!;
@@ -107,7 +112,8 @@ describe("People", () => {
 
   it("shows the reason for a cell from the simulator", async () => {
     setup({ "POST /api/v1/access/simulate": () => ({ body: { ok: true, decision: { allowed: false, reason: "Outside the release window.", needs: "Wait for Monday", rule: { id: "POL-101", name: "Release window", kind: "policy" } }, trace: [], week: [] } }) });
-    mount(<PeopleView />);
+    window.location.hash = "#person/p-asha";
+    mount(<PersonView />);
     const cell = await waitFor(() => {
       const c = document.getElementById("ppl-eff-payments-release");
       if (!c) throw new Error("no cell");
@@ -183,8 +189,8 @@ describe("People", () => {
 
   it("a step-up refusal nobody resolved is shown as its message (the shell's prompt handles the rest)", async () => {
     setup({ "PUT /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ status: 403, body: { ok: false, msg: "Sign in again to confirm this change.", needs: "step_up" } }) });
-    mount(<PeopleView />);
-    fireEvent.click(await byId("ppl-mem-platform-p-tomas"));
+    window.location.hash = "#person/p-tomas";
+    mount(<PersonView />);
     const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "factory_admin" } });
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Covering for Asha" } });
@@ -197,8 +203,8 @@ describe("People", () => {
       "PUT /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ body: { ok: true, msg: "Granted Factory Admin to Tomas Eriksen.", version: 2 } }),
       "DELETE /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ body: { ok: true, msg: "Removed Factory Admin from Tomas Eriksen.", version: 3 } }),
     });
-    mount(<PeopleView />);
-    fireEvent.click(await byId("ppl-mem-platform-p-tomas"));
+    window.location.hash = "#person/p-tomas";
+    mount(<PersonView />);
     const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "factory_admin" } });
     expect(await screen.findByText(/A factory role applies on every project/)).toBeTruthy();

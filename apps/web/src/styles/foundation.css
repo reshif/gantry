@@ -227,9 +227,9 @@ textarea.input { padding: 7px 10px; }
 .filterbar .filterbar-count { margin-left: auto; color: var(--muted); font-size: var(--t-md); }
 .filterbar .filterbar-end { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-left: auto; }
 .filterbar .filterbar-count + .filterbar-end { margin-left: 0; }
-.filterbar .searchbox { position: relative; display: inline-flex; align-items: center; }
-.filterbar .searchbox .ic { position: absolute; left: 9px; color: var(--faint); width: 14px; height: 14px; pointer-events: none; }
-.filterbar .searchbox .input { padding-left: 28px; min-width: 200px; }
+.searchbox { position: relative; display: inline-flex; align-items: center; }
+.searchbox .ic { position: absolute; left: 9px; color: var(--faint); width: 14px; height: 14px; pointer-events: none; }
+.searchbox .input { padding-left: 28px; min-width: 200px; }
 .filters .field { border-radius: var(--r1); border-color: var(--line); background: var(--surface); }
 .filters .field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 

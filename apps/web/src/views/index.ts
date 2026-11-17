@@ -23,6 +23,7 @@ export const VIEWS: Record<string, LazyExoticComponent<ComponentType>> = {
   mcp: lazy(() => import("./mcp")),
   api: lazy(() => import("./api")),
   people: lazy(() => import("./people")),
+  person: lazy(() => import("./person")),
   workload: lazy(() => import("./workload")),
   access: lazy(() => import("./access")),
   security: lazy(() => import("./security")),

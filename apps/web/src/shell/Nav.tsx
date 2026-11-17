@@ -121,7 +121,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
               <ul className="nav-list">
                 {items.map((it) => {
                   const bd = badges[it.id];
-                  const active = current === it.id || (it.id === "work-orders" && current === "record");
+                  const active = current === it.id || (it.id === "work-orders" && current === "record") || (it.id === "people" && current === "person");
                   return (
                     <li key={it.id}>
                       <a

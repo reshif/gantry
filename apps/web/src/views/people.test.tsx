@@ -7,6 +7,7 @@ import { bindQueryClient } from "../api/keys";
 import { setCsrfToken, setStepUpHandler } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import PeopleView from "./people";
+import PersonView from "./person";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
 interface Call { method: string; path: string; body: any; ifMatch?: string }
@@ -61,10 +62,12 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
   return calls;
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-function mount() {
+/** The list page; with a person id, that person's own page. */
+function mount(personId?: string) {
+  if (personId) window.location.hash = `#person/${personId}`;
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
-  return render(<QueryClientProvider client={qc}><OverlayProvider><PeopleView /></OverlayProvider></QueryClientProvider>);
+  return render(<QueryClientProvider client={qc}><OverlayProvider>{personId ? <PersonView /> : <PeopleView />}</OverlayProvider></QueryClientProvider>);
 }
 const writes = (calls: Call[]) => calls.filter((c) => c.method !== "GET" && c.path !== "/api/v1/can");
 
@@ -138,8 +141,7 @@ describe("People & teams: roles for teams", () => {
 describe("People & teams: a member's roles and where permissions come from", () => {
   it("separates direct roles from roles inherited via a team", async () => {
     setup();
-    mount();
-    fireEvent.click(await byId("ppl-mem-payments-p-tomas"));
+    mount("p-tomas");
     const held = await byId("ppl-held");
     await waitFor(() => expect(document.getElementById("ppl-held")?.textContent).toContain("Reviewer · Payments Platform · via Payments"));
     const [direct, inherited] = Array.from(held.querySelectorAll(":scope > div"));
@@ -150,8 +152,7 @@ describe("People & teams: a member's roles and where permissions come from", () 
 
   it("marks effective-permission cells with their source", async () => {
     setup();
-    mount();
-    fireEvent.click(await byId("ppl-mem-payments-p-tomas"));
+    mount("p-tomas");
     const cell = await byId(`ppl-eff-payments-${gate.id.replace(/\./g, "_")}`);
     expect(cell.getAttribute("data-tip")).toContain("Role via Payments.");
     expect(cell.textContent).toContain("allowed, via Payments");
@@ -172,7 +173,6 @@ describe("People & teams: default deny", () => {
 
 describe("People & teams: deactivate", () => {
   const open = async () => {
-    fireEvent.click(await byId("ppl-mem-payments-p-tomas"));
     fireEvent.click(await byId("ppl-deactivate"));
     return byId("ppl-off");
   };
@@ -188,7 +188,7 @@ describe("People & teams: deactivate", () => {
 
   it("lists what the person holds with a consequence for each", async () => {
     setup(base());
-    mount();
+    mount("p-tomas");
     const dlg = await open();
     await waitFor(() => expect(dlg.textContent).toContain("CI bot"));
     expect(dlg.textContent).toContain("Engineer · Payments Platform");
@@ -198,7 +198,7 @@ describe("People & teams: deactivate", () => {
 
   it("needs a reason of 10 characters and sends nothing until then", async () => {
     const calls = setup(base());
-    mount();
+    mount("p-tomas");
     await open();
     typeReason("too short");
     fireEvent.click(await byId("ppl-off-submit"));
@@ -208,7 +208,7 @@ describe("People & teams: deactivate", () => {
 
   it("shows the server's refusal and rule verbatim", async () => {
     setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => ({ status: 409, body: { ok: false, msg: "Tomás is the only approver for Payments.", rule: { kind: "invariant", id: "INV-14.4", name: "Last approver" } } }) });
-    mount();
+    mount("p-tomas");
     await open();
     typeReason("Left the company on Friday");
     fireEvent.click(await byId("ppl-off-submit"));
@@ -218,7 +218,7 @@ describe("People & teams: deactivate", () => {
 
   it("on success sends reason, keepKeys and If-Match, then lists the server's open work with links", async () => {
     const calls = setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => ({ body: { ok: true, msg: "Deactivated.", openWork: [{ id: "WO-9", title: "Fix refund", project: "payments", state: "running", roles: ["assignee"] }, { id: "WO-12", title: "Ship it", project: "payments", state: "gated", roles: ["sole_approver"], gate: "review" }] } }) });
-    mount();
+    mount("p-tomas");
     await open();
     fireEvent.click(await byId("ppl-off-keep"));
     typeReason("Left the company on Friday");
@@ -238,7 +238,7 @@ describe("People & teams: deactivate", () => {
 
   it("shows the server's list only, never the client preview, after success", async () => {
     setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => ({ body: { ok: true, msg: "Deactivated.", openWork: [] } }) });
-    mount();
+    mount("p-tomas");
     await open();
     await waitFor(() => expect(document.getElementById("ppl-off-work")?.textContent).toContain("WO-9"));
     typeReason("Left the company on Friday");
@@ -253,7 +253,7 @@ describe("People & teams: deactivate", () => {
     const calls = setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => (n++ === 0 ? { status: 403, body: { ok: false, msg: "Sign in again.", needs: "step_up", rule: { kind: "step-up", id: "STEP-UP" } } } : { body: { ok: true, msg: "Deactivated.", openWork: [] } }) });
     const asked = vi.fn(async () => ({ ok: true as const }));
     setStepUpHandler(asked);
-    mount();
+    mount("p-tomas");
     await open();
     typeReason("Left the company on Friday");
     fireEvent.click(await byId("ppl-off-submit"));
@@ -266,7 +266,7 @@ describe("People & teams: deactivate", () => {
 
   it("says a list is not shown when the viewer cannot read it, instead of claiming none", async () => {
     setup({ ...base(), "GET /api/v1/api-keys": () => ({ status: 403, body: { ok: false, msg: "No." } }) });
-    mount();
+    mount("p-tomas");
     const dlg = await open();
     await waitFor(() => expect(dlg.textContent).toContain("your access does not cover this list"));
   });
@@ -280,7 +280,9 @@ describe("People & teams: deactivate", () => {
     expect(ines.textContent).toContain("deactivated");
     expect(ines.className).toContain("is-off");
     expect(tomas.compareDocumentPosition(ines) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(ines);
+    expect(ines.getAttribute("href")).toBe("#person/p-ines");
+    cleanup();
+    mount("p-ines");
     expect(document.getElementById("ppl-deactivate")).toBeNull();
     fireEvent.click(await byId("ppl-reactivate"));
     const ta = await waitFor(() => { const e = document.querySelector<HTMLTextAreaElement>("dialog textarea, [role=dialog] textarea, .dlg textarea"); if (!e) throw new Error("no reason box"); return e; });
@@ -299,16 +301,14 @@ describe("People & teams: deactivate", () => {
 
   it("locks Deactivate for the last Factory Admin with the reason", async () => {
     setup({ "GET /api/v1/me": () => ({ body: { ...ME, person: PEOPLE[1] } }) });
-    mount();
-    fireEvent.click(await byId("ppl-mem-platform-p-asha"));
+    mount("p-asha");
     const btn = await byId("ppl-deactivate");
     expect(btn.getAttribute("aria-description")).toContain("only Factory Admin");
   });
 
   it("locks Deactivate on yourself with the reason", async () => {
     setup();
-    mount();
-    fireEvent.click(await byId("ppl-mem-platform-p-asha"));
+    mount("p-asha");
     const btn = await byId("ppl-deactivate");
     expect(btn.getAttribute("aria-description")).toContain("cannot deactivate yourself");
   });
