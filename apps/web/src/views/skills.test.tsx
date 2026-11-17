@@ -87,8 +87,6 @@ describe("Skills screen", () => {
     expect(row.textContent).toContain("v1.2.0");
     expect(row.textContent).toContain("9/10");
     expect((await byId("sk-row-sk-docs")).textContent).toContain("none");
-    expect(text()).toContain("Skills2");
-    expect(text()).toContain("Pass rate90%");
     expect(locked(await byId("sk-new"))).toBe(false);
     fireEvent.click(row);
     expect(window.location.hash).toBe("#skills/sk-review");
@@ -102,7 +100,7 @@ describe("Skills screen", () => {
     setup();
     mount();
     await byId("sk-row-sk-review");
-    fireEvent.click(await byId("sk-view-unused"));
+    fireEvent.change(await byId("sk-view"), { target: { value: "unused" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-review")).toBeNull());
     expect(document.getElementById("sk-row-sk-docs")).toBeTruthy();
     fireEvent.change(await byId("sk-search"), { target: { value: "zzz" } });

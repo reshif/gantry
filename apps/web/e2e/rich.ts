@@ -6,6 +6,7 @@
  */
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Page } from "@playwright/test";
+import { workforceOverrides } from "./rich-workforce";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
@@ -79,7 +80,7 @@ let _agents: unknown[] | null = null;
 function agents() {
   if (_agents) return _agents;
   const names: Record<string, string> = { "ag-intake": "Intake Clerk", "ag-research": "Researcher", "ag-spec": "Spec Writer", "ag-design": "Designer", "ag-plan": "Planner", "ag-build": "Builder", "ag-test": "Test Engineer", "ag-review": "Reviewer", "ag-close": "Release Captain" };
-  _agents = cat.stations.map((s) => ({ id: s.agent, name: names[s.agent] ?? s.agent, station: s.id, model: "claude-sonnet", fallbacks: [], version: "1.4.0", status: "active", autonomy: { level: 2 }, tools: {}, skills: [], mcp: [], stations: [s.id], projects: "all", budget: 40, guardrails: { paths: [], maxDiff: 800 }, suite: "su-" + s.id, instructions: "", overrides: {}, versions: [], spark: [], spend7d: 12.4, initials: (names[s.agent] ?? "AG").split(" ").map((x) => x[0]).join("").slice(0, 2) }));
+  _agents = cat.stations.map((s) => ({ id: s.agent, name: names[s.agent] ?? s.agent, station: s.id, model: "claude-sonnet", fallbacks: [], version: "1.4.0", status: "active", autonomy: "gate", evalScore: 0.9, threshold: 0.85, suiteName: "Golden set", rev: 1, runs30: 120, rework: 0.06, tools: {}, skills: [], mcp: [], stations: [s.id], projects: "all", budget: 40, guardrails: { paths: [], maxDiff: 800 }, suite: "su-" + s.id, instructions: "", overrides: {}, versions: [], spark: [], spend7d: 12.4, initials: (names[s.agent] ?? "AG").split(" ").map((x) => x[0]).join("").slice(0, 2) }));
   return _agents;
 }
 
@@ -194,6 +195,7 @@ export function richOverrides(): Record<string, Handler> {
       },
     });
   ov["people"] = (r) => fulfillJson(r, [person("p-admin", "Asha Raman", "Engineering Director", "factory_admin"), person("p-lead", "Meera Iyer", "Tech Lead", "tech_lead"), person("p-reader", "Rae Reader", "Auditor", "auditor")]);
+  Object.assign(ov, workforceOverrides());
   return ov;
 }
 
