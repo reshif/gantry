@@ -6,3 +6,5 @@
 !services/launcher/tsconfig.json
 !services/launcher/src
 !packages/domain/package.json
+!packages/domain/tsconfig.json
+!packages/domain/src

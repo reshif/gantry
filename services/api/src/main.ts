@@ -9,8 +9,8 @@ const pool = createPool("app", { applicationName: "gantry-api", max: 20 });
 const log = { info: (o: object, m?: string) => console.log(JSON.stringify({ level: "info", msg: m ?? "boot", ...o })) };
 const { orgId } = await bootstrapOrg(pool, config, log);
 const app = await buildApp({ pool, config, orgId });
-await app.listen({ host: config.host, port: config.port });
 startAnchoring(app, orgId, config.auditAnchorFile, anchorKeyFor(config.secrets.sessionKey));
+await app.listen({ host: config.host, port: config.port });
 
 const stop = async (): Promise<void> => {
   await app.close();
