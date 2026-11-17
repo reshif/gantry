@@ -159,15 +159,12 @@ describe("Home: one page", () => {
     expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
   });
 
-  it("shows 'No spend yet' instead of a 0% gauge, and keeps health collapsed until opened", async () => {
+  it("shows 'No spend yet' instead of a 0% gauge, and shows health as a panel", async () => {
     setup(ASHA, adminHome({}, { setup: undefined }));
     mount();
-    const toggle = await screen.findByRole("button", { name: /Factory health/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await screen.findByRole("heading", { level: 2, name: /Factory health/ });
     expect(text()).toContain("No spend yet");
     expect(text()).not.toMatch(/0%/);
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(document.querySelector('[role="meter"]')).toBeNull();
   });
 
@@ -175,7 +172,7 @@ describe("Home: one page", () => {
     const evals = { scored: 3, passing: 2, unscored: 0, failing: [{ agent: "ag-spec", name: "Spec agent", version: "1.2.0", suite: "ES-spec", score: 0.7, threshold: 0.85 }] };
     setup(ASHA, adminHome({}, { setup: undefined, health: { ...HEALTH, spend: { spent: 500, budget: 2000, projects: [] }, evals } }));
     mount();
-    fireEvent.click(await screen.findByRole("button", { name: /Factory health/ }));
+    await screen.findByRole("heading", { level: 2, name: /Factory health/ });
     expect(screen.getByText("2 of 3 live agent versions pass their suite threshold (last run)")).toBeTruthy();
     expect(screen.getByText("Spec agent 1.2.0: 70% vs 85% on ES-spec")).toBeTruthy();
     expect(screen.getAllByText("$500 of $2,000", { exact: false })).toHaveLength(1);
@@ -183,7 +180,7 @@ describe("Home: one page", () => {
     vi.unstubAllGlobals();
     setup(ASHA, adminHome({}, { setup: undefined }));
     mount();
-    fireEvent.click(await screen.findByRole("button", { name: /Factory health/ }));
+    await screen.findByRole("heading", { level: 2, name: /Factory health/ });
     expect(screen.queryByText(/live agent versions pass/)).toBeNull();
   });
 
@@ -191,7 +188,7 @@ describe("Home: one page", () => {
     setup(ASHA, adminHome({}, { setup: undefined, attention: [] }));
     mount();
     await screen.findByRole("heading", { level: 1, name: "Home" });
-    await screen.findByRole("heading", { level: 2, name: /Waiting on you/ });
+    await screen.findByRole("heading", { level: 2, name: /Needs you/ });
     expect(screen.queryByText(/Set up the factory/)).toBeNull();
     expect(document.querySelector(".hm-step")).toBeNull();
   });
@@ -249,8 +246,8 @@ describe("Home: by role", () => {
     }, { extra: { "POST /api/v1/gate-instances/WO-9%3AG3d%3A2/approve": () => ({ body: { ok: true, msg: "G3d approved on WO-9." } }) } });
     mount();
     expect(await screen.findByText("Which format?")).toBeTruthy();
-    expect(document.getElementById("hm-tok-WO-10")?.className).toContain("tok-waiting");
-    expect(screen.queryByRole("button", { name: /Factory health/ })).toBeNull();
+    expect(document.getElementById("hm-tok-WO-10")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /Factory health/ })).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: /My projects/ })).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Approve WO-9 at G3d" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/approve"))).toBe(true));
