@@ -54,7 +54,7 @@ export default function WorkspaceView() {
   // On a narrow screen the inbox stacks above the conversation: opening one brings its pane to the top of the screen.
   const pane = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (!key || !window.matchMedia?.("(max-width: 820px)").matches) return;
+    if (!key || key === "inbox" || !window.matchMedia?.("(max-width: 820px)").matches) return;
     // after the shell has reset the page to its top for the new route
     const t = window.setTimeout(() => pane.current?.scrollIntoView?.({ block: "start" }), 0);
     return () => window.clearTimeout(t);
@@ -124,7 +124,7 @@ export default function WorkspaceView() {
   return (
     <div className="view ws-view">
       <ViewHead sheet="conversations" title="Conversations" sub="The dialogue between people and the agents at each station." actions={<Btn kind="primary" icon="plus" label="New chat" id="ws-conv-new" onClick={newChat} />} />
-      <div className="ws-grid">
+      <div className={`ws-grid${key === "inbox" ? " ws-nosel" : ""}`}>
         <Inbox me={me.person.id} items={items} loading={filter === "archived" ? archived.isLoading : all.isLoading} current={key} filter={cur} onFilter={setFilter} onPick={(k) => open(k)} onNew={newChat} onSearch={(s) => setQ(s)}
           operator={operator ? { show: true, active: key === "operator", onOpen: () => open("operator") } : null} />
         <main className="ws-main" aria-label="Conversation" ref={pane}>{main}</main>

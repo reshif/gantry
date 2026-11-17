@@ -133,7 +133,7 @@ describe("New work order", () => {
   async function open(extra: Record<string, (c: Call) => { status?: number; body: unknown } | undefined> = {}, o: Parameters<typeof mockApi>[1] = {}) {
     const calls = mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([]) }), "GET /api/v1/work-orders/WO-3000": traveler, ...extra }, o);
     mount(<Host />);
-    await screen.findByRole("button", { name: /New work order/ });
+    await screen.findByRole("button", { name: /Submit work order/ });
     // the same command the palette runs; the page button itself is locked when submitting is blocked
     act(() => void runCommand("newWorkOrder"));
     await screen.findByLabelText("Title");
@@ -196,7 +196,7 @@ describe("New work order", () => {
   it("locks the page button with the reason when this person may not submit", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([]) }) }, { denied: ["wo.submit"] });
     mount(<WorkOrdersView />);
-    const btn = await screen.findByRole("button", { name: /New work order/ });
+    const btn = await screen.findByRole("button", { name: /Submit work order/ });
     await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBe("true"));
     expect(btn.getAttribute("data-reason")).toMatch(/No role holds it/);
     fireEvent.click(btn);

@@ -109,10 +109,12 @@ export function DossierHead({ wo, cat, project, session, onActivity }: { wo: TWo
         <span className="muted small" role="status">{statusLine(wo, cat, session)}</span>
       </div>
       {steps.length ? (
+        <details className="dz-rail-d"><summary className="micro" id="dz-rail-sum">Route of this work order</summary>
         <div className="dz-rail">
           <PipelineRow steps={steps} label={`Route of ${wo.id}: ${stateLabel}`} />
           <div className="dz-next">{nobody ? <span><b>Nobody is running it.</b>{wo.state === "done" ? " It has shipped." : ""}</span> : session ? <span><b>{{ agent: session.agent.name, you: "You", approver: "An approver", person: "Someone else", nobody: "Nobody" }[session.next.actor]}</b>{` is next. ${session.next.text}`}</span> : null}</div>
         </div>
+        </details>
       ) : null}
       {wo.killed ? (
         <div className="callout callout-block" role="alert">

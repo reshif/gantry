@@ -115,8 +115,8 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     mount();
     const t = await byId("wl-people");
     expect(document.body.textContent).toContain("Approvals waiting3");
-    expect(document.body.textContent).toContain("Median wait1h 35m");
-    expect(document.body.textContent).toContain("After hours33%");
+    expect(document.body.textContent).toContain("Median wait 1h 35m");
+    expect(document.body.textContent).toContain("After hours 33%");
     expect(document.querySelector(".wl-bus")?.textContent).toContain("2 of 3 waiting gates have exactly one eligible approver; 1 have nobody eligible except break-glass. That person is the bus factor for that work.");
     const priya = t.querySelector("tr[data-key='p-priya']")!;
     await waitFor(() => expect(priya.textContent).toContain("Priya Nair"));

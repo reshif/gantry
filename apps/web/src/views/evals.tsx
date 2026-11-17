@@ -61,15 +61,17 @@ export default function EvalsView() {
   const tab = evalsUi.tab as EvalsTab;
   const body = tab === "suites" ? <SuitesTab d={d} /> : tab === "factory" ? <FactoryTab d={d} /> : <ScorecardsTab d={d} label={label} />;
   const overall = d.extra?.overrideRate ?? 0;
+  const cards = Object.values(d.scorecards);
+  const avg = (k: "taskSuccess" | "firstPass" | "rework"): string => { const v = cards.map((c) => c[k]).filter((x): x is number => typeof x === "number"); return v.length ? fmt.pct(v.reduce((x, y) => x + y, 0) / v.length) : "–"; };
   return (
     <div className="view view-evals">
       <ViewHead title="Evals" sub="Golden-set suites decide whether an agent version is allowed to serve." />
       <StatRow id="ev-stats">
-        <Stat label="Suites" value={String(d.suites.length)} sub={`${d.suites.filter((x) => x.builtin).length} built in`} />
-        <Stat label="Runs" value={String(d.runs.length)} sub="all time" />
-        <Stat label="Regressions" value={String(regs.length)} sub="in the last 14 days" tone={regs.length ? "block" : undefined} />
-        <Stat label="Candidates eligible" value={String(eligible)} sub={`of ${waiting} waiting`} tone={eligible ? "done" : undefined} />
-        <Stat label="Human override rate" value={fmt.pct(overall)} sub="gate decisions changed by a person" />
+        <Stat label="Task success" value={avg("taskSuccess")} sub="7-day, all agents" tone="done" />
+        <Stat label="First pass" value={avg("firstPass")} sub="no rework" tone="done" />
+        <Stat label="Rework rate" value={avg("rework")} tone="wait" />
+        <Stat label="Human override" value={fmt.pct(overall)} sub="of classifications" />
+        <Stat label="Suites" value={String(d.suites.length)} sub={`${d.runs.length} runs`} />
       </StatRow>
       {regs.length ? (
         <div className="callout callout-fail ev-regs" role="note">

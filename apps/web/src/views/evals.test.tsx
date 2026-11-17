@@ -121,9 +121,10 @@ describe("Evals screen: scorecards", () => {
     mount();
     await byId("ev-ag-ag-build");
     const head = document.getElementById("ev-stats")!.textContent!;
-    expect(head).toContain("Suites2");
-    expect(head).toContain("Runs2");
-    expect(head).toContain("Candidates eligible1");
+    expect(head).toContain("Suites22 runs");
+    expect(head).toContain("Task success90%");
+    expect(head).toContain("First pass80%");
+    expect(head).toContain("Rework rate10%");
   });
   it("blocks promotion with the reason until the suite passed, and promotes an eligible candidate with the agent's version", async () => {
     const calls = setup({ "POST /api/v1/agents/ag-build/versions/2.8.0-rc1/promote": () => ({ body: { ok: true, msg: "Builder 2.8.0-rc1 is on the floor." } }) });

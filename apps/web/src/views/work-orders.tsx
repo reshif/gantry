@@ -414,8 +414,7 @@ export default function WorkOrdersView() {
           actions={
             <>
               <Segmented name="wo-mode" label="Table or board" items={[{ id: "table", label: "List" }, { id: "board", label: "Board" }]} value={mode} onChange={(v) => updatePrefs({ floorView: v })} />
-              <Btn label="All records" icon="record" id="wo-records" onClick={() => { updatePrefs({ record: null }); navigate("record"); }} />
-              <Btn label="New work order" kind="primary" icon="plus" id="wo-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWo({ project: project.id })} />
+              <Btn label="Submit work order" kind="primary" icon="plus" id="wo-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWo({ project: project.id })} />
             </>
           }
         />
@@ -426,7 +425,7 @@ export default function WorkOrdersView() {
         <Stat label="Stuck" value={snapItems ? String(snapItems.filter((w) => w.state === "blocked" || w.state === "failed").length) : "…"} tone="block" />
         <Stat label="Done" value={String(stat.data?.done ?? "…")} tone="done" />
       </StatRow>
-      {atIntake.length ? (
+      {atIntake.length && mode === "table" && tab === "intake" ? (
         <div className="callout callout-info wo-intake-note">
           <Icon name="chat" />
           <div>
@@ -441,7 +440,6 @@ export default function WorkOrdersView() {
         <BoardMode projectId={projectId} />
       ) : (
         <Panel title="All work orders" flush cls="wo-panel">
-          <Tabs items={tabs.map((t) => ({ id: t.id, label: t.label, count: t.count }))} active={tab} onChange={(id) => setTab(id as TabId)} idPrefix="wo-tab" />
           <div className="wo-bar">
             <FilterBar label="Filter work orders" count={showCount} actions={filtered ? <Btn label="Clear filters" small kind="ghost" id="wo-clear-top" onClick={clear} /> : undefined}>
               <SearchBox id="wo-q" value={f.q} onChange={set("q")} placeholder="Search id or title" label="Search" />
@@ -458,9 +456,11 @@ export default function WorkOrdersView() {
                 <Select id="wo-f-prio" options={[{ value: "all", label: "All" }, ...PRIOS.map((p) => ({ value: p, label: p }))]} value={f.prio} onChange={set("prio")} />
               </Field>
             </FilterBar>
-            <details className="wo-more" open={f.repo !== "all" || f.source !== "all" || f.assignee !== "all" || groupBy !== "none" || !!applied}>
+            <details className="wo-more" open={tab !== "all" || f.repo !== "all" || f.source !== "all" || f.assignee !== "all" || groupBy !== "none" || !!applied}>
               <summary className="micro" id="wo-more-btn">More filters, grouping, columns and saved views</summary>
+              <Tabs items={tabs.map((t) => ({ id: t.id, label: t.label, count: t.count }))} active={tab} onChange={(id) => setTab(id as TabId)} idPrefix="wo-tab" />
               <div className="wo-more-row">
+                <Btn label="All records" icon="record" id="wo-records" small onClick={() => { updatePrefs({ record: null }); navigate("record"); }} />
                 <Field label="Repo" htmlFor="wo-f-repo">
                   <Select id="wo-f-repo" options={[{ value: "all", label: "All" }, ...repos.map((r) => ({ value: r.id, label: r.name }))]} value={f.repo} onChange={set("repo")} />
                 </Field>

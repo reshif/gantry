@@ -46,8 +46,8 @@ export default function OnboardingView() {
     <div className="view onb-view">
       <ViewHead
         title="Onboarding"
-        sub="A repo must reach Ready before anyone can submit work orders to it. Gantry assesses each repo and opens a PR with the changes it needs. The Onboarding Agent adds its judgement and drafts when a model vendor is connected; otherwise the work is rule-based."
-        actions={<Btn kind="primary" icon="plus" id="onb-connect" label="Connect repo" guard={connect} onClick={wizard} />}
+        sub="Bring a repository onto the line: assess it, fix the gaps by pull request, then go live."
+        actions={<Btn kind="primary" icon="plus" id="onb-connect" label="Onboard a repo" guard={connect} onClick={wizard} />}
       />
       <StatRow>
         <Stat label="Waiting" value={qState(reposQ, () => String(waiting))} sub="not started" />

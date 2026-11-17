@@ -7,11 +7,12 @@
  */
 import { useState } from "react";
 import { useCan } from "../api/can";
-import { useMe, useWorkload } from "../api/queries";
+import { useMe, useProjects, useWorkload } from "../api/queries";
 import type { Workload, WorkloadSuggestion } from "../api/types";
 import { Btn, Chip, Empty, Panel, Segmented, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
+import { BarList } from "../ui/charts";
 import { fmt } from "@gantry/domain";
 import { useUI } from "../ui/overlay-context";
 import type { SortState } from "../ui/SortTable";
@@ -19,6 +20,7 @@ import { dec } from "./mcp/kit";
 import { DelegateDialog } from "./workload/Delegate";
 import { PersonDrawer } from "./workload/Drawer";
 import { MinutesTab, PeopleTab, TeamsTab, WaitsTab } from "./workload/Tabs";
+import { useCatalog, metricsOf, type PView } from "./projects/kit";
 import { MIN_N, goConfig, goPerson, goTrust, mins, useDelegateGuard } from "./workload/kit";
 
 function SuggestionItem({ s, openDelegate }: { s: WorkloadSuggestion; m: Workload; openDelegate: (pid: string) => void }) {
@@ -51,6 +53,8 @@ export default function WorkloadView() {
   const [allSugg, setAllSugg] = useState(false);
   const [sorts, setSorts] = useState<Record<string, SortState>>({});
   const q = useWorkload(project, days);
+  const projects = useProjects();
+  const cat = useCatalog();
   const m = q.data;
 
   if (!me) return null;
@@ -74,37 +78,52 @@ export default function WorkloadView() {
     : <PeopleTab m={m} sorts={sorts} setSort={setSort} openPerson={openPerson} />;
   const sugg = m.suggestions;
   const controls = (
-    <div className="wl-controls">
+    <div className="wl-controls wl-filters">
       {projSel}
       <Segmented name="wl-days" label="Window" value={String(days)} onChange={(v) => setDays(+v)} items={[{ id: "1", label: "24 hours" }, { id: "7", label: "7 days" }]} />
-      <span className="wl-snap small muted">{`Snapshot ${fmt.ist(m.at)} IST · ${t.acts} acts`}</span>
+      <span className="wl-snap small muted">{`Median wait ${t.timedN >= MIN_N ? mins(t.medianWaitMin) : "–"} · After hours ${t.acts >= MIN_N ? fmt.pct(t.afterHours / t.acts) : "–"} · Snapshot ${fmt.ist(m.at)} IST · ${t.acts} acts`}</span>
       <Btn label="Refresh" icon="swap" id="wl-refresh" onClick={() => void q.refetch()} />
     </div>
   );
+  const sel = new Set(project === "all" ? m.projects.map((p) => p.id) : [project]);
+  const plist = projects.data as PView[] | undefined;
+  const scoped = plist ? plist.filter((p) => sel.has(p.id)) : [];
+  const sumBy = (pick: (mm: ReturnType<typeof metricsOf>) => Record<string, number>): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const p of scoped) for (const [k, v] of Object.entries(pick(metricsOf(p)))) out[k] = (out[k] ?? 0) + v;
+    return out;
+  };
+  const byGate = sumBy((x) => x.byGate);
+  const byPos = sumBy((x) => Object.fromEntries(Object.entries(x.byPosition).map(([k, v]) => [k, v.n])));
+  const gateItems = (cat?.gates ?? []).filter((g) => g.kind !== "auto").map((g) => ({ label: `${g.label} ${g.name}`, value: byGate[g.id] ?? 0, tone: "warn" as const }));
+  const stationItems = (cat?.stations ?? []).filter((s) => !s.custom).map((s) => ({ label: s.name, value: byPos[s.id] ?? 0 }));
+  const oldest = Math.max(0, ...m.bottlenecks.map((b) => (b.open ? b.oldestMin : 0)));
   return (
     <div className="view view-workload">
       <ViewHead title="Workload"
         sub="Who is carrying the approvals, and where the queue is building up." />
-      {controls}
       <StatRow id="wl-stats">
         <Stat label="Approvals waiting" value={String(t.gatesWaiting)} sub="across people" tone={t.gatesWaiting > 10 ? "wait" : undefined} />
+        <Stat label="Approvers" value={String(m.rows.length)} sub="active" />
         <Stat label="On call" value={String(m.rows.filter((r) => r.oncall).length)} />
-        <Stat label="Median wait" value={t.timedN >= MIN_N ? mins(t.medianWaitMin) : "–"} sub={t.timedN >= MIN_N ? `n=${t.timedN}` : t.timedN ? `Needs ${MIN_N} or more observations (n=${t.timedN})` : undefined} />
-        <Stat label="After hours" value={t.acts >= MIN_N ? fmt.pct(t.afterHours / t.acts) : "–"} sub={t.acts >= MIN_N ? `${t.afterHours} of ${t.acts} acts` : undefined} />
+        <Stat label="Oldest wait" value={oldest ? mins(oldest) : "–"} sub="at a gate" tone={oldest ? "wait" : undefined} />
       </StatRow>
+      <div className="cols wl-charts">
+        <Panel title="Queue by gate"><BarList label="Approvals waiting by gate" items={gateItems} labelWidth={170} /></Panel>
+        <Panel title="Work by station"><BarList label="Open work by station" items={stationItems} labelWidth={110} /></Panel>
+      </div>
       {t.soleGates || t.noneGates ? (
         <div className="callout callout-warn wl-bus" role="note">
           <Icon name="alert" />
           <span><strong>Bus factor</strong>{" "}{(t.soleGates ? `${t.soleGates} of ${t.gatesWaiting} waiting gates have exactly one eligible approver` : "") + (t.soleGates && t.noneGates ? "; " : "") + (t.noneGates ? `${t.noneGates} have nobody eligible except break-glass` : "")}. That person is the bus factor for that work.</span>
         </div>
       ) : null}
-      <Panel title="Suggestions" cls="wl-sugg" tools={sugg.length > 5 ? <Btn label={allSugg ? "Show top 5" : `Show all ${sugg.length}`} small id="wl-sugg-all" onClick={() => setAllSugg(!allSugg)} /> : undefined}>
-        {sugg.length ? (
+      {sugg.length ? (
+        <Panel title="Suggestions" cls="wl-sugg" tools={sugg.length > 5 ? <Btn label={allSugg ? "Show top 5" : `Show all ${sugg.length}`} small id="wl-sugg-all" onClick={() => setAllSugg(!allSugg)} /> : undefined}>
           <ol className="wl-sugg-list">{sugg.slice(0, allSugg ? sugg.length : 5).map((s) => <SuggestionItem key={s.key} s={s} m={m} openDelegate={openDelegate} />)}</ol>
-        ) : (
-          <Empty id="wl-sugg-empty" icon="check" title="No suggestions" text="No single points of failure, long waits or pending trust proposals in this scope." />
-        )}
-      </Panel>
+        </Panel>
+      ) : null}
+      {controls}
       <Tabs idPrefix="wl-tab" active={tab} onChange={setTab} items={[{ id: "people", label: "People", count: m.rows.length }, { id: "teams", label: "Teams", count: m.teams.length }, { id: "waits", label: "Where work waits", count: m.bottlenecks.filter((b) => b.open).length }, { id: "minutes", label: "Minutes per work order" }]} />
       <section className="panel wl-main" aria-label="Workload detail">
         <div className="panel-body" id="wl-tab-panel" role="tabpanel">{body}</div>

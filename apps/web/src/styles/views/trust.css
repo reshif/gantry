@@ -122,3 +122,5 @@
 /* the runtime switch for levels above L1 (off in a new install) */
 .tr-switch { display: flex; gap: 14px; align-items: flex-start; }
 .tr-switch p { margin: 4px 0 0; }
+.tr-in-panel{margin:12px 12px 0}
+.tr-matrix-panel .tr-toolbar{padding:12px}

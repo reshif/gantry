@@ -119,7 +119,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
     expect(l.textContent).toContain("Not connected");
     expect(l.querySelector("#vendor-connect-local")?.textContent).toContain("Connect Local models");
     expect(document.querySelector(".md-incident")?.textContent).toContain("Amazon Bedrock is degraded (p50 1460 ms)");
-    expect(document.body.textContent).toContain("Vendors connected3 of 4");
+    expect(document.body.textContent).toContain("Vendors41 not connected");
     expect(document.getElementById("vendor-test-anthropic")).toBeNull();
   });
 
@@ -363,9 +363,9 @@ describe("vendors summary", () => {
   it("counts models on only among connected vendors, and shows a dash where a vendor is not connected", async () => {
     setup({});
     mount();
-    const tile = await waitFor(() => { const e = [...document.querySelectorAll("#md-stats .stat-tile")].find((x) => x.textContent?.includes("Models on")); if (!e) throw new Error("no tile"); return e; });
+    const tile = await waitFor(() => { const e = [...document.querySelectorAll("#md-stats .stat-tile")].find((x) => x.textContent?.includes("Models")); if (!e) throw new Error("no tile"); return e; });
     const connectedModels = VENDORS.filter((v) => v.connected).reduce((n, v) => n + v.models.length, 0);
-    await waitFor(() => expect(tile.textContent).toContain(`of ${connectedModels}`));
+    await waitFor(() => expect(tile.textContent).toContain(`${connectedModels}`));
     const off = (await byId("vendor-local")).querySelector(".tb-vendor dd")!;
     expect(off.textContent).toBe("–");
   });

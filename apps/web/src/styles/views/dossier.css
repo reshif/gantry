@@ -129,3 +129,7 @@
 .dz-tabbar { position: static; border: 0; background: none; box-shadow: none; padding: 0; border-radius: 0; }
 .dz-rail { margin: 0 0 14px; }
 @media (max-width: 1000px) { .dz-grid.cols { grid-template-columns: minmax(0, 1fr); } }
+.dz-rail-d{margin:0 0 12px}
+.dz-rail-d>summary{cursor:pointer;color:var(--muted);padding:2px 0}
+.dz-rail-d[open]>summary{margin-bottom:8px}
+.dz-rail-d .dz-rail{margin:0}

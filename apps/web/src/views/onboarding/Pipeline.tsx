@@ -91,7 +91,7 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
       ) : (
         <Empty id="onb-empty" icon="folder" title="No repos yet" text="Connect a repo the GitHub App is installed on to start onboarding." />
       )}
-      <p className="footnote">Gantry reads each repo through the GitHub App, checks the onboarding PR's CI every minute, and moves repos on by itself. A person must approve and merge each onboarding PR.</p>
+      <p className="footnote">A repo must reach Ready before anyone can submit work orders to it. Gantry assesses each repo and opens a PR with the changes it needs. The Onboarding Agent adds its judgement and drafts when a model vendor is connected; otherwise the work is rule-based. Gantry reads each repo through the GitHub App, checks the onboarding PR's CI every minute, and moves repos on by itself. A person must approve and merge each onboarding PR.</p>
     </div>
   );
 }

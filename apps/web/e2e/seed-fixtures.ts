@@ -43,6 +43,20 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
   });
   const conversations = wos.filter((w) => w.state === "blocked").map((w) => ({ wo: w.id, title: w.title, project: w.project, question: w.blockReason, stuck: { state: "blocked", station: stationId(w), reason: w.blockReason ?? "", actions: ["retry"] } }));
   const live = wos.filter((w) => w.state !== "done");
+  const projectMetrics = (pid: string) => {
+    const mine = live.filter((w) => w.project === pid && w.state !== "killed");
+    const byPosition: Record<string, { n: number; blocked: number }> = {};
+    const byGate: Record<string, number> = {};
+    for (const w of mine) {
+      const st = stationId(w);
+      byPosition[st] = byPosition[st] ?? { n: 0, blocked: 0 };
+      byPosition[st].n += 1;
+      if (w.state === "blocked") byPosition[st].blocked += 1;
+      const g = w.state === "waiting" ? gateInfo(w) : null;
+      if (g) byGate[g.id] = (byGate[g.id] ?? 0) + 1;
+    }
+    return { wip: mine.length, bays: 0, gates: Object.values(byGate).reduce((a, b) => a + b, 0), oldest: 0, late: 0, eff: null, effN: 0, cov: { total: 0, auto: 0, share: 0 }, bad: 0, haltedRepos: 0, byPosition, byClass: {}, byGate, slotsUsed: 0, onboarding: 0, health: { id: "ok", label: "Healthy", icon: "st-done" } };
+  };
   const done = wos.filter((w) => w.state === "done");
   const byStation: Record<string, number> = {};
   for (const w of live) byStation[stationId(w)] = (byStation[stationId(w)] ?? 0) + 1;
@@ -142,7 +156,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     const seg = path.split("/");
     const q = (k: string) => url.searchParams.get(k);
     if (path === "home") return home;
-    if (path === "projects") return seed.projects;
+    if (path === "projects") return seed.projects.map((p: Seed) => ({ ...p, metrics: projectMetrics(p.id) }));
     if (seg[0] === "projects" && seg[1]) {
       const p = seed.projects.find((x: Seed) => x.id === seg[1]);
       if (!p) return undefined;
@@ -242,7 +256,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "workload") {
       const people = (seed.people as Array<{ id: string; name: string; status: string; oncall?: boolean; teams?: string[] }>).filter((x) => x.status === "active");
       const rows = people.map((x, i) => ({ person: x.id, name: x.name, team: x.teams?.[0] ?? null, glass: 0, perDay: (4 + i) / 7, waitN: 6, waiting: i % 3, approvals: 4 + i, answered: i % 4, medianResponseMin: 12 + i, afterHours: i % 2, n: 6, sole: i % 5 === 0 ? 1 : 0, minutes: 30 + i * 5, away: null, oncall: !!x.oncall, waitingGates: [], recent: [] }));
-      return { at: seed.NOW, days: 7, scope: "all", minN: 5, projects: [{ id: "payments", name: "Payments Platform" }], factoryWide: true, ids: people.map((x) => x.id), totals: { gatesWaiting: 6, soleGates: 1, noneGates: 0, timedN: 12, medianWaitMin: 42, acts: 64, afterHours: 9, minutes: 520 }, rows, teams: [], byCls: [], byProject: [], bottlenecks: [], needsPerson: [], suggestions: [] };
+      return { at: seed.NOW, days: 7, scope: "all", minN: 5, projects: [{ id: "payments", name: "Payments Platform" }], factoryWide: true, ids: people.map((x) => x.id), totals: { gatesWaiting: waiting.length, soleGates: 1, noneGates: 0, timedN: 12, medianWaitMin: 42, acts: 64, afterHours: 9, minutes: 520 }, rows, teams: [], byCls: [], byProject: [], bottlenecks: waiting.map((w) => { const g = gateInfo(w)!; return { gate: g.id, project: w.project, decisions: 0, medianWaitMin: null, open: 1, oldestMin: Math.round((NOW - g.since) / 60000), station: null, minEligible: 2 }; }), needsPerson: [], suggestions: [] };
     }
     const eff = /^people\/([^/]+)\/effective-permissions$/.exec(path);
     if (eff) {
