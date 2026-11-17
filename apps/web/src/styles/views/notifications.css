@@ -2,7 +2,7 @@
    Previews are drawn in Gantry's own tokens: they suggest each channel's card shape
    without copying any product's chrome or marks. */
 
-.nt-split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--s4); align-items: start; }
+.nt-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); align-items: start; }
 .nt-routes { display: grid; gap: var(--s4); }
 .nt-table td { vertical-align: top; }
 .nt-table tr.nt-off td:not(:first-child) { color: var(--muted); }

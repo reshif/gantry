@@ -24,8 +24,8 @@ const WEB = resolve(HERE, "..");
 const PROTO_DIR = "/home/reshif/Downloads/gantry-designs/design-3-blueprint";
 const OUT_DIR = join(PROTO_DIR, "fidelity");
 const PW = "/home/reshif/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
-const PROTO_PORT = 9403;
-const REAL_PORT = 9530;
+const PROTO_PORT = 9453;
+const REAL_PORT = 9535;
 const FONTS = join(WEB, "src/assets/fonts");
 
 const argv = process.argv.slice(2);

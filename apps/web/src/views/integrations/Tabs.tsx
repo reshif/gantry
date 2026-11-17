@@ -25,22 +25,17 @@ function Filters({ nav, withStatus, count }: { nav: Nav; withStatus: boolean; co
   );
 }
 
-export function ConnectedTab({ nav, openInstance }: { nav: Nav; openInstance: (id: string) => void }) {
+export function ConnectedTab({ nav, openInstance, onToggle }: { nav: Nav; openInstance: (id: string) => void; onToggle: (i: IntegrationInstance) => void }) {
   const d = useIntegrationData();
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: "name", dir: 1 });
+  const ui = useUI();
+  const perm = dec(useCan("integration.edit"));
   const q = nav.q.trim().toLowerCase();
-  const matches = (t: TypeRow, extra: string) => (nav.cat === "all" || t.category === nav.cat) && (!q || `${t.name} ${catName(t.category)} ${extra}`.toLowerCase().includes(q));
-  const rows = d.insts.filter((i) => matches(d.typeOf(i), i.name) && (nav.status === "all" || statusOf(i) === nav.status));
+  const rows = d.insts.filter((i) => !q || `${i.name} ${d.typeOf(i).name}`.toLowerCase().includes(q));
   const bad = d.insts.filter((i) => statusOf(i) !== "healthy");
-  const keyFn: Record<string, (i: IntegrationInstance) => string | number> = {
-    name: (i) => i.name.toLowerCase(), category: (i) => catName(d.typeOf(i).category), scope: (i) => (i.projects === "all" ? "" : scopeText(i, d.pname)), status: (i) => statusOf(i), sync: (i) => -i.lastSync,
+  const test = async (i: IntegrationInstance): Promise<void> => {
+    const r = await ops.testIntegrationInstance(i.id);
+    ui.toast(r.ok ? `${i.name}: connection tested.` : r.msg, r.ok ? "ok" : "error");
   };
-  const sorted = [...rows].sort((a, b) => { const x = keyFn[sort.key]!(a), y = keyFn[sort.key]!(b); return (x < y ? -1 : x > y ? 1 : 0) * sort.dir; });
-  const th = (key: string, label: string, cls = "") => (
-    <th scope="col" className={cls} aria-sort={sort.key === key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
-      {keyFn[key] ? <button type="button" className="th-sort" onClick={() => setSort({ key, dir: sort.key === key ? (sort.dir === 1 ? -1 : 1) : 1 })}>{label}</button> : label}
-    </th>
-  );
   return (
     <div className="form-grid">
       {bad.length ? (
@@ -52,44 +47,38 @@ export function ConnectedTab({ nav, openInstance }: { nav: Nav; openInstance: (i
           </div>
         </div>
       ) : null}
-      <Panel flush>
-      <Filters nav={nav} withStatus count={`${sorted.length} of ${d.insts.length}`} />
-      {!sorted.length ? (
-        <Empty title={d.insts.length ? "No connection matches" : "Nothing connected"} text={d.insts.length ? "Change the search or filters." : "Add an integration to start."} />
+      {!rows.length ? (
+        <Empty title={d.insts.length ? "No connection matches" : "Nothing connected"} text={d.insts.length ? "Change the search." : "Add an integration to start."} />
       ) : (
-        <div className="dtable-wrap" id="int-table">
-          <table className="dtable">
-            <caption className="sr-only">Connected integrations</caption>
-            <thead>
-              <tr>{th("name", "Connection")}{th("category", "Category", "hide-sm")}{th("scope", "Projects")}{th("status", "Status")}<th scope="col">Used by</th>{th("sync", "Last sync", "is-end hide-sm")}</tr>
-            </thead>
-            <tbody>
-              {sorted.map((i) => {
-                const t = d.typeOf(i);
-                return (
-                  <tr key={i.id} data-key={i.id}>
-                    <td data-label="Connection">
-                      <div className="int-cell-name">
-                        <Mark icon={t.icon} small />
-                        <div>
-                          <button type="button" className="linkish int-name-btn" id={`int-open-${i.id}`} onClick={() => openInstance(i.id)}>{i.name}</button>
-                          <div className="small muted">{t.name}{t.custom ? " · custom" : ""}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td data-label="Category" className="hide-sm">{catName(t.category)}</td>
-                    <td data-label="Projects">{scopeText(i, d.pname)}</td>
-                    <td data-label="Status"><Health st={statusOf(i)} /></td>
-                    <td data-label="Used by"><span className="small">{usageLine(d.usage(i))}</span></td>
-                    <td data-label="Last sync" className="is-end hide-sm"><span className="mono small">{fmt.ago(i.lastSync, Date.now())}</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="card-grid" id="int-table">
+          {rows.map((i) => {
+            const t = d.typeOf(i);
+            const st = statusOf(i);
+            const tone = st === "healthy" ? "ok" : st === "failing" ? "bad" : "plain";
+            const cfg = Object.entries(i.config).filter(([, v]) => v !== undefined && v !== "").slice(0, 2);
+            return (
+              <div className="card" key={i.id} data-key={i.id}>
+                <div className="row">
+                  <h3><button type="button" className="linkish int-name-btn" id={`int-open-${i.id}`} onClick={() => openInstance(i.id)}>{i.name}</button></h3>
+                  <span className="spacer" />
+                  <span className={`chip ${tone}`}>{st}</span>
+                </div>
+                <div className="small muted">{t.name} · {catName(t.category)}</div>
+                <dl className="kv">
+                  <dt>Scope</dt><dd>{scopeText(i, d.pname)}</dd>
+                  <dt>Last sync</dt><dd>{fmt.ago(i.lastSync, Date.now())}</dd>
+                  {cfg.map(([k, v]) => [<dt key={`${k}-t`}>{k}</dt>, <dd key={`${k}-d`}><span className="mono small">{String(v)}</span></dd>])}
+                  <dt>Secret</dt><dd>{i.secretMask}</dd>
+                </dl>
+                <div className="row">
+                  <Btn label="Test" small id={`int-test-${i.id}`} guard={perm} onClick={() => void test(i)} />
+                  <Btn label={i.connected ? "Disconnect" : "Reconnect"} small id={`int-toggle-${i.id}`} guard={perm} onClick={() => onToggle(i)} />
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
-      </Panel>
     </div>
   );
 }

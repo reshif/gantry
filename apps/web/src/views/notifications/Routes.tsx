@@ -1,7 +1,7 @@
 /** The Routes tab: routes of one project (event, destinations, card, conditions), the route editor and the card designer (legacy routesTab, editor, designer). */
 import { useEffect, useMemo, useState } from "react";
 import { ops } from "../../api/ops";
-import { Btn, Empty, Field, LockNote, Panel, Segmented, Select, Toggle, type Decision } from "../../ui/primitives";
+import { Btn, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Segmented, Select, Table, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ClassChip, useCatalog } from "../projects/kit";
@@ -15,12 +15,15 @@ const norm = (r: Route | Draft): Draft => ({ ...(clone(r) as Draft), id: r.id ??
 export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision }) {
   const ui = useUI();
   const list = nt.routes as Route[];
-  const [sel, setSel] = useState<string | null>(list[0]?.id ?? null);
+  const [sel, setSel] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [preview, setPreview] = useState("d0");
+  const [q, setQ] = useState("");
+  const [ch, setCh] = useState("all");
+  const shown = list.filter((r) => (ch === "all" || r.dest.some((d) => d.channel === ch)) && (!q.trim() || `${r.event} ${evName(r.event)} ${r.dest.map((d) => d.target + d.channel).join(" ")}`.toLowerCase().includes(q.trim().toLowerCase())));
   // The selection follows the data: a deleted route, or a project switch, falls back to the first route.
   useEffect(() => {
-    if (sel !== "new" && !list.some((r) => r.id === sel)) setSel(list[0]?.id ?? null);
+    if (sel !== null && sel !== "new" && !list.some((r) => r.id === sel)) setSel(null);
   }, [list, sel]);
   const cur = sel === "new" ? null : list.find((r) => r.id === sel) ?? null;
   useEffect(() => {
@@ -45,39 +48,38 @@ export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
   };
   return (
     <div className="nt-routes">
-      <div className="nt-split">
-        <Panel title={`Routes on ${p.name}`} flush tools={<Btn label="Add route" small icon="plus" kind="primary" id="nt-add" guard={perm} onClick={() => select("new")} />}>
-          <div className="table-scroll">
-            <table className="table table-compact nt-table">
-              <thead><tr><th>On</th><th>Event</th><th>Destinations</th><th>Card</th><th>Conditions</th></tr></thead>
-              <tbody>
-                {list.length ? list.map((r) => {
-                  const c = condText(r);
-                  return (
-                    <tr key={r.id} className={`row-link${sel === r.id ? " is-selected" : ""}${r.enabled ? "" : " nt-off"}`} id={`nt-row-${r.id}`} onClick={(e) => { if ((e.target as HTMLElement).closest("button,input,.switch")) return; select(r.id); }}>
-                      <td><Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={!perm.allowed ? perm : r.event === "kill" || r.event === "restore" ? { allowed: false, reason: "Kill and restore notifications cannot be switched off." } : null} label={`Route ${r.id} enabled`} onChange={(v) => void toggleRoute(r, v)} /></td>
-                      <td><button type="button" className="linkish nt-ev" id={`nt-open-${r.id}`} onClick={() => select(r.id)}><span className="mono small">{r.id}</span> {evName(r.event)}</button></td>
-                      <td>
-                        <ul className="nt-dests">
-                          {r.dest.map((d, i) => {
-                            const inst = nt.instOf(d);
-                            const st = instState(inst);
-                            return <li key={i}><Icon name={chanIcon(inst?.type ?? d.channel)} /><span className="nt-dest-inst small">{inst ? inst.name : d.channel}</span><span className="mono">{d.target}</span>{st !== "healthy" ? <span className="nt-dest-bad" title={st}>✕ {st}</span> : null}</li>;
-                          })}
-                        </ul>
-                      </td>
-                      <td>{nt.tplInfo(r.template).name}</td>
-                      <td className="small">{c.length ? c.join(" · ") : <span className="muted">always</span>}</td>
-                    </tr>
-                  );
-                }) : <tr><td colSpan={5} className="muted">No routes yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-        <Editor p={p} nt={nt} perm={perm} cur={cur} draft={draft} setDraft={setDraft} onSaved={select} />
-      </div>
-      {draft ? <Designer p={p} nt={nt} perm={perm} draft={draft} setDraft={setDraft} preview={preview} setPreview={setPreview} /> : null}
+      <Panel title={`Who hears about what, in ${p.name}`} flush tools={<Btn label="Add route" small icon="plus" kind="primary" id="nt-add" guard={perm} onClick={() => select("new")} />}>
+        <FilterBar count={`${shown.length} ${shown.length === 1 ? "route" : "routes"}`}>
+          <SearchBox id="nt-q" label="Search" placeholder="Search..." value={q} onChange={setQ} />
+          <Field label="Channel" htmlFor="nt-ch"><Select id="nt-ch" options={[{ value: "all", label: "All" }, ...["slack", "teams", "email", "webhook", "paging"].map((c) => ({ value: c, label: c }))]} value={ch} onChange={setCh} /></Field>
+        </FilterBar>
+        <Table>
+          <thead><tr><th>Event</th><th>Sent to</th><th>Condition</th><th>On</th></tr></thead>
+          <tbody>
+            {shown.length ? shown.map((r) => {
+              const c = condText(r);
+              return (
+                <tr key={r.id} className={`row-link${sel === r.id ? " is-selected" : ""}${r.enabled ? "" : " nt-off"}`} id={`nt-row-${r.id}`} onClick={(e) => { if ((e.target as HTMLElement).closest("button,input,.switch")) return; select(r.id); }}>
+                  <td><div><button type="button" className="linkish nt-ev" id={`nt-open-${r.id}`} onClick={() => select(r.id)}><b>{evName(r.event)}</b></button></div><span className="sub mono small">{r.event}</span></td>
+                  <td>
+                    <div className="row">
+                      {r.dest.map((d, i) => {
+                        const inst = nt.instOf(d);
+                        const st = instState(inst);
+                        return <span key={i} className={`chip plain${st !== "healthy" ? " bad" : ""}`} title={st !== "healthy" ? st : undefined}>{inst?.type ?? d.channel} · {d.target}</span>;
+                      })}
+                    </div>
+                  </td>
+                  <td className="small">{c.length ? c.join(" · ") : "Always"}</td>
+                  <td><Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={!perm.allowed ? perm : r.event === "kill" || r.event === "restore" ? { allowed: false, reason: "Kill and restore notifications cannot be switched off." } : null} label={`Route ${r.id} enabled`} onChange={(v) => void toggleRoute(r, v)} /></td>
+                </tr>
+              );
+            }) : <tr><td colSpan={4} className="muted">{list.length ? "No route matches." : "No routes yet."}</td></tr>}
+          </tbody>
+        </Table>
+      </Panel>
+      {sel !== null ? <div className="nt-split"><Editor p={p} nt={nt} perm={perm} cur={cur} draft={draft} setDraft={setDraft} onSaved={select} /></div> : null}
+      {sel !== null && draft ? <Designer p={p} nt={nt} perm={perm} draft={draft} setDraft={setDraft} preview={preview} setPreview={setPreview} /> : null}
     </div>
   );
 }

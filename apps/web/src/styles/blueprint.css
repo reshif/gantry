@@ -548,3 +548,4 @@ textarea.input{height:auto;min-height:84px;padding:8px 10px}
 .dlg-body{overflow-y:auto;min-height:0}
 .dlg-form{min-height:0}
 .drawer{overflow-y:auto}
+.card h3 .linkish{color:var(--ink);font:inherit;font-weight:600;text-decoration:none;cursor:pointer}.card h3 .linkish:hover{color:var(--accent);text-decoration:underline}
