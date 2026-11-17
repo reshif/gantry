@@ -49,7 +49,7 @@ describe("startStream", () => {
     const spy = vi.spyOn(qc, "invalidateQueries");
     bindQueryClient(qc);
     const src = fakeSource();
-    const stop = startStream({ create: () => src.es });
+    const stop = startStream({ create: () => src.es, coalesceMs: 0 });
     src.emit('{"keys":["workOrders"],"project":"p1"}');
     const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: string[] }).queryKey[0]);
     expect(keys).toEqual(expect.arrayContaining(["workOrders", "floor", "home"]));
@@ -61,7 +61,7 @@ describe("startStream", () => {
     const fn = vi.fn();
     const off = onCanInvalidated(fn);
     const src = fakeSource();
-    const stop = startStream({ create: () => src.es });
+    const stop = startStream({ create: () => src.es, coalesceMs: 0 });
     src.emit('{"keys":["matrix"]}');
     expect(fn).toHaveBeenCalledTimes(1);
     src.emit('{"keys":["audit"]}');

@@ -1,5 +1,7 @@
 /** The signed-in app shell (legacy app.js): top bar, kill banner, left nav, main view and global keys. */
-import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AppErrorBoundary } from "../lib/errors/AppErrorBoundary";
+import { RouteSkeleton } from "./RouteSkeleton";
 import type { Me } from "../api/types";
 import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
@@ -16,26 +18,6 @@ import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
-
-class ViewBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  override state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-  override componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error(error, info.componentStack);
-  }
-  override render() {
-    if (this.state.error) {
-      return (
-        <div className="view">
-          <Empty title="This screen failed to render" text={this.state.error.message} />
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 export function Shell({ me }: { me: Me }) {
   const ui = useUI();
@@ -127,15 +109,19 @@ export function Shell({ me }: { me: Me }) {
   const killed = !!me.factory.killed;
   return (
     <div id="app" className={`shell${prefs.navRail ? " nav-rail" : ""}${navOpen ? " nav-open" : ""}`}>
-      <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
+      <AppErrorBoundary level="chrome">
+        <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
+      </AppErrorBoundary>
       <div className="sysbanner" id="sysbanner" hidden={!killed}>
         {killed ? <StopBanner projectId={null} /> : null}
       </div>
-      <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
+      <AppErrorBoundary level="chrome">
+        <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
+      </AppErrorBoundary>
       <div className="nav-scrim" id="nav-scrim" hidden={!navOpen} onClick={() => setNavOpen(false)} />
       <main className="main" id="main" tabIndex={-1} ref={main}>
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
-        <ViewBoundary key={`${routeId}/${loc.param ?? ""}`}>
+        <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
           {noAccess ? (
             <div className="view">
               <Empty id="no-access" title="No access yet" text="Ask a Factory Admin or Project Admin to give you a role. Until then only your own profile is available." />
@@ -150,9 +136,9 @@ export function Shell({ me }: { me: Me }) {
               <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
             </div>
           ) : ready ? (
-            <Suspense fallback={null}>{View ? <View /> : null}</Suspense>
+            <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
           ) : null}
-        </ViewBoundary>
+        </AppErrorBoundary>
       </main>
     </div>
   );

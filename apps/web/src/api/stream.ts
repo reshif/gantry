@@ -7,6 +7,8 @@
 import { API_BASE } from "./client";
 import { invalidateSlices, getQueryClient } from "./keys";
 import type { ChangeEvent } from "./types";
+import { connection } from "../lib/connection/store";
+import { createCoalescer } from "../lib/connection/coalesce";
 
 export const STREAM_URL = `${API_BASE}/stream`;
 const MIN_DELAY = 1000;
@@ -42,6 +44,8 @@ export interface StreamOptions {
   setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimer?: (t: ReturnType<typeof setTimeout>) => void;
   onChange?: (e: ChangeEvent) => void;
+  /** Trailing window for SSE-driven invalidation (ms). 0 invalidates at once. A person's own writes never wait. */
+  coalesceMs?: number;
 }
 
 /** Starts the stream. Returns a stop function. */
@@ -55,6 +59,7 @@ export function startStream(o: StreamOptions = {}): () => void {
   let attempt = 0;
   let stopped = false;
   let everOpened = false;
+  const coalescer = createCoalescer((keys) => invalidateSlices(keys), { waitMs: o.coalesceMs ?? 250, setTimer: setT, clearTimer: clearT });
 
   const connect = () => {
     if (stopped) return;
@@ -62,6 +67,7 @@ export function startStream(o: StreamOptions = {}): () => void {
     es = src;
     src.onopen = () => {
       attempt = 0;
+      connection.streamOpened();
       // After a drop, events may have been missed: refetch what is on screen.
       if (everOpened) void getQueryClient()?.invalidateQueries();
       everOpened = true;
@@ -69,19 +75,33 @@ export function startStream(o: StreamOptions = {}): () => void {
     src.addEventListener("change", (ev) => {
       const parsed = parseChange((ev as MessageEvent<string>).data);
       if (!parsed) return;
-      invalidateSlices(parsed.keys);
+      connection.alive();
+      coalescer.add(parsed.keys);
       o.onChange?.(parsed);
     });
     src.onerror = () => {
       src.close();
       if (es === src) es = null;
+      connection.streamDropped();
       if (stopped) return;
       timer = setT(connect, backoffDelay(attempt++, rnd));
     };
   };
+  // watchdog verdict "silent and unreachable": drop the socket and reconnect now
+  const restart = (): void => {
+    if (stopped) return;
+    if (timer) clearT(timer);
+    es?.close();
+    es = null;
+    connection.streamDropped();
+    connect();
+  };
+  connection.streamWanted(true, restart);
   connect();
   return () => {
     stopped = true;
+    coalescer.cancel();
+    connection.streamWanted(false);
     if (timer) clearT(timer);
     es?.close();
     es = null;

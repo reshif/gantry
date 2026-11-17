@@ -4,7 +4,7 @@
  */
 import { STATIONS } from "@gantry/domain";
 import type { PublicConfig } from "../api/types";
-import { loginUrl } from "../api/ops";
+import { loginUrlWithReturn as loginUrl } from "../lib/session/returnTo";
 import { DEMO_ACCOUNTS } from "../lib/demo";
 import { Icon, Logo } from "../ui/Icon";
 import { Btn } from "../ui/primitives";

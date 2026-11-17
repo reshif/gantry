@@ -8,6 +8,7 @@
  * dialogs) is restored on return. Callers need no step-up code; if the person cancels they receive the refusal.
  */
 import { useEffect, useRef, useState } from "react";
+import { watchPopupClosed } from "../lib/session/popupWatch";
 import { stepUpUrl } from "../api/ops";
 import { setStepUpHandler, type CommandRefusal, type StepUpOutcome } from "../api/client";
 import { Dialog } from "./Overlay";
@@ -148,7 +149,13 @@ export function openStepUpPopup(): { result: Promise<StepUpOutcome>; cancel: () 
   const stop = (): void => {
     window.removeEventListener("message", onMessage);
     bc?.close();
+    unwatch();
   };
+  // the person closed the window without finishing: end the wait instead of hanging
+  const unwatch = watchPopupClosed(win, () => {
+    stop();
+    finish({ ok: false, error: "The sign-in window was closed before it finished." });
+  });
   window.addEventListener("message", onMessage);
   try {
     bc = new BroadcastChannel(CHANNEL);
