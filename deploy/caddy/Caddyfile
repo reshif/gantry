@@ -22,7 +22,24 @@ https://{$GANTRY_HOSTNAME:localhost} {
 
 	log {
 		output stdout
-		format json
+		# Invite tokens, OIDC codes and id_token_hint travel in query strings, and the CSRF token in a header: none of them belong in a log.
+		# Caddy redacts Authorization and Cookie by default; the rest are replaced here.
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace invite REDACTED
+					replace code REDACTED
+					replace state REDACTED
+					replace session_state REDACTED
+					replace id_token_hint REDACTED
+					replace login_hint REDACTED
+					replace token REDACTED
+				}
+				request>headers>X-Csrf-Token replace REDACTED
+				request>headers>X-Api-Key replace REDACTED
+			}
+		}
 	}
 
 	# Headers every response gets. `?` keeps a header an upstream already set (Keycloak and Mailpit send their own).

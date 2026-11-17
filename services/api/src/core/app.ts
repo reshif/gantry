@@ -54,6 +54,17 @@ export async function publicConfig(app: FastifyInstance): Promise<{ demoAccounts
   return { demoAccounts: g.config.demoAccounts, githubLogin: !!sec.value.githubLogin && !!g.oidc.githubIdp, ...(org ? { orgName: org.name } : {}), ...(demoAccountList ? { demoAccountList } : {}) };
 }
 
+/** A URL as it may be logged: query values of credential parameters are replaced, everything else is kept. */
+export function logUrl(url: string | undefined): string | undefined {
+  if (!url) return url;
+  const i = url.indexOf("?");
+  if (i < 0) return url;
+  // /auth/* and /idp/* queries are credentials end to end; elsewhere only the known credential names are masked
+  const path = url.slice(0, i);
+  if (/^\/(auth|idp)(\/|$)/i.test(path)) return `${path}?[redacted]`;
+  return `${path}?${url.slice(i + 1).replace(/(^|&)(invite|code|state|session_state|id_token_hint|login_hint|token|access_token|refresh_token|key|secret)=[^&]*/gi, "$1$2=[redacted]")}`;
+}
+
 /**
  * The Fastify app: request id, rate limit, error mapping, authentication (session cookie + CSRF, API-key bearer, service tokens),
  * the live-update hub and the product routes. Stateless: every replica serves any request.
@@ -61,7 +72,12 @@ export async function publicConfig(app: FastifyInstance): Promise<{ demoAccounts
 export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
   const { pool, config, orgId } = o;
   const app = Fastify({
-    logger: o.logger ?? { level: process.env.LOG_LEVEL ?? "info", redact: ["req.headers.authorization", "req.headers.cookie", "res.headers['set-cookie']"] },
+    logger: o.logger ?? {
+      level: process.env.LOG_LEVEL ?? "info",
+      redact: ["req.headers.authorization", "req.headers.cookie", "req.headers['x-csrf-token']", "res.headers['set-cookie']"],
+      // Sign-in links carry credentials in the query (invite token, OIDC code and state, id_token_hint), so the log keeps the path only.
+      serializers: { req: (r: { method?: string; url?: string; host?: string; remoteAddress?: string; remotePort?: number; headers?: unknown }) => ({ method: r.method, url: logUrl(r.url), host: r.host, remoteAddress: r.remoteAddress, remotePort: r.remotePort, headers: r.headers }) },
+    },
     trustProxy: config.trustProxy,
     genReqId: (req) => {
       const h = req.headers["x-request-id"];

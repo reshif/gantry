@@ -164,6 +164,24 @@ describe.skipIf(!TEST_URL)("jobs, timers, outbox", () => {
       expect(c.created).toBe(true);
     });
 
+    it("drops an invite's one-time link once the row is delivered or dead, and keeps it while it may still be retried", async () => {
+      const e = await event();
+      const payload = { kind: "invite", to: "a@b.c", link: "https://x/auth/login?invite=SECRETTOKEN", token: "SECRETTOKEN" };
+      const a = await enqueueOutbox(db.app, { orgId: db.orgId, eventId: e.id, destination: "smtp", payload });
+      const e2 = await event();
+      const b = await enqueueOutbox(db.app, { orgId: db.orgId, eventId: e2.id, destination: "smtp", payload, maxAttempts: 1 });
+      const got = await claimOutbox(db.app, { workerId: "scrub", leaseMs: 1000, destinations: ["smtp"] });
+      expect(got).toHaveLength(2);
+      expect(got.find((x) => x.id === a.id)!.payload).toMatchObject({ link: payload.link });
+      expect(await markDelivered(db.app, a.id, "scrub")).toBe(true);
+      expect(await markFailed(db.app, b.id, "scrub", "550")).toBe("dead");
+      for (const id of [a.id, b.id]) {
+        const row = (await db.admin.query(`select payload from outbox where id = $1`, [id])).rows[0].payload;
+        expect(JSON.stringify(row)).not.toContain("SECRETTOKEN");
+        expect(row).toMatchObject({ kind: "invite", to: "a@b.c" });
+      }
+    });
+
     it("claims, delivers, retries with backoff and dies", async () => {
       const e = await event();
       await enqueueOutbox(db.app, { orgId: db.orgId, eventId: e.id, destination: "slack", maxAttempts: 2 });
