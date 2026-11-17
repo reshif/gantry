@@ -37,6 +37,8 @@ export interface MenuItem {
   label?: string;
   icon?: string;
   hint?: string;
+  /** "danger" or "andon" marks a destructive or stopping item. */
+  kind?: string;
   sep?: boolean;
   guard?: Decision | null | undefined;
   onClick?: () => void;

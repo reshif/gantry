@@ -176,7 +176,7 @@ function MenuList({ title, items, close }: { title: string | null; items: MenuIt
               <button
                 type="button"
                 role="menuitem"
-                className={`menu-item${g.locked ? " is-locked" : ""}`}
+                className={`menu-item${g.locked ? " is-locked" : ""}${it.kind === "danger" || it.kind === "andon" ? " menu-item-danger" : ""}`}
                 aria-disabled={g["aria-disabled"]}
                 data-reason={g["data-reason"]}
                 onClick={(e) => {

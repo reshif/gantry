@@ -39,6 +39,23 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
     const t = setTimeout(() => { scroll(document.getElementById(target), document.getElementById(target)); pending.current = null; }, 120);
     return () => clearTimeout(t);
   }, [tab, session]);
+  // a link to a section of the document opens the Document tab first, then scrolls once it has rendered
+  const pendingSection = useRef<SectionId | null>(null);
+  const scrollToSection = useCallback(() => {
+    const s = pendingSection.current;
+    if (!s) return;
+    const el = document.getElementById(`rec-sec-${s}`);
+    if (!el) return;
+    pendingSection.current = null;
+    const det = el.querySelector("details");
+    if (det) det.open = true;
+    scroll(el, el.querySelector<HTMLElement>(".rec-sec-title"));
+  }, []);
+  useEffect(() => {
+    if (tab !== "document" || !pendingSection.current) return;
+    const t = setTimeout(scrollToSection, 120);
+    return () => clearTimeout(t);
+  }, [tab, d.loading, scrollToSection]);
   const toActivity = (target?: string) => {
     pending.current = target ?? "wos-input";
     if (tab !== "activity") setTab("activity");
@@ -54,16 +71,9 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
   const { wo, rec, project, cat } = d;
   const c = { wo, rec, project, cat, pre: "rec-", compact: false, doc: true };
   const jump = (s: SectionId) => {
-    if (tab !== "document") {
-      setTab("document");
-      setTimeout(() => jump(s), 150);
-      return;
-    }
-    const el = document.getElementById(`rec-sec-${s}`);
-    if (!el) return;
-    const det = el.querySelector("details");
-    if (det) det.open = true;
-    scroll(el, el.querySelector<HTMLElement>(".rec-sec-title"));
+    pendingSection.current = s;
+    if (tab !== "document") setTab("document");
+    else scrollToSection();
   };
   const decide = () => {
     const b = document.getElementById("trv-approve");

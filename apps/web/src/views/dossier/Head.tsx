@@ -11,6 +11,8 @@ import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
 import { navigate, hashFor } from "../../lib/router";
+import { updatePrefs } from "../../lib/prefs";
+import { useOpenTraveler } from "../../shell/useTraveler";
 import { ClassChip, classOf } from "../projects/kit";
 import { useActionSpecs, type ActionSpec } from "../traveler/Actions";
 import { bayLabel, stName, stNo, type TWo } from "../traveler/model";
@@ -27,7 +29,7 @@ function ActionBar({ wo, onActivity }: { wo: TWo; onActivity: () => void }) {
   const of = (g: ActionSpec["group"]) => specs.filter((s) => s.group === g);
   const btn = (a: ActionSpec) => <Btn key={a.key} label={a.label} {...(a.kind ? { kind: a.kind } : {})} icon={a.icon} id={a.id} {...(a.aria ? { aria: a.aria } : {})} guard={a.guard} onClick={a.onClick} />;
   const menu = (title: string, items: ActionSpec[]) => (anchor: HTMLElement) =>
-    ui.menu(anchor, title, items.map((a) => ({ label: a.label, icon: a.icon, guard: a.guard, onClick: a.onClick })));
+    ui.menu(anchor, title, items.map((a) => ({ label: a.label, icon: a.icon, ...(a.kind ? { kind: a.kind } : {}), guard: a.guard, onClick: a.onClick })));
   const move = of("move");
   const more = of("more");
   const locked = specs.filter((s) => s.guard && !s.guard.allowed);
@@ -58,7 +60,7 @@ function ActionBar({ wo, onActivity }: { wo: TWo; onActivity: () => void }) {
 
 /** One line on what the work order is doing right now, from the work order read and, when there is one, its conversation. */
 export function statusLine(wo: TWo, cat: Catalog, s: WoSession | undefined): string {
-  if (wo.killed) return `Killed by ${wo.killed.by}: ${wo.killed.reason}`;
+  if (wo.killed) return `Held in place by a ${wo.killed.scope} kill, ${fmt.stamp(wo.killed.at)}`;
   if (wo.state === "done") return wo.split ? "Split into child work orders" : `Shipped ${fmt.stamp(wo.doneAt ?? 0)}`;
   if (wo.bay) return `Off the belt in ${bayLabel(cat, wo.bay)}${wo.bayReason ? `: ${wo.bayReason}` : ""}`;
   if (s?.next.text) return s.next.text;
@@ -68,6 +70,7 @@ export function statusLine(wo: TWo, cat: Catalog, s: WoSession | undefined): str
 
 export function DossierHead({ wo, cat, project, session, onActivity }: { wo: TWo; cat: Catalog; project: Project; session: WoSession | undefined; onActivity: () => void }) {
   const copy = useCopy();
+  const openTraveler = useOpenTraveler();
   const actor = useActors();
   const st = cat.stations[wo.state === "done" ? cat.stations.length - 1 : wo.station];
   const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;
@@ -80,7 +83,9 @@ export function DossierHead({ wo, cat, project, session, onActivity }: { wo: TWo
       <div className="body">
         <nav className="dz-back" aria-label="Work order navigation">
           <a href={hashFor("work-orders", null, wo.project)} onClick={(e) => { e.preventDefault(); navigate("work-orders", null, wo.project); }}><Icon name="back" />Work orders</a>
+          <a href={hashFor("record", null, wo.project)} onClick={(e) => { e.preventDefault(); updatePrefs({ record: null }); navigate("record"); }} id="rec-all">All records</a>
           <span className="grow" />
+          <Btn label="Open traveler" small kind="ghost" icon="page" id="rec-traveler" onClick={() => openTraveler(wo.id)} />
           <Btn label="Copy link" small kind="ghost" icon="copy" id="dz-link" onClick={() => copy(`${window.location.origin}${window.location.pathname}${hashFor("record", wo.id, wo.project)}`)} />
         </nav>
         <div className="dz-title">

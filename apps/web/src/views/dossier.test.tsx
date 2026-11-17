@@ -58,6 +58,35 @@ describe("Work order page", () => {
   });
 });
 
+describe("Work order page: links, viewers and kills", () => {
+  it("scrolls to a section when the viewer is on the Activity tab, and stops retrying", async () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    await show({}, `#record/${W.id}/activity`);
+    fireEvent.click(screen.getByRole("button", { name: "Read the brief" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Document" }).getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() => expect(document.getElementById("rec-sec-agreement")).toBeTruthy());
+    await waitFor(() => expect(scrolled).toHaveBeenCalled());
+    const n = scrolled.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 500));
+    expect(scrolled.mock.calls.length).toBe(n);
+  });
+
+  it("degrades cleanly for a viewer without access to the conversation", async () => {
+    await show({ [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ status: 403, body: { ok: false, msg: "No access." } }) });
+    expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
+    expect(screen.getByText("Outline")).toBeTruthy();
+    expect(document.getElementById("dz-head")?.textContent).not.toMatch(/is next/);
+  });
+
+  it("keeps the traveler and the record picker reachable from the page", async () => {
+    await show();
+    expect(document.getElementById("rec-traveler")).toBeTruthy();
+    fireEvent.click(document.getElementById("rec-all") as HTMLElement);
+    await waitFor(() => expect(window.location.hash).not.toContain(W.id));
+  });
+});
+
 describe("Changes page", () => {
   it("shows counts, the plan and a way back to the work order", async () => {
     mockApi({ ...readsFor(W) });
