@@ -549,3 +549,7 @@ textarea.input{height:auto;min-height:84px;padding:8px 10px}
 .dlg-form{min-height:0}
 .drawer{overflow-y:auto}
 .card h3 .linkish{color:var(--ink);font:inherit;font-weight:600;text-decoration:none;cursor:pointer}.card h3 .linkish:hover{color:var(--accent);text-decoration:underline}
+.fbar .field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fbar .field>.field-label{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+.fbar .field select{width:100%}
+.btn.danger,.btn.btn-danger{background:var(--surface);color:var(--bad);border-color:var(--bad)}.btn.danger:hover,.btn.btn-danger:hover{background:var(--bad-bg);filter:none;opacity:1}

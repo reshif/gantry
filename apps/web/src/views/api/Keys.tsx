@@ -4,7 +4,7 @@ import { DAY, fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { api, get } from "../../api/client";
-import { Btn, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
+import { Btn, Field, FilterBar, LockNote, Panel, SearchBox, Select, Table, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { tip } from "../../ui/Tip";
@@ -136,18 +136,16 @@ function KeyRow({ k, pname }: { k: ApiKey; pname: string }) {
   const perm = dec(useCan("api.keys", { project: k.project }));
   const gone = k.revoked || k.expired;
   return (
-    <tr className={gone ? "api-revoked" : ""} id={`api-key-row-${k.id}`}>
-      <td><strong>{k.name}</strong><div className="small muted">{`by ${who(k.by).name}`}</div></td>
-      <td className="mono">{k.prefix}…</td>
+    <tr id={`api-key-row-${k.id}`}>
+      <td><b>{k.name}</b><span className="sub mono">{k.prefix}… · by {who(k.by).name}</span></td>
       <td>{pname}</td>
-      <td>{k.actions.map((a) => <span key={a} className="tag">{a}</span>)}</td>
-      <td className="mono small">{fmt.istDate(k.created)}</td>
-      <td className="small">{k.lastUsed ? fmt.ago(k.lastUsed, Date.now()) : "never"}</td>
+      <td><div className="row">{k.actions.map((a) => <span key={a} className="chip plain">{a}</span>)}</div></td>
+      <td>{k.lastUsed ? fmt.ago(k.lastUsed, Date.now()) : "never"}</td>
       <td>
-        {k.revoked ? <span className="outcome o-denied">⊘ revoked</span> : k.expired ? <span className="outcome o-denied">⊘ expired</span> : <span className="outcome o-ok">✓ active</span>}
+        <span className={`chip ${gone ? "bad" : "ok"}`}>{k.revoked ? "revoked" : k.expired ? "expired" : "active"}</span>
         {!k.revoked && k.expires ? <div className="small muted">{k.expired ? "expired " : "expires "}{fmt.istDate(k.expires)}</div> : null}
       </td>
-      <td className="num">{k.revoked ? null : <Btn label="Revoke" small kind="ghost" id={`api-key-revoke-${k.id}`} guard={perm} onClick={() => ui.open((c) => <RevokeKey k={k} perm={perm} close={c} />)} />}</td>
+      <td className="r">{k.revoked ? null : <Btn label="Revoke" small kind="danger" id={`api-key-revoke-${k.id}`} guard={perm} onClick={() => ui.open((c) => <RevokeKey k={k} perm={perm} close={c} />)} />}</td>
     </tr>
   );
 }
@@ -155,23 +153,20 @@ function KeyRow({ k, pname }: { k: ApiKey; pname: string }) {
 export function KeysTab({ d, onCreated }: { d: ApiData; onCreated: (k: ApiKey) => void }) {
   const ui = useUI();
   const guard = useCanAny("api.keys", d.vis);
-  const keys = [...d.keys].sort((a, b) => Number(a.revoked) - Number(b.revoked) || b.created - a.created);
+  const [q, setQ] = useState("");
+  const keys = [...d.keys].sort((a, b) => Number(a.revoked) - Number(b.revoked) || b.created - a.created).filter((k) => !q.trim() || `${k.name} ${d.pname(k.project)}`.toLowerCase().includes(q.trim().toLowerCase()));
   return (
-    <div className="form-grid">
-      <div className="toolbar">
-        <p className="muted">Keys are service accounts scoped to one project and a set of actions. The full key is shown once at creation, and every key expires.</p>
-        <Btn label="Create key" kind="primary" icon="plus" id="api-key-new" guard={guard} onClick={() => ui.open((c) => <CreateKey d={d} close={c} onCreated={onCreated} />)} />
-      </div>
-      <Panel flush>
-        <div className="table-scroll">
-          <table className="table table-compact api-keys">
-            <thead><tr><th>Name</th><th>Key</th><th>Project</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th><span className="sr">Actions</span></th></tr></thead>
-            <tbody>
-              {keys.length ? keys.map((k) => <KeyRow key={k.id} k={k} pname={d.pname(k.project)} />) : <tr><td colSpan={8} className="muted">No keys on your projects.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-    </div>
+    <Panel title="API keys" flush tools={<Btn label="New key" small kind="primary" icon="plus" id="api-key-new" guard={guard} onClick={() => ui.open((c) => <CreateKey d={d} close={c} onCreated={onCreated} />)} />}>
+      <FilterBar label="Filter keys" count={`${keys.length} ${keys.length === 1 ? "key" : "keys"}`}>
+        <SearchBox id="api-key-q" label="Search" placeholder="Search..." value={q} onChange={setQ} />
+      </FilterBar>
+      <Table>
+        <thead><tr><th>Name</th><th>Project</th><th>Allowed</th><th>Last used</th><th>State</th><th className="r"><span className="sr">Actions</span></th></tr></thead>
+        <tbody>
+          {keys.length ? keys.map((k) => <KeyRow key={k.id} k={k} pname={d.pname(k.project)} />) : <tr><td colSpan={6} className="muted">No keys on your projects.</td></tr>}
+        </tbody>
+      </Table>
+      <div className="tfoot">Keys are service accounts scoped to one project. The full key is shown once at creation, and every key expires.</div>
+    </Panel>
   );
 }
