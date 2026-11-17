@@ -57,6 +57,18 @@ describe("Work orders table", () => {
     expect(await screen.findByText("5 of 5 shown")).toBeTruthy();
   });
 
+  it("has a mobile sort select and direction toggle that drive the same server sort", async () => {
+    const calls = mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 7) : page(WOS.slice(0, 3)) }) });
+    mount(<WorkOrdersView />);
+    expect(await screen.findByText("WO-2398")).toBeTruthy();
+    const sel = document.getElementById("wo-sort-select") as HTMLSelectElement;
+    expect(Array.from(sel.options).map((o) => o.value)).toEqual(["id", "title", "cls", "where", "state", "prio", "age"]);
+    fireEvent.change(sel, { target: { value: "age" } });
+    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "age" && c.query.get("dir") === "desc")).toBe(true));
+    fireEvent.click(document.getElementById("wo-sort-dir") as HTMLElement);
+    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "age" && c.query.get("dir") === "asc")).toBe(true));
+  });
+
   it("explains an empty result and clears the filters", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([], null, 0) }) });
     mount(<WorkOrdersView />);

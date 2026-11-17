@@ -33,6 +33,15 @@ interface Filters {
   state: string;
 }
 const NONE: Filters = { q: "", cls: "all", where: "all", repo: "all", prio: "all", source: "all", state: "all" };
+const SORTS: Array<{ value: SortKey; label: string }> = [
+  { value: "id", label: "Id" },
+  { value: "title", label: "Title" },
+  { value: "cls", label: "Class" },
+  { value: "where", label: "Station / bay" },
+  { value: "state", label: "State" },
+  { value: "prio", label: "Priority" },
+  { value: "age", label: "Age" },
+];
 const PRIOS = ["P0", "P1", "P2", "P3"];
 const PAGE = 60;
 
@@ -197,6 +206,16 @@ export default function WorkOrdersView() {
             <Select id="wo-f-state" options={[{ value: "all", label: "All" }, ...Object.keys(WO_STATES).map((k) => ({ value: k, label: (WO_STATES as Record<string, { label: string }>)[k]?.label ?? k }))]} value={f.state} onChange={set("state")} />
           </Field>
         </div>
+        <div className="wo-sortm">
+          <Field label="Sort by" htmlFor="wo-sort-select">
+            <div className="wo-sortm-row">
+              <Select id="wo-sort-select" options={SORTS} value={sort.k} onChange={(k) => setSort((x) => ({ ...x, k: k as SortKey }))} />
+              <button type="button" id="wo-sort-dir" className="btn btn-sm" aria-label={sort.dir > 0 ? "Ascending, switch to descending" : "Descending, switch to ascending"} onClick={() => setSort((x) => ({ ...x, dir: x.dir === 1 ? -1 : 1 }))}>
+                {sort.dir > 0 ? "↑ Asc" : "↓ Desc"}
+              </button>
+            </div>
+          </Field>
+        </div>
         <div className="wo-count">
           <span className="muted small">{`${rows.length} of ${matched} shown`}</span>
           {filtered ? <Btn label="Clear filters" small kind="ghost" id="wo-clear-top" onClick={clear} /> : null}
@@ -229,15 +248,15 @@ export default function WorkOrdersView() {
                   const cost = woTotals(w).cost;
                   return (
                     <tr key={w.id} data-key={w.id} tabIndex={0} onClick={(e) => { if (!(e.target as HTMLElement).closest("button,a,input,select,textarea")) open(w.id); }} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(w.id); }}>
-                      <td data-label="Work order"><span className={`mono strong wo-id${killed ? " is-killed" : ""}`}>{w.id}</span></td>
-                      <td data-label="Title">
+                      <td data-label="Work order" className="wo-c-id"><span className={`mono strong wo-id${killed ? " is-killed" : ""}`}>{w.id}</span></td>
+                      <td data-label="Title" className="wo-c-title">
                         <span className={`wo-title${killed ? " is-killed" : ""}`}>
                           {w.title}
                           {w.parent ? <span className="muted small">{` · child of ${w.parent}`}</span> : null}
                           {w.children?.length ? <span className="muted small">{` · ${w.children.length} children`}</span> : null}
                         </span>
                       </td>
-                      <td data-label="Class">
+                      <td data-label="Class" className="wo-c-cls">
                         <span className="wo-cls">
                           <ClassChip cls={classOf(cat, project, w.cls)} small />
                           {w.clsOverridden ? (
@@ -247,19 +266,19 @@ export default function WorkOrdersView() {
                           ) : null}
                         </span>
                       </td>
-                      <td data-label="Station / bay">{whereCell(w)}</td>
-                      <td data-label="State"><StateChip state={w.state} /></td>
+                      <td data-label="Station / bay" className="wo-c-where">{whereCell(w)}</td>
+                      <td data-label="State" className="wo-c-state"><StateChip state={w.state} /></td>
                       <td data-label="Repo" className="hide-sm"><span className="mono small">{w.repo}</span></td>
-                      <td data-label="Pri"><span className={`chip wo-prio wo-prio-${w.priority}`}>{w.priority}</span></td>
+                      <td data-label="Pri" className="wo-c-prio"><span className={`chip wo-prio wo-prio-${w.priority}`}>{w.priority}</span></td>
                       <td data-label="Requested" className="hide-sm">
                         <span className="small wo-by">
                           {actor(w.requestedBy).name}
                           <span className="muted">{` via ${w.source}`}</span>
                         </span>
                       </td>
-                      <td data-label="Age" className="is-end"><span className="mono">{age}</span></td>
+                      <td data-label="Age" className="is-end wo-c-age"><span className="mono">{age}</span></td>
                       <td data-label="Spend" className="is-end hide-sm"><span className="mono">{fmt.money(cost)}</span></td>
-                      <td data-label="Open">
+                      <td data-label="Open" className="wo-c-open">
                         <span className="wo-acts">
                           <button type="button" className="icon-btn icon-btn-sm" id={`wo-rec-${w.id}`} aria-label={`Open full record for ${w.id}`} data-tip="Full record" onClick={(e) => { e.stopPropagation(); navigate("record", w.id); }}>
                             <Icon name="record" />
