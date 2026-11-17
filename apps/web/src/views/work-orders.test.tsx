@@ -64,9 +64,9 @@ describe("Work orders table", () => {
     const sel = document.getElementById("wo-sort-select") as HTMLSelectElement;
     expect(Array.from(sel.options).map((o) => o.value)).toEqual(["id", "title", "cls", "where", "state", "prio", "age"]);
     fireEvent.change(sel, { target: { value: "age" } });
-    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "age" && c.query.get("dir") === "desc")).toBe(true));
-    fireEvent.click(document.getElementById("wo-sort-dir") as HTMLElement);
     await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "age" && c.query.get("dir") === "asc")).toBe(true));
+    fireEvent.click(document.getElementById("wo-sort-dir") as HTMLElement);
+    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "age" && c.query.get("dir") === "desc")).toBe(true));
   });
 
   it("reads every page for the tabs it works out itself, and says when the list is cut short", async () => {
@@ -110,6 +110,7 @@ describe("Work orders table", () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([failed]) }) });
     mount(<WorkOrdersView />);
     expect(await screen.findByText("WO-3100")).toBeTruthy();
+    fireEvent.click(document.getElementById("wo-col-gate") as HTMLElement);
     const cell = Array.from(document.querySelectorAll("#wo-table tbody tr td")).map((td) => td.textContent ?? "");
     expect(cell.some((t) => /^Next: (Approve|Confirm|Review|Check|Wait)/.test(t)), cell.join(" | ")).toBe(true);
     expect(cell.some((t) => t === "Spec approved")).toBe(false);
