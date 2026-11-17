@@ -316,6 +316,8 @@ export async function enterStation(fx: Fx, w: Wo, stationId: string, o: { projec
   delete w.data.bayReason;
   delete w.data.bayFrom;
   delete w.data.bayAt;
+  delete w.data.bayCause;
+  delete w.data.failPhase;
   w.data.blockReason = null;
   w.data.failReason = null;
   if (stationId === "intake") {

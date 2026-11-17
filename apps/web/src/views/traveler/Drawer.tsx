@@ -2,6 +2,7 @@
  * Traveler: the routing sheet that rides with every work order (right-hand drawer), ported from legacy/js/views/traveler.js.
  * Open it with useOpenTraveler(). Position, gates with progress, approve and reject, moves, send back, park, reassign, retry, history.
  */
+import { useEffect } from "react";
 import { fmt } from "@gantry/domain";
 import { Btn, Empty, StateChip, Tabs } from "../../ui/primitives";
 import { Async } from "../../ui/async";
@@ -21,6 +22,7 @@ import { RunTimelineView } from "../documents/Timeline";
 import { useRepoName } from "./repo";
 import { ApproversPanel } from "./Approvers";
 import { navigate } from "../../lib/router";
+import { clearTravelerUrl, writeTravelerUrl } from "../../shell/travelerUrl";
 import { setProject } from "../../lib/prefs";
 import { useWoSessions } from "../conversations/session-api";
 import { useWoDialogue } from "../documents/api";
@@ -52,6 +54,11 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
   const close = () => onClose?.();
   const sessions = useWoSessions(wo?.project);
   const row = sessions.data?.items.find((x) => x.id === woId);
+  // The open traveler (and its tab) is in the URL; closing it, by any route, takes it out again.
+  useEffect(() => {
+    writeTravelerUrl(woId, tab);
+    return () => clearTravelerUrl(woId);
+  }, [woId, tab]);
   if (!wo || !project || !cat) {
     return (
       <div className="drawer-inner trv-drawer">
@@ -157,6 +164,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
           <span className="small" role="status">
             {!row ? "Talk to the agent at this station about this work order."
               : row.closed ? "Closed."
+              : wo.state === "failed" || wo.state === "blocked" ? <strong>{`${wo.state === "blocked" ? "Blocked" : "Stopped"}: a person has to retry it or assign another agent`}</strong>
               : row.waitingOn === "you" ? <strong>{`${row.agentName ?? "The agent"} is waiting for you`}</strong>
               : row.waitingOn === "approver" ? "Waiting for an approver"
               : row.waitingOn === "person" ? "Waiting for someone else's answer"

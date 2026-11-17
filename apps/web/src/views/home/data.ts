@@ -38,6 +38,10 @@ export interface Conversation {
   title: string;
   project: string;
   question: string | null;
+  /** Set when the work order is at the brief gate: the item is a gate decision, not a question. */
+  gate?: { id: string; label: string; name: string };
+  /** A failed, blocked or parked work order that needs a person: the reason is `question`; `actions` are what this person may do (retry, assign). */
+  stuck?: { state: string; station: string; reason: string; actions: string[] };
 }
 
 export interface MineWo {

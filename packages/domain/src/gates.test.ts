@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALWAYS_ON_GATES, COMBINED_GATES, GATES, approvalText, gateExplain, gateKindText, gateLock, gateTitle, route, routeGates, DEFAULT_CATALOG } from "./index.js";
+import { ALWAYS_ON_GATES, COMBINED_GATES, GATES, approvalText, gateExplain, gateKindText, gateLock, gatePendingName, gatePendingTitle, gateTitle, route, routeGates, DEFAULT_CATALOG } from "./index.js";
 import { seedState } from "./testkit.js";
 
 const gate = (id: string) => GATES.find((g) => g.id === id)!;
@@ -10,6 +10,13 @@ describe("gate naming and explanation", () => {
     expect(gateExplain(gate("G0G1"))).toMatch(/One gate\./);
     expect(gateExplain(gate("G3G3s"))).toMatch(/security checks run automatically/);
     expect(Object.keys(COMBINED_GATES).sort()).toEqual(["G0G1", "G3G3s"]);
+  });
+  it("titles a waiting gate with what to do, never with the outcome it waits for", () => {
+    expect(gatePendingTitle(gate("G2"))).toBe("Approve spec · G2");
+    expect(gatePendingTitle(gate("G0G1"))).toBe("Confirm brief · G0+G1");
+    expect(gateTitle(gate("G2"))).toBe("Spec approved · G2"); // the done wording is unchanged
+    for (const g of GATES.filter((x) => x.id !== "G5")) expect(gatePendingName(g), g.id).not.toBe(g.name); // G5 is already worded as an action
+    expect(gatePendingName({ id: "X1", name: "Legal sign-off" })).toBe("Approve legal sign-off");
   });
   it("names the kind in words", () => {
     expect([gateKindText("human"), gateKindText("auto"), gateKindText("mixed")]).toEqual(["person", "automatic", "person + automatic"]);

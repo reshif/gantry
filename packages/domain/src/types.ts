@@ -741,6 +741,10 @@ export interface WorkOrder {
   pr: PullRequest | null;
   blockReason: string | null;
   failReason: string | null;
+  /** Why the work order sits in the Needs a person bay: "failed" when the station failed or lost its run repeatedly (so Retry applies). */
+  bayCause?: string;
+  /** "start" when the failed run never started (workspace seeding, the launcher, no model). */
+  failPhase?: string;
   doneAt: Ms | null;
   killed: WoKill | null;
   parent: Id | null;

@@ -96,7 +96,8 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
     });
   }
   void approveGate;
-  if (wo.state === "failed" || wo.state === "blocked")
+  // A station that failed repeatedly is parked in the Needs a person bay: retrying it is what that person is there for.
+  if (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && wo.bayCause === "failed"))
     out.push({ key: "retry", label: `Retry ${stName(cat, stationId)}`, kind: "primary", icon: "refresh", id: "trv-retry", guard: stop ? no(stopWhy) : dec(wo, "sendback"), group: "main", onClick: () => void ops.retry(wo.id, undefined, ifm).then((r) => res(r)) });
   if (wo.bay) {
     let dU: TDecision = stop ? no(stopWhy) : dec(wo, "park");

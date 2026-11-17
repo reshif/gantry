@@ -191,6 +191,12 @@ d("internal runs API", () => {
       const um = (await q(`select * from usage_meter where run_id = $1`, [r.runId]))[0];
       expect(um).toMatchObject({ station: "build", cost_micros: "6525", vendor_id: "w3-anthropic", cache_write_tokens: "100" });
     });
+    it("the run shows the model that actually answered, not the one pinned when it was prepared", async () => {
+      const r = await makeRun();
+      await q(`update runs set model_id = 'claude-sonnet-5-5' where id = $1`, [r.runId]);
+      await usage(r, { requestId: "model-1", model: "claude-test-1" });
+      expect((await q(`select model_id from runs where id = $1`, [r.runId]))[0].model_id).toBe("claude-test-1");
+    });
     it("is idempotent per request id", async () => {
       const r = await makeRun();
       await usage(r, { requestId: "dup-1" });

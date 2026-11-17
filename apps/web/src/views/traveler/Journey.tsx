@@ -1,6 +1,6 @@
 /** The Journey tab: the station-by-station routing sheet with its gates, the journey scrubber and the after-release outcomes (legacy traveler.js journey). */
 import { useEffect, useRef, type ReactElement } from "react";
-import { TRUST_LEVELS, flowOf, fmt, gateAfter, gateDef, gateKind, woTotals, type Catalog, type Project } from "@gantry/domain";
+import { TRUST_LEVELS, flowOf, fmt, gateAfter, gateDef, gateKind, gatePendingName, woTotals, type Catalog, type Project } from "@gantry/domain";
 import { useAgents } from "../../api/queries";
 import { Btn, Avatar, StateChip } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
@@ -209,7 +209,7 @@ export function Journey({ wo, project, cat }: { wo: TWo; project: Project; cat: 
         <div key="gate" className={`trv-gate trv-gate-${gs.status}${late ? " trv-future" : ""}`}>
           <span className="trv-gd" aria-hidden="true" />
           <div>
-            <strong>{`${g.label} ${g.name}: ${late ? "not decided yet at this step" : gs.status === "waiting" ? `waiting${prog ? ` (${prog.have} of ${prog.need})` : ""}` : gs.status}`}</strong>
+            <strong>{`${g.label} ${gs.status === "passed" && !late ? g.name : gatePendingName(g)}: ${late ? "not decided yet at this step" : gs.status === "waiting" ? `waiting${prog ? ` (${prog.have} of ${prog.need})` : ""}` : gs.status}`}</strong>
             {dec && !late ? <span className={`trv-mode trv-mode-${dec.mode}`}>{dec.mode === "trust" ? "under trust" : dec.mode === "auto" ? "automatic" : "by a person"}</span> : null}
             {prog && prog.unmet.length ? <div className="small">{`Still needs: ${prog.unmet.map((c) => c.text).join("; ")}`}</div> : null}
             {gl.length && !late ? <ul className="checklist small">{gl}</ul> : null}

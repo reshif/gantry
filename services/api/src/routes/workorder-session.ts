@@ -125,7 +125,7 @@ export async function woSessionRows(db: Queryable, orgId: string, req: FastifyRe
       const waitingOn: "you" | "approver" | "agent" | "person" | "nobody" = closed ? "nobody"
         : pending ? "you"
         : asks.length ? (askedMe ? "you" : "person")
-        : w.position === "person" ? "you"
+        : w.position === "person" || w.state === "failed" || w.state === "blocked" ? "you"
         : gate ? "approver"
         : m && m.role === "user" ? "agent"
         : l && l.status === "open" && l.author_kind === "agent" && !m ? "you"
@@ -222,7 +222,8 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     void row;
     return {
       db: g.pool, orgId: g.orgId, wo: f.wo, st: f.st, project: f.project, catalog: f.catalog, repoFull, inspect, person: who,
-      agent: ag.mode === "agent" ? { id: ag.agentId, name: ag.agentName, version: ag.pin.version, model: ag.pin.model } : null,
+      // The model the route resolves for the call (what the meter will record), not the agent's pinned wish.
+      agent: ag.mode === "agent" ? { id: ag.agentId, name: ag.agentName, version: ag.pin.version, model: ag.model } : null,
       briefOpen: briefOpenOf(f.wo, f.catalog), cards: [], drafts: {}, used: [], next: 1,
     };
   }
@@ -375,7 +376,11 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const stepIdx = r.indexOf(sid);
     const cls = classOf(c, f.project, wo.cls);
     const gdef = gateWaiting ? c.gates.find((x) => x.id === gateWaiting[0]) : null;
+    // A failed or blocked work order is not being worked on: it waits for a person, with the reason, and Retry or another agent is what moves it.
+    const stuck = !closed && (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && wo.bayCause === "failed"));
+    const stuckWhy = (wo.state === "failed" ? wo.failReason : wo.state === "blocked" ? wo.blockReason : wo.bayReason) || `${stationName(c, sid)} did not finish.`;
     const next = closed ? { actor: "nobody", text: wo.bay === "declined" ? "The request was declined." : wo.state === "done" ? "The work order is finished." : "The work order was killed." }
+      : stuck ? { actor: "you", text: `${stationName(c, sid)} ${wo.state === "blocked" ? "is blocked" : "stopped"}: ${stuckWhy} A person can retry it or assign another agent.` }
       : pending.length ? (confirm.allowed || !pending.some((p) => p.what === "brief") ? { actor: "you", text: "Review the proposal below: approve it, ask for changes, or discard it." } : { actor: "approver", text: "An approver with the right to confirm briefs has to approve the proposal." })
       : blockingAsks.length ? (askedMe ? { actor: "you", text: `${stationName(c, blockingAsks[0]!.station)} is waiting for your answer${blockingAsks.length > 1 ? `s to ${blockingAsks.length} questions` : ""} below.` } : { actor: "person", text: `${stationName(c, blockingAsks[0]!.station)} is waiting for an answer from ${askedOf}.` })
       : openQuestion ? { actor: "you", text: "Answer the agent's question (click a suggestion or write your own)." }
@@ -386,7 +391,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
       : { actor: "agent", text: `${ag.agentName} works at ${stationName(c, sid)}.` };
     const swarmLive = swarmOf(row.data);
     const scoutsLive = swarmLive && !swarmLive.endedAt ? swarmLive.scouts.filter((x) => x.state === "queued" || x.state === "running").length : 0;
-    const waiting = closed ? null : scoutsLive ? { text: `${scoutsLive} scout${scoutsLive === 1 ? "" : "s"} working at ${stationName(c, swarmLive!.station)}`, kind: "agent" }
+    const waiting = closed ? null : stuck ? { text: `${stationName(c, sid)} ${wo.state === "blocked" ? "is blocked" : "stopped"}: waiting for a person to retry it`, kind: "you" as const } : scoutsLive ? { text: `${scoutsLive} scout${scoutsLive === 1 ? "" : "s"} working at ${stationName(c, swarmLive!.station)}`, kind: "agent" }
       : planWaiting && !blockingAsks.length ? { text: `Waiting for ${canDecidePlan ? "you" : "an approver"}: the research plan from ${stationName(c, planWaiting.station)}`, kind: canDecidePlan ? "you" : "gate" }
       : blockingAsks.length ? { text: `Waiting for ${askedMe ? "you" : askedOf}: ${blockingAsks.length === 1 ? "1 question" : `${blockingAsks.length} questions`} from ${stationName(c, blockingAsks[0]!.station)}`, kind: askedMe ? "you" : "person" }
       : atIntake && ag.mode === "agent" && !pending.length && !openQuestion ? { text: `${ag.agentName} is reading the request`, kind: "agent" }

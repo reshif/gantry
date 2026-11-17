@@ -95,7 +95,7 @@ export async function readTeams(db: Queryable, orgId: string): Promise<Team[]> {
 /* ---------------------------------------------------------------- projects -- */
 
 export async function readProjects(db: Queryable, orgId: string, stops?: ActiveStop[]): Promise<Project[]> {
-  const [pr, teams, flows, rules, notes, budgets, gl, st] = await reads(db, [
+  const [pr, teams, flows, rules, notes, budgets, gl, st, spend] = await reads(db, [
     () => db.query(`select id, key, name, description, status, owner_id, template_id, regulated, overlay, config, created_at, version from projects where org_id = $1 order by position nulls last, created_at, id`, [orgId]),
     () => db.query(`select project_id, team_id from project_teams where org_id = $1 order by created_at, team_id`, [orgId]),
     () => db.query(`select f.project_id, f.doc, f.version from flow_versions f join projects p on p.org_id = f.org_id and p.id = f.project_id and p.current_flow_version = f.version where f.org_id = $1`, [orgId]),
@@ -109,6 +109,9 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
     // The project's onboarding guidelines (spec 8.6): every published version, newest last.
     () => db.query(`select project_id, version, body, note, published_at, published_by from guideline_versions where org_id = $1 and scope = 'project' and published_at is not null order by project_id, version`, [orgId]),
     () => (stops ? Promise.resolve(stops) : readActiveStops(db, orgId)),
+    // Month to date is metered spend, never the figure a project's config once carried: every metered call that names the project counts (station runs, console turns, side threads).
+    // The same sum (UTC month) drives the budget gate and the 80% alert, so the number shown and the number acted on cannot differ.
+    () => db.query(`select project_id, coalesce(sum(cost_micros), 0)::text as micros from usage_meter where org_id = $1 and project_id is not null and at >= date_trunc('month', now() at time zone 'UTC') at time zone 'UTC' group by project_id`, [orgId]),
   ]);
   const stopList = st;
   return pr.rows.map((r) => {
@@ -129,7 +132,7 @@ export async function readProjects(db: Queryable, orgId: string, stops?: ActiveS
       })),
       mcp: Array.isArray(cfg.mcp) ? cfg.mcp : [],
       oncall: Array.isArray(cfg.oncall) ? (cfg.oncall as unknown[]).filter((x): x is string => typeof x === "string") : [],
-      budget: { monthly: b ? Math.round(num(b.monthly_limit_micros) / 1_000_000) : 0, mtd: num(cfg.mtd), alertAt: b ? num(b.alert_at) : 0.8 },
+      budget: { monthly: b ? Math.round(num(b.monthly_limit_micros) / 1_000_000) : 0, mtd: num(spend.rows.find((x) => x.project_id === r.id)?.micros) / 1_000_000, alertAt: b ? num(b.alert_at) : 0.8 },
       created: ms(r.created_at) ?? 0,
       halted: halt ? haltInfo(halt) : null,
       killed: kill ? killInfo(kill) : null,

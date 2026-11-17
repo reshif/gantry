@@ -114,6 +114,11 @@ d("attempt.dispatch and run.result", () => {
     expect(w.broker.count("seed")).toBe(5);
     // The prepared network and volume were torn down.
     expect(w.launcher.runs.size).toBe(0);
+    // The reason stays on the run, so System health can say runs are not starting and why.
+    const run = (await w.q(`select ended_at, data from runs where attempt_id = $1`, [attemptId]))[0];
+    expect(run.ended_at).not.toBeNull();
+    expect(run.data.endedBy).toBe("dispatch failed");
+    expect(run.data.dispatchError.msg).toMatch(/could not be started/);
   });
 
   it("fails an agent with no model with a clear reason instead of running the stub", async () => {

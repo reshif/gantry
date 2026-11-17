@@ -143,7 +143,10 @@ export const WO_TOOLS: WoTool[] = [
       if (!r.ok) return { error: r.error };
       const p = str(i.path, 300);
       const text = p ? r.facts.contents[p] : undefined;
-      if (text === undefined) return { error: "Only files the assessment reads are available.", available: Object.keys(r.facts.contents).slice(0, 60) };
+      if (text === undefined) {
+        const listed = !!p && r.facts.files.includes(p);
+        return { error: listed ? `${p} is in the repository but its text is not part of the snapshot Gantry reads (it may be large or binary). Ask the person, or work from the files that are available.` : "Only files the assessment reads are available (the README, contributing guide, build and CI files, AGENTS.md and the like).", available: Object.keys(r.facts.contents).slice(0, 60) };
+      }
       return { source: OBSERVED, path: p, content: mark(text, 4000) };
     },
   },

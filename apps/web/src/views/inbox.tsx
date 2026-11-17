@@ -4,7 +4,7 @@
  * the server puts in front of this person (trust, learning, MCP and trigger proposals, a factory restore). Every decision is a command the server checks (approver rules, separation of duties).
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { fmt } from "@gantry/domain";
+import { fmt, gatePendingTitle } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useHome, useMe, useProjects } from "../api/queries";
 import { dec, useTravelerWo } from "./traveler/model";
@@ -20,11 +20,12 @@ import { useOpenTraveler } from "../shell/useTraveler";
 import { useGateApprovers } from "./traveler/Approvers";
 import { goAttention, type Approval, type AttentionItem, type Conversation, type HomeFull } from "./home/data";
 
-type Group = "gate" | "onboarding" | "questions" | "other";
+type Group = "gate" | "onboarding" | "questions" | "stuck" | "other";
 type Item =
   | { kind: "gate"; group: "gate"; key: string; project: string; projectName: string; waitMs: number; a: Approval }
   | { kind: "onboarding"; group: "onboarding"; key: string; project: string; projectName: string; waitMs: number; a: Approval }
   | { kind: "question"; group: "questions"; key: string; project: string; projectName: string; waitMs: number; c: Conversation }
+  | { kind: "stuck"; group: "stuck"; key: string; project: string; projectName: string; waitMs: number; c: Conversation }
   | { kind: "other"; group: "other"; key: string; project: string; projectName: string; waitMs: number; x: AttentionItem };
 
 /** Attention items that are decisions for this person, rather than health to look at: a restore, and proposals on the governance pages. */
@@ -35,6 +36,7 @@ const GROUPS: Array<{ id: Group; label: string; title: string; hint: string; emp
   { id: "gate", label: "Gate approvals", title: "Gate approvals", hint: "Longest wait first. Approve, or send it back with what must change. The rule and who else can decide are shown on every row.", empty: "No gate approvals waiting." },
   { id: "onboarding", label: "Onboarding", title: "Onboarding approvals", hint: "Pull requests that wire a repo into Gantry. Open the onboarding session to review the files before the merge.", empty: "No onboarding merges waiting." },
   { id: "questions", label: "Questions", title: "Questions for you", hint: "Agents ask in the work order's one conversation. Answer there.", empty: "No open questions." },
+  { id: "stuck", label: "Needs a person", title: "Stopped work", hint: "A station failed or could not start, so nothing is working on it. Retry it, or open it to assign another agent.", empty: "Nothing is stopped." },
   { id: "other", label: "Other decisions", title: "Other decisions", hint: "Proposals and restores that need a person. A factory restore appears here while the factory is stopped.", empty: "Nothing else is waiting." },
 ];
 
@@ -49,7 +51,18 @@ function useItems(home: HomeFull | undefined, names: Map<string, string>): Item[
       const base = { project: a.project, projectName: a.projectName, waitMs: a.waitMs ?? 0 };
       out.push(a.repo ? { kind: "onboarding", group: "onboarding", key: `onb-${a.repo}-${a.note ? "n" : "m"}`, ...base, a } : { kind: "gate", group: "gate", key: `gate-${a.wo}-${a.gate}`, ...base, a });
     }
-    for (const c of s.waiting?.conversations ?? []) out.push({ kind: "question", group: "questions", key: `q-${c.wo}`, project: c.project, projectName: projectNames.get(c.project) ?? "", waitMs: 0, c });
+    for (const c of s.waiting?.conversations ?? []) {
+      const projectName = projectNames.get(c.project) ?? "";
+      // The brief gate is a gate decision whatever line the conversation last said (the classifier's line is not a question): it is listed with the gate approvals.
+      if (c.gate) {
+        if (out.some((i) => i.kind === "gate" && i.a.wo === c.wo && i.a.gate === c.gate!.id)) continue;
+        const a: Approval = { wo: c.wo, title: c.title, gate: c.gate.id, gateLabel: c.gate.label, gateName: c.gate.name, project: c.project, projectName };
+        out.push({ kind: "gate", group: "gate", key: `gate-${c.wo}-${c.gate.id}`, project: c.project, projectName, waitMs: 0, a });
+        continue;
+      }
+      if (c.stuck) { out.push({ kind: "stuck", group: "stuck", key: `stuck-${c.wo}`, project: c.project, projectName, waitMs: 0, c }); continue; }
+      out.push({ kind: "question", group: "questions", key: `q-${c.wo}`, project: c.project, projectName, waitMs: 0, c });
+    }
     for (const x of s.attention ?? []) if (isDecision(x)) out.push({ kind: "other", group: "other", key: x.id, project: x.act.project ?? "factory", projectName: x.where, waitMs: 0, x });
     return out.sort((p, q) => q.waitMs - p.waitMs);
   }, [home, names]);
@@ -145,7 +158,7 @@ function GateItem({ it }: { it: Extract<Item, { kind: "gate" }> }) {
       id={`inb-${it.key}`}
       tag="Gate approval"
       project={it.projectName}
-      title={`${a.gateName ?? "Gate"} · ${a.gateLabel ?? gate} on ${wo}`}
+      title={`${gatePendingTitle({ id: gate, name: a.gateName ?? "gate", label: a.gateLabel ?? gate })} on ${wo}`}
       sub={`${wo} · ${a.title ?? ""}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`}
       status={<Status tone="wait">Waiting</Status>}
       details={<GateRule wo={wo} gate={gate} project={it.project} />}
@@ -187,6 +200,34 @@ function QuestionItem({ it }: { it: Extract<Item, { kind: "question" }> }) {
       sub={`${c.wo} · ${c.title}`}
       status={<Status tone="wait">Waiting</Status>}
       actions={<Btn label="Answer" kind="primary" icon="chat" id={`inb-conv-${c.wo}`} onClick={() => { setProject(c.project); updatePrefs({ openConversation: c.wo }); navigate("conversations"); }} />}
+    />
+  );
+}
+
+/** A failed, blocked or parked work order: the reason, and the actions the server allows this person (retry, assign). */
+function StuckItem({ it }: { it: Extract<Item, { kind: "stuck" }> }) {
+  const open = useOpenTraveler();
+  const c = it.c;
+  const s = c.stuck!;
+  const q = useTravelerWo(c.wo);
+  const t = q.data;
+  const ifm = t ? { ifMatch: t.version } : undefined;
+  const retry = useCommand(() => ops.retry(c.wo, undefined, ifm), {});
+  const guard: Decision = !t ? CHECKING : dec(t, "sendback");
+  return (
+    <Row
+      id={`inb-${it.key}`}
+      tag="Needs a person"
+      project={it.projectName}
+      title={c.question || "This work order stopped and needs a person."}
+      sub={`${c.wo} · ${c.title}`}
+      status={<Status tone="fail">{s.state === "blocked" ? "Blocked" : s.state === "parked" ? "Parked" : "Failed"}</Status>}
+      actions={
+        <>
+          {s.actions.includes("retry") ? <Btn label="Retry" kind="primary" icon="refresh" id={`inb-retry-${c.wo}`} guard={guard} onClick={() => void retry.run()} /> : null}
+          <Btn label={s.actions.includes("assign") ? "Open to assign an agent" : `Open ${c.wo}`} kind="ghost" id={`inb-open-${c.wo}`} onClick={() => open(c.wo)} />
+        </>
+      }
     />
   );
 }
@@ -242,7 +283,7 @@ export default function InboxView() {
   }, [items, names]);
   const shown = items.filter((i) => (group === "all" || i.group === group) && (project === "all" || i.project === project));
   const render = (i: Item): ReactNode =>
-    i.kind === "gate" ? <GateItem key={i.key} it={i} /> : i.kind === "onboarding" ? <OnboardingItem key={i.key} it={i} /> : i.kind === "question" ? <QuestionItem key={i.key} it={i} /> : <OtherItem key={i.key} it={i} />;
+    i.kind === "gate" ? <GateItem key={i.key} it={i} /> : i.kind === "onboarding" ? <OnboardingItem key={i.key} it={i} /> : i.kind === "question" ? <QuestionItem key={i.key} it={i} /> : i.kind === "stuck" ? <StuckItem key={i.key} it={i} /> : <OtherItem key={i.key} it={i} />;
   return (
     <div className="view inbox">
       <ViewHead title="Inbox" sub="Everything that waits for you, in one list. Decide right here." />

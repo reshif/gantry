@@ -27,7 +27,7 @@ export interface StationResult {
   summary?: string;
   /** The station's structured output (spec 10.3). Agent-reported. */
   output?: Record<string, unknown> | null;
-  error?: { code: string; msg: string } | null;
+  error?: { code: string; msg: string; /** "start": the run never started (seeding, launcher, no model). */ phase?: "start" } | null;
   usage?: { tokens?: number; costUsd?: number };
   /** System-observed values from GitHub and the edge. They win over the agent's report. */
   observed?: { checks?: ObservedChecks[]; files?: Array<{ path: string; additions?: number; deletions?: number }>; headSha?: string | null; tests?: { passed: number; failed: number; added: number } };
@@ -129,7 +129,7 @@ async function failCount(tx: Tx, orgId: string, woId: string, station: string): 
   return Number((await tx.query(`select count(*)::int as n from attempts where org_id = $1 and wo_id = $2 and station = $3 and state = 'failed' and (data->>'streakBroken') is null`, [orgId, woId, station])).rows[0].n);
 }
 
-async function needsPerson(fx: Fx, w: Wo, reason: string): Promise<void> {
+async function needsPerson(fx: Fx, w: Wo, reason: string, cause?: "failed"): Promise<void> {
   const from = stationIdOf(fx.catalog, w);
   w.data.bayFrom = from;
   w.data.bayReason = reason;
@@ -138,6 +138,9 @@ async function needsPerson(fx: Fx, w: Wo, reason: string): Promise<void> {
   w.state = "parked";
   await releaseSlot(fx, w);
   await enterBay(fx, w, "person", reason);
+  // Why it waits for a person: a failed station is retried, a question is answered. Cleared when it leaves the bay.
+  if (cause) w.data.bayCause = cause;
+  else delete w.data.bayCause;
   note(w, fx, "system", reason);
   ev(fx, w, "wo.bay", { bay: "person", from: null, station: from, text: reason });
 }
@@ -216,13 +219,15 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     if (result.status === "failed" && n < MAX_STATION_FAILURES) {
       w.state = "failed";
       w.data.failReason = result.error?.msg ?? `${stationDef(fx.catalog, sid)?.name ?? sid} failed.`;
+      if (result.error?.phase === "start") w.data.failPhase = "start";
+      else delete w.data.failPhase;
       ev(fx, w, "wo.state", { from: "running", to: "failed", station: sid, text: String(w.data.failReason) });
       next = sid;
     } else if (result.status === "interrupted" && (await interruptions(tx, orgId, w.id, sid)) < MAX_STATION_FAILURES) {
       await enterStation(fx, w, sid);
       next = sid;
     } else {
-      await needsPerson(fx, w, `${stationDef(fx.catalog, sid)?.name ?? sid} ${result.status === "failed" ? "failed" : "was interrupted"} ${MAX_STATION_FAILURES} times; a person needs to look.`);
+      await needsPerson(fx, w, `${stationDef(fx.catalog, sid)?.name ?? sid} ${result.status === "failed" ? "failed" : "was interrupted"} ${MAX_STATION_FAILURES} times; a person needs to look.`, "failed");
       next = "person";
     }
   }
@@ -265,7 +270,7 @@ export async function expireLeases(tx: Tx, o: { now?: Date; limit?: number } = {
     } else if ((await interruptions(tx, a.org_id, w.id, a.station)) < MAX_STATION_FAILURES) {
       await enterStation(fx, w, a.station);
     } else {
-      await needsPerson(fx, w, `${stationDef(fx.catalog, a.station)?.name ?? a.station} lost its run ${MAX_STATION_FAILURES} times; a person needs to look.`);
+      await needsPerson(fx, w, `${stationDef(fx.catalog, a.station)?.name ?? a.station} lost its run ${MAX_STATION_FAILURES} times; a person needs to look.`, "failed");
     }
     await saveWo(tx, a.org_id, w);
     await flushFx(fx);

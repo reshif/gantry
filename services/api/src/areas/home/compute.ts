@@ -128,7 +128,7 @@ async function attention(db: Queryable, orgId: string, st: Flow, stops: ActiveSt
     const where = `${p?.name ?? w.project} · ${stationName(w)}`;
     const act = { label: "Traveler", route: "traveler", wo: w.id, project: w.project };
     if (w.state === "blocked") add({ id: `hm-att-wo-${w.id}`, sev: 1, icon: "st-block", title: `${w.id} blocked`, where, sub: w.blockReason || w.title, act });
-    else if (w.state === "failed") add({ id: `hm-att-wo-${w.id}`, sev: 1, icon: "st-fail", title: `${w.id} check failed`, where, sub: w.failReason || w.title, act });
+    else if (w.state === "failed") add({ id: `hm-att-wo-${w.id}`, sev: 1, icon: "st-fail", title: w.failPhase === "start" ? `${w.id} run did not start` : `${w.id} check failed`, where, sub: w.failReason || w.title, act });
     else if (w.bay === "sechold") add({ id: `hm-att-wo-${w.id}`, sev: 0, icon: "shield", title: `${w.id} on security hold`, where: p?.name ?? w.project, sub: w.bayReason || w.title, act });
     else if (w.bay === "person") add({ id: `hm-att-wo-${w.id}`, sev: 2, icon: "human", title: `${w.id} needs a person`, where: p?.name ?? w.project, sub: w.bayReason || w.title, act });
   }
@@ -223,7 +223,8 @@ async function myConversations(db: Queryable, orgId: string, st: Flow, st0: Poli
     [orgId],
   );
   const text = new Map(q.rows.map((r) => [r.wo_id, r.question]));
-  const out: Array<{ wo: string; title: string; project: string; question: string | null }> = [];
+  const out: Array<{ wo: string; title: string; project: string; question: string | null; gate?: { id: string; label: string; name: string }; stuck?: { state: string; station: string; reason: string; actions: string[] } }> = [];
+  const briefGate = gateDef(st.catalog, "G0G1");
   for (const w of st.workOrders) {
     if (!vis.has(w.project) || w.state === "done" || w.state === "killed" || w.bay === "declined") continue;
     const open = text.has(w.id);
@@ -233,7 +234,20 @@ async function myConversations(db: Queryable, orgId: string, st: Flow, st0: Poli
     if (!open && !raised && !toConfirm) continue;
     const lead = rolesIn(me, w.project).some((r) => r === "line_lead" || r === "project_admin");
     const mine = toConfirm && !open && !raised ? canApprove(st, me.id, w, "G0G1", now) && (w.requestedBy === me.id || lead) : w.requestedBy === me.id || (raised && lead && decideFor(st0, principal, "wo.answer", { project: w.project, time: now }).allowed);
-    if (mine) out.push({ wo: w.id, title: w.title, project: w.project, question: text.get(w.id) ?? null });
+    // A work order at the brief gate is a gate decision for its submitter, whatever line the conversation last said (the classifier's, a question, a draft): it carries the gate so it is listed with gate approvals.
+    if (mine) out.push({ wo: w.id, title: w.title, project: w.project, question: text.get(w.id) ?? null, ...(atIntake && briefGate ? { gate: { id: briefGate.id, label: briefGate.label, name: briefGate.name } } : {}) });
+  }
+  // A failed or blocked work order, or one parked for a person after repeated failures, waits on a person who may retry it. It stays in "Waiting on you" with the reason and the actions it allows.
+  for (const w of st.workOrders) {
+    if (!vis.has(w.project) || w.state === "done" || w.state === "killed" || w.bay === "declined" || out.some((x) => x.wo === w.id)) continue;
+    const failedBay = w.bay === "person" && w.bayCause === "failed";
+    if (w.state !== "failed" && w.state !== "blocked" && !failedBay) continue;
+    const scope = { project: w.project, time: now };
+    const retry = decideFor(st0, principal, "wo.sendback", scope).allowed;
+    const assign = decideFor(st0, principal, "wo.reassign", scope).allowed;
+    if (!retry && !assign) continue;
+    const reason = (w.state === "failed" ? w.failReason : w.state === "blocked" ? w.blockReason : w.bayReason) || `${st.catalog.stations[w.station]?.name ?? "The station"} did not finish.`;
+    out.push({ wo: w.id, title: w.title, project: w.project, question: reason, stuck: { state: failedBay ? "parked" : w.state, station: st.catalog.stations[w.station]?.id ?? "", reason, actions: [...(retry ? ["retry"] : []), ...(assign ? ["assign"] : [])] } });
   }
   // A station agent's question (wo_questions) is for the people its `ask_of` names, not for everyone who can see the work order.
   const asks = await db.query<{ wo_id: string; ask_of: string; question: string }>(`select wo_id, ask_of, question from wo_questions where org_id = $1 and status = 'open' order by created_at`, [orgId]);

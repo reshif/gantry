@@ -10,13 +10,16 @@ export interface BackupStatus { status: "ok" | "stale" | "failed" | "unknown"; a
 export interface DrillStatus { status: "ok" | "failed" | "unknown"; at: string | null; ageHours: number | null; set: string | null; seconds: number | null; failedChecks: number; detail: string }
 export interface DeadLetter { id: string; destination: string; scope: "factory" | "project"; attempts: number; maxAttempts: number; lastError: string | null; createdAt: string; failedAt: string }
 export interface StuckJob { id: string; queue: string; kind: string; attempts: number; maxAttempts: number; owner: string | null; startedAt: string | null; leaseUntil: string | null; reason: "lease_expired" | "running_long"; lastError: string | null }
+export interface DeadJob { id: string; queue: string; kind: string; attempts: number; maxAttempts: number; lastError: string | null; diedAt: string }
+export interface RunStartFailure { code: string; reason: string; count: number; lastAt: string }
 export interface SystemHealth {
   at: string;
   services: ServiceHealth[];
   backup: BackupStatus;
   drill: DrillStatus;
   outbox: { counts: Record<"pending" | "sending" | "delivered" | "dead", number>; oldestPendingSeconds: number | null; dead: DeadLetter[] };
-  jobs: { counts: Record<"queued" | "running" | "done" | "dead", number>; stuck: StuckJob[]; runningLongMinutes: number };
+  jobs: { counts: Record<"queued" | "running" | "done" | "dead", number>; stuck: StuckJob[]; runningLongMinutes: number; dead?: DeadJob[]; deadWindowHours?: number };
+  runStarts?: { windowMinutes: number; failed: number; reasons: RunStartFailure[] };
 }
 
 /** Refreshes itself every 30 s: this page is for watching. */

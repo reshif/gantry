@@ -22,6 +22,12 @@ export const WORKER_OVERDUE_SECONDS = 120;
 /** The worker beats every 5 s: a heartbeat this old is late, and this old means it is gone. */
 export const HEARTBEAT_LATE_SECONDS = 30;
 export const HEARTBEAT_DOWN_SECONDS = 90;
+/** Run starts that failed within this window are a problem to show (a run that never got going: workspace seeding, the launcher, a missing model). */
+export const RUN_START_WINDOW_MINUTES = 30;
+/** This many failed run starts in the window means station runs are not starting at all; fewer is a warning. */
+export const RUN_START_DOWN_AT = 3;
+/** Jobs that died within this many hours are listed with their reason and make the background jobs service unhealthy. */
+export const DEAD_JOB_WINDOW_HOURS = 24;
 
 export interface BackupStatus { status: "ok" | "stale" | "failed" | "unknown"; at: string | null; ageHours: number | null; set: string | null; detail: string }
 export interface DrillStatus { status: "ok" | "failed" | "unknown"; at: string | null; ageHours: number | null; set: string | null; seconds: number | null; failedChecks: number; detail: string }
@@ -109,13 +115,17 @@ export async function readDrill(dir: string, now: Date): Promise<DrillStatus> {
 
 export interface DeadLetter { id: string; destination: string; /** "project" rows belong to one project's notifications: only the transport and a generic reason are shown here. */ scope: "factory" | "project"; attempts: number; maxAttempts: number; lastError: string | null; createdAt: string; failedAt: string }
 export interface StuckJob { id: string; queue: string; kind: string; attempts: number; maxAttempts: number; owner: string | null; startedAt: string | null; leaseUntil: string | null; reason: "lease_expired" | "running_long"; lastError: string | null }
+export interface DeadJob { id: string; queue: string; kind: string; attempts: number; maxAttempts: number; lastError: string | null; diedAt: string }
+export interface RunStartFailure { code: string; reason: string; count: number; lastAt: string }
 export interface Health {
   at: string;
   services: ServiceHealth[];
   backup: BackupStatus;
   drill: DrillStatus;
   outbox: { counts: Record<"pending" | "sending" | "delivered" | "dead", number>; oldestPendingSeconds: number | null; dead: DeadLetter[] };
-  jobs: { counts: Record<"queued" | "running" | "done" | "dead", number>; stuck: StuckJob[]; runningLongMinutes: number };
+  jobs: { counts: Record<"queued" | "running" | "done" | "dead", number>; stuck: StuckJob[]; runningLongMinutes: number; /** Jobs that died in the last DEAD_JOB_WINDOW_HOURS, newest first, with the reason. */ dead: DeadJob[]; deadWindowHours: number };
+  /** Station runs that failed to start in the last RUN_START_WINDOW_MINUTES, grouped by the reason recorded on the run. */
+  runStarts: { windowMinutes: number; failed: number; reasons: RunStartFailure[] };
 }
 
 export interface HealthDeps { pool: Queryable; orgId: string; probe: Probe; targets: Targets; backupsDir: string; now?: Date }
@@ -204,6 +214,32 @@ async function workerService(pool: Queryable, orgId: string, now: Date): Promise
   }
 }
 
+/** Failed run starts in the window, grouped by their recorded reason. The worker writes `dispatchError` on the run when it gives up starting it. */
+async function runStartFailures(pool: Queryable, orgId: string, now: Date): Promise<Health["runStarts"]> {
+  const r = await pool.query<{ code: string | null; msg: string | null; n: number; last: Date }>(
+    `select data->'dispatchError'->>'code' as code, data->'dispatchError'->>'msg' as msg, count(*)::int as n, max(ended_at) as last
+       from runs where org_id = $1 and data->>'endedBy' = 'dispatch failed' and ended_at >= $2::timestamptz - make_interval(mins => $3)
+      group by 1, 2 order by max(ended_at) desc limit 10`,
+    [orgId, now, RUN_START_WINDOW_MINUTES],
+  );
+  const reasons = r.rows.map((x) => ({ code: x.code ?? "dispatch_error", reason: redactError(x.msg ?? "The run could not be started.", false, 240) ?? "The run could not be started.", count: x.n, lastAt: iso(x.last)! }));
+  return { windowMinutes: RUN_START_WINDOW_MINUTES, failed: reasons.reduce((a, x) => a + x.count, 0), reasons };
+}
+
+export function runStartsService(rs: Health["runStarts"]): ServiceHealth {
+  const base = { id: "run-starts", name: "Run starts", latencyMs: null };
+  if (rs.failed === 0) return { ...base, status: "ok", detail: `No run failed to start in the last ${rs.windowMinutes} min.` };
+  const top = rs.reasons[0]!;
+  return { ...base, status: rs.failed >= RUN_START_DOWN_AT ? "down" : "degraded", detail: `${rs.failed} run start${rs.failed === 1 ? "" : "s"} failed in the last ${rs.windowMinutes} min. Latest: ${top.reason}` };
+}
+
+export function deadJobsService(dead: DeadJob[], windowHours: number): ServiceHealth {
+  const base = { id: "jobs", name: "Background jobs", latencyMs: null };
+  if (!dead.length) return { ...base, status: "ok", detail: `No job died in the last ${windowHours} hours.` };
+  const top = dead[0]!;
+  return { ...base, status: "degraded", detail: `${dead.length} job${dead.length === 1 ? "" : "s"} died in the last ${windowHours} hours. Latest: ${top.kind}${top.lastError ? `: ${top.lastError}` : ""}` };
+}
+
 export async function collectHealth(d: HealthDeps): Promise<Health> {
   const now = d.now ?? new Date();
   const { pool, orgId } = d;
@@ -222,7 +258,7 @@ export async function collectHealth(d: HealthDeps): Promise<Health> {
   ]);
   const api: ServiceHealth = { id: "api", name: "API", status: "ok", detail: "Answering this request.", latencyMs: null };
 
-  const [ob, obCounts, jobCounts, stuck] = await Promise.all([
+  const [ob, obCounts, jobCounts, stuck, deadJobs, runStarts] = await Promise.all([
     pool.query<{ id: string; destination: string; attempts: number; max_attempts: number; last_error: string | null; created_at: Date; updated_at: Date; project_id: string | null }>(
       `select o.id, o.destination, o.attempts, o.max_attempts, o.last_error, o.created_at, o.updated_at, e.project_id
          from outbox o join events e on e.id = o.event_id where o.org_id = $1 and o.status = 'dead' order by o.updated_at desc, o.id limit 20`, [orgId]),
@@ -233,7 +269,13 @@ export async function collectHealth(d: HealthDeps): Promise<Health> {
       `select id, queue, kind, attempts, max_attempts, lease_owner, started_at, lease_until, last_error, (lease_until < $2::timestamptz) as expired
          from jobs where org_id = $1 and status = 'running' and (lease_until < $2::timestamptz or started_at < $2::timestamptz - make_interval(mins => $3))
         order by coalesce(started_at, lease_until) limit 50`, [orgId, now, RUNNING_LONG_MINUTES]),
+    pool.query<{ id: string; queue: string; kind: string; attempts: number; max_attempts: number; last_error: string | null; died: Date }>(
+      `select id, queue, kind, attempts, max_attempts, last_error, coalesce(completed_at, updated_at) as died
+         from jobs where org_id = $1 and status = 'dead' and coalesce(completed_at, updated_at) >= $2::timestamptz - make_interval(hours => $3)
+        order by coalesce(completed_at, updated_at) desc, id limit 20`, [orgId, now, DEAD_JOB_WINDOW_HOURS]),
+    runStartFailures(pool, orgId, now),
   ]);
+  const dead: DeadJob[] = deadJobs.rows.map((r) => ({ id: r.id, queue: r.queue, kind: r.kind, attempts: r.attempts, maxAttempts: r.max_attempts, lastError: redactError(r.last_error, false), diedAt: iso(r.died)! }));
   const oc: Health["outbox"]["counts"] = { pending: 0, sending: 0, delivered: 0, dead: 0 };
   let oldest: Date | null = null;
   for (const r of obCounts.rows) {
@@ -245,7 +287,7 @@ export async function collectHealth(d: HealthDeps): Promise<Health> {
 
   return {
     at: now.toISOString(),
-    services: [api, db, objects, edge, worker, broker, launcher],
+    services: [api, db, objects, edge, worker, broker, launcher, runStartsService(runStarts), deadJobsService(dead, DEAD_JOB_WINDOW_HOURS)],
     backup, drill,
     outbox: {
       counts: oc,
@@ -253,8 +295,9 @@ export async function collectHealth(d: HealthDeps): Promise<Health> {
       dead: ob.rows.map((r) => ({ id: r.id, destination: shownDestination(r.destination, !!r.project_id), scope: r.project_id ? "project" as const : "factory" as const, attempts: r.attempts, maxAttempts: r.max_attempts, lastError: redactError(r.last_error, !!r.project_id), createdAt: iso(r.created_at)!, failedAt: iso(r.updated_at)! })),
     },
     jobs: {
-      counts: jc, runningLongMinutes: RUNNING_LONG_MINUTES,
+      counts: jc, runningLongMinutes: RUNNING_LONG_MINUTES, dead, deadWindowHours: DEAD_JOB_WINDOW_HOURS,
       stuck: stuck.rows.map((r) => ({ id: r.id, queue: r.queue, kind: r.kind, attempts: r.attempts, maxAttempts: r.max_attempts, owner: r.lease_owner, startedAt: iso(r.started_at), leaseUntil: iso(r.lease_until), reason: r.expired ? "lease_expired" : "running_long", lastError: redactError(r.last_error, false) })),
     },
+    runStarts,
   };
 }

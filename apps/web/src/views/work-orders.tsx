@@ -9,7 +9,7 @@
 import { qk } from "../api/keys";
 import { useInfiniteQuery, useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { WO_STATES, bayDef, classesOf, flowOf, fmt, gateForWO, woTotals } from "@gantry/domain";
+import { WO_STATES, bayDef, classesOf, flowOf, fmt, gateForWO, gatePendingName, woTotals } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
 import { useHome, useMe, useProject } from "../api/queries";
@@ -274,7 +274,8 @@ export default function WorkOrdersView() {
   const gateCell = (w: WorkOrder): string => {
     if (w.state === "done") return "Shipped";
     const g = gateForWO(cat, project, w);
-    return g ? g.name : "None next";
+    // A gate's name is the outcome it waits for ("Spec approved"): while it is ahead of the work order, say what it needs instead.
+    return g ? (w.state === "waiting" ? gatePendingName(g) : `Next: ${gatePendingName(g)}`) : "None next";
   };
   const allCols: Col<WorkOrder>[] = [
     {

@@ -172,8 +172,15 @@ export async function reassign(tx: Tx, actor: Actor, woId: string, agentId: stri
 export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResult> {
   const { fx, w } = await begin(tx, actor, woId, "wo.sendback");
   const by = person(actor, "Retrying is");
-  if (w.state !== "failed" && w.state !== "blocked") throw invalid(`${w.id} is not failed or blocked.`);
+  // A station that failed (or lost its run) three times is parked in the Needs a person bay: retrying it is what that person is there to decide.
+  const failedBay = w.state === "parked" && bayOf(fx.catalog, w) === "person" && w.data.bayCause === "failed";
+  if (w.state !== "failed" && w.state !== "blocked" && !failedBay) throw invalid(`${w.id} is not failed or blocked.`);
   const sid = stationIdOf(fx.catalog, w);
+  if (failedBay) {
+    await leaveBay(fx, w);
+    // The person's retry starts the station's failure count afresh.
+    await fx.tx.query(`update attempts set data = data || '{"streakBroken": true}'::jsonb, updated_at = now() where org_id = $1 and wo_id = $2 and station = $3 and state = 'failed'`, [fx.orgId, w.id, sid]);
+  }
   await cancelAttempts(fx, w, "retried");
   const gs = (w.data.gateStatus ??= {}) as Record<string, string>;
   for (const k of Object.keys(gs)) if (gs[k] === "failed") delete gs[k];
