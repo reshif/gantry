@@ -82,7 +82,7 @@ describe("Integrations screen", () => {
     expect(table.textContent).toContain("Disabled");
     expect(table.textContent).toContain("Payments Platform");
     expect(document.getElementById("int-attn-int-gh-1")?.textContent).toBe("GitHub org");
-    expect(text()).toContain("Types3in the catalogue, 0 custom");
+    expect(text()).toContain("Healthy1enabled and reachable");
     expect(locked(await byId("int-add"))).toBe(false);
   });
 
@@ -100,7 +100,7 @@ describe("Integrations screen", () => {
     mount();
     await waitFor(() => expect(text()).toContain("Nothing connected"));
     expect(text()).toContain("Add an integration to start.");
-    expect(document.getElementById("int-table")).toBeNull();
+    expect(document.querySelector("#int-table table")).toBeNull();
     expect(locked(await byId("int-add"))).toBe(false);
   });
 

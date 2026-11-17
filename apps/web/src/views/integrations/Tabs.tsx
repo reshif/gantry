@@ -1,13 +1,14 @@
 /** The Connected, Catalogue and Custom builder tabs (legacy connectedTab, catalogueTab, customTab). */
 import { useState } from "react";
-import { INTEGRATION_CATEGORIES, NOTIFY_EVENTS, fmt, type IntegrationInstance } from "@gantry/domain";
+import { INTEGRATION_CATEGORIES, NOTIFY_EVENTS, fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
+import { DataTable } from "../../ui/DataTable";
 import { Btn, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, type Decision } from "../../ui/primitives";
 import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
-import { AUTHS, DirTags, FTYPES, Health, Mark, PAYLOADS, catName, evName, keyOf, scopeText, slug, statusOf, useIntegrationData, usageLine, type TypeRow } from "./kit";
+import { AUTHS, DirTags, FTYPES, Health, Mark, PAYLOADS, catName, evName, keyOf, scopeText, slug, statusOf, useIntegrationData, type TypeRow } from "./kit";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
@@ -16,80 +17,50 @@ interface Nav { q: string; setQ: (v: string) => void; cat: string; setCat: (v: s
 function Filters({ nav, withStatus, count }: { nav: Nav; withStatus: boolean; count?: string }) {
   return (
     <FilterBar label="Filter connections" count={count}>
-      <SearchBox id="int-q" label="Search" placeholder="Search by name, type or category" value={nav.q} onChange={nav.setQ} />
-      <div className="filters">
-        <Field label="Category" htmlFor="int-cat"><Select id="int-cat" options={[{ value: "all", label: "All categories" }, ...INTEGRATION_CATEGORIES.map((c) => ({ value: c.id, label: c.name }))]} value={nav.cat} onChange={nav.setCat} /></Field>
-        {withStatus ? <Field label="Status" htmlFor="int-status"><Select id="int-status" options={[{ value: "all", label: "Any status" }, { value: "healthy", label: "Healthy" }, { value: "failing", label: "Failing" }, { value: "disabled", label: "Disabled" }]} value={nav.status} onChange={nav.setStatus} /></Field> : null}
-      </div>
+      <SearchBox id="int-q" label="Search" placeholder="Search integrations" value={nav.q} onChange={nav.setQ} />
+      <Select id="int-cat" aria-label="Category" options={[{ value: "all", label: "Category: all" }, ...INTEGRATION_CATEGORIES.map((c) => ({ value: c.id, label: c.name }))]} value={nav.cat} onChange={nav.setCat} />
+      {withStatus ? <Select id="int-status" aria-label="Status" options={[{ value: "all", label: "Status: all" }, { value: "healthy", label: "Healthy" }, { value: "failing", label: "Failing" }, { value: "disabled", label: "Disabled" }]} value={nav.status} onChange={nav.setStatus} /> : null}
     </FilterBar>
   );
 }
 
 export function ConnectedTab({ nav, openInstance }: { nav: Nav; openInstance: (id: string) => void }) {
   const d = useIntegrationData();
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: "name", dir: 1 });
   const q = nav.q.trim().toLowerCase();
   const matches = (t: TypeRow, extra: string) => (nav.cat === "all" || t.category === nav.cat) && (!q || `${t.name} ${catName(t.category)} ${extra}`.toLowerCase().includes(q));
   const rows = d.insts.filter((i) => matches(d.typeOf(i), i.name) && (nav.status === "all" || statusOf(i) === nav.status));
   const bad = d.insts.filter((i) => statusOf(i) !== "healthy");
-  const keyFn: Record<string, (i: IntegrationInstance) => string | number> = {
-    name: (i) => i.name.toLowerCase(), category: (i) => catName(d.typeOf(i).category), scope: (i) => (i.projects === "all" ? "" : scopeText(i, d.pname)), status: (i) => statusOf(i), sync: (i) => -i.lastSync,
-  };
-  const sorted = [...rows].sort((a, b) => { const x = keyFn[sort.key]!(a), y = keyFn[sort.key]!(b); return (x < y ? -1 : x > y ? 1 : 0) * sort.dir; });
-  const th = (key: string, label: string, cls = "") => (
-    <th scope="col" className={cls} aria-sort={sort.key === key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
-      {keyFn[key] ? <button type="button" className="th-sort" onClick={() => setSort({ key, dir: sort.key === key ? (sort.dir === 1 ? -1 : 1) : 1 })}>{label}</button> : label}
-    </th>
-  );
   return (
     <div className="form-grid">
       {bad.length ? (
-        <div className="callout callout-warn int-attn" role="note">
+        <div className="banner warn int-attn" role="note">
           <Icon name="alert" />
-          <div>
+          <div className="grow">
             <strong>{bad.length === 1 ? "1 connection needs attention" : `${bad.length} connections need attention`}</strong>
             {bad.map((i) => <div key={i.id}><button type="button" className="linkish" id={`int-attn-${i.id}`} onClick={() => openInstance(i.id)}>{i.name}</button> is {statusOf(i)}</div>)}
           </div>
         </div>
       ) : null}
-      <Panel flush>
-      <Filters nav={nav} withStatus count={`${sorted.length} of ${d.insts.length}`} />
-      {!sorted.length ? (
-        <Empty title={d.insts.length ? "No connection matches" : "Nothing connected"} text={d.insts.length ? "Change the search or filters." : "Add an integration to start."} />
-      ) : (
-        <div className="dtable-wrap" id="int-table">
-          <table className="dtable">
-            <caption className="sr-only">Connected integrations</caption>
-            <thead>
-              <tr>{th("name", "Connection")}{th("category", "Category", "hide-sm")}{th("scope", "Projects")}{th("status", "Status")}<th scope="col">Used by</th>{th("sync", "Last sync", "is-end hide-sm")}</tr>
-            </thead>
-            <tbody>
-              {sorted.map((i) => {
-                const t = d.typeOf(i);
-                return (
-                  <tr key={i.id} data-key={i.id}>
-                    <td data-label="Connection">
-                      <div className="int-cell-name">
-                        <Mark icon={t.icon} small />
-                        <div>
-                          <button type="button" className="linkish int-name-btn" id={`int-open-${i.id}`} onClick={() => openInstance(i.id)}>{i.name}</button>
-                          <div className="small muted">{t.name}{t.custom ? " · custom" : ""}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td data-label="Category" className="hide-sm">{catName(t.category)}</td>
-                    <td data-label="Projects">{scopeText(i, d.pname)}</td>
-                    <td data-label="Status"><Health st={statusOf(i)} /></td>
-                    <td data-label="Used by"><span className="small">{usageLine(d.usage(i))}</span></td>
-                    <td data-label="Last sync" className="is-end hide-sm"><span className="mono small">{fmt.ago(i.lastSync, Date.now())}</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      </Panel>
+      <Filters nav={nav} withStatus count={`${rows.length} of ${d.insts.length}`} />
+      <DataTable
+        id="int-table"
+        caption="Connected integrations"
+        rows={rows}
+        rowKey={(i) => i.id}
+        rowId={(i) => `int-row-${i.id}`}
+        pageSize={12}
+        sort={{ key: "name", dir: 1 }}
+        onRow={(i) => openInstance(i.id)}
+        rowLabel={(i) => `Open ${i.name}`}
+        empty={{ title: d.insts.length ? "No connection matches" : "Nothing connected", text: d.insts.length ? "Change the search or filters." : "Add an integration to start." }}
+        columns={[
+          { key: "name", label: "Integration", sort: (i) => i.name.toLowerCase(), render: (i) => <b className="ell" id={`int-open-${i.id}`}>{i.name}</b> },
+          { key: "category", label: "Type", sort: (i) => d.typeOf(i).name, hideSmall: true, render: (i) => <span className="tag">{d.typeOf(i).id}</span> },
+          { key: "scope", label: "Projects", sort: (i) => (i.projects === "all" ? "" : scopeText(i, d.pname)), render: (i) => <span className="ell">{i.projects === "all" ? "all" : i.projects.map((p) => d.pname(p)).join(", ")}</span> },
+          { key: "sync", label: "Last sync", sort: (i) => -i.lastSync, render: (i) => <span className="mono dim">{fmt.ago(i.lastSync, Date.now())}</span> },
+          { key: "status", label: "Status", sort: (i) => statusOf(i), render: (i) => <Health st={statusOf(i)} /> },
+        ]}
+      />
     </div>
   );
 }
