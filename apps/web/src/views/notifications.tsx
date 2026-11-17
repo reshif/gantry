@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { useCan } from "../api/can";
 import { useDeliveries } from "../api/queries";
-import { Empty, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Empty, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { useProjectRepos } from "./floor/kit";
 import { DeliveriesTab, OverridesTab, TemplatesTab } from "./notifications/Other";
@@ -39,9 +39,15 @@ export default function NotificationsView() {
       <ViewHead
         title="Notifications"
         sub="Which events reach which people, through which connection, with which card. Per project, with repo overrides. Every notification comes from a committed event and is delivered at least once."
-        meta={[["Project", p.name], ["Routes", `${p.notifications.filter((r) => r.enabled).length} on / ${p.notifications.length}`], ["Connections", String(nt.destInsts.length)], ["Failed deliveries", qState(failedQ, () => String(failed))], ["Edit rights", perm.allowed ? "yes" : "read-only"]]}
-        actions={nt.visible.length > 1 ? <span className="muted small">Switch project in the top bar to edit another project's routes.</span> : undefined}
       />
+      <StatRow id="nt-stats">
+        <Stat label="Project" value={p.name} sub="from the top-bar switcher" />
+        <Stat label="Routes" value={`${p.notifications.filter((r) => r.enabled).length} on / ${p.notifications.length}`} sub="enabled and total" />
+        <Stat label="Connections" value={String(nt.destInsts.length)} sub="open to this project" />
+        <Stat label="Failed deliveries" value={qState(failedQ, () => String(failed))} sub="in the delivery log" tone={failed ? "block" : undefined} />
+        <Stat label="Edit rights" value={perm.allowed ? "yes" : "read-only"} sub={perm.allowed ? "you can change routes" : perm.reason} />
+      </StatRow>
+      {nt.visible.length > 1 ? <p className="muted small nt-switch">Switch project in the top bar to edit another project's routes.</p> : null}
       <Tabs idPrefix="nt-tab" active={tab} onChange={setTab} items={[
         { id: "routes", label: "Routes", count: p.notifications.length },
         { id: "templates", label: "Card templates", count: Object.keys(TPL).length + nt.customCards.length },

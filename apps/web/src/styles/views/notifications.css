@@ -152,3 +152,4 @@
   .nt-destrow { grid-template-columns: minmax(0, 1fr) auto; }
   .nt-destrow > select, .nt-destrow > input { grid-column: 1 / -1; }
 }
+.nt-switch { margin: 10px 0 0; }
