@@ -80,7 +80,7 @@ export default function PeopleView() {
           </section>
           <OrgTree people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} q={q} perm={perm} invite={invite} teamDlg={teamDlg} />
         </>
-      ) : <PeopleTable people={people} teams={teams} roles={roles} projects={projects as Project[]} onOpen={goPerson} />)}</Async>
+      ) : <PeopleTable people={people} teams={teams} roles={roles} onOpen={goPerson} />)}</Async>
     </div>
   );
 }
@@ -172,7 +172,7 @@ function OrgTree({ people, teams, projects, repos, roles, q, perm, invite, teamD
 
 /* ---------- the directory as a table (the Control Room People screen) ---------- */
 
-function PeopleTable({ people, teams, roles, projects, onOpen }: { people: Person[]; teams: Team[]; roles: Role[]; projects: Project[]; onOpen: (id: string) => void }) {
+function PeopleTable({ people, teams, roles, onOpen }: { people: Person[]; teams: Team[]; roles: Role[]; onOpen: (id: string) => void }) {
   const [q, setQ] = useState("");
   const [role, setRole] = useState("all");
   const [team, setTeam] = useState("all");
