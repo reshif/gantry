@@ -126,7 +126,7 @@ describe("signed in", () => {
     window.location.hash = "#floor";
     render(<App />);
     const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(Array.from(nav.querySelectorAll(".navgrp")).map((e) => e.textContent)).toEqual(["Operate", "Portfolio", "Workforce", "Connect", "Govern"]);
+    expect(Array.from(nav.querySelectorAll(".navgrp")).map((e) => e.textContent)).toEqual(["Operate", "Portfolio", "Workforce", "Connect", "Govern", "Reference"]);
     expect(within(nav).getByText("Access")).toBeTruthy();
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
     expect(await screen.findByText("Couldn't load the floor")).toBeTruthy(); // the shared failed state (ui/async)

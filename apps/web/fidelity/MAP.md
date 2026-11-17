@@ -50,7 +50,7 @@ Compare: `node apps/web/fidelity/compare.mjs <prototype-route> [...]` (`all` run
 | `integrations`, `mcp`, `api`, `notifications` | `#integrations`, `#mcp`, `#api`, `#notifications` | `useIntegrations`, `useMcpServers`, `useApiKeys`, `useTriggers`, `useDeliveries` | lists | none | todo |
 | `people` (+ `/id`), `workload`, `access`, `security`, `audit`, `system` | `#people`, `#person/<id>`, `#workload`, `#access`, `#security`, `#audit`, `#system` | `usePeople`, `useWorkload`, `useAccessMatrix`, `useSecurity`, `useAudit`, system reads | lists | none | todo |
 | `signin` | sign-in shell (`/` signed out, MFA step kept) | `useMeState` | persona null | demo accounts only when configured | todo |
-| `design-system` | none | none | none | not a product screen | omitted |
+| `design-system` | `#design-system` | none | none | none | built |
 | states `?state=loading|empty|error|forbidden|conflict` | `<Async>` states, `Empty`, `DraftConflict` | all | per-test overrides | none | todo |
 
 

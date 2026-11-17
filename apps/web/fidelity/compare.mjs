@@ -36,7 +36,7 @@ export const ROUTE_MAP = {
   onboarding: `${P}/onboarding`, "project-config": `${P}/project-config`,
   agents: "/#agents", skills: "/#skills", models: "/#models", evals: "/#evals", trust: "/#trust", learning: "/#learning",
   integrations: "/#integrations", mcp: "/#mcp", api: "/#api", notifications: "/#notifications",
-  people: "/#people", workload: "/#workload", access: "/#access", security: "/#security", audit: "/#audit", system: "/#system", signin: "/", "design-system": null,
+  people: "/#people", workload: "/#workload", access: "/#access", security: "/#security", audit: "/#audit", system: "/#system", signin: "/", "design-system": "/#design-system",
 };
 const realHash = (route) => {
   const [name, param] = route.split("/");

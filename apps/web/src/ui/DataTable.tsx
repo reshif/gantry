@@ -123,15 +123,15 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </select>
         </label>
       ) : null}
-      <div ref={scroller} className={`dtable-scroll${overflow ? " is-overflow" : ""}`} {...regionProps}>
-        <table className={`dtable${action ? " is-clickable" : ""}`}>
+      <div ref={scroller} className={`dtable-scroll tw cards${overflow ? " is-overflow" : ""}`} {...regionProps}>
+        <table className={`dtable t${action ? " is-clickable" : ""}`}>
           {caption ? <caption className="sr-only">{caption}</caption> : null}
           <thead>
             <tr>
               {columns.map((c) => {
                 const active = cur?.key === c.key;
                 return (
-                  <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
+                  <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
                         {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
@@ -158,7 +158,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                     const first = i === 0 && action && !hasOwn;
                     const lid = `${uid}-${key}`.replace(/[^\w-]/g, "_");
                     return (
-                      <td key={c.key} data-label={c.label} className={`${c.align === "end" ? "is-end" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
+                      <td key={c.key} data-label={c.label} data-l={c.label} className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
                         {i === 0 && action ? <span className="cell-content" id={first ? lid : undefined}>{content}</span> : content}
                         {first ? (
                           rowHref ? <a className="row-link" href={rowHref(r)} aria-labelledby={rowLabel ? undefined : lid} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} />
@@ -174,7 +174,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
         </table>
       </div>
       {clientMore || hasMore ? (
-        <div className="dtable-more">
+        <div className="dtable-more pager">
           <span className="dtable-count" role="status">{total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>
           {clientMore ? (
             <button type="button" className="btn btn-sm" id={`${id ?? "dt"}-more`} onClick={() => setShown(shown + (pageSize ?? 0))}>{`Show ${Math.min(pageSize ?? 0, rows.length - shown)} more of ${rows.length - shown}`}</button>

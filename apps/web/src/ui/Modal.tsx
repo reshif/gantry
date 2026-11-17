@@ -196,7 +196,7 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
   const scrim = useScrimClose(requestClose);
   const inner = (
     <>
-      <div className="dlg-body">{children}</div>
+      <div className="dlg-body dlg-b">{children}</div>
       {asking ? (
         <div ref={keepBtn} className="dlg-discard" role="alertdialog" aria-labelledby={`discard-${titleId}`}>
           <span id={`discard-${titleId}`}>Discard your unsaved changes?</span>
@@ -204,14 +204,14 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
           <Btn label="Discard" kind="danger" small onClick={onClose} />
         </div>
       ) : null}
-      {footer ? <div className="dlg-foot">{typeof footer === "function" ? footer(requestClose) : footer}</div> : null}
+      {footer ? <div className="dlg-foot dlg-f">{typeof footer === "function" ? footer(requestClose) : footer}</div> : null}
     </>
   );
   return (
     <div className="dlg-wrap">
       <div className="scrim" {...scrim} />
-      <div ref={panel} className={`dlg${wide ? " dlg-wide" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <div className="dlg-head">
+      <div ref={panel} className={`dlg${wide ? " dlg-wide lg" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <div className="dlg-head dlg-h">
           <div>
             {kicker ? <div className="kicker">{kicker}</div> : null}
             <h2 id={titleId} className="dlg-title">{title}</h2>

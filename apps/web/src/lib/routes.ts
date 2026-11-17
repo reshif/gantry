@@ -68,6 +68,7 @@ export const ROUTES: readonly RouteDef[] = [
   { id: "security", title: "Security", group: "Govern", icon: "shield", perm: "policy.view", canSee: (me) => factoryRole(me) },
   { id: "audit", title: "Audit", group: "Govern", icon: "ledger", perm: "audit.view", canSee: (me, ctx) => ctx.canAudit === true || anyRole(me, ["project_admin"]) || (ctx.canAudit === undefined && anyRole(me, FACTORY_READ)) },
   { id: "system", title: "System health", group: "Govern", icon: "server", perm: "integrations.view", canSee: (me) => factoryRole(me) },
+  { id: "design-system", title: "Design system", group: "Reference", icon: "info" },
 ];
 
 /** Read actions behind each nav route, asked once per session. */

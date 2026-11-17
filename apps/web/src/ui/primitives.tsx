@@ -123,7 +123,7 @@ export interface Option {
 
 export function Select({ id, options, value, onChange, ...rest }: { id: string; options: Array<string | Option>; value: string | null | undefined; onChange?: (v: string) => void } & Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "value" | "id">) {
   return (
-    <select {...rest} id={id} className="input" value={value ?? ""} onChange={(e) => onChange?.(e.target.value)}>
+    <select {...rest} id={id} className="input in" value={value ?? ""} onChange={(e) => onChange?.(e.target.value)}>
       {options.map((o) => {
         const opt = typeof o === "string" ? { value: o, label: o } : o;
         return (
@@ -164,14 +164,14 @@ export function Field({ label, htmlFor, hint, description, error, required, chil
     : children;
   const groupProps = !only && (descId || errId) ? { role: "group", "aria-labelledby": `lbl-${controlId}`, "aria-describedby": [descId, errId].filter(Boolean).join(" ") } : {};
   return (
-    <div className="field" {...groupProps}>
+    <div className={`field${error ? " invalid" : ""}`} {...groupProps}>
       <label className="field-label" id={`lbl-${controlId}`} htmlFor={controlId}>
         {label}
         {required ? <span className="field-req" aria-hidden="true"> *</span> : null}
       </label>
       {control}
-      {desc ? <div className="field-hint" id={descId}>{desc}</div> : null}
-      {error ? <div className="field-error" id={errId} role="alert">{error}</div> : null}
+      {desc ? <div className="field-hint hint" id={descId}>{desc}</div> : null}
+      {error ? <div className="field-error err" id={errId} role="alert">{error}</div> : null}
     </div>
   );
 }
@@ -230,13 +230,15 @@ export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: Tab
     n?.click();
   };
   return (
+    <div className={`tabs-w${more.includes("start") ? " ov-l" : ""}${more.includes("end") ? " ov-r" : ""}`}>
     <div className="tabs" role="tablist" data-more={more || undefined} ref={bar} onKeyDown={onKey}>
       {items.map((it) => (
         <button key={it.id} type="button" role="tab" id={`${idPrefix}-${it.id}`} className={`tab${it.id === active ? " is-active" : ""}`} aria-selected={it.id === active ? "true" : "false"} onClick={() => onChange(it.id)}>
           {it.label}
-          {it.count != null ? <span className="tab-count">{String(it.count)}</span> : null}
+          {it.count != null ? <span className="tab-count badge">{String(it.count)}</span> : null}
         </button>
       ))}
+    </div>
     </div>
   );
 }
@@ -244,7 +246,7 @@ export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: Tab
 /** Radio group styled as buttons. */
 export function Segmented({ name, items, value, onChange, label }: { name: string; items: Array<{ id: string; label: string; icon?: string }>; value: string; onChange: (id: string) => void; label?: string }) {
   return (
-    <div className="seg" role="radiogroup" aria-label={label || name}>
+    <div className="seg seg-radio" role="radiogroup" aria-label={label || name}>
       {items.map((it) => {
         const id = `${name}-${it.id}`;
         return [
@@ -302,12 +304,10 @@ export function Who({ id }: { id: string | null | undefined }) {
 export function Empty({ title, text, action, id, icon, tone }: { title: ReactNode; text?: ReactNode; action?: ReactNode; id?: string; icon?: string; tone?: "block" }) {
   return (
     <div className={`empty${icon ? " empty-state" : ""}${tone ? ` empty-${tone}` : ""}`} id={id}>
-      {icon ? (
-        <div className="empty-icon" aria-hidden="true">
-          <Icon name={icon} />
-        </div>
-      ) : null}
-      <div className="empty-title">{title}</div>
+      <div className="ei empty-icon" aria-hidden="true">
+        <Icon name={icon ?? "inbox"} />
+      </div>
+      <h3 className="empty-title">{title}</h3>
       {text != null ? <p>{text}</p> : null}
       {action ?? null}
     </div>
@@ -363,11 +363,17 @@ export function StatRow({ children, id }: { children: ReactNode; id?: string }) 
 
 /** The one filter toolbar: filters and search on the left (children), the result count and secondary actions on the right. */
 export function FilterBar({ children, count, actions, label = "Filters" }: { children?: ReactNode; count?: ReactNode; actions?: ReactNode; label?: string }) {
+  // prototype grid: search, then one column per select (--fn), then the meta cell
+  const n = Math.max(0, Children.toArray(children).length - 1);
   return (
-    <div className="filterbar" role="search" aria-label={label}>
+    <div className="filterbar fb" role="search" aria-label={label} style={{ "--fn": n } as React.CSSProperties}>
       {children}
-      {count != null ? <span className="filterbar-count" role="status">{count}</span> : null}
-      {actions ? <div className="filterbar-end">{actions}</div> : null}
+      {count != null || actions ? (
+        <div className="meta">
+          {count != null ? <span className="filterbar-count" role="status">{count}</span> : null}
+          {actions ? <div className="filterbar-end">{actions}</div> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -375,9 +381,9 @@ export function FilterBar({ children, count, actions, label = "Filters" }: { chi
 /** A search box for a FilterBar: icon inside, labelled for screen readers. */
 export function SearchBox({ id, value, onChange, placeholder = "Search", label }: { id?: string; value: string; onChange: (v: string) => void; placeholder?: string; label?: string }) {
   return (
-    <span className="searchbox">
+    <span className="searchbox search">
       <Icon name="search" />
-      <input id={id} className="input" type="search" value={value} placeholder={placeholder} aria-label={label ?? placeholder} onChange={(e) => onChange(e.target.value)} />
+      <input id={id} className="input in" type="search" value={value} placeholder={placeholder} aria-label={label ?? placeholder} onChange={(e) => onChange(e.target.value)} />
     </span>
   );
 }
@@ -438,14 +444,14 @@ export const useFieldId = (prefix = "f"): string => `${prefix}-${useId().replace
 /* ---------- status (docs/ui/design-system.md §2) ---------- */
 
 export type Tone = "run" | "wait" | "block" | "fail" | "done" | "accent" | "neutral";
+const CHIP_TONE: Record<Tone, string> = { run: "info", wait: "warn", block: "bad", fail: "bad", done: "ok", accent: "agent", neutral: "idle" };
 const TONE_GLYPH: Record<Tone, string> = { run: "st-run", wait: "st-wait", block: "st-block", fail: "st-fail", done: "st-done", accent: "st-park", neutral: "st-park" };
 
 /** The one status badge: a glyph and a word on a soft tone. Colour never carries meaning alone. */
 export function Status({ tone, icon, children, title, id }: { tone: Tone; icon?: string | null; children: ReactNode; title?: string; id?: string }) {
   const glyph = icon === null ? null : (icon ?? TONE_GLYPH[tone]);
   return (
-    <span className={`status tone-${tone}`} title={title} id={id}>
-      {glyph ? <Icon name={glyph} /> : null}
+    <span className={`status tone-${tone} chip ${CHIP_TONE[tone]}${glyph ? "" : " plain"}`} title={title} id={id}>
       <span>{children}</span>
     </span>
   );

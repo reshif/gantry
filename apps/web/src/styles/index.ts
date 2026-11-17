@@ -45,3 +45,4 @@ import "./views/home-projects.css";
 import "./cr/tokens.css";
 import "./cr/app.css";
 import "./cr/screens.css";
+import "./cr/compat.css";

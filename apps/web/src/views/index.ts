@@ -33,4 +33,5 @@ export const VIEWS: Record<string, LazyExoticComponent<ComponentType>> = {
   security: lazyRetry(() => import("./security")),
   audit: lazyRetry(() => import("./audit")),
   system: lazyRetry(() => import("./system")),
+  "design-system": lazyRetry(() => import("./design-system")),
 };

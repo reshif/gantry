@@ -34,7 +34,7 @@ export function Loading({ label, rows = 3, id }: { label: string; rows?: number;
   }, []);
   return (
     <div className="async-loading" id={id} role="status" aria-live="polite" aria-label={`Loading ${label}`}>
-      {show ? Array.from({ length: rows }, (_, i) => <span key={i} className="async-bar" style={{ width: `${92 - i * 14}%` }} />) : null}
+      {show ? Array.from({ length: rows }, (_, i) => <span key={i} className="async-bar skel" style={{ width: `${92 - i * 14}%` }} />) : null}
     </div>
   );
 }
@@ -80,7 +80,7 @@ export function Async<T>({ query, what, isEmpty = defaultEmpty, empty, id, rows,
   if (query.data === undefined) return <Loading id={id ? `${id}-loading` : undefined} label={what} rows={rows} />;
   const stale = query.isError ? failureOf(query.error) : null;
   const strip = stale ? (
-    <div className="async-stale" role="alert" id={id ? `${id}-stale` : undefined}>
+    <div className="async-stale banner warn" role="alert" id={id ? `${id}-stale` : undefined}>
       <span>{`Showing the last loaded copy of ${what}. Couldn't refresh: ${stale.msg}`}</span>
       <Btn small icon="refresh" label="Try again" id={id ? `${id}-stale-retry` : undefined} onClick={() => void query.refetch()} />
     </div>

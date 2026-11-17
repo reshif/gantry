@@ -34,11 +34,12 @@ const NAV_LAYOUT: ReadonlyArray<{ name: string; ids: readonly string[] }> = [
   { name: "Workforce", ids: ["agents", "skills", "models", "evals", "trust", "learning"] },
   { name: "Connect", ids: ["integrations", "mcp", "api", "notifications"] },
   { name: "Govern", ids: ["people", "workload", "access", "security", "audit", "system"] },
+  { name: "Reference", ids: ["design-system"] },
 ];
 const NAV_ICON: Record<string, string> = {
   home: "home", inbox: "inbox", floor: "floor", "work-orders": "wo", workspace: "agent", projects: "projects", onboarding: "git", "project-config": "system",
   agents: "agent", skills: "skill", models: "model", evals: "eval", trust: "trust", learning: "learn", integrations: "plug", mcp: "mcp", api: "key",
-  notifications: "bell", people: "people", workload: "work", access: "access", security: "security", audit: "audit", system: "system",
+  notifications: "bell", people: "people", workload: "work", access: "access", security: "security", audit: "audit", system: "system", "design-system": "palette",
 };
 
 export function Nav({ me, current, project, onNavigate }: { me: Me; current: string; project: ProjectLite | null; onNavigate: () => void }) {
