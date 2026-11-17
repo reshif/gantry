@@ -526,6 +526,8 @@ networks:
     ipam:
       config:
         - subnet: 10.89.17.0/24
+          # Dynamic addresses come only from the upper half, so they can never take a fixed one (the ingress is 10.89.17.2).
+          ip_range: 10.89.17.128/25
   launch:
     driver: bridge
     internal: true
