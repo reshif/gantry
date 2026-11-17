@@ -80,9 +80,19 @@ describe("session robustness", () => {
     render(<App />);
     await screen.findByRole("navigation", { name: "Main" });
     localStorage.setItem("gantry.navClosed", "x");
+    localStorage.setItem("gantry.accessSim", "x");
+    sessionStorage.setItem("gantry.stepup.draft", "{}");
     meMode = "401";
+    // only the /me refetch sees the 401 here (nothing calls the API client's handler): still an expiry
     act(() => invalidateSlices(["session"]));
     await screen.findByText("Continue with SSO");
-    expect(localStorage.getItem("gantry.navClosed")).toBeNull();
+    expect(localStorage.getItem("gantry.accessSim")).toBeNull();
+    expect(localStorage.getItem("gantry.navClosed")).toBe("x");
+    expect(sessionStorage.getItem("gantry.stepup.draft")).toBe("{}");
+  });
+  it("shows the connection state in the top bar", async () => {
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Main" });
+    expect(document.getElementById("conn-indicator")?.textContent).toMatch(/Live/);
   });
 });

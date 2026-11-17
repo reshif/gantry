@@ -60,7 +60,8 @@ function Fallback({ level, error, id, onRetry }: { level: BoundaryLevel; error: 
       {import.meta.env.DEV ? <pre className="error-detail">{error.message}</pre> : null}
       {id ? <p className="error-id">Error id <code>{id}</code></p> : null}
       <p>
-        <button type="button" className="btn btn-sm" onClick={onRetry}>Try again</button>{" "}
+        {/* React.lazy caches the rejected import, so re-rendering would throw the same error: a missing chunk offers Reload only */}
+        {chunk ? null : <button type="button" className="btn btn-sm" onClick={onRetry}>Try again</button>}{" "}
         <button type="button" className="btn btn-sm" onClick={() => window.location.reload()}>Reload</button>
       </p>
     </div>

@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { render, renderHook } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import type { MeState } from "../../api/queries";
-import { deriveSession, noteUnauthorized, registerSessionReset, resetSessionState, useSessionLifecycle } from "./session";
+import { classifyEnd, deriveSession, noteSignedOut, noteUnauthorized, registerSessionReset, resetSessionState, useSessionLifecycle } from "./session";
+import { getPrefs, resetPrefsInMemory, updatePrefs, reloadPrefs } from "../prefs";
 import { currentReturnTo, loginUrlWithReturn } from "./returnTo";
 import { watchPopupClosed } from "./popupWatch";
 
@@ -48,7 +50,37 @@ describe("resetSessionState", () => {
     resetSessionState(new QueryClient(), "expired");
     expect(sessionStorage.getItem("gantry.stepup.draft")).toBe("{}");
     expect(sessionStorage.getItem("gantry.draft.agent-1")).toBe("text");
-    expect(localStorage.getItem("gantry.prefs")).toBeNull();
+    // layout choices are not sensitive and survive an expiry; other gantry.* keys go
+    expect(localStorage.getItem("gantry.prefs")).toBe("{}");
+    localStorage.setItem("gantry.other", "x");
+    resetSessionState(new QueryClient(), "expired");
+    expect(localStorage.getItem("gantry.other")).toBeNull();
+  });
+  it("sign-out and identity change drop prefs and drafts; the chunk-reload guard always survives", () => {
+    for (const reason of ["signed_out", "identity_changed"] as const) {
+      localStorage.setItem("gantry.prefs", "{}");
+      sessionStorage.setItem("gantry.stepup.draft", "{}");
+      sessionStorage.setItem("gantry.chunk-reload", "123");
+      resetSessionState(new QueryClient(), reason);
+      expect(localStorage.getItem("gantry.prefs")).toBeNull();
+      expect(sessionStorage.getItem("gantry.stepup.draft")).toBeNull();
+      expect(sessionStorage.getItem("gantry.chunk-reload")).toBe("123");
+    }
+  });
+  it("registered stores learn the reason, so prefs reset in memory unless the session only expired", () => {
+    updatePrefs({ theme: "dark" });
+    const seen: string[] = [];
+    const off = registerSessionReset((r) => {
+      seen.push(r);
+      if (r !== "expired") resetPrefsInMemory();
+    });
+    resetSessionState(new QueryClient(), "expired");
+    expect(getPrefs().theme).toBe("dark");
+    resetSessionState(new QueryClient(), "signed_out");
+    expect(getPrefs().theme).toBe("system");
+    expect(seen).toEqual(["expired", "signed_out"]);
+    off();
+    reloadPrefs();
   });
   it("identity change drops other people's data but keeps the /me query", () => {
     const qc = new QueryClient();
@@ -82,6 +114,45 @@ describe("useSessionLifecycle", () => {
     noteUnauthorized(0);
     rerender({ d: outState });
     expect(sessionStorage.getItem("gantry.draft.x")).toBeNull();
+  });
+});
+
+describe("expiry classification", () => {
+  it("a /me 401 alone (noteUnauthorized, no other call) is an expiry; a deliberate sign-out wins even with a 401", () => {
+    const t = 1_000_000;
+    noteUnauthorized(t);
+    expect(classifyEnd(t + 1000)).toBe("expired");
+    expect(classifyEnd(t + 60_000)).toBe("signed_out");
+    noteSignedOut(t + 2000);
+    expect(classifyEnd(t + 3000)).toBe("signed_out");
+  });
+  it("an expiry found by /me keeps the step-up draft through the lifecycle hook; identity change wipes it", () => {
+    const qc = new QueryClient();
+    const { rerender } = renderHook(({ d }) => useSessionLifecycle(qc, d), { initialProps: { d: inState("a") as MeState } });
+    sessionStorage.setItem("gantry.stepup.draft", "{}");
+    noteSignedOut(0);
+    noteUnauthorized();
+    rerender({ d: outState });
+    expect(sessionStorage.getItem("gantry.stepup.draft")).toBe("{}");
+    rerender({ d: inState("a") });
+    rerender({ d: inState("b") });
+    expect(sessionStorage.getItem("gantry.stepup.draft")).toBeNull();
+  });
+  it("on identity change the previous person's cache is gone in the layout phase, before paint", () => {
+    const qc = new QueryClient();
+    qc.setQueryData(["agents"], ["old person data"]);
+    let seen: unknown = "unset";
+    function Probe({ d }: { d: MeState }) {
+      useSessionLifecycle(qc, d);
+      // declared after the hook: runs in the same commit, so a passive reset would not have happened yet
+      useLayoutEffect(() => {
+        if (d.status === "in" && d.me.person.id === "b") seen = qc.getQueryData(["agents"]);
+      });
+      return null;
+    }
+    const { rerender } = render(<Probe d={inState("a")} />);
+    rerender(<Probe d={inState("b")} />);
+    expect(seen).toBeUndefined();
   });
 });
 

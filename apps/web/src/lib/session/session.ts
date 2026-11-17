@@ -10,7 +10,7 @@
  * ends (401 or sign-out) and when the identity behind the session changes (a different person in the same tab).
  */
 import type { QueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type { MeState } from "../../api/queries";
 
 export type SessionState = "unknown" | "in" | "out" | "offline";
@@ -38,23 +38,28 @@ export function deriveSession(q: MeQueryLike): SessionView {
 
 export type ResetReason = "expired" | "signed_out" | "identity_changed";
 
-const resets = new Set<() => void>();
+const resets = new Set<(reason: ResetReason) => void>();
 
 /** Module-level stores (caches, drafts, subscriptions held outside React) register their clear function here. Returns unregister. */
-export function registerSessionReset(fn: () => void): () => void {
+export function registerSessionReset(fn: (reason: ResetReason) => void): () => void {
   resets.add(fn);
   return () => {
     resets.delete(fn);
   };
 }
 
-/** Storage keys that hold unsent work. They survive an expired session (so the person can sign in again and continue). */
-const DRAFT_KEY = /^gantry\.(stepup\.draft|draft\.)/;
+/**
+ * Keys that survive an expired session: unsent drafts (sign in again and carry on) and non-sensitive layout choices (theme, nav,
+ * collapsed panels), so an expiry does not reset how the person set the app up. A deliberate sign-out or a different person drops them.
+ */
+const EXPIRY_KEEP = /^gantry\.(stepup\.draft|draft\.|prefs$|navClosed$|home\.)/;
+/** The stale-deploy reload guard holds no person data and must outlive any reset, or a missing chunk could loop reloads. */
+const ALWAYS_KEEP = /^gantry\.chunk-reload$/;
 
-function wipe(s: Storage | null, keepDrafts: boolean): void {
+function wipe(s: Storage | null, expired: boolean): void {
   if (!s) return;
   try {
-    for (const k of Object.keys(s)) if (k.startsWith("gantry.") && !(keepDrafts && DRAFT_KEY.test(k))) s.removeItem(k);
+    for (const k of Object.keys(s)) if (k.startsWith("gantry.") && !ALWAYS_KEEP.test(k) && !(expired && EXPIRY_KEEP.test(k))) s.removeItem(k);
   } catch {
     /* storage blocked: nothing to clear */
   }
@@ -69,12 +74,12 @@ const storage = (kind: "localStorage" | "sessionStorage"): Storage | null => {
 
 /**
  * Clears everything that belongs to the previous session.
- *  - expired: cache and stores go, unsent drafts stay (sign in again and carry on)
- *  - signed_out: everything goes, zero gantry.* keys remain
+ *  - expired: cache and stores go, unsent drafts and layout preferences stay (sign in again and carry on)
+ *  - signed_out: everything goes, no gantry.* keys remain (except the chunk-reload loop guard)
  *  - identity_changed: like signed_out, but the /me query is kept (it already holds the new person)
  */
 export function resetSessionState(client: QueryClient | null, reason: ResetReason): void {
-  const keepDrafts = reason === "expired";
+  const expired = reason === "expired";
   if (client) {
     if (reason === "identity_changed") {
       void client.cancelQueries({ predicate: (q) => q.queryKey[0] !== "me" });
@@ -86,21 +91,31 @@ export function resetSessionState(client: QueryClient | null, reason: ResetReaso
   }
   for (const fn of [...resets]) {
     try {
-      fn();
+      fn(reason);
     } catch {
       /* one store failing to clear must not stop the others */
     }
   }
-  wipe(storage("localStorage"), keepDrafts);
-  wipe(storage("sessionStorage"), keepDrafts);
+  wipe(storage("localStorage"), expired);
+  wipe(storage("sessionStorage"), expired);
 }
 
 /* ---------- lifecycle ---------- */
 
 let unauthorizedAt = 0;
-/** Called by the API client's 401 handler: the next transition to "out" is an expiry, not a deliberate sign-out. */
+let signedOutAt = 0;
+/** Called on any 401 (the API client's handler and the /me refetch): the next transition to "out" is an expiry, not a deliberate sign-out. */
 export function noteUnauthorized(now: number = Date.now()): void {
   unauthorizedAt = now;
+}
+/** The person chose to sign out: the resulting "out" is a sign-out even though /me answers 401. */
+export function noteSignedOut(now: number = Date.now()): void {
+  signedOutAt = now;
+}
+const RECENT_MS = 30_000;
+export function classifyEnd(now: number = Date.now()): ResetReason {
+  if (now - signedOutAt < RECENT_MS) return "signed_out";
+  return now - unauthorizedAt < RECENT_MS ? "expired" : "signed_out";
 }
 
 /** Watches the /me result: in -> out resets the session, and a different person id resets it too. */
@@ -108,13 +123,15 @@ export function useSessionLifecycle(client: QueryClient, data: MeState | undefin
   const prev = useRef<{ status: "in" | "out"; person: string | null } | null>(null);
   const status = data?.status;
   const person = data?.status === "in" ? data.me.person.id : null;
-  useEffect(() => {
+  // Layout phase, not passive: the reset must land before the browser paints the new identity, so one frame never shows the previous
+  // person's cached data (a passive effect runs after paint).
+  useLayoutEffect(() => {
     if (!status) return;
     const before = prev.current;
     prev.current = { status, person };
     if (!before) return;
     if (status === "out" && before.status === "in") {
-      resetSessionState(client, Date.now() - unauthorizedAt < 30_000 ? "expired" : "signed_out");
+      resetSessionState(client, classifyEnd());
     } else if (status === "in" && before.status === "in" && before.person && person && before.person !== person) {
       resetSessionState(client, "identity_changed");
     }

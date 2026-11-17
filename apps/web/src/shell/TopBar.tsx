@@ -10,6 +10,7 @@ import { Avatar, Btn, Chip, Table } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { StatusCluster } from "./StatusCluster";
+import { ConnectionIndicator } from "../lib/connection/ConnectionIndicator";
 import { useOpenTraveler } from "./useTraveler";
 import { navigate } from "../lib/router";
 import { isProjectRoute } from "../lib/routes";
@@ -82,6 +83,7 @@ export function TopBar({ me, crumb, project, current, onOpenNav, onOpenPalette }
         <kbd>{isMac() ? "⌘K" : "Ctrl K"}</kbd>
       </button>
       <div className="top-right">
+        <ConnectionIndicator />
         <StatusCluster />
         <button ref={inboxRef} type="button" className="icon-btn inbox-btn" id="inbox-btn" aria-label={`Waiting for you: ${n}`} aria-haspopup="dialog" aria-expanded="false" onClick={openInbox}>
           <Icon name="bell" />

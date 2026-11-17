@@ -9,7 +9,7 @@ import { startConnectionWatch } from "./lib/connection/store";
 import { deriveSession, noteUnauthorized, registerSessionReset, useSessionLifecycle } from "./lib/session/session";
 import { ReconnectBanner } from "./lib/session/ReconnectBanner";
 import { AppErrorBoundary } from "./lib/errors/AppErrorBoundary";
-import { applyTheme, reducedMotion, usePrefs } from "./lib/prefs";
+import { applyTheme, reducedMotion, resetPrefsInMemory, usePrefs } from "./lib/prefs";
 import { OverlayProvider } from "./ui/Overlay";
 import { Tip } from "./ui/Tip";
 import { Shell } from "./shell/Shell";
@@ -51,7 +51,7 @@ function Root() {
   if (me) {
     return (
       <>
-        <Shell me={me} />
+        <Shell key={me.person.id} me={me} />
         {session.stale ? <ReconnectBanner onRetry={() => void meState.refetch()} retrying={meState.isFetching} /> : null}
       </>
     );
@@ -78,7 +78,15 @@ export default function App() {
     bindQueryClient(client);
     return () => bindQueryClient(null);
   }, [client]);
-  useEffect(() => registerSessionReset(() => canBatcher.clear()), []);
+  useEffect(
+    () =>
+      registerSessionReset((reason) => {
+        canBatcher.clear();
+        // storage keeps prefs only across an expiry; otherwise memory must match the wiped storage
+        if (reason !== "expired") resetPrefsInMemory();
+      }),
+    [],
+  );
   useEffect(() => {
     setUnauthorizedHandler(() => {
       noteUnauthorized();

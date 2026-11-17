@@ -7,6 +7,7 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { api, ApiError, get, getText, setCsrfToken } from "./client";
 import { qk } from "./keys";
 import { readIfAllowed } from "./can";
+import { noteUnauthorized } from "../lib/session/session";
 
 /* The factory-level reads behind each register (core/read-gates.ts on the server): asked before the request is sent. */
 const MODELS = ["models.view"] as const;
@@ -39,6 +40,7 @@ export async function fetchMe(): Promise<MeState> {
     body = null;
   }
   if (res.status === 401) {
+    noteUnauthorized(); // an expiry found by a /me refetch alone is still an expiry (drafts and layout choices are kept)
     setCsrfToken(null);
     const b = (body ?? {}) as { config?: PublicConfig; msg?: string };
     return { status: "out", config: b.config ?? null, reason: b.msg ?? "" };

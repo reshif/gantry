@@ -98,6 +98,37 @@ describe("AppErrorBoundary", () => {
     expect(screen.getByText("route content")).toBeTruthy();
     expect(screen.getByRole("alert")).toBeTruthy();
   });
+  it("a chunk-load failure offers Reload only: Try again cannot work because React.lazy caches the rejected import", () => {
+    function ChunkBomb(): never {
+      throw new Error("Failed to fetch dynamically imported module: /assets/x.js");
+    }
+    render(
+      <AppErrorBoundary level="route">
+        <ChunkBomb />
+      </AppErrorBoundary>,
+    );
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+  it("nested levels report their own level in situ, and only the route fallback takes focus", () => {
+    const got: ErrorReport[] = [];
+    setErrorSink((r) => got.push(r));
+    render(
+      <div>
+        <AppErrorBoundary level="chrome">
+          <Bomb boom />
+        </AppErrorBoundary>
+        <AppErrorBoundary level="route">
+          <Bomb boom />
+        </AppErrorBoundary>
+      </div>,
+    );
+    // same message from two levels: the reporter de-duplicates by message, so check what was recorded plus the DOM
+    expect(got.map((r) => r.boundary)).toContain("chrome");
+    expect(document.getElementById("error-chrome")).toBeTruthy();
+    expect(document.getElementById("error-route")).toBeTruthy();
+    expect(document.activeElement?.closest("#error-route")).toBeTruthy();
+  });
   it("reports to the sink", () => {
     const got: ErrorReport[] = [];
     setErrorSink((r) => got.push(r));

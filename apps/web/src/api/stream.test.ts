@@ -57,6 +57,28 @@ describe("startStream", () => {
     bindQueryClient(null);
   });
 
+  it("with the default window, a burst of change events is one flush per 250ms carrying the union of slices", () => {
+    vi.useFakeTimers();
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    bindQueryClient(qc);
+    const src = fakeSource();
+    const stop = startStream({ create: () => src.es });
+    src.emit('{"keys":["workOrders"]}');
+    src.emit('{"keys":["audit"]}');
+    src.emit('{"keys":["workOrders"]}');
+    expect(spy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(249);
+    expect(spy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: string[] }).queryKey[0]);
+    expect(keys).toEqual(expect.arrayContaining(["workOrders", "audit"]));
+    expect(keys.filter((k) => k === "workOrders")).toHaveLength(1);
+    stop();
+    bindQueryClient(null);
+    vi.useRealTimers();
+  });
+
   it("clears the can() cache when a decision input changes", () => {
     const fn = vi.fn();
     const off = onCanInvalidated(fn);

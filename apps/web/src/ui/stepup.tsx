@@ -128,8 +128,13 @@ export function registerStepUpDraft(fn: () => Draft | null): () => void {
   };
 }
 
-/** Opens the sign-in popup. Resolves when the popup reports (message from this origin only), or null when the popup was blocked. */
-export function openStepUpPopup(): { result: Promise<StepUpOutcome>; cancel: () => void } | null {
+/**
+ * Opens the sign-in popup. `result` resolves when the popup reports (message from this origin only); null is returned when the popup was blocked.
+ * `closed` is only a hint: a popup that navigates to an identity provider sending Cross-Origin-Opener-Policy reads as `closed` on our handle
+ * while it is still open. So a closed verdict never ends the wait; the listeners stay alive and a late success still wins. The caller shows a
+ * soft "window closed" note (and lets the person retry); `cancel()` is the only thing that stops listening.
+ */
+export function openStepUpPopup(onClosed?: () => void): { result: Promise<StepUpOutcome>; cancel: () => void } | null {
   const win = window.open(POPUP_URL, "gantry-step-up", "popup,width=520,height=720");
   if (!win) return null;
   let finish: (o: StepUpOutcome) => void = () => undefined;
@@ -151,11 +156,8 @@ export function openStepUpPopup(): { result: Promise<StepUpOutcome>; cancel: () 
     bc?.close();
     unwatch();
   };
-  // the person closed the window without finishing: end the wait instead of hanging
-  const unwatch = watchPopupClosed(win, () => {
-    stop();
-    finish({ ok: false, error: "The sign-in window was closed before it finished." });
-  });
+  // the window reads as closed: tell the caller, but keep listening for a late success (see above)
+  const unwatch = watchPopupClosed(win, () => onClosed?.());
   window.addEventListener("message", onMessage);
   try {
     bc = new BroadcastChannel(CHANNEL);
@@ -194,7 +196,13 @@ function StepUpPrompt({ refusal, done }: { refusal: CommandRefusal; done: (o: St
     done({ ok: false });
   };
   const go = (): void => {
-    const p = openStepUpPopup();
+    popup.current?.cancel();
+    setError("");
+    const p = openStepUpPopup(() => {
+      // soft: the sign-in may still complete (the window can read as closed while open); a late success calls done() via p.result
+      setError("The sign-in window was closed before it finished. If you completed sign-in, this continues on its own; otherwise try again.");
+      setPhase("error");
+    });
     if (!p) {
       redirectToSignIn();
       return;
