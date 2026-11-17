@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { backoffDelay, parseChange, startStream, type EventSourceLike } from "./stream";
+import { backoffDelay, isStreamLive, onStreamLive, parseChange, startStream, type EventSourceLike } from "./stream";
 import { bindQueryClient, expandSlices, onCanInvalidated } from "./keys";
 
 describe("keys", () => {
@@ -100,5 +100,22 @@ describe("startStream", () => {
     stop();
     timers.at(-1)!.fn(); // a pending reconnect after stop does nothing
     expect(sources).toHaveLength(3);
+  });
+});
+
+describe("stream liveness (screens poll only while it is down)", () => {
+  it("is live once the stream opens, not live after an error or stop, and tells listeners", () => {
+    const src = fakeSource();
+    const seen = vi.fn();
+    const off = onStreamLive(seen);
+    const stop = startStream({ create: () => src.es, setTimer: () => 0 as never, clearTimer: () => undefined });
+    expect(isStreamLive()).toBe(false);
+    src.es.onopen?.(new Event("open"));
+    expect(isStreamLive()).toBe(true);
+    src.es.onerror?.(new Event("error"));
+    expect(isStreamLive()).toBe(false);
+    expect(seen).toHaveBeenCalledTimes(2);
+    stop();
+    off();
   });
 });

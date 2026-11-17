@@ -8,6 +8,20 @@ import { API_BASE } from "./client";
 import { invalidateSlices, getQueryClient } from "./keys";
 import type { ChangeEvent } from "./types";
 
+let live = false;
+const liveListeners = new Set<() => void>();
+function setLive(v: boolean): void {
+  if (live === v) return;
+  live = v;
+  for (const fn of [...liveListeners]) fn();
+}
+/** True while the live channel is open. Screens that would otherwise poll fall back to polling when it is not. */
+export const isStreamLive = (): boolean => live;
+export function onStreamLive(fn: () => void): () => void {
+  liveListeners.add(fn);
+  return () => void liveListeners.delete(fn);
+}
+
 export const STREAM_URL = `${API_BASE}/stream`;
 const MIN_DELAY = 1000;
 const MAX_DELAY = 30_000;
@@ -62,6 +76,7 @@ export function startStream(o: StreamOptions = {}): () => void {
     es = src;
     src.onopen = () => {
       attempt = 0;
+      setLive(true);
       // After a drop, events may have been missed: refetch what is on screen.
       if (everOpened) void getQueryClient()?.invalidateQueries();
       everOpened = true;
@@ -74,6 +89,7 @@ export function startStream(o: StreamOptions = {}): () => void {
     });
     src.onerror = () => {
       src.close();
+      setLive(false);
       if (es === src) es = null;
       if (stopped) return;
       timer = setT(connect, backoffDelay(attempt++, rnd));
@@ -82,6 +98,7 @@ export function startStream(o: StreamOptions = {}): () => void {
   connect();
   return () => {
     stopped = true;
+    setLive(false);
     if (timer) clearT(timer);
     es?.close();
     es = null;
