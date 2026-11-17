@@ -33,6 +33,7 @@ export function ApproversPanel({ woId, gate, project, onNavigate }: { woId: stri
       <h3 className="sub-h">{`Who may approve ${a.label}`}</h3>
       <p className="small" id="apr-rule">{a.rule.text}</p>
       {a.rule.conditions.length ? <p className="small muted">{`Also: ${a.rule.conditions.join("; ")}`}</p> : null}
+      {typeof a.rule.classOverride === "number" ? <p className="small muted">{`This work order's class needs ${a.rule.classOverride} instead of the gate's base ${a.rule.base}.`}</p> : null}
       <p className="small" id="apr-progress"><strong>{`${a.progress.have}/${a.progress.need}`}</strong>{a.progress.approvals.length ? ` approved by ${a.progress.approvals.map((x) => x.name).join(", ")}` : " approved so far"}{a.progress.unmet.length ? `; still needs: ${a.progress.unmet.join("; ")}` : ""}</p>
       {!a.satisfiable ? <div className="callout callout-warn small" role="alert" id="apr-warning">{a.warning}</div> : null}
       <p className="small"><strong>{`Eligible (${a.eligible.length})`}</strong></p>

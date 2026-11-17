@@ -9,7 +9,7 @@
  * supersedes every older attempt inside its scope without the stop path having to touch attempts.
  */
 import {
-  gateAfter, gateDef, gateKind, gateProgress, nextStationId, riskTagsOf, route, routeGates, stationDef,
+  gateAfter, gateDef, gateKind, gateProgress, requiredFor, nextStationId, riskTagsOf, route, routeGates, stationDef,
   type Catalog, type Person, type Project, type WorkOrder,
 } from "@gantry/domain";
 import { appendEvent, cancel, enqueue, schedule, type EventCategory, type EventChannel, type Tx } from "@gantry/db";
@@ -477,7 +477,7 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
       evidence = ci.evidence;
     }
   }
-  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0 || guardrailBreach, checks, evidence, required: Math.max(1, Number(project.approvers[gateId]?.required) || 1) }, now: fx.now });
+  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0 || guardrailBreach, checks, evidence, required: requiredFor(project.approvers[gateId], w.cls) }, now: fx.now });
   if (kind === "auto" || kind === "mixed") {
     (w.data.gateChecks ??= {})[gateId] = checks;
     const failed = checks.some((c) => !c.ok && !c.warn);

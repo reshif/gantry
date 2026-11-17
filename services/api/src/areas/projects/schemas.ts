@@ -17,6 +17,8 @@ export const RuleSchema = z.object({
   roles: ids,
   people: ids,
   required: z.number().int().min(0).max(9),
+  /** Per-class override of the approvals count (class id -> count). Whole numbers; range and class ids are checked with the rule. */
+  classRequired: z.record(z.string().min(1).max(60), z.number().int()).optional(),
   sod: z.boolean(),
   conditions: z.array(Condition).max(20),
   escalateH: z.number().int().min(0).max(240),

@@ -40,7 +40,8 @@ function ApproverSummary({ gid }: { gid: string }) {
   const rule = ctx.project.approvers[gid];
   const kind = gateKind(ctx.cat, ctx.project, gid);
   const roleName = (r: string): string => ctx.cat.roles.find((x) => x.id === r)?.name ?? r;
-  const line = <p className="small"><strong>{approvalText(g, kind, rule, roleName, (id) => actor(id).name)}</strong></p>;
+  const perClass = rule?.classRequired ? Object.entries(rule.classRequired).map(([c, n]) => `${ctx.project.flow.classes.find((x) => x.id === c)?.name ?? c} needs ${n}`).join("; ") : "";
+  const line = <><p className="small"><strong>{approvalText(g, kind, rule, roleName, (id) => actor(id).name)}</strong></p>{perClass && kind !== "auto" && gid !== "G0G1" ? <p className="small muted">{`By class: ${perClass}.`}</p> : null}</>;
   if (kind === "auto") return <>{line}<p className="small">{`Passes when its checks pass: ${g.checks.join(", ")}.`}</p></>;
   if (gid === "G0G1") return <>{line}<p className="small">The submitter confirms the brief. Line Leads and Project Admins may confirm any brief.</p></>;
   if (!rule) return <p className="small muted">No approver rule set. Factory Admins can approve (break-glass).</p>;
