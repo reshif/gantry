@@ -214,6 +214,16 @@ Remaining (resource limits, a configurable hostname with real TLS, and the upgra
   - documentation for users, admins and operators, plus OpenAPI
   - self-hosted fonts
 
+## Wave 7: agent context is real (2026-11-16)
+
+Findings from the agent context audit (P2 items 8, 9 and 10). Each is a rail around the agent; none decides what an agent concludes.
+
+- **Tool allow-list is enforced in the runner.** The Claude adapter now passes `--tools` (the built-in tools the model is offered at all) and names every other built-in in `--disallowedTools`, in addition to `--allowedTools` (which only pre-approves). A specifier such as `Bash(npm test:*)` grants the tool and narrows approval. MCP tools (station tools, registry servers in scope) are still gated by the edge. As a last rail, a tool call outside the list stops the harness; the call stays in the transcript checkpoint and the run fails with `tool_not_allowed` and a message naming the tool. Tests: `runner/wrapper/test/claude.test.ts` (flags for Reviewer-style and empty lists, allow/deny helper, a stand-in harness that calls `Bash` is refused and recorded, listed tools pass).
+- **No model is a visible failure, never a silent stub.** Dispatch fails the attempt with `no_model` and the user-facing reason "This agent has no model, so the run was not started. Choose a model for the agent on the Agents page, then run the station again." The stub adapter runs only when the worker is started with `GANTRY_ALLOW_STUB_ADAPTER=1` (the worker test config sets it), and the run spec route no longer infers `stub` from a missing model; only a run explicitly marked as a stub gets one. Tests: `services/worker/test/dispatch.test.ts`, `services/api/test/internal-runs.test.ts`.
+- **The `previous` handoff is structured and capped.** `services/api/src/areas/internal/previous.ts` passes the latest succeeded result of each earlier station (summary and structured output) and drops superseded retries, failed or interrupted runs, `needs_person` runs, usage, cost and runner metadata. Total size is capped at 12 KB; an output that does not fit keeps whole top-level fields and lists which were omitted. An `omitted` note says how many attempts were left out and points to the work order timeline, and tells the agent to ask the person rather than guess. Documents, questions and assumptions are unchanged. Tests: `services/api/test/previous-handoff.test.ts`, `services/api/test/internal-runs.test.ts`.
+
+Not done here (other tracks): repository conventions, session prompts, prompt trace, skill versions.
+
 ## Decisions for the owner
 
 Answered 2026-11-15:

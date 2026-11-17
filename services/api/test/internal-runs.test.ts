@@ -346,6 +346,31 @@ d("internal runs API", () => {
       const r = await makeRun({ model: null, runData: { adapter: "claude" } });
       expect((await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).statusCode).toBe(422);
     });
+    it("never falls back to the stub for a run with no model unless it was marked as a stub", async () => {
+      const r = await makeRun({ model: null });
+      const res = await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token });
+      expect(res.statusCode).toBe(422);
+      expect(JSON.stringify(res.json())).toMatch(/no model/i);
+    });
+    it("hands over the latest accepted result per station, without retries, usage or cost, and within a size cap", async () => {
+      const r = await makeRun();
+      let visit = 10;
+      const old = async (id: string, station: string, outcome: string, summary: string, output: object) => {
+        await q(`insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,$4,$5,'succeeded','{}'::jsonb)`, [t.orgId, id, r.woId, station, ++visit]);
+        await q(`insert into station_results (org_id, id, attempt_id, wo_id, station, outcome, summary, body) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, [
+          t.orgId, `sr-${id}`, id, r.woId, station, outcome, summary,
+          JSON.stringify({ output, usage: [{ model: "m", inputTokens: 1, outputTokens: 1, costUsd: 0.5 }], capabilities: { cancel: true }, adapter: "claude", error: null }),
+        ]);
+      };
+      await old(`${r.attemptId}-s1`, "spec", "failed", "crashed", {});
+      await old(`${r.attemptId}-s2`, "spec", "succeeded", "spec accepted", { summary: "spec accepted", notes: "n".repeat(60_000) });
+      const s = (await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json();
+      expect(s.input.previous.results).toHaveLength(1);
+      expect(s.input.previous.results[0]).toMatchObject({ station: "spec", summary: "spec accepted", truncated: { omittedFields: ["notes"] } });
+      expect(s.input.previous.omitted.attempts).toBe(1);
+      expect(JSON.stringify(s.input.previous.results)).not.toMatch(/costUsd|capabilities|usage/);
+      expect(JSON.stringify(s.input.previous).length).toBeLessThan(16_000);
+    });
   });
 
   describe("mcp-authorize", () => {
