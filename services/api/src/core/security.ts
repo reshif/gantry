@@ -3,6 +3,15 @@ import type { SecuritySettings } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
 import { DEFAULT_SECURITY, readSecurity, type Versioned } from "./read/index.js";
 
+/** A bare address or CIDR range with an in-range numeric prefix. Anything else is rejected where it is set, never silently skipped. */
+export function validIpEntry(raw: string): boolean {
+  const [net, bits, extra] = raw.trim().split("/");
+  const f = net ? isIP(net) : 0;
+  if (!f || extra !== undefined) return false;
+  if (bits === undefined) return true;
+  return /^\d{1,3}$/.test(bits) && Number(bits) <= (f === 4 ? 32 : 128);
+}
+
 /** Is `ip` inside any allow-list entry (a CIDR or a bare address)? An empty list allows everyone. IPv4-mapped IPv6 is unwrapped. */
 export function ipAllowed(ip: string, allow: string[]): boolean {
   if (!allow.length) return true;
@@ -11,12 +20,12 @@ export function ipAllowed(ip: string, allow: string[]): boolean {
   if (!fam) return false;
   const list = new BlockList();
   for (const raw of allow) {
+    if (!validIpEntry(raw)) continue; // refused where it is set (the Security setting); never throws here
     const [net, bits] = raw.trim().split("/");
-    const f = net ? isIP(net) : 0;
-    if (!net || !f) continue;
+    const f = isIP(net!);
     const type = f === 4 ? "ipv4" : "ipv6";
-    if (bits === undefined) list.addAddress(net, type);
-    else if (/^\d+$/.test(bits)) list.addSubnet(net, Number(bits), type);
+    if (bits === undefined) list.addAddress(net!, type);
+    else list.addSubnet(net!, Number(bits), type);
   }
   return list.check(addr, fam === 4 ? "ipv4" : "ipv6");
 }

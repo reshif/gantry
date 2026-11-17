@@ -16,6 +16,7 @@ import { appendEvent, withTx } from "@gantry/db";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { recordSignInFailure, signIn } from "../core/auth/signin.js";
+import { validIpEntry } from "../core/security.js";
 import { csrfFor, findSession, listSessions, revokeSessions } from "../core/auth/sessions.js";
 import { publishChange } from "../core/changes.js";
 import { command } from "../core/command.js";
@@ -56,7 +57,7 @@ const SecuritySchema = z.object({
   sessionHours: z.number().int().min(1).max(24 * 30),
   idleMin: z.number().int().min(1).max(24 * 60),
   domains: z.array(z.string().max(200)).max(100),
-  ipAllow: z.array(z.string().max(100)).max(200),
+  ipAllow: z.array(z.string().max(100).refine(validIpEntry, "not an IP address or CIDR range")).max(200),
   restoreFactoryNeedsTwo: z.boolean(),
   killNeedsStepUp: z.boolean(),
   stepUpWindowMinutes: z.number().int().min(5).max(60).optional(),
@@ -288,7 +289,10 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
         const next = setPath(cur.value, body.path, body.value);
         if (!next) throw invalid(`There is no security setting called ${body.path}.`);
         const parsed = SecuritySchema.safeParse(next);
-        if (!parsed.success) throw invalid(`That value is not valid for ${body.path}.`);
+        if (!parsed.success) {
+          const bad = body.path === "ipAllow" && Array.isArray(body.value) ? body.value.filter((x) => typeof x !== "string" || !validIpEntry(x)).slice(0, 3).map((x) => JSON.stringify(String(x).slice(0, 60))) : [];
+          throw invalid(bad.length ? `Not an IP address or CIDR range: ${bad.join(", ")}.` : `That value is not valid for ${body.path}.`);
+        }
         const before = getPath(cur.value, body.path);
         const after = getPath(parsed.data, body.path);
         // Locking yourself out: an IP list that excludes the caller is refused.
@@ -323,7 +327,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     return { results: checks.map((c) => decideFor(st, p, c.action, { project: c.project ?? null, repo: c.repo ?? null, time: c.time ?? now })).map((d) => ({ allowed: d.allowed, reason: d.reason, rule: d.rule, needs: d.needs })) };
   });
 
-  app.get("/api/v1/stream", async (req, reply) => {
+  app.get("/api/v1/stream", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (req, reply) => {
     const p = req.gx.principal;
     if (p?.kind !== "person") throw refuse("denied", "The live stream is for signed-in people.");
     const st = await policyState(req);

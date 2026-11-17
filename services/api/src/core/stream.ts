@@ -13,7 +13,7 @@ export interface Subscriber {
 
 export interface HubHooks {
   /** Recomputes a subscriber's visible projects. Returns null if the person or session is gone (the stream is closed). */
-  refresh(s: Subscriber): Promise<Set<string> | "all" | null>;
+  refresh(s: Subscriber, batch: Map<string, unknown>): Promise<Set<string> | "all" | null>;
 }
 
 const VISIBILITY_KEYS = new Set(["people", "projects", "matrix", "roles", "session", "sessions", "factory", "*"]);
@@ -55,9 +55,10 @@ export class Hub {
 
   /** Closes the streams of people whose session or account ended (expiry and idle timeout produce no notification). */
   async sweep(): Promise<void> {
+    const batch = new Map<string, unknown>(); // shared by every subscriber of this sweep: one policy load, not one per stream
     await Promise.all(
       [...this.subs].map(async (s) => {
-        const v = await this.hooks.refresh(s).catch(() => s.visible);
+        const v = await this.hooks.refresh(s, batch).catch(() => s.visible);
         if (v === null) s.close();
         else s.visible = v;
       }),
@@ -97,10 +98,11 @@ export class Hub {
 
   async dispatch(ch: Change): Promise<void> {
     const refresh = ch.keys.some((k) => VISIBILITY_KEYS.has(k));
+    const batch = new Map<string, unknown>();
     await Promise.all(
       [...this.subs].map(async (s) => {
         if (refresh) {
-          const v = await this.hooks.refresh(s).catch(() => s.visible);
+          const v = await this.hooks.refresh(s, batch).catch(() => s.visible);
           if (v === null) return s.close();
           s.visible = v;
         }
@@ -110,7 +112,12 @@ export class Hub {
     );
   }
 
+  /** At most this many open streams per person: opening one more closes that person's oldest. */
+  static readonly MAX_STREAMS_PER_PERSON = 5;
+
   add(s: Subscriber): () => void {
+    const mine = [...this.subs].filter((x) => x.personId === s.personId); // insertion order: oldest first
+    for (const old of mine.slice(0, Math.max(0, mine.length - (Hub.MAX_STREAMS_PER_PERSON - 1)))) old.close();
     this.subs.add(s);
     return () => this.subs.delete(s);
   }
@@ -141,6 +148,8 @@ export function openStream(req: FastifyRequest, reply: FastifyReply, hub: Hub, s
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
     "x-accel-buffering": "no",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
     "x-request-id": req.id,
   });
   let done = false;

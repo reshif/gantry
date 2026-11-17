@@ -84,8 +84,10 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
 
   const security = new SecurityCache(pool, orgId);
   const hub = new Hub(pool, orgId, {
-    async refresh(s) {
-      const st = await loadPolicyState(pool, orgId);
+    async refresh(s, batch) {
+      let load = batch.get("policy") as ReturnType<typeof loadPolicyState> | undefined;
+      if (!load) batch.set("policy", (load = loadPolicyState(pool, orgId)));
+      const st = await load;
       const person = st.people.find((p) => p.id === s.personId);
       if (!person || person.status !== "active") return null;
       if (s.sessionId) {
@@ -111,7 +113,7 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     timeWindow: "1 minute",
     allowList: (req) => {
       const path = canonicalPath(req.url) ?? "";
-      return path === "/healthz" || path.startsWith("/api/v1/stream") || path.startsWith("/internal/v1/");
+      return path === "/healthz" || path.startsWith("/internal/v1/");
     },
     keyGenerator: (req) => req.ip,
   });
@@ -213,7 +215,8 @@ async function authApi(app: FastifyInstance, req: FastifyRequest, reply: import(
       return;
     }
   }
-  void touchSession(g.pool, g.orgId, s).catch(() => undefined);
+  // Only a person's own activity keeps a session from going idle: the app marks its timed polling and the live stream as background.
+  if (req.headers["x-gantry-background"] !== "1" && !req.url.startsWith("/api/v1/stream")) void touchSession(g.pool, g.orgId, s).catch(() => undefined);
   req.gx.principal = { kind: "person", id: s.personId, name: s.personName, sessionId: s.id };
   req.gx.session = { id: s.id, personId: s.personId, method: s.method, authTime: s.authTime, createdAt: s.createdAt, expiresAt: s.expiresAt };
 }

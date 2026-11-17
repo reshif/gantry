@@ -107,6 +107,14 @@ async function ensureCsrf(): Promise<void> {
   }
 }
 
+/**
+ * Idle timeout counts a person's own activity. Timed polling from an unattended tab must not keep the session alive, so reads sent
+ * when there has been no pointer or key input for a while carry a background marker the server does not count.
+ */
+let lastInput = Date.now();
+if (typeof window !== "undefined") for (const ev of ["pointerdown", "keydown", "wheel", "touchstart"]) window.addEventListener(ev, () => (lastInput = Date.now()), { passive: true, capture: true });
+const ACTIVE_MS = 60_000;
+
 async function send(path: string, opts: RequestOptions): Promise<Response> {
   const method = opts.method ?? "GET";
   const headers: Record<string, string> = { Accept: "application/json", ...opts.headers };
@@ -116,6 +124,7 @@ async function send(path: string, opts: RequestOptions): Promise<Response> {
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (opts.idempotent) headers["Idempotency-Key"] = typeof opts.idempotent === "string" ? opts.idempotent : newKey();
   }
+  if (!isMutation(method) && Date.now() - lastInput > ACTIVE_MS) headers["X-Gantry-Background"] = "1";
   if (opts.ifMatch !== undefined) headers["If-Match"] = String(opts.ifMatch);
   const init: RequestInit = { method, credentials: "include", headers };
   if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
