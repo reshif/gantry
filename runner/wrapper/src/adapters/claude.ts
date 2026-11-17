@@ -16,6 +16,7 @@ import type { Adapter, AdapterContext, AdapterOutcome } from "../adapter.js";
 import type { UsageEntry } from "../edge.js";
 import type { RunEnv } from "../env.js";
 import type { RunSpec } from "../spec.js";
+import { narrowShell } from "../tools.js";
 
 /** Writable scratch space: the root filesystem is read-only, /tmp is a tmpfs. */
 export const SCRATCH = process.env.GANTRY_SCRATCH ?? "/tmp/gantry";
@@ -75,7 +76,7 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
     "--append-system-prompt", composeSystemPrompt(spec),
   ];
   if (spec.model) args.push("--model", spec.model);
-  args.push("--allowedTools", [...spec.toolAllowList, ...STATION_TOOL_NAMES].join(","));
+  args.push("--allowedTools", [...narrowShell(spec.toolAllowList), ...STATION_TOOL_NAMES].join(","));
 
   const cloneEnv: Record<string, string> = {};
   for (const k of ["PATH", "LANG", "LC_ALL", "TZ"]) {
@@ -91,6 +92,8 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
     // Package and other HTTPS goes through the edge proxy; the gateway itself is reached directly.
     HTTPS_PROXY: baseEnv.HTTPS_PROXY ?? "",
     NO_PROXY: edgeHost,
+    // Commands the model runs in the shell must not inherit the run token or the proxy credentials (the harness strips them from tool subprocesses).
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
     DISABLE_AUTOUPDATER: "1",
     DISABLE_TELEMETRY: "1",
     DISABLE_ERROR_REPORTING: "1",
