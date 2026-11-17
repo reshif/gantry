@@ -39,3 +39,13 @@
 .prj-tpl-custom dd { color: var(--accent); }
 .prj-te-cust { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 0; border-bottom: 1px dotted var(--line); }
 .prj-te-cust > span:nth-child(2) { flex: 1 1 12em; min-width: 0; }
+
+/* wizard: pill steps and soft radio cards */
+.prj-wz-steps { gap: 6px; }
+.prj-wz-steps li { margin-right: 0; border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px 3px 4px; }
+.prj-wz-steps li span { border-radius: 50%; border-color: var(--line-strong); }
+.prj-wz .radio-card { border-radius: var(--r2); padding: 12px 12px 12px 34px; border-color: var(--line); background: var(--surface); gap: 4px; }
+.prj-wz .radio-card input { left: 12px; top: 14px; }
+.prj-wz .radio-card .rc-t { font-weight: 600; }
+.prj-wz .radio-card .rc-d { color: var(--muted); font-size: var(--t-md); }
+.prj-wz .radio-card .rc-d:last-child { color: var(--faint); font-size: var(--t-sm); }

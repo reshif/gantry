@@ -42,6 +42,7 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
   void m;
   return (
     <div className="two-col">
+      <div className="pcf-stack">
       <Panel title="About this project">
         <div className="form-grid">
           <LockNote decision={d} what="Project details" />
@@ -69,27 +70,6 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
           </div>
         </div>
       </Panel>
-      <div className="pcf-stack">
-        <Panel title="Facts">
-          <div className="form-grid">
-            <dl className="titleblock pcf-facts">
-              <div><dt>Key</dt><dd className="mono">{p.key}</dd></div>
-              <div><dt>Status</dt><dd>{p.status}</dd></div>
-              <div><dt>Template</dt><dd>{tpl ? tpl.name : p.template}</dd></div>
-              <div><dt>Regulated</dt><dd>{p.regulated ? "yes" : "no"}</dd></div>
-              <div><dt>Teams</dt><dd>{p.teams.map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "none"}</dd></div>
-              <div><dt>Created</dt><dd>{fmt.istDate(p.created)}</dd></div>
-            </dl>
-            <Field label="Owner" htmlFor="pcf-owner" hint="The owner is the default fallback approver and gets budget alerts.">
-              <Select id="pcf-owner" disabled={locked} options={owners.map((x) => ({ value: x.id, label: `${x.name} · ${x.title}` }))} value={p.owner} onChange={async (v) => res(await ops.setProject(p.id, "owner", v, { ifMatch: p.version }), `Owner is now ${actor(v).name.replace(" (agent)", "")}.`)} />
-            </Field>
-            <div className="pcf-belt-row"><MiniBelt cat={cat} project={p} counts={metricsOf(p).byPosition} /></div>
-            <p className="small" id="pcf-flow-sum">
-              {`${stations} stations, ${gates} gates, ${p.flow.bays.length} bays, ${p.flow.classes.length} work classes. `}
-              {custom.length ? <span><span className="kv-k">Custom </span>{`${custom.join(", ")}.`}</span> : <span className="muted">No custom entries.</span>}
-            </p>
-          </div>
-        </Panel>
         <Panel title="Repos" tools={<Btn small kind="ghost" id="pcf-to-onb" label="Onboarding" onClick={() => navigate("onboarding")} />}>
           {repos.length ? (
             <ul className="plain-list pcf-repos">
@@ -115,6 +95,28 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
           <div className="form-grid">
             <p className="small muted">Save this project's stations, gates, bays, slots and class routes as a template for new projects, custom entries included.</p>
             <div><Btn icon="copy" id="pcf-save-tpl" guard={td} label="Save as template" onClick={() => saveAs(p)} /></div>
+          </div>
+        </Panel>
+      </div>
+      <div className="pcf-stack">
+        <Panel title="Facts">
+          <div className="form-grid">
+            <dl className="pcf-kv">
+              <div><dt>Key</dt><dd className="mono">{p.key}</dd></div>
+              <div><dt>Status</dt><dd>{p.status === "archived" ? "Archived" : p.killed ? "Killed" : p.halted ? "Halted" : "Active"}</dd></div>
+              <div><dt>Template</dt><dd>{tpl ? tpl.name : p.template}</dd></div>
+              <div><dt>Regulated</dt><dd>{p.regulated ? "Yes" : "No"}</dd></div>
+              <div><dt>Teams</dt><dd>{p.teams.map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "None"}</dd></div>
+              <div><dt>Created</dt><dd>{fmt.istDate(p.created)}</dd></div>
+            </dl>
+            <Field label="Owner" htmlFor="pcf-owner" hint="The owner is the default fallback approver and gets budget alerts.">
+              <Select id="pcf-owner" disabled={locked} options={owners.map((x) => ({ value: x.id, label: `${x.name} · ${x.title}` }))} value={p.owner} onChange={async (v) => res(await ops.setProject(p.id, "owner", v, { ifMatch: p.version }), `Owner is now ${actor(v).name.replace(" (agent)", "")}.`)} />
+            </Field>
+            <div className="pcf-belt-row"><MiniBelt cat={cat} project={p} counts={metricsOf(p).byPosition} /></div>
+            <p className="small" id="pcf-flow-sum">
+              {`${stations} stations, ${gates} gates, ${p.flow.bays.length} bays, ${p.flow.classes.length} work classes. `}
+              {custom.length ? <span><span className="hm-lbl">Custom </span>{`${custom.join(", ")}.`}</span> : <span className="muted">No custom entries.</span>}
+            </p>
           </div>
         </Panel>
       </div>

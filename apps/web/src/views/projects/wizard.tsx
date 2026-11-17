@@ -130,7 +130,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
               <span className="rc-t">{t.name}</span>
               <span className="rc-d">{t.desc}</span>
               <TplBelt cat={cat} t={t} />
-              <span className="rc-d mono">{`${t.slots} slot${t.slots > 1 ? "s" : ""} · ${t.approverPreset} approvers`}</span>
+              <span className="rc-d">{`${t.slots} slot${t.slots > 1 ? "s" : ""} · ${t.approverPreset.charAt(0).toUpperCase()}${t.approverPreset.slice(1)} approvers`}</span>
             </label>
           );
         })}
