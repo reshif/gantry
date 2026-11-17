@@ -88,6 +88,9 @@ export function createOidcAdapter(cfg: Config["oidc"], opts: { allowInsecure?: b
       // A named account (demo card, invite link) must not be satisfied by whoever already holds the identity provider's SSO session:
       // without prompt=login, Keycloak ignores login_hint and silently signs the previous person back in.
       if (p.stepUp || p.loginHint) params.prompt = "login";
+      // Step-up asks for a sign-in that happened now (max_age=0). It proves a fresh password entry, not a second factor: requiring OTP or
+      // WebAuthn is a Keycloak browser-flow setting for the production realm (deploy/PRODUCTION.md), and auth_time is what we verify.
+      if (p.stepUp) params.max_age = "0";
       if (p.idpHint) params.kc_idp_hint = p.idpHint;
       return client.buildAuthorizationUrl(c, params);
     },

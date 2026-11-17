@@ -16,6 +16,9 @@ export interface HubHooks {
   refresh(s: Subscriber): Promise<Set<string> | "all" | null>;
 }
 
+export const STREAMS_PER_PERSON = 5;
+export const STREAMS_TOTAL = 2000;
+
 const VISIBILITY_KEYS = new Set(["people", "projects", "matrix", "roles", "session", "sessions", "factory", "*"]);
 
 /**
@@ -41,7 +44,25 @@ export class Hub {
   private retry: NodeJS.Timeout | null = null;
   private sweeper: NodeJS.Timeout | null = null;
 
-  constructor(private readonly pool: pg.Pool, private readonly orgId: string, private readonly hooks: HubHooks, private readonly sweepMs = 60_000) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly orgId: string,
+    private readonly hooks: HubHooks,
+    private readonly sweepMs = 60_000,
+    /** Open streams one person may hold (the oldest is closed for a new one) and in all. Every stream costs a policy load on each visibility change. */
+    private readonly limits: { perPerson: number; total: number } = { perPerson: STREAMS_PER_PERSON, total: STREAMS_TOTAL },
+  ) {}
+
+  /** One refresh per person and session for a whole fan-out, not one per open stream. */
+  private refresher(): (s: Subscriber) => Promise<Set<string> | "all" | null> {
+    const done = new Map<string, Promise<Set<string> | "all" | null>>();
+    return (s) => {
+      const k = `${s.personId}\u0000${s.sessionId ?? ""}`;
+      let p = done.get(k);
+      if (!p) done.set(k, (p = this.hooks.refresh(s)));
+      return p;
+    };
+  }
 
   get size(): number {
     return this.subs.size;
@@ -55,9 +76,10 @@ export class Hub {
 
   /** Closes the streams of people whose session or account ended (expiry and idle timeout produce no notification). */
   async sweep(): Promise<void> {
+    const refresh = this.refresher();
     await Promise.all(
       [...this.subs].map(async (s) => {
-        const v = await this.hooks.refresh(s).catch(() => s.visible);
+        const v = await refresh(s).catch(() => s.visible);
         if (v === null) s.close();
         else s.visible = v;
       }),
@@ -96,11 +118,12 @@ export class Hub {
   }
 
   async dispatch(ch: Change): Promise<void> {
-    const refresh = ch.keys.some((k) => VISIBILITY_KEYS.has(k));
+    const needsRefresh = ch.keys.some((k) => VISIBILITY_KEYS.has(k));
+    const refresh = this.refresher();
     await Promise.all(
       [...this.subs].map(async (s) => {
-        if (refresh) {
-          const v = await this.hooks.refresh(s).catch(() => s.visible);
+        if (needsRefresh) {
+          const v = await refresh(s).catch(() => s.visible);
           if (v === null) return s.close();
           s.visible = v;
         }
@@ -110,7 +133,14 @@ export class Hub {
     );
   }
 
+  /** False when the hub is full: the caller refuses the stream. A person over their own limit loses their oldest stream instead. */
+  hasRoom(): boolean {
+    return this.subs.size < this.limits.total;
+  }
+
   add(s: Subscriber): () => void {
+    const mine = [...this.subs].filter((x) => x.personId === s.personId);
+    for (const old of mine.slice(0, Math.max(0, mine.length - this.limits.perPerson + 1))) old.close();
     this.subs.add(s);
     return () => this.subs.delete(s);
   }

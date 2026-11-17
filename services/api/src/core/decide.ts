@@ -78,7 +78,10 @@ export function refuseDecision(d: Decision): Refusal {
   return refuse(d.rule.kind === "stop" ? "stopped" : "denied", d.reason, { rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) });
 }
 
-/** Spec 14.1: a fresh, strong sign-in for kill, restore, policy, role, security and key operations. */
+/**
+ * Spec 14.1: a fresh sign-in for kill, restore, policy, role, security and key operations. "Fresh" means auth_time is inside the window.
+ * It is a password re-entry unless the identity provider's browser flow requires a second factor (OTP, WebAuthn); we do not check acr or amr.
+ */
 export function stepUpSatisfied(req: FastifyRequest, maxAgeSec = 300): boolean {
   const s = req.gx.session;
   return !!s?.authTime && Date.now() - s.authTime <= maxAgeSec * 1000;

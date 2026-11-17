@@ -326,6 +326,7 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
   app.get("/api/v1/stream", async (req, reply) => {
     const p = req.gx.principal;
     if (p?.kind !== "person") throw refuse("denied", "The live stream is for signed-in people.");
+    if (!g.hub.hasRoom()) throw refuse("conflict", "Too many live streams are open. Try again shortly.");
     const st = await policyState(req);
     const person = await currentPerson(req);
     if (!person) throw refuse("denied", "This account no longer exists.");

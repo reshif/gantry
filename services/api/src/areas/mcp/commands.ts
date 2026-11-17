@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import type { Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult } from "../../core/command.js";
-import { conflict, invalid, notFound } from "../../core/errors.js";
+import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import type { AddBody, PatchBody, GrantBody } from "./schemas.js";
 import type { DiscoveredTool, Discovery } from "./edge-client.js";
 import { sealSecret } from "./secret.js";
@@ -293,9 +293,14 @@ export async function grantWrites(tx: Tx, a: Actor, b: z.infer<typeof GrantBody>
     `select id, station, data from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running') order by fencing desc limit 1 for update`, [a.orgId, b.wo],
   )).rows[0];
   if (!att) throw conflict(`${b.wo} has no attempt in progress to pre-authorise.`);
+  // Separation of duties: the person who asked for the work does not also pre-authorise what writes to outside systems for it.
+  const requester = (await tx.query<{ submitter: string | null }>(`select submitter from work_orders where org_id = $1 and id = $2`, [a.orgId, b.wo])).rows[0]?.submitter ?? null;
+  if (requester && (requester === a.personId || requester === a.id)) throw refuse("denied", `${b.wo} was requested by you. Another approver pre-authorises its write tools.`);
   for (const g of b.tools) {
     const [server, tool] = g.split("/", 2) as [string, string];
-    if (!(await tx.query(`select 1 from mcp_servers where org_id = $1 and id = $2`, [a.orgId, server])).rowCount) throw invalid(`There is no MCP server ${server}.`);
+    const srv = (await tx.query<{ enabled: boolean }>(`select enabled from mcp_servers where org_id = $1 and id = $2`, [a.orgId, server])).rows[0];
+    if (!srv) throw invalid(`There is no MCP server ${server}.`);
+    if (tool === "*" && !srv.enabled) throw invalid(`${server} is switched off: a whole-server grant needs it on.`);
     if (tool !== "*") {
       const t = (await tx.query<{ tool_class: string }>(`select tool_class from mcp_tools where org_id = $1 and server_id = $2 and name = $3`, [a.orgId, server, tool])).rows[0];
       if (!t) throw invalid(`${server} has no tool ${tool}.`);

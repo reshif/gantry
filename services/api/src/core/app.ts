@@ -111,7 +111,7 @@ export async function buildApp(o: BuildOptions): Promise<FastifyInstance> {
     timeWindow: "1 minute",
     allowList: (req) => {
       const path = canonicalPath(req.url) ?? "";
-      return path === "/healthz" || path.startsWith("/api/v1/stream") || path.startsWith("/internal/v1/");
+      return path === "/healthz" || path.startsWith("/internal/v1/");
     },
     keyGenerator: (req) => req.ip,
   });
