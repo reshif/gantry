@@ -33,7 +33,7 @@ type Via = string | undefined;
 const enc = encodeURIComponent;
 
 /** The id a decision names: the shown instance when it is a full `WO:G:n`, otherwise the bare gate (the server then answers 428 with the open instance). */
-export const gateInstanceId = (woId: string, gateId: string, instance?: string): string => (instance && instance.split(":").length === 3 ? instance : `${woId}:${gateId}`);
+export const gateInstanceId = (woId: string, gateId: string, instance?: string): string => (instance && instance.startsWith(`${woId}:${gateId}:`) && instance.split(":").length === 3 ? instance : `${woId}:${gateId}`);
 
 /** A gate decision refused as stale (409) or unpinned (428): the screens refetch at once and the person is told what changed and that nothing was decided. */
 async function gateDecided<T extends object>(req: Promise<ApiResult<T>>): Promise<ApiResult<T>> {

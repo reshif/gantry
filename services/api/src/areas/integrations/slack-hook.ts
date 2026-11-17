@@ -176,6 +176,7 @@ export const slackHookRoutes: FastifyPluginAsync = async (app) => {
     const gi = parseGateId(v.instance);
     const wo = (await g.pool.query<{ project_id: string }>(`select project_id from work_orders where org_id = $1 and id = $2`, [g.orgId, gi.woId])).rows[0];
     if (!wo) return respond("That work order no longer exists.");
+    if (gi.n === null) return respond("This card does not name the exact request, so it cannot be approved here. Open it in Gantry.");
     // The chat policy first, so the reason a person reads is the real one (a release or a hotfix is never approved from chat), then again under the lock inside the command.
     const chatPolicy = async (db: import("@gantry/db").Queryable): Promise<ReturnType<typeof chatApprovalFor> | null> => {
       const w = (await loadFlow(db, g.orgId, { ids: [gi.woId] })).workOrders[0];

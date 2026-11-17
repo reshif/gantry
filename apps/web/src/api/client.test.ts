@@ -130,6 +130,13 @@ describe("ops mapping", () => {
       expect(bare.msg).toMatch(/It is now at instance 5\. Nothing was decided\./);
     }
   });
+  it("A8: an instance shown for another gate or work order is never sent for this decision", async () => {
+    mockFetch(() => ({ body: { ok: true, msg: "" } }));
+    await ops.approveGate("WO-7", "G2", "WO-7:G3:2");
+    await ops.approveGate("WO-7", "G2", "WO-8:G2:2");
+    expect(calls[0]?.url).toBe("/api/v1/gate-instances/WO-7%3AG2/approve");
+    expect(calls[1]?.url).toBe("/api/v1/gate-instances/WO-7%3AG2/approve");
+  });
   it("addresses gate instances and stops by the documented id conventions", async () => {
     mockFetch(() => ({ body: { ok: true, msg: "" } }));
     await ops.approveGate("WO-1042", "G3", "WO-1042:G3:4");
