@@ -19,6 +19,7 @@ import { runConversation, ModelUnavailable, readiness } from "../areas/console/m
 import { UNTRUSTED_NOTE } from "../areas/console/mark.js";
 import { brokerInspect } from "../areas/onboarding/session/broker.js";
 import { readRepoRow } from "../areas/onboarding/state.js";
+import { composeSessionContext, recordTurnTuple } from "../areas/session/context.js";
 import { agentBudgetUsd, historyFrom, openSse, stationAgentGate, turnCostMicros } from "../areas/session/core.js";
 import { postMessage, reclassify, decline } from "../areas/workorders/intake.js";
 import { loadFlow, readWoRow, stateWithPinned, woVersion } from "../areas/workorders/model.js";
@@ -54,15 +55,20 @@ interface RuleMode { mode: "rule-based"; reason: string; budget: { spentUsd: num
 
 const stationOf = (c: Catalog, w: WorkOrder): string => (w.bay ? (w.bayFrom ?? "intake") : (c.stations[w.station]?.id ?? "intake"));
 
-const system = (o: { agent: string; station: string; purpose: string; wo: string; project: string; person: string; canConfirm: boolean; atIntake: boolean; cls: string }): string => [
-  `You are ${o.agent}, the agent at the ${o.station} station of Gantry, a factory of AI coding agents. You work with people, in one conversation per work order, for the whole life of that work order. This conversation is about ${o.wo} in project ${o.project}. Station purpose: ${o.purpose}`,
-  "Rules. Facts about the work order, the project and the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What a person tells you is their claim: use it and say it is theirs. You never change anything yourself: you propose, as cards, and a person approves; say plainly when something waits for their approval and never claim a change happened. You understand free text: answer every message the person writes, in plain sentences, whatever they ask (a brief, why a class, where the work is, what a station did), then say the next concrete step.",
+/** The facts of this conversation: supplied by Gantry, never decided by the agent. */
+const facts = (o: { agent: string; station: string; purpose: string; wo: string; project: string; person: string; canConfirm: boolean; atIntake: boolean; cls: string }): string => [
+  `You are ${o.agent}, the agent at the ${o.station} station. This conversation is about ${o.wo} in project ${o.project}, and it lasts for the whole life of that work order. Station purpose: ${o.purpose}`,
+  `You are talking with ${o.person}.${o.atIntake ? ` The work order is at Intake: the request was submitted as text and the person is waiting. Gantry classified it as ${o.cls}. ${o.canConfirm ? "This person may confirm the brief." : "This person may not confirm the brief; an approver with the right does."}` : " The work order is past Intake."}`,
+].join("\n");
+
+/** The fixed rules of the work-order session: evidence labelling, the card protocol and what the tools can and cannot do, the untrusted-data note and the answer cap. */
+const rails = (o: { atIntake: boolean }): string => [
+  "Facts about the work order, the project and the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What a person tells you is their claim: use it and say it is theirs. You never change anything yourself: you propose, as cards, and a person approves; say plainly when something waits for their approval and never claim a change happened. Answer every message the person writes in plain sentences, then say the next concrete step.",
   o.atIntake
-    ? `Intake. The request was submitted as text and the person is waiting. Start with get_work_order; read the repository (inspect_repository, read_file) and look at related work (list_related_work) when it helps. Work out yourself what you need: ask only what the request and the repository do not already answer, in natural language, one question at a time, with suggested answers (ask_user); if the request is clear enough, ask nothing. Do not guess: a question is blocking when the brief would be a guess without its answer, and you cannot propose a brief while a blocking question is unanswered. What you proceed on without confirmation goes into the brief as an assumption (in its open questions or decisions, said as such), never as a fact. As soon as you can write a brief, call propose_brief (goal, scope in and out, acceptance criteria a reviewer can check, risks, open questions, estimate) and say in two sentences what you propose, how you classified the request (${o.cls}) and why. If the person asks for changes, revise and propose again. If you read the request as a different class, use propose_reclassify; if it should not be built, propose_decline with the reason. ${o.canConfirm ? "This person may confirm the brief." : "This person may not confirm the brief; an approver with the right does, say so."}`
-    : "This work order is past Intake. From here you cannot change anything: gates are decided by people on the work order's traveler. Answer questions from get_work_order and get_station_progress: where it is, what each station did, what waits on whom. Say what the next step is and who takes it.",
+    ? "Tools at Intake: get_work_order, get_station_progress, inspect_repository, read_file, list_related_work read facts. ask_user puts a question with suggested answers to the person. propose_brief (goal, scope in and out, acceptance criteria, risks, open questions, estimate) puts a brief up for confirmation; propose_reclassify and propose_decline put those proposals up. A blocking question (ask_user with blocking set) must be answered before a brief can be proposed; open questions that do not block may stay open in a brief. Anything you proceed on without confirmation belongs in the brief as an assumption, said as such. How and how much you ask is for you to decide."
+    : "Past Intake you cannot change anything: gates are decided by people on the work order's traveler. Your tools (get_work_order, get_station_progress) read facts: where it is, what each station did, what waits on whom.",
   UNTRUSTED_NOTE,
   "Keep each answer under 140 words. Plain sentences, no headings, no emoji.",
-  `You are talking with ${o.person}.`,
 ].join("\n\n");
 
 export interface WoSessionRow {
@@ -244,9 +250,21 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const { hist, question } = historyFrom(prior.map((m) => ({ role: m.role, text: m.text })), o.kind, o.question, { take: 16 });
     const atIntake = ctx.briefOpen;
     const defs = woToolDefs().filter((t) => atIntake || !/^(propose_|ask_user)/.test(t.name));
+    // The agent's own instructions and skills, composed like a station run; code adds the facts and the fixed rules.
+    const sc = await composeSessionContext(g.pool, {
+      orgId: g.orgId, surface: atIntake ? "intake" : "work_order", agentId: o.ag.agentId, agentVersion: o.ag.pin.version, model: o.ag.pin.model, projectId: o.row.project, repoId: o.row.repo,
+      facts: facts({ agent: o.ag.agentName, station: stationName(f.catalog, o.ag.station), purpose: stationDef(f.catalog, o.ag.station)?.purpose ?? "", wo: o.row.id, project: f.project.name, person: o.who.name, canConfirm: o.canConfirm, atIntake, cls: classOf(f.catalog, f.project, f.wo.cls).name }),
+      rails: rails({ atIntake }),
+    });
+    if (!sc) throw new ModelUnavailable("no_agent_context", `${o.ag.agentName} has no live version to speak from.`);
+    // The turn runs only if its tuple is recorded: a message must never point at a tuple with no row.
+    await recordTurnTuple(g.pool, g.orgId, sc.turn).catch((e: Error) => {
+      app.log.error({ err: e, tuple: sc.turn.tupleId }, "session tuple not recorded");
+      throw new ModelUnavailable("tuple_not_recorded", "This turn could not be recorded, so it was not run. Try again; if it keeps happening, tell a Factory Admin.");
+    });
     const r = await runConversation({
       edgeToken: g.config.secrets.edgeToken, purpose: "console", pick: { model: o.ag.pin.model, project: o.row.project }, maxTokens: WO_SESSION_MAX_TOKENS, maxSteps: 8,
-      system: system({ agent: o.ag.agentName, station: stationName(f.catalog, o.ag.station), purpose: stationDef(f.catalog, o.ag.station)?.purpose ?? "", wo: o.row.id, project: f.project.name, person: o.who.name, canConfirm: o.canConfirm, atIntake, cls: classOf(f.catalog, f.project, f.wo.cls).name }),
+      system: sc.system,
       history: hist, question, signal: o.signal,
       toolset: { defs, execute: async (name, input) => {
         const before = ctx.cards.length;
@@ -260,8 +278,8 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const micros = await turnCostMicros(g.pool, g.orgId, model, r.usage);
     const text = r.text || (r.stopped ? "" : r.truncated ? "My answer was cut off at the output limit before I finished, so nothing was proposed. Ask me to continue." : "The model returned no text.");
     return persist(o.row, "assistant", o.ag.agentId, text, {
-      mode: "agent", model, agent: o.ag.agentName, version: o.ag.pin.version, station: o.ag.station, cards: ctx.cards, drafts: ctx.drafts, tools: ctx.used, usage: r.usage, costMicros: micros, ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}),
-    }, o.who.id, { mode: "agent", model, agent: o.ag.agentId, version: o.ag.pin.version, tools: ctx.used, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costMicros: micros });
+      mode: "agent", model, agent: o.ag.agentName, version: o.ag.pin.version, station: o.ag.station, context: sc.turn, cards: ctx.cards, drafts: ctx.drafts, tools: ctx.used, usage: r.usage, costMicros: micros, ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}),
+    }, o.who.id, { mode: "agent", model, agent: o.ag.agentId, version: o.ag.pin.version, skills: sc.turn.skillVersions, instructionHash: sc.turn.instructionHash, promptHash: sc.turn.promptHash, tuple: sc.turn.tupleId, tools: ctx.used, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costMicros: micros });
   }
 
   /** Follow-ups: an update that asked for one (data.followUp = pending) gets an agent turn that says what it means and puts up the next proposal. Never writes anything about the work. */

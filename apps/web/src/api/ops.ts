@@ -195,6 +195,8 @@ export const ops = {
     run(["agents", "skills"], (attach ? put : del)(api(`agents/${enc(agentId)}/skills/${enc(skillId)}`))),
   /** `v.ifMatch` is the base version from GET /instructions/base. */
   saveInstructions: (text: string, v?: Versioned) => run(["instructions", "agents"], put(api("instructions/base"), { text }, opts(v))),
+  /** Binds the console to an agent (its live instructions and skills answer), or null to unbind. */
+  setConsoleAgent: (agent: string | null) => run(["agents"], put(api("agents/bindings/console"), { agent })),
   /** skillId null creates a skill. */
   saveSkill: (skillId: string | null, patchBody: Obj, note?: string, v?: Versioned) =>
     run(["skills"], skillId ? patch(api(`skills/${enc(skillId)}`), { patch: patchBody, note }, opts(v)) : post(api("skills"), { ...patchBody, note }, create)),

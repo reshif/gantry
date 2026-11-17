@@ -151,9 +151,19 @@ async function call(edgeToken: string, purpose: "console" | "explain" | "onboard
   return stream(res, onText);
 }
 
-export const systemPrompt = (o: { person: string; roles: string[]; projects: string[]; current: string | null; /** What this person's console rights let it propose (tool names with plain words), and what it may not. */ may: Array<{ tool: string; does: string }>; mayNot: Array<{ does: string; right: string }>; canUse?: boolean; now: Date }): string =>
+type PromptInput = { person: string; roles: string[]; projects: string[]; current: string | null; /** What this person's console rights let it propose (tool names with plain words), and what it may not. */ may: Array<{ tool: string; does: string }>; mayNot: Array<{ does: string; right: string }>; canUse?: boolean; now: Date };
+
+/** The facts of this conversation: supplied by Gantry, never decided by the agent. */
+export const consoleFacts = (o: PromptInput): string =>
   [
-    "You are the Gantry console, answering people who run a software factory of AI coding agents. Answer questions about projects, work orders, gates, onboarding, permissions, trust, workload, evals and the audit ledger by calling the read tools; do not guess numbers or ids.",
+    "You are the Gantry console, answering people who run a software factory of AI coding agents about projects, work orders, gates, onboarding, permissions, trust, workload, evals and the audit ledger.",
+    `Today is ${o.now.toISOString()}. The person asking is ${o.person} (${o.roles.join(", ") || "no roles"}). Projects they can see: ${o.projects.join(", ") || "none"}.${o.current ? ` Their current project is ${o.current}.` : ""}`,
+  ].join("\n");
+
+/** The fixed rules of the console: read tools for facts, what this person may propose (from their rights), how an unseen thing is treated, the untrusted-data note and the answer cap. */
+export const consoleRails = (o: PromptInput): string =>
+  [
+    "Call the read tools for facts; do not guess numbers or ids.",
     o.may.length
       ? `You may propose these changes for this person by calling the matching tool once (${o.may.map((m) => `${m.tool}: ${m.does}`).join("; ")}): the page shows a confirm card and runs nothing until they click it, so say it is waiting for their confirmation. Never claim an action happened.`
       : "You cannot change anything for this person: their console is read-only. If asked to change something, say so and name the screen where they can do it themselves.",
@@ -163,8 +173,10 @@ export const systemPrompt = (o: { person: string; roles: string[]; projects: str
     "If a tool says something is not visible, say you cannot see it; never reveal projects the tools do not return. Mention work orders by id (WO-1234), projects by name, gates by id. For 'why was this denied', call explain_denial and report the deciding rule and what would change the answer; the trace is authoritative.",
     UNTRUSTED_NOTE,
     "Keep answers under 150 words unless asked for detail. Plain sentences, no headings, no emoji.",
-    `Today is ${o.now.toISOString()}. The person asking is ${o.person} (${o.roles.join(", ") || "no roles"}). Projects they can see: ${o.projects.join(", ") || "none"}.${o.current ? ` Their current project is ${o.current}.` : ""}`,
   ].filter(Boolean).join("\n\n");
+
+/** The console's prompt when no agent is bound to it: Gantry's fixed text alone. With an agent bound, routes/console.ts composes the agent's layers and skills around the same facts and rails. */
+export const systemPrompt = (o: PromptInput): string => [consoleFacts(o), consoleRails(o)].join("\n\n");
 
 export interface RunOptions {
   edgeToken: string;

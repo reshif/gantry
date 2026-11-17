@@ -132,6 +132,8 @@ export const useAgentEffective = (id: string | null | undefined, q: { project?: 
     queryFn: () => get<AgentEffective>(api(`agents/${encodeURIComponent(id ?? "")}/effective`), q),
     enabled: !!id,
   });
+export interface SurfaceBindingRow { surface: string; label: string; source: "station" | "fixed" | "binding" | "none"; agent: string | null; agentName: string | null; configurable: boolean; note: string }
+export const useAgentBindings = () => useQuery({ queryKey: ["agents", "bindings"], queryFn: () => get<{ surfaces: SurfaceBindingRow[] }>(api("agents/bindings")) });
 export const useInstructions = () => useQuery({ queryKey: ["instructions"], queryFn: () => readIfAllowed(AGENTS, () => get<AgentInstructions>(api("instructions/base"))) });
 export const useSkills = () => useQuery({ queryKey: qk.skills(), queryFn: () => get<Skill[]>(api("skills")) });
 export const useVendors = () => useQuery({ queryKey: qk.vendors(), queryFn: () => readIfAllowed(MODELS, () => get<Vendor[]>(api("vendors"))) });
