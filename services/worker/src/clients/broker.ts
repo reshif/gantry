@@ -75,7 +75,7 @@ export interface BrokerClient {
   mergeOnboardingPr(b: { repo: string; number: number; headSha: string; method: "squash" | "merge" | "rebase" }): Promise<MergeOutcome>;
   canary(b: { repo: string; prefix: string; waitMs?: number }): Promise<CanaryOutcome>;
   /** Seeds the run's workspace; answers the repository context (convention files at the commit) the broker read while it had the checkout. Null when an older broker does not send one. */
-  seed(b: { repo: string; commit: string; volume: string }): Promise<{ repoContext: RepoContext | null }>;
+  seed(b: { repo: string; commit: string; volume: string; baseBranch?: string }): Promise<{ repoContext: RepoContext | null; base: string | null; baseBranch: string | null }>;
   publish(b: PublishRequest): Promise<PublishOutcome>;
   gateCheck(b: { woId: string; repo: string; headSha: string; state: "passing" | "failing" | "pending"; summary?: string }): Promise<{ ok: boolean; skipped?: string }>;
   convertToDraft(b: { woId: string; repo: string; number: number }): Promise<{ ok: boolean; skipped?: string }>;
@@ -116,10 +116,11 @@ export function brokerClient(base: string, token: string, fetchImpl?: typeof fet
       return refusal(r) ?? failFor("github canary", r);
     },
     async seed(b) {
-      const r = await call<{ repoContext?: unknown }>("POST", "/v1/workspaces/seed", b, 600_000);
+      const r = await call<{ repoContext?: unknown; base?: unknown; baseBranch?: unknown }>("POST", "/v1/workspaces/seed", b, 600_000);
       if (!ok(r)) failFor("github seed", r);
       const rc = RepoContext.safeParse(r.body.repoContext);
-      return { repoContext: rc.success ? rc.data : null };
+      const base = typeof r.body.base === "string" && /^[0-9a-f]{40}$/.test(r.body.base) ? r.body.base : null;
+      return { repoContext: rc.success ? rc.data : null, base, baseBranch: base && typeof r.body.baseBranch === "string" ? r.body.baseBranch : null };
     },
     async publish(b) {
       const r = await call<PublishResult & { ok: boolean }>("POST", "/v1/publish", b, 600_000);

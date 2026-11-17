@@ -37,6 +37,13 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(inv.env.HOME).toMatch(/home$/);
   });
 
+  it("keeps git able to commit, with hooks off, and still holds no token", () => {
+    expect(inv.env.GIT_AUTHOR_NAME).toBeTruthy();
+    expect(inv.env.GIT_COMMITTER_EMAIL).toMatch(/@/);
+    expect(inv.env.GIT_CONFIG_KEY_0).toBe("core.hooksPath");
+    expect(inv.env.GIT_CONFIG_VALUE_0).toBe("/dev/null");
+    expect(JSON.stringify(inv.env)).not.toContain(TOKEN);
+  });
   it("points the harness at the loopback relay, and no secret is in its environment, its MCP config or the station tools' environment", () => {
     expect(inv.env.ANTHROPIC_BASE_URL).toBe(`${RELAY}/model`);
     expect(inv.env.NO_PROXY).toBe("127.0.0.1,localhost");
@@ -47,7 +54,7 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(JSON.stringify(inv.mcpConfig)).not.toMatch(/authorization|bearer/i);
     expect((inv.mcpConfig.mcpServers.docs as { url: string }).url).toBe(`${RELAY}/mcp/docs`);
     // the only credential-named variable is the placeholder the harness needs in order to start
-    for (const [k, v] of Object.entries(inv.env)) if (/token|secret|password|key|auth/i.test(k)) expect(v, k).toBe("relay");
+    for (const [k, v] of Object.entries(inv.env)) if (/token|secret|password|key|auth/i.test(k) && !/^GIT_(AUTHOR|CONFIG_KEY)/.test(k)) expect(v, k).toBe("relay");
     expect(inv.env).not.toHaveProperty("SECRET");
     expect(inv.env).not.toHaveProperty("GANTRY_RUN_TOKEN");
     expect(inv.env).not.toHaveProperty("ANTHROPIC_API_KEY");

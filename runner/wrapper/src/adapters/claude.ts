@@ -133,6 +133,14 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, relayUrl: stri
     // The harness's inner sandbox (bubblewrap) cannot start in this container (no user namespaces, no capabilities), so it is off. What it protected
     // is gone instead: no token or credential is in this environment, so no tool subprocess can inherit one (see relay.ts).
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0",
+    // The image sets the git identity and the hardening (hooks off, fsmonitor off, /workspace trusted) in its environment, but this clean environment
+    // dropped them, and `git commit` refuses without an identity. Same values as runner/Dockerfile; no token is among them.
+    GIT_AUTHOR_NAME: "Gantry Agent", GIT_AUTHOR_EMAIL: "agent@gantry.invalid", GIT_COMMITTER_NAME: "Gantry Agent", GIT_COMMITTER_EMAIL: "agent@gantry.invalid",
+    GIT_CONFIG_COUNT: "3",
+    GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: "/dev/null",
+    GIT_CONFIG_KEY_1: "safe.directory", GIT_CONFIG_VALUE_1: "/workspace",
+    GIT_CONFIG_KEY_2: "core.fsmonitor", GIT_CONFIG_VALUE_2: "false",
+    GIT_TERMINAL_PROMPT: "0",
     DISABLE_AUTOUPDATER: "1",
     DISABLE_TELEMETRY: "1",
     DISABLE_ERROR_REPORTING: "1",

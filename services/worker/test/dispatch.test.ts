@@ -33,6 +33,20 @@ d("attempt.dispatch and run.result", () => {
     expect(att.lease_until).not.toBeNull();
   });
 
+  it("seeds the pull request's head together with the target branch head, and records both on the run so the agents can diff offline", async () => {
+    await w.q(`update repos set github_full_name = 'acme/payments-api' where org_id = $1 and id = 'payments-api'`, [w.orgId]);
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"1".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    const head = "5".repeat(40);
+    w.broker.seedBase = "6".repeat(40);
+    const { runId } = await w.workOrderAt("WO-9030", { station: "verify", dispatch: false });
+    await w.q(`insert into pull_requests (org_id, id, repo_id, wo_id, number, title, state, head_sha, base_branch) values ($1,'pr-9030','payments-api','WO-9030',7,'t','open',$2,'develop')`, [w.orgId, head]);
+    await w.enqueue("attempt.dispatch", { woId: "WO-9030", station: "verify", attemptId: "ATT-WO-9030-verify-1", fencing: 1 }, { dedupeKey: "attempt:ATT-WO-9030-verify-1" });
+    await w.drain();
+    const seed = w.broker.calls.find((c) => c.op === "seed")!;
+    expect(seed.body).toEqual({ repo: "acme/payments-api", commit: head, volume: `ws-${runId}`, baseBranch: "develop" });
+    expect((await w.q(`select data->'seed' as s from runs where id = $1`, [runId]))[0].s).toEqual({ commit: head, base: "6".repeat(40), baseBranch: "develop" });
+  });
+
   it("records the repository context the broker read at the seeded commit on the run (paths, sizes, hashes, what was inlined), so the run spec can offer it", async () => {
     await w.q(`update repos set github_full_name = 'acme/payments-api' where org_id = $1 and id = 'payments-api'`, [w.orgId]);
     await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"3".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);

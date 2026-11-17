@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ALWAYS_ON_GATES, COMBINED_GATES, GATES, approvalText, gateExplain, gateKindText, gateLock, gatePendingName, gatePendingTitle, gateTitle, route, routeGates, DEFAULT_CATALOG } from "./index.js";
-import { seedState } from "./testkit.js";
+import { ALWAYS_ON_GATES, COMBINED_GATES, GATES, approvalText, classRequiredError, requiredFor, gateProgress, gateDecision, ruleText, gateExplain, gateKindText, gateLock, gatePendingName, gatePendingTitle, gateTitle, route, routeGates, DEFAULT_CATALOG } from "./index.js";
+import { NOW, seedState } from "./testkit.js";
 
 const gate = (id: string) => GATES.find((g) => g.id === id)!;
 
@@ -55,5 +55,49 @@ describe("gate locks", () => {
     expect(routeGates(DEFAULT_CATALOG, off, "feature")).not.toContain("G3d");
     expect(routeGates(DEFAULT_CATALOG, off, "feature")).toEqual(expect.arrayContaining(["G0G1", "G5"]));
     expect(route(DEFAULT_CATALOG, off, "feature")).toContain("design");
+  });
+});
+
+describe("per-class approvals required", () => {
+  const rule = { roles: ["reviewer", "line_lead"], people: [], required: 2, classRequired: { docs: 1 }, sod: true, conditions: [], escalateH: 0, fallback: null };
+  it("a Docs work order needs 1 and a Code one needs 2; a missing override uses the base count", () => {
+    expect(requiredFor(rule, "docs")).toBe(1);
+    expect(requiredFor(rule, "feature")).toBe(2);
+    expect(requiredFor(rule, undefined)).toBe(2);
+    expect(requiredFor({ required: 2 }, "docs")).toBe(2);
+    expect(approvalText(gate("G5"), "human", rule, undefined, undefined, "docs")).toBe("1 approval: reviewer / line_lead");
+    expect(approvalText(gate("G5"), "human", rule, undefined, undefined, "feature")).toBe("2 approvals: reviewer / line_lead");
+    expect(ruleText(rule, (x) => x, (x) => x, "docs")).toMatch(/^Needs 1 approval from/);
+    const S = seedState();
+    const project = S.projects.find((p) => p.id === "payments")!;
+    project.approvers.G5 = structuredClone(rule);
+    const wo = structuredClone(S.workOrders.find((w) => w.project === "payments" && w.gates.G5))!;
+    wo.gates.G5!.approvals = [{ by: "p-priya", at: NOW, via: "web" }];
+    expect(gateProgress(project, { ...wo, cls: "docs" }, "G5", S.people)).toMatchObject({ have: 1, need: 1, passes: true });
+    expect(gateProgress(project, { ...wo, cls: "feature" }, "G5", S.people)).toMatchObject({ have: 1, need: 2, passes: false });
+  });
+  it("the author is still refused at a count of 1 (separation of duties is untouched)", () => {
+    const S = seedState();
+    const project = S.projects.find((p) => p.id === "payments")!;
+    project.approvers.G5 = structuredClone(rule);
+    const wo = structuredClone(S.workOrders.find((w) => w.project === "payments" && w.gates.G5))!;
+    wo.cls = "docs";
+    wo.gates.G5!.status = "waiting";
+    wo.gates.G5!.approvals = [];
+    wo.requestedBy = "p-priya";
+    const d = gateDecision(S, "p-priya", wo, "G5", NOW);
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toMatch(/author/i);
+    expect(gateDecision(S, "p-meera", wo, "G5", NOW).allowed).toBe(true); // someone else may
+  });
+  it("rejects 0, negative, fractional and huge counts, and unknown classes", () => {
+    const classes = new Set(["docs", "feature"]);
+    expect(classRequiredError({ docs: 0 }, classes)).toMatch(/at least 1/);
+    expect(classRequiredError({ docs: -1 }, classes)).toMatch(/at least 1/);
+    expect(classRequiredError({ docs: 1.5 }, classes)).toMatch(/whole number/);
+    expect(classRequiredError({ docs: 10 }, classes)).toMatch(/more than 9/);
+    expect(classRequiredError({ nope: 1 }, classes)).toMatch(/does not have/);
+    expect(classRequiredError({ docs: 1 }, classes)).toBeNull();
+    expect(classRequiredError(undefined, classes)).toBeNull();
   });
 });

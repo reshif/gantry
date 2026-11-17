@@ -4,7 +4,7 @@
  * (N of M, author cannot approve, risk tags force human), slots, queue order, submit guard and move rules.
  */
 import { DEFAULT_CATALOG, ONBOARD_STAGES, RISK_TAG_RULES } from "./catalog.js";
-import { gateModeLock } from "./gates.js";
+import { gateModeLock, requiredFor } from "./gates.js";
 import { HOUR } from "./format.js";
 import { actorName, can, effectiveStop, findPerson, findProject, findRepo, isOnCall, rolesIn } from "./policy.js";
 import type { PolicyState } from "./policy.js";
@@ -436,7 +436,7 @@ export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk
     const pp = people.find((x) => x.id === a.by);
     return !!pp && satisfies(pp, project, cd.needs);
   }));
-  const need = Math.max(1, rule.required || 1);
+  const need = requiredFor(rule, wo.cls);
   const onlyRequester = gateId !== "G0G1" && st.approvals.length > 0 && st.approvals.every((a) => a.by === wo.requestedBy);
   return { have: st.approvals.length, need, unmet, conds, onlyRequester, passes: st.approvals.length >= need && !unmet.length && !onlyRequester };
 }

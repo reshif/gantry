@@ -48,12 +48,29 @@ async function forbiddenPaths(db: Queryable, a: AttemptInfo): Promise<string[]> 
   return Array.isArray(g?.paths) ? g.paths.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
 }
 
+/** The blocking question a Build with no commit puts to a person: the fact, and the agent's own notes (its proposed way forward) as the context. */
+export function noChangeOutput(output: Record<string, unknown> | null, fact: string): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(output ?? {}) };
+  const notes = Array.isArray(out.notes) ? (out.notes as unknown[]).filter((n): n is string => typeof n === "string" && n.trim() !== "") : [];
+  const said = notes.length ? ` The agent reported: ${notes.join(" ").slice(0, 1500)}` : " The agent reported nothing about why.";
+  const d = out.dialogue && typeof out.dialogue === "object" ? (out.dialogue as Record<string, unknown>) : {};
+  const questions = Array.isArray(d.questions) ? (d.questions as unknown[]) : [];
+  out.dialogue = {
+    ...d,
+    questions: [...questions, { question: `${fact}${said} Should Build try again (for example once it can commit), or is no change the right result for this work order?`, why: "The work order's brief asks for a change, and Verify and Review would otherwise judge an empty diff.", blocking: true }],
+  };
+  return out;
+}
+
 /** Publishes the attempt's workspace through gantry-github (spec 11.4, step 7). The broker fence-checks the attempt itself. */
 export async function publishAttempt(deps: Deps, a: AttemptInfo, summary: string): Promise<PublishOutcome | null> {
   if (!a.repo?.full) return null;
   const denyPaths = await forbiddenPaths(deps.pool, a);
+  // A workspace seeded with history (a base to diff against) no longer has the seed commit as its one shallow boundary, so the publisher is told it.
+  const seedCommit = (await deps.pool.query<{ c: string | null }>(`select data->'seed'->>'commit' as c from runs where org_id = $1 and id = $2`, [a.orgId, runIdFor(a.attemptId)])).rows[0]?.c;
   return deps.broker.publish({
     ...(denyPaths.length ? { denyPaths } : {}),
+    ...(seedCommit && /^[0-9a-f]{40}$/.test(seedCommit) ? { base: seedCommit } : {}),
     attemptId: a.attemptId, fencing: a.fencing, repo: a.repo.full, volume: volumeFor(runIdFor(a.attemptId)), branch: `${a.repo.branchPrefix}${a.woId}`,
     baseBranch: a.repo.defaultBranch, title: `${a.woId}: ${a.title}`.slice(0, 250), ...(summary ? { body: summary.slice(0, 60000) } : {}),
   });
@@ -109,7 +126,7 @@ export async function runResult(job: Job, ctx: HandlerCtx): Promise<unknown> {
   }
   let outcome: unknown = { superseded: cur.reason };
   if (cur.current) {
-    const output = sr.body.output ?? null;
+    let output: Record<string, unknown> | null = sr.body.output ?? null;
     let status: StationResult["status"] = sr.outcome;
     let error = sr.body.error ?? null;
     let summary = sr.summary;
@@ -120,6 +137,13 @@ export async function runResult(job: Job, ctx: HandlerCtx): Promise<unknown> {
       const pub = await publishAttempt(deps, a, sr.summary);
       if (pub && pub.ok) {
         if (pub.result.headSha) observed.headSha = pub.result.headSha;
+        // A Build that delivered no commit changed nothing, whatever it reported: the factory must not pass that to Verify and Review as work done.
+        // The fact is added here; what to do about it is a person's call, with the agent's own account and proposed way forward beside it.
+        if (a.station === "build" && (pub.result.noop || pub.result.commits.length === 0)) {
+          status = "needs_person";
+          summary = `Build finished, but its workspace holds no commit, so there is nothing to publish (branch ${pub.result.branch} has no change against ${a.repo.defaultBranch}).`;
+          output = noChangeOutput(output, summary);
+        }
         const files = await filesOf(deps.pool, job.orgId, a.woId, pub.result.commits.map((c) => c.sha));
         if (files.length) observed.files = files;
         await withTx(deps.pool, (tx) => recordEvent(tx, {

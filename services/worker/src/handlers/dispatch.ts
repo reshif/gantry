@@ -5,7 +5,7 @@ import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg, PermanentError, TransientError } from "../errors.js";
 import type { HandlerCtx } from "../runner.js";
-import { coveringStops, loadAttempt, resolveSeedCommit, runIdFor, volumeFor, type AttemptInfo } from "./common.js";
+import { coveringStops, loadAttempt, resolveSeedBase, resolveSeedCommit, runIdFor, volumeFor, type AttemptInfo } from "./common.js";
 import { failEvalCase } from "./evals.js";
 import { teardownRun } from "./teardown.js";
 
@@ -163,7 +163,10 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
     if (prep.state === "capacity") return await defer(deps, job, a, runId, prep.msg);
     if (a.repo?.full) {
       const commit = await resolveSeedCommit(deps.pool, a.orgId, a.woId, a.repo.id);
-      const seeded = await deps.broker.seed({ repo: a.repo.full, commit, volume: volumeFor(runId) });
+      const baseBranch = await resolveSeedBase(deps.pool, a.orgId, a.woId, a.repo.defaultBranch);
+      const seeded = await deps.broker.seed({ repo: a.repo.full, commit, volume: volumeFor(runId), ...(baseBranch ? { baseBranch } : {}) });
+      // What the workspace holds, as a fact on the run: the seed commit (the publisher's base) and the target branch head the agents diff against (null: none could be read).
+      await withTx(deps.pool, (tx) => tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ seed: { commit, base: seeded.base, baseBranch: seeded.baseBranch } })]));
       // What the repository's convention files said at this commit, recorded on the run before the runner starts: the run spec's prompt is built from it,
       // and the record (paths, sizes, hashes, what was inlined or withheld) shows later exactly what the agent was offered.
       await recordRepoContext(deps, a, runId, seeded.repoContext);

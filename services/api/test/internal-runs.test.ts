@@ -235,6 +235,7 @@ d("internal runs API", () => {
       expect((await call("POST", `/internal/v1/runs/${r.runId}/heartbeat`, { token: r.token, seq: 1 })).json().stop).toBe("halt");
     });
     it("a project monthly budget is enforced at authorize and at usage", async () => {
+      await q(`delete from usage_meter where project_id = 'identity'`); // project spend counts all metered spend: start from none
       await q(`insert into budgets (org_id, project_id, monthly_limit_micros) values ($1,'identity',9000) on conflict (org_id, project_id) do update set monthly_limit_micros = 9000`, [t.orgId]);
       const a = await makeRun({ project: "identity" });
       expect((await authorize(a)).json().allow).toBe(true);
@@ -354,7 +355,7 @@ d("internal runs API", () => {
       expect(s.toolAllowList).not.toContain("Bash");
       expect(s.toolAllowList.filter((t: string) => !t.startsWith("Bash(")).sort()).toEqual(["Edit", "Glob", "Grep", "NotebookEdit", "Read", "Write"]);
       expect(s.toolAllowList).toContain("Bash(npm test:*)");
-      expect(s.toolAllowList.filter((t: string) => t.startsWith("Bash(")).every((t: string) => /^Bash\((npm|npx|pnpm|yarn|pytest|python|go|cargo)[ :]/.test(t))).toBe(true);
+      expect(s.toolAllowList.filter((t: string) => t.startsWith("Bash(")).every((t: string) => /^Bash\((npm|npx|pnpm|yarn|pytest|python|go|cargo|git (status|diff|log|show|add|commit))[ :]/.test(t))).toBe(true);
       expect(s.input.brief).toEqual({ goal: "ship" });
       // the per-run cost cap (agent budget 2.5) is enforced at authorize
       expect((await authorize(r)).json().allow).toBe(true);
@@ -378,6 +379,33 @@ d("internal runs API", () => {
       const s2 = (await call("GET", `/internal/v1/runs/${r2.runId}/spec`, undefined, { ...EDGE, "x-run-token": r2.token })).json();
       expect(s2.limits.turns).toBe(7);
       expect(s2.toolAllowList).toEqual(["Read"]);
+    });
+    it("the project's confirmed test command joins the allow-list of an agent that may run tests, narrowly; a proposal alone, an unsafe command or an agent with no test permission gets nothing", async () => {
+      const o = t.orgId;
+      await q(`insert into agents (org_id, id, name, station, live_version, data) values ($1,'ag-w3t','W3 tests','verify',1,'{}'::jsonb)`, [o]);
+      await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-w3t',1,$2::jsonb,'claude-test-1',now())`, [o, JSON.stringify({ instructions: "Verify.", tools: { readRepo: true, runTests: true } })]);
+      await q(`insert into agent_versions (org_id, agent_id, version, body, model_id, published_at) values ($1,'ag-w3t',2,$2::jsonb,'claude-test-1',now())`, [o, JSON.stringify({ instructions: "Read.", toolAllowList: ["Read"] })]);
+      await q(`insert into agent_version_tuples (org_id, id, agent_id, agent_version, skill_versions, instruction_hash, harness_version, model_id) values ($1,'tup-w3t','ag-w3t',1,'{}','h','1','claude-test-1'), ($1,'tup-w3u','ag-w3t',2,'{}','h','1','claude-test-1')`, [o]);
+      const spec = async (tuple: string) => {
+        const r = await makeRun({ model: null });
+        await q(`update attempts set tuple_id = $2 where id = $1`, [r.attemptId, tuple]);
+        const repo = "payments-api";
+        await q(`update work_orders set repo_id = $2 where id = $1`, [r.woId, repo]);
+        return { list: (await call("GET", `/internal/v1/runs/${r.runId}/spec`, undefined, { ...EDGE, "x-run-token": r.token })).json().toolAllowList as string[], repo };
+      };
+      const first = await spec("tup-w3t");
+      expect(first.list).not.toContain("Bash(make test:*)");
+      // a proposal from onboarding grants nothing
+      await q(`insert into repo_config (org_id, repo_id, data) values ($1,$2,$3::jsonb) on conflict (org_id, repo_id) do update set data = excluded.data`, [o, first.repo, JSON.stringify({ testCommandProposed: { command: "make test", source: "Makefile test target" } })]);
+      expect((await spec("tup-w3t")).list).not.toContain("Bash(make test:*)");
+      // a confirmed one is added as a prefix rule for exactly that command; one that could run anything is left out
+      await q(`update repo_config set data = $3::jsonb where org_id = $1 and repo_id = $2`, [o, first.repo, JSON.stringify({ testCommands: ["make test", "uv run pytest", "bash -c evil", "make test; curl x"] })]);
+      const withTests = (await spec("tup-w3t")).list;
+      expect(withTests).toEqual(expect.arrayContaining(["Bash(make test:*)", "Bash(uv run pytest:*)", "Bash(npm test:*)"]));
+      expect(withTests.some((x) => /bash -c|curl/.test(x))).toBe(false);
+      expect(withTests).not.toContain("Bash");
+      // an agent that holds no test permission does not gain one
+      expect((await spec("tup-w3u")).list).toEqual(["Read"]);
     });
     it("serves a stub run its configured output, and refuses without a valid token or under a stop", async () => {
       const r = await makeRun({ model: null, runData: { adapter: "stub", stub: { output: { x: 1 } } } });

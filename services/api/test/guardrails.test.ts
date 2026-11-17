@@ -28,6 +28,18 @@ d("guardrails enforced from observed files", () => {
     expect(await guardrail(id)).toMatchObject({ over: true, size: 31, protectedTouched: ["src/secret/key.ts"], forbiddenTouched: ["infra/main.tf"] });
   });
 
+  it("the recorded diff is what the platform observed in the published commits, never the agent's own files list", async () => {
+    const a = await w.atStation("build", "Observed diff");
+    const attA = (await w.liveAttempt(a))!;
+    await w.apply(attA, { status: "succeeded", summary: "built", output: { files: [{ path: "claimed.ts", additions: 999, deletions: 5 }] }, observed: { files: [{ path: "README.md", additions: 1, deletions: 1 }] } });
+    expect((await w.q<{ d: any; f: any }>(`select data->'diff' as d, data->'files' as f from work_orders where id = $1`, [a]))[0]).toEqual({ d: { plus: 1, minus: 1, files: 1 }, f: [{ path: "README.md", plus: 1, minus: 1 }] });
+    // no platform observation: the agent's claim is not recorded as stats
+    const b = await w.atStation("build", "Claimed diff only");
+    const attB = (await w.liveAttempt(b))!;
+    await w.apply(attB, { status: "succeeded", summary: "built", output: { files: [{ path: "claimed.ts", additions: 999, deletions: 5 }] } });
+    expect((await w.q<{ d: any; f: any }>(`select data->'diff' as d, data->'files' as f from work_orders where id = $1`, [b]))[0]).toEqual({ d: { plus: 0, minus: 0, files: 0 }, f: null });
+  });
+
   it("a guardrail breach sends an automatic gate to a person even when every check is green", async () => {
     await w.insertWo("WO-9301", { position: "build", state: "running", data: { files: [{ path: "src/a.ts" }], guardrail: { over: true, size: 500, protectedTouched: [], forbiddenTouched: [] } } });
     await w.tx(async (tx) => openGate(await w.fxIn(tx), await lockWo(tx, t.orgId, "WO-9301"), "G4", { checks: [{ name: "Required checks", ok: true }] }));

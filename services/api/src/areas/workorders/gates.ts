@@ -93,7 +93,9 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   const after = await flowFor(fx, w);
   const project = after.st.projects.find((p) => p.id === w.project)!;
   const prog = gateProgress(project, after.wo, gateId, after.st.people);
-  const need = Math.max(prog.need, Number(inst.basis.required) || 0);
+  // The count never drops below what the instance opened with, except where the rule lists this class: that override is the owner's setting and applies live.
+  const classSet = !!project.approvers[gateId]?.classRequired && Object.prototype.hasOwnProperty.call(project.approvers[gateId]!.classRequired, w.cls);
+  const need = classSet ? prog.need : Math.max(prog.need, Number(inst.basis.required) || 0);
   const ruled = gateId === "G0G1" ? true : prog.passes && prog.have >= need;
   // Factory Admin break-glass: a vote the rule would not let pass the gate (author under separation of duties, N of M not reached,
   // requester alone) passes it as an override, with a reason, flagged in the audit. Nobody else can override.

@@ -344,8 +344,11 @@ export async function putApprovers(tx: Tx, a: Actor, projectId: string, gateId: 
   const version = await bumpProject(tx, a.orgId, projectId);
   // Non-blocking: a rule that fewer people can satisfy than it requires saves, and says so.
   const warning = ruleWarning((await readPeople(tx, a.orgId)) as never, project, rule, def.label);
+  // The per-class count override is part of the audited change: before and after always carry `classRequired` (empty when none), and the message names it.
+  const withCls = (r: ApproverRule | null) => (r ? { ...r, classRequired: r.classRequired ?? {} } : r);
+  const clsText = Object.entries(rule.classRequired ?? {}).map(([c, n]) => `${project.flow.classes.find((x) => x.id === c)?.name ?? c} ${n} (base ${rule.required})`).join(", ");
   return {
-    msg: `Saved approvers.${gateId}.${warning ? ` Warning: ${warning}` : ""}`, events: [evt("approvers.edit", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, jsonOf(before), jsonOf(rule))],
+    msg: `Saved approvers.${gateId}.${clsText ? ` Per-class approvals: ${clsText}.` : ""}${warning ? ` Warning: ${warning}` : ""}`, events: [evt("approvers.edit", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, jsonOf(withCls(before)), jsonOf(withCls(rule)))],
     extra: { version, ruleVersion, ...(warning ? { warning } : {}) }, changes: ["projects"], project: projectId,
   };
 }

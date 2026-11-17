@@ -43,6 +43,8 @@ d("run.result, publish and teardown", () => {
     await w.drain();
     const pub = w.broker.calls.find((c) => c.op === "publish")!;
     expect(pub.body).toMatchObject({ attemptId: a.attemptId, fencing: a.fencing, repo: "acme/payments-api", volume: `ws-${a.runId}`, branch: "gantry/WO-9102" });
+    // The workspace was seeded with history, so the publisher is told the seed commit as its base.
+    expect(pub.body!.base).toBe("1".repeat(40));
     // Publish happens while the workspace still exists, then the launcher removes the volume.
     const stop = w.launcher.calls.filter((c) => c.op === "stop").pop()!;
     expect(pub.at).toBeLessThanOrEqual(stop.at);
@@ -50,6 +52,22 @@ d("run.result, publish and teardown", () => {
     expect(wo.data.outputs.build._labels.systemObserved).toContain("headSha");
     expect((await w.q(`select count(*)::int as n from events where type = 'run.published'`))[0].n).toBe(1);
     expect((await w.q(`select state from attempts where id = $1`, [a.attemptId]))[0].state).toBe("succeeded");
+  });
+
+  it("a Build that published no commit does not pass: it asks a person, with the fact and the agent's own notes", async () => {
+    const a = await w.workOrderAt("WO-9106", { station: "build", github: true });
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"1".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    await w.drain();
+    w.broker.publishResponse = { ok: true, branch: "gantry/WO-9106", headSha: null, noop: true, alreadyPublished: false, commits: [], pullRequest: null };
+    await deliverResult(w, a, "WO-9106", "build", "succeeded", { commits: [], notes: ["git commit was denied; the edit is in the working tree only."] });
+    await w.drain();
+    expect((await w.q(`select state, outcome from attempts where id = $1`, [a.attemptId]))[0]).toMatchObject({ state: "cancelled", outcome: "needs_person" });
+    const wo = (await w.q(`select position, state, data from work_orders where id = 'WO-9106'`))[0];
+    expect(wo.position).toBe("person");
+    expect(wo.data.bayReason).toMatch(/waiting for an answer at/i);
+    const q = (await w.q(`select * from wo_questions where wo_id = 'WO-9106'`))[0];
+    expect(JSON.stringify(q)).toMatch(/no commit/);
+    expect(JSON.stringify(q)).toContain("git commit was denied");
   });
 
   it("passes the agent's forbidden paths to the broker, and a guardrail breach fails the station without applying it", async () => {
