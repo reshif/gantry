@@ -70,11 +70,11 @@ export default function ProjectConfigView() {
         }
       />
       <dl className="pcf-strip" id="pcf-strip">
-        {([["Status", p.killed ? "Killed" : p.halted ? "Halted" : p.status === "archived" ? "Archived" : "Active"], ["Owner", actor(p.owner).name.replace(" (agent)", "")], ["Slots", String(p.flow.slots)], ["Budget", p.budget.monthly ? `${fmt.money0(p.budget.mtd)} / ${fmt.money0(p.budget.monthly)}` : "None set"]] as const).map(([k, v]) => (
+        {([["Status", p.killed ? "Killed" : p.halted ? "Halted" : p.status === "archived" ? "Archived" : p.status.charAt(0).toUpperCase() + p.status.slice(1)], ["Owner", actor(p.owner).name.replace(" (agent)", "")], ["Slots", String(p.flow.slots)], ["Budget", p.budget.monthly ? `${fmt.money0(p.budget.mtd)} / ${fmt.money0(p.budget.monthly)}` : "None set"]] as const).map(([k, v]) => (
           <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
         ))}
       </dl>
-      <Tabs idPrefix="pcf-tab" items={TABS.filter((t) => t[0] !== "history" || s.tab === "history").map((t) => ({ id: t[0], label: t[1], count: count(t[0]) }))} active={s.tab} onChange={(id) => set({ tab: id })} />
+      <Tabs idPrefix="pcf-tab" items={TABS.map((t) => ({ id: t[0], label: t[1], count: count(t[0]) }))} active={s.tab} onChange={(id) => set({ tab: id })} />
       <div className="pcf-body" id="pcf-tab-panel" role="tabpanel" aria-labelledby={`pcf-tab-${s.tab}`}>{body}</div>
     </div>
   );

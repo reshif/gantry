@@ -103,7 +103,7 @@ export function OverviewTab({ p, cat, people, s, set }: PcProps) {
           <div className="form-grid">
             <dl className="pcf-kv">
               <div><dt>Key</dt><dd className="mono">{p.key}</dd></div>
-              <div><dt>Status</dt><dd>{p.status === "archived" ? "Archived" : p.killed ? "Killed" : p.halted ? "Halted" : "Active"}</dd></div>
+              <div><dt>Status</dt><dd>{p.status === "archived" ? "Archived" : p.killed ? "Killed" : p.halted ? "Halted" : p.status.charAt(0).toUpperCase() + p.status.slice(1)}</dd></div>
               <div><dt>Template</dt><dd>{tpl ? tpl.name : p.template}</dd></div>
               <div><dt>Regulated</dt><dd>{p.regulated ? "Yes" : "No"}</dd></div>
               <div><dt>Teams</dt><dd>{p.teams.map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "None"}</dd></div>

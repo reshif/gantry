@@ -5,6 +5,7 @@ import { fmt, gateExplain, route as domainRoute, type ApproverRule, type Catalog
 import { api, get } from "../../api/client";
 import { ops } from "../../api/ops";
 import { getQueryClient } from "../../api/keys";
+import { DRAFT_PREFIX } from "../../api/drafts";
 import { useCan } from "../../api/can";
 import { useMe, usePeople, useTemplates } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
@@ -44,21 +45,21 @@ interface Wz {
   err: string | null;
 }
 
-const DRAFT_KEY = "gantry.new-project.draft";
-/** What the person typed last time they closed the wizard, for this browser tab only. Anything malformed is ignored. */
-function readDraft(): Partial<Wz> | null {
+const draftKey = (personId: string): string => `${DRAFT_PREFIX}new-project.${personId}`;
+/** What this person typed last time they closed the wizard, for this browser tab only. Anything malformed is ignored. */
+function readDraft(personId: string): Partial<Wz> | null {
   try {
-    const o = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "null") as Partial<Wz> | null;
+    const o = JSON.parse(sessionStorage.getItem(draftKey(personId)) ?? "null") as Partial<Wz> | null;
     if (!o || typeof o !== "object" || typeof o.name !== "string") return null;
     return o;
   } catch {
     return null;
   }
 }
-const writeDraft = (w: Wz | null): void => {
+const writeDraft = (personId: string, w: Wz | null): void => {
   try {
-    if (w) sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ ...w, err: null }));
-    else sessionStorage.removeItem(DRAFT_KEY);
+    if (w) sessionStorage.setItem(draftKey(personId), JSON.stringify({ ...w, err: null }));
+    else sessionStorage.removeItem(draftKey(personId));
   } catch {
     /* storage blocked: the draft just is not kept */
   }
@@ -79,11 +80,26 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
       step: 0, tpl: first?.id ?? "", name: "", key: "", desc: "", owner: me?.person.id ?? "", teams: [], budget: 2000, repos: {}, extraRepo: "",
       approverPreset: first?.approverPreset ?? "standard", fallback: "", notifyPreset: first?.notify ?? "standard", routesOff: {}, err: null,
     };
-    // A template picked on purpose (Use on a template card) starts fresh; otherwise pick up where the person left off.
-    const d = tplId ? null : readDraft();
-    return d ? { ...fresh, ...d, err: null, tpl: tpls.some((t) => t.id === d.tpl) ? (d.tpl as string) : fresh.tpl } : fresh;
+    const saved = me ? readDraft(me.person.id) : null;
+    if (!saved) return fresh;
+    // Typed text always comes back. A template picked on purpose (Use on a template card) keeps its own template and presets
+    // and opens on the first step; otherwise the person lands on the step they left, never on the review of a stale preset.
+    const typed = { name: saved.name, key: saved.key, desc: saved.desc, owner: saved.owner, teams: saved.teams, budget: saved.budget, repos: saved.repos, extraRepo: saved.extraRepo };
+    const own = tplId ? {} : { tpl: tpls.some((t) => t.id === saved.tpl) ? saved.tpl : fresh.tpl, approverPreset: saved.approverPreset, notifyPreset: saved.notifyPreset, fallback: saved.fallback, routesOff: saved.routesOff, step: Math.min(saved.step ?? 0, STEPS.length - 2) };
+    return { ...fresh, ...typed, ...own, err: null } as Wz;
   });
-  useEffect(() => writeDraft(wz), [wz]);
+  const pid = me?.person.id ?? "";
+  useEffect(() => { if (pid) writeDraft(pid, wz); }, [pid, wz]);
+  // Drop what no longer resolves: an owner who is gone or deactivated, teams that no longer exist.
+  const peopleLoaded = people.length > 0;
+  const teamsLoaded = teams.length > 0;
+  useEffect(() => {
+    setWz((x) => {
+      const owner = peopleLoaded && !people.some((p) => p.id === x.owner && p.status === "active") ? (me?.person.id ?? "") : x.owner;
+      const keep = teamsLoaded ? x.teams.filter((t) => teams.some((r) => r.id === t)) : x.teams;
+      return owner === x.owner && keep.length === x.teams.length ? x : { ...x, owner, teams: keep };
+    });
+  }, [peopleLoaded, teamsLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState(false);
   if (!cat || !first || !presets) return <Dialog title="New project" kicker="Projects · from a template" wide body={<p className="muted small">Loading…</p>} onClose={close} actions={[{ label: "Cancel", id: "prj-wz-cancel" }]} />;
   const T = tpls.find((t) => t.id === wz.tpl) ?? first;
@@ -137,7 +153,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
     }
     const n = Object.keys(wz.repos).length - failedRepos.length;
     ui.toast(`${r.msg} ${n} repo${n === 1 ? "" : "s"} onboarding.${failedRepos.length ? ` Not connected: ${failedRepos.join("; ")}.` : ""}`, custom.failed.length || failedRepos.length ? "warn" : "ok");
-    writeDraft(null);
+    writeDraft(pid, null);
     close();
     // the shell keeps the stored project to one in `me`: wait until `me` lists the new project before switching to it
     await getQueryClient()?.refetchQueries({ queryKey: ["me"] });

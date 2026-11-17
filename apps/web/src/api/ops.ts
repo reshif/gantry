@@ -15,6 +15,7 @@
  *  - gate instance id = `${woId}:${gateId}`           (POST /gate-instances/{id}/approve|reject)
  *  - stop id          = `${scope}:${targetId}`        (DELETE /stops/{id}, POST /stops/{id}/restore), scope in factory|project|repo|workorder
  */
+import { clearDrafts } from "./drafts";
 import { api, del, patch, post, put, command, type ApiResult, type RequestOptions } from "./client";
 import { invalidateSlices } from "./keys";
 
@@ -73,6 +74,7 @@ export const ops = {
    */
   async signOut(): Promise<ApiResult<{ logoutUrl?: string }>> {
     const r = await post<{ logoutUrl?: string }>("/auth/logout");
+    if (r.ok) clearDrafts();
     if (r.ok && typeof r.logoutUrl === "string" && /^https?:\/\//.test(r.logoutUrl)) {
       window.location.assign(r.logoutUrl);
       return r;
