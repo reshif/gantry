@@ -50,7 +50,7 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
       key: "pr", label: "Onboarding PR", hideSmall: true,
       render: (r) => (r.onboarding.pr ? <span className="mono">{`#${r.onboarding.pr.number}`}<span className="muted">{` · ${r.onboarding.pr.state === "merged" ? "merged" : `checks ${r.onboarding.pr.checks}`}`}</span></span> : <span className="muted">none yet</span>),
     },
-    { key: "gaps", label: "Gaps", align: "end", sort: (r) => (r.onboarding.findings.length ? gaps(r).length : -1), render: (r) => (r.onboarding.findings.length ? <span className="mono">{String(gaps(r).length)}</span> : <span className="muted">-</span>) },
+    { key: "gaps", label: "Gaps", align: "end", sort: (r) => (r.onboarding.findings.length ? gaps(r).length : -1), render: (r) => (r.onboarding.findings.length ? <span className="mono">{String(gaps(r).length)}</span> : <span className="muted" title="Not assessed yet"><span aria-hidden="true">-</span><span className="sr">Not assessed yet</span></span>) },
     {
       key: "time", label: "Time", hideSmall: true,
       render: (r) => {
@@ -108,7 +108,7 @@ export function Pipeline({ project, repos, open, details }: { project: string; r
               onRow={(r) => open(r.id)}
               sort={{ key: "stage", dir: 1 }}
               pageSize={8}
-              empty={{ title: "No repos match", text: "Pick another filter, or clear the search." }}
+              empty={{ title: "No repos match", text: "Pick another filter, or clear the search.", action: <button type="button" className="btn btn-sm" id="onb-filter-clear" onClick={() => { setFilter("all"); setQ(""); }}>Show all</button> }}
             />
           </Panel>
         </>

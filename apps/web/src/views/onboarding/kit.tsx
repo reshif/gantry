@@ -86,7 +86,7 @@ export function Steps({ r, big }: { r: RepoV; big?: boolean }) {
   const ready = r.onboarding.stage === "ready";
   const label = `Onboarding stage: ${stageName(r.onboarding.stage)} (${idx + 1} of 7)`;
   const state = (i: number): "done" | "now" | "stop" | "todo" => (i < idx || (ready && i === idx) ? "done" : i === idx ? (stop ? "stop" : "now") : "todo");
-  if (big) return <div className="onb-rail"><PipelineRail label={label} steps={STAGES.map((s, i) => ({ key: s.id, name: s.name, tone: ({ done: "done", now: "run", stop: "bad", todo: "todo" } as const)[state(i)] }))} /></div>;
+  if (big) return <div className="onb-rail"><PipelineRail label={label} steps={STAGES.map((s, i) => ({ key: s.id, name: s.name, tone: ({ done: "done", now: "run", stop: "warn", todo: "todo" } as const)[state(i)] }))} /></div>;
   return (
     <ol className="onb-steps" aria-label={label}>
       {STAGES.map((s, i) => {

@@ -115,6 +115,44 @@ describe("Onboarding: pipeline", () => {
     expect(await screen.findByText("No repos yet")).toBeTruthy();
   });
 
+  it("searching narrows the repos, and an empty result offers Show all which clears the search and the filter", async () => {
+    api([find("web-storefront"), GREEN, find("search-indexer")]);
+    mount(<OnboardingView />);
+    await byId("onb-row-mobile-app");
+    fireEvent.change(document.getElementById("onb-search") as HTMLInputElement, { target: { value: "indexer" } });
+    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(1));
+    fireEvent.change(document.getElementById("onb-search") as HTMLInputElement, { target: { value: "zzz-nothing" } });
+    fireEvent.click(await byId("onb-filter-clear"));
+    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(3));
+    expect((document.getElementById("onb-search") as HTMLInputElement).value).toBe("");
+  });
+
+  it("a repo row opens with Enter or Space, and the table sorts by a header", async () => {
+    api([find("web-storefront"), GREEN, find("search-indexer")]);
+    mount(<OnboardingView />);
+    const row = await byId("onb-row-mobile-app");
+    const order = () => Array.from(document.querySelectorAll(".dtable tbody tr")).map((t) => t.getAttribute("data-key"));
+    fireEvent.click(document.getElementById("onb-table-sort-name")!);
+    const asc = order();
+    expect(asc).toEqual([...asc].sort());
+    fireEvent.click(document.getElementById("onb-table-sort-name")!);
+    expect(order()).toEqual([...asc].reverse());
+    const ev = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    row.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it("the Guidelines tab shows the agent's guidelines and the profile button opens the agent", async () => {
+    api([find("web-storefront"), GREEN]);
+    mount(<OnboardingView />);
+    await byId("onb-row-mobile-app");
+    fireEvent.click(document.getElementById("onb-tab-agent")!);
+    await byId("onb-agent-off");
+    expect(document.getElementById("onb-tab-agent")!.getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(document.getElementById("onb-agent-profile")!);
+    await waitFor(() => expect(window.location.hash).toContain("agents"));
+  });
+
   it("Connect repo is locked with the server's reason when the person cannot onboard", async () => {
     api([find("web-storefront")], {}, { denied: ["repo.onboard"] });
     mount(<OnboardingView />);

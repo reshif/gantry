@@ -34,12 +34,12 @@ export function SortTable<R>({ id, caption, columns, rows, rowKey, rowId, rowLab
   sort?: SortState | undefined;
   onSort?: (s: SortState) => void;
   pageSize?: number;
-  empty?: { title: string; text?: string };
+  empty?: { title: string; text?: string; action?: ReactNode };
 }) {
   const [own, setOwn] = useState<SortState | undefined>(undefined);
   const [shown, setShown] = useState(pageSize ?? 0);
   const cur = own ?? sort;
-  if (!rows.length) return <div className="dtable-wrap" id={id}><Empty title={empty?.title ?? "Nothing here"} text={empty?.text ?? "No rows match."} /></div>;
+  if (!rows.length) return <div className="dtable-wrap" id={id}><Empty title={empty?.title ?? "Nothing here"} text={empty?.text ?? "No rows match."} action={empty?.action} /></div>;
   const val = (c: SortCol<R>, r: R): number | string => (typeof c.sort === "function" ? c.sort(r) : ((r as Record<string, unknown>)[c.key] as number | string));
   let list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
@@ -76,7 +76,7 @@ export function SortTable<R>({ id, caption, columns, rows, rowKey, rowId, rowLab
           </thead>
           <tbody>
             {list.map((r) => (
-              <tr key={rowKey(r)} data-key={rowKey(r)} {...(rowId ? { id: rowId(r) } : {})} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} {...(onRow ? { tabIndex: 0, onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest("button,a,input,select,textarea")) return; onRow(r); }, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" && e.target === e.currentTarget) onRow(r); } } : {})}>
+              <tr key={rowKey(r)} data-key={rowKey(r)} {...(rowId ? { id: rowId(r) } : {})} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} {...(onRow ? { tabIndex: 0, onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest("button,a,input,select,textarea")) return; onRow(r); }, onKeyDown: (e: React.KeyboardEvent) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); onRow(r); } } } : {})}>
                 {columns.map((c) => (
                   <td key={c.key} data-label={c.label} className={`${c.align === "end" ? "is-end" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
                     {c.render ? c.render(r) : ((r as Record<string, unknown>)[c.key] as ReactNode) ?? ""}

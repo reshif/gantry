@@ -170,7 +170,7 @@ export function SettingsDialog({ repo, project, close }: { repo: RepoV; project:
   };
   return (
     <Dialog
-      title={`Settings for ${repo.name}`} kicker="Onboarding · repo settings" wide onClose={close}
+      title={`Settings for ${repo.name}`} wide onClose={close}
       body={
         <div className="onb-settings">
           <LockNote decision={dec} what="Repo settings" />
