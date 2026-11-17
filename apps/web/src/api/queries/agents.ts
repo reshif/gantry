@@ -31,6 +31,8 @@ export interface PriceVersion { version: number; effectiveFrom: string; publishe
 export const usePrices = () => useQuery({ queryKey: qk.prices(), queryFn: () => readIfAllowed(MODELS, () => get<{ current: number | null; versions: PriceVersion[] }>(api("prices"))) });
 export interface BudgetRow { project: string; monthly: number; alertAt: number; perWorkOrder: number; spent: number; version: number }
 export const useBudgets = () => useQuery({ queryKey: qk.budgets(), queryFn: () => readIfAllowed(MODELS, () => get<BudgetRow[]>(api("budgets"))) });
+export interface RoutingVersion { version: number; publishedAt: string; publishedBy: string | null; note: string }
+export const useRoutingVersions = () => useQuery({ queryKey: qk.routingVersions(), queryFn: () => readIfAllowed(MODELS, () => get<RoutingVersion[]>(api("routing/versions"))) });
 export interface RouteAnswer { model: string | null; vendor: string | null; wanted: string | null; layer: string; steps: string[]; blocked: string | null; crossModel: boolean; sameModelFallback: boolean; rule: { id: string; tag: string } | null }
 export const useRoutingResolve = (q: { station?: string; repo?: string; project?: string; class?: string }, enabled = true) =>
   useQuery({ queryKey: qk.routingResolve(q), queryFn: () => readIfAllowed(MODELS, () => get<RouteAnswer>(api("routing/resolve"), q)), enabled });

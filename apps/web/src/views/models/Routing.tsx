@@ -4,11 +4,12 @@
  * Every edit saves a new routing version with If-Match; a stale screen is refused.
  */
 import { useState } from "react";
-import type { Agent, Catalog, Project, Repo, Routing, Vendor } from "@gantry/domain";
+import { fmt, type Agent, type Catalog, type Project, type Repo, type Routing, type Vendor } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { useRoutingResolve } from "../../api/queries";
-import { Btn, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { useRoutingResolve, useRoutingVersions } from "../../api/queries";
+import { useActors } from "../../ui/actors";
+import { Btn, Empty, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ProjectPolicy } from "./Policy";
@@ -180,33 +181,66 @@ export function RoutingPanel({ routing, vendors, agents, repos, projects, cat }:
   );
 
   return (
-    <Panel title="Routing policy" cls="md-routing">
-      <div className="routing">
-        <LockNote decision={perm} what="Routing" />
-        <div className="routing-grid">
-          <div>
+    <div className="md-routing" id="rt-panel">
+      <LockNote decision={perm} what="Routing" />
+      <div className="md-tb">
+        <div className="md-col">
+          <Panel title="Defaults and overrides" cls="md-routing-defaults">
             <Field label="Factory default model" htmlFor="rt-default" hint="Used by any station without an override and by new agents.">{defaultSel}</Field>
             <h3 className="sub-h">Per-station overrides</h3>
             {overrides}
             <h3 className="sub-h">Per-class overrides</h3>
             <p className="muted small">A work-order class overrides its station. Order: factory default, project, station, class.</p>
             {classTable}
-            <h3 className="sub-h">Fallback order</h3>
+          </Panel>
+          <Panel title="Fallback order">
             <p className="muted small">Tried in order when a model errors, times out or its vendor is down, and only if the project allows a different model. The same model on another allowed vendor is always tried first.</p>
             {fb}
             {addFb}
             {cross}
-          </div>
-          <div>
-            <h3 className="sub-h">Residency and routing rules</h3>
-            {rules}
-            {form}
-            <h3 className="sub-h">Per-project policy</h3>
-            <ProjectPolicy routing={r} vendors={vendors} projects={projects} enabled={enabled} change={change} />
-            <h3 className="sub-h">Where would this request go?</h3>
-            <Preview repos={repos} projects={projects} stations={stations.map((s) => ({ value: s.id, label: `${s.no} ${s.name}${s.custom ? ` (${projects.find((p) => p.id === s.project)?.name ?? s.project})` : ""}` }))} stationLabel={stationLabel} />
-          </div>
+          </Panel>
         </div>
+        <div className="md-col">
+          <Panel title="Residency and routing rules">
+            {r.rules.length ? rules : <Empty icon="globe" title="No residency rules" text="Without a rule, any allowed vendor can serve any repo." />}
+            {form}
+          </Panel>
+          <Panel title="Per-project policy">
+            <ProjectPolicy routing={r} vendors={vendors} projects={projects} enabled={enabled} change={change} />
+          </Panel>
+          <RoutingVersions current={r.version} />
+          <Panel title="Where would this request go?">
+            <Preview repos={repos} projects={projects} stations={stations.map((s) => ({ value: s.id, label: `${s.no} ${s.name}${s.custom ? ` (${projects.find((p) => p.id === s.project)?.name ?? s.project})` : ""}` }))} stationLabel={stationLabel} />
+          </Panel>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Every published routing version, newest first. Read-only: each edit above publishes the next one. */
+function RoutingVersions({ current }: { current: number | undefined }) {
+  const q = useRoutingVersions();
+  const actor = useActors();
+  const rows = Array.isArray(q.data) ? q.data : [];
+  return (
+    <Panel title="Routing versions">
+      <p className="muted small">Each edit to the routing policy is published as a new version with a change note. Runs are routed by the version in force.</p>
+      <div className="table-scroll">
+        <table className="table table-compact" id="rv-table">
+          <thead><tr><th scope="col">Version</th><th scope="col">Published</th><th scope="col">By</th><th scope="col">Note</th></tr></thead>
+          <tbody>
+            {rows.length ? null : <tr><td colSpan={4} className="small muted">{q.isLoading ? "Loading versions." : "No routing version has been published yet."}</td></tr>}
+            {rows.slice(0, 8).map((v) => (
+              <tr key={v.version}>
+                <td className="mono">v{v.version}{v.version === current ? <span className="chip chip-accent"> in force</span> : null}</td>
+                <td className="mono small">{`${fmt.istDate(Date.parse(v.publishedAt))} ${fmt.ist(Date.parse(v.publishedAt))}`}</td>
+                <td className="small">{v.publishedBy && v.publishedBy !== "system" ? actor(v.publishedBy).name : "System"}</td>
+                <td className="small">{v.note || <span className="muted">–</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </Panel>
   );

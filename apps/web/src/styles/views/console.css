@@ -64,10 +64,10 @@
 }
 
 /* round three: Claude mode, streaming, entity chips */
-.con-mode-line { display: flex; gap: 6px; align-items: baseline; flex-wrap: nowrap; color: var(--muted); margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--sunk); border-radius: var(--r1) var(--r1) 0 0; }
+.con-mode-line { display: flex; gap: 6px 10px; align-items: center; flex-wrap: wrap; color: var(--muted); margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--sunk); border-radius: var(--r1) var(--r1) 0 0; }
 .con-mode-line a { color: var(--accent); }
 .con-model { display: inline-flex; align-items: center; gap: 6px; }
-.con-model select { max-width: 280px; font-family: var(--f-mono); font-size: var(--t-xs); }
+.con-model select { min-width: 200px; max-width: 280px; font-family: var(--f-mono); font-size: var(--t-xs); }
 .con-mode-line .ic { width: 12px; height: 12px; flex: none; position: relative; top: 2px; }
 .con-mode-line a { white-space: nowrap; }
 .view-console .msg-text { white-space: pre-wrap; }
@@ -126,3 +126,41 @@
 @media (max-width: 1100px) {
   .con-chats-list { max-height: 180px; }
 }
+
+/* Console, redesign look: quiet status line, answer bubbles, composer, compact side panels. */
+.console-main { border-radius: var(--r2); box-shadow: var(--shadow-1); overflow: hidden; }
+.con-mode-line { padding: 10px 16px; background: var(--surface); font-size: var(--t-sm); align-items: center; border-radius: 0; }
+.con-mode-line .ic { top: 0; }
+.view-console .thread { padding: 16px; gap: 16px; }
+.view-console .msg-factory .msg-text { background: var(--sunk); border-radius: var(--r2); padding: 10px 12px; }
+.view-console .msg-factory .msg-text.is-thinking { background: transparent; padding-left: 0; }
+.view-console .msg-user .msg-text { border-radius: var(--r2); }
+.msg-name { font-size: var(--t-sm); }
+.msg-mode { font-family: var(--f-body); font-size: var(--t-xs); text-transform: none; letter-spacing: 0; padding: 1px 8px; border-radius: 999px; background: var(--surface); }
+.msg-chips .kicker { font-size: var(--t-xs); color: var(--muted); }
+.composer { border-top: 1px solid var(--line); background: var(--surface); padding: 12px 16px 14px; }
+.composer-input { border-radius: var(--r2); min-height: 64px; resize: vertical; }
+.composer-foot { align-items: center; }
+.composer-foot .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sugg { border-radius: 999px; background: var(--surface); border-color: var(--line); font-size: var(--t-xs); }
+.try-lbl { margin-right: 2px; }
+.view-console .ctx .panel-title, .ws-chat .ctx .panel-title { font-size: var(--t-md); }
+.ctx .panel-head { min-height: 40px; padding: 10px 14px; }
+.ctx .panel-body { padding: 12px 14px; }
+.ctx .caps li { grid-template-columns: 16px minmax(0, 1fr); }
+.ctx .footnote { font-size: var(--t-xs); color: var(--muted); margin: 0; }
+@media (max-width: 560px) {
+  .composer { padding: 10px 12px 12px; }
+  .view-console .thread { padding: 12px; }
+}
+
+/* header chip beside the title, toolbar above the thread, permission codes in the capability list */
+.vtitle-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.con-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.con-bar-title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 160px; }
+.con-bar-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx .caps .cap-code { grid-column: 2; font-size: var(--t-xs); color: var(--faint); background: none; padding: 0; margin-top: -2px; }
+.ctx .caps li.no .cap-code { color: var(--muted); }
+.con-audit-link { margin-top: 8px; }
+.con-mode-line > span:not(.ask-badge):not(.con-mode-pick) { flex: 1 1 240px; min-width: 0; }
+.con-mode-line .con-mode-pick { flex: 0 1 auto; max-width: 100%; }

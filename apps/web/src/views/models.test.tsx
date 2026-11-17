@@ -112,14 +112,14 @@ describe("Models screen (legacy models.js on the real API)", () => {
     expect(a.querySelector("#mt-claude-haiku-5-5")).toBeTruthy();
     expect((a.querySelector("#mt-claude-haiku-5-5") as HTMLInputElement).checked).toBe(false);
     const b = await byId("vendor-bedrock");
-    expect(b.querySelector(".health")?.className).toContain("h-degraded");
+    expect(b.querySelector(".vendor-head .status")?.textContent).toContain("Degraded");
     expect(b.textContent).toContain("Data retention: zero");
     const l = await byId("vendor-local");
     expect(l.classList.contains("is-off")).toBe(true);
-    expect(l.textContent).toContain("not connected");
+    expect(l.textContent).toContain("Not connected");
     expect(l.querySelector("#vendor-connect-local")?.textContent).toContain("Connect Local models");
     expect(document.querySelector(".md-incident")?.textContent).toContain("Amazon Bedrock is degraded (p50 1460 ms)");
-    expect(document.body.textContent).toContain("Vendors connected3 / 4");
+    expect(document.body.textContent).toContain("Vendors connected3 of 4");
     expect(document.getElementById("vendor-test-anthropic")).toBeNull();
   });
 
@@ -250,6 +250,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
 });
 
 describe("routing policy", () => {
+  beforeEach(() => { window.location.hash = "#models/routing"; });
   it("changes the default model with If-Match from the loaded version", async () => {
     const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
     mount();
@@ -357,20 +358,44 @@ describe("routing policy", () => {
   });
 });
 
+describe("vendors summary", () => {
+  beforeEach(() => { window.location.hash = "#models"; });
+  it("counts models on only among connected vendors, and shows a dash where a vendor is not connected", async () => {
+    setup({});
+    mount();
+    const tile = await waitFor(() => { const e = [...document.querySelectorAll("#md-stats .stat-tile")].find((x) => x.textContent?.includes("Models on")); if (!e) throw new Error("no tile"); return e; });
+    const connectedModels = VENDORS.filter((v) => v.connected).reduce((n, v) => n + v.models.length, 0);
+    await waitFor(() => expect(tile.textContent).toContain(`of ${connectedModels}`));
+    const off = (await byId("vendor-local")).querySelector(".tb-vendor dd")!;
+    expect(off.textContent).toBe("–");
+  });
+});
+
+describe("routing versions", () => {
+  beforeEach(() => { window.location.hash = "#models/routing"; });
+  it("lists the published versions with who and why", async () => {
+    setup({ "GET /api/v1/routing/versions": () => ({ body: [{ version: 4, publishedAt: new Date().toISOString(), publishedBy: "asha", note: "Default model changed" }, { version: 3, publishedAt: new Date().toISOString(), publishedBy: "system", note: "" }] }) });
+    mount();
+    const t = await byId("rv-table");
+    await waitFor(() => expect(t.textContent).toContain("Default model changed"));
+    expect(t.querySelector("tbody tr")?.textContent).toContain("v4");
+  });
+});
+
 describe("prices and budgets", () => {
+  beforeEach(() => { window.location.hash = "#models/prices"; });
   it("lists price versions with their effective dates and publishes a price from a date, with an idempotency key", async () => {
     const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "Price version 3 is in force.", version: 3 }) });
     mount();
     const t = await byId("pv-table");
     await waitFor(() => expect(t.textContent).toContain("Price cut"));
     expect(t.querySelector("tbody tr")?.textContent).toContain("in force");
-    type(await byId("pv-model"), "claude-sonnet-5-5");
-    type(await byId("pv-in"), "");
+    type(await byId("pv-in-claude-sonnet-5-5"), "");
     fireEvent.submit(await byId("pv-form"));
     await new Promise((r) => setTimeout(r, 30));
     expect(writes(calls)).toHaveLength(0);
-    type(await byId("pv-in"), "3.5");
-    type(await byId("pv-out"), "16");
+    type(await byId("pv-in-claude-sonnet-5-5"), "3.5");
+    type(await byId("pv-out-claude-sonnet-5-5"), "16");
     type(await byId("pv-note"), "Rate card");
     fireEvent.submit(await byId("pv-form"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
@@ -379,11 +404,31 @@ describe("prices and budgets", () => {
     expect(writes(calls)[0]!.headers["idempotency-key"]).toBeTruthy();
   });
 
+  it("publishes several changed models as one version and leaves the unchanged ones out", async () => {
+    const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "Price version 3 is in force.", version: 3 }) });
+    mount();
+    await byId("pv-edit");
+    const ids = [...document.querySelectorAll<HTMLInputElement>("#pv-edit input[id^='pv-in-']")].map((i) => i.id.replace("pv-in-", ""));
+    expect(ids.length).toBeGreaterThan(1);
+    for (const id of ids.slice(0, 2)) { type(await byId(`pv-in-${id}`), "7"); type(await byId(`pv-out-${id}`), "9"); }
+    fireEvent.submit(await byId("pv-form"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(Object.keys(writes(calls)[0]!.body.prices).sort()).toEqual(ids.slice(0, 2).sort());
+  });
+
+  it("shows each vendor's spend against its budget, read-only", async () => {
+    setup({});
+    mount();
+    const t = await byId("vb-table");
+    expect(t.querySelectorAll("tbody tr").length).toBeGreaterThan(0);
+    expect(t.querySelector("input")).toBeNull();
+  });
+
   it("schedules a price for a future date", async () => {
     const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "scheduled", version: 3 }) });
     mount();
-    type(await byId("pv-in"), "4");
-    type(await byId("pv-out"), "20");
+    type(await byId("pv-in-claude-sonnet-5-5"), "4");
+    type(await byId("pv-out-claude-sonnet-5-5"), "20");
     const later = new Date(Date.now() + 5 * 86400000);
     later.setMinutes(later.getMinutes() - later.getTimezoneOffset());
     type(await byId("pv-eff"), later.toISOString().slice(0, 16));
@@ -408,16 +453,24 @@ describe("permissions", () => {
   it("without model.edit every control shows why it is locked and nothing is sent", async () => {
     const calls = setup({}, ["model.edit", "project.config"]);
     mount();
-    for (const id of ["md-add-vendor", "vendor-connect-anthropic", "vendor-addmodel-anthropic", "vendor-disc-anthropic", "rr-del-RR-1", "rr-add", "rt-proj-save", "pv-add", "bd-save-payments", "vendor-qual-go-mistral-eu"]) {
-      const el = await byId(id);
-      await waitFor(() => expect(el.getAttribute("data-reason")).toMatch(/Needs Factory Admin\. No role holds/));
-      fireEvent.click(el);
-    }
+    const locked = async (ids: string[]) => {
+      for (const id of ids) {
+        const el = await byId(id);
+        await waitFor(() => expect(el.getAttribute("data-reason")).toMatch(/Needs Factory Admin\. No role holds/));
+        fireEvent.click(el);
+      }
+    };
+    await locked(["md-add-vendor", "vendor-connect-anthropic", "vendor-addmodel-anthropic", "vendor-disc-anthropic", "vendor-qual-go-mistral-eu"]);
     expect((await byId("mt-claude-haiku-5-5")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
+    window.location.hash = "#models/routing";
+    await locked(["rr-del-RR-1", "rr-add", "rt-proj-save"]);
     expect((await byId("rt-default") as HTMLSelectElement).disabled).toBe(true);
     expect((await byId("rt-st-build") as HTMLSelectElement).disabled).toBe(true);
     expect((await byId("rt-fb-rm-0")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
-    expect(document.body.textContent).toContain("Read-only for you: routing.");
+    window.location.hash = "#models/prices";
+    await locked(["pv-add", "bd-save-payments"]);
+    window.location.hash = "#models/routing";
+    await waitFor(() => expect(document.body.textContent).toContain("Read-only for you: routing."));
     expect(writes(calls)).toHaveLength(0);
   });
 });

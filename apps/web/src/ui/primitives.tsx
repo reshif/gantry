@@ -314,12 +314,12 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
   );
 }
 
-export function ViewHead({ kicker, title, sub, meta, actions }: { kicker?: ReactNode; title: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+export function ViewHead({ kicker, title, status, sub, meta, actions }: { kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
   return (
     <header className="vhead">
       <div className="vhead-main">
         {kicker ? <div className="kicker">{kicker}</div> : null}
-        <h1 className="vtitle">{title}</h1>
+        {status ? <div className="vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
         {sub ? <p className="vsub">{sub}</p> : null}
       </div>
       {meta ? (
