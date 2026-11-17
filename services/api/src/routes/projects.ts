@@ -148,10 +148,11 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const body = ConfigBody.parse(req.body);
     const scope = { project: id };
     const ifMatch = projectVersion(g.orgId, id);
-    if ("gate" in body) return inProject(req, { action: "project.config", scope, ifMatchRequired: true, ifMatch }, id, "edit", (tx, a) => changeGateMode(tx, a, id, body.gate, body.mode));
+    // Anything that lowers the human oversight on a route (a gate to automatic or mixed) needs a fresh sign-in too.
+    if ("gate" in body) return inProject(req, { action: "project.config", scope, ifMatchRequired: true, ifMatch, ...(body.mode !== "human" ? { stepUp: true as const } : {}) }, id, "edit", (tx, a) => changeGateMode(tx, a, id, body.gate, body.mode));
     const edit = parseConfigEdit(body.path, body.value);
-    // Turning a gate off removes a check on future work: it needs a fresh sign-in on top of project.config (spec 14.1).
-    const stepUp = edit.kind === "gate-enabled" && !edit.value ? { stepUp: true as const } : {};
+    // Turning a gate or a station off (its gate leaves the route) removes a check on future work: it needs a fresh sign-in on top of project.config (spec 14.1).
+    const stepUp = (edit.kind === "gate-enabled" || edit.kind === "station-enabled") && !edit.value ? { stepUp: true as const } : {};
     return inProject(req, { action: actionFor(edit), scope, ifMatchRequired: true, ifMatch, ...stepUp }, id, "edit", (tx, a) => setConfig(tx, a, id, edit, body.path));
   });
 

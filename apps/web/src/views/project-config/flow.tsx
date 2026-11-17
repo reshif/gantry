@@ -1,6 +1,6 @@
 /** Project config: Flow tab and its dialogs (legacy project-config.js flowTab, stationDialog, gateDialog, bayDialog). */
 import { useState, type ReactNode } from "react";
-import { approvalText, flowOf, gateExplain, gateKindText, gateLock, type Catalog, type Project, type WorkClass } from "@gantry/domain";
+import { approvalText, flowOf, gateExplain, gateKindText, gateLock, gateModeLock, type Catalog, type GateKind, type Project, type WorkClass } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useAgents, useTemplates } from "../../api/queries";
@@ -329,7 +329,7 @@ export function FlowTab({ p, cat, s, set }: PcProps) {
                   const gs = gateState(p, g.id);
                   const lock = gateLock(g, p);
                   const mode = g.mode;
-                  const opts = KINDS.filter((o) => (g.id === "G0G1" ? o.value === "human" : g.id === "G6" ? o.value !== "auto" : true));
+                  const opts = KINDS.filter((o) => o.value === mode || !gateModeLock(g, o.value as GateKind, p));
                   return (
                     <tr key={g.id} className={`${on ? "" : "is-disabled"}${g.custom ? " is-custom" : ""}`.trim() || undefined}>
                       <td><GateDiamond cat={cat} gateId={g.id} state={gs.state} count={gs.waiting || gs.failing} size="sm" /></td>
