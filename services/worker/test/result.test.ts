@@ -43,6 +43,8 @@ d("run.result, publish and teardown", () => {
     await w.drain();
     const pub = w.broker.calls.find((c) => c.op === "publish")!;
     expect(pub.body).toMatchObject({ attemptId: a.attemptId, fencing: a.fencing, repo: "acme/payments-api", volume: `ws-${a.runId}`, branch: "gantry/WO-9102" });
+    // The workspace was seeded with history, so the publisher is told the seed commit as its base.
+    expect(pub.body!.base).toBe("1".repeat(40));
     // Publish happens while the workspace still exists, then the launcher removes the volume.
     const stop = w.launcher.calls.filter((c) => c.op === "stop").pop()!;
     expect(pub.at).toBeLessThanOrEqual(stop.at);

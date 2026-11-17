@@ -114,6 +114,44 @@ describe("seed", () => {
     expect(c.files[2]).toMatchObject({ inlined: false });
     expect(c.files[2].content).toBeUndefined();
   });
+  it("with a base branch the workspace holds the target branch head and the merge base, so `git diff <base>...<head>` works offline; publishing from it still works", async () => {
+    const work = join(env.root, "src-work");
+    const g = (...a: string[]) => gitSync(work, ...a);
+    g("checkout", "-q", "-b", "feature", base);
+    await writeFile(join(work, "README.md"), "hello\nfeature line\n");
+    g("commit", "-q", "-am", "feature change");
+    const featureHead = g("rev-parse", "HEAD");
+    g("checkout", "-q", "main");
+    await writeFile(join(work, "other.txt"), "target moved on\n");
+    g("add", "-A"); g("commit", "-q", "-m", "main moves on");
+    const mainHead = g("rev-parse", "HEAD");
+    g("push", "-q", env.remote, "feature", "main");
+    const volume = "ws-withbase";
+    const r = await env.call("POST", "/v1/workspaces/seed", { repo: REPO, commit: featureHead, volume, baseBranch: "main" });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ commit: featureHead, base: mainHead, baseBranch: "main" });
+    const dir = env.store.dir(volume);
+    expect(run(dir, "rev-parse", "HEAD")).toBe(featureHead);
+    // Offline: the diff is the pull request's own change, not "adds every file" and not main's later commit.
+    expect(run(dir, "diff", "--name-only", `${mainHead}...${featureHead}`)).toBe("README.md");
+    expect(run(dir, "diff", "--numstat", `${mainHead}...HEAD`)).toBe("1\t0\tREADME.md");
+    expect(run(dir, "log", "--format=%H", `${mainHead}..${featureHead}`)).toBe(featureHead);
+    const cfg = await readFile(join(dir, ".git/config"), "utf8");
+    expect(cfg).not.toMatch(/extraheader|Authorization|ghs_|x-access-token/i);
+    // The publisher is told the seed commit as its base, because the shallow boundary no longer says it.
+    await writeFile(join(dir, "x.txt"), "x\n"); run(dir, "add", "-A"); run(dir, "commit", "-q", "-m", "more");
+    env.gh.refs.delete("refs/heads/gantry/WO-1"); env.gh.pulls.length = 0;
+    env.gh.registerCommit(featureHead, { ...FILES, "README.md": "hello\nfeature line\n" });
+    const p = await publish({ volume, attemptId: "at-wb" }, { base: featureHead });
+    expect(p.status, JSON.stringify(p.body)).toBe(200);
+    expect(p.body.commits).toHaveLength(1);
+  });
+  it("a target branch that cannot be read leaves the checkout as it was and reports no base", async () => {
+    const r = await env.call("POST", "/v1/workspaces/seed", { repo: REPO, commit: base, volume: "ws-nobase", baseBranch: "no-such-branch" });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.base).toBeNull();
+    expect(run(env.store.dir("ws-nobase"), "rev-parse", "HEAD")).toBe(base);
+  });
   it("refuses a commit that does not exist", async () => {
     const r = await env.call("POST", "/v1/workspaces/seed", { repo: REPO, commit: "1".repeat(40), volume: "ws-nope" });
     expect(r.status).toBe(502);
