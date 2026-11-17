@@ -149,6 +149,8 @@ async function main(): Promise<number> {
     console.error(`[wrapper] bad environment: ${env.error}`);
     return 2;
   }
+  // The wrapper keeps the token in memory only (RunEnv). Whatever it spawns inherits an environment without it.
+  delete process.env.GANTRY_RUN_TOKEN;
   return runWrapper({ env: env.value, edge: new EdgeClient(env.value) });
 }
 

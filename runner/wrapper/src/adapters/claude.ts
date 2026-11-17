@@ -16,6 +16,7 @@ import type { Adapter, AdapterContext, AdapterOutcome } from "../adapter.js";
 import type { UsageEntry } from "../edge.js";
 import type { RunEnv } from "../env.js";
 import type { RunSpec } from "../spec.js";
+import { startRelay } from "../relay.js";
 import { narrowShell } from "../tools.js";
 
 /** Writable scratch space: the root filesystem is read-only, /tmp is a tmpfs. */
@@ -31,7 +32,7 @@ export const STATION_TOOL_NAMES = TOOL_DEFS.map((t) => `mcp__gantry__${t.name}`)
 export interface ClaudeInvocation {
   args: string[];
   env: Record<string, string>;
-  /** Written to `mcpConfigPath` (mode 0600) before launch: it carries the run token for the edge's MCP gateway. */
+  /** Written to `mcpConfigPath` (mode 0600) before launch: it names only relay URLs, no credential. */
   mcpConfig: { mcpServers: Record<string, unknown> };
   mcpConfigPath: string;
   stdin: string;
@@ -85,14 +86,15 @@ export function composeSystemPrompt(spec: RunSpec): string {
  *    precedence (factory rails > project overlay > repository conventions > agent defaults). Deterministic, audited, identical for every harness;
  *  - `--disable-slash-commands`: repo-defined commands and skills are not discovered.
  */
-export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJS.ProcessEnv = process.env): ClaudeInvocation {
-  const edgeHost = new URL(env.edgeUrl).hostname;
+export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, relayUrl: string, baseEnv: NodeJS.ProcessEnv = process.env): ClaudeInvocation {
+  const edgeOrigin = new URL(env.edgeUrl).origin;
   const mcpServers: Record<string, unknown> = {};
   for (const [name, s] of Object.entries(spec.mcpServers)) {
-    mcpServers[name] = { ...s, headers: { authorization: `Bearer ${env.runToken}` } };
+    // The edge's MCP gateway is reached through the relay, which adds the run token: the config file and the harness never hold it.
+    mcpServers[name] = { ...s, url: s.url.startsWith(edgeOrigin) ? relayUrl + s.url.slice(edgeOrigin.length) : s.url };
   }
   // The station tools run in this container as a stdio server (they only record into the run's scratch space): see station-tools.ts.
-  mcpServers.gantry = { type: "stdio", command: baseEnv.GANTRY_NODE_BIN ?? process.execPath, args: [STATION_TOOLS_JS], env: { GANTRY_STATION_DIR: STATION_DIR, GANTRY_EDGE_URL: env.edgeUrl, GANTRY_RUN_TOKEN: env.runToken, GANTRY_RUN_ID: env.runId, ...(isScout(spec) ? { GANTRY_STATION_ROLE: "scout" } : {}) } };
+  mcpServers.gantry = { type: "stdio", command: baseEnv.GANTRY_NODE_BIN ?? process.execPath, args: [STATION_TOOLS_JS], env: { GANTRY_STATION_DIR: STATION_DIR, GANTRY_EDGE_URL: relayUrl, GANTRY_RUN_ID: env.runId, ...(isScout(spec) ? { GANTRY_STATION_ROLE: "scout" } : {}) } };
   const mcpConfigPath = join(SCRATCH, "mcp.json");
   const args = [
     "-p",
@@ -121,21 +123,22 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, baseEnv: NodeJ
   Object.assign(cloneEnv, {
     HOME: join(SCRATCH, "home"),
     CLAUDE_CONFIG_DIR: join(SCRATCH, "claude-config"),
-    // The harness talks to the edge's model gateway with the run token; the vendor key never enters the runner.
-    ANTHROPIC_BASE_URL: `${env.edgeUrl}/model`,
-    ANTHROPIC_AUTH_TOKEN: env.runToken,
-    // Package and other HTTPS goes through the edge proxy; the gateway itself is reached directly.
-    HTTPS_PROXY: baseEnv.HTTPS_PROXY ?? "",
-    NO_PROXY: edgeHost,
-    // Commands the model runs in the shell must not inherit the run token or the proxy credentials (the harness strips them from tool subprocesses).
-    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
+    // The harness talks to the edge's model gateway through the loopback relay, which adds the run token; the vendor key never enters the runner.
+    // The placeholder only satisfies the harness's need for some credential. Nothing in this environment is a secret.
+    ANTHROPIC_BASE_URL: `${relayUrl}/model`,
+    ANTHROPIC_AUTH_TOKEN: "relay",
+    // Package and other HTTPS goes through the same relay, which opens the tunnel to the edge proxy with the run's credentials.
+    HTTPS_PROXY: relayUrl,
+    NO_PROXY: "127.0.0.1,localhost",
+    // The harness's inner sandbox (bubblewrap) cannot start in this container (no user namespaces, no capabilities), so it is off. What it protected
+    // is gone instead: no token or credential is in this environment, so no tool subprocess can inherit one (see relay.ts).
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0",
     DISABLE_AUTOUPDATER: "1",
     DISABLE_TELEMETRY: "1",
     DISABLE_ERROR_REPORTING: "1",
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
   });
-  if (cloneEnv.HTTPS_PROXY === "") delete cloneEnv.HTTPS_PROXY;
 
   const input = spec.input === undefined ? "" : typeof spec.input === "string" ? spec.input : JSON.stringify(spec.input, null, 2);
   const stdin = `Station: ${spec.station}\n\n${input}`.trimEnd() + "\n";
@@ -276,8 +279,10 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
     async run(ctx: AdapterContext): Promise<AdapterOutcome> {
       const { spec, env } = ctx;
       if (!spec.model) return { status: "failed", usage: [], error: { code: "spec_invalid", msg: "claude adapter requires spec.model" } };
-      const inv = buildClaudeInvocation(spec, env);
+      const relay = await startRelay({ edgeUrl: env.edgeUrl, runToken: env.runToken, runId: env.runId, upstreamProxy: process.env.HTTPS_PROXY });
+      const inv = buildClaudeInvocation(spec, env, relay.url);
       if (inv.args.some((a) => Buffer.byteLength(a) > MAX_ARG_BYTES)) {
+        await relay.close();
         return { status: "failed", usage: [], error: { code: "instructions_too_large", msg: "composed instructions exceed the command-line limit" } };
       }
       await mkdir(join(SCRATCH, "home"), { recursive: true, mode: 0o700 });
@@ -349,6 +354,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
       });
 
       const code = await new Promise<number | null>((resolve) => child.once("close", (c) => resolve(c)));
+      await relay.close();
       if (buf.trim() !== "") chain = chain.then(() => handleLine(buf));
       await chain;
       await flush();

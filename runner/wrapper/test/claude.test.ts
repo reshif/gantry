@@ -10,6 +10,7 @@ import { startFakeEdge, type FakeEdge } from "./helpers.js";
 
 const TOKEN = "run-token-abcdef123456";
 const env = { edgeUrl: "http://gantry-edge:8443", runToken: TOKEN, runId: "r1", workspace: "/workspace" };
+const RELAY = "http://127.0.0.1:45678";
 const spec = RunSpec.parse({
   adapter: "claude",
   station: "build",
@@ -23,7 +24,7 @@ const spec = RunSpec.parse({
 });
 
 describe("claude invocation (flags unverified against a live CLI)", () => {
-  const inv = buildClaudeInvocation(spec, env, { PATH: "/usr/bin", HTTPS_PROXY: "http://gantry-edge:8444", GANTRY_RUN_TOKEN: TOKEN, SECRET: "x" });
+  const inv = buildClaudeInvocation(spec, env, RELAY, { PATH: "/usr/bin", HTTPS_PROXY: "http://gantry-edge:8444", GANTRY_RUN_TOKEN: TOKEN, SECRET: "x" });
   const flag = (f: string) => inv.args[inv.args.indexOf(f) + 1];
 
   it("prevents repo-local settings, hooks and MCP config from loading", () => {
@@ -36,23 +37,29 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(inv.env.HOME).toMatch(/home$/);
   });
 
-  it("points the harness at the edge's model gateway with the run token only", () => {
-    expect(inv.env.ANTHROPIC_BASE_URL).toBe("http://gantry-edge:8443/model");
-    expect(inv.env.ANTHROPIC_AUTH_TOKEN).toBe(TOKEN);
-    expect(inv.env.NO_PROXY).toBe("gantry-edge");
-    expect(inv.env.HTTPS_PROXY).toBe("http://gantry-edge:8444");
+  it("points the harness at the loopback relay, and no secret is in its environment, its MCP config or the station tools' environment", () => {
+    expect(inv.env.ANTHROPIC_BASE_URL).toBe(`${RELAY}/model`);
+    expect(inv.env.NO_PROXY).toBe("127.0.0.1,localhost");
+    expect(inv.env.HTTPS_PROXY).toBe(RELAY);
+    const everything = JSON.stringify([inv.env, inv.mcpConfig, inv.args]);
+    expect(everything).not.toContain(TOKEN);
+    expect(everything).not.toContain("gantry-edge:8444");
+    expect(JSON.stringify(inv.mcpConfig)).not.toMatch(/authorization|bearer/i);
+    expect((inv.mcpConfig.mcpServers.docs as { url: string }).url).toBe(`${RELAY}/mcp/docs`);
+    // the only credential-named variable is the placeholder the harness needs in order to start
+    for (const [k, v] of Object.entries(inv.env)) if (/token|secret|password|key|auth/i.test(k)) expect(v, k).toBe("relay");
     expect(inv.env).not.toHaveProperty("SECRET");
     expect(inv.env).not.toHaveProperty("GANTRY_RUN_TOKEN");
     expect(inv.env).not.toHaveProperty("ANTHROPIC_API_KEY");
   });
 
-  it("never hands the model an unrestricted shell, and scrubs credentials from tool subprocesses", () => {
-    const wide = buildClaudeInvocation(RunSpec.parse({ adapter: "claude", station: "build", model: "m", toolAllowList: ["Read", "Bash", "Bash(*)"] }), env, { PATH: "/usr/bin" });
+  it("never hands the model an unrestricted shell; the inner sandbox is off because there is nothing left to scrub", () => {
+    const wide = buildClaudeInvocation(RunSpec.parse({ adapter: "claude", station: "build", model: "m", toolAllowList: ["Read", "Bash", "Bash(*)"] }), env, RELAY, { PATH: "/usr/bin" });
     const allowed = wide.args[wide.args.indexOf("--allowedTools") + 1]!.split(",");
     expect(allowed).not.toContain("Bash");
     expect(allowed).not.toContain("Bash(*)");
     expect(allowed).toContain("Bash(npm test:*)");
-    expect(inv.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
+    expect(inv.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("0");
   });
 
   it("passes limits, model, tools and composed instructions explicitly", () => {
@@ -74,10 +81,10 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(off).toEqual(expect.arrayContaining(["Agent", "Workflow", "WebFetch", "WebSearch", "Write", "NotebookEdit"]));
     expect(off).not.toContain("Read");
     expect(off).not.toContain("Bash");
-    const reviewer = buildClaudeInvocation(RunSpec.parse({ ...spec, toolAllowList: ["Read", "Glob", "Grep"] }), env, {});
+    const reviewer = buildClaudeInvocation(RunSpec.parse({ ...spec, toolAllowList: ["Read", "Glob", "Grep"] }), env, RELAY, {});
     expect(reviewer.args[reviewer.args.indexOf("--tools") + 1]).toBe("Read,Glob,Grep");
     expect(reviewer.args[reviewer.args.indexOf("--disallowedTools") + 1]).toContain("Bash");
-    const none = buildClaudeInvocation(RunSpec.parse({ ...spec, toolAllowList: [] }), env, {});
+    const none = buildClaudeInvocation(RunSpec.parse({ ...spec, toolAllowList: [] }), env, RELAY, {});
     expect(none.args[none.args.indexOf("--tools") + 1]).toBe("");
   });
 
@@ -88,9 +95,9 @@ describe("claude invocation (flags unverified against a live CLI)", () => {
     expect(toolAllowed("mcp__gantry__ask", ["Read"])).toBe(true);
   });
 
-  it("gives MCP servers the run token as a header, in a file rather than argv", () => {
+  it("points MCP servers at the relay, with no credential in the file or argv", () => {
     expect(JSON.stringify(inv.args)).not.toContain(TOKEN);
-    expect(inv.mcpConfig.mcpServers.docs).toMatchObject({ type: "http", url: "http://gantry-edge:8443/mcp/docs", headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(inv.mcpConfig.mcpServers.docs).toEqual({ type: "http", url: `${RELAY}/mcp/docs` });
     expect(inv.stdin).toContain("Station: build");
   });
 });
@@ -179,9 +186,34 @@ describe("process handling with a stand-in harness executable", () => {
     expect(cps[1].turn).toBe(2);
     const seen = JSON.parse(await readFile(out, "utf8"));
     expect(seen.stdin).toContain("Station: spec");
-    expect(seen.base).toBe(`${edge!.url}/model`);
+    expect(seen.base).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/model$/);
     expect(seen.cwd).toBe(dir);
     expect(seen.argv).toContain("--strict-mcp-config");
+  });
+
+  it("the harness and a tool subprocess never see the run token, and the wrapper still calls the edge with it through the relay", async () => {
+    const out = join(dir, "seen.json");
+    const bin = await fake(`
+      import { writeFileSync } from "node:fs";
+      import { execFileSync } from "node:child_process";
+      // what a Bash tool call would run: the harness's environment, inherited by the subprocess
+      const toolEnv = execFileSync("env", { encoding: "utf8" });
+      const r = await fetch(process.env.ANTHROPIC_BASE_URL + "/v1/messages", { method: "POST", headers: { "x-api-key": "model-key" } });
+      const refused = await fetch(process.env.ANTHROPIC_BASE_URL.replace("/model", "/run/v1/spec"));
+      writeFileSync(${JSON.stringify(out)}, JSON.stringify({ own: JSON.stringify(process.env), toolEnv, modelStatus: r.status, otherStatus: refused.status }));
+      console.log(JSON.stringify({ type: "result", subtype: "success", result: "{\\"a\\":1}" }));
+    `);
+    const { calls } = await run(bin);
+    const seen = JSON.parse(await readFile(out, "utf8"));
+    expect(seen.own).not.toContain(TOKEN);
+    expect(seen.toolEnv).not.toContain(TOKEN);
+    expect(seen.toolEnv).not.toMatch(/GANTRY_RUN_TOKEN/);
+    expect(seen.modelStatus).toBe(200);
+    expect(seen.otherStatus).toBe(403);
+    const model = calls.find((c) => c.path === "/model/v1/messages")!;
+    expect(model.auth).toBe(`Bearer ${TOKEN}`);
+    expect(calls.at(-1)!.auth).toBe(`Bearer ${TOKEN}`);
+    expect(calls.at(-1)!.body).toMatchObject({ status: "succeeded" });
   });
 
   it("refuses a tool call outside the allow-list: stops the harness, records the call, fails the run with the reason", async () => {

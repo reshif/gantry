@@ -205,11 +205,12 @@ export async function callTool(name: string, args: unknown, dir = STATION_DIR): 
     if (why.length < 3) return refuse("Say why you read this page.");
     if ((log.fetched ?? 0) >= LIMITS.fetches) return refuse(`A run can read at most ${LIMITS.fetches} pages.`);
     const edge = process.env.GANTRY_EDGE_URL;
+    // Under the harness there is no token here: GANTRY_EDGE_URL is the loopback relay, which adds it. The token is read only when run directly against an edge.
     const token = process.env.GANTRY_RUN_TOKEN;
-    if (!edge || !token) return refuse("Web research is not available in this run.");
+    if (!edge) return refuse("Web research is not available in this run.");
     let res: Response;
     try {
-      res = await fetch(`${edge}/run/v1/research/fetch`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(process.env.GANTRY_RUN_ID ? { "x-gantry-run-id": process.env.GANTRY_RUN_ID } : {}) }, body: JSON.stringify({ url, why }), signal: AbortSignal.timeout(40_000) });
+      res = await fetch(`${edge}/run/v1/research/fetch`, { method: "POST", headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json", ...(process.env.GANTRY_RUN_ID ? { "x-gantry-run-id": process.env.GANTRY_RUN_ID } : {}) }, body: JSON.stringify({ url, why }), signal: AbortSignal.timeout(40_000) });
     } catch (e) {
       return refuse(`The page could not be read: ${e instanceof Error ? e.message : String(e)}`);
     }
