@@ -575,19 +575,41 @@ export async function finish(fx: Fx, w: Wo, by: string): Promise<void> {
   await dispatchQueued(fx, w.project);
 }
 
-async function completeParentIfDone(fx: Fx, parentId: string, by: string): Promise<void> {
-  const open = await fx.tx.query(`select 1 from work_orders where org_id = $1 and parent_id = $2 and state not in ('done') limit 1`, [fx.orgId, parentId]);
-  if (open.rowCount) return;
+/**
+ * An epic parent settles once every child has ended: done, killed, or declined. All done completes the parent. Any other mix puts the parent in Needs a person
+ * with a summary of how each child ended, so it never waits for ever on a child that will not finish (the person decides: add children, return it to Plan, or
+ * close it). Safe to call after any child's end and again later: a parent that is not waiting on its children is left alone.
+ */
+export async function completeParentIfDone(fx: Fx, parentId: string, by: string): Promise<void> {
+  const kids = (await fx.tx.query<{ id: string; state: string; position: string }>(`select id, state, position from work_orders where org_id = $1 and parent_id = $2 order by id`, [fx.orgId, parentId])).rows;
+  const how = (k: { state: string; position: string }): string => (k.position === "declined" ? "declined" : k.state);
+  if (!kids.length || kids.some((k) => how(k) !== "done" && how(k) !== "killed" && how(k) !== "declined")) return;
   const { lockWo } = await import("./model.js");
   const parent = await lockWo(fx.tx, fx.orgId, parentId);
-  if (parent.state === "done" || parent.state === "killed") return;
-  parent.state = "done";
-  parent.closedAt = fx.now;
-  parent.data.progress = 100;
+  if (parent.state === "done" || parent.state === "killed" || parent.position === "declined") return;
+  if (kids.every((k) => how(k) === "done")) {
+    if (bayOf(fx.catalog, parent)) {
+      // It was waiting for a person because a child had not finished; that child finished after all (restored), so the wait is over.
+      await leaveBay(fx, parent);
+      parent.position = String(parent.data.bayFrom ?? "plan");
+      for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete parent.data[k];
+    }
+    parent.state = "done";
+    parent.closedAt = fx.now;
+    parent.data.progress = 100;
+    parent.data.blockReason = null;
+    note(parent, fx, by, "Every child work order is closed.");
+    await saveWo(fx.tx, fx.orgId, parent);
+    ev(fx, parent, "wo.state", { from: "waiting", to: "done" });
+    return;
+  }
+  if (bayOf(fx.catalog, parent)) return; // already waiting for a person
+  const summary = kids.map((k) => `${k.id} ${how(k)}`).join(", ");
+  const { parkInto } = await import("./intake.js");
   parent.data.blockReason = null;
-  note(parent, fx, by, "Every child work order is closed.");
+  note(parent, fx, "system", `Every child work order has ended, but not all finished: ${summary}.`);
+  await parkInto(fx, parent, "person", `Every child work order has ended, but not all of them finished (${summary}). Decide whether the epic is complete: add children to the brief, or return it to Plan so the Plan agent proposes the rest.`);
   await saveWo(fx.tx, fx.orgId, parent);
-  ev(fx, parent, "wo.state", { from: "waiting", to: "done" });
 }
 
 /* ----------------------------------------------------------------------------------- votes and decisions */

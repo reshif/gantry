@@ -9,9 +9,10 @@
  */
 import { gateAfter, type Catalog } from "@gantry/domain";
 import type { Queryable, Tx } from "@gantry/db";
-import { cancelAttempts, closeEntry, closeInstance, dispatchQueued, enterStation, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
+import { cancelAttempts, closeEntry, completeParentIfDone, closeInstance, dispatchQueued, enterStation, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
 import { lockWo, saveWo, toWo, WO_COLS, type Wo } from "../workorders/model.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
+import { job } from "../../core/jobs-contract.js";
 import type { ScopeType } from "./targets.js";
 
 /** Spec 4.5: how long a halted run may still checkpoint and report before teardown. Default 20 s (below the reaper's 30 s re-enqueue age). */
@@ -78,6 +79,8 @@ export async function reconcileStop(tx: Tx, stopId: string, o: { now?: Date; org
       await restoreOne(fx, w, s, catalog);
     }
     await saveWo(tx, orgId, w);
+    // A killed child ends its epic's wait (the parent settles once every child has ended).
+    if (active && w.state === "killed" && w.parentId) await completeParentIfDone(fx, w.parentId, fx.actor);
     count++;
   }
   for (const p of projects) await dispatchQueued(fx, p);
@@ -138,9 +141,12 @@ async function enforceOn(fx: Fx, w: Wo, s: StopDb, graceMs: number): Promise<{ c
 
 /** One work order after its stop was lifted. */
 async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<void> {
-  const killed = w.data.killed as { prev?: { state: string; position: string; station: string; bayFrom: string | null } } | null | undefined;
-  const heldThisScope = w.data.heldByKill === (s.scope_type === "wo" ? "workorder" : s.scope_type);
-  if (w.state === "killed" && killed && s.scope_type === "wo" && s.mode === "kill") {
+  const killed = w.data.killed as { scope?: string; prev?: { state: string; position: string; station: string; bayFrom: string | null } } | null | undefined;
+  const scopeName = s.scope_type === "wo" ? "workorder" : s.scope_type;
+  const heldThisScope = w.data.heldByKill === scopeName;
+  // An order this very scope killed (a work order's own kill, or a project, repo or factory kill with 'cancel') comes back from the state it was killed in.
+  // One that an inner stop killed first (its own kill) keeps that kill: `stillCovered` already kept it out of here while that stop is active.
+  if (w.state === "killed" && killed && s.mode === "kill" && (s.scope_type === "wo" || killed.scope === scopeName)) {
     const prev = killed.prev ?? { state: "running", position: w.position, station: w.position, bayFrom: null };
     w.data.restoredFrom = killed;
     delete w.data.killed;
@@ -164,10 +170,24 @@ async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<v
 async function resume(fx: Fx, w: Wo, sid: string, catalog: Catalog, afterKill: boolean, s: Pick<StopDb, "fencing">): Promise<void> {
   if (w.position !== sid && !catalog.bays.some((b) => b.id === w.position)) w.position = sid;
   if (catalog.bays.some((b) => b.id === w.position)) return; // in a bay: the bay's own rules apply (the queue is dispatched by the caller)
+  // An approved merge that a stop deferred (the merge job skips work in a stopped scope) is requested again, for the same approved head. The G5 approval is
+  // still on the record (`data.merging`); nothing is merged that a person did not approve.
+  const merging = w.data.merging as { prNumber?: number; headSha?: string } | undefined;
+  if (w.state === "waiting" && merging?.prNumber && merging.headSha) {
+    fx.jobs.push(job("merge.request", { woId: w.id, prNumber: merging.prNumber, headSha: merging.headSha }, { dedupeKey: `merge:${w.id}:${merging.prNumber}:${merging.headSha}:resume:${s.fencing}` }));
+    note(w, fx, fx.actor, `Resumed: the approved merge of #${merging.prNumber} is requested again.`);
+    return;
+  }
   // An attempt older than the stop is superseded by it (F3) even when the stop was lifted before it was enforced: it does not count as live,
   // and the fresh attempt started below replaces it.
-  const live = (await fx.tx.query(`select 1 from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running') and fencing > $3`, [fx.orgId, w.id, s.fencing])).rowCount;
-  if (live) return;
+  const live = (await fx.tx.query<{ id: string; station: string; state: string; fencing: string }>(`select id, station, state, fencing::text from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running') and fencing > $3`, [fx.orgId, w.id, s.fencing])).rows;
+  // A person's send-back or retry during a halt queued an attempt whose dispatch job ran while the halt covered it and skipped. A halt means nothing new starts
+  // while it lasts, not that the decision is lost: the queued attempt is dispatched now (a running one has its run already).
+  for (const a of live.filter((x) => x.state === "queued")) {
+    fx.jobs.push(job("attempt.dispatch", { woId: w.id, station: a.station, attemptId: a.id, fencing: Number(a.fencing) }, { dedupeKey: `attempt:${a.id}:resume:${s.fencing}` }));
+    fx.changes.add("floor");
+  }
+  if (live.length) return;
   const g = gateAfter(catalog, sid);
   const reopen = (w.data.stopClosedGates as string[] | undefined) ?? [];
   delete w.data.stopClosedGates;

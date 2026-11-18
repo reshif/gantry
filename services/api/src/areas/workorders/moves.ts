@@ -128,6 +128,8 @@ async function unparkInner(fx: Fx, actor: Actor, w: Wo, reason?: string): Promis
   if (from === "sechold" && !can(st, by, "gate.approve", { project: w.project, time: fx.now.getTime() }).allowed) throw refuse("denied", "Security hold can only be released by someone who may approve gates in this project.", { rule: { kind: "matrix", id: "gate.approve", name: "Approve gates" } });
   const project = await projectOf(fx, w.project);
   const back = from === "queue" ? "build" : String(w.data.bayFrom ?? "intake");
+  // Returning a blocked merge to the belt gives up that approval: the station runs again and the gate opens afresh on whatever head it ends with.
+  if (w.data.bayCause === "merge") delete w.data.merging;
   await leaveBay(fx, w);
   if (from === "queue") {
     const n = await acquireSlot(fx, w, project);
@@ -190,12 +192,14 @@ export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResu
   const by = person(actor, "Retrying is");
   // A station that failed (or lost its run) three times is parked in the Needs a person bay: retrying it is what that person is there to decide.
   const failedBay = w.state === "parked" && bayOf(fx.catalog, w) === "person" && w.data.bayCause === "failed";
+  // An approved merge that could not happen (the pull request closed, or GitHub still refuses it) waits for a person: Retry merge asks again.
+  if (w.state === "parked" && bayOf(fx.catalog, w) === "person" && w.data.bayCause === "merge") return retryMerge(fx, w, by);
   if (w.state !== "failed" && w.state !== "blocked" && !failedBay) throw invalid(`${w.id} is not failed or blocked.`);
   const sid = stationIdOf(fx.catalog, w);
   if (failedBay) {
     await leaveBay(fx, w);
-    // The person's retry starts the station's failure count afresh.
-    await fx.tx.query(`update attempts set data = data || '{"streakBroken": true}'::jsonb, updated_at = now() where org_id = $1 and wo_id = $2 and station = $3 and state = 'failed'`, [fx.orgId, w.id, sid]);
+    // The person's retry starts the station's failure and interruption counts afresh.
+    await fx.tx.query(`update attempts set data = data || '{"streakBroken": true}'::jsonb, updated_at = now() where org_id = $1 and wo_id = $2 and station = $3 and (state = 'failed' or outcome in ('interrupted','lease_expired'))`, [fx.orgId, w.id, sid]);
   }
   await cancelAttempts(fx, w, "retried");
   const gs = (w.data.gateStatus ??= {}) as Record<string, string>;
@@ -206,6 +210,29 @@ export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResu
   ev(fx, w, "wo.retry", { station: sid });
   await saveWo(fx.tx, fx.orgId, w);
   return done(fx, `${w.id} is running again.`, w.project, { version: w.version });
+}
+
+/**
+ * Retry merge: the same approved head is merged again. Never a new approval and never another commit: when the pull request is closed or its head moved since the
+ * approval, there is nothing approved to merge, and the person is told to reopen it on GitHub or return the work order to Review.
+ */
+async function retryMerge(fx: Fx, w: Wo, by: string): Promise<CmdResult> {
+  const merging = (w.data.merging ?? {}) as { prNumber?: number; headSha?: string };
+  if (!merging.prNumber || !merging.headSha) throw conflict(`${w.id} has no approved merge to retry. Return it to Review instead.`);
+  const pr = (await fx.tx.query<{ state: string; head_sha: string | null }>(`select state, head_sha from pull_requests where org_id = $1 and wo_id = $2 and number = $3`, [fx.orgId, w.id, merging.prNumber])).rows[0];
+  if (!pr || pr.state !== "open") throw conflict(`Pull request #${merging.prNumber} is not open, so there is nothing to merge. Reopen it on GitHub and retry, or return ${w.id} to Review.`);
+  if (pr.head_sha !== merging.headSha) throw conflict(`Pull request #${merging.prNumber} changed after it was approved. Return ${w.id} to Review so the new commit is approved.`);
+  await leaveBay(fx, w);
+  w.position = String(w.data.bayFrom ?? "review");
+  for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete w.data[k];
+  w.state = "waiting";
+  w.data.blockReason = `Merging pull request #${merging.prNumber}.`;
+  const { job } = await import("../../core/jobs-contract.js");
+  fx.jobs.push(job("merge.request", { woId: w.id, prNumber: merging.prNumber, headSha: merging.headSha }, { dedupeKey: `merge:${w.id}:${merging.prNumber}:${merging.headSha}:retry:${fx.now.getTime()}` }));
+  note(w, fx, by, `Retried the merge of #${merging.prNumber} at ${merging.headSha.slice(0, 7)}.`);
+  ev(fx, w, "wo.retry", { station: w.position, text: `merge #${merging.prNumber}` });
+  await saveWo(fx.tx, fx.orgId, w);
+  return done(fx, `${w.id}: merging #${merging.prNumber} again.`, w.project, { version: w.version });
 }
 
 /** `PUT .../record/summary`: the person-written summary on the record (legacy `setRecordSummary`; the right is wo.answer). */

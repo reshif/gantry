@@ -240,7 +240,7 @@ async function myConversations(db: Queryable, orgId: string, st: Flow, st0: Poli
   // A failed or blocked work order, or one parked for a person after repeated failures, waits on a person who may retry it. It stays in "Waiting on you" with the reason and the actions it allows.
   for (const w of st.workOrders) {
     if (!vis.has(w.project) || w.state === "done" || w.state === "killed" || w.bay === "declined" || out.some((x) => x.wo === w.id)) continue;
-    const failedBay = w.bay === "person" && w.bayCause === "failed";
+    const failedBay = w.bay === "person" && (w.bayCause === "failed" || w.bayCause === "merge");
     if (w.state !== "failed" && w.state !== "blocked" && !failedBay) continue;
     const scope = { project: w.project, time: now };
     const retry = decideFor(st0, principal, "wo.sendback", scope).allowed;

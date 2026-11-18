@@ -63,6 +63,27 @@ export interface StationAgentPin { agent: string; version: number; model: string
 export type StationAgentGate = { usable: true; pin: StationAgentPin } | { usable: false; reason: string };
 
 /**
+ * Whether an agent may run at all: "off" when it is not active, "unpromoted" when its live version never passed its eval suite, else null. The one definition of
+ * "active and promoted", used by the chat gate below and by the worker before it starts a station's run. With `requirePromotionRecord` false a version is judged
+ * unpromoted only when the agent keeps a promotion record that lacks it (the promote command keeps it; fixtures that never went through it have none).
+ */
+export function agentOffKind(ag: { status: string; live_version: number | null; data: Record<string, unknown> }, o: { requirePromotionRecord: boolean }): "off" | "unpromoted" | null {
+  if (ag.status !== "active") return "off";
+  if (ag.live_version === null) return null;
+  const record = Array.isArray(ag.data.promoted) ? (ag.data.promoted as unknown[]) : null;
+  return (record || o.requirePromotionRecord) && !(record ?? []).includes(ag.live_version) ? "unpromoted" : null;
+}
+
+/** The reason a station's agent may not start a run now, or null (an agent id of "" or one not set up is judged elsewhere). */
+export async function stationRunBlock(db: Queryable, orgId: string, agentId: string): Promise<string | null> {
+  if (!agentId) return null;
+  const ag = (await db.query<{ name: string; status: string; live_version: number | null; data: Record<string, unknown> }>(`select name, status, live_version, data from agents where org_id = $1 and id = $2`, [orgId, agentId])).rows[0];
+  const kind = ag ? agentOffKind(ag, { requirePromotionRecord: false }) : null;
+  if (!ag || !kind) return null;
+  return kind === "off" ? `The ${ag.name} agent is turned off; turn it on or reassign the station.` : `Version ${ag.live_version} of the ${ag.name} agent has not passed its eval suite; promote it or reassign the station.`;
+}
+
+/**
  * Whether a station's agent may talk now: it exists, is active, has a promoted live version, pins a model that a connected vendor serves for this project, and no stop
  * covers the work. The reason is shown when it falls back to the rules.
  */
@@ -70,10 +91,9 @@ export async function stationAgentGate(db: Queryable, orgId: string, agentId: st
   if (!agentId) return { usable: false, reason: "No agent is assigned to this station." };
   const ag = (await db.query<{ name: string; status: string; live_version: number | null; data: Record<string, unknown> }>(`select name, status, live_version, data from agents where org_id = $1 and id = $2`, [orgId, agentId])).rows[0];
   if (!ag) return { usable: false, reason: `Agent ${agentId} is not set up in this factory.` };
-  if (ag.status !== "active") return { usable: false, reason: `${ag.name} is ${ag.status}.` };
+  if (agentOffKind(ag, { requirePromotionRecord: false }) === "off") return { usable: false, reason: `${ag.name} is ${ag.status}.` };
   if (ag.live_version === null) return { usable: false, reason: `${ag.name} has no live version.` };
-  const promoted = Array.isArray(ag.data.promoted) ? (ag.data.promoted as unknown[]) : [];
-  if (!promoted.includes(ag.live_version)) return { usable: false, reason: `Version ${ag.live_version} of ${ag.name} has not passed its eval suite.` };
+  if (agentOffKind(ag, { requirePromotionRecord: true }) === "unpromoted") return { usable: false, reason: `Version ${ag.live_version} of ${ag.name} has not passed its eval suite.` };
   const v = (await db.query<{ body: Record<string, unknown>; model_id: string | null }>(`select body, model_id from agent_versions where org_id = $1 and agent_id = $2 and version = $3`, [orgId, agentId, ag.live_version])).rows[0];
   if (!v) return { usable: false, reason: `${ag.name}'s live version is missing.` };
   const run = await pinRunConfig(db, { orgId, agentId, agentVersion: ag.live_version, projectId: scope.project, repoId: scope.repoId ?? null }).catch(() => null);

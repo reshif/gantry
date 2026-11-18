@@ -90,6 +90,12 @@ export interface Catalog {
   actions: Action[];
 }
 
+/**
+ * `blocked` is reserved: no engine path sets it today (a work order that cannot go on is `failed`, or `parked` in a bay such as Needs a person; a merge that
+ * cannot happen is parked with bayCause "merge"). Retry, Home, the session and the board still treat it as live, so a future producer or an imported row behaves
+ * like `failed`. Statechart model, gap 7: the handling is kept and documented rather than removed; `lifecycle-gaps.test.ts` fails if something starts setting it
+ * without this note being revisited.
+ */
 export type WoStateId = "running" | "waiting" | "blocked" | "failed" | "parked" | "killed" | "done";
 export interface WoStateInfo {
   label: string;
@@ -767,7 +773,7 @@ export interface WorkOrder {
   pr: PullRequest | null;
   blockReason: string | null;
   failReason: string | null;
-  /** Why the work order sits in the Needs a person bay: "failed" when the station failed or lost its run repeatedly (so Retry applies). */
+  /** Why the work order sits in the Needs a person bay: "failed" when the station failed or lost its run repeatedly, "merge" when the approved merge could not happen (so Retry or Retry merge applies). */
   bayCause?: string;
   /** "start" when the failed run never started (workspace seeding, the launcher, no model). */
   failPhase?: string;
