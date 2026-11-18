@@ -46,13 +46,14 @@ export function toEvent(r: Record<string, unknown>): EventEntry {
   if (typeof r.type === "string") return { ...r, id: Number(r.id ?? 0), at: Number(r.at ?? 0), type: r.type } as EventEntry;
   const action = typeof r.action === "string" ? r.action : "event";
   const target = typeof r.target === "string" && r.target ? r.target : undefined;
-  const wo = target && /^WO-\d+$/i.test(target) ? target : typeof r.wo_id === "string" ? r.wo_id : undefined;
+  const ent = r.entity as { type?: unknown; id?: unknown } | null | undefined;
+  const wo = ent && ent.type === "wo" && typeof ent.id === "string" ? ent.id : target && /^WO-\d+$/i.test(target) ? target : typeof r.wo_id === "string" ? r.wo_id : undefined;
   return {
     id: Number(r.id ?? r.seq ?? 0), at: Number(r.at ?? 0), type: action,
     ...(typeof r.project === "string" ? { project: r.project } : {}),
     ...(wo ? { wo } : {}),
     ...(typeof r.actor === "string" ? { by: r.actor } : {}),
-    ...(target && !wo ? { text: target } : {}),
+    ...(target && !wo && !(ent && ent.type === "wo") ? { text: target } : {}),
   };
 }
 

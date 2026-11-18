@@ -29,7 +29,8 @@ export function byFile<T extends { path: string; plus: number; minus: number }>(
   const m = new Map<string, T>();
   for (const f of rows) {
     const a = m.get(f.path);
-    m.set(f.path, a ? { ...a, ...f, plus: a.plus + f.plus, minus: a.minus + f.minus } : { ...f });
+    const patch = [(a as { patch?: string } | undefined)?.patch, (f as { patch?: string }).patch].filter(Boolean).join("");
+    m.set(f.path, a ? { ...a, ...f, plus: a.plus + f.plus, minus: a.minus + f.minus, ...(patch ? { patch } : {}) } : { ...f });
   }
   return [...m.values()];
 }
@@ -173,7 +174,7 @@ export default function ChangesView() {
             </div>
           </Card>
           <div className="stack" style={{ minWidth: 0 }}>
-            <Card title={<span style={{ fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{cur?.path}</span>} acts={<span className="row"><span className="dim" style={{ whiteSpace: "nowrap" }}>{cur?.preview?.length ? "Click a line number to comment" : "No diff available from the server"}</span></span>} flush>
+            <Card title={<span style={{ fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{cur?.path}</span>} acts={<span className="row"><span className="dim" style={{ whiteSpace: "nowrap" }}>{cur?.preview?.length ? "Click a line number to comment" : "No stored diff for this file"}</span></span>} flush>
               {cur?.preview?.length ? (
                 <div className="diff" style={{ border: 0, borderRadius: 0 }}>
                   {cur.preview.map((l, i) => (
@@ -191,7 +192,7 @@ export default function ChangesView() {
                     </Fragment>
                   ))}
                 </div>
-              ) : <Empty icon="page" title="No diff preview" text="The server keeps the patch by content hash and has no read that returns it yet, so the lines are not shown. The counts on the left are the commits' totals." />}
+              ) : <Empty icon="page" title="No diff preview" text="The server has no stored patch for this file (it may be a binary or very large change). The counts on the left are the sums over the commits that touched it, which can differ from the pull request's net diff." />}
             </Card>
             <Card title="Review summary">
               <p>{`${pr ? `Pull request #${pr.number} is ${pr.state}${pr.draft ? " (draft)" : ""}` : "No pull request yet"}: ${files.length} files, +${sum(files, "plus")} \u2212${sum(files, "minus")}. ${tests.passed + tests.failed + tests.added ? `Tests: ${tests.passed} passed, ${tests.failed} failed, ${tests.added} added.` : "Tests: not available."} ${files.some((f) => f.protected) ? `${files.filter((f) => f.protected).length} sensitive paths touched.` : "No sensitive paths touched."} ${rg ? `${rg.g.label} ${rg.g.name} has ${gi ? `${gi.have} of ${gi.need}` : "no"} approvals.` : "No gate is waiting."} The review agent's findings are not recorded by the server yet.`}</p>

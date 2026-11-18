@@ -1,4 +1,5 @@
 /** Work-order reads (spec 8.4): the list, the traveler, conversations, the floor with replay, the record and its export, and the changes. All rows are mapped to the legacy shapes the web already reads. */
+import { splitPatch } from "./split-patch.js";
 import { createHash } from "node:crypto";
 import {
   can, completeness, criteriaFor, effectiveStop, gateDecision, gateProgress, moveCheck, route, routeGates, stateAt, summaryText, woTotals,
@@ -297,13 +298,17 @@ export async function readChanges(db: Queryable, orgId: string, woId: string) {
     q<{ id: string; sha: string; message: string; author: string | null; committed_at: Date | null; pr_id: string | null }>(`select id, sha, message, author, committed_at, pr_id from commits where org_id = $1 and wo_id = $2 order by committed_at nulls last, created_at`),
     q<{ commit_id: string | null; pr_id: string | null; path: string; status: string; additions: number; deletions: number }>(
       `select f.commit_id, f.pr_id, f.path, f.status, f.additions, f.deletions from changed_files f where f.org_id = $1 and (f.pr_id in (select id from pull_requests where org_id = $1 and wo_id = $2) or f.commit_id in (select id from commits where org_id = $1 and wo_id = $2)) order by f.path`),
-    q<{ id: string; commit_id: string | null; pr_id: string | null; content_hash: string; size_bytes: string }>(`select id, commit_id, pr_id, content_hash, size_bytes::text from patches where org_id = $1 and wo_id = $2 order by created_at`),
+    q<{ id: string; commit_id: string | null; pr_id: string | null; content_hash: string; size_bytes: string; body: Buffer | null }>(`select p.id, p.commit_id, p.pr_id, p.content_hash, p.size_bytes::text, b.content as body from patches p left join github_blobs b on b.org_id = p.org_id and b.hash = p.content_hash where p.org_id = $1 and p.wo_id = $2 order by p.created_at`),
     q<{ id: string; number: number; state: string; head_sha: string | null; head_branch: string | null; base_branch: string | null; url: string | null }>(`select id, number, state, head_sha, head_branch, base_branch, url from pull_requests where org_id = $1 and wo_id = $2 order by number`),
   ]);
+  // each commit's stored patch, cut by file, so a file row can carry its own diff text
+  const byCommit = new Map<string, Map<string, string>>();
+  for (const p of patches) if (p.commit_id && p.body) byCommit.set(p.commit_id, splitPatch(Buffer.from(p.body).toString("utf8")));
+  const patchOf = (commitId: string | null, path: string): string | undefined => (commitId ? byCommit.get(commitId)?.get(path) : undefined);
   return {
     pullRequests: prs.map((p) => ({ number: p.number, state: p.state, headSha: p.head_sha, branch: p.head_branch, base: p.base_branch, url: p.url })),
-    commits: commits.map((c) => ({ sha: c.sha, message: c.message, author: c.author, at: ms(c.committed_at) ?? null, files: files.filter((f) => f.commit_id === c.id).map((f) => ({ path: f.path, status: f.status, plus: f.additions, minus: f.deletions })) })),
-    files: files.map((f) => ({ path: f.path, status: f.status, plus: f.additions, minus: f.deletions })),
+    commits: commits.map((c) => ({ sha: c.sha, message: c.message, author: c.author, at: ms(c.committed_at) ?? null, files: files.filter((f) => f.commit_id === c.id).map((f) => ({ path: f.path, status: f.status, plus: f.additions, minus: f.deletions, ...(patchOf(c.id, f.path) ? { patch: patchOf(c.id, f.path) } : {}) })) })),
+    files: files.map((f) => ({ path: f.path, status: f.status, plus: f.additions, minus: f.deletions, ...(patchOf(f.commit_id, f.path) ? { patch: patchOf(f.commit_id, f.path) } : {}) })),
     patches: patches.map((p) => ({ id: p.id, ref: `sha256/${p.content_hash}`, bytes: Number(p.size_bytes) })),
   };
 }

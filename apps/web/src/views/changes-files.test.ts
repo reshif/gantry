@@ -17,3 +17,14 @@ describe("Changes: one row per file", () => {
     expect(previewOf("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n keep\n-old\n+new\n")).toEqual([{ t: " ", s: "@@ -1,2 +1,2 @@" }, { t: " ", s: "keep" }, { t: "-", s: "old" }, { t: "+", s: "new" }]);
   });
 });
+
+describe("Changes: the diff text follows the file", () => {
+  it("joins the patches of the commits that touched a file and feeds the preview", () => {
+    const rows = byFile([
+      { path: "a.py", status: "added", plus: 1, minus: 0, patch: "@@ -0,0 +1 @@\n+one\n" },
+      { path: "a.py", status: "modified", plus: 1, minus: 0, patch: "@@ -1 +1,2 @@\n+two\n" },
+    ]);
+    const lines = previewOf((rows[0] as { patch?: string }).patch)!;
+    expect(lines.filter((l) => l.t === "+").map((l) => l.s)).toEqual(["one", "two"]);
+  });
+});
