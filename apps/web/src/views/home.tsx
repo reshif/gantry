@@ -139,7 +139,7 @@ export default function HomeView() {
       acts={
         <>
           <a className="btn" href={hashFor("floor", null, scopeId)}><CrIcon name="floor" />Open floor</a>
-          {canSubmit ? <a className="btn primary" id="hm-my-new" href={hashFor("console")}><CrIcon name="plus" />Submit work order</a> : null}
+          {canSubmit ? <a className="btn primary" id="hm-my-new" href={hashFor("console", "submit")}><CrIcon name="plus" />Submit work order</a> : null}
         </>
       }
     >

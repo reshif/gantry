@@ -1,7 +1,7 @@
 /**
- * Console (#console), the Control Room prototype's "submit a work order" screen: the New work order form on the left (the same fields,
+ * Console submit (#console/submit), the Control Room prototype's "submit a work order" screen: the New work order form on the left (the same fields,
  * validation, classifier preview and guarded submit as the dialog), the route preview and the latest submissions on the right.
- * The chat with the factory Console lives in Agents at work (`#workspace`, New chat).
+ * The chat with Gantry is the Console itself (`#console`); this form is `#console/submit`.
  */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
@@ -29,7 +29,7 @@ export default function ConsoleSubmitView() {
   if (scope.all && !projectId) {
     return (
       <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit"
-        acts={<Btn id="con-chats" icon="chat" label="Chats" onClick={() => navigate("workspace", "chats")} />}>
+        acts={<Btn id="con-chats" icon="chat" label="Console chats" onClick={() => navigate("console")} />}>
         <Empty
           id="con-pick-project"
           icon="projects"
@@ -57,7 +57,7 @@ export default function ConsoleSubmitView() {
   );
   return (
     <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit"
-      acts={<Btn id="con-chats" icon="chat" label="Chats" onClick={() => navigate("workspace", "chats")} />}>
+      acts={<Btn id="con-chats" icon="chat" label="Console chats" onClick={() => navigate("console")} />}>
       <NewWorkOrderDialog key={n} variant="page" preset={{ source: "console", ...(projectId ? { project: projectId } : {}) }} onClose={() => setN((x) => x + 1)} aside={aside} />
     </Page>
   );

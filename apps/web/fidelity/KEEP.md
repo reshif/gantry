@@ -26,7 +26,7 @@ The prototype sets the LOOK. These working features from the current app must st
 - Research plans and the run timeline; scouts and objections.
 
 ## Console and workspace
-- Console chat list: New chat, rename, delete, search, sharing and members; model picker; permission codes; audit link.
+- Console (#console) is the general chat with Gantry: chat list (New chat, search, Recent, Shared with me), settings popover in the chat header; the submit-a-work-order form is #console/submit, one click away via New work order in the header. Chat list: New chat, rename, delete, search, sharing and members; model picker; permission codes; audit link.
 - Agents at work (workspace): conversations that need you, archive; conversation and inbox update from the live stream.
 
 ## Govern

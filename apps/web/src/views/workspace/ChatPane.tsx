@@ -3,7 +3,7 @@
  * who answers, who can read it, and the thread actions (rename, share with the project, invite, export, archive). A side thread (a chat about a
  * work order, repository or project, or with a chosen agent) replaces the Console's context panel with what the thread is about and its people.
  */
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { useMe, usePeople } from "../../api/queries";
 import { Btn, Chip, Field, Panel, Select, Who } from "../../ui/primitives";
@@ -42,7 +42,10 @@ function InviteForm({ exclude, registerSubmit, onSave }: { exclude: string[]; re
   );
 }
 
-export function ChatPane({ id, item, onThread }: { id: string | null; item: InboxItem | null; onThread: (id: string) => void }) {
+/** `page` is the Console page's chat: the project this chat asks about, and the header controls (scope, settings); it has no side column. */
+export interface ChatPageOpts { project: string | null; tools: ReactNode }
+
+export function ChatPane({ id, item, onThread, page }: { id: string | null; item: InboxItem | null; onThread: (id: string) => void; page?: ChatPageOpts }) {
   const me = useMe();
   const ui = useUI();
   const actor = useActors();
@@ -92,6 +95,7 @@ export function ChatPane({ id, item, onThread }: { id: string | null; item: Inbo
       {t?.status === "archived" ? <Chip text="Archived" /> : null}
       {item?.spendUsd ? <span className="mono small muted" title="What this conversation's answers cost">{`$${item.spendUsd.toFixed(2)}`}</span> : null}
       <span className="osx-spacer" />
+      {page?.tools}
       {t?.scope?.kind === "work_order" && t.scope.id ? <Btn small id="ws-chat-wo" label={`${t.scope.id} thread`} onClick={() => navigate("workspace", `wo:${t.scope!.id}`)} /> : null}
       {t ? <button type="button" className="icon-btn" id="ws-chat-more" aria-label="Conversation options" aria-haspopup="menu" onClick={(e) => more(e.currentTarget)}><Icon name="dots" /></button> : null}
     </header>
@@ -115,7 +119,7 @@ export function ChatPane({ id, item, onThread }: { id: string | null; item: Inbo
   ) : undefined;
 
   return (
-    <ConsoleView embed={{ threadId: id, onThread, header, ...(aside ? { aside } : {}), readOnly, agent: side ? { name: agentName ?? "Gantry assistant", about } : null, initial: id ? initials.current[id] ?? null : null }} />
+    <ConsoleView embed={{ threadId: id, onThread, header, ...(aside ? { aside } : page ? { aside: null } : {}), ...(page ? { project: page.project } : {}), readOnly, agent: side ? { name: agentName ?? "Gantry assistant", about } : null, initial: id ? initials.current[id] ?? null : null }} />
   );
 }
 

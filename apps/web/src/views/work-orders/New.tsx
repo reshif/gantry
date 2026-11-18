@@ -286,7 +286,7 @@ export function useNewWorkOrder(): (preset?: NewWoPreset) => void {
       // Under All projects the pick stays this one work order's; only a narrowed scope remembers the project.
       if (!getPrefs().scopeAll) setProject(preset.project);
     }
-    navigate("console");
+    navigate("console", "submit");
   };
 }
 

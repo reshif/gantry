@@ -9,7 +9,7 @@ import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import type { ThreadSummary } from "./types";
 
-function RenameForm({ initial, onSave, registerSubmit }: { initial: string; onSave: (t: string) => Promise<string | null>; registerSubmit: (fn: () => void) => void }) {
+export function RenameForm({ initial, onSave, registerSubmit }: { initial: string; onSave: (t: string) => Promise<string | null>; registerSubmit: (fn: () => void) => void }) {
   const [v, setV] = useState(initial);
   const [err, setErr] = useState("");
   registerSubmit(() => {

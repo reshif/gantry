@@ -2,7 +2,7 @@
  * Agents at work (#workspace): one place for every conversation with agents (agent workspace, Phase 4). The inbox on the left lists the work
  * orders' threads, side threads with a chosen agent, repositories' onboarding threads and factory chats; the centre shows the one picked, with its
  * own context pane. `#workspace/<key>`: `wo:<id>`, `repo:<id>`, a chat id, `new` (a new factory chat) or `operator`.
- * The older Conversations (#conversations/<WO>) and Console (#console) links land here.
+ * The older Conversations (#conversations/<WO>) links land here. #workspace/new and #workspace/chats keep working; the general chat lives at #console.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMe } from "../api/queries";
@@ -26,10 +26,9 @@ export default function WorkspaceView() {
   const me = useMe();
   const ui = useUI();
   const prefs = usePrefs();
-  // Older links: #conversations/<WO> and #console[/<chat>] open here.
+  // Older links: #conversations/<WO> opens here (#console is its own page now).
   useEffect(() => {
     if (hash.id === "conversations") toWorkspace(hash.param ? `wo:${hash.param}` : "chats");
-    else if (hash.id === "console") toWorkspace(hash.param ?? "new");
   }, [hash.id, hash.param]);
   const pending = prefs.openConversation;
   useEffect(() => {

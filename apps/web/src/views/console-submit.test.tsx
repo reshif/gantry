@@ -2,7 +2,6 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { updatePrefs } from "../lib/prefs";
 import ConsoleSubmitView from "./console-submit";
-import WorkspaceView from "./workspace";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 
 beforeEach(() => {
@@ -105,16 +104,11 @@ describe("Console (submit a work order, prototype layout)", () => {
     await waitFor(() => expect(screen.queryByText("trace.log")).toBeNull());
   });
 
-  it("Chats on the Console page reaches the conversations hub: New chat, search, filters and archive", async () => {
-    mockApi({ "GET /api/v1/workspace/inbox": () => ({ body: { items: [] } }) });
-    window.location.hash = "#console";
+  it("the Console chats button goes to the general chat", async () => {
+    mockApi({});
+    window.location.hash = "#console/submit";
     mount(<ConsoleSubmitView />);
-    fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
-    await waitFor(() => expect(window.location.hash).toMatch(/workspace\/chats/));
-    cleanup();
-    mount(<WorkspaceView />);
-    await waitFor(() => expect(document.getElementById("ws-new")).toBeTruthy());
-    expect(document.getElementById("ws-q")).toBeTruthy();
-    expect(document.getElementById("ws-f-archived")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Console chats" }));
+    await waitFor(() => expect(window.location.hash).toBe("#console"));
   });
 });

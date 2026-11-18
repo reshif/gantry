@@ -43,7 +43,7 @@ describe("palette", () => {
     fireEvent.change(await screen.findByRole("combobox", { name: "Search commands" }), { target: { value: "submit" } });
     await waitFor(() => expect(labels()).toContain("Submit a work order"));
     fireEvent.mouseDown(screen.getByText("Submit a work order"));
-    await waitFor(() => expect(window.location.hash).toBe("#console"));
+    await waitFor(() => expect(window.location.hash).toBe("#console/submit"));
   });
   it("is capped at 40 results with no Sign out action", async () => {
     mockApi();
