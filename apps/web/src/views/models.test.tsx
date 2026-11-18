@@ -111,6 +111,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
   });
   it("shows the vendor hub: health from real calls, key mask, residency, models and the title block", async () => {
     setup();
+    window.location.hash = "#models/vendors";
     mount();
     const a = await byId("vendor-anthropic");
     expect(within(a).getByText("Anthropic")).toBeTruthy();
@@ -128,7 +129,9 @@ describe("Models screen (legacy models.js on the real API)", () => {
     expect(l.textContent).toContain("Not connected");
     expect(l.querySelector("#vendor-connect-local")?.textContent).toContain("Connect Local models");
     expect(document.querySelector(".md-incident")?.textContent).toContain("Amazon Bedrock is degraded (p50 1460 ms)");
-    expect(document.body.textContent).toContain("Vendors connected3 of 4");
+    expect(document.querySelector(".ph .sub")!.textContent).toBe("Which models agents may use, what they cost and where they are used.");
+    expect(document.getElementById("md-discover")).toBeNull();
+    expect(document.getElementById("md-back")).toBeTruthy();
     expect(document.getElementById("vendor-test-anthropic")).toBeNull();
   });
 
@@ -369,12 +372,12 @@ describe("routing policy", () => {
 
 describe("vendors summary", () => {
   beforeEach(() => { window.location.hash = "#models/vendors"; });
-  it("counts models on only among connected vendors, and shows a dash where a vendor is not connected", async () => {
+  it("counts every listed model (as the prototype's 4/6) and shows a dash where a vendor is not connected", async () => {
     setup({});
     mount();
-    const tile = await waitFor(() => { const e = [...document.querySelectorAll("#md-stats .stat-tile")].find((x) => x.textContent?.includes("Models on")); if (!e) throw new Error("no tile"); return e; });
-    const connectedModels = VENDORS.filter((v) => v.connected).reduce((n, v) => n + v.models.length, 0);
-    await waitFor(() => expect(tile.textContent).toContain(`of ${connectedModels}`));
+    const tile = await waitFor(() => { const e = [...document.querySelectorAll("#md-stats .stat")].find((x) => x.textContent?.includes("Enabled")); if (!e) throw new Error("no tile"); return e; });
+    const connectedModels = VENDORS.reduce((n, v) => n + v.models.length, 0);
+    await waitFor(() => expect(tile.textContent).toContain(`/${connectedModels}`));
     const off = (await byId("vendor-local")).querySelector(".tb-vendor dd")!;
     expect(off.textContent).toBe("–");
   });
@@ -539,5 +542,50 @@ describe("Models screen: a read the person may not make", () => {
     mount();
     await waitFor(() => expect(document.getElementById("models-hidden")?.textContent).toContain("Not visible to you"));
     expect(document.getElementById("models-hidden")?.textContent).toContain("model.view");
+  });
+});
+
+describe("models catalog in the prototype layout", () => {
+  beforeEach(() => { window.location.hash = "#models"; });
+  it("has the four tiles, Discover models and the prototype's columns", async () => {
+    setup();
+    mount();
+    await byId("mc-table");
+    expect([...document.querySelectorAll("#md-stats .label")].map((x) => x.textContent)).toEqual(["Enabled", "Needs a price", "Spend, 30 days", "Fallbacks fired"]);
+    expect([...document.querySelectorAll("#mc-table thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim())).toEqual(["Model", "Tier", "Context", "In / out per Mtok", "Used at", "Enabled"]);
+    expect(document.getElementById("md-discover")).toBeTruthy();
+  });
+  it("offers Set price for a model without one, rejects a price of zero and publishes a positive one", async () => {
+    const vendors = VENDORS.map((v) => v.id === "anthropic" ? { ...v, models: v.models.map((m) => m.id === "claude-haiku-5-5" ? { ...m, needsPrice: true, enabled: false } : m) } : v);
+    const calls = setup({ "GET /api/v1/vendors": () => ({ body: vendors }), "POST /api/v1/prices": () => ok({ msg: "Price published." }) });
+    mount();
+    fireEvent.click(await byId("mc-price-claude-haiku-5-5"));
+    fireEvent.change(await byId("sp-in"), { target: { value: "0" } });
+    fireEvent.change(await byId("sp-out"), { target: { value: "4" } });
+    fireEvent.click(await byId("sp-save"));
+    await waitFor(() => expect(document.body.textContent).toContain("Prices must be above zero."));
+    expect(writes(calls)).toHaveLength(0);
+    fireEvent.change(await byId("sp-in"), { target: { value: "0.8" } });
+    fireEvent.click(await byId("sp-save"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/prices", body: { prices: { "claude-haiku-5-5": { in: 0.8, out: 4 } } } });
+  });
+});
+
+describe("models screen has no tab strip (prototype)", () => {
+  it("the catalog has no buttons to vendors, routing or prices; Spend by model replaces Spend by vendor; Add vendor lives on the vendors page", async () => {
+    setup();
+    window.location.hash = "#models";
+    mount();
+    await byId("mc-table");
+    expect(document.getElementById("md-tab-models")).toBeNull();
+    expect(document.getElementById("md-add-vendor")).toBeNull();
+    expect(document.getElementById("mc-vendors")).toBeNull();
+    expect(document.body.textContent).toContain("Spend by model");
+    expect(document.body.textContent).not.toContain("Spend by vendor");
+    cleanup();
+    window.location.hash = "#models/vendors";
+    mount();
+    await byId("md-add-vendor");
   });
 });

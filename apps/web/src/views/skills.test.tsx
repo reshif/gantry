@@ -79,16 +79,20 @@ afterEach(() => {
 });
 
 describe("Skills screen", () => {
-  it("shows the library with versions, usage and eval coverage, and the first skill's definition", async () => {
+  it("shows the library in the prototype's columns, opens the drawer from the name and the page from the drawer", async () => {
     setup();
     mount();
     const row = await byId("sk-row-sk-review");
     expect(row.textContent).toContain("Code review");
-    expect(row.textContent).toContain("v1.2.0");
-    expect(row.textContent).toContain("9/10");
-    expect((await byId("sk-row-sk-docs")).textContent).toContain("none");
+    expect(row.textContent).toContain("1.2.0");
     expect(locked(await byId("sk-new"))).toBe(false);
-    fireEvent.click(row);
+    fireEvent.click(row.querySelector("a.sk-name")!);
+    expect(window.location.hash).not.toContain("sk-review");
+    expect((await byId("sk-drawer")).textContent).toContain("Skill \u00b7 v1.2.0");
+    fireEvent.click(await byId("sk-drawer-edit"));
+    await waitFor(() => expect(document.body.textContent).toContain("Opened a draft of Code review"));
+    expect(window.location.hash).not.toContain("sk-review");
+    fireEvent.click(await byId("sk-drawer-page"));
     expect(window.location.hash).toBe("#skills/sk-review");
     cleanup();
     mount("sk-review");
@@ -96,21 +100,20 @@ describe("Skills screen", () => {
     expect(document.getElementById("sk-save")?.textContent).toContain("Save as v1.3.0");
   });
 
-  it("filters to unused skills and says when none match", async () => {
+  it("filters by search and says Nothing matches with a Clear filters button", async () => {
     setup();
     mount();
     await byId("sk-row-sk-review");
-    fireEvent.change(await byId("sk-view"), { target: { value: "unused" } });
-    await waitFor(() => expect(document.getElementById("sk-row-sk-review")).toBeNull());
-    expect(document.getElementById("sk-row-sk-docs")).toBeTruthy();
     fireEvent.change(await byId("sk-search"), { target: { value: "zzz" } });
-    expect((await byId("sk-lib")).textContent).toContain("No skills match");
+    expect((await byId("sk-lib")).textContent).toContain("Nothing matches");
+    fireEvent.click(await byId("sk-empty-clear"));
+    await waitFor(() => expect(document.getElementById("sk-row-sk-review")).not.toBeNull());
   });
 
   it("shows the empty state when the library has no skills, and still offers a new skill", async () => {
     setup({ "GET /api/v1/skills": () => ({ body: [] }) });
     mount();
-    await waitFor(() => expect(text()).toContain("No skills yet"));
+    await waitFor(() => expect(text()).toContain("Nothing here yet"));
     expect(text()).toContain("Create the first skill.");
     expect(locked(await byId("sk-new"))).toBe(false);
   });

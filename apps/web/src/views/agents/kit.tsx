@@ -69,7 +69,7 @@ export function nextVersion(a: AgentRow): string {
 
 /* ---------- screen state, kept across tabs and screens like legacy `ui` ---------- */
 
-export const ui = { sel: null as string | null, tab: "overview", ctxProject: null as string | null, ctxRepo: null as string | null, newVer: "", newNote: "" };
+export const ui = { sel: null as string | null, want: "", ctxProject: null as string | null, ctxRepo: null as string | null, newVer: "", newNote: "" };
 let tick = 0;
 const listeners = new Set<() => void>();
 export const rerender = (): void => {
@@ -80,7 +80,7 @@ export const useAgentsUi = (): number => useSyncExternalStore((l) => (listeners.
 /** Other screens (skills, palette) open an agent: its page, on the tab asked for. */
 export const agentsSelect = (id: string, tab?: string): void => {
   ui.sel = id;
-  if (tab) ui.tab = tab;
+  ui.want = tab ?? "";
   rerender();
   navigate("agents", id);
 };

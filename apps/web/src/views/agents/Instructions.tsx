@@ -64,7 +64,7 @@ export function TextDialog({ o, close }: { o: TextOpts; close: () => void }) {
 
 /** The status of the repo's own convention files, from the manifest of the last run seeded from it (not from the guidelines text above). */
 function conventionsLine(rc: AgentEffective["repoContext"] | undefined): string {
-  if (!rc) return "Repo conventions: not read yet. Agents are shown AGENTS.md and CLAUDE.md from the repository when a run starts.";
+  if (!rc || !Array.isArray(rc.files)) return "Repo conventions: not read yet. Agents are shown AGENTS.md and CLAUDE.md from the repository when a run starts.";
   const f = (path: string) => rc.files.find((x) => x.path === path);
   const one = (path: string): string => {
     const x = f(path);
@@ -74,7 +74,7 @@ function conventionsLine(rc: AgentEffective["repoContext"] | undefined): string 
   return `Repo conventions at ${rc.commit.slice(0, 12)}: ${one("AGENTS.md")}; ${one("CLAUDE.md")}.`;
 }
 
-export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
+export function InstructionsTab({ a, d, projects }: TabProps) {
   const ui_ = useUI();
   const base = useInstructions().data;
   const live = projects.filter((p) => p.status !== "archived");
@@ -138,11 +138,7 @@ export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
                   save: async (v) => refreshed(await ops.setProject(project.id, "overlay", v.trim(), { ifMatch: (project as { version?: number }).version })) }} />
               ));
             }} /> : null)}
-          {layer(3, "Agent", `${d.name} · this agent only`, (
-            <Field label="Agent instructions" htmlFor="ag-instr" hint="Saved with the agent. Unsaved edits show in the preview.">
-              <textarea id="ag-instr" className="input" rows={5} disabled={ro} value={d.instructions || ""} onChange={(e) => edit(() => { d.instructions = e.target.value; })} />
-            </Field>
-          ))}
+          {layer(3, "Agent", `${d.name} \u00b7 this agent only`, <p className="ag-layer-text muted">{d.instructions ? `${d.instructions.length} characters. Edit them in the Instructions card above.` : "No agent instructions yet. Write them in the Instructions card above."}</p>)}
           {layer(4, "Repo guidelines (Gantry)", repo ? repo.name : "no repo in this project",
             <div>
               {repos.length ? (
