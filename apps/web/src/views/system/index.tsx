@@ -124,7 +124,7 @@ function StuckCard({ h }: { h: SystemHealth }) {
               <Lamp tone="warn" />
               <div className="main1">
                 <span className="t1">{j.workOrder ? <><a href={hashFor("record", j.workOrder, j.project ?? null)}>{j.workOrder}</a>{j.station ? ` at ${cap(j.station)}` : ""}</> : <><span className="mono">{j.kind}</span> in {j.queue}</>}</span>
-                <span className="t2">{`${j.reason === "lease_expired" ? "Lease expired" : `Over ${h.jobs.runningLongMinutes / 60}h`} · ${Number.isFinite(since) ? fmt.dur(Date.now() - since) : "not started"} · try ${j.attempts}/${j.maxAttempts}`}</span>
+                <span className="t2" title={`Attempt ${j.attempts} of ${j.maxAttempts}`}>{`${j.reason === "lease_expired" ? "Lease expired" : `Over ${h.jobs.runningLongMinutes / 60}h`} · ${Number.isFinite(since) ? fmt.dur(Date.now() - since) : "not started"}`}</span>
               </div>
               <Btn small label="Nudge" id={`sys-nudge-${j.id}`} onClick={() => ui.toast(noEndpoint("Nudging a stuck job"), "info")} />
             </div>
@@ -179,7 +179,7 @@ export default function SystemView() {
         { l: "Worker heartbeat", v: hb != null ? `${hb}s` : "–", d: "last tick", tone: hb != null && hb >= 30 ? "bad" : "ok" },
         { l: "Services healthy", v: h ? `${up}/${h.services.length}` : "–", tone: h && up < h.services.length ? "warn" : "ok" },
         { l: "Dead letters", v: h ? fmt.num(h.outbox.counts.dead) : "–", tone: h && h.outbox.counts.dead ? "warn" : "ok" },
-        { l: "Stuck work orders", v: h ? fmt.num(h.jobs.stuck.length) : "–", d: "flagged jobs", tone: h && h.jobs.stuck.length ? "warn" : "ok" },
+        { l: "Stuck work orders", v: h ? fmt.num(h.jobs.stuck.length) : "–", tone: h && h.jobs.stuck.length ? "warn" : "ok" },
       ]} />
       <Tabs idPrefix="sys-tab" active={tab} onChange={setTab} items={[{ id: "overview", label: "Services" }, { id: "backups", label: "Backups and drill" }, { id: "outbox", label: "Outbox", count: h?.outbox.counts.dead ?? 0 }, { id: "stuck", label: "Stuck jobs", count: h?.jobs.stuck.length ?? 0 }]} />
       <Async query={q} what="system health" id="sys">

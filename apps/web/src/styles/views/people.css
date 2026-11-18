@@ -139,3 +139,5 @@
 /* gov1: a dialog panel sits above its own scrim (the prototype scrim carries z-index 100; the panel is not positioned) */
 .dlg-wrap > .scrim { z-index: 0; }
 .dlg-wrap > .dlg { position: relative; z-index: 1; }
+.btn.linkbtn { background: none; border: 0; padding: 0; height: auto; min-height: 0; box-shadow: none; color: var(--accent); font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.btn.linkbtn:hover { background: none; color: var(--ink); }
