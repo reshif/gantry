@@ -4,7 +4,9 @@ import { DAY, fmt, type IntegrationInstance } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useChatLinks, useMe } from "../../api/queries";
-import { Btn, Field, LockNote, type Decision } from "../../ui/primitives";
+import { Avatar, Btn, Field, LockNote, type Decision } from "../../ui/primitives";
+import { CrIcon } from "../../ui/cr";
+import { CrDrawer, Kv, agoShort } from "../connect/kit";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -111,13 +113,13 @@ export function RemoveIntegration({ inst, close, closeDrawer }: { inst: Integrat
   const block = reasons.length ? { allowed: false, reason: `${reasons.join("; ")}.`, needs: "" } : null;
   const alt = u.implicit.length ? d.insts.find((x) => x.type === inst.type && x.id !== inst.id) : null;
   return (
-    <Dialog title={`Remove ${inst.name}?`} kicker={d.typeOf(inst).name} onClose={close} actions={[{ label: "Cancel" }, { label: `Remove ${inst.name}`, kind: "danger", id: "int-rm-go", guard: block ?? perm, onClick: async () => {
+    <Dialog title={`Disconnect ${inst.name}?`} kicker={d.typeOf(inst).name} sub="Projects using it stop receiving events. Secrets are deleted." onClose={close} actions={[{ label: "Cancel" }, { label: "Disconnect", kind: "danger", id: "int-rm-go", guard: block ?? perm, onClick: async () => {
       const r = await ops.removeIntegration(inst.id);
       ui.toast(r.msg, r.ok ? "ok" : "error");
       if (r.ok) { close(); closeDrawer(); }
     } }]} body={(
       <div className="form-grid">
-        <p>Removes the connection and its stored secret. This cannot be undone; adding it again needs the secret.</p>
+        <p>This cannot be undone; adding it again needs the secret.</p>
         {block ? <div className="callout callout-block" id="int-rm-blocked"><Icon name="lock" /><span>{block.reason}</span></div> : null}
         {u.implicit.length ? <div className="callout callout-warn"><Icon name="alert" /><span>{u.implicit.length} route{u.implicit.length > 1 ? "s" : ""} pick it by type today. After removal they {alt ? `use ${alt.name}.` : "fail until you pick another destination."}</span></div> : null}
         <h3 className="sub-h">Depends on it</h3>
@@ -175,43 +177,46 @@ export function InstanceDrawer({ id, close, onEdit, onToggle, onRemove }: { id: 
   const st = statusOf(inst);
   const u = d.usage(inst);
   const day = dl.filter((x) => x.at > Date.now() - DAY);
-  const failed = day.filter((x) => x.status === "failed").length;
-  const secretF = t.fields.find((f) => f.type === "secret");
+  const failed = day.filter((x) => x.status === "failed");
+  const recent = dl.slice(0, 5);
+  const lastFailed = recent.length > 0 && recent.every((x) => x.status === "failed");
   const test = async () => {
+    ui.toast(`Testing ${inst.name}…`, "info");
     const r = await ops.testIntegrationInstance(inst.id);
     const out = (r as unknown as { test?: { ok: boolean } }).test;
-    ui.toast(r.msg, r.ok && (out?.ok ?? true) ? "ok" : "error");
+    const good = r.ok && (out?.ok ?? true);
+    ui.toast(good ? `${inst.name} is reachable.` : `${inst.name}: ${r.msg || "the test failed"}. Still failing.`, good ? "ok" : "error");
   };
+  const why = st === "failing" ? (failed.length ? `${lastFailed ? `Last ${recent.length} deliveries failed` : `${failed.length} of ${day.length} deliveries failed in the last day`}${failed[0]?.error ? `: ${failed[0].error}` : ""}.` : "The last connection test failed.") : st === "degraded" ? "Responses are slow or partly failing." : st === "offline" ? "The service did not answer." : st === "disabled" ? "This connection is switched off. Nothing is sent through it until you enable it." : "";
   return (
-    <div className="drawer-inner int-drawer">
-      <div className="drawer-head">
-        <div>
-          <div className="kicker">{t.name} · {catName(t.category)}</div>
-          <div className="drawer-id"><Mark icon={t.icon} small /><Health st={st} /></div>
-          <h2 className="drawer-title">{inst.name}</h2>
-        </div>
-        <button type="button" className="icon-btn drawer-close" aria-label="Close" onClick={close}><Icon name="x" /></button>
-      </div>
-      <div className="drawer-scroll">
-        <LockNote decision={perm} what={inst.name} />
+    <CrDrawer
+      eyebrow={`Integration · ${t.id}`} title={inst.name} close={close}
+      foot={<><Btn label="Test connection" id="int-d-test" guard={perm} onClick={() => void test()} /><Btn label="Disconnect…" kind="danger" id="int-d-remove" guard={perm} onClick={() => onRemove(inst)} /></>}
+    >
+      <div className="row"><Health st={st} /></div>
+      {why && st !== "healthy" ? <div className={`banner ${st === "failing" ? "bad" : "warn"}`} id="int-d-why"><CrIcon name="warn" /><div className="grow">{why}</div></div> : null}
+      <LockNote decision={perm} what={inst.name} />
+      <Kv rows={[
+        ["Projects", <span key="p">{inst.projects === "all" ? "all" : inst.projects.join(", ")}</span>],
+        ["Secret", <span key="s" className="mono">{inst.secretMask || "not set"}</span>],
+        ["Connected by", <span key="b" className="row nowrap" style={{ gap: 6 }}><Avatar id={inst.createdBy} /><span className="ell">{actor(inst.createdBy).name}</span></span>],
+        ["Last sync", agoShort(inst.lastSync)],
+      ]} />
+      <details className="int-more" id="int-d-more">
+        <summary>Settings, usage and recent deliveries</summary>
         <div className="int-drawer-actions">
-          <Btn label="Test connection" small icon="refresh" id="int-d-test" guard={perm} onClick={() => void test()} />
           <Btn label="Edit" small icon="dots" id="int-d-edit" guard={perm} onClick={() => onEdit(inst)} />
           <Btn label={inst.connected ? "Disable" : "Enable"} small kind={inst.connected ? "ghost" : "primary"} icon="power" id="int-d-toggle" guard={perm} onClick={() => onToggle(inst)} />
-          <Btn label="Remove" small kind="danger" icon="x" id="int-d-remove" guard={perm} onClick={() => onRemove(inst)} />
         </div>
         {inst.lastTest ? (
           <div className={`callout ${inst.lastTest.ok ? "callout-ok" : "callout-warn"}`} role="status" id="int-d-lasttest">
             <Icon name={inst.lastTest.ok ? "check" : "alert"} />
-            <span>Last test {fmt.ago(inst.lastTest.at, Date.now())} by {actor(inst.lastTest.by).name}: {inst.lastTest.ok ? "answered." : `failed${inst.lastTest.lines?.length ? ` (${inst.lastTest.lines.find((l) => /refus|fail|answered|could|did not|missing/i.test(l)) ?? inst.lastTest.lines[0]})` : "."}`}</span>
+            <span>Last test {fmt.ago(inst.lastTest.at, Date.now())} by {actor(inst.lastTest.by).name}: {inst.lastTest.ok ? "answered." : "failed."}</span>
           </div>
         ) : null}
-        {!inst.connected ? <div className="callout callout-warn" id="int-d-off"><Icon name="power" /><span>This connection is switched off. Nothing is sent through it until you enable it.</span></div> : null}
         <dl className="int-kv int-kv-drawer">
-          {t.fields.map((f) => {
-            // Only the first secret has a mask on record; the others are sealed with it and never shown.
-            const firstSecret = t.fields.find((x) => x.type === "secret")?.key === f.key;
-            const v = f.type === "secret" ? (firstSecret ? inst.secretMask || "not set" : inst.secretMask ? "set, sealed" : "not set") : f.type === "bool" ? (inst.config[f.key] ? "yes" : "no") : inst.config[f.key];
+          {t.fields.filter((f) => f.type !== "secret").map((f) => {
+            const v = f.type === "bool" ? (inst.config[f.key] ? "yes" : "no") : inst.config[f.key];
             return (
               <div key={f.key}>
                 <dt>{f.label}</dt>
@@ -220,47 +225,21 @@ export function InstanceDrawer({ id, close, onEdit, onToggle, onRemove }: { id: 
             );
           })}
           {inst.targetId ? <div><dt>Endpoint id</dt><dd className="mono">{inst.targetId}</dd></div> : null}
-          <div><dt>Projects</dt><dd>{inst.projects === "all" ? "All projects" : inst.projects.map(d.pname).join(", ")}</dd></div>
-          <div><dt>Last sync</dt><dd>{fmt.ago(inst.lastSync, Date.now())}</dd></div>
-          <div><dt>Added</dt><dd>{actor(inst.createdBy).name}, {fmt.ago(inst.createdAt, Date.now())}</dd></div>
-          <div><dt>Last 24h</dt><dd className={`mono${failed ? " neg" : ""}`}>{day.length} sent{failed ? `, ${failed} failed` : ""}</dd></div>
+          <div><dt>Last 24h</dt><dd className={`mono${failed.length ? " neg" : ""}`}>{day.length} sent{failed.length ? `, ${failed.length} failed` : ""}</dd></div>
         </dl>
-        {secretF ? null : <p className="muted small">This type stores no secret.</p>}
         {inst.type === "slack" && me ? <LinkAccount inst={inst} /> : null}
-        <h3 className="sub-h">What it does</h3>
-        <div className="int-caps">
-          <div><div className="nt-sub int-sub">Events</div>{t.events.length ? <ul className="int-chips">{t.events.map((e) => <li className="int-chip mono" key={e}>{e}</li>)}</ul> : <p className="muted small">Receives every event a route sends it.</p>}</div>
-          <div><div className="nt-sub int-sub">Actions</div>{t.actions.length ? <ul className="int-chips">{t.actions.map((a) => <li className="int-chip mono" key={a}>{a}</li>)}</ul> : <p className="muted small">None declared.</p>}</div>
-        </div>
-        {t.manifest ? (
-          <>
-            <div className="nt-sub int-sub">Connector</div>
-            <p className="small muted" id="int-d-manifest">Version {t.manifest.version}. Delivery key: {t.manifest.delivery.idempotencyKey}. Retries: {t.manifest.delivery.retryable}. Permanent: {t.manifest.delivery.permanent}.</p>
-          </>
-        ) : null}
         <h3 className="sub-h">Depends on it ({usageCount(u)})</h3>
         <ImpactList u={u} inst={inst} pname={d.pname} />
         <h3 className="sub-h">Recent deliveries</h3>
         {dl.length ? (
-          <div className="table-scroll">
-            <table className="table table-compact">
-              <thead><tr><th>Time (IST)</th><th>Project</th><th>Event</th><th>Target</th><th>Status</th></tr></thead>
-              <tbody>
-                {dl.slice(0, 8).map((x) => (
-                  <tr key={x.id}>
-                    <td className="mono">{fmt.ist(x.at)}</td>
-                    <td>{d.projects.find((p) => p.id === x.project)?.key ?? x.project}</td>
-                    <td>{evName(x.event)}</td>
-                    <td className="mono">{x.target}</td>
-                    <td><span className={`outcome o-${x.status === "failed" ? "failed" : "ok"}`}>{x.status === "failed" ? "✕ failed" : x.status === "pending" ? "… pending" : "✓ delivered"}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="plain-list" id="int-d-deliveries">
+            {dl.slice(0, 8).map((x) => (
+              <li key={x.id}><span className="mono dim">{agoShort(x.at)}</span><span>{evName(x.event)} to <span className="mono">{x.target}</span></span><span className={`outcome o-${x.status === "failed" ? "failed" : "ok"}`}>{x.status === "failed" ? "failed" : x.status === "pending" ? "pending" : "delivered"}</span></li>
+            ))}
+          </ul>
         ) : <p className="muted small">{t.destination ? "Nothing sent yet." : "Source integrations send events to Gantry; nothing is delivered to them."}</p>}
-      </div>
-    </div>
+      </details>
+    </CrDrawer>
   );
 }
 

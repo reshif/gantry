@@ -1,55 +1,74 @@
 /**
- * API & triggers (spec 8.8, 8.10, 11.7, 12.5). Port of legacy/js/views/api.js against /api-keys, /api-config, /api-requests and /triggers:
- * API keys (service accounts, shown once, expiring), the endpoint reference, a playground that really submits with a pasted key, the request log, limits,
- * and triggers with "Simulate incoming" and their run history. Not ported, on purpose: "The API here runs on local sample logic" (it is the real API);
- * the conversation endpoint (not in the public API), and the Ed25519 and HMAC-SHA512 signing choices (the delivery implements HMAC-SHA256 only).
+ * API and triggers (spec 8.8, 8.10, 11.7, 12.5), the Control Room screen: head with Create key or New trigger for the open tab, tabs API keys,
+ * Triggers and Quick start (`?tab=`), search, sortable tables with paging in the URL, and a trigger drawer (`?open=`). Quick start shows the
+ * curl for submitting a work order, then the endpoint reference, playground, request log and limits as sections.
  */
-import { useState } from "react";
-import { Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
-import { KeysTab } from "./api/Keys";
+import { useEffect, useState } from "react";
+import { Btn, Tabs } from "../ui/primitives";
+import { Async } from "../ui/async";
+import { Card, Page } from "../ui/cr";
+import { useUI } from "../ui/overlay-context";
+import { CreateKey, KeysTab } from "./api/Keys";
 import { LimitsTab } from "./api/Limits";
 import { LogTab } from "./api/Log";
 import { PlayTab } from "./api/Playground";
-import { RefTab } from "./api/Reference";
-import { TriggersTab } from "./api/Triggers";
-import { useApiData } from "./api/kit";
-import { Async, qState } from "../ui/async";
+import { ENDPOINTS, RefTab, curl } from "./api/Reference";
+import { NewTrigger, TriggerDrawer, TriggersTab } from "./api/Triggers";
+import { CodeBlock, useApiData, useCanAny } from "./api/kit";
+import { ClearOnClose, oneOf, useUrlState } from "./connect/kit";
+
+const TABS = ["keys", "triggers", "docs"] as const;
 
 export default function ApiView() {
+  const ui = useUI();
   const d = useApiData();
-  const [tab, setTab] = useState("keys");
+  const url = useUrlState({ tab: "keys", q: "", sort: "", dir: "", page: "0", open: "" });
+  const tab = oneOf(url.v.tab, TABS, "keys");
+  const keyGuard = useCanAny("api.keys", d.vis);
+  const trGuard = useCanAny("triggers.edit", d.vis);
+
+  const openTrigger = (id: string): void => {
+    url.set({ open: id });
+    ui.drawer.open(`api-tr:${id}`, (close) => <ClearOnClose param="open" id={id}><TriggerDrawer id={id} close={close} /></ClearOnClose>);
+  };
+  const [opened, setOpened] = useState("");
+  useEffect(() => {
+    if (url.v.open && url.v.open !== opened && d.triggers.some((t) => t.id === url.v.open)) {
+      setOpened(url.v.open);
+      if (!ui.drawer.isOpen(`api-tr:${url.v.open}`)) openTrigger(url.v.open);
+    }
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   if (!d.me) return null;
+
   const active = d.keys.filter((k) => !k.revoked && !k.expired);
-  const on = d.triggers.filter((t) => t.enabled);
-  const tabs = [
-    { id: "keys", label: "Keys", count: active.length }, { id: "ref", label: "Endpoints" }, { id: "play", label: "Playground" },
-    { id: "log", label: "Request log", count: d.last24h }, { id: "triggers", label: "Triggers", count: d.triggers.length }, { id: "limits", label: "Limits" },
-  ];
+  const acts = tab === "keys"
+    ? <Btn label="Create key" kind="primary" icon="plus" id="api-key-new" guard={keyGuard} onClick={() => ui.open((c) => <CreateKey d={d} close={c} onCreated={() => undefined} />)} />
+    : tab === "triggers"
+      ? <Btn label="New trigger" kind="primary" icon="plus" id="api-tr-new" guard={trGuard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={openTrigger} />)} />
+      : undefined;
+  const urlList = { v: url.v, set: url.set, clear: () => url.clear("tab", "open") };
+
   return (
-    <div className="view cx api-view">
-      <ViewHead
-        kicker="Connect"
-        title="API and triggers"
-        sub="How outside systems create work: scoped API keys and event triggers."
-      />
-      <StatRow id="api-stats">
-        <Stat label="Active keys" value={qState(d.keysQ, () => String(active.length))} sub="not revoked or expired" />
-        <Stat label="Requests 24h" value={qState(d.logQ, () => String(d.last24h))} sub="to the API" />
-        <Stat label="Rate limited 24h" value={qState(d.logQ, () => String(d.limited24h))} sub="refused for going over the limit" tone={d.limited24h ? "wait" : undefined} />
-        <Stat label="Triggers on" value={qState(d.trigQ, () => `${on.length} of ${d.triggers.length}`)} sub="switched on" />
-      </StatRow>
-      <Tabs idPrefix="api-tab" items={tabs} active={tab} onChange={setTab} />
+    <Page eyebrow="Connect" title="API and triggers" sub="How outside systems create work: scoped API keys and event triggers." cls="api-view" acts={acts}>
+      <Tabs idPrefix="api-tab" items={[{ id: "keys", label: "API keys", count: active.length }, { id: "triggers", label: "Triggers", count: d.triggers.length }, { id: "docs", label: "Quick start" }]} active={tab} onChange={(t) => url.set({ tab: t, q: "", sort: "", dir: "", open: "" })} />
       <div id="api-tab-panel" role="tabpanel" aria-labelledby={`api-tab-${tab}`}>
-        {tab === "ref" ? <RefTab d={d} /> : tab === "play" ? <PlayTab d={d} /> : tab === "log" ? (
-          <Async query={d.logQ} what="the request log" id="api-log">{() => <LogTab d={d} />}</Async>
-        ) : tab === "triggers" ? (
-          <Async query={d.trigQ} what="triggers" id="api-trig">{() => <TriggersTab d={d} />}</Async>
-        ) : tab === "limits" ? (
-          <Async query={d.cfgQ} what="the API limits" id="api-limits">{() => <LimitsTab d={d} />}</Async>
+        {tab === "triggers" ? (
+          <Async query={d.trigQ} what="triggers" id="api-trig">{() => <TriggersTab d={d} url={urlList} openTrigger={openTrigger} />}</Async>
+        ) : tab === "docs" ? (
+          <>
+            <Card title="Submit a work order from code">
+              <CodeBlock id="api-quickstart-copy" label="curl" text={curl(ENDPOINTS[0]!)} />
+              <p className="muted" style={{ marginTop: 12 }}>Keys are scoped to one project and a list of actions. The secret is shown once when created.</p>
+            </Card>
+            <details className="int-more" id="api-more-ref"><summary>Endpoints</summary><RefTab d={d} /></details>
+            <details className="int-more" id="api-more-play"><summary>Playground</summary><PlayTab d={d} /></details>
+            <details className="int-more" id="api-more-log"><summary>Request log</summary><Async query={d.logQ} what="the request log" id="api-log">{() => <LogTab d={d} />}</Async></details>
+            <details className="int-more" id="api-more-limits"><summary>Limits</summary><Async query={d.cfgQ} what="the API limits" id="api-limits">{() => <LimitsTab d={d} />}</Async></details>
+          </>
         ) : (
-          <Async query={d.keysQ} what="API keys" id="api-keys">{() => <KeysTab d={d} onCreated={() => undefined} />}</Async>
+          <Async query={d.keysQ} what="API keys" id="api-keys">{() => <KeysTab d={d} url={urlList} />}</Async>
         )}
       </div>
-    </div>
+    </Page>
   );
 }

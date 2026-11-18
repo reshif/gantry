@@ -16,7 +16,7 @@ export interface Col<R> {
   label: string;
   /** true sorts by `row[key]`; a function gives the value to sort by. */
   sort?: boolean | ((r: R) => number | string);
-  align?: "end";
+  align?: "end" | "center";
   hideSmall?: boolean;
   width?: string;
   render?: (r: R) => ReactNode;
@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, page: pageProp, onPage }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -59,9 +59,14 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   loadingMore?: boolean;
   /** Total on the server, for the "Showing x of y" line. */
   total?: number;
+  /** Optional controlled page (0-based) for a pager held in the URL; with `onPage` the pager reports changes. */
+  page?: number;
+  onPage?: (page: number) => void;
 }) {
   const uid = useId().replace(/:/g, "");
-  const [page, setPage] = useState(0);
+  const [pageS, setPage] = useState(0);
+  const page = pageProp ?? pageS;
+  const goPage = (n: number): void => { setPage(n); onPage?.(n); };
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
   const [shown, setShown] = useState(pageSize ?? 0);
   // a new page size or a different row count (a filter changed) starts the list over at the first page
@@ -145,7 +150,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
               {columns.map((c) => {
                 const active = cur?.key === c.key;
                 return (
-                  <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
+                  <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={{ ...(c.width ? { width: c.width } : {}), ...(c.align === "center" ? { textAlign: "center" as const } : {}) }} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
                         {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
@@ -173,7 +178,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                     const first = i === 0 && action && !hasOwn;
                     const lid = `${uid}-${key}`.replace(/[^\w-]/g, "_");
                     return (
-                      <td key={c.key} data-label={c.label} data-l={c.label} className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
+                      <td key={c.key} data-label={c.label} data-l={c.label} className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.align === "center" ? { textAlign: "center" } : undefined}>
                         {i === 0 && action ? <span className="cell-content" id={first ? lid : undefined}>{content}</span> : content}
                         {first ? (
                           rowHref ? <a className="row-link" href={rowHref(r)} aria-labelledby={rowLabel ? undefined : lid} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} />
@@ -192,9 +197,9 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
         <div className="pager">
           <span role="status">{`${pg * size + 1}–${Math.min(list.length, pg * size + size)} of ${total ?? list.length}`}</span>
           <span className="row">
-            <button type="button" className="btn sm" id={`${id ?? "dt"}-prev`} disabled={pg <= 0} onClick={() => setPage(pg - 1)}>Prev</button>
+            <button type="button" className="btn sm" id={`${id ?? "dt"}-prev`} disabled={pg <= 0} onClick={() => goPage(pg - 1)}>Prev</button>
             <span>{`${pg + 1} / ${pages}`}</span>
-            <button type="button" className="btn sm" id={`${id ?? "dt"}-next`} disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next</button>
+            <button type="button" className="btn sm" id={`${id ?? "dt"}-next`} disabled={pg >= pages - 1} onClick={() => goPage(pg + 1)}>Next</button>
           </span>
         </div>
       ) : null}

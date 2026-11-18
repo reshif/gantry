@@ -19,7 +19,8 @@ import { useOpenTraveler } from "../../shell/useTraveler";
 import { usePrefs } from "../../lib/prefs";
 import { useCatalog } from "../projects/kit";
 import { useOutcome } from "../govern/data";
-import { TTYPES, dec, hookUrl, kindsFor, srcName, srcOptions, srcState, useCanAny, whoOptions, type ApiData } from "./kit";
+import { CrDrawer, Kv, agoShort } from "../connect/kit";
+import { useApiData as useApiDataLive, TTYPES, dec, hookUrl, kindsFor, srcName, srcOptions, srcState, whoOptions, type ApiData } from "./kit";
 
 interface SimResult { outcome: string; msg: string; wo: string; created: boolean; notes: string[]; at: number }
 const outcomeClass = (o: string): string => (o === "created" ? "ok" : o === "refused" ? "denied" : "warn");
@@ -52,30 +53,30 @@ export function NewTrigger({ d, close, onCreated }: { d: ApiData; close: () => v
   const ty = kinds.includes(type) ? type : kinds[0]!;
   const inst = d.insts.find((i) => i.id === src);
   const go = async () => {
-    if (!name.trim()) { setErr("Name the trigger."); return; }
+    if (name.trim().length < 3) { setErr("Name must be at least 3 characters."); return; }
     if (!src) { setErr("Pick a source. Connect one in Integrations first."); return; }
     const base: Record<string, unknown> = { project, type: ty, name: name.trim(), source: src };
     if (ty === "schedule") Object.assign(base, { cls: classes.includes("chore") ? "chore" : classes[0] });
     if (ty === "ci") Object.assign(base, { cls: classes.includes("hotfix") ? "hotfix" : classes[0] });
     const r = await ops.saveTrigger(null, base);
     if (!r.ok) { setErr(r.msg); return; }
-    ui.toast(`${r.msg.replace(/ It starts disabled.*$/, "")} It starts disabled; review it, then turn it on.`, "ok");
+    ui.toast("Trigger created. It starts disabled; review it, then turn it on.", "ok");
     onCreated((r as unknown as { trigger: { id: string } }).trigger.id);
     close();
   };
   return (
     <Dialog
-      title="New trigger" kicker="API & triggers" onClose={close}
+      title="New trigger" onClose={close} dirty={!!name}
       body={(
         <div className="form-grid">
           <LockNote decision={perm} what={`Triggers on ${d.pname(project)}`} />
+          <Field label="Name" htmlFor="api-tr-new-name"><input id="api-tr-new-name" className="input" value={name} placeholder="Issues labelled factory" onChange={(e) => setName(e.target.value)} /></Field>
           <Field label="Project" htmlFor="api-tr-new-project"><Select id="api-tr-new-project" options={d.vis.map((p) => ({ value: p.id, label: p.name }))} value={project} onChange={(v) => { setProject(v); setSource(""); }} /></Field>
-          <Field label="Source" htmlFor="api-tr-new-source" hint="Connected source-control, issue-tracker, CI and custom source connections open to this project. Add more in Integrations.">
+          <Field label="Connection" htmlFor="api-tr-new-source" hint="Connected source-control, issue-tracker, CI and custom source connections open to this project. Add more in Integrations.">
             <Select id="api-tr-new-source" options={opts} value={src} onChange={setSource} />
           </Field>
-          <Field label="Type" htmlFor="api-tr-new-type"><Select id="api-tr-new-type" options={kinds.map((k) => ({ value: k, label: TTYPES[k]?.name ?? k }))} value={ty} onChange={setType} /></Field>
+          <Field label="Source" htmlFor="api-tr-new-type"><Select id="api-tr-new-type" options={kinds.map((k) => ({ value: k, label: TTYPES[k]?.name ?? k }))} value={ty} onChange={setType} /></Field>
           {inst && srcState(inst.id, d) !== "healthy" ? <div className="callout callout-warn"><Icon name="alert" /><span>{`${inst.name} is ${srcState(inst.id, d)}. The trigger saves, but events from it will not arrive until it is healthy.`}</span></div> : null}
-          <Field label="Name" htmlFor="api-tr-new-name"><input id="api-tr-new-name" className="input" value={name} placeholder="Issues labelled factory" onChange={(e) => setName(e.target.value)} /></Field>
           <div className="form-err" role="alert">{err}</div>
         </div>
       )}
@@ -174,7 +175,7 @@ function Proposals({ t }: { t: Trigger }) {
 
 interface Draft { source: string; name: string; label: string; command: string; schedule: string; title: string; cls: string; who: string; reply: string; dedupe: boolean; perHour: string; perDay: string; labelMap: Array<{ label: string; cls: string }> }
 
-function Detail({ t, d, res, setRes }: { t: Trigger; d: ApiData; res: SimResult | undefined; setRes: (r: SimResult) => void }) {
+export function Detail({ t, d, res, setRes }: { t: Trigger; d: ApiData; res: SimResult | undefined; setRes: (r: SimResult) => void }) {
   const ui = useUI();
   const out = useOutcome();
   const openTraveler = useOpenTraveler();
@@ -324,46 +325,85 @@ function Detail({ t, d, res, setRes }: { t: Trigger; d: ApiData; res: SimResult 
   );
 }
 
-/* ---------- the tab ---------- */
+/* ---------- the list and the drawer ---------- */
 
-export function TriggersTab({ d }: { d: ApiData }) {
-  const ui = useUI();
-  const guard = useCanAny("triggers.edit", d.vis);
-  const [sel, setSel] = useState<string | null>(null);
-  const [sims, setSims] = useState<Record<string, SimResult>>({});
-  const [q, setQ] = useState("");
-  const list = d.triggers;
-  const needle = q.trim().toLowerCase();
-  const shown = list.filter((x) => !needle || `${x.name} ${x.type} ${srcName(x.source, d)}`.toLowerCase().includes(needle));
-  const cur = list.find((t) => t.id === sel) ?? list[0] ?? null;
+const pkeyOf = (id: string, d: ApiData): string => d.vis.find((p) => p.id === id)?.key ?? id;
+
+function EnableSwitch({ t }: { t: Trigger }) {
+  const out = useOutcome();
+  const perm = dec(useCan("triggers.edit", { project: t.project }));
+  return <Toggle id={`api-tr-en-${t.id}`} checked={t.enabled} label={`${t.name} enabled`} decision={perm} onChange={(v) => void (async () => { out(await ops.saveTrigger(t.id, { enabled: v }, t.version !== undefined ? { ifMatch: t.version } : undefined)); })()} />;
+}
+
+export type TriggerUrl = { v: { q: string; sort: string; dir: string; page: string }; set: (p: { q?: string; sort?: string; dir?: string; page?: string }) => void; clear: () => void };
+
+export function TriggersTab({ d, url, openTrigger }: { d: ApiData; url: TriggerUrl; openTrigger: (id: string) => void }) {
+  const needle = url.v.q.trim().toLowerCase();
+  const shown = d.triggers.filter((x) => !needle || `${x.id} ${x.name} ${x.type} ${pkeyOf(x.project, d)}`.toLowerCase().includes(needle));
   return (
-    <div className="form-grid">
-      <FilterBar label="Triggers" count={`${list.length} triggers`} actions={<Btn label="New trigger" kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={setSel} />)} />}>
-        <SearchBox id="api-tr-q" label="Search triggers" placeholder="Search triggers" value={q} onChange={setQ} />
+    <>
+      <FilterBar label="Filter triggers" count={`${shown.length} of ${d.triggers.length}`} actions={url.v.q ? <Btn label="Clear" small kind="ghost" id="api-tr-clear" onClick={() => url.clear()} /> : null}>
+        <SearchBox id="api-tr-q" label="Search triggers" placeholder="Search triggers" value={url.v.q} onChange={(q) => url.set({ q })} />
       </FilterBar>
-      <DataTable
+      <DataTable<Trigger>
         id="api-tr-list"
         caption="Triggers"
         rows={shown}
         rowKey={(x) => x.id}
-        rowId={(x) => `api-tr-open-${x.id}`}
-        rowLabel={(x) => `Open ${x.name}`}
-        onRow={(x) => setSel(x.id)}
+        rowId={(x) => `api-tr-row-${x.id}`}
         pageSize={10}
-        empty={{ title: "No trigger matches", text: "Change the search." }}
+        pager
+        page={Math.max(0, Number(url.v.page) || 0)}
+        onPage={(p) => url.set({ page: String(p) })}
+        sort={{ key: url.v.sort || "name", dir: url.v.dir === "desc" ? -1 : 1 }}
+        onSort={(s) => url.set({ sort: s.key, dir: s.dir === 1 ? "asc" : "desc", page: "0" })}
+        empty={d.triggers.length ? { title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="clear-filters" onClick={() => url.clear()} /> } : { title: "No triggers", text: "Create a trigger to open work orders from events." }}
         columns={[
-          { key: "name", label: "Trigger", sort: (x) => x.name.toLowerCase(), render: (x) => <b className={`ell${x.id === cur?.id ? " sel-mark" : ""}`}>{x.name}</b> },
-          { key: "source", label: "Source", render: (x) => <><span className="tag">{srcName(x.source, d)}</span>{srcState(x.source, d) === "healthy" ? null : <div className="small neg">{`✕ source ${srcState(x.source, d)}`}</div>}</> },
-          { key: "type", label: "Type", hideSmall: true, render: (x) => <span className="tag">{TTYPES[x.type]?.name ?? x.type}</span> },
-          { key: "project", label: "Project", render: (x) => <span className="tag">{d.pname(x.project)}</span> },
+          { key: "id", label: "ID", sort: (x) => x.id, render: (x) => <span className="mono">{x.id}</span> },
+          { key: "name", label: "Trigger", sort: (x) => x.name.toLowerCase(), render: (x) => <a className="rl ell" id={`api-tr-open-${x.id}`} href="#api" onClick={(e) => { e.preventDefault(); openTrigger(x.id); }}>{x.name}</a> },
+          { key: "type", label: "Source", sort: (x) => x.type, hideSmall: true, render: (x) => <span className="tag">{x.type}</span> },
+          { key: "project", label: "Project", sort: (x) => pkeyOf(x.project, d), render: (x) => <span className="tag">{pkeyOf(x.project, d)}</span> },
           { key: "runs", label: "Runs", align: "end", sort: (x) => x.runs.length, render: (x) => <span className="mono">{x.runs.length}</span> },
-          { key: "last", label: "Last fired", render: (x) => { const last = x.runs[x.runs.length - 1]; return <span className="mono dim">{last ? fmt.ago(last.at, Date.now()) : "never"}</span>; } },
-          { key: "en", label: "Enabled", render: (x) => <>{x.enabled ? <span className="chip ok">on</span> : <span className="chip idle">off</span>}{x.held ? <span className="chip warn" title="Proposals waiting for a person">{`${x.held} held`}</span> : null}</> },
+          { key: "last", label: "Last fired", sort: (x) => x.runs[x.runs.length - 1]?.at ?? 0, render: (x) => <span className="mono dim">{agoShort(x.runs[x.runs.length - 1]?.at)}</span> },
+          { key: "en", label: "Enabled", render: (x) => <EnableSwitch t={x} /> },
         ]}
       />
-      <div className="api-tdetail">
-        {cur ? <Detail key={`${cur.id}:${cur.version ?? 0}`} t={cur} d={d} res={sims[cur.id]} setRes={(r) => setSims((s) => ({ ...s, [cur.id]: r }))} /> : <Empty title="No triggers" text="Create a trigger to open work orders from a connected source." />}
+    </>
+  );
+}
+
+/** The trigger drawer (prototype anatomy), with the full rule editor, held proposals and Simulate in a disclosure. */
+export function TriggerDrawer({ id, close }: { id: string; close: () => void }) {
+  const d = useApiDataLive();
+  const t = d.triggers.find((x) => x.id === id);
+  const [sim, setSim] = useState<SimResult | undefined>(undefined);
+  if (!t) return null;
+  const runs = [...t.runs].reverse().slice(0, 3);
+  const who = t.who === "org" ? "Members of the org" : t.who === "system" ? "System creates the work order" : "Held for a person";
+  return (
+    <CrDrawer eyebrow={`Trigger ${t.id}`} title={t.name} close={close}>
+      <Kv rows={[
+        ["Source", <span key="s" className="tag">{t.type}</span>],
+        ["Project", d.pname(t.project)],
+        ["Who may fire", who],
+        ["Reply", t.reply || "none"],
+        ["Dedupe", t.dedupe ? "On" : "Off"],
+      ]} />
+      <div className="card">
+        <div className="card-h"><h3>Recent runs</h3></div>
+        <div className="card-b flush">
+          {runs.length ? runs.map((r, i) => (
+            <div className="li" key={r.id ?? i}>
+              <span className={`lamp ${r.outcome === "created" ? "ok" : r.outcome === "refused" ? "bad" : "warn"}`} />
+              <div className="main1"><span className="t1">{r.wo ? `${r.outcome} ${r.wo}` : r.outcome}</span><span className="t2 mono">{r.source} · {agoShort(r.at)}</span></div>
+            </div>
+          )) : <div className="li"><div className="main1"><span className="t2">No runs yet.</span></div></div>}
+        </div>
       </div>
-    </div>
+      <details className="int-more" id="api-tr-more">
+        <summary>Edit rule, simulate and held proposals</summary>
+        <Detail t={t} d={d} res={sim} setRes={setSim} />
+      </details>
+    </CrDrawer>
   );
 }

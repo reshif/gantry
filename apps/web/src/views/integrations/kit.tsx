@@ -32,7 +32,7 @@ export const keyOf = (s: string): string => {
   return w.map((x, i) => (i ? x.charAt(0).toUpperCase() + x.slice(1).toLowerCase() : x.toLowerCase())).join("").slice(0, 24);
 };
 
-export const statusOf = (i: IntegrationInstance): "disabled" | "failing" | "offline" | "healthy" => (!i.connected ? "disabled" : i.status === "failing" ? "failing" : i.status === "offline" ? "offline" : "healthy");
+export const statusOf = (i: IntegrationInstance): "disabled" | "failing" | "degraded" | "offline" | "healthy" => (!i.connected ? "disabled" : i.status === "failing" ? "failing" : i.status === "degraded" ? "degraded" : i.status === "offline" ? "offline" : "healthy");
 
 const STATUS_WORD: Record<string, string> = { healthy: "Healthy", failing: "Failing", degraded: "Degraded", offline: "Offline", disabled: "Disabled" };
 
