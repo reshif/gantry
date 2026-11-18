@@ -68,7 +68,10 @@ function Samples() {
         <div>
           <div className="label" style={{ marginBottom: 8 }}>Tabs and segmented control</div>
           <Tabs items={[{ id: "overview", label: "Overview" }, { id: "journey", label: "Journey" }, { id: "gates", label: "Gates", count: 3 }]} active="overview" onChange={() => undefined} idPrefix="ds" />
-          <Segmented name="ds-seg" label="View" value="table" onChange={() => undefined} items={[{ id: "table", label: "Table" }, { id: "cards", label: "Cards" }]} />
+          {/* static sample like the prototype: clicks are ignored so Table stays pressed */}
+          <div className="ds-seg-static" onClickCapture={(e) => e.preventDefault()}>
+            <Segmented name="ds-seg" label="View" value="table" onChange={() => undefined} items={[{ id: "table", label: "Table" }, { id: "cards", label: "Cards" }]} />
+          </div>
           <div className="label" style={{ margin: "16px 0 8px" }}>Banner</div>
           <div className="banner warn"><CrIcon name="warn" /><div className="grow">Line halted by Sofia Rossi.</div></div>
         </div>
