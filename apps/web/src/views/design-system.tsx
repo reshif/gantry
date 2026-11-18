@@ -2,7 +2,7 @@
  * Design system reference sheet (prototype #/design-system): every component, shown in both themes side by side,
  * paper drawing on the left and blueprint on the right. It is a reference page: static sample data, no reads, no writes.
  */
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { DataTable } from "../ui/DataTable";
 import { BarList, Spark } from "../ui/charts";
 import { Btn, Chip, Field, FilterBar, IconBtn, Meter, Panel, Select, SearchBox, Stat, StatRow, Tabs, TextInput, Toggle, ViewHead } from "../ui/primitives";
@@ -19,6 +19,8 @@ const AGENTS = [
   { id: "ag-design", name: "Designer", model: "claude-opus-5-5", autonomy: "gate", eval: 0.9 },
 ];
 /** The prototype strip is a static sample: choosing a tab changes nothing. */
+/** The legacy aliases (--ink-2, --muted) resolve at :root; re-point them inside each scope so ghost buttons and muted text follow the scope's own palette. */
+const SCOPE_ALIASES = { "--ink-2": "var(--ink2)", "--muted": "var(--ink3)" } as CSSProperties;
 const noop = (): void => undefined;
 const SPARK = [0.92, 0.89, 0.94, 0.87, 0.94, 0.9, 0.84];
 const TABS = ["Overview", "Configuration", "Instructions", "Skills and MCP", "Per-project", "Versions", "Evaluations", "History"];
@@ -272,11 +274,11 @@ export default function DesignSystem() {
         actions={<Btn icon={prefs.theme === "dark" ? "sun" : "moon"} label="Toggle app theme" onClick={() => { updatePrefs({ theme: next }); applyTheme(next); }} />}
       />
       <div className="cols" style={{ alignItems: "start" }}>
-        <div data-scope="light">
+        <div data-scope="light" style={SCOPE_ALIASES}>
           <h2 style={{ marginBottom: 12, fontSize: 18 }}>Paper drawing (light)</h2>
           <Gallery sc="light" />
         </div>
-        <div data-scope="dark">
+        <div data-scope="dark" style={SCOPE_ALIASES}>
           <h2 style={{ marginBottom: 12, fontSize: 18 }}>Blueprint (dark)</h2>
           <Gallery sc="dark" />
         </div>

@@ -91,3 +91,15 @@ describe("Design system gallery", () => {
     expect(container.querySelector('[aria-label="Loading"]')?.querySelectorAll(".skel")).toHaveLength(3);
   });
 });
+
+describe("Design system scopes and account menu", () => {
+  it("each scope re-points the legacy ink alias so ghost buttons stay legible; the account menu entry is My account", async () => {
+    mockApi();
+    const { container } = mount(<DesignSystem />);
+    for (const sc of Array.from(container.querySelectorAll("[data-scope]"))) expect((sc as HTMLElement).style.getPropertyValue("--ink-2")).toBe("var(--ink2)");
+    const { readFileSync } = await import("node:fs");
+    const top = readFileSync("src/shell/TopBar.tsx", "utf8");
+    expect(top).toContain('label: "My account"');
+    expect(top).toContain('navigate("people", v.id)');
+  });
+});

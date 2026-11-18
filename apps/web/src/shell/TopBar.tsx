@@ -41,7 +41,7 @@ export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me:
     const theme = prefs.theme;
     ui.menu(userRef.current, `${v.name} · ${v.email}`, [
       ...(me.config.demoAccounts ? [{ label: "Environment: local stack · demo accounts on", icon: "info" }, { sep: true }] : []),
-      { label: "Account", icon: "user", onClick: () => navigate("account") },
+      { label: "My account", icon: "user", onClick: () => navigate("people", v.id) },
       { sep: true },
       { label: "Theme: system", icon: "auto", hint: theme === "system" ? "on" : "", onClick: () => setTheme("system") },
       { label: "Theme: light", icon: "sun", hint: theme === "light" ? "on" : "", onClick: () => setTheme("light") },
