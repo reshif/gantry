@@ -62,3 +62,4 @@
   .sys-stuck .c-when { grid-column: 2; grid-row: 2; }
   .sys-stuck .c-tries { grid-column: 3; grid-row: 2; }
 }
+.view-system .stat, .view-system .stat-tile { box-shadow: none; }

@@ -106,6 +106,14 @@ describe("Audit", () => {
     expect(document.querySelector(".lock-note")).toBeNull();
   });
 
+  it("the Actor select lists people by name, with no group entries", async () => {
+    setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }) });
+    mount(<AuditView />);
+    await screen.findByText("role.add");
+    const labels = [...(document.getElementById("aud-actor") as HTMLSelectElement).options].map((o) => o.textContent);
+    expect(labels).toEqual(["Actor: all", "Asha Raman"]);
+  });
+
   it("debounces the search into the q filter and shows a clear button", async () => {
     const calls = setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }) });
     mount(<AuditView />);

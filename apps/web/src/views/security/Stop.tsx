@@ -12,6 +12,7 @@ import { fmt } from "@gantry/domain";
 import { makeStopActions } from "../../shell/stopActions";
 import { Btn, Panel, Status, Who, type Decision } from "../../ui/primitives";
 import { Async } from "../../ui/async";
+import { DataTable } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
@@ -56,30 +57,27 @@ export function StopTab({ sec, onSignIn }: { sec: SecuritySettings; onSignIn: ()
         <dl className="sec-kv">
           <div><dt>Restore</dt><dd>{sec.restoreFactoryNeedsTwo ? "Needs two different Factory Admins and a fresh sign-in." : "One Factory Admin with a fresh sign-in."}</dd></div>
           <div><dt>Kill</dt><dd>{sec.killNeedsStepUp !== false ? "Needs a fresh sign-in." : "No fresh sign-in needed."}</dd></div>
-          <div><dt>Change this</dt><dd><button type="button" className="linkbtn" onClick={onSignIn}>Sign-in tab, Session lifetime</button></dd></div>
+          <div><dt>Change this</dt><dd><Btn label="Sign-in tab, Session lifetime" cls="linkbtn" onClick={onSignIn} /></dd></div>
         </dl>
       </Panel>
       <Panel title="Stops in force" flush>
         <Async query={stops} what="stops" id="sec-stops">{(rows) => rows.length ? (
-          <div className="table-scroll">
-            <table className="table table-compact sec-table" id="sec-stops-table">
-              <thead><tr>{["Scope", "Target", "Mode", "Reason", "Set by", "Set (IST)"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id}>
-                    <td>{SCOPE[r.scope] ?? r.scope}</td>
-                    <td className="mono">{r.id.includes(":") ? r.id.split(":")[1] || "factory" : r.id}</td>
-                    <td><Status tone={r.mode === "kill" ? "block" : "wait"}>{r.mode === "kill" ? "Killed" : "Halted"}</Status></td>
-                    <td className="small">{r.reason || "No reason recorded"}</td>
-                    <td><Who id={r.by} /></td>
-                    <td className="mono nowrap">{`${fmt.istDate(r.at)} ${fmt.ist(r.at)}`}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable<StopRow>
+            id="sec-stops-table"
+            caption="Stops in force"
+            rows={rows}
+            rowKey={(r) => r.id}
+            columns={[
+              { key: "scope", label: "Scope", render: (r) => SCOPE[r.scope] ?? r.scope },
+              { key: "target", label: "Target", render: (r) => <span className="mono">{r.id.includes(":") ? r.id.split(":")[1] || "factory" : r.id}</span> },
+              { key: "mode", label: "Mode", render: (r) => <Status tone={r.mode === "kill" ? "block" : "wait"}>{r.mode === "kill" ? "Killed" : "Halted"}</Status> },
+              { key: "reason", label: "Reason", render: (r) => <span className="small">{r.reason || "No reason recorded"}</span> },
+              { key: "by", label: "Set by", render: (r) => <Who id={r.by} /> },
+              { key: "at", label: "Set (IST)", render: (r) => <span className="mono nowrap">{`${fmt.istDate(r.at)} ${fmt.ist(r.at)}`}</span> },
+            ]}
+          />
         ) : <p className="muted small sec-stop-none">Nothing is stopped right now.</p>}</Async>
-        <p className="muted small sec-stop-foot">Stops that were lifted stay in the <button type="button" className="linkbtn" onClick={() => navigate("audit")}>Audit ledger</button> under Kill.</p>
+        <p className="muted small sec-stop-foot">Stops that were lifted stay in the <Btn label="Audit ledger" cls="linkbtn" onClick={() => navigate("audit")} /> under Kill.</p>
       </Panel>
     </div>
   );

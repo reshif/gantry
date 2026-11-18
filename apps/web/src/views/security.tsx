@@ -9,6 +9,7 @@ import type { SecuritySettings, Session, SignIn } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useMe, usePeople, useSecurity, useSessions, useSignins } from "../api/queries";
+import { Input } from "../ui/inputs";
 import { Btn, Field, IconBtn, LockNote, Segmented, Select, Tabs, Toggle, Who, type Decision } from "../ui/primitives";
 import { Card, Page } from "../ui/cr";
 import { DataTable } from "../ui/DataTable";
@@ -162,10 +163,10 @@ function MfaPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
           <Select id="sec-mfa-policy" value={sec.mfa.policy} disabled={!perm.allowed} options={REQUIRED_FOR.map(([value, label]) => ({ value, label }))} onChange={(v) => void set("mfa.policy", v, saved)} />
         </Field>
         <Field label="Session length (hours)" htmlFor="sec-hours">
-          <input id="sec-hours" className="input" type="number" min={1} max={720} key={`h${sec.sessionHours}`} defaultValue={sec.sessionHours} disabled={!perm.allowed} onBlur={num("sessionHours", 1, 720)} />
+          <Input id="sec-hours" type="number" min={1} max={720} key={`h${sec.sessionHours}`} defaultValue={sec.sessionHours} disabled={!perm.allowed} onBlur={num("sessionHours", 1, 720)} />
         </Field>
         <Field label="Idle timeout (minutes)" htmlFor="sec-idle">
-          <input id="sec-idle" className="input" type="number" min={1} max={1440} key={`i${sec.idleMin}`} defaultValue={sec.idleMin} disabled={!perm.allowed} onBlur={num("idleMin", 1, 1440)} />
+          <Input id="sec-idle" type="number" min={1} max={1440} key={`i${sec.idleMin}`} defaultValue={sec.idleMin} disabled={!perm.allowed} onBlur={num("idleMin", 1, 1440)} />
         </Field>
       </div>
     </Card>
@@ -190,7 +191,7 @@ function AddRangeDialog({ sec, close }: { sec: SecuritySettings; close: () => vo
     <Modal title="Add IP range" dirty={!!val} onClose={close} onSubmit={(e) => { e.preventDefault(); void submit(); }}
       footer={(rc) => <><Btn label="Cancel" onClick={rc} /><Btn label="Add" kind="primary" type="submit" id="sec-ip-add-ok" /></>}>
       <Field label="CIDR" htmlFor="sec-ip-new" error={err || undefined}>
-        <input id="sec-ip-new" className="input mono" placeholder="198.51.100.0/24" value={val} autoComplete="off" onChange={(e) => setVal(e.target.value)} />
+        <Input id="sec-ip-new" mono placeholder="198.51.100.0/24" value={val} autoComplete="off" onChange={(e) => setVal(e.target.value)} />
       </Field>
     </Modal>
   );
@@ -233,7 +234,7 @@ function RestorePanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) 
       <div className="stack">
         <div className="row spread">
           <div><b>Restoring after emergency stop needs two Factory Admins</b><div className="dim small">Recommended. Prevents a single compromised account from restarting the line.</div></div>
-          <Toggle id="sec-two" label="Two admins to restore" checked={sec.restoreFactoryNeedsTwo} decision={perm} onChange={(v) => void set("restoreFactoryNeedsTwo", v, v ? "Factory restore needs two Factory Admins." : "One Factory Admin can restore the factory.")} />
+          <Toggle id="sec-two" label="Two admins to restore" checked={sec.restoreFactoryNeedsTwo} decision={perm} onChange={(v) => void set("restoreFactoryNeedsTwo", v, `${v ? "Enabled" : "Disabled"} Two admins to restore`)} />
         </div>
       </div>
     </Card>
