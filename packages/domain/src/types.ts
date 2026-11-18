@@ -1123,6 +1123,8 @@ export interface McpServer {
   protocolRevision?: string;
   enabled?: boolean;
   disabledReason?: string | null;
+  /** The address or transport changed and its tools were not approved again; it cannot be switched on until they are. */
+  needsReapproval?: boolean;
   healthDetail?: string | null;
   discoveredAt?: Ms | null;
   version?: number;

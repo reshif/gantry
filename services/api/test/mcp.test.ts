@@ -242,6 +242,28 @@ d("MCP registry (spec 8.8, 12.4)", () => {
     expect((await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: true })).body.server.enabled).toBe(true);
   });
 
+  it("S-21: an address change stays 'needs re-approval' through switch-off and switch-on, and is audited; only approving clears it", async () => {
+    asApproved();
+    await w.call(ADMIN, "POST", `/api/v1/mcp/servers/${id}/approve`, {}).catch(() => null);
+    const moved = await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { url: "https://third.example.net/mcp" });
+    expect(moved.body.server.enabled).toBe(false);
+    const off = await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: false });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    expect(off.body.server.disabledReason).toMatch(/Discover its tools again and re-approve/i);
+    expect(off.body.server.needsReapproval).toBe(true);
+    const on = await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: true });
+    expect(on.status, JSON.stringify(on.body)).toBe(409);
+    expect(JSON.stringify(on.body)).toMatch(/discover.*approve|re-approve/i);
+    expect((await server(id)).enabled).toBe(false);
+    const ev = (await evs("mcp.edit")).at(-1)!;
+    expect(JSON.stringify(ev.after)).toContain("third.example.net");
+    const ok = await w.call(ADMIN, "POST", `/api/v1/mcp/servers/${id}/approve`, {});
+    expect(ok.body.server).toMatchObject({ enabled: true, disabledReason: null });
+    // after approval the plain switch-off / switch-on works again
+    expect((await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: false })).body.server.enabled).toBe(false);
+    expect((await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { enabled: true })).body.server.enabled).toBe(true);
+  });
+
   it("calls: the usage log in the legacy shape, filterable, newest first", async () => {
     const o = t.orgId;
     for (const [tool, outcome, agent, ms] of [["search", "ok", "ag-build", 31], ["update_page", "denied", "ag-build", 0], ["search", "error", "ag-review", 90]] as const) {

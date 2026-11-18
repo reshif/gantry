@@ -166,11 +166,15 @@ export async function patchServer(tx: Tx, a: Actor, dataKey: Buffer | null, id: 
     enabled = false;
     reason = "The address changed. Discover its tools again and re-approve them before it is used.";
     put("health", "unknown");
+    if (!r.address_unapproved) put("address_unapproved", true);
   }
   if (b.enabled !== undefined && !reapprove) {
-    if (b.enabled && !r.enabled && r.disabled_reason) throw conflict(`${r.name} is disabled: ${r.disabled_reason} Re-approve it instead.`);
+    if (b.enabled && !r.enabled && (r.address_unapproved || r.disabled_reason)) {
+      throw conflict(`${r.name} is disabled: ${r.disabled_reason ?? "its address changed."} Discover its tools and approve them again (Re-approve) before switching it on.`);
+    }
     enabled = b.enabled;
-    if (!b.enabled) reason = null;
+    // The mark of an unapproved address, and its reason, survive a switch-off: only approving clears them.
+    if (!b.enabled && !r.address_unapproved) reason = null;
   }
   if (enabled !== r.enabled || reason !== r.disabled_reason) { put("enabled", enabled); put("disabled_reason", reason); if (!changed.includes("enabled")) changed.push("enabled"); after.enabled = enabled; }
 
@@ -272,6 +276,7 @@ export async function applyDiscovery(tx: Tx, a: Actor, id: string, found: Discov
     if (!changedTools.length && !r.disabled_reason) throw conflict(`${r.name} has no changed definitions to approve.`);
     enabled = true;
     reason = null;
+    if (r.address_unapproved) await tx.query(`update mcp_servers set address_unapproved = false where org_id = $1 and id = $2`, [a.orgId, id]);
   } else if (changedTools.length && r.enabled) {
     enabled = false;
     reason = `Definition of ${changedTools.join(", ")} changed`;
