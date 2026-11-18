@@ -370,6 +370,25 @@ export async function parkMergeBlocked(tx: Tx, orgId: string, woId: string, o: {
 export async function recordNewHead(tx: Tx, orgId: string, woId: string, headSha: string, o: { now?: Date } = {}): Promise<{ reopened: string | null }> {
   const w = await lockWo(tx, orgId, woId);
   const fx = await fxFor(tx, orgId, "system", o.now ?? new Date());
+  // A commit after the last G5 approval: the approval named the old head, so the merge is closed (it would never run) and G5 opens again on the new head.
+  const merging = asObj(w.data.merging);
+  if (typeof merging.prNumber === "number" && merging.headSha !== headSha && w.state !== "done" && w.state !== "killed") {
+    if (bayOf(fx.catalog, w)) {
+      await leaveBay(fx, w);
+      w.position = String(w.data.bayFrom ?? "review");
+      for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete w.data[k];
+    }
+    delete w.data.merging;
+    w.data.blockReason = null;
+    w.state = "waiting";
+    note(w, fx, "system", `Pull request #${merging.prNumber} changed after it was approved for merge (new head ${headSha.slice(0, 7)}); the merge is cancelled and the gate reopens.`);
+    await closeOpenInstances(fx, woId, "new_head");
+    await openGate(fx, w, "G5", { headSha });
+    ev(fx, w, "gate.reopened", { gate: "G5", text: `New head commit ${headSha.slice(0, 7)} after approval` }, { category: "approvals" });
+    await saveWo(tx, orgId, w);
+    await flushFx(fx);
+    return { reopened: "G5" };
+  }
   const open = (await tx.query<{ gate_id: string; head_sha: string | null }>(`select gate_id, head_sha from gate_instances where org_id = $1 and wo_id = $2 and status = 'open'`, [orgId, woId])).rows;
   const stale = open.filter((i) => i.head_sha !== headSha);
   if (!stale.length) return { reopened: null };

@@ -265,4 +265,37 @@ d("lifecycle gaps", () => {
     expect((await w.get(id)).state).toBe("waiting");
     expect((await vote("p-kenji")).body).toMatchObject({ passed: true, have: 2, need: 2 });
   });
+
+  it("item 13: a new head after the last G5 approval closes the merge and reopens G5 on the new head", async () => {
+    const id = await atG5("New head after approval");
+    await t.db.admin.query(`insert into pull_requests (org_id, id, repo_id, wo_id, number, title, state, head_sha) values ($1,'PR-13a','payments-api',$2,801,'x','open','1111aaaa2222')`, [t.orgId, id]);
+    await approveG5(id);
+    expect((await w.q(`select data->'merging' as m from work_orders where id = $1`, [id]))[0].m).toMatchObject({ prNumber: 801, headSha: "1111aaaa2222" });
+    // A commit lands on the pull request after the approval (the merge job would skip for the moved head).
+    await t.db.admin.query(`update pull_requests set head_sha = '3333bbbb4444' where id = 'PR-13a'`);
+    const { recordNewHead } = await import("../src/areas/workorders/station.js");
+    expect((await w.tx((tx) => recordNewHead(tx, t.orgId, id, "3333bbbb4444"))).reopened).toBe("G5");
+    const wo = await w.get(id);
+    expect(wo.state).toBe("waiting");
+    expect(wo.allowed.approve?.gate).toBe("G5");
+    expect((await w.q(`select data->'merging' as m from work_orders where id = $1`, [id]))[0].m).toBeNull();
+    expect((await w.q(`select head_sha from gate_instances where wo_id = $1 and gate_id = 'G5' and status = 'open'`, [id]))[0].head_sha).toBe("3333bbbb4444");
+    // The new head is approved afresh and merges at that head.
+    await approveG5(id);
+    const jobs = await w.q(`select payload from jobs where kind = 'merge.request' and payload->>'woId' = $1 order by created_at`, [id]);
+    expect(jobs.at(-1)!.payload).toEqual({ woId: id, prNumber: 801, headSha: "3333bbbb4444" });
+  });
+
+  it("item 13: a pull request closed on GitHub after the last G5 approval sends the order to Needs a person (Retry merge)", async () => {
+    const id = await atG5("PR closed after approval");
+    await t.db.admin.query(`insert into pull_requests (org_id, id, repo_id, wo_id, number, title, state, head_sha) values ($1,'pr-payments-api-802','payments-api',$2,802,'x','open','5555cccc6666')`, [t.orgId, id]);
+    await approveG5(id);
+    const { applyFacts } = await import("../src/areas/github/store.js");
+    await t.db.admin.query(`update repos set github_full_name = 'acme/payments-api' where org_id = $1 and id = 'payments-api'`, [t.orgId]);
+    const facts = { repo: "acme/payments-api", pullRequests: [{ number: 802, title: "x", state: "closed", draft: false, headSha: "5555cccc6666", headBranch: `gantry/${id}`, baseBranch: "main", labels: [] }], commits: [], checks: [], reviews: [], issues: [] } as never;
+    await w.tx((tx) => applyFacts(tx, t.orgId, facts, {}));
+    const wo = await w.get(id);
+    expect(wo).toMatchObject({ state: "parked", bay: "person", bayCause: "merge" });
+    expect(wo.bayReason).toMatch(/closed/);
+  });
 });

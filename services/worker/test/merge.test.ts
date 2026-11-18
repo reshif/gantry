@@ -60,6 +60,17 @@ d("merge.request (F4)", () => {
     expect((await w.jobs("merge.request"))[0]!.result.headSha).toBe("e".repeat(40));
   });
 
+  it("item 13: a head that moved after approval closes the merge (data.merging cleared) and reopens G5 on the new head", async () => {
+    await waitingOnMerge("WO-9210");
+    await w.q(`update pull_requests set head_sha = $1 where wo_id = 'WO-9210'`, ["f".repeat(40)]);
+    await w.drain();
+    expect(w.broker.merges).toHaveLength(0);
+    const r = (await w.q(`select state, data from work_orders where id = 'WO-9210'`))[0];
+    expect(r.data.merging).toBeUndefined();
+    expect(r.state).toBe("waiting");
+    expect((await w.q(`select head_sha from gate_instances where wo_id = 'WO-9210' and gate_id = 'G5' and status = 'open'`))[0].head_sha).toBe("f".repeat(40));
+  });
+
   it("does not merge in a stopped scope", async () => {
     await waitingOnMerge("WO-9204");
     await w.q(`insert into stops (org_id, id, scope_type, project_id, mode, reason, set_by) values ($1,'project:payments:1','project','payments','halt','x','p-asha')`, [w.orgId]);

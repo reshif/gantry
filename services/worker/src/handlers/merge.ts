@@ -19,6 +19,12 @@ export async function mergeRequest(job: Job, ctx: HandlerCtx): Promise<unknown> 
   const { woId, prNumber, headSha } = p.value;
   const org = job.orgId;
 
+  /** The head moved after the approval: that approval no longer names what would merge. The merge is closed and G5 reopens on the new head for a person to approve afresh. */
+  const reopen = async (newHead: string): Promise<unknown> => {
+    await withTx(deps.pool, (tx) => recordNewHead(tx, org, woId, newHead));
+    return { skipped: "head moved", headSha: newHead };
+  };
+
   /** A merge that cannot happen is never left waiting as "merging": the order goes to Needs a person with the reason (Retry merge asks again for the approved head). */
   const park = async (reason: string): Promise<unknown> => {
     const r = await withTx(deps.pool, (tx) => parkMergeBlocked(tx, org, woId, { prNumber, reason }));
@@ -35,7 +41,10 @@ export async function mergeRequest(job: Job, ctx: HandlerCtx): Promise<unknown> 
   const pr = (await deps.pool.query<{ head_sha: string | null; state: string }>(`select head_sha, state from pull_requests where org_id = $1 and wo_id = $2 and number = $3`, [org, woId, prNumber])).rows[0];
   if (pr?.state === "closed") return park(`Pull request #${prNumber} was closed without merging.`);
   if (!pr || pr.state !== "open") return { skipped: "the pull request is not open" };
-  if (pr.head_sha !== headSha) return { skipped: "the head moved after approval; the gate reopens on the new head" };
+  if (pr.head_sha !== headSha) {
+    if (pr.head_sha) return reopen(pr.head_sha);
+    return { skipped: "the head is not known" };
+  }
   const repo = await loadRepo(deps.pool, org, wo.repo_id);
   if (!repo?.full) throw new PermanentError("The work order's repository has no GitHub identity.", "no_repo");
 
@@ -54,10 +63,6 @@ export async function mergeRequest(job: Job, ctx: HandlerCtx): Promise<unknown> 
       await recordMerged(tx, org, woId, { prNumber, ...(mergeSha ? { mergeSha } : {}) });
     });
     return { merged: true, mergeSha };
-  };
-  const reopen = async (newHead: string): Promise<unknown> => {
-    await withTx(deps.pool, (tx) => recordNewHead(tx, org, woId, newHead));
-    return { skipped: "head moved", headSha: newHead };
   };
 
   // F4: look at GitHub before acting.
