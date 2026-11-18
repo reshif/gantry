@@ -5,20 +5,24 @@
  * Live / Replay switch. Replay rebuilds the floor from the event log at a chosen past time (read-only). All data comes from
  * GET /projects/{id}/floor; every control is a command through the API.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan, useCanMany } from "../api/can";
 import { makeStopActions } from "../shell/stopActions";
 import { useUI } from "../ui/overlay-context";
-import { useMe } from "../api/queries";
+import { useAgents, useMe } from "../api/queries";
 import { Btn, Empty, Panel, ViewHead, type Decision } from "../ui/primitives";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { pickProject } from "../lib/routes";
 import { hashFor } from "../lib/router";
 import { usePrefs } from "../lib/prefs";
 import { Belt } from "./floor/Belt";
+import { NeedBar } from "./floor/Need";
+import { PartsList, type PartsSort } from "./floor/Parts";
+import { buildModel, dur, type FloorModel } from "./floor/model";
+import type { LineHandlers } from "./floor/Line";
 import { useDrawers } from "./floor/Drawers";
-import { FloorCtx, WoChip, isLive, since, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
+import { FloorCtx, WoChip, isLive, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
 import { useQueryParam } from "./floor/urlState";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
@@ -33,32 +37,30 @@ function useTick(ms: number): void {
   }, [ms]);
 }
 
-function Kpis() {
-  const ctx = useFloorCtx();
-  const { wos } = ctx;
-  const live = wos.filter((w) => isLive(w) && w.bay !== "declined");
-  const waiting = live.filter((w) => w.state === "waiting" && !w.bay);
-  const stuck = wos.filter((w) => (w.state === "blocked" || w.state === "failed" || w.state === "killed") && !w.split && !w.bay).length;
-  const parked = live.filter((w) => w.bay).length;
-  const released = wos.filter((w) => w.state === "done" && !w.split);
-  const oldest = waiting.length ? fmt.dur(waiting.reduce((m, w) => Math.max(m, ctx.now - since(w)), 0)) : "";
+/** The ticker beside the title: how much is on the line, where it is jammed, the longest wait at a person's gate, and what shipped. */
+function Ticker({ model }: { model: FloorModel }) {
   const facts = useFacts();
-  const items: Array<{ k: string; v: string; sub: ReactNode; tone?: string; title?: string }> = [
-    { k: "In flight", v: String(live.length), sub: "on the line", tone: "info", title: facts },
-    { k: "At gates", v: String(waiting.length), sub: "people to approve", tone: "warn", ...(oldest ? { title: `Oldest has waited ${oldest}` } : {}) },
-    { k: "Stuck", v: String(stuck), sub: "blocked or failed", tone: "bad" },
-    { k: "Parked", v: String(parked), sub: "in side bays" },
-    { k: "Released", v: String(released.length), sub: "done", tone: "ok" },
-  ];
+  const ctx = useFloorCtx();
+  const bn = model.bottleneck;
+  const old = model.oldest;
   return (
-    <div className="fstrip" id="floor-kpis">
-      {items.map((x) => (
-        <div key={x.k} className={`fs${x.tone ? ` ${x.tone}` : ""}`} title={x.title}>
-          <span className="micro">{x.k}</span>
-          <b className="num">{x.v}</b>
-          <span className="small muted">{x.sub}</span>
-        </div>
-      ))}
+    <div className="fp-ticker" id="floor-kpis" aria-label="Line summary">
+      <div className="tk" title={facts}>
+        <span className="k">ON THE LINE</span>
+        <span className="v">{model.live.length}<small>{`of ${ctx.wos.filter((w) => w.bay !== "declined").length}`}</small></span>
+      </div>
+      <div className={`tk${bn ? " bott" : ""}`}>
+        <span className="k">BOTTLENECK</span>
+        <span className="v">{bn ? `${bn.st.s.no} ${bn.st.items.length}/${bn.st.lim}` : "none"}<small>{bn ? `+${bn.over} over` : "none over limit"}</small></span>
+      </div>
+      <div className="tk" title={old ? `Oldest has waited ${fmt.dur(old.ms)}` : undefined}>
+        <span className="k">{old ? `OLDEST AT ${old.gate}` : "OLDEST AT GATE"}</span>
+        <span className="v">{old ? dur(old.ms) : "—"}<small>{old ? old.wo : "nobody waiting"}</small></span>
+      </div>
+      <div className="tk done">
+        <span className="k">RELEASED</span>
+        <span className="v">{model.done.length}<small>shipped</small></span>
+      </div>
     </div>
   );
 }
@@ -101,7 +103,7 @@ function LineControl() {
   );
 }
 
-function Header({ view, onView }: { view: string; onView: (v: string | null) => void }) {
+function Header({ view, onView, model, parts, onParts, focus, onFocus, replaying, onReplay }: { view: string; onView: (v: string | null) => void; model: FloorModel; parts: boolean; onParts: () => void; focus: boolean; onFocus: () => void; replaying: boolean; onReplay: (on: boolean) => void }) {
   const ctx = useFloorCtx();
   const me = useMe();
   const p = ctx.project;
@@ -110,14 +112,25 @@ function Header({ view, onView }: { view: string; onView: (v: string | null) => 
   if (!me) return null;
   const block = projectSubmitBlock(me, p, ctx.repos);
   const newGuard: Decision | null = ctx.replay ? REPLAY_LOCK : !dSubmit.allowed && !dSubmit.pending ? dSubmit : block ? { allowed: false, reason: block, needs: "" } : null;
+  const partsN = model.all.filter((b) => b.w.bay !== "declined").length;
   return (
     <div id="floor-head">
       <ViewHead
         title="Floor"
         kicker={p.key}
-        sub="Every work order on the production line, station by station. Click a station, a valve or a tag."
+        sub={`${p.name} · flow v${ctx.floor.flowVersion}`}
         actions={
           <>
+            {view === "belt" ? (
+              <>
+            <Btn label={`Parts list (${partsN})`} id="floor-parts-toggle" title="Show the bill of materials: every work order as a numbered part" aria-pressed={parts} aria-controls="floor-parts" aria-expanded={parts} onClick={onParts} />
+            <Btn label="Focus on me" icon="eye" id="floor-focus" title="Dim everything that does not need a person" aria-pressed={focus} onClick={onFocus} />
+            <div className="seg" role="group" aria-label="Live or replay">
+              <Btn label="Live" id="floor-mode-live" aria-pressed={!replaying} onClick={() => onReplay(false)} />
+              <Btn label="Replay" id="floor-mode-replay" title="Rebuild the floor from the event log at a past time (read-only)" aria-pressed={replaying} onClick={() => onReplay(true)} />
+            </div>
+              </>
+            ) : null}
             <div className="seg" role="group" aria-label="View">
               {(["belt", "board"] as const).map((v) => (
                 <Btn key={v} label={v === "belt" ? "Belt" : "Board"} id={`floor-view-${v}`} aria-pressed={view === v} onClick={() => onView(v === "board" ? "board" : null)} />
@@ -128,6 +141,7 @@ function Header({ view, onView }: { view: string; onView: (v: string | null) => 
           </>
         }
       />
+      <Ticker model={model} />
     </div>
   );
 }
@@ -166,16 +180,37 @@ function FloorBody({ projectId }: { projectId: string }) {
   const rp = ctx.replay;
   const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId, rp, "floor-mode-live");
   useTick(30_000);
+  const agents = useAgents().data;
+  const model = buildModel(ctx, agents);
   const [viewQ, setView] = useQueryParam("view");
+  const [partsQ, setParts] = useQueryParam("parts");
+  const [sortQ, setSort] = useQueryParam("psort");
+  const [focusQ, setFocus] = useQueryParam("focus");
+  const [hl, setHl] = useState<string[] | null>(null);
   const view = viewQ === "board" ? "board" : "belt";
-
+  const parts = partsQ === "open";
+  const focus = focusQ === "1";
+  const sort: PartsSort = sortQ === "wait" || sortQ === "rev" ? sortQ : "group";
+  const h: Omit<LineHandlers, "route"> = { onStation: drawers.station, onGate: drawers.gate, onBay: (sid, bayId) => drawers.bay(bayId, sid), onOut: drawers.out, onWo: drawers.wo, hl: new Set(hl ?? []), hover: setHl };
+  const showParts = view === "belt" && parts;
   return (
     <>
-      <Header view={view} onView={setView} />
-      <Kpis />
+      <Header view={view} onView={setView} model={model} parts={parts} onParts={() => setParts(parts ? null : "open")} focus={focus} onFocus={() => setFocus(focus ? null : "1")} replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} />
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
-      {view === "board" ? <BoardPanel /> : <Belt replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} onStation={drawers.station} onGate={drawers.gate} onOut={drawers.out} onWo={drawers.wo} />}
-          </>
+      {view === "board" ? (
+        <BoardPanel />
+      ) : (
+        <>
+          <NeedBar model={model} h={{ ...h, route: null }} onMore={() => { setParts("open"); setSort(null); }} />
+          <div className={`fp-main${showParts ? " has-parts" : ""}${focus ? " is-focus" : ""}`}>
+            <div className="fp-left">
+              <Belt model={model} h={h} focus={focus} showHint={!showParts} />
+            </div>
+            {showParts ? <PartsList model={model} sort={sort} onSort={(s) => setSort(s === "group" ? null : s)} onClose={() => setParts(null)} h={{ ...h, route: null }} /> : null}
+          </div>
+        </>
+      )}
+    </>
   );
 }
 

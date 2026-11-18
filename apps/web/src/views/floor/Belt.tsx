@@ -1,17 +1,16 @@
 /**
- * The belt of the floor (Blueprint prototype): one panel holding the production-line schematic (SVG, see Schematic.tsx) with the density
- * switch and the class routes, then the side bays as cards. Gates are valves between stations; work orders are tags in a tray under their station.
+ * The belt of the floor: the "Line drawing" panel (Line.tsx) with the route legend and the side bays under it. Under 700 px the drawing is a
+ * stacked list of the same stations. Hover and focus-on-me state live in the Floor view; this component draws them.
  */
 import { useState } from "react";
 import { flowOf, fmt, route as routeOf } from "@gantry/domain";
-import { hashFor } from "../../lib/router";
 import { Btn, Panel } from "../../ui/primitives";
 import { useMe } from "../../api/queries";
 import { updatePrefs, usePrefs } from "../../lib/prefs";
 import { ClassChip, classOf } from "../projects/kit";
 import { FloorCtx, bayName, gateHaveNeed, openEntry, since, useFloorCtx } from "./kit";
-import { Schematic } from "./Schematic";
-import { useQueryParam } from "./urlState";
+import { LineDrawing, LineStack, useNarrow, type LineHandlers } from "./Line";
+import type { FloorModel } from "./model";
 
 /* ---------- the belt ---------- */
 
@@ -64,42 +63,28 @@ function RoutePill({ id, hover, onHover }: { id: string; hover: string | null; o
   );
 }
 
-export function Belt({ onStation, onGate, onOut, onWo, replaying, onReplay }: { replaying?: boolean; onReplay?: (on: boolean) => void; onStation: (sid: string) => void; onGate: (gid: string) => void; onOut: () => void; onWo: (id: string) => void }) {
+export function Belt({ model, h, focus, showHint }: { model: FloorModel; h: Omit<LineHandlers, "route">; focus: boolean; showHint?: boolean }) {
   const ctx = useFloorCtx();
   const prefs = usePrefs();
   const [hover, setHover] = useState<string | null>(null);
   const [routes, setRoutes] = useState(false);
-  const [density, setDensity] = useQueryParam("density");
+  const [holder, narrow] = useNarrow();
   const p = ctx.project;
   const classes = flowOf(ctx.cat, p).classes;
   const activeCls = hover ?? prefs.activeClass;
   const route = activeCls ? routeOf(ctx.cat, p, activeCls) : null;
-  const detail = density === "detail";
+  const handlers: LineHandlers = { ...h, route };
   const tools = (
-    <div className="seg" role="group" aria-label="Density">
-      {([["fit", "Fit", "Compact tags so the whole line fits one screen"], ["detail", "Detail", "One tag per row with title and state"]] as const).map(([v, l, t]) => (
-        <Btn key={v} label={l} title={t} aria-pressed={(detail ? "detail" : "fit") === v} onClick={() => setDensity(v === "fit" ? null : v)} />
-      ))}
-    </div>
-  );
-  // Live / Replay and the route legend stay (kept features) on their own strip under the panel header, so the header carries only the density toggle.
-  const modes = (
-    <div className="row fl-modes" style={{ justifyContent: "flex-end", gap: 8, padding: "6px 12px", borderBottom: "1px solid var(--line)" }}>
-      {onReplay ? (
-        <div className="seg" role="group" aria-label="Live or replay">
-          <Btn label="Live" id="floor-mode-live" aria-pressed={!replaying} onClick={() => onReplay(false)} />
-          <Btn label="Replay" id="floor-mode-replay" title="Rebuild the floor from the event log at a past time (read-only)" aria-pressed={replaying} onClick={() => onReplay(true)} />
-        </div>
-      ) : null}
+    <>
+      {showHint === false ? null : <span className="fp-hint mono">balloon no. = end of the WO number · figure below = time waiting · click a balloon, gate or bay</span>}
       <Btn label="Routes" id="floor-routes-toggle" title="Show the route of each work class" aria-pressed={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
-    </div>
+    </>
   );
   const bays = flowOf(ctx.cat, p).bays;
   return (
     <>
-      <Panel title="Production line" cls={`fl-belt floor${activeCls ? " has-route" : ""}`} tools={tools} flush>
-        {modes}
-        <div id="floor-belt" aria-label={`Line for ${p.name}`} data-active={prefs.activeClass ?? ""}>
+      <Panel title="Line drawing" cls={`fl-belt fp-sheetp${activeCls ? " has-route" : ""}${focus ? " is-focus" : ""}`} tools={tools} flush id="floor-line">
+        <div id="floor-belt" ref={holder} aria-label={`Line for ${p.name}`} data-active={prefs.activeClass ?? ""} className="fp-drawing">
           {routes || prefs.activeClass ? (
             <div className="fl-routes" id="floor-routes" role="group" aria-label="Class routes. Hover to preview, select to pin">
               <span className="fl-routes-l">Routes</span>
@@ -108,40 +93,18 @@ export function Belt({ onStation, onGate, onOut, onWo, replaying, onReplay }: { 
               ))}
             </div>
           ) : null}
-          <Schematic detail={detail} route={route} onStation={onStation} onGate={onGate} onWo={onWo} onOut={onOut} />
-          <div className="flegend" aria-label="Legend">
-            <span className="lg"><i className="run" />Running</span>
-            <span className="lg"><i className="wait" />At a gate (person approves)</span>
-            <span className="lg"><i className="bad" />Stuck (blocked or failed)</span>
-            <span className="lg"><i className="valve" />Valve: solid = person, dashed = automatic check</span>
-            <span className="lg"><i className="hop" />Hopper = work in progress against the limit, red when over</span>
-            <span className="lg"><i className="rw" />Rework return line</span>
-          </div>
+          {narrow ? <LineStack model={model} h={handlers} /> : <LineDrawing model={model} h={handlers} />}
         </div>
       </Panel>
-      <Panel title="Side bays" cls="fl-bays">
-        <div className="card-grid" aria-label="Off the line">
-          {bays.map((b) => {
-            const list = ctx.wos.filter((w) => w.bay === b.id && w.state !== "killed");
-            return (
-              <div key={b.id} className={`card fl-bay fl-bay-${b.id}`} data-bay={b.id}>
-                <div className="row fl-bay-h">
-                  <h3 className="fl-bay-n">{b.name}</h3>
-                  <span className="spacer" />
-                  <span className={`chip ${list.length ? "warn" : "plain"} fl-bay-c`}>{String(list.length)}</span>
-                </div>
-                <div className="small muted">{b.desc}</div>
-                {list.map((w) => (
-                  <div key={w.id} className="row small" data-wo={w.id}>
-                    <a className="pri mono" id={`floor-bay-${w.id}`} href={hashFor("record", w.id, p.id)}>{w.id}</a>
-                    <span className="trunc grow">{w.title}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      </Panel>
+      <div className="fp-bays" aria-label="Side bays">
+        <span className="fp-bays-l mono">SIDE BAYS</span>
+        {bays.map((b) => {
+          const n = ctx.wos.filter((w) => w.bay === b.id && w.state !== "killed" && w.state !== "done").length;
+          return (
+            <Btn key={b.id} label={`${b.name} ${n}`} small kind="ghost" id={`floor-bayc-${b.id}`} title={b.desc} onClick={() => h.onBay("", b.id)} />
+          );
+        })}
+      </div>
     </>
   );
 }

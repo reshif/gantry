@@ -256,6 +256,36 @@ export function WoDrawer({ woId, close }: { woId: string; close: () => void }) {
   );
 }
 
+
+/** A side bay (all of it, or only what one station parked): why each work order is there and how long, each opening its drawer. */
+export function BayDrawer({ bayId, sid, close, onWo }: { bayId: string; sid: string; close: () => void; onWo: (id: string) => void }) {
+  const ctx = useFloorCtx();
+  const bay = ctx.cat.bays.find((b) => b.id === bayId);
+  if (!bay) return null;
+  const idx = sid ? stationIdx(ctx.cat, sid) : -1;
+  const list = ctx.wos.filter((w) => w.bay === bayId && w.state !== "killed" && w.state !== "done" && (idx < 0 || w.station === idx));
+  const st = sid ? ctx.cat.stations.find((s) => s.id === sid) : null;
+  return (
+    <Frame kicker={`${st ? `${st.no} · ` : ""}SIDE BAY`} title={bay.name} sub={bay.desc} close={close} label="Close bay details">
+      <div className="fl-drawer-body">
+        {list.length ? (
+          <ul className="list fl-bordered" id="floor-bay-list">
+            {list.map((w) => (
+              <li key={w.id} data-wo={w.id} className="fl-waiting">
+                <a className="pri mono" href={hashFor("record", w.id, ctx.project.id)} onClick={(e) => { e.preventDefault(); onWo(w.id); }}>{w.id}</a>
+                <span className="grow trunc">{w.title}</span>
+                <span className="small muted">{convWaiting(w, ctx.cat) ?? (w.bayReason || ctx.cat.stations[w.station]?.name || "")}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Empty title="Bay is empty" text="Nothing is parked here." />
+        )}
+      </div>
+    </Frame>
+  );
+}
+
 /** OUT: the work orders that cleared the last gate (prototype "Released" drawer). */
 export function ReleasedDrawer({ close }: { close: () => void }) {
   const ctx = useFloorCtx();
@@ -307,6 +337,14 @@ export function useDrawers(projectId: string | null) {
       ui.drawer.open(`floorwo:${woId}`, (close) => (
         <DrawerRoot projectId={projectId}>
           <WoDrawer woId={woId} close={close} />
+        </DrawerRoot>
+      ));
+    },
+    bay: (bayId: string, sid = ""): void => {
+      if (!projectId) return;
+      ui.drawer.open(`bay:${sid}:${bayId}`, (close) => (
+        <DrawerRoot projectId={projectId}>
+          <BayDrawer bayId={bayId} sid={sid} close={close} onWo={(id) => { close(); api.wo(id); }} />
         </DrawerRoot>
       ));
     },
