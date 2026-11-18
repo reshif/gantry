@@ -119,12 +119,16 @@
 .dz-treebox { padding: 6px 14px 10px; }
 .dz-chg .rec-file { padding-left: 8px; }
 /* prototype anatomy: page header with actions, a status strip card, then tabs */
-.dz-top { display: flex; flex-direction: column; gap: 12px; }
+.dz-top { display: flex; flex-direction: column; gap: 0; }
+.dz-top > .trv-why { margin: 0 0 12px; }
+.dz-top > .banner { margin-top: 12px; }
 .dz-ph .acts { flex-wrap: wrap; justify-content: flex-end; }
 .dz-strip .card-b { display: flex; flex-direction: column; gap: 12px; }
 .dz-strip .dz-chips { flex-wrap: wrap; gap: 8px; }
 .dz-strip .dz-rail { border: 0; padding: 0; background: none; }
 .dz-tabbar { position: static; background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; padding: 0; }
-.dz-overview { margin-top: 4px; }
-.dz-top .banner { margin: 0; }
+.dz > .tabs-w { margin-bottom: 0; } /* the page's 16px gap is the prototype's gap under the tab bar */
+.dz-top .banner { margin-bottom: 0; }
 .dz-tabbar { flex-wrap: wrap; }
+/* stacked cards at phone width: the prototype's rows are 28px min, 4px padding, not the desktop 44px table row */
+@media (max-width: 720px) { .dz .dtable.t td { height: auto; padding: 4px 0; } .dz .dtable.t td:first-child { padding-bottom: 6px; } }

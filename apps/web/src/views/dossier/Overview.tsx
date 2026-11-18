@@ -5,7 +5,7 @@ import { Btn, Meter, Textarea } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { EditDialog } from "./WoDialogs";
 import { attemptsOf } from "./kit";
-import { Card } from "../../ui/cr";
+import { Card, CrIcon } from "../../ui/cr";
 import { useActors } from "../../ui/actors";
 import { classOf } from "../projects/kit";
 import { useRepoName } from "../traveler/repo";
@@ -91,6 +91,7 @@ export function Overview({ wo, rec, cat, project }: { wo: TWo; rec: RecordData; 
             <dt>Pull request</dt><dd>{pr ? <a className="m" href={`#/p/${wo.project}/changes/${wo.id}`}>{`#${pr.number}`}</a> : "not yet"}</dd>
           </dl>
         </Card>
+        {wo.blockReason ? <div className="banner bad" id="dz-blocked"><CrIcon name="warn" /><div className="grow"><b>Blocked.</b>{` ${wo.blockReason}`}</div></div> : null}
         {slaTotal > 0 ? (
           <Card title="SLA">
             <div className="row spread" style={{ marginBottom: 8 }}>

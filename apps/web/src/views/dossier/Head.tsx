@@ -89,7 +89,7 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
         </div>
       </header>
       {why?.why ? <p className="small muted trv-why" id="trv-approve-why" role="note">{why.why}</p> : null}
-      <section className="card wo-strip" style={{ marginBottom: 4 }}>
+      <section className="card wo-strip">
         <div className="card-b row spread">
           <div className="row dz-chips">
             <span className={`chip ${tone}`} role="status">{chipText}</span>
@@ -121,7 +121,6 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
           <div className="grow"><b>Stopped</b>{` ${wo.stop.reason}${heldByKill ? " It is held in place and resumes on restore." : ""}`}</div>
         </div>
       ) : null}
-      {wo.blockReason ? <div className="banner bad"><Icon name="alert" /><div className="grow"><b>Blocked</b>{` ${wo.blockReason}`}</div></div> : null}
       {wo.failReason ? <div className="banner bad"><Icon name="alert" /><div className="grow"><b>Failed</b>{` ${wo.failReason}`}</div></div> : null}
     </div>
   );

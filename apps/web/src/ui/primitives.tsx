@@ -230,6 +230,14 @@ export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: Tab
       window.removeEventListener("resize", measure);
     };
   }, [items.length]);
+  // a tab chosen by the address (or off-screen at phone width) is brought into the strip, as the prototype does
+  useEffect(() => {
+    const el = bar.current?.querySelector<HTMLElement>(".tab.is-active");
+    const strip = bar.current;
+    if (!el || !strip) return;
+    const a = el.offsetLeft, b = a + el.offsetWidth;
+    if (a < strip.scrollLeft || b > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = Math.max(0, a - 24);
+  }, [active]);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const tabs = Array.from(bar.current?.querySelectorAll<HTMLButtonElement>(".tab") ?? []);

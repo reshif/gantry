@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
 import ChangesView from "./changes";
 import { mockApi, mount, resetApp } from "./floor/testkit";
-import { readsFor, waitingWo } from "./traveler/testkit";
+import { readsFor, travelerOf, waitingWo } from "./traveler/testkit";
 
 beforeEach(() => resetApp());
 afterEach(() => {
@@ -86,6 +86,30 @@ describe("Work order page", () => {
     expect(screen.getByRole("button", { name: "Stop work order" })).toBeTruthy();
   });
 
+  it("leaves the page for the work orders list after a valid Stop, as the prototype does", async () => {
+    await show({ "POST /api/v1/stops": () => ({ body: { ok: true } }) }, `#/p/payments/record/${W.id}`);
+    fireEvent.click(document.getElementById("dz-more") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Stop this work order/ }));
+    await screen.findByRole("dialog", { name: `Stop ${W.id}?` });
+    fireEvent.change(document.getElementById("wo-stop-reason") as HTMLElement, { target: { value: "Bad data in the brief" } });
+    fireEvent.click(screen.getByRole("button", { name: "Stop work order" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/p/payments/work-orders"));
+  });
+
+  it("shows the blocked reason in the Overview's right column as \"Blocked.\", not above the tabs", async () => {
+    await show({ ...readsFor(W, travelerOf(W, { blockReason: "Waiting on the schema owner" })) }, `#record/${W.id}`);
+    const b = await screen.findByText("Blocked.");
+    expect(b.closest("#dz-blocked")?.textContent).toContain("Waiting on the schema owner");
+    expect(b.closest("#dz-overview")).toBeTruthy();
+  });
+
+  it("marks the current station's dot blue even at a gate, with a Gate chip", async () => {
+    await show({}, `#record/${W.id}/journey`);
+    const cur = document.querySelector("#dz-journey .tl > .info");
+    expect(cur?.textContent).toContain("Gate");
+    expect(document.querySelector("#dz-journey .tl > .warn")).toBeNull();
+  });
+
   it("opens the Edit dialog from the Brief card's Edit button", async () => {
     await show({}, `#record/${W.id}`);
     expect(screen.getByText("Click the description to edit it")).toBeTruthy();
@@ -131,9 +155,13 @@ describe("Work order page", () => {
   it("keeps the tab in the address", async () => {
     await show({}, `#record/${W.id}`);
     fireEvent.click(screen.getByRole("tab", { name: "Gates" }));
-    await waitFor(() => expect(window.location.hash).toContain(`${W.id}%2Fgates`));
+    await waitFor(() => expect(window.location.search).toBe("?tab=gates"));
+    expect(window.location.hash).not.toContain("%2F");
+    expect(screen.getByRole("tab", { name: "Gates" }).getAttribute("aria-selected")).toBe("true");
     expect(await screen.findByRole("heading", { name: "Gates" })).toBeTruthy();
     for (const c of ["Gate", "Mode", "Status", "Decided by", "When"]) expect(screen.getAllByText(c).length).toBeGreaterThan(0);
+    // stacked small-screen cards say "By", as the prototype does
+    expect(document.querySelector('#dz-gates-table td[data-l="By"]')).toBeTruthy();
   });
 
   it("shows the Journey timeline, the attempts table, the cost by station and the events", async () => {

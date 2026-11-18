@@ -89,6 +89,8 @@ function BriefVersions({ rec }: { rec: RecordData }) {
   const b = vs.at(-1);
   if (!b) return <div className="card"><Empty icon="page" title="No brief versions" text="The brief has not been written yet." /></div>;
   const diff = briefDiff(a?.brief, b.brief);
+  // the newest brief is the approved one once the brief gate has been approved
+  const approved = rec.gates.some((g) => g.gate === "G0G1" && g.decision?.decision === "approve");
   const block = (title: string, lines: Array<{ t: string; text: string }>, empty: string) => (
     <Card title={title}>
       {lines.length ? <pre className="code diff" style={{ padding: 8 }}>{lines.map((l, i) => <div key={i} className={l.t === "+" ? "add" : l.t === "-" ? "del" : ""}>{`${l.t} ${l.text}`}</div>)}</pre> : <p className="muted small">{empty}</p>}
@@ -97,7 +99,7 @@ function BriefVersions({ rec }: { rec: RecordData }) {
   return (
     <div className="grid g2">
       {block(a ? `Brief v${a.v} (before)` : "Before", diff.filter((l) => l.t === "-").map((l) => ({ t: "-", text: `${l.field}: ${l.text}` })), a ? "Nothing was removed." : "There is no earlier version.")}
-      {block(`Brief v${b.v} (latest)`, diff.filter((l) => l.t === "+").map((l) => ({ t: "+", text: `${l.field}: ${l.text}` })), "Nothing was added.")}
+      {block(`Brief v${b.v} (${approved ? "approved" : "latest"})`, diff.filter((l) => l.t === "+").map((l) => ({ t: "+", text: `${l.field}: ${l.text}` })), "Nothing was added.")}
     </div>
   );
 }

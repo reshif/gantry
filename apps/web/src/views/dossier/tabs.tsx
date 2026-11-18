@@ -34,7 +34,7 @@ export function JourneyTimeline({ wo, cat, project }: { wo: TWo; cat: Catalog; p
           const h = visits[visits.length - 1];
           const skipped = !visits.length && !wo.route.includes(s.id);
           const cur = idx === wo.station && wo.state !== "done";
-          const tone = skipped ? "" : cur ? (wo.state === "waiting" ? "warn" : "info") : "ok";
+          const tone = skipped ? "" : cur ? "info" : "ok"; // the dot is blue for the current station even at a gate (the chip says Gate)
           const dur = visits.reduce((t, v) => t + Math.max(0, (v.endedAt ?? now) - v.startedAt), 0);
           const who = actor(h?.agent ?? s.agent).name.replace(" (agent)", "");
           return (
@@ -74,7 +74,7 @@ export function GatesTab({ wo, cat, project, rec, review }: { wo: TWo; cat: Cata
     { key: "gate", label: "Gate", render: (r) => <><b className="mono">{cat.gates.find((g) => g.id === r.id)?.label ?? r.id}</b>{` ${r.name}`}</> },
     { key: "mode", label: "Mode", render: (r) => cap(r.mode) },
     { key: "status", label: "Status", render: (r) => (r.status === "waiting" ? <Chip tone="warn">Waiting</Chip> : r.status === "passed" ? <Chip tone="ok">Approved</Chip> : <Chip tone="idle">Not reached</Chip>) },
-    { key: "by", label: "Decided by", render: (r) => (r.by ? <Who id={r.by} /> : <span className="dim">{"—"}</span>) },
+    { key: "by", label: "Decided by", cardLabel: "By", render: (r) => (r.by ? <Who id={r.by} /> : <span className="dim">{"—"}</span>) },
     { key: "when", label: "When", render: (r) => <span className="mono dim">{r.at ? when(r.at) : "—"}</span> },
   ];
   return (
