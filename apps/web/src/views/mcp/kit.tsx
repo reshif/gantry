@@ -76,3 +76,6 @@ export const OUTCOME: Record<string, { cls: string; text: string }> = {
   denied: { cls: "denied", text: "⊘ denied" },
   error: { cls: "failed", text: "✕ error" },
 };
+
+/** The auth label the registry shows: OAuth, API key or None. */
+export const authLabel = (s: Pick<McpServer, "auth" | "authMode">): string => (s.authMode === "none" || /^none$/i.test(s.auth) ? "None" : s.authMode === "header" || /key/i.test(s.auth) ? "API key" : /oauth/i.test(s.auth) ? "OAuth" : "Bearer token");

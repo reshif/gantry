@@ -423,7 +423,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttrib
 Textarea.displayName = "Textarea";
 
 /** Table in the standard scroll wrapper. */
-export function Table({ compact, children, className = "" }: { compact?: boolean; children: ReactNode; className?: string }) {
+export function Table({ compact, children, className = "", bare }: { compact?: boolean; children: ReactNode; className?: string; /** A plain `<table>` with no wrapper or classes, for a parent that draws it (the prototype's `.matrix`). */ bare?: boolean }) {
+  if (bare) return <table>{children}</table>;
   return (
     <div className="table-scroll">
       <table className={`table${compact ? " table-compact" : ""} ${className}`.trim()}>{children}</table>

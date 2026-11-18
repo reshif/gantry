@@ -16,7 +16,7 @@ export interface Col<R> {
   label: string;
   /** true sorts by `row[key]`; a function gives the value to sort by. */
   sort?: boolean | ((r: R) => number | string);
-  align?: "end";
+  align?: "end" | "center";
   hideSmall?: boolean;
   width?: string;
   render?: (r: R) => ReactNode;
@@ -29,11 +29,13 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage, sortHints, neutralArrow, sortGlyphs }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage, sortHints, neutralArrow, sortGlyphs, idleGlyph }: {
   /** Show the prototype's dim up/down arrow on sortable headers that are not the active sort. */
   neutralArrow?: boolean;
   /** Additive: show a faint two-way arrow on every sortable column that is not the current sort (Control Room prototype). */
   sortHints?: boolean;
+  /** Show the prototype's faint two-way arrow on sortable headers that are not the active sort. */
+  idleGlyph?: boolean;
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -161,7 +163,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
               {columns.map((c) => {
                 const active = cur?.key === c.key;
                 return (
-                  <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
+                  <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={{ ...(c.width ? { width: c.width } : {}), ...(c.align === "center" ? { textAlign: "center" as const } : {}) }} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
                         {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : (neutralArrow || sortHints || sortGlyphs) ? <span className="th-arrow-idle">↕</span> : ""}</span>
@@ -189,7 +191,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                     const first = i === 0 && action && !hasOwn;
                     const lid = `${uid}-${key}`.replace(/[^\w-]/g, "_");
                     return (
-                      <td key={c.key} data-label={c.label} data-l={c.label} className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
+                      <td key={c.key} data-label={c.label} data-l={c.label} className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.align === "center" ? { textAlign: "center" } : undefined}>
                         {i === 0 && action ? <span className="cell-content" id={first ? lid : undefined}>{content}</span> : content}
                         {first ? (
                           rowHref ? <a className="row-link" href={rowHref(r)} aria-labelledby={rowLabel ? undefined : lid} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} />

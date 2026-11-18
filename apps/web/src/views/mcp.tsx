@@ -1,26 +1,24 @@
 /**
- * MCP servers (spec 8.8, 12.4). Port of legacy/js/views/mcp.js against /api/v1/mcp/*: the registry (transport, URL, masked auth, health, tools with the
- * admin-set read or write class, sensitivity), the Add dialog with real tool discovery through the edge, scope by project, repo, agent, station and work
- * class, per-tool allow and deny, an effective-access checker and the usage log.
- * Not ported, on purpose: stdio servers (they run on the runner, outside the registry), the OAuth, mTLS and Vault auth modes (the edge injects a bearer
- * token or an API key header), the write-gate switch (write tools always need a pre-authorisation, so it is shown on and locked), the "gated" call
- * outcome (a write call without its pre-authorisation is denied) and every "simulated" label: discovery and the calls are real.
+ * MCP servers (spec 8.8, 12.4), the Control Room screen: head with Register server, a banner when a server changed a tool definition
+ * (Review change opens the re-approval), a search with its count, and one card per server (auth, sensitivity, tools and write tools, tool tags,
+ * Agents, Manage tools). Manage tools opens the server drawer (not in the URL, like the prototype). The usage log of every call stays behind the Usage log button (`?view=usage`).
+ * Real data: /mcp/servers and /mcp/usage; discovery, scope and the access check are the registry's own.
  */
-import { useState } from "react";
-import { DAY } from "@gantry/domain";
+import type { McpServer } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useMcpCalls, useMcpServers, useProjects } from "../api/queries";
-import { Btn, Empty, FilterBar, SearchBox, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
-import { Async, qState } from "../ui/async";
+import { Btn, FilterBar, SearchBox } from "../ui/primitives";
+import { Async } from "../ui/async";
+import { Page, CrIcon } from "../ui/cr";
 import { useActors } from "../ui/actors";
-import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
-import { useCatalog } from "./projects/kit";
-import { useAllRepos } from "./govern/data";
 import { AddMcp } from "./mcp/AddDialog";
-import { Detail } from "./mcp/Detail";
-import { Health, SENS, SensChip, dec, scopeText } from "./mcp/kit";
+import { ServerDrawer } from "./mcp/Drawer";
+import { ScopeDialog } from "./mcp/Scope";
+import { ReapproveDialog } from "./mcp/Reapprove";
+import { Health, authLabel, dec } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
+import { NothingMatches, oneOf, useUrlState } from "./connect/kit";
 
 export default function McpView() {
   const ui = useUI();
@@ -31,97 +29,88 @@ export default function McpView() {
   const calls = Array.isArray(callsQ.data) ? callsQ.data : callsQ.data?.items ?? [];
   const projects = useProjects().data ?? [];
   const agents = useAgents().data ?? [];
-  const cat = useCatalog();
-  const { repos } = useAllRepos();
   const actor = useActors();
-  const [tab, setTab] = useState("registry");
-  const [sel, setSel] = useState<string | null>(null);
-  const [q, setQ] = useState("");
-  const [health, setHealth] = useState("all");
-  const [sens, setSens] = useState("all");
-  const needle = q.trim().toLowerCase();
-  const shown = servers.filter((m) => (health === "all" || (health === "disabled" ? m.enabled === false : m.enabled !== false && m.health === health)) && (sens === "all" || m.sensitivity === sens) && (!needle || `${m.name} ${m.url} ${m.transport}`.toLowerCase().includes(needle)));
-  const current = servers.find((m) => m.id === sel) ?? servers[0] ?? null;
-  const actorName = (id: string): string => actor(id).name;
-  const day = calls.filter((u) => u.at > Date.now() - DAY).length;
-  const notHealthy = servers.filter((m) => m.enabled === false || m.health !== "healthy").length;
-  const writeTools = servers.reduce((n, m) => n + m.tools.filter((t) => t.write).length, 0);
+  const url = useUrlState({ view: "registry", q: "", server: "" });
+  const view = oneOf(url.v.view, ["registry", "usage", "scope"] as const, "registry");
+
+  const openServer = (id: string): void => {
+    ui.drawer.open(`mcp:${id}`, (close) => <ServerDrawer id={id} close={close} />);
+  };
+
+  const needle = url.v.q.trim().toLowerCase();
+  const shown = servers.filter((m) => !needle || `${m.name} ${m.url}`.toLowerCase().includes(needle));
+  const changed = servers.filter((m) => m.tools.some((t) => t.changed) || (m.enabled === false && m.disabledReason));
+  const agentNames = (m: McpServer): string => (m.agents === "all" ? "all agents" : m.agents.map((a) => agents.find((x) => x.id === a)?.name ?? a).join(", ") || "none");
 
   const registry = (
-    <Async query={serversQ} what="MCP servers" id="mcp" empty={<Empty id="mcp-empty" title="No MCP servers yet" text="An MCP server gives agents tools: a tracker, docs or a database. Add one, then choose the projects, stations and agents that may use it." />}>
+    <Async query={serversQ} what="MCP servers" id="mcp" empty={(
+      <div className="card"><div className="empty"><div className="ei"><CrIcon name="inbox" /></div><h3>No MCP servers yet</h3><p>An MCP server gives agents tools: a tracker, docs or a database. Register one, then choose the projects, stations and agents that may use it.</p></div></div>
+    )}>
       {() => (
-    <div className="stack">
-      {servers.some((m) => m.tools.some((t) => t.changed)) ? (
-        <div className="banner warn" role="note">
-          <Icon name="alert" />
-          <div className="grow">{servers.filter((m) => m.tools.some((t) => t.changed)).map((m) => <span key={m.id}><b>{m.name}</b> changed a tool definition. It stays paused until re-approved. </span>)}</div>
-        </div>
-      ) : null}
-      <FilterBar label="Filter servers" count={`${shown.length} of ${servers.length}`}>
-        <SearchBox id="mcp-q" label="Search" placeholder="Search servers" value={q} onChange={setQ} />
-        <Select id="mcp-f-health" aria-label="Health" options={[{ value: "all", label: "Health: all" }, { value: "healthy", label: "Healthy" }, { value: "degraded", label: "Degraded" }, { value: "failing", label: "Failing" }, { value: "offline", label: "Offline" }, { value: "disabled", label: "Disabled" }]} value={health} onChange={setHealth} />
-        <Select id="mcp-f-sens" aria-label="Sensitivity" options={[{ value: "all", label: "Sensitivity: all" }, ...SENS]} value={sens} onChange={setSens} />
-      </FilterBar>
-      {shown.length ? (
-        <div className="grid g2" id="mcp-registry">
-          {shown.map((m) => {
-            const w = m.tools.filter((t) => t.write).length;
-            const den = m.tools.filter((t) => !t.allowed).length;
-            return (
-              <section key={m.id} className={`card${m.id === current?.id ? " is-selected" : ""}`} id={`mcp-row-${m.id}`}>
-                <div className="card-h">
-                  <div style={{ minWidth: 0 }}>
-                    <h3 className="ell">{m.name}</h3>
-                    <div className="hint mono ell">{m.url}</div>
-                  </div>
-                  <Health st={m.health} />
-                </div>
-                <div className="card-b stack" style={{ gap: 12 }}>
-                  <div className="row">
-                    <span className="tag">{m.auth}</span>
-                    <SensChip s={m.sensitivity} />
-                    {m.enabled === false ? <span className="chip idle">disabled</span> : null}
-                    <span className="dim">{m.tools.length} tools · {`${m.tools.length - w} R · ${w} W`}{den ? ` · ${den} denied` : ""}</span>
-                  </div>
-                  <div className="row">
-                    {m.tools.map((t) => <span key={t.name} className="tag" style={{ ...(t.write ? { borderColor: "var(--warn)", color: "var(--warn)" } : {}), ...(t.allowed ? {} : { textDecoration: "line-through" }) }}>{t.name}</span>)}
-                  </div>
-                  <div className="row spread">
-                    <span className="dim small">{`${scopeText(m.projects, "projects")} · ${scopeText(m.repos, "repos")} · ${scopeText(m.agents, "agents")} · ${scopeText(m.stations, "stations")} · ${scopeText(m.classes ?? "all", "classes")}`}</span>
-                    <Btn label="Manage tools" small id={`mcp-open-${m.id}`} onClick={() => { setSel(m.id); requestAnimationFrame(() => document.getElementById("mcp-detail")?.scrollIntoView?.({ behavior: "smooth", block: "start" })); }} />
-                  </div>
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      ) : <Empty title="No server matches" text="Change the search or filters." />}
-      {current ? <div id="mcp-detail"><Detail key={current.id} srv={current} cat={cat} projects={projects} agents={agents} repos={repos} calls={calls} actorName={actorName} onRemoved={() => setSel(null)} /></div> : null}
-    </div>
+        <>
+          {changed.map((m) => (
+            <div className="banner warn" role="note" key={m.id} id={`mcp-changed-${m.id}`}>
+              <CrIcon name="warn" />
+              <div className="grow"><b>{m.name}</b> changed a tool definition. It stays paused until re-approved.</div>
+              <Btn label="Review change" small id={`mcp-review-${m.id}`} guard={perm} onClick={() => ui.open((close) => <ReapproveDialog srv={m} close={close} />)} />
+            </div>
+          ))}
+          <FilterBar label="Filter servers" count={`${shown.length} of ${servers.length}`} actions={(
+            <>
+              {url.v.q ? <Btn label="Clear" small kind="ghost" id="mcp-clear" onClick={() => url.clear("view", "server")} /> : null}
+            </>
+          )}>
+            <SearchBox id="mcp-q" label="Search servers" placeholder="Search servers" value={url.v.q} onChange={(q) => url.set({ q })} />
+          </FilterBar>
+          {shown.length ? (
+            <div className="grid g2" id="mcp-registry">
+              {shown.map((m) => {
+                const w = m.tools.filter((t) => t.write).length;
+                return (
+                  <section key={m.id} className="card" id={`mcp-row-${m.id}`}>
+                    <div className="card-h">
+                      <div style={{ minWidth: 0 }}>
+                        <h3 className="ell">{m.name}</h3>
+                        <div className="hint mono ell">{m.url}</div>
+                      </div>
+                      <Health st={m.enabled === false ? "disabled" : m.health} />
+                    </div>
+                    <div className="card-b stack" style={{ gap: 12 }}>
+                      <div className="row">
+                        <span className="tag">{authLabel(m)}</span>
+                        <span className={`chip ${m.sensitivity === "restricted" ? "bad" : "idle"} plain`}>{m.sensitivity}</span>
+                        <span className="dim">{m.tools.length} tools, {w} write</span>
+                      </div>
+                      <div className="row">
+                        {m.tools.map((t) => <span key={t.name} className="tag" style={{ ...(t.write ? { borderColor: "var(--warn)", color: "var(--warn)" } : {}), ...(t.allowed ? {} : { textDecoration: "line-through" }) }}>{t.name}</span>)}
+                      </div>
+                      <div className="row spread">
+                        <span className="dim" style={{ fontSize: 12 }}>Agents: {agentNames(m)}</span>
+                        <Btn label="Manage tools" small id={`mcp-open-${m.id}`} onClick={() => openServer(m.id)} />
+                      </div>
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          ) : <div className="card"><NothingMatches onClear={() => url.clear("view", "server")} /></div>}
+        </>
       )}
     </Async>
   );
 
   return (
-    <div className="view cx mcp-view">
-      <ViewHead
-        kicker="Connect"
-        title="MCP servers"
-        sub="Tool servers agents can call. Write tools need a gate; changed definitions need re-approval."
-        actions={<Btn label="Add server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} onAdded={(id) => { setSel(id); setTab("registry"); }} />)} />}
-      />
-      <StatRow id="mcp-stats">
-        <Stat label="Servers" value={qState(serversQ, (d) => String(d.length))} sub="in the registry" />
-        <Stat label="Not healthy" value={qState(serversQ, () => String(notHealthy))} sub={notHealthy ? "degraded, failing, offline or disabled" : "all healthy"} tone={serversQ.data && notHealthy ? "wait" : undefined} />
-        <Stat label="Write tools" value={qState(serversQ, () => String(writeTools))} sub="across all servers" />
-        <Stat label="Calls 24h" value={qState(callsQ, () => String(day))} sub="from agents" />
-      </StatRow>
-      <Tabs idPrefix="mcp-tab" items={[{ id: "registry", label: "Registry", count: servers.length }, { id: "usage", label: "Usage log", count: calls.length }]} active={tab} onChange={setTab} />
-      <div id="mcp-tab-panel" role="tabpanel" aria-labelledby={`mcp-tab-${tab}`}>
-        {tab === "usage" ? (
-          <Async query={callsQ} what="the MCP usage log" id="mcp-usage">{() => <UsageTab calls={calls} servers={servers} agents={agents} projects={projects} actorName={actorName} />}</Async>
-        ) : registry}
-      </div>
-    </div>
+    <Page
+      eyebrow="Connect" title="MCP servers" sub="Tool servers agents can call. Write tools need a gate; changed definitions need re-approval." cls="mcp-view"
+      acts={<Btn label="Register server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} />)} />}
+    >
+      {view === "scope" && url.v.server ? <ScopeDialog id={url.v.server} close={() => url.set({ view: "registry", server: "" })} /> : null}
+      {view === "usage" ? (
+        <>
+          <div className="row" style={{ marginBottom: 12 }}><Btn label="Back to servers" small kind="ghost" icon="arrow-left" id="mcp-view-back" onClick={() => url.set({ view: "registry" })} /><span className="dim">Usage log: {calls.length} calls</span></div>
+          <Async query={callsQ} what="the MCP usage log" id="mcp-usage">{() => <UsageTab calls={calls} servers={servers} agents={agents} projects={projects} actorName={(id) => actor(id).name} />}</Async>
+        </>
+      ) : registry}
+    </Page>
   );
 }

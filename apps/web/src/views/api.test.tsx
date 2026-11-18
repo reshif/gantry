@@ -75,9 +75,42 @@ function mount() {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><ApiView /></OverlayProvider></QueryClientProvider>);
 }
+/** Deep links the screen keeps for what the prototype does not draw: the rule editor and the sections behind Quick start. */
+const goto = (q: string) => { window.history.replaceState(null, "", `/?${q}`); window.dispatchEvent(new Event("gantry:urlstate")); };
+const openTr = async (id: string) => { await byId(`api-tr-open-${id}`); goto(`tab=triggers&edit=${id}`); await byId("api-tr-sim"); };
+/** Quick start, then one of the sections linked under the curl (ref, play, log, limits). */
+const docs = async (sec: string) => { await tab("docs"); goto(`tab=docs&sec=${sec}`); };
 const tab = async (name: string) => fireEvent.click(await byId(`api-tab-${name}`));
 beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+describe("API & triggers: quick start", () => {
+  it("shows the prototype card (one curl, no copy bar, no disclosures) and no links to the reference, playground, log or limits", async () => {
+    setup();
+    mount();
+    await tab("docs");
+    const pre = await byId("api-quickstart");
+    expect(pre.textContent).toContain('-H "Idempotency-Key: $(uuidgen)"');
+    expect(document.getElementById("api-quickstart-copy")).toBeNull();
+    expect(document.querySelector("details")).toBeNull();
+    for (const s of ["ref", "play", "log", "limits"]) expect(document.getElementById(`api-sec-${s}`)).toBeNull();
+    expect(document.querySelector(".card a")).toBeNull();
+    goto("tab=docs&sec=ref");
+    expect(await screen.findByText("/api/v1/work-orders/{id}/messages")).toBeTruthy();
+  });
+
+  it("the trigger drawer is the prototype's (no disclosure); its foot has no extra buttons (the rule editor is a deep link)", async () => {
+    setup();
+    mount();
+    await tab("triggers");
+    fireEvent.click(await byId("api-tr-open-TR-1"));
+    await byId("api-tr-open-TR-1");
+    expect(document.querySelector("details")).toBeNull();
+    expect(document.querySelector(".drawer-f")).toBeNull();
+    expect(document.getElementById("api-tr-more")).toBeNull();
+    expect(window.location.search).not.toContain("open=");
+  });
+});
 
 describe("API & triggers: keys", () => {
   it("says Not visible to you when the keys read is refused, and the key count is not a 0", async () => {
@@ -94,17 +127,15 @@ describe("API & triggers: keys", () => {
     const row = await byId("api-key-row-key-1");
     expect(within(row).getByText("Jira bridge")).toBeTruthy();
     expect(within(row).getByText("gk_7hq2c91x…")).toBeTruthy();
-    expect(within(row).getByText("Payments Platform")).toBeTruthy();
+    expect(within(row).getByText("PAY")).toBeTruthy();
     expect(within(row).getByText("wo.submit")).toBeTruthy();
-    expect(within(row).getByText("Active")).toBeTruthy();
-    expect(within(row).getByText(/^expires /)).toBeTruthy();
+    expect(within(row).getByText("Revoke")).toBeTruthy();
     expect(within(await byId("api-key-row-key-2")).getByText("Revoked")).toBeTruthy();
     expect(within(await byId("api-key-row-key-3")).getByText("Expired")).toBeTruthy();
     expect(document.getElementById("api-key-revoke-key-2")).toBeNull(); // nothing to revoke
-    const meta = document.getElementById("api-stats")!.textContent ?? "";
-    expect(meta).toMatch(/Active keys\s*1/);
-    expect(meta).toMatch(/Requests 24h\s*2/);
-    expect(meta).toMatch(/Rate limited 24h\s*1/);
+    expect(document.getElementById("api-stats")).toBeNull();
+    expect(document.body.textContent).toContain("3 of 3");
+    expect(document.getElementById("api-key-new")!.textContent).toBe("Create key"); // in the page head, not the filter bar
     expect(document.body.textContent).not.toMatch(/local sample logic|simulated/i);
   });
 
@@ -114,24 +145,17 @@ describe("API & triggers: keys", () => {
     mount();
     fireEvent.click(await byId("api-key-new"));
     fireEvent.click(await byId("api-key-go"));
-    expect((await screen.findByText("Name the key.")).getAttribute("role")).toBe("alert");
+    expect((await screen.findByText("Name is required.")).getAttribute("role")).toBe("alert");
     fireEvent.change(await byId("api-key-name"), { target: { value: "ServiceNow bridge" } });
-    fireEvent.click(await byId("api-key-act-triggers-run"));
-    fireEvent.click(await byId("api-key-act-wo-read")); // off again
-    fireEvent.change(await byId("api-key-expires"), { target: { value: "30" } });
+    expect(document.getElementById("api-key-expires")).toBeNull();
+    expect(document.querySelector(".dlg details")).toBeNull();
     fireEvent.click(await byId("api-key-go"));
     const input = (await byId("api-secret-value")) as HTMLInputElement;
     expect(input.value).toBe(SECRET);
     const post = calls.find((c) => c.method === "POST" && c.path === "/api/v1/api-keys")!;
-    expect(post.body).toEqual({ name: "ServiceNow bridge", project: "payments", actions: ["wo.submit", "triggers.run"], expiresInDays: 30 });
+    expect(post.body).toEqual({ name: "ServiceNow bridge", project: "payments", actions: ["wo.submit", "wo.read"], expiresInDays: 90 });
     expect(post.headers["idempotency-key"]).toBeTruthy();
-    const done = await byId("api-secret-done");
-    expect(done.getAttribute("aria-disabled")).toBe("true");
-    expect(done.getAttribute("data-reason")).toBe("Confirm you stored the key first.");
-    fireEvent.click(done);
-    expect(document.getElementById("api-secret-value")).toBeTruthy();
-    fireEvent.click(await byId("api-secret-ack"));
-    await waitFor(() => expect(document.getElementById("api-secret-done")!.getAttribute("aria-disabled")).toBeNull());
+    expect(document.querySelector(".dlg h2, [role=dialog] h2")!.textContent).toContain("Copy your key now");
     fireEvent.click(await byId("api-secret-done"));
     await waitFor(() => expect(document.getElementById("api-secret-value")).toBeNull());
     expect(document.body.textContent).not.toContain(SECRET);
@@ -158,7 +182,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("documents the real public API with copyable curl requests, and the real webhook signature", async () => {
     setup();
     mount();
-    await tab("ref");
+    await docs("ref");
     expect(await screen.findByText("/api/v1/projects/{project}/work-orders")).toBeTruthy();
     expect(screen.getByText("/api/v1/work-orders/{id}/messages")).toBeTruthy();
     expect(screen.getByText("/api/v1/triggers/{id}/fire")).toBeTruthy();
@@ -173,7 +197,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("the playground sends a real request with the pasted key as an external client would, and shows the response", async () => {
     const calls = setup({ "POST /api/v1/projects/payments/work-orders": () => ({ body: { ok: true, msg: "WO-2500 submitted to Payments Platform as Feature.", id: "WO-2500" } }) });
     mount();
-    await tab("play");
+    await docs("play");
     const send = await byId("api-pg-send");
     expect(send.getAttribute("aria-disabled")).toBe("true");
     expect(send.getAttribute("data-reason")).toMatch(/Paste a key/);
@@ -196,7 +220,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("a refused request shows its status and message without leaving the screen", async () => {
     setup({ "POST /api/v1/projects/payments/work-orders": () => ({ status: 401, body: { ok: false, msg: "The API key is not valid." } }) });
     mount();
-    await tab("play");
+    await docs("play");
     fireEvent.change(await byId("api-pg-secret"), { target: { value: "gk_" + "00000000_" + "z".repeat(30) } });
     fireEvent.click(await byId("api-pg-send"));
     expect(await screen.findByText("The API key is not valid.", { selector: ".api-resline span" })).toBeTruthy();
@@ -207,7 +231,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("the request log lists requests and filters by status through the API", async () => {
     const calls = setup();
     mount();
-    await tab("log");
+    await docs("log");
     const table = await screen.findByRole("table");
     expect(within(table).getByText("/api/v1/projects/payments/work-orders")).toBeTruthy();
     expect(within(table).getByText("✓ 200")).toBeTruthy();
@@ -221,7 +245,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("limits: saves the whole settings with the version it loaded, validates, and the master switch for triggers is off", async () => {
     const calls = setup({ "PATCH /api/v1/api-config": () => ({ body: { ok: true, msg: "API settings saved.", version: 4 } }) });
     mount();
-    await tab("limits");
+    await docs("limits");
     expect((await byId("api-lim-triggers") as HTMLInputElement).checked).toBe(false);
     expect((await byId("api-lim-sign")).querySelectorAll("option").length).toBe(1); // only the scheme the delivery implements
     fireEvent.change(await byId("api-lim-rate"), { target: { value: "0" } });
@@ -240,8 +264,8 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("limits are read-only with the reason for someone without the right", async () => {
     setup({}, ["integration.edit"]);
     mount();
-    await tab("limits");
-    await waitFor(() => expect(document.querySelector(".lock-note")?.textContent).toMatch(/No role holds integration.edit/));
+    await docs("limits");
+    await waitFor(() => expect(document.body.textContent).toMatch(/No role holds integration.edit/));
     expect((document.getElementById("api-lim-rate") as HTMLInputElement).disabled).toBe(true);
     expect(document.getElementById("api-lim-save")!.getAttribute("aria-disabled")).toBe("true");
   });
@@ -253,13 +277,15 @@ describe("API & triggers: triggers", () => {
     mount();
     await tab("triggers");
     const item = await byId("api-tr-open-TR-1");
-    for (const w of ["Acme GitHub", "Issue with label", "Payments Platform"]) expect(item.textContent).toContain(w);
-    expect(item.textContent).toContain("off");
+    expect(item.textContent).toContain("Issues labelled factory");
+    await openTr("TR-1");
+    for (const w of ["Acme GitHub", "Issue with label", "Payments Platform"]) expect(document.body.textContent).toContain(w);
+    expect(document.querySelector(".dlg")!.textContent).toContain("TR-1");
     expect((await byId("api-tr-master")).textContent).toMatch(/switched off for the organisation/);
     expect(screen.getByText("✓ created")).toBeTruthy();
     expect(screen.getByText("◆ held")).toBeTruthy();
     expect(screen.getByText("TP-aa")).toBeTruthy();
-    fireEvent.click(await byId("api-tr-enabled"));
+    fireEvent.click(await byId("api-tr-en-TR-1"));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && c.path === "/api/v1/triggers/TR-1")).toBe(true));
     const p = calls.find((c) => c.method === "PATCH")!;
     expect(p.body).toEqual({ enabled: true });
@@ -272,8 +298,8 @@ describe("API & triggers: triggers", () => {
     await tab("triggers");
     fireEvent.click(await byId("api-tr-new"));
     fireEvent.click(await byId("api-tr-new-go"));
-    expect((await screen.findByText("Name the trigger.")).getAttribute("role")).toBe("alert");
-    fireEvent.change(await byId("api-tr-new-type"), { target: { value: "comment" } });
+    expect((await screen.findByText("Name is required.")).getAttribute("role")).toBe("alert");
+    fireEvent.change(await byId("api-tr-new-type"), { target: { value: "pr-comment" } });
     fireEvent.change(await byId("api-tr-new-name"), { target: { value: "Fix PRs" } });
     fireEvent.click(await byId("api-tr-new-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/triggers")).toBe(true));
@@ -286,6 +312,7 @@ describe("API & triggers: triggers", () => {
     const calls = setup({ "PATCH /api/v1/triggers/TR-1": () => ({ body: { ok: true, msg: "Saved Issues labelled factory.", version: 3 } }) });
     mount();
     await tab("triggers");
+    await openTr("TR-1");
     fireEvent.change(await byId("api-tr-label"), { target: { value: "ship-it" } });
     fireEvent.click(await byId("api-tr-lm-add"));
     fireEvent.change(await byId("api-tr-lm-l-1"), { target: { value: "docs" } });
@@ -312,6 +339,7 @@ describe("API & triggers: triggers", () => {
     });
     mount();
     await tab("triggers");
+    await openTr("TR-1");
     fireEvent.click(await byId("api-tr-sim"));
     expect(await screen.findByText(/Sends a sample issue through this trigger's real rules/)).toBeTruthy();
     fireEvent.change(await byId("api-sim-author"), { target: { value: "tomas-acme" } });
@@ -343,11 +371,12 @@ describe("API & triggers: triggers", () => {
     });
     mount();
     await tab("triggers");
+    await openTr("TR-1");
     const held = await byId("api-tr-held");
     expect(held.textContent).toContain("Drive-by request");
     expect(held.textContent).toContain("does not map to a Gantry identity");
     fireEvent.click(await byId("api-tr-dec-TP-aa"));
-    const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
+    const dlg = await waitFor(() => { const e = Array.from(document.querySelectorAll<HTMLElement>(".dlg")).pop(); if (!e) throw new Error("no dialog"); return e; });
     fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Not our work" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Decline" }));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/trigger-proposals/TP-aa/decline")).toBe(true));
@@ -359,6 +388,7 @@ describe("API & triggers: triggers", () => {
     setup({ "GET /api/v1/trigger-proposals": () => ({ body: [PROPOSAL] }) }, ["wo.submit"]);
     mount();
     await tab("triggers");
+    await openTr("TR-1");
     const rel = await byId("api-tr-rel-TP-aa");
     await waitFor(() => expect(rel.getAttribute("aria-disabled")).toBe("true"));
     expect(rel.getAttribute("data-reason")).toMatch(/No role holds wo.submit/);
@@ -368,6 +398,7 @@ describe("API & triggers: triggers", () => {
     setup({}, ["triggers.edit"]);
     mount();
     await tab("triggers");
+    await openTr("TR-1");
     const save = await byId("api-tr-save");
     await waitFor(() => expect(save.getAttribute("aria-disabled")).toBe("true"));
     expect(save.getAttribute("data-reason")).toMatch(/No role holds triggers.edit/);
@@ -380,11 +411,16 @@ describe("API & triggers: triggers", () => {
     setup({ "GET /api/v1/triggers": () => ({ body: [TRIG({ id: "TR-3", type: "schedule", name: "Weekly chores", source: "schedule", schedule: "Mon 06:00 IST", title: "Weekly dependency updates", cls: "chore", who: "system", nextRun: Date.now() + 86_400_000, label: undefined, labelMap: undefined }), TRIG({ id: "TR-4", type: "ci", name: "Failing CI on main", who: "proposal", cls: "hotfix", label: undefined, labelMap: undefined })] }) });
     mount();
     await tab("triggers");
+    await openTr("TR-3");
     expect((await byId("api-tr-schedule") as HTMLInputElement).value).toBe("Mon 06:00 IST");
     expect((await byId("api-tr-title") as HTMLInputElement).value).toBe("Weekly dependency updates");
     expect(screen.getByText(/Next run/)).toBeTruthy();
     expect(document.getElementById("api-tr-label")).toBeNull();
-    fireEvent.click(await byId("api-tr-open-TR-4"));
+    fireEvent.click(within(document.querySelector<HTMLElement>(".dlg")!).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(document.getElementById("api-tr-schedule")).toBeNull());
+    await byId("api-tr-open-TR-4");
+    goto("tab=triggers&edit=TR-4");
+    await waitFor(() => expect((document.getElementById("api-tr-cls") as HTMLSelectElement | null)?.value).toBe("hotfix"));
     expect((await byId("api-tr-cls") as HTMLSelectElement).value).toBe("hotfix");
     expect(screen.getByText(/opens a proposal and asks a person to confirm/i)).toBeTruthy();
     expect((await byId("api-tr-sim")).textContent).toBe("Simulate incoming CI failure");

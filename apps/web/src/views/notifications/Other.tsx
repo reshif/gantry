@@ -1,15 +1,11 @@
 /** The Repo overrides, Delivery log and Card templates tabs (legacy overridesTab, deliveriesTab, templatesTab). */
 import { useEffect, useState } from "react";
-import { Async, qState } from "../../ui/async";
-import { fmt, type Delivery, type Project } from "@gantry/domain";
+import { type Project } from "@gantry/domain";
 import { useCan } from "../../api/can";
-import { useDeliveries } from "../../api/queries";
 import { ops } from "../../api/ops";
-import { DataTable } from "../../ui/DataTable";
-import { Btn, Empty, Field, FilterBar, LockNote, SearchBox, Panel, Select, type Decision } from "../../ui/primitives";
+import { Btn, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
-import { useOpenTraveler } from "../../shell/useTraveler";
 import { useProjectRepos } from "../floor/kit";
 import { ACTION_LABEL, DEF_TPL, DestCard, FIELDS, KIND_EVENT, TPL, WebhookCard, chanIcon, defaultTarget, evName, events, instState, targetError, usePreview, type useNtData } from "./kit";
 
@@ -89,57 +85,6 @@ export function OverridesTab({ p, nt }: { p: Project; nt: Nt }) {
 }
 
 /* ---------- delivery log ---------- */
-
-export function DeliveriesTab({ p, nt }: { p: Project; nt: Nt }) {
-  const ui = useUI();
-  const openTraveler = useOpenTraveler();
-  const perm = dec(useCan("notify.edit", { project: p.id }));
-  const [f, setF] = useState({ status: "all", integration: "all", event: "all" });
-  const [limit, setLimit] = useState(40);
-  const q = useDeliveries({ project: p.id, limit, ...(f.status !== "all" ? { status: f.status } : {}), ...(f.integration !== "all" ? { integration: f.integration } : {}), ...(f.event !== "all" ? { event: f.event } : {}) });
-  const page = Array.isArray(q.data) ? { items: q.data, next: null } : q.data ?? { items: [] as Delivery[], next: null };
-  const [sq, setSq] = useState("");
-  const list = page.items.filter((d) => !sq.trim() || `${d.id} ${d.event} ${d.target} ${d.wo ?? ""}`.toLowerCase().includes(sq.trim().toLowerCase()));
-  const failedQ = useDeliveries({ project: p.id, status: "failed", limit: 200 });
-  const failed = (Array.isArray(failedQ.data) ? failedQ.data : failedQ.data?.items ?? []).length;
-  const instName = (d: Delivery): string => { const ii = d.integration ? nt.insts.find((i) => i.id === d.integration) : nt.instOf({ channel: d.channel, target: d.target }); return ii ? ii.name : `${d.channel}${d.integration ? " (removed)" : ""}`; };
-  const retry = async (d: Delivery) => {
-    const r = await ops.retryDelivery(d.id);
-    ui.toast(r.msg, r.ok ? "ok" : "error");
-  };
-  return (
-    <div className="form-grid">
-      <FilterBar label="Filter deliveries" count={<>{qState(q, () => String(list.length))} shown · <span className={failed ? "neg" : ""}>{qState(failedQ, () => String(failed))} failed</span></>}>
-        <SearchBox id="nt-dl-q" label="Search deliveries" placeholder="Search deliveries" value={sq} onChange={setSq} />
-        <Select id="nt-dl-status" aria-label="Status" options={[{ value: "all", label: "Status: all" }, { value: "delivered", label: "Delivered" }, { value: "pending", label: "Pending" }, { value: "failed", label: "Failed" }]} value={f.status} onChange={(v) => { setF({ ...f, status: v }); setLimit(40); }} />
-        <Select id="nt-dl-channel" aria-label="Connection" options={[{ value: "all", label: "Connection: all" }, ...nt.destInsts.map((c) => ({ value: c.id, label: c.name }))]} value={f.integration} onChange={(v) => { setF({ ...f, integration: v }); setLimit(40); }} />
-        <Select id="nt-dl-event" aria-label="Event" options={[{ value: "all", label: "Event: all" }, ...events()]} value={f.event} onChange={(v) => { setF({ ...f, event: v }); setLimit(40); }} />
-      </FilterBar>
-      <Async query={q} what="the delivery log" id="nt-dl">{() => (
-      <DataTable
-        id="nt-dl-table"
-        caption="Delivery log"
-        rows={list}
-        rowKey={(d) => d.id}
-        rowId={(d) => `nt-dl-${d.id}`}
-        empty={{ title: "No deliveries match", text: "Change the filters." }}
-        columns={[
-          { key: "id", label: "ID", render: (d) => <span className="mono">{d.id}{d.test ? <span className="tag nt-testtag">test</span> : null}</span> },
-          { key: "at", label: "When", render: (d) => <span className="mono dim">{fmt.istDate(d.at)} {fmt.ist(d.at)}</span> },
-          { key: "event", label: "Event", render: (d) => evName(d.event) },
-          { key: "conn", label: "Connection", hideSmall: true, render: (d) => <><Icon name={chanIcon(d.channel)} /> {instName(d)}</> },
-          { key: "target", label: "Target", render: (d) => <span className="mono ell">{d.target}</span> },
-          { key: "wo", label: "Work order", hideSmall: true, render: (d) => (d.wo ? <Btn label={d.wo} small kind="ghost" id={`nt-dl-wo-${d.id}`} onClick={() => openTraveler(d.wo!)} /> : <span className="dim">–</span>) },
-          { key: "st", label: "Status", render: (d) => <><span className={`chip ${d.status === "failed" ? (d.state === "failed" && d.attempts > 0 ? "warn" : "bad") : d.status === "pending" ? "info" : "ok"}`}>{d.status === "failed" ? (d.state === "failed" && d.attempts > 0 ? "retrying" : "failed") : d.status === "pending" ? "pending" : "delivered"}</span>{d.error ? <div className="small nt-err dim">{d.error}</div> : null}</> },
-          { key: "act", label: "", align: "end", render: (d) => (d.status === "failed" ? <Btn label="Retry" small icon="refresh" id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : null) },
-        ]}
-      />
-      )}</Async>
-      {page.next ? <div className="more"><Btn label="Show 40 more" id="nt-dl-more" onClick={() => setLimit(limit + 40)} /></div> : null}
-      <LockNote decision={perm} what={`Retries on ${p.name}`} />
-    </div>
-  );
-}
 
 /* ---------- card templates ---------- */
 

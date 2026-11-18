@@ -71,6 +71,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The catalogue and custom types are screens behind the Add dialog's link (`?view=`); a pasted link reaches them too. */
+const goView = async (view: string) => {
+  await byId("int-table");
+  window.history.replaceState(null, "", `?view=${view}`);
+  window.dispatchEvent(new Event("gantry:urlstate"));
+};
+
 describe("Integrations screen", () => {
   it("lists the connections with their status, scope and the header counts", async () => {
     setup();
@@ -80,16 +87,20 @@ describe("Integrations screen", () => {
     expect(table.textContent).toContain("GitHub org");
     expect(table.textContent).toContain("Failing");
     expect(table.textContent).toContain("Disabled");
-    expect(table.textContent).toContain("Payments Platform");
-    expect(document.getElementById("int-attn-int-gh-1")?.textContent).toBe("GitHub org");
-    expect(text()).toContain("Healthy1enabled and reachable");
+    expect(table.textContent).toContain("payments");
+    expect(table.textContent).not.toContain("Payments Platform");
+    expect(document.getElementById("int-attn")).toBeNull(); // the prototype has no attention disclosure under the table
+    expect(document.getElementById("int-view-catalogue")).toBeNull(); // the catalogue opens from the Add dialog, not from the filter bar
+    expect(text()).toContain("Healthy1");
+    expect(text()).not.toContain("enabled and reachable");
+    expect(document.getElementById("int-stats")?.textContent).toMatch(/Connected3.*Healthy1.*Degraded0.*Failing1/);
     expect(locked(await byId("int-add"))).toBe(false);
   });
 
   it("shows the catalogue with a type that cannot be connected yet", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("int-tab-catalogue"));
+    await goView("catalogue");
     await waitFor(() => expect(text()).toContain("Linear"));
     expect(text()).toContain("Slack");
     expect(text()).toContain("GitHub");
@@ -121,7 +132,7 @@ describe("Integrations screen", () => {
   it("says the catalogue is not visible when the read is refused with 403", async () => {
     setup({ "GET /api/v1/integration-types": () => ({ status: 403, body: { ok: false, msg: "Needs Integrations access." } }) });
     mount();
-    fireEvent.click(await byId("int-tab-catalogue"));
+    await goView("catalogue");
     const hidden = await byId("int-cat-hidden");
     expect(hidden.textContent).toContain("Not visible to you");
     expect(hidden.textContent).toContain("Needs Integrations access.");
@@ -133,10 +144,10 @@ describe("Integrations screen", () => {
     const add = await byId("int-add");
     await waitFor(() => expect(locked(add)).toBe(true));
     expect(add.getAttribute("data-reason")).toMatch(/Factory Admin/);
-    expect(locked(await byId("int-build"))).toBe(true);
+    expect(document.getElementById("int-build")).toBeNull();
     fireEvent.click(add);
     expect(document.querySelector("[role=dialog]")).toBeNull();
-    fireEvent.click(await byId("int-tab-custom"));
+    await goView("custom");
     const save = await byId("int-b-save");
     await waitFor(() => expect(locked(save)).toBe(true));
     expect(((await byId("int-b-name")) as HTMLInputElement).disabled).toBe(true);
@@ -156,7 +167,7 @@ describe("Integrations screen", () => {
     setup({ "GET /api/v1/integration-types": () => ({ status: 500, body: { ok: false, msg: "Types are down." } }) });
     mount();
     await byId("int-table");
-    fireEvent.click(await byId("int-tab-catalogue"));
+    await goView("catalogue");
     const err = await byId("int-cat-error");
     expect(err.textContent).toContain("Couldn't load the integration catalogue");
     expect(err.textContent).toContain("Types are down.");
@@ -165,7 +176,7 @@ describe("Integrations screen", () => {
   it("locks Add on a type this version cannot connect, with its reason, and keeps the others open", async () => {
     const calls = setup();
     mount();
-    fireEvent.click(await byId("int-tab-catalogue"));
+    await goView("catalogue");
     const linear = await byId("int-cat-add-linear");
     expect(locked(linear)).toBe(true);
     expect(linear.getAttribute("data-reason")).toContain("Not available in this version.");
@@ -180,5 +191,30 @@ describe("Integrations screen", () => {
     mount();
     fireEvent.click(await byId("int-add"));
     await waitFor(() => expect(document.querySelector("[role=dialog]")).toBeTruthy());
+  });
+
+  it("keeps search, type and status in the URL, and Clear removes them", async () => {
+    setup();
+    mount();
+    await byId("int-table");
+    fireEvent.change(await byId("int-q"), { target: { value: "slack" } });
+    await waitFor(() => expect(window.location.search).toContain("q=slack"));
+    fireEvent.change(await byId("int-status"), { target: { value: "failing" } });
+    await waitFor(() => expect(window.location.search).toContain("st=failing"));
+    expect(text()).toContain("Nothing matches");
+    fireEvent.click(await byId("clear-filters"));
+    await waitFor(() => expect(window.location.search).not.toContain("q=slack"));
+    expect(document.getElementById("int-clear")).toBeNull();
+  });
+
+  it("opens a connection in a drawer with Test connection and Disconnect… in its foot", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("int-open-int-gh-1"));
+    await waitFor(() => expect(document.querySelector(".drawer-f")).toBeTruthy());
+    const foot = document.querySelector(".drawer-f")!.textContent ?? "";
+    expect(foot).toContain("Test connection");
+    expect(foot).toContain("Disconnect…");
+    expect(document.querySelector(".drawer-h")?.textContent?.toUpperCase()).toContain("INTEGRATION");
   });
 });
