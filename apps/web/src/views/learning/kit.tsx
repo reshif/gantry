@@ -126,7 +126,7 @@ export function useChangeLines(lp: LearningProposal): string[] {
   const c = (lp.change ?? {}) as Change;
   const cat = useCatalog();
   const { projName, agName } = useLn();
-  if (lp.kind === "skill") return [`- ${String(c.before ?? "")}`, `+ ${String(c.after ?? "")}`];
+  if (lp.kind === "skill") return [...(c.before ? [`- ${String(c.before)}`] : []), `+ ${String(c.after ?? "")}`];
   if (lp.kind === "eval") return [`+ Add case "${c.case?.name || lp.title}" to ${c.suite}`];
   if (lp.kind === "guideline") return [`+ ${projName(c.project)} onboarding guideline${c.item?.required ? " (required)" : ""}: ${c.item?.text || ""}`];
   if (lp.kind === "guardrail") return [`+ ${agName(c.agent)} must not touch ${c.path}`];

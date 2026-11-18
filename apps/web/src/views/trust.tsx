@@ -50,9 +50,9 @@ export default function TrustView() {
   const agentName = useMemo(() => (id: string) => (agentsData ?? []).find((a) => a.id === id)?.name ?? id, [agentsData]);
   const clsName = useMemo(() => (id: string) => cat?.classes.find((c) => c.id === id)?.name ?? id, [cat]);
   const head = <Page eyebrow="Workforce" title="Trust" sub={SUB} />;
-  if (pq.data === undefined) return <div className="view view-trust">{head}<Async query={pq} what="projects" id="trust-projects">{() => null}</Async></div>;
-  if (!projects.length) return <div className="view view-trust">{head}<Empty title="No projects to show" text="You have no role on an active project." /></div>;
-  if (!tr || !cat) return <div className="view view-trust">{head}<Async query={all} what="trust levels" id="trust">{() => null}</Async></div>;
+  if (pq.data === undefined) return <div className="view-trust">{head}<Async query={pq} what="projects" id="trust-projects">{() => null}</Async></div>;
+  if (!projects.length) return <div className="view-trust">{head}<Empty title="No projects to show" text="You have no role on an active project." /></div>;
+  if (!tr || !cat) return <div className="view-trust">{head}<Async query={all} what="trust levels" id="trust">{() => null}</Async></div>;
   const proj = projects.find((p) => p.id === project)!;
   const pending = proposals.filter((x) => x.status === "pending");
   const dem7 = cells.reduce((n, c) => n + (c.history || []).filter((e) => (e.kind === "demote" || (e.kind === "grant" && e.from != null && e.to < e.from)) && e.at >= Date.now() - 7 * DAY).length, 0);
@@ -71,7 +71,7 @@ export default function TrustView() {
     : tab === "criteria" ? <CriteriaTab p={policy} cells={cells} projects={projects} />
     : <LadderTab p={base} />;
   return (
-    <div className="view view-trust">
+    <div className="view-trust">
       <Page eyebrow="Workforce" title="Trust" sub={SUB}>
         <div id="tr-stats">
           <Stats items={[

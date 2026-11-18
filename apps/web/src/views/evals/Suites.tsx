@@ -234,6 +234,20 @@ export function defaultRun(d: EvalsData, suiteId: string): { agent: string; vers
 }
 
 /** Starts a real run for each given suite through the existing run command and says what happened. Nothing is simulated: scores arrive as the runs finish. */
+const pending: { current: { ids: string[]; seen: Set<string> } | null } = { current: null };
+
+/** Says "Finished N runs" once every run this screen started has left the queue (a run started here is real; its score arrives when it finishes). */
+export function useFinishedRuns(d: EvalsData): void {
+  const ui = useUI();
+  const p = pending.current;
+  if (!p) return;
+  const fresh = p.ids.map((id) => d.runsOf(id).filter((r) => !p.seen.has(r.id)));
+  if (fresh.some((rs) => !rs.length || rs.some((r) => r.status === "queued" || r.status === "running"))) return;
+  pending.current = null;
+  const n = fresh.reduce((t, rs) => t + rs.length, 0);
+  queueMicrotask(() => ui.toast(`Finished ${n} run${n > 1 ? "s" : ""}`, "ok"));
+}
+
 export function useRunSuites(d: EvalsData): { start: (ids: string[]) => void; guard: ReturnType<typeof useCan> } {
   const ui = useUI();
   const perm = useCan("eval.run");
@@ -242,9 +256,9 @@ export function useRunSuites(d: EvalsData): { start: (ids: string[]) => void; gu
     if (!jobs.length) { ui.toast("Nothing to run: every suite is already running or has no cases.", "warn"); return; }
     ui.toast(`Running ${jobs.length} suite${jobs.length > 1 ? "s" : ""}\u2026`, "info");
     void Promise.all(jobs.map((j) => ops.runSuite(j.r!.agent, j.id, j.r!.version, j.r!.model || undefined, evalsUi.repeats))).then((rs) => {
-      const ok = rs.filter((r) => r.ok).length;
       const bad = rs.find((r) => !r.ok);
-      if (ok) ui.toast(`Started ${ok} run${ok > 1 ? "s" : ""}. Scores appear as they finish.`, "ok");
+      // the success toast ("Finished N runs") is raised by useFinishedRuns once the started runs have scores
+      pending.current = rs.some((r) => r.ok) ? { ids: jobs.filter((_, i) => rs[i]!.ok).map((j) => j.id), seen: new Set(d.runs.map((r) => r.id)) } : null;
       if (bad && !bad.ok) ui.toast(bad.msg, "error");
     });
   };

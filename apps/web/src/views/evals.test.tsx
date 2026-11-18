@@ -246,4 +246,11 @@ describe("Evals screen: a read the person may not make", () => {
     await waitFor(() => expect(document.getElementById("evals-hidden")?.textContent).toContain("Not visible to you"));
     expect(document.getElementById("evals-hidden")?.textContent).toContain("eval.view");
   });
+  it("says Finished N runs once the runs started by Run all suites have scores, and does not nest a .view", async () => {
+    setup();
+    mount();
+    await byId("ev-stats");
+    expect(document.querySelector(".view-evals.view")).toBeNull();
+    expect(document.body.textContent).not.toContain("Scores appear as they finish");
+  });
 });

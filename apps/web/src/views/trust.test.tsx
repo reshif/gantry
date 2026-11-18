@@ -368,4 +368,21 @@ describe("Trust screen: matrix", () => {
     await byId("tr-matrix");
     expect(window.location.search).toContain("tab=ladder");
   });
+  it("keeps the ladder link out of the propose dialog and the runtime switch out of the ceilings list", async () => {
+    setup();
+    Object.assign(trustUi, { tab: "matrix" });
+    mount();
+    const m = await byId("tr-agent-matrix");
+    fireEvent.click(m.querySelector("a.lvl") as HTMLElement);
+    const dlg = await waitFor(() => { const e = document.querySelector("[role=dialog], .dlg"); if (!e) throw new Error("no dialog"); return e; });
+    expect(dlg.querySelector("#tr-mx-ladder")).toBeNull();
+    expect(document.querySelector(".view-trust.view")).toBeNull();
+    cleanup();
+    setup();
+    mount();
+    fireEvent.click(await byId("tr-tab-ceilings"));
+    await byId("tr-switch");
+    expect(document.querySelectorAll(".tr-ceil .setrow")).toHaveLength(document.querySelectorAll(".tr-ceil [id^='tr-ceil-on-']").length);
+    expect(document.querySelector(".tr-ceil #tr-switch")).toBeNull();
+  });
 });

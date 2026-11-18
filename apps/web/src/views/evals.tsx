@@ -10,7 +10,7 @@ import { Btn, Empty, Tabs } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Page, Stats } from "../ui/cr";
 import { setUrlParams, useUrlState } from "./urlState";
-import { SuitesTab, useRunSuites } from "./evals/Suites";
+import { SuitesTab, useFinishedRuns, useRunSuites } from "./evals/Suites";
 import { agentOf, evalsUi, suiteOf, useEvalsData, useEvalsUi, type EvalsData, type EvalsTab, type RunRow } from "./evals/kit";
 import { RunsTab } from "./evals/Runs";
 
@@ -49,6 +49,7 @@ export default function EvalsView() {
   usePrefs();
   const [url, setUrl] = useUrlState({ tab: "suites", q: "", sort: "", dir: "", suite: "", run: "" });
   const runner = useRunSuites(d);
+  useFinishedRuns(d);
   // another screen (Agents) asked for a suite: its request becomes URL state once, so a reload keeps it
   useEffect(() => {
     if (evalsUi.suite && !url.suite) setUrlParams({ suite: evalsUi.suite, ...(evalsUi.tab !== "suites" ? { tab: evalsUi.tab } : {}) });
@@ -58,8 +59,8 @@ export default function EvalsView() {
   evalsUi.suite = url.suite || null;
   evalsUi.run = url.run || null;
   const head = <Page eyebrow="Workforce" title="Evals" sub={SUB} />;
-  if (d.q.data === undefined) return <div className="view view-evals">{head}<Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
-  if (!d.agents.length) return <div className="view view-evals">{head}<Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
+  if (d.q.data === undefined) return <div className="view-evals">{head}<Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
+  if (!d.agents.length) return <div className="view-evals">{head}<Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
   const lastOf = (id: string): RunRow | undefined => { const done = d.runsOf(id).filter((r) => r.status === "completed"); return done[done.length - 1]; };
   const passing = d.suites.filter((su) => { const last = lastOf(su.id); return !!last && last.score >= su.threshold; }).length;
   const below = d.suites.filter((su) => { const last = lastOf(su.id); return !!last && last.score < su.threshold; }).length;
@@ -67,7 +68,7 @@ export default function EvalsView() {
   const body = tab === "suites" ? <SuitesTab d={d} url={url} setUrl={setUrl} runner={runner} /> : <RunsTab d={d} url={url} setUrl={setUrl} />;
   const all = d.suites.map((s) => s.id);
   return (
-    <div className="view view-evals">
+    <div className="view-evals">
       <Page eyebrow="Workforce" title="Evals" sub={SUB}
         acts={<Btn label="Run all suites" kind="primary" icon="play" id="ev-run-all" guard={runner.guard.allowed ? null : runner.guard} onClick={() => runner.start(all)} />}>
         <div id="ev-stats">

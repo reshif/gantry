@@ -327,6 +327,28 @@ describe("Learning screen: prototype structure", () => {
   });
 });
 
+describe("Learning screen: round 3 fidelity", () => {
+  it("has no header action and no nested .view wrapper; the proposals switch lives on the Proposals tab", async () => {
+    setup();
+    window.history.replaceState(null, "", "/");
+    mount();
+    await byId("ln-stats");
+    expect(document.querySelector(".ph .acts")).toBeNull();
+    expect(document.querySelector(".view-learning.view")).toBeNull();
+    expect(document.querySelector(".ph #ln-switch")).toBeNull();
+    fireEvent.click(await byId("ln-tab-proposals"));
+    expect((await byId("ln-switch")).closest("#ln-switch-row")).not.toBeNull();
+    expect(document.getElementById("ln-switch")!.closest(".ph")).toBeNull();
+  });
+  it("draws a skill proposal with no earlier text as one added line, not an empty removed line", async () => {
+    setup({}, { proposals: [prop({ change: { skill: "sk-spec", before: "", after: "Always end a spec with a rollback note." } })] });
+    window.history.replaceState(null, "", "/?tab=proposals");
+    mount();
+    const pre = (await waitFor(() => { const e = document.querySelector("pre.diff"); if (!e) throw new Error("no diff"); return e; }));
+    expect([...pre.children].map((c) => c.textContent)).toEqual(["+ Always end a spec with a rollback note."]);
+  });
+});
+
 describe("Learning screen: a read the person may not make", () => {
   it("says Not visible to you, not an empty list, when the primary read is refused", async () => {
     setup({ "GET /api/v1/learning/proposals": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include learning.view." } }) });
