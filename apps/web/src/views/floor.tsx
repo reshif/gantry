@@ -24,6 +24,7 @@ import { useScope } from "../lib/scope";
 import type { Project } from "@gantry/domain";
 import { makeStopActions } from "../shell/stopActions";
 import { useDrawers } from "./floor/Drawers";
+import { OffLine } from "./floor/OffLine";
 import { FloorCtx, projectOf, since, useFloorCtx, useScopedFloorState, type FloorCtxValue } from "./floor/kit";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
@@ -258,6 +259,7 @@ function FloorBody({ projectId }: { projectId: string | null }) {
           </div>
         </Card>
       </div>
+      <div style={{ marginTop: 16 }}><OffLine /></div>
       </>)}
     </Header>
   );

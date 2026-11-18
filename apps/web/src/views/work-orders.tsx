@@ -81,7 +81,7 @@ function WorkOrdersView() {
   const park = useParkMany();
   const [u, setU] = useUrlState(URL_KEYS, { view: "all", sort: "id", dir: "desc", page: "1" });
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
-  // The prototype list is a table only: the board stays reachable from a link (`?mode=board`) but has no toggle on the page.
+  // The list is a table or the floor's board; the Table / Board switch in the view row writes `?mode=`.
   const mode: "table" | "board" = u.mode === "board" ? "board" : "table";
   const projectId = scope.projectId;
   const projectIds = useMemo(() => scope.projects.map((p) => p.id), [scope.projects]);
@@ -269,6 +269,8 @@ function WorkOrdersView() {
         {mode === "table" ? (
           <Segmented name="wo-tab" label="Work order views" items={VIEWS.map((t) => ({ id: t.id, label: t.label }))} value={tab} onChange={(id) => change({ view: id === "all" ? "" : id, st: "" })} />
         ) : <span />}
+        <span className="grow" />
+        <Segmented name="wo-mode" label="Table or board" items={[{ id: "table", label: "Table", icon: "list" }, { id: "board", label: "Board", icon: "board" }]} value={mode} onChange={(id) => change({ mode: id === "board" ? "board" : "" })} />
       </div>
       {mode === "table" ? (
         <FilterBar

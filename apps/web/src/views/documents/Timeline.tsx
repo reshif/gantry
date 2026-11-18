@@ -27,7 +27,8 @@ function Line({ e }: { e: TimelineEntry }) {
 
 function Run({ r, compact }: { r: RunTimeline; compact?: boolean }) {
   const live = r.state === "running" || r.state === "starting";
-  const entries = compact ? r.entries.slice(-6) : r.entries;
+  const all = Array.isArray(r.entries) ? r.entries : [];
+  const entries = compact ? all.slice(-6) : all;
   return (
     <section className={`tl-run${live ? " is-live" : ""}`} aria-label={`${station(r.station)} run`}>
       <header className="tl-run-h">
@@ -35,7 +36,7 @@ function Run({ r, compact }: { r: RunTimeline; compact?: boolean }) {
         <span className={`tl-state is-${r.state}`}>{live ? `Working${r.turn ? ` · turn ${r.turn}` : ""}` : r.state}</span>
         <span className="small muted tl-meter">{`${r.calls} model call${r.calls === 1 ? "" : "s"} · ${fmt.num(r.tokens)} tokens · ${fmt.money(r.costUsd)}`}</span>
       </header>
-      {compact && r.entries.length > entries.length ? <p className="small muted tl-more">{`${r.entries.length - entries.length} earlier steps`}</p> : null}
+      {compact && all.length > entries.length ? <p className="small muted tl-more">{`${all.length - entries.length} earlier steps`}</p> : null}
       <ol className="tl-list">{entries.map((e, i) => <Line key={i} e={e} />)}</ol>
     </section>
   );
@@ -46,12 +47,13 @@ export function RunTimelineView({ woId }: { woId: string }) {
   const q = useWoTimeline(woId);
   const [all, setAll] = useState(false);
   if (!q.data) return <Async query={q} what="the run timeline" id="tl">{() => null}</Async>;
-  const runs = q.data.runs;
+  const runs = Array.isArray(q.data.runs) ? q.data.runs.filter((r) => !!r && typeof r === "object") : null;
+  if (!runs) return <Empty icon="warn" title="The run timeline could not be shown" text="The server sent a timeline in a shape this page does not understand. Nothing was changed. Reload to try again." />;
   if (!runs.length) return <Empty icon="clock" title="No runs yet" text="Each station's run shows here as it works: the files it reads, the pages it fetches, what it writes and what it costs." />;
   const shown = all ? runs : runs.slice(0, 3);
   return (
     <div className="tl" id="tl">
-      {shown.map((r) => <Run key={r.runId} r={r} />)}
+      {shown.map((r, i) => <Run key={r.runId ?? i} r={r} />)}
       {runs.length > shown.length ? <button type="button" className="linkish small" onClick={() => setAll(true)}>{`Show ${runs.length - shown.length} older runs`}</button> : null}
     </div>
   );
@@ -59,7 +61,8 @@ export function RunTimelineView({ woId }: { woId: string }) {
 
 /** The live run in a side panel: the last few steps of the run that is working now, if any. */
 export function LiveRun({ woId, onOpen }: { woId: string; onOpen: () => void }) {
-  const runs = useWoTimeline(woId).data?.runs ?? [];
+  const raw = useWoTimeline(woId).data?.runs;
+  const runs = Array.isArray(raw) ? raw : [];
   const r = runs.find((x) => x.state === "running" || x.state === "starting");
   if (!r) return null;
   return (
