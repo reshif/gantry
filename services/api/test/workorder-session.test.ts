@@ -258,6 +258,8 @@ d("the work-order session", () => {
       edge.respond = (body) => (String(body.system).includes(`about ${id}`) && !JSON.stringify(body.messages).includes("tool_result")
         ? { blocks: [{ type: "tool_use", id: "t1", name: "propose_brief", input: BRIEF }] }
         : { blocks: [{ type: "text", text: "I read your request and drafted the brief." }] });
+      // The agent classifies a new request first; the session opens once that is settled.
+      await q(`update work_orders set data = jsonb_set(data, '{classifyPending}', '"done"') where org_id = $1 and data->>'classifyPending' in ('pending','running')`, [t.orgId]);
       while ((await q(`select 1 from workorder_messages where wo_id = $1`, [id])).length === 0) { if (!(await woSessionJobs.open())) break; }
       for (let i = 0; i < 6 && (await q(`select 1 from workorder_messages where wo_id = $1 and role = 'assistant'`, [id])).length === 0; i++) await woSessionJobs.followUps();
       expect(await woSessionJobs.followUps()).toBe(0);

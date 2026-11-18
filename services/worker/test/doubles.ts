@@ -96,7 +96,7 @@ export class FakeLauncher {
 
 /* ------------------------------------------------------------------------------------------ github broker */
 
-export interface FakePr { number: number; state: "open" | "closed" | "merged"; head: string; draft: boolean; mergeSha: string | null; checks?: Array<{ name: string; status: string; conclusion: string | null }> }
+export interface FakePr { number: number; state: "open" | "closed" | "merged"; head: string; draft: boolean; mergeSha: string | null; body?: string; title?: string; checks?: Array<{ name: string; status: string; conclusion: string | null }> }
 
 export class FakeBroker {
   readonly token = "github-test-token";
@@ -158,6 +158,15 @@ export class FakeBroker {
       const pr = this.prs.get(b.number);
       if (pr) pr.draft = true;
       return send(res, 200, { ok: true, draft: true, alreadyDraft: false });
+    }
+    if (path === "/v1/pulls/describe") {
+      this.calls.push({ op: "describe", at: Date.now(), body: b });
+      const pr = this.prs.get(b.number);
+      if (!pr) return send(res, 404, { ok: false, code: "not_found", msg: "no such pull request" });
+      const changed = pr.body !== b.body || (b.title !== undefined && pr.title !== b.title);
+      pr.body = b.body;
+      if (b.title !== undefined) pr.title = b.title;
+      return send(res, 200, { ok: true, changed, redacted: 0, number: b.number });
     }
     if (path === "/v1/pull-state") {
       const n = Number(u.searchParams.get("number"));

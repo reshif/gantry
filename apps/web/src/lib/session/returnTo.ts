@@ -8,7 +8,7 @@ export function currentReturnTo(hash: string = typeof window === "undefined" ? "
 }
 
 export function loginUrlWithReturn(method: "sso" | "github", loginHint?: string, hash?: string): string {
-  const base = loginUrl(method, loginHint);
+  const base = loginUrl(method, loginHint, ""); // the hash is added once, below, from the caller's hash (not the window's)
   const rt = currentReturnTo(hash);
   return rt ? `${base}&return_to=${encodeURIComponent(rt)}` : base;
 }

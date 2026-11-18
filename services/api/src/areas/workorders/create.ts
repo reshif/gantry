@@ -54,6 +54,9 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
   const data = {
     description: built.description, attachments: built.attachments, clsConfidence: built.clsConfidence, clsRationale: built.clsRationale, clsSuggested: built.clsSuggested, clsOverridden: null, requestedCls: built.requestedCls,
     progress: 0, history: [], log: [{ at: now, who: i.requestedBy, text: `Submitted from ${i.source}.` }], diff: { plus: 0, minus: 0, files: 0 }, tests: { passed: 0, failed: 0, added: 0 },
+    clsBy: i.requestedCls || i.forceCls ? { kind: "person", at: now } : { kind: "rule", at: now },
+    // No class was requested: the Intake agent classifies it next (a job). Until then the keyword match above is provisional.
+    ...(!i.requestedCls && !i.forceCls && !i.childOf && !["eval", "onboarding"].includes(i.source) ? { classifyPending: "pending" } : {}),
     blockReason: null, failReason: null, paths: built.paths, brief: built.brief, children: [], gateStatus: {}, ...(i.submittedBy ? { submittedBy: i.submittedBy } : {}),
   };
   await fx.tx.query(
@@ -83,7 +86,8 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
       if (g && gates.includes(g.id)) skipped[g.id] = "skipped";
     }
     w.data.gateStatus = skipped;
-    w.data.history = [{ station: "intake", agent: "ag-intake", model: "", startedAt: now, endedAt: now, tokens: 0, cost: 0, outcome: "passed", note: "" }];
+    // No agent ran at Intake for an inherited brief: no history entry is invented.
+    w.data.history = [];
     note(w, fx, by, `Created from epic ${i.childOf.parent}.`);
     await enterStation(fx, w, "build", { project });
     await saveWo(fx.tx, fx.orgId, w);

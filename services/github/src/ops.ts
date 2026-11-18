@@ -9,6 +9,7 @@ import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
 import { GithubApp, splitRepo, toApiError } from "./github.js";
 import { prFact } from "./publish.js";
+import { redactSecrets } from "./redact.js";
 
 export interface OpDeps { cfg: Pick<GithubConfig, "gateCheckName" | "issueLabel">; app: GithubApp; api: ApiClient; appId: number }
 
@@ -131,6 +132,39 @@ export async function convertToDraft(d: OpDeps, b: z.infer<typeof DraftBody>): P
       if (pr.state !== "open") throw new BrokerError(409, "not_open", `Pull request #${b.number} is ${pr.merged_at ? "merged" : "closed"}.`);
       await c.write(() => c.octokit.graphql(`mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { id isDraft } } }`, { id: pr.node_id }));
       return { ok: true as const, draft: true as const, alreadyDraft: false };
+    });
+  } catch (e) { throw gh(e); }
+}
+
+// ---------------------------------------------------------------- description
+
+export const DescribeBody = z.object({
+  woId: z.string().min(1).max(200), repo: repoName, number: z.number().int().positive(),
+  title: z.string().min(1).max(250).optional(), body: z.string().min(1).max(60000),
+}).strict();
+
+/**
+ * Writes the Review agent's description (and title) to the work order's own pull request: the same write path as onboarding's PR (the App's one-repository token,
+ * the write limiter), fenced like every work-order write (a stop or a closed work order refuses), only for the work order's branch, secrets redacted, and
+ * skipped when nothing changes. A closed or merged pull request is left alone.
+ */
+export async function describePullRequest(d: OpDeps, b: z.infer<typeof DescribeBody>): Promise<{ ok: true; changed: boolean; redacted: number; number: number }> {
+  const f = await fenced(d, b.woId, "pr", b.repo);
+  const { owner, name } = splitRepo(b.repo);
+  const body = redactSecrets(b.body);
+  const title = b.title ? redactSecrets(b.title) : null;
+  try {
+    return await d.app.withRepo(b.repo, "pull_request", async (c) => {
+      const req = rq(c.octokit);
+      const pr = (await req("GET /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo: name, pull_number: b.number })).data;
+      if (pr.head?.ref !== f.branch) throw new BrokerError(409, "not_work_order_pr", `Pull request #${b.number} is not ${b.woId}'s (its branch is ${String(pr.head?.ref)}, not ${f.branch}).`);
+      if (pr.state !== "open") throw new BrokerError(409, "not_open", `Pull request #${b.number} is ${pr.merged_at ? "merged" : "closed"}.`);
+      const patch: Record<string, string> = {};
+      if ((pr.body ?? "") !== body.text) patch.body = body.text;
+      if (title && pr.title !== title.text) patch.title = title.text;
+      if (!Object.keys(patch).length) return { ok: true as const, changed: false, redacted: body.redacted + (title?.redacted ?? 0), number: b.number };
+      await c.write(() => req("PATCH /repos/{owner}/{repo}/pulls/{pull_number}", { owner, repo: name, pull_number: b.number, ...patch }));
+      return { ok: true as const, changed: true, redacted: body.redacted + (title?.redacted ?? 0), number: b.number };
     });
   } catch (e) { throw gh(e); }
 }

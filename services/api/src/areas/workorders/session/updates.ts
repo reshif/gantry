@@ -73,7 +73,7 @@ export async function scanWoEvents(pool: pg.Pool, orgId: string, now = new Date(
       case "wo.merged": text = `The pull request ${String(a.text ?? "")} was merged.`; break;
       case "wo.state": text = `The work order is now ${String(a.to ?? "")}${a.text ? `: ${String(a.text).slice(0, 300)}` : "."}`; break;
       case "wo.sendback": text = `Sent back to ${String(a.to ?? "an earlier station")}${a.text ? `: ${String(a.text).slice(0, 300)}` : "."}`; followUp = a.to === "intake"; break;
-      case "wo.classify": text = `The class changed from ${String(a.from ?? "")} to ${String(a.to ?? "")}: ${String(a.text ?? "").slice(0, 300)}`; followUp = true; break;
+      case "wo.classify": if (a.initial === true) continue; text = `The class changed from ${String(a.from ?? "")} to ${String(a.to ?? "")}: ${String(a.text ?? "").slice(0, 300)}`; followUp = true; break;
       case "release": text = "The release was recorded."; break;
       default: continue;
     }
@@ -91,7 +91,8 @@ export async function openIntakeSessions(pool: pg.Pool, orgId: string, now = new
   const { rows } = await pool.query<{ id: string; project_id: string; title: string }>(
     `select w.id, w.project_id, w.title from work_orders w
       where w.org_id = $1 and w.position = 'intake' and w.state not in ('done','killed','declined') and w.source not in ('eval','onboarding') and w.created_at > $2::timestamptz - interval '14 days'
-        and not exists (select 1 from workorder_messages m where m.org_id = w.org_id and m.wo_id = w.id) order by w.created_at limit 5`,
+        and coalesce(w.data->>'classifyPending', '') not in ('pending', 'running')
+        and not exists (select 1 from workorder_messages m where m.org_id = w.org_id and m.wo_id = w.id and m.data->>'event' is distinct from 'agent.classified') order by w.created_at limit 5`,
     [orgId, now],
   );
   let n = 0;

@@ -610,10 +610,13 @@ Do
 Use the Code review and PR description skill and the Security review skill.
 
 Result: one JSON object with exactly these fields.
-- verdict: "approve" or "changes_requested".
+- verdict: "approve" or "changes_requested". It is enforced: "changes_requested" sends the work back, so it never waits at the approval gate.
+- criteria: array of objects { "criterion": string, "result": "pass" | "fail" | "untested", "evidence": string }, one for each acceptance criterion in the input's review.acceptanceCriteria, checked against the diff (a helper that is added but never used does not meet a criterion that needs it).
+- sendBackTo: the station that should redo the work when the verdict is "changes_requested" ("build" if you are not sure), otherwise empty.
 - reviewNotes: string, the findings in order of severity, or a short statement that there are none.
 - findings: array of objects { "severity": "blocker" | "major" | "minor", "file": string, "line": number, "issue": string, "fix": string }.
-- pullRequestDescription: string, markdown with the four sections.
+- pullRequestTitle: string, optional, a short title for the pull request.
+- pullRequestDescription: string, markdown with the four sections. It is written to the pull request, so leave out secrets and tokens.
 - commentResponses: array of objects { "comment": string, "response": string }, empty when there are no comments.`),
   suite: {
     id: "SUITE-REVIEW", name: "Reviewer built-in suite", station: "review", threshold: 0.85,
