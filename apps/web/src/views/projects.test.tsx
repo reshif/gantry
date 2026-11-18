@@ -185,6 +185,16 @@ describe("Projects: prototype parity", () => {
     fireEvent.click(await byId("prj-nd-create"));
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/projects")?.body).toMatchObject({ name: "Loyalty", key: "LOY", templateId: "tpl-backend" }));
   });
+
+  it("a create reply without the project still opens the new project (its slug)", async () => {
+    setup({ "POST /api/v1/projects": () => ok({}) });
+    mount(<ProjectsView />);
+    fireEvent.click(await byId("prj-new"));
+    fireEvent.change(await byId("prj-nd-name"), { target: { value: "Loyalty" } });
+    fireEvent.change(await byId("prj-nd-key"), { target: { value: "LOY" } });
+    fireEvent.click(await byId("prj-nd-create"));
+    await waitFor(() => expect(window.location.hash).toContain("/p/loyalty/project-config"), { timeout: 4000 });
+  });
 });
 
 /** The full wizard opens from the template library; the New project dialog is the prototype's small one. */
@@ -390,6 +400,15 @@ describe("Project config", () => {
     expect(window.location.hash).toBe("#/p/payments/project-config/payments");
   });
 
+  it("switching project keeps the open tab in the URL", async () => {
+    window.location.hash = "#/p/payments/project-config/risk";
+    window.history.replaceState(null, "", "/?tab=members#/p/payments/project-config/risk");
+    withPayments();
+    mount(<ProjectConfigView />);
+    fireEvent.change(await byId("pcf-switch"), { target: { value: "payments" } });
+    await waitFor(() => expect(window.location.search).toContain("tab=members"));
+  });
+
   it("freezes tab lists the project's freezes and schedules one; danger zone has halt, emergency stop and archive", async () => {
     const calls = withPayments({ "GET /api/v1/freezes": () => ({ body: [{ id: "FRZ-1", name: "Quarter-end close", repos: "all", from: Date.now() + 1e8, to: Date.now() + 2e8, by: "p-asha", version: 1 }] }), "POST /api/v1/freezes": () => ok() });
     mount(<ProjectConfigView />);
@@ -470,15 +489,16 @@ describe("Project config", () => {
     expect(put.headers["if-match"]).toBe("7");
   });
 
-  it("danger zone: archiving needs the typed project name and sends If-Match", async () => {
+  it("danger zone: archiving needs the typed project key (the server still gets the name), sends If-Match and goes to Projects", async () => {
     const calls = withPayments({ "POST /api/v1/projects/payments/archive": () => ok() });
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-tab-danger"));
     fireEvent.click(await byId("pcf-archive"));
     const input = await waitFor(() => { const i = document.querySelector<HTMLInputElement>(".dlg input.input"); if (!i) throw new Error("no input"); return i; });
-    fireEvent.change(input, { target: { value: "Payments Platform" } });
+    fireEvent.change(input, { target: { value: PAYMENTS.key } });
     fireEvent.submit(document.querySelector(".dlg-form")!);
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path.endsWith("/archive"))).toBeTruthy());
+    await waitFor(() => expect(window.location.hash).toMatch(/^#\/?projects$/));
     const post = calls.find((c) => c.path.endsWith("/archive"))!;
     expect(post.body).toEqual({ confirmText: "Payments Platform" });
     expect(post.headers["if-match"]).toBe("7");

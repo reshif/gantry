@@ -403,7 +403,8 @@ export function NewProjectDialog({ projects, close }: { projects: PView[]; close
     const r = await ops.createProject({ name: name.trim(), key, templateId: tplId, owner, teams: person?.teams ?? [], desc: null, budget: 1000 });
     setBusy(false);
     if (!r.ok) return setErr({ form: r.msg });
-    const project = (r as typeof r & { project: { id: string } }).project;
+    // a reply without the project (older servers) still names it: the id is the name's slug
+    const project = (r as typeof r & { project?: { id: string } }).project ?? { id: idFor(name) };
     ui.toast(`Created ${name.trim()}`, "ok");
     close();
     // the shell keeps the stored project to one in `me`: wait until `me` lists the new project before opening it

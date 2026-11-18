@@ -388,9 +388,9 @@ export function DangerCard({ p }: TabProps) {
     ["Halt line", "Stops new work entering stations. In-flight runs finish.", <Btn key="h" kind="danger" id="pcf-halt" guard={halt} label={halted ? "Resume line" : "Halt line"} onClick={() => (halted ? void stop?.resume(p.id) : ui.open((close) => <HaltLine p={p} close={close} />))} />],
     ["Emergency stop", "Stops all agents on this project immediately.", <Btn key="k" kind="danger" id={killed ? "pcf-restore" : "pcf-kill"} guard={killed ? rd : kd} label={killed ? "Restore project" : "Emergency stop…"} onClick={() => (killed ? stop?.restore("project", p.id) : ui.open((close) => <EmergencyStop p={p} close={close} />))} />],
     ["Archive project", "Hides the project. History is kept for audit.", <Btn key="a" kind="danger" id="pcf-archive" guard={ad} label="Archive…" onClick={() => ui.typedConfirm({
-      title: `Archive ${p.name}?`, sub: "It disappears from lists. History stays for audit. You can restore it from the audit ledger.", phrase: p.name, okLabel: "Archive", kind: "danger", guard: ad,
-      body: <p className="small muted">Type the project name ({p.name}) to confirm.</p>,
-      onOk: async (text) => { const r = await ops.archiveProject(p.id, text, { ifMatch: p.version }); res(r, "Archived"); if (r.ok) navigate("projects"); return r.ok ? undefined : { ok: false, msg: r.msg }; },
+      title: `Archive ${p.name}?`, sub: "It disappears from lists. History stays for audit. You can restore it from the audit ledger.", phrase: p.key, okLabel: "Archive", kind: "danger", guard: ad,
+      body: <p className="small muted">Type the project key ({p.key}) to confirm.</p>,
+      onOk: async (text) => { const r = await ops.archiveProject(p.id, p.name, { ifMatch: p.version }); res(r, "Archived"); if (r.ok) navigate("projects"); return r.ok ? undefined : { ok: false, msg: r.msg }; },
     })} />],
   ];
   return (
