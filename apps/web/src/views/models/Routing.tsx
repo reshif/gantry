@@ -3,13 +3,15 @@
  * The preview asks the API (GET /routing/resolve), which is the same resolver the model gateway uses, so it cannot disagree with what a run gets.
  * Every edit saves a new routing version with If-Match; a stale screen is refused.
  */
-import { useState } from "react";
-import { fmt, type Agent, type Catalog, type Project, type Repo, type Routing, type Vendor } from "@gantry/domain";
+import { Fragment, useState } from "react";
+import { fmt, type Catalog, type Project, type Repo, type Routing, type Vendor } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useRoutingResolve, useRoutingVersions } from "../../api/queries";
 import { useActors } from "../../ui/actors";
-import { Btn, Empty, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { Btn, Chip, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { DataTable, type SortCol } from "../../ui/SortTable";
+import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ProjectPolicy } from "./Policy";
@@ -17,12 +19,12 @@ import { dec, enabledModels, repoTags } from "./kit";
 
 type RoutingRead = Routing & { version?: number };
 
-export function RoutingPanel({ routing, vendors, agents, repos, projects, cat }: { routing: RoutingRead; vendors: Vendor[]; agents: Agent[]; repos: Repo[]; projects: Project[]; cat: Catalog | null }) {
+export function RoutingPanel({ routing, vendors, repos, projects, cat }: { routing: RoutingRead; vendors: Vendor[]; repos: Repo[]; projects: Project[]; cat: Catalog | null }) {
   const ui = useUI();
   const perm = dec(useCan("model.edit"));
   const ro = !perm.allowed;
   const r = routing;
-  const enabled = enabledModels(vendors);
+  const enabled = enabledModels(vendors).map((m) => ({ value: m.value, label: m.label.replace(/ · [^·]*$/, "") }));
   const vendorName = (id: string): string => vendors.find((v) => v.id === id)?.name ?? id;
   const modelOf = (id: string) => vendors.flatMap((v) => v.models.map((m) => ({ m, v }))).find((x) => x.m.id === id);
 
@@ -42,36 +44,25 @@ export function RoutingPanel({ routing, vendors, agents, repos, projects, cat }:
   const withCurrent = (cur: string) => (cur && !enabled.some((m) => m.value === cur) ? [...enabled, { value: cur, label: `${cur} (unavailable)` }] : enabled);
 
   const defaultSel = (
-    <Select id="rt-default" disabled={ro} options={withCurrent(r.defaultModel)} value={r.defaultModel}
-      onChange={(v) => void change((x) => { x.defaultModel = v; }, `Default model is now ${v}.`, `Default model → ${v}`)} />
+    <Select id="rt-default" aria-label="Default model" disabled={ro} options={withCurrent(r.defaultModel)} value={r.defaultModel}
+      onChange={(v) => void change((x) => { x.defaultModel = v; }, "Default model updated", `Default model → ${v}`)} />
   );
 
   const overrides = (
-    <div className="table-scroll">
-      <table className="table table-compact">
-        <thead><tr><th scope="col">Station</th><th scope="col">Model</th><th scope="col">Agent&apos;s own primary</th></tr></thead>
-        <tbody>
-          {stations.map((st) => {
-            const cur = r.overrides[st.id] ?? "";
-            const ag = agents.find((a) => a.id === st.agent);
-            return (
-              <tr key={st.id}>
-                <td className="nowrap">
-                  <span className="mono muted">{st.no} </span>
-                  {st.name}
-                  {st.custom ? <span className="tag">{projects.find((p) => p.id === st.project)?.name ?? st.project}</span> : null}
-                </td>
-                <td>
-                  <Select id={`rt-st-${st.id}`} aria-label={`${st.name} model`} disabled={ro} options={[{ value: "", label: `Default (${r.defaultModel})` }, ...withCurrent(cur)]} value={cur}
-                    onChange={(v) => void change((x) => { if (v) x.overrides[st.id] = v; else delete x.overrides[st.id]; }, `${st.name} now uses ${v || "the default"}.`, `${st.name} → ${v || "default"}`)} />
-                </td>
-                <td>{ag ? <span className="mono small">{ag.model}</span> : <span className="muted small">–</span>}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <>
+      {stations.filter((st) => !st.custom).map((st) => {
+        const cur = r.overrides[st.id] ?? "";
+        return (
+          <Fragment key={st.id}>
+            <dt>{st.name}</dt>
+            <dd>
+              <Select id={`rt-st-${st.id}`} aria-label={`${st.name} model`} disabled={ro} options={[{ value: "", label: "Use default" }, ...withCurrent(cur)]} value={cur}
+                onChange={(v) => void change((x) => { if (v) x.overrides[st.id] = v; else delete x.overrides[st.id]; }, `${st.name} routing saved`, `${st.name} → ${v || "default"}`)} />
+            </dd>
+          </Fragment>
+        );
+      })}
+    </>
   );
 
   const classTable = (
@@ -136,85 +127,93 @@ export function RoutingPanel({ routing, vendors, agents, repos, projects, cat }:
   );
 
   // ---- residency and routing rules
+  const ruleCols: SortCol<Routing["rules"][number]>[] = [
+    { key: "tag", label: "Repo tag", render: (x) => <Chip text={x.tag} cls="info" /> },
+    { key: "use", label: "Use vendor", render: (x) => vendorName(x.use) + (x.alt ? ` or ${vendorName(x.alt)}` : "") },
+    { key: "region", label: "Region", render: (x) => x.region || "—" },
+    { key: "note", label: "Why", render: (x) => x.note || "—" },
+    { key: "rm", label: "", align: "end", render: (x) => <Btn label="Remove" small kind="ghost" id={`rr-del-${x.id}`} aria={`Remove rule ${x.id}`} guard={perm} onClick={() => void change((y) => { y.rules = y.rules.filter((z) => z.id !== x.id); }, `${x.id} removed.`, `Removed ${x.id} (${x.tag} → ${x.use})`)} /> },
+  ];
   const tags = new Set<string>(["regulated", "infra", "experimental", "pci"]);
   repos.forEach((rp) => repoTags(rp, projects).forEach((t) => tags.add(t)));
-  const [draft, setDraft] = useState({ tag: "regulated", use: "bedrock", region: "", alt: "", note: "" });
+  const vendorOpts = vendors.map((v) => ({ value: v.id, label: v.name }));
   const rules = (
-    <ul className="rule-cards">
-      {r.rules.map((rule) => {
-        const hits = repos.filter((rp) => repoTags(rp, projects).includes(rule.tag));
-        return (
-          <li key={rule.id} className="rule-card">
-            <div className="rule-top"><span className="mono">{rule.id}</span><span className="tag">{rule.tag}</span></div>
-            <p className="rule-text">
-              Repos tagged <strong>{rule.tag}</strong> use <strong>{vendorName(rule.use) + (rule.region ? ` ${rule.region}` : "")}</strong>
-              {rule.alt ? <span> or <strong>{vendorName(rule.alt)}</strong></span> : null} only.
-            </p>
-            {rule.note ? <p className="muted small">{rule.note}</p> : null}
-            <p className="small">Applies to: <span className="mono">{hits.map((x) => x.name).join(", ") || "no repos yet"}</span></p>
-            <Btn label="Remove rule" small kind="ghost" icon="x" id={`rr-del-${rule.id}`} guard={perm}
-              onClick={() => void change((x) => { x.rules = x.rules.filter((y) => y.id !== rule.id); }, `${rule.id} removed.`, `Removed ${rule.id} (${rule.tag} → ${rule.use})`)} />
-          </li>
-        );
-      })}
-    </ul>
+    <DataTable id="rr-table" caption="Routing rules" columns={ruleCols} rows={r.rules} rowKey={(x) => x.id} pageSize={12} pager
+      empty={{ title: "No residency rules", text: "Without a rule, any allowed vendor can serve any repo." }} />
   );
-  const addRule = async () => {
+
+  return (
+    <div className="stack md-routing" id="rt-panel">
+      <LockNote decision={perm} what="Routing" />
+      <div className="cols">
+        <Panel title="Default and per-station">
+          <dl className="kv">
+            <dt>Default model</dt><dd>{defaultSel}</dd>
+            {overrides}
+          </dl>
+        </Panel>
+        <Panel title="Fallback chain">
+          <ol className="mono" style={{ margin: 0, paddingLeft: 20 }}>
+            {r.fallback.map((f) => <li key={f} style={{ padding: "6px 0" }}>{f}</li>)}
+          </ol>
+          <details className="md-manage">
+            <summary className="small">Change the order</summary>
+            <p className="muted small">Tried in order when a model errors, times out or its vendor is down, and only if the project allows a different model. The same model on another allowed vendor is always tried first.</p>
+            {fb}
+            {addFb}
+            {cross}
+          </details>
+        </Panel>
+      </div>
+      <Panel title="Routing rules" flush tools={<Btn label="Add rule" small icon="plus" id="rr-add-open" guard={perm} onClick={() => ui.open((close) => <RuleDialog close={close} tags={[...tags]} vendorOpts={vendorOpts} r={r} change={change} />)} />}>
+        {rules}
+      </Panel>
+      <Panel title="Per-class overrides">
+        <p className="muted small">A work-order class overrides its station. Order: factory default, project, station, class.</p>
+        {classTable}
+      </Panel>
+      <div className="cols">
+        <Panel title="Per-project policy">
+          <ProjectPolicy routing={r} vendors={vendors} projects={projects} enabled={enabled} change={change} />
+        </Panel>
+        <Panel title="Where would this request go?">
+          <Preview repos={repos} projects={projects} stations={stations.map((s) => ({ value: s.id, label: `${s.no} ${s.name}${s.custom ? ` (${projects.find((p) => p.id === s.project)?.name ?? s.project})` : ""}` }))} stationLabel={stationLabel} />
+        </Panel>
+      </div>
+      <RoutingVersions current={r.version} />
+    </div>
+  );
+}
+
+type ChangeFn = (fn: (x: Routing) => void, msg: string, label?: string) => Promise<{ ok: boolean }>;
+
+/** Add a residency rule (kept from the editor; the rules table itself is read-only like the prototype's). */
+function RuleDialog({ close, tags, vendorOpts, r, change }: { close: () => void; tags: string[]; vendorOpts: Array<{ value: string; label: string }>; r: Routing; change: ChangeFn }) {
+  const ui = useUI();
+  const perm = dec(useCan("model.edit"));
+  const ro = !perm.allowed;
+  const [draft, setDraft] = useState({ tag: "regulated", use: vendorOpts[0]?.value ?? "", region: "", alt: "", note: "" });
+  const addRule = async (done: () => void) => {
     if (ro) return;
     if (draft.alt && draft.alt === draft.use) { ui.toast("The alternative must be a different vendor.", "error"); return; }
     if (r.rules.some((x) => x.tag === draft.tag)) { ui.toast(`A rule for ${draft.tag} already exists. Remove it first.`, "error"); return; }
     const id = `RR-${r.rules.reduce((m, x) => Math.max(m, +x.id.slice(3) || 0), 0) + 1}`;
     const rule = { id, tag: draft.tag, use: draft.use, region: draft.region.trim(), alt: draft.alt, note: draft.note.trim() };
     const res = await change((x) => { x.rules.push(rule); }, `${id} added.`, `Added ${id}: ${rule.tag} → ${rule.use}${rule.region ? ` ${rule.region}` : ""}${rule.alt ? ` or ${rule.alt}` : ""}`);
-    if (res.ok) setDraft({ tag: "regulated", use: "bedrock", region: "", alt: "", note: "" });
+    if (res.ok) done();
   };
-  const vendorOpts = vendors.map((v) => ({ value: v.id, label: v.name }));
-  const form = (
-    <form className="rule-form md-rule-form" id="rr-form" onSubmit={(e) => { e.preventDefault(); void addRule(); }}>
-      <Field label="When repo is tagged" htmlFor="rr-tag"><Select id="rr-tag" disabled={ro} options={[...tags]} value={draft.tag} onChange={(v) => setDraft((d) => ({ ...d, tag: v }))} /></Field>
-      <Field label="Use only" htmlFor="rr-use"><Select id="rr-use" disabled={ro} options={vendorOpts} value={draft.use} onChange={(v) => setDraft((d) => ({ ...d, use: v }))} /></Field>
-      <Field label="Region (optional)" htmlFor="rr-region"><input id="rr-region" className="input mono" placeholder="eu-central-1" value={draft.region} disabled={ro} onChange={(e) => setDraft((d) => ({ ...d, region: e.target.value }))} /></Field>
-      <Field label="Or else" htmlFor="rr-alt"><Select id="rr-alt" disabled={ro} options={[{ value: "", label: "No alternative" }, ...vendorOpts]} value={draft.alt} onChange={(v) => setDraft((d) => ({ ...d, alt: v }))} /></Field>
-      <Field label="Note" htmlFor="rr-note"><input id="rr-note" className="input" placeholder="Why this rule exists" value={draft.note} disabled={ro} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} /></Field>
-      <Btn label="Add rule" kind="primary" type="submit" icon="plus" id="rr-add" guard={perm} />
-    </form>
-  );
-
   return (
-    <div className="md-routing" id="rt-panel">
-      <LockNote decision={perm} what="Routing" />
-      <div className="md-tb">
-        <div className="md-col">
-          <Panel title="Defaults and overrides" cls="md-routing-defaults">
-            <Field label="Factory default model" htmlFor="rt-default" hint="Used by any station without an override and by new agents.">{defaultSel}</Field>
-            <h3 className="sub-h">Per-station overrides</h3>
-            {overrides}
-            <h3 className="sub-h">Per-class overrides</h3>
-            <p className="muted small">A work-order class overrides its station. Order: factory default, project, station, class.</p>
-            {classTable}
-          </Panel>
-          <Panel title="Fallback order">
-            <p className="muted small">Tried in order when a model errors, times out or its vendor is down, and only if the project allows a different model. The same model on another allowed vendor is always tried first.</p>
-            {fb}
-            {addFb}
-            {cross}
-          </Panel>
+    <Dialog title="Add routing rule" kicker="Models · routing" onClose={close}
+      body={(
+        <div className="form-grid md-rule-form" id="rr-form">
+          <Field label="When repo is tagged" htmlFor="rr-tag"><Select id="rr-tag" disabled={ro} options={tags} value={draft.tag} onChange={(v) => setDraft((d) => ({ ...d, tag: v }))} /></Field>
+          <Field label="Use only" htmlFor="rr-use"><Select id="rr-use" disabled={ro} options={vendorOpts} value={draft.use} onChange={(v) => setDraft((d) => ({ ...d, use: v }))} /></Field>
+          <Field label="Region (optional)" htmlFor="rr-region"><input id="rr-region" className="input mono" placeholder="eu-central-1" value={draft.region} disabled={ro} onChange={(e) => setDraft((d) => ({ ...d, region: e.target.value }))} /></Field>
+          <Field label="Or else" htmlFor="rr-alt"><Select id="rr-alt" disabled={ro} options={[{ value: "", label: "No alternative" }, ...vendorOpts]} value={draft.alt} onChange={(v) => setDraft((d) => ({ ...d, alt: v }))} /></Field>
+          <Field label="Note" htmlFor="rr-note"><input id="rr-note" className="input" placeholder="Why this rule exists" value={draft.note} disabled={ro} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} /></Field>
         </div>
-        <div className="md-col">
-          <Panel title="Residency and routing rules">
-            {r.rules.length ? rules : <Empty icon="globe" title="No residency rules" text="Without a rule, any allowed vendor can serve any repo." />}
-            {form}
-          </Panel>
-          <Panel title="Per-project policy">
-            <ProjectPolicy routing={r} vendors={vendors} projects={projects} enabled={enabled} change={change} />
-          </Panel>
-          <RoutingVersions current={r.version} />
-          <Panel title="Where would this request go?">
-            <Preview repos={repos} projects={projects} stations={stations.map((s) => ({ value: s.id, label: `${s.no} ${s.name}${s.custom ? ` (${projects.find((p) => p.id === s.project)?.name ?? s.project})` : ""}` }))} stationLabel={stationLabel} />
-          </Panel>
-        </div>
-      </div>
-    </div>
+      )}
+      actions={[{ label: "Cancel" }, { label: "Add rule", kind: "primary", submit: true, icon: "plus", id: "rr-add", guard: perm, onClick: (done) => void addRule(done) }]} />
   );
 }
 

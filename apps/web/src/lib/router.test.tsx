@@ -12,15 +12,20 @@ const meWith = (roles: Array<{ role: string; scope: string }>, projects = ["paym
 
 describe("hash parsing", () => {
   it("parses ids and params like legacy hashes", () => {
-    expect(parseHash("#home")).toEqual({ id: "home", param: null, project: null });
-    expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042", project: null });
-    expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null });
-    expect(parseHash("")).toEqual({ id: "", param: null, project: null });
-    expect(parseHash("#record/a%2Fb")).toEqual({ id: "record", param: "a/b", project: null });
+    expect(parseHash("#home")).toEqual({ id: "home", param: null, project: null, q: {} });
+    expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042", project: null, q: {} });
+    expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null, q: {} });
+    expect(parseHash("")).toEqual({ id: "", param: null, project: null, q: {} });
+    expect(parseHash("#record/a%2Fb")).toEqual({ id: "record", param: "a/b", project: null, q: {} });
   });
+  it("reads the hash query (#models?tab=prices) without it leaking into the id or param", () => {
+    expect(parseHash("#/models?tab=prices")).toEqual({ id: "models", param: null, project: null, q: { tab: "prices" } });
+    expect(parseHash("#/agents/ag-build?tab=skills&x=1")).toEqual({ id: "agents", param: "ag-build", project: null, q: { tab: "skills", x: "1" } });
+  });
+
   it("parses and formats project routes", () => {
-    expect(parseHash("#/p/payments/floor")).toEqual({ id: "floor", param: null, project: "payments" });
-    expect(parseHash("#/p/pay%20x/record/WO-1")).toEqual({ id: "record", param: "WO-1", project: "pay x" });
+    expect(parseHash("#/p/payments/floor")).toEqual({ id: "floor", param: null, project: "payments", q: {} });
+    expect(parseHash("#/p/pay%20x/record/WO-1")).toEqual({ id: "record", param: "WO-1", project: "pay x", q: {} });
     expect(formatHash("record", "WO-1", "payments")).toBe("#/p/payments/record/WO-1");
   });
   it("navigate puts the remembered project into project routes only", () => {

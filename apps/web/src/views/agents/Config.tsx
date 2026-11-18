@@ -1,9 +1,12 @@
-/** Configuration and Per-project tabs (legacy configTab and overridesTab): identity, model chain, autonomy, tools, staffing, budget and guardrails, promotion gate, per-project overrides. */
-import type { ReactNode } from "react";
+/** Configuration and Per-project tabs in the Blueprint layout: Identity (kv list) and Tools side by side, Guardrail paths below; editing happens in place and stays in the draft. */
+import { useState, type ReactNode } from "react";
 import { fmt, type Policy, type Project } from "@gantry/domain";
-import { Btn, Field, Select, Toggle, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Field, Panel, Select, Toggle, type Decision } from "../../ui/primitives";
+import { DataTable, type SortCol } from "../../ui/SortTable";
+import { Dialog } from "../../ui/Overlay";
+import { useUI } from "../../ui/overlay-context";
 import { Icon } from "../../ui/Icon";
-import { useAgentSuites } from "../../api/queries";
+import { useAgentSuites, useEvalsFactory } from "../../api/queries";
 import { AUTONOMY, TOOLS, autonomyCheck, useModels, useStations, type AgentRow, type Draft } from "./kit";
 
 export interface TabProps {
@@ -15,15 +18,25 @@ export interface TabProps {
   policies: Policy[];
   /** Mutates the draft, then redraws. */
   edit: (fn: () => void) => void;
+  /** Instructions tab: save the edited text and cut a candidate version from it. */
+  saveAsVersion: () => void;
+  /** Instructions tab: put the saved text back. */
+  revert: () => void;
 }
 
-const Sec = ({ title, children, hint, cls }: { title: string; children: ReactNode; hint?: ReactNode; cls?: string }) => (
-  <section className={`cfg-sec${cls ? ` ${cls}` : ""}`}>
-    <h3 className="cfg-h">{title}</h3>
-    {hint ? <p className="muted small">{hint}</p> : null}
-    {children}
-  </section>
-);
+/** A value shown as plain text with a small Edit button that reveals its control. */
+function InPlace({ id, label, text, ro, perm, children }: { id: string; label: string; text: ReactNode; ro: boolean; perm: Decision; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ag-inplace">
+      <div className="row">
+        <span>{text}</span>
+        <Btn label={open ? "Done" : "Edit"} small kind="ghost" id={`${id}-edit`} aria={`${open ? "Close" : "Edit"} ${label}`} guard={ro ? perm : null} onClick={() => setOpen(!open)} />
+      </div>
+      {open && !ro ? <div className="ag-inplace-body">{children}</div> : null}
+    </div>
+  );
+}
 
 export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps) {
   const m = useModels();
@@ -34,76 +47,92 @@ export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps
   const models = m.list;
   const check = (autonomy: string) => autonomyCheck(policies, projects, { station: a.station, projects: d.projects }, autonomy);
   const move = (list: string[], i: number, to: number) => edit(() => { const [x] = list.splice(i, 1); list.splice(to, 0, x as string); });
-
-  const primaryOpts = models.map((x) => ({ value: x.id, label: `${x.name} · ${x.vendor}` })).concat(models.some((x) => x.id === d.model) ? [] : [{ value: d.model, label: `${m.name(d.model)} (not available)` }]);
+  const modelOpts = models.map((x) => ({ value: x.id, label: x.name })).concat(models.some((x) => x.id === d.model) ? [] : [{ value: d.model, label: `${m.name(d.model)} (not available)` }]);
   const addable = models.filter((x) => x.id !== d.model && !d.fallbacks.includes(x.id));
+  const autoValues = [...new Set([...AUTONOMY.map((o) => o[0]), d.autonomy])];
   const allProj = d.projects === "all";
+  const station = st.find(a.station);
+  const paths = d.guardrails.paths;
+  const [editPaths, setEditPaths] = useState(false);
   return (
-    <div className="cfg">
-      <Sec title="Identity">
-        <div className="form-grid">
-          <Field label="Name" htmlFor="ag-name"><input id="ag-name" className="input" value={d.name} disabled={ro} onChange={(e) => edit(() => { d.name = e.target.value; })} /></Field>
-          <dl className="kv-row ag-ident">
-            <div className="kv"><dt className="kv-k">Id</dt><dd className="kv-v mono">{a.id}</dd></div>
-            <div className="kv"><dt className="kv-k">Home station</dt><dd className="kv-v">{st.label(a.station, projects)}</dd></div>
-            <div className="kv"><dt className="kv-k">Live version</dt><dd className="kv-v mono">{a.version}</dd></div>
+    <>
+      <div className="cols">
+        <Panel title="Identity">
+          <dl className="kv">
+            <dt>Station</dt><dd>{station?.name ?? "Roaming"}</dd>
+            <dt>Model</dt>
+            <dd><Select id="ag-model" aria-label="Model" disabled={ro} options={modelOpts} value={d.model} onChange={(v) => edit(() => { d.model = v; d.fallbacks = d.fallbacks.filter((x) => x !== v); })} /></dd>
+            <dt>Fallbacks</dt>
+            <dd>
+              <InPlace id="ag-fb" label="fallbacks" ro={ro} perm={perm} text={d.fallbacks.length ? d.fallbacks.join(", ") : "None"}>
+                {d.fallbacks.length ? (
+                  <ol className="chain">
+                    {d.fallbacks.map((f, i) => (
+                      <li key={f}>
+                        <span className="mono chain-n">{i + 1}</span>
+                        <span className="mono">{f}</span>
+                        {m.usable(f) ? null : <span className="chip chip-warn"><Icon name="alert" />vendor or model off, skipped</span>}
+                        <span className="chain-tools">
+                          <Btn icon="up" small id={`ag-fb-up-${i}`} aria={`Move ${f} up`} disabledReason={i === 0 ? "Already first." : null} onClick={() => move(d.fallbacks, i, i - 1)} />
+                          <Btn icon="down" small id={`ag-fb-down-${i}`} aria={`Move ${f} down`} disabledReason={i === d.fallbacks.length - 1 ? "Already last." : null} onClick={() => move(d.fallbacks, i, i + 1)} />
+                          <Btn icon="x" small id={`ag-fb-rm-${i}`} aria={`Remove ${f}`} onClick={() => edit(() => { d.fallbacks.splice(i, 1); })} />
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+                <Select id="ag-fb-add" aria-label="Add fallback model" disabled={!addable.length} value="" options={[{ value: "", label: "Add fallback model…" }, ...addable.map((x) => ({ value: x.id, label: `${x.name} · ${x.vendor}` }))]} onChange={(v) => { if (v) edit(() => { d.fallbacks.push(v); }); }} />
+              </InPlace>
+            </dd>
+            <dt>Autonomy</dt>
+            <dd>
+              <Select id="ag-autonomy" aria-label="Autonomy" disabled={ro} value={d.autonomy}
+                options={autoValues.map((v) => { const c = check(v); return { value: v, label: c.allowed ? v : `${v} (blocked by ${c.rule})`, disabled: !c.allowed && v !== d.autonomy }; })}
+                onChange={(v) => edit(() => { d.autonomy = v as Draft["autonomy"]; })} />
+              {!check(d.autonomy).allowed ? <div className="small neg"><Icon name="lock" /> {check(d.autonomy).reason}</div> : null}
+            </dd>
+            <dt>Budget / run</dt>
+            <dd>
+              <InPlace id="ag-budget" label="budget per run" ro={ro} perm={perm} text={`$${d.budget}`}>
+                <Field label="Budget per work order (USD)" htmlFor="ag-budget-in"><input id="ag-budget-in" className="input mono" type="number" min="0" step="0.1" value={String(d.budget)} onChange={(e) => edit(() => { d.budget = +e.target.value || 0; })} /></Field>
+              </InPlace>
+            </dd>
+            <dt>Max diff</dt>
+            <dd>
+              <InPlace id="ag-maxdiff" label="max diff" ro={ro} perm={perm} text={d.guardrails.maxDiff ? `${d.guardrails.maxDiff} lines` : "No code changes"}>
+                <Field label="Max diff size (lines)" htmlFor="ag-maxdiff-in" hint="0 means no code changes."><input id="ag-maxdiff-in" className="input mono" type="number" min="0" step="50" value={String(d.guardrails.maxDiff)} onChange={(e) => edit(() => { d.guardrails.maxDiff = +e.target.value || 0; })} /></Field>
+              </InPlace>
+            </dd>
+            <dt>Eval suite</dt>
+            <dd>
+              <InPlace id="ag-suite" label="eval suite" ro={ro} perm={perm} text={d.suite || "—"}>
+                <Select id="ag-suite-in" aria-label="Required eval suite" value={d.suite}
+                  options={(suites.some((x) => x.id === d.suite) || !d.suite ? suites : [...suites, { id: d.suite, name: "not found", station: null, agent: null, threshold: 0 }]).map((x) => ({ value: x.id, label: `${x.id} · ${x.name} (≥ ${fmt.pct(x.threshold)})` }))}
+                  onChange={(v) => edit(() => { d.suite = v; })} />
+              </InPlace>
+            </dd>
           </dl>
-        </div>
-      </Sec>
-      <Sec title="Model chain">
-        <div className="form-grid">
-          <Field label="Primary model" htmlFor="ag-model" hint="Only enabled models on connected vendors are listed.">
-            <Select id="ag-model" options={primaryOpts} value={d.model} disabled={ro} onChange={(v) => edit(() => { d.model = v; d.fallbacks = d.fallbacks.filter((x) => x !== v); })} />
-          </Field>
-          <div className="field">
-            <div className="field-label">Fallbacks, tried in order</div>
-            {d.fallbacks.length ? (
-              <ol className="chain">
-                {d.fallbacks.map((f, i) => (
-                  <li key={f}>
-                    <span className="mono chain-n">{i + 1}</span>
-                    <span className="mono">{f}</span>
-                    {m.usable(f) ? null : <span className="chip chip-warn"><Icon name="alert" />vendor or model off, skipped</span>}
-                    <span className="chain-tools">
-                      <Btn icon="up" small id={`ag-fb-up-${i}`} aria={`Move ${f} up`} disabledReason={ro ? perm.reason : i === 0 ? "Already first." : null} onClick={() => move(d.fallbacks, i, i - 1)} />
-                      <Btn icon="down" small id={`ag-fb-down-${i}`} aria={`Move ${f} down`} disabledReason={ro ? perm.reason : i === d.fallbacks.length - 1 ? "Already last." : null} onClick={() => move(d.fallbacks, i, i + 1)} />
-                      <Btn icon="x" small id={`ag-fb-rm-${i}`} aria={`Remove ${f}`} disabledReason={ro ? perm.reason : null} onClick={() => edit(() => { d.fallbacks.splice(i, 1); })} />
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            ) : <p className="muted small">No fallbacks. If the primary fails, the work order blocks.</p>}
-            <Select id="ag-fb-add" aria-label="Add fallback model" disabled={ro || !addable.length} value="" options={[{ value: "", label: "Add fallback model…" }, ...addable.map((x) => ({ value: x.id, label: `${x.name} · ${x.vendor}` }))]} onChange={(v) => { if (v) edit(() => { d.fallbacks.push(v); }); }} />
-          </div>
-        </div>
-      </Sec>
-      <Sec title="Autonomy" hint="POL-112 limits agents from Plan onward on regulated projects to act with gate.">
-        <div className="radio-cards" role="radiogroup" aria-label="Autonomy level">
-          {AUTONOMY.map((o) => {
-            const chk = check(o[0]);
-            const dis = ro || !chk.allowed;
-            return (
-              <label key={o[0]} className={`radio-card${d.autonomy === o[0] ? " is-on" : ""}${dis ? " is-locked" : ""}`} htmlFor={`ag-aut-${o[0]}`} data-reason={!chk.allowed ? chk.reason : ro ? perm.reason : undefined}>
-                <input type="radio" name="ag-autonomy" id={`ag-aut-${o[0]}`} value={o[0]} checked={d.autonomy === o[0]} disabled={dis} onChange={() => edit(() => { d.autonomy = o[0] as Draft["autonomy"]; })} />
-                <span className="rc-t">{o[1]}</span>
-                <span className="rc-d muted small">{o[2]}</span>
-                {!chk.allowed ? <span className="rc-why small neg"><Icon name="lock" /> Blocked by {chk.rule}</span> : null}
+        </Panel>
+        <Panel title="Tools">
+          <div>
+            {TOOLS.map((t) => (
+              <label key={t[0]} className="check ag-tool-row" htmlFor={`ag-tool-${t[0]}`} style={{ justifyContent: "space-between", padding: "6px 0", borderBottom: "1px dotted var(--line)" }}>
+                <span>{t[0]}</span>
+                <Toggle id={`ag-tool-${t[0]}`} checked={!!d.tools[t[0]]} decision={perm} label={t[0]} onChange={(v) => edit(() => { d.tools[t[0]] = v; })} />
               </label>
-            );
-          })}
-        </div>
-      </Sec>
-      <Sec title="Tool permissions">
-        <div className="toggle-grid">
-          {TOOLS.map((t) => (
-            <div key={t[0]} className="toggle-row">
-              <label htmlFor={`ag-tool-${t[0]}`}><span>{t[1]}</span><span className="muted small ag-tool-d">{t[2]}</span></label>
-              <Toggle id={`ag-tool-${t[0]}`} checked={!!d.tools[t[0]]} decision={perm} onChange={(v) => edit(() => { d.tools[t[0]] = v; })} />
-            </div>
-          ))}
-        </div>
-      </Sec>
-      <Sec title="Staffing">
+            ))}
+          </div>
+        </Panel>
+      </div>
+      <Panel title="Guardrail paths" tools={<Btn label={editPaths ? "Done" : "Edit paths"} small kind="ghost" id="ag-paths-edit" guard={ro ? perm : null} onClick={() => setEditPaths(!editPaths)} />}>
+        {paths.length ? <pre className="pre">{paths.join("\n")}</pre> : <div className="empty">No protected paths for this agent.</div>}
+        {editPaths && !ro ? (
+          <Field label="Paths it must not touch" htmlFor="ag-paths" hint="One glob per line.">
+            <textarea id="ag-paths" className="input mono" rows={3} placeholder="infra/prod/**" value={paths.join("\n")} onChange={(e) => edit(() => { d.guardrails.paths = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); })} />
+          </Field>
+        ) : null}
+      </Panel>
+      <Panel title="Staffing">
         <div className="form-grid">
           <div className="field">
             <div className="field-label">Stations it may staff</div>
@@ -111,104 +140,77 @@ export function ConfigTab({ a, d, ro, perm, projects, policies, edit }: TabProps
               {st.all.map((s) => (
                 <label key={s.id} className="check" htmlFor={`ag-st-${s.id}`}>
                   <input type="checkbox" id={`ag-st-${s.id}`} checked={d.stations.includes(s.id)} disabled={ro} onChange={(e) => edit(() => { d.stations = e.target.checked ? [...d.stations, s.id] : d.stations.filter((x) => x !== s.id); })} />
-                  <span className="mono muted">{s.no}</span>{s.name}{s.custom ? <span className="tag">{projects.find((p) => p.id === s.project)?.name ?? s.project}</span> : null}
+                  <span className="mono muted">{s.no}</span>{s.name}
                 </label>
               ))}
             </div>
           </div>
           <div className="field">
             <div className="field-label">Projects it may work on</div>
-            <div>
-              <label className="check" htmlFor="ag-proj-all">
-                <input type="checkbox" id="ag-proj-all" checked={allProj} disabled={ro} onChange={(e) => edit(() => { d.projects = e.target.checked ? "all" : projects.map((p) => p.id); })} />
-                All projects, including new ones
-              </label>
-              {allProj ? null : (
-                <div className="check-grid">
-                  {live.map((p) => (
-                    <label key={p.id} className="check" htmlFor={`ag-proj-${p.id}`}>
-                      <input type="checkbox" id={`ag-proj-${p.id}`} checked={arr(d.projects as string[]).includes(p.id)} disabled={ro} onChange={(e) => edit(() => { const cur = d.projects as string[]; d.projects = e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id); })} />
-                      {p.name}{p.regulated ? <span className="tag">regulated</span> : null}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
+            <label className="check" htmlFor="ag-proj-all">
+              <input type="checkbox" id="ag-proj-all" checked={allProj} disabled={ro} onChange={(e) => edit(() => { d.projects = e.target.checked ? "all" : projects.map((p) => p.id); })} />
+              All projects, including new ones
+            </label>
+            {allProj ? null : (
+              <div className="check-grid">
+                {live.map((p) => (
+                  <label key={p.id} className="check" htmlFor={`ag-proj-${p.id}`}>
+                    <input type="checkbox" id={`ag-proj-${p.id}`} checked={arr(d.projects as string[]).includes(p.id)} disabled={ro} onChange={(e) => edit(() => { const cur = d.projects as string[]; d.projects = e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id); })} />
+                    {p.name}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      </Sec>
-      <Sec title="Budget and guardrails">
-        <div className="form-grid">
-          <div className="form-row">
-            <Field label="Budget per work order (USD)" htmlFor="ag-budget"><input id="ag-budget" className="input mono" type="number" min="0" step="0.1" value={String(d.budget)} disabled={ro} onChange={(e) => edit(() => { d.budget = +e.target.value || 0; })} /></Field>
-            <Field label="Max diff size (lines)" htmlFor="ag-maxdiff" hint="0 means no limit."><input id="ag-maxdiff" className="input mono" type="number" min="0" step="50" value={String(d.guardrails.maxDiff)} disabled={ro} onChange={(e) => edit(() => { d.guardrails.maxDiff = +e.target.value || 0; })} /></Field>
-          </div>
-          <Field label="Paths it must not touch" htmlFor="ag-paths" hint="One glob per line.">
-            <textarea id="ag-paths" className="input mono" rows={3} disabled={ro} placeholder="infra/prod/**" value={d.guardrails.paths.join("\n")} onChange={(e) => edit(() => { d.guardrails.paths = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); })} />
-          </Field>
-        </div>
-      </Sec>
-      <Sec title="Promotion gate" cls="ag-wide">
-        <Field label="Required eval suite" htmlFor="ag-suite" hint="A version reaches the floor only when its latest run of this suite meets the threshold.">
-          <Select id="ag-suite" disabled={ro} value={d.suite} onChange={(v) => edit(() => { d.suite = v; })}
-            options={(suites.some((x) => x.id === d.suite) || !d.suite ? suites : [...suites, { id: d.suite, name: "not found", station: null, agent: null, threshold: 0 }]).map((x) => ({ value: x.id, label: `${x.id} · ${x.name} (≥ ${fmt.pct(x.threshold)})` }))} />
-        </Field>
-      </Sec>
-    </div>
+      </Panel>
+    </>
   );
 }
 
-export function OverridesTab({ a, d, ro, projects, policies, edit }: TabProps) {
+type Ov = { model?: string; autonomy?: string; budget?: number };
+
+function OverrideDialog({ a, d, p, policies, projects, edit, close }: { a: AgentRow; d: Draft; p: Project; policies: Policy[]; projects: Project[]; edit: (fn: () => void) => void; close: () => void }) {
   const m = useModels();
-  const models = m.list;
-  const rows = projects.filter((p) => p.status !== "archived").map((p) => {
-    const ov = d.overrides[p.id] ?? {};
-    const staffs = d.projects === "all" || (d.projects as string[]).includes(p.id);
-    const set = (k: string, v: string | number | "") => edit(() => {
-      const o: Record<string, unknown> = { ...(d.overrides[p.id] ?? {}) };
-      if (v === "" || v == null) delete o[k]; else o[k] = v;
-      if (Object.keys(o).length) d.overrides[p.id] = o as never; else delete d.overrides[p.id];
-    });
-    const effAut = ov.autonomy ?? d.autonomy;
-    const chkEff = autonomyCheck(policies, projects, { station: a.station, projects: d.projects }, effAut, p.id);
-    return (
-      <tr key={p.id} className={staffs ? "" : "ag-ov-off"}>
-        <td><strong>{p.name}</strong>{p.regulated ? <span className="tag">regulated</span> : null}{staffs ? null : <div className="small muted">Not staffed by this agent</div>}</td>
-        <td>
-          <Select id={`ag-ov-model-${p.id}`} aria-label={`Model on ${p.name}`} disabled={ro || !staffs} value={ov.model ?? ""} onChange={(v) => set("model", v)}
-            options={[{ value: "", label: `Inherit (${d.model})` }, ...models.map((x) => ({ value: x.id, label: x.name }))]} />
-        </td>
-        <td>
-          <Select id={`ag-ov-aut-${p.id}`} aria-label={`Autonomy on ${p.name}`} disabled={ro || !staffs} value={ov.autonomy ?? ""} onChange={(v) => set("autonomy", v)}
-            options={[{ value: "", label: `Inherit (${d.autonomy})` }, ...AUTONOMY.map((o) => { const c = autonomyCheck(policies, projects, { station: a.station, projects: d.projects }, o[0], p.id); return { value: o[0], label: o[1] + (c.allowed ? "" : " (blocked by POL-112)"), disabled: !c.allowed }; })]} />
-        </td>
-        <td>
-          <input id={`ag-ov-budget-${p.id}`} className="input mono" type="number" min="0" step="0.5" aria-label={`Budget per work order on ${p.name}`} placeholder={`$${d.budget}`} disabled={ro || !staffs}
-            value={ov.budget != null ? String(ov.budget) : ""} onChange={(e) => set("budget", e.target.value === "" ? "" : +e.target.value)} />
-        </td>
-        <td className="small">
-          {staffs ? (
-            <span>
-              <span className="mono">{ov.model ?? d.model}</span>{` · ${effAut} · $${ov.budget != null ? ov.budget : d.budget}`}
-              {chkEff.allowed ? null : <div className="neg"><Icon name="lock" /> {chkEff.reason}</div>}
-            </span>
-          ) : "–"}
-        </td>
-      </tr>
-    );
-  });
+  const cur = (d.overrides[p.id] ?? {}) as Ov;
+  const [model, setModel] = useState(cur.model ?? "");
+  const [aut, setAut] = useState(cur.autonomy ?? "");
+  const [budget, setBudget] = useState(cur.budget != null ? String(cur.budget) : "");
+  const apply = (done: () => void) => {
+    const o: Record<string, unknown> = {};
+    if (model) o.model = model;
+    if (aut) o.autonomy = aut;
+    if (budget !== "") o.budget = +budget;
+    edit(() => { if (Object.keys(o).length) d.overrides[p.id] = o as never; else delete d.overrides[p.id]; });
+    done();
+  };
   return (
-    <div className="cfg">
-      <section className="cfg-sec ag-wide">
-        <h3 className="cfg-h">Per-project overrides</h3>
-        <p className="muted small">Change the model, autonomy or budget on one project without a new agent. Overrides are part of the agent and save with it. Routing rules in Models still apply on top: a regulated repo is never sent to a vendor its rule forbids.</p>
-        <div className="table-scroll">
-          <table className="table table-compact ag-ov">
-            <thead><tr>{["Project", "Model", "Autonomy", "Budget / WO", "Effective"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
-            <tbody>{rows}</tbody>
-          </table>
+    <Dialog title={`Override on ${p.name}`} kicker="Agent · per-project" onClose={close}
+      sub="Change the model, autonomy or budget on one project without a new agent. Routing rules in Models still apply on top."
+      body={(
+        <div className="form-grid">
+          <Field label="Model" htmlFor={`ag-ov-model-${p.id}`}><Select id={`ag-ov-model-${p.id}`} value={model} onChange={setModel} options={[{ value: "", label: `Inherit (${d.model})` }, ...m.list.map((x) => ({ value: x.id, label: x.name }))]} /></Field>
+          <Field label="Autonomy" htmlFor={`ag-ov-aut-${p.id}`}><Select id={`ag-ov-aut-${p.id}`} value={aut} onChange={setAut} options={[{ value: "", label: `Inherit (${d.autonomy})` }, ...AUTONOMY.map((o) => { const c = autonomyCheck(policies, projects, { station: a.station, projects: d.projects }, o[0], p.id); return { value: o[0], label: o[1] + (c.allowed ? "" : " (blocked by POL-112)"), disabled: !c.allowed }; })]} /></Field>
+          <Field label="Budget per work order (USD)" htmlFor={`ag-ov-budget-${p.id}`}><input id={`ag-ov-budget-${p.id}`} className="input mono" type="number" min="0" step="0.5" placeholder={`$${d.budget}`} value={budget} onChange={(e) => setBudget(e.target.value)} /></Field>
         </div>
-      </section>
-    </div>
+      )}
+      actions={[{ label: "Cancel" }, { label: "Apply to draft", kind: "primary", submit: true, id: "ag-ov-ok", onClick: apply }]} />
+  );
+}
+
+export function OverridesTab({ a, d, ro, perm, projects, policies, edit }: TabProps) {
+  const ui = useUI();
+  const heat = useEvalsFactory().data?.heat?.[a.id];
+  const rows = projects.filter((p) => p.status !== "archived");
+  const cols: SortCol<Project>[] = [
+    { key: "p", label: "Project", render: (p) => p.name },
+    { key: "o", label: "Override", render: (p) => (d.overrides[p.id] ? <Chip text="custom" cls="info" /> : <span className="muted">Uses default</span>) },
+    { key: "sc", label: "Eval", align: "end", render: (p) => { const v = heat?.[p.id]; return v == null ? "—" : <span className="num">{fmt.pct(v)}</span>; } },
+    { key: "act", label: "", align: "end", render: (p) => <Btn label="Edit" small id={`ag-ov-edit-${p.id}`} aria={`Edit override on ${p.name}`} guard={ro ? perm : null} onClick={() => ui.open((close) => <OverrideDialog a={a} d={d} p={p} policies={policies} projects={projects} edit={edit} close={close} />)} /> },
+  ];
+  return (
+    <Panel title="Overrides" flush>
+      <DataTable id="ag-ov" caption="Per-project overrides" columns={cols} rows={rows} rowKey={(p) => p.id} pageSize={12} pager />
+    </Panel>
   );
 }

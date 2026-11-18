@@ -1,13 +1,16 @@
 /** Price versions with effective dates (spec 10.4 Prices) and the per-work-order cost cap (spec 10.4 Budget). */
 import { useState } from "react";
 import { fmt, type Project, type Vendor } from "@gantry/domain";
+import { hashFor, navigate } from "../../lib/router";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useBudgets, usePrices, type BudgetRow, type PriceVersion } from "../../api/queries";
-import { Btn, Field, LockNote, Meter, Panel } from "../../ui/primitives";
+import { Btn, Chip, Field, FilterBar, LockNote, Meter, Panel, SearchBox } from "../../ui/primitives";
+import { DataTable, type SortCol } from "../../ui/SortTable";
+import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
-import { allModels, dec } from "./kit";
+import { allModels, dec, usd } from "./kit";
 
 const nowLocal = (): string => {
   const d = new Date();
@@ -15,10 +18,9 @@ const nowLocal = (): string => {
   return d.toISOString().slice(0, 16);
 };
 
-export function PricesPanel({ vendors }: { vendors: Vendor[] }) {
+function PublishPricesBody({ vendors, close }: { vendors: Vendor[]; close: () => void }) {
   const ui = useUI();
   const perm = dec(useCan("model.edit"));
-  const actor = useActors();
   const q = usePrices();
   const versions: PriceVersion[] = q.data?.versions ?? [];
   const models = allModels(vendors);
@@ -49,11 +51,10 @@ export function PricesPanel({ vendors }: { vendors: Vendor[] }) {
     const at = new Date(eff).getTime();
     const r = await ops.publishPrices(out, Number.isFinite(at) && at > now + 60_000 ? new Date(at).toISOString() : undefined, note.trim() || undefined);
     ui.toast(r.msg, r.ok ? "ok" : "error");
-    if (r.ok) { setEdits({}); setNote(""); setEff(nowLocal()); }
+    if (r.ok) close();
   };
   return (
-    <>
-      <Panel title="Prices per million tokens" cls="md-prices">
+      <div className="md-prices">
         <LockNote decision={perm} what="Prices" />
         <p className="muted small">US dollars. Change as many models as you like; everything you changed goes out as one price version with one note.</p>
         <form id="pv-form" onSubmit={(e) => { e.preventDefault(); void publish(); }}>
@@ -80,7 +81,66 @@ export function PricesPanel({ vendors }: { vendors: Vendor[] }) {
             <Btn label="Publish prices" kind="primary" type="submit" icon="plus" id="pv-add" guard={perm} />
           </div>
         </form>
-      </Panel>
+    </div>
+  );
+}
+
+/** Model prices (Blueprint §1): a read table; publishing a new price version is the extra action. */
+export function ModelPrices({ vendors }: { vendors: Vendor[] }) {
+  const ui = useUI();
+  const perm = dec(useCan("model.edit"));
+  const [q, setQ] = useState("");
+  const models = allModels(vendors);
+  const term = q.trim().toLowerCase();
+  const rows = models.filter((m) => !term || `${m.name}${m.vendorName}`.toLowerCase().includes(term));
+  const cols: SortCol<(typeof models)[number]>[] = [
+    { key: "name", label: "Model", sort: (m) => m.name.toLowerCase(), render: (m) => <div>{m.name}<span className="sub">{m.vendorName}</span></div> },
+    { key: "ctx", label: "Context", align: "end", sort: (m) => m.context || 0, render: (m) => fmt.k(m.context || 0) },
+    { key: "in", label: "$ in / M", align: "end", sort: (m) => m.inPrice || 0, render: (m) => <span className="num">{m.inPrice}</span> },
+    { key: "out", label: "$ out / M", align: "end", sort: (m) => m.outPrice || 0, render: (m) => <span className="num">{m.outPrice}</span> },
+    { key: "en", label: "State", render: (m) => <Chip text={m.enabled ? "enabled" : "disabled"} cls={m.enabled ? "ok" : "plain"} /> },
+  ];
+  return (
+    <Panel title="Model prices" flush tools={<Btn label="Publish prices" small id="pv-open" guard={perm} onClick={() => ui.open((close) => <Dialog title="Publish prices" kicker="Models · prices" wide onClose={close} body={<PublishPricesBody vendors={vendors} close={close} />} actions={[{ label: "Close" }]} />)} />}>
+      <FilterBar label="Filter models" count={`${rows.length} model${rows.length === 1 ? "" : "s"}${rows.length !== models.length ? ` of ${models.length}` : ""}`}>
+        <SearchBox id="md-price-search" value={q} onChange={setQ} placeholder="Search…" label="Search models" />
+      </FilterBar>
+      <DataTable id="md-prices" caption="Model prices" columns={cols} rows={rows} rowKey={(m) => m.id} pageSize={12} pager
+        empty={{ title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" onClick={() => setQ("")} /> }} />
+    </Panel>
+  );
+}
+
+/** Project budgets, this month (Blueprint §2): name link, spend over budget, a meter that turns amber past the alert. */
+export function ProjectBudgets({ projects }: { projects: Project[] }) {
+  const live = projects.filter((p) => p.status !== "archived");
+  return (
+    <Panel title="Project budgets, this month">
+      <div className="stack">
+        {live.map((p) => {
+          const r = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
+          return (
+            <div key={p.id}>
+              <div className="row">
+                <a href={hashFor("project-config", null, p.id)} onClick={(e) => { e.preventDefault(); navigate("project-config", null, p.id); }}>{p.name}</a>
+                <span className="spacer" />
+                <span className="num small">{`${usd(p.budget.mtd)} / ${usd(p.budget.monthly)}`}</span>
+              </div>
+              <div className={`meter${r > p.budget.alertAt ? " warn" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, r) * 100)} aria-label={`${p.name} spend vs budget`}><i style={{ width: `${Math.min(1, r) * 100}%` }} /></div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+export function PriceVersions() {
+  const actor = useActors();
+  const q = usePrices();
+  const versions: PriceVersion[] = q.data?.versions ?? [];
+  const now = Date.now();
+  return (
       <Panel title="Price versions">
         <p className="muted small">Each call is costed at the price version in force when it is recorded. A published version never changes; a new price takes effect from its date, never in the past.</p>
         <div className="table-scroll">
@@ -103,8 +163,7 @@ export function PricesPanel({ vendors }: { vendors: Vendor[] }) {
             </tbody>
           </table>
         </div>
-      </Panel>
-    </>
+    </Panel>
   );
 }
 
@@ -132,12 +191,12 @@ export function VendorBudgets({ vendors }: { vendors: Vendor[] }) {
   );
 }
 
-export function BudgetsPanel({ projects }: { projects: Project[] }) {
+export function WoCaps({ projects }: { projects: Project[] }) {
   const q = useBudgets();
   const rows = q.data ?? [];
   const live = projects.filter((p) => p.status !== "archived" && rows.some((r) => r.project === p.id));
   return (
-    <Panel title="Work-order budgets" cls="md-budgets">
+    <Panel title="Per-work-order caps" cls="md-budgets">
       <p className="muted small">The project&apos;s monthly budget is set in its configuration. The cap below applies to each work order in the project; a work order may carry its own. When a cap is spent the gateway refuses the next call and the work order is halted with cause budget.</p>
       <div className="table-scroll">
         <table className="table table-compact" id="bd-table">

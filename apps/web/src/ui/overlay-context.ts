@@ -56,7 +56,8 @@ export interface UIApi {
   closeTopDialog(): boolean;
   closeAllDialogs(): void;
   drawer: {
-    open(key: string, render: (close: () => void) => ReactNode): void;
+    /** `onClose` runs when the person closes it (X, Esc, scrim), not when a route change does: use it to take the drawer out of the URL. */
+    open(key: string, render: (close: () => void) => ReactNode, onClose?: () => void): void;
     close(): void;
     isOpen(key?: string): boolean;
   };

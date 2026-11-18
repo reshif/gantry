@@ -106,19 +106,19 @@ describe("Models screen (legacy models.js on the real API)", () => {
     const a = await byId("vendor-anthropic");
     expect(within(a).getByText("Anthropic")).toBeTruthy();
     expect(a.textContent).toContain("sk-ant-••••••••3f9a");
-    expect(a.textContent).toContain("$4,182 / $9,000");
+    expect(a.textContent).toContain("$4,182.40 / $9,000");
     expect(a.querySelector(".md-def")?.textContent).toBe("factory default");
     expect(within(a).getAllByText(/^Used by/).length).toBeGreaterThan(0);
     expect(a.querySelector("#mt-claude-haiku-5-5")).toBeTruthy();
     expect((a.querySelector("#mt-claude-haiku-5-5") as HTMLInputElement).checked).toBe(false);
     const b = await byId("vendor-bedrock");
-    expect(b.querySelector(".vendor-head .status")?.textContent).toContain("Degraded");
+    expect(b.querySelector(".vendor-head .chip")?.textContent).toBe("degraded");
     expect(b.textContent).toContain("Data retention: zero");
     const l = await byId("vendor-local");
     expect(l.classList.contains("is-off")).toBe(true);
-    expect(l.textContent).toContain("Not connected");
+    expect(l.querySelector(".vendor-head .chip")?.textContent).toBe("offline");
     expect(l.querySelector("#vendor-connect-local")?.textContent).toContain("Connect Local models");
-    expect(document.querySelector(".md-incident")?.textContent).toContain("Amazon Bedrock is degraded (p50 1460 ms)");
+    expect(document.querySelector(".md-incident")).toBeNull();
     expect(document.body.textContent).toContain("Vendors41 not connected");
     expect(document.getElementById("vendor-test-anthropic")).toBeNull();
   });
@@ -250,7 +250,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
 });
 
 describe("routing policy", () => {
-  beforeEach(() => { window.location.hash = "#models/routing"; });
+  beforeEach(() => { window.location.hash = "#models?tab=routing"; });
   it("changes the default model with If-Match from the loaded version", async () => {
     const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
     mount();
@@ -309,19 +309,20 @@ describe("routing policy", () => {
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]!.body.routing.rules).toEqual([]);
     // The duplicate check uses the loaded rules (RR-1 is regulated).
-    fireEvent.submit(await byId("rr-form"));
+    fireEvent.click(await byId("rr-add-open"));
+    fireEvent.click(await byId("rr-add"));
     await new Promise((r) => setTimeout(r, 30));
     expect(writes(calls)).toHaveLength(1);
     type(await byId("rr-tag"), "pci");
     type(await byId("rr-use"), "bedrock");
     type(await byId("rr-alt"), "bedrock");
-    fireEvent.submit(await byId("rr-form"));
+    fireEvent.click(await byId("rr-add"));
     await new Promise((r) => setTimeout(r, 30));
     expect(writes(calls)).toHaveLength(1);
     type(await byId("rr-alt"), "local");
     type(await byId("rr-region"), "eu-central-1");
     type(await byId("rr-note"), "Card data stays in the EU");
-    fireEvent.submit(await byId("rr-form"));
+    fireEvent.click(await byId("rr-add"));
     await waitFor(() => expect(writes(calls)).toHaveLength(2));
     expect(writes(calls)[1]!.body.routing.rules.at(-1)).toEqual({ id: "RR-2", tag: "pci", use: "bedrock", region: "eu-central-1", alt: "local", note: "Card data stays in the EU" });
   });
@@ -364,15 +365,15 @@ describe("vendors summary", () => {
     setup({});
     mount();
     const tile = await waitFor(() => { const e = [...document.querySelectorAll("#md-stats .stat-tile")].find((x) => x.textContent?.includes("Models")); if (!e) throw new Error("no tile"); return e; });
-    const connectedModels = VENDORS.filter((v) => v.connected).reduce((n, v) => n + v.models.length, 0);
-    await waitFor(() => expect(tile.textContent).toContain(`${connectedModels}`));
+    const allModels = VENDORS.reduce((n, v) => n + v.models.length, 0);
+    await waitFor(() => expect(tile.textContent).toContain(`${allModels}`));
     const off = (await byId("vendor-local")).querySelector(".tb-vendor dd")!;
-    expect(off.textContent).toBe("–");
+    expect(off.textContent).toBe("0 ms");
   });
 });
 
 describe("routing versions", () => {
-  beforeEach(() => { window.location.hash = "#models/routing"; });
+  beforeEach(() => { window.location.hash = "#models?tab=routing"; });
   it("lists the published versions with who and why", async () => {
     setup({ "GET /api/v1/routing/versions": () => ({ body: [{ version: 4, publishedAt: new Date().toISOString(), publishedBy: "asha", note: "Default model changed" }, { version: 3, publishedAt: new Date().toISOString(), publishedBy: "system", note: "" }] }) });
     mount();
@@ -383,13 +384,14 @@ describe("routing versions", () => {
 });
 
 describe("prices and budgets", () => {
-  beforeEach(() => { window.location.hash = "#models/prices"; });
+  beforeEach(() => { window.location.hash = "#models?tab=prices"; });
   it("lists price versions with their effective dates and publishes a price from a date, with an idempotency key", async () => {
     const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "Price version 3 is in force.", version: 3 }) });
     mount();
     const t = await byId("pv-table");
     await waitFor(() => expect(t.textContent).toContain("Price cut"));
     expect(t.querySelector("tbody tr")?.textContent).toContain("in force");
+    fireEvent.click(await byId("pv-open"));
     type(await byId("pv-in-claude-sonnet-5-5"), "");
     fireEvent.submit(await byId("pv-form"));
     await new Promise((r) => setTimeout(r, 30));
@@ -407,6 +409,7 @@ describe("prices and budgets", () => {
   it("publishes several changed models as one version and leaves the unchanged ones out", async () => {
     const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "Price version 3 is in force.", version: 3 }) });
     mount();
+    fireEvent.click(await byId("pv-open"));
     await byId("pv-edit");
     const ids = [...document.querySelectorAll<HTMLInputElement>("#pv-edit input[id^='pv-in-']")].map((i) => i.id.replace("pv-in-", ""));
     expect(ids.length).toBeGreaterThan(1);
@@ -427,6 +430,7 @@ describe("prices and budgets", () => {
   it("schedules a price for a future date", async () => {
     const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "scheduled", version: 3 }) });
     mount();
+    fireEvent.click(await byId("pv-open"));
     type(await byId("pv-in-claude-sonnet-5-5"), "4");
     type(await byId("pv-out-claude-sonnet-5-5"), "20");
     const later = new Date(Date.now() + 5 * 86400000);
@@ -462,14 +466,14 @@ describe("permissions", () => {
     };
     await locked(["md-add-vendor", "vendor-connect-anthropic", "vendor-addmodel-anthropic", "vendor-disc-anthropic", "vendor-qual-go-mistral-eu"]);
     expect((await byId("mt-claude-haiku-5-5")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
-    window.location.hash = "#models/routing";
-    await locked(["rr-del-RR-1", "rr-add", "rt-proj-save"]);
+    window.location.hash = "#models?tab=routing";
+    await locked(["rr-del-RR-1", "rr-add-open", "rt-proj-save"]);
     expect((await byId("rt-default") as HTMLSelectElement).disabled).toBe(true);
     expect((await byId("rt-st-build") as HTMLSelectElement).disabled).toBe(true);
     expect((await byId("rt-fb-rm-0")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
-    window.location.hash = "#models/prices";
-    await locked(["pv-add", "bd-save-payments"]);
-    window.location.hash = "#models/routing";
+    window.location.hash = "#models?tab=prices";
+    await locked(["pv-open", "bd-save-payments"]);
+    window.location.hash = "#models?tab=routing";
     await waitFor(() => expect(document.body.textContent).toContain("Read-only for you: routing."));
     expect(writes(calls)).toHaveLength(0);
   });

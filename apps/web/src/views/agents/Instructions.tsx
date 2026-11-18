@@ -6,7 +6,7 @@ import { useAgentEffective, useInstructions, useRepos } from "../../api/queries"
 import type { AgentEffective } from "../../api/types";
 import { invalidateSlices } from "../../api/keys";
 import { ops } from "../../api/ops";
-import { Btn, Chip, Field, LockNote, Segmented, Select, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Field, LockNote, Panel, Segmented, Select, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { BindingsPanel } from "./Bindings";
@@ -74,7 +74,7 @@ function conventionsLine(rc: AgentEffective["repoContext"] | undefined): string 
   return `Repo conventions at ${rc.commit.slice(0, 12)}: ${one("AGENTS.md")}; ${one("CLAUDE.md")}.`;
 }
 
-export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
+export function InstructionsTab({ a, d, projects, ro, perm, edit, saveAsVersion, revert }: TabProps) {
   const ui_ = useUI();
   const base = useInstructions().data;
   const live = projects.filter((p) => p.status !== "archived");
@@ -108,6 +108,17 @@ export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
   const refreshed = <T extends { ok: boolean }>(r: T): T => { if (r.ok) invalidateSlices(["agents"]); return r; };
 
   return (
+    <>
+      <Panel title="Instructions">
+        <div>
+          <textarea id="ag-instr" className="input" rows={8} aria-label="Instructions" disabled={ro} value={d.instructions || ""} onChange={(e) => edit(() => { d.instructions = e.target.value; })} />
+          <div className="row" style={{ marginTop: 10 }}>
+            <Btn label="Save as new version" kind="primary" id="ag-instr-save" guard={ro ? perm : null} onClick={saveAsVersion} />
+            <Btn label="Revert" id="ag-instr-revert" onClick={revert} />
+            <span className="small muted">Changes ship as a new version and run the eval suite before going live.</span>
+          </div>
+        </div>
+      </Panel>
     <div className="ag-instr-grid">
       <section className="cfg-sec">
         <h3 className="cfg-h">Layers, applied in order</h3>
@@ -138,11 +149,7 @@ export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
                   save: async (v) => refreshed(await ops.setProject(project.id, "overlay", v.trim(), { ifMatch: (project as { version?: number }).version })) }} />
               ));
             }} /> : null)}
-          {layer(3, "Agent", `${d.name} · this agent only`, (
-            <Field label="Agent instructions" htmlFor="ag-instr" hint="Saved with the agent. Unsaved edits show in the preview.">
-              <textarea id="ag-instr" className="input" rows={5} disabled={ro} value={d.instructions || ""} onChange={(e) => edit(() => { d.instructions = e.target.value; })} />
-            </Field>
-          ))}
+          {layer(3, "Agent", `${d.name} · this agent only`, <p className="ag-layer-text muted small">Edited in the Instructions panel above.</p>)}
           {layer(4, "Repo guidelines (Gantry)", repo ? repo.name : "no repo in this project",
             <div>
               {repos.length ? (
@@ -188,5 +195,6 @@ export function InstructionsTab({ a, d, projects, ro, edit }: TabProps) {
       </section>
       <BindingsPanel />
     </div>
+    </>
   );
 }

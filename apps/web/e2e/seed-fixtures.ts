@@ -203,6 +203,18 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "people") return seed.people;
     if (path === "teams") return seed.teams;
     if (path === "templates") return seed.templates;
+    // ---- work1 fixtures (agents, skills, models): endpoints the prototype seed has no table for, derived from the seed ----
+    if (path.startsWith("agents/") && path.endsWith("/effective")) {
+      const ag = (seed.agents as Seed[]).find((x: Seed) => x.id === path.split("/")[1]);
+      const text = String(ag?.instructions ?? "");
+      const words = text.split(" ").length;
+      return { agent: ag?.id, version: ag?.version ?? "draft", live: true, draft: false, project: null, repo: null, text, hash: "0".repeat(64), promptHash: "1".repeat(64), sections: [{ key: "agent", title: "Agent", source: "layer", text, words }], handoff: { first: "Station: the station the agent works", json: ["workOrder (id, title, class)"] }, words, tokens: Math.round(text.length / 4), layers: [{ key: "agent", name: "Agent", version: 1, hash: "2", text }], skills: [] };
+    }
+    if (path === "agents/bindings") return { surfaces: [] };
+    if (path === "prices") return { current: null, versions: [] };
+    if (path === "budgets") return (seed.projects as Seed[]).map((p: Seed) => ({ project: p.id, monthly: p.budget?.monthly ?? 0, alertAt: p.budget?.alertAt ?? 0.8, perWorkOrder: 0, spent: p.budget?.mtd ?? 0, version: 1 }));
+    if (path === "routing/versions") return [];
+    // ---- end work1 fixtures ----
     if (path === "agents") return seed.agents.map((a: Seed) => ({ rev: 1, suiteName: a.suite ?? null, threshold: 0.85, ...a, versions: (a.versions ?? []).map((v: Seed) => ({ eligibility: { ok: true, text: "Passes the gate", score: null, suite: a.suite ?? null, threshold: 0.85, needs: "" }, ...v })) }));
     if (path === "evals/factory") return seed.eval_extra;
     if (path === "skills") return seed.skills;

@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, empty, hasMore, onLoadMore, loadingMore, total }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -48,6 +48,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
   pageSize?: number;
+  /** With `pageSize`: the prototype's footer ("1–12 of 13", Prev / Page n / N / Next) instead of "Show more"; sortable headers carry the ↕ hint. Without `pageSize` it is only the count footer. */
+  pager?: boolean;
   empty?: { title: string; text?: string; action?: ReactNode };
   /** Server paging: more rows exist on the server. */
   hasMore?: boolean;
@@ -59,10 +61,12 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const uid = useId().replace(/:/g, "");
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
   const [shown, setShown] = useState(pageSize ?? 0);
+  const [page, setPage] = useState(0);
   // a new page size or a different row count (a filter changed) starts the list over at the first page
   const [seen, setSeen] = useState(`${pageSize ?? 0}:${rows.length}`);
   if (seen !== `${pageSize ?? 0}:${rows.length}`) {
     setSeen(`${pageSize ?? 0}:${rows.length}`);
+    setPage(0);
     setShown(pageSize ?? 0);
   }
   const [own1, setOwn1] = useState<string>("");
@@ -100,7 +104,9 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
   if (cur && col) list.sort((a, b) => { const x = val(col, a); const y = val(col, b); return (x > y ? 1 : x < y ? -1 : 0) * cur.dir; });
-  const visible = shown ? list.slice(0, shown) : list;
+  const pages = pager && pageSize ? Math.max(1, Math.ceil(list.length / pageSize)) : 1;
+  const pg = Math.min(page, pages - 1);
+  const visible = pager ? (pageSize ? list.slice(pg * pageSize, (pg + 1) * pageSize) : list) : shown ? list.slice(0, shown) : list;
   const pick = (key: string, dir?: 1 | -1): void => {
     const active = cur?.key === key;
     const next: SortState = { key, dir: dir ?? (active ? (cur!.dir === 1 ? -1 : 1) : 1) };
@@ -111,7 +117,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const ownedKeys = new Set(own1 ? own1.split("\u0000") : []);
   const sortable = columns.filter((c) => c.sort);
   const regionProps = overflow ? { role: "region", tabIndex: 0, "aria-label": caption ?? "Table" } : {};
-  const clientMore = shown && rows.length > shown;
+  const clientMore = !pager && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
       {sortable.length ? (
@@ -134,7 +140,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : pager ? <span className="sorthint"> ↕</span> : ""}</span>
                       </button>
                     ) : c.label}
                   </th>
@@ -174,6 +180,18 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </tbody>
         </table>
       </div>
+      {pager ? (
+        <div className="tfoot dtable-pager">
+          <span className="dtable-count" role="status">{`${pg * (pageSize ?? list.length) + 1}–${pg * (pageSize ?? list.length) + visible.length} of ${list.length}`}</span>
+          {pages > 1 ? (
+            <div className="row">
+              <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-prev`} disabled={pg === 0} onClick={() => setPage(pg - 1)}>Prev</button>
+              <span>{`Page ${pg + 1} / ${pages}`}</span>
+              <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-next`} disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next</button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {clientMore || hasMore ? (
         <div className="tfoot dtable-more">
           <span className="dtable-count" role="status">{total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>
