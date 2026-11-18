@@ -109,7 +109,9 @@ function mountAgent(id = "ag-build") {
 }
 const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra } });
 const writes = (calls: Call[], method: string) => calls.filter((c) => c.method === method && c.path !== "/api/v1/can");
-const tab = async (id: string) => fireEvent.click(await byId(`ag-tab-${id}`));
+/** The page has seven tabs (the prototype's); the former Settings, Per-project, Versions, Trust and History tabs live inside them. */
+const PARENT: Record<string, string> = { settings: "model", overrides: "model", versions: "instructions", trust: "guardrails", history: "guardrails" };
+const tab = async (id: string) => fireEvent.click(await byId(`ag-tab-${PARENT[id] ?? id}`));
 
 beforeEach(() => {
   setCsrfToken("c");
@@ -302,7 +304,8 @@ describe("Agents screen", () => {
     await waitFor(() => expect(document.querySelector(".lock-note")).not.toBeNull());
     expect(document.querySelector(".lock-note")!.textContent).toContain("Read-only for you: agent configuration");
     expect(((await byId("ag-name")) as HTMLInputElement).disabled).toBe(true);
-    expect(document.getElementById("ag-pause")!.getAttribute("aria-disabled")).toBe("true");
+    await tab("guardrails");
+    expect((await byId("ag-pause")).getAttribute("aria-disabled")).toBe("true");
     cleanup();
     window.location.hash = "#agents";
     mount(<AgentsView />);
@@ -313,6 +316,7 @@ describe("Agents screen", () => {
   it("pauses an agent through a save with its version", async () => {
     const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
     mountAgent();
+    await tab("guardrails");
     fireEvent.click(await byId("ag-pause"));
     await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
     expect(writes(calls, "PATCH")[0]).toMatchObject({ body: { patch: { status: "paused" }, note: "paused" }, headers: { "if-match": "7" } });
@@ -677,5 +681,18 @@ describe("Skills screen: a read the person may not make", () => {
     setup({ "GET /api/v1/skills": () => ({ status: 403, body: { ok: false, msg: "Your roles do not include skill.view." } }) });
     mount(<SkillsView />);
     await waitFor(() => expect(document.getElementById("skills-hidden")?.textContent).toContain("Not visible to you"));
+  });
+});
+
+describe("agent page layout (prototype)", () => {
+  it("has exactly the seven prototype tabs and only All agents and Talk in the header", async () => {
+    setup();
+    mountAgent();
+    await byId("ag-tab-overview");
+    const ids = [...document.querySelectorAll("[id^=ag-tab-]")].map((e) => e.id.replace("ag-tab-", ""));
+    expect(ids).toEqual(["overview", "instructions", "tools", "model", "skills", "guardrails", "evals"]);
+    expect(document.getElementById("ag-pause")).toBeNull();
+    expect(document.getElementById("ag-back-link")).toBeTruthy();
+    expect(document.getElementById("ag-talk")).toBeTruthy();
   });
 });

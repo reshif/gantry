@@ -111,6 +111,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
   });
   it("shows the vendor hub: health from real calls, key mask, residency, models and the title block", async () => {
     setup();
+    window.location.hash = "#models/vendors";
     mount();
     const a = await byId("vendor-anthropic");
     expect(within(a).getByText("Anthropic")).toBeTruthy();
@@ -128,9 +129,9 @@ describe("Models screen (legacy models.js on the real API)", () => {
     expect(l.textContent).toContain("Not connected");
     expect(l.querySelector("#vendor-connect-local")?.textContent).toContain("Connect Local models");
     expect(document.querySelector(".md-incident")?.textContent).toContain("Amazon Bedrock is degraded (p50 1460 ms)");
-    expect(document.getElementById("md-tab-vendors")!.textContent).toContain("4");
     expect(document.querySelector(".ph .sub")!.textContent).toBe("Which models agents may use, what they cost and where they are used.");
-    expect(document.getElementById("md-discover")).toBeTruthy();
+    expect(document.getElementById("md-discover")).toBeNull();
+    expect(document.getElementById("md-back")).toBeTruthy();
     expect(document.getElementById("vendor-test-anthropic")).toBeNull();
   });
 
@@ -371,11 +372,11 @@ describe("routing policy", () => {
 
 describe("vendors summary", () => {
   beforeEach(() => { window.location.hash = "#models/vendors"; });
-  it("counts models on only among connected vendors, and shows a dash where a vendor is not connected", async () => {
+  it("counts every listed model (as the prototype's 4/6) and shows a dash where a vendor is not connected", async () => {
     setup({});
     mount();
     const tile = await waitFor(() => { const e = [...document.querySelectorAll("#md-stats .stat")].find((x) => x.textContent?.includes("Enabled")); if (!e) throw new Error("no tile"); return e; });
-    const connectedModels = VENDORS.filter((v) => v.connected).reduce((n, v) => n + v.models.length, 0);
+    const connectedModels = VENDORS.reduce((n, v) => n + v.models.length, 0);
     await waitFor(() => expect(tile.textContent).toContain(`/${connectedModels}`));
     const off = (await byId("vendor-local")).querySelector(".tb-vendor dd")!;
     expect(off.textContent).toBe("–");
@@ -568,5 +569,19 @@ describe("models catalog in the prototype layout", () => {
     fireEvent.click(await byId("sp-save"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/prices", body: { prices: { "claude-haiku-5-5": { in: 0.8, out: 4 } } } });
+  });
+});
+
+describe("models screen has no tab strip (prototype)", () => {
+  it("the catalog links to vendors, routing and prices instead, and Add vendor lives on the vendors page", async () => {
+    setup();
+    window.location.hash = "#models";
+    mount();
+    await byId("mc-table");
+    expect(document.getElementById("md-tab-models")).toBeNull();
+    expect(document.getElementById("md-add-vendor")).toBeNull();
+    fireEvent.click(await byId("mc-vendors"));
+    await byId("md-add-vendor");
+    expect(window.location.hash).toBe("#models/vendors");
   });
 });

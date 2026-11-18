@@ -6,6 +6,7 @@ import { useRouteState, useDebouncedParam } from "../../lib/routeState";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { fmt, type Agent, type Routing, type Vendor } from "@gantry/domain";
+import { navigate } from "../../lib/router";
 import { useCan } from "../../api/can";
 import { Btn, Chip, Field, FilterBar, Meter, SearchBox, Select, Toggle, reasonText } from "../../ui/primitives";
 import { Card } from "../../ui/cr";
@@ -93,6 +94,7 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
             </div>
           ))}
         </div>
+        <span className="row" style={{ marginTop: 12 }}><Btn label="Vendors" small id="mc-vendors" onClick={() => navigate("models", "vendors")} /><Btn label="Routing" small id="mc-routing" onClick={() => navigate("models", "routing")} /><Btn label="Prices" small id="mc-prices" onClick={() => navigate("models", "prices")} /></span>
       </Card>
     </div>
   );

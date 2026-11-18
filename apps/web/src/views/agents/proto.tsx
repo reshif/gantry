@@ -50,7 +50,6 @@ export function KvList({ rows }: { rows: Array<[string, React.ReactNode]> }) {
 export function OverviewTab({ a, d, onTab }: TabProps & { onTab: (t: string) => void }) {
   const st = useStations();
   const { sc, evalRuns } = useAgentFacts(a);
-  const skills = useSkills().data ?? [];
   const recent = useRecentRuns(a);
   const trend = evalRuns.slice(0, 8).reverse().map((r) => Math.round(r.score * 100));
   const spark = (sc?.trend.success?.length ?? 0) > 1 ? sc!.trend.success : a.spark;
@@ -58,7 +57,7 @@ export function OverviewTab({ a, d, onTab }: TabProps & { onTab: (t: string) => 
   const cols: SortCol<Run>[] = [
     { key: "wo", label: "Work order", render: (r) => <a className="rl mono" href={hashFor("record", r.wo)}>{r.wo}</a> },
     { key: "outcome", label: "Outcome", render: (r) => outcomeChip(r.outcome) },
-    { key: "ms", label: "Duration", align: "end", render: (r) => <span className="mono">{r.ms == null ? "running" : `${Math.max(1, Math.round(r.ms / 60000))}m`}</span> },
+    { key: "ms", label: "Duration", align: "end", render: (r) => <span className="mono">{r.ms == null ? "\u2014" : `${Math.max(1, Math.round(r.ms / 60000))}m`}</span> },
     { key: "cost", label: "Cost", align: "end", render: (r) => <span className="mono">{fmt.money(r.cost)}</span> },
   ];
   return (
@@ -66,11 +65,11 @@ export function OverviewTab({ a, d, onTab }: TabProps & { onTab: (t: string) => 
       <div className="stack">
         <Stats items={[
           { l: "Eval score", v: Number.isFinite(a.evalScore) ? a.evalScore.toFixed(2) : "—", tone: "ok", ...(spark && spark.length > 1 ? { spark } : {}) },
-          { l: "Rework", v: sc ? `${Math.round(sc.rework * 100)}%` : "—", d: sc ? "last 7 days" : NA },
-          { l: "Runs, 7d", v: sc?.counts ? sc.counts.attempts : "—", tone: "info", d: sc?.counts ? "all projects" : NA },
+          { l: "Rework", v: sc ? `${Math.round(sc.rework * 100)}%` : "—" },
+          { l: "Runs, 7d", v: sc?.counts ? sc.counts.attempts : "—", tone: "info" },
           { l: "Autonomy", v: `L${levelOf(a)}`, tone: "agent" },
         ]} />
-        <Card title="Recent runs" hint="Latest attempts on the project in view" flush>
+        <Card title="Recent runs" flush>
           <DataTable id="ag-runs" caption="Recent runs" columns={cols} rows={recent} rowKey={(r) => `${r.wo}-${r.at}`} empty={{ title: "No runs yet", text: "This agent has not worked on a work order in the project in view." }} />
         </Card>
       </div>
@@ -82,7 +81,7 @@ export function OverviewTab({ a, d, onTab }: TabProps & { onTab: (t: string) => 
             ["Version", <span key="v" className="m">{a.version}</span>],
             ["Owner", <span key="o" className="dim">{NA}</span>],
             ["Budget", `$${d.budget} per run`],
-            ["Skills", d.skills.length ? <span key="s" className="row">{d.skills.map((s) => <span key={s} className="tag">{(skills.find((x) => x.id === s)?.name ?? s.replace("sk-", ""))}</span>)}</span> : "—"],
+            ["Skills", d.skills.length ? <span key="s" className="row">{d.skills.map((s) => <span key={s} className="tag">{s.replace("sk-", "")}</span>)}</span> : "—"],
           ]} />
         </Card>
         <Card title="Eval trend" hint="Score of the last runs, percent">

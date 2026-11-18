@@ -98,7 +98,7 @@ function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] })
   const usedBy = (id: string) => agents.filter((a) => a.skills.includes(id) || (a.liveSkills ?? []).some((l) => l.id === id));
   /** The backend has no station on a skill: it is the station of the agents that use it. */
   const stationsOf = (id: string): string[] => [...new Set(usedBy(id).map((a) => a.station).filter((x): x is string => !!x))];
-  const stationName = (id: string): string => st.find(id)?.name ?? (id === "onboarding" ? "Onboarding" : cap(id));
+  const stationName = (id: string): string => cap(id);
   const term = qText.trim().toLowerCase();
   const list = skills.filter((sk) => (!r.station || stationsOf(sk.id).includes(r.station)) && (!term || `${sk.name} ${sk.desc} ${sk.id}`.toLowerCase().includes(term)));
   const open = (sk: SkillRow): void => ui_.drawer.open(`skill:${sk.id}`, (close) => <SkillDrawer sk={sk} agents={agents} stations={stationsOf(sk.id).map(stationName).join(", ")} close={close} />);

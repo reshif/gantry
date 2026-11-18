@@ -12,7 +12,7 @@ import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useProjects, useRouting, useVendors } from "../api/queries";
 import { useDiscoverModels } from "../api/modelCommands";
-import { Btn, Tabs } from "../ui/primitives";
+import { Btn } from "../ui/primitives";
 import { Page, Stats } from "../ui/cr";
 import { navigate, useHash } from "../lib/router";
 import { Async, qState } from "../ui/async";
@@ -41,16 +41,14 @@ export default function ModelsView() {
   const { repos } = useAllRepos();
 
   const mtd = vendors.reduce((t, v) => t + (v.mtd || 0), 0);
-  const bud = vendors.reduce((t, v) => t + (v.budget || 0), 0);
-  const allN = vendors.reduce((t, v) => t + (v.connected ? v.models.length : 0), 0);
+  const allN = vendors.reduce((t, v) => t + v.models.length, 0);
   const enabledN = vendors.reduce((t, v) => t + (v.connected ? v.models.filter((m) => m.enabled).length : 0), 0);
   const needsPriceN = vendors.reduce((t, v) => t + v.models.filter((m) => m.needsPrice).length, 0);
   const degraded = vendors.filter((v) => v.connected && v.health !== "healthy");
 
   const hash = useHash();
   const tab: Tab = hash.id === "models" && (hash.param === "vendors" || hash.param === "routing" || hash.param === "prices") ? hash.param : "models";
-  const setTab = (t: string) => navigate("models", t === "models" ? null : t);
-
+  
   const discoverCmd = useDiscoverModels();
   const discover = (): void => {
     const targets = vendors.filter((v) => v.connected && (v.template || v.custom || v.id === "anthropic"));
@@ -62,14 +60,16 @@ export default function ModelsView() {
   return (
     <Page eyebrow="Workforce" title="Models" cls="view-models"
         sub="Which models agents may use, what they cost and where they are used."
-        acts={<><Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} /><Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} /></>}>
+        acts={tab === "models" ? <Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} /> : <>
+          <Btn label="All models" id="md-back" onClick={() => navigate("models")} />
+          {tab === "vendors" ? <Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} /> : null}
+        </>}>
       <Stats id="md-stats" items={[
         { l: "Enabled", v: qState(vq, () => `${enabledN}/${allN}`), tone: "ok" },
         { l: "Needs a price", v: qState(vq, () => needsPriceN), tone: "warn" },
-        { l: "Spend, 30 days", v: qState(vq, () => fmt.money0(mtd)), d: bud ? `Month to date, of ${fmt.money0(bud)} budget` : "Month to date", tone: "agent" },
-        { l: "Fallbacks fired", v: "\u2014", d: "not available: the gateway does not count them", tone: "info" },
+        { l: "Spend, 30 days", v: qState(vq, () => fmt.money0(mtd)), tone: "agent" },
+        { l: "Fallbacks fired", v: "\u2014", tone: "info" },
       ]} />
-      <Tabs idPrefix="md-tab" active={tab} onChange={setTab} items={[{ id: "models", label: "Models", count: vq.data ? allN : null }, { id: "vendors", label: "Vendors", count: vq.data ? vendors.length : null }, { id: "routing", label: "Routing" }, { id: "prices", label: "Prices and budgets" }]} />
       <Async query={vq} what="model vendors" id="models">
         {() => (
           <Async query={rq} what="model routing" id="models-routing">

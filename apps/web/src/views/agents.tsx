@@ -15,7 +15,7 @@ import { useCrumbTail } from "../lib/crumb";
 import { Async, useCommand } from "../ui/async";
 import { Avatar, Btn, Chip, FilterBar, LockNote, SearchBox, Select, Tabs, type Decision } from "../ui/primitives";
 import { DataTable, type SortCol } from "../ui/DataTable";
-import { CrEmpty, Page, Stats } from "../ui/cr";
+import { Card, CrEmpty, Page, Stats } from "../ui/cr";
 import { useRouteState, useDebouncedParam } from "../lib/routeState";
 import { NotFoundPage } from "./NotFound";
 import { useUI } from "../ui/overlay-context";
@@ -63,7 +63,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
     } },
     { key: "model", label: "Model", sort: true, render: (a) => <span className="mono ell">{a.model.replace("claude-", "")}</span> },
     { key: "autonomy", label: "Autonomy", sort: (a) => levelOf(a), render: (a) => <span className="lvl" style={{ "--l": levelOf(a), cursor: "default" } as React.CSSProperties}>{`L${levelOf(a)}`}</span> },
-    { key: "version", label: "Version", render: (a) => <span className="mono">{a.version}</span> },
+    { key: "version", label: "Version", sort: true, render: (a) => <span className="mono">{a.version}</span> },
     { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => Number.isFinite(a.evalScore) ? <span className="mono">{a.evalScore.toFixed(2)}</span> : <span className="dim">{"\u2014"}</span> },
     { key: "runs", label: "Runs 7d", sort: (a) => runs(a) ?? -1, align: "end", render: (a) => { const n = runs(a); return n == null ? <span className="dim">{NA}</span> : <span className="mono">{n}</span>; } },
     { key: "status", label: "Status", sort: (a) => (a.status === "paused" ? "paused" : (a.running ?? 0) > 0 ? "busy" : "idle"), render: (a) => a.status === "paused" ? <Chip text="Paused" cls="idle" /> : (a.running ?? 0) > 0 ? <Chip text="Busy" cls="info" /> : <Chip text="Idle" cls="idle" /> },
@@ -83,14 +83,17 @@ function Roster({ agents }: { agents: AgentRow[] }) {
   );
 }
 
-const TAB_IDS = ["overview", "instructions", "tools", "model", "skills", "guardrails", "evals", "settings", "overrides", "versions", "trust", "history"] as const;
-const SAVE_TABS: readonly string[] = ["instructions", "tools", "model", "skills", "guardrails", "settings", "overrides"];
+const TAB_IDS = ["overview", "instructions", "tools", "model", "skills", "guardrails", "evals"] as const;
+/** Older links and other screens name the former tabs; each now lives inside one of the seven prototype tabs. */
+const TAB_ALIAS: Record<string, string> = { settings: "model", overrides: "model", versions: "instructions", trust: "guardrails", history: "guardrails" };
+const SAVE_TABS: readonly string[] = ["instructions", "tools", "model", "skills", "guardrails"];
 
 function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const ui_ = useUI();
   const out = useOutcome();
   const [route, setRoute] = useRouteState({ tab: "overview" });
-  const tab = (TAB_IDS as readonly string[]).includes(route.tab) ? route.tab : "overview";
+  const want = TAB_ALIAS[route.tab] ?? route.tab;
+  const tab = (TAB_IDS as readonly string[]).includes(want) ? want : "overview";
   const setTab = (t: string): void => setRoute({ tab: t });
   // Another screen asked for a tab (agentsSelect): apply it once the route has settled.
   useEffect(() => {
@@ -154,22 +157,22 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const station = st.find(a.station);
   const tabs = [
     { id: "overview", label: "Overview" }, { id: "instructions", label: "Instructions" }, { id: "tools", label: "Tools" }, { id: "model", label: "Model and budget" },
-    { id: "skills", label: "Skills", count: d.skills.length }, { id: "guardrails", label: "Guardrails" }, { id: "evals", label: "Evals" },
-    { id: "settings", label: "Settings" }, { id: "overrides", label: "Per-project", count: Object.keys(d.overrides ?? {}).length },
-    { id: "versions", label: "Versions", count: a.versions.length }, { id: "trust", label: "Trust" }, { id: "history", label: "History" },
+    { id: "skills", label: "Skills" }, { id: "guardrails", label: "Guardrails" }, { id: "evals", label: "Evals" },
   ];
   const tp: TabProps = { a, d, ro, perm, projects, policies, edit };
-  const body = tab === "instructions" ? <><InstructionsCard a={a} d={d} ro={ro} edit={edit} onSaveVersion={saveVersion} saving={draft.saving || draft.syncing} /><InstructionsTab {...tp} /></>
+  const body = tab === "instructions" ? <><InstructionsCard a={a} d={d} ro={ro} edit={edit} onSaveVersion={saveVersion} saving={draft.saving || draft.syncing} /><InstructionsTab {...tp} /><VersionsTab a={a} dirty={dirty} perm={perm} /></>
     : tab === "tools" ? <ToolsTab {...tp} />
-    : tab === "model" ? <ModelTab {...tp} />
+    : tab === "model" ? <><ModelTab {...tp} /><ConfigTab {...tp} /><OverridesTab {...tp} /></>
     : tab === "skills" ? <><SkillsListTab {...tp} /><SkillsTab {...tp} /></>
-    : tab === "guardrails" ? <GuardrailsTab {...tp} />
-    : tab === "evals" ? <EvalsTab a={a} />
-    : tab === "settings" ? <ConfigTab {...tp} />
-    : tab === "overrides" ? <OverridesTab {...tp} />
-    : tab === "versions" ? <VersionsTab a={a} dirty={dirty} perm={perm} />
-    : tab === "trust" ? <><TrustStrip a={a} projects={projects} /><TrustTab a={a} projects={projects} /></>
-    : tab === "history" ? <div className="ag-hist"><EntityHistory type="agent" id={a.id} limit={40} /></div>
+    : tab === "guardrails" ? <>
+        <GuardrailsTab {...tp} />
+        <Card title="Agent status" hint={paused ? "Paused: its stations queue work until it resumes." : "Pause it to stop new work reaching this agent."}>
+          <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving\u2026")} onClick={toggleStatus} />
+        </Card>
+        <TrustStrip a={a} projects={projects} /><TrustTab a={a} projects={projects} />
+        <div className="ag-hist"><EntityHistory type="agent" id={a.id} limit={40} /></div>
+      </>
+    : tab === "evals" ? <><EvalsTab a={a} /><Btn label="Open the eval suite" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} /></>
     : <OverviewTab {...tp} onTab={setTab} />;
   const showSave = SAVE_TABS.includes(tab);
   return (
@@ -178,8 +181,6 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
       acts={<>
         <Btn label="All agents" id="ag-back-link" onClick={() => navigate("agents")} />
         <Btn label="Talk" icon="chat" id="ag-talk" onClick={() => navigate("conversations")} />
-        <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving\u2026")} onClick={toggleStatus} />
-        <Btn label="Evals" icon="eval" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} />
       </>}>
       <LockNote decision={perm} what="Agent configuration" />
       <Tabs idPrefix="ag-tab" items={tabs} active={tab} onChange={setTab} />
