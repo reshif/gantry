@@ -36,13 +36,19 @@ describe("what a work order needs (from the data the API returns)", () => {
   });
   it("names the waiting gate with the vote count the approvals list gave", () => {
     const w = mk({ gates: { G5: { status: "waiting", approvals: [], rejections: [], checks: [], waitingSince: NOW - 3_600_000 } } });
-    const label = cat.gates.find((g) => g.id === "G5")?.label ?? "G5";
-    expect(needsOf(w, { ...ctx, votes: () => ({ have: 0, need: 2 }) })).toMatchObject({ kind: "gate", text: `${label} approval (0 of 2)`, me: true });
-    expect(needsOf(w, ctx).text).toBe(`${label} approval`);
+    const name = cat.gates.find((g) => g.id === "G5")?.name ?? "G5";
+    expect(needsOf(w, { ...ctx, votes: () => ({ have: 0, need: 2 }) })).toMatchObject({ kind: "gate", text: `${name} (0 of 2)`, me: true });
+    // without the open approvals list the project's own rule gives the count; with neither there is no count
+    expect(needsOf(w, { ...ctx, required: () => 2 }).text).toBe(`${name} (0 of 2)`);
+    expect(needsOf(w, ctx).text).toBe(name);
   });
   it("says a station sent it back for changes, using the station's own name", () => {
     const w = mk({ sendbacks: [{ from: "review", to: "build", note: "Two criteria fail", at: NOW, by: "a" }] });
-    expect(needsOf(w, ctx)).toMatchObject({ kind: "review", text: "Review and merge requested changes", detail: "Two criteria fail", me: false });
+    expect(needsOf(w, ctx)).toMatchObject({ kind: "review", text: "Review requested changes", detail: "Two criteria fail", me: false });
+  });
+  it("does not repeat the state chip in the detail line", () => {
+    expect(needsOf(mk({ state: "blocked", bay: null, blockReason: "Waiting on an upstream schema change" }), ctx)).toMatchObject({ text: "Waiting on an upstream schema change", detail: "" });
+    expect(needsOf(mk({ state: "failed", bay: null, failReason: "2 checks failed" }), ctx).detail).toBe("");
   });
   it("shows the bay reason, and the agent and start for a running one", () => {
     expect(needsOf(mk({ bay: "person", bayReason: "needs the table name", state: "parked" }), ctx)).toMatchObject({ kind: "bay", text: "needs the table name", me: true, rank: 2 });
@@ -67,8 +73,8 @@ describe("Work orders list: Needs, actions, project column", () => {
     const heads = Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, "").trim());
     expect(heads).not.toContain("Project");
     expect(document.getElementById("wo-needs-WO-9001")?.textContent).toContain("Build asks you");
-    expect(document.getElementById("wo-needs-WO-9002")?.textContent).toMatch(/approval/);
-    expect(document.getElementById("wo-needs-WO-9003")?.textContent).toContain("Review and merge requested changes");
+    expect(document.getElementById("wo-needs-WO-9002")?.textContent).toMatch(/Spec approved \(0 of 1\)/);
+    expect(document.getElementById("wo-needs-WO-9003")?.textContent).toContain("Review requested changes");
     expect(document.getElementById("wo-needs-WO-9004")?.textContent).toContain("needs the table name");
     // the full title is in the DOM (wrapped by CSS, not cut)
     expect(screen.getByText(/rather than being cut off after fifty characters/).textContent).toContain("fifty characters of text");
@@ -101,6 +107,9 @@ describe("Work orders list: Needs, actions, project column", () => {
     const css = ["views/workorders.css", "shared.css"].map((f) => readFileSync(`${process.cwd()}/src/styles/${f}`, "utf8")).join("\n");
     expect(css).toMatch(/\.wo-table \.wo-title-t \{[^}]*-webkit-line-clamp: 2/);
     expect(css).not.toMatch(/\.wo-table[^{]*\{[^}]*min-width: *(\d{4,}|[1-9]\d{3})/);
+    // actions stay on one line in a fixed order on wide pages; phone cards lead with Needs
+    expect(css).toMatch(/\.wo-acts \{[^}]*flex-wrap: nowrap/);
+    expect(css).toMatch(/td\[data-l="Needs"\] \{ grid-row: 3/);
     expect(css).toMatch(/@media \(max-width: 639px\)[\s\S]*\.dtable, \.dtable tbody, \.dtable tr, \.dtable td \{ display: block/);
     // eight columns at most (select + 7), so the row fits a 1366 px page next to the nav
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page(rows()) }) });
@@ -122,7 +131,7 @@ describe("shared work order actions", () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] }, attention: [] }) }) });
     mount(<InboxView />);
     const acts = await waitFor(() => { const e = document.getElementById("inb-acts-gate-WO-2398-G2"); if (!e) throw new Error("no actions"); return e; });
-    expect(Array.from(acts.querySelectorAll("a, button")).map((a) => a.textContent)).toEqual(["Conversation", "Record", "Review"]);
+    expect(Array.from(acts.querySelectorAll("a, button")).map((a) => a.textContent)).toEqual(["Conversation", "Record", "Approve…"]);
     fireEvent.click(within(acts).getByText("Conversation"));
     expect(window.location.hash).toBe("#/p/payments/conversations/WO-2398");
   });
@@ -131,7 +140,7 @@ describe("shared work order actions", () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] }, attention: [] }) }) });
     mount(<HomeView />);
     const acts = await waitFor(() => { const e = document.getElementById("hm-acts-gate-WO-2398-G2"); if (!e) throw new Error("no actions"); return e; });
-    expect(Array.from(acts.querySelectorAll("a")).map((a) => a.textContent)).toEqual(["Conversation", "Record"]);
+    expect(Array.from(acts.querySelectorAll("a, button")).map((a) => a.textContent)).toEqual(["Conversation", "Record", "Approve…"]);
     fireEvent.click(within(acts).getByText("Conversation"));
     expect(window.location.hash).toBe("#/p/payments/conversations/WO-2398");
   });

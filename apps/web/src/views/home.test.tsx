@@ -214,7 +214,7 @@ describe("Home: Control Room", () => {
     expect(screen.getByText("Payments Platform · WO-9 · Add limits · waiting 1h ago")).toBeTruthy();
     const submit = document.getElementById("hm-my-new") as HTMLAnchorElement;
     expect(submit.getAttribute("href")).toBe("#console");
-    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve…" }));
     expect(await screen.findByRole("button", { name: "Request changes" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
   });

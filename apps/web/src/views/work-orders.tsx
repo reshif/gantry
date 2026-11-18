@@ -9,7 +9,7 @@
 import { qk } from "../api/keys";
 import { useInfiniteQuery, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { bayDef, classesOf, flowOf, fmt } from "@gantry/domain";
+import { bayDef, classesOf, flowOf, fmt, requiredFor } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
 import { useParkMany } from "../api/bulk";
@@ -168,7 +168,7 @@ function WorkOrdersView() {
   };
   const idNum = (w: WorkOrder): number => Number(w.id.replace(/\D/g, "")) || 0;
   const now = Date.now();
-  const needs = (w: WorkOrder): Needs => needsOf(w, { cat, now, votes, agent: (id) => actors(id).name.replace(" (agent)", "") });
+  const needs = (w: WorkOrder): Needs => needsOf(w, { cat, now, votes, required: (x, g) => { const r = projectFor(x.project).approvers?.[g]; return r ? requiredFor(r, x.cls) : undefined; }, agent: (id) => actors(id).name.replace(" (agent)", "") });
   const cols: Col<WorkOrder>[] = [
     {
       key: "id",

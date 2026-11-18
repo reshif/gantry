@@ -55,7 +55,7 @@ function ApprovalActions({ it }: { it: Item }) {
   const review = useReviewApproval();
   if (it.kind === "gate") {
     const wo = it.a.wo;
-    const go = <Btn label="Review" kind="primary" small id={`inb-review-${it.key}`} onClick={() => review(it)} />;
+    const go = <Btn label={wo ? "Approve…" : "Review"} kind="primary" small id={`inb-review-${it.key}`} onClick={() => review(it)} />;
     return wo ? <WoActions wo={{ id: wo, project: it.a.project }} id={`inb-acts-${it.key}`} next={go} /> : go;
   }
   if (it.kind === "other") return <Btn label="Review" kind="primary" small id={`inb-review-${it.key}`} onClick={() => review(it)} />;

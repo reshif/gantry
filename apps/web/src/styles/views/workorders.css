@@ -22,11 +22,18 @@
 .wo-table .wo-needs.is-me .wo-needs-t { color: var(--wait); }
 .wo-table .wo-needs-d { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .wo-table .wo-act { display: grid; gap: 2px; }
-.wo-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 210px; }
+/* One line, always in the order Conversation, Record, next action, so rows with and without a next action are the same height. */
+.wo-acts { display: inline-flex; flex-wrap: nowrap; gap: 6px; justify-content: flex-end; align-items: center; }
 .wo-acts .btn { white-space: nowrap; }
+.wo-table td.is-end { min-width: 252px; }
+@media (min-width: 641px) and (max-width: 1180px) {
+  /* narrower pages stack the same actions in the same order instead of overflowing */
+  .wo-acts { flex-direction: column; align-items: stretch; }
+  .wo-table td.is-end { min-width: 0; }
+}
 @media (max-width: 639px) {
   .wo-table .wo-title, .wo-table .wo-needs { max-width: none; min-width: 0; }
-  .wo-acts { justify-content: flex-start; max-width: none; }
+  .wo-acts { justify-content: flex-start; }
 }
 .wo-r-killed .wo-id, .wo-r-killed .wo-title { text-decoration: line-through; color: var(--kill); }
 .wo-r-done { color: var(--ink-2); }
@@ -81,7 +88,6 @@
 .wo-table .wo-title { display: inline-block; max-width: 420px; white-space: normal; }
 .wo-id.is-killed, .wo-title.is-killed { text-decoration: line-through; color: var(--kill); }
 .wo-cls { display: inline-flex; align-items: center; white-space: nowrap; }
-.wo-acts { display: inline-flex; gap: 2px; }
 .int-rs.is-custom { border-style: dashed; border-color: var(--accent-line); }
 @media (max-width: 640px) { .wo-table .wo-title { min-width: 0; } }
 .wo-table .dtable td { white-space: normal; }
@@ -114,7 +120,6 @@
   .wo-c-prio { grid-column: 3; grid-row: 3; text-align: right; }
   .wo-c-open { grid-column: 4; grid-row: 1 / 4; align-self: center; }
   .wo-table .wo-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; min-width: 0; max-width: none; }
-  .wo-acts { flex-direction: column; gap: 0; }
   .wo-acts .icon-btn { width: 44px; height: 44px; }
   .wo-acts .icon-btn .ic { width: 18px; height: 18px; }
 }
@@ -145,3 +150,24 @@
 
 /* Work orders (prototype): the search icon is centred on the field, whatever the field's height */
 .wo-view .fb .searchbox.search > .ic { top: 50%; transform: translateY(-50%); }
+
+/* Phone cards for the work orders list: ID, where it is and its age on top, the full title, then what it needs (the lead), then class and the actions on one row. */
+@media (max-width: 640px) {
+  .wo-table .dtable tr { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--s2); row-gap: 6px; align-items: center; padding: var(--s3); }
+  .wo-table .dtable td { display: block; padding: 0; min-width: 0; grid-column: 1 / -1; }
+  .wo-table .dtable td::before { content: none; display: none; }
+  .wo-table .dtable td[data-l="ID"] { grid-column: 1; grid-row: 1; }
+  .wo-table .dtable td[data-l="Station"] { grid-column: 2; grid-row: 1; }
+  .wo-table .dtable td[data-l="Activity"] { grid-column: 3; grid-row: 1; text-align: right; }
+  .wo-table .dtable td[data-l="Title"] { grid-row: 2; }
+  .wo-table .dtable td[data-l="Needs"] { grid-row: 3; padding: 6px 8px; border-radius: var(--r1, 4px); background: var(--panel); }
+  .wo-table .dtable td[data-l="Project"] { grid-row: 4; }
+  .wo-table .dtable td[data-l="Class"] { grid-row: 5; grid-column: 1 / 3; }
+  .wo-table .dtable td.cbcol { grid-row: 5; grid-column: 3; justify-self: end; }
+  .wo-table .dtable td.is-end { grid-row: 6; min-width: 0; }
+  .wo-table .wo-needs { max-width: none; min-width: 0; }
+  .wo-table .wo-act { display: inline-flex; gap: var(--s2); align-items: baseline; }
+  .wo-table .wo-where { flex-direction: row; }
+  .wo-acts { flex-wrap: wrap; gap: 6px; width: 100%; }
+  .wo-acts .btn { flex: 1 1 auto; justify-content: center; }
+}
