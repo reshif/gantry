@@ -93,7 +93,7 @@ function SsoPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
   const set = useSet(sec);
   const ui = useUI();
   return (
-    <Card title="Single sign-on" id="sec-sso" acts={<Btn label={<><CrIcon name="edit" />Edit</>} aria="Edit single sign-on" small id="sec-sso-edit" guard={perm.allowed ? null : perm} onClick={() => ui.open((close) => <SsoDialog sec={sec} close={close} />)} />}>
+    <Card title="Single sign-on" id="sec-sso" acts={<Btn label={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><CrIcon name="edit" />Edit</span>} aria="Edit single sign-on" small id="sec-sso-edit" guard={perm.allowed ? null : perm} onClick={() => ui.open((close) => <SsoDialog sec={sec} close={close} />)} />}>
       <dl className="kv">
         <dt>Provider</dt><dd id="sec-sso-provider">{sec.sso.provider}</dd>
         <dt>Domain</dt><dd><span className="mono" id="sec-sso-domain">{sec.sso.domain}</span></dd>

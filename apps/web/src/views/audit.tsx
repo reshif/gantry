@@ -108,7 +108,7 @@ export default function AuditView() {
       title="Audit ledger"
       sub="An append-only record of every decision and change. Entries are chained; the chain is verified hourly."
       acts={<>
-        <Btn label={<><CrIcon name="dl" />Export CSV</>} aria="Export CSV" id="aud-export" onClick={exportCsv} />
+        <Btn label={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><CrIcon name="dl" />Export CSV</span>} aria="Export CSV" id="aud-export" onClick={exportCsv} />
         {canVerify ? <Btn label={checking ? "Verifying..." : "Verify chain"} icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify()} /> : null}
       </>}
     >
