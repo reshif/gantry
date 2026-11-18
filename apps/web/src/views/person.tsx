@@ -13,6 +13,7 @@ import { useUI } from "../ui/overlay-context";
 import { fmtDay, ifMatchOf, lockd, useOutcome, useTeams } from "./govern/data";
 import { useOffboard } from "./people/Offboard";
 import { useGrantRole } from "./people/GrantRole";
+import { useEditTeams } from "./people/PersonTeams";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
@@ -90,6 +91,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   else if (perm.allowed && frRole === "factory_admin" && admins.length < 2) factGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
 
   const grant = useGrantRole({ roles, projects: visible, guard: perm });
+  const editTeams = useEditTeams({ teams, guard: perm });
 
   const removeFactoryRole = (role: string) =>
     ui.reasonDialog({
@@ -114,7 +116,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   // open work orders this person requested, across every project the viewer can read
   const wos = useWorkOrdersOfProjects(visible.map((x) => x.id));
   const held = wos.items.filter((w) => w.requestedBy === p.id && w.state !== "done" && w.state !== "killed");
-  const teamNames = (p.teams ?? []).map(teamName).join(", ") || "\u2014";
+  const teamNames = (p.teams ?? []).map(teamName).join(", ") || "No team";
   // On-call is kept per project (a project's admins choose; Factory Admins always count). The person switch edits the lists of the
   // projects this person is a member of (on) or sits on (off); the server applies its own rules to each list.
   const setOncall = async (on: boolean) => {
@@ -161,7 +163,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         </Panel>
         <Panel title="Details">
           <dl className="kv">
-            <dt>Teams</dt><dd>{teamNames}</dd>
+            <dt>Teams</dt><dd>{teamNames}{" "}<Btn label="Change" small kind="ghost" id="ppl-teams" guard={perm} onClick={() => editTeams(p)} /></dd>
             <dt>GitHub</dt><dd>{p.github || "Not linked"}</dd>
             <dt>Away</dt><dd>{away ? `Until ${fmtDay(away.to)}` : "Available"}</dd>
             <dt>On call</dt><dd><div className="row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}><span>On call rotation</span><Toggle id="ppl-oncall" checked={!!p.oncall} decision={perm} label="On call rotation" onChange={(v) => void setOncall(v)} /></div></dd>
