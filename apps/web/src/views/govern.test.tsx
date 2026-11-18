@@ -84,6 +84,7 @@ function mount(node: React.ReactElement) {
 }
 
 beforeEach(() => {
+  window.history.replaceState(null, "", "/");
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
@@ -353,9 +354,10 @@ describe("Security", () => {
     const calls = setup();
     mount(<SecurityView />);
     fireEvent.click(await screen.findByRole("tab", { name: /Network/ }));
-    fireEvent.change(await screen.findByLabelText("Address range to allow"), { target: { value: "nope" } });
-    fireEvent.click(screen.getByText("Add range"));
-    expect(await screen.findByText(/Enter an IPv4 address or CIDR range/)).toBeTruthy();
+    fireEvent.click(await byId("sec-ip-add"));
+    fireEvent.change(await byId("sec-ip-new"), { target: { value: "nope" } });
+    fireEvent.click(await byId("sec-ip-add-ok"));
+    expect(await screen.findByText("Use CIDR, e.g. 198.51.100.0/24")).toBeTruthy();
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   });
 
@@ -381,7 +383,8 @@ describe("Security", () => {
     setup({}, ["security.manage"]);
     mount(<SecurityView />);
     expect(await screen.findByText(/Read-only for you: security settings/)).toBeTruthy();
-    expect(document.getElementById("sec-sso-domain")).toBeTruthy();
-    await waitFor(() => expect((document.getElementById("sec-sso-domain") as HTMLInputElement).disabled).toBe(true));
+    await waitFor(() => expect(document.getElementById("sec-sso-domain")).toBeTruthy());
+    await waitFor(() => expect(document.getElementById("sec-sso-edit")?.getAttribute("aria-disabled")).toBe("true"));
+    expect((document.getElementById("sec-idle") as HTMLInputElement).disabled).toBe(true);
   });
 });

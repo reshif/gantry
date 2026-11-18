@@ -66,6 +66,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -73,43 +74,117 @@ afterEach(() => {
 });
 
 describe("Security screen", () => {
-  it("shows the sign-in settings and the header summary, with every control enabled for an admin", async () => {
+  it("shows the prototype's two cards: Single sign-on as key/value rows and Multi-factor with the three fields", async () => {
     setup();
     mount();
-    expect(((await byId("sec-sso-domain")) as HTMLInputElement).value).toBe("acme.dev");
-    expect(((await byId("sec-sso-entity")) as HTMLInputElement).value).toBe("https://acme.okta.com/metadata");
+    expect((await byId("sec-sso-domain")).textContent).toBe("acme.dev");
+    expect((await byId("sec-sso-provider")).textContent).toBe("Okta");
+    expect((await byId("sec-sso-entity")).textContent).toBe("https://acme.okta.com/metadata");
     expect((await byId("sec-sso-enforced") as HTMLInputElement).checked).toBe(true);
     expect((await byId("sec-gh") as HTMLInputElement).checked).toBe(false);
-    expect(((await byId("sec-idle")) as HTMLSelectElement).value).toBe("30");
-    await waitFor(() => expect(text()).toContain("Active sessions2"));
-    expect(text()).toContain("Okta, required");
-    expect(text()).toContain("Idle timeout30 min");
-    expect(text()).toContain("Failed sign-ins 24 h1");
+    const titles = [...document.querySelectorAll(".card-h h2")].map((h) => h.textContent);
+    expect(titles).toEqual(["Single sign-on", "Multi-factor"]);
+    expect(((await byId("sec-mfa-policy")) as HTMLSelectElement).value).toBe("admins");
+    expect([...(await byId("sec-mfa-policy")).querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Everyone", "Admins and approvers", "No one"]);
+    expect(((await byId("sec-hours")) as HTMLInputElement).value).toBe("12");
+    expect(((await byId("sec-idle")) as HTMLInputElement).value).toBe("30");
+    expect(text()).toContain("Session length (hours)");
+    expect(text()).toContain("Idle timeout (minutes)");
+    // the five-tile stat row is not part of the screen
+    expect(document.querySelector(".stats")).toBeNull();
     expect(document.querySelector(".lock-note")).toBeNull();
-    expect(locked(await byId("sec-sso-domain"))).toBe(false);
+  });
+
+  it("has the prototype's tabs (Sign-in, Sessions, Network and restore) in the URL, then History and Emergency stop", async () => {
+    setup();
+    mount();
+    await byId("sec-sso-domain");
+    expect([...document.querySelectorAll("[role=tab]")].map((t) => t.firstChild?.textContent)).toEqual(["Sign-in", "Sessions", "Network and restore", "History", "Emergency stop"]);
+    fireEvent.click(await byId("sec-tab-network"));
+    expect(window.location.search).toBe("?tab=network");
+    fireEvent.click(await byId("sec-tab-signin"));
+    expect(window.location.search).toBe("");
+  });
+
+  it("opens on the tab named in the URL", async () => {
+    window.history.replaceState(null, "", "/?tab=sessions");
+    setup();
+    mount();
+    await byId("sec-ses-rv-s2");
   });
 
   it("says plainly that MFA is not enforced instead of advertising a policy", async () => {
     setup();
     mount();
     expect((await byId("sec-mfa-notice")).textContent).toContain("Not enforced");
-    await waitFor(() => expect(text()).toContain("MFAnot enforced"));
     expect(text()).not.toContain("MFAadmins");
   });
 
-  it("lists domains, ranges and research hosts on the network tab, and the active sessions and history tabs", async () => {
-    setup();
+  it("edits the SSO provider, domain and entity in a dialog and saves them with the version read", async () => {
+    const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 4 } }) });
+    mount();
+    fireEvent.click(await byId("sec-sso-edit"));
+    const dom = (await byId("sec-sso-domain-in")) as HTMLInputElement;
+    fireEvent.change(dom, { target: { value: "acme.io" } });
+    fireEvent.click(await byId("sec-sso-save"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "PATCH", body: { path: "sso.domain", value: "acme.io" } });
+  });
+
+  it("saves the session length as a number field", async () => {
+    const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 4 } }) });
+    mount();
+    const hours = await byId("sec-hours");
+    fireEvent.change(hours, { target: { value: "8" } });
+    fireEvent.blur(hours);
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ body: { path: "sessionHours", value: 8 } });
+  });
+
+  it("lists the IP allow list with Add range and Remove, domains and research hosts below, and the sessions tab as a table", async () => {
+    const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 4 } }) });
     mount();
     fireEvent.click(await byId("sec-tab-network"));
     await byId("sec-dom-form");
+    expect([...document.querySelectorAll(".card-h h2")].slice(0, 2).map((h) => h.textContent)).toEqual(["IP allow list", "Restore rules"]);
     expect(text()).toContain("partner.example");
     expect(text()).toContain("10.0.0.0/8");
     expect(text()).toContain("inside 10.0.0.0/8");
     expect(text()).toContain("docs.example.com");
-    fireEvent.click(await byId("sec-tab-sessions"));
+    // adding goes through a dialog with the prototype's error text
+    fireEvent.click(await byId("sec-ip-add"));
+    fireEvent.change(await byId("sec-ip-new"), { target: { value: "nonsense" } });
+    fireEvent.click(await byId("sec-ip-add-ok"));
+    await waitFor(() => expect(text()).toContain("Use CIDR, e.g. 198.51.100.0/24"));
+    fireEvent.change(await byId("sec-ip-new"), { target: { value: "198.51.100.0/24" } });
+    fireEvent.click(await byId("sec-ip-add-ok"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ body: { path: "ipAllow", value: ["10.0.0.0/8", "198.51.100.0/24"] } });
+  });
+
+  it("asks before removing an IP range, with the prototype's wording", async () => {
+    window.history.replaceState(null, "", "/?tab=network");
+    const calls = setup({ "GET /api/v1/security": () => ({ body: { ...SEC, ipAllow: ["10.0.0.0/8", "192.0.2.0/24"] } }), "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 4 } }) });
+    mount();
+    fireEvent.click(await byId("sec-ip-rm-192_0_2_0_24"));
+    await waitFor(() => expect(text()).toContain("People connecting from this range will be refused."));
+    expect(text()).toContain("Remove 192.0.2.0/24?");
+    expect(writes(calls)).toHaveLength(0);
+    fireEvent.click(await byId("sec-ip-rm-ok"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ body: { path: "ipAllow", value: ["10.0.0.0/8"] } });
+  });
+
+  it("lists sessions in a sortable, paged table with Sign out, hiding ended ones until asked", async () => {
+    window.history.replaceState(null, "", "/?tab=sessions");
+    setup();
+    mount();
     await byId("sec-ses-rv-s2");
     expect(document.getElementById("sec-ses-rv-s3")).toBeNull();
-    fireEvent.click(document.querySelector("input[name=sec-ses-show][value=all]") as HTMLElement);
+    expect(document.getElementById("sec-ses-rv-s2")?.textContent).toBe("Sign out");
+    expect([...document.querySelectorAll("#sec-sessions-table th")].map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["Person", "Device", "IP", "Started", "MFA", ""]);
+    fireEvent.click(await byId("sec-ses-show"));
+    expect(window.location.search).toContain("show=all");
     expect(locked(await byId("sec-ses-rv-s3"))).toBe(true);
     fireEvent.click(await byId("sec-tab-history"));
     await waitFor(() => expect(text()).toContain("mallory@evil.test"));
@@ -120,7 +195,7 @@ describe("Security screen", () => {
     setup({ "GET /api/v1/signins": () => ({ body: [] }) });
     mount();
     fireEvent.click(await byId("sec-tab-history"));
-    await waitFor(() => expect(text()).toContain("0 sign-ins · 0 failures in the last 24 h"));
+    await waitFor(() => expect(text()).toContain("0 sign-ins · 0 failures in the last 24 hours"));
     expect(document.getElementById("sec-history-error")).toBeNull();
   });
 
@@ -132,6 +207,7 @@ describe("Security screen", () => {
     expect(err.textContent).toContain("Couldn't load security settings");
     expect(err.textContent).toContain("The settings store is down.");
     expect(document.getElementById("sec-sso-domain")).toBeNull();
+    expect(document.querySelector(".page h1")?.textContent).toBe("Security");
     fail = false;
     fireEvent.click(await byId("sec-error-retry"));
     await byId("sec-sso-domain");
@@ -158,18 +234,18 @@ describe("Security screen", () => {
   it("is read-only with the reason for someone who may only view: every control locked, no writes", async () => {
     const calls = setup({}, ["security.manage"]);
     mount();
-    const save = await byId("sec-sso-save");
+    const edit = await byId("sec-sso-edit");
     await waitFor(() => expect(document.querySelector(".sec-lock .lock-note")).toBeTruthy());
     expect(document.querySelector(".lock-note")?.textContent).toContain("Read-only for you");
-    expect(locked(save)).toBe(true);
-    for (const id of ["sec-sso-provider", "sec-sso-domain", "sec-sso-entity", "sec-sso-enforced", "sec-gh", "sec-hours", "sec-idle", "sec-two", "sec-kill-stepup"]) {
+    expect(locked(edit)).toBe(true);
+    for (const id of ["sec-sso-enforced", "sec-gh", "sec-mfa-policy", "sec-hours", "sec-idle"]) {
       expect(locked(await byId(id))).toBe(true);
     }
     fireEvent.click(await byId("sec-sso-enforced"));
-    fireEvent.click(save);
+    fireEvent.click(edit);
     fireEvent.click(await byId("sec-tab-network"));
     await byId("sec-dom-add");
-    for (const id of ["sec-dom-new", "sec-dom-add", "sec-dom-rm-partner_example", "sec-ip-new", "sec-ip-add", "sec-rh-add", "sec-rh-rm-docs_example_com", "sec-chatcap-save"]) {
+    for (const id of ["sec-dom-new", "sec-dom-add", "sec-dom-rm-partner_example", "sec-ip-add", "sec-two", "sec-kill-stepup", "sec-stepup-window", "sec-rh-add", "sec-rh-rm-docs_example_com", "sec-chatcap-save"]) {
       expect(locked(await byId(id))).toBe(true);
     }
     expect(writes(calls)).toHaveLength(0);

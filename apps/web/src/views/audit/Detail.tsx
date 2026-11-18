@@ -165,12 +165,8 @@ export function AuditDrawer({ seq, projectName, close }: { seq: number; projectN
     <div className="drawer-inner aud-drawer">
       <div className="drawer-head">
         <div>
-          <div className="kicker">{"Audit entry · " + (CAT_NAME[e.category] ?? e.category)}</div>
-          <div className="drawer-id">
-            <span className="mono big-id">{"#" + e.seq}</span>
-            <span className={`outcome o-${e.outcome}`}>{e.outcome}</span>
-          </div>
-          <h2 className="drawer-title">{e.target}</h2>
+          <div className="kicker eyebrow">{"Audit entry #" + e.seq}</div>
+          <h2 className="drawer-title">{e.action}</h2>
         </div>
         <button type="button" className="icon-btn drawer-close" id="aud-drawer-close" aria-label="Close" onClick={close}><Icon name="x" /></button>
       </div>
@@ -178,10 +174,13 @@ export function AuditDrawer({ seq, projectName, close }: { seq: number; projectN
         <dl className="aud-kvs">
           <Kv k="When"><span className="mono">{fmt.iso(e.at) + " IST"}</span></Kv>
           <Kv k="Actor"><span><ActorCell id={e.actor} name={e.actorName} /><span className="muted small">{" · " + e.actorKind}</span></span></Kv>
-          <Kv k="Action"><span className="mono">{e.action}</span></Kv>
-          <Kv k="Category"><span className="row gap-sm"><CatChip c={e.category} />{topic ? <Chip text={topic} /> : null}</span></Kv>
+          <Kv k="Target"><span className="mono">{e.target}</span></Kv>
           <Kv k="Project">{e.project ? projectName(e.project) : "Factory-wide"}</Kv>
+          <Kv k="Category"><span className="row gap-sm"><span>{e.category}</span>{topic ? <Chip text={topic} /> : null}</span></Kv>
+          <Kv k="Outcome"><span className={`chip ${e.outcome === "ok" ? "ok" : e.outcome === "denied" ? "bad" : "warn"}`}>{e.outcome}</span></Kv>
           <Kv k="Via"><span className="mono">{e.via}</span></Kv>
+          <Kv k="Hash"><span className="mono digest" style={{ fontSize: 11 }}>{"sha256:" + e.digest}</span></Kv>
+          <Kv k="Previous"><span className="mono digest" style={{ fontSize: 11 }}>{"sha256:" + e.prev}</span></Kv>
           {e.onBehalfOf ? <Kv k="On behalf of"><ActorCell id={e.onBehalfOf} /></Kv> : null}
           {e.rule ? <Kv k="Rule"><span className="mono">{e.rule}</span></Kv> : null}
           {e.entity ? <Kv k="Entity"><span className="mono">{e.entity.type + " " + e.entity.id}</span></Kv> : null}
@@ -193,11 +192,6 @@ export function AuditDrawer({ seq, projectName, close }: { seq: number; projectN
         <h3 className="sub-h">Before and after</h3>
         <DiffView e={e} />
         <div className="drawer-actions aud-actions"><EntityLink e={e} close={close} /></div>
-        <h3 className="sub-h">Chain</h3>
-        <dl className="aud-kvs">
-          <Kv k="Digest"><span className="mono digest">{e.digest}</span></Kv>
-          <Kv k="Previous"><span className="mono digest">{e.prev}</span></Kv>
-        </dl>
         {e.entity ? (
           <div>
             <h3 className="sub-h">{"Other entries for this " + e.entity.type}</h3>

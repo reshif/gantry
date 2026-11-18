@@ -1,5 +1,6 @@
 /**
- * Security (spec 8.9, 14.1). Port of legacy/js/views/security.js against GET/PATCH /security, /sessions and /signins.
+ * Security (spec 8.9, 14.1), in the Control Room prototype's layout: Sign-in, Sessions and Network and restore, then the two
+ * working tabs the prototype has no room for (History, Emergency stop). Against GET/PATCH /security, /sessions and /signins.
  * Not ported, on purpose: the simulated SSO test sign-in and the idle-warning demo (nothing in the product is simulated).
  */
 import { useState } from "react";
@@ -8,10 +9,14 @@ import type { SecuritySettings, Session, SignIn } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useMe, usePeople, useSecurity, useSessions, useSignins } from "../api/queries";
-import { Btn, Field, FilterBar, LockNote, Panel, Segmented, Select, Stat, StatRow, Status, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
-import { Async, qState } from "../ui/async";
+import { Btn, Field, LockNote, Segmented, Select, Tabs, Toggle, Who, type Decision } from "../ui/primitives";
+import { Card, CrIcon, Page } from "../ui/cr";
+import { DataTable } from "../ui/DataTable";
+import { Modal } from "../ui/Modal";
+import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
+import { useQueryState } from "../lib/queryState";
 import { ExplainDenial } from "./console/ExplainDenial";
 import { lockd, nextVersion, useOutcome, versionOf } from "./govern/data";
 import { inCidr, parseCidr } from "./security/cidr";
@@ -20,6 +25,8 @@ import { StopTab } from "./security/Stop";
 const PROVIDERS = ["Okta", "Microsoft Entra ID", "Google Workspace", "OneLogin"];
 const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
+export const SEC_TABS = ["signin", "sessions", "network", "history", "stop"] as const;
+const QS = ["tab", "show", "hist", "method"] as const;
 
 /** One security setting change: PATCH /security {path, value} with the version we read. */
 function useSet(sec: SecuritySettings | undefined) {
@@ -38,51 +45,45 @@ export default function SecurityView() {
   const signinsRaw = signinsQ.data;
   const signins: SignIn[] = Array.isArray(signinsRaw) ? signinsRaw : signinsRaw?.items ?? [];
   const perm = dec(useCan("security.manage"));
-  const [tab, setTab] = useState("signin");
+  const qs = useQueryState(QS);
+  const tab = (SEC_TABS as readonly string[]).includes(qs.values.tab) ? qs.values.tab : "signin";
+  const setTab = (t: string) => qs.set({ tab: t === "signin" ? null : t });
   if (!me) return null;
+  const head = { eyebrow: "Govern", title: "Security", sub: "Sign-in, sessions and network rules for the whole factory." };
   // without the settings the page is its header and the shared loading, not-visible or failed state, never a blank page
-  if (!sec) return <div className="view view-security"><ViewHead title="Security" /><Async query={secQ} what="security settings" id="sec">{() => null}</Async></div>;
+  if (!sec) return <Page {...head} cls="view-security"><Async query={secQ} what="security settings" id="sec">{() => null}</Async></Page>;
   const active = sessions.filter((x) => !x.revoked).length;
-  const fails = signins.filter((x) => x.outcome === "failure" && Date.now() - x.at < 86400000).length;
   const thisIp = me.session.ip;
 
   return (
-    <div className="view view-security">
-      <ViewHead
-        kicker="Govern"
-        title="Security"
-        sub="Sign-in, sessions and network rules for the whole factory."
-      />
-      <StatRow id="sec-stats">
-        <Stat label="SSO" value={sec.sso.enforced ? `${sec.sso.provider}, required` : "optional"} tone={sec.sso.enforced ? "done" : "wait"} />
-        <Stat label="MFA" value="not enforced" />
-        <Stat label="Idle timeout" value={`${sec.idleMin} min`} />
-        <Stat label="Active sessions" value={qState(sessionsQ, () => String(active))} />
-        <Stat label="Failed sign-ins 24 h" value={qState(signinsQ, () => String(fails))} tone={fails ? "wait" : undefined} />
-      </StatRow>
+    <Page {...head} cls="view-security">
       {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /><ExplainDenial id="sec-explain" action="security.manage" /></div> : null}
-      <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in" }, { id: "network", label: "Network" }, { id: "sessions", label: "Sessions", count: active }, { id: "history", label: "History", count: signins.length }, { id: "stop", label: "Emergency stop" }]} />
+      <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in" }, { id: "sessions", label: "Sessions", count: active }, { id: "network", label: "Network and restore" }, { id: "history", label: "History", count: signins.length }, { id: "stop", label: "Emergency stop" }]} />
       <div id="sec-tab-panel" role="tabpanel">
         {tab === "network" ? (
-          <>
-            <div className="two-col sec-cols"><DomainsPanel perm={perm} sec={sec} mine={me.person.email.split("@")[1] ?? null} /><IpPanel perm={perm} sec={sec} thisIp={thisIp} sessions={sessions} /></div>
-            <ResearchPanel perm={perm} sec={sec} />
+          <div className="stack">
+            <IpPanel perm={perm} sec={sec} thisIp={thisIp} sessions={sessions} />
+            <RestorePanel perm={perm} sec={sec} />
+            <div className="grid g2">
+              <DomainsPanel perm={perm} sec={sec} mine={me.person.email.split("@")[1] ?? null} />
+              <ResearchPanel perm={perm} sec={sec} />
+            </div>
             <ChatCapPanel perm={perm} sec={sec} />
-          </>
+          </div>
         ) : tab === "stop" ? (
           <StopTab sec={sec} onSignIn={() => setTab("signin")} />
         ) : tab === "sessions" ? (
-          <Async query={sessionsQ} what="sessions" id="sec-sessions">{() => <SessionsTab perm={perm} sessions={sessions} sec={sec} currentId={me.session.id} viewerId={me.person.id} />}</Async>
+          <Async query={sessionsQ} what="sessions" id="sec-sessions">{() => <SessionsTab perm={perm} sessions={sessions} currentId={me.session.id} viewerId={me.person.id} />}</Async>
         ) : tab === "history" ? (
           <Async query={signinsQ} what="sign-in history" id="sec-history">{() => <HistoryTab signins={signins} />}</Async>
         ) : (
-          <div className="two-col sec-cols">
-            <div className="sec-stack"><SsoPanel perm={perm} sec={sec} /><MfaPanel perm={perm} sec={sec} /></div>
-            <SessionPanel perm={perm} sec={sec} />
+          <div className="grid g2">
+            <SsoPanel perm={perm} sec={sec} />
+            <MfaPanel perm={perm} sec={sec} />
           </div>
         )}
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -90,17 +91,32 @@ export default function SecurityView() {
 
 function SsoPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
   const set = useSet(sec);
+  const ui = useUI();
+  return (
+    <Card title="Single sign-on" id="sec-sso" acts={<Btn label={<><CrIcon name="edit" />Edit</>} aria="Edit single sign-on" small id="sec-sso-edit" guard={perm.allowed ? null : perm} onClick={() => ui.open((close) => <SsoDialog sec={sec} close={close} />)} />}>
+      <dl className="kv">
+        <dt>Provider</dt><dd id="sec-sso-provider">{sec.sso.provider}</dd>
+        <dt>Domain</dt><dd><span className="mono" id="sec-sso-domain">{sec.sso.domain}</span></dd>
+        <dt>Enforced</dt>
+        <dd><Toggle id="sec-sso-enforced" label="Enforce SSO" checked={sec.sso.enforced} decision={perm} onChange={(v) => void set("sso.enforced", v, `${v ? "Enabled" : "Disabled"} Enforce SSO`)} /></dd>
+        <dt>Entity</dt><dd><span className="mono ell" id="sec-sso-entity">{sec.sso.entity}</span></dd>
+        <dt>GitHub sign-in</dt>
+        <dd><Toggle id="sec-gh" label="Allow GitHub sign-in" checked={sec.githubLogin} decision={perm} onChange={(v) => void set("githubLogin", v, `${v ? "Enabled" : "Disabled"} GitHub sign-in`)} /></dd>
+      </dl>
+    </Card>
+  );
+}
+
+/** Editing the provider, domain and metadata URL: they are read-only facts on the card, changed here and saved together. */
+function SsoDialog({ sec, close }: { sec: SecuritySettings; close: () => void }) {
   const outcome = useOutcome();
-  const [d, setD] = useState<{ provider: string; domain: string; entity: string } | null>(null);
+  const [cur, setCur] = useState({ provider: sec.sso.provider, domain: sec.sso.domain, entity: sec.sso.entity });
   const [err, setErr] = useState("");
-  const cur = d ?? { provider: sec.sso.provider, domain: sec.sso.domain, entity: sec.sso.entity };
   const dirty = cur.provider !== sec.sso.provider || cur.domain !== sec.sso.domain || cur.entity !== sec.sso.entity;
-  const upd = (patch: Partial<typeof cur>) => setD({ ...cur, ...patch });
   const save = async () => {
     if (!DOMAIN_RE.test(cur.domain.trim().toLowerCase())) return setErr("Enter a domain such as acme.dev.");
     if (!/^https:\/\/\S+$/.test(cur.entity.trim())) return setErr("The metadata URL must start with https://.");
     setErr("");
-    let ok = true;
     let ver = versionOf(sec);
     for (const k of ["provider", "domain", "entity"] as const) {
       if (cur[k].trim() !== sec.sso[k]) {
@@ -109,118 +125,69 @@ function SsoPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
         if (r.ok && ver !== undefined) ver = nextVersion(r, ver);
         if (!r.ok) {
           outcome(r);
-          ok = false;
-          break;
+          return;
         }
       }
     }
-    if (ok) outcome({ ok: true, msg: "SSO settings saved.", status: 200 });
-    setD(null);
+    outcome({ ok: true, msg: "SSO settings saved.", status: 200 });
+    close();
   };
   return (
-    <Panel title="Single sign-on">
-      <div className="form-grid">
-        <div className="form-row">
-          <Field label="Identity provider" htmlFor="sec-sso-provider"><Select id="sec-sso-provider" options={PROVIDERS} value={cur.provider} disabled={!perm.allowed} onChange={(v) => upd({ provider: v })} /></Field>
-          <Field label="SSO domain" htmlFor="sec-sso-domain"><input id="sec-sso-domain" className="input mono" value={cur.domain} disabled={!perm.allowed} autoComplete="off" onChange={(e) => upd({ domain: e.target.value })} /></Field>
-        </div>
-        <Field label="SAML entity / metadata URL" htmlFor="sec-sso-entity" hint="Recorded for the organisation. The identity provider itself is configured where Gantry's OIDC client is registered."><input id="sec-sso-entity" className="input mono" value={cur.entity} disabled={!perm.allowed} autoComplete="off" onChange={(e) => upd({ entity: e.target.value })} /></Field>
-        <div className="toggle-grid">
-          <div className="toggle-row">
-            <label htmlFor="sec-sso-enforced"><span className="strong">Require SSO</span><span className="muted small">Email and password sign-in is refused.</span></label>
-            <Toggle id="sec-sso-enforced" checked={sec.sso.enforced} decision={perm} onChange={(v) => void set("sso.enforced", v, v ? "SSO is required." : "SSO is optional now.")} />
-          </div>
-          <div className="toggle-row">
-            <label htmlFor="sec-gh"><span className="strong">Allow GitHub sign-in</span><span className="muted small">People can sign in with their linked GitHub account.</span></label>
-            <Toggle id="sec-gh" checked={sec.githubLogin} decision={perm} onChange={(v) => void set("githubLogin", v, v ? "GitHub sign-in allowed." : "GitHub sign-in turned off.")} />
-          </div>
-        </div>
+    <Modal title="Single sign-on" sub="Recorded for the organisation. The identity provider itself is configured where Gantry's OIDC client is registered." dirty={dirty} onClose={close} onSubmit={(e) => { e.preventDefault(); void save(); }}
+      footer={(rc) => <><Btn label="Cancel" onClick={rc} /><Btn label="Save SSO settings" kind="primary" type="submit" id="sec-sso-save" guard={dirty ? null : lockd("Nothing changed yet.")} /></>}>
+      <div className="stack">
+        <Field label="Identity provider" htmlFor="sec-sso-provider-in"><Select id="sec-sso-provider-in" options={PROVIDERS} value={cur.provider} onChange={(v) => setCur({ ...cur, provider: v })} /></Field>
+        <Field label="SSO domain" htmlFor="sec-sso-domain-in"><input id="sec-sso-domain-in" className="input mono" value={cur.domain} autoComplete="off" onChange={(e) => setCur({ ...cur, domain: e.target.value })} /></Field>
+        <Field label="Entity (SAML metadata URL)" htmlFor="sec-sso-entity-in"><input id="sec-sso-entity-in" className="input mono" value={cur.entity} autoComplete="off" onChange={(e) => setCur({ ...cur, entity: e.target.value })} /></Field>
         <div className="form-err" role="alert">{err}</div>
-        <div className="form-actions">
-          <Btn label="Save SSO settings" kind="primary" small id="sec-sso-save" guard={!perm.allowed ? perm : !dirty ? lockd("Nothing changed yet.") : null} onClick={() => void save()} />
-          {dirty ? <Btn label="Discard" small kind="ghost" id="sec-sso-discard" onClick={() => { setD(null); setErr(""); }} /> : null}
-        </div>
       </div>
-    </Panel>
+    </Modal>
   );
 }
+
+const REQUIRED_FOR: Array<[string, string]> = [["all", "Everyone"], ["admins", "Admins and approvers"], ["off", "No one"]];
 
 function MfaPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
   const set = useSet(sec);
   const people = usePeople().data ?? [];
-  const opts: Array<[string, string, string]> = [["off", "Nobody", "MFA is optional for everyone."], ["admins", "Admins", "Factory and Project Admins must use MFA."], ["all", "Everyone", "Every person must use MFA."]];
   const methods: Array<[string, string]> = [["totp", "Authenticator app (TOTP)"], ["webauthn", "Security key or passkey (WebAuthn)"], ["sms", "SMS code"]];
   const enrolled = people.filter((p) => p.mfa).length;
+  const saved = "Security setting saved";
+  const num = (key: "sessionHours" | "idleMin", min: number, max: number) => (e: React.FocusEvent<HTMLInputElement>) => {
+    const n = Number(e.target.value);
+    if (Number.isFinite(n) && n >= min && n <= max && n !== sec[key]) void set(key, n, saved);
+  };
   return (
-    <Panel title="Multi-factor authentication">
-      <div className="form-grid">
-        <p className="small muted" role="note" id="sec-mfa-notice"><strong>Not enforced yet.</strong> These choices are recorded but sign-in does not check them: Gantry does not require a second factor itself. Use your identity provider to enforce MFA until this is wired in.</p>
-        <div className="radio-cards" role="radiogroup" aria-label="MFA policy (not enforced)">
-          {opts.map((o) => (
-            <label key={o[0]} className={`radio-card${perm.allowed ? "" : " is-locked"}`} htmlFor={`sec-mfa-${o[0]}`}>
-              <input type="radio" name="sec-mfa" id={`sec-mfa-${o[0]}`} value={o[0]} checked={sec.mfa.policy === o[0]} disabled={!perm.allowed} onChange={() => void set("mfa.policy", o[0], `MFA preference recorded for: ${o[1].toLowerCase()} (not enforced by Gantry).`)} />
-              <span className="rc-t">{o[1]}</span>
-              <span className="rc-d muted small">{o[2]}</span>
-            </label>
-          ))}
-        </div>
+    <Card title="Multi-factor" id="sec-mfa">
+      <div className="stack">
+        <Field label="Required for" htmlFor="sec-mfa-policy">
+          <Select id="sec-mfa-policy" value={sec.mfa.policy} disabled={!perm.allowed} options={REQUIRED_FOR.map(([value, label]) => ({ value, label }))} onChange={(v) => void set("mfa.policy", v, saved)} />
+        </Field>
+        <Field label="Session length (hours)" htmlFor="sec-hours">
+          <input id="sec-hours" className="input" type="number" min={1} max={720} key={`h${sec.sessionHours}`} defaultValue={sec.sessionHours} disabled={!perm.allowed} onBlur={num("sessionHours", 1, 720)} />
+        </Field>
+        <Field label="Idle timeout (minutes)" htmlFor="sec-idle">
+          <input id="sec-idle" className="input" type="number" min={1} max={1440} key={`i${sec.idleMin}`} defaultValue={sec.idleMin} disabled={!perm.allowed} onBlur={num("idleMin", 1, 1440)} />
+        </Field>
+        <p className="small dim" role="note" id="sec-mfa-notice"><strong>Not enforced yet.</strong> These choices are recorded but sign-in does not check them: Gantry does not require a second factor itself. Use your identity provider to enforce MFA until this is wired in.</p>
         <div className="field">
           <div className="field-label">Allowed methods</div>
-          <div className="check-grid">
+          <div className="stack" style={{ gap: 6 }}>
             {methods.map((m) => {
               const on = sec.mfa.methods.includes(m[0]);
               const last = on && sec.mfa.methods.length === 1;
               return (
-                <label key={m[0]} className="check" htmlFor={`sec-mfa-m-${m[0]}`} title={last ? "Keep at least one method." : undefined}>
-                  <input type="checkbox" id={`sec-mfa-m-${m[0]}`} checked={on} disabled={!perm.allowed || last} onChange={(e) => void set("mfa.methods", e.target.checked ? [...sec.mfa.methods, m[0]] : sec.mfa.methods.filter((x) => x !== m[0]), `${m[1]}${e.target.checked ? " allowed." : " no longer allowed."}`)} />
-                  {m[1]}
-                </label>
+                <div key={m[0]} className="row spread" title={last ? "Keep at least one method." : undefined}>
+                  <span>{m[1]}</span>
+                  <Toggle id={`sec-mfa-m-${m[0]}`} label={m[1]} checked={on} decision={!perm.allowed ? perm : last ? lockd("Keep at least one method.") : null} onChange={(v) => void set("mfa.methods", v ? [...sec.mfa.methods, m[0]] : sec.mfa.methods.filter((x) => x !== m[0]), `${m[1]}${v ? " allowed." : " no longer allowed."}`)} />
+                </div>
               );
             })}
           </div>
-          <div className="field-hint">SMS is weaker than an app or a key. At least one method stays on.</div>
-        </div>
-        <p className="small muted">{`${enrolled} of ${people.length} people enrolled.`}</p>
-      </div>
-    </Panel>
-  );
-}
-
-function SessionPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
-  const set = useSet(sec);
-  const hours = [4, 8, 12, 24, 72];
-  const idle = [10, 15, 30, 60, 120];
-  return (
-    <Panel title="Session lifetime and idle timeout">
-      <div className="form-grid">
-        <div className="form-row">
-          <Field label="Session lifetime" htmlFor="sec-hours" hint="After this, people sign in again.">
-            <Select id="sec-hours" value={String(sec.sessionHours)} disabled={!perm.allowed} options={hours.map((x) => ({ value: String(x), label: `${x} hours` }))} onChange={(v) => void set("sessionHours", Number(v), `Sessions now last ${v} hours.`)} />
-          </Field>
-          <Field label="Idle timeout" htmlFor="sec-idle" hint="People who stay idle this long are signed out.">
-            <Select id="sec-idle" value={String(sec.idleMin)} disabled={!perm.allowed} options={idle.map((x) => ({ value: String(x), label: `${x} minutes` }))} onChange={(v) => void set("idleMin", Number(v), `Idle timeout set to ${v} minutes.`)} />
-          </Field>
-        </div>
-        <div className="form-row">
-          <Field label="Fresh sign-in window" htmlFor="sec-stepup-window" hint="Kill, restore, policy, role, security and key changes need a sign-in within this time. Changing it needs a fresh sign-in and is audited.">
-            <Select id="sec-stepup-window" value={String(sec.stepUpWindowMinutes ?? 15)} disabled={!perm.allowed} options={[5, 10, 15, 30, 60].map((x) => ({ value: String(x), label: `${x} minutes` }))} onChange={(v) => void set("stepUpWindowMinutes", Number(v), `A sign-in now counts as fresh for ${v} minutes.`)} />
-          </Field>
-        </div>
-        <div className="toggle-row">
-          <label htmlFor="sec-two"><span className="strong">Factory restore needs two Factory Admins</span><span className="muted small">After a factory kill, two different Factory Admins must approve the restore.</span></label>
-          <Toggle id="sec-two" checked={sec.restoreFactoryNeedsTwo} decision={perm} onChange={(v) => void set("restoreFactoryNeedsTwo", v, v ? "Factory restore needs two Factory Admins." : "One Factory Admin can restore the factory.")} />
-        </div>
-        <div className="toggle-row">
-          <label htmlFor="sec-kill-stepup">
-            <span className="strong">Require a fresh sign-in to kill</span>
-            <span className="muted small">
-              A kill is a hard stop, so by default it needs a sign-in within the fresh sign-in window above (15 minutes by default). That stops a stolen or left-open session from halting the factory. Turn it off if you want a kill to work in an emergency from any signed-in session. Restoring always needs a fresh sign-in (and, for the factory, two Factory Admins), and changing this setting needs a fresh sign-in too. Every change is audited.
-            </span>
-          </label>
-          <Toggle id="sec-kill-stepup" checked={sec.killNeedsStepUp !== false} decision={perm} onChange={(v) => void set("killNeedsStepUp", v, v ? "Kill needs a fresh sign-in." : "Kill no longer needs a fresh sign-in. Restore still does.")} />
+          <div className="field-hint hint">SMS is weaker than an app or a key. At least one method stays on. {`${enrolled} of ${people.length} people enrolled.`}</div>
         </div>
       </div>
-    </Panel>
+    </Card>
   );
 }
 
@@ -241,7 +208,7 @@ function DomainsPanel({ perm, sec, mine }: { perm: Decision; sec: SecuritySettin
     await set("domains", [...sec.domains, v], `${v} allowed.`);
   };
   return (
-    <Panel title="Allowed email domains">
+    <Card title="Allowed email domains">
       <div className="form-grid">
         <p className="small muted">Sign-in and invites are refused for any other domain.</p>
         <ul className="sec-list">
@@ -262,52 +229,87 @@ function DomainsPanel({ perm, sec, mine }: { perm: Decision; sec: SecuritySettin
         </form>
         <div className="form-err" role="alert">{err}</div>
       </div>
-    </Panel>
+    </Card>
+  );
+}
+
+/** The prototype's "Add IP range" dialog: one CIDR field, the prototype's error text, Cancel and Add. */
+function AddRangeDialog({ sec, close }: { sec: SecuritySettings; close: () => void }) {
+  const set = useSet(sec);
+  const ui = useUI();
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    const p = parseCidr(val);
+    if (!p || !val.includes("/")) return setErr("Use CIDR, e.g. 198.51.100.0/24");
+    if (sec.ipAllow.includes(p.text)) return setErr(`${p.text} is already on the list.`);
+    const r = await set("ipAllow", [...sec.ipAllow, p.text], "Added");
+    if (r.ok) close();
+    else ui.toast(r.msg, "error");
+  };
+  return (
+    <Modal title="Add IP range" dirty={!!val} onClose={close} onSubmit={(e) => { e.preventDefault(); void submit(); }}
+      footer={(rc) => <><Btn label="Cancel" onClick={rc} /><Btn label="Add" kind="primary" type="submit" id="sec-ip-add-ok" /></>}>
+      <Field label="CIDR" htmlFor="sec-ip-new" error={err || undefined}>
+        <input id="sec-ip-new" className="input mono" placeholder="198.51.100.0/24" value={val} autoComplete="off" onChange={(e) => setVal(e.target.value)} />
+      </Field>
+    </Modal>
   );
 }
 
 function IpPanel({ perm, sec, thisIp, sessions }: { perm: Decision; sec: SecuritySettings; thisIp: string; sessions: Session[] }) {
   const set = useSet(sec);
-  const [val, setVal] = useState("");
-  const [err, setErr] = useState("");
+  const ui = useUI();
   const covered = sec.ipAllow.filter((c) => inCidr(thisIp, c));
-  const submit = async () => {
-    if (!perm.allowed) return;
-    const p = parseCidr(val);
-    if (!p) return setErr("Enter an IPv4 address or CIDR range such as 192.0.2.0/24.");
-    if (sec.ipAllow.includes(p.text)) return setErr(`${p.text} is already on the list.`);
-    setErr("");
-    setVal("");
-    await set("ipAllow", [...sec.ipAllow, p.text], `${p.text} added to the allow-list.`);
-  };
+  const remove = (c: string) =>
+    ui.dialog({
+      title: `Remove ${c}?`, sub: "People connecting from this range will be refused.", body: null,
+      actions: [{ label: "Cancel" }, { label: "Remove", kind: "danger", id: "sec-ip-rm-ok", onClick: (close) => { close(); void set("ipAllow", sec.ipAllow.filter((x) => x !== c), "Removed"); } }],
+    });
   return (
-    <Panel title="IP allow-list">
-      <div className="form-grid">
-        <div className={`sec-here ${covered.length ? "is-ok" : "is-bad"}`}>
-          <Icon name={covered.length ? "check" : "alert"} />
-          <span>{"This browser connects from "}<span className="mono">{thisIp}</span>{covered.length ? `, inside ${covered.join(", ")}.` : sec.ipAllow.length ? ", outside every range." : ". With an empty list every address is allowed."}</span>
-        </div>
-        <ul className="sec-list">
-          {sec.ipAllow.map((c) => {
-            const lockout = covered.length === 1 && covered[0] === c;
-            const g = !perm.allowed ? perm : lockout ? lockd(`This is the only range covering your address ${thisIp}; removing it would lock you out.`) : null;
-            const n = sessions.filter((x) => !x.revoked && inCidr(x.ip, c)).length;
-            return (
-              <li key={c}>
-                <Icon name="shield" /><span className="mono">{c}</span><span className="muted small">{`${n} active sessions`}</span>
-                <Btn label="Remove" small kind="ghost" icon="x" id={`sec-ip-rm-${c.replace(/\W/g, "_")}`} guard={g} onClick={() => void set("ipAllow", sec.ipAllow.filter((x) => x !== c), `${c} removed from the allow-list.`)} />
-              </li>
-            );
-          })}
-        </ul>
-        <form className="inline-form" id="sec-ip-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-          <input id="sec-ip-new" className="input mono" placeholder="CIDR, e.g. 198.51.100.0/24" value={val} disabled={!perm.allowed} autoComplete="off" aria-label="Address range to allow" onChange={(e) => setVal(e.target.value)} />
-          <Btn label="Add range" type="submit" small icon="plus" id="sec-ip-add" guard={perm} />
-        </form>
-        <div className="form-err" role="alert">{err}</div>
-        <p className="footnote">Requests and sign-ins from addresses outside these ranges are refused. An empty list allows every address.</p>
+    <Card title="IP allow list" id="sec-ip" flush hint={<span id="sec-here" className={covered.length ? "" : "bad"}>{"This browser connects from "}<span className="mono">{thisIp}</span>{covered.length ? `, inside ${covered.join(", ")}.` : sec.ipAllow.length ? ", outside every range." : ". With an empty list every address is allowed."}</span>}
+      acts={<Btn label="Add range" kind="primary" small icon="plus" id="sec-ip-add" guard={perm.allowed ? null : perm} onClick={() => ui.open((close) => <AddRangeDialog sec={sec} close={close} />)} />}>
+      <div className="list">
+        {sec.ipAllow.map((c) => {
+          const lockout = covered.length === 1 && covered[0] === c;
+          const g = !perm.allowed ? perm : lockout ? lockd(`This is the only range covering your address ${thisIp}; removing it would lock you out.`) : null;
+          const n = sessions.filter((x) => !x.revoked && inCidr(x.ip, c)).length;
+          return (
+            <div className="li" key={c}>
+              <span className="mono" style={{ flex: 1 }}>{c}</span>
+              <span className="dim small">{`${n} active`}</span>
+              <Btn label="Remove" small kind="ghost danger" id={`sec-ip-rm-${c.replace(/\W/g, "_")}`} guard={g} onClick={() => remove(c)} />
+            </div>
+          );
+        })}
+        {!sec.ipAllow.length ? <div className="li dim">An empty list allows every address.</div> : null}
       </div>
-    </Panel>
+    </Card>
+  );
+}
+
+/** Restore rules and the fresh sign-in rules that guard a kill and a restore. */
+function RestorePanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) {
+  const set = useSet(sec);
+  return (
+    <Card title="Restore rules" id="sec-restore">
+      <div className="stack">
+        <div className="row spread">
+          <div><b>Restoring after emergency stop needs two Factory Admins</b><div className="dim small">Recommended. Prevents a single compromised account from restarting the line.</div></div>
+          <Toggle id="sec-two" label="Two admins to restore" checked={sec.restoreFactoryNeedsTwo} decision={perm} onChange={(v) => void set("restoreFactoryNeedsTwo", v, v ? "Factory restore needs two Factory Admins." : "One Factory Admin can restore the factory.")} />
+        </div>
+        <div className="row spread">
+          <div>
+            <b>Require a fresh sign-in to kill</b>
+            <div className="dim small">A kill is a hard stop, so by default it needs a sign-in within the fresh sign-in window. That stops a stolen or left-open session from halting the factory. Restoring always needs a fresh sign-in, and changing this setting does too. Every change is audited.</div>
+          </div>
+          <Toggle id="sec-kill-stepup" label="Require a fresh sign-in to kill" checked={sec.killNeedsStepUp !== false} decision={perm} onChange={(v) => void set("killNeedsStepUp", v, v ? "Kill needs a fresh sign-in." : "Kill no longer needs a fresh sign-in. Restore still does.")} />
+        </div>
+        <Field label="Fresh sign-in window" htmlFor="sec-stepup-window" hint="Kill, restore, policy, role, security and key changes need a sign-in within this time. Changing it needs a fresh sign-in and is audited.">
+          <Select id="sec-stepup-window" value={String(sec.stepUpWindowMinutes ?? 15)} disabled={!perm.allowed} options={[5, 10, 15, 30, 60].map((x) => ({ value: String(x), label: `${x} minutes` }))} onChange={(v) => void set("stepUpWindowMinutes", Number(v), `A sign-in now counts as fresh for ${v} minutes.`)} />
+        </Field>
+      </div>
+    </Card>
   );
 }
 
@@ -329,7 +331,7 @@ function ResearchPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings })
     await set("researchHosts", [...list, h].sort(), `${h} added to the research allow-list.`);
   };
   return (
-    <Panel title="Research allow-list">
+    <Card title="Research allow-list">
       <div className="form-grid" id="sec-research">
         <p className="small muted">Web hosts that people who approve gates may approve in a work order&apos;s research plan. A host that is not here needs someone who manages security. Agents read only the hosts of an approved plan, through Gantry, and every page is recorded.</p>
         {list.length ? (
@@ -348,7 +350,7 @@ function ResearchPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings })
         </form>
         <div className="form-err" role="alert">{err}</div>
       </div>
-    </Panel>
+    </Card>
   );
 }
 
@@ -367,7 +369,7 @@ function ChatCapPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) 
     await set("chatCapUsdPerDay", n, n === null ? "Chats have no per-person cap." : `Each person may spend ${n.toFixed(2)} USD on chats per 24 hours.`);
   };
   return (
-    <Panel title="Chat spending per person">
+    <Card title="Chat spending per person">
       <div className="form-grid" id="sec-chatcap">
         <p className="small muted">The most one person&apos;s chats (the Console and side threads with agents) may cost over a rolling 24 hours. When it is reached, their next question is refused until earlier answers age out. Work orders keep their own budgets.</p>
         <form className="inline-form" id="sec-chatcap-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
@@ -377,20 +379,23 @@ function ChatCapPanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) 
         </form>
         <div className="form-err" role="alert">{err}</div>
       </div>
-    </Panel>
+    </Card>
   );
 }
 
 /* ---------- sessions tab ---------- */
 
-function SessionsTab({ perm, sessions, sec, currentId, viewerId }: { perm: Decision; sessions: Session[]; sec: SecuritySettings; currentId: string; viewerId: string }) {
+function SessionsTab({ perm, sessions, currentId, viewerId }: { perm: Decision; sessions: Session[]; currentId: string; viewerId: string }) {
   const ui = useUI();
   const outcome = useOutcome();
-  const [show, setShow] = useState("active");
-  const list = [...sessions].sort((a, b) => b.lastSeen - a.lastSeen);
-  const maxAge = sec.sessionHours * 3600000;
-  const rows = list.filter((x) => show === "all" || !x.revoked);
-  const others = list.filter((x) => !x.revoked && x.id !== currentId);
+  const people = usePeople().data;
+  const qs = useQueryState(QS);
+  const showEnded = qs.values.show === "all";
+  const name = (id: string): string => people?.find((p) => p.id === id)?.name ?? id;
+  const enrolled = (id: string): boolean | null => { const p = people?.find((x) => x.id === id); return p ? !!p.mfa : null; };
+  const rows = sessions.filter((x) => showEnded || !x.revoked);
+  const ended = sessions.length - sessions.filter((x) => !x.revoked).length;
+  const others = sessions.filter((x) => !x.revoked && x.id !== currentId);
   const revoke = (s: Session) => {
     if (s.id === currentId) {
       ui.dialog({
@@ -399,48 +404,40 @@ function SessionsTab({ perm, sessions, sec, currentId, viewerId }: { perm: Decis
       });
       return;
     }
-    void ops.revokeSession(s.id).then((r) => outcome(r));
+    void ops.revokeSession(s.id).then((r) => { if (r.ok) ui.toast("Session ended", "warn"); else outcome(r); });
   };
   return (
     <div className="sec-tabbody">
-      <FilterBar
-        label="Sessions"
-        count={`${rows.length} ${rows.length === 1 ? "session" : "sessions"}`}
-        actions={<Btn
-          label="Revoke all other sessions" kind="danger" icon="logout" id="sec-ses-all"
+      <div className="row" style={{ justifyContent: "flex-end", marginBottom: 12 }}>
+        {ended ? <Btn label={showEnded ? "Hide ended sessions" : `Show ended (${ended})`} small kind="ghost" id="sec-ses-show" onClick={() => qs.set({ show: showEnded ? null : "all" })} /> : null}
+        <Btn
+          label="Revoke all other sessions" kind="danger" small icon="logout" id="sec-ses-all"
           guard={!perm.allowed ? perm : !others.length ? lockd("No other active sessions.") : null}
           onClick={() => ui.dialog({
             title: `Revoke ${others.length} sessions?`, kicker: "Sessions", sub: "Everyone except you is signed out and must sign in again.", body: null,
             actions: [{ label: "Cancel" }, { label: `Revoke ${others.length}`, kind: "danger", id: "sec-ses-all-ok", onClick: (close) => void (async () => { let n = 0; for (const x of others) if ((await ops.revokeSession(x.id)).ok) n++; close(); ui.toast(`${n} sessions revoked.`, "ok"); })() }],
           })}
-        />}
-      >
-        <Segmented name="sec-ses-show" label="Sessions shown" value={show} onChange={setShow} items={[{ id: "active", label: `Active (${list.filter((x) => !x.revoked).length})` }, { id: "all", label: `All (${list.length})` }]} />
-      </FilterBar>
-      <Panel flush>
-      <div className="table-scroll" data-keep-scroll="sec-sessions">
-        <table className="table table-compact sec-table">
-          <thead><tr>{["Person", "Method", "Device", "IP", "Started (IST)", "Last seen", "State", ""].map((x, i) => <th key={i} scope="col">{x}</th>)}</tr></thead>
-          <tbody>
-            {rows.map((x) => {
-              const isCur = x.id === currentId;
-              const expired = !x.revoked && Date.now() - x.started > maxAge;
-              const own = x.person === viewerId;
-              const g = x.revoked ? lockd("Already ended.") : !perm.allowed && !own ? perm : null;
-              return (
-                <tr key={x.id} className={`${isCur ? "is-selected" : ""}${x.revoked ? " sec-ended" : ""}`}>
-                  <td><Who id={x.person} /></td><td className="mono">{x.method}</td><td>{x.device}</td><td className="mono">{x.ip}</td>
-                  <td className="mono nowrap">{`${fmt.istDate(x.started)} ${fmt.ist(x.started)}`}</td>
-                  <td className="nowrap">{fmt.ago(x.lastSeen, Date.now())}</td>
-                  <td>{x.revoked ? <Status tone="neutral" icon="x">Ended</Status> : expired ? <Status tone="wait" icon="clock">Past lifetime</Status> : isCur ? <Status tone="accent" icon="check">This session</Status> : <Status tone="done" icon="check">Active</Status>}</td>
-                  <td><Btn label={isCur ? "Revoke (signs you out)" : "Revoke"} small kind="ghost" icon="logout" id={`sec-ses-rv-${x.id}`} guard={g} onClick={() => revoke(x)} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        />
       </div>
-      </Panel>
+      <DataTable
+        id="sec-sessions-table"
+        caption="Sessions"
+        rows={rows}
+        rowKey={(x) => x.id}
+        pageSize={10}
+        pager
+        sort={{ key: "started", dir: -1 }}
+        empty={{ title: "Nothing matches", text: "No sessions fit the current filters.", action: showEnded ? <Btn label="Clear filters" small id="sec-ses-clear" onClick={() => qs.clear()} /> : undefined }}
+        columns={[
+          { key: "person", label: "Person", sort: (x) => name(x.person), render: (x) => <Who id={x.person} /> },
+          { key: "device", label: "Device", sort: true, render: (x) => <span>{x.device}{x.id === currentId ? <span className="chip info" style={{ marginLeft: 6 }}>This session</span> : null}{x.revoked ? <span className="chip idle" style={{ marginLeft: 6 }}>Ended</span> : null}</span> },
+          { key: "ip", label: "IP", sort: true, render: (x) => <span className="mono">{x.ip}</span> },
+          { key: "started", label: "Started", sort: (x) => x.started, render: (x) => <span className="mono dim" title={fmt.iso(x.started)}>{fmt.ago(x.started, Date.now())}</span> },
+          // the API gives enrolment per person, not whether this session passed a second factor
+          { key: "mfa", label: "MFA", sort: (x) => (enrolled(x.person) ? 1 : 0), render: (x) => { const e = enrolled(x.person); return e === null ? <span className="dim" title="Not available">–</span> : <span className={`chip ${e ? "ok" : "warn"}`}>{e ? "Yes" : "No"}</span>; } },
+          { key: "x", label: "", align: "end", render: (x) => <Btn label="Sign out" small kind="danger" id={`sec-ses-rv-${x.id}`} guard={x.revoked ? lockd("Already ended.") : !perm.allowed && x.person !== viewerId ? perm : null} onClick={() => revoke(x)} /> },
+        ]}
+      />
     </div>
   );
 }
@@ -448,38 +445,40 @@ function SessionsTab({ perm, sessions, sec, currentId, viewerId }: { perm: Decis
 /* ---------- history tab ---------- */
 
 function HistoryTab({ signins }: { signins: SignIn[] }) {
-  const [hist, setHist] = useState("all");
-  const [method, setMethod] = useState("all");
-  const [limit, setLimit] = useState(40);
+  const qs = useQueryState(QS);
+  const hist = qs.values.hist || "all";
+  const method = qs.values.method || "all";
   const all = [...signins].sort((a, b) => b.at - a.at);
   const rows = all.filter((x) => (hist === "all" || x.outcome === hist) && (method === "all" || x.method === method));
   const fails24 = all.filter((x) => x.outcome === "failure" && Date.now() - x.at < 86400000).length;
   const methods = [...new Set(all.map((x) => x.method))];
   return (
     <div className="sec-tabbody">
-      <FilterBar label="Sign-in history" count={`${rows.length} sign-ins · ${fails24} ${fails24 === 1 ? "failure" : "failures"} in the last 24 hours`}>
-        <Segmented name="sec-hist" label="Outcome" value={hist} onChange={(v) => { setHist(v); setLimit(40); }} items={[{ id: "all", label: "All" }, { id: "success", label: "Succeeded" }, { id: "failure", label: "Failed" }]} />
-        <Field label="Method" htmlFor="sec-hist-method"><Select id="sec-hist-method" value={method} onChange={setMethod} options={[{ value: "all", label: "Any method" }, ...methods.map((m) => ({ value: m, label: m }))]} /></Field>
-      </FilterBar>
-      <Panel flush>
-      <div className="table-scroll" data-keep-scroll="sec-hist">
-        <table className="table table-compact sec-table">
-          <thead><tr>{["When (IST)", "Who", "Method", "Outcome", "Detail", "IP", "Device"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
-          <tbody>
-            {rows.slice(0, limit).map((x, i) => (
-              <tr key={`${x.at}-${i}`} className={x.outcome === "failure" ? "sec-fail" : ""}>
-                <td className="mono nowrap">{fmt.iso(x.at)}</td>
-                <td>{x.person ? <Who id={x.person} /> : <span className="mono">{x.email}</span>}</td>
-                <td className="mono">{x.method}</td>
-                <td>{x.outcome === "success" ? <Status tone="done" icon="check">Succeeded</Status> : <Status tone="fail" icon="alert">Failed</Status>}</td>
-                <td className="small">{x.reason || ""}</td><td className="mono">{x.ip}</td><td className="small">{x.device}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="row spread" style={{ marginBottom: 12 }}>
+        <span className="mono dim" role="status">{`${rows.length} sign-ins · ${fails24} ${fails24 === 1 ? "failure" : "failures"} in the last 24 hours`}</span>
+        <span className="row">
+          <Segmented name="sec-hist" label="Outcome" value={hist} onChange={(v) => qs.set({ hist: v === "all" ? null : v })} items={[{ id: "all", label: "All" }, { id: "success", label: "Succeeded" }, { id: "failure", label: "Failed" }]} />
+          <Select id="sec-hist-method" aria-label="Method" value={method} onChange={(v) => qs.set({ method: v === "all" ? null : v })} options={[{ value: "all", label: "Method: all" }, ...methods.map((m) => ({ value: m, label: m }))]} />
+        </span>
       </div>
-      </Panel>
-      {rows.length > limit ? <div className="more"><Btn label="Show more" small id="sec-hist-more" onClick={() => setLimit(limit + 40)} /></div> : null}
+      <DataTable
+        id="sec-hist-table"
+        caption="Sign-in history"
+        rows={rows}
+        rowKey={(x) => `${x.at}-${x.email}-${x.method}-${x.ip}`}
+        pageSize={15}
+        pager
+        empty={{ title: "Nothing matches", text: "No sign-ins fit the current filters.", action: <Btn label="Clear filters" small onClick={() => qs.clear(["tab"])} /> }}
+        columns={[
+          { key: "at", label: "When", sort: (x) => x.at, render: (x) => <span className="mono dim">{fmt.iso(x.at)}</span> },
+          { key: "who", label: "Who", render: (x) => (x.person ? <Who id={x.person} /> : <span className="mono">{x.email}</span>) },
+          { key: "method", label: "Method", sort: true, render: (x) => <span className="mono">{x.method}</span> },
+          { key: "outcome", label: "Outcome", sort: true, render: (x) => <span className={`chip ${x.outcome === "success" ? "ok" : "bad"}`}>{x.outcome === "success" ? "Succeeded" : "Failed"}</span> },
+          { key: "reason", label: "Detail", hideSmall: true, render: (x) => <span className="small">{x.reason || ""}</span> },
+          { key: "ip", label: "IP", hideSmall: true, render: (x) => <span className="mono">{x.ip}</span> },
+          { key: "device", label: "Device", hideSmall: true, render: (x) => <span className="small">{x.device}</span> },
+        ]}
+      />
     </div>
   );
 }

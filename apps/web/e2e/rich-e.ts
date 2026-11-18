@@ -182,6 +182,25 @@ export function richGovern(): Record<string, Handler> {
       jobs: { counts: { queued: 3, running: 4, done: 2210, dead: 0 }, stuck: [], runningLongMinutes: 45, dead: [], deadWindowHours: 24 },
       runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
     });
+  // ---- gov2 fixtures (Security, Audit, System health): stuck jobs and a second dead letter so the prototype's lists render ----
+  ov["system/health"] = (r) => {
+    return fulfillJson(r, {
+      at: new Date(NOW).toISOString(),
+      services: [["api", "API", 42], ["worker", "Worker", null], ["db", "Database", 6], ["runner", "Runner pool", null], ["edge", "MCP edge", 88], ["stream", "Live stream", 12]].map(([id, name, ms], i) => ({ id, name, status: i === 4 ? "degraded" : "ok", detail: i === 4 ? "p95 4.2 s on discovery" : "healthy", latencyMs: ms, heartbeatAgeSeconds: id === "worker" ? 6 : null })),
+      backup: { status: "ok", at: new Date(NOW - 5 * HOUR).toISOString(), ageHours: 5, set: "nightly-2026-01-15", detail: "Encrypted, verified" },
+      drill: { status: "ok", at: new Date(NOW - 3 * DAY).toISOString(), ageHours: 72, set: "nightly-2026-01-12", seconds: 840, failedChecks: 0, detail: "Restored and checked" },
+      outbox: { counts: { pending: 2, sending: 0, delivered: 1840, dead: 2 }, oldestPendingSeconds: 40, dead: [
+        { id: "ob-9", destination: "webhook data-platform", scope: "project", attempts: 5, maxAttempts: 5, lastError: "HTTP 503", createdAt: new Date(NOW - 6 * HOUR).toISOString(), failedAt: new Date(NOW - 2 * HOUR).toISOString() },
+        { id: "ob-12", destination: "notify.slack", scope: "factory", attempts: 5, maxAttempts: 5, lastError: "channel_not_found", createdAt: new Date(NOW - 4 * HOUR).toISOString(), failedAt: new Date(NOW - 3 * HOUR).toISOString() },
+      ] },
+      jobs: { counts: { queued: 3, running: 4, done: 2210, dead: 0 }, runningLongMinutes: 120, stuck: [
+        { id: "j-1", queue: "flow", kind: "flow.advance", attempts: 2, maxAttempts: 5, owner: "w1", startedAt: new Date(NOW - 3 * HOUR).toISOString(), leaseUntil: new Date(NOW - 2 * HOUR).toISOString(), reason: "lease_expired", lastError: null },
+        { id: "j-2", queue: "run", kind: "run.start", attempts: 1, maxAttempts: 5, owner: "w2", startedAt: new Date(NOW - 7 * HOUR).toISOString(), leaseUntil: null, reason: "running_long", lastError: null },
+      ], dead: [], deadWindowHours: 24 },
+      runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
+    });
+  };
+  // ---- end gov2 fixtures ----
   ov["workload"] = (r) => {
     const rows = PEOPLE.filter((p) => p[6] === "active").slice(0, 10).map((p, i) => ({ person: p[0], name: p[1], team: p[4], waiting: (i * 3) % 5, glass: (i * 2) % 4, approvals: 12 + i * 3, perDay: 1.5 + (i % 4) * 0.7, answered: 4 + i, waitN: 10 + i, medianResponseMin: 25 + i * 11, afterHours: i % 3, n: 14 + i, sole: i % 4 === 0 ? 1 : 0, minutes: 120 + i * 35, away: null, oncall: i === 3, waitingGates: [], recent: [] }));
     return fulfillJson(r, {
