@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 import { world } from "./flow-helpers.js";
 import { briefMarkdown, documentFromResult } from "../src/areas/workorders/station-docs.js";
+import { applyStationResult } from "../src/areas/workorders/station.js";
+import { latestDocuments } from "../src/areas/workorders/documents.js";
 
 describe("document rendering", () => {
   it("renders the agent's own fields and Gantry's observed facts, and says it was recorded from the result", () => {
@@ -69,4 +71,59 @@ d("every station leaves a document", () => {
     expect(row!.body).toContain("Deviated: kept the old helper");
     expect(row!.body).toContain("File: src/x.py (+4 −0)");
   });
+
+  it("a research run that wrote no note is recorded from its result, and the automatic G1f gate still reports 'Research note attached' as failed", async () => {
+    const id = await w.atStation("research", "Research without a note");
+    const att = (await w.liveAttempt(id))!;
+    // applyStationResult directly: the shared helper would add a note for research, which is what this case lacks
+    const r = await w.tx((tx) => applyStationResult(tx, att.id, Number(att.fencing), { status: "succeeded", summary: "Found the helper.", output: { findings: ["jobs live in jobs/"] } } as never));
+    expect(r.applied).toBe(true);
+    const docs = await w.q<{ author_kind: string; body: string }>(`select author_kind, body from artefacts where wo_id = $1 and doc = 'research.md'`, [id]);
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({ author_kind: "system" });
+    expect(docs[0]!.body).toContain("jobs live in jobs/");
+    const [dec] = await w.q<{ decision: string; detail: { checks?: Array<{ name: string; ok: boolean }> } }>(`select decision, detail from gate_decisions where wo_id = $1 and rule like 'AUTO-%'`, [id]);
+    expect(dec?.decision).toBe("auto_failed");
+    expect(dec?.detail.checks ?? []).toContainEqual({ name: "Research note attached", ok: false });
+  });
+
+  it("a note the research agent wrote itself still satisfies G1f", async () => {
+    const id = await w.atStation("research", "Research with a note");
+    const att = (await w.liveAttempt(id))!;
+    await w.q(`insert into artefacts (org_id, id, wo_id, attempt_id, kind, name, content_hash, media_type, size_bytes, station, doc, version, author_kind, author_id, body) values ($1,$2,$3,$4,'document','research.md','0000000000000000000000000000000000000000000000000000000000000000','text/markdown',3,'research','research.md',1,'agent','ag-research','# mine')`, [t.orgId, `art-${att.id}-own`, id, att.id]);
+    await w.tx((tx) => applyStationResult(tx, att.id, Number(att.fencing), { status: "succeeded", summary: "ok", output: {} } as never));
+    const [dec] = await w.q<{ decision: string }>(`select decision from gate_decisions where wo_id = $1 and rule like 'AUTO-%'`, [id]);
+    expect(dec?.decision).not.toBe("auto_failed");
+  });
+
+  it("system-recorded result renderings are not handed to later stations as prior documents; brief.md and agent documents are", async () => {
+    const id = await w.atStation("spec", "Handoff");
+    const att = (await w.liveAttempt(id))!;
+    await w.apply(att, { status: "succeeded", summary: "Spec ready.", output: { acceptanceCriteria: ["x"] } });
+    const names = (await latestDocuments(t.db.app, t.orgId, id)).map((x) => x.name);
+    expect(names).toContain("brief.md");
+    expect(names).not.toContain("spec.md");
+  });
+
+  it("build.md lists the commits Gantry observed", async () => {
+    const id = await w.atStation("build", "Build commits");
+    const att = (await w.liveAttempt(id))!;
+    await w.q(`insert into commits (org_id, id, repo_id, sha, wo_id, message) select $1, $2, repo_id, $3, id, 'Add the zero case' from work_orders where id = $4`, [t.orgId, `c-${id}`, "e".repeat(40), id]);
+    await w.apply(att, { status: "succeeded", summary: "Done.", output: {} });
+    const [row] = await w.q<{ body: string }>(`select body from artefacts where wo_id = $1 and doc = 'build.md'`, [id]);
+    expect(row!.body).toContain(`Commit ${"e".repeat(12)}: Add the zero case`);
+  });
+
+  it("every later station that ends without a document of its own leaves one", async () => {
+    const st = (await w.call("p-asha", "GET", "/api/v1/catalog")).body.stations as Array<{ id: string }>;
+    const ids = Object.values(st).map((x) => x.id).filter((x) => ["design", "plan", "verify", "review", "close"].includes(x));
+    expect(ids.length).toBeGreaterThan(0);
+    for (const sid of ids) {
+      const id = await w.atStation(sid, `Fallback ${sid}`);
+      const att = (await w.liveAttempt(id))!;
+      await w.apply(att, { status: "succeeded", summary: `${sid} done.`, output: {} });
+      const rows = await w.q<{ author_kind: string }>(`select author_kind from artefacts where wo_id = $1 and doc = $2`, [id, `${sid}.md`]);
+      expect(rows, sid).toEqual([{ author_kind: "system" }]);
+    }
+  }, 120_000);
 });

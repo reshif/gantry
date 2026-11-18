@@ -37,7 +37,7 @@ function render(v: unknown, depth = 0): string[] {
 }
 
 /** The markdown for a station result that came with no document of its own. */
-export function documentFromResult(stationName: string, result: StationResult): string {
+export function documentFromResult(stationName: string, result: StationResult, commits: Array<{ sha: string; message: string }> = []): string {
   const out = isObj(result.output) ? result.output : {};
   const lines: string[] = [`# ${stationName}`, "", "_Recorded by Gantry from this run's structured result: the agent wrote no document of its own. The fields below are the agent's, unchanged._", ""];
   if (result.summary) lines.push("## Summary", "", result.summary, "");
@@ -47,12 +47,13 @@ export function documentFromResult(stationName: string, result: StationResult): 
     if (body.length) lines.push(`## ${label(k)}`, "", ...body, "");
   }
   const o = result.observed;
-  if (o) {
+  if (o || commits.length) {
     const facts: string[] = [];
-    if (o.headSha) facts.push(`- Head commit: ${o.headSha}`);
-    for (const f of o.files ?? []) facts.push(`- File: ${f.path} (+${f.additions ?? 0} −${f.deletions ?? 0})`);
-    for (const c of o.checks ?? []) facts.push(`- Check ${c.name}: ${c.ok ? "passed" : "failed"}${c.note ? ` (${oneLine(c.note)})` : ""}`);
-    if (o.tests) facts.push(`- Tests: ${o.tests.passed} passed, ${o.tests.failed} failed, ${o.tests.added} added`);
+    for (const c of commits) facts.push(`- Commit ${c.sha.slice(0, 12)}: ${oneLine(c.message).slice(0, 200)}`);
+    if (o?.headSha) facts.push(`- Head commit: ${o.headSha}`);
+    for (const f of o?.files ?? []) facts.push(`- File: ${f.path} (+${f.additions ?? 0} −${f.deletions ?? 0})`);
+    for (const c of o?.checks ?? []) facts.push(`- Check ${c.name}: ${c.ok ? "passed" : "failed"}${c.note ? ` (${oneLine(c.note)})` : ""}`);
+    if (o?.tests) facts.push(`- Tests: ${o.tests.passed} passed, ${o.tests.failed} failed, ${o.tests.added} added`);
     if (facts.length) lines.push("## Observed by Gantry", "", ...facts, "");
   }
   return lines.join("\n").trimEnd().slice(0, MAX_DOC) + "\n";
@@ -63,7 +64,8 @@ export async function ensureStationDocument(tx: Tx, d: { orgId: string; woId: st
   const name = `${d.station}.md`;
   const have = await tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and attempt_id = $3 and doc = $4`, [d.orgId, d.woId, d.attemptId, name]);
   if (have.rowCount) return null;
-  const body = documentFromResult(d.stationName, d.result);
+  const commits = d.station === "build" ? (await tx.query<{ sha: string; message: string }>(`select sha, message from commits where org_id = $1 and wo_id = $2 order by committed_at nulls last, created_at`, [d.orgId, d.woId])).rows : [];
+  const body = documentFromResult(d.stationName, d.result, commits);
   const id = `art-${d.attemptId}-${d.station}-result`;
   await recordDocument(tx, { orgId: d.orgId, id, woId: d.woId, attemptId: d.attemptId, station: d.station, name, hash: await hash(body), mediaType: "text/markdown; charset=utf-8", size: body.length, body, author: null, authorKind: "system" });
   return id;
