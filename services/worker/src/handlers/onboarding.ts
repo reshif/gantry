@@ -366,7 +366,6 @@ export async function onboardingVerify(j: Job, ctx: HandlerCtx): Promise<unknown
   const { deps } = ctx;
   const l = await load(deps, j.orgId, p.value.repoId);
   if (!l) return { skipped: "The repo is gone or has no GitHub name." };
-  if (l.doc.exception) return { skipped: "Ready by exception." };
   if (p.value.runId && l.doc.runId && l.doc.runId !== p.value.runId) return { skipped: "A newer assessment replaced this run." };
   if (p.value.trigger === "schedule" && l.doc.stage !== "ready") return { skipped: "Not Ready; nothing to re-check." };
   if (p.value.trigger === "schedule" && l.doc.busy) return { skipped: "Something else is running on this repo." };
@@ -434,7 +433,7 @@ export async function onboardingSync(j: Job, ctx: HandlerCtx): Promise<unknown> 
     await withTx(deps.pool, (tx) => enqueue(tx, { orgId: j.orgId, ...job("onboarding.verify", { repoId: l.repo.id, runId: d.runId ?? null, trigger: "merge" }, { dedupeKey: `onboarding.verify:${l.repo.id}:retry:${bucket(5 * 60_000)}` }) }));
     return { requeued: "verify" };
   }
-  if (d.stage === "ready" && !d.exception && !d.busy) {
+  if (d.stage === "ready" && !d.busy) {
     await withTx(deps.pool, (tx) => enqueue(tx, { orgId: j.orgId, ...job("onboarding.verify", { repoId: l.repo.id, runId: null, trigger: "schedule" }, { dedupeKey: `onboarding.verify:${l.repo.id}:schedule:${bucket(deps.cfg.readinessEveryMs ?? 6 * 3600_000)}` }) }));
     return { requeued: "recheck" };
   }

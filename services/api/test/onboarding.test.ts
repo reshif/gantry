@@ -498,11 +498,13 @@ d("repo onboarding", () => {
       expect((await q(`select count(*)::int as n from stops where org_id = $1 and repo_id = $2`, [t.orgId, r.id]))[0].n).toBe(0);
       expect((await verify(r, lostChecks(), "manual")).outcome).toBe("lost");
       expect((await q(`select cause from stops where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]))[0].cause).toBe("readiness");
-      // An exception accepts the gaps: it lifts the readiness halt too, and later checks skip the repo.
+      // An exception accepts the gaps: it lifts the readiness halt too, and later checks still run and report without halting or unsetting it (S-6).
       expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception`, { reason: "Owner accepts the missing ruleset" })).status).toBe(200);
       expect((await q(`select lifted_by from stops where org_id = $1 and repo_id = $2`, [t.orgId, r.id]))[0].lifted_by).toBe(lena);
-      const skip = await verify(r, lostChecks(), "schedule");
-      expect(skip.applied).toBe(false);
+      const rechecked = await verify(r, lostChecks(), "schedule");
+      expect(rechecked).toMatchObject({ applied: true, outcome: "excepted" });
+      expect((await q(`select count(*)::int as n from stops where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]))[0].n).toBe(0);
+      expect(await doc(r.id)).toMatchObject({ stage: "ready", exception: { reason: "Owner accepts the missing ruleset" }, verification: { ok: false, trigger: "schedule" } });
     });
 
     it("a repo that was already halted by a person keeps their halt: readiness loss does not add a second one", async () => {
@@ -557,6 +559,35 @@ d("repo onboarding", () => {
         const m = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
         expect(m.status, JSON.stringify(m.body)).toBe(200);
       }
+    });
+  });
+
+  describe("ready by exception", () => {
+    it("S-6: a repo ready by exception can be re-assessed and re-verified (reported, exception kept) and the exception can be withdrawn, audited", async () => {
+      const r = await connect();
+      await assessed(r);
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception`, { reason: "Owner accepts the missing ruleset" })).status).toBe(200);
+      // verification is no longer refused
+      const v = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/verify`);
+      expect(v.status, JSON.stringify(v.body)).toBe(200);
+      expect((await verify(r, lostChecks(), "manual")).outcome).toBe("excepted");
+      expect(await doc(r.id)).toMatchObject({ stage: "ready", exception: { reason: "Owner accepts the missing ruleset" }, busy: null });
+      // so is a new assessment: it reports and the repo stays ready
+      const a = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`);
+      expect(a.status, JSON.stringify(a.body)).toBe(200);
+      const run = (await doc(r.id)).runId as string;
+      expect((await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: run, now: new Date(), result: { kind: "failed", msg: "GitHub timed out" } }))).applied).toBe(true);
+      expect(await doc(r.id)).toMatchObject({ stage: "ready", exception: { reason: "Owner accepts the missing ruleset" }, busy: null });
+      // a person with the right withdraws it, with a reason; engineers cannot
+      expect((await call(rui, "POST", `/api/v1/repos/${r.id}/onboarding/exception/withdraw`, { reason: "No longer accepted by the owner" })).status).toBe(403);
+      const w = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception/withdraw`, { reason: "No longer accepted by the owner" });
+      expect(w.status, JSON.stringify(w.body)).toBe(200);
+      expect(await doc(r.id)).toMatchObject({ stage: "person", exception: null, blocker: expect.stringMatching(/withdrawn/) });
+      expect((await repoDoc(r.id)).onboarding_stage).toBe("person");
+      expect((await events("onboarding.exception.withdrawn")).find((e) => e.subject?.id === r.id)).toMatchObject({ actor: lena, outcome: "ok", after: { reason: "No longer accepted by the owner" } });
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception/withdraw`, { reason: "No longer accepted by the owner" })).status).toBe(409);
+      // and it is re-assessed like any other
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`)).status).toBe(200);
     });
   });
 

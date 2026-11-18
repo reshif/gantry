@@ -338,12 +338,16 @@ d("onboarding jobs (spec 11.3)", () => {
       expect((await w.q(`select cause from stops where repo_id = $1`, [r.id]))[0].cause).toBe("readiness");
     });
 
-    it("a repo ready by exception is never re-checked", async () => {
+    it("S-6: a repo ready by exception is still re-checked on schedule and the result is reported, without halting it or unsetting the exception", async () => {
       const r = await repo({ stage: "ready", busy: null, exception: { by: "p-lena", at: Date.now(), reason: "accepted" } });
       w.broker.inspectFacts = goodFacts({ protection: null });
       await verify(r.id, "schedule");
-      expect(w.broker.calls.some((c) => c.op === "inspect")).toBe(false);
-      expect((await doc(r.id)).stage).toBe("ready");
+      await verify(r.id, "schedule");
+      expect(w.broker.calls.some((c) => c.op === "inspect")).toBe(true);
+      const x = await doc(r.id);
+      expect(x.stage).toBe("ready");
+      expect(x.d).toMatchObject({ exception: { reason: "accepted" }, verification: { ok: false, trigger: "schedule" } });
+      expect((await w.q(`select count(*)::int as n from stops where repo_id = $1`, [r.id]))[0].n).toBe(0);
     });
 
     it("the required guidelines count: a missing test command stops Ready even when every live check passes", async () => {
