@@ -75,6 +75,15 @@ describe("shell fidelity", () => {
     expect(n.getByText("Audit ledger").closest("a")?.getAttribute("href")).toBe("#audit");
   });
 
+  it("keeps the developer-only Design system page out of the side nav (no Reference group), while #design-system still opens it", async () => {
+    api();
+    window.location.hash = "#/home";
+    render(<App />);
+    const n = await nav();
+    expect(n.queryByText("Design system")).toBeNull();
+    expect(n.queryByText(/^Reference$/i)).toBeNull();
+  });
+
   it("shows the Sheet not found page for an unknown route, with Go home", async () => {
     api();
     window.location.hash = "#/nonexistent";
