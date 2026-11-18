@@ -506,7 +506,7 @@ textarea.input{height:auto;min-height:84px;padding:8px 10px}
 .chip-ok::before,.chip-done::before,.chip-accent::before,.chip-run::before,.chip-info::before{border-radius:50%}
 .avatar.av-sm{width:22px;height:22px;font-size:10px}
 /* command palette (prototype .pal) as the app's dialog */
-.dlg.dlg-palette{top:12vh;transform:translateX(-50%);width:min(640px,calc(100vw - 24px));max-height:70vh;z-index:110}
+.dlg.dlg-palette{top:12vh;margin-top:0;transform:translateX(-50%);width:min(640px,calc(100vw - 24px));max-height:70vh;z-index:110}
 .dlg-palette>header,.dlg-palette .dlg-form>header{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);padding:0;border:0}
 .dlg-palette .dlg-form>footer{display:none}
 .dlg-palette .dlg-form>.body{padding:0}

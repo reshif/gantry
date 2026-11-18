@@ -1,11 +1,11 @@
 /** Command palette (legacy openPalette): views, projects, work orders, repos, agents and actions; pins and recents. */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useAgents, useMe, useRepos, useWorkOrders } from "../api/queries";
+import { useAgents, useMe, useRepos, useWorkOrdersAcross } from "../api/queries";
 import { useCanMany } from "../api/can";
 import { ops } from "../api/ops";
-import { canSeeRoute, ROUTES } from "../lib/routes";
+import { canSeeRoute, isProjectRoute, ROUTES } from "../lib/routes";
 import { hasCommand, runCommand } from "../lib/commands";
-import { navigate, navigateProject, openRecordRoute } from "../lib/router";
+import { navigate, navigateProject, openRecordRoute, useHash } from "../lib/router";
 import { applyTheme, setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { Dialog } from "../ui/Overlay";
 import { Icon } from "../ui/Icon";
@@ -34,7 +34,9 @@ export function usePaletteItems(projectId: string | null): Item[] {
   const prefs = usePrefs();
   const ui = useUI();
   const ctx = useRouteCtx();
-  const wos = useWorkOrders(projectId, { limit: 50 }).data;
+  const loc = useHash();
+  // the prototype lists work orders of every project, not only the scoped one
+  const wos = useWorkOrdersAcross((me?.projects ?? []).map((p) => p.id), { limit: 50 });
   const repos = useRepos(projectId).data;
   const canAgents = canSeeRoute("agents", me, ctx);
   const agents = useAgents().data;
@@ -52,10 +54,9 @@ export function usePaletteItems(projectId: string | null): Item[] {
     const stop = makeStopActions(ui, me);
     const guard = (i: number): Decision | undefined => (checks[i]?.pending ? undefined : checks[i]);
     const allowedNow = (i: number): boolean => !checks[i]?.pending && !!checks[i]?.allowed;
-    for (const r of ROUTES) if (r.nav !== false && canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, group: "Go to", icon: r.icon, label: r.title, hint: r.group, run: () => r.project && cp ? navigateProject(cp.id, r.id) : navigate(r.id) });
-    for (const p of me.projects) items.push({ key: `project:${p.id}`, group: "Projects", icon: "folder", label: p.name, hint: p.key, run: () => { setProject(p.id); navigateProject(p.id); ui.toast(`Project: ${p.name}`); } });
-    const woList = Array.isArray(wos) ? wos : (wos?.items ?? []);
-    for (const w of woList) items.push({ key: `record:${w.id}`, group: "Work orders", icon: "record", label: `${w.id} · ${w.title}`, hint: w.state, run: () => { setProject(w.project); openRecordRoute(w.id); } });
+    for (const r of ROUTES) if (r.nav !== false && canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, group: "Go to", icon: r.icon, label: r.title, hint: r.group === "Project" ? "Project line" : r.group, run: () => r.project && cp ? navigateProject(cp.id, r.id) : navigate(r.id) });
+    for (const p of me.projects) items.push({ key: `project:${p.id}`, group: "Projects", icon: "folder", label: p.name, hint: p.key, run: () => { setProject(p.id); if (isProjectRoute(loc.id)) navigateProject(p.id, loc.id); ui.toast(`Project: ${p.name}`); } });
+    for (const w of wos) items.push({ key: `record:${w.id}`, group: "Work orders", icon: "record", label: `${w.id} · ${w.title}`, hint: w.state, run: () => { setProject(w.project); openRecordRoute(w.id); } });
     if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, group: "Agents", icon: "agent", label: a.name, hint: a.station || "agent", run: () => { navigate("agents", a.id); } });
     for (const r of repos ?? []) items.push({ key: `repo:${r.id}`, group: "Repos", icon: "branch", label: r.name, hint: r.lang, run: () => { if (cp) setProject(cp.id); navigate("onboarding", r.id); } });
     if (hasCommand("newWorkOrder")) items.push({ group: "Actions", icon: "plus", label: "Submit a work order", hint: "", guard: guard(3), run: () => void runCommand("newWorkOrder") });
@@ -69,7 +70,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
     items.push({ group: "Actions", icon: "logout", label: "Sign out", hint: "", run: () => void ops.signOut() });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me, prefs.theme, wos, repos, agents, canAgents, cp, factoryKilled, ctx.canAudit, checks.map((c) => c.pending + ":" + c.allowed).join("|")]);
+  }, [me, prefs.theme, loc.id, wos, repos, agents, canAgents, cp, factoryKilled, ctx.canAudit, checks.map((c) => c.pending + ":" + c.allowed).join("|")]);
 }
 
 export function PaletteDialog({ projectId, onClose }: { projectId: string | null; onClose: () => void }) {

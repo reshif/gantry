@@ -282,14 +282,14 @@ export function HaltDialog({ scope, id, projectId, onClose }: { scope: "project"
   return (
     <Dialog
       title={scope === "project" ? "Halt the line" : `Halt ${name}`}
-      kicker={`Andon · ${scope === "project" ? name : "repo"}`}
+      kicker={scope === "project" ? undefined : "Andon · repo"}
       sub={scope === "project" ? "Running agents finish their current step; nothing new starts until the line is resumed." : `A soft, resumable pause. Agents on this repo stop at their current step until someone resumes it.`}
       onClose={onClose}
       body={
         <div className="form-grid">
           <LockNote decision={d.pending ? null : d} what="The andon cord" />
-          <Field label="Reason" htmlFor="rsn-text">
-            <textarea id="rsn-text" className="input" rows={3} placeholder="What did you see?" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Field label={<>Reason<span className="muted"> (required)</span></>} htmlFor="rsn-text" hint="Recorded in the audit ledger.">
+            <input id="rsn-text" className="input" autoComplete="off" value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
           <div className="form-err" role="alert">
             {err}

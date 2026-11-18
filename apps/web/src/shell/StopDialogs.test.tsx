@@ -183,6 +183,15 @@ describe("Restore dialog", () => {
 });
 
 describe("Halt dialog", () => {
+  it("is the prototype dialog: no Andon eyebrow, a Reason marked (required) with the audit hint", async () => {
+    await start({}, { me: { projects: [PAYMENTS] } });
+    act(() => actions?.halt("payments"));
+    await screen.findByText("Halt the line");
+    expect(document.body.textContent).not.toMatch(/Andon ·/);
+    expect(screen.getByText("(required)")).toBeTruthy();
+    expect(screen.getByText("Recorded in the audit ledger.")).toBeTruthy();
+  });
+
   it("needs 20 characters on a regulated project and sends a halt", async () => {
     const regulated = { ...PAYMENTS, regulated: true };
     const calls = await start({ "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform halted." } }) }, { me: { projects: [regulated] } });

@@ -24,7 +24,8 @@ export function ProjectSwitcher({ me, project, current }: { me: Me; project: Pro
     const ordered = [...pinned, ...me.projects.filter((p) => !prefs.pinnedProjects.includes(p.id))];
     ui.menu(ref.current, null, [
       { head: "Project line" },
-      { label: "All projects", icon: "grid", sel: !project, onClick: () => { navigate("projects"); ui.toast("Showing all projects"); } },
+      // like the prototype: the scope changes and the person stays on the sheet they are reading (a project sheet has no "all" form, so it goes to the list)
+      { label: "All projects", icon: "grid", sel: !project, onClick: () => { if (isProjectRoute(current)) navigate("projects"); ui.toast("Showing all projects"); } },
       { sep: true },
       ...ordered.map((p) => ({
         label: `${p.name}  ·  ${p.key}`,
@@ -33,7 +34,7 @@ export function ProjectSwitcher({ me, project, current }: { me: Me; project: Pro
         ...(p.killed ? { hint: "killed" } : p.halted ? { hint: "halted" } : {}),
         onClick: () => {
           setProject(p.id);
-          navigateProject(p.id, isProjectRoute(current) ? keepRoute(current) : "floor");
+          if (isProjectRoute(current)) navigateProject(p.id, keepRoute(current));
           ui.toast(`Project: ${p.name}`);
         },
       })),

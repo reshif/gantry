@@ -131,4 +131,75 @@ describe("shell fidelity", () => {
     fireEvent.change(input, { target: { value: "console" } });
     await waitFor(() => expect(document.querySelector("#palette-list .pal-hint")?.textContent).toBe("Go to · Overview"));
   });
+
+  it("the Line control menu holds only Halt line and Emergency stop", async () => {
+    api();
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Line control/ }));
+    await screen.findByRole("menuitem", { name: /Halt line/ });
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Halt line", "Emergency stop"]);
+  });
+
+  it("the account menu has My account, a View as group with the three sheets (the session's own marked), and Sign out", async () => {
+    api();
+    render(<App />);
+    fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
+    expect(await screen.findByText("View as", { selector: ".micro" })).toBeTruthy();
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((m) => m.textContent)).toEqual(["My account", "Factory admin", "Approver", "Read-only viewer", "Sign out"]);
+    expect(items[1]?.getAttribute("aria-current")).toBe("true");
+    // another role is another sign-in: it is never faked on the client
+    fireEvent.click(items[2] as HTMLElement);
+    expect(await screen.findByText(/holds one role/)).toBeTruthy();
+    fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
+    const items2 = screen.getAllByRole("menuitem");
+    fireEvent.click(items2[0] as HTMLElement);
+    await waitFor(() => expect(window.location.hash).toBe("#person/p-x"));
+  });
+
+  it("choosing a project in the switcher keeps the person on the sheet and only changes the scope", async () => {
+    api();
+    window.location.hash = "#/home";
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Switch project/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Payments Platform/ }));
+    expect(await screen.findByText("Project: Payments Platform")).toBeTruthy();
+    expect(window.location.hash).toBe("#/home");
+  });
+
+  it("the palette lists work orders of every project and names the Project group 'Project line'", async () => {
+    mockApi({
+      "/api/v1/me": () => ({ body: meBody() }),
+      "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }),
+      "/api/v1/projects/risk/work-orders": () => ({ body: [{ id: "WO-2414", title: "Unsubscribe link in digest emails", state: "running", project: "risk" }] }),
+      "/api/v1/projects/payments/work-orders": () => ({ body: [] }),
+    });
+    render(<App />);
+    await nav();
+    act(() => { fireEvent.keyDown(document, { key: "k", ctrlKey: true }); });
+    const input = await screen.findByPlaceholderText("Jump to a screen, work order, agent, repo or action…");
+    fireEvent.change(input, { target: { value: "sub" } });
+    await waitFor(() => expect(document.querySelector("#palette-list .pal-label")?.textContent).toBe("WO-2414 · Unsubscribe link in digest emails"));
+    fireEvent.change(input, { target: { value: "floor" } });
+    await waitFor(() => expect(document.querySelector("#palette-list .pal-hint")?.textContent).toBe("Go to · Project line"));
+    // nothing is pinned to the top unless the person pins it
+    fireEvent.change(input, { target: { value: "" } });
+    await waitFor(() => expect(document.querySelector("#palette-list .pal-label")?.textContent).toBe("Home"));
+  });
+
+  it("the Sheet not found page carries drawing GNT-GEN-00 and lights no nav item", async () => {
+    api();
+    window.location.hash = "#/nonexistent";
+    render(<App />);
+    await screen.findByText("Sheet not found");
+    expect(screen.getByTitle("Drawing number").textContent).toBe("GNT-GEN-00");
+    expect(document.querySelector("#side [aria-current=page]")).toBeNull();
+  });
+
+  it("the brand line shows the plant, or READ-ONLY SHEET for a session that can change nothing", async () => {
+    mockApi({ "/api/v1/me": () => ({ body: { ...meBody(), org: { id: "acme", name: "Acme Payments", plant: "Plant 1 · Bengaluru", tz: "IST" } } }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
+    render(<App />);
+    const brand = (await nav()).getByText("Gantry").closest("a") as HTMLElement;
+    expect(brand.textContent).toContain("PLANT 1 · BENGALURU");
+  });
 });

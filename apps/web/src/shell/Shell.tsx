@@ -128,7 +128,7 @@ export function Shell({ me }: { me: Me }) {
     <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a>
     <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
       <AppErrorBoundary level="chrome">
-        <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} open={navOpen} onNavigate={() => setNavOpen(false)} />
+        <Nav me={me} current={unknown ? "" : denied ? denied.id : routeId} project={scoped ? project : null} open={navOpen} onNavigate={() => setNavOpen(false)} />
       </AppErrorBoundary>
       {navOpen ? <div className="scrim nav" id="nav-scrim" onClick={() => setNavOpen(false)} /> : null}
       <div className="main">
@@ -149,7 +149,7 @@ export function Shell({ me }: { me: Me }) {
             </div>
           ) : unknown ? (
             <div className="view" id="route-not-found">
-              <ViewHead sheet="home" title="Sheet not found" sub={`There is no route called "${loc.id}".`} />
+              <ViewHead sheet="notfound" title="Sheet not found" sub={`There is no route called "${loc.id}".`} />
               <Panel>
                 <Empty title="Nothing drawn here" text="Check the address or pick a sheet from the navigation." action={<Btn label="Go home" kind="primary" id="not-found-home" onClick={() => navigate("home")} />} />
               </Panel>

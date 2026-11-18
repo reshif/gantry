@@ -266,7 +266,7 @@ describe("Floor: andon and kill", () => {
     await screen.findByText("Payments Platform");
     fireEvent.click(document.getElementById("floor-line") as HTMLElement);
     fireEvent.click(await screen.findByRole("menuitem", { name: /Halt Payments Platform/ }));
-    fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Duplicate refunds seen" } });
+    fireEvent.change(await screen.findByLabelText(/^Reason/), { target: { value: "Duplicate refunds seen" } });
     fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
     await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/stops")).toHaveLength(1));
     expect(bodyOf(calls, "POST", "/api/v1/stops")[0]?.body).toMatchObject({ scope: "project", id: "payments", mode: "halt", reason: "Duplicate refunds seen" });

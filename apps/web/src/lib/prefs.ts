@@ -45,7 +45,7 @@ export function defaultPrefs(): Prefs {
     boardSwim: "none",
     navCollapsed: {},
     navRail: false,
-    palettePinned: ["floor", "work-orders"],
+    palettePinned: [],
     paletteRecent: [],
     openConversation: null,
     record: null,

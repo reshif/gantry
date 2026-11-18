@@ -65,9 +65,10 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const [title, setTitle] = useState(preset.title ?? "");
   const [desc, setDesc] = useState(preset.description ?? "");
   const [att, setAtt] = useState("");
+  // Class and priority open on the prototype's defaults (Feature, P2) but only what the person actually picks is sent: untouched, the Intake agent classifies and the class sets the priority.
   const [cls, setCls] = useState("");
-  const [prio, setPrio] = useState("auto");
-  const [source, setSource] = useState(preset.source ?? "web");
+  const [prio, setPrio] = useState("");
+  const [source] = useState(preset.source ?? "web");
   const [err, setErr] = useState("");
   // The refusal is shown inline (setErr), so the command toasts nothing itself.
   const send = useCommand(ops.submitWO, { ok: false, toastFail: false });
@@ -87,6 +88,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const block = decision && !decision.allowed && !decision.pending ? { reason: decision.reason, needs: decision.needs, onboarding: false } : (() => { const b = submitBlock(me, project, repos, repo); return b ? { reason: b.reason, needs: "", onboarding: b.onboarding } : null; })();
   const fullProject = project as unknown as Project;
   const classes = classesOf(cat, fullProject);
+  const clsShown = cls || (classes.find((c) => c.id === "feature") ?? classes[0])?.id || "";
   const text = `${title} ${desc}`.trim();
   const preview = text.length >= 6 ? classify(cat, text, cls || null, fullProject) : null;
   const submit = async () => {
@@ -104,7 +106,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
       return;
     }
     const r = await send.run(
-      { project: projectId, repo, title: title.trim(), description: desc.trim(), priority: prio === "auto" ? undefined : prio, requestedCls: cls || undefined, attachments: att.split(",").map((s) => s.trim()).filter(Boolean), source },
+      { project: projectId, repo, title: title.trim(), description: desc.trim(), priority: prio || undefined, requestedCls: cls || undefined, attachments: att.split(",").map((s) => s.trim()).filter(Boolean), source },
       source === "console" ? "console" : "web",
       key.current,
     );
@@ -123,59 +125,44 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   return (
     <Dialog
       title="Submit a work order"
-      kicker="Intake · S0"
-      wide
       onClose={onClose}
-      sub="It starts at S0 Intake. The Intake agent classifies it, proposes a route and opens a conversation to complete the brief."
       body={
         <div className="form-grid">
-          <div className="form-row">
-            <Field label="Project" htmlFor="nwo-project">
-              <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
-            </Field>
-            <div className="nwo-repo">
-              <Field label="Repo" htmlFor="nwo-repo" hint="Only Ready repos accept work orders.">
-                {repos.length ? (
-                  <Select id="nwo-repo" options={repos.map((r) => ({ value: r.id, label: r.name + (ready(r) ? "" : ` (not ready: ${STAGE_NAMES[r.onboarding.stage] ?? r.onboarding.stage})`) }))} value={repo} onChange={setRepoId} />
-                ) : (
-                  <p className="muted small" id="nwo-repo">{`No repos in ${project.name} yet.`}</p>
-                )}
-              </Field>
+          {block ? (
+            <div className="callout callout-warn" role="note">
+              <Icon name="lock" />
+              <span>
+                {`${block.needs ? `${block.needs}. ` : ""}${block.reason} `}
+                {block.onboarding ? (
+                  <a href="#onboarding" className="linkish" id="nwo-onb-link" onClick={() => { setProject(projectId); onClose(); navigate("onboarding"); }}>{`Open onboarding for ${project.name}`}</a>
+                ) : null}
+              </span>
             </div>
-          </div>
-          <div>
-            {block ? (
-              <div className="callout callout-warn" role="note">
-                <Icon name="lock" />
-                <span>
-                  {`${block.needs ? `${block.needs}. ` : ""}${block.reason} `}
-                  {block.onboarding ? (
-                    <a href="#onboarding" className="linkish" id="nwo-onb-link" onClick={() => { setProject(projectId); onClose(); navigate("onboarding"); }}>{`Open onboarding for ${project.name}`}</a>
-                  ) : null}
-                </span>
-              </div>
-            ) : null}
-          </div>
-          <Field label="Title" htmlFor="nwo-title">
-            <input id="nwo-title" className="input" value={title} placeholder="Add idempotency keys to refund endpoint" autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
+          ) : null}
+          <Field label={<>Title<span className="muted"> (required)</span></>} htmlFor="nwo-title" hint="A short, specific request.">
+            <input id="nwo-title" className="input" value={title} autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
           </Field>
-          <Field label="Description" htmlFor="nwo-desc" hint="Acceptance criteria help the Spec agent.">
-            <textarea id="nwo-desc" className="input" rows={4} placeholder="What should change, and how will we know it is done?" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          <Field label={<>What should change and why<span className="muted"> (required)</span></>} htmlFor="nwo-desc">
+            <textarea id="nwo-desc" className="input" rows={4} value={desc} onChange={(e) => setDesc(e.target.value)} />
           </Field>
-          <Field label="Attachment names" htmlFor="nwo-att" hint="Names only; files are not uploaded here.">
-            <input id="nwo-att" className="input" placeholder="trace.log, screenshot.png" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
+          <Field label="Project" htmlFor="nwo-project">
+            <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
           </Field>
-          <div className="form-row">
-            <Field label="Requested class" htmlFor="nwo-cls" hint="The classifier may disagree; overrides are audited.">
-              <Select id="nwo-cls" options={[{ value: "", label: "Let the Intake agent decide" }, ...classes.map((c) => ({ value: c.id, label: c.name }))]} value={cls} onChange={setCls} />
+          {repos.length > 1 ? (
+            // the server needs a repo; the picker only appears when the project has a real choice
+            <Field label="Repo" htmlFor="nwo-repo">
+              <Select id="nwo-repo" options={repos.map((r) => ({ value: r.id, label: r.name + (ready(r) ? "" : ` (not ready: ${STAGE_NAMES[r.onboarding.stage] ?? r.onboarding.stage})`) }))} value={repo} onChange={setRepoId} />
             </Field>
-            <Field label="Priority" htmlFor="nwo-prio">
-              <Select id="nwo-prio" options={[{ value: "auto", label: "From class" }, { value: "P1", label: "P1 · urgent" }, { value: "P2", label: "P2 · normal" }, { value: "P3", label: "P3 · when free" }]} value={prio} onChange={setPrio} />
-            </Field>
-            <Field label="Source" htmlFor="nwo-source">
-              <Select id="nwo-source" options={[{ value: "web", label: "Web" }, { value: "console", label: "Console" }, { value: "slack", label: "Slack message" }, { value: "github", label: "GitHub issue" }]} value={source} onChange={setSource} />
-            </Field>
-          </div>
+          ) : null}
+          <Field label="Class" htmlFor="nwo-cls">
+            <Select id="nwo-cls" options={classes.map((c) => ({ value: c.id, label: c.name }))} value={clsShown} onChange={setCls} />
+          </Field>
+          <Field label="Priority" htmlFor="nwo-prio">
+            <Select id="nwo-prio" options={["P0", "P1", "P2", "P3"].map((v) => ({ value: v, label: v }))} value={prio || "P2"} onChange={setPrio} />
+          </Field>
+          <Field label="Attachments" htmlFor="nwo-att" hint="File names, comma separated.">
+            <input id="nwo-att" className="input" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
+          </Field>
           <div className="nwo-preview" aria-live="polite">
             {preview ? (
               <>

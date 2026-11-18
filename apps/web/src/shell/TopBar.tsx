@@ -11,7 +11,10 @@ import { ProjectSwitcher } from "./ProjectSwitcher";
 import { StatusCluster } from "./StatusCluster";
 import { openNotifications, useUnread } from "./NotificationsDrawer";
 import { navigate } from "../lib/router";
+import { useCan, useCanMany } from "../api/can";
+import { useReadOnly } from "./Nav";
 
+const PERSONAS: Record<string, string> = { admin: "Factory admin", approver: "Approver", viewer: "Read-only viewer" };
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform || "");
 
 export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me: Me; project: Me["projects"][number] | null; current: string; onOpenNav: () => void; onOpenPalette: () => void }) {
@@ -22,7 +25,11 @@ export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me:
   const waiting = (home?.approvals.length ?? 0) + (home?.conversations.length ?? 0);
   const unread = useUnread(waiting);
   const v = me.person;
-  
+  const readOnly = useReadOnly();
+  const people = useCan("people.view");
+  // Which sheet the server gives this session: the same three the prototype lists under "View as".
+  const admin = useCanMany([{ action: "kill.factory" }])[0];
+  const persona = readOnly ? "viewer" : admin?.allowed ? "admin" : "approver";
   const signOut = async (what?: string) => {
     ui.closeAllDialogs();
     ui.drawer.close();
@@ -37,12 +44,25 @@ export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me:
 
   const openUserMenu = () => {
     if (!userRef.current) return;
+    // "View as": the session's real role is marked; another one needs another sign-in (demo stacks list their accounts), never a client-side pretence.
+    const viewAs = (Object.entries(PERSONAS) as Array<[string, string]>).map(([k, label]) => ({
+      label,
+      icon: "user",
+      sel: persona === k,
+      onClick: () => {
+        if (persona === k) return ui.toast(`Viewing as ${label}`);
+        if (me.config.demoAccounts) void signOut(`Signed out. Sign in as ${label} to view as that role.`);
+        else ui.toast("Your session holds one role. Sign in with an account that has this role to view as it.", "warn");
+      },
+    }));
     ui.menu(userRef.current, null, [
       { head: `${v.name} · ${v.email}` },
-      ...(me.config.demoAccounts ? [{ label: "Environment: local stack · demo accounts on", icon: "info" }, { sep: true }] : []),
-      { label: "My account", icon: "user", onClick: () => navigate("account") },
+      // own person page (the prototype's target); a session without the people read right keeps the Account page
+      { label: "My account", icon: "user", onClick: () => (people.allowed ? navigate("person", v.id) : navigate("account")) },
       { sep: true },
-      ...(me.config.demoAccounts ? [{ label: "Switch demo account (demo only)", icon: "swap", onClick: () => void signOut("Signed out. Pick another demo account.") }] : []),
+      { head: "View as" },
+      ...viewAs,
+      { sep: true },
       { label: "Sign out", icon: "logout", onClick: () => void signOut() },
     ]);
   };

@@ -15,6 +15,7 @@ export const personaFromSeed = (seed: Seed, id = "p-asha"): Persona => {
     person: p,
     session: { id: "s-fid", person: id, method: "sso", device: "fidelity", ip: "127.0.0.1", started: seed.NOW, lastSeen: seed.NOW, revoked: false },
     csrf: "csrf-fid",
+    org: seed.org?.org,
     projects: seed.projects.map((q: Seed) => ({ id: q.id, name: q.name, key: q.key, status: q.status, halted: q.halted, killed: q.killed })),
     factory: { killed: null },
     config: { demoAccounts: false },

@@ -1,5 +1,5 @@
 /** Typed reads for this slice of /api/v1. Keys come from ../keys (`qk`). */
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, get, getText } from "../client";
 import { qk } from "../keys";
 import type { Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
@@ -35,6 +35,15 @@ export const useWorkOrders = (projectId: string | null | undefined, q: { cursor?
     queryKey: qk.workOrders(projectId ?? "", q),
     queryFn: () => get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), q),
     enabled: !!projectId,
+  });
+/** Work orders of several projects in one list (the command palette); each project is its own cached read. */
+export const useWorkOrdersAcross = (projectIds: string[], q: { limit?: number } = {}): WorkOrder[] =>
+  useQueries({
+    queries: projectIds.map((id) => ({
+      queryKey: qk.workOrders(id, q),
+      queryFn: () => get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(id)}/work-orders`), q),
+    })),
+    combine: (rs) => rs.flatMap((r) => (Array.isArray(r.data) ? r.data : (r.data?.items ?? []))),
   });
 export const useWorkOrder = (id: string | null | undefined) =>
   useQuery({ queryKey: qk.workOrder(id ?? ""), queryFn: () => get<WorkOrder>(api(`work-orders/${encodeURIComponent(id ?? "")}`)), enabled: !!id });
