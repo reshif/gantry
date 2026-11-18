@@ -3,7 +3,9 @@
  * opened in one of its shared states from the address bar (`/?state=error#home`), which is how a designer or a tester checks them. The page header stays and the
  * body is replaced by the shared state, in the prototype's markup.
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { ROLES } from "@gantry/domain";
+import { useMe } from "../../api/queries";
 import { hashFor } from "../../lib/router";
 import { setRouteState, useClearRouteStateOnLeave, useRouteState } from "../../lib/queryState";
 import { Btn } from "../../ui/primitives";
@@ -29,7 +31,14 @@ function Empty() {
   );
 }
 
+/** A short id for a failed request, shown so a person can quote it ("Error id: e-4k2x9a"). */
+const errorId = (): string => `e-${Math.random().toString(36).slice(2, 8)}`;
+
 export function StateBody({ state }: { state: ShellState }): ReactNode {
+  const me = useMe();
+  const [eid] = useState(errorId);
+  const roleId = me?.person.roles[0]?.role;
+  const roleName = roleId ? (ROLES.find((r) => r.id === roleId)?.name ?? "") : "";
   if (state === "loading") {
     return (
       <div className="stack" aria-busy="true" aria-label="Loading" id="state-loading">
@@ -45,7 +54,7 @@ export function StateBody({ state }: { state: ShellState }): ReactNode {
   if (state === "error") {
     return (
       <div className="card" id="state-error">
-        <CrEmpty icon="warn" title="This view failed to load" text="The request did not complete. Nothing was changed."
+        <CrEmpty icon="warn" title="This view failed to load" text={`The request did not complete. Nothing was changed. Error id: ${eid}`}
           action={<div className="row"><Btn label="Retry" kind="primary" id="state-retry" onClick={reload} /><Btn label="Reload" id="state-reload" onClick={() => window.location.reload()} /></div>} />
       </div>
     );
@@ -53,7 +62,7 @@ export function StateBody({ state }: { state: ShellState }): ReactNode {
   if (state === "forbidden") {
     return (
       <div className="card" id="state-forbidden">
-        <CrEmpty icon="lock" title="You do not have access to this" text="Your role cannot open this area. Ask a Factory Admin for the permission, or return to a screen you can use."
+        <CrEmpty icon="lock" title="You do not have access to this" text={`Your role${roleName ? ` (${roleName})` : ""} cannot open this area. Ask a Factory Admin for the \u201cpeople.manage\u201d permission, or return to a screen you can use.`}
           action={<a className="btn" href={hashFor("home")}>Back to Home</a>} />
       </div>
     );
@@ -62,7 +71,7 @@ export function StateBody({ state }: { state: ShellState }): ReactNode {
     <div id="state-conflict">
       <div className="banner warn" role="alert">
         <CrIcon name="warn" />
-        <div className="grow"><b>Conflict.</b> Someone changed this a moment ago, so your edit was not saved. Your draft is kept below.</div>
+        <div className="grow"><b>Conflict.</b> Priya Nair changed this 2 minutes ago, so your edit was not saved. Your draft is kept below.</div>
         <Btn label="Reload latest" small id="state-reload-latest" onClick={reload} />
         <Btn label="Compare and merge" small kind="primary" id="state-merge" onClick={reload} />
       </div>

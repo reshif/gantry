@@ -9,19 +9,21 @@ import { fmt } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useHome, useProjects } from "../api/queries";
 import { useTravelerWo, dec } from "./traveler/model";
-import { Btn, Chip, FilterBar, SearchBox, Select, Tabs, Status, type Decision } from "../ui/primitives";
+import { Btn, Chip, FilterBar, SearchBox, Select, Tabs, Status, Who, type Decision } from "../ui/primitives";
+import { useActors } from "../ui/actors";
+import { useInbox } from "./workspace/api";
 import { DataTable, type SortState } from "../ui/DataTable";
 import { Card, CrEmpty, ListItem, Page } from "../ui/cr";
 import { Async, useCommand } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { navigate, hashFor } from "../lib/router";
-import { setProject, updatePrefs } from "../lib/prefs";
+import { setProject } from "../lib/prefs";
 import { setRouteState, useClearRouteStateOnLeave, useRouteState } from "../lib/queryState";
 import { useDecided } from "../lib/decided";
 import { useOpenTraveler } from "../shell/useTraveler";
 import type { Conversation, HomeFull } from "./home/data";
 import { useReviewApproval } from "./inbox/ApprovalDialog";
-import { TYPE_LABEL, titleOf, typeOf, useItems, type Item } from "./inbox/kit";
+import { TYPE_LABEL, agoShort, titleOf, typeOf, useItems, type Item } from "./inbox/kit";
 import type { PView } from "./projects/kit";
 import { StateBody, useStateOverride } from "./ops1/stateOverride";
 
@@ -57,37 +59,45 @@ function ApprovalActions({ it }: { it: Item }) {
 }
 
 const TYPES = ["gate", "trust", "learning", "mcp", "trigger", "onboarding"];
-const agoOf = (ms: number): string => (ms ? fmt.ago(Date.now() - ms, Date.now()) : "just now");
+const agoOf = (ms: number): string => agoShort(ms);
 
-/** One question for a person, as a card (prototype: a stack of cards); the answer is written here or in the conversation. */
+/** One question for a person, as a card (prototype: a stack of cards): the question as the title, who asked, about which work order and when, then one button per answer option and "Write an answer…". */
 function QuestionCard({ it }: { it: Extract<Item, { kind: "question" | "stuck" }> }) {
   const ui = useUI();
   const open = useOpenTraveler();
+  const actors = useActors();
+  const threads = useInbox(false).data?.items;
   const c = it.c;
   const stuck = it.kind === "stuck";
-  const answer = () =>
+  const thread = threads?.find((t) => t.scope.kind === "work_order" && t.scope.id === c.wo);
+  const agentId = c.agent ?? thread?.agent ?? null;
+  const askedAt = c.at ?? thread?.latest?.at ?? null;
+  const agentName = agentId ? actors(agentId).name.replace(" (agent)", "") : "The agent";
+  const send = async (text: string, toastText: string) => {
+    const r = await ops.answer(c.wo, text);
+    if (r.ok) ui.toast(toastText, "ok");
+    else ui.toast(r.msg, "error");
+    return r;
+  };
+  const answerFree = () =>
     ui.reasonDialog({
-      title: `Answer ${c.wo}`, kicker: "Question", sub: c.question || c.title, label: "Your answer", placeholder: "Your answer", ok: "Send answer", min: 3,
-      onOk: async (text) => {
-        const r = await ops.answer(c.wo, text);
-        if (r.ok) ui.toast("Answer sent.", "ok");
-        return r;
-      },
+      title: `Answer ${agentName}`, sub: c.question || c.title, label: "Your answer (required)", placeholder: "Your answer", ok: "Send answer", min: 3,
+      onOk: (text) => send(text, "Answer sent."),
     });
   return (
     <Card id={`inb-${it.key}`} title={c.question || (stuck ? "This work order stopped and needs a person." : "Confirm the brief or answer the open question.")}>
       <div className="row" style={{ marginBottom: 12 }}>
-        {stuck ? <Status tone="fail">{c.stuck!.state === "blocked" ? "Blocked" : c.stuck!.state === "parked" ? "Parked" : "Failed"}</Status> : <Chip text="Question" cls="agent" />}
-        <span className="dim">about</span>
+        {stuck ? <Status tone="fail">{c.stuck!.state === "blocked" ? "Blocked" : c.stuck!.state === "parked" ? "Parked" : "Failed"}</Status> : agentId ? <Who id={agentId} /> : null}
+        <span className="dim">{stuck ? "about" : "asked about"}</span>
         <a className="mono" href={hashFor("record", c.wo)} onClick={(e) => { e.preventDefault(); open(c.wo); }}>{c.wo}</a>
-        <span className="dim">{c.title}</span>
+        {askedAt ? <span className="dim mono">{agoShort(Date.now() - askedAt)}</span> : <span className="dim">{c.title}</span>}
         {it.projectName ? <span className="tag">{it.projectName}</span> : null}
       </div>
       <div className="row">
         {stuck ? <StuckActions c={c} /> : (
           <>
-            <Btn label="Write an answer…" kind="primary" icon="chat" id={`inb-answer-${c.wo}`} onClick={answer} />
-            <Btn label="Open conversation" kind="ghost" id={`inb-conv-${c.wo}`} onClick={() => { setProject(c.project); updatePrefs({ openConversation: c.wo }); navigate("conversations"); }} />
+            {(c.options ?? []).map((o) => <Btn key={o} label={o} id={`inb-opt-${c.wo}-${o}`} onClick={() => void send(o, `Answered \u201c${o}\u201d. ${agentName} will continue.`)} />)}
+            <Btn label="Write an answer…" kind="ghost" id={`inb-answer-${c.wo}`} onClick={answerFree} />
           </>
         )}
       </div>

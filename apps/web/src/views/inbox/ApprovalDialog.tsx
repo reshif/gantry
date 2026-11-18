@@ -4,7 +4,6 @@
  * Reads the rule and the eligible people from the server for this gate and pins every decision to the gate instance and the work order version it returned.
  */
 import { useState } from "react";
-import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useMe } from "../../api/queries";
 import { useCan } from "../../api/can";
@@ -19,7 +18,7 @@ import { useUI } from "../../ui/overlay-context";
 import { goAttention } from "../home/data";
 import { dec, useTravelerWo } from "../traveler/model";
 import { useGateApprovers } from "../traveler/Approvers";
-import { titleOf, type Item } from "./kit";
+import { agoShort, titleOf, type Item } from "./kit";
 
 const CHECKING: Decision = { allowed: false, reason: "Checking what you may decide here.", needs: "" };
 const MIN_NOTE = 10;
@@ -43,7 +42,16 @@ function GateBody({ it, close }: { it: Extract<Item, { kind: "gate" }>; close: (
   const ifm = t ? { ifMatch: t.version } : undefined;
   const inst = ap?.instance ?? a.instance;
   const title = String(titleOf(it).title);
-  const done = (decision: "approved" | "rejected" | "changes", n: string) => { recordDecision({ key: it.key, title, decision, note: n, at: Date.now() }); close(); };
+  /* The prototype's toasts: "Approved: <title>", "Rejected: <title>", "Changes requested: <title>"; an approval that is not the last one needed is only a vote ("Vote recorded. N more approver needed."). */
+  const done = (decision: "approved" | "rejected" | "changes", n: string) => {
+    const left = decision === "approved" && rule.data?.progress ? rule.data.progress.need - rule.data.progress.have - 1 : 0;
+    if (left > 0) ui.toast(`Vote recorded. ${left} more approver${left > 1 ? "s" : ""} needed.`, "info");
+    else {
+      recordDecision({ key: it.key, title, decision, note: n, at: Date.now() });
+      ui.toast(`${decision === "approved" ? "Approved" : decision === "rejected" ? "Rejected" : "Changes requested"}: ${title}`, decision === "approved" ? "ok" : "warn");
+    }
+    close();
+  };
   const approve = useCommand(() => (brief ? ops.confirmBrief(wo, undefined, ifm) : ops.approveGate(wo, gate, inst, undefined, ifm)), {});
   const send = useCommand((kind: "rejected" | "changes") => {
     const reason = kind === "rejected" ? `Rejected: ${note.trim()}` : note.trim();
@@ -72,7 +80,7 @@ function GateBody({ it, close }: { it: Extract<Item, { kind: "gate" }>; close: (
           <dt>Eligible</dt>
           <dd>{r ? (r.eligible?.length ? (r.eligible ?? []).map((e) => e.name + (e.away ? " (away)" : "")).join(", ") : "Nobody is eligible today.") : "…"}{r && r.satisfiable === false ? <span className="inb-warn" role="alert"> {r.warning}</span> : null}</dd>
           <dt>Waiting</dt>
-          <dd>{a.waitMs ? fmt.ago(Date.now() - a.waitMs, Date.now()) : "just now"}</dd>
+          <dd>{agoShort(a.waitMs ?? 0)}</dd>
           <dt>Work order</dt>
           <dd><a href={hashFor("record", wo)} onClick={close}>{wo}</a> {a.title}</dd>
         </dl>

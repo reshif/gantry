@@ -54,7 +54,7 @@ describe("Inbox", () => {
     expect(screen.queryByText(/Classified as Docs/)).toBeNull();
     expect(document.getElementById("inb-gate-WO-1005-G0G1")?.textContent).toContain("Gate");
     fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
-    expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("Question");
+    expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("Which currency?");
   });
 
   it("lists a stopped work order with its reason and a Retry the server's decision allows", async () => {
@@ -194,7 +194,7 @@ describe("Inbox", () => {
     await screen.findByText("Approve spec · G2 for WO-2398");
     const row = document.getElementById("inb-gate-WO-2398-G2")!;
     expect(row.textContent).toContain("1/2");
-    expect(row.textContent).toContain("3h 00m ago");
+    expect(row.textContent).toContain("3h ago");
     expect(document.getElementById("inb-t1")?.textContent).toContain("Trust");
     const opts = Array.from(document.querySelectorAll<HTMLOptionElement>("#inbox-type option")).map((o) => o.textContent);
     expect(opts).toEqual(["Type: all", "Gate", "Trust", "Learning", "MCP", "Trigger", "Onboarding"]);
@@ -239,6 +239,37 @@ describe("Inbox", () => {
     fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Use EUR" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2407/messages")).toBe(true));
+  });
+
+  it("shows one button per answer option beside Write an answer, with no Question chip or Open conversation, and sends the option", async () => {
+    const asked = { ...CONV, options: ["EUR", "USD"], agent: "ag-spec" };
+    const cs = mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [asked] }, attention: [] }) }),
+      "POST /api/v1/work-orders/WO-2407/messages": () => ({ body: { ok: true, msg: "Sent." } }),
+    });
+    mount(<InboxView />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Questions/ }));
+    expect(screen.queryByRole("button", { name: "Open conversation" })).toBeNull();
+    expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("asked about");
+    fireEvent.click(await screen.findByRole("button", { name: "EUR" }));
+    await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2407/messages")).toBe(true));
+  });
+
+  it("names the wait with one unit, like the prototype (6h ago, not 6h 00m ago)", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [{ ...GATE, waitMs: 6 * 3_600_000 }], conversations: [] }, attention: [] }) }) });
+    mount(<InboxView />);
+    expect(await screen.findByText("6h ago")).toBeTruthy();
+  });
+
+  it("?state=forbidden names the role and the permission; ?state=error carries an error id", async () => {
+    window.history.replaceState(null, "", "/?state=forbidden");
+    mockApi({ "GET /api/v1/home": () => ({ body: home({}) }) });
+    mount(<InboxView />);
+    expect(await screen.findByText(/people\.manage/)).toBeTruthy();
+    cleanup();
+    window.history.replaceState(null, "", "/?state=error");
+    mount(<InboxView />);
+    expect(await screen.findByText(/Error id: e-/)).toBeTruthy();
   });
 
   it("says nothing is waiting, and does not say it on a refused read", async () => {

@@ -17,7 +17,7 @@ import { Async } from "../ui/async";
 import { Bars, Card, CrEmpty, CrIcon, Lamp, ListItem, MiniBeltCr, Page, Stats, type MiniStation, type StatItem } from "../ui/cr";
 import { type HomeFull } from "./home/data";
 import { useReviewApproval } from "./inbox/ApprovalDialog";
-import { titleOf, useItems } from "./inbox/kit";
+import { agoShort, titleOf, useItems } from "./inbox/kit";
 import { RestoreAction, SetupChecklist, openNewProject } from "./home/sections";
 import { StateBody, useStateOverride } from "./ops1/stateOverride";
 import { metricsOf, useCatalog, type PView } from "./projects/kit";
@@ -81,7 +81,7 @@ export default function HomeView() {
   const items = allItems.filter((i) => (i.kind === "gate" || i.kind === "onboarding" || i.kind === "other") && !(i.kind === "other" && i.x.restore?.scope === "factory"));
   const att = s.attention ?? [];
   const killBanner = att.find((a) => a.restore?.scope === "factory");
-  const waitSub = (ms: number) => (ms ? ` · waiting ${fmt.dur(ms)}` : "");
+  const waitSub = (ms: number) => (ms ? ` · waiting ${agoShort(ms)}` : "");
   const rows = items.map((i) => {
     const t = titleOf(i);
     const gate = i.kind === "gate" ? i.a : null;

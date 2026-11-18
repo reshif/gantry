@@ -183,7 +183,7 @@ describe("Home: Control Room", () => {
     expect(await screen.findByText(/Plant overview for .*\. Agents propose, people approve\./)).toBeTruthy();
     expect(await screen.findByText("G2 Spec approved for WO-9")).toBeTruthy();
     expect(document.querySelector("#hm-projects #hm-new-project")).toBeNull();
-    expect(screen.getByText("WO-9 · Add limits · waiting 1h 00m")).toBeTruthy();
+    expect(screen.getByText("WO-9 · Add limits · waiting 1h ago")).toBeTruthy();
     const submit = document.getElementById("hm-my-new") as HTMLAnchorElement;
     expect(submit.getAttribute("href")).toBe("#console");
     fireEvent.click(await screen.findByRole("button", { name: "Review" }));

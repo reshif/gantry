@@ -8,7 +8,7 @@ import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Page } from "@playwright/test";
 import { workforceOverrides } from "./rich-workforce";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
-import { woReadOverrides } from "./rich-wo";
+import { woReadOverrides, type Ops1Approve } from "./rich-wo";
 import { richGroupE, routesE } from "./rich-e";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
@@ -204,6 +204,33 @@ export function richOverrides(): Record<string, Handler> {
     Object.assign(ov, woReadOverrides(floorFor(p.id).workOrders as never, p.id));
     ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, p.id === "payments" ? reposFor(p.id) : []);
   }
+  /* ---- ops1 fixtures: the station is called Release (the prototype's name), and the three gate approvals on Home carry what the server says about this person ---- */
+  ov["catalog"] = (r) => fulfillJson(r, { ...cat, stations: cat.stations.map((st) => (st.id === "close" ? { ...st, name: "Release" } : st)) });
+  const OPS1_APPROVE: Array<[number, string, string, string, string, string, Ops1Approve]> = [
+    [1004, "Add idempotency keys to refund endpoint", "payments", "review", "G5", "Review and merge", { allowed: true, reason: "", have: 1, need: 2, approvals: [{ name: "Meera Iyer" }] }],
+    [1013, "Add order tracking page", "storefront", "close", "G6", "Release confirmed", { allowed: false, reason: "Separation of duties: you requested this work order, so someone else must approve.", have: 0, need: 1 }],
+    [1021, "Add WebAuthn backup codes", "identity", "verify", "G4", "Checks green", { allowed: true, reason: "", have: 0, need: 2 }],
+  ];
+  for (const [num, title, proj, sid, gate, , approve] of OPS1_APPROVE) {
+    const w = { ...wo([num, title, "feature", "P2", sid, "gate"], proj), gates: { [gate]: { status: "waiting", approvals: [], rejections: [], checks: [], waitingSince: NOW - 5 * HOUR } } };
+    Object.assign(ov, woReadOverrides([w as never], proj, { [`WO-${num}`]: approve }));
+  }
+  /* a conversation for every work order on the payments line, so Talk opens a real thread */
+  for (const w of floorFor("payments").workOrders as Array<ReturnType<typeof wo>>) {
+    const st = cat.stations[w.station];
+    if (!st || w.id === "WO-1006") continue;
+    const agentName = ({ "ag-intake": "Intake Clerk", "ag-research": "Researcher", "ag-spec": "Spec Writer", "ag-design": "Designer", "ag-plan": "Planner", "ag-build": "Builder", "ag-test": "Test Engineer", "ag-review": "Reviewer", "ag-close": "Release Captain" } as Record<string, string>)[st.agent] ?? st.agent;
+    ov[`work-orders/${w.id}/session`] = (r) => fulfillJson(r, {
+      woId: w.id, project: "payments", repo: w.repo,
+      wo: { id: w.id, title: w.title, description: "", cls: w.cls, clsName: "Feature", confidence: 0.9, rationale: "", priority: w.priority, station: st.id, stationName: st.id === "close" ? "Release" : st.name, state: "running", bay: null, gate: null, requestedBy: "p-lead", closed: false },
+      messages: [{ id: "m1", role: "assistant", author: st.agent, text: `I am working on "${w.title}" at ${st.name}.`, at: NOW - 40 * MIN, data: { kind: "station", mode: "agent" } }],
+      agent: { mode: "agent", name: agentName, id: st.agent, model: ops1Model(st.agent), vendor: "anthropic", version: 3, station: st.id },
+      budget: { spentUsd: 1.2, limitUsd: 20 }, costUsd: 0.6, can: { talk: true, talkWhy: "", confirm: false, confirmWhy: "" },
+      steps: [], next: { actor: "agent", text: `${agentName} is working.` }, waiting: null,
+      dialogue: { questions: [], assumptions: [], objections: [], askedMe: false }, swarm: null, documents: [], research: { state: "none" }, sources: [], pending: [], brief: {}, briefConfirmed: true, briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false,
+    });
+  }
+  /* ---- end ops1 ---- */
   ov["activity"] = (r) => fulfillJson(r, events());
   ov["agents"] = (r) => fulfillJson(r, agents());
   ov["home"] = (r) =>
@@ -213,12 +240,12 @@ export function richOverrides(): Record<string, Handler> {
         { wo: "WO-1013", title: "Add order tracking page", gate: "G6", gateLabel: "G6", gateName: "Release confirmed", project: "storefront", projectName: "Storefront", have: 0, need: 1, waitMs: 6 * HOUR },
         { wo: "WO-1021", title: "Add WebAuthn backup codes", gate: "G4", gateLabel: "G4", gateName: "Checks green", project: "identity", projectName: "Identity", have: 0, need: 1, waitMs: 2 * HOUR },
       ],
-      conversations: [{ wo: "WO-1070", title: "Batch size tuning for payout worker", project: "payments", question: "Should the batch size be per region?" }],
-      badges: { inbox: { n: 4, label: "4 waiting for you" }, floor: { n: 6, label: "6 gates waiting", kind: "wait" } },
+      conversations: [{ wo: "WO-1070", title: "Batch size tuning for payout worker", project: "payments", question: "Should the batch size be per region?", agent: "ag-intake", at: NOW - 95 * MIN, options: ["Per region", "One global size"] }],
+      badges: { inbox: { n: 4, label: "4 waiting for you" } },
       factory: { killed: null },
       sections: {
         attention: [
-          { id: "hm-att-1", sev: 0, icon: "st-block", title: "WO-1006 is blocked at Close", where: "Payments Platform", sub: "Waiting on an upstream schema change · 7h", act: { label: "Open", route: "traveler", wo: "WO-1006" } },
+          { id: "hm-att-1", sev: 0, icon: "st-block", title: "WO-1006 is blocked at Release", where: "Payments Platform", sub: "Waiting on an upstream schema change · 7h", act: { label: "Open", route: "traveler", wo: "WO-1006" } },
           { id: "hm-att-2", sev: 1, icon: "st-wait", title: "Search is halted", where: "Search", sub: "Relevance regression under investigation", act: { label: "Open floor", route: "floor", project: "search" } },
         ],
         waiting: {
@@ -227,7 +254,7 @@ export function richOverrides(): Record<string, Handler> {
             { wo: "WO-1013", title: "Add order tracking page", gate: "G6", gateLabel: "G6", gateName: "Release confirmed", project: "storefront", projectName: "Storefront", have: 0, need: 1, waitMs: 6 * HOUR },
             { wo: "WO-1021", title: "Add WebAuthn backup codes", gate: "G4", gateLabel: "G4", gateName: "Checks green", project: "identity", projectName: "Identity", have: 0, need: 1, waitMs: 2 * HOUR },
           ],
-          conversations: [{ wo: "WO-1070", title: "Batch size tuning for payout worker", project: "payments", question: "Should the batch size be per region?" }],
+          conversations: [{ wo: "WO-1070", title: "Batch size tuning for payout worker", project: "payments", question: "Should the batch size be per region?", agent: "ag-intake", at: NOW - 95 * MIN, options: ["Per region", "One global size"] }],
         },
         motion: { inFlight: 52, running: 31, inBays: 3, byStation: {}, shippedToday: 7, shippedWeek: 34, shippedPrevWeek: 29, recentDone: [], mine: [] },
         health: { spend: { spent: 186.4, budget: 240, projects: [] }, evals: null, audit: true },

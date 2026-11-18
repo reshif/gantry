@@ -72,3 +72,13 @@ export const titleOf = (it: Item): { title: ReactNode; sub: ReactNode; type: str
   if (it.kind === "other") return { title: it.x.title, sub: it.x.sub, type, tone: "agent" };
   return { title: "", sub: "", type: "", tone: "idle" };
 };
+
+/** The prototype's "ago": one unit, rounded (just now, 14m ago, 6h ago, 3d ago). `ms` is how long ago it was. */
+export function agoShort(ms: number): string {
+  const sec = Math.max(0, ms / 1000);
+  if (sec < 60) return "just now";
+  const m = sec / 60;
+  if (m < 60) return `${Math.round(m)}m ago`;
+  const h = m / 60;
+  return h < 48 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago`;
+}
