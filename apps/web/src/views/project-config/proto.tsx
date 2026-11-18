@@ -4,29 +4,28 @@
  * instructions overlay and templates) stay one click away as secondary pages (`?tab=members` ...), linked from the tab they belong to.
  */
 import { useState } from "react";
-import { flowOf, gateLock, gateModeLock, type GateKind } from "@gantry/domain";
 import { fmt } from "@gantry/domain";
 import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
 import { useMcpServers, useMe, useRepos, useTemplates } from "../../api/queries";
 import { hashFor } from "../../lib/router";
 import { makeStopActions } from "../../shell/stopActions";
-import { Chip, Empty, Field, Input, LockNote, Meter, Panel, Select, Toggle } from "../../ui/primitives";
+import { Chip, Empty, Field, Input, LockNote, Meter, Panel, Select } from "../../ui/primitives";
 import { isStepUp } from "../../ui/stepup";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { Async } from "../../ui/async";
 import { FormDialog } from "../projects/formdialog";
-import { NumInput, roleName, useRes, useTeams } from "../projects/kit";
-import { ActBtn, Kv, LOCK, ToggleRow } from "../projects/proto";
+import { roleName, useRes, useTeams } from "../projects/kit";
+import { ActBtn, Kv, ToggleRow } from "../projects/proto";
 import { ProtoList } from "../projects/protolist";
 import { nextVersion } from "../govern/data";
 import type { PcProps } from "./ctx";
+import { FlowLine } from "./flow-line";
 
 /** A repository is part of the project once it is Ready; the ones still being onboarded are in Onboarding. */
 const isLive = (r: { onboarding: { stage: string } }): boolean => r.onboarding.stage === "ready";
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
-const KINDS = ["human", "auto", "mixed"];
 
 export function OverviewProto({ p, people }: PcProps) {
   const ui = useUI();
@@ -84,80 +83,8 @@ export function OverviewProto({ p, people }: PcProps) {
   );
 }
 
-/** The prototype lets a locked control be tried and answers with a toast; a locked Toggle would look washed out, so the reason is spoken on the attempt instead. */
-function useRefuse() {
-  const ui = useUI();
-  return (reason: string) => ui.toast(reason, "error");
-}
-
-export function FlowProto({ p, cat }: PcProps) {
-  const res = useRes();
-  const ui = useUI();
-  const refuse = useRefuse();
-  const d = useCan("project.config", { project: p.id });
-  const f = flowOf(cat, p);
-  // every gate the project's flow lists, including one that is absent (the Compliance sign-off gate shows as off)
-  const gates = cat.gates.filter((g) => p.flow.gates[g.id]);
-  const rowStyle = { padding: "8px 0", borderBottom: "1px dotted var(--line)", flexWrap: "nowrap" } as const;
-  return (
-    <div className="stack">
-      <div className="cols">
-        <Panel title="Stations">
-          <div>
-            {f.stations.map((st) => {
-              const cfg = p.flow.stations[st.id] ?? { enabled: false, wip: 5 };
-              return (
-                <div key={st.id} className="row" style={rowStyle}>
-                  <span className="mono small" style={{ width: 34, color: "var(--accent)" }}>{st.no}</span>
-                  <span>{st.name}</span>
-                  <span className="row small" style={{ flexWrap: "nowrap" }}>WIP <span style={{ width: 64, display: "inline-block" }}><NumInput id={`pcf-wip-${st.id}`} value={cfg.wip} min={1} max={20} limit={30} minMsg="WIP limit must be at least 1" locked={false} label={`${st.name} WIP limit`} onCommit={async (v) => (d.allowed ? res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `${st.name} WIP ${v}`) : refuse(LOCK))} /></span></span>
-                  <Toggle id={`pcf-st-${st.id}`} checked={st.id === "intake" ? true : cfg.enabled} decision={null} label={`${st.name} enabled`}
-                    onChange={async (v) => {
-                      if (!d.allowed) return refuse(LOCK);
-                      if (st.id === "intake") return refuse("Intake is always on: every work order starts there.");
-                      res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " on" : " off"}`);
-                    }} />
-                </div>
-              );
-            })}
-          </div>
-        </Panel>
-        <Panel title="Gates">
-          <div>
-            {gates.map((g) => {
-              const gc = p.flow.gates[g.id]!;
-              const on = gc.enabled ?? false;
-              const mode = (f.gates.find((x) => x.id === g.id)?.mode ?? gc.mode ?? "human") as GateKind;
-              const lock = gateLock(g, p);
-              return (
-                <div key={g.id} className="row" style={rowStyle}>
-                  <span className="mono small" style={{ width: 52, color: "var(--accent)" }}>{g.label}</span>
-                  <span>{g.name}</span>
-                  <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.name} mode`} style={{ width: 110 }} options={KINDS} value={mode}
-                    onChange={async (v) => {
-                      if (!d.allowed) return refuse(LOCK);
-                      const why = gateModeLock(g, v as GateKind, p);
-                      if (why) return refuse(why);
-                      res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), `${g.label} → ${v}`);
-                    }} />
-                  <Toggle id={`pcf-gate-${g.id}`} checked={on} decision={null} label={`${g.name} enabled`}
-                    onChange={async (v) => {
-                      if (!d.allowed) return refuse(LOCK);
-                      if (lock.locked) return refuse(lock.reason);
-                      if (!v && g.id !== "G1f") {
-                        const ok = await ui.confirm({ title: `Turn off ${g.name}?`, kicker: `Flow · ${p.name}`, ok: "Turn off", body: `${g.name} (${g.label}) is skipped for new work orders. Work orders already in flight keep the flow they started with. This needs a recent sign-in and is audited.` });
-                        if (!ok) return;
-                      }
-                      res(await ops.setProject(p.id, `flow.gates.${g.id}.enabled`, v, { ifMatch: p.version }), `${g.label}${v ? " on" : " off"}`);
-                    }} />
-                </div>
-              );
-            })}
-          </div>
-        </Panel>
-      </div>
-    </div>
-  );
+export function FlowProto(props: PcProps) {
+  return <FlowLine {...props} />;
 }
 
 export function ApproversProto({ p, cat }: PcProps) {
