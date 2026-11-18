@@ -104,7 +104,7 @@ describe("Conversations URL state (prototype ?c= and ?q=)", () => {
     expect(calls.some((c) => c.path === `/api/v1/work-orders/${W.id}/session`)).toBe(true);
     fireEvent.change(screen.getByLabelText("Search conversations"), { target: { value: "other" } });
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("q")).toBe("other"));
-    expect(screen.queryByText(row().title)).toBeNull();
+    expect(document.getElementById(`conv-item-${W.id}`)).toBeNull();
     fireEvent.change(screen.getByLabelText("Search conversations"), { target: { value: "zzz" } });
     expect(await screen.findByText("No conversations")).toBeTruthy();
     expect(document.querySelector(".conv-list .empty p")?.textContent ?? "").toBe("");
@@ -233,7 +233,7 @@ describe("Station questions, assumptions and documents in the session", () => {
 
   it("the person asked answers with a suggestion; the status line says the station waits for them", async () => {
     const calls = await showSession(asked(), { [`POST /api/v1/work-orders/${W.id}/questions/Q-AT1-1/answer`]: () => ({ body: { ok: true, msg: "Answer recorded; Research runs again with it.", resumed: true } }) });
-    expect(document.getElementById("wos-status")!.textContent).toContain("Research is waiting for your answer below.");
+    expect(document.getElementById("wos-status")!.textContent).toContain("Research is waiting for you");
     expect(screen.getByText("Why it matters:")).toBeTruthy();
     expect(screen.getByText(/Research asks the requester \(you\)/)).toBeTruthy();
     expect(document.querySelector("#wos-asks")?.textContent).toContain("asks you");

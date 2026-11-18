@@ -11,7 +11,6 @@ import { ops } from "../../api/ops";
 import { Btn, Chip, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { agoShort } from "./ago";
-import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { setProject } from "../../lib/prefs";
@@ -29,7 +28,15 @@ import { ResearchPlanCard } from "../documents/Research";
 import { LiveRun, RunTimelineView } from "../documents/Timeline";
 import { GateNotes, ObjectionCard, SwarmBoard } from "../documents/Swarm";
 import { hashFor, navigate } from "../../lib/router";
-import { createThread, useWsAgents } from "../workspace/api";
+import { createThread, useInbox, useWsAgents } from "../workspace/api";
+import { ChatPane } from "../workspace/ChatPane";
+import { Tabs, Toggle, StateChip } from "../../ui/primitives";
+import { useUrlState } from "../work-orders/url-state";
+import { ChatFeed } from "./ChatFeed";
+import { QuestionLine } from "./QuestionLine";
+import { StationAvatar, useAgentLabel } from "./StationAvatar";
+import { useStickyEnd } from "./sticky-end";
+import { blockingQuestion, buildFeed, questionView, type QuestionView } from "./thread-model";
 import { mentionChoices, mentionOf, queueAsk } from "../workspace/mention";
 
 type Proposal = Extract<WoCard, { kind: "proposal" }>;
@@ -136,7 +143,7 @@ function DocLine({ s, c }: { s: WoSession; c: Extract<WoCard, { kind: "document"
   );
 }
 
-function Cards({ m, s, agent, send, last }: { m: WoSessionMessage; s: WoSession; agent: string; send: (b: { kind: "message" | "continue"; text?: string }) => void; last: boolean }) {
+function Cards({ m, s, agent, send, last, qv }: { m: WoSessionMessage; s: WoSession; agent: string; send: (b: { kind: "message" | "continue"; text?: string }) => void; last: boolean; /** The Conversations screen: repeated station questions collapse and answered ones shrink to a line; assumptions and objections fold. */ qv?: QuestionView }) {
   return (
     <>
       {(m.data.cards ?? []).map((c, i) => {
@@ -146,18 +153,25 @@ function Cards({ m, s, agent, send, last }: { m: WoSessionMessage; s: WoSession;
         if (c.kind === "swarm") return s.swarm ? <SwarmBoard key={i} woId={s.woId} sw={s.swarm} canStop={!!s.can.park} stopWhy={s.can.parkWhy} /> : null;
         if (c.kind === "objection") {
           const o = s.dialogue.objections.find((x) => x.id === c.id);
-          return !o || m.role === "user" ? null : <ObjectionCard key={i} woId={s.woId} o={o} canDecide={s.research.canDecide} />;
+          if (!o || m.role === "user") return null;
+          const card = <ObjectionCard key={i} woId={s.woId} o={o} canDecide={s.research.canDecide} />;
+          return qv ? <details key={i} className="conv-fold" open={o.status === "open"}><summary className="small">{`Objection: ${o.claim}`}</summary>{card}</details> : card;
         }
         if (c.kind === "research_plan") return m.role === "user" ? null : <ResearchPlanCard key={i} woId={s.woId} r={s.research} />;
         if (c.kind === "station_question") {
           const q = s.dialogue.questions.find((x) => x.id === c.id);
           // A person's answer quotes the question it answers; the card itself lives on the agent's message.
           if (!q || m.role === "user") return null;
-          return <StationQuestionCard key={i} woId={s.woId} q={q} mine={q.mine} canAnswer={s.can.talk} why={s.can.talkWhy} />;
+          if (!qv) return <StationQuestionCard key={i} woId={s.woId} q={q} mine={q.mine} canAnswer={s.can.talk} why={s.can.talkWhy} />;
+          if (qv.superseded.has(q.id)) return null;
+          if (q.status !== "open") return <QuestionLine key={i} q={q} times={qv.times.get(q.id) ?? 1} replied={s.messages.some((x) => x.data.kind === "answer" && (x.data.cards ?? []).some((k) => k.kind === "station_question" && k.id === q.id))} />;
+          const n = qv.times.get(q.id) ?? 1;
+          return <div key={i} className="conv-q">{n > 1 ? <p className="small muted conv-q-times" id={`sq-times-${q.id.replace(/[^A-Za-z0-9_-]/g, "-")}`}>{`asked ${n} times`}</p> : null}<StationQuestionCard woId={s.woId} q={q} mine={q.mine} canAnswer={s.can.talk} why={s.can.talkWhy} /></div>;
         }
         if (c.kind === "assumptions") {
           const items = s.dialogue.assumptions.filter((a) => a.station === c.station && (!c.attempt || a.attemptId === c.attempt));
-          return <AssumptionList key={i} woId={s.woId} items={items} canDecide={s.can.talk} />;
+          if (!qv) return <AssumptionList key={i} woId={s.woId} items={items} canDecide={s.can.talk} />;
+          return items.length ? <details key={i} className="conv-fold"><summary className="small">{`Assumptions (${items.length})`}</summary><AssumptionList woId={s.woId} items={items} canDecide={s.can.talk} /></details> : null;
         }
         return <ProposalCard key={i} m={m} c={c} s={s} agent={agent} send={send} />;
       })}
@@ -236,7 +250,7 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
   const ui = useUI();
   const openTraveler = useOpenTraveler();
   const openRecord = useOpenRecordRoute();
-  const actorOf = useActors();
+  const labelOf = useAgentLabel();
   const [draft, setDraft] = useState("");
   const [showSide, setShowSide] = useState(false);
   const opened = useRef(false);
@@ -244,6 +258,24 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
   const run = useCallback((on: Parameters<typeof sendWoTurn>[2], signal: AbortSignal) => sendWoTurn(woId, turn.current, on, signal), [woId]);
   const { live, error, start } = useLiveTurn<WoCard>(run, (m) => ui.toast(m, "error"));
   const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text);
+  // The Conversations screen: the thread has its own scroll box (newest at the bottom), line events are folded unless asked for, and side threads open in the same pane (all three in the URL).
+  const [pane, setPane] = useUrlState(["ev", "side"] as const);
+  const sticky = useStickyEnd<HTMLDivElement>(s?.messages.length, live?.text, live?.cards.length, pane.side);
+  const inbox = useInbox(false);
+  // The header says what the station waits for, unless that question's card is already on screen.
+  const blockId = s ? blockingQuestion(s)?.id : undefined;
+  const [cardSeen, setCardSeen] = useState(false);
+  useEffect(() => {
+    setCardSeen(false);
+    const root = sticky.ref.current;
+    const el = blockId ? document.getElementById(`sq-${blockId.replace(/[^A-Za-z0-9_-]/g, "-")}`) : null;
+    if (!el || !root || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((es) => setCardSeen(es.some((e) => e.isIntersecting)), { root, threshold: 0.6 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [blockId, s?.messages.length, pane.side]); // eslint-disable-line react-hooks/exhaustive-deps
+  const qv = useMemo(() => (s ? questionView(s.dialogue.questions) : null), [s]);
+  const feed = useMemo(() => (s && qv ? buildFeed(s.messages, qv) : []), [s, qv]);
   const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => { turn.current = body; if (body.kind === "message") void markWoSeen(woId); void start(); };
   const agents = useWsAgents(woId).data?.items ?? [];
   const mentions = useMentions(woId, draft, setDraft, !!s?.can.talk && !live);
@@ -283,9 +315,13 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
     : { cls: "is-live", text: s.waiting?.text ?? s.next.text };
   const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."} Type @ to ask an agent in a side thread.` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}, or type @ to ask another agent in a side thread or to mention a person`;
   // a station's message carries its agent's id: show the agent's name, as everywhere else
-  const tag = (m: WoSessionMessage) => (m.role === "user" ? (proto ? actorOf(m.author).name.replace(" (agent)", "") : <Who id={m.author} />) : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? (proto ? actorOf(m.author).name.replace(" (agent)", "") : <Who id={m.author} />) : (m.data.agent ?? agentName));
+  const tag = (m: WoSessionMessage) => (m.role === "user" ? (proto ? labelOf(m.author) : <Who id={m.author} />) : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? (proto ? labelOf(m.author) : <Who id={m.author} />) : (m.data.agent ?? agentName));
 
   const threadBody = (<>
+            {proto && qv ? (
+              <ChatFeed s={s} feed={feed} showEvents={pane.ev === "1"} nameOf={(m) => String(tag(m))} cards={(m) => <Cards m={m} s={s} agent={agentName} send={(b) => send(b)} last={m.id === lastId} qv={qv} />}
+                markers={(m) => <>{m.id === s.messages[0]?.id && m.data.mode === "legacy" ? <p className="small muted wos-legacy-h">Earlier: the scripted intake questions</p> : null}{s.messages[firstSession]?.id === m.id && firstSession > 0 ? <p className="small muted wos-legacy-h">The conversation with {agentName}</p> : null}</>} />
+            ) : (<>
             {s.messages.map((m, i) => (
               <div key={m.id}>
                 {i === 0 && m.data.mode === "legacy" ? <p className="small muted wos-legacy-h">Earlier: the scripted intake questions</p> : null}
@@ -300,6 +336,7 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
                 </div>
               </div>
             ))}
+            </>)}
             {s.ruleQuestion ? (
               <article className="osx-card osx-question" aria-label="Scripted question">
                 <strong>{s.ruleQuestion.text}</strong>
@@ -357,33 +394,84 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
         </aside>
   );
   if (proto) {
-    const aid = s.agent.id;
+    const cap = (x: string) => `${x.charAt(0).toUpperCase()}${x.slice(1)}`;
+    const sideItems = Array.isArray(inbox.data?.items) ? inbox.data.items.filter((i) => i.kind === "side" && i.scope.kind === "work_order" && i.scope.id === s.woId) : null;
+    const blocker = blockingQuestion(s);
+    const lastAgent = [...s.messages].reverse().find((m) => m.role === "assistant" && m.author.startsWith("ag-"))?.author;
+    const headAgent = blocker?.askedBy ?? lastAgent ?? s.agent.id;
+    const headName = labelOf(headAgent, s.wo.stationName);
+    const blockerStation = blocker ? (s.steps.find((x) => x.id === blocker.station)?.name ?? cap(blocker.station)) : "";
+    const jumpTo = (id: string) => { if (pane.side) setPane({ side: "" }); window.setTimeout(() => document.getElementById(id)?.scrollIntoView?.({ block: "center" }), 0); };
+    const open = pane.side ? "side" : "chat";
+    const sideItem = pane.side && pane.side !== "list" ? (sideItems?.find((i) => i.key === pane.side) ?? null) : null;
     return (
-      <section className="card conv-thread wos" id="wos" data-wo={s.woId} aria-label={`Conversation ${s.woId}`}>
-        <div className="card-h">
-          <div className="row nowrap">
-            <Btn small kind="ghost" cls="nodesk-back" id="wos-back" label="← Back" onClick={back} />
-            <Who id={aid} />
+      <section className="card conv-thread conv-chat wos" id="wos" data-wo={s.woId} aria-label={`Conversation ${s.woId}`}>
+        <div className="card-h conv-h">
+          <Btn small kind="ghost" cls="nodesk-back" id="wos-back" label="← Back" onClick={back} />
+          <StationAvatar id={headAgent} fallback={headName} />
+          <div className="conv-h-t">
             <a className="mono" id="wos-record" href={hashFor("record", s.woId, s.project)}>{s.woId}</a>
+            <span className="conv-h-title" title={s.wo.title}>{s.wo.title}</span>
           </div>
-          <span className="row nowrap"><span className="dim">Agent proposes; people decide</span><Btn small kind="ghost" id="wos-details" cls="conv-details" label="Details" aria={showSide ? "Hide brief, gate and proposals" : "Show brief, gate and proposals"} onClick={() => setShowSide(!showSide)} /></span>
+          <span className="conv-h-chips"><span className="chip">{s.wo.bay ? `Bay · ${s.wo.bay}` : s.wo.stationName}</span>{blocker ? <span className="state state-waiting" id="conv-state"><Icon name="human" /><span>Waiting on you</span></span> : <StateChip state={s.wo.state} />}</span>
+          <span className="row nowrap conv-h-acts">
+            <span className="conv-ev"><Toggle id="conv-events" checked={pane.ev === "1"} onChange={(v) => setPane({ ev: v ? "1" : "" })} label="Line events" /><label className="small" htmlFor="conv-events">Events</label></span>
+            <Btn small kind="ghost" id="wos-details" cls="conv-details" label="Details" aria={showSide ? "Hide brief, gate and proposals" : "Show brief, gate and proposals"} onClick={() => setShowSide(!showSide)} />
+            <a className="btn btn-sm sm" id="wos-open-record" href={hashFor("record", s.woId, s.project)}>Open record</a>
+          </span>
         </div>
-        <div className="card-b stack thread" style={{ minHeight: 280, maxHeight: "52vh", overflow: "auto" }} role="log" aria-live="polite" ref={thread}>
-          {status.cls === "is-live" && !live ? null : <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite"><span className="wos-dot" aria-hidden="true" /><span>{status.text}</span></div>}
-          {threadBody}
-        </div>
-        <form className="card-b row nowrap" style={{ borderTop: "1px solid var(--line)", position: "relative" }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
-          {choices.length ? (
-            <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
-              {choices.map((a) => <li key={a.id} role="option" aria-selected="false" id={`wos-mention-${a.id}`} onMouseDown={(e) => { e.preventDefault(); setDraft(`@${a.name} `); }}><span className="strong">{`@${a.name}`}</span><span className="muted">{`${a.stationName} · answers in a side thread`}</span></li>)}
-            </ul>
-          ) : null}
-          <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
-          <input id="wos-input" className="input in" aria-label="Message" autoComplete="off" value={draft} placeholder={s.can.talk ? `Message ${agentName}…` : `Read-only: ${s.can.talkWhy || "you may not act on this work order."}`} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter") { e.preventDefault(); submit(); } }} />
-          <Btn kind="primary" type="submit" id="wos-send" icon="send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || (!mention && !s.can.talk)} />
-        </form>
-        {mention ? <p className="card-b small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</p> : null}
-        {showSide ? <div className="card-b wos-more" id="wos-more" style={{ borderTop: "1px solid var(--line)" }}><div className="osx-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>{sideEl}</div></div> : null}
+        {blocker && !cardSeen ? (
+          <div className="wos-status is-you conv-wait" id="wos-status" role="status" aria-live="polite">
+            <span className="wos-dot" aria-hidden="true" />
+            <span className="conv-wait-t">{`${blockerStation} is waiting for you`}<span className="muted small">{`: ${blocker.question}`}</span></span>
+            <Btn small kind="ghost" id="conv-jump-q" label="Jump to question" onClick={() => jumpTo(`sq-${blocker.id.replace(/[^A-Za-z0-9_-]/g, "-")}`)} />
+          </div>
+        ) : blocker ? null : status.cls === "is-live" && !live ? null : <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite"><span className="wos-dot" aria-hidden="true" /><span>{status.text}</span></div>}
+        <Tabs idPrefix="conv-pane" active={open} onChange={(id) => setPane({ side: id === "side" ? "list" : "" })} items={[{ id: "chat", label: "Conversation" }, { id: "side", label: "Side threads", count: sideItems ? sideItems.length : null }]} />
+        {open === "chat" ? (
+          <div className="conv-scroll-w">
+            {/* a scrolling region must be reachable by keyboard (axe scrollable-region-focusable) */}
+            {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+            <div className="card-b stack thread conv-scroll" role="log" aria-live="polite" aria-label="Conversation messages" tabIndex={0} ref={sticky.ref} onScroll={sticky.onScroll} id="conv-scroll">
+              {threadBody}
+            </div>
+            {sticky.unseen ? <Btn small kind="primary" cls="conv-new" id="conv-new" icon="down" label="New messages" onClick={sticky.jump} /> : null}
+          </div>
+        ) : (
+          <div className="conv-side-body" id="conv-side">
+            {pane.side === "list" || (!sideItem && !(pane.side && pane.side !== "list")) ? (
+              sideItems === null ? <Async query={inbox} what="side threads" id="conv-side-async">{() => null}</Async>
+                : sideItems.length ? (
+                  <ul className="conv-side-l">
+                    {sideItems.map((i) => (
+                      <li key={i.key}>
+                        <Btn kind="ghost" cls="conv-side-row" id={`conv-side-${i.key}`} label="" aria={i.title} onClick={() => setPane({ side: i.key })}><span className="strong">{i.title}</span><span className="muted small">{`${i.agentName ?? "Assistant"} · ${agoShort(i.updatedAt)}`}</span></Btn>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="muted small conv-side-none" id="conv-side-none">No side threads on this work order yet. Type @ and an agent's name in the message box to ask one.</p>
+            ) : (
+              <>
+                <div className="conv-side-bar"><Btn small kind="ghost" id="conv-side-back" icon="back" label="Side threads" onClick={() => setPane({ side: "list" })} /></div>
+                <ChatPane id={pane.side} item={sideItem} onThread={(id) => setPane({ side: id })} />
+              </>
+            )}
+          </div>
+        )}
+        {open === "chat" ? (
+          <form className="card-b row nowrap conv-compose" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+            {choices.length ? (
+              <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
+                {choices.map((a) => <li key={a.id} role="option" aria-selected="false" id={`wos-mention-${a.id}`} onMouseDown={(e) => { e.preventDefault(); setDraft(`@${a.name} `); }}><span className="strong">{`@${a.name}`}</span><span className="muted">{`${a.stationName} · answers in a side thread`}</span></li>)}
+              </ul>
+            ) : null}
+            <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
+            <input id="wos-input" className="input in" aria-label="Message" autoComplete="off" value={draft} placeholder={s.can.talk ? `Message ${agentName}…` : `Read-only: ${s.can.talkWhy || "you may not act on this work order."}`} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter") { e.preventDefault(); submit(); } }} />
+            <Btn kind="primary" type="submit" id="wos-send" icon="send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || (!mention && !s.can.talk)} />
+          </form>
+        ) : null}
+        {open === "chat" && mention ? <p className="card-b small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</p> : null}
+        {showSide ? <div className="card-b wos-more" id="wos-more"><div className="osx-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>{sideEl}</div></div> : null}
       </section>
     );
   }
