@@ -75,6 +75,16 @@ afterEach(() => {
 describe("Audit", () => {
   const page = (items: unknown[], next: string | null = null, total = items.length) => ({ items, next, total, summary: SUMMARY });
 
+  it("opens on one project when the address carries ?project= (Project config's Full history), names it, and All projects drops it", async () => {
+    window.history.replaceState(null, "", "/?project=payments");
+    const calls = setup(ASHA, { "GET /api/v1/audit": () => ({ body: page([row(1, { project: "payments" })]) }), "GET /api/v1/projects": () => ({ body: [{ id: "payments", name: "Payments Platform" }] }) });
+    mount(<AuditView />);
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("project") === "payments")).toBe(true));
+    expect((await screen.findByText("Payments Platform", { selector: "#aud-via-note" })).textContent).toBe("Payments Platform");
+    fireEvent.click(await screen.findByRole("button", { name: "All projects" }));
+    await waitFor(() => expect(window.location.search).not.toMatch(/project=/));
+  });
+
   it("shows the locked sheet with a way home when the ledger read is refused, and no entry counts of 0", async () => {
     setup(SAM, { "GET /api/v1/audit": () => ({ status: 403, body: { ok: false, msg: "Needs audit.view." } }) });
     mount(<AuditView />);

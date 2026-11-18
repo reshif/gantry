@@ -1,131 +1,61 @@
 /**
- * Project config in the Blueprint's seven tabs: Overview, Flow, Approvers, MCP, Budget, Repos, Line control.
- * The richer editors that were tabs before (members, work classes, notifications, history, the full rule editor, route matrix, spend breakdown,
- * instructions overlay and templates) stay one click away as secondary pages (`?tab=members` ...), linked from the tab they belong to.
+ * Project config, tab by tab. Overview and Members live in overview.tsx; Flow in flow-line.tsx; the rule editor in approvers.tsx.
+ * Here: the gate table (Approvers), MCP, Budget, Repos and Line control. Eight tabs, no menu: each old secondary page is a section of its tab
+ * and an old `?tab=` bookmark lands on it (see LEGACY_TABS in ctx.ts). Every change goes through the typed commands, which call the API.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fmt } from "@gantry/domain";
 import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
-import { useMcpServers, useMe, useRepos, useTemplates } from "../../api/queries";
+import { useMcpServers, useMe, useRepos } from "../../api/queries";
 import { hashFor } from "../../lib/router";
 import { makeStopActions } from "../../shell/stopActions";
-import { Chip, Empty, Field, Input, LockNote, Meter, Panel, Select } from "../../ui/primitives";
+import { Chip, Empty, Field, Input, LockNote, Meter, Panel } from "../../ui/primitives";
 import { isStepUp } from "../../ui/stepup";
-import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { Async } from "../../ui/async";
 import { FormDialog } from "../projects/formdialog";
-import { roleName, useRes, useTeams } from "../projects/kit";
-import { ActBtn, Kv, ToggleRow } from "../projects/proto";
+import { roleName, useRes } from "../projects/kit";
+import { ActBtn, ToggleRow } from "../projects/proto";
 import { ProtoList } from "../projects/protolist";
 import { nextVersion } from "../govern/data";
+import { useQueryParam } from "../projects/urlState";
 import type { PcProps } from "./ctx";
+import { RulePanel, isDirty } from "./approvers";
+import { ArchivePanel, SpendBreakdown } from "./misc";
 import { FlowLine } from "./flow-line";
 
 /** A repository is part of the project once it is Ready; the ones still being onboarded are in Onboarding. */
 const isLive = (r: { onboarding: { stage: string } }): boolean => r.onboarding.stage === "ready";
-const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
-
-export function OverviewProto({ p, people }: PcProps) {
-  const ui = useUI();
-  const res = useRes();
-  const actor = useActors();
-  const d = useCan("project.edit", { project: p.id });
-  const cfg = useCan("project.config", { project: p.id });
-  const teams = useTeams();
-  const tpls = useTemplates().data;
-  const repos = useRepos(p.id).data?.filter(isLive);
-  const [name, setName] = useState(p.name);
-  const [desc, setDesc] = useState(p.desc ?? "");
-  const [owner, setOwner] = useState(p.owner);
-  const [errs, setErrs] = useState<Record<string, string>>({});
-  const owners = people.filter((x) => x.status === "active");
-  const save = async () => {
-    const nm = name.trim();
-    if (!nm) { setErrs({ name: "Name is required." }); return; }
-    if (nm.length < 3) { setErrs({ name: "Name needs at least 3 characters." }); return; }
-    setErrs({});
-    let ver = p.version;
-    let ok = true;
-    if (nm !== p.name) { const r = await ops.setProject(p.id, "name", nm, { ifMatch: ver }); if (!r.ok) { setErrs({ name: r.msg }); return; } ver = nextVersion(r, ver); }
-    if (desc !== (p.desc ?? "")) { const r = res(await ops.setProject(p.id, "desc", desc.trim(), { ifMatch: ver })); ok = r.ok; if (r.ok) ver = nextVersion(r, ver); }
-    if (ok && owner !== p.owner) { const r = res(await ops.setProject(p.id, "owner", owner, { ifMatch: ver })); ok = r.ok; }
-    if (ok) ui.toast("Project saved", "ok");
-  };
-  return (
-    <div className="stack">
-      <div className="cols">
-        <Panel title="Details">
-          <form noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
-            <div>
-              <Field label={<>Name <span className="muted">(required)</span></>} error={errs.name}>
-                <Input id="pcf-name" aria-required value={name} disabled={!cfg.allowed} onChange={(e) => setName(e.target.value)} />
-              </Field>
-              <Field label="Description"><Input id="pcf-desc" value={desc} disabled={!cfg.allowed} onChange={(e) => setDesc(e.target.value)} /></Field>
-              <Field label="Owner"><Select id="pcf-owner" disabled={!cfg.allowed} value={owner} onChange={setOwner} options={owners.map((x) => ({ value: x.id, label: x.name }))} /></Field>
-              <div><ActBtn kind="primary" type="submit" id="pcf-ov-save" label="Save" guard={d.allowed ? cfg : d} /></div>
-            </div>
-          </form>
-        </Panel>
-        <Panel title="Summary">
-          <Kv rows={[
-            ["Key", p.key],
-            ["Template", tpls?.find((t) => t.id === p.template)?.name ?? p.template],
-            ["Teams", p.teams.map((t) => teams.find((x) => x.id === t)?.name ?? t).join(", ") || "—"],
-            ["Regulated", p.regulated ? "Yes, capped at L2" : "No"],
-            ["Repos", repos ? String(repos.length) : "—"],
-          ]} />
-          <span className="sr">{actor(p.owner).name}</span>
-        </Panel>
-      </div>
-    </div>
-  );
-}
 
 export function FlowProto(props: PcProps) {
   return <FlowLine {...props} />;
 }
 
-export function ApproversProto({ p, cat }: PcProps) {
-  const ui = useUI();
-  const d = useCan("flow.edit", { project: p.id });
+export function ApproversProto(props: PcProps) {
+  const { p, cat, s } = props;
+  const d = useCan("approvers.edit", { project: p.id });
+  const [rule, setRule] = useQueryParam("rule");
   const rows = Object.entries(p.approvers).map(([g, a]) => ({ g, ...a }));
   const name = (id: string) => cat.gates.find((x) => x.id === id)?.name ?? id;
-  const edit = (x: (typeof rows)[number]) => ui.open((close) => (
-    <FormDialog
-      title={`Approvers for ${x.g}`} submit="Save" close={close}
-      values={{ required: x.required, escalateH: x.escalateH ?? "", sod: x.sod }}
-      fields={[
-        { k: "required", label: "Approvals needed", type: "number", min: 0, req: true },
-        { k: "escalateH", label: "Escalate after (hours)", type: "number", min: 1, hint: "Reminds the next role up." },
-        { k: "sod", label: "Submitter cannot approve their own work", type: "switch" },
-      ]}
-      onSubmit={async (v) => {
-        const { g: _g, ...rule } = x; void _g;
-        const next = { ...clone(rule), required: Number(v.required), sod: !!v.sod, ...(v.escalateH === "" ? {} : { escalateH: Number(v.escalateH) }) };
-        const r = await ops.setProject(p.id, `approvers.${x.g}`, next, { ifMatch: p.version });
-        if (!r.ok) return r.msg;
-        ui.toast("Approvers saved", "ok");
-        return undefined;
-      }}
-    />
-  ));
+  useEffect(() => { if (rule) document.getElementById("pcf-rule")?.scrollIntoView?.({ block: "nearest" }); }, [rule]);
   return (
     <div className="stack">
+      <LockNote decision={d} what="Approver rules" />
       <Panel title="Who may approve each gate" flush>
         <ProtoList
           id="pcf-appr" noun="gate" search={false} rows={rows} rowKey={(x) => x.g}
           cols={[
-            { key: "g", label: "Gate", render: (x) => <div><b className="mono">{x.g}</b><span className="sub">{name(x.g)}</span></div> },
+            { key: "g", label: "Gate", render: (x) => <div><b className="mono">{x.g}</b><span className="sub">{name(x.g)}</span>{isDirty(p, s.drafts, x.g) ? <span className="chip chip-warn">unsaved</span> : null}</div> },
             { key: "r", label: "Roles", render: (x) => <div className="row">{x.roles.length ? x.roles.map((y) => <Chip key={y} text={roleName(cat, y)} cls="plain" />) : <Chip text="automatic" cls="info" />}</div> },
             { key: "n", label: "Needed", align: "end", render: (x) => String(x.required) },
             { key: "s", label: "Separation", render: (x) => (x.sod ? <Chip text="SoD" cls="ok" /> : "—") },
             { key: "e", label: "Escalate", align: "end", render: (x) => (x.escalateH ? `${x.escalateH} h` : "—") },
-            { key: "a", label: "", align: "end", render: (x) => <ActBtn small id={`pcf-ap-edit-${x.g}`} label="Edit" guard={d} onClick={() => edit(x)} /> },
+            { key: "a", label: "", align: "end", render: (x) => <ActBtn small id={`pcf-ap-edit-${x.g}`} label={rule === x.g ? "Editing" : "Edit"} aria={`Edit the rule for ${x.g} ${name(x.g)}`} guard={d} onClick={() => setRule(x.g)} /> },
           ]}
         />
       </Panel>
+      {rule ? <RulePanel {...props} gid={rule} onClose={() => setRule(null)} /> : <p className="small muted">Edit a gate to set its roles, named people, approvals needed, per-class counts, conditions, escalation, fallback, separation of duties, who is away, and to test a scenario.</p>}
     </div>
   );
 }
@@ -144,7 +74,7 @@ export function McpProto({ p }: PcProps) {
             {servers.map((s) => {
               const on = p.mcp.includes(s.id);
               const scopeOk = s.projects === "all" || s.projects.includes(p.id);
-              return <ToggleRow key={s.id} id={`pcf-mcp-${s.id}`} label={s.name} hint={s.url} checked={on} decision={d} onChange={async (v) => (v && !scopeOk ? ui.toast(`${s.name} is not scoped to ${p.name}. Change its scope in MCP servers first.`, "error") : res(await ops.setProject(p.id, "mcp", v ? [...p.mcp, s.id] : p.mcp.filter((x) => x !== s.id), { ifMatch: p.version }), `${s.name}${v ? " attached" : " detached"}`))} />;
+              return <ToggleRow key={s.id} id={`pcf-mcp-${s.id}`} label={s.name} hint={<><span className="mono">{s.url}</span>{" "}<Chip text={s.health} cls={s.health === "healthy" ? "ok" : "warn"} /> <Chip text={s.sensitivity} cls="plain" /></>} checked={on} decision={d} onChange={async (v) => (v && !scopeOk ? ui.toast(`${s.name} is not scoped to ${p.name}. Change its scope in MCP servers first.`, "error") : res(await ops.setProject(p.id, "mcp", v ? [...p.mcp, s.id] : p.mcp.filter((x) => x !== s.id), { ifMatch: p.version }), `${s.name}${v ? " attached" : " detached"}`))} />;
             })}
           </div>
         )}
@@ -153,7 +83,7 @@ export function McpProto({ p }: PcProps) {
   );
 }
 
-export function BudgetProto({ p }: PcProps) {
+export function BudgetProto({ p, cat }: PcProps) {
   const ui = useUI();
   const res = useRes();
   const d = useCan("project.config", { project: p.id });
@@ -195,6 +125,7 @@ export function BudgetProto({ p }: PcProps) {
           </form>
         </Panel>
       </div>
+      <SpendBreakdown p={p} cat={cat} />
     </div>
   );
 }
@@ -202,21 +133,43 @@ export function BudgetProto({ p }: PcProps) {
 export function ReposProto({ p }: PcProps) {
   const q = useRepos(p.id);
   return (
-    <Panel title="Repositories" flush>
-      <Async query={q} what="repos" id="pcf-repos" empty={<Empty id="pcf-repos-empty" title="No repos yet" text="Connect a repo in Onboarding. It must be Ready before work orders can target it." />}>
-        {(repos) => (
-          <ul className="list">
-            {repos.filter(isLive).map((x) => (
-              <li key={x.id}>
-                <a className="pri grow" href={hashFor("dossier", x.id, p.id)}>{x.name}</a>
-                <Chip text={x.lang} cls="plain" />
-                {x.halted ? <Chip text="halted" cls="warn" /> : <Chip text="active" cls="ok" />}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Async>
-    </Panel>
+    <div className="stack">
+      <Panel title="Ready repositories" id="pcf-ready" flush>
+        <Async query={q} what="repos" id="pcf-repos" empty={<Empty id="pcf-repos-empty" title="No repos yet" text="Connect a repo in Onboarding. It must be Ready before work orders can target it." />}>
+          {(repos) => (repos.some(isLive) ? (
+            <ul className="list">
+              {repos.filter(isLive).map((x) => (
+                <li key={x.id}>
+                  <a className="pri grow" href={hashFor("dossier", x.id, p.id)}>{x.name}</a>
+                  <Chip text={x.lang} cls="plain" />
+                  {x.halted ? <Chip text="halted" cls="warn" /> : <Chip text="active" cls="ok" />}
+                </li>
+              ))}
+            </ul>
+          ) : <Empty id="pcf-repos-none" title="No ready repos" text="Work orders can target a repo once it is Ready." />)}
+        </Async>
+      </Panel>
+      <Panel title="Still onboarding" id="pcf-onb" flush>
+        <Async query={q} what="repos" id="pcf-onb-q">
+          {(repos) => {
+            const pending = repos.filter((r) => !isLive(r));
+            return pending.length ? (
+              <ul className="list" id="pcf-onb-list">
+                {pending.map((x) => {
+                  const st = x.onboarding.stage;
+                  return (
+                    <li key={x.id}>
+                      <a className="pri grow" href={hashFor("onboarding", x.id, p.id)}>{x.name}</a>
+                      <Chip text={st === "person" ? "Needs a person" : st.replace("_", " ")} cls={st === "failed" || st === "person" ? "warn" : "plain"} />
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : <Empty id="pcf-onb-none" title="Nothing onboarding" text="Repos that are being assessed or set up appear here, with a link to their Onboarding session." />;
+          }}
+        </Async>
+      </Panel>
+    </div>
   );
 }
 
@@ -252,6 +205,7 @@ export function LineProto({ p }: PcProps) {
     />
   ));
   return (
+    <div className="stack">
     <Panel title="Halt and stop">
       <div className="stack">
         <p>Halting lets running agents finish their current step. A kill stops them now.</p>
@@ -261,5 +215,7 @@ export function LineProto({ p }: PcProps) {
         </div>
       </div>
     </Panel>
+    <ArchivePanel p={p} />
+    </div>
   );
 }
