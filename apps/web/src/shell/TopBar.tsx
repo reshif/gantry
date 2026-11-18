@@ -78,10 +78,11 @@ export function TopBar({ me, crumb, project, current, navOpen, onOpenNav, onOpen
       userRef.current,
       (close) => (
         <CrMenu>
-          <div className="mh" role="link" tabIndex={0} title="Open your account" style={{ cursor: "pointer" }} onClick={() => { close(); navigate("account"); }} onKeyDown={(e) => { if (e.key === "Enter") { close(); navigate("account"); } }}>
+          <div className="mh">
             <b>{v.name}</b>
             <div className="dim" style={{ fontSize: 12 }}>{subtitle || v.email}</div>
           </div>
+          <MenuRow icon="people" label="My account" onClick={() => { close(); navigate("account"); }} />
           {me.config.demoAccounts ? (
             <>
               <MenuDivider />

@@ -4,6 +4,7 @@ import { updatePrefs } from "../lib/prefs";
 import FloorView from "./floor";
 import WorkOrdersView from "./work-orders";
 import { NOW, WOS, floorRead, mockApi, mount, resetApp, type Call } from "./floor/testkit";
+import { readsFor, travelerOf } from "./traveler/testkit";
 
 beforeEach(() => {
   resetApp();
@@ -215,9 +216,21 @@ describe("Floor: fidelity round 1", () => {
     expect(screen.getByText("Traveler")).toBeTruthy();
     expect(document.querySelector(".drawer .drawer-h")).toBeTruthy();
     expect(document.querySelector(".drawer .pipe .st")).toBeTruthy();
-    fireEvent.click(screen.getByText("Traveler"));
+  });
+
+  it("opens the Traveler drawer (Journey, Documents, History tabs, ?traveler= in the URL) from the token, and the printable page from inside it", async () => {
+    mockApi(Object.assign({}, ...WOS.map((w) => readsFor(w, travelerOf(w)))));
+    mount(<FloorView />);
+    await screen.findByRole("button", { name: /Line control/ });
+    fireEvent.click(document.querySelector(".belt .tok") as HTMLElement);
+    fireEvent.click(await screen.findByText("Traveler"));
+    for (const t of ["journey", "documents", "history"]) await waitFor(() => expect(document.getElementById(`trv-tab-${t}`)).toBeTruthy());
+    await waitFor(() => expect(window.location.search).toMatch(/traveler=WO-/));
+    expect(window.location.hash).not.toMatch(/traveler\/WO-/);
+    fireEvent.click(document.getElementById("trv-tab-documents") as HTMLElement);
+    await waitFor(() => expect(window.location.search).toContain("ttab=documents"));
+    fireEvent.click(document.getElementById("trv-open-page") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toMatch(/\/traveler\/WO-/));
-    expect(document.querySelector(".drawer .drawer-h")).toBeNull();
   });
 
   it("shows the prototype empty states: no gates waiting, and an empty belt", async () => {

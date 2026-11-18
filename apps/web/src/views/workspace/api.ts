@@ -48,7 +48,12 @@ export const useInbox = (all = false) => useQuery({ queryKey: wk.inbox(all), que
 export const useWsAgents = (wo: string | null) => useQuery({ queryKey: qk.wsAgents(wo ?? ""), queryFn: () => get<{ items: WsAgent[] }>(api(`workspace/agents${wo ? `?wo=${enc(wo)}` : ""}`)), staleTime: 60_000 });
 export const useSearch = (q: string, kinds: string) =>
   useQuery({ queryKey: wk.search(q, kinds), queryFn: () => get<{ items: Hit[] }>(api(`workspace/search?q=${enc(q)}${kinds ? `&kinds=${enc(kinds)}` : ""}`)), enabled: q.trim().length >= 2, staleTime: 10_000 });
-export const useOperator = (on: boolean) => useQuery({ queryKey: wk.operator(), queryFn: () => get<OperatorView>(api("workspace/operator")), enabled: on, refetchInterval: 30_000 });
+export const useOperator = (on: boolean) => useQuery({ queryKey: wk.operator(), queryFn: async () => {
+      const v = await get<OperatorView>(api("workspace/operator"));
+      // A read that is not the operator view (an empty or unrelated body) is a failed read, never a half-drawn panel.
+      if (!v || !Array.isArray(v.stuck) || !Array.isArray(v.waiting) || !Array.isArray(v.budget) || !v.chats || !Array.isArray(v.chats.people) || !Array.isArray(v.projects)) throw new Error("The operator view came back in a shape this app does not know.");
+      return v;
+    }, enabled: on, refetchInterval: 30_000 });
 
 const done = <T extends { ok: boolean }>(r: T): T => {
   if (r.ok) invalidateSlices(["workspace", "console"]);

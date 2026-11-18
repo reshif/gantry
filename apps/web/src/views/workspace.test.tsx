@@ -213,4 +213,14 @@ describe("Operator view", () => {
     expect([...table.querySelectorAll("th")].map((th) => th.className)).toEqual(["", "num", "num"]);
     expect([...table.querySelectorAll("tbody td")].map((td) => td.className)).toEqual(["", "num mono", "num mono"]);
   });
+
+  it("shows a failed read, not the error boundary, when the operator read has no lists, reached by clicking Operator view", async () => {
+    window.location.hash = "#workspace/chats";
+    mockApi({ ...readsFor(intakeWo), "GET /api/v1/workspace/inbox": () => ({ body: { items: ITEMS } }), "GET /api/v1/workspace/operator": () => ({ body: {} }) });
+    mount(<WorkspaceView />);
+    await waitFor(() => expect(document.getElementById("ws-operator") ?? document.getElementById("ws-home-op")).toBeTruthy(), { timeout: 4000 });
+    fireEvent.click((document.getElementById("ws-operator") ?? document.getElementById("ws-home-op")) as HTMLElement);
+    expect(await screen.findByText(/Couldn.t load/i, {}, { timeout: 4000 })).toBeTruthy();
+    expect(document.getElementById("ws-op")).toBeTruthy();
+  });
 });

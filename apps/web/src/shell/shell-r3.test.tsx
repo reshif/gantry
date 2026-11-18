@@ -76,6 +76,14 @@ describe("user menu", () => {
     expect(menu.textContent).toContain("factory admin");
     expect(menu.textContent).toContain("Sign out");
   });
+  it("has My account as a menu entry that opens the account page", async () => {
+    const me = meRead({ config: { demoAccounts: false } });
+    mockApi({ "GET /api/v1/me": () => ({ body: me }) });
+    mount(<TopBar me={me as never} crumb={[]} project={PAYMENTS as never} current="home" navOpen={false} onOpenNav={() => undefined} onOpenPalette={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Account menu/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "My account" }));
+    await waitFor(() => expect(window.location.hash).toContain("account"));
+  });
   it("a persona the directory cannot resolve by id still shows initials, never ?", async () => {
     const list = [{ id: "idp-zed", name: "Zed Quill", email: "zed@acme.dev", role: "engineer", note: "" }];
     const me = meRead({ config: { demoAccounts: true, demoAccountList: list } });

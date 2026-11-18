@@ -125,15 +125,14 @@ describe("Audit", () => {
     expect(window.location.search).toContain("q=slack");
   });
 
-  it("has only Export CSV in the header, the verify result in a button-less banner, the All, Denied and Config views and no More filters", async () => {
+  it("has Export CSV and Verify chain in the header, the verify result in the banner, the All, Denied and Config views and no More filters", async () => {
     setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }), "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 1, msg: "Chain intact." } }) });
     mount(<AuditView />);
     await screen.findByText("role.add");
     expect(document.getElementById("aud-export")?.textContent).toContain("Export CSV");
-    expect(document.querySelector(".page-head #aud-verify, .page-acts #aud-verify")).toBeNull();
     await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
     expect(document.getElementById("aud-verified")?.querySelector("button")).toBeNull();
-    expect(document.getElementById("aud-verify")).toBeNull();
+    expect(document.getElementById("aud-verify")?.textContent).toContain("Verify chain");
     expect(document.getElementById("aud-verified-dismiss")).toBeNull();
     expect([...document.querySelectorAll("[role=tab]")].map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["All", "Denied", "Config"]);
     expect(document.querySelectorAll("#aud-ledger th .th-arrow").length).toBeGreaterThan(3);
@@ -212,5 +211,19 @@ describe("Audit", () => {
     mount(<AuditView />);
     await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
     expect(document.getElementById("aud-verified")?.textContent).toContain("no gaps");
+  });
+
+  it("has a Verify chain button that runs the verify read again and shows the result", async () => {
+    let n = 0;
+    const calls = setup(ASHA, {
+      "GET /api/v1/audit": () => ({ body: page([row(1)]) }),
+      "GET /api/v1/audit/verify": () => ({ body: (n += 1) < 2 ? { ok: true, checked: 1, msg: "Chain intact." } : { ok: false, checked: 1, msg: "Entry 1 does not match its digest." } }),
+    });
+    mount(<AuditView />);
+    await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
+    const before = calls.filter((c) => c.path === "/api/v1/audit/verify").length;
+    fireEvent.click(screen.getByRole("button", { name: "Verify chain" }));
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/audit/verify").length).toBe(before + 1));
+    await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("The chain is broken"));
   });
 });

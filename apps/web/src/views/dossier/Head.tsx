@@ -9,6 +9,7 @@ import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
 import { navigate } from "../../lib/router";
+import { useOpenTraveler } from "../../shell/useTraveler";
 import { classOf } from "../projects/kit";
 import { useActionSpecs } from "../traveler/Actions";
 import { bayLabel, stName, stNo, type TWo } from "../traveler/model";
@@ -39,6 +40,7 @@ export function reviewGate(wo: TWo, cat: Catalog) {
 
 export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: Catalog; project: Project; session: WoSession | undefined; rec: RecordData | undefined }) {
   const ui = useUI();
+  const openTraveler = useOpenTraveler();
   const actor = useActors();
   const specs = useActionSpecs(wo);
   const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;
@@ -80,7 +82,7 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
           <p className="sub">{`${project.name} · ${wo.repo} · requested by ${actor(wo.requestedBy).name}`}</p>
         </div>
         <div className="acts dz-actions" role="toolbar" aria-label="Work order actions">
-          <Btn label="Traveler" id="rec-traveler" onClick={() => navigate("traveler", wo.id, wo.project)} />
+          <Btn label="Traveler" id="rec-traveler" onClick={() => openTraveler(wo.id)} />
           <Btn label="Dossier" id="rec-dossier" onClick={() => navigate("dossier", wo.id, wo.project)} />
           <Btn label="Changes" id="rec-changes" onClick={() => navigate("changes", wo.id, wo.project)} />
           {retry.map((a) => <Btn key={a.key} label={a.label} kind="primary" icon={a.icon} id={a.id} guard={a.guard} onClick={a.onClick} />)}

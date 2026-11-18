@@ -40,12 +40,20 @@ describe("Work order page", () => {
     expect(labels.some((l) => /^Review /.test(l ?? ""))).toBe(true);
     expect(labels).not.toContain("Open conversation");
     expect(document.getElementById("rec-all")).toBeNull();
-    fireEvent.click(document.getElementById("rec-traveler") as HTMLElement);
-    await waitFor(() => expect(window.location.hash).toContain(`traveler/${W.id}`));
     fireEvent.click(document.getElementById("rec-dossier") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toContain(`dossier/${W.id}`));
     fireEvent.click(document.getElementById("rec-changes") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toContain(`changes/${W.id}`));
+  });
+
+  it("opens the Traveler drawer from the Traveler button, with its tabs and ?traveler= in the URL, and reaches the printable page from inside it", async () => {
+    await show({}, `#record/${W.id}`);
+    fireEvent.click(document.getElementById("rec-traveler") as HTMLElement);
+    for (const t of ["journey", "documents", "history"]) await waitFor(() => expect(document.getElementById(`trv-tab-${t}`)).toBeTruthy());
+    await waitFor(() => expect(window.location.search).toContain(`traveler=${W.id}`));
+    expect(window.location.hash).not.toContain("traveler/");
+    fireEvent.click(document.getElementById("trv-open-page") as HTMLElement);
+    await waitFor(() => expect(window.location.hash).toContain(`traveler/${W.id}`));
   });
 
   it("has the prototype's Actions menu: edit, reassign, park, send back, a divider and stop", async () => {

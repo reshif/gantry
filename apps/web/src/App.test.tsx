@@ -390,7 +390,8 @@ describe("signed in", () => {
     fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
     const menu = await screen.findByRole("menu", { name: "Account menu" });
     expect(menu.querySelector(".mh")?.textContent).toBe("Asha RamanHead · Factory Admin");
-    expect(menu.querySelector(".mh")?.getAttribute("role")).toBe("link");
+    expect(menu.querySelector(".mh")?.getAttribute("role")).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "My account" })).toBeTruthy();
     expect(within(menu).getByText("Sign out")).toBeTruthy();
     expect(within(menu).queryByText(/Theme/)).toBeNull();
   });
