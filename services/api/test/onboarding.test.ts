@@ -514,6 +514,33 @@ d("repo onboarding", () => {
     });
   });
 
+  describe("statechart gaps", () => {
+    it("S-3: a readiness halt does not block the onboarding merge that would restore readiness; any other halt still does", async () => {
+      const r = await ready();
+      expect((await verify(r, lostChecks(), "manual")).outcome).toBe("lost");
+      expect((await q(`select cause from stops where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]))[0].cause).toBe("readiness");
+      // Re-assess, open the PR, checks go green: the way back to Ready is the merge.
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`)).status).toBe(200);
+      await assessed({ id: r.id, runId: (await doc(r.id)).runId });
+      const cur = { id: r.id, runId: (await doc(r.id)).runId as string };
+      await opened(cur, 8, SHA("d"));
+      await green(cur, SHA("d"));
+      const m = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
+      expect(m.status, JSON.stringify(m.body)).toBe(200);
+      const adm = await call(admin, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
+      expect(adm.status).toBe(409); // already merging: refused for busy, not for the halt
+      expect(adm.body.msg).not.toMatch(/andon|Readiness lost/);
+      // A hand-pulled halt still refuses it.
+      await q(`update repos set data = jsonb_set(data, '{onboarding,busy}', 'null') where org_id = $1 and id = $2`, [t.orgId, r.id]);
+      await q(`update stops set lifted_by = 'system', lifted_at = now() where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]);
+      await q(`insert into stops (org_id, id, scope_type, project_id, repo_id, mode, reason, set_by) values ($1,$2,'repo','identity',$3,'halt','hand halt','p-lena')`, [t.orgId, `repo:${r.id}:s3`, r.id]);
+      const blocked = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.msg).toMatch(/hand halt/);
+      await q(`update stops set lifted_by = 'p-lena', lifted_at = now() where org_id = $1 and id = $2`, [t.orgId, `repo:${r.id}:s3`]);
+    });
+  });
+
   describe("Ready gates work orders", () => {
     const submit = (repo: string) => call(rui, "POST", "/api/v1/projects/identity/work-orders", { repo, title: "Add idempotency keys to refund requests", description: "Refunds can be retried by clients; the API should accept an Idempotency-Key header." });
 

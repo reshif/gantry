@@ -165,6 +165,8 @@ export interface StopInfo {
   mode: StopMode;
   reason: string;
   kill?: KillInfo;
+  /** For a halt: why it was raised (`readiness`, `budget`, `manual`). */
+  cause?: string;
 }
 
 const MODE_SEVERITY: Record<StopMode, number> = { halt: 1, kill: 2, archived: 2 };
@@ -201,7 +203,7 @@ export function effectiveStop(state: PolicyState, scope: { project?: string | nu
   const p = findProject(state, scope.project);
   if (p && p.halted) found.push({ level: "project", mode: "halt", reason: p.name + " is halted (andon): " + p.halted.reason });
   const r = findRepo(state, scope.repo);
-  if (r && r.halted) found.push({ level: "repo", mode: "halt", reason: r.name + " is halted (andon): " + r.halted.reason });
+  if (r && r.halted) found.push({ level: "repo", mode: "halt", reason: r.name + " is halted (andon): " + r.halted.reason, ...(r.halted.cause ? { cause: r.halted.cause } : {}) });
   const w = scope.wo;
   if (w && (w.killed || w.state === "killed")) found.push({ level: "workorder", mode: "kill", reason: w.id + " is killed" + (w.killed ? ": " + w.killed.reason + "." : "."), ...(w.killed ? { kill: w.killed } : {}) });
   if (!found.length) return null;
@@ -220,6 +222,8 @@ export function stopBlocks(state: PolicyState, action: string, stop: StopInfo): 
   if (STOP_EXEMPT.has(action)) return false;
   const act = actionsOf(state).find((a) => a.id === action);
   if (!act || act.scope !== "project" || !STOPPABLE_GROUPS.has(act.group)) return false;
+  // A halt Gantry raised for readiness never blocks the merge of the onboarding PR: that merge is how readiness is regained (onboarding/fence.ts says the same).
+  if (stop.mode === "halt" && stop.cause === "readiness" && action === "onboarding.merge") return false;
   return stop.mode === "halt" ? HALT_BLOCKS.has(action) : true;
 }
 

@@ -298,6 +298,8 @@ export interface HaltInfo {
   by: Id;
   at: Ms;
   reason: string;
+  /** Why the halt exists: `manual` (a person), `budget` or `readiness` (Gantry raised it). Absent on older data. */
+  cause?: string;
 }
 
 export interface Project {
