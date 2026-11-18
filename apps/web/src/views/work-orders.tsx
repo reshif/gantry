@@ -210,9 +210,10 @@ function WorkOrdersView() {
     const ids = [...sel];
     const ok = await ui.confirm({
       title: `Park ${ids.length} work order${ids.length === 1 ? "" : "s"}?`,
-      kicker: "Work orders",
-      body: "Parked work orders stop moving until someone resumes them.",
+      sub: "Parked work orders stop moving until someone resumes them.",
       ok: "Park",
+      bare: true,
+      cancelKind: "",
     });
     if (!ok) return;
     const r = await park.run(ids, "hold", "Parked from the work orders list");
@@ -224,6 +225,7 @@ function WorkOrdersView() {
     const n = sel.size;
     ui.dialog({
       title: "Set priority",
+      bare: true,
       sub: `${n} work order${n === 1 ? "" : "s"}`,
       body: (
         <Field label="Priority" htmlFor="wo-bulk-prio-select">
@@ -231,7 +233,7 @@ function WorkOrdersView() {
         </Field>
       ),
       actions: [
-        { label: "Cancel" },
+        { label: "Cancel", kind: "" },
         // Gantry has no endpoint that changes a work order's priority yet (backend gap): say so instead of pretending.
         { label: "Apply", kind: "primary", id: "wo-bulk-prio-apply", submit: true, onClick: (close) => { close(); ui.toast("Changing priority is not available yet: Gantry has no priority change on a work order.", "warn"); } },
       ],

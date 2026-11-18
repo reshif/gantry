@@ -30,6 +30,8 @@ export interface DialogOpts {
   cls?: string;
   /** True while the body holds unsaved input: Escape, scrim and close ask before discarding. */
   dirty?: boolean;
+  /** No corner close button (Escape, scrim and the footer still close). */
+  bare?: boolean;
   body: ReactNode | ((close: () => void) => ReactNode);
   actions?: DialogAction[];
   onClose?: () => void;
@@ -74,7 +76,7 @@ export interface UIApi {
   menu(anchor: HTMLElement, title: string | null, items: MenuItem[]): () => void;
   closePopover(): void;
   /** Resolves true when the person confirms. */
-  confirm(o: { title: string; body?: ReactNode; ok?: string; kind?: string; kicker?: string }): Promise<boolean>;
+  confirm(o: { title: string; body?: ReactNode; sub?: ReactNode; ok?: string; kind?: string; kicker?: string; bare?: boolean; cancelKind?: string }): Promise<boolean>;
   /** Reason prompt (legacy G.reasonDialog). onOk may return a refusal to show inline. */
   reasonDialog(o: {
     title: string;

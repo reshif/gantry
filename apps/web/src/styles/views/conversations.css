@@ -128,3 +128,9 @@
 /* Conversations (prototype): agent avatars are tinted, thread header details button, message author is plain text */
 .conv .av.av-agent { background: color-mix(in srgb, var(--agent) 22%, var(--surface-2)); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
 .conv-thread .card-h .conv-details { margin-left: auto; }
+
+/* the prototype thread card is a plain .card: the legacy .conv-thread padding and gap do not apply to it */
+.card.conv-thread { display: block; padding: 0; gap: 0; flex: none; }
+@media (max-width: 720px) {
+  .conv-thread .card-h { flex-wrap: wrap; }
+}

@@ -165,6 +165,7 @@ describe("Work orders table", () => {
     const pdlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
     expect(pdlg.textContent).toMatch(/Set priority/);
     expect(pdlg.querySelector("#wo-bulk-prio-select")).toBeTruthy();
+    expect(pdlg.querySelector('[aria-label="Close dialog"]')).toBeNull();
     expect(Array.from(pdlg.querySelectorAll("button")).map((b) => b.textContent)).toEqual(expect.arrayContaining(["Cancel", "Apply"]));
     fireEvent.click(Array.from(pdlg.querySelectorAll("button")).find((b) => b.textContent === "Cancel") as HTMLElement);
     await waitFor(() => expect(document.querySelector(".dlg")).toBeNull());
@@ -173,6 +174,11 @@ describe("Work orders table", () => {
     const dlg = document.querySelector(".dlg") as HTMLElement;
     // the Park dialog is a plain confirm: no reason field
     expect(dlg.querySelector("textarea,input")).toBeNull();
+    // prototype shape: no eyebrow, no close X, the sentence is the sub line, Cancel is the bordered secondary button
+    expect(dlg.querySelector(".kicker")).toBeNull();
+    expect(dlg.querySelector('[aria-label="Close dialog"]')).toBeNull();
+    expect(dlg.querySelector(".dlg-sub")?.textContent).toContain("Parked work orders stop moving");
+    expect((Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "Cancel") as HTMLElement).className).not.toContain("ghost");
     fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "Park") as HTMLElement);
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/work-orders/WO-2398/park")).toBe(true));
     await waitFor(() => expect(document.getElementById("wo-bulk")).toBeNull());
