@@ -1,5 +1,5 @@
 /** Typed reads for this slice of /api/v1. Keys come from ../keys (`qk`). */
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, get, getText } from "../client";
 import { qk } from "../keys";
 import type { Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
@@ -36,6 +36,17 @@ export const useWorkOrders = (projectId: string | null | undefined, q: { cursor?
     queryFn: () => get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), q),
     enabled: !!projectId,
   });
+/** Every work order in the given projects (first 100 of each), merged. `failed` is true when any project's list could not be read, so a count never claims more certainty than it has. */
+export function useWorkOrdersAcross(projectIds: string[]): { items: WorkOrder[]; pending: boolean; failed: boolean } {
+  const results = useQueries({
+    queries: projectIds.map((id) => ({
+      queryKey: qk.workOrders(id, { limit: 100 }),
+      queryFn: () => get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(id)}/work-orders`), { limit: 100 }),
+    })),
+  });
+  const items = results.flatMap((r) => (r.data ? (Array.isArray(r.data) ? r.data : r.data.items) : []));
+  return { items, pending: results.some((r) => r.isPending), failed: results.some((r) => r.isError) };
+}
 export const useWorkOrder = (id: string | null | undefined) =>
   useQuery({ queryKey: qk.workOrder(id ?? ""), queryFn: () => get<WorkOrder>(api(`work-orders/${encodeURIComponent(id ?? "")}`)), enabled: !!id });
 export const useConversations = (q: { project?: string; awaitingMe?: boolean } = {}) =>

@@ -182,8 +182,8 @@ export function useOffboard(args: { perm: Decision; projects: Project[]; roleNam
     deactivate(p: Person, guard: Decision) {
       let submit: () => void = () => undefined;
       ui.dialog({
-        title: `Deactivate ${p.name}?`, kicker: "People", wide: true,
-        sub: "They lose access now. History stays on the audit log, and you can reactivate them later.",
+        title: `Deactivate ${p.name}`,
+        sub: `${p.name} will be signed out everywhere. Open work they hold stays on the line and is reassigned to their team lead. History stays on the audit log, and you can reactivate them later.`,
         body: (close) => <DeactivateForm p={p} projects={args.projects} roleName={args.roleName} perm={guard} registerSubmit={(fn) => (submit = fn)} onDone={(r) => {
           close();
           ui.dialog({
@@ -197,8 +197,8 @@ export function useOffboard(args: { perm: Decision; projects: Project[]; roleNam
     },
     reactivate(p: Person) {
       ui.reasonDialog({
-        title: `Reactivate ${p.name}?`, kicker: "People",
-        sub: "They can sign in again. Roles come back; API keys and sessions do not.",
+        title: `Reactivate ${p.name}`,
+        sub: "They can sign in again with their previous roles. API keys and sessions do not come back.",
         label: "Reason", placeholder: "Why are they back?", ok: "Reactivate", min: MIN_REASON, guard: args.perm,
         onOk: async (reason) => {
           const r = await ops.reactivatePerson(p.id, reason, p.version !== undefined ? { ifMatch: p.version } : undefined);

@@ -157,3 +157,18 @@ describe("ExtLink", () => {
     expect(safeExternalUrl("ftp://x")).toBeNull();
   });
 });
+
+describe("additive primitive options used by the govern sheets", () => {
+  it("ViewHead renders a breadcrumb trail in place of the drawing number, Toggle draws a square checkbox, Stat takes the info tone", async () => {
+    const { ViewHead, Toggle, Stat } = await import("./primitives");
+    const { render: r, screen: sc } = await import("@testing-library/react");
+    r(<><ViewHead title="Meera" crumbs={[{ label: "People & teams", href: "#people" }, { label: "Meera" }]} /><Toggle id="t1" variant="check" checked label="Role can Act" /><Stat label="Roles" value="10" tone="info" /></>);
+    const nav = sc.getByRole("navigation", { name: "Breadcrumb" });
+    expect(nav.querySelector("a")?.getAttribute("href")).toBe("#people");
+    expect(document.querySelector("[title='Drawing number']")).toBeNull();
+    const box = sc.getByLabelText("Role can Act");
+    expect(box.className).toContain("mx");
+    expect(box.getAttribute("role")).toBeNull();
+    expect(document.querySelector(".stat.info")).toBeTruthy();
+  });
+});

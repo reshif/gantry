@@ -253,6 +253,9 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
         runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
       };
     }
+    /* ---- gov1 fixtures (People, Workload, Access): the seed catalogue carries the Compliance sign-off gate that the Workload queue chart lists ---- */
+    if (path === "catalog") return seed.catalog;
+    /* ---- end gov1 fixtures ---- */
     if (path === "workload") {
       const people = (seed.people as Array<{ id: string; name: string; status: string; oncall?: boolean; teams?: string[] }>).filter((x) => x.status === "active");
       const rows = people.map((x, i) => ({ person: x.id, name: x.name, team: x.teams?.[0] ?? null, glass: 0, perDay: (4 + i) / 7, waitN: 6, waiting: i % 3, approvals: 4 + i, answered: i % 4, medianResponseMin: 12 + i, afterHours: i % 2, n: 6, sole: i % 5 === 0 ? 1 : 0, minutes: 30 + i * 5, away: null, oncall: !!x.oncall, waitingGates: [], recent: [] }));

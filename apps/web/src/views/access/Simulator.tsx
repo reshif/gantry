@@ -1,5 +1,9 @@
-import { DAYS, fmt, istTime, istToday, type Person, type Project, type Repo, type SimulationResult, type Action } from "@gantry/domain";
+import { useState } from "react";
+import { DAYS, fmt, istTime, type Person, type Project, type Repo, type SimulationResult, type Action } from "@gantry/domain";
+import { ops } from "../../api/ops";
 import { Btn, Field, Panel, Select } from "../../ui/primitives";
+import { useUI } from "../../ui/overlay-context";
+import { useQS } from "../govern/kit";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { ExplainDenial } from "../console/ExplainDenial";
@@ -22,26 +26,7 @@ export const nowIst = () => {
   const d = new Date(Date.now() + 330 * 60000).toISOString();
   return { date: d.slice(0, 10), time: d.slice(11, 16) };
 };
-const nextDow = (dow: number) => {
-  const today = new Date(Date.now() + 330 * 60000).getUTCDay();
-  return istToday(Date.now(), (dow - today + 7) % 7 || 7);
-};
 export const simTime = (s: Sim) => istTime(s.date, s.time);
-
-/** The legacy example questions. They name seeded people and projects, so only the ones that exist in this org are offered. */
-export function presets(people: Person[], projects: Project[], repos: Repo[]): Array<{ label: string; s: () => Sim }> {
-  const n = () => nowIst();
-  const all: Array<{ label: string; need: string[]; s: () => Sim }> = [
-    { label: "Kenji releases Payments on Friday 22:00", need: ["p-kenji", "payments", "payments-api"], s: () => ({ person: "p-kenji", action: "release", project: "payments", repo: "payments-api", date: nextDow(5), time: "22:00" }) },
-    { label: "Kenji releases Payments on Wednesday 11:00", need: ["p-kenji", "payments", "payments-api"], s: () => ({ person: "p-kenji", action: "release", project: "payments", repo: "payments-api", date: nextDow(3), time: "11:00" }) },
-    { label: "Release payouts-worker during a freeze", need: ["p-kenji", "payments", "payouts-worker"], s: () => ({ person: "p-kenji", action: "release", project: "payments", repo: "payouts-worker", date: istToday(Date.now(), 1), time: "11:00" }) },
-    { label: "Priya kills Risk at 02:00", need: ["p-priya", "risk"], s: () => ({ person: "p-priya", action: "kill.project", project: "risk", repo: "", date: istToday(Date.now(), 1), time: "02:00" }) },
-    { label: "Lena releases Identity on Sunday 03:00", need: ["p-lena", "identity"], s: () => ({ person: "p-lena", action: "release", project: "identity", repo: "", date: nextDow(0), time: "03:00" }) },
-    { label: "Tomás approves a gate in Storefront", need: ["p-tomas", "storefront"], s: () => ({ person: "p-tomas", action: "gate.approve", project: "storefront", repo: "", date: n().date, time: n().time }) },
-  ];
-  const have = new Set([...people.map((p) => p.id), ...projects.map((p) => p.id), ...repos.map((r) => r.id)]);
-  return all.filter((p) => p.need.every((x) => have.has(x)));
-}
 
 function Trace({ lines }: { lines: string[] }) {
   return (
@@ -93,78 +78,66 @@ function WeekStrip({ r }: { r: Evaluated }) {
   );
 }
 
-export function Simulator({ people, projects, repos, actions, sim, setSim, evaluated, onEvaluate, onShowRule, presetsList }: {
-  people: Person[]; projects: Project[]; repos: Repo[]; actions: Action[]; sim: Sim; setSim: (s: Sim) => void; evaluated: Evaluated | null;
-  onEvaluate: (s: Sim) => void; onShowRule: (tab: string) => void; presetsList: Array<{ label: string; s: () => Sim }>;
-}) {
+export function Simulator({ people, projects, repos, actions, defaults }: { people: Person[]; projects: Project[]; repos: Repo[]; actions: Action[]; defaults: Sim }) {
+  const ui = useUI();
   const actors = useActors();
-  const act = actions.find((a) => a.id === sim.action);
+  const [person, setPerson] = useQS("acc.person", defaults.person);
+  const [action, setAction] = useQS("acc.action", defaults.action);
+  const [project, setProject] = useQS("acc.project", defaults.project);
+  const [extra, setExtra] = useState({ repo: "", date: defaults.date, time: defaults.time });
+  const [r, setR] = useState<Evaluated | null>(null);
+  const sim: Sim = { person, action, project, ...extra };
+  const act = actions.find((a) => a.id === action);
   const scoped = !act || act.scope === "project";
-  const set = (k: keyof Sim) => (v: string) => setSim({ ...sim, [k]: v, ...(k === "project" ? { repo: "" } : {}) });
-  const r = evaluated;
+
+  const check = async () => {
+    const t = simTime(sim);
+    const res = await ops.simulateAccess({ person, action, ...(scoped ? { project, ...(sim.repo ? { repo: sim.repo } : {}) } : {}), time: t });
+    if (!res.ok) return void ui.toast(res.msg, "error");
+    setR({ sim, t, result: res as unknown as SimulationResult });
+  };
+
   const rd = r?.result.decision;
   const ract = r ? actions.find((a) => a.id === r.sim.action) : undefined;
   const rp = r ? projects.find((p) => p.id === r.sim.project) : undefined;
-  const rr = r?.sim.repo ? repos.find((x) => x.id === r.sim.repo) : undefined;
   const rule = rd?.rule as { freeze?: string } | undefined;
   return (
-    <Panel title="Policy simulator" cls="panel-sim">
-      <p className="muted small acc-sim-hint">Could this person do this, there, then? The answer is asked again whenever the matrix, a policy, a freeze or the people change.</p>
-      <div className="acc-sim">
-        <div>
-          <form
-            className="sim-form acc-sim-form"
-            id="acc-sim-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              onEvaluate(sim);
-            }}
-          >
-            <Field label="Person" htmlFor="acc-sim-person"><Select id="acc-sim-person" value={sim.person} onChange={set("person")} options={people.map((p) => ({ value: p.id, label: p.name + (p.status === "invited" ? " (invited)" : "") }))} /></Field>
-            <Field label="Action" htmlFor="acc-sim-action"><Select id="acc-sim-action" value={sim.action} onChange={set("action")} options={actions.map((a) => ({ value: a.id, label: `${a.group}: ${a.name}` }))} /></Field>
-            <Field label="Project" htmlFor="acc-sim-project"><Select id="acc-sim-project" value={sim.project} onChange={set("project")} disabled={!scoped} title={scoped ? undefined : "Factory actions apply everywhere"} options={projects.map((p) => ({ value: p.id, label: p.name }))} /></Field>
-            <Field label="Repo" htmlFor="acc-sim-repo"><Select id="acc-sim-repo" value={sim.repo} onChange={set("repo")} disabled={!scoped} options={[{ value: "", label: "Any repo" }, ...repos.filter((x) => x.project === sim.project).map((x) => ({ value: x.id, label: x.name }))]} /></Field>
-            <Field label="Date (IST)" htmlFor="acc-sim-date"><input id="acc-sim-date" className="input mono" type="date" value={sim.date} onChange={(e) => setSim({ ...sim, date: e.target.value })} /></Field>
-            <Field label="Time (IST)" htmlFor="acc-sim-time"><input id="acc-sim-time" className="input mono" type="time" value={sim.time} onChange={(e) => setSim({ ...sim, time: e.target.value })} /></Field>
-            <div className="sim-go">
-              <Btn label="Evaluate" kind="primary" type="submit" icon="play" id="acc-sim-run" />
-              <Btn label="Use now" id="acc-sim-now" onClick={() => setSim({ ...sim, ...nowIst() })} />
-            </div>
-          </form>
-          {presetsList.length ? (
-            <div className="chips acc-presets">
-              <span className="kicker">Try</span>
-              {presetsList.map((pr, i) => (
-                <button key={pr.label} type="button" className="sugg" id={`acc-preset-${i}`} onClick={() => { const s = pr.s(); setSim(s); onEvaluate(s); }}>{pr.label}</button>
-              ))}
-            </div>
-          ) : null}
+    <Panel title="Can this person do this?">
+      <form id="acc-sim-form" onSubmit={(e) => { e.preventDefault(); void check(); }}>
+        <div className="cols w3">
+          <Field label="Person" htmlFor="acc-sim-person"><Select id="acc-sim-person" value={person} onChange={setPerson} options={people.map((p) => ({ value: p.id, label: p.name + (p.status === "invited" ? " (invited)" : "") }))} /></Field>
+          <Field label="Action" htmlFor="acc-sim-action"><Select id="acc-sim-action" value={action} onChange={setAction} options={actions.map((a) => ({ value: a.id, label: a.name }))} /></Field>
+          <Field label="Project" htmlFor="acc-sim-project"><Select id="acc-sim-project" value={project} onChange={(v) => { setProject(v); setExtra({ ...extra, repo: "" }); }} disabled={!scoped} title={scoped ? undefined : "Factory actions apply everywhere"} options={projects.map((p) => ({ value: p.id, label: p.name }))} /></Field>
         </div>
+        <details className="acc-adv" style={{ margin: "8px 0" }}>
+          <summary>Repo, date and time</summary>
+          <div className="cols w3">
+            <Field label="Repo" htmlFor="acc-sim-repo"><Select id="acc-sim-repo" value={extra.repo} onChange={(v) => setExtra({ ...extra, repo: v })} disabled={!scoped} options={[{ value: "", label: "Any repo" }, ...repos.filter((x) => x.project === project).map((x) => ({ value: x.id, label: x.name }))]} /></Field>
+            <Field label="Date (IST)" htmlFor="acc-sim-date"><input id="acc-sim-date" className="input mono" type="date" value={extra.date} onChange={(e) => setExtra({ ...extra, date: e.target.value })} /></Field>
+            <Field label="Time (IST)" htmlFor="acc-sim-time"><input id="acc-sim-time" className="input mono" type="time" value={extra.time} onChange={(e) => setExtra({ ...extra, time: e.target.value })} /></Field>
+          </div>
+          <Btn label="Use now" small id="acc-sim-now" onClick={() => setExtra({ ...extra, ...nowIst() })} />
+        </details>
+        <Btn label="Check" kind="primary" type="submit" id="acc-sim-run" />
+      </form>
+      <div style={{ marginTop: 12 }} aria-live="polite">
         {r && rd && ract ? (
-          <div className="acc-out">
-            <div className={`decision ${rd.allowed ? "is-allowed" : "is-denied"}`} aria-live="polite" id="acc-sim-result">
-              <div className="decision-v"><Icon name={rd.allowed ? "check" : "halt"} />{rd.allowed ? "Allowed" : "Denied"}</div>
-              <div><strong>{actors(r.sim.person).name}</strong>{` · ${ract.name.toLowerCase()}${ract.scope === "project" ? ` · ${rp?.name ?? r.sim.project}${rr ? ` / ${rr.name}` : ""}` : " · factory-wide"} · ${fmt.stamp(r.t)}`}</div>
-              <div className="decision-rule">
-                <span className="kicker">Deciding rule</span>
-                <span className="mono strong">{rule?.freeze ? `${rd.rule.id} + ${rule.freeze}` : rd.rule.id}</span>
-                <span>{rd.rule.name}</span>
-                <button type="button" className="linkish" id="acc-sim-show" onClick={() => onShowRule(rule?.freeze ? "freezes" : rd.rule.kind === "policy" ? "policies" : "matrix")}>Show rule</button>
-              </div>
-              <p>{rd.reason}</p>
-              {rd.needs && !rd.allowed ? <p className="small"><strong>To allow it: </strong>{`${rd.needs}.`}</p> : null}
-              {!rd.allowed ? <ExplainDenial id="acc-sim-explain" person={r.sim.person} action={r.sim.action} project={ract.scope === "project" ? r.sim.project : null} repo={ract.scope === "project" ? r.sim.repo || null : null} time={r.t} /> : null}
+          <div id="acc-sim-result">
+            <div className={`callout ${rd.allowed ? "ok" : "bad"}`}>
+              <b>{rd.allowed ? "Allowed" : "Denied"}</b>
+              {`${actors(r.sim.person).name} \u00b7 ${ract.name.toLowerCase()}${ract.scope === "project" ? ` \u00b7 ${rp?.name ?? r.sim.project}` : " \u00b7 factory-wide"} \u00b7 ${fmt.stamp(r.t)}. ${rd.reason}`}
+              {rd.needs && !rd.allowed ? ` To allow it: ${rd.needs}.` : ""}
             </div>
-            <details className="acc-why" open>
+            <div className="small muted" style={{ marginTop: 8 }}>{`Deciding rule ${rule?.freeze ? `${rd.rule.id} + ${rule.freeze}` : rd.rule.id}${rd.rule.name ? `: ${rd.rule.name}` : ""}`}</div>
+            {!rd.allowed ? <ExplainDenial id="acc-sim-explain" person={r.sim.person} action={r.sim.action} project={ract.scope === "project" ? r.sim.project : null} repo={ract.scope === "project" ? r.sim.repo || null : null} time={r.t} /> : null}
+            <details className="acc-why">
               <summary>How the engine got there</summary>
               <Trace lines={r.result.trace} />
+              <div className="acc-wk-h"><span className="sub-h">Same question, every hour of the next 7 days</span></div>
+              <WeekStrip r={r} />
             </details>
-            <div className="acc-wk-h"><span className="sub-h">Same question, every hour of the next 7 days</span></div>
-            <WeekStrip r={r} />
           </div>
-        ) : (
-          <div className="acc-out"><p className="muted small acc-sim-empty">Pick a person, action, project or repo and an IST time, then evaluate. The deciding rule is highlighted in the tabs below, and the week strip shows when the answer changes.</p></div>
-        )}
+        ) : null}
       </div>
     </Panel>
   );

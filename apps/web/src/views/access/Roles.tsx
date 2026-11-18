@@ -3,6 +3,7 @@ import type { Action, Matrix, Person, Role } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { Btn, Chip, Field, LockNote, Segmented, Select, type Decision } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
 import { useUI } from "../../ui/overlay-context";
 import { ifMatchOf, lockd, useOutcome } from "../govern/data";
 
@@ -48,49 +49,31 @@ export function RolesList({ roles, matrix, actions, people, onRights, onEdit, on
   roles: Role[]; matrix: Matrix; actions: Action[]; people: Person[]; onRights: (id: string) => void; onEdit: (r: Role) => void; onRemove: (r: Role) => void;
 }) {
   const perm = useCan("role.edit") as Decision;
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: "", dir: 1 });
-  const holdersOf = (id: string) => people.filter((p) => p.roles.some((g) => g.role === id));
+  const ui = useUI();
+  const holdersOf = (id: string) => people.filter((p) => p.roles.some((g) => g.role === id)).length;
   const grantsOf = (id: string) => actions.filter((a) => matrix[id]?.[a.id]).length;
-  const val: Record<string, (r: Role) => string | number> = { name: (r) => r.name.toLowerCase(), level: (r) => r.level, acts: (r) => grantsOf(r.id), holders: (r) => holdersOf(r.id).length };
-  const rows = [...roles];
-  if (sort.key && val[sort.key]) rows.sort((a, b) => (val[sort.key]!(a) > val[sort.key]!(b) ? 1 : val[sort.key]!(a) < val[sort.key]!(b) ? -1 : 0) * sort.dir);
-  const th = (key: string, label: string, align?: string) => (
-    <th scope="col" className={align === "end" ? "num" : undefined} aria-sort={sort.key === key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
-      <button type="button" className={`th-sort${sort.key === key ? " is-active" : ""}`} onClick={() => setSort({ key, dir: sort.key === key ? (sort.dir === 1 ? -1 : 1) : 1 })}>{label}</button>
-    </th>
-  );
   return (
-    <div className="acc-roles">
-      <p className="muted small acc-mx-note">Built-in roles plus custom roles your organisation adds. Custom roles are cloned from an existing role and then edited in the matrix. Holding a factory role makes every project visible.</p>
-      <div className="table-scroll">
-        <table className="table" id="acc-roles-table">
-          <caption className="sr">Roles</caption>
-          <thead><tr>{th("name", "Role")}{th("level", "Scope")}<th scope="col">Cloned from</th>{th("acts", "Actions", "end")}{th("holders", "Held by")}<th scope="col">Description</th><th scope="col"><span className="sr">Actions</span></th></tr></thead>
-          <tbody>
-            {rows.map((r) => {
-              const hs = holdersOf(r.id);
-              return (
-                <tr key={r.id}>
-                  <td><span className="acc-role-name"><strong>{r.name}</strong>{r.custom ? <Chip text="custom" cls="chip-accent" /> : null}<span className="mono muted small">{r.id}</span></span></td>
-                  <td>{r.level === "factory" ? "Factory" : "Project"}</td>
-                  <td>{r.base ? roles.find((x) => x.id === r.base)?.name ?? r.base : <span className="muted">built in</span>}</td>
-                  <td className="num"><span className="mono">{grantsOf(r.id)}</span></td>
-                  <td>{hs.length ? <span className="small">{hs.slice(0, 3).map((p) => p.name).join(", ") + (hs.length > 3 ? ` +${hs.length - 3}` : "")}</span> : <span className="muted small">nobody</span>}</td>
-                  <td><span className="small">{r.desc ?? ""}</span></td>
-                  <td>
-                    <span className="row gap-sm acc-role-tools">
-                      <Btn label="Rights" small kind="ghost" id={`acc-role-mx-${r.id}`} onClick={() => onRights(r.id)} />
-                      <Btn label="Edit" small kind="ghost" id={`acc-role-edit-${r.id}`} guard={!perm.allowed ? perm : !r.custom ? lockd(`${r.name} is built in. Edit its rights in the matrix.`) : null} onClick={() => onEdit(r)} />
-                      <Btn label="Remove" small kind="ghost" id={`acc-role-rm-${r.id}`} guard={!perm.allowed ? perm : !r.custom ? lockd(`${r.name} is built in and cannot be removed.`) : null} onClick={() => onRemove(r)} />
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DataTable<Role>
+      id="acc-roles-table"
+      caption="Roles"
+      rows={roles}
+      rowKey={(r) => r.id}
+      columns={[
+        { key: "name", label: "Role", render: (r) => (
+          <span className="row" style={{ flexWrap: "nowrap", justifyContent: "space-between" }}>
+            <b>{r.name}</b>
+            <Btn icon="dots" aria={`Manage ${r.name}`} small kind="ghost" cls="icon" id={`acc-role-menu-${r.id}`} onClick={(e) => ui.menu(e.currentTarget, r.name, [
+              { label: "Show rights in the matrix", icon: "list", onClick: () => onRights(r.id) },
+              { label: "Edit role", icon: "tag", guard: !perm.allowed ? perm : !r.custom ? lockd(`${r.name} is built in. Edit its rights in the matrix.`) : null, onClick: () => onEdit(r) },
+              { label: "Remove role", icon: "x", kind: "danger", guard: !perm.allowed ? perm : !r.custom ? lockd(`${r.name} is built in and cannot be removed.`) : null, onClick: () => onRemove(r) },
+            ])} />
+          </span>
+        ) },
+        { key: "level", label: "Level", render: (r) => <Chip text={r.level} cls="plain" /> },
+        { key: "members", label: "Members", align: "end", render: (r) => holdersOf(r.id) },
+        { key: "acts", label: "Actions", align: "end", render: (r) => grantsOf(r.id) },
+      ]}
+    />
   );
 }
 

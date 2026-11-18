@@ -3,7 +3,7 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Children, Fragment, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
@@ -90,16 +90,17 @@ export function IconBtn({ icon, label, className = "", onClick, ...rest }: { ico
 /* ---------- form controls ---------- */
 
 /** Switch (checkbox with role=switch). A forbidden decision locks it and shows the reason on click. */
-export function Toggle({ id, checked, onChange, decision, label }: { id: string; checked: boolean; onChange?: (v: boolean) => void; decision?: Decision | null; label?: string }) {
+export function Toggle({ id, checked, onChange, decision, label, variant }: { id: string; checked: boolean; onChange?: (v: boolean) => void; decision?: Decision | null; label?: string; /** "check" draws the prototype's square matrix checkbox instead of the switch. */ variant?: "check" }) {
   const g = guardProps(decision);
+  const box = variant === "check";
   return (
-    <span className={`switch${g.locked ? " is-locked" : ""}`}>
+    <span className={`${box ? "checkbox" : "switch"}${g.locked ? " is-locked" : ""}`}>
       <input
         aria-description={g["data-reason"]}
         type="checkbox"
-        role="switch"
+        role={box ? undefined : "switch"}
         id={id}
-        className={`sw switch-input${g.locked ? " is-locked" : ""}`}
+        className={`${box ? "mx" : "sw switch-input"}${g.locked ? " is-locked" : ""}`}
         checked={checked}
         aria-label={label}
         aria-disabled={g["aria-disabled"]}
@@ -324,16 +325,22 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
 }
 
 /** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
-export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: { sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, crumbs }: { sheet?: string; /** Breadcrumb trail that replaces the drawing-number eyebrow (prototype pageHeader `crumbs`). */ crumbs?: Array<{ label: ReactNode; href?: string }>; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
   const hashId = useHash().id || "home";
   const route = sheet ?? hashId;
   return (
     <header className="ph vhead">
       <div className="title vhead-main">
-        <div className="eyebrow kicker">
-          <span title="Drawing number">{drawingNo(route)}</span>
-          {kicker ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
-        </div>
+        {crumbs ? (
+          <nav className="eyebrow kicker" aria-label="Breadcrumb">
+            {crumbs.map((c, i) => <Fragment key={i}>{i ? <span aria-hidden="true">/</span> : null}{c.href ? <a href={c.href}>{c.label}</a> : <span aria-current="page">{c.label}</span>}</Fragment>)}
+          </nav>
+        ) : (
+          <div className="eyebrow kicker">
+            <span title="Drawing number">{drawingNo(route)}</span>
+            {kicker ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
+          </div>
+        )}
         {status ? <div className="row vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
         {sub ? <p className="sub vsub">{sub}</p> : null}
         {meta ? (
@@ -350,8 +357,8 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: {
 }
 
 /** One stat tile: a quiet label, a big value, an optional note. Put them in <StatRow>. `value` may be the result of qState(). */
-export function Stat({ label, value, sub, tone, icon, id, action }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done"; icon?: string; id?: string; action?: ReactNode }) {
-  const t = tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : "";
+export function Stat({ label, value, sub, tone, icon, id, action }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done" | "info"; icon?: string; id?: string; action?: ReactNode }) {
+  const t = tone === "info" ? "info" : tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : "";
   return (
     <div className={`stat${t ? ` ${t}` : ""} stat-tile${tone ? ` stat-${tone}` : ""}`} id={id}>
       <div className="micro stat-lbl">

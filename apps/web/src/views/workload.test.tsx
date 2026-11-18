@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,6 +58,9 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
     "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }),
     "GET /api/v1/catalog": () => ({ body: DEFAULT_CATALOG }),
     "GET /api/v1/agents": () => ({ body: [] }),
+    "GET /api/v1/access/matrix": () => ({ body: { matrix: { factory_admin: { "gate.approve": true }, reviewer: { "gate.approve": true } }, roles: [{ id: "factory_admin", name: "Factory Admin", level: "factory" }, { id: "reviewer", name: "Reviewer", level: "project" }], actions: [], version: 1 } }),
+    "GET /api/v1/projects/payments/work-orders": () => ({ body: [{ id: "WO-1", title: "A", project: "payments", state: "waiting", requestedBy: "p-meera", gates: { G2: { status: "waiting" } } }, { id: "WO-2", title: "B", project: "payments", state: "running", requestedBy: "p-meera", gates: {} }, { id: "WO-3", title: "C", project: "payments", state: "done", requestedBy: "p-meera", gates: {} }] }),
+    "GET /api/v1/projects/risk/work-orders": () => ({ body: [{ id: "WO-4", title: "D", project: "risk", state: "waiting", requestedBy: "p-meera", gates: { G5: { status: "waiting" } } }] }),
     "GET /api/v1/workload": (url) => {
       const q = new URL(url, "http://x").searchParams;
       return { body: { ...WORKLOAD, days: Number(q.get("days") ?? 7), scope: q.get("scope") ?? "all" } };
@@ -96,6 +99,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/"); // view state lives in the query string
 });
 afterEach(() => {
   cleanup();
@@ -110,46 +114,47 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     expect(document.getElementById("wl-hidden")?.textContent).toContain("Needs workload.view.");
   });
 
-  it("shows the title block, the bus-factor note and the people table with counts beside every rate", async () => {
+  it("shows the prototype sheet: four stats, the two charts and a §3 People table with Can approve, Open requests, At a gate, Actions logged and On call", async () => {
     setup();
     mount();
     const t = await byId("wl-people");
     expect(document.body.textContent).toContain("Approvals waiting3");
-    expect(document.body.textContent).toContain("Median wait 1h 35m");
-    expect(document.body.textContent).toContain("After hours 33%");
-    expect(document.querySelector(".wl-bus")?.textContent).toContain("2 of 3 waiting gates have exactly one eligible approver; 1 have nobody eligible except break-glass. That person is the bus factor for that work.");
-    const priya = t.querySelector("tr[data-key='p-priya']")!;
-    await waitFor(() => expect(priya.textContent).toContain("Priya Nair"));
-    expect(priya.textContent).toContain("on call");
-    expect(priya.textContent).toContain("+1 break-glass");
-    expect(priya.textContent).toContain("1h 35m");
-    expect(priya.textContent).toContain("n=8");
-    expect(priya.textContent).toContain("1.39 in 7d"); // 1.3 a day, 9 in 7d
-    expect(priya.textContent).toContain("36%");
-    expect(priya.textContent).toContain("2 of 2");
-    expect(priya.textContent).toContain("100%");
-    const meera = t.querySelector("tr[data-key='p-meera']")!;
-    expect(meera.textContent).toContain("away");
-    // two timed approvals and two acts are not enough for a rate
-    expect(meera.textContent).toContain("insufficient data, n=2");
-    expect(meera.textContent).toContain("0/2");
-    expect(meera.textContent).toContain("none waiting");
-    expect(document.querySelector(".footnote")?.textContent).toContain("Out of hours means outside Mon to Fri 09:00 to 19:00 IST.");
+    expect(document.body.textContent).toContain("Oldest wait3 h");
+    // approvers are the people whose role the matrix lets approve gates (Priya, Meera hold the factory role here)
+    expect(document.getElementById("wl-stats")?.textContent).toContain("Approvers3");
+    expect(Array.from(t.querySelectorAll("thead th")).map((h) => h.textContent?.replace(/[\u2191\u2193]/g, ""))).toEqual(["Person", "Can approve", "Open requests", "At a gate", "Actions logged", "On call"]);
+    // no old controls: project select, tabs, bus-factor callout
+    expect(document.getElementById("wl-project")).toBeNull();
+    expect(document.getElementById("wl-tab-teams")).toBeNull();
+    expect(document.querySelector(".wl-bus")).toBeNull();
+    // Meera asked for 3 open orders over both projects (WO-3 is done), 2 of them at a gate; the list is sorted by open requests, newest first
+    const meera = await waitFor(() => { const r = t.querySelector("tr[data-key='p-meera']"); if (!r?.textContent?.includes("2")) throw new Error("no counts"); return r; });
+    expect(meera.querySelector("td[data-label='Open requests']")?.textContent).toBe("3");
+    expect(meera.querySelector("td[data-label='At a gate']")?.textContent).toBe("2");
+    expect(t.querySelector("tr[data-key='p-priya'] td[data-label='On call']")?.textContent).toBe("on call");
+    expect(Array.from(t.querySelectorAll("tbody tr"))[0]?.getAttribute("data-key")).toBe("p-meera");
+    expect(screen.getByText("3 persons")).toBeTruthy();
+    expect(screen.getByText("1\u20133 of 3")).toBeTruthy();
   });
 
-  it("asks the server for the chosen project and window", async () => {
+  it("links a person to their page, filters by approver in the address bar, and fetches the window the control picks", async () => {
     const calls = setup();
     mount();
     await byId("wl-people");
     expect(reads(calls)[0]!.query.get("scope")).toBe("all");
     expect(reads(calls)[0]!.query.get("days")).toBe("7");
-    type(await byId("wl-project"), "risk");
-    await waitFor(() => expect(reads(calls).some((c) => c.query.get("scope") === "risk")).toBe(true));
+    const link = await screen.findByRole("link", { name: "Priya Nair" });
+    expect(link.getAttribute("href")).toBe("#person/p-priya");
+    fireEvent.click(link);
+    expect(window.location.hash).toBe("#person/p-priya");
+    type(await byId("wl-f-approver"), "no");
+    expect(window.location.search).toContain("wl.approver=no");
+    expect(await screen.findByText("Nothing matches these filters")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(window.location.search).not.toContain("wl.approver");
     fireEvent.click(document.getElementById("wl-days-1")!);
-    await waitFor(() => expect(reads(calls).some((c) => c.query.get("days") === "1" && c.query.get("scope") === "risk")).toBe(true));
-    const before = reads(calls).length;
-    fireEvent.click(await byId("wl-refresh"));
-    await waitFor(() => expect(reads(calls).length).toBe(before + 1));
+    await waitFor(() => expect(reads(calls).some((c) => c.query.get("days") === "1")).toBe(true));
+    expect(window.location.search).toContain("wl.days=1");
   });
 
   it("lists suggestions with the top five, and a link to show them all", async () => {
@@ -173,7 +178,7 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     fireEvent.click(await byId("wl-sg-tp-TP-1"));
     expect(window.location.hash).toBe("#trust");
     fireEvent.click(await byId("wl-sg-ah-p-priya"));
-    expect(window.location.hash).toBe("#people/p-priya");
+    expect(window.location.hash).toBe("#person/p-priya");
   });
 
   it("locks the approver-rule suggestion with the reason when the person cannot edit rules", async () => {
@@ -199,69 +204,5 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     fireEvent.click(await byId("wl-dl-save"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/people/p-meera/away", body: { away: { delegate: "p-priya", to: expect.any(Number) }, project: null } });
-  });
-
-  it("opens a person's drawer with what waits on them and their recent acts, and ends a delegation", async () => {
-    const calls = setup({ "PUT /api/v1/people/p-meera/away": () => ({ body: { ok: true, msg: "Meera Iyer is back." } }) });
-    mount();
-    const t = await byId("wl-people");
-    fireEvent.click(t.querySelector("tr[data-key='p-priya']")!);
-    const dr = await byId("wl-drawer-close");
-    const drawer = dr.closest(".wl-drawer")!;
-    await waitFor(() => expect(drawer.textContent).toContain("Reviewer · on call"));
-    expect(drawer.textContent).toContain("Priya Nair");
-    expect(drawer.textContent).toContain("Reviewer · on call");
-    expect(drawer.querySelectorAll(".titleblock dd")).toHaveLength(5);
-    expect(drawer.textContent).toContain("Waiting on Priya");
-    expect(drawer.querySelector("#wl-dr-wo-w-WO-1042")).toBeTruthy();
-    expect(drawer.textContent).toContain("only approver");
-    expect(drawer.textContent).toContain("2 others eligible");
-    expect(drawer.textContent).toContain("approved G2");
-    expect(drawer.textContent).toContain("after 12m");
-    expect(drawer.textContent).toContain("answered a question");
-    fireEvent.click(dr);
-    await waitFor(() => expect(document.getElementById("wl-drawer-close")).toBeNull());
-    fireEvent.click(t.querySelector("tr[data-key='p-meera']")!);
-    expect((await byId("wl-dr-delegate")).textContent).toContain("Change delegation");
-    fireEvent.click(await byId("wl-dr-delegate"));
-    fireEvent.click(await byId("wl-dl-end"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ path: "/api/v1/people/p-meera/away", body: { away: null } });
-  });
-
-  it("shows teams, where work waits and the minutes per work order, with small samples marked", async () => {
-    setup();
-    mount();
-    fireEvent.click(await byId("wl-tab-teams"));
-    const teams = await byId("wl-teams");
-    expect(teams.textContent).toContain("Payments");
-    expect(teams.textContent).toContain("1.6");
-    fireEvent.click(await byId("wl-tab-waits"));
-    const b = await byId("wl-bottlenecks");
-    expect(b.querySelector("tr[data-key='payments:G2']")?.textContent).toContain("2h 10m");
-    expect(b.querySelector("tr[data-key='payments:G2']")?.textContent).toContain("only 1");
-    expect(b.querySelector("tr[data-key='payments:G2']")?.textContent).toContain("3h 00m");
-    expect(document.getElementById("wl-bn-cfg-payments-G2")).toBeTruthy();
-    expect(document.getElementById("wl-np-WO-1050")?.textContent).toBe("WO-1050");
-    expect(document.body.textContent).toContain("Waiting on a decision");
-    fireEvent.click(document.getElementById("wl-bn-cfg-risk-G5")!);
-    expect(window.location.hash).toMatch(/^#(\/p\/[^/]+\/)?project-config$/);
-    fireEvent.click(await byId("wl-tab-minutes"));
-    const cls = await byId("wl-min-cls");
-    expect(cls.querySelector("tr[data-key='bug']")?.textContent).toContain("insufficient data");
-    expect(document.getElementById("wl-min-proj")).toBeTruthy();
-    expect(document.querySelector(".wl-mins")?.textContent).toContain("an approval counts 6 minutes, a brief confirmation 4 and a conversation answer 3");
-  });
-
-  it("sorts a column and keeps the sort across tabs", async () => {
-    setup();
-    mount();
-    const t = await byId("wl-people");
-    expect(Array.from(t.querySelectorAll("tbody tr")).map((r) => r.getAttribute("data-key"))).toEqual(["p-priya", "p-meera"]);
-    fireEvent.click(await byId("wl-people-sort-name"));
-    expect(Array.from(document.querySelectorAll("#wl-people tbody tr")).map((r) => r.getAttribute("data-key"))).toEqual(["p-meera", "p-priya"]);
-    fireEvent.click(await byId("wl-tab-teams"));
-    fireEvent.click(await byId("wl-tab-people"));
-    expect(Array.from(document.querySelectorAll("#wl-people tbody tr")).map((r) => r.getAttribute("data-key"))).toEqual(["p-meera", "p-priya"]);
   });
 });
