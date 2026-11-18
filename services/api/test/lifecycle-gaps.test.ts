@@ -95,4 +95,63 @@ d("lifecycle gaps", () => {
       await t.db.admin.query(`update repos set github_full_name = null where org_id = $1 and id = 'payments-api'`, [t.orgId]);
     }
   });
+
+  /** An epic that split into two children, each at Build: the parent waits for them (as the engine leaves it after the split). */
+  const epicWithChildren = async (parent: string, kids: string[]) => {
+    await w.insertWo(parent, { cls: "epic", position: "plan", state: "waiting", data: { split: true, children: kids, blockReason: `Waiting for ${kids.join(", ")} to finish.` } });
+    let ord = 0;
+    for (const k of kids) {
+      await w.insertWo(k, { position: "build", state: "running" });
+      await t.db.admin.query(`update work_orders set parent_id = $2 where id = $1`, [k, parent]);
+      await t.db.admin.query(`insert into epic_children (org_id, epic_id, child_id, ord) values ($1,$2,$3,$4)`, [t.orgId, parent, k, ord++]);
+    }
+  };
+  const finishChild = async (id: string) => {
+    const { finish, flushFx } = await import("../src/areas/workorders/engine.js");
+    const { lockWo } = await import("../src/areas/workorders/model.js");
+    await w.tx(async (tx) => {
+      const fx = await w.fxIn(tx);
+      await finish(fx, await lockWo(tx, t.orgId, id), "p-asha");
+      await flushFx(fx);
+    });
+  };
+  const killChild = async (id: string) => {
+    expect((await w.call("p-asha", "POST", "/api/v1/stops", { scope: "workorder", id, mode: "kill", reason: "Child no longer wanted" })).status).toBe(200);
+    const { reconcileStop } = await import("../src/areas/stops/enforce.js");
+    const stop = (await w.q(`select id from stops where wo_id = $1 and lifted_at is null`, [id]))[0].id;
+    await w.tx((tx) => reconcileStop(tx, stop));
+  };
+
+  it("gap 3: an epic whose last child was killed does not wait for ever: it goes to Needs a person with a summary", async () => {
+    await epicWithChildren("WO-9301", ["WO-9302", "WO-9303"]);
+    await finishChild("WO-9302");
+    expect((await w.get("WO-9301")).state).toBe("waiting"); // one child is still open
+    await killChild("WO-9303");
+    const p = await w.get("WO-9301");
+    expect(p).toMatchObject({ state: "parked", bay: "person" });
+    expect(p.bayReason).toMatch(/WO-9302 done/);
+    expect(p.bayReason).toMatch(/WO-9303 killed/);
+    expect(p.bayReason).not.toMatch(/Waiting for/);
+  });
+
+  it("gap 3: an epic whose last open child finishes after a sibling was killed, and one with a declined child, also go to Needs a person", async () => {
+    await epicWithChildren("WO-9304", ["WO-9305", "WO-9306"]);
+    await killChild("WO-9305");
+    expect((await w.get("WO-9304")).state).toBe("waiting");
+    await finishChild("WO-9306");
+    expect(await w.get("WO-9304")).toMatchObject({ state: "parked", bay: "person" });
+    await epicWithChildren("WO-9307", ["WO-9308", "WO-9309"]);
+    expect((await w.call("p-asha", "POST", "/api/v1/work-orders/WO-9308/park", { bay: "declined", reason: "Out of scope for this quarter" })).status).toBe(200);
+    await finishChild("WO-9309");
+    const p = await w.get("WO-9307");
+    expect(p).toMatchObject({ state: "parked", bay: "person" });
+    expect(p.bayReason).toMatch(/WO-9308 declined/);
+  });
+
+  it("gap 3: an epic whose every child is done completes", async () => {
+    await epicWithChildren("WO-9310", ["WO-9311", "WO-9312"]);
+    await finishChild("WO-9311");
+    await finishChild("WO-9312");
+    expect((await w.get("WO-9310")).state).toBe("done");
+  });
 });

@@ -9,7 +9,7 @@
  */
 import { gateAfter, type Catalog } from "@gantry/domain";
 import type { Queryable, Tx } from "@gantry/db";
-import { cancelAttempts, closeEntry, closeInstance, dispatchQueued, enterStation, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
+import { cancelAttempts, closeEntry, completeParentIfDone, closeInstance, dispatchQueued, enterStation, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
 import { lockWo, saveWo, toWo, WO_COLS, type Wo } from "../workorders/model.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { job } from "../../core/jobs-contract.js";
@@ -79,6 +79,8 @@ export async function reconcileStop(tx: Tx, stopId: string, o: { now?: Date; org
       await restoreOne(fx, w, s, catalog);
     }
     await saveWo(tx, orgId, w);
+    // A killed child ends its epic's wait (the parent settles once every child has ended).
+    if (active && w.state === "killed" && w.parentId) await completeParentIfDone(fx, w.parentId, fx.actor);
     count++;
   }
   for (const p of projects) await dispatchQueued(fx, p);
