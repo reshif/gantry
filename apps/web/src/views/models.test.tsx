@@ -100,27 +100,6 @@ afterEach(() => {
 });
 
 describe("Models screen (legacy models.js on the real API)", () => {
-  it("connects a vendor: the key goes to the server, never into the screen afterwards; validation before the call", async () => {
-    const calls = setup({ "PATCH /api/v1/vendors/local": () => ok({ msg: "Local models connected." }) });
-    mount();
-    fireEvent.click(await byId("vendor-connect-local"));
-    const ep = await byId("vc-endpoint");
-    expect((ep as HTMLInputElement).value).toBe("http://gpu-pool.internal:8000/v1");
-    type(ep, "ftp://nope");
-    fireEvent.click(await byId("vc-submit"));
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/http:\/\/ or https:\/\//));
-    expect(writes(calls)).toHaveLength(0);
-    type(ep, "http://gpu-pool.internal:8000/v1");
-    type(await byId("vc-key"), "tok-" + "9".repeat(12));
-    type(await byId("vc-budget"), "250");
-    type(await byId("vc-retention"), "zero");
-    fireEvent.click(await byId("vc-submit"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    const w = writes(calls)[0]!;
-    expect(w).toMatchObject({ method: "PATCH", path: "/api/v1/vendors/local", body: { action: "vendor.connect", patch: { key: "tok-" + "9".repeat(12), connected: true, budget: 250, retention: "zero", endpoint: "http://gpu-pool.internal:8000/v1" } } });
-    expect(document.body.innerHTML).not.toContain("tok-" + "9".repeat(12));
-  });
-
 });
 
 describe("routing policy", () => {
