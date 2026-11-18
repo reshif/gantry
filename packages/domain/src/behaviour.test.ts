@@ -316,7 +316,6 @@ describe("intake: classification, conversation and brief", () => {
     let t = NOW;
     while (!wo.conv.done) {
       const frozen = JSON.stringify(wo.conv);
-      const q = wo.conv.questions[wo.conv.qi]!;
       const r = answerConversation(S.catalog, payments, wo, "A typed answer", "p-tomas", (t += 60000));
       expect(JSON.stringify(wo.conv)).toBe(frozen);
       wo = { ...wo, conv: r.conv, brief: r.brief };

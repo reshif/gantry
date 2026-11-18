@@ -62,7 +62,7 @@ export function parseDiff(text: string): DiffFile[] {
     if (h && line.startsWith("\\")) { const last = h.lines[h.lines.length - 1]; if (last) last.noNewline = true; continue; }
     if (line.startsWith("diff --git ")) {
       const m = /^diff --git (".*?"|\S+) (".*?"|\S+)$/.exec(line);
-      const p = m ? unq(m[2]) : line.slice(11);
+      const p = m ? unq(m[2]!) : line.slice(11);
       f = { path: p, oldPath: null, status: "modified", binary: false, plus: 0, minus: 0, hunks: [] };
       files.push(f); h = null; ro = rn = 0;
       continue;

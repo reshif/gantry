@@ -29,8 +29,8 @@ d("pr.describe", () => {
     await w.drain();
     const call = w.broker.calls.find((c) => c.op === "describe")!;
     expect(call.body).toMatchObject({ woId: "WO-9301", repo: "acme/payments-api", number: 7, title: "Add the refund idempotency key" });
-    expect(String(call.body.body)).toContain("## Summary\nAdds the key.");
-    expect(String(call.body.body)).toContain("Gantry work order WO-9301");
+    expect(String(call.body!.body)).toContain("## Summary\nAdds the key.");
+    expect(String(call.body!.body)).toContain("Gantry work order WO-9301");
     expect(w.broker.prs.get(7)!.body).toContain("Adds the key.");
     expect((await w.q(`select type from events where wo_id = 'WO-9301' and type = 'github.pr.described'`)).length).toBe(1);
     // Review runs again with a better description: the pull request is updated, not left with the first one.

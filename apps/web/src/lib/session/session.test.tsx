@@ -157,6 +157,12 @@ describe("expiry classification", () => {
 });
 
 describe("return_to", () => {
+  it("never sends the window hash twice when a hash is passed in", () => {
+    window.location.hash = "#/floor";
+    try {
+      expect(loginUrlWithReturn("sso", undefined, "#/p/pay")).toBe("/auth/login?method=sso&return_to=%2F%23%2Fp%2Fpay");
+    } finally { window.location.hash = ""; }
+  });
   it("is added only when there is a hash route", () => {
     expect(currentReturnTo("")).toBeNull();
     expect(currentReturnTo("#")).toBeNull();

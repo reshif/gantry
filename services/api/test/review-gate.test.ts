@@ -15,7 +15,7 @@ d("Review's verdict is enforced (findings 15, 16, 17, 19)", () => {
   afterAll(() => t.close());
 
   let ids: string[] = [];
-  const sid = (wo: { station: number }) => ids[wo.station];
+  const sid = (wo: { station?: number }) => ids[wo.station as number];
   const atReview = async (title: string) => {
     ids = (await w.call("p-asha", "GET", "/api/v1/catalog")).body.stations.map((x: { id: string }) => x.id);
     await w.q(`update slots set state = 'free', wo_id = null, attempt_id = null, released_at = now() where state = 'held'`);

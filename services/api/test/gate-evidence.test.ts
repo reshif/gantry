@@ -97,8 +97,8 @@ d("automatic gates need real evidence", () => {
     await w.tx((tx) => applyStationResult(tx, att!.id, Number(att!.fencing), { status: "succeeded", summary: "ran", output: { testsRun: [{ name: "test_lists", command: "make test", result: "pass", ms: 12 }, { name: "test_empty", command: "make test", result: "fail" }], criteria: [{ criterion: "Lists devices", result: "pass", evidence: "test_lists passed" }, { criterion: "Handles empty", result: "pass", evidence: "test_empty passed" }] } } as never));
     const rec = await w.tx((tx) => readRecord(tx, t.orgId, id));
     expect(rec!.code.tests).toMatchObject({ passed: 1, failed: 1, added: 0 });
-    expect(rec!.criteria.slice(0, 2).map((c) => c.status)).toEqual(["met", "not met"]);
-    expect(rec!.criteria[0]!.tests).toEqual([{ name: "test_lists", result: "pass", ms: 12 }]);
+    expect(rec!.criteria!.slice(0, 2).map((c) => c.status)).toEqual(["met", "not met"]);
+    expect(rec!.criteria![0]!.tests).toEqual([{ name: "test_lists", result: "pass", ms: 12 }]);
   });
 
   it("a station is handed GitHub's own check results for the PR head, and a note instead of a failure when there are none", async () => {
