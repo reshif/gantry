@@ -32,7 +32,7 @@ export function liveAnswer(text: string, ctx: LiveCtx): string | null {
     const w = ctx.wos.find((x) => x.id === id);
     if (!w) return `I cannot find ${id}.`;
     const gate = ctx.waiting.find((x) => x.wo === w.id)?.gate;
-    return `${w.id} "${w.title}" is ${w.state}${w.stationName ? ` at ${w.stationName}` : ""}${ctx.project ? ` (${ctx.project})` : ""}.${w.priority ? ` Priority ${w.priority}.` : ""}${gate ? ` It waits on gate ${gate}.` : ""}${w.blockReason ? ` Blocked: ${w.blockReason}` : ""}`;
+    return `${w.id} "${w.title}" is ${w.state}${w.stationName ? ` at ${w.stationName}` : ""}${ctx.project ? ` (${ctx.project})` : ""}.${w.priority ? ` Priority ${w.priority}${typeof w.progress === "number" ? `, ${Math.round(w.progress)}% through the current station` : ""}.` : typeof w.progress === "number" ? ` ${Math.round(w.progress)}% through the current station.` : ""}${gate ? ` It waits on gate ${gate}.` : ""}${w.blockReason ? ` Blocked: ${w.blockReason}` : ""}`;
   }
   if (/wait|approv|inbox/.test(q)) {
     const p = ctx.waiting;

@@ -27,7 +27,8 @@ const dec = (v: string): string => {
 };
 
 export function parseHash(hash: string): RouteLocation {
-  const raw = hash.replace(/^#\/?/, "");
+  // A query after the route (`#/work-orders?view=board`, as the prototype writes it) belongs to the view, not to the route.
+  const raw = hash.replace(/^#\/?/, "").split("?")[0] ?? "";
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {

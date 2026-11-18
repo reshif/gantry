@@ -13,7 +13,7 @@ import { useAudit, useHome, useMe, useProjects, useWorkOrders } from "../api/que
 import { setProject, usePrefs } from "../lib/prefs";
 import { hashFor, navigate } from "../lib/router";
 import { Icon } from "../ui/Icon";
-import { Avatar, Btn, Empty, Field, IconBtn, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
+import { Avatar, Btn, Chip, Empty, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { useOpenTraveler } from "../shell/useTraveler";
@@ -137,7 +137,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const liveCtx: LiveCtx = {
     wos: wos.map((w): LiveWo => ({ ...w, ...(typeof w.station === "number" && cat?.stations[w.station] ? { stationName: cat.stations[w.station]!.name } : {}) })),
     waiting: (home?.approvals ?? []).filter((a) => a.wo).map((a) => ({ wo: a.wo!, ...(a.gate ? { gate: a.gate } : {}) })),
-    spend: visible.length ? { mtd: visible.reduce((n, p) => n + (p.budget?.mtd ?? 0), 0), monthly: visible.reduce((n, p) => n + (p.budget?.monthly ?? 0), 0) } : null,
+    spend: projects.length ? { mtd: projects.reduce((n, p) => n + (p.budget?.mtd ?? 0), 0), monthly: projects.reduce((n, p) => n + (p.budget?.monthly ?? 0), 0) } : null,
     project: cur?.name ?? null,
   };
 
@@ -237,7 +237,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
       if (e.event === "thread") { tid = e.data.threadId; setFresh(false); setThreadId(tid); if (e.data.messageId) setTail((t) => t.map((m) => (m.id === uid ? { ...m, serverId: e.data.messageId } : m))); }
       else if (e.event === "text") patchLive((m) => ({ ...m, text: m.text + e.data.delta }));
       else if (e.event === "proposal") patchLive((m) => ({ ...m, cards: [...(m.cards ?? []), { type: "proposal", proposal: e.data.proposal }], serverId: e.data.messageId }));
-      else if (e.event === "unavailable" || e.event === "error") patchLive((m) => ({ ...m, text: e.data.msg, mode: e.event === "error" ? "error" : "none", streaming: false }));
+      else if (e.event === "unavailable" || e.event === "error") patchLive((m) => (page ? { ...m, text: helpText(liveCtx), mode: "live", streaming: false } : { ...m, text: e.data.msg, mode: e.event === "error" ? "error" : "none", streaming: false }));
       else if (e.event === "done") patchLive((m) => ({ ...m, text: e.data.text || m.text, mode: e.data.mode === "none" ? "none" : "model", streaming: false, cited: e.data.cited, stopped: !!e.data.stopped, serverId: e.data.messageId }));
     };
     const r = await sendMessage({ text, ...(threadId ? { threadId } : {}), ...(cur ? { project: cur.id } : {}) }, onEvent, ctl.signal);
@@ -247,12 +247,13 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
         if (r.status === 404) { setThreadId(null); setFresh(true); }
         // Interrupted mid-answer: the server may still finish and save it, so look before showing an error.
         if (tid && r.status !== 404) await Promise.all([qc.refetchQueries({ queryKey: ck.thread(tid) }), qc.invalidateQueries({ queryKey: ck.threads() })]);
-        patchLive((m) => ({ ...m, text: r.msg, mode: "error", streaming: false }));
+        // On the Console page a question the model cannot answer gets the prototype's help line (what can be asked), not a bare error.
+        patchLive((m) => (page ? { ...m, text: helpText(liveCtx), mode: "live", streaming: false } : { ...m, text: r.msg, mode: "error", streaming: false }));
         return;
       }
       if (tid) await Promise.all([qc.refetchQueries({ queryKey: ck.thread(tid) }), qc.invalidateQueries({ queryKey: ck.threads() })]);
       // The saved answer (the merge above) replaces the streamed one. If the stream ended without one, never leave a partial row marked streaming.
-      patchLive((m) => (m.streaming ? { ...m, streaming: false, mode: m.text ? "model" : "error", text: m.text || "The answer ended without a reply. Try again.", note: m.text ? "The answer was cut short." : undefined } as Msg : m));
+      patchLive((m) => (m.streaming ? { ...m, streaming: false, mode: m.text ? "model" : page ? "live" : "error", text: m.text || (page ? helpText(liveCtx) : "The answer ended without a reply. Try again."), note: m.text ? "The answer was cut short." : undefined } as Msg : m));
       // The tail is kept: the merge hides it once the saved question and answer are in the thread, and shows it (with Retry) if they never arrive.
     } finally {
       // Only now (after the saved thread is loaded) can Retry be offered: it needs to know which saved rows it replaces.
@@ -457,8 +458,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
                   <li key={id}>
                     <a className="pri mono" id={`con-pin-${id}`} href={hashFor("record", id, cur?.id ?? null)}>{id}</a>
                     {w ? <span className="grow wrap2" title={w.title}>{w.title}</span> : <span className="grow" />}
-                    {w ? <span style={{ alignSelf: "center" }}><StateChip state={w.state} /></span> : null}
-                    <IconBtn icon="x" label={`Unpin ${id}`} id={`con-unpin-${id}`} onClick={() => { if (threadId) void savePinned(threadId, pinned.filter((x) => x !== id)).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) })); }} />
+                    {w ? <Chip text={w.state} cls={PIN_TONE[w.state] ?? "plain"} /> : null}
                   </li>
                 ); })}</ul>
               ) : <div className="empty" title="Pin a work order from a why card.">Nothing pinned.</div>}
@@ -560,6 +560,8 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
 }
 
 /** Recent work orders of a project, for the suggested questions only (a stuck one, a finished one). */
+const PIN_TONE: Record<string, string> = { running: "info", waiting: "warn", blocked: "bad", failed: "bad", killed: "bad", done: "ok" };
+
 function useWorkOrdersLite(projectId: string | null, q: { limit: number }): Array<LiveWo & { bay: string | null }> {
   const r = useWorkOrders(projectId, q);
   const d = r.data;

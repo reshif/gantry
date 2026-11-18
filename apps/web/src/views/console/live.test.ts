@@ -24,4 +24,8 @@ describe("console live answers", () => {
   it("Console and Conversations are real nav entries, not redirects", () => {
     for (const id of ["console", "conversations"]) expect(ROUTES.find((r) => r.id === id)?.nav).not.toBe(false);
   });
+  it("status carries the share through the current station", () => {
+    const c: LiveCtx = { ...ctx, wos: [{ id: "WO-2417", title: "T", state: "running", priority: "P1", progress: 40 }] };
+    expect(liveAnswer("status of WO-2417", c)).toContain("Priority P1, 40% through the current station.");
+  });
 });

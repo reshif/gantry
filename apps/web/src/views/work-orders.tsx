@@ -11,7 +11,7 @@
 import { qk } from "../api/keys";
 import { useInfiniteQuery, useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { classesOf, flowOf } from "@gantry/domain";
+import { flowOf } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
 import { useHome, useMe, useProject } from "../api/queries";
@@ -20,13 +20,13 @@ import type { Page, WorkOrder } from "../api/types";
 import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { DataTable, type Col } from "../ui/SortTable";
-import { Icon } from "../ui/Icon";
 import { useActors } from "../ui/actors";
 import { hashFor, navigate } from "../lib/router";
 import { plural } from "../lib/plural";
 import { pickProject } from "../lib/routes";
 import { usePrefs } from "../lib/prefs";
 import { classOf, useCatalog } from "./projects/kit";
+import { allClasses } from "./work-orders/classes";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 import { useUrlState } from "./work-orders/url";
 import { PrioChip, WoStateChip, agoShort } from "./work-orders/cells";
@@ -183,14 +183,7 @@ export default function WorkOrdersView() {
       key: "cls",
       label: "Class",
       render: (w) => (
-        <span className="wo-cls">
-          {classOf(cat, project, w.cls).name}
-          {w.clsOverridden ? (
-            <span className="wo-ovr" title={`Class overridden from ${classOf(cat, project, w.clsOverridden.from).name}`}>
-              <Icon name="swap" />
-            </span>
-          ) : null}
-        </span>
+        <span className="wo-cls" title={w.clsOverridden ? `Class overridden from ${classOf(cat, project, w.clsOverridden.from).name}` : undefined}>{classOf(cat, project, w.cls).name}</span>
       ),
     },
     { key: "prio", label: "Prio", sort: (w) => w.priority, render: (w) => <PrioChip p={w.priority} /> },
@@ -225,7 +218,7 @@ export default function WorkOrdersView() {
           sub="The full register of requests and where each one stands."
           actions={
             <>
-              <Segmented name="wo-mode" label="View" items={[{ id: "list", label: "List" }, { id: "board", label: "Board" }]} value={mode} onChange={(v) => setU({ view: v })} />
+              <div className="wo-view-seg"><Segmented name="wo-mode" label="View" items={[{ id: "list", label: "List" }, { id: "board", label: "Board" }]} value={mode} onChange={(v) => setU({ view: v })} /></div>
               <Btn label="Submit work order" kind="primary" icon="plus" id="wo-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWo({ project: project.id })} />
             </>
           }
@@ -251,7 +244,7 @@ export default function WorkOrdersView() {
                 <Select id="wo-f-where" options={[{ value: "all", label: "All" }, ...fl.stations.filter((s) => s.enabled).map((s) => ({ value: s.id, label: s.name }))]} value={f.station} onChange={set("station")} />
               </Field>
               <Field label="Class" htmlFor="wo-f-cls">
-                <Select id="wo-f-cls" options={[{ value: "all", label: "All" }, ...classesOf(cat, project).map((c) => ({ value: c.id, label: c.name + (c.custom ? " (custom)" : "") }))]} value={f.cls} onChange={set("cls")} />
+                <Select id="wo-f-cls" options={[{ value: "all", label: "All" }, ...allClasses(cat, project).map((c) => ({ value: c.id, label: c.name }))]} value={f.cls} onChange={set("cls")} />
               </Field>
               <Field label="Priority" htmlFor="wo-f-prio">
                 <Select id="wo-f-prio" options={[{ value: "all", label: "All" }, ...PRIOS.map((p) => ({ value: p, label: p }))]} value={f.prio} onChange={set("prio")} />

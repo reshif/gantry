@@ -5,6 +5,7 @@
  * order, the belt, the brief as it stands, what is proposed, what it cost.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMe } from "../../api/queries";
 import type { WoCard } from "@gantry/domain";
 import { fmt, isBriefScaffold } from "@gantry/domain";
 import { ops } from "../../api/ops";
@@ -230,6 +231,7 @@ export const panelDate = (t: number): string => new Date(t).toLocaleString("en-G
 
 export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean; /** The Conversations page: the prototype's chat bubbles and composer inside the page's own panel. */ panel?: boolean }) {
   const q = useWoSession(woId);
+  const me = useMe();
   const s = q.data;
   const ui = useUI();
   const openTraveler = useOpenTraveler();
@@ -239,9 +241,15 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
   const opened = useRef(false);
   const turn = useRef<{ kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }>({ kind: "open" });
   const run = useCallback((on: Parameters<typeof sendWoTurn>[2], signal: AbortSignal) => sendWoTurn(woId, turn.current, on, signal), [woId]);
-  const { live, error, start } = useLiveTurn<WoCard>(run, (m) => ui.toast(m, "error"));
+  const { live, error, start } = useLiveTurn<WoCard>(run, (m) => { setSent(null); ui.toast(m || "The message could not be sent. Try again.", "error"); });
   const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text);
-  const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => { turn.current = body; void start(); };
+  /** The person's own words show at once; they give way to the saved copy as soon as the thread has grown. */
+  const [sent, setSent] = useState<{ text: string; base: number; at: number } | null>(null);
+  const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => {
+    turn.current = body;
+    if (body.kind === "message" && body.text) setSent({ text: body.text, base: s?.messages.length ?? 0, at: Date.now() });
+    void start();
+  };
   const agents = useWsAgents(woId).data?.items ?? [];
   const mentions = useMentions(woId, draft, setDraft, !!s?.can.talk && !live);
 
@@ -348,7 +356,13 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
               )}
             </div>
           ))}
-          {quick && !s.wo.closed ? (
+          {sent && s.messages.length <= sent.base ? (
+            <div className="msg me" id="wos-sent">
+              <Avatar id={me?.person.id} />
+              <div className="bub"><div className="who">{`${actorOf(me?.person.id).name} · ${panelDate(sent.at)}`}</div><p className="osx-text">{sent.text}</p></div>
+            </div>
+          ) : null}
+          {quick && !s.wo.closed && !(sent && s.messages.length <= sent.base) ? (
             <div className="callout" id="wos-asks-callout">
               <b>{`${lastFrom} asks`}</b>{quick.text}
               {quick.chips.length ? <div className="chips" style={{ marginTop: 8 }}>{quick.chips.map((o) => <button key={o} type="button" className="chipbtn" disabled={!s.can.talk} onClick={() => send({ kind: "message", text: o })}>{o}</button>)}</div> : null}

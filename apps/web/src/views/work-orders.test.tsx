@@ -48,13 +48,13 @@ describe("Work orders table", () => {
     expect(document.querySelector("#wo-table tbody tr a.pri")?.textContent).toBe("WO-5016");
     fireEvent.click(document.getElementById("wo-table-next") as HTMLElement);
     expect(await screen.findByText("16–17 of 17")).toBeTruthy();
-    expect(window.location.search).toContain("page=2");
+    expect(window.location.hash).toContain("page=2");
     fireEvent.click(document.getElementById("wo-table-sort-id") as HTMLElement);
-    await waitFor(() => expect(window.location.search).toContain("sort=id"));
-    expect(window.location.search).not.toContain("page=");
+    await waitFor(() => expect(window.location.hash).toContain("sort=id"));
+    expect(window.location.hash).not.toContain("page=");
     fireEvent.change(document.getElementById("wo-f-cls") as HTMLElement, { target: { value: "bug" } });
     await waitFor(() => expect(lists(calls).some((c) => c.query.get("cls") === "bug")).toBe(true));
-    expect(window.location.search).toContain("cls=bug");
+    expect(window.location.hash).toContain("cls=bug");
   });
 
   it("opens the record from the id link and from the row; no extra icon column", async () => {
@@ -75,7 +75,7 @@ describe("Work orders table", () => {
     await screen.findByText("WO-2398");
     expect(screen.getByRole("radiogroup", { name: "View" })).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Board"));
-    await waitFor(() => expect(window.location.search).toContain("view=board"));
+    await waitFor(() => expect(window.location.hash).toContain("view=board"));
     expect(await screen.findByRole("heading", { name: "Board" })).toBeTruthy();
     expect(document.querySelectorAll(".board .col").length).toBeGreaterThan(3);
     expect(document.querySelector('.board a.card[href^="#/p/payments/record/"]')).toBeTruthy();
@@ -162,6 +162,7 @@ describe("New work order", () => {
   it("shows the server's refusal inline and keeps the dialog open", async () => {
     await open({ "POST /api/v1/projects/payments/work-orders": () => ({ status: 409, body: { ok: false, msg: "Payments Platform is halted (andon): duplicate refunds." } }) });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
+    fireEvent.change(screen.getByLabelText("What should change and why"), { target: { value: "Refunds are duplicated when the call retries." } });
     fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
     expect(await screen.findByText(/is halted \(andon\)/)).toBeTruthy();
     expect(screen.getByLabelText("Title")).toBeTruthy();
@@ -170,9 +171,9 @@ describe("New work order", () => {
   it("clears the inline title error as soon as a title is typed", async () => {
     await open();
     fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
-    expect(await screen.findByText("Give the work order a title.")).toBeTruthy();
+    expect(await screen.findByText("Give the work order a title of at least 6 characters.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
-    await waitFor(() => expect(screen.queryByText("Give the work order a title.")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Give the work order a title of at least 6 characters.")).toBeNull());
   });
 
   it("locks the submit button with the reason while the factory is killed, and sends nothing", async () => {

@@ -176,12 +176,11 @@ describe("Console (legacy console.js on the real API)", () => {
       expect(document.getElementById("con-stop")).toBeNull();
     });
 
-    it("a refused send is shown as the reason, not as an answer", async () => {
+    it("on the Console page a send the model cannot answer gets the prototype's help line", async () => {
       setup({ "POST /api/v1/console/messages": () => ({ status: 404, body: { ok: false, msg: "No such conversation." } }) });
       mount("/settings");
       await ask("hello");
-      await waitFor(() => expect(document.querySelector(".msg-mode.is-error")?.textContent).toBe("Model did not answer"));
-      expect(text()).toContain("No such conversation.");
+      await waitFor(() => expect(text()).toContain("I can answer questions about work orders"));
     });
   });
 
