@@ -1,7 +1,7 @@
 /** Team membership of one person: a checklist of teams (PUT /people/{id}/teams). Used by the person page ("Change" next to Teams) and by a team's "Add member". */
 import { useState } from "react";
 import type { Person } from "@gantry/domain";
-import { ops } from "../../api/ops";
+import { commands as ops } from "../../api/commands";
 import { useUI } from "../../ui/overlay-context";
 import { Btn, LockNote, Toggle, type Decision } from "../../ui/primitives";
 import { useOutcome } from "../govern/data";

@@ -1,20 +1,25 @@
 /**
  * Project config > Flow: two panels, "Stations" and "Gates", one compact aligned row each (the Blueprint prototype's layout), a row
  * opens in place for details (URL state). Hovering a station lights the gates beside it and the other way round.
- * Edits are a draft. "Review changes" lists each before -> after; Save sends the same requests as before (one PATCH per change,
- * each carrying If-Match, the version chained from the previous save). Nothing is written until Save.
+ * Edits are a draft: WIP limits, stations and gates on or off, gate modes, coding slots, class routes and which classes are on.
+ * "Review changes" lists each before -> after; Save sends one PATCH per change, each carrying If-Match, the version chained from the previous one.
+ * Nothing is written until Save. Below the line: "Advanced: structure" (add, move, remove), Class routes and Work classes.
  */
 import { useMemo, useState } from "react";
 import { approvalText, flowOf, gateLock, gateModeLock, ruleText, ruleWarning, type ApproverRule, type Catalog, type Gate, type GateKind, type Station, type WorkClass } from "@gantry/domain";
 import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
-import { useAgents } from "../../api/queries";
+import { useAgents, useTemplates } from "../../api/queries";
 import { useLeaveGuard } from "../../lib/useLeaveGuard";
 import { DraftConflictBanner } from "../../ui/DraftConflict";
 import { useUI } from "../../ui/overlay-context";
 import { Btn, Input, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { nextVersion } from "../govern/data";
-import { useRes } from "../projects/kit";
+import { metricsOf, useRes, type PView } from "../projects/kit";
+import { flowFrom, type Tpl } from "../projects/templates-kit";
+import { ClassRoutes } from "./flow-routes";
+import { FlowStructure } from "./flow-structure";
+import { WorkClassesPanel } from "./classes";
 import { useQueryParam } from "../projects/urlState";
 import type { PcProps } from "./ctx";
 
@@ -30,6 +35,8 @@ const MODES: GateKind[] = ["human", "auto", "mixed"];
 
 interface StOv { enabled?: boolean; wip?: number }
 interface GOv { kind?: GateKind; on?: boolean }
+interface ClsOv { skips?: string[]; enabled?: boolean }
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 /** Work classes that travel through a station (the class's skips and where it ends). */
 function classesAt(cat: Catalog, order: string[], classes: WorkClass[], sid: string): WorkClass[] {
@@ -37,7 +44,7 @@ function classesAt(cat: Catalog, order: string[], classes: WorkClass[], sid: str
   return classes.filter((c) => c.enabled !== false && !c.skips.includes(sid) && (!c.endsAfter || order.indexOf(c.endsAfter) >= at));
 }
 
-export function FlowLine({ p, cat, people, set }: PcProps) {
+export function FlowLine({ p, cat, people, set, s }: PcProps) {
   const ui = useUI();
   const res = useRes();
   const d = useCan("project.config", { project: p.id });
@@ -46,7 +53,12 @@ export function FlowLine({ p, cat, people, set }: PcProps) {
   const order = f.stations.map((s) => s.id);
   const [stOv, setStOv] = useState<Record<string, StOv>>({});
   const [gOv, setGOv] = useState<Record<string, GOv>>({});
+  const [clsOv, setClsOv] = useState<Record<string, ClsOv>>({});
+  const [slotsOv, setSlotsOv] = useState<number | null>(null);
   const [openQ, setOpenQ] = useQueryParam("open");
+  const [secQ, setSecQ] = useQueryParam("sec");
+  const [, setRuleQ] = useQueryParam("rule");
+  const tpls = (useTemplates().data ?? []) as Tpl[];
   const [hot, setHot] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -61,6 +73,11 @@ export function FlowLine({ p, cat, people, set }: PcProps) {
   const gOn = (g: Gate): boolean => gOv[g.id]?.on ?? !!p.flow.gates[g.id]?.enabled;
   const gKind = (g: Gate): GateKind => gOv[g.id]?.kind ?? gateMode(g);
   const gEff = (g: Gate): Mode => (gOn(g) ? gKind(g) : "off");
+  const slots = slotsOv ?? p.flow.slots;
+  const classesEff = p.flow.classes.map((c) => ({ ...c, ...clsOv[c.id] }));
+  /** The project as the draft would leave it: the route matrix, the preview and the class table read this. */
+  const pe = { ...p, flow: { ...p.flow, slots, classes: classesEff } } as PView;
+  const clsChanged = (c: WorkClass): { skips: boolean; enabled: boolean } => { const e = classesEff.find((x) => x.id === c.id)!; return { skips: !same([...c.skips].sort(), [...e.skips].sort()), enabled: (c.enabled !== false) !== (e.enabled !== false) }; };
 
   const gates = cat.gates.filter((g) => p.flow.gates[g.id]);
   const gatesAfter = (sid: string): Gate[] => gates.filter((g) => g.after === sid);
@@ -79,12 +96,19 @@ export function FlowLine({ p, cat, people, set }: PcProps) {
       const o = gEff(g);
       if (o !== gCur(g)) out.push({ key: `g-${g.id}`, what: `${g.label} ${g.name}`, from: MODE_TEXT[gCur(g)].label, to: MODE_TEXT[o].label });
     }
+    if (slots !== p.flow.slots) out.push({ key: "slots", what: "Coding slots", from: String(p.flow.slots), to: String(slots) });
+    for (const c of p.flow.classes) {
+      const x = clsChanged(c);
+      const e = classesEff.find((y) => y.id === c.id)!;
+      if (x.enabled) out.push({ key: `cls-on-${c.id}`, what: `${c.name} class`, from: c.enabled !== false ? "on" : "off", to: e.enabled !== false ? "on" : "off" });
+      if (x.skips) out.push({ key: `cls-route-${c.id}`, what: `${c.name} route`, from: c.skips.length ? `skips ${c.skips.length}` : "every station", to: e.skips.length ? `skips ${e.skips.length}` : "every station" });
+    }
     return out;
-  }, [p, cat, stOv, gOv]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [p, cat, stOv, gOv, slotsOv, clsOv]); // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = changes.length > 0;
   useLeaveGuard(dirty);
 
-  const discard = () => { setStOv({}); setGOv({}); setReviewing(false); setConflict(false); };
+  const discard = () => { setStOv({}); setGOv({}); setClsOv({}); setSlotsOv(null); setReviewing(false); setConflict(false); };
 
   const save = async () => {
     if (!dirty || saving) return;
@@ -123,6 +147,8 @@ export function FlowLine({ p, cat, people, set }: PcProps) {
         if (to !== gateMode(g) && !(await run(ops.setGateMode(p.id, g.id, to, { ifMatch: ver }), `${g.label} set to ${MODE_TEXT[to].label}.`))) break;
       }
     }
+    if (!failed && slots !== p.flow.slots) await run(ops.setProject(p.id, "flow.slots", slots, { ifMatch: ver }), `Coding slots set to ${slots}.`);
+    if (!failed && p.flow.classes.some((c) => clsChanged(c).skips || clsChanged(c).enabled)) await run(ops.setProject(p.id, "flow.classes", classesEff, { ifMatch: ver }), "Class routes saved.");
     setSaving(false);
     if (!failed) { discard(); }
   };
@@ -238,7 +264,7 @@ export function FlowLine({ p, cat, people, set }: PcProps) {
           <div className="flw-more small" id={`flw-d-g-${g.id}`}>
             <div><span className="muted">{s && next ? `Between ${s.no} ${s.name} and ${next.no} ${next.name}.` : s ? `After ${s.no} ${s.name}.` : "Not placed on this line."}</span>{g.custom ? " Custom gate." : ""}</div>
             <div>{MODE_TEXT[on ? kind : "off"].help}{on && kind !== "human" ? ` Checks: ${g.checks.join(", ") || "none listed"}.` : ""}</div>
-            <div>{who}{on && kind !== "auto" ? <> <Btn small kind="ghost" id={`pcf-gate-ap-${g.id}`} label="Approvers" aria={`Approvers for ${g.name}`} onClick={() => set({ tab: "approvers", gate: g.id })} /></> : null}</div>
+            <div>{who}{on && kind !== "auto" ? <> <Btn small kind="ghost" id={`pcf-gate-ap-${g.id}`} label="Approvers" aria={`Approvers for ${g.name}`} onClick={() => { setRuleQ(g.id); set({ tab: "approvers" }); }} /></> : null}</div>
             {why.length ? <div className="muted" id={`pcf-gate-lock-${g.id}`}><span className="sr">Locked: </span>{[...new Set(why)].join(" ")}</div> : null}
             <div className="muted">{on ? "Turning it off skips this gate for new work orders; work already in flight keeps its flow." : "Off: new work orders pass straight through."}</div>
           </div>
@@ -247,12 +273,34 @@ export function FlowLine({ p, cat, people, set }: PcProps) {
     );
   };
 
+  const m = metricsOf(p);
+  const touch = (cid: string, patch: ClsOv) => setClsOv((o) => ({ ...o, [cid]: { ...o[cid], ...patch } }));
+  const toggleRoute = (cid: string, sid: string, travels: boolean) => {
+    const c = classesEff.find((x) => x.id === cid)!;
+    touch(cid, { skips: travels ? c.skips.filter((x) => x !== sid) : [...c.skips, sid] });
+    set({ flowCls: cid });
+  };
+  const enableClass = (cid: string, v: boolean) => {
+    const open = m.byClass[cid] ?? 0;
+    if (!v && open) return void ui.toast(`Open work orders use ${p.flow.classes.find((x) => x.id === cid)?.name ?? cid}. Reclassify or finish them first.`, "error");
+    touch(cid, { enabled: v });
+  };
+  const resetRoutes = () => {
+    const tpl = tpls.find((t) => t.id === p.template) ?? tpls[0];
+    if (!tpl) return;
+    const fresh = flowFrom(cat, tpl).classes;
+    setClsOv((o) => { const n = { ...o }; for (const c of p.flow.classes.filter((x) => !x.custom)) { const t = fresh.find((x) => x.id === c.id); if (t) n[c.id] = { ...n[c.id], skips: t.skips }; } return n; });
+    ui.toast("Built-in class routes reset to the template in the draft. Custom classes are kept. Review, then Save.", "info");
+  };
+  const structureOpen = secQ === "structure";
+  const changedCls = new Set(p.flow.classes.filter((c) => clsChanged(c).skips || clsChanged(c).enabled).map((c) => c.id));
+
   return (
     <div className="pcf-stack" id="flw">
       <LockNote decision={d} what="Flow settings" />
       <DraftConflictBanner id="flw-conflict" conflict={conflict ? { keys: [] } as never : null} onKeepMine={() => { setConflict(false); void save(); }} onDiscard={discard} />
       <div className="flw-cols">
-        <Panel title="Stations" tools={<Btn small kind="ghost" id="flw-more" label="Add or reorder (Flow details)" onClick={() => set({ tab: "flow-advanced" })} />}>
+        <Panel title="Stations">
           <ul className="flw-list" aria-label="Stations in order">{f.stations.map(stationRow)}</ul>
         </Panel>
         <Panel title="Gates">
@@ -262,6 +310,11 @@ export function FlowLine({ p, cat, people, set }: PcProps) {
           </ul>
         </Panel>
       </div>
+      <Panel title="Advanced: structure" id="flw-adv" tools={<Btn small kind="ghost" icon={structureOpen ? "down" : "chevron"} id="flw-adv-toggle" label={structureOpen ? "Hide" : "Show"} aria={`${structureOpen ? "Hide" : "Show"} advanced structure`} aria-expanded={structureOpen} aria-controls="flw-structure" onClick={() => setSecQ(structureOpen ? null : "structure")} />}>
+        {structureOpen ? <FlowStructure p={p} cat={cat} slots={slots} setSlots={setSlotsOv} /> : <p className="small muted">Add a station, gate or bay, move or remove stations, and set the coding slots.</p>}
+      </Panel>
+      <ClassRoutes p={pe} cat={cat} sel={s.flowCls} onSel={(id) => set({ flowCls: id })} decision={d} onToggle={toggleRoute} onEnable={enableClass} onReset={resetRoutes} />
+      <WorkClassesPanel p={p} cat={cat} classes={classesEff} changed={changedCls} onEnable={enableClass} onAdded={(id) => set({ flowCls: id })} />
       <div className="flw-bar" role="region" aria-label="Draft changes">
         {dirty ? (
           <>

@@ -39,11 +39,11 @@
       "views/integrations": 5,
       "views/learning": 12,
       "views/mcp": 3,
-      "views/models": 5,
+      "views/models": 4,
       "views/notifications": 5,
       "views/onboarding": 6,
       "views/people": 4,
-      "views/project-config": 7,
+      "views/project-config": 5,
       "views/projects": 5,
       "views/skills": 2,
       "views/traveler": 2,
@@ -74,10 +74,7 @@
       "views/console": 2,
       "views/conversations": 1,
       "views/notifications": 1,
-      "views/project-config": 5
-    },
-    "jsx-a11y/no-redundant-roles": {
-      "views/project-config": 1
+      "views/project-config": 3
     },
     "jsx-a11y/no-static-element-interactions": {
       "shell": 1,
@@ -110,7 +107,6 @@
       "views/notifications": 1,
       "views/onboarding": 3,
       "views/people": 1,
-      "views/project-config": 3,
       "views/projects": 3,
       "views/record": 5,
       "views/traveler": 4,
@@ -133,7 +129,7 @@
       "views/notifications": 4,
       "views/onboarding": 14,
       "views/people": 11,
-      "views/project-config": 25,
+      "views/project-config": 8,
       "views/projects": 15,
       "views/record": 4,
       "views/security": 8,
@@ -151,7 +147,6 @@
       "views/integrations": 1,
       "views/models": 4,
       "views/notifications": 2,
-      "views/project-config": 7,
       "views/projects": 2,
       "views/record": 1,
       "views/trust": 1,
@@ -164,7 +159,7 @@
       "views/govern": 2,
       "views/learning": 6,
       "views/people": 1,
-      "views/project-config": 7,
+      "views/project-config": 5,
       "views/traveler": 1,
       "views/workspace": 1
     },
@@ -199,7 +194,6 @@
       "views/notifications": 3,
       "views/onboarding": 3,
       "views/people": 5,
-      "views/project-config": 5,
       "views/projects": 2,
       "views/record": 1,
       "views/security": 1,

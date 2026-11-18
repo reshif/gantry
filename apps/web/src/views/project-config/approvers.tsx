@@ -1,20 +1,20 @@
-/** Project config: Approvers tab, rule editor and away dialog (legacy project-config.js approversTab, ruleEditor, awayDialog). */
+/** Project config > Approvers: the full rule editor (roles, people, approvals required, per-class counts, conditions, escalation, fallback, SoD, away and delegates, a test scenario) and the away dialog. */
 import { useState } from "react";
 import { DAY, fmt, flowOf, requiredFor, type ApproverCondition, type ApproverRule, type Catalog, type Person } from "@gantry/domain";
-import { ops } from "../../api/ops";
+import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
 import { Dialog } from "../../ui/Overlay";
-import { Btn, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { Btn, Field, Input, Panel, Select, Toggle } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
-import { GateDiamond, NumInput, classOf, gateState, projectRoles, roleName, useRes, type PView } from "../projects/kit";
+import { NumInput, classOf, projectRoles, roleName, useRes, type PView } from "../projects/kit";
 import { membersOf, rolesIn, type PcProps } from "./ctx";
 import { HistoryList } from "./history";
 
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-function isDirty(p: PView, drafts: Record<string, ApproverRule>, gid: string): boolean {
+export function isDirty(p: PView, drafts: Record<string, ApproverRule>, gid: string): boolean {
   return !!drafts[gid] && JSON.stringify(drafts[gid]) !== JSON.stringify(p.approvers[gid]);
 }
 
@@ -58,59 +58,26 @@ function AwayDialog({ p, cat, person, people, close }: { p: PView; cat: Catalog;
   );
 }
 
-export function ApproversTab({ p, cat, people, s, set }: PcProps) {
+/** The full rule editor for one gate, opened in place under the gate table (`?rule=<gate>`). */
+export function RulePanel({ p, cat, people, s, set, gid, onClose }: PcProps & { gid: string; onClose: () => void }) {
   const d = useCan("approvers.edit", { project: p.id });
-  const locked = !d.allowed;
-  const fg = flowOf(cat, p).gates;
-  const g = fg.find((x) => x.id === s.gate) ?? fg.find((x) => x.id === "G5") ?? fg[0];
-  const actor = useActors();
-  const name = (id: string) => actor(id).name.replace(" (agent)", "");
+  const g = flowOf(cat, p).gates.find((x) => x.id === gid);
   if (!g) return null;
-  return (
-    <div className="pcf-stack">
-      <LockNote decision={d} what="Approver rules" />
-      <div className="pcf-ap">
-        <Panel title="Gates" flush cls="pcf-ap-list">
-          <ul className="pcf-gates" role="list">
-            {fg.map((x) => {
-              const r = p.approvers[x.id];
-              const gs = gateState(p, x.id);
-              const sum = x.mode === "auto" ? "Automatic checks" : x.id === "G0G1" ? "Submitter confirms" : r ? `${r.required}${r.classRequired && Object.keys(r.classRequired).length ? ` (${Object.entries(r.classRequired).map(([c, n]) => `${classOf(cat, p, c).name} ${n}`).join(", ")})` : ""} of ${r.roles.map((y) => roleName(cat, y)).concat(r.people.map(name)).join(", ") || "nobody"}${r.conditions.length ? ` · ${r.conditions.length} condition${r.conditions.length > 1 ? "s" : ""}` : ""}` : "No rule";
-              return (
-                <li key={x.id}>
-                  <button type="button" id={`pcf-ap-g-${x.id}`} className={`pcf-gate-btn${x.id === g.id ? " is-sel" : ""}`} aria-current={x.id === g.id ? "true" : undefined} onClick={() => set({ gate: x.id })}>
-                    <GateDiamond cat={cat} gateId={x.id} state={gs.state} count={gs.waiting || gs.failing} size="sm" />
-                    <span className="pcf-gate-main">
-                      <span>
-                        <span className="mono">{x.label}</span>{` ${x.name}`}
-                        {x.custom ? <span className="tag pcf-tag-custom">custom</span> : null}
-                        {isDirty(p, s.drafts, x.id) ? <span className="chip chip-warn">unsaved</span> : null}
-                      </span>
-                      <span className="muted small">{sum}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
-        {g.mode === "auto" ? (
-          <Panel title={`${g.label} ${g.name}`}>
-            <div className="form-grid">
-              <p>{g.purpose}</p>
-              <p className="muted small">{`This gate is automatic in ${p.name}. It passes when its checks pass; nobody approves it. Change its mode on the Flow tab.`}</p>
-              {g.checks.length ? <ul className="checklist">{g.checks.map((c) => <li key={c} className="ok">{c}</li>)}</ul> : <p className="muted small">No checks: it passes straight through.</p>}
-            </div>
-          </Panel>
-        ) : (
-          <RuleEditor key={`${p.id}:${g.id}`} p={p} cat={cat} people={people} gate={g} s={s} set={set} d={d} locked={locked} />
-        )}
-      </div>
-    </div>
-  );
+  if (g.mode === "auto") {
+    return (
+      <Panel title={`${g.label} ${g.name}`} id="pcf-rule" tools={<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} />}>
+        <div className="form-grid">
+          <p>{g.purpose}</p>
+          <p className="muted small">{`This gate is automatic in ${p.name}. It passes when its checks pass; nobody approves it. Change its mode on the Flow tab.`}</p>
+          {g.checks.length ? <ul className="checklist">{g.checks.map((c) => <li key={c} className="ok">{c}</li>)}</ul> : <p className="muted small">No checks: it passes straight through.</p>}
+        </div>
+      </Panel>
+    );
+  }
+  return <RuleEditor key={`${p.id}:${g.id}`} p={p} cat={cat} people={people} gate={g} s={s} set={set} d={d} locked={!d.allowed} onClose={onClose} />;
 }
 
-function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { gate: ReturnType<typeof flowOf>["gates"][number]; d: ReturnType<typeof useCan>; locked: boolean }) {
+function RuleEditor({ p, cat, people, gate: g, s, set, d, locked, onClose }: PcProps & { gate: ReturnType<typeof flowOf>["gates"][number]; d: ReturnType<typeof useCan>; locked: boolean; onClose: () => void }) {
   const ui = useUI();
   const res = useRes();
   const actor = useActors();
@@ -169,10 +136,10 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
   const classesOn = p.flow.classes.filter((c) => c.enabled !== false);
   const sodId = "pcf-ap-sod";
   return (
-    <section className="panel pcf-rule" aria-label={`${g.label} approver rule`}>
+    <section className="panel pcf-rule" id="pcf-rule" aria-label={`${g.label} approver rule`}>
       <div className="panel-head">
         <h2 className="panel-title"><span className="mono">{g.label}</span>{` ${g.name}`}</h2>
-        {dirty ? <span className="chip chip-warn">Unsaved changes</span> : <span className="muted small mono">{`APR-${gid}`}</span>}
+        <span className="row">{dirty ? <span className="chip chip-warn">Unsaved changes</span> : <span className="muted small mono">{`APR-${gid}`}</span>}<Btn small kind="ghost" id="pcf-ap-close" label="Close" onClick={onClose} /></span>
       </div>
       <div className="panel-body form-grid">
         <p className="small">{g.purpose}{r.note ? <span className="muted">{` ${r.note}`}</span> : null}</p>
@@ -257,7 +224,7 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
                       ) : c.when.type === "risk" ? (
                         <Select id={`${idp}-val`} aria-label="Risk" disabled={locked} options={[{ value: "high", label: "High risk" }, { value: "normal", label: "Normal risk" }]} value={c.when.value} onChange={(v) => upd((x) => { const y = x.conditions[i]!; y.when.value = v; y.text = condText(y); })} />
                       ) : (
-                        <input id={`${idp}-val`} className="input mono" defaultValue={c.when.value} disabled={locked} aria-label="Path prefix" placeholder="/payments" onBlur={(e) => { if (e.target.value.trim() !== c.when.value) upd((x) => { const y = x.conditions[i]!; y.when.value = e.target.value.trim() || "/"; y.text = condText(y); }); }} />
+                        <Input id={`${idp}-val`} className="mono" defaultValue={c.when.value} disabled={locked} aria-label="Path prefix" placeholder="/payments" onBlur={(e) => { if (e.target.value.trim() !== c.when.value) upd((x) => { const y = x.conditions[i]!; y.when.value = e.target.value.trim() || "/"; y.text = condText(y); }); }} />
                       )}
                     </div>
                     <div className="pcf-cond-needs">
@@ -326,7 +293,7 @@ function RuleEditor({ p, cat, people, gate: g, s, set, d, locked }: PcProps & { 
           <div className="form-row">
             <Field label="Class" htmlFor="pcf-sc-cls"><Select id="pcf-sc-cls" options={classesOn.map((x) => ({ value: x.id, label: classOf(cat, p, x.id).name }))} value={sc.cls} onChange={(v) => set({ scen: { ...sc, cls: v } })} /></Field>
             <Field label="Risk" htmlFor="pcf-sc-risk"><Select id="pcf-sc-risk" options={["normal", "high"]} value={sc.risk} onChange={(v) => set({ scen: { ...sc, risk: v } })} /></Field>
-            <Field label="Changed path" htmlFor="pcf-sc-path"><input id="pcf-sc-path" className="input mono" defaultValue={sc.path} placeholder="/payments/refunds" onBlur={(e) => set({ scen: { ...sc, path: e.target.value.trim() } })} /></Field>
+            <Field label="Changed path" htmlFor="pcf-sc-path"><Input id="pcf-sc-path" className="mono" defaultValue={sc.path} placeholder="/payments/refunds" onBlur={(e) => set({ scen: { ...sc, path: e.target.value.trim() } })} /></Field>
           </div>
           <p className="small" aria-live="polite">
             {`${requiredFor(r, sc.cls)} approval${requiredFor(r, sc.cls) > 1 ? "s" : ""} from ${r.roles.map((x) => roleName(cat, x)).concat(r.people.map(name)).join(", ") || "nobody"}${r.sod ? ", not the author" : ""}${scConds.length ? `; plus: ${scConds.map(condText).join("; ")}` : "; no conditions apply"}.`}

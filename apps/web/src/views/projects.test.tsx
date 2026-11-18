@@ -334,22 +334,20 @@ describe("Project config", () => {
     expect((await byId("pcf-gmode-G3d")).hasAttribute("disabled")).toBe(true);
   });
 
-  it("flow tab: gates read by name with the code beside, their kind and approvals; locked gates say why and cannot be switched", async () => {
+  it("flow tab: locked gates cannot be switched and say why; a gate that may be turned off asks first, then sends the audited, versioned change on Save", async () => {
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
-    tab("flow-advanced");
+    tab("flow");
     mount(<ProjectConfigView />);
-    const row = (await byId("pcf-gmode-G0G1")).closest("tr") as HTMLElement;
-    expect(row.querySelector("th")?.textContent).toMatch(/Brief confirmed\s*G0\+G1/);
-    expect(row.textContent).toMatch(/person · 1 approval: the submitter, or Line Lead/);
-    const auto = (await byId("pcf-gmode-G4")).closest("tr") as HTMLElement;
-    expect(auto.textContent).toMatch(/automatic · No approvals/);
+    await byId("pcf-gmode-G0G1");
+    expect(document.getElementById("flw-g-G0G1")!.textContent).toMatch(/Brief confirmed/);
     for (const id of ["G0G1", "G3G3s", "G4", "G5"]) {
-      expect(document.getElementById(`pcf-gate-${id}`), id).toBeNull();
-      expect(document.getElementById(`pcf-gate-lock-${id}`)?.textContent, id).toMatch(/always on/);
+      expect((await byId(`pcf-gate-${id}`)).hasAttribute("disabled"), id).toBe(true);
+      expect(document.querySelector(`#flw-g-${id} .flw-on`)?.getAttribute("title"), id).toBeTruthy();
     }
-    expect(document.getElementById("pcf-gate-lock-G5")?.getAttribute("title")).toMatch(/No agent merges on its own authority/);
-    // a gate that may be turned off asks first, then sends the audited, versioned change
+    expect(document.querySelector("#flw-g-G5 .flw-on")?.getAttribute("title")).toMatch(/No agent merges on its own authority/);
     fireEvent.click(await byId("pcf-gate-G3d"));
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false); // a draft until Save
+    fireEvent.click(await byId("flw-save"));
     fireEvent.click(await screen.findByRole("button", { name: "Turn off" }));
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "flow.gates.G3d.enabled", value: false }));
     expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toBe("7");
@@ -357,14 +355,13 @@ describe("Project config", () => {
 
   it("flow tab: a regulated project keeps every gate on, with the reason", async () => {
     withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, regulated: true }, RISK] }) });
-    tab("flow-advanced");
+    tab("flow");
     mount(<ProjectConfigView />);
-    await byId("pcf-gmode-G3d");
-    expect(document.getElementById("pcf-gate-G3d")).toBeNull();
-    expect(document.getElementById("pcf-gate-lock-G3d")?.getAttribute("title")).toMatch(/Regulated projects keep every gate on/);
+    expect((await byId("pcf-gate-G3d")).hasAttribute("disabled")).toBe(true);
+    expect(document.querySelector("#flw-g-G3d .flw-on")?.getAttribute("title")).toMatch(/Regulated projects keep every gate on/);
   });
 
-  it("flow tab: toggles a station, sets WIP and slots, changes a gate mode, and moves a station", async () => {
+  it("flow tab: station, WIP, slots and gate mode are one draft, saved in order with the version chained; moving a station is its own request", async () => {
     const calls = withPayments({
       "PATCH /api/v1/projects/payments/config": () => ok(),
       "PATCH /api/v1/projects/payments/flow/stations/spec": () => ok(),
@@ -372,19 +369,65 @@ describe("Project config", () => {
     tab("flow-advanced");
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-st-research"));
-    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "flow.stations.research.enabled", value: false }));
-    const wip = (await byId("pcf-wip-spec")) as HTMLInputElement;
-    fireEvent.change(wip, { target: { value: "9" } });
-    fireEvent.blur(wip);
-    await waitFor(() => expect(calls.some((c) => (c.body as { path?: string })?.path === "flow.stations.spec.wip")).toBe(true));
+    fireEvent.change(await byId("pcf-wip-spec"), { target: { value: "9" } });
     const slots = (await byId("pcf-slots")) as HTMLInputElement;
     fireEvent.change(slots, { target: { value: "30" } });
     fireEvent.blur(slots);
     expect(await screen.findByText("Enter a number from 1 to 8.")).toBeTruthy();
-    fireEvent.change(await byId("pcf-gmode-G3d"), { target: { value: "mixed" } });
-    await waitFor(() => expect(calls.some((c) => (c.body as { gate?: string })?.gate === "G3d")).toBe(true));
+    fireEvent.change(slots, { target: { value: "3" } });
+    fireEvent.blur(slots);
+    fireEvent.change(await byId("pcf-gmode-G1f"), { target: { value: "human" } });
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    await waitFor(() => expect(document.getElementById("flw-count")!.textContent).toMatch(/4 unsaved changes/));
+    fireEvent.click(await byId("flw-review"));
+    expect((await byId("flw-changes")).textContent).toMatch(/Coding slots: \d+ → 3/);
+    fireEvent.click(await byId("flw-save"));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").length).toBe(4));
+    const patches = calls.filter((c) => c.method === "PATCH");
+    expect(patches.map((c) => (c.body as { path?: string; gate?: string }).path ?? (c.body as { gate?: string }).gate)).toEqual(["flow.stations.research.enabled", "flow.stations.spec.wip", "G1f", "flow.slots"]);
+    expect(patches[0]!.headers["if-match"]).toBe("7");
+    expect(patches[3]!.headers["if-match"]).toBe("10");
     fireEvent.click(await byId("pcf-mv-dn-spec"));
     await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/projects/payments/flow/stations/spec")?.body).toEqual({ move: 1 }));
+  });
+
+  it("flow tab: a class route tick, a class switched off and Reset routes are part of the draft; Save writes the classes once with If-Match", async () => {
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
+    tab("flow");
+    mount(<ProjectConfigView />);
+    const tick = (await byId("pcf-rm-feature-research")) as HTMLInputElement;
+    expect(tick.checked).toBe(true);
+    fireEvent.click(tick);
+    expect(((await byId("pcf-rm-feature-research")) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(await byId("pcf-cl-en-docs"));
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    fireEvent.click(await byId("flw-review"));
+    const list = (await byId("flw-changes")).textContent ?? "";
+    expect(list).toMatch(/Feature route: every station → skips 1/);
+    expect(list).toMatch(/Docs class: on → off/);
+    fireEvent.click(await byId("flw-save"));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toBeTruthy());
+    const put = calls.filter((c) => c.method === "PATCH");
+    expect(put).toHaveLength(1);
+    const body = put[0]!.body as { path: string; value: Array<{ id: string; skips: string[]; enabled?: boolean }> };
+    expect(body.path).toBe("flow.classes");
+    expect(body.value.find((c) => c.id === "feature")!.skips).toContain("research");
+    expect(body.value.find((c) => c.id === "docs")!.enabled).toBe(false);
+    expect(put[0]!.headers["if-match"]).toBe("7");
+  });
+
+  it("flow tab: there is no Flow details link and no immediate-write station or gate row outside the draft", async () => {
+    withPayments();
+    tab("flow");
+    mount(<ProjectConfigView />);
+    await byId("pcf-wip-spec");
+    expect(document.getElementById("flw-more")).toBeNull();
+    expect(document.querySelectorAll("#pcf-st-table").length).toBe(0); // the structure table is collapsed until asked for
+    expect(document.getElementById("flw-structure")).toBeNull();
+    fireEvent.click(await byId("flw-adv-toggle"));
+    expect(window.location.search).toMatch(/sec=structure/);
+    expect(await byId("flw-structure")).toBeTruthy();
+    expect(document.querySelectorAll("#pcf-wip-spec").length).toBe(1); // one WIP control per station, in the line editor
   });
 
   it("flow tab: refuses removing a custom station while work is at it, and shows the server's refusal", async () => {
@@ -442,9 +485,11 @@ describe("Project config", () => {
   it("approvers tab: edits a rule, refuses N larger than the eligible people, and saves with If-Match", async () => {
     const people = [PEOPLE[0]!, person("p-meera", "Meera Iyer", [{ role: "line_lead", scope: "payments" }]), person("p-priya", "Priya Nair", [{ role: "reviewer", scope: "payments" }])];
     const calls = withPayments({ "GET /api/v1/people": () => ({ body: people }), "PUT /api/v1/projects/payments/approvers/G5": () => ok() });
-    tab("rules");
+    tab("rules"); // an old bookmark: lands on Approvers with the rule editor open
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-ap-g-G5"));
+    await byId("pcf-rule");
+    expect(window.location.search).toMatch(/tab=approvers/);
+    expect(window.location.search).toMatch(/rule=G5/);
     const req = (await byId("pcf-ap-required")) as HTMLInputElement;
     fireEvent.change(req, { target: { value: "5" } });
     fireEvent.blur(req);
@@ -463,7 +508,7 @@ describe("Project config", () => {
 
   it("danger zone: archiving needs the typed project name and sends If-Match", async () => {
     const calls = withPayments({ "POST /api/v1/projects/payments/archive": () => ok() });
-    window.history.replaceState(null, "", "/?tab=archive"); // Archive is not on the Blueprint's Line control tab: it is its own page
+    window.history.replaceState(null, "", "/?tab=line"); // Archive is a panel of Line control
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-archive"));
     const input = await waitFor(() => { const i = document.querySelector<HTMLInputElement>(".dlg input.input"); if (!i) throw new Error("no input"); return i; });
@@ -480,7 +525,7 @@ describe("Project config", () => {
     tab("budget");
     mount(<ProjectConfigView />);
     const el = (await byId("pcf-bud-monthly")) as HTMLInputElement;
-    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Spend", "Limits"]);
+    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent).slice(0, 2)).toEqual(["Spend", "Limits"]);
     fireEvent.change(document.getElementById("pcf-bud-alert")!, { target: { value: "120" } });
     fireEvent.click(await byId("pcf-bud-save"));
     expect(await screen.findByText("Cannot exceed 100.")).toBeTruthy();
@@ -512,49 +557,96 @@ describe("Project config", () => {
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   });
 
-  it("is the Blueprint's seven tabs held in the URL; Members, Work classes, Notifications and History are pages reached from Overview", async () => {
+  it("is the Blueprint's eight tabs held in the URL, with no More menu; an old ?tab= id lands on the tab and section that took it over", async () => {
     window.location.hash = "#/p/payments/project-config";
     withPayments();
     mount(<ProjectConfigView />);
     await byId("pcf-desc");
     expect(document.querySelector(".vhead .kicker")?.textContent).toBe("GNT-CFG-10·PAY");
     expect(document.querySelector(".vhead .vsub")?.textContent).toBe("Payments Platform · PAY");
-    expect(document.getElementById("pcf-to-floor")).toBeNull(); // the two extra header buttons are gone
-    expect(document.getElementById("pcf-to-history")).toBeNull();
-    expect(Array.from(document.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Overview", "Flow", "Approvers", "MCP", "Budget", "Repos", "Line control"]);
+    expect(document.getElementById("pcf-pages")).toBeNull(); // no More menu
+    expect(Array.from(document.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Overview", "Flow", "Approvers", "MCP", "Budget", "Repos", "Members", "Line control"]);
     fireEvent.click(await byId("pcf-tab-flow"));
     expect(window.location.search).toBe("?tab=flow");
     expect(document.getElementById("pcf-tab-flow")!.getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(await byId("pcf-tab-overview"));
-    expect(document.getElementById("pcf-more")).toBeNull(); // no "Also:" row of extra pages under the tab
-    cleanup();
-    window.history.replaceState(null, "", "/?tab=members");
-    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-members"));
     await byId("pcf-oncall-none");
-    expect(document.getElementById("pcf-tab-overview")!.getAttribute("aria-selected")).toBe("true"); // the page belongs to Overview
-    fireEvent.click(await byId("pcf-back"));
-    await byId("pcf-desc");
+    expect(document.getElementById("pcf-tab-members")!.getAttribute("aria-selected")).toBe("true");
+    expect(document.getElementById("pcf-back")).toBeNull();
+    cleanup();
+    const landing: Array<[string, string, string, RegExp]> = [
+      ["classes", "flw-classes", "flow", /^\?tab=flow$/],
+      ["flow-advanced", "flw-structure", "flow", /tab=flow.*sec=structure|sec=structure.*tab=flow/],
+      ["rules", "pcf-rule", "approvers", /rule=G5/],
+      ["spend", "pcf-bud-monthly", "budget", /^\?tab=budget$/],
+      ["archive", "pcf-archive-panel", "line", /^\?tab=line$/],
+      ["history", "pcf-recent", "overview", /^$/],
+      ["notifications", "pcf-notify", "overview", /^$/],
+      ["more", "pcf-overlay", "overview", /^$/],
+    ];
+    for (const [old, el, tabId, search] of landing) {
+      window.history.replaceState(null, "", `/?tab=${old}`);
+      mount(<ProjectConfigView />);
+      await byId(el);
+      expect(document.getElementById(`pcf-tab-${tabId}`)!.getAttribute("aria-selected"), old).toBe("true");
+      expect(window.location.search, old).toMatch(search);
+      cleanup();
+    }
   });
 
-  it("Overview: Details (Name, Description, Owner, Save) and a five-row Summary", async () => {
+  it("Overview: Details (Name, Description, Owner, Instructions overlay, Save), a five-row Summary with Save as template, Recent changes, Notifications and Advanced", async () => {
     withPayments();
     mount(<ProjectConfigView />);
     await byId("pcf-desc");
-    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Details", "Summary"]);
+    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Details", "Summary", "Recent changes", "Notifications", "Advanced"]);
     expect(Array.from(document.querySelectorAll(".kv dt")).map((d) => d.textContent)).toEqual(["Key", "Template", "Teams", "Regulated", "Repos"]);
     const name = document.getElementById("pcf-name") as HTMLInputElement;
     expect(name.value).toBe("Payments Platform");
     expect(name.disabled).toBe(false); // an editable required field, not a read-only one with a hint
     expect(document.getElementById("pcf-more")).toBeNull();
     expect(document.getElementById("pcf-ov-save")!.textContent).toBe("Save");
+    expect(document.getElementById("pcf-save-tpl")!.textContent).toBe("Save as template");
+    expect(document.getElementById("pcf-to-audit")!.getAttribute("href")).toBe("#/audit?project=payments");
+    expect(document.getElementById("pcf-flow-sum")).toBeNull(); // the flow summary is behind Advanced
+    fireEvent.click(await byId("pcf-adv-toggle"));
+    expect((await byId("pcf-flow-sum")).textContent).toMatch(/\d+ stations, \d+ gates/);
   });
 
-  it("Flow: two panels of compact rows (Stations, Gates), gates in flow order with an S1 → S2 hint; every control labelled", async () => {
+  it("Overview: the instructions overlay saves with the description, one version chained from the other", async () => {
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
+    mount(<ProjectConfigView />);
+    const overlay = (await byId("pcf-overlay")) as HTMLTextAreaElement;
+    fireEvent.change(await byId("pcf-desc"), { target: { value: "Changed" } });
+    fireEvent.change(overlay, { target: { value: "Always cite the ticket." } });
+    fireEvent.click(await byId("pcf-ov-save"));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").length).toBe(2));
+    const patches = calls.filter((c) => c.method === "PATCH");
+    expect(patches.map((c) => c.body)).toEqual([{ path: "desc", value: "Changed" }, { path: "overlay", value: "Always cite the ticket." }]);
+    expect(patches.map((c) => c.headers["if-match"])).toEqual(["7", "8"]);
+  });
+
+  it("Overview: Notifications shows the route count and turns a route on or off with If-Match; Recent changes says when the ledger is refused", async () => {
+    const route = { id: "NR-9", event: "gate.waiting", dest: [{ channel: "slack", target: "#gates" }], template: "gate", cond: { classes: [], priority: [], hours: "any" }, enabled: true, fields: {} };
+    const calls = withPayments({
+      "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, notifications: [route] }, RISK] }),
+      "PATCH /api/v1/projects/payments/config": () => ok(),
+      "GET /api/v1/audit": () => ({ status: 403, body: { ok: false, msg: "Needs audit.view." } }),
+    });
+    mount(<ProjectConfigView />);
+    expect((await byId("pcf-notify-count")).textContent).toBe("1 route, 1 on.");
+    fireEvent.click(await byId("pcf-nr-NR-9"));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ path: "notifications" }));
+    expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toBe("7");
+    expect(await screen.findByText("Not visible to you")).toBeTruthy(); // a refused ledger is not "No history yet"
+    expect(screen.queryByText("No history yet")).toBeNull();
+  });
+
+  it("Flow: Stations and Gates as compact rows, then Advanced: structure, Class routes and Work classes; gates in flow order with an S1 → S2 hint; every control labelled", async () => {
     withPayments({});
     tab("flow");
     mount(<ProjectConfigView />);
     await byId("pcf-wip-spec");
-    expect(Array.from(document.querySelectorAll("#flw .flw-cols > section > h2, #flw .panel-title")).map((h) => h.textContent)).toEqual(["Stations", "Gates"]);
+    expect(Array.from(document.querySelectorAll("#flw .flw-cols > section > h2, #flw .panel-title")).map((h) => h.textContent)).toEqual(["Stations", "Gates", "Advanced: structure", "Class routes", "Work classes on Payments Platform"]);
     expect(Array.from(document.querySelectorAll("#flw .flw-list:not(.flw-gates) > li")).slice(0, 3).map((li) => li.id)).toEqual(["flw-st-intake", "flw-st-research", "flw-st-spec"]);
     expect(Array.from(document.querySelectorAll("#flw .flw-gates > li")).slice(0, 3).map((li) => li.id)).toEqual(["flw-g-G0G1", "flw-g-G1f", "flw-g-G2"]);
     expect(document.querySelector("#flw-g-G2 .flw-hint")!.textContent).toBe("S2 → S3");
@@ -640,20 +732,23 @@ describe("Project config", () => {
     expect(css).not.toMatch(/flw-card/);
   });
 
-  it("Approvers: an overview table with Edit; Edit opens a dialog that saves the rule with If-Match", async () => {
-    const calls = withPayments({ "PUT /api/v1/projects/payments/approvers/G5": () => ok() });
+  it("Approvers: a gate table; Edit opens the full rule editor in place (roles, per-class counts, conditions, away, scenario) and the deep link names the gate", async () => {
+    withPayments();
     tab("approvers");
+    window.location.hash = "#/p/payments/project-config/approvers/G2";
     mount(<ProjectConfigView />);
     expect(Array.from((await waitFor(() => { const t = document.querySelectorAll("#pcf-appr thead th"); if (!t.length) throw new Error("no table"); return t; }))).map((t) => t.textContent?.replace(/[↑↓↕]/, "").trim())).toEqual(["Gate", "Roles", "Needed", "Separation", "Escalate", ""]);
+    expect((await byId("pcf-rule")).getAttribute("aria-label")).toMatch(/G2/); // the Traveler's Edit rule link opens that gate
+    expect(window.location.hash).toBe("#/p/payments/project-config"); // the gate lives in ?rule=, not a stale hash segment
+    expect(window.location.search).toMatch(/tab=approvers/);
     fireEvent.click(await byId("pcf-ap-edit-G5"));
-    expect(await screen.findByText("Approvers for G5")).toBeTruthy();
-    fireEvent.change(document.getElementById("fd-required")!, { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT")).toBeTruthy());
-    const put = calls.find((c) => c.method === "PUT")!;
-    expect((put.body as { value: ApproverRule }).value).toMatchObject({ required: 2, sod: true });
-    expect(put.headers["if-match"]).toBe("7");
-    expect(document.getElementById("pcf-more")).toBeNull();
+    await waitFor(() => expect(document.getElementById("pcf-rule")!.getAttribute("aria-label")).toMatch(/G5/));
+    for (const id of ["pcf-ap-required", "pcf-ap-sod", "pcf-ap-add", "pcf-ap-esc", "pcf-ap-fallback", "pcf-sc-cls"]) expect(document.getElementById(id), id).toBeTruthy();
+    expect(document.querySelector("#pcf-rule .sub-h")).toBeTruthy();
+    expect(screen.getByText("Away and delegates")).toBeTruthy();
+    fireEvent.click(await byId("pcf-ap-close"));
+    expect(document.getElementById("pcf-rule")).toBeNull();
+    expect(document.querySelector(".dlg")).toBeNull(); // no 3-field dialog
   });
 
   it("MCP: a switch row per server with its url; the tab count is the servers attached", async () => {
@@ -678,12 +773,12 @@ describe("Project config", () => {
 
   it("Line control: Halt and Kill project, in a panel with the Blueprint's text", async () => {
     withPayments();
-    tab("danger");
+    tab("line");
     mount(<ProjectConfigView />);
     expect(await screen.findByText("Halting lets running agents finish their current step. A kill stops them now.")).toBeTruthy();
     expect(document.getElementById("pcf-halt")!.textContent).toBe("Halt project");
     expect(document.getElementById("pcf-kill")!.textContent).toBe("Kill project");
-    expect(document.getElementById("pcf-tab-danger")!.textContent).toBe("Line control");
+    expect(document.getElementById("pcf-tab-line")!.textContent).toBe("Line control");
   });
 
   it("Name is editable and required (3 characters); a rename goes to the server and its refusal is shown on the field", async () => {
@@ -700,22 +795,27 @@ describe("Project config", () => {
     expect(await screen.findByText("Renaming a project is not supported.")).toBeTruthy();
   });
 
-  it("Repos lists only live repositories (not the ones still being onboarded), and Summary counts the same", async () => {
+  it("Repos lists the live repositories under Ready, and the ones still being onboarded under Still onboarding", async () => {
     const ready = (id: string) => ({ id, name: `acme/${id}`, project: "payments", team: "payments", tags: [], lang: "Go", halted: null, onboarding: { stage: "ready", findings: [], pr: null, timeline: [], exception: null } });
     const moving = { ...ready("moving"), onboarding: { stage: "assessed", findings: [], pr: null, timeline: [], exception: null } };
     withPayments({ "GET /api/v1/projects/payments/repos": () => ({ body: [ready("a"), ready("b"), moving] }) });
     tab("repos");
     mount(<ProjectConfigView />);
-    await waitFor(() => expect(document.querySelectorAll(".list li").length).toBe(2));
-    expect(document.body.textContent).not.toMatch(/acme\/moving/);
+    await waitFor(() => expect(document.querySelectorAll("#pcf-ready .list li").length).toBe(2));
+    expect(document.querySelector("#pcf-ready")!.textContent).not.toMatch(/acme\/moving/);
+    // the one still onboarding is listed apart, linking to its Onboarding session
+    const link = (await waitFor(() => { const x = document.querySelector<HTMLAnchorElement>("#pcf-onb-list a.pri"); if (!x) throw new Error("none"); return x; }));
+    expect(link.textContent).toBe("acme/moving");
+    expect(link.getAttribute("href")).toBe("#/p/payments/onboarding/moving");
   });
 
-  it("Line control is one Halt and stop panel; Kill asks only for the project key, not the shell's kill dialog", async () => {
+  it("Line control: Halt and stop, then the Archive panel; Kill asks only for the project key, not the shell's kill dialog", async () => {
     const calls = withPayments({ "POST /api/v1/stops/project/payments/kill": () => ok(), "POST /api/v1/stops": () => ok() });
-    tab("danger");
+    tab("line");
     mount(<ProjectConfigView />);
     await byId("pcf-kill");
-    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Halt and stop"]); // no Archive panel
+    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Halt and stop", "Archive this project"]);
+    expect(document.getElementById("pcf-archive")).toBeTruthy();
     fireEvent.click(document.getElementById("pcf-kill")!);
     expect(await screen.findByText("Type the project key (PAY)")).toBeTruthy();
     fireEvent.change(document.getElementById("fd-c")!, { target: { value: "WRONG" } });
@@ -725,19 +825,32 @@ describe("Project config", () => {
     expect(calls.some((c) => c.method === "POST" && /kill|stops/.test(c.path))).toBe(false);
   });
 
-  it("the pages that are not tabs stay reachable from the More menu in the header", async () => {
-    withPayments();
+  it("Members is a tab: members and roles, grant a role, on call and the factory-wide roles, each with its own guard", async () => {
+    withPayments({}, ["project.members"]);
+    tab("members");
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-pages"));
-    const labels = Array.from(document.querySelectorAll("[role=menuitem]")).map((x) => x.textContent);
-    expect(labels).toEqual(expect.arrayContaining(["Members and roles", "Work classes", "Notification routes", "History", "Full rule editor", "Spend breakdown", "Archive project"]));
-    fireEvent.click(screen.getByText("Members and roles"));
-    expect(window.location.search).toBe("?tab=members");
+    expect(await byId("pcf-mem-table")).toBeTruthy();
+    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Members of Payments Platform", "Grant a role", "On call", "Factory-wide roles"]);
+    await waitFor(() => expect(document.getElementById("pcf-add-go")!.getAttribute("aria-disabled")).toBe("true"));
+    expect(document.getElementById("pcf-rm-p-meera-line_lead")!.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("Budget: spend by station and the most expensive work orders from the work orders on record, no stale limit fields", async () => {
+    const wo = (id: string, cost: number) => ({ id, title: `Work ${id}`, history: [{ station: "build", cost }], project: "payments" });
+    withPayments({ "GET /api/v1/projects/payments/work-orders": () => ({ body: [wo("WO-1", 4), wo("WO-2", 9)] }) });
+    tab("spend");
+    mount(<ProjectConfigView />);
+    expect((await byId("pcf-bud-st-build")).textContent).toMatch(/\$13/);
+    expect((await byId("pcf-bud-st-other")).textContent).toMatch(/\$237/); // metered month to date ($250) less the $13 on stations, so the figures reconcile
+    expect(document.getElementById("pcf-bud-note")!.textContent).toMatch(/\$250/);
+    expect(Array.from(document.querySelectorAll("#pcf-bud-top-table tbody tr")).map((r) => r.querySelector("button")?.textContent)).toEqual(["WO-2", "WO-1"]);
+    expect(document.getElementById("pcf-bud-monthly")!.getAttribute("min")).toBe("0");
+    expect(document.getElementById("pcf-bud-monthly")!.getAttribute("max")).toBe("10000000");
   });
 
   it("Halt project halts at once with the Blueprint's toast; WIP below 1 says so; locked Kill shows the title", async () => {
     const calls = withPayments({ "POST /api/v1/stops": () => ok() });
-    tab("danger");
+    tab("line");
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-halt"));
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/stops")?.body).toMatchObject({ scope: "project", id: "payments", mode: "halt" }));
@@ -747,7 +860,7 @@ describe("Project config", () => {
 
   it("read-only: Kill project, Halt project and the approver Edit carry the lock title and toast on click", async () => {
     withPayments({}, ["kill.project", "halt.project", "project.config", "flow.edit"]);
-    tab("danger");
+    tab("line");
     mount(<ProjectConfigView />);
     const kill = await byId("pcf-kill");
     await waitFor(() => expect(kill.getAttribute("aria-disabled")).toBe("true"));
@@ -764,7 +877,7 @@ describe("Project config", () => {
     const calls = withPayments({ "POST /api/v1/stops": () => stepUpBody }, [], ["halt.project", "project.config"]);
     const handler = vi.fn(async (): Promise<StepUpOutcome> => ({ ok: false, error: "cancelled" }));
     setStepUpHandler(handler);
-    tab("danger");
+    tab("line");
     mount(<ProjectConfigView />);
     const halt = await byId("pcf-halt");
     await waitFor(() => expect(halt.getAttribute("title")).toMatch(/asked to sign in again/));
