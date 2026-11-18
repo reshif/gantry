@@ -4,18 +4,20 @@
  * Edits stay in a draft (kept across tabs and screens) until Save; saving writes one audited change. A version is a snapshot of the saved configuration and is immutable.
  * "Run suite" opens Evals, which owns suite runs.
  */
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo } from "react";
 import { fmt, type Project } from "@gantry/domain";
 import { useCan } from "../api/can";
-import { useAgents, usePolicies, useProjects } from "../api/queries";
+import { useAgents, usePolicies, useProjects, useScorecards } from "../api/queries";
 import { ops } from "../api/ops";
 import { hashFor, navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { useCrumbTail } from "../lib/crumb";
 import { Async, useCommand } from "../ui/async";
-import { Avatar, Btn, Chip, Empty, FilterBar, LockNote, SearchBox, Select, Stat, StatRow, Status, Tabs, ViewHead, type Decision } from "../ui/primitives";
-import { DataTable, type SortCol } from "../ui/SortTable";
-import { Icon } from "../ui/Icon";
+import { Avatar, Btn, Chip, FilterBar, LockNote, SearchBox, Select, Tabs, type Decision } from "../ui/primitives";
+import { DataTable, type SortCol } from "../ui/DataTable";
+import { CrEmpty, Page, Stats } from "../ui/cr";
+import { useRouteState, useDebouncedParam } from "../lib/routeState";
+import { NotFoundPage } from "./NotFound";
 import { useUI } from "../ui/overlay-context";
 import { useOutcome } from "./govern/data";
 import { evalsFocus } from "./evals/kit";
@@ -24,50 +26,30 @@ import { DraftDot } from "../ui/DraftDot";
 import { useLeaveGuard } from "../lib/useLeaveGuard";
 import { DraftConflictBanner } from "../ui/DraftConflict";
 import { invalidateSlices } from "../api/keys";
-import { EntityHistory, pick, rerender, ui, useAgentsUi, useStations, autonomyCheck, type AgentRow, type Draft } from "./agents/kit";
+import { EntityHistory, pick, ui, useAgentsUi, useStations, autonomyCheck, nextVersion, type AgentRow, type Draft } from "./agents/kit";
 import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
 import { InstructionsTab } from "./agents/Instructions";
 import { SkillsTab } from "./agents/SkillsMcp";
 import { VersionsTab } from "./agents/Versions";
 import { TrustStrip, TrustTab } from "./agents/Trust";
-import { CreateAgent } from "./agents/Create";
+import { NewAgentDialog } from "./agents/NewAgent";
+import { EvalsTab, GuardrailsTab, InstructionsCard, ModelTab, OverviewTab, SkillsListTab, ToolsTab, confirmNewVersion, levelOf } from "./agents/proto";
 
+const NA = "not available";
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
-type ListTab = "all" | "station" | "candidate" | "below" | "paused";
-const isBelow = (a: AgentRow): boolean => a.threshold != null && a.evalScore < a.threshold;
-const candidates = (a: AgentRow): number => a.versions.filter((v) => v.rc).length;
-const LIST_TABS: Array<{ id: ListTab; label: string; test: (a: AgentRow) => boolean }> = [
-  { id: "all", label: "All", test: () => true },
-  { id: "station", label: "Station agents", test: (a) => !!a.station },
-  { id: "candidate", label: "Has candidate", test: (a) => candidates(a) > 0 },
-  { id: "below", label: "Below threshold", test: isBelow },
-  { id: "paused", label: "Paused", test: (a) => a.status === "paused" },
-];
-
-/** The roster's tab, search and filters live outside the component so they survive opening an agent and coming back. */
-const roster = { tab: "all" as ListTab, q: "", station: "", status: "" };
-const rosterListeners = new Set<() => void>();
-let rosterSnap = { ...roster };
-const setRoster = (p: Partial<typeof roster>): void => { Object.assign(roster, p); rosterSnap = { ...roster }; rosterListeners.forEach((l) => l()); };
-const useRosterState = () => useSyncExternalStore((l) => (rosterListeners.add(l), () => rosterListeners.delete(l)), () => rosterSnap);
-
-/** The roster: view tabs with counts, a filter bar and one table. A row opens that agent's own page. */
+/** The roster (prototype `agents`): search, Station and Autonomy selects and the table. The state is in the URL (?q ?station ?lv ?sort ?dir). */
 function Roster({ agents }: { agents: AgentRow[] }) {
   const st = useStations();
-  const { tab, q, station, status } = useRosterState();
-  const setTab = (v: ListTab): void => setRoster({ tab: v });
-  const setQ = (v: string): void => setRoster({ q: v });
-  const setStation = (v: string): void => setRoster({ station: v });
-  const setStatus = (v: string): void => setRoster({ status: v });
+  const scorecards = useScorecards().data;
+  const [r, setR] = useRouteState({ q: "", station: "", lv: "", sort: "name", dir: "asc" });
+  const [qText, setQText] = useDebouncedParam(r.q, (v) => setR({ q: v }));
   const open = (a: AgentRow): void => navigate("agents", a.id);
-  const term = q.trim().toLowerCase();
-  const inTab = LIST_TABS.find((t) => t.id === tab)!.test;
-  const rows = agents.filter((a) => inTab(a)
-    && (!station || a.station === station || a.stations.includes(station))
-    && (!status || a.status === status)
-    && (!term || `${a.name} ${a.id} ${a.model}`.toLowerCase().includes(term)));
-  const lvl = (a: AgentRow): number => (a.autonomy === "auto" ? 3 : a.autonomy === "gate" ? 2 : 1);
+  const term = qText.trim().toLowerCase();
+  const rows = agents.filter((a) => (!r.station || a.station === r.station) && (!r.lv || String(levelOf(a)) === r.lv)
+    && (!term || [a.name, a.id, a.model, a.station ?? ""].join(" ").toLowerCase().includes(term)));
+  const any = !!(r.q || r.station || r.lv);
+  const runs = (a: AgentRow): number | null => scorecards?.[a.id]?.counts?.attempts ?? null;
   const cols: SortCol<AgentRow>[] = [
     { key: "name", label: "Agent", sort: (a) => a.name.toLowerCase(), render: (a) => (
       <span className="row nowrap">
@@ -77,32 +59,47 @@ function Roster({ agents }: { agents: AgentRow[] }) {
     ) },
     { key: "station", label: "Station", sort: (a) => st.find(a.station)?.no ?? "~", render: (a) => {
       const s = st.find(a.station);
-      return s ? <span className="nowrap">{s.name}{a.stations.length > 1 ? <span className="dim">{` +${a.stations.length - 1}`}</span> : null}</span> : <span className="dim">{"\u2014"}</span>;
+      return s ? <span className="nowrap">{s.name}</span> : <span className="dim">{"\u2014"}</span>;
     } },
-    { key: "model", label: "Model", sort: true, render: (a) => <span className="mono ell">{a.model.replace("claude-", "")}{a.fallbacks.length ? <span className="dim">{` +${a.fallbacks.length}`}</span> : null}</span> },
-    { key: "autonomy", label: "Autonomy", sort: (a) => lvl(a), render: (a) => <span className="lvl" style={{ "--l": lvl(a), cursor: "default" } as React.CSSProperties}>{`L${lvl(a)}`}</span> },
-    { key: "version", label: "Version", render: (a) => { const rc = candidates(a); return <span><span className="mono">{a.version}</span>{rc ? <Chip text={`${rc} candidate`} cls="agent" /> : null}</span>; } },
-    { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => Number.isFinite(a.evalScore) ? <span className={`mono${isBelow(a) ? " neg" : ""}`}>{isBelow(a) ? <Icon name="alert" className="ag-below" /> : null}{a.evalScore.toFixed(2)}</span> : <span className="dim">{"\u2014"}</span> },
-    { key: "spend7d", label: "Spend 7d", sort: true, align: "end", render: (a) => <span className="mono">{fmt.money0(a.spend7d)}</span> },
-    { key: "status", label: "Status", sort: true, render: (a) => <Status tone={a.status === "paused" ? "neutral" : "run"}>{a.status === "paused" ? "Paused" : "Active"}</Status> },
+    { key: "model", label: "Model", sort: true, render: (a) => <span className="mono ell">{a.model.replace("claude-", "")}</span> },
+    { key: "autonomy", label: "Autonomy", sort: (a) => levelOf(a), render: (a) => <span className="lvl" style={{ "--l": levelOf(a), cursor: "default" } as React.CSSProperties}>{`L${levelOf(a)}`}</span> },
+    { key: "version", label: "Version", render: (a) => <span className="mono">{a.version}</span> },
+    { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => Number.isFinite(a.evalScore) ? <span className="mono">{a.evalScore.toFixed(2)}</span> : <span className="dim">{"\u2014"}</span> },
+    { key: "runs", label: "Runs 7d", sort: (a) => runs(a) ?? -1, align: "end", render: (a) => { const n = runs(a); return n == null ? <span className="dim">{NA}</span> : <span className="mono">{n}</span>; } },
+    { key: "status", label: "Status", sort: (a) => (a.status === "paused" ? "paused" : (a.running ?? 0) > 0 ? "busy" : "idle"), render: (a) => a.status === "paused" ? <Chip text="Paused" cls="idle" /> : (a.running ?? 0) > 0 ? <Chip text="Busy" cls="info" /> : <Chip text="Idle" cls="idle" /> },
   ];
-  const stOpts = [{ value: "", label: "Station: all" }, ...st.all.map((s) => ({ value: s.id, label: `Station: ${s.name}` }))];
+  const clear = <Btn label="Clear" small kind="ghost" id="ag-clear" onClick={() => { setQText(""); setR({ q: "", station: "", lv: "" }); }} />;
   return (
     <>
-      <FilterBar label="Filter agents" count={`${rows.length} of ${agents.length}`}>
-        <SearchBox id="ag-search" value={q} onChange={setQ} placeholder="Search agents" />
-        <Select id="ag-f-station" aria-label="Station" value={station} onChange={setStation} options={stOpts} />
-        <Select id="ag-view" aria-label="View" value={tab} onChange={(t) => setTab(t as ListTab)} options={LIST_TABS.map((t) => ({ value: t.id, label: `View: ${t.label} (${agents.filter(t.test).length})` }))} />
-        <Select id="ag-f-status" aria-label="Status" value={status} onChange={setStatus} options={[{ value: "", label: "Status: all" }, { value: "active", label: "Status: Active" }, { value: "paused", label: "Status: Paused" }]} />
+      <FilterBar label="Filter agents" count={`${rows.length} of ${agents.length}`} actions={any ? clear : undefined}>
+        <SearchBox id="ag-search" value={qText} onChange={setQText} placeholder="Search agents" />
+        <Select id="ag-f-station" aria-label="Station" value={r.station} onChange={(v) => setR({ station: v })} options={[{ value: "", label: "Station: all" }, ...st.all.map((s) => ({ value: s.id, label: s.name }))]} />
+        <Select id="ag-f-lv" aria-label="Autonomy" value={r.lv} onChange={(v) => setR({ lv: v })} options={[{ value: "", label: "Autonomy: all" }, ...[0, 1, 2, 3, 4].map((l) => ({ value: String(l), label: `L${l}` }))]} />
       </FilterBar>
-      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} pageSize={12} pager empty={{ title: "No agents match", text: "Clear a filter or the search to see more." }} />
+      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} pageSize={12} pager
+        sort={{ key: r.sort, dir: r.dir === "desc" ? -1 : 1 }} onSort={(x) => setR({ sort: x.key, dir: x.dir === -1 ? "desc" : "asc" })}
+        empty={{ title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="ag-empty-clear" onClick={() => { setQText(""); setR({ q: "", station: "", lv: "" }); }} /> }} />
     </>
   );
 }
 
+const TAB_IDS = ["overview", "instructions", "tools", "model", "skills", "guardrails", "evals", "settings", "overrides", "versions", "trust", "history"] as const;
+const SAVE_TABS: readonly string[] = ["instructions", "tools", "model", "skills", "guardrails", "settings", "overrides"];
+
 function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const ui_ = useUI();
   const out = useOutcome();
+  const [route, setRoute] = useRouteState({ tab: "overview" });
+  const tab = (TAB_IDS as readonly string[]).includes(route.tab) ? route.tab : "overview";
+  const setTab = (t: string): void => setRoute({ tab: t });
+  // Another screen asked for a tab (agentsSelect): apply it once the route has settled.
+  useEffect(() => {
+    if (!ui.want) return undefined;
+    const want = ui.want;
+    ui.want = "";
+    const t = setTimeout(() => setRoute({ tab: want }), 0);
+    return () => clearTimeout(t);
+  }, [a.id, setRoute]);
   const statusCmd = useCommand((resume: boolean) => ops.saveAgent(a.id, { status: resume ? "active" : "paused" }, resume ? "resumed" : "paused", { ifMatch: a.rev }), { ok: false });
   const policies = usePolicies().data ?? [];
   const st = useStations();
@@ -129,45 +126,63 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
     if (!d.stations.length) { out({ ok: false, msg: "Pick at least one station the agent may staff.", status: 422 }); return; }
     void draft.save().then((r) => { if (r) out(r); });
   };
-  const saveGuard: Decision | null = !perm.allowed ? perm : draft.saving || draft.syncing ? { allowed: false, needs: "", reason: "Saving…" } : !autoChk.allowed ? { allowed: false, needs: "", reason: autoChk.reason ?? "" } : !dirty ? { allowed: false, needs: "", reason: "No changes to save." } : null;
+  const saveGuard: Decision | null = !perm.allowed ? perm : draft.saving || draft.syncing ? { allowed: false, needs: "", reason: "Saving\u2026" } : !autoChk.allowed ? { allowed: false, needs: "", reason: autoChk.reason ?? "" } : !dirty ? { allowed: false, needs: "", reason: "No changes to save." } : null;
   const toggleStatus = () => {
     const resume = a.status === "paused";
     void statusCmd.run(resume).then((r) => { if (r?.ok) ui_.toast(resume ? `${a.name} is active.` : `${a.name} is paused. Its stations queue work until it resumes.`, "ok"); });
   };
+  // "Save as new version": the working copy is saved first (one audited change), then a candidate snapshots it. Promotion stays a separate step on Versions.
+  const saveVersion = () => {
+    if ((d.instructions ?? "").trim().length < 40) { ui_.toast("Instructions are too short.", "warn"); return; }
+    confirmNewVersion(ui_, a, () => {
+      void (async () => {
+        let rev = a.rev;
+        if (dirty) {
+          const r = await draft.save();
+          if (r && !r.ok) { out(r); return; }
+          if (r && r.ok && typeof (r as { rev?: number }).rev === "number") rev = (r as { rev?: number }).rev as number;
+        }
+        const label = nextVersion(a);
+        const r2 = await ops.newAgentVersion(a.id, label, "Saved from the Instructions tab", rev === a.rev ? { ifMatch: a.rev } : undefined);
+        out(r2);
+        if (r2.ok) ui_.toast(`${a.name} ${label} saved. The eval suite runs before it can go live.`, "ok");
+      })();
+    });
+  };
   const running = a.running ?? 0;
+  const paused = a.status === "paused";
+  const station = st.find(a.station);
   const tabs = [
-    { id: "config", label: "Configuration" }, { id: "instructions", label: "Instructions" }, { id: "skills", label: "Skills and MCP", count: d.skills.length },
-    { id: "overrides", label: "Per-project", count: Object.keys(d.overrides ?? {}).length }, { id: "versions", label: "Versions", count: a.versions.length }, { id: "trust", label: "Trust" }, { id: "history", label: "History" },
+    { id: "overview", label: "Overview" }, { id: "instructions", label: "Instructions" }, { id: "tools", label: "Tools" }, { id: "model", label: "Model and budget" },
+    { id: "skills", label: "Skills", count: d.skills.length }, { id: "guardrails", label: "Guardrails" }, { id: "evals", label: "Evals" },
+    { id: "settings", label: "Settings" }, { id: "overrides", label: "Per-project", count: Object.keys(d.overrides ?? {}).length },
+    { id: "versions", label: "Versions", count: a.versions.length }, { id: "trust", label: "Trust" }, { id: "history", label: "History" },
   ];
   const tp: TabProps = { a, d, ro, perm, projects, policies, edit };
-  const body = ui.tab === "instructions" ? <InstructionsTab {...tp} />
-    : ui.tab === "skills" ? <SkillsTab {...tp} />
-    : ui.tab === "overrides" ? <OverridesTab {...tp} />
-    : ui.tab === "versions" ? <VersionsTab a={a} dirty={dirty} perm={perm} />
-    : ui.tab === "trust" ? <TrustTab a={a} projects={projects} />
-    : ui.tab === "history" ? <div className="ag-hist"><EntityHistory type="agent" id={a.id} limit={40} /></div>
-    : <ConfigTab {...tp} />;
-  const showSave = ["config", "instructions", "skills", "overrides"].includes(ui.tab);
-  const paused = a.status === "paused";
-  const here = st.find(a.station);
-  const after = here ? st.all[st.all.indexOf(here) + 1] : undefined;
-  const nextLine = !here ? "off the line" : after ? `next after this station: ${after.name}` : "last station on the line";
+  const body = tab === "instructions" ? <><InstructionsCard a={a} d={d} ro={ro} edit={edit} onSaveVersion={saveVersion} saving={draft.saving || draft.syncing} /><InstructionsTab {...tp} /></>
+    : tab === "tools" ? <ToolsTab {...tp} />
+    : tab === "model" ? <ModelTab {...tp} />
+    : tab === "skills" ? <><SkillsListTab {...tp} /><SkillsTab {...tp} /></>
+    : tab === "guardrails" ? <GuardrailsTab {...tp} />
+    : tab === "evals" ? <EvalsTab a={a} />
+    : tab === "settings" ? <ConfigTab {...tp} />
+    : tab === "overrides" ? <OverridesTab {...tp} />
+    : tab === "versions" ? <VersionsTab a={a} dirty={dirty} perm={perm} />
+    : tab === "trust" ? <><TrustStrip a={a} projects={projects} /><TrustTab a={a} projects={projects} /></>
+    : tab === "history" ? <div className="ag-hist"><EntityHistory type="agent" id={a.id} limit={40} /></div>
+    : <OverviewTab {...tp} onTab={setTab} />;
+  const showSave = SAVE_TABS.includes(tab);
   return (
-    <section className="agent-detail" id="agent-detail" aria-label={`${a.name} configuration`}>
-      <a className="back-link" id="ag-back-link" href={hashFor("agents")} onClick={(e) => { e.preventDefault(); navigate("agents"); }}><Icon name="back" />All agents</a>
-      <ViewHead
-        kicker={`Agent · ${st.label(a.station, projects)}${a.builtin ? " · built-in" : ""}`}
-        title={<span className="ag-title"><span>{a.name}</span><Status tone={paused ? "neutral" : "done"}>{paused ? "Paused" : "Active"}</Status></span>}
-        sub={<span className="ad-meta mono">{[a.version, a.model, `${running} work order${running === 1 ? "" : "s"} now`, a.suite ? `${a.suite} ${fmt.pct(a.evalScore)}` : "", nextLine].filter(Boolean).join(" · ")}</span>}
-        actions={<>
-          <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving…")} onClick={toggleStatus} />
-          <Btn label="Evals" icon="eval" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} />
-        </>}
-      />
-      <TrustStrip a={a} projects={projects} />
+    <Page id="agent-detail" eyebrow="Workforce · Agent" title={a.name} cls="agent-detail"
+      sub={`${station ? `${station.name} station \u00b7 ` : ""}${a.model}${running ? ` \u00b7 ${running} work order${running === 1 ? "" : "s"} now` : ""}${paused ? " \u00b7 paused" : ""}`}
+      acts={<>
+        <Btn label="All agents" id="ag-back-link" onClick={() => navigate("agents")} />
+        <Btn label="Talk" icon="chat" id="ag-talk" onClick={() => navigate("conversations")} />
+        <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving\u2026")} onClick={toggleStatus} />
+        <Btn label="Evals" icon="eval" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} />
+      </>}>
       <LockNote decision={perm} what="Agent configuration" />
-      <div className="panel ag-panel">
-      <Tabs idPrefix="ag-tab" items={tabs} active={ui.tab} onChange={(t) => { ui.tab = t; rerender(); }} />
+      <Tabs idPrefix="ag-tab" items={tabs} active={tab} onChange={setTab} />
       <div className="ag-body">{body}</div>
       {showSave ? <DraftConflictBanner id="ag-conflict" conflict={draft.conflict} onKeepMine={draft.keepMine} onDiscard={draft.discard} /> : null}
       {showSave ? (
@@ -177,10 +192,11 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
           <Btn label="Save agent" kind="primary" id="ag-save" guard={saveGuard} onClick={save} />
         </div>
       ) : null}
-      </div>
-    </section>
+    </Page>
   );
 }
+
+const SUB = "One agent per station. Each has instructions, tools, a model, a budget and an autonomy level people granted.";
 
 export default function AgentsView() {
   useAgentsUi();
@@ -190,7 +206,7 @@ export default function AgentsView() {
   const q = useAgents();
   const agents = useMemo(() => (q.data ?? []) as unknown as AgentRow[], [q.data]);
   const projects = (useProjects().data ?? []) as Project[];
-  const policies = usePolicies().data ?? [];
+  const scorecards = useScorecards().data;
   const perm = dec(useCan("agent.edit"));
   const wanted = route.id === "agents" ? route.param : null;
   useCrumbTail(wanted ? agents.find((a) => a.id === wanted)?.name : null);
@@ -204,52 +220,31 @@ export default function AgentsView() {
     }
   }, [prefs.agent, agents]);
 
-  const sub = "Who staffs each station, on which model, with which instructions, skills and permissions. Every change is a draft, then a version, then a promotion.";
-  const create = <Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />;
+  const create = <Btn label="New agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <NewAgentDialog agents={agents} perm={perm} close={close} />)} />;
+  const head = (children: React.ReactNode) => <Page eyebrow="Workforce" title="Agents" sub={SUB} acts={create} cls="view-agents">{children}</Page>;
 
-  if (q.data === undefined) {
-    return (
-      <div className="view view-agents">
-        <ViewHead kicker="Workforce" title="Agents" sub={sub} actions={q.isError ? create : undefined} />
-        <Async query={q} what="agents" id="agents">{() => null}</Async>
-      </div>
-    );
-  }
-  if (!agents.length) {
-    return (
-      <div className="view view-agents">
-        <ViewHead kicker="Workforce" title="Agents" sub={sub} actions={create} />
-        <Empty title="No agents yet" text="Create the first agent." />
-      </div>
-    );
-  }
+  if (q.data === undefined) return head(<Async query={q} what="agents" id="agents">{() => null}</Async>);
   if (wanted) {
     const current = agents.find((a) => a.id === wanted);
-    if (!current) {
-      return (
-        <div className="view view-agents">
-          <ViewHead title="Agent not found" sub="This agent does not exist, or it was removed." />
-          <Empty title="No agent with that id" text="Pick one from the roster." action={<Btn label="Back to agents" icon="back" id="ag-back" onClick={() => navigate("agents")} />} />
-        </div>
-      );
-    }
+    if (!current) return <NotFoundPage what="agent" />;
     ui.sel = current.id;
-    return <div className="view view-agents"><Detail a={current} projects={projects} /></div>;
+    return <Detail a={current} projects={projects} />;
   }
-  const active = agents.filter((a) => a.status === "active").length;
-  const cands = agents.reduce((n, a) => n + candidates(a), 0);
-  const below = agents.filter(isBelow).length;
-  return (
-    <div className="view view-agents">
-      <ViewHead kicker="Workforce" title="Agents" sub={sub} actions={create} />
-      <StatRow id="ag-stats">
-        <Stat label="Agents" value={String(agents.length)} />
-        <Stat label="Active" value={`${active} / ${agents.length}`} tone="done" />
-        <Stat label="Candidates" value={String(cands)} tone={cands ? "wait" : undefined} />
-        <Stat label="Below threshold" value={String(below)} tone={below ? "block" : undefined} />
-        <Stat label="Spend, 7 days" value={fmt.money0(agents.reduce((t, a) => t + a.spend7d, 0))} />
-      </StatRow>
+  if (!agents.length) return head(<div className="card"><CrEmpty title="Nothing here yet" text="Create the first agent." action={<Btn label="New agent" kind="primary" icon="plus" id="agents-empty-new" guard={perm} onClick={() => ui_.open((close) => <NewAgentDialog agents={agents} perm={perm} close={close} />)} />} /></div>);
+  const cards = agents.map((a) => scorecards?.[a.id]).filter((x): x is NonNullable<typeof x> => !!x);
+  const scored = agents.filter((a) => Number.isFinite(a.evalScore));
+  const avgEval = scored.length ? scored.reduce((t, a) => t + a.evalScore, 0) / scored.length : null;
+  const runs = cards.some((c) => c.counts) ? cards.reduce((t, c) => t + (c.counts?.attempts ?? 0), 0) : null;
+  const rework = cards.length ? cards.reduce((t, c) => t + c.rework, 0) / cards.length : null;
+  return head(
+    <>
+      <Stats id="ag-stats" items={[
+        { l: "Agents", v: agents.length, tone: "agent" },
+        { l: "Avg eval score", v: avgEval == null ? NA : avgEval.toFixed(2), tone: "ok" },
+        { l: "Runs, 7 days", v: runs == null ? NA : fmt.k(runs), tone: "info" },
+        { l: "Avg rework", v: rework == null ? NA : `${Math.round(rework * 100)}%` },
+      ]} />
       <Roster agents={agents} />
-    </div>
+    </>,
   );
 }
