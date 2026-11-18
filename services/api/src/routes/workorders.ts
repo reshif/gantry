@@ -6,7 +6,7 @@
  *   POST /api/v1/gate-instances/{id}/approve, /reject            (id = `${woId}:${gateId}:${n}`, the exact opening decided; without `:n` the answer is 428 with the open instance)
  *   PUT /api/v1/work-orders/{id}/budget       (set or raise the spending cap)
  *   POST /api/v1/work-orders/{id}/move (dry_run), /send-back, /park, /unpark, /reassign, /retry
- *   GET /api/v1/work-orders/{id}/record, record.md, record/export, PUT .../record/summary, GET .../changes
+ *   GET /api/v1/work-orders/{id}/record, record.md, record/export, PUT .../record/summary, GET .../changes, .../patches/{patchId}, .../diff (the stored patch text as files and hunks)
  *
  * Every state-changing handler goes through command() (docs/BUILD.md, spec 15.4): the decision point, audit of success and denial, state and event in one
  * transaction, `If-Match` against the locked row, idempotent creates. Reads return the legacy shapes.
@@ -28,10 +28,12 @@ import { acceptDocument, commentOnDocument, editDocument, listDocComments, resol
 import { answerStationQuestion, decideAssumption, decideObjection, decideResearchPlan } from "../areas/workorders/dialogue.js";
 import { stopScout } from "../areas/workorders/swarm.js";
 import { listSources, readSource } from "../areas/workorders/research.js";
+import { readDiff, readPatch } from "../areas/workorders/patches.js";
 import { woTimeline } from "../areas/workorders/timeline.js";
 import { listConversations, listWorkOrders, readChanges, readRecord, readTraveler, recordBundle, recordMarkdown } from "../areas/workorders/reads.js";
 
 const Id = z.object({ id: z.string().min(1).max(100) });
+const PathQ = z.object({ path: z.string().min(1).max(1000).optional() });
 const DocId = z.object({ doc: z.string().min(1).max(200) });
 const QId = z.object({ qid: z.string().min(1).max(200) });
 const AId = z.object({ aid: z.string().min(1).max(200) });
@@ -287,6 +289,20 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const { id } = Id.parse(req.params);
     await scopeOf(req, id);
     return readChanges(g.pool, req.gx.orgId, id);
+  });
+  /** One stored patch (a commit's) as files and hunks. `?path=` keeps one file. Redacted, capped (`truncated`), binary files carry no hunks. */
+  app.get("/api/v1/work-orders/:id/patches/:patchId", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id, patchId } = Id.extend({ patchId: z.string().min(1).max(300) }).parse(req.params);
+    const { path } = PathQ.parse(req.query);
+    await scopeOf(req, id);
+    return readPatch(g.pool, req.gx.orgId, id, patchId, path);
+  });
+  /** One entry per path across the work order's commits (see readDiff). `?path=` keeps one file. */
+  app.get("/api/v1/work-orders/:id/diff", { config: { apiKey: "wo.read" } }, async (req) => {
+    const { id } = Id.parse(req.params);
+    const { path } = PathQ.parse(req.query);
+    await scopeOf(req, id);
+    return readDiff(g.pool, req.gx.orgId, id, path);
   });
 
   /* ----------------------------------------------------------------- commands */
