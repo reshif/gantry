@@ -92,12 +92,15 @@ export function flowOf(c: Catalog, project: Project | null | undefined): FlowDef
     const g = gateAfter(c, st.id);
     if (!g) continue;
     const cfg = f?.gates[g.id] ?? { enabled: true, mode: g.kind };
-    gates.push({ ...g, enabled: g.id === "G0G1" ? true : !!cfg.enabled && st.enabled, mode: cfg.mode || g.kind });
+    gates.push({ ...g, enabled: !!cfg.enabled && st.enabled, mode: cfg.mode || g.kind });
   }
   const bayIds = f?.bays ?? c.bays.filter((b) => !b.custom).map((b) => b.id);
   const bays = bayIds.map((id) => bayDef(c, id)).filter((b): b is Bay => !!b);
   return { stations, active: stations.filter((s) => s.enabled), gates, bays, classes: classesOf(c, project) };
 }
+
+/** The brief gate (G0+G1) is switched off in this project (a Factory Admin override). Intake itself is never off: the work order still enters there and the brief is written. */
+export const briefGateOff = (project: Project | null | undefined): boolean => !!project?.flow && project.flow.gates.G0G1?.enabled === false && !project.flow.gates.G0G1.absent;
 
 /** Ordered station ids a class travels in a project (follows project.flow.order and station toggles). */
 export function route(c: Catalog, project: Project | null | undefined, clsId: string): string[] {
@@ -121,6 +124,7 @@ export function routeGates(c: Catalog, project: Project | null | undefined, clsI
     const g = gateAfter(c, sid);
     if (!g) continue;
     const cfg = project?.flow?.gates[g.id];
+    // G0+G1 stays on the route even when switched off by an override: the work order still waits at Intake for its brief, and the runtime passes the gate by itself (briefGateOff) once the brief is written.
     if (project?.flow && (!cfg || cfg.absent || (!cfg.enabled && g.id !== "G0G1"))) continue;
     if (g.id === "G6" && cl.endsAfter) continue;
     if (cl.gates && cl.gates.length && g.id !== "G0G1" && !cl.gates.includes(g.id) && g.kind !== "auto") continue;
@@ -150,7 +154,8 @@ export function gateKind(c: Catalog, project: Project | null | undefined, gateId
   const cfg = project?.flow?.gates[gateId];
   const mode = cfg?.mode || g.kind;
   // Runtime guard: a mode stored before a lock existed (or written around the API) never lowers a gate a person must decide. (The regulated-project rule is enforced on edits only.)
-  if (cfg?.mode && mode !== "human" && gateModeLock(g, mode, null) !== null) return "human";
+  // A locked mode a Factory Admin chose with a reason (recorded on the gate) is honoured, except where it is a correctness or G5 rule.
+  if (cfg?.mode && mode !== "human" && gateModeLock(g, mode, null, { override: !!cfg.override?.mode }) !== null) return "human";
   return mode;
 }
 

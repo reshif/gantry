@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALWAYS_ON_GATES, COMBINED_GATES, GATES, approvalText, classRequiredError, requiredFor, gateProgress, gateDecision, ruleText, gateExplain, gateKindText, gateLock, gatePendingName, gatePendingTitle, gateTitle, route, routeGates, DEFAULT_CATALOG } from "./index.js";
+import { ALWAYS_ON_GATES, COMBINED_GATES, GATES, approvalText, classRequiredError, requiredFor, gateProgress, gateDecision, ruleText, gateExplain, gateKindText, gateLock, gateLockView, gateModeLock, gatePendingName, gatePendingTitle, gateTitle, route, routeGates, DEFAULT_CATALOG } from "./index.js";
 import { NOW, seedState } from "./testkit.js";
 
 const gate = (id: string) => GATES.find((g) => g.id === id)!;
@@ -99,5 +99,27 @@ describe("per-class approvals required", () => {
     expect(classRequiredError({ nope: 1 }, classes)).toMatch(/does not have/);
     expect(classRequiredError({ docs: 1 }, classes)).toBeNull();
     expect(classRequiredError(undefined, classes)).toBeNull();
+  });
+});
+
+describe("Factory Admin override of the gate locks (owner decision 2026-11-19)", () => {
+  const g = (id: string) => DEFAULT_CATALOG.gates.find((x) => x.id === id)!;
+  it("lifts the permission locks on a mode, except G5, and keeps the correctness rule", () => {
+    expect(gateModeLock(g("G3G3s"), "auto", null)).not.toBeNull();
+    expect(gateModeLock(g("G3G3s"), "auto", null, { override: true })).toBeNull();
+    expect(gateModeLock(g("G4"), "auto", { regulated: true })).not.toBeNull();
+    expect(gateModeLock(g("G4"), "auto", { regulated: true }, { override: true })).toBeNull();
+    for (const m of ["auto", "mixed"] as const) expect(gateModeLock(g("G5"), m, null, { override: true })).toMatch(/I1|merge/);
+    // a gate that a person decides and has no checks would pass with no evidence, for an admin too
+    for (const id of ["G0G1", "G2", "G6"]) expect(gateModeLock(g(id), "auto", null, { override: true }), id).toMatch(/no automatic checks/);
+    expect(gateModeLock(g("G5"), "human", null, { override: true })).toBeNull();
+  });
+  it("describes a gate's lock for the viewer from a decision, not a role name; G5 is never overridable", () => {
+    const flow = { gates: { G4: { enabled: false, mode: "auto" as const, override: { off: { by: "p-asha", byName: "Asha", at: 1, reason: "Because we decided so" } } } }, stations: {} };
+    expect(gateLockView(g("G4"), { flow }, true)).toMatchObject({ locked: true, overridable: true, viewerMayOverride: true, overridden: { by: "p-asha" } });
+    expect(gateLockView(g("G4"), { flow }, false)).toMatchObject({ viewerMayOverride: false });
+    expect(gateLockView(g("G5"), null, true)).toMatchObject({ locked: true, overridable: false, viewerMayOverride: false });
+    expect(gateLockView(g("G2"), null, true)).toMatchObject({ locked: false, overridable: false, viewerMayOverride: false });
+    expect(gateLockView(g("G2"), { regulated: true }, true)).toMatchObject({ locked: true, overridable: true, viewerMayOverride: true });
   });
 });
