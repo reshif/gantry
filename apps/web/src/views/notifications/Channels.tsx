@@ -19,9 +19,11 @@ const WORD: Record<string, string> = { healthy: "connected" };
 export function ChannelsTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision }) {
   const chans = nt.destInsts.filter((i) => MATRIX_TYPES.includes(i.type));
   const ui = useUI();
+  /** The target a channel row shows, and the one Send test uses and names: the first route destination on this connection, else the connection's default. */
+  const targetOf = (i: (typeof nt.destInsts)[number]): string => (nt.routes as Route[]).filter((r) => r.enabled && r.dest.some((d) => d.integration === i.id)).flatMap((r) => r.dest).find((d) => d.integration === i.id)?.target || defaultTarget(i.type, p, i);
   const send = async (i: (typeof nt.destInsts)[number]): Promise<void> => {
     const t = nt.typeOf(i.type);
-    const target = defaultTarget(i.type, p, i);
+    const target = targetOf(i);
     const ev = (t.events ?? []).find((e) => accepts(t, e)) ?? "submitted";
     const r = await ops.sendTest(p.id, { channel: i.type, target, integration: i.id }, "", ev);
     ui.toast(r.ok ? `Sent a test message to ${target || i.name}` : r.msg, r.ok ? "ok" : "error");
@@ -33,7 +35,7 @@ export function ChannelsTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decisio
         <div className="list">
           {chans.map((i) => {
             const mine = (nt.routes as Route[]).filter((r) => r.enabled && r.dest.some((d) => d.integration === i.id));
-            const target = mine.flatMap((r) => r.dest).find((d) => d.integration === i.id)?.target || defaultTarget(i.type, p, i);
+            const target = targetOf(i);
             const st = instState(i);
             const used = Array.from(new Set(mine.map((r) => USED_FOR[r.event]).filter(Boolean)));
             const ws = typeof i.config.workspace === "string" ? i.config.workspace : "";

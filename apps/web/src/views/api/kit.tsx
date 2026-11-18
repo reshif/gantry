@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import type { ApiConfig, ApiKey, IntegrationInstance, Project, RequestLogEntry, Trigger } from "@gantry/domain";
 import { useCanMany } from "../../api/can";
 import { useApiConfig, useApiKeys, useApiRequests, useIntegrationTypes, useIntegrations, useMe, useProjects, useTriggers } from "../../api/queries";
+import { usePrefs } from "../../lib/prefs";
 import { Btn, useCopy, type Decision } from "../../ui/primitives";
 
 export const KEY_ACTIONS: Array<[string, string]> = [["wo.submit", "Submit work orders"], ["wo.read", "Read work orders"], ["wo.answer", "Answer intake questions"], ["triggers.run", "Fire triggers"]];
@@ -35,9 +36,12 @@ export interface ApiData {
   vis: Project[];
   visIds: string[];
   pname: (id: string) => string;
+  /** Keys in the top-bar scope; `allKeys` is every key on the viewer's projects (the prototype's "N of M" total and tab count). */
   keys: ApiKey[];
+  allKeys: ApiKey[];
   cfg: ApiConfig | undefined;
   triggers: Trigger[];
+  allTriggers: Trigger[];
   log: RequestLogEntry[];
   last24h: number;
   limited24h: number;
@@ -52,6 +56,7 @@ export interface ApiData {
 
 export function useApiData(): ApiData {
   const me = useMe();
+  const prefs = usePrefs();
   const projectsData = useProjects().data;
   const projects = useMemo(() => projectsData ?? [], [projectsData]);
   const keysQ = useApiKeys();
@@ -62,13 +67,15 @@ export function useApiData(): ApiData {
   const types = useIntegrationTypes().data ?? [];
   const vis = useMemo(() => (me ? projects.filter((p) => me.projects.some((x) => x.id === p.id)) : []), [me, projects]);
   const visIds = vis.map((p) => p.id);
+  // the top bar scope: a chosen project narrows keys and triggers to it, All projects shows every project the person can see
+  const scoped = !prefs.scopeAll && prefs.project && visIds.includes(prefs.project) ? [prefs.project] : visIds;
   const raw = logQ.data;
   const items = Array.isArray(raw) ? raw : raw?.items ?? [];
   const extra = (!Array.isArray(raw) && raw ? (raw as unknown as { last24h?: number; limited24h?: number }) : {}) as { last24h?: number; limited24h?: number };
   const day = Date.now() - 86_400_000;
   return {
     me, vis, visIds, pname: (id) => projects.find((p) => p.id === id)?.name ?? id,
-    keys: (keysQ.data ?? []).filter((k) => visIds.includes(k.project)), cfg: cfgQ.data, triggers: (trigQ.data ?? []).filter((t) => visIds.includes(t.project)),
+    keys: (keysQ.data ?? []).filter((k) => scoped.includes(k.project)), allKeys: (keysQ.data ?? []).filter((k) => visIds.includes(k.project)), cfg: cfgQ.data, triggers: (trigQ.data ?? []).filter((t) => scoped.includes(t.project)), allTriggers: (trigQ.data ?? []).filter((t) => visIds.includes(t.project)),
     log: items, last24h: extra.last24h ?? items.filter((x) => x.at > day).length, limited24h: extra.limited24h ?? items.filter((x) => x.at > day && x.status === 429).length,
     insts, typeOf: (id) => types.find((t) => t.id === id), loading: keysQ.isPending || trigQ.isPending, keysQ, trigQ, logQ, cfgQ,
   };

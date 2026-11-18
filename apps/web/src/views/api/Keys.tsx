@@ -119,7 +119,7 @@ export function KeysTab({ d, url }: { d: ApiData; url: { v: { q: string; sort: s
   const pkey = (id: string): string => d.vis.find((p) => p.id === id)?.key ?? id;
   return (
     <>
-      <FilterBar label="Filter keys" count={`${keys.length} of ${d.keys.length}`} actions={url.v.q ? <Btn label="Clear" small kind="ghost" id="api-key-clear" onClick={() => url.clear()} /> : null}>
+      <FilterBar label="Filter keys" count={`${keys.length} of ${d.allKeys.length}`} actions={url.v.q ? <Btn label="Clear" small kind="ghost" id="api-key-clear" onClick={() => url.clear()} /> : null}>
         <SearchBox id="api-key-q" label="Search keys" placeholder="Search keys" value={url.v.q} onChange={(q) => url.set({ q })} />
       </FilterBar>
       <DataTable
@@ -135,7 +135,7 @@ export function KeysTab({ d, url }: { d: ApiData; url: { v: { q: string; sort: s
         onPage={(p) => url.set({ page: String(p) })}
         sort={{ key: url.v.sort || "created", dir: url.v.dir ? (url.v.dir === "asc" ? 1 : -1) : -1 }}
         onSort={(s) => url.set({ sort: s.key, dir: s.dir === 1 ? "asc" : "desc", page: "0" })}
-        empty={d.keys.length ? { title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="clear-filters" onClick={() => url.clear()} /> } : { title: "No keys on your projects", text: "Create a key to let another system submit work." }}
+        empty={d.allKeys.length ? { title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="clear-filters" onClick={() => url.clear()} /> } : { title: "No keys on your projects", text: "Create a key to let another system submit work." }}
         columns={[
           { key: "name", label: "Name", sort: (k) => k.name.toLowerCase(), render: (k) => <b className="ell" title={`Created by ${who(k.by).name}`}>{k.name}</b> },
           { key: "prefix", label: "Key", sort: (k) => k.prefix, render: (k) => <span className="mono">{k.prefix.replace(/…+$/, "")}…</span> },

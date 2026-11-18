@@ -37,7 +37,7 @@ export default function ApiView() {
   };
   if (!d.me) return null;
 
-  const active = d.keys.filter((k) => !k.revoked && !k.expired);
+  const active = d.allKeys.filter((k) => !k.revoked && !k.expired);
   const acts = tab === "keys"
     ? <Btn label="Create key" kind="primary" icon="plus" id="api-key-new" guard={keyGuard} onClick={() => ui.open((c) => <CreateKey d={d} close={c} onCreated={() => undefined} />)} />
     : tab === "triggers"
@@ -47,7 +47,7 @@ export default function ApiView() {
 
   return (
     <Page eyebrow="Connect" title="API and triggers" sub="How outside systems create work: scoped API keys and event triggers." cls="api-view" acts={acts}>
-      <Tabs idPrefix="api-tab" items={[{ id: "keys", label: "API keys", count: active.length }, { id: "triggers", label: "Triggers", count: d.triggers.length }, { id: "docs", label: "Quick start" }]} active={tab} onChange={(t) => url.set({ tab: t, q: "", sort: "", dir: "", sec: "", edit: "" })} />
+      <Tabs idPrefix="api-tab" items={[{ id: "keys", label: "API keys", count: active.length }, { id: "triggers", label: "Triggers", count: d.allTriggers.length }, { id: "docs", label: "Quick start" }]} active={tab} onChange={(t) => url.set({ tab: t, q: "", sort: "", dir: "", sec: "", edit: "" })} />
       {tab === "triggers" && url.v.edit ? <TriggerEditor id={url.v.edit} close={() => url.set({ edit: "" })} /> : null}
       <div id="api-tab-panel" role="tabpanel" aria-labelledby={`api-tab-${tab}`}>
         {tab === "triggers" ? (

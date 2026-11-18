@@ -39,7 +39,7 @@ export default function IntegrationsView() {
 
   const openInstance = (id: string): void => {
     ui.drawer.open(`int:${id}`, (close) => (
-      <InstanceDrawer id={id} close={close} onRemove={(i: IntegrationInstance) => ui.open((c) => <RemoveIntegration inst={i} close={c} closeDrawer={close} />)} />
+      <InstanceDrawer id={id} close={close} onRemove={(i: IntegrationInstance) => { close(); ui.open((c) => <RemoveIntegration inst={i} close={c} />); }} />
     ));
   };
   const addDialog = (_typeId: string | null): void => {

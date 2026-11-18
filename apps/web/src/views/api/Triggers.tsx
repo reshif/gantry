@@ -340,7 +340,7 @@ export function TriggersTab({ d, url, openTrigger }: { d: ApiData; url: TriggerU
   const shown = d.triggers.filter((x) => !needle || `${x.id} ${x.name} ${x.type} ${pkeyOf(x.project, d)}`.toLowerCase().includes(needle));
   return (
     <>
-      <FilterBar label="Filter triggers" count={`${shown.length} of ${d.triggers.length}`} actions={url.v.q ? <Btn label="Clear" small kind="ghost" id="api-tr-clear" onClick={() => url.clear()} /> : null}>
+      <FilterBar label="Filter triggers" count={`${shown.length} of ${d.allTriggers.length}`} actions={url.v.q ? <Btn label="Clear" small kind="ghost" id="api-tr-clear" onClick={() => url.clear()} /> : null}>
         <SearchBox id="api-tr-q" label="Search triggers" placeholder="Search triggers" value={url.v.q} onChange={(q) => url.set({ q })} />
       </FilterBar>
       <DataTable<Trigger>
@@ -356,7 +356,7 @@ export function TriggersTab({ d, url, openTrigger }: { d: ApiData; url: TriggerU
         onPage={(p) => url.set({ page: String(p) })}
         sort={{ key: url.v.sort || "name", dir: url.v.dir === "desc" ? -1 : 1 }}
         onSort={(s) => url.set({ sort: s.key, dir: s.dir === 1 ? "asc" : "desc", page: "0" })}
-        empty={d.triggers.length ? { title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="clear-filters" onClick={() => url.clear()} /> } : { title: "No triggers", text: "Create a trigger to open work orders from events." }}
+        empty={d.allTriggers.length ? { title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="clear-filters" onClick={() => url.clear()} /> } : { title: "No triggers", text: "Create a trigger to open work orders from events." }}
         columns={[
           { key: "id", label: "ID", sort: (x) => x.id, render: (x) => <span className="mono">{x.id}</span> },
           { key: "name", label: "Trigger", sort: (x) => x.name.toLowerCase(), render: (x) => <a className="rl ell" id={`api-tr-open-${x.id}`} href="#api" onClick={(e) => { e.preventDefault(); openTrigger(x.id); }}>{x.name}</a> },

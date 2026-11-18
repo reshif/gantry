@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
 import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
+import { updatePrefs } from "../lib/prefs";
 import { OverlayProvider } from "../ui/Overlay";
 import ApiView from "./api";
 
@@ -137,6 +138,16 @@ describe("API & triggers: keys", () => {
     expect(document.body.textContent).toContain("3 of 3");
     expect(document.getElementById("api-key-new")!.textContent).toBe("Create key"); // in the page head, not the filter bar
     expect(document.body.textContent).not.toMatch(/local sample logic|simulated/i);
+  });
+
+  it("narrows keys to the project chosen in the top bar, and keeps the total as the denominator (prototype: 1 of 3)", async () => {
+    setup({ "GET /api/v1/api-keys": () => ({ body: [...KEYS, key({ id: "key-9", name: "Storefront bot", project: "storefront" })] }) });
+    updatePrefs({ project: "storefront", scopeAll: false });
+    mount();
+    await byId("api-key-row-key-9");
+    expect(document.getElementById("api-key-row-key-1")).toBeNull();
+    expect(document.body.textContent).toContain("1 of 4");
+    updatePrefs({ project: null, scopeAll: true });
   });
 
   it("creates a key: the secret is shown once and only after you confirm you stored it can you close it", async () => {
