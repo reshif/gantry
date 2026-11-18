@@ -87,9 +87,12 @@ function agents() {
   return _agents;
 }
 
+// group proj: approver rules for the payments gates (the Approvers tab), prototype wording
+const PAY_APPROVERS = Object.fromEntries([["G0G1", ["project_admin", "line_lead"]], ["G2", ["project_admin", "line_lead"]], ["G3d", ["approver"]], ["G3G3s", ["approver", "security_reviewer"]], ["G5", ["reviewer", "line_lead"]], ["G6", ["release_manager"]]].map(([g, roles]) => [g, { roles, people: [], required: 2, sod: true, conditions: [], escalateH: 24, fallback: null }]));
+
 function project(p: (typeof PROJECTS)[number], i: number) {
   return {
-    id: p.id, name: p.name, key: p.key, status: "active", teams: ["platform"], owner: "p-admin", template: "standard", regulated: i % 2 === 0, desc: p.desc, flow: flow(), approvers: {}, notifications: routesE, mcp: [],
+    id: p.id, name: p.name, key: p.key, status: "active", teams: ["platform"], owner: "p-admin", template: "standard", regulated: i % 2 === 0, desc: p.desc, flow: flow(), approvers: p.id === "payments" ? PAY_APPROVERS : {}, notifications: routesE, mcp: [],
     budget: { monthly: 4000, mtd: 1280 + i * 190, alertAt: 0.8 }, created: NOW - 90 * DAY,
     halted: "halted" in p && p.halted ? { by: "p-admin", at: NOW - 3 * HOUR, reason: "Relevance regression under investigation" } : null, killed: null, overlay: "", version: 3,
   };

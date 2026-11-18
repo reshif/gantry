@@ -118,6 +118,8 @@ async function main() {
         const rc = await browser.newContext(common);
         await rc.addInitScript(([t, nowMs]) => { try { localStorage.setItem("gantry.prefs", JSON.stringify({ theme: t, project: "payments", recentProjects: ["payments"], pinnedProjects: [], navRail: false })); } catch { /* ignore */ } void nowMs; }, [theme, NOW]);
         const rp = await rc.newPage();
+        rp.on("pageerror", (e) => console.error("pageerror:", String(e).slice(0, 300)));
+        rp.on("console", (m) => { if (m.type() === "error") console.error("console.error:", m.text().slice(0, 400)); });
         await rp.clock.install({ time: new Date(NOW) });
         if (route === "signin") await rich.installSignedOut(rp); else await rich.installRich(rp);
         if (real === null) {
