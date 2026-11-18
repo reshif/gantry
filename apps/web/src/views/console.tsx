@@ -403,6 +403,8 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const whoSwitches = st?.isFactoryAdmin ? "You can switch them on under Govern, Access (Console group)." : "A Factory Admin can switch them on under Govern, Access (Console group).";
   const offReason = st?.canUse === false ? `You may not use the console${st.use?.reason ? `: ${st.use.reason}` : "."}` : st?.proposals?.length ? `Console actions are switched off for you: no console right to propose changes is granted. ${whoSwitches} It still answers questions.` : `Console actions are switched off for this factory, so it only answers questions. ${whoSwitches}`;
   const modeLine = status.isLoading ? "Checking whether a model is configured." : st?.configured ? `Answers come from ${st.model} (${st.vendor}) using tools over the live factory. ${actionsOn ? "It may propose the actions your console rights allow; each waits for your click." : offReason}` : noModels ? (st?.canManageModels ? "No model can be called yet." : "No model can be called yet. Ask a Factory Admin to connect a model vendor in Models.") : (st?.reason ?? "The console could not check its model.");
+  // In Settings the model is named once (the select, or the header chip when there is no select), so this line only says what is not working.
+  const settingsLine = st?.configured ? (actionsOn ? null : offReason) : modeLine;
   const label = st?.configured ? (st.effectiveModel ?? st.model ?? "Model") : status.isLoading ? "Checking" : "No model";
   const cls = st?.configured ? "ready" : status.isLoading ? "checking" : "absent";
 
@@ -471,10 +473,10 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             {aux === "settings" ? (
               <div className="con2-settings" id="con-settings" role="region" aria-label="Console settings">
                 <div className="con2-settings-h"><b>Console settings</b><Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} /></div>
-                <div className="row">{modeChip}{modePicker}</div>
-                <p className="con-mode-line small muted" id="con-mode-reason"><span>{modeLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p>
-                {ctxPanels}
-                <p className="footnote small muted">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
+                {modePicker}
+                {settingsLine ? <p className="con-mode-line small muted" id="con-mode-reason"><span>{settingsLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p> : null}
+                <p className="small muted" id="con-access-line">The console proposes only actions your role allows; each waits for your click. Permissions are managed in <a href="#access" id="con-access-link" onClick={(e) => { e.preventDefault(); navigate("access"); }}>Access</a>.</p>
+                <p className="footnote small muted">{`Questions go to the model through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
               </div>
             ) : null}
             <div className="chat con2-log" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
