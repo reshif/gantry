@@ -180,3 +180,79 @@ describe("Floor: andon and kill", () => {
   });
 });
 
+
+describe("Floor: fidelity round 1", () => {
+  it("has the prototype header: eyebrow Operate, plain Floor title, Pause belt and Halt line first", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByText(/Payments Platform/);
+    expect(document.querySelector(".ph .eyebrow")?.textContent).toBe("Operate");
+    expect(document.querySelector(".ph h1")?.textContent).toBe("Floor");
+    const labels = [...document.querySelectorAll(".ph .acts .btn")].map((b) => b.textContent);
+    expect(labels.slice(0, 2)).toEqual(["Pause belt", "Halt line"]);
+    expect(screen.getByText("Per hour")).toBeTruthy();
+  });
+
+  it("keeps the filters in the URL and clears them", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByText(/Payments Platform/);
+    fireEvent.change(screen.getByLabelText("Find a work order"), { target: { value: "WO-2401" } });
+    await waitFor(() => expect(window.location.search).toContain("q=WO-2401"));
+    fireEvent.change(screen.getByLabelText("Class"), { target: { value: "bug" } });
+    await waitFor(() => expect(window.location.search).toContain("cls=bug"));
+    fireEvent.click(screen.getByText("Clear"));
+    await waitFor(() => expect(window.location.search).toBe(""));
+  });
+
+  it("opens the token drawer in the prototype layout with Traveler and Open record", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByText(/Payments Platform/);
+    fireEvent.click(document.querySelector(".belt .tok") as HTMLElement);
+    expect(await screen.findByText("Open record")).toBeTruthy();
+    expect(screen.getByText("Traveler")).toBeTruthy();
+    expect(document.querySelector(".drawer .drawer-h")).toBeTruthy();
+    expect(document.querySelector(".drawer .pipe .st")).toBeTruthy();
+  });
+
+  it("shows Review only for a work order with an open gate approval, and it opens the approval dialog", async () => {
+    mockApi({
+      "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ gates: [{ instance: "gi-1", wo: "WO-2404", gate: "G5", since: NOW - 3600000 }] }) }),
+      "GET /api/v1/work-orders/WO-2404/gates/G5/approvers": () => ({ body: { gate: "G5", label: "G5", eligible: [], overrides: [], satisfiable: true, warning: "", viewerCanOverride: false, can: { editRule: false, editWhy: "", grantRole: false, grantWhy: "" }, progress: { have: 0, need: 1, approvals: [], unmet: [] }, rule: { text: "One approval", conditions: [], base: 1 } } }),
+    });
+    mount(<FloorView />);
+    await screen.findByText(/Payments Platform/);
+    await screen.findByText("Waiting at gates");
+    await waitFor(() => expect(document.querySelectorAll('#floor-gates [id^="floor-review-"]').length).toBe(1));
+    expect(document.querySelectorAll('#floor-gates .li').length).toBe(1);
+    fireEvent.click(document.querySelector('#floor-review-WO-2404') as HTMLElement);
+    expect(await screen.findByText("Approval")).toBeTruthy();
+  });
+
+  it("opens the gate and station drawers with the prototype key facts and footer links", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByText(/Payments Platform/);
+    fireEvent.click(document.querySelector(".belt .gate .gh") as HTMLElement);
+    expect(await screen.findByText("Configure gates")).toBeTruthy();
+    expect(screen.getByText("After station")).toBeTruthy();
+    cleanup();
+    mount(<FloorView />);
+    await screen.findByText(/Payments Platform/);
+    fireEvent.click(document.querySelector(".belt .stn-h") as HTMLElement);
+    expect(await screen.findByText("Work here")).toBeTruthy();
+    expect(screen.getByText("Capacity")).toBeTruthy();
+    expect(screen.getByText("Eval score")).toBeTruthy();
+  });
+});
+
+describe("Floor: kill banner", () => {
+  it("shows the Factory stopped banner with Start restore when the factory is killed", async () => {
+    mockApi({}, { me: { factory: { killed: { reason: "Bad deploy", by: "p-asha", at: 1, mode: "hold" } } } });
+    mount(<FloorView />);
+    await screen.findByText(/Payments Platform/);
+    expect(await screen.findByText("Start restore")).toBeTruthy();
+    expect(document.querySelector("#floor-kill-banner")?.getAttribute("role")).toBe("alert");
+  });
+});

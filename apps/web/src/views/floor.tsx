@@ -6,16 +6,18 @@
  * GET /projects/{id}/floor; every control is a command through the API.
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { DAY, fmt } from "@gantry/domain";
+import { HOUR, fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
+import { Icon } from "../ui/Icon";
 import { Btn, Empty, Segmented, Status, type Decision, type Tone } from "../ui/primitives";
 import { Card, Conveyor, CrEmpty, FloorKpis, FloorTools, ListItem, LoadBar, Page, Ticker } from "../ui/cr";
 import { useActors } from "../ui/actors";
 import { useActivity } from "../api/queries";
 import { eventRows, eventText } from "../lib/eventText";
-import { useOpenTraveler } from "../shell/useTraveler";
-import { NO_FILTER, buildBelt, type BeltFilter } from "./floor/conveyor";
+import { buildBelt } from "./floor/conveyor";
+import { useFloorFilter } from "./floor/urlState";
+import { openApproval } from "./floor/Approval";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { pickProject } from "../lib/routes";
@@ -43,7 +45,7 @@ function Kpis({ open, ticker }: { open: ReturnType<typeof buildBelt>["open"]; ti
   const gates = open.filter((w) => w.state === "waiting" && !w.bay && !!ctx.floor.gates.find((g) => g.wo === w.id)).length;
   const queued = open.filter((w) => w.state === "waiting" && !ctx.floor.gates.some((g) => g.wo === w.id)).length;
   const stuck = open.filter((w) => w.state === "blocked" || w.state === "failed" || w.bay === "sechold" || w.bay === "person").length;
-  const shipped24 = wos.filter((w) => w.state === "done" && !w.split && (w.doneAt ?? 0) > now - DAY).length;
+  const perHour = wos.filter((w) => w.state === "done" && !w.split && (w.doneAt ?? 0) > now - 6 * HOUR).length / 6;
   return (
     <div className="floor-top" id="floor-kpis">
       <FloorKpis
@@ -52,7 +54,7 @@ function Kpis({ open, ticker }: { open: ReturnType<typeof buildBelt>["open"]; ti
           { l: "Queued", v: queued, tone: queued > 8 ? "warn" : undefined },
           { l: "At gates", v: gates, tone: gates ? "warn" : "ok" },
           { l: "Blocked", v: stuck, tone: stuck ? "bad" : "ok" },
-          { l: "Shipped 24h", v: shipped24 },
+          { l: "Per hour", v: perHour.toFixed(1) },
         ]}
       />
       <Ticker items={ticker} />
@@ -74,6 +76,7 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
   const dResume = useCan("line.resume", { project: p.id });
   const dKill = useCan("kill.project", { project: p.id });
   const dRestore = useCan("restore.project", { project: p.id });
+  const dRestoreAny = useCan(me?.factory.killed ? "restore.factory" : "restore.project", me?.factory.killed ? {} : { project: p.id });
   if (!me) return null;
   const stop = makeStopActions(ui, me);
   const lockIf = (d: Decision | null): Decision | null => (ctx.replay ? REPLAY_LOCK : d);
@@ -98,22 +101,39 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
       killItem,
     ]);
   };
+  const killed = factoryKilled ? me.factory.killed : p.killed;
   return (
     <Page
-      eyebrow={`Operate · ${p.name}`}
-      title={<>Floor<span className="vtitle-badge"> <Status tone={statusTone(status.cls)} icon={status.icon} id="floor-status">{status.label}</Status></span></>}
-      sub="The production line, left to right. Work orders ride the belt; gates are checkpoints where a person decides."
+      eyebrow="Operate"
+      title="Floor"
+      sub={
+        <>
+          The production line, left to right. Work orders ride the belt; gates are checkpoints where a person decides.{" "}
+          <span className="vtitle-badge"><Status tone={statusTone(status.cls)} icon={status.icon} id="floor-status">{status.label}</Status></span>
+          <span className="dim mono" style={{ marginLeft: 8, fontSize: 12 }}>{p.name}</span>
+        </>
+      }
       cls="view-floor-page"
       id="floor-head"
       acts={
         <>
-          <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
           <Btn label={paused ? "Resume belt" : "Pause belt"} icon={paused ? "play" : "pause"} id="floor-pause" aria-pressed={paused} onClick={onPause} />
-          <Btn label={p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Halt line"} kind="danger" icon="halt" id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" />
-          <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
+          <Btn label="Halt line" kind="danger" icon="halt" id="floor-halt" aria="Emergency stop: halt the line" guard={lockIf(factoryKilled || p.killed ? { allowed: false, reason: "The line is already stopped. Use Start restore.", needs: "" } : dKill.pending ? null : dKill)} onClick={() => stop.kill("project", p.id)} />
         </>
       }
     >
+      <div className="row fl-extra" id="floor-extra">
+          <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
+          <Btn label={p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Line control"} icon="halt" id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" />
+          <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
+      </div>
+      {killed ? (
+        <div className="banner bad" role="alert" id="floor-kill-banner">
+          <Icon name="stop" />
+          <div className="grow"><b>{factoryKilled ? "Factory stopped." : "Project stopped."}</b>{` ${killed.reason ?? ""} Restore needs ${factoryKilled ? "two Factory Admins" : "a Project Admin"}.`}</div>
+          <Btn label="Start restore" small id="floor-start-restore" guard={dRestoreAny.pending ? null : dRestoreAny} onClick={() => stop.restore(factoryKilled ? "factory" : "project", factoryKilled ? null : p.id)} />
+        </div>
+      ) : null}
       {children}
     </Page>
   );
@@ -122,19 +142,19 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
 function FloorBody({ projectId }: { projectId: string }) {
   const ctx = useFloorCtx();
   const drawers = useDrawers(projectId);
-  const openTraveler = useOpenTraveler();
   const actors = useActors();
   const activity = useActivity(projectId);
   const rp = ctx.replay;
   const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId, rp, "floor-mode-live");
   const [paused, setPaused] = useState(false);
-  const [filter, setFilter] = useState<BeltFilter>(NO_FILTER);
+  const { filter, set: setFilter, clear: clearFilter } = useFloorFilter();
+  const ui = useUI();
   const [filtersOpen, setFiltersOpen] = useState(false);
   useTick(30_000);
 
   const agentName = (id: string) => actors(id).name.replace(" (agent)", "");
   const { stations, released, open } = buildBelt(ctx, agentName, filter);
-  const ticker = eventRows(activity.data).slice(0, 14).map((e) => ({ when: fmt.ago(e.at, Date.now()), text: eventText(e, ctx.cat, (id) => actors(id).name.replace(" (agent)", "")) }));
+  const ticker = eventRows(activity.data).slice(0, 14).map((e) => ({ when: fmt.ago(e.at, Date.now()), text: eventText(e, ctx.cat, (id) => actors(id).name.replace(" (agent)", "")).replace(/ entered /, " moved to ") }));
 
   /* below the belt: what waits at a gate (oldest first) and where the belt is tight */
   const gates = open.filter((w) => w.state === "waiting" && !w.bay && ctx.floor.gates.some((g) => g.wo === w.id)).sort((a, b) => since(a) - since(b));
@@ -146,6 +166,7 @@ function FloorBody({ projectId }: { projectId: string }) {
     .sort((a, b) => b.wait - a.wait || b.used / b.s.slots - a.used / a.s.slots)
     .slice(0, 5);
   const scale = Math.max(1, ...load.map((x) => x.s.slots + x.wait));
+  const priorities = [...new Set(["P1", "P2", "P3", ...ctx.wos.map((w) => w.priority)])].sort();
   const gateOf = (woId: string) => ctx.floor.gates.find((g) => g.wo === woId);
 
   return (
@@ -154,19 +175,19 @@ function FloorBody({ projectId }: { projectId: string }) {
       <Kpis open={open} ticker={ticker} />
       <FloorTools
         q={filter.q}
-        onQ={(q) => setFilter((f) => ({ ...f, q }))}
+        onQ={(q) => setFilter("q", q)}
         filters={[
           { key: "cls", label: "Class", options: ctx.cat.classes.map((c) => [c.id, c.name]) },
-          { key: "pri", label: "Priority", options: [["P0", "P0"], ["P1", "P1"], ["P2", "P2"], ["P3", "P3"]] },
+          { key: "pri", label: "Priority", options: priorities.map((x): [string, string] => [x, x]) },
           { key: "st", label: "State", options: [["running", "Running"], ["queued", "Queued"], ["gate", "At gate"], ["blocked", "Blocked"]] },
         ]}
         values={{ cls: filter.cls, pri: filter.pri, st: filter.st }}
-        onFilter={(k, v) => setFilter((f) => ({ ...f, [k]: v }))}
-        onClear={() => setFilter(NO_FILTER)}
+        onFilter={(k, v) => setFilter(k as "cls" | "pri" | "st", v)}
+        onClear={clearFilter}
         open={filtersOpen}
         onToggle={() => setFiltersOpen((o) => !o)}
       />
-      <Conveyor stations={stations} released={released} paused={paused} onToken={openTraveler} onStation={drawers.station} onGate={drawers.gate} onPile={drawers.station} />
+      <Conveyor stations={stations} released={released} paused={paused} onToken={drawers.token} onStation={drawers.station} onGate={drawers.gate} onPile={drawers.station} />
       <div className="grid g2" style={{ marginTop: 16, alignItems: "start" }}>
         <Card title="Waiting at gates" flush hint="Oldest first" id="floor-gates">
           <div className="list">
@@ -175,7 +196,7 @@ function FloorBody({ projectId }: { projectId: string }) {
                 const g = gateOf(w.id);
                 return (
                   <ListItem key={w.id} tone="warn" title={`${g?.gate ?? ""} · ${w.title}`} sub={`${w.id} · waiting ${fmt.dur(Math.max(0, ctx.now - since(w)))}`}>
-                    <Btn label="Review" small kind="primary" onClick={() => openTraveler(w.id)} />
+                    {g ? <Btn label="Review" small kind="primary" id={`floor-review-${w.id}`} onClick={() => { const gd = ctx.cat.gates.find((x) => x.id === g.gate); openApproval(ui, projectId, w.id, g.gate, gd?.label ?? g.gate, gd?.name ?? ""); }} /> : null}
                   </ListItem>
                 );
               })

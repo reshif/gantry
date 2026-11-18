@@ -383,3 +383,12 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 }
 
 @media (max-width: 560px) { .vhead-actions .seg { align-self: flex-start; width: auto; } }
+
+/* Floor header at phone width: Pause belt and Halt line share one row, the rest sit on a second row (fidelity: prototype is two equal buttons). */
+@media (max-width: 720px) {
+  .view-floor-page .ph .acts { display: grid; grid-template-columns: 1fr 1fr; }
+  .view-floor-page .fl-extra > .btn { flex: 1 1 140px; }
+}
+.view-floor-page .ph .sub .vtitle-badge { margin-left: 0; }
+.drawer .card .li.click { cursor: pointer; }
+.view-floor-page .fl-extra { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: flex-end; margin: calc(-1 * var(--s2)) 0 var(--s3); }
