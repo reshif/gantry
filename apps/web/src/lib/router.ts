@@ -26,8 +26,14 @@ const dec = (v: string): string => {
   }
 };
 
+/** The query carried by the hash (`#/p/x/floor?state=loading`), falling back to the URL's own search string. */
+export function hashQuery(hash: string = window.location.hash, search: string = window.location.search): URLSearchParams {
+  const i = hash.indexOf("?");
+  return new URLSearchParams(i >= 0 ? hash.slice(i + 1) : search);
+}
+
 export function parseHash(hash: string): RouteLocation {
-  const raw = hash.replace(/^#\/?/, "");
+  const raw = hash.replace(/^#\/?/, "").replace(/\?.*$/, "");
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {

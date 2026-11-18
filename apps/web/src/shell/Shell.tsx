@@ -15,6 +15,7 @@ import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
 import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
+import { NotFoundPage, SharedStatePage, sharedStateFromUrl } from "./SharedStates";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StatusBar } from "./StatusBar";
@@ -54,7 +55,9 @@ export function Shell({ me }: { me: Me }) {
 
   // redirect (replace, no dead back step) to the canonical form of the URL
   useLayoutEffect(() => {
-    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id));
+    // the redirect keeps the hash's query (`?state=` previews survive the canonical rewrite)
+    const q = window.location.hash.includes("?") ? window.location.hash.slice(window.location.hash.indexOf("?")) : "";
+    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id) + q);
     else if (loc.id === "" && landing) replaceHash(formatHash(landing.id, null, landing.project));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoped, loc.project, loc.param, loc.id, project?.id, routeId]);
@@ -106,6 +109,9 @@ export function Shell({ me }: { me: Me }) {
   };
   const View = VIEWS[routeId] ?? VIEWS.home;
   const noAccess = hasNoAccess(me);
+  // `?state=loading|empty|error|forbidden|conflict` previews the shared states on any route (the design-system page links to them)
+  const sharedState = sharedStateFromUrl();
+  const unknownRoute = loc.id !== "" && !routeDef(loc.id);
   const shown = denied ?? def;
   const crumbTail = useCrumbTailValue();
   const baseCrumb = scoped ? [def?.title ?? ""] : [...(shown && !["Overview"].includes(shown.group) ? [shown.group] : []), shown?.title ?? "Home"];
@@ -140,6 +146,10 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
             </div>
+          ) : unknownRoute ? (
+            <NotFoundPage name={loc.id} />
+          ) : ready && sharedState ? (
+            <SharedStatePage kind={sharedState} eyebrow={def?.group ?? ""} title={def?.title ?? ""} />
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
           ) : null}
