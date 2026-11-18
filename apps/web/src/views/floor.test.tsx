@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { updatePrefs } from "../lib/prefs";
+import { DEFAULT_CATALOG } from "@gantry/domain";
 import FloorView from "./floor";
+import { convWaiting } from "./floor/TokenDrawer";
 import WorkOrdersView from "./work-orders";
 import { NOW, WOS, floorRead, mockApi, mount, resetApp, type Call } from "./floor/testkit";
 import { readsFor, travelerOf } from "./traveler/testkit";
@@ -216,6 +218,37 @@ describe("Floor: fidelity round 1", () => {
     expect(screen.getByText("Traveler")).toBeTruthy();
     expect(document.querySelector(".drawer .drawer-h")).toBeTruthy();
     expect(document.querySelector(".drawer .pipe .st")).toBeTruthy();
+  });
+
+  it("opens the work order's conversation from the token drawer, and says why when a station question waits for a person", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByRole("button", { name: /Line control/ });
+    const tok = document.querySelector(".belt .tok") as HTMLElement;
+    const first = WOS.find((w) => tok.id.endsWith(w.id) || tok.textContent?.includes(w.id))!;
+    expect(first).toBeTruthy();
+    cleanup();
+    const withConv = (over: Record<string, unknown>) => () => ({ body: floorRead({ workOrders: WOS.map((w) => (w.id === first.id ? { ...w, ...over } : w)) }) });
+    const openToken = async () => {
+      mount(<FloorView />);
+      await screen.findByRole("button", { name: /Line control/ });
+      fireEvent.click(document.querySelector(`.belt .tok`) as HTMLElement);
+      return screen.findByRole("button", { name: "Conversation" });
+    };
+    mockApi();
+    let btn = await openToken();
+    expect(document.getElementById("floor-tok-conv-why")).toBeNull();
+    fireEvent.click(btn);
+    expect(window.location.hash).toBe(`#/p/${first.project}/conversations/${first.id}`);
+    cleanup();
+    window.location.hash = "";
+    mockApi({ "GET /api/v1/projects/payments/floor": withConv({ conv: { ...first.conv, raised: [{ station: "build", text: "Which table?", at: NOW, answered: false }] } }) });
+    btn = await openToken();
+    expect(document.getElementById("floor-tok-conv-why")?.textContent).toBe("Build is waiting for you");
+    expect(btn.getAttribute("aria-describedby")).toBe("floor-tok-conv-why");
+    cleanup();
+    expect(convWaiting({ ...first, bay: "person", bayReason: "needs the table name" } as never, DEFAULT_CATALOG)).toBe("needs the table name");
+    expect(convWaiting({ ...first, bay: null, conv: { ...first.conv, raised: [] } } as never, DEFAULT_CATALOG)).toBeNull();
   });
 
   it("opens the Traveler drawer (Journey, Documents, History tabs, ?traveler= in the URL) from the token, and the printable page from inside it", async () => {

@@ -1,4 +1,4 @@
-/** The token drawer (prototype G.woDrawer): state, priority and class, the pipeline strip, where the work order is, and Review gate / Traveler / Open record. */
+/** The token drawer (prototype G.woDrawer): state, priority and class, the pipeline strip, where the work order is, and Review gate / Conversation / Traveler / Open record. */
 import { useEffect, useRef } from "react";
 import { fmt } from "@gantry/domain";
 import { Btn, IconBtn, Who } from "../../ui/primitives";
@@ -7,13 +7,23 @@ import { navigate } from "../../lib/router";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { setProject } from "../../lib/prefs";
 import { useRepoName } from "../traveler/repo";
+import { stName } from "../traveler/model";
+import { raisedOpen } from "../conversations/model";
 import { beltGateLabels, tokenState } from "./conveyor";
 import { openApproval } from "./Approval";
 import { DrawerRoot } from "./Drawers";
-import { projectOf, since, useFloorCtx } from "./kit";
+import { projectOf, since, useFloorCtx, type FWo } from "./kit";
 
 const TONE: Record<string, string> = { running: "info", queued: "idle", gate: "warn", blocked: "bad" };
 const LABEL: Record<string, string> = { running: "Running", queued: "Queued", gate: "At a gate", blocked: "Blocked" };
+
+/** Why this work order's conversation needs a person, from its open station question or its parked bay reason; null when nothing waits. */
+export function convWaiting(w: FWo, cat: Parameters<typeof stName>[0]): string | null {
+  const r = w.conv ? raisedOpen(w)[0] : undefined;
+  if (r) return `${stName(cat, r.station)} is waiting for you`;
+  if (w.bay === "person") return w.bayReason || "Waiting for you";
+  return null;
+}
 
 export const Dr = ({ eyebrow, title, close, label, children, foot }: { eyebrow: string; title: string; close: () => void; label: string; children: React.ReactNode; foot?: React.ReactNode }) => (
   <div className="drawer-inner">
@@ -53,6 +63,7 @@ function Body({ woId, close }: { woId: string; close: () => void }) {
   const skips = wp.flow.classes.find((c) => c.id === w.cls) as { skips?: string[] } | undefined;
   const st = ctx.cat.stations[cur];
   const agent = w.history[w.history.length - 1]?.agent ?? null;
+  const waiting = convWaiting(w, ctx.cat);
   const reason = w.blockReason || w.failReason || (w.bay ? w.bayReason : "");
   return (
     <Dr
@@ -62,7 +73,9 @@ function Body({ woId, close }: { woId: string; close: () => void }) {
       label="Close work order details"
       foot={
         <>
+          {waiting ? <div className="small muted" id="floor-tok-conv-why" style={{ flexBasis: "100%", textAlign: "right" }}>{waiting}</div> : null}
           {gate && gd ? <Btn label="Review gate" kind="ok" id="floor-tok-review" onClick={() => openApproval(ui, wp.id, w.id, gate.gate, glabel, gd.name)} /> : null}
+          <Btn label="Conversation" id="floor-tok-conversation" aria-describedby={waiting ? "floor-tok-conv-why" : undefined} onClick={() => { close(); navigate("conversations", w.id, w.project); }} />
           <Btn label="Traveler" id="floor-tok-traveler" onClick={() => { setProject(w.project); openTraveler(w.id); }} />
           <Btn label="Open record" kind="primary" id="floor-tok-record" onClick={() => { close(); setProject(w.project); navigate("record", w.id); }} />
         </>
