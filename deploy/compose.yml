@@ -358,11 +358,17 @@ services:
       - |
         export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/keycloak_admin_password)"
         export GANTRY_OIDC_CLIENT_SECRET="$$(cat /run/secrets/oidc_client_secret)"
+        # Demo users (asha, daniel, ...; password gantry-dev) exist only on a seeded stack (GANTRY_DEV_SEED=true).
+        # Without the seed the realm is imported with no users; the first Factory Admin comes from GANTRY_BOOTSTRAP_ADMIN_USERNAME.
+        mkdir -p /opt/keycloak/data/import
+        if [ "$${GANTRY_DEV_SEED:-false}" = "true" ]; then src=realm-gantry.json; else src=realm-gantry.empty.json; fi
+        cp "/opt/keycloak/realms/$$src" /opt/keycloak/data/import/realm-gantry.json
         exec /opt/keycloak/bin/kc.sh "$$@"
       - kc
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      GANTRY_DEV_SEED: ${GANTRY_DEV_SEED:-false}
       KC_HTTP_ENABLED: "true"
       KC_HTTP_PORT: "8081"
       KC_HTTP_RELATIVE_PATH: /idp
@@ -376,9 +382,10 @@ services:
     volumes:
       # The dev H2 database lives under data/. Persisting it keeps user ids (the OIDC `sub` Gantry links people to)
       # stable across container recreation. --import-realm skips a realm that already exists, so edits to
-      # realm-gantry.json only apply after `docker volume rm gantry_kcdata`.
+      # realm-gantry.json (or realm-gantry.empty.json, the same realm without users) only apply after `docker volume rm gantry_kcdata`.
       - kcdata:/opt/keycloak/data
-      - ./keycloak/realm-gantry.json:/opt/keycloak/data/import/realm-gantry.json:ro
+      - ./keycloak/realm-gantry.json:/opt/keycloak/realms/realm-gantry.json:ro
+      - ./keycloak/realm-gantry.empty.json:/opt/keycloak/realms/realm-gantry.empty.json:ro
     healthcheck:
       test:
         - CMD-SHELL
