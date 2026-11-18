@@ -47,12 +47,26 @@ function mount() {
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
 
-beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); });
+beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.history.replaceState(null, "", "/"); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("System health view", () => {
   it("is a Govern route behind the integrations read right", () => {
     expect(ROUTES.find((r) => r.id === "system")).toMatchObject({ group: "Govern", perm: "integrations.view" });
+  });
+
+  it("draws each service as the prototype does: a 40-bar strip in the state colour, a 30d figure and the server's note", async () => {
+    setup({ health: { ...HEALTH, services: [{ id: "api", name: "API", status: "ok", detail: "p95 84ms", latencyMs: 84, uptime30d: 99.98 }, { id: "outbox", name: "Outbox", status: "degraded", detail: "2 dead letters", latencyMs: null }] } });
+    mount();
+    const api = await waitFor(() => { const e = document.querySelector("[data-service='api']"); if (!e) throw new Error("no api"); return e; });
+    const bars = [...api.querySelectorAll("svg rect")];
+    expect(bars).toHaveLength(40);
+    expect(new Set(bars.map((b) => b.getAttribute("fill")))).toEqual(new Set(["var(--ok)"]));
+    expect(api.textContent).toContain("99.98% 30d");
+    expect(api.textContent).toContain("p95 84ms");
+    const ob = document.querySelector("[data-service='outbox']")!;
+    expect(ob.textContent).toContain("n/a 30d");
+    expect([...ob.querySelectorAll("svg rect")].filter((b) => b.getAttribute("height") === "12")).toHaveLength(1);
   });
 
   it("shows services, the stale-backup warning, an unknown drill, dead letters and stuck jobs", async () => {
@@ -62,26 +76,44 @@ describe("System health view", () => {
     await waitFor(() => expect(document.querySelector("[data-service='launcher']")).toBeTruthy());
     expect(document.querySelector("[data-service='launcher']")?.textContent).toContain("Down");
     expect(document.querySelector("[data-service='github']")?.textContent).toContain("Degraded");
-    expect(document.querySelector("[data-service='api']")?.textContent).toContain("Up");
+    expect(document.querySelector("[data-service='api']")?.textContent).toContain("Healthy");
     fireEvent.click(await byId("sys-tab-backups"));
     await byId("sys-stale");
     expect(document.getElementById("sys-stale")?.textContent).toContain("over 26 hours old");
     expect(document.getElementById("sys-backup")?.textContent).toContain("Stale");
     expect(document.getElementById("sys-drill")?.textContent).toContain("Not run yet");
+    // the prototype's two cards; the buttons the server has no endpoint for work as buttons and say so
+    expect([...document.querySelectorAll(".card-h h2")].map((h) => h.textContent)).toEqual(["Backups", "Restore drill"]);
+    expect((await byId("sys-backup-now")).getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(await byId("sys-backup-now"));
+    await waitFor(() => expect(document.body.textContent).toContain("Starting a backup is not available yet"));
+    expect((await byId("sys-drill-run")).getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(await byId("sys-drill-run"));
+    await waitFor(() => expect(document.body.textContent).toContain("Starting a restore drill is not available yet"));
+    expect(document.getElementById("sys-refresh")).toBeNull();
     fireEvent.click(await byId("sys-tab-outbox"));
     expect(document.querySelector("tr[data-key='ob-1']")?.textContent).toContain("HTTP 500 from slack");
-    fireEvent.click(await byId("sys-tab-jobs"));
-    expect(document.querySelector("tr[data-key='j1']")?.textContent).toContain("Lease expired");
-    expect(document.body.textContent).toContain("Services up2 of 4");
+    expect([...document.querySelectorAll("#sys-dead th")].map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["ID", "Topic", "Error", "Attempts", ""]);
+    fireEvent.click(await byId("sys-discard-ob-1"));
+    await waitFor(() => expect(document.body.textContent).toContain("Discard ob-1?"));
+    expect(document.body.textContent).toContain("The message is dropped and recorded in the audit ledger.");
+    fireEvent.click(await byId("sys-discard-ok"));
+    await waitFor(() => expect(document.body.textContent).toContain("Discarding a dead letter is not available yet"));
+    fireEvent.click(await byId("sys-tab-stuck"));
+    expect(document.querySelector("[data-key='j1']")?.textContent).toContain("Lease expired");
+    expect((await byId("sys-nudge-j1")).getAttribute("aria-disabled")).not.toBe("true");
+    expect(window.location.search).toBe("?tab=stuck");
+    expect(document.body.textContent).toContain("Services healthy2/4");
+    expect(document.body.textContent).toContain("Stuck work orders1");
   });
 
   it("shows no stale warning for a current backup and says nothing is stuck or dead", async () => {
     setup({ health: { ...HEALTH, backup: { ...HEALTH.backup, status: "ok", ageHours: 3 }, outbox: { ...HEALTH.outbox, counts: { ...HEALTH.outbox.counts, dead: 0 }, dead: [] }, jobs: { ...HEALTH.jobs, stuck: [] } } });
     mount();
     fireEvent.click(await byId("sys-tab-outbox"));
-    await byId("sys-dead-empty");
-    fireEvent.click(await byId("sys-tab-jobs"));
-    await byId("sys-stuck-empty");
+    await waitFor(() => expect(document.body.textContent).toContain("Everything was delivered."));
+    fireEvent.click(await byId("sys-tab-stuck"));
+    await waitFor(() => expect(document.body.textContent).toContain("All work orders are moving."));
     fireEvent.click(await byId("sys-tab-backups"));
     expect(document.getElementById("sys-stale")).toBeNull();
   });

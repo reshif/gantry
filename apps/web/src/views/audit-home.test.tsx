@@ -62,6 +62,7 @@ function mount(node: React.ReactElement) {
 }
 
 beforeEach(() => {
+  window.history.replaceState(null, "", "/");
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
@@ -87,18 +88,21 @@ describe("Audit", () => {
     });
     mount(<AuditView />);
     expect(await screen.findByText("policy.edit.denied")).toBeTruthy();
-    const stat = (label: string) => Array.from(document.querySelectorAll("#aud-stats .stat-tile")).find((t) => t.querySelector(".stat-lbl")?.textContent === label)?.querySelector(".stat-val")?.textContent;
-    expect(stat("Head digest")).toBe("cccccccc");
-    expect(stat("Denied")).toBe("1");
+    // the stat row is gone: counts live on the view tabs, and an always-present banner says whether the chain was checked
+    expect(document.getElementById("aud-stats")).toBeNull();
+    expect(document.getElementById("aud-view-denied")).toBeTruthy();
+    expect(document.getElementById("aud-verified")?.className).toContain("banner");
+    expect([...document.querySelectorAll("#aud-ledger th")].map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["#", "When", "Actor", "Action", "Target", "Project", "Category", "Outcome"]);
+    expect(document.querySelector("#aud-ledger .pager")?.textContent).toContain("1–3 of 3");
     expect(document.querySelectorAll("tr[id^=aud-row-]")).toHaveLength(3);
     expect(Array.from(document.querySelectorAll("tr[id^=aud-row-] .chip")).map((c) => c.textContent)).toContain("denied");
     expect(document.querySelectorAll(".aud-has-diff")).toHaveLength(1);
-    expect((document.getElementById("aud-cat") as HTMLSelectElement).textContent).toContain("Access (2)");
+    expect((document.getElementById("aud-cat") as HTMLSelectElement).textContent).toContain("access");
     // Clicking a category narrows server-side.
     fireEvent.change(document.getElementById("aud-cat")!, { target: { value: "config" } });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("category") === "config")).toBe(true));
-    // Auditors get the verify button; the note about a limited view is absent.
-    expect(document.getElementById("aud-verify")).toBeTruthy();
+    // Auditors get the verified banner; the note about a limited view is absent.
+    expect(document.getElementById("aud-verified")).toBeTruthy();
     expect(document.querySelector(".lock-note")).toBeNull();
   });
 
@@ -109,6 +113,35 @@ describe("Audit", () => {
     fireEvent.change(document.getElementById("aud-q")!, { target: { value: "slack" } });
     await waitFor(() => expect(calls.some((c) => c.query.get("q") === "slack")).toBe(true));
     expect(document.getElementById("aud-clear")).toBeTruthy();
+    // the filter is in the URL
+    expect(window.location.search).toContain("q=slack");
+  });
+
+  it("has only Export CSV in the header, the verify result in a button-less banner, the All, Denied and Config views and no More filters", async () => {
+    setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }), "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 1, msg: "Chain intact." } }) });
+    mount(<AuditView />);
+    await screen.findByText("role.add");
+    expect(document.getElementById("aud-export")?.textContent).toContain("Export CSV");
+    expect(document.querySelector(".page-head #aud-verify, .page-acts #aud-verify")).toBeNull();
+    await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
+    expect(document.getElementById("aud-verified")?.querySelector("button")).toBeNull();
+    expect(document.getElementById("aud-verify")).toBeNull();
+    expect(document.getElementById("aud-verified-dismiss")).toBeNull();
+    expect([...document.querySelectorAll("[role=tab]")].map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["All", "Denied", "Config"]);
+    expect(document.querySelectorAll("#aud-ledger th .th-arrow").length).toBeGreaterThan(3);
+    expect(document.querySelector("#aud-ledger a.rl")?.getAttribute("href")).toBe("#audit");
+    fireEvent.click(document.getElementById("aud-view-denied")!);
+    await waitFor(() => expect(window.location.search).toContain("out=denied"));
+    fireEvent.click(document.getElementById("aud-view-config")!);
+    await waitFor(() => expect(window.location.search).toContain("cat=config"));
+    expect(window.location.search).not.toContain("out=denied");
+    fireEvent.click(document.getElementById("aud-view-all")!);
+    await waitFor(() => expect(window.location.search).not.toContain("cat="));
+    expect(document.getElementById("aud-more")).toBeNull();
+    fireEvent.change(document.getElementById("aud-cat")!, { target: { value: "config" } });
+    await waitFor(() => expect(window.location.search).toContain("cat=config"));
+    fireEvent.click(document.getElementById("aud-clear")!);
+    await waitFor(() => expect(window.location.search).not.toContain("cat="));
   });
 
   it("pages with the cursor", async () => {
@@ -123,7 +156,7 @@ describe("Audit", () => {
     expect(document.getElementById("aud-ledger-more")).toBeNull();
   });
 
-  it("opens the detail drawer with the field diff, chain digests and history", async () => {
+  it("opens the detail drawer with the prototype's nine fields only", async () => {
     setup(SAM, {
       "GET /api/v1/audit": () => ({ body: page([row(2, { before: '{"a":1}', after: '{"a":2}', category: "config", action: "project.config" })]) }),
       "GET /api/v1/audit/2": () => ({
@@ -135,13 +168,14 @@ describe("Audit", () => {
     });
     mount(<AuditView />);
     fireEvent.click(await screen.findByLabelText("Open audit entry 2: project.config"));
-    const drawer = await waitFor(() => { const d = document.querySelector(".aud-drawer"); if (!d || !d.textContent?.includes("Chain")) throw new Error("not yet"); return d as HTMLElement; });
-    expect(within(drawer).getByText("1 of 1 fields changed")).toBeTruthy();
-    expect(within(drawer).getByText("203.0.113.5")).toBeTruthy();
-    expect(within(drawer).getByText("req-9")).toBeTruthy();
-    expect(drawer.querySelector(".digest")?.textContent).toBe("2".padStart(64, "a"));
-    expect(within(drawer).getByText("role.edit")).toBeTruthy();
-    expect(within(drawer).getByText("Open Access")).toBeTruthy();
+    const drawer = await waitFor(() => { const d = document.querySelector(".aud-drawer"); if (!d || !d.textContent?.includes("Previous")) throw new Error("not yet"); return d as HTMLElement; });
+    expect(document.querySelector(".drawer-head .kicker")?.textContent).toBe("Audit entry #2");
+    expect(document.querySelector(".drawer-title")?.textContent).toBe("project.config");
+    expect([...drawer.querySelectorAll(".aud-kv dt")].map((d) => d.textContent)).toEqual(["When", "Actor", "Target", "Project", "Category", "Outcome", "Via", "Hash", "Previous"]);
+    expect(drawer.querySelector(".digest")?.textContent).toBe("sha256:" + "2".padStart(64, "a"));
+    expect([...drawer.querySelectorAll(".aud-kv dt")]).toHaveLength(9);
+    expect(drawer.textContent).not.toContain("Before and after");
+    expect(within(drawer).queryByText("Open Access")).toBeNull();
   });
 
   it("tells a person without audit.view that they see their own projects only, and hides verify", async () => {
@@ -152,14 +186,23 @@ describe("Audit", () => {
     expect(document.getElementById("aud-verify")).toBeNull();
   });
 
-  it("shows an empty state, and verify reports the result", async () => {
+  it("shows an empty state, and the verify result lands in the banner", async () => {
     setup(ASHA, {
       "GET /api/v1/audit": () => ({ body: { items: [], next: null, total: 0, summary: { ...SUMMARY, entries: 0, denied: 0, changes: 0, categories: {} } } }),
       "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 12, msg: "Chain intact: 12 entries verified." } }),
     });
     mount(<AuditView />);
-    expect(await screen.findByText("The ledger is empty")).toBeTruthy();
-    fireEvent.click(document.getElementById("aud-verify")!);
-    expect(await screen.findByText("Chain intact: 12 entries verified.")).toBeTruthy();
+    expect(await screen.findByText("Nothing matches")).toBeTruthy();
+    await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
+  });
+
+  it("verifies the chain on arrival and shows the Ledger verified banner without a click", async () => {
+    setup(ASHA, {
+      "GET /api/v1/audit": () => ({ body: page([row(1)]) }),
+      "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 1, msg: "Chain intact." } }),
+    });
+    mount(<AuditView />);
+    await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
+    expect(document.getElementById("aud-verified")?.textContent).toContain("no gaps");
   });
 });

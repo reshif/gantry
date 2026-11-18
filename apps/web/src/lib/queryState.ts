@@ -3,6 +3,7 @@
  * link restores it. A value equal to its default is left out of the URL. Writes use `replaceState` (no history entry) and tell every reader in this window.
  */
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { parseHash } from "./router";
 
 const EVT = "gantry:querystate";
 
@@ -65,4 +66,39 @@ export function useClearRouteStateOnLeave(keys: string[]): void {
     },
     [joined],
   );
+}
+
+const snapshot = (): string => {
+  try {
+    return window.location.search;
+  } catch {
+    return "";
+  }
+};
+
+function writeWith(mutate: (q: URLSearchParams) => void): void {
+  try {
+    const u = new URL(window.location.href);
+    mutate(u.searchParams);
+    if (u.href !== window.location.href) window.history.replaceState(window.history.state, "", u.href);
+  } catch {
+    /* a sandboxed frame without history access: the state still works, it is just not in the URL */
+  }
+  window.dispatchEvent(new Event(EVT));
+}
+
+/** The values of `keys` from the URL (empty string when absent), a setter that merges a patch (empty or null removes a key) and `clear`. */
+export function useQueryState<K extends string>(keys: readonly K[]): { values: Record<K, string>; set: (patch: Partial<Record<K, string | null>>) => void; clear: (except?: readonly K[]) => void } {
+  const search = useSyncExternalStore(subscribe, snapshot, () => "");
+  const q = new URLSearchParams(search);
+  const values = Object.fromEntries(keys.map((k) => [k, q.get(k) ?? ""])) as Record<K, string>;
+  const set = useCallback((patch: Partial<Record<K, string | null>>) => writeWith((p) => { for (const [k, v] of Object.entries(patch)) { if (v) p.set(k, v as string); else p.delete(k); } }), []);
+  const clear = useCallback((except: readonly K[] = []) => writeWith((p) => { for (const k of keys) if (!except.includes(k)) p.delete(k); }), [keys]);
+  useEffect(() => {
+    const route = parseHash(window.location.hash).id;
+    const onHash = () => { if (parseHash(window.location.hash).id !== route) writeWith((p) => { for (const k of keys) p.delete(k); }); };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [keys]);
+  return { values, set, clear };
 }
