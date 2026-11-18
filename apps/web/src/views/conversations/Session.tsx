@@ -10,6 +10,7 @@ import { fmt, isBriefScaffold } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { Avatar, Btn, Chip, Empty, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
+import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { setProject } from "../../lib/prefs";
@@ -224,12 +225,16 @@ function SideDialogue({ s }: { s: WoSession }) {
 
 /* ------------------------------------------------------------------ the page ---- */
 
+/** The prototype's message time: "13 Nov 15:43" (IST, as everywhere in the app). */
+export const panelDate = (t: number): string => new Date(t).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata", hour12: false }).replace(",", "");
+
 export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean; /** The Conversations page: the prototype's chat bubbles and composer inside the page's own panel. */ panel?: boolean }) {
   const q = useWoSession(woId);
   const s = q.data;
   const ui = useUI();
   const openTraveler = useOpenTraveler();
   const openRecord = useOpenRecordRoute();
+  const actorOf = useActors();
   const [draft, setDraft] = useState("");
   const opened = useRef(false);
   const turn = useRef<{ kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }>({ kind: "open" });
@@ -319,26 +324,22 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
   );
   const quick = s.ruleQuestion;
   const writeFirst = () => { document.getElementById("wos-input")?.focus(); ui.toast("Write a message first", "error"); };
+  const panelName = (m: WoSessionMessage): string => (m.role === "user" || (m.author && m.author.startsWith("ag-")) ? actorOf(m.author).name.replace(" (agent)", "") : m.author === "system" ? "Gantry" : m.data.agent ?? agentName);
+  const lastFrom = s.messages.length ? panelName(s.messages[s.messages.length - 1]!) : agentName;
   if (panel) {
     return (
       <div className="wos wos-panel stack" id="wos" data-wo={s.woId} role="region" aria-label={`Conversation ${s.woId}`}>
-        <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite">
-          <span className="wos-dot" aria-hidden="true" />
-          <span>{status.text}</span>
-        </div>
         <div className="chat" id="wos-thread" role="log" aria-live="polite" ref={thread}>
           {!s.messages.length && !live && !quick ? <Empty title="No conversation yet" text="Agents talk here when they need you." /> : null}
-          {s.messages.map((m, i) => (
+          {s.messages.map((m) => (
             <div key={m.id} className="wos-turn">
-              {i === 0 && m.data.mode === "legacy" ? <p className="small muted wos-legacy-h">Earlier: the scripted intake questions</p> : null}
-              {i === firstSession && firstSession > 0 ? <p className="small muted wos-legacy-h">The conversation with {agentName}</p> : null}
               {m.data.kind === "update" ? (
                 <p className="osx-event small muted"><span>{fmt.stamp(m.at)}</span> {m.text}</p>
               ) : (
                 <div className={`msg${m.role === "user" ? " me" : ""}`}>
                   <Avatar id={m.author} />
                   <div className="bub">
-                    <div className="who">{tag(m)}{` · ${fmt.stamp(m.at)}`}{m.data.mode === "rule-based" ? " · rule-based" : ""}</div>
+                    <div className="who">{panelName(m)}{` · ${panelDate(m.at)}`}</div>
                     {m.data.kind === "answer" ? <AnswerText m={m} s={s} /> : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
                     {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
                     <Cards m={m} s={s} agent={agentName} send={(b) => send(b)} last={m.id === lastId} />
@@ -349,7 +350,7 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
           ))}
           {quick && !s.wo.closed ? (
             <div className="callout" id="wos-asks-callout">
-              <b>{`${agentName} asks`}</b>{quick.text}
+              <b>{`${lastFrom} asks`}</b>{quick.text}
               {quick.chips.length ? <div className="chips" style={{ marginTop: 8 }}>{quick.chips.map((o) => <button key={o} type="button" className="chipbtn" disabled={!s.can.talk} onClick={() => send({ kind: "message", text: o })}>{o}</button>)}</div> : null}
             </div>
           ) : null}
@@ -365,7 +366,6 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
             </div>
           ) : null}
           {error ? <p className="callout warn small" role="alert">{error}</p> : null}
-          {ruleBased ? <p className="small muted osx-reason" id="wos-mode-note">{`Rule-based (no agent): ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
         </div>
         <form className="wos-reply" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { writeFirst(); return; } submit(); }}>
           {choices.length ? (
@@ -382,7 +382,6 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
             <Btn kind="primary" type="submit" id="wos-send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || (!mention && !s.can.talk)} />
           </div>
         </form>
-        <div className="osx-side wos-side-inline" aria-label="Work order">{sideBody}</div>
       </div>
     );
   }

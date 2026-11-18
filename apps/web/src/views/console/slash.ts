@@ -23,6 +23,8 @@ export const SLASH: Array<{ cmd: string; hint: string }> = [
   { cmd: "/workload", hint: "Who carries the approvals in your projects" },
   { cmd: "/trust ", hint: "Trust levels and proposals, e.g. /trust payments" },
   { cmd: "/mine", hint: "Approvals and questions waiting on you" },
+  { cmd: "/chats", hint: "Saved chats: open, rename, delete, new" },
+  { cmd: "/settings", hint: "Model, your console rights and audit link" },
 ];
 
 export interface ProjectRef { id: string; name: string; key?: string }

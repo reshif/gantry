@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -59,6 +59,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   pager?: { page: number; size: number; onPage: (page: number) => void };
   /** "blueprint": sort arrows ▲ / ▼ and a quiet ↕ hint on sortable headers that are not sorted. Optional, additive. */
   glyphs?: "blueprint";
+  /** The "Sort by" select shown above the stacked cards on a phone (default on); the prototype's list has none. */
+  mobileSort?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
@@ -120,7 +122,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const clientMore = shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
-      {sortable.length ? (
+      {sortable.length && mobileSort ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
           <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>

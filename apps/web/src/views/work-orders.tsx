@@ -10,14 +10,14 @@
  */
 import { qk } from "../api/keys";
 import { useInfiniteQuery, useQuery, keepPreviousData } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { bayDef, classesOf, flowOf, fmt, gateForWO, gatePendingName, woTotals } from "@gantry/domain";
+import { useEffect, useMemo } from "react";
+import { classesOf, flowOf } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
 import { useHome, useMe, useProject } from "../api/queries";
 import { assigneeOf, useProjectRepos } from "./floor/kit";
 import type { Page, WorkOrder } from "../api/types";
-import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { DataTable, type Col } from "../ui/SortTable";
 import { Icon } from "../ui/Icon";
@@ -25,15 +25,12 @@ import { useActors } from "../ui/actors";
 import { hashFor, navigate } from "../lib/router";
 import { plural } from "../lib/plural";
 import { pickProject } from "../lib/routes";
-import { updatePrefs, usePrefs } from "../lib/prefs";
-import { useOpenTraveler } from "../shell/useTraveler";
+import { usePrefs } from "../lib/prefs";
 import { classOf, useCatalog } from "./projects/kit";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
-import { columnsKey, savedViewsKey, useStored, type GroupBy, type SavedView } from "./work-orders/saved";
 import { useUrlState } from "./work-orders/url";
 import { PrioChip, WoStateChip, agoShort } from "./work-orders/cells";
 import { WoBoard } from "./work-orders/Board";
-import { useUI } from "../ui/overlay-context";
 
 type TabId = "all" | "mine" | "waiting" | "intake" | "open" | "done" | "incidents" | "killed";
 interface Filters {
@@ -54,10 +51,8 @@ const PAGE = 15;
 const SNAPSHOT = 200;
 /** The most work orders read for the list. Beyond it the page says the list is cut short. */
 const CAP = 1000;
-const GROUPS: Array<{ id: GroupBy; label: string }> = [{ id: "none", label: "No grouping" }, { id: "station", label: "Station" }, { id: "repo", label: "Repo" }, { id: "cls", label: "Class" }, { id: "assignee", label: "Assignee" }];
-/** Columns a person can turn on and off. The first (work order) is always shown. */
-const OPTIONAL_COLS: Array<[string, string]> = [["cls", "Class"], ["where", "Station"], ["state", "State"], ["next", "Next actor"], ["gate", "Gate"], ["repo", "Project"], ["prio", "Prio"], ["by", "By"], ["age", "Created"], ["spend", "Spend"]];
-const DEFAULT_HIDDEN = ["next", "gate", "spend"];
+/** The prototype's eight columns, in its order. */
+const PROTO_COLS = ["id", "repo", "where", "state", "cls", "prio", "age", "by"];
 const STATES = ["running", "waiting", "parked", "blocked", "failed", "done", "killed"];
 
 const isIncident = (w: WorkOrder): boolean => w.state === "blocked" || w.state === "failed" || w.bay === "sechold" || w.bay === "person";
@@ -69,20 +64,14 @@ export default function WorkOrdersView() {
   const prefs = usePrefs();
   const cat = useCatalog();
   const actor = useActors();
-  const openTraveler = useOpenTraveler();
   const newWo = useNewWorkOrder();
   const home = useHome().data;
-  const ui = useUI();
   const [u, setU] = useUrlState(URL_DEFAULTS);
-  const [applied, setApplied] = useState("");
   const mode: "list" | "board" = u.view === "board" ? "board" : "list";
   const tab = u.tab as TabId;
-  const groupBy = u.group as GroupBy;
   const sort = { k: u.sort, dir: (u.dir === "asc" ? 1 : -1) as 1 | -1 };
-  const f: Filters = { q: u.q, cls: u.cls, station: u.station, repo: u.repo, prio: u.prio, source: u.source, state: u.state, assignee: u.assignee };
+  const f: Filters = { q: u.q, cls: u.cls, station: cat?.stations.find((x) => x.id === u.station || x.no === u.station)?.id ?? u.station, repo: u.repo, prio: u.prio, source: u.source, state: u.state, assignee: u.assignee };
   const projectId = me ? pickProject(me, prefs.project) : null;
-  const [hidden, setHidden] = useStored<string[]>(columnsKey(projectId ?? ""), DEFAULT_HIDDEN);
-  const [saved, setSaved] = useStored<SavedView[]>(savedViewsKey(projectId ?? ""), []);
   const projectQ = useProject(projectId);
   const project = projectQ.data ?? null;
   const repos = useProjectRepos(projectId);
@@ -139,17 +128,6 @@ export default function WorkOrdersView() {
     return { all: snapItems.length, open: snapItems.filter(inFlight).length, done: snapItems.filter((w) => w.state === "done").length, killed: snapItems.filter((w) => w.state === "killed").length, intake: snapItems.filter(atIntakeNow).length };
   }, [snap.data?.cut, snapItems, stat.data]);
 
-  const assignees = useMemo(() => {
-    const s = new Set<string>(loaded.map(assigneeOf).filter((a): a is string => !!a));
-    if (f.assignee !== "all" && f.assignee !== "none") s.add(f.assignee);
-    return [...s].sort();
-  }, [loaded, f.assignee]);
-  const sources = useMemo(() => {
-    const s = new Set<string>((snapItems ?? loaded).map((w) => w.source));
-    if (f.source !== "all") s.add(f.source);
-    return [...s].sort();
-  }, [snapItems, loaded, f.source]);
-
   const q = f.q.trim().toLowerCase();
   const rows = useMemo(() => {
     const text = (w: WorkOrder): string => [w.id, w.title, project?.name ?? "", w.repo, actor(w.requestedBy).name].join(" ").toLowerCase();
@@ -186,34 +164,6 @@ export default function WorkOrdersView() {
   const set = (k: keyof Filters) => (v: string) => setU({ [k]: v, page: "1" } as Partial<typeof URL_DEFAULTS>);
   const clear = () => setU({ ...NONE, tab: "all", page: "1" });
   const block = projectSubmitBlock(me, project, repos);
-  const plus = snap.data?.cut ? "+" : "";
-  const tabs: Array<{ id: TabId; label: string; count: number | string | null }> = [
-    { id: "all", label: "All", count: counts?.all ?? null },
-    { id: "mine", label: "Mine", count: snapItems ? `${snapItems.filter((w) => w.requestedBy === me.person.id).length}${plus}` : null },
-    { id: "waiting", label: "Waiting on me", count: snapItems ? `${snapItems.filter((w) => waitingIds.has(w.id)).length}${plus}` : null },
-    { id: "intake", label: "At Intake", count: counts?.intake ?? null },
-    { id: "open", label: "In flight", count: counts?.open ?? null },
-    { id: "done", label: "Shipped", count: counts?.done ?? null },
-    { id: "incidents", label: "Incidents", count: snapItems ? `${snapItems.filter(isIncident).length}${plus}` : null },
-    { id: "killed", label: "Killed", count: counts?.killed ?? null },
-  ];
-  /** Who acts next: the agent working, the approvers at a gate, or a person when the work is stuck. */
-  const nextActor = (w: WorkOrder): string => {
-    if (w.state === "done") return "Finished";
-    if (w.state === "killed") return "Stopped";
-    if (w.state === "waiting") return "Approvers";
-    if (w.state === "running") {
-      const a = assigneeOf(w);
-      return a ? actor(a).name.replace(" (agent)", "") : "An agent";
-    }
-    return "A person";
-  };
-  const gateCell = (w: WorkOrder): string => {
-    if (w.state === "done") return "Shipped";
-    const g = gateForWO(cat, project, w);
-    // A gate's name is the outcome it waits for ("Spec approved"): while it is ahead of the work order, say what it needs instead.
-    return g ? (w.state === "waiting" ? gatePendingName(g) : `Next: ${gatePendingName(g)}`) : "None next";
-  };
   const allCols: Col<WorkOrder>[] = [
     {
       key: "id",
@@ -232,7 +182,6 @@ export default function WorkOrdersView() {
     {
       key: "cls",
       label: "Class",
-      sort: (w) => w.cls,
       render: (w) => (
         <span className="wo-cls">
           {classOf(cat, project, w.cls).name}
@@ -247,71 +196,11 @@ export default function WorkOrdersView() {
     { key: "prio", label: "Prio", sort: (w) => w.priority, render: (w) => <PrioChip p={w.priority} /> },
     { key: "age", label: "Created", sort: (w) => w.createdAt, render: (w) => <span style={{ whiteSpace: "nowrap" }}>{agoShort(w.createdAt)}</span> },
     { key: "by", label: "By", render: (w) => <span title={`via ${w.source}`}>{actor(w.requestedBy).name.split(" ")[0]}</span> },
-    { key: "next", label: "Next actor", hideSmall: true, render: (w) => <span className="small">{nextActor(w)}</span> },
-    { key: "gate", label: "Gate", hideSmall: true, render: (w) => <span className="small muted">{gateCell(w)}</span> },
-    { key: "spend", label: "Spend", align: "end", hideSmall: true, render: (w) => <span className="mono">{fmt.money(woTotals(w).cost)}</span> },
-    {
-      key: "open",
-      label: "Open",
-      render: (w) => (
-        <span className="wo-acts">
-          <button type="button" className="icon-btn icon-btn-sm" id={`wo-trav-${w.id}`} aria-label={`Open traveler for ${w.id}`} data-tip="Traveler" onClick={(e) => { e.stopPropagation(); openTraveler(w.id); }}>
-            <Icon name="record" />
-          </button>
-          <button type="button" className="icon-btn icon-btn-sm" id={`wo-conv-${w.id}`} aria-label={`Open conversation for ${w.id}`} data-tip="Conversation" onClick={(e) => { e.stopPropagation(); navigate("conversations", w.id, projectId); }}>
-            <Icon name="chat" />
-          </button>
-        </span>
-      ),
-    },
   ];
-  const cols = allCols.filter((c) => c.key === "id" || c.key === "open" || !hidden.includes(c.key));
+  const cols = allCols.filter((c) => PROTO_COLS.includes(c.key));
   const cutNote = `Only the latest ${CAP} work orders are read for this view, so the project has more. Narrow it with the search or a filter.`;
   const total = snapItems?.length ?? loaded.length;
   const showCount = `${plural(rows.length, "work order")}${rows.length !== total ? ` of ${total}` : ""}`;
-  const groupKey = (w: WorkOrder): string => {
-    if (groupBy === "station") return w.bay ? bayDef(cat, w.bay)?.name ?? w.bay : w.state === "done" ? "Shipped" : cat.stations[w.station]?.name ?? "?";
-    if (groupBy === "repo") return w.repo;
-    if (groupBy === "cls") return classOf(cat, project, w.cls).name;
-    const a = assigneeOf(w);
-    return a ? actor(a).name.replace(" (agent)", "") : "Unassigned";
-  };
-  const groups: Array<[string, WorkOrder[]]> = (() => {
-    if (groupBy === "none") return [["", rows]];
-    const m = new Map<string, WorkOrder[]>();
-    for (const w of rows) {
-      const k = groupKey(w);
-      m.set(k, [...(m.get(k) ?? []), w]);
-    }
-    return [...m.entries()].sort((x, y) => x[0].localeCompare(y[0]));
-  })();
-  const applyView = (id: string) => {
-    const v = saved.find((x) => x.id === id);
-    setApplied(id);
-    if (!v) return;
-    const vf = v.filters as Record<string, string | undefined>;
-    setU({ tab: v.tab, ...NONE, ...(Object.fromEntries(Object.entries(vf).filter(([k]) => k in NONE)) as Partial<Filters>), ...(vf.where ? { station: vf.where } : {}), sort: v.sort.k, dir: v.sort.dir > 0 ? "asc" : "desc", group: v.groupBy, page: "1" });
-    setHidden(v.hidden);
-  };
-  const saveView = () =>
-    ui.reasonDialog({
-      title: "Save this view",
-      kicker: "Work orders",
-      sub: "Keeps the tab, filters, sort, grouping and columns you have now, for you in this browser.",
-      label: "Name",
-      placeholder: "For example: My P1s",
-      ok: "Save view",
-      min: 2,
-      onOk: (name) => {
-        const id = `v${Date.now().toString(36)}`;
-        setSaved([...saved, { id, name: name.trim(), tab, filters: { ...f }, sort, groupBy, hidden }]);
-        setApplied(id);
-      },
-    });
-  const dropView = () => {
-    setSaved(saved.filter((x) => x.id !== applied));
-    setApplied("");
-  };
   const tableOf = (items: WorkOrder[], id: string, cap: string, paged: boolean) => (
     <DataTable
       id={id}
@@ -323,10 +212,10 @@ export default function WorkOrdersView() {
       sort={{ key: sort.k, dir: sort.dir }}
       onSort={(s) => setU({ sort: s.key, dir: s.dir > 0 ? "asc" : "desc", page: "1" })}
       glyphs="blueprint"
+      mobileSort={false}
       {...(paged ? { pager: { page: Math.max(0, Number(u.page) - 1 || 0), size: PAGE, onPage: (p: number) => setU({ page: String(p + 1) }) } } : {})}
     />
   );
-  const moreOpen = tab !== "all" || f.repo !== "all" || f.source !== "all" || f.assignee !== "all" || groupBy !== "none" || !!applied;
   return (
     <div className="view view-wide wo-view">
       <div id="wo-head">
@@ -359,7 +248,7 @@ export default function WorkOrdersView() {
                 <Select id="wo-f-state" options={[{ value: "all", label: "All" }, ...STATES.map((k) => ({ value: k, label: k }))]} value={f.state} onChange={set("state")} />
               </Field>
               <Field label="Station" htmlFor="wo-f-where">
-                <Select id="wo-f-where" options={[{ value: "all", label: "All" }, ...fl.stations.filter((s) => s.enabled).map((s) => ({ value: s.id, label: s.name })), ...fl.bays.map((b) => ({ value: b.id, label: `Bay: ${b.name}` }))]} value={f.station} onChange={set("station")} />
+                <Select id="wo-f-where" options={[{ value: "all", label: "All" }, ...fl.stations.filter((s) => s.enabled).map((s) => ({ value: s.id, label: s.name }))]} value={f.station} onChange={set("station")} />
               </Field>
               <Field label="Class" htmlFor="wo-f-cls">
                 <Select id="wo-f-cls" options={[{ value: "all", label: "All" }, ...classesOf(cat, project).map((c) => ({ value: c.id, label: c.name + (c.custom ? " (custom)" : "") }))]} value={f.cls} onChange={set("cls")} />
@@ -368,54 +257,10 @@ export default function WorkOrdersView() {
                 <Select id="wo-f-prio" options={[{ value: "all", label: "All" }, ...PRIOS.map((p) => ({ value: p, label: p }))]} value={f.prio} onChange={set("prio")} />
               </Field>
             </FilterBar>
-            <details className="wo-more" open={moreOpen}>
-              <summary className="micro" id="wo-more-btn">More: tabs, grouping, columns and saved views</summary>
-              <Tabs items={tabs.map((t) => ({ id: t.id, label: t.label, count: t.count }))} active={tab} onChange={(id) => setU({ tab: id, page: "1" })} idPrefix="wo-tab" />
-              <div className="wo-more-row">
-                <Btn label="All records" icon="record" id="wo-records" small onClick={() => { updatePrefs({ record: null }); navigate("record"); }} />
-                <Field label="Repo" htmlFor="wo-f-repo">
-                  <Select id="wo-f-repo" options={[{ value: "all", label: "All" }, ...repos.map((r) => ({ value: r.id, label: r.name }))]} value={f.repo} onChange={set("repo")} />
-                </Field>
-                <Field label="Source" htmlFor="wo-f-source">
-                  <Select id="wo-f-source" options={[{ value: "all", label: "All" }, ...sources.map((s) => ({ value: s, label: s }))]} value={f.source} onChange={set("source")} />
-                </Field>
-                <Field label="Assignee" htmlFor="wo-f-assignee">
-                  <Select id="wo-f-assignee" options={[{ value: "all", label: "Anyone" }, { value: "none", label: "Unassigned" }, ...assignees.map((a) => ({ value: a, label: actor(a).name.replace(" (agent)", "") }))]} value={f.assignee} onChange={set("assignee")} />
-                </Field>
-                <Field label="Group by" htmlFor="wo-group">
-                  <Select id="wo-group" options={GROUPS.map((g) => ({ value: g.id, label: g.label }))} value={groupBy} onChange={(v) => setU({ group: v, page: "1" })} />
-                </Field>
-                {saved.length ? (
-                  <Field label="Saved views" htmlFor="wo-views">
-                    <Select id="wo-views" options={[{ value: "", label: "Choose a view" }, ...saved.map((v) => ({ value: v.id, label: v.name }))]} value={applied} onChange={applyView} />
-                  </Field>
-                ) : null}
-                <details className="wo-cols">
-                  <summary className="btn btn-sm sm" id="wo-cols-btn"><Icon name="columns" />Columns</summary>
-                  <div className="wo-cols-pop" role="group" aria-label="Columns shown">
-                    {OPTIONAL_COLS.map(([k, label]) => (
-                      <label key={k} className="wo-cols-opt">
-                        <input type="checkbox" id={`wo-col-${k}`} checked={!hidden.includes(k)} onChange={(e) => setHidden(e.target.checked ? hidden.filter((x) => x !== k) : [...hidden, k])} />
-                        {`Show ${label}`}
-                      </label>
-                    ))}
-                  </div>
-                </details>
-                {applied ? <Btn label="Delete view" small kind="ghost" id="wo-view-del" onClick={dropView} /> : null}
-                <Btn label="Save view" small id="wo-view-save" onClick={saveView} />
-              </div>
-            </details>
           </div>
           <Async query={list} what="work orders" id="wo-list">{() => rows.length ? (
             <div className="wo-table" id="wo-table-wrap">
-              {groupBy === "none"
-                ? tableOf(rows, "wo-table", `Work orders in ${project.name}`, true)
-                : groups.map(([g, items], i) => (
-                    <section key={g} className="wo-group" aria-labelledby={`wo-group-h-${i}`}>
-                      <h3 className="wo-group-h" id={`wo-group-h-${i}`}>{g} <span className="muted num">{items.length}</span></h3>
-                      {tableOf(items, `wo-table-${i}`, `Work orders in ${project.name}: ${g}`, false)}
-                    </section>
-                  ))}
+              {tableOf(rows, "wo-table", `Work orders in ${project.name}`, true)}
               {cut ? <div className="wo-foot"><span className="muted small">{cutNote}</span></div> : null}
             </div>
           ) : (

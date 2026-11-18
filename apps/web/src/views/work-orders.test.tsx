@@ -57,13 +57,16 @@ describe("Work orders table", () => {
     expect(window.location.search).toContain("cls=bug");
   });
 
-  it("opens the record from the id link and from the row, and the conversation from its own icon", async () => {
+  it("opens the record from the id link and from the row; no extra icon column", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 3) : page(WOS.slice(0, 3), null, 3) }) });
     mount(<WorkOrdersView />);
     const link = await screen.findByRole("link", { name: "WO-2398" });
     expect(link.getAttribute("href")).toBe("#/p/payments/record/WO-2398");
-    fireEvent.click(document.getElementById("wo-conv-WO-2398") as HTMLElement);
-    await waitFor(() => expect(window.location.hash).toBe("#/p/payments/conversations/WO-2398"));
+    // the prototype's table has no traveler / conversation icon column: the id link and the row are the way in
+    expect(document.getElementById("wo-conv-WO-2398")).toBeNull();
+    expect(document.getElementById("wo-trav-WO-2398")).toBeNull();
+    fireEvent.click(link.closest("tr") as HTMLElement);
+    await waitFor(() => expect(window.location.hash).toBe("#/p/payments/record/WO-2398"));
   });
 
   it("the List / Board switch is in the URL and the board is a panel of station columns with cards linking to the record", async () => {
@@ -78,7 +81,7 @@ describe("Work orders table", () => {
     expect(document.querySelector('.board a.card[href^="#/p/payments/record/"]')).toBeTruthy();
   });
 
-  it("reads every page for the tabs it works out itself, and says when the list is cut short", async () => {
+  it("reads every page for a tab link (?tab=incidents) it works out itself, and says when the list is cut short", async () => {
     const base = WOS[0]!;
     const many = (n: number, from: number) => Array.from({ length: n }, (_, k) => ({ ...base, id: `WO-${from + k}`, requestedBy: "p-asha" }));
     let served = 0;
@@ -89,40 +92,28 @@ describe("Work orders table", () => {
         return { body: page(many(200, served * 1000), `c${served}`, 9000) };
       },
     });
+    window.history.replaceState(null, "", "?tab=incidents");
     mount(<WorkOrdersView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Incidents/ }));
-    await waitFor(() => expect(document.querySelector("#wo-tab-incidents .tab-count")?.textContent).toMatch(/\+$/));
     await waitFor(() => expect(document.body.textContent).toMatch(/Only the latest 1000 work orders/), { timeout: 5000 });
     expect(lists(calls).filter((c) => c.query.get("cursor")).length).toBeGreaterThan(3);
   }, 20_000);
 
-  it("filters by assignee, groups the rows and keeps a saved view", async () => {
+  it("?station= presets the Station filter by id or by number", async () => {
+    window.history.replaceState(null, "", "?station=S5");
+    mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 5) : page(WOS.slice(0, 5), null, 5) }) });
+    mount(<WorkOrdersView />);
+    const station = (await waitFor(() => { const e = document.getElementById("wo-f-where"); if (!e) throw new Error("no select"); return e; })) as HTMLSelectElement;
+    expect(station.value).toBe("build");
+    expect(Array.from(station.options).some((o) => /^Bay:/.test(o.textContent ?? ""))).toBe(false);
+  });
+
+  it("is the prototype's panel: eight columns, four filters, no disclosure, no Open column", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 5) : page(WOS.slice(0, 5), null, 5) }) });
     mount(<WorkOrdersView />);
     expect(await screen.findByText("WO-2398")).toBeTruthy();
-    const sel = document.getElementById("wo-f-assignee") as HTMLSelectElement;
-    expect(Array.from(sel.options).map((o) => o.value)).toContain("none");
-    fireEvent.change(document.getElementById("wo-group") as HTMLElement, { target: { value: "repo" } });
-    await waitFor(() => expect(document.querySelectorAll(".wo-group").length).toBeGreaterThan(0));
-    fireEvent.click(document.getElementById("wo-col-by") as HTMLElement);
-    expect(document.querySelectorAll("#wo-table-0 thead th").length).toBeGreaterThan(0);
-    fireEvent.click(document.getElementById("wo-view-save") as HTMLElement);
-    const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
-    fireEvent.change(dlg.querySelector("input,textarea") as HTMLElement, { target: { value: "By repo" } });
-    fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "Save view") as HTMLElement);
-    await waitFor(() => expect(document.getElementById("wo-views")).toBeTruthy());
-    expect(Array.from((document.getElementById("wo-views") as HTMLSelectElement).options).map((o) => o.textContent)).toContain("By repo");
-  });
-
-  it("words the Gate column as what the gate needs, never as the outcome it waits for", async () => {
-    const failed = { ...wo, id: "WO-3100", state: "failed", station: 2, failReason: "workspace seeding failed", gates: {} } as unknown as typeof WOS[number];
-    mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([failed]) }) });
-    mount(<WorkOrdersView />);
-    expect(await screen.findByText("WO-3100")).toBeTruthy();
-    fireEvent.click(document.getElementById("wo-col-gate") as HTMLElement);
-    const cell = Array.from(document.querySelectorAll("#wo-table tbody tr td")).map((td) => td.textContent ?? "");
-    expect(cell.some((t) => /^Next: (Approve|Confirm|Review|Check|Wait)/.test(t)), cell.join(" | ")).toBe(true);
-    expect(cell.some((t) => t === "Spec approved")).toBe(false);
+    expect(Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => (t.textContent ?? "").replace(/[^A-Za-z ]/g, "").trim())).toEqual(["Work order", "Project", "Station", "State", "Class", "Prio", "Created", "By"]);
+    expect(document.querySelectorAll(".wo-bar select")).toHaveLength(4);
+    expect(document.querySelector(".wo-more, #wo-more-btn, #wo-view-save, #wo-group, #wo-cols-btn")).toBeNull();
   });
 
   it("explains an empty result and clears the filters", async () => {

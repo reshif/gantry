@@ -100,6 +100,8 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const [streaming, setStreaming] = useState(false);
   /** Questions asked again with Retry: their earlier saved copy and error are hidden so the question shows once. */
   const [redo, setRedo] = useState<Array<{ text: string; cut: number }>>([]);
+  /** A panel the person asked for with /chats or /settings (the prototype page has neither). */
+  const [aux, setAux] = useState<"chats" | "settings" | null>(null);
   const [draft, setDraft] = useState("");
   const [slashIdx, setSlashIdx] = useState(0);
   const ac = useRef<AbortController | null>(null);
@@ -130,7 +132,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const suggestions = [...new Set(suggestionsFor(roles, cur?.name ?? "my projects", cur?.id ?? null, stuck, doneWo))];
   // The Console page (not the workspace's embedded chat): the prototype's four questions, answered at once from live state.
   const page = !embed;
-  const statusWo = stuck ?? wos.find(isInFlight)?.id ?? null;
+  const statusWo = thread.data?.pinned?.[0] ?? wos.find((w) => w.state === "blocked")?.id ?? stuck ?? wos.find(isInFlight)?.id ?? null;
   const liveChips = ["What is blocked?", "What waits on a person?", ...(statusWo ? [`Status of ${statusWo}`] : []), "Spend this month"];
   const liveCtx: LiveCtx = {
     wos: wos.map((w): LiveWo => ({ ...w, ...(typeof w.station === "number" && cat?.stations[w.station] ? { stationName: cat.stations[w.station]!.name } : {}) })),
@@ -196,6 +198,8 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
 
   /* ---------- slash commands: tools, directly ---------- */
   const runSlash = async (text: string): Promise<void> => {
+    // The chat list and the model and rights panel are not on the page (the prototype has neither): /chats and /settings open them.
+    if (page && /^\/(chats|settings)\s*$/i.test(text)) { setAux(/chats/i.test(text) ? "chats" : "settings"); return; }
     addLocal({ role: "user", text, mode: "pending", by: meId });
     const p = planSlash(text, visible, cur ? { id: cur.id, name: cur.name, key: cur.key } : null, Date.now());
     if (p.kind === "help") { addLocal({ role: "factory", mode: "slash", text: "Slash commands and plain sentences both work. Anything that changes state shows a confirm card first.", cards: [{ type: "help" }] }); return; }
@@ -411,9 +415,9 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     const modeOf = (m: Msg): string => (m.mode === "model" ? `${st?.model ?? "Model"}${m.stopped ? " · stopped" : ""}` : m.mode === "live" ? "Live work-order state" : m.mode === "slash" ? "Slash command · live data" : m.mode === "none" ? "No model configured" : "Model did not answer");
     return (
       <div className="view view-console view-console-page">
-        <ViewHead kicker="ALL LINES" title="Console" status={modeChip} sub="Ask the factory a question in plain language. Answers are read from live work-order state." actions={modePicker} />
+        <ViewHead kicker="ALL LINES" title="Console" sub="Ask the factory a question in plain language. Answers are read from live work-order state." />
         <div className="cols w21">
-          <Panel title="Conversation" tools={<span className="row" id="con-bar"><Btn label="New" small icon="plus" id="con-new" disabledReason={streaming ? "Wait for the answer or stop it." : null} onClick={newChat} /><Btn label="Clear" small kind="ghost" icon="x" id="con-clear" disabledReason={threadId || local.length ? null : "There is nothing to clear."} onClick={() => void clear()} /></span>}>
+          <Panel title="Conversation">
             <div className="conv" id="con-conv">
               <div className="chat" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
                 {empty ? <Empty id="con-empty" title="Ask anything about the line" text="Try one of the suggestions below." /> : msgs.map((m) => (
@@ -446,26 +450,34 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
               </form>
             </div>
           </Panel>
-          <div className="stack">
+          <>
             <Panel title="Pinned work orders" flush id="con-pins">
               {pinned.length ? (
-                <ul className="list pins">{pinned.map((id) => { const w = woById.get(id); return (
+                <ul className="list">{pinned.map((id) => { const w = woById.get(id); return (
                   <li key={id}>
                     <a className="pri mono" id={`con-pin-${id}`} href={hashFor("record", id, cur?.id ?? null)}>{id}</a>
                     {w ? <span className="grow wrap2" title={w.title}>{w.title}</span> : <span className="grow" />}
-                    {w ? <StateChip state={w.state} /> : null}
+                    {w ? <span style={{ alignSelf: "center" }}><StateChip state={w.state} /></span> : null}
                     <IconBtn icon="x" label={`Unpin ${id}`} id={`con-unpin-${id}`} onClick={() => { if (threadId) void savePinned(threadId, pinned.filter((x) => x !== id)).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) })); }} />
                   </li>
                 ); })}</ul>
               ) : <div className="empty" title="Pin a work order from a why card.">Nothing pinned.</div>}
             </Panel>
-            <Panel title="Chats" flush id="con-chats-panel">
-              <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />
-            </Panel>
-            <p className="con-mode-line small muted" id="con-mode-reason"><span>{modeLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p>
-            <details className="con-more panel" id="con-more"><summary className="micro">What you and the console can do here</summary>{ctxPanels}</details>
-            <p className="footnote small muted">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
-          </div>
+            {aux === "chats" ? (
+              <Panel title="Chats" flush id="con-chats-panel" tools={<Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} />}>
+                <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />
+                <div className="row" style={{ padding: 8 }}><Btn label="Clear conversation" small kind="ghost" icon="x" id="con-clear" disabledReason={threadId || local.length ? null : "There is nothing to clear."} onClick={() => void clear()} /></div>
+              </Panel>
+            ) : null}
+            {aux === "settings" ? (
+              <Panel title="Console settings" id="con-settings" tools={<Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} />}>
+                <div className="row">{modeChip}{modePicker}</div>
+                <p className="con-mode-line small muted" id="con-mode-reason"><span>{modeLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p>
+                {ctxPanels}
+                <p className="footnote small muted">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
+              </Panel>
+            ) : null}
+          </>
         </div>
       </div>
     );

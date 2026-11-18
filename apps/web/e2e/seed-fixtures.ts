@@ -108,7 +108,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     return {
       woId: w.id, project: w.project, repo: w.repo,
       wo: { id: w.id, title: w.title, description: w.description ?? "", cls: w.cls, clsName: w.cls, confidence: w.clsConfidence ?? 0, rationale: w.clsRationale ?? "", priority: w.priority, station: st?.id ?? "intake", stationName: st?.name ?? "Intake", state: w.state, bay: w.bay ?? null, gate: gd ? { id: gd.id, label: gd.label, name: gd.name, purpose: gd.purpose } : null, requestedBy: w.requestedBy, closed: w.state === "done" || w.state === "killed" },
-      messages: (w.conv?.messages ?? []).map((m: Seed, i: number) => ({ id: `m${i}`, role: m.from === w.requestedBy ? "user" : "assistant", author: m.from, text: m.text, at: m.at, data: {} })),
+      messages: (w.conv?.messages ?? []).map((m: Seed, i: number) => ({ id: `m${i}`, role: m.from.startsWith("ag-") ? "assistant" : "user", author: m.from, text: m.text, at: m.at, data: {} })), // ops2: people are "user" rows, agents "assistant"
       agent: { mode: "rule-based", name: "Intake Clerk", id: st?.agent ?? "ag-intake", reason: "Rule-based intake", label: "Rule-based", station: st?.id ?? "intake" },
       budget: { spentUsd: 0, limitUsd: 5 }, costUsd: 0,
       can: { talk: true, talkWhy: "", confirm: true, confirmWhy: "", park: true, parkWhy: "" },
@@ -117,7 +117,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
       waiting: w.state === "waiting" ? { text: "Waiting at a gate.", kind: "gate" } : null,
       dialogue: { questions: [], assumptions: [], objections: [], askedMe: false },
       swarm: null, documents: [], research: { plan: null, allowList: [], canDecide: false, canApproveUnlisted: false }, sources: [], pending: [],
-      brief: w.brief ?? {}, briefConfirmed: !!w.gates?.G0G1 && w.gates.G0G1.status === "passed", briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false,
+      brief: w.brief ?? {}, briefConfirmed: !!w.gates?.G0G1 && w.gates.G0G1.status === "passed", briefOpen: false, ruleQuestion: w.conv?.awaiting && w.conv.questions?.[w.conv.qi] ? { id: w.conv.questions[w.conv.qi].id, text: w.conv.questions[w.conv.qi].text, chips: w.conv.questions[w.conv.qi].chips ?? [] } : null, // ops2: the open question and its quick answers ruleReady: false, busy: false,
     };
   };
   const approversOf = (w: Seed, gate: string) => {
@@ -182,7 +182,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
         items: wos.filter((w) => !proj || w.project === proj).map((w) => {
           const last = w.conv?.messages?.[w.conv.messages.length - 1];
           const st = (cat.stations as Seed[])[w.station];
-          return { id: w.id, project: w.project, title: w.title, cls: w.cls, station: st?.id ?? "intake", stationName: st?.name ?? "Intake", state: w.state, bay: w.bay ?? null, gate: gateInfo(w)?.id ?? null, agent: st?.agent ?? null, agentName: null, waitingOn: w.state === "waiting" ? "approver" : "agent", latest: last ? { text: last.text, at: last.at, by: last.from, role: "assistant" } : null, unread: false, closed: w.state === "done" || w.state === "killed", started: true, requestedBy: w.requestedBy, createdAt: w.createdAt };
+          return { id: w.id, project: w.project, title: w.title, cls: w.cls, station: st?.id ?? "intake", stationName: st?.name ?? "Intake", state: w.state, bay: w.bay ?? null, gate: gateInfo(w)?.id ?? null, agent: st?.agent ?? null, agentName: null, waitingOn: w.conv?.awaiting ? "you" : w.state === "waiting" ? "approver" : "agent", latest: last ? { text: last.text, at: last.at, by: last.from, role: "assistant" } : null, unread: false, closed: w.state === "done" || w.state === "killed", started: true, requestedBy: w.requestedBy, createdAt: w.createdAt };
         }),
       };
     }
@@ -199,7 +199,10 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
       };
     }
     if (path === "console/status") return { configured: true, vendor: "anthropic", model: "claude-sonnet-5-5", actionsEnabled: false, canUse: true, retentionDays: 90, tools: [], proposals: [], models: [] };
-    if (path === "console/threads") return { items: [], retentionDays: 90 };
+    // --- ops2 fixtures (Console, Conversations, Work orders): the prototype's pinned work orders ride on one empty saved chat ---
+    if (path === "console/threads") return { items: [{ id: "ct-seed", title: "Console", pinned: seed.org?.console?.pinned ?? [], updatedAt: NOW, expiresAt: NOW + 90 * 864e5, retentionDays: 90, count: 0 }], retentionDays: 90 };
+    if (path === "console/threads/ct-seed") return { id: "ct-seed", title: "Console", pinned: seed.org?.console?.pinned ?? [], createdAt: NOW, updatedAt: NOW, expiresAt: NOW + 90 * 864e5, retentionDays: 90, messages: [] };
+    // --- end ops2 fixtures ---
     if (path === "people") return seed.people;
     if (path === "teams") return seed.teams;
     if (path === "templates") return seed.templates;

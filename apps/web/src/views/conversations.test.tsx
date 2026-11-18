@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useOpenTraveler } from "../shell/useTraveler";
 import ConversationsView from "./conversations";
+import { WoSessionPage } from "./conversations/Session";
 import { updatePrefs } from "../lib/prefs";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 import { intakeWo, posts, readsFor, travelerOf } from "./traveler/testkit";
@@ -48,10 +49,11 @@ function showList(rows: WoSessionRow[]) {
   mount(<ConversationsView />);
   return calls;
 }
-async function showSession(s: WoSession, extra: Parameters<typeof mockApi>[0] = {}) {
+/** `full`: the work order's own session page (status line, belt, side panels); otherwise the Conversations page, which draws the prototype's bubbles and composer only. */
+async function showSession(s: WoSession, extra: Parameters<typeof mockApi>[0] = {}, full = false) {
   window.location.hash = `#/p/payments/conversations/${W.id}`;
   const calls = mockApi({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ body: s }), [`POST /api/v1/work-orders/${W.id}/session/seen`]: () => ({ body: { ok: true, msg: "Seen." } }), ...extra });
-  mount(<ConversationsView />);
+  mount(full ? <WoSessionPage woId={W.id} back={() => undefined} /> : <ConversationsView />);
   await screen.findByRole("region", { name: `Conversation ${W.id}` }, { timeout: 4000 });
   return calls;
 }
@@ -85,16 +87,16 @@ describe("Conversations list", () => {
 
 describe("Work-order session", () => {
   it("makes it obvious the dialogue is open: the agent waits for you, the composer is always there, a suggested answer is one click", async () => {
-    const calls = await showSession(session(), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
+    const calls = await showSession(session(), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) }, true);
     expect(await screen.findByText("Intake Clerk is waiting for you")).toBeTruthy();
-    expect(screen.getByLabelText("Reply")).toBeTruthy();
+    expect(screen.getByLabelText("Message to Intake Clerk")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Traveler" })).toBeTruthy();
     expect(screen.getByRole("list", { name: "The belt" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "POST /refunds" }));
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
     expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)[0]!.body).toMatchObject({ kind: "message", text: "POST /refunds" });
     // Free text on Enter.
-    const box = screen.getByLabelText("Reply");
+    const box = screen.getByLabelText("Message to Intake Clerk");
     fireEvent.change(box, { target: { value: "gimme a brief" } });
     fireEvent.keyDown(box, { key: "Enter" });
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(2));
@@ -150,12 +152,24 @@ describe("Work-order session", () => {
 
   it("without a usable model it says 'Rule-based (no agent)', shows the scripted question with its chips, and still lets you answer", async () => {
     const s = session({ agent: { mode: "rule-based", name: "Intake Clerk", id: "ag-intake", reason: "No model is configured.", label: "Rule-based (no agent)", station: "intake" }, messages: [], ruleQuestion: { id: "scope", text: "What is in scope?", chips: ["Only the API"] } });
-    const calls = await showSession(s, { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Answer recorded.", mode: "rule-based" } }) });
+    const calls = await showSession(s, { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Answer recorded.", mode: "rule-based" } }) }, true);
     expect((await screen.findAllByText("Rule-based (no agent)")).length).toBeGreaterThan(0);
     expect(screen.getByText("What is in scope?")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Only the API" }));
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
-    expect((screen.getByLabelText("Reply") as HTMLTextAreaElement).disabled).toBe(false);
+    expect((screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("the Conversations page draws the prototype's panel: no status banner, no Traveler button, '<Agent> asks' callout with quick answers, 'DD Mon HH:MM' times, no side facts", async () => {
+    const calls = await showSession(session({ ruleQuestion: { id: "q1", text: "What is in scope?", chips: ["Only the API"] } }), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
+    expect(await screen.findByText("Intake Clerk asks")).toBeTruthy();
+    expect(document.getElementById("wos-status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Traveler" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "The belt" })).toBeNull();
+    expect(document.querySelector(".wos-side-inline")).toBeNull();
+    expect(document.querySelector("#wos .who")?.textContent).toMatch(/ · \d{2} [A-Z][a-z]{2} \d{2}:\d{2}$/);
+    fireEvent.click(screen.getByRole("button", { name: "Only the API" }));
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
   });
 
   it("the agent starts the dialogue by itself when the session has none yet", async () => {
@@ -194,7 +208,7 @@ describe("Station questions, assumptions and documents in the session", () => {
   });
 
   it("the person asked answers with a suggestion; the status line says the station waits for them", async () => {
-    const calls = await showSession(asked(), { [`POST /api/v1/work-orders/${W.id}/questions/Q-AT1-1/answer`]: () => ({ body: { ok: true, msg: "Answer recorded; Research runs again with it.", resumed: true } }) });
+    const calls = await showSession(asked(), { [`POST /api/v1/work-orders/${W.id}/questions/Q-AT1-1/answer`]: () => ({ body: { ok: true, msg: "Answer recorded; Research runs again with it.", resumed: true } }) }, true);
     expect(document.getElementById("wos-status")!.textContent).toContain("Research is waiting for your answer below.");
     expect(screen.getByText("Why it matters:")).toBeTruthy();
     expect(screen.getByText(/Research asks the requester \(you\)/)).toBeTruthy();
@@ -205,7 +219,7 @@ describe("Station questions, assumptions and documents in the session", () => {
   });
 
   it("someone else sees whom it waits on; an answered question shows who answered", async () => {
-    await showSession(asked({ next: { actor: "person", text: "Research is waiting for an answer from the requester." }, dialogue: { questions: [q({ status: "answered", answer: "EUR", answerKind: "answer", answeredBy: "p-tomas", answeredAt: Date.now(), mine: false })], assumptions: [], objections: [], askedMe: false } }));
+    await showSession(asked({ next: { actor: "person", text: "Research is waiting for an answer from the requester." }, dialogue: { questions: [q({ status: "answered", answer: "EUR", answerKind: "answer", answeredBy: "p-tomas", answeredAt: Date.now(), mine: false })], assumptions: [], objections: [], askedMe: false } }), {}, true);
     expect(document.getElementById("wos-status")!.textContent).toContain("Research is waiting for an answer from the requester.");
     const card = document.querySelector("#sq-Q-AT1-1")!;
     expect(card.textContent).toContain("Answered");
@@ -378,7 +392,7 @@ describe("Scouts and objections", () => {
   });
 
   it("an objection needs a reason to decide, and the gate shows what is still open", async () => {
-    const calls = await showSession(withBoard(true), { [`POST /api/v1/work-orders/${W.id}/objections/${ob.id}`]: () => ({ body: { ok: true, msg: "Objection upheld." } }) });
+    const calls = await showSession(withBoard(true), { [`POST /api/v1/work-orders/${W.id}/objections/${ob.id}`]: () => ({ body: { ok: true, msg: "Objection upheld." } }) }, true);
     expect(document.getElementById("gate-notes")!.textContent).toContain("1 objection not decided");
     const up = document.getElementById("ob-O-AT9-1-up") as HTMLButtonElement;
     expect(up.disabled).toBe(true);

@@ -12,9 +12,8 @@ import { pickProject } from "../lib/routes";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Avatar, Btn, Chip, Empty, Panel, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
-import { useOpenTraveler } from "../shell/useTraveler";
 import { WoSessionPage } from "./conversations/Session";
-import { useWoSessions, type WoSessionRow } from "./conversations/session-api";
+import { useWoSessions } from "./conversations/session-api";
 
 const THREADS = 30;
 
@@ -25,7 +24,6 @@ export default function ConversationsView() {
   const projectId = me ? pickProject(me, prefs.project) : null;
   const project = useProject(projectId).data ?? null;
   const q = useWoSessions(projectId ?? undefined);
-  const openTraveler = useOpenTraveler();
   // A deep link from an older screen (the work orders table, the bell, the record) asks for one conversation: land on its session.
   const pending = prefs.openConversation;
   useEffect(() => {
@@ -34,8 +32,7 @@ export default function ConversationsView() {
     navigate("conversations", pending);
   }, [pending]);
   const threads = useMemo(() => {
-    const at = (w: WoSessionRow) => w.latest?.at ?? w.createdAt;
-    return (q.data?.items ?? []).filter((w) => !!w.latest || w.started).sort((a, b) => at(b) - at(a));
+    return (q.data?.items ?? []).filter((w) => !!w.latest || w.started).sort((a, b) => Number(b.waitingOn === "you") - Number(a.waitingOn === "you"));
   }, [q.data]);
   if (!me) return <div className="view conv-view" />;
   const sel = threads.find((w) => w.id === hash.param) ?? (hash.param ? null : threads.find((w) => w.waitingOn === "you") ?? threads[0] ?? null);
@@ -61,7 +58,7 @@ export default function ConversationsView() {
           ) : <Empty id="conv-empty" title="No conversations" text="" />}</Async>
         </Panel>
         {picked ? (
-          <Panel title={sel ? `${picked} · ${sel.title}` : picked} id="conv-detail" tools={<><Btn small label="Traveler" id="conv-traveler" onClick={() => openTraveler(picked)} /><Btn small label="Open record" icon="record" id="conv-open-record" onClick={() => navigate("record", picked, sel?.project ?? projectId)} /></>}>
+          <Panel title={sel ? `${picked} · ${sel.title}` : picked} id="conv-detail" tools={<Btn small label="Open record" icon="record" id="conv-open-record" onClick={() => navigate("record", picked, sel?.project ?? projectId)} />}>
             <WoSessionPage key={picked} woId={picked} panel back={() => navigate("conversations", null)} />
           </Panel>
         ) : <Panel id="conv-detail"><Empty title="No conversations" text="" /></Panel>}
