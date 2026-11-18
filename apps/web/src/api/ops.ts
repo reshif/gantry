@@ -279,7 +279,7 @@ export const ops = {
   /** The Add dialog's connection test: settings that are not saved yet. Nothing is stored; the result's `test` has the lines. */
   testIntegrationDraft: (type: string, body: Obj) => post(api(`integration-types/${enc(type)}/test`), body),
   /** The recorded link step (spec 12.3): a one-time code the person sends from the chat app. */
-  requestChatLink: (channel = "slack", integration?: string) => run(["chatLinks"], post(api("chat-links"), { channel, ...(integration ? { integration } : {}) }, create)),
+  requestChatLink: (channel = "slack", integration?: string) => run<{ command: string }>(["chatLinks"], post(api("chat-links"), { channel, ...(integration ? { integration } : {}) }, create)),
   removeChatLink: (id: string) => run(["chatLinks"], del(api(`chat-links/${enc(id)}`))),
   /** Channel-level connection settings (slack, email, ...). */
   setIntegration: (channel: string, patchBody: Obj) => run(["integrations", "integrationInstances"], patch(api(`integrations/${enc(channel)}`), patchBody)),

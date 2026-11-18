@@ -131,6 +131,7 @@ export function ScrollCue({ children, maxHeight, label }: { children: ReactNode;
       <div className="sf l" aria-hidden="true" />
       <div className="sf r" aria-hidden="true" />
       <div className="sh" aria-hidden="true">scroll {"→"}</div>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be keyboard focusable */}
       <div ref={ref} className="tw" tabIndex={0} role="region" aria-label={label} onScroll={measure}>{children}</div>
     </div>
   );

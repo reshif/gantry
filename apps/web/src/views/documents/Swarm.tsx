@@ -5,7 +5,7 @@
  */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Btn, Chip, Who } from "../../ui/primitives";
+import { Btn, Chip, Who, TextArea } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { decideObjection, stopScout, type Assumption, type Objection, type SwarmView } from "./api";
 
@@ -71,7 +71,7 @@ export function ObjectionCard({ woId, o, canDecide }: { woId: string; o: Objecti
         canDecide ? (
           <div className="osx-ask">
             <label className="small" htmlFor={`${fid}-note`}>Your reason (both agents work from it)</label>
-            <textarea id={`${fid}-note`} className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+            <TextArea id={`${fid}-note`} className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
             <div className="osx-actions">
               <Btn small kind="primary" id={`${fid}-up`} label="The objection stands" disabled={busy || note.trim().length < 3} disabledReason={note.trim().length < 3 ? "Give your reason." : undefined} onClick={() => void run("upheld")} />
               <Btn small id={`${fid}-over`} label={`${station(o.targetStation)} is right`} disabled={busy || note.trim().length < 3} disabledReason={note.trim().length < 3 ? "Give your reason." : undefined} onClick={() => void run("overruled")} />

@@ -4,7 +4,7 @@
  */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Btn, Who } from "../../ui/primitives";
+import { Btn, Who, TextArea } from "../../ui/primitives";
 import { useCommand } from "../../ui/async";
 import { commentOnDocument, editDocument, resolveDocComment, type DocComment, type DocVersion } from "./api";
 
@@ -41,7 +41,7 @@ export function DocComments({ woId, version, sections, items }: { woId: string; 
           {sections.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <label className="small" htmlFor="doc-comment-text">Your comment</label>
-        <textarea id="doc-comment-text" className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
+        <TextArea id="doc-comment-text" className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
         <div>
           <Btn small kind="primary" id="doc-comment-add" label="Add comment" disabledReason={!text.trim() ? "Write the comment first." : add.wait()} onClick={async () => { const r = await add.run(); if (r?.ok) setText(""); }} />
         </div>
@@ -57,7 +57,7 @@ export function DocEditor({ woId, version, text, onDone }: { woId: string; versi
   return (
     <div className="doc-editor" id="doc-editor">
       <label className="small" htmlFor="doc-edit-text">{`Edit ${version.doc}`}</label>
-      <textarea id="doc-edit-text" className="input mono doc-edit-text" rows={18} value={draft} onChange={(e) => setDraft(e.target.value)} />
+      <TextArea id="doc-edit-text" className="input mono doc-edit-text" rows={18} value={draft} onChange={(e) => setDraft(e.target.value)} />
       <label className="small" htmlFor="doc-edit-why">What did you change? (optional)</label>
       <input id="doc-edit-why" className="input" value={why} onChange={(e) => setWhy(e.target.value)} />
       <div className="osx-actions">

@@ -6,7 +6,6 @@
 .acc-from { align-items: center; }
 .acc-from > div { flex: 1; min-width: 0; }
 .acc-sim-form { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-.acc-sim-form .sim-go { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
 .acc-presets { margin-top: 12px; align-items: center; }
 .acc-presets .kicker { margin-right: 4px; }
 .acc-out { display: grid; gap: 10px; min-width: 0; }
@@ -18,28 +17,13 @@
 
 /* week strip: allowed cells are solid, denied cells are hatched, so the answer does not rely on colour */
 .wk { display: grid; gap: 2px; }
-.wk-row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; align-items: center; }
-.wk-d { font-size: 10px; color: var(--muted); white-space: nowrap; }
-.wk-cells { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 1px; }
-.wk-axis .wk-cells { font-size: 9px; color: var(--faint); }
-.wk-tick { border-left: 1px solid var(--line-strong); padding-left: 2px; }
-.wk-c { display: inline-block; height: 13px; min-width: 6px; border-radius: 1px; }
-.wk-c.is-yes { background: var(--done); }
-.wk-c.is-no { background: repeating-linear-gradient(-45deg, var(--block-soft) 0 2px, var(--surface) 2px 4px); border: 1px solid var(--line); }
-.wk-c.is-sel { outline: 2px solid var(--ink); outline-offset: 0; position: relative; z-index: 1; }
-.wk-legend { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
-.wk-legend .wk-c { width: 14px; height: 10px; }
 
 /* rules panel with tabs */
 .acc-tabbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: var(--s2); }
 .acc-tabbar .tabs { flex: 1; min-width: 0; overflow-x: auto; }
 .acc-body { display: grid; gap: var(--s3); min-width: 0; margin-top: calc(-1 * var(--s2)); }
 .acc-tab-tools { padding-bottom: 6px; }
-.policy-card { border-radius: var(--r2); border-color: var(--line); box-shadow: var(--shadow-1); }
 .freeze { border-radius: var(--r2); }
-.policy-card.is-extend { border-left-color: var(--accent); }
-.policy-card.is-extend .pc-effect { color: var(--accent); }
-.pc-actions { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px dotted var(--line); padding-top: 6px; width: 100%; }
 .acc-freezes { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 .freeze.is-past { opacity: 0.6; }
 .freeze.is-hl { box-shadow: 0 0 0 3px var(--accent); }
@@ -68,8 +52,6 @@
 
 @media (max-width: 1100px) { .acc-sim { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) {
-  .wk-row { grid-template-columns: 60px minmax(0, 1fr); }
-  .wk-d { overflow: hidden; text-overflow: ellipsis; }
   .acc-trace li { grid-template-columns: 16px 1fr; }
   .acc-trace li > .muted { grid-column: 2; }
 }

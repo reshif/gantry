@@ -45,7 +45,6 @@
 .trv-conv { display: grid; gap: 10px; }
 
 /* new work order dialog */
-.nwo-repo { min-width: 0; }
 .nwo-preview { padding: 8px 10px; border: 1px dashed var(--line-strong); background: var(--panel); display: grid; gap: 4px; }
 .nwo-cls-preview { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 

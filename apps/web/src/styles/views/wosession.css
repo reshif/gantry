@@ -18,16 +18,7 @@
 .wos-minus { color: var(--block, inherit); overflow-wrap: anywhere; }
 .osx-answered { margin: 0; }
 .osx-question.is-answered { opacity: 0.75; }
-.wos-list-rows { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.wos-row { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--line-strong); background: var(--surface); color: inherit; cursor: pointer; min-width: 0; }
-.wos-row:hover, .wos-row:focus-visible { border-color: var(--ink); }
-.wos-row.is-mine { border-left: 3px solid var(--accent, var(--ink)); }
-.wos-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.wos-row-t { margin-left: auto; }
-.wos-row-title { font-weight: 600; overflow-wrap: anywhere; }
-.wos-row-last { overflow-wrap: anywhere; }
 .wos-unread { width: 8px; height: 8px; border-radius: 50%; background: var(--accent, var(--ink)); display: inline-block; }
-.wos-wait.is-you { border-color: var(--accent, var(--ink)); }
 .wos-open-conv { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line-strong); background: var(--surface); }
 .wos-open-conv.is-you { border-left: 3px solid var(--accent, var(--ink)); }
 .wos-compose { position: relative; flex: 1; min-width: 200px; display: flex; }
@@ -35,4 +26,3 @@
 .wos-mentions { position: absolute; bottom: 100%; left: 0; right: 0; margin: 0 0 4px; padding: 4px 0; list-style: none; max-height: 220px; overflow-y: auto; background: var(--surface); border: 1px solid var(--line-strong); z-index: 5; }
 .wos-mentions li { padding: 6px 12px; cursor: pointer; overflow-wrap: anywhere; }
 .wos-mentions li.is-active, .wos-mentions li:hover { background: var(--surface-2, var(--line)); }
-.wos-mention-note { margin: 4px 0 0; }

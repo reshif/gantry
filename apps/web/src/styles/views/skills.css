@@ -3,31 +3,13 @@
 .sk-lib .filterbar { padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .sk-name { font-weight: 600; color: var(--ink); text-decoration: none; margin-right: 6px; }
 .sk-name:hover { color: var(--accent); }
-.sk-table td { vertical-align: top; }
 .sk-desc { max-width: 52ch; }
-.sk-cov { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.sk-cov-bar { width: 46px; height: 6px; background: var(--sunk); border: 1px solid var(--line-strong); display: inline-block; position: relative; }
-.sk-cov-bar > span { display: block; height: 100%; background: var(--done); }
-.sk-cov-ok .sk-cov-bar > span { background: var(--wait); }
-.sk-cov-low .sk-cov-bar > span { background: var(--block); }
-.sk-cov-low .mono { color: var(--block); font-weight: 600; }
-.sk-cov-low .mono::after { content: " low"; font-family: var(--f-body); font-weight: 400; }
-.sk-cov-none .sk-cov-bar { border-style: dashed; }
-.sk-cov-none .mono { color: var(--muted); }
 
-.sk-detail, .sk-panel, .sk-body, .view-skills { min-width: 0; max-width: 100%; }
-.sk-panel { margin-top: 12px; }
-.sk-panel > .tabs { padding: 0 12px; overflow-x: auto; }
+.sk-detail, .sk-body, .view-skills { min-width: 0; max-width: 100%; }
 .sk-detail > .lock-note { margin-top: 12px; }
 .sk-body { padding: 14px 16px; }
-.sk-def .savebar { margin: 14px -16px -14px; }
-.sk-p { margin-bottom: 10px; }
-.sk-all { padding: 8px 10px; border: 1px solid var(--line); background: var(--panel); margin-bottom: 10px; }
 .sk-vers { list-style: none; display: grid; gap: 0; margin-bottom: 16px; }
 .sk-vers li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 8px 0 8px 18px; border-left: 2px solid var(--line); position: relative; }
 .sk-vers li::before { content: ""; position: absolute; left: -6px; top: 13px; width: 10px; height: 10px; background: var(--surface); border: 2px solid var(--line-strong); transform: rotate(45deg); }
 .sk-vers li.is-current::before { background: var(--accent); border-color: var(--accent); }
-
-.sk-meta { color: var(--ink-2); margin-top: 2px; }
 .view-skills .tag, .view-models .tag { margin-left: 6px; }
-.sk-detail .savebar:not(.is-dirty) { position: static; }

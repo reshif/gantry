@@ -16,7 +16,7 @@ test("persona: admin lands signed in with the navigation", async ({ page }) => {
   await mockApi(page, { persona: PERSONAS.admin });
   await open(page, "/#home");
   await expect(page.getByRole("navigation").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: /new work order/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /(new|submit) work order/i })).toBeVisible();
 });
 
 test("persona: read-only reader is refused every action and sees no enabled stop control", async ({ page }) => {

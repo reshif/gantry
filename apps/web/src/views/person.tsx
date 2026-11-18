@@ -3,10 +3,11 @@
  * requested. Team editing sits on the Teams row, the invite acceptance on the Invite row, and the history below the sheet.
  */
 import { WO_STATES, type Person, type Project, type Role } from "@gantry/domain";
-import { ops } from "../api/ops";
+import { commands as ops } from "../api/commands";
 import { useAccessMatrix, useMe, usePeople, useProjects, useWorkOrdersOfProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { hashFor, useHash } from "../lib/router";
+import { FACTORY_ADMIN, PROJECT_ADMIN } from "../lib/roles";
 import { Btn, Empty, LockNote, Panel, Stat, StatRow, Toggle, ViewHead, type Decision } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
@@ -27,8 +28,8 @@ export default function PersonView() {
   const perm = dec(useCan("people.manage"));
   const view = dec(useCan("people.view"));
   if (!me) return null;
-  const people = peopleQ.data ?? [];
-  const p = people.find((x) => x.id === loc.param);
+  const people = peopleQ.data;
+  const p = people?.find((x) => x.id === loc.param);
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
   if (!view.allowed) return <div className="view view-person"><ViewHead title="Person" /><Empty id="people-no-access" icon="lock" title="No access to this sheet" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
@@ -40,11 +41,11 @@ export default function PersonView() {
       </div>
     );
   }
-  const admins = people.filter((x) => x.status === "active" && x.roles.some((g) => g.role === "factory_admin"));
+  const admins = (people ?? []).filter((x) => x.status === "active" && x.roles.some((g) => g.role === FACTORY_ADMIN));
   return (
     <div className="view view-person">
       <LockNote decision={perm} what="Roles, teams and access" />
-      <MemberDetail key={p.id} p={p} teams={teamsQ.data ?? []} projects={projects} roles={roles} perm={perm} admins={admins} viewerId={me.person.id} roleName={roleName} />
+      <MemberDetail key={p.id} p={p} teams={teamsQ.data ? teamsQ.data : []} projects={projects} roles={roles} perm={perm} admins={admins} viewerId={me.person.id} roleName={roleName} />
     </div>
   );
 }
@@ -70,7 +71,7 @@ function ProjectRoleRow(props: Omit<Parameters<typeof RoleRow>[0], "guard"> & { 
   const { projectScope, self, perm, ...rest } = props;
   const d = dec(useCan("project.members", { project: projectScope }));
   let guard: Decision = d;
-  if (d.allowed && self && rest.g.role === "project_admin") guard = lockd("You cannot remove your own Project Admin role. Ask another Project Admin or a Factory Admin.");
+  if (d.allowed && self && rest.g.role === PROJECT_ADMIN) guard = lockd("You cannot remove your own Project Admin role. Ask another Project Admin or a Factory Admin.");
   void perm;
   return <RoleRow {...rest} guard={guard} />;
 }
@@ -88,7 +89,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
 
   let factGuard: Decision = perm;
   if (perm.allowed && p.id === viewerId) factGuard = lockd("You cannot change your own factory role. Ask another Factory Admin.");
-  else if (perm.allowed && frRole === "factory_admin" && admins.length < 2) factGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
+  else if (perm.allowed && frRole === FACTORY_ADMIN && admins.length < 2) factGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
 
   const grant = useGrantRole({ roles, projects: visible, guard: perm });
   const editTeams = useEditTeams({ teams, guard: perm });
@@ -111,7 +112,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const off = p.status === "deactivated";
   let offGuard: Decision = perm;
   if (perm.allowed && p.id === viewerId) offGuard = lockd("You cannot deactivate yourself. Ask another Factory Admin.");
-  else if (perm.allowed && p.status === "active" && p.roles.some((g) => g.role === "factory_admin" && !g.via) && admins.length < 2) offGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
+  else if (perm.allowed && p.status === "active" && p.roles.some((g) => g.role === FACTORY_ADMIN && !g.via) && admins.length < 2) offGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
 
   // open work orders this person requested, across every project the viewer can read
   const wos = useWorkOrdersOfProjects(visible.map((x) => x.id));

@@ -1,0 +1,146 @@
+/* Precision theme (docs: gantry-designs/belt-options/PRECISION-THEME.md). Loaded LAST: one source for the primitives.
+   Flat outlined frames, mono uppercase labels with a hairline rule, three line tiers (hairline --line, outline --line2,
+   emphasis 2px for the one hot object). Amber = needs you, red = stuck/failed, green = done, violet = split, cyan = selection/flow.
+   Floating things (menu, dialog, toast, popover) keep a hard offset shadow so they separate from the grid. */
+
+/* ---- tokens that only this layer needs ---- */
+:root { --shadow-1: none; --lab: 600 var(--t-label)/1.2 var(--mono); --lab-track: .12em; --row-line: color-mix(in srgb, var(--line) 40%, transparent); }
+
+/* ---- panels: flat frame, no offset shadow, corner ticks only on the one hot canvas ---- */
+.panel, .stat, .card, .titleblock > div { box-shadow: none; }
+.panel::before, .panel::after { content: none; }
+.panel[data-hot] { box-shadow: none; }
+.panel[data-hot]::before, .panel[data-hot]::after { content: ""; }
+.stat::after { content: none; }
+.panel-head, .panel>header { min-height: 36px; padding: 6px 14px; border-bottom: 1px solid var(--line2); }
+.panel-title, .panel>header h2 { font-size: 13.5px; font-weight: 650; letter-spacing: 0; }
+.panel>header h2 .sec { font: 600 11px var(--mono); color: var(--accent); }
+.panel-tools { font: 500 var(--t-label)/1.2 var(--mono); color: var(--ink2); }
+
+/* ---- page header: title block with the sheet's double rule ---- */
+.ph { padding-bottom: 12px; border-bottom: 2px solid var(--line2); }
+.ph::after { left: 0; right: 0; bottom: -6px; width: auto; height: 0; border: 0; background: none; border-top: 1px solid var(--line2); }
+.ph { margin-bottom: 20px; }
+.ph .eyebrow, .kicker { font: 500 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink2); }
+.ph .eyebrow a { color: var(--ink2); }
+.ph h1, .vtitle { font-size: var(--t-title); line-height: 1.2; font-weight: 650; letter-spacing: -.02em; }
+.ph .sub, .vsub { font: 500 11px/1.5 var(--mono); color: var(--ink2); max-width: 80ch; }
+/* ticker: a bordered strip of cells divided by hairlines */
+.titleblock { display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(0, auto); gap: 0; border: 1px solid var(--line2); border-radius: var(--r); background: var(--surface); max-width: 100%; margin-top: 8px; }
+.titleblock > div, .titleblock > div:last-child { border: 0; border-right: 1px solid var(--line2); border-radius: 0; background: none; padding: 5px 12px; gap: 1px; }
+.titleblock > div:last-child { border-right: 0; }
+.titleblock dt { font: var(--lab); letter-spacing: var(--lab-track); text-transform: uppercase; color: var(--ink2); }
+.titleblock dd { font-family: var(--mono); font-weight: 650; font-size: 18px; letter-spacing: 0; }
+@media (max-width: 640px) {
+  .titleblock { display: grid; grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .titleblock > div, .titleblock > div:nth-child(2n) { border-right: 0; border-bottom: 1px solid var(--line2); padding: 6px 10px; }
+  .titleblock > div:nth-child(2n+1) { border-right: 1px solid var(--line2); }
+  .titleblock > div:nth-last-child(-n+2):nth-child(odd), .titleblock > div:last-child { border-bottom: 0; }
+  .titleblock dd { font-size: 16px; }
+}
+.stat .v, .stat-val { font-size: 22px; letter-spacing: -.01em; }
+.stat .micro, .stat-lbl { font: var(--lab); letter-spacing: var(--lab-track); color: var(--ink2); }
+
+/* ---- buttons: outlined, 30px; primary is solid ink; pressed toggle is solid amber ---- */
+.btn { height: var(--control-h); background: transparent; border-color: var(--line2); box-shadow: none; font-weight: 600; font-size: 12.5px; transition: border-color var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
+.btn:hover { background: var(--surface2); border-color: var(--accent); color: var(--ink); }
+.btn:active { transform: none; box-shadow: none; }
+.btn.btn-primary, .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.btn.btn-primary:hover, .btn.primary:hover { background: var(--ink); border-color: var(--accent); color: var(--bg); filter: none; opacity: .9; }
+.btn.btn-primary.is-locked, .btn.btn-primary:disabled { background: var(--surface2); color: var(--ink3); border-color: var(--line); opacity: 1; }
+.btn.btn-ghost, .btn.ghost { background: transparent; border-color: transparent; color: var(--ink2); }
+.btn.btn-ghost:hover, .btn.ghost:hover { background: var(--surface2); border-color: var(--line2); color: var(--ink); }
+.btn.btn-andon, .btn.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+.btn.btn-andon:hover, .btn.danger:hover { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+.btn[aria-pressed="true"] { background: var(--warn-solid); border-color: var(--warn-solid); color: var(--on-warn); }
+.btn.sm, .btn-sm { height: 26px; font-size: 12px; }
+.btn.icon { width: var(--control-h); }
+.btn.icon.sm { width: 26px; }
+.btn.icon.ghost, .icon-btn { border-color: transparent; }
+.btn svg { width: 16px; height: 16px; stroke-width: 1.5; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- chips, statuses: 22px, 2px radius, mono 10px uppercase, tone border; fill only for needs-you / stuck / done ---- */
+.chip, .status, .health, .hk-health { height: 22px; padding: 0 8px; border-radius: 2px; border: 1px solid var(--line2); background: transparent; color: var(--ink2); font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.health, .hk-health { display: inline-flex; align-items: center; gap: 5px; }
+.chip.ok, .chip-ok, .h-healthy, .hk-ok, .tone-done, .status.tone-done { color: var(--ok); border-color: var(--ok); background: var(--ok-bg); }
+.chip.warn, .chip-warn, .h-degraded, .tone-wait, .status.tone-wait { color: var(--warn); border-color: var(--warn); background: var(--warn-bg); }
+.chip.bad, .chip-block, .h-failing, .hk-attention, .tone-block, .tone-fail, .status.tone-block, .status.tone-fail { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); }
+.chip.info, .chip-accent, .hk-new, .hk-onboarding, .tone-accent, .tone-run, .status.tone-run, .status.tone-accent { color: var(--accent); border-color: var(--accent); background: transparent; }
+.chip.split, .state-split { color: var(--split); border-color: var(--split); background: var(--split-soft); }
+.chip.plain, .h-offline, .hk-archived, .tone-neutral, .state-parked { color: var(--ink2); border-color: var(--line2); background: transparent; }
+.chip-ok, .chip-warn, .chip-block, .chip-accent { border-radius: 2px; }
+.hk-killed { color: var(--bg); background: var(--bad); border-color: var(--bad); }
+.tag, .outcome, .cls, .bay-chip, .ask-badge { border-radius: 2px; }
+.tab .n, .tab-count { font: 600 11px var(--mono); border-radius: 9px; background: transparent; border: 1px solid var(--line); color: var(--ink2); padding: 0 6px; }
+
+/* ---- tables: sticky mono head on surface2, hairline rows at 40%, no zebra ---- */
+.tbl th, .table th { background: var(--surface2); font: var(--lab); font-size: 10px; letter-spacing: var(--lab-track); color: var(--ink2); padding: 7px 12px; border-bottom: 1px solid var(--line2); }
+.tbl td, .table td { border-bottom: 1px solid var(--row-line); }
+.tbl tbody tr:hover, .table tbody tr:hover { background: var(--accent-soft); }
+.tbl tr.sel, .row-link.is-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.tbl .num, .tbl td.r, .tbl td.is-end { font-variant-numeric: tabular-nums; }
+.tfoot { font: 500 var(--t-label) var(--mono); color: var(--ink2); border-top: 1px solid var(--line2); }
+.kv dt { font: var(--lab); letter-spacing: .1em; color: var(--ink2); border-bottom: 1px solid var(--row-line); }
+.kv dd { border-bottom: 1px solid var(--row-line); }
+.list>li { border-bottom: 1px solid var(--row-line); }
+
+/* ---- forms: sunk inputs on the control line; mono labels; segmented joined with solid pressed ---- */
+input[type=text],input[type=search],input[type=number],input[type=email],input[type=password],input[type=date],input[type=time],select,textarea,.input { background: var(--sunk); border: 1px solid var(--control-line); border-radius: var(--r); height: var(--control-h); }
+textarea, textarea.input { height: auto; }
+input:focus,select:focus,textarea:focus,.input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+.input[aria-invalid="true"], .field.invalid input, .field.invalid select, .field.invalid textarea { border-color: var(--bad); }
+.fbar label>span, .fbar .field>.field-label, .fbar .field-label { font: var(--lab); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
+.field-label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.field-hint, .field .hint { color: var(--ink3); }
+.field .err, .field-error { color: var(--bad); font-size: 12.5px; font-weight: 600; }
+.seg { border-color: var(--control-line); }
+.seg button, .seg-label { background: transparent; color: var(--ink2); border-right: 1px solid var(--line); }
+.seg button[aria-pressed="true"], .seg-input:checked + .seg-label { background: var(--ink); color: var(--bg); font-weight: 600; }
+.sw:checked, .switch-input:checked { background: var(--accent); border-color: var(--accent); }
+
+/* ---- tabs: flat underline tabs, sans 13px ---- */
+.tabs { border-bottom: 1px solid var(--line2); }
+.tab { font-size: 13px; font-weight: 500; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom: 2px solid var(--accent); font-weight: 600; }
+
+/* ---- overlays: floating things keep the hard shadow; header kicker, footer bar ---- */
+.dlg, .drw { border: 1px solid var(--line2); }
+.drw { border-left: 1px solid var(--line2); }
+.dlg>header, .drw>header { border-bottom: 1px solid var(--line2); }
+.dlg>footer, .drw>footer, .dlg-foot { background: var(--surface2); border-top: 1px solid var(--line2); }
+.menu, .pop { border: 1px solid var(--accent); }
+.menu button:hover,.menu a:hover { background: var(--accent-soft); }
+.menu .micro, .pop-head { font: var(--lab); font-size: 10px; letter-spacing: .12em; color: var(--ink2); }
+:root[data-theme="dark"] .toast { background: var(--ink); color: var(--bg); }
+
+/* ---- empty / failed / loading ---- */
+.state.empty { border: 1px dashed var(--line2); background: var(--sunk); border-radius: var(--r); padding: 28px 16px; }
+.state .art, .empty-state .empty-icon { width: 24px; height: 24px; margin: 0 auto 8px; color: var(--ink3); background: none; border-radius: 0; }
+.empty-state .empty-icon .ic, .empty-state .empty-icon svg { width: 20px; height: 20px; }
+.state.empty .empty-title { font-size: 14px; color: var(--ink); }
+.state.empty[role="alert"], .state.empty.empty-block, .state.empty.empty-fail { border: 1px solid var(--bad); border-left: 3px solid var(--bad); background: var(--bad-bg); text-align: left; }
+.async-bar { border-radius: 2px; background: color-mix(in srgb, var(--line) 50%, transparent); animation: none; }
+
+/* ---- app shell ---- */
+.side { border-right: 1px solid var(--line2); }
+.brand { border-bottom: 1px solid var(--line2); }
+.nav h3 { font: 600 var(--t-label) var(--mono); letter-spacing: .1em; color: var(--ink3); }
+.nav a { min-height: 34px; font-size: 13px; transition: background var(--dur-fast), border-color var(--dur-fast); }
+.nav a[aria-current="page"] { background: var(--accent-soft); border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.nav a .cnt { border-radius: 9px; background: var(--warn-solid); color: var(--on-warn); }
+.nav a .cnt.bad { background: var(--bad); color: var(--bg); }
+.top { min-height: 52px; background: var(--surface); border-bottom: 1px solid var(--line2); }
+.search-btn { background: var(--sunk); border-color: var(--control-line); }
+.callout { border-radius: 0; }
+
+/* ---- motion: only short colour transitions outside the Floor drawing ---- */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* Work orders list: the Actions column keeps whole labels; the row chevron is only for rows with no buttons in the last cell. */
+.wo-table td:last-child { min-width: 148px; }
+.wo-table td:last-child .wo-acts .btn { white-space: nowrap; }
+.tbl tr.rowtr:has(a.pri) td:last-child:has(.btn)::after { content: none; }
+
+/* Native selects: the same outlined, mono-label look as the other controls, with a drawn chevron that follows the ink colour. */
+select.input { appearance: none; padding-right: 28px; background-image: linear-gradient(45deg, transparent 50%, var(--ink2) 50%), linear-gradient(135deg, var(--ink2) 50%, transparent 50%); background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }

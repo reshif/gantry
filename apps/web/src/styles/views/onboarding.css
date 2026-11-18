@@ -4,10 +4,8 @@
 .onb-strip li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--shadow-1); }
 .onb-strip-no { font-size: var(--t-sm); color: var(--faint); }
 .onb-strip-n { font-size: var(--t-2xl); font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--faint); }
-.onb-strip li.has-n .onb-strip-n { color: var(--ink); }
 .onb-strip-l { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .onb-strip-off { border-style: dashed !important; }
-.onb-strip-off.has-n .onb-strip-n { color: var(--wait); }
 @media (max-width: 1100px) { .onb-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .onb-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .onb-tabrow { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; border-bottom: 1px solid var(--line); }
@@ -117,14 +115,10 @@
 
 /* The repo's onboarding session: header, conversation and lifecycle, in the shared card look. */
 .onb-view .osx-top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); flex-wrap: wrap; padding: 0 0 var(--s3); }
-.onb-view .osx-top-main { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .onb-view .osx-title { overflow-wrap: anywhere; }
-.onb-view .osx-top-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .onb-view .osx-main, .onb-view .osx-side, .onb-view .osx-card { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
 .onb-view .osx-card { box-shadow: none; }
 .onb-view .osx-side { padding: var(--s4); gap: var(--s3); }
-.onb-view .osx-side-h { margin: 0; font-size: var(--t-sm); font-weight: 600; color: var(--faint); }
-.onb-view .osx-next { border: 1px solid var(--line); border-radius: var(--r1); background: var(--panel); }
 .onb-view .osx-msg.is-user { border-radius: var(--r2); }
 .onb-view .osx-composer { border-top: 1px solid var(--line); }
 .onb-view .osx-waiting { border-radius: var(--r1); }

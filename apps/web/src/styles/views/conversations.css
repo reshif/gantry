@@ -2,7 +2,6 @@
 .conv-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(280px, 360px); gap: 0; border: 1px solid var(--line-strong); background: var(--surface); min-height: 560px; }
 .conv-inbox { border-right: 1px solid var(--line-strong); display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
 .conv-inbox .tabs { padding: 0 6px; background: var(--surface); }
-.conv-inbox .tab { padding: 8px 8px; }
 .conv-list { list-style: none; overflow-y: auto; max-height: 72vh; }
 .conv-item { display: grid; gap: 3px; width: 100%; text-align: left; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink); border-left: 3px solid transparent; }
 .conv-item:hover { background: var(--surface); }
@@ -95,8 +94,6 @@
   .conv-layout { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .conv-inbox { grid-row: auto; border-right: 0; }
   .conv-brief { grid-column: 1; }
-  .conv-layout.show-thread .conv-inbox { display: none; }
-  .conv-layout:not(.show-thread) .conv-main, .conv-layout:not(.show-thread) .conv-brief { display: none; }
   .conv-back { display: inline-flex; }
   .conv-list { max-height: none; }
   .conv-msg { max-width: 100%; }

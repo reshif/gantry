@@ -19,4 +19,11 @@ export const commands = {
   setSkillProjects: ops.setSkillProjects,
   editBrief: ops.editBrief,
   sendBack: ops.sendBack,
+  setFactoryRole: ops.setFactoryRole,
+  setMemberRole: ops.setMemberRole,
+  setProjectOncall: ops.setProjectOncall,
+  acceptInvite: ops.acceptInvite,
+  revokeSession: ops.revokeSession,
+  requestChatLink: ops.requestChatLink,
+  removeChatLink: ops.removeChatLink,
 };

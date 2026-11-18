@@ -7,10 +7,6 @@
 .md-doc ul, .md-doc ol { margin: 0 0 10px; padding-left: 22px; }
 .md-doc li > ul { margin: 2px 0 2px; }
 .md-doc .md-h { font-family: var(--f-display); color: var(--ink); line-height: 1.25; margin: 18px 0 8px; scroll-margin-top: 12px; }
-.md-doc .md-h1 { font-size: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-.md-doc .md-h2 { font-size: 16px; }
-.md-doc .md-h3 { font-size: 14px; }
-.md-doc .md-h4, .md-doc .md-h5, .md-doc .md-h6 { font-size: var(--t-sm); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); }
 .md-doc code { font-family: var(--f-mono); font-size: 0.92em; padding: 0 4px; background: var(--sunk); border: 1px solid var(--line); border-radius: 2px; }
 .md-code { margin: 0 0 10px; padding: 8px 10px; overflow-x: auto; white-space: pre; background: var(--sunk); border: 1px solid var(--line); font-size: var(--t-xs); }
 .md-code code { padding: 0; border: 0; background: none; }

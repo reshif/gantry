@@ -5,7 +5,7 @@
  */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Btn, Who } from "../../ui/primitives";
+import { Btn, Who, TextArea } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { decideResearchPlan, useWoSource, type ResearchState, type Source } from "./api";
@@ -75,7 +75,7 @@ export function ResearchPlanCard({ woId, r }: { woId: string; r: ResearchState }
         r.canDecide ? (
           <div className="osx-ask">
             <label className="small" htmlFor="rp-note">Note (needed to reject)</label>
-            <textarea id="rp-note" className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+            <TextArea id="rp-note" className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
             <div className="osx-actions">
               <Btn kind="primary" small id="rp-approve" label="Approve plan" disabled={busy || budgetBad || (web && !hosts.length) || blocked.length > 0} disabledReason={blocked.length ? `${blocked.join(", ")} needs someone who manages security.` : web && !hosts.length ? "Pick at least one host, or untick the web." : budgetBad ? "Budget is a positive amount up to 100." : undefined} onClick={() => void run("approve")} />
               <Btn small id="rp-reject" label="Reject" disabled={busy || note.trim().length < 3} disabledReason={note.trim().length < 3 ? "Say why in the note." : undefined} onClick={() => void run("reject")} />

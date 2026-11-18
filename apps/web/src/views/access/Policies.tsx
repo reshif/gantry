@@ -5,6 +5,7 @@ import { useCan } from "../../api/can";
 import { useAccessMatrix } from "../../api/queries";
 import { Btn, Chip, Field, FilterBar, LockNote, SearchBox, Segmented, Toggle, type Decision } from "../../ui/primitives";
 import { DataTable } from "../../ui/DataTable";
+import { RELEASE_MANAGER } from "../../lib/roles";
 import { CountClear, setQS, useQS } from "../govern/kit";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -25,7 +26,7 @@ const draftOf = (existing: Policy | null): Draft => {
     d.where = d.where ?? {};
     return d as Draft;
   }
-  return { id: "NEW", name: "", effect: "allow", enabled: true, roles: ["release_manager"], actions: ["release"], where: { projects: [] }, when: { days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00" }, oncallOnly: false, extend: false, custom: true };
+  return { id: "NEW", name: "", effect: "allow", enabled: true, roles: [RELEASE_MANAGER], actions: ["release"], where: { projects: [] }, when: { days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00" }, oncallOnly: false, extend: false, custom: true };
 };
 
 function Checks({ prefix, items, list, onChange }: { prefix: string; items: Array<{ value: string; label: string }>; list: string[]; onChange: (v: string, on: boolean) => void }) {

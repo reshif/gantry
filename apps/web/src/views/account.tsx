@@ -4,7 +4,7 @@
  */
 import { useState } from "react";
 import { fmt, ROLES } from "@gantry/domain";
-import { ops } from "../api/ops";
+import { commands as ops } from "../api/commands";
 import { useChatLinks, useMe, useSessions } from "../api/queries";
 import { navigate } from "../lib/router";
 import { applyTheme, updatePrefs, usePrefs, type Theme } from "../lib/prefs";
@@ -12,6 +12,7 @@ import { canSeeRoute } from "../lib/routes";
 import type { Me } from "../api/types";
 import { Avatar, Btn, Empty, Panel, Segmented, Status, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
+import { DataTable, type Col } from "../ui/DataTable";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { useTeams } from "./govern/data";
@@ -35,7 +36,8 @@ export default function AccountView() {
 
 function ProfileTab({ me }: { me: Me }) {
   const v = me.person;
-  const teams = useTeams().data ?? [];
+  const teamsData = useTeams().data;
+  const teams = teamsData ?? [];
   const names = v.teams.map((id) => teams.find((t) => t.id === id)?.name ?? id);
   const rows: Array<[string, React.ReactNode]> = [
     ["Title", v.title || "Not set"],
@@ -61,30 +63,34 @@ function ProfileTab({ me }: { me: Me }) {
 
 function AccessTab({ me }: { me: Me }) {
   const roles = me.person.roles;
-  const teams = useTeams().data ?? [];
+  const teamsData = useTeams().data;
+  const teams = teamsData ?? [];
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
+  const roleCols: Array<Col<(typeof roles)[number]>> = [
+    { key: "scope", label: "Scope", render: (g) => (g.scope === "factory" ? "Factory" : me.projects.find((p) => p.id === g.scope)?.name ?? g.scope) },
+    { key: "role", label: "Role", render: (g) => <span className="chip">{ROLES.find((r) => r.id === g.role)?.name ?? g.role}</span> },
+    { key: "via", label: "Granted", render: (g) => (g.via ? <span className="muted">{`via team ${teamName(g.via)}`}</span> : "Directly") },
+  ];
   return (
     <Panel title="My access" flush>
       <p className="muted small acct-hint acct-hint-pad">Roles are granted at factory level or per project. Projects where you hold no role are hidden from you.</p>
       {roles.length ? (
-        <div className="table-scroll">
-          <table className="table table-compact" id="acct-roles">
-            <thead><tr><th scope="col">Scope</th><th scope="col">Role</th><th scope="col">Granted</th></tr></thead>
-            <tbody>
-              {roles.map((g, i) => (
-                <tr key={`${g.scope}-${g.role}-${i}`}>
-                  <td>{g.scope === "factory" ? "Factory" : me.projects.find((p) => p.id === g.scope)?.name ?? g.scope}</td>
-                  <td><span className="chip">{ROLES.find((r) => r.id === g.role)?.name ?? g.role}</span></td>
-                  <td>{g.via ? <span className="muted">{`via team ${teamName(g.via)}`}</span> : "Directly"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable id="acct-roles" caption="My roles" columns={roleCols} rows={roles} rowKey={(g) => `${g.scope}-${g.role}-${g.via ?? ""}`} />
       ) : <Empty id="acct-no-roles" icon="lock" title="No roles yet" text="Nothing has been granted to you. A Factory Admin or Project Admin can give you a role." />}
     </Panel>
   );
 }
+
+type SessionRow = NonNullable<ReturnType<typeof useSessions>["data"]>[number];
+const sessionCols = (currentId: string, revoke: (id: string) => Promise<void>): Array<Col<SessionRow>> => [
+  { key: "device", label: "Device", render: (x) => x.device },
+  { key: "method", label: "Method", render: (x) => <span className="mono">{x.method}</span> },
+  { key: "ip", label: "IP", render: (x) => <span className="mono">{x.ip}</span> },
+  { key: "started", label: "Started (IST)", render: (x) => <span className="mono nowrap">{`${fmt.istDate(x.started)} ${fmt.ist(x.started)}`}</span> },
+  { key: "lastSeen", label: "Last seen", render: (x) => <span className="nowrap">{fmt.ago(x.lastSeen, Date.now())}</span> },
+  { key: "state", label: "State", render: (x) => (x.id === currentId || x.current ? <Status tone="accent" icon="check">This session</Status> : <Status tone="done" icon="check">Active</Status>) },
+  { key: "act", label: "", render: (x) => (x.id === currentId || x.current ? null : <Btn label="Revoke" small id={`acct-rev-${x.id}`} onClick={() => void revoke(x.id)} />) },
+];
 
 function SessionsTab({ me }: { me: Me }) {
   const ui = useUI();
@@ -99,25 +105,7 @@ function SessionsTab({ me }: { me: Me }) {
       <Async query={q} what="your sessions" id="acct-sessions">{(all) => {
         const mine = all.filter((s) => s.person === me.person.id && !s.revoked).sort((a, b) => b.lastSeen - a.lastSeen);
         return mine.length ? (
-          <div className="table-scroll">
-            <table className="table table-compact">
-              <thead><tr>{["Device", "Method", "IP", "Started (IST)", "Last seen", "State", ""].map((x, i) => <th key={i} scope="col">{x}</th>)}</tr></thead>
-              <tbody>
-                {mine.map((s) => {
-                  const cur = s.id === me.session.id || s.current;
-                  return (
-                    <tr key={s.id}>
-                      <td>{s.device}</td><td className="mono">{s.method}</td><td className="mono">{s.ip}</td>
-                      <td className="mono nowrap">{`${fmt.istDate(s.started)} ${fmt.ist(s.started)}`}</td>
-                      <td className="nowrap">{fmt.ago(s.lastSeen, Date.now())}</td>
-                      <td>{cur ? <Status tone="accent" icon="check">This session</Status> : <Status tone="done" icon="check">Active</Status>}</td>
-                      <td>{cur ? null : <Btn label="Revoke" small id={`acct-rev-${s.id}`} onClick={() => void revoke(s.id)} />}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <DataTable id="acct-sessions-table" caption="My sessions" columns={sessionCols(me.session.id, revoke)} rows={mine} rowKey={(x) => x.id} />
         ) : <Empty id="acct-no-sessions" icon="key" title="No other sessions" text="You are not signed in anywhere else." />;
       }}</Async>
     </Panel>
@@ -151,7 +139,7 @@ function LinkedTab() {
   const request = async () => {
     const r = await ops.requestChatLink("slack");
     if (!r.ok) return ui.toast(r.msg, "error");
-    setCode({ command: (r as unknown as { command: string }).command });
+    setCode({ command: r.command });
   };
   return (
     <Panel title="Linked accounts">

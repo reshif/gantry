@@ -6,7 +6,7 @@ import { weeksOf, agentOf, type EvalsData } from "./kit";
 
 type Extra = EvalExtra & { counts?: { workOrders: number; classified: number; decisions: number; attempts: number } };
 
-const heatColor = (v: number | null): string => (v == null ? "var(--sunk)" : `color-mix(in srgb, var(--accent) ${Math.round(Math.max(0, (v - 0.6) / 0.4) * 70 + 8)}%, var(--surface))`);
+const heatColor = (v: number | null): string => (v == null ? "var(--sunk)" : `color-mix(in srgb, var(--accent) ${Math.round(Math.max(0, (v - 0.6) / 0.4) * 40 + 8)}%, var(--surface))`);
 
 /** The prototype's agent x project heat map: micro project headers, the first ten agents, whole-number scores, a dash where there is no work. */
 function Heat({ d }: { d: EvalsData }) {
