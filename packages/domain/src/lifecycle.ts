@@ -21,16 +21,48 @@ export function topic(wo: Pick<WorkOrder, "title">): string {
   return (words[0] || "change").replace(/s$/, "");
 }
 
-/** Acceptance criteria derived from the confirmed brief and the class. */
-export function criteriaFor(wo: Pick<WorkOrder, "brief" | "cls">): Criterion[] {
+/**
+ * Whether a GitHub check run is the repository's required check. A required name is written as the status context ("ci/test", "ci / test") but a check
+ * run reports only its job name ("test"), so the two match when they are equal or when the run's name is the last segment of the required one.
+ */
+export function checkMatches(required: string, checkName: string): boolean {
+  const n = (x: string): string => x.toLowerCase().replace(/\s*\/\s*/g, "/").trim();
+  const r = n(required);
+  const c = n(checkName);
+  return r === c || r.endsWith("/" + c);
+}
+
+/** What Verify reported for each criterion (agent-reported, recorded by the station), and the test runs it listed. */
+export interface Verification {
+  criteria?: Array<{ criterion: string; result: string; evidence?: string }>;
+  testsRun?: Array<{ name: string; command?: string; result: string }>;
+}
+
+const VERDICT: Record<string, string> = { pass: "met", passed: "met", met: "met", fail: "not met", failed: "not met", "not met": "not met" };
+const norm = (t: string): string => t.toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * Acceptance criteria derived from the confirmed brief and the class. With Verify's recorded report, each criterion carries its verdict
+ * ("met", "not met", otherwise "not tested") and the test runs its evidence names. A verdict is matched by the criterion's text, else by its
+ * position among the brief's criteria; a criterion Verify did not mention stays "not tested".
+ */
+export function criteriaFor(wo: Pick<WorkOrder, "brief" | "cls">, verification?: Verification | null): Criterion[] {
   const b = wo.brief;
   const list: string[] = [];
+  const fromBrief = b && b.ac && b.ac.length ? b.ac.length : 0;
   for (const t of b && b.ac && b.ac.length ? b.ac : ["New behaviour covered by tests"]) list.push(t);
   list.push("Existing behaviour unchanged (regression suite green)");
   if (wo.cls === "hotfix" || wo.cls === "security") list.push("Fix verified in staging before release");
   else if (wo.cls === "feature" || wo.cls === "epic") list.push("Change documented in the changelog and API reference");
   else if (wo.cls === "docs") list.push("Reviewed by the owning team");
-  return list.map((text, i) => ({ id: "AC-" + (i + 1), text, status: "not tested", tests: [] }));
+  const reported = Array.isArray(verification?.criteria) ? verification!.criteria! : [];
+  const runs = Array.isArray(verification?.testsRun) ? verification!.testsRun! : [];
+  return list.map((text, i) => {
+    const v = reported.find((r) => typeof r?.criterion === "string" && norm(r.criterion) === norm(text)) ?? (i < Math.max(fromBrief, 1) ? reported[i] : undefined);
+    const status = v ? (VERDICT[String(v.result).toLowerCase()] ?? "not tested") : "not tested";
+    const tests = v && typeof v.evidence === "string" ? runs.filter((r) => typeof r?.name === "string" && r.name && v.evidence!.includes(r.name)).map((r) => ({ name: r.name, result: r.result === "pass" ? "pass" : "fail", ms: 0 })) : [];
+    return { id: "AC-" + (i + 1), text, status, tests };
+  });
 }
 
 /** The request snapshot a work order carries (what was asked, by whom, through which channel). */

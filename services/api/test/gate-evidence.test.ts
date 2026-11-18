@@ -72,6 +72,22 @@ d("automatic gates need real evidence", () => {
     expect((await w.get("WO-9206")).state).toBe("waiting");
   });
 
+  it("a required check written as ci/test is satisfied by GitHub's check run named test", async () => {
+    await w.insertWo("WO-9210", { position: "build", state: "running", data: { files: [{ path: "src/h.ts" }] } });
+    await pr("WO-9210", 9210, "sha9210", ["ci/test"], [["test", "completed", "success"]]);
+    await open("WO-9210");
+    expect((await decision("WO-9210"))?.decision).toBe("auto_passed");
+  });
+
+  it("Verify's report is recorded: counts from the runs it listed and a verdict per criterion", async () => {
+    const id = await w.atStation("verify", "Verify records tests");
+    const att = await w.liveAttempt(id);
+    await w.tx((tx) => applyStationResult(tx, att!.id, Number(att!.fencing), { status: "succeeded", summary: "ran", output: { testsRun: [{ name: "test_a", command: "make test", result: "pass" }, { name: "test_b", command: "make test", result: "pass" }, { name: "test_c", command: "make test", result: "fail" }], criteria: [{ criterion: "x", result: "pass", evidence: "test_a" }] } } as never));
+    const row = await w.get(id);
+    expect((row as any).tests).toMatchObject({ passed: 2, failed: 1, added: 0 });
+    expect((row as any).verification.criteria[0]).toMatchObject({ result: "pass" });
+  });
+
   it("an empty observed checks list is not evidence", async () => {
     await w.insertWo("WO-9207", { position: "build", state: "running", data: { files: [{ path: "src/g.ts" }] } });
     await open("WO-9207", { checks: [] });

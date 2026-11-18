@@ -4,10 +4,16 @@ import { vendorTemplate } from "@gantry/domain";
 import { discoveryHosts } from "../models/discovery.js";
 import { ANTHROPIC_BASE_URL } from "./route.js";
 
+/**
+ * The only hosts a run may reach to install Python test dependencies (owner decision 2026-11-18): the package index and its file host. Exact names, no
+ * wildcard. The interpreter is baked into the runner image, so nothing else (no python.org, no GitHub release download) is needed.
+ */
+export const PYTHON_TEST_HOSTS = ["pypi.org", "files.pythonhosted.org"] as const;
+
 /** The GitHub host and the common package registries (spec 5.3 Outbound allow-list). Admins add more per org and per project. */
 export const DEFAULT_RUN_HOSTS = [
   "github.com", "api.github.com", "codeload.github.com", "objects.githubusercontent.com",
-  "registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "files.pythonhosted.org",
+  "registry.npmjs.org", "registry.yarnpkg.com", ...PYTHON_TEST_HOSTS,
   "proxy.golang.org", "sum.golang.org", "crates.io", "index.crates.io", "static.crates.io",
   "repo.maven.apache.org", "repo1.maven.org", "rubygems.org",
 ];
