@@ -48,8 +48,19 @@ export function toEvent(r: Record<string, unknown>): EventEntry {
   const target = typeof r.target === "string" && r.target ? r.target : undefined;
   const ent = r.entity as { type?: unknown; id?: unknown } | null | undefined;
   const wo = ent && ent.type === "wo" && typeof ent.id === "string" ? ent.id : target && /^WO-\d+$/i.test(target) ? target : typeof r.wo_id === "string" ? r.wo_id : undefined;
+  // what the event recorded about itself (the station entered, the gate decided, the bay): the audit row carries it as JSON text in `after`
+  let after: Record<string, unknown> = {};
+  try {
+    const v: unknown = typeof r.after === "string" ? JSON.parse(r.after) : r.after;
+    if (v && typeof v === "object" && !Array.isArray(v)) after = v as Record<string, unknown>;
+  } catch { /* plain text: nothing to read from it */ }
+  const pick = (k: string): string | undefined => (typeof after[k] === "string" && after[k] ? (after[k] as string) : undefined);
+  const station = pick("station") ?? pick("to");
+  const gate = pick("gate");
+  const bay = pick("bay");
   return {
     id: Number(r.id ?? r.seq ?? 0), at: Number(r.at ?? 0), type: action,
+    ...(station && action.startsWith("wo.") ? { station } : {}), ...(gate ? { gate } : {}), ...(bay ? { bay } : {}),
     ...(typeof r.project === "string" ? { project: r.project } : {}),
     ...(wo ? { wo } : {}),
     ...(typeof r.actor === "string" ? { by: r.actor } : {}),

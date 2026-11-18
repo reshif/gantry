@@ -14,7 +14,7 @@ import { DataTable, type Col } from "../../ui/DataTable";
 import { Btn } from "../../ui/primitives";
 import { when } from "./kit";
 
-const KIND: Record<string, string> = { repo_context: "Repository context", layer: "Agent layer", skill: "Skill", system: "System prompt", tools: "Tools", station_tools: "Station tools", result_instruction: "Result instruction", result_schema: "Result shape" };
+const KIND: Record<string, string> = { repo_context: "Repository context (AGENTS.md)", layer: "Agent layer", skill: "Skill", system: "System prompt", tools: "Tools", station_tools: "Station tools", result_instruction: "Result instruction", result_schema: "Result shape" };
 const dollars = (micros: number): string => `$${(micros / 1e6).toFixed(micros >= 1e5 ? 2 : 4)}`;
 const short = (h: string | null): string => (h ? h.slice(0, 8) : "—");
 const callKey = (c: PromptCall): string => c.trace ?? c.requestId ?? `${c.at}`;
@@ -34,20 +34,37 @@ const partCols: Col<PromptPart>[] = [
   { key: "sha", label: "Hash", hideSmall: true, render: (p) => <span className="mono dim">{short(p.sha256)}</span> },
 ];
 
+/** The manifest's parts under the headings a person looks for: what the agent layer was, which repository context it read, which skills (and versions), which station tools. */
+const GROUPS: Array<{ id: string; label: string; kinds: string[] }> = [
+  { id: "layers", label: "Agent layers", kinds: ["layer"] },
+  { id: "repo", label: "Repository context", kinds: ["repo_context"] },
+  { id: "skills", label: "Skills", kinds: ["skill"] },
+  { id: "tools", label: "Station tools", kinds: ["station_tools", "tools"] },
+  { id: "other", label: "Instructions and result shape", kinds: ["system", "result_instruction", "result_schema"] },
+];
+const knownKinds = GROUPS.flatMap((g) => g.kinds);
+
 function TraceDetail({ call }: { call: PromptCall }) {
   const q = usePromptTrace(call.trace);
   return (
     <Async<PromptTrace> query={q} what="this prompt record" id="dz-prompt-trace">
       {(t) => {
-        const parts = t.manifest?.parts ?? [];
+        const manifest = t.manifest?.parts?.length ? t.manifest : (t.runPrompt?.manifest ?? t.manifest);
+        const parts = manifest?.parts ?? [];
+        const groups = [...GROUPS, { id: "more", label: "Other parts", kinds: [] as string[] }]
+          .map((g) => ({ ...g, rows: parts.filter((p) => (g.id === "more" ? !knownKinds.includes(p.kind) : g.kinds.includes(p.kind))) }))
+          .filter((g) => g.rows.length);
         const system = systemText(t.request);
         return (
           <div className="stack" id="dz-prompt-detail" style={{ gap: 12 }}>
             <div className="label">Manifest</div>
-            {parts.length ? (
-              <DataTable id="dz-prompt-parts" caption="What the model was given" columns={partCols} rows={parts} rowKey={(p) => `${p.kind}:${p.name}:${p.sha256}`} />
-            ) : <p className="muted small">This call recorded no manifest.</p>}
-            {t.manifest?.hash ? <p className="dim small">{`Instruction hash `}<span className="mono">{t.manifest.hash}</span>{t.manifest.compact ? " (some parts left out of the header; the hash covers them all)" : ""}</p> : null}
+            {groups.length ? groups.map((g) => (
+              <section key={g.id} id={`dz-prompt-${g.id}`} aria-label={g.label} className="stack" style={{ gap: 4 }}>
+                <div className="small strong">{`${g.label} (${g.rows.length})`}</div>
+                <DataTable id={`dz-prompt-parts-${g.id}`} caption={`${g.label} this call was given`} columns={partCols} rows={g.rows} rowKey={(p) => `${p.kind}:${p.name}:${p.sha256}`} />
+              </section>
+            )) : <p className="muted small" id="dz-prompt-nomanifest">This call recorded no manifest.</p>}
+            {manifest?.hash ? <p className="dim small">{`Instruction hash `}<span className="mono">{manifest.hash}</span>{manifest.compact ? " (some parts left out of the header; the hash covers them all)" : ""}</p> : null}
             {system ? <><div className="label">System prompt</div><pre className="code" id="dz-prompt-system" style={{ fontSize: 12, maxHeight: 320, overflow: "auto" }}>{system}</pre></> : null}
             {t.response !== undefined ? <><div className="label">Answer</div><pre className="code" id="dz-prompt-answer" style={{ fontSize: 12, maxHeight: 320, overflow: "auto" }}>{pretty(t.response)}</pre></> : null}
           </div>

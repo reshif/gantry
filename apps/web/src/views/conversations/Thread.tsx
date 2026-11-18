@@ -12,6 +12,7 @@ import { setProject, updatePrefs } from "../../lib/prefs";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { ClassChip, GateDiamond, classOf, useCatalog } from "../projects/kit";
 import { ConfMeter, ReclassifyDialog } from "../work-orders/intake";
+import { EditBriefDialog } from "./EditBrief";
 import { useProject } from "../../api/queries";
 import { dec as decOf, no, stName, useTravelerWo, type TWo } from "../traveler/model";
 import { useOpenRecordRoute } from "../record/nav";
@@ -300,6 +301,7 @@ export function ConversationThread({ woId, idPrefix = "conv", head, noActions, n
             <span className="muted small">Confirm or decline from the traveler header.</span>
           ) : (
             <div className="conv-act-btns">
+              <Btn label="Edit brief" small icon="edit" id={`${pre}editbrief-${wo.id}`} guard={stopD ?? (canAnswer.allowed ? null : canAnswer)} onClick={() => void ui.open((close) => <EditBriefDialog woId={wo.id} guard={stopD ?? (canAnswer.allowed ? null : canAnswer)} onClose={close} />)} />
               <Btn label="Raise a question" small icon="human" id={`${pre}raise-${wo.id}`} guard={stopD ?? decOf(wo, "park")} onClick={raiseQ} />
               <Btn label="Decline" kind="danger" small icon="x" id={`${pre}decline-${wo.id}`} guard={stopD ?? declineD} onClick={decline} />
               <Btn label="Confirm brief" kind="primary" small icon="check" id={`${pre}confirm-${wo.id}`} guard={stopD ?? confirmD} disabledReason={confirmD.allowed && !stop ? (!conv.done ? `Answer the ${openQs} open question${openQs === 1 ? "" : "s"} first` : null) : null} onClick={() => void confirm()} />

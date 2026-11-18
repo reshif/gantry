@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ops } from "../../api/ops";
 import { useAgents } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
-import { Field, LockNote, Select } from "../../ui/primitives";
+import { Field, LockNote, Select, Textarea } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { useCatalog } from "../projects/kit";
 import { navigate } from "../../lib/router";
@@ -26,20 +26,29 @@ export function SendBackDialog({ woId, onClose, simple }: { woId: string; onClos
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   if (!wo || !cat) return null;
-  const cur = wo.route.indexOf(cat.stations[wo.station]?.id ?? "");
-  const opts = wo.route
+  const curId = cat.stations[wo.station]?.id ?? "";
+  const cur = wo.route.indexOf(curId);
+  const earlier = wo.route
     .slice(0, Math.max(0, cur))
     .map((sid) => {
       const m = wo.allowed.moves[sid];
       return { value: sid, label: `${cat.stations.find((s) => s.id === sid)?.no ?? ""} ${stName(cat, sid)}`.trim(), disabled: !!m && !m.allowed, why: m?.reason };
     })
     .reverse();
+  // the station the work order is at can be run again ("Redo") with a note on what to do differently
+  const redo = cur >= 0 ? [{ value: curId, label: `Redo ${cat.stations.find((s) => s.id === curId)?.no ?? ""} ${stName(cat, curId)} (run it again)`.replace("  ", " "), disabled: false, why: undefined as string | undefined }] : [];
+  const opts = simple ? earlier : [...earlier, ...redo];
   const pick = to ?? opts.find((o) => !o.disabled)?.value ?? opts[0]?.value ?? "";
+  const isRedo = !simple && pick !== "" && pick === curId;
   const d: TDecision = dec(wo, "sendback");
   const submit = async () => {
     if (busy) return;
     if (!pick) {
       setErr("Already at the first station.");
+      return;
+    }
+    if (isRedo && note.trim().length < 3) {
+      setErr("Say what the station should do differently (at least 3 characters).");
       return;
     }
     setBusy(true);
@@ -49,28 +58,28 @@ export function SendBackDialog({ woId, onClose, simple }: { woId: string; onClos
       setErr(r.msg);
       return;
     }
-    ui.toast("Sent back", "warn");
+    ui.toast(isRedo ? "Redo started" : "Sent back", "warn");
     onClose();
   };
   return (
     <Dialog
-      title={`Send ${wo.id} back${pick ? ` to ${stName(cat, pick)}` : ""}?`}
+      title={isRedo ? `Redo ${stName(cat, pick)} on ${wo.id}?` : `Send ${wo.id} back${pick ? ` to ${stName(cat, pick)}` : ""}?`}
       {...(simple ? {} : { kicker: "Rework" })}
-      sub="The previous agent re-runs with your note."
+      sub={isRedo ? "The station runs again from a clean attempt, with your note." : "The previous agent re-runs with your note."}
       onClose={onClose}
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Sending work back" />
-          {simple ? null : <><Field label="Back to station" htmlFor="sb-to" hint={`Only earlier stations on the ${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} route.`}>
+          {simple ? null : <><Field label="Back to station" htmlFor="sb-to" hint={`This station or an earlier one on the ${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} route.`}>
             <Select id="sb-to" options={opts} value={pick} onChange={setTo} />
           </Field>
-          <Field label="Note for the agent" htmlFor="sb-note">
+          <Field label={isRedo ? "Note for the agent (required)" : "Note for the agent"} htmlFor="sb-note">
             <textarea id="sb-note" className="input" rows={3} placeholder="What needs to change?" value={note} onChange={(e) => setNote(e.target.value)} />
           </Field></>}
           <Err text={err} />
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: "Send back", kind: "primary", icon: "undo", submit: true, id: "sb-submit", guard: d, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: isRedo ? "Redo station" : "Send back", kind: "primary", icon: "undo", submit: true, id: "sb-submit", guard: d, onClick: () => void submit() }]}
     />
   );
 }
@@ -203,6 +212,53 @@ export function ParkDialog({ woId, onClose, simple }: { woId: string; onClose: (
         </div>
       }
       actions={[{ label: "Cancel" }, { label: "Park", kind: "primary", icon: "pause", submit: true, id: "park-submit", guard: d, onClick: () => void submit() }]}
+    />
+  );
+}
+
+/** Run the station the work order is at again, with a note on what to do differently (the prototype's page menu entry "Redo this station"). */
+export function RedoDialog({ woId, onClose }: { woId: string; onClose: () => void }) {
+  const ui = useUI();
+  const cat = useCatalog();
+  const wo = useTravelerWo(woId).data;
+  const [note, setNote] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!wo || !cat) return null;
+  const sid = cat.stations[wo.station]?.id ?? "";
+  const d: TDecision = dec(wo, "sendback");
+  const submit = async () => {
+    if (busy) return;
+    if (note.trim().length < 3) {
+      setErr("Say what the station should do differently (at least 3 characters).");
+      return;
+    }
+    setBusy(true);
+    const r = await ops.sendBack(wo.id, sid, note.trim(), undefined, { ifMatch: wo.version });
+    setBusy(false);
+    if (!r.ok) {
+      setErr(r.msg);
+      return;
+    }
+    ui.toast(r.msg, "warn");
+    onClose();
+  };
+  return (
+    <Dialog
+      title={`Redo ${stName(cat, sid)} on ${wo.id}?`}
+      sub="The station runs again from a clean attempt, with your note. What it wrote before stays in the record."
+      onClose={onClose}
+      dirty={note.length > 0}
+      body={
+        <div className="form-grid">
+          <LockNote decision={d} what="Redoing a station" />
+          <Field label="What should it do differently?" htmlFor="redo-note" required>
+            <Textarea id="redo-note" rows={3} value={note} onChange={(e) => { setNote(e.target.value); setErr(""); }} />
+          </Field>
+          <Err text={err} />
+        </div>
+      }
+      actions={[{ label: "Cancel" }, { label: "Redo station", kind: "primary", icon: "refresh", submit: true, id: "redo-submit", guard: d, onClick: () => void submit() }]}
     />
   );
 }

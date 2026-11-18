@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TravelerPage from "./traveler-page";
 import DossierPage from "./dossier-page";
-import ChangesView, { numbered } from "./changes";
+import ChangesView from "./changes";
 import { VIEWS } from "./index";
 import { ROUTES } from "../lib/routes";
 import { mockApi, mount, resetApp } from "./floor/testkit";
@@ -100,10 +100,10 @@ describe("Traveler, Dossier and Changes are routes of their own", () => {
 });
 
 describe("Changes page", () => {
-  it("numbers lines from the hunk header and makes each number a button", async () => {
-    expect(numbered([{ t: " ", s: "@@ -40,9 +40,22 @@" }, { t: " ", s: "a" }, { t: "-", s: "b" }, { t: "+", s: "c" }, { t: "+", s: "d" }])).toEqual([{ n: null, hunk: true }, { n: 40, hunk: false }, { n: 41, hunk: false }, { n: 41, hunk: false }, { n: 42, hunk: false }]);
+  it("makes each line number of the stored diff a button that opens a note", async () => {
     const rec = recordOf(W, { code: { pullRequests: [{ number: 12, state: "open", draft: false, headSha: null, title: "t", url: null, mergedAt: null }], commits: [], files: [{ path: "src/a.ts", status: "M", plus: 2, minus: 1, preview: [{ t: " ", s: "@@ -3,2 +3,3 @@" }, { t: " ", s: "x" }, { t: "+", s: "y" }] }], diff: { plus: 2, minus: 1, files: 1 }, tests: { passed: 3, failed: 0, added: 1 } } });
-    mockApi(readsFor(W, travelerOf(W), rec));
+    const diff = { truncated: false, redactions: 0, missingPatches: [], files: [{ path: "src/a.ts", status: "modified", oldPath: null, binary: false, plus: 2, minus: 1, approximate: false, commits: [{ commit: "abc1234def", patch: "p1", plus: 2, minus: 1, status: "modified", hunks: [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 3, header: "", lines: [{ kind: "ctx", old: 3, new: 3, text: "x" }, { kind: "add", old: null, new: 4, text: "y" }] }] }] }] };
+    mockApi({ ...readsFor(W, travelerOf(W), rec), [`GET /api/v1/work-orders/${W.id}/diff`]: () => ({ body: diff }) });
     window.location.hash = `#changes/${W.id}`;
     mount(<ChangesView />);
     fireEvent.click(await screen.findByRole("button", { name: "Comment on line 3" }, { timeout: 4000 }));

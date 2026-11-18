@@ -130,7 +130,6 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
     });
   } else
     out.push({ key: "park", label: "Move to bay", menuLabel: "Park", icon: "pause", id: "trv-park", guard: closed ? no(closedWhy) : stop ? no(stopWhy) : dec(wo, "park"), group: "move", onClick: () => void ui.open((close) => <ParkDialog woId={wo.id} onClose={close} />) });
-  const first = wo.route.indexOf(stationId) <= 0;
   out.push(
     {
       key: "sendback",
@@ -138,7 +137,7 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
       menuLabel: "Send back a station",
       icon: "undo",
       id: "trv-sendback",
-      guard: closed ? no(closedWhy) : stop ? no(stopWhy) : wo.bay ? no(`Return it from ${bayLabel(cat, wo.bay)} first.`) : first ? no("Already at the first station.") : dec(wo, "sendback"),
+      guard: closed ? no(closedWhy) : stop ? no(stopWhy) : wo.bay ? no(`Return it from ${bayLabel(cat, wo.bay)} first.`) : dec(wo, "sendback"),
       group: "move",
       onClick: () => void ui.open((close) => <SendBackDialog woId={wo.id} onClose={close} />),
     },

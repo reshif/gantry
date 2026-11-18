@@ -14,7 +14,7 @@ import { classOf } from "../projects/kit";
 import { useActionSpecs } from "../traveler/Actions";
 import { bayLabel, stName, stNo, type TWo } from "../traveler/model";
 import type { WoSession } from "../conversations/session-api";
-import { ParkDialog, SendBackDialog } from "../traveler/Dialogs";
+import { ParkDialog, RedoDialog, SendBackDialog } from "../traveler/Dialogs";
 import { EditDialog, OwnerDialog, StopDialog } from "./WoDialogs";
 import type { RecordData } from "../record/data";
 import { ReviewDialog } from "./ReviewDialog";
@@ -63,6 +63,7 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
       { label: "Reassign", icon: "people", onClick: () => void ui.open((close) => <OwnerDialog wo={wo} onClose={close} />) },
       { label: "Park", icon: "pause", guard: parkSpec?.guard, onClick: () => (wo.bay ? parkSpec?.onClick() : void ui.open((close) => <ParkDialog woId={wo.id} simple onClose={close} />)) },
       { label: "Send back a station", icon: "refresh", guard: by("sendback")?.guard, onClick: () => void ui.open((close) => <SendBackDialog woId={wo.id} simple onClose={close} />) },
+      { label: "Redo this station", icon: "refresh", guard: by("sendback")?.guard, onClick: () => void ui.open((close) => <RedoDialog woId={wo.id} onClose={close} />) },
       { sep: true },
       wo.state === "killed" && stopSpec
         ? { label: stopSpec.label, icon: stopSpec.icon, guard: stopSpec.guard, onClick: stopSpec.onClick }
@@ -85,6 +86,7 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
           <Btn label="Traveler" id="rec-traveler" onClick={() => openTraveler(wo.id)} />
           <Btn label="Dossier" id="rec-dossier" onClick={() => navigate("dossier", wo.id, wo.project)} />
           <Btn label="Changes" id="rec-changes" onClick={() => navigate("changes", wo.id, wo.project)} />
+          <Btn label="Documents" id="rec-documents" onClick={() => openTraveler(wo.id, "documents")} />
           {retry.map((a) => <Btn key={a.key} label={a.label} kind="primary" icon={a.icon} id={a.id} guard={a.guard} onClick={a.onClick} />)}
           {rg && approve ? <Btn label={rg.g.id === "G0G1" ? "Confirm brief" : `Review ${rg.g.label}`} kind="ok" id="trv-approve" guard={approve.guard} onClick={() => void ui.open((close) => <ReviewDialog wo={wo} gate={rg.g} rec={rec} onClose={close} />)} /> : null}
           {specs ? <Btn label="Actions" id="dz-more" aria-haspopup="menu" onClick={(e) => menu(e.currentTarget)}><Icon name="down" /></Btn> : null}
