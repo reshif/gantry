@@ -96,6 +96,36 @@ d("work order spending cap (owner decision 3)", () => {
   });
 
   const resume = (who: string, woId: string, reason?: string) => w.call(who, "DELETE", `/api/v1/stops/${encodeURIComponent(`workorder:${woId}`)}`, reason ? { reason } : undefined);
+  const setProjectBudget = (usd: number) => w.call(ADMIN, "PATCH", "/api/v1/projects/payments/config", { path: "budget.monthly", value: usd });
+
+  it("S-11: raising the project's monthly budget lifts the project budget halt (audited); a work-order cap raise names the cap that holds it", async () => {
+    const prior = (await w.q(`select monthly_limit_micros::text as m from budgets where org_id = $1 and project_id = 'payments'`, [t.orgId]))[0]?.m;
+    await w.q(`insert into budgets (org_id, project_id, monthly_limit_micros) values ($1,'payments',5000) on conflict (org_id, project_id) do update set monthly_limit_micros = 5000`, [t.orgId]);
+    try {
+      const { woId, runId } = await breached(1000);
+      const [halt] = await stops(woId);
+      expect(halt).toMatchObject({ cause: "budget", lifted_at: null });
+      expect((await w.q(`select reason from stops where id = $1`, [halt.id]))[0].reason).toMatch(/the project has spent/);
+      expect(await breach(runId)).toMatchObject({ scope: "project" });
+      // Raising the work-order cap does not touch it, and says which budget holds it.
+      const wo = await put(ADMIN, woId, { usd: 2000 });
+      expect(wo.status, JSON.stringify(wo.body)).toBe(200);
+      expect(wo.body.resumed).toBe(false);
+      expect(wo.body.msg).toMatch(/held by the project's monthly budget/);
+      expect(wo.body.msg).not.toMatch(/stays halted until the cap is raised/);
+      expect((await stops(woId))[0].lifted_at).toBeNull();
+      // Raising the project's monthly budget lifts it.
+      const pr = await setProjectBudget(1_000_000);
+      expect(pr.status, JSON.stringify(pr.body)).toBe(200);
+      expect(pr.body.msg).toMatch(new RegExp(`Lifted the budget halt on ${woId}`));
+      expect((await stops(woId))[0].lifted_at).not.toBeNull();
+      expect(await breach(runId)).toBeNull();
+      expect((await w.events("resume")).some((e) => e.after?.stop === halt.id && /Project monthly budget raised/.test(String(e.after?.text)))).toBe(true);
+    } finally {
+      if (prior === undefined) await w.q(`delete from budgets where org_id = $1 and project_id = 'payments'`, [t.orgId]);
+      else await w.q(`update budgets set monthly_limit_micros = $2 where org_id = $1 and project_id = 'payments'`, [t.orgId, prior]);
+    }
+  });
 
   it("S-12: resuming a budget halt while still over budget is refused; a Factory Admin can resume it with a reason, audited", async () => {
     const { woId } = await breached(0.01);

@@ -3,6 +3,8 @@ import { gateLock, ruleWarning, isFactoryAdminPerson, type ApproverRule, type Pr
 import type { Tx } from "@gantry/db";
 import type { z } from "zod";
 import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
+import { capOfReason, overBudget, overText } from "../workorders/budget-state.js";
+import { liftBudgetHalt } from "../workorders/budget.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { readCatalog, readPeople, readRoles, readTemplates } from "../../core/read/index.js";
 import { parseConfigEdit, type ConfigEdit } from "./config.js";
@@ -180,7 +182,27 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
         `insert into budgets (org_id, project_id, monthly_limit_micros) values ($1,$2,$3) on conflict (org_id, project_id) do update set monthly_limit_micros = excluded.monthly_limit_micros, version = budgets.version + 1, updated_at = now()`,
         [org, projectId, Math.round(edit.value * 1_000_000)],
       );
-      return done("project.config", before, edit.value, `Saved ${path}.`);
+      // Raising the monthly budget lifts the budget halts it was holding (audited as a resume, naming the cap), unless something else still holds the work order.
+      const lifted: string[] = [];
+      const kept: string[] = [];
+      const events: EventSpec[] = [];
+      const jobs: NonNullable<CommandResult["jobs"]> = [];
+      if (edit.value > before) {
+        const halts = (await tx.query<{ wo_id: string; reason: string }>(
+          `select s.wo_id, s.reason from stops s join work_orders w on w.org_id = s.org_id and w.id = s.wo_id where s.org_id = $1 and w.project_id = $2 and s.scope_type = 'wo' and s.mode = 'halt' and s.cause = 'budget' and s.lifted_at is null order by s.wo_id`, [org, projectId],
+        )).rows;
+        for (const h of halts) {
+          if (capOfReason(h.reason) !== "project") continue;
+          const still = await overBudget(tx, org, h.wo_id);
+          if (still.length) { kept.push(`${h.wo_id} (${still.map(overText).join(" and ")})`); continue; }
+          const l = await liftBudgetHalt(tx, a, h.wo_id, `Project monthly budget raised to $${edit.value}`);
+          events.push(...l.events);
+          jobs.push(...l.jobs);
+          lifted.push(h.wo_id);
+        }
+      }
+      const r = await done("project.config", before, edit.value, `Saved ${path}.${lifted.length ? ` Lifted the budget halt on ${lifted.join(", ")}.` : ""}${kept.length ? ` Still halted: ${kept.join("; ")}.` : ""}`);
+      return lifted.length ? { ...r, events: [...r.events, ...events], jobs, changes: [...(r.changes ?? []), "workOrders", "stops", "floor", "home"] } : r;
     }
     case "budget-alert": {
       const before = Number((await tx.query(`select alert_at from budgets where org_id = $1 and project_id = $2`, [org, projectId])).rows[0]?.alert_at ?? 0.8);
