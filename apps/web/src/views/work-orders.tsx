@@ -9,11 +9,15 @@
 import { qk } from "../api/keys";
 import { useInfiniteQuery, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { bayDef, classesOf, flowOf, fmt } from "@gantry/domain";
+import { bayDef, classesOf, flowOf, fmt, requiredFor } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
 import { useParkMany } from "../api/bulk";
-import { useMe, useProject, useProjects, useWorkOrdersAcross } from "../api/queries";
+import { useHome, useMe, useProject, useProjects, useWorkOrdersAcross } from "../api/queries";
+import { useActors } from "../ui/actors";
+import { WoActions, WoNext } from "./work-orders/WoActions";
+import { costOf, lastActivity, needsOf, type Needs } from "./work-orders/needs";
+import type { HomeFull } from "./home/data";
 import { FloorCtx, mergeProjects, useFloorCtx, useProjectRepos, useScopedFloorState, type FloorCtxValue } from "./floor/kit";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { Board } from "./floor/Board";
@@ -79,7 +83,7 @@ function WorkOrdersView() {
   const newWo = useNewWorkOrder();
   const ui = useUI();
   const park = useParkMany();
-  const [u, setU] = useUrlState(URL_KEYS, { view: "all", sort: "id", dir: "desc", page: "1" });
+  const [u, setU] = useUrlState(URL_KEYS, { view: "all", sort: "needs", dir: "desc", page: "1" });
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
   // The list is a table or the floor's board; the Table / Board switch in the view row writes `?mode=`.
   const mode: "table" | "board" = u.mode === "board" ? "board" : "table";
@@ -92,6 +96,11 @@ function WorkOrdersView() {
   const project = scope.all ? (cat && inScope.length ? mergeProjects(cat, inScope) : null) : (projectQ.data ?? null);
   const repos = useProjectRepos(projectId);
   const submit = useCan("wo.submit", projectId ? { project: projectId } : {});
+  const actors = useActors();
+  const home = useHome().data as HomeFull | undefined;
+  /* The gate rule's vote count comes from the open approvals the server lists for this person, keyed by work order and gate. */
+  const voteMap = useMemo(() => new Map((home?.sections?.waiting?.approvals ?? []).filter((a) => a.wo && a.gate && a.need).map((a) => [`${a.wo}:${a.gate}`, { have: a.have ?? 0, need: a.need ?? 0 }] as const)), [home]);
+  const votes = (wo: string, gate: string) => voteMap.get(`${wo}:${gate}`);
 
   const tab: TabId = VIEWS.some((v) => v.id === u.view) ? (u.view as TabId) : "all";
   const sort = { k: u.sort, dir: (u.dir === "asc" ? 1 : -1) as 1 | -1 };
@@ -139,6 +148,7 @@ function WorkOrdersView() {
   const projectFor = (id: string) => inScope.find((p) => p.id === id) ?? project;
   const fl = flowOf(cat, project);
   const projectKey = (id: string): string => me.projects.find((p) => p.id === id)?.key ?? id;
+  const nameOf = (id: string): string => me.projects.find((p) => p.id === id)?.name ?? id;
   const filtered = !!(needle || f.cls !== "all" || f.where !== "all" || f.prio !== "all" || u.st || tab !== "all");
   const clearAll = () => { setU({ q: "", st: "", cls: "", pri: "", station: "", view: "", page: "" }); };
   const change = (patch: Partial<Record<(typeof URL_KEYS)[number], string>>) => { setSel(new Set()); setU({ ...patch, page: "" }); };
@@ -157,6 +167,8 @@ function WorkOrdersView() {
     return <span>{stationName(w)}</span>;
   };
   const idNum = (w: WorkOrder): number => Number(w.id.replace(/\D/g, "")) || 0;
+  const now = Date.now();
+  const needs = (w: WorkOrder): Needs => needsOf(w, { cat, now, votes, required: (x, g) => { const r = projectFor(x.project).approvers?.[g]; return r ? requiredFor(r, x.cls) : undefined; }, agent: (id) => actors(id).name.replace(" (agent)", "") });
   const cols: Col<WorkOrder>[] = [
     {
       key: "id",
@@ -169,14 +181,13 @@ function WorkOrdersView() {
       label: "Title",
       sort: (w) => w.title,
       render: (w) => (
-        <span className={`ell wo-title${w.state === "killed" ? " is-killed" : ""}`} style={{ maxWidth: 320 }} title={w.title}>
-          {w.title}
-          {w.parent ? <span className="muted small">{` · child of ${w.parent}`}</span> : null}
-          {w.children?.length ? <span className="muted small">{` · ${w.children.length} children`}</span> : null}
+        <span className={`wo-title${w.state === "killed" ? " is-killed" : ""}`} title={w.title}>
+          <span className="wo-title-t">{w.title}</span>
+          {w.parent || w.children?.length ? <span className="muted small">{w.parent ? `child of ${w.parent}` : `${w.children.length} children`}</span> : null}
         </span>
       ),
     },
-    { key: "project", label: "Project", sort: (w) => w.project, render: (w) => <span className="tag">{projectKey(w.project)}</span> },
+    ...(scope.all ? [{ key: "project", label: "Project", sort: (w: WorkOrder) => w.project, render: (w: WorkOrder) => <span className="tag">{projectKey(w.project)}</span> }] : []),
     {
       key: "cls",
       label: "Class",
@@ -191,14 +202,51 @@ function WorkOrdersView() {
                 <Icon name="swap" />
               </span>
             ) : null}
+            <span className={`tag pri ${w.priority.toLowerCase()}`} title={`Priority ${w.priority}`}>{w.priority}</span>
           </span>
         );
       },
     },
-    { key: "prio", label: "Pri", sort: (w) => w.priority, render: (w) => <span className={`tag pri ${w.priority.toLowerCase()}`} title={`Priority ${w.priority}`}>{w.priority}</span> },
-    { key: "where", label: "Station", sort: (w) => (w.bay ? 100 : 0) + w.station, render: whereCell },
-    { key: "state", label: "State", sort: (w) => stateOf(w), render: (w) => <WoStateChip w={w} gates={cat.gates} /> },
-    { key: "age", label: "Age", align: "end", sort: (w) => -w.createdAt, render: (w) => <span className="mono">{fmt.dur(Date.now() - w.createdAt)}</span> },
+    {
+      key: "where",
+      label: "Station",
+      sort: (w) => (w.bay ? 100 : 0) + w.station,
+      render: (w) => (
+        <span className="wo-where">
+          {whereCell(w)}
+          <WoStateChip w={w} gates={cat.gates} />
+        </span>
+      ),
+    },
+    {
+      key: "needs",
+      label: "Needs",
+      sort: (w) => needs(w).rank * 1e7 + idNum(w),
+      render: (w) => {
+        const n = needs(w);
+        return (
+          <span className={`wo-needs wo-needs-${n.kind}${n.me ? " is-me" : ""}`} id={`wo-needs-${w.id}`}>
+            <span className="wo-needs-t">{n.text}</span>
+            {n.detail ? <span className="wo-needs-d small muted" title={n.detail}>{n.detail}</span> : null}
+          </span>
+        );
+      },
+    },
+    {
+      key: "act",
+      label: "Activity",
+      sort: (w) => lastActivity(w),
+      render: (w) => {
+        const cost = costOf(w);
+        return (
+          <span className="wo-act">
+            <span className="mono" title="Last activity">{fmt.ago(lastActivity(w), now)}</span>
+            <span className="mono muted small" title="Cost so far">{cost ? fmt.money(cost) : "$0.00"}</span>
+          </span>
+        );
+      },
+    },
+    { key: "do", label: "", align: "end", render: (w) => <WoActions wo={w} next={<WoNext w={w} cat={cat} projectName={nameOf(w.project)} />} /> },
   ];
   const cutNote = `Only the latest ${CAP} work orders are read for this view, so ${scope.all ? "a project has" : "the project has"} more. Narrow it with the search or a filter.`;
   const exportCsv = () => {

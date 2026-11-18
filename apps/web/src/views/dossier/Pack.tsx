@@ -3,6 +3,7 @@
  * verdict and the evidence trail), Criteria, Brief versions, Checks and the Audit trail. Every figure comes from the record, changes and
  * audit reads; what the server does not record is shown as "not available", never invented.
  */
+import { WoActions } from "../work-orders/WoActions";
 import { type Catalog } from "@gantry/domain";
 import { useAudit } from "../../api/queries";
 import { Btn, Tabs, Who, Empty } from "../../ui/primitives";
@@ -151,6 +152,7 @@ export default function PackView() {
       sub={`The evidence pack for ${wo.title}`}
       acts={
         <>
+          <WoActions wo={wo} here="record" id="pack-acts" />
           <Btn label="Back to record" id="pack-back" onClick={() => navigate("record", wo.id, wo.project)} />
           <Btn label="Export PDF" icon="dl" id="pack-export" onClick={() => void exportRecord(wo.id)} />
         </>

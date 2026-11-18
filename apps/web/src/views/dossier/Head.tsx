@@ -3,6 +3,7 @@
  * "Review G5" when a gate waits on the viewer, and one Actions menu. Below, a card with the state chip, priority, class, where the work
  * is and who has it, and the route as a numbered strip. Banners for anything that stops the work. Locked actions say why.
  */
+import { WoActions } from "../work-orders/WoActions";
 import { WO_STATES, fmt, type Catalog, type Project } from "@gantry/domain";
 import { Btn, Who } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
@@ -83,6 +84,7 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
           <p className="sub">{`${project.name} · ${wo.repo} · requested by ${actor(wo.requestedBy).name}`}</p>
         </div>
         <div className="acts dz-actions" role="toolbar" aria-label="Work order actions">
+          <WoActions wo={wo} here="record" id="rec-acts" />
           <Btn label="Traveler" id="rec-traveler" onClick={() => openTraveler(wo.id)} />
           <Btn label="Dossier" id="rec-dossier" onClick={() => navigate("dossier", wo.id, wo.project)} />
           <Btn label="Changes" id="rec-changes" onClick={() => navigate("changes", wo.id, wo.project)} />

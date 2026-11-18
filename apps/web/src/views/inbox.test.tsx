@@ -29,7 +29,7 @@ const approvers = {
 const traveler = (allowed: boolean) => ({ id: "WO-2398", project: "payments", allowed: { approve: { gate: "G2", instance: "WO-2398:G2:3", allowed, reason: allowed ? "" : "You wrote this work order; someone else must approve.", needs: "" } } });
 
 /** The row's one Review button opens the decision. */
-const review = async (nth = 0) => { const b = await screen.findAllByRole("button", { name: "Review" }); fireEvent.click(b[nth]!); };
+const review = async (nth = 0) => { const b = await screen.findAllByRole("button", { name: /^(Review|Approve…)$/ }); fireEvent.click(b[nth]!); };
 
 describe("Inbox", () => {
   it("follows the switcher's project scope: a project hides the other projects' approvals, All projects shows them", async () => {
@@ -164,7 +164,7 @@ describe("Inbox", () => {
     });
     mount(<InboxView />);
     await review();
-    const locked = await screen.findByRole("button", { name: /^Approve/ });
+    const locked = await within(await screen.findByRole("dialog")).findByRole("button", { name: /^Approve/ });
     await waitFor(() => expect(locked.getAttribute("aria-disabled")).toBe("true"));
     expect(locked.getAttribute("data-reason")).toMatch(/someone else must approve/);
   });

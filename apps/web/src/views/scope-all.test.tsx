@@ -206,3 +206,16 @@ describe("All projects: Work orders", () => {
     expect(screen.getByRole("menuitem", { name: new RegExp(PAYMENTS.name) })).toBeTruthy();
   });
 });
+
+describe("All projects: Work orders project column", () => {
+  it("shows the Project column only under All projects", async () => {
+    mockApi({
+      ...BOTH,
+      "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: WOS.slice(0, 1), next: null } }),
+      "GET /api/v1/projects/risk/work-orders": () => ({ body: { items: RISK_WOS.slice(0, 1), next: null } }),
+    } as never, { me: TWO });
+    mount(<WorkOrdersView />);
+    await screen.findByText((WOS[0] as WorkOrder).title);
+    expect(Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, "").trim())).toContain("Project");
+  });
+});
