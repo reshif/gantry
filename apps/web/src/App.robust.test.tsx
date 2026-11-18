@@ -15,8 +15,11 @@ const meBody = (id = "p-x") => ({
 });
 
 class FakeES {
-  onopen = null;
+  onopen: ((ev: Event) => unknown) | null = null;
   onerror = null;
+  constructor() {
+    setTimeout(() => this.onopen?.(new Event("open")), 0);
+  }
   addEventListener() {}
   close() {}
 }
@@ -54,7 +57,7 @@ afterEach(() => {
 describe("session robustness", () => {
   it("a failed /me refetch keeps the signed-in app mounted and shows a reconnect banner (P0 regression)", async () => {
     render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
     expect(document.getElementById("reconnect-banner")).toBeNull();
 
     meMode = "500";
@@ -66,7 +69,7 @@ describe("session robustness", () => {
     }, { timeout: 5000 });
     expect(banner.getAttribute("role")).toBe("alert");
     // the app did not unmount: same nav element, no hard "could not be reached" screen
-    expect(screen.getByRole("navigation", { name: "Main" })).toBe(nav);
+    expect(screen.getByRole("navigation", { name: "Primary" })).toBe(nav);
     expect(screen.queryByText(/could not be reached/)).toBeNull();
     expect(within(banner).getByRole("button", { name: "Retry" })).toBeTruthy();
 
@@ -78,7 +81,7 @@ describe("session robustness", () => {
 
   it("a 401 after being signed in shows sign-in and clears storage that belongs to the session", async () => {
     render(<App />);
-    await screen.findByRole("navigation", { name: "Main" });
+    await screen.findByRole("navigation", { name: "Primary" });
     localStorage.setItem("gantry.navClosed", "x");
     localStorage.setItem("gantry.accessSim", "x");
     sessionStorage.setItem("gantry.stepup.draft", "{}");
@@ -92,7 +95,7 @@ describe("session robustness", () => {
   });
   it("shows the connection state in the top bar", async () => {
     render(<App />);
-    await screen.findByRole("navigation", { name: "Main" });
-    expect(document.getElementById("conn-indicator")?.textContent).toMatch(/Live/);
+    await screen.findByRole("navigation", { name: "Primary" });
+    await waitFor(() => expect(document.getElementById("conn-indicator")?.textContent).toMatch(/Live/));
   });
 });

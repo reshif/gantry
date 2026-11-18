@@ -37,10 +37,11 @@ function mockApi(routes: Record<string, (url: string, init?: RequestInit) => { s
 
 class FakeES {
   static instances: FakeES[] = [];
-  onopen = null;
+  onopen: ((ev: Event) => unknown) | null = null;
   onerror = null;
   constructor(public url: string) {
     FakeES.instances.push(this);
+    setTimeout(() => this.onopen?.(new Event("open")), 0);
   }
   addEventListener() {}
   close() {}
@@ -66,7 +67,7 @@ describe("signed out", () => {
     await screen.findByText("Continue with SSO");
     expect(screen.getByText("Continue with GitHub")).toBeTruthy();
     expect(screen.queryByText(/Demo accounts/)).toBeNull();
-    expect(document.querySelector(".auth-belt li")).toBeTruthy(); // stations from the catalogue
+    expect(document.querySelector("main.signin .panel")).toBeTruthy();
   });
 
   it("shows the guided two-step setup screen when the server says a Factory Admin needs a second factor", async () => {
@@ -125,14 +126,14 @@ describe("signed in", () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [], badges: { conversations: { n: 3, label: "3 conversations waiting for you" } } } }) });
     window.location.hash = "#floor";
     render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
     expect(Array.from(nav.querySelectorAll(".nav h3")).map((e) => e.textContent)).toEqual(["Overview", "Project line", "Agents", "Connect", "Govern", "Reference"]);
     expect(within(nav).getByText("Access")).toBeTruthy();
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
     expect(await screen.findByText("Couldn't load the floor")).toBeTruthy(); // the shared failed state (ui/async)
     expect(within(nav).getByText("Floor").closest("a")?.getAttribute("aria-current")).toBe("page");
     await waitFor(() => expect(within(nav).getByTitle("3 conversations waiting for you").textContent).toBe("3"));
-    expect(document.title).toBe("Floor · Payments Platform · Gantry Software Factory");
+    expect(document.title).toBe("Floor · Gantry Blueprint");
     expect(window.location.hash).toBe("#/p/payments/floor");
     expect(FakeES.instances[0]?.url).toBe("/api/v1/stream");
   });
@@ -141,10 +142,10 @@ describe("signed in", () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody({ roles: [{ role: "engineer", scope: "payments" }] }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
     window.location.hash = "#security";
     render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
     expect(within(nav).queryByText("Security")).toBeNull();
     expect(within(nav).queryByText("Agents")).toBeNull();
-    expect(await screen.findByText("Security isn't available to your roles")).toBeTruthy();
+    expect(await screen.findByText("No access to this sheet")).toBeTruthy();
     expect(window.location.hash).toBe("#security");
     expect(within(nav).getByText("Home").closest("a")?.getAttribute("aria-current")).toBeNull();
   });
@@ -156,7 +157,7 @@ describe("signed in", () => {
       "/api/v1/people": () => ({ body: [person([])] }),
     });
     render(<App />);
-    expect((await screen.findByText("FACTORY KILLED")).closest(".banner")?.className).toContain("is-kill");
+    expect((await screen.findByText("Factory emergency stop is active.")).closest(".banner")?.className).toContain("is-kill");
   });
 
   const homeApi = () => mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
@@ -166,7 +167,7 @@ describe("signed in", () => {
     homeApi();
     window.location.hash = "#home";
     render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
     const top = document.querySelector("#topbar") as HTMLElement;
     expect(top.querySelector("select")).toBeNull();
     expect(screen.queryByLabelText("Current project")).toBeNull();
@@ -184,13 +185,13 @@ describe("signed in", () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody({ demo: true }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
     window.location.hash = "#home";
     render(<App />);
-    await screen.findByRole("navigation", { name: "Main" });
+    await screen.findByRole("navigation", { name: "Primary" });
     const top = document.querySelector("#topbar") as HTMLElement;
     expect(top.textContent).not.toContain("Demo accounts on");
     // the non-production marker rides on the account button, reachable via its title
     const acct = top.querySelector("#user-menu") as HTMLElement;
     expect(acct.title).toContain("non-production");
-    expect(top.querySelector("#status-cluster")?.textContent).toBe("Running");
+    await waitFor(() => expect(top.querySelector("#status-cluster")?.textContent).toBe("Live"));
     expect(top.querySelector(".user-name")).toBeNull();
     expect(top.querySelector(".palette-label")?.textContent).toBe("Search or jump to…");
   });
@@ -206,13 +207,10 @@ describe("signed in", () => {
       return el!;
     });
     fireEvent.click(sw);
-    expect((await screen.findByText("All projects (portfolio)")).getAttribute("href")).toBe("#projects");
-    const search = await screen.findByLabelText("Find a project");
-    fireEvent.change(search, { target: { value: "ris" } });
-    const link = await screen.findByRole("link", { name: "risk" });
-    expect(link.getAttribute("href")).toBe("#/p/risk/work-orders");
-    fireEvent.click(link);
-    act(() => { window.location.hash = "#/p/risk/work-orders"; });
+    // a prototype menu: PROJECT LINE heading, All projects, then one entry per project
+    expect((await screen.findAllByText("Project line")).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("menuitem", { name: /All projects/ })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /risk/ }));
     await waitFor(() => expect(getPrefs().project).toBe("risk"));
   });
 
@@ -240,11 +238,11 @@ describe("signed in", () => {
   it("opens the command palette with Ctrl+K and runs a view", async () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
     render(<App />);
-    await screen.findByRole("navigation", { name: "Main" });
+    await screen.findByRole("navigation", { name: "Primary" });
     act(() => {
       fireEvent.keyDown(document, { key: "k", ctrlKey: true });
     });
-    const input = await screen.findByRole("combobox", { name: "Search commands" });
+    const input = await screen.findByRole("combobox", { name: "Command palette" });
     fireEvent.change(input, { target: { value: "people" } });
     const opt = await waitFor(() => {
       const el = document.querySelector("#palette-list .pal-label");

@@ -49,13 +49,13 @@ describe("Kill dialog", () => {
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     await waitFor(() => expect(posts(calls, "/api/v1/stops")).toHaveLength(1));
     expect(posts(calls, "/api/v1/stops")[0]?.body).toMatchObject({ scope: "project", id: "payments", mode: "kill", reason: "Runaway agent spend", inFlight: "cancel", confirmText: PAYMENTS.name });
-    expect(await screen.findByText("Payments Platform killed (cancel).")).toBeTruthy();
+    expect(await screen.findByText("Done: kill. Payments Platform killed (cancel).")).toBeTruthy();
   });
 
   it("asks for KILL FACTORY on the factory scope", async () => {
     const calls = await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 10, workOrders: 6, running: 2, slots: 2, prs: 0 } }), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Factory killed." } }) });
     act(() => actions?.kill("factory", null));
-    await screen.findByText("Kill the whole factory");
+    await screen.findByText("Emergency stop the factory");
     await waitFor(() => expect(screen.getByText("Projects").nextElementSibling?.textContent).toBe("10"));
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Credential leak suspected" } });
     fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "kill factory" } });
@@ -97,7 +97,7 @@ describe("Step-up and the notify list", () => {
   it("explains the step-up refusal, keeps the draft across Sign in again, and restores it in the reopened dialog", async () => {
     const calls = await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 1, workOrders: 0, running: 0, slots: 0, prs: 0 } }), "POST /api/v1/stops": () => stepUp });
     act(() => actions?.kill("factory", null));
-    await screen.findByText("Kill the whole factory");
+    await screen.findByText("Emergency stop the factory");
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Credential leak suspected" } });
     fireEvent.click(screen.getByLabelText("Cancel in-flight work"));
     fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "KILL FACTORY" } });
@@ -113,12 +113,12 @@ describe("Step-up and the notify list", () => {
     cleanup();
     await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 1, workOrders: 0, running: 0, slots: 0, prs: 0 } }), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Factory killed." } }) });
     act(() => actions?.kill("factory", null));
-    await screen.findByText("Kill the whole factory");
+    await screen.findByText("Emergency stop the factory");
     expect((document.getElementById("kill-reason") as HTMLTextAreaElement).value).toBe("Credential leak suspected");
     expect((document.getElementById("kill-confirm") as HTMLInputElement).value).toBe("KILL FACTORY");
     expect((screen.getByLabelText("Cancel in-flight work") as HTMLInputElement).checked).toBe(true);
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
-    expect(await screen.findByText("Factory killed.")).toBeTruthy();
+    expect(await screen.findByText("Done: kill. Factory killed.")).toBeTruthy();
     expect(window.sessionStorage.getItem("gantry.stepup.draft")).toBeNull();
   });
 
@@ -126,7 +126,7 @@ describe("Step-up and the notify list", () => {
     window.sessionStorage.setItem("gantry.stepup.draft", JSON.stringify({ kind: "kill", scope: "factory", id: null, values: { reason: "x y z w v" }, at: Date.now() }));
     await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 1, workOrders: 0, running: 0, slots: 0, prs: 0 } }) });
     act(() => actions?.kill("factory", null));
-    await screen.findByText("Kill the whole factory");
+    await screen.findByText("Emergency stop the factory");
     fireEvent.click(screen.getByText("Cancel"));
     expect(window.sessionStorage.getItem("gantry.stepup.draft")).toBeNull();
   });
@@ -187,7 +187,7 @@ describe("Halt dialog", () => {
     const regulated = { ...PAYMENTS, regulated: true };
     const calls = await start({ "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform halted." } }) }, { me: { projects: [regulated] } });
     act(() => actions?.halt("payments"));
-    await screen.findByText("Pull the andon cord on Payments Platform");
+    await screen.findByText("Halt the line");
     fireEvent.change(document.getElementById("rsn-text") as HTMLElement, { target: { value: "Too short" } });
     fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
     expect(await screen.findByText(/at least 20 characters/)).toBeTruthy();

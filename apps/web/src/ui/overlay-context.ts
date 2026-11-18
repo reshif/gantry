@@ -37,6 +37,10 @@ export interface DialogOpts {
 
 export interface MenuItem {
   label?: string;
+  /** A mono section heading in the list (no action). */
+  head?: string;
+  /** Marks the current choice with a check. */
+  sel?: boolean;
   icon?: string;
   hint?: string;
   /** "danger" or "andon" marks a destructive or stopping item. */

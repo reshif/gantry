@@ -6,33 +6,34 @@ import { ops } from "../api/ops";
 import { canSeeRoute, ROUTES } from "../lib/routes";
 import { hasCommand, runCommand } from "../lib/commands";
 import { navigate, navigateProject, openRecordRoute } from "../lib/router";
-import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
+import { applyTheme, setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { Dialog } from "../ui/Overlay";
 import { Icon } from "../ui/Icon";
 import type { Decision } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { useRouteCtx } from "./Nav";
 import { makeStopActions } from "./stopActions";
-import { useOpenTraveler } from "./useTraveler";
 
 interface Item {
   key?: string;
-  kind: string;
+  /** Group label shown before the hint ("Go to", "Projects", ...). */
+  group: string;
+  icon: string;
   label: string;
   hint: string;
   guard?: Decision | undefined;
   run: () => void;
 }
+
 interface Row {
   it: Item;
-  sec: string | null;
 }
 
 export function usePaletteItems(projectId: string | null): Item[] {
   const me = useMe();
+  const prefs = usePrefs();
   const ui = useUI();
   const ctx = useRouteCtx();
-  const openTraveler = useOpenTraveler();
   const wos = useWorkOrders(projectId, { limit: 50 }).data;
   const repos = useRepos(projectId).data;
   const canAgents = canSeeRoute("agents", me, ctx);
@@ -51,26 +52,24 @@ export function usePaletteItems(projectId: string | null): Item[] {
     const stop = makeStopActions(ui, me);
     const guard = (i: number): Decision | undefined => (checks[i]?.pending ? undefined : checks[i]);
     const allowedNow = (i: number): boolean => !checks[i]?.pending && !!checks[i]?.allowed;
-    for (const r of ROUTES) if (r.nav !== false && canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, kind: "View", label: r.title, hint: r.project ? (cp?.name ?? "project") : "factory", run: () => r.project && cp ? navigateProject(cp.id, r.id) : navigate(r.id) });
-    for (const p of me.projects) items.push({ key: `project:${p.id}`, kind: "Project", label: p.name, hint: `enter ${p.key}`, run: () => { setProject(p.id); navigateProject(p.id); } });
+    for (const r of ROUTES) if (r.nav !== false && canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, group: "Go to", icon: r.icon, label: r.title, hint: r.group, run: () => r.project && cp ? navigateProject(cp.id, r.id) : navigate(r.id) });
+    for (const p of me.projects) items.push({ key: `project:${p.id}`, group: "Projects", icon: "folder", label: p.name, hint: p.key, run: () => { setProject(p.id); navigateProject(p.id); ui.toast(`Project: ${p.name}`); } });
     const woList = Array.isArray(wos) ? wos : (wos?.items ?? []);
-    for (const w of woList) {
-      items.push({ key: `wo:${w.id}`, kind: "Work order", label: `${w.id} ${w.title}`, hint: `${w.repo} · ${w.state}`, run: () => openTraveler(w.id) });
-      items.push({ key: `record:${w.id}`, kind: "Record", label: `${w.id} full record`, hint: w.title, run: () => { setProject(w.project); openRecordRoute(w.id); } });
-    }
-    for (const r of repos ?? []) items.push({ key: `repo:${r.id}`, kind: "Repo", label: r.name, hint: `${cp?.name ?? ""} · ${r.onboarding.stage}`, run: () => { if (cp) setProject(cp.id); navigate("onboarding"); } });
-    if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, kind: "Agent", label: a.name, hint: a.model, run: () => { navigate("agents", a.id); } });
-    if (hasCommand("newWorkOrder")) items.push({ kind: "Action", label: "Submit a work order", hint: "Intake", guard: guard(3), run: () => void runCommand("newWorkOrder") });
+    for (const w of woList) items.push({ key: `record:${w.id}`, group: "Work orders", icon: "record", label: `${w.id} · ${w.title}`, hint: w.state, run: () => { setProject(w.project); openRecordRoute(w.id); } });
+    if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, group: "Agents", icon: "agent", label: a.name, hint: a.station || "agent", run: () => { navigate("agents", a.id); } });
+    for (const r of repos ?? []) items.push({ key: `repo:${r.id}`, group: "Repos", icon: "branch", label: r.name, hint: r.lang, run: () => { if (cp) setProject(cp.id); navigate("onboarding", r.id); } });
+    if (hasCommand("newWorkOrder")) items.push({ group: "Actions", icon: "plus", label: "Submit a work order", hint: "", guard: guard(3), run: () => void runCommand("newWorkOrder") });
+    items.push({ key: "toggle-theme", group: "Actions", icon: "moon", label: "Toggle theme", hint: "", run: () => { const dark = document.documentElement.dataset.theme === "dark" || (prefs.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches); applyTheme(dark ? "light" : "dark"); } });
     if (cp) {
-      items.push({ kind: "Action", label: `${cp.halted ? "Resume " : "Halt "}${cp.name}`, hint: "andon", guard: guard(0), run: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) });
+      items.push({ group: "Actions", icon: "pause", label: `${cp.halted ? "Resume " : "Halt "}${cp.name}`, hint: "andon", guard: guard(0), run: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) });
       // Kill and restore are offered only to people who hold the right (resolved by the server); the dialogs ask for the reason and step-up.
-      if (allowedNow(1)) items.push({ kind: "Action", label: `${cp.killed ? "Restore" : "Kill"} ${cp.name}…`, hint: "kill switch", guard: guard(1), run: () => (cp.killed ? stop.restore("project", cp.id) : stop.kill("project", cp.id)) });
+      if (allowedNow(1)) items.push({ group: "Actions", icon: "stop", label: `${cp.killed ? "Restore" : "Kill"} ${cp.name}…`, hint: "kill switch", guard: guard(1), run: () => (cp.killed ? stop.restore("project", cp.id) : stop.kill("project", cp.id)) });
     }
-    if (allowedNow(2)) items.push({ kind: "Action", label: factoryKilled ? "Restore factory…" : "Kill factory…", hint: "kill switch", guard: guard(2), run: () => (factoryKilled ? stop.restore("factory", null) : stop.kill("factory", null)) });
-    items.push({ kind: "Action", label: "Sign out", hint: me.person.name, run: () => void ops.signOut() });
+    if (allowedNow(2)) items.push({ group: "Actions", icon: "stop", label: factoryKilled ? "Restore factory…" : "Kill factory…", hint: "kill switch", guard: guard(2), run: () => (factoryKilled ? stop.restore("factory", null) : stop.kill("factory", null)) });
+    items.push({ group: "Actions", icon: "logout", label: "Sign out", hint: "", run: () => void ops.signOut() });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me, wos, repos, agents, canAgents, cp, factoryKilled, ctx.canAudit, checks.map((c) => c.pending + ":" + c.allowed).join("|")]);
+  }, [me, prefs.theme, wos, repos, agents, canAgents, cp, factoryKilled, ctx.canAudit, checks.map((c) => c.pending + ":" + c.allowed).join("|")]);
 }
 
 export function PaletteDialog({ projectId, onClose }: { projectId: string | null; onClose: () => void }) {
@@ -80,28 +79,15 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
-  const byKey = useMemo(() => {
-    const m: Record<string, Item> = {};
-    for (const it of all) if (it.key) m[it.key] = it;
-    return m;
-  }, [all]);
 
   const shown: Row[] = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) {
-      const pinned = prefs.palettePinned.map((k) => byKey[k]).filter((x): x is Item => !!x);
-      const recent = prefs.paletteRecent.filter((k) => !prefs.palettePinned.includes(k)).map((k) => byKey[k]).filter((x): x is Item => !!x).slice(0, 5);
-      const rest = all.filter((it) => (it.kind === "View" || it.kind === "Action") && !pinned.includes(it) && !recent.includes(it));
-      return [...pinned.map((it) => ({ it, sec: "Pinned" })), ...recent.map((it) => ({ it, sec: "Recent" })), ...rest.map((it) => ({ it, sec: "All" }))].slice(0, 48);
-    }
-    return all
-      .filter((it) => {
-        const hay = `${it.kind} ${it.label} ${it.hint}`.toLowerCase();
-        return needle.split(/\s+/).every((w) => hay.includes(w));
-      })
-      .slice(0, 40)
-      .map((it) => ({ it, sec: null }));
-  }, [q, all, byKey, prefs.palettePinned, prefs.paletteRecent]);
+    const hay = (it: Item) => `${it.label} ${it.group} ${it.hint}`.toLowerCase();
+    const hits = all.filter((it) => !needle || needle.split(/\s+/).every((w) => hay(it).includes(w)));
+    // pinned first (a kept convenience), then the prototype order; the first 40
+    const pinned = hits.filter((it) => it.key && prefs.palettePinned.includes(it.key));
+    return [...pinned, ...hits.filter((it) => !pinned.includes(it))].slice(0, 40).map((it) => ({ it }));
+  }, [q, all, prefs.palettePinned]);
 
   const cur = Math.min(active, Math.max(0, shown.length - 1));
   useEffect(() => {
@@ -132,12 +118,9 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
   };
 
   const rows: ReactNode[] = [];
-  if (!shown.length) rows.push(<li key="empty" className="palette-empty" role="presentation">No match. Try a WO id like WO-2417 or a repo name.</li>);
-  let lastSec: string | null = null;
+  if (!shown.length) rows.push(<li key="empty" className="palette-empty" role="presentation">No matches</li>);
   shown.forEach((row, i) => {
     const it = row.it;
-    if (row.sec && row.sec !== lastSec && !(row.sec === "All" && lastSec === null)) rows.push(<li key={`sec-${row.sec}-${i}`} className="palette-sec" role="presentation">{row.sec}</li>);
-    lastSec = row.sec;
     const locked = !!it.guard && !it.guard.allowed;
     const isPinned = !!it.key && prefs.palettePinned.includes(it.key);
     rows.push(
@@ -155,9 +138,9 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
           runAt(i);
         }}
       >
-        <span className="pal-kind">{it.kind}</span>
-        <span className="pal-label">{it.label}</span>
-        <span className="pal-hint mono">{locked && it.guard ? it.guard.needs || "Not permitted" : it.hint}</span>
+        <Icon name={it.icon} />
+        <span className="pal-label trunc">{it.label}</span>
+        <span className="pal-hint mono">{locked && it.guard ? it.guard.needs || "Not permitted" : `${it.group}${it.hint ? ` · ${it.hint}` : ""}`}</span>
         {it.key ? (
           <button
             type="button"
@@ -198,18 +181,18 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
   return (
     <Dialog
       title="Command palette"
-      kicker="Ctrl/Cmd K · Alt+P pins the highlighted item"
       cls="dlg-palette"
+      actions={[]}
       onClose={onClose}
       body={
         <div className="palette">
           <input
             id="palette-input"
             className="palette-input"
-            placeholder="Type a view, project, WO id, repo, agent or action"
+            placeholder="Jump to a screen, work order, agent, repo or action…"
             autoComplete="off"
             aria-controls="palette-list"
-            aria-label="Search commands"
+            aria-label="Command palette"
             role="combobox"
             aria-expanded="true"
             aria-activedescendant={shown.length ? `pal-opt-${cur}` : ""}
@@ -225,7 +208,6 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
           </ul>
         </div>
       }
-      actions={[{ label: "Close" }]}
     />
   );
 }

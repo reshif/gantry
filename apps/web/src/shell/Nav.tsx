@@ -37,6 +37,15 @@ export function BrandMark() {
   );
 }
 
+/**
+ * True when the server says this session may submit no work and change nothing. Decided by the can-decisions
+ * (wo.submit and line.halt on the first project, kill.factory), never by comparing role names; false while unresolved.
+ */
+export function useReadOnly(): boolean {
+  const checks = useCanMany([{ action: "wo.submit" }, { action: "line.halt" }, { action: "kill.factory" }]);
+  return checks.every((c) => !c.pending && !c.allowed);
+}
+
 const GROUP_LABEL: Record<string, string> = { Project: "Project line" };
 
 /**
@@ -44,6 +53,7 @@ const GROUP_LABEL: Record<string, string> = { Project: "Project line" };
  * permission filtering are the app's; only the markup is the prototype's. Under 1024px it slides over the page (`open`).
  */
 export function Nav({ me, current, project, open, onNavigate }: { me: Me; current: string; project: ProjectLite | null; open: boolean; onNavigate: () => void }) {
+  const readOnly = useReadOnly();
   const prefs = usePrefs();
   const badges = useNavBadges();
   const access = useRouteAccess(me);
@@ -51,12 +61,12 @@ export function Nav({ me, current, project, open, onNavigate }: { me: Me; curren
   // on factory pages the Project group is a shortcut to the last project, never a selector implying scope
   const shown = inProject ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
   return (
-    <nav className={`side${open ? " open" : ""}`} id="side" aria-label="Main">
+    <nav className={`side${open ? " open" : ""}`} id="side" aria-label="Primary">
       <a className="brand" href="#home" onClick={onNavigate}>
         <BrandMark />
         <div>
           <b>Gantry</b>
-          <small>{(me.org?.plant ?? me.config.orgName ?? "Software factory").toUpperCase()}</small>
+          <small>{readOnly ? "READ-ONLY SHEET" : (me.org?.plant ?? me.config.orgName ?? "Software factory").toUpperCase()}</small>
         </div>
       </a>
       <div className="nav" id="nav">

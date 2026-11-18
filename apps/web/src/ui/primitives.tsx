@@ -10,6 +10,8 @@ import { tip } from "./Tip";
 import { useActors } from "./actors";
 import { useUI } from "./overlay-context";
 import { useHash } from "../lib/router";
+import { isProjectRoute } from "../lib/routes";
+import { useMe } from "../api/queries";
 import { drawingNo } from "../lib/sheets";
 
 export interface Decision {
@@ -323,16 +325,39 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
   );
 }
 
+/** One linked ancestor in a sub-page's back trail (`Work orders / WO-2417`); the last has no href. */
+export interface Crumb {
+  label: ReactNode;
+  href?: string;
+}
+
 /** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
-export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: { sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
-  const hashId = useHash().id || "home";
+export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, crumbs }: { crumbs?: Crumb[]; sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+  const loc = useHash();
+  const hashId = loc.id || "home";
   const route = sheet ?? hashId;
+  const me = useMe();
+  // the scope key follows the page: a project page shows that project, a factory page shows every line
+  const key = isProjectRoute(route) ? me?.projects.find((p) => p.id === loc.project)?.key : undefined;
   return (
     <header className="ph vhead">
       <div className="title vhead-main">
         <div className="eyebrow kicker">
-          <span title="Drawing number">{drawingNo(route)}</span>
-          {kicker ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
+          {crumbs ? (
+            crumbs.map((c, i) => (
+              <span key={i} className="crumb">
+                {i ? <span aria-hidden="true">/ </span> : null}
+                {c.href ? <a href={c.href}>{c.label}</a> : <span>{c.label}</span>}
+              </span>
+            ))
+          ) : (
+            <>
+              <span title="Drawing number">{drawingNo(route)}</span>
+              <span aria-hidden="true">·</span>
+              <span>{key ?? "ALL LINES"}</span>
+            </>
+          )}
+          {kicker && !crumbs ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
         </div>
         {status ? <div className="row vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
         {sub ? <p className="sub vsub">{sub}</p> : null}

@@ -56,7 +56,7 @@ function Bomb({ boom }: { boom: boolean }) {
 }
 
 describe("AppErrorBoundary", () => {
-  it("shows a role=alert fallback with an error id, focuses its heading, and Try again re-renders", () => {
+  it("shows a role=alert fallback with an error id, focuses its heading, and Retry re-renders", () => {
     let boom = true;
     const view = () => (
       <AppErrorBoundary level="route">
@@ -69,7 +69,7 @@ describe("AppErrorBoundary", () => {
     expect(document.activeElement?.tagName).toBe("H2");
     boom = false;
     rerender(view());
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(screen.getByText("fine")).toBeTruthy();
   });
   it("clears itself when the route key changes", () => {
@@ -108,7 +108,7 @@ describe("AppErrorBoundary", () => {
       </AppErrorBoundary>,
     );
     expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
   it("nested levels report their own level in situ, and only the route fallback takes focus", () => {
     const got: ErrorReport[] = [];

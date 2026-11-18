@@ -115,12 +115,14 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
     }
     onClose();
     const id = (r as unknown as { id?: string }).id;
-    if (id) ui.open((close) => <ClassificationCard woId={id} onClose={close} />);
-    else ui.toast(r.msg, "ok");
+    if (id) {
+      ui.toast(`${id} submitted to Intake`, "ok");
+      ui.open((close) => <ClassificationCard woId={id} onClose={close} />);
+    } else ui.toast(r.msg, "ok");
   };
   return (
     <Dialog
-      title="New work order"
+      title="Submit a work order"
       kicker="Intake · S0"
       wide
       onClose={onClose}

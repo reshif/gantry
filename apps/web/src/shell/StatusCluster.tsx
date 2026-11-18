@@ -2,11 +2,11 @@
 import { FACTORY_READ } from "../lib/routes";
 import { useEffect, useRef, useState } from "react";
 import { fmt } from "@gantry/domain";
-import { useCan } from "../api/can";
+import { useCanMany } from "../api/can";
+import { useConnection } from "../lib/connection/store";
 import { useFreezes, useMe, usePolicies } from "../api/queries";
 import { statusInfo, type StatusInfo } from "../lib/status";
 import { setReplay, usePrefs } from "../lib/prefs";
-import { Icon } from "../ui/Icon";
 import { Btn } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { makeStopActions } from "./stopActions";
@@ -24,68 +24,60 @@ export function useStatus(): StatusInfo | null {
   if (!me) return null;
   return statusInfo(now, {
     visibleProjectIds: me.projects.map((p) => p.id),
-    policies: policies ?? [],
-    freezes: freezes ?? [],
+    policies: Array.isArray(policies) ? policies : [],
+    freezes: Array.isArray(freezes) ? freezes : [],
     killed: !!me.factory.killed,
     replay: !!prefs.replay,
   });
 }
 
+/** The LIVE chip of the top bar (prototype): Live, Halted, Stopped, plus the stream states folded in. Click opens the Line control menu. */
 export function StatusCluster() {
   const s = useStatus();
+  const me = useMe();
   const ui = useUI();
   const btn = useRef<HTMLButtonElement>(null);
   const prefs = usePrefs();
-  if (!s) return null;
-  const stateText = s.factory === "replay" ? "Replay" : s.factory === "killed" ? "Killed" : "Running";
+  const conn = useConnection().state;
+  const cp = me?.projects.find((p) => p.id === prefs.project) ?? me?.projects[0] ?? null;
+  const killed = !!me?.factory.killed;
+  const checks = useCanMany([
+    { action: cp?.halted ? "line.resume" : "line.halt", project: cp?.id },
+    { action: killed ? "restore.factory" : "kill.factory" },
+  ]);
+  if (!s || !me) return null;
+  const anyHalted = me.projects.some((p) => p.halted);
+  const guardOf = (i: number) => (checks[i]?.pending ? undefined : checks[i]);
+  const [label, tone] = killed ? ["Stopped", "bad"] : anyHalted ? ["Halted", "warn"] : conn === "reconnecting" ? ["Reconnecting", "warn"] : conn === "offline" ? ["Offline", "warn"] : s.factory === "replay" ? ["Replay", "info"] : ["Live", "ok"];
+  const hint = conn === "live" ? "" : conn === "reconnecting" ? "Live updates dropped. Reconnecting; screens refresh on a timer meanwhile." : "No network. Showing the last information we had.";
+  const stop = makeStopActions(ui, me);
+  const open = () => {
+    if (!btn.current) return;
+    const anchor = btn.current;
+    ui.menu(anchor, null, [
+      { head: "Line control" },
+      cp
+        ? { label: cp.halted ? "Resume line" : "Halt line", icon: cp.halted ? "right" : "pause", hint: cp.key, guard: guardOf(0), onClick: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) }
+        : { label: "Halt line", icon: "pause", guard: { allowed: false, reason: "No project to halt.", needs: "" } },
+      { label: killed ? "Restore factory" : "Emergency stop", icon: "stop", kind: killed ? undefined : "andon", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
+      { sep: true },
+      { label: "Windows and freezes", icon: "clock", hint: s.activeFreezes.length ? `${s.activeFreezes.length} freeze` : "", onClick: () => ui.popover(anchor, (close) => <StatusPopover s={s} replayAt={prefs.replay?.at} close={close} />) },
+    ]);
+  };
   return (
     <button
       ref={btn}
       type="button"
       className={`btn sm ghost status-cluster is-${s.factory}`}
       id="status-cluster"
-      aria-haspopup="dialog"
+      aria-haspopup="menu"
       aria-expanded="false"
-      aria-label={`Factory ${stateText.toLowerCase()}. ${s.clock} IST, ${s.shift}. ${s.activeFreezes.length ? `${s.activeFreezes.length} freeze active. ` : ""}Show change windows and freezes.`}
-      onClick={() => btn.current && ui.popover(btn.current, (close) => <StatusPopover s={s} replayAt={prefs.replay?.at} close={close} />)}
+      title={hint || undefined}
+      aria-label={`Line control. Factory ${label.toLowerCase()}. ${s.clock} IST, ${s.shift}.${hint ? ` ${hint}` : ""}`}
+      onClick={open}
     >
-      <span className={`chip ${s.factory === "killed" ? "bad" : s.factory === "replay" ? "info" : "ok"}`}>{stateText}</span>
-      {s.activeFreezes.length ? <Icon name="lock" /> : null}
+      <span id="conn-indicator" className={`chip ${tone}`}>{label}</span>
     </button>
-  );
-}
-
-/**
- * Kill and restore the factory: here and in the Ctrl K palette, nowhere on Home. Shown only to people who hold the right (no locked copy for anyone else);
- * the dialogs and their step-up are the shared ones in StopDialogs.
- */
-function FactoryStop({ close }: { close: () => void }) {
-  const me = useMe();
-  const ui = useUI();
-  const kill = useCan("kill.factory");
-  const restore = useCan("restore.factory");
-  if (!me) return null;
-  const killed = me.factory.killed as { restoreApprovals?: Array<{ by: string }> } | null;
-  const stop = makeStopActions(ui, me);
-  if (killed) {
-    if (restore.pending || !restore.allowed) return null;
-    const have = killed.restoreApprovals ?? [];
-    const already = have.some((a) => a.by === me.person.id);
-    return (
-      <div className="sp-stop" id="sp-stop">
-        <h3 className="sp-h">Restore the factory</h3>
-        <p className="small muted">{have.length ? `${have.length} restore ${have.length === 1 ? "approval" : "approvals"} so far.` : "No restore approval yet."}</p>
-        <Btn label={have.length ? "Approve restore…" : "Restore factory…"} kind="primary" icon="power" id="sp-restore" disabledReason={already ? "You approved this restore already. A second Factory Admin must approve." : null} onClick={() => { close(); stop.restore("factory", null); }} />
-      </div>
-    );
-  }
-  if (kill.pending || !kill.allowed) return null;
-  return (
-    <div className="sp-stop" id="sp-stop">
-      <h3 className="sp-h">Kill the factory</h3>
-      <p className="small muted">Stops every agent in every project and refuses new submissions. Needs a reason and a typed phrase.</p>
-      <Btn label="Kill factory…" kind="danger" icon="st-kill" id="sp-kill" onClick={() => { close(); stop.kill("factory", null); }} />
-    </div>
   );
 }
 
@@ -138,7 +130,6 @@ function StatusPopover({ s, replayAt, close }: { s: StatusInfo; replayAt: number
       ) : (
         <p className="muted small">No freezes active or scheduled.</p>
       )}
-      <FactoryStop close={close} />
       {canAccess ? (
         <a href="#access" className="small" onClick={close}>
           Manage windows and freezes in Access

@@ -7,16 +7,16 @@ import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
-import { formatHash, replaceHash, useHash } from "../lib/router";
+import { formatHash, navigate, replaceHash, useHash } from "../lib/router";
 import { setProject, usePrefs } from "../lib/prefs";
-import { Empty } from "../ui/primitives";
+import { Btn, Empty, Panel, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
 import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
-import { StopBanner } from "./StopBanner";
+import { ReadOnlyBanner, StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
 
@@ -44,6 +44,8 @@ export function Shell({ me }: { me: Me }) {
   const routeId = permDenied ? "home" : resolved.id;
   const denied = permDenied ?? resolved.denied;
   const def = routeDef(routeId);
+  // an id no screen answers to: the Sheet not found page, never a silent fall back to Home
+  const unknown = loc.id !== "" && !routeDef(loc.id);
   const scoped = isProjectRoute(routeId);
   const urlProject = scoped ? (loc.project ?? landing?.project ?? pickProject(me, prefs.project)) : null;
   const project = me.projects.find((p) => p.id === urlProject) ?? null;
@@ -78,8 +80,25 @@ export function Shell({ me }: { me: Me }) {
   }, [routeId, loc.param]);
 
   useEffect(() => {
-    document.title = `${denied?.title ?? def?.title ?? "Home"}${scoped && project ? ` · ${project.name}` : ""} · Gantry Software Factory`;
-  }, [def, denied, scoped, project]);
+    document.title = unknown ? `Sheet not found · Gantry Blueprint` : `${denied?.title ?? def?.title ?? "Home"} · Gantry Blueprint`;
+  }, [def, denied, unknown]);
+
+  // a truncated label keeps its full text one hover away
+  useEffect(() => {
+    const root = document.getElementById("app");
+    if (!root) return;
+    let raf = 0;
+    const mark = () => {
+      raf = 0;
+      root.querySelectorAll<HTMLElement>(".trunc").forEach((e) => {
+        if (!e.title && !e.closest("[title]") && e.textContent) e.title = e.textContent;
+      });
+    };
+    const mo = new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(mark); });
+    mo.observe(root, { childList: true, subtree: true, characterData: true });
+    mark();
+    return () => { mo.disconnect(); if (raf) cancelAnimationFrame(raf); };
+  }, []);
 
   const openPalette = useCallback(() => {
     ui.open((close) => <PaletteDialog projectId={projectId} onClose={close} />);
@@ -96,13 +115,17 @@ export function Shell({ me }: { me: Me }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [openPalette, navOpen]);
 
-  const toggleNav = () => setNavOpen((o) => !o);
-  const View = VIEWS[routeId] ?? VIEWS.home;
+  const toggleNav = () => {
+    setNavOpen((o) => !o);
+    // opening moves focus into the drawer, onto its first link
+    if (!navOpen) setTimeout(() => document.querySelector<HTMLElement>("#side a")?.focus(), 30);
+  };
+  const View = unknown ? VIEWS.home : (VIEWS[routeId] ?? VIEWS.home);
   const noAccess = hasNoAccess(me);
-  const switcherProject = scoped ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
   const ready = !scoped || (!!project && synced === project.id);
-  const killed = !!me.factory.killed;
   return (
+    <>
+    <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a>
     <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
       <AppErrorBoundary level="chrome">
         <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} open={navOpen} onNavigate={() => setNavOpen(false)} />
@@ -110,11 +133,11 @@ export function Shell({ me }: { me: Me }) {
       {navOpen ? <div className="scrim nav" id="nav-scrim" onClick={() => setNavOpen(false)} /> : null}
       <div className="main">
       <AppErrorBoundary level="chrome">
-        <TopBar me={me} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
+        <TopBar me={me} project={scoped ? project : null} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
       </AppErrorBoundary>
-      {killed ? <StopBanner projectId={null} /> : null}
+      <StopBanner projectId={scoped ? projectId : null} />
+      <ReadOnlyBanner />
       <main className="content" id="main" tabIndex={-1} ref={main}>
-        {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
           {noAccess ? (
             <div className="view">
@@ -124,10 +147,20 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="no-project-access" title="You do not have access to this project" text="It may not exist, or you hold no role on it. Projects you cannot see are hidden from you." action={<p><a href="#projects" className="linkish">Back to all projects</a></p>} />
             </div>
+          ) : unknown ? (
+            <div className="view" id="route-not-found">
+              <ViewHead sheet="home" title="Sheet not found" sub={`There is no route called "${loc.id}".`} />
+              <Panel>
+                <Empty title="Nothing drawn here" text="Check the address or pick a sheet from the navigation." action={<Btn label="Go home" kind="primary" id="not-found-home" onClick={() => navigate("home")} />} />
+              </Panel>
+            </div>
           ) : denied ? (
             // a page outside the person's roles: say so where they asked for it (the URL stays, so it works once access is granted)
             <div className="view">
-              <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
+              <ViewHead sheet="home" title={denied.title} />
+              <Panel>
+                <Empty id="route-denied" icon="lock" title="No access to this sheet" text={`Your roles do not include ${denied.title}.${denied.perm ? ` Ask a factory admin for the ${denied.perm} permission.` : ""} Until then it stays hidden from your menu.`} action={<Btn label="Back to Home" id="route-denied-home" onClick={() => navigate("home")} />} />
+              </Panel>
             </div>
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
@@ -136,5 +169,6 @@ export function Shell({ me }: { me: Me }) {
       </main>
       </div>
     </div>
+    </>
   );
 }

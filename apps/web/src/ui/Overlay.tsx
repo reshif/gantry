@@ -134,6 +134,7 @@ function MenuList({ title, items, close }: { title: string | null; items: MenuIt
       <ul className="menu" role="menu" ref={list} onKeyDown={onKey}>
         {items.map((it, i) => {
           if (it.sep) return <li key={i} className="menu-sep" role="separator" />;
+          if (it.head) return <li key={i} role="presentation"><span className="micro">{it.head}</span></li>;
           const g = guardProps(it.guard);
           return (
             <li key={i} role="none">
@@ -142,6 +143,7 @@ function MenuList({ title, items, close }: { title: string | null; items: MenuIt
                 role="menuitem"
                 className={`menu-item${g.locked ? " is-locked" : ""}${it.kind === "danger" || it.kind === "andon" ? " menu-item-danger" : ""}`}
                 aria-disabled={g["aria-disabled"]}
+                aria-current={it.sel ? "true" : undefined}
                 data-reason={g["data-reason"]}
                 onClick={(e) => {
                   if (g.locked) {
@@ -154,6 +156,7 @@ function MenuList({ title, items, close }: { title: string | null; items: MenuIt
               >
                 {it.icon ? <Icon name={it.icon} /> : null}
                 <span className="menu-l">{it.label}</span>
+                {it.sel ? <span className="menu-sel"><Icon name="check" /></span> : null}
                 {it.hint ? <span className="menu-h">{g.locked ? "locked" : it.hint}</span> : g.locked ? <span className="menu-h">locked</span> : null}
               </button>
             </li>
@@ -320,7 +323,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     later(() => {
       setToasts((l) => l.map((t) => (t.id === id ? { ...t, out: true } : t)));
       later(() => setToasts((l) => l.filter((t) => t.id !== id)), 300);
-    }, action ? 10_000 : 4600);
+    }, action ? 9_000 : kind === "error" ? 7_000 : 3_800);
   }, []);
 
   const closePopover = useCallback(() => {
@@ -440,7 +443,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       <div id="layer-pop" data-inert-exempt="">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
       <div className="toasts" id="toasts" role="status" aria-live="polite" data-inert-exempt="">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.kind}${t.out ? " out" : ""}`}>
+          <div key={t.id} className={`toast toast-${t.kind} ${t.kind === "error" ? "bad" : t.kind}${t.out ? " out" : ""}`} role={t.kind === "error" ? "alert" : "status"}>
             <Icon name={t.kind === "error" ? "alert" : t.kind === "warn" ? "halt" : "check"} />
             <span>{t.text}</span>
             {t.action ? (

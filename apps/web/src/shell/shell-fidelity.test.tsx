@@ -1,0 +1,134 @@
+/** The shell against the prototype: nav entries and destinations, menus, drawers, the not-found sheet and the dialogs. */
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import App from "../App";
+import { canBatcher } from "../api/can";
+import { reloadPrefs } from "../lib/prefs";
+
+type Json = unknown;
+const person = (roles: Array<{ role: string; scope: string }>) => ({ id: "p-x", name: "Asha Raman", title: "Head", email: "asha@acme.dev", teams: ["platform"], roles, status: "active", oncall: false, github: "asha", away: null });
+const project = (id: string, extra: object = {}) => ({ id, name: id === "payments" ? "Payments Platform" : id, key: id.slice(0, 3).toUpperCase(), status: "active", halted: null, killed: null, ...extra });
+const meBody = (o: { roles?: Array<{ role: string; scope: string }>; projects?: object[]; killed?: object | null; demo?: boolean } = {}) => ({
+  person: person(o.roles ?? [{ role: "factory_admin", scope: "factory" }]),
+  session: { id: "s1", person: "p-x", method: "sso", device: "d", ip: "1", started: 0, lastSeen: 0, revoked: false },
+  csrf: "csrf-1",
+  projects: o.projects ?? [project("payments"), project("risk")],
+  factory: { killed: o.killed ?? null },
+  config: { demoAccounts: !!o.demo },
+});
+
+function mockApi(routes: Record<string, (url: string, init?: RequestInit) => { status?: number; body: Json }>) {
+  const calls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      const path = url.split("?")[0] ?? url;
+      if (path === "/api/v1/can") {
+        const checks = (JSON.parse(String(init?.body)) as { checks: unknown[] }).checks;
+        return new Response(JSON.stringify({ results: checks.map(() => ({ allowed: true, reason: "", needs: "" })) }));
+      }
+      const h = routes[path];
+      const r = h ? h(url, init) : { status: 404, body: { ok: false, msg: "none" } };
+      return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
+    }),
+  );
+  return calls;
+}
+
+class FakeES {
+  static instances: FakeES[] = [];
+  onopen = null;
+  onerror = null;
+  constructor(public url: string) {
+    FakeES.instances.push(this);
+  }
+  addEventListener() {}
+  close() {}
+}
+
+
+beforeEach(() => {
+  vi.stubGlobal("EventSource", FakeES);
+  window.location.hash = "";
+  try { localStorage.clear(); } catch { /* ignore */ }
+  reloadPrefs();
+  canBatcher.clear();
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+const api = (home: object = { approvals: [], conversations: [] }) =>
+  mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: home }) });
+const nav = async () => within(await screen.findByRole("navigation", { name: "Primary" }));
+
+describe("shell fidelity", () => {
+  it("lists Console and Conversations in the side nav, linking to their routes", async () => {
+    api();
+    window.location.hash = "#/home";
+    render(<App />);
+    const n = await nav();
+    expect(n.getByText("Console").closest("a")?.getAttribute("href")).toBe("#console");
+    expect(n.getByText("Conversations").closest("a")?.getAttribute("href")).toMatch(/conversations$/);
+    expect(n.getByText("Audit ledger").closest("a")?.getAttribute("href")).toBe("#audit");
+  });
+
+  it("shows the Sheet not found page for an unknown route, with Go home", async () => {
+    api();
+    window.location.hash = "#/nonexistent";
+    render(<App />);
+    expect(await screen.findByText("Sheet not found")).toBeTruthy();
+    expect(screen.getByText('There is no route called "nonexistent".')).toBeTruthy();
+    expect(screen.getByText("Nothing drawn here")).toBeTruthy();
+    expect(document.title).toBe("Sheet not found · Gantry Blueprint");
+    fireEvent.click(screen.getByRole("button", { name: "Go home" }));
+    await waitFor(() => expect(window.location.hash).toBe("#home"));
+  });
+
+  it("opens the Line control menu from the LIVE chip", async () => {
+    api();
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Line control/ }));
+    expect(await screen.findByText("Line control", { selector: ".micro" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Halt line/ })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Emergency stop/ })).toBeTruthy();
+  });
+
+  it("opens the Notifications drawer from the bell, with its two footer actions", async () => {
+    api({ approvals: [{ wo: "WO-2417", gate: "G3", gateLabel: "G3", title: "Refund keys", project: "payments" }], conversations: [] });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Notifications" }));
+    expect(await screen.findByText("Gate requests, questions and system messages")).toBeTruthy();
+    expect(await screen.findByText("WO-2417 needs your approval")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Notification routes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Mark all read" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    await waitFor(() => expect(window.location.hash).toContain("record/WO-2417"));
+  });
+
+  it("the account menu offers My account and Sign out, and the theme menu lists three themes", async () => {
+    api();
+    render(<App />);
+    fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
+    expect(await screen.findByText("My account")).toBeTruthy();
+    act(() => { fireEvent.keyDown(document, { key: "Escape" }); });
+    fireEvent.click(await screen.findByRole("button", { name: /^Theme:/ }));
+    expect(await screen.findByRole("menuitem", { name: /Dark · blueprint/ })).toBeTruthy();
+  });
+
+  it("the palette uses the prototype copy and Go to hints, and has a Toggle theme action", async () => {
+    api();
+    render(<App />);
+    await nav();
+    act(() => { fireEvent.keyDown(document, { key: "k", ctrlKey: true }); });
+    const input = await screen.findByPlaceholderText("Jump to a screen, work order, agent, repo or action…");
+    fireEvent.change(input, { target: { value: "zzzz" } });
+    expect(await screen.findByText("No matches")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "theme" } });
+    await waitFor(() => expect(document.querySelector("#palette-list .pal-label")?.textContent).toBe("Toggle theme"));
+    fireEvent.change(input, { target: { value: "console" } });
+    await waitFor(() => expect(document.querySelector("#palette-list .pal-hint")?.textContent).toBe("Go to · Overview"));
+  });
+});

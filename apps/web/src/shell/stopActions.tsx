@@ -17,7 +17,7 @@ export function makeStopActions(ui: UIApi, _me: Me): StopActions {
   const done = (r: { ok: boolean; msg: string }) => ui.toast(r.msg, r.ok ? "ok" : "error");
   return {
     halt: (projectId) => void ui.open((close) => <HaltDialog scope="project" id={projectId} projectId={projectId} onClose={close} />),
-    resume: async (projectId) => done(await ops.resumeProject(projectId)),
+    resume: async (projectId) => { const r = await ops.resumeProject(projectId); if (r.ok) ui.toast(`Done: resume. ${r.msg}`, "ok"); else done(r); },
     haltRepo: (repoId, projectId) => void ui.open((close) => <HaltDialog scope="repo" id={repoId} projectId={projectId} onClose={close} />),
     resumeRepo: async (repoId) => done(await ops.resumeRepo(repoId)),
     kill: (scope, id) => void ui.open((close) => <KillDialog scope={scope} id={id} onClose={close} />),

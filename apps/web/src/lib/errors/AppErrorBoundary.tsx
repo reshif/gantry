@@ -51,8 +51,8 @@ function Fallback({ level, error, id, onRetry }: { level: BoundaryLevel; error: 
   }, [level]);
   const chunk = isChunkError(error);
   const title =
-    level === "chrome" ? "This part of the page failed" : chunk ? "A newer version of Gantry is available" : level === "root" ? "Gantry hit a problem" : "This screen failed to render";
-  const text = chunk ? "Reload to get the latest version." : "Nothing you entered elsewhere was lost. Try again, or reload the page.";
+    level === "chrome" ? "This part of the page failed" : chunk ? "A newer version of Gantry is available" : level === "root" ? "Gantry hit a problem" : "This sheet failed to draw";
+  const text = chunk ? "Reload to get the latest version." : "Nothing you entered elsewhere was lost. Retry, or reload the page.";
   const body = (
     <div className={`error-fallback error-${level}`} role="alert" id={`error-${level}`}>
       <h2 className="empty-title" tabIndex={-1} ref={head}>{title}</h2>
@@ -61,12 +61,27 @@ function Fallback({ level, error, id, onRetry }: { level: BoundaryLevel; error: 
       {id ? <p className="error-id">Error id <code>{id}</code></p> : null}
       <p>
         {/* React.lazy caches the rejected import, so re-rendering would throw the same error: a missing chunk offers Reload only */}
-        {chunk ? null : <button type="button" className="btn btn-sm" onClick={onRetry}>Try again</button>}{" "}
-        <button type="button" className="btn btn-sm" onClick={() => window.location.reload()}>Reload</button>
+        {chunk ? null : <button type="button" className="btn btn-sm primary" onClick={onRetry}>Retry</button>}{" "}
+        {level === "route" ? <a className="btn btn-sm" href="#/home">Home</a> : null}{" "}
+        <button type="button" className={`btn btn-sm${chunk ? " primary" : ""}`} onClick={() => window.location.reload()}>Reload</button>
       </p>
     </div>
   );
   if (level === "root") return <div className="boot">{body}</div>;
-  if (level === "route") return <div className="view">{body}</div>;
+  if (level === "route") {
+    // the prototype's failed sheet: a header, then one empty-state panel with Retry (primary) and Home
+    return (
+      <div className="view">
+        <header className="ph vhead">
+          <div className="title vhead-main">
+            <h1 className="vtitle">Something went wrong</h1>
+          </div>
+        </header>
+        <section className="panel">
+          <div className="body panel-body">{body}</div>
+        </section>
+      </div>
+    );
+  }
   return body;
 }

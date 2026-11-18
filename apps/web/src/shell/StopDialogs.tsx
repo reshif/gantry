@@ -133,15 +133,15 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
       } else setErr(r.msg);
       return;
     }
-    ui.toast(r.msg, "warn");
+    ui.toast(`Done: kill. ${r.msg}`, "error");
     close();
   };
   return (
     <Dialog
-      title={`Kill ${label}`}
+      title={scope === "factory" ? "Emergency stop the factory" : `Kill ${label}`}
       kicker={`Kill switch · ${scope}`}
       wide
-      sub={`A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused${scope === "workorder" ? " for this work order." : " until someone restores it."}`}
+      sub={scope === "factory" ? "Every running agent is stopped immediately and no station will start new work. Work orders keep their place. Restoring needs two people." : `A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused${scope === "workorder" ? " for this work order." : " until someone restores it."}`}
       onClose={close}
       body={
         <div className="form-grid">
@@ -179,7 +179,7 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
       }
       actions={[
         { label: "Cancel" },
-        { label: `Kill ${scope === "workorder" ? (id ?? "") : scope === "project" ? "project" : "factory"}`, kind: "danger", icon: "st-kill", submit: true, id: "kill-ok", guard: d.pending ? null : d, onClick: () => void submit() },
+        { label: scope === "factory" ? "Stop everything" : `Kill ${scope === "workorder" ? (id ?? "") : "project"}`, kind: "danger", icon: "st-kill", submit: true, id: "kill-ok", guard: d.pending ? null : d, onClick: () => void submit() },
       ]}
     />
   );
@@ -223,14 +223,14 @@ export function RestoreDialog({ scope, id, onClose }: { scope: Scope; id: string
       } else setErr(r.msg);
       return;
     }
-    ui.toast(r.msg, "ok");
+    ui.toast(`Done: restore. ${r.msg}`, "ok");
     close();
   };
   return (
     <Dialog
-      title={`Restore ${label}`}
+      title={scope === "factory" ? "Restore the factory" : `Restore ${label}`}
       kicker="Kill switch · restore"
-      sub={`${k ? `Killed by ${actor(k.by).name} at ${fmt.stamp(k.at)}: ${k.reason}. ` : ""}${scope === "factory" ? "Restoring the factory needs two Factory Admins." : ""}`}
+      sub={`${k ? `Killed by ${actor(k.by).name} at ${fmt.stamp(k.at)}: ${k.reason}. ` : ""}Agents start picking up work again in station order.${scope === "factory" ? " Restoring the factory needs two Factory Admins." : ""}`}
       onClose={close}
       body={
         <div className="form-grid">
@@ -276,14 +276,14 @@ export function HaltDialog({ scope, id, projectId, onClose }: { scope: "project"
       setErr(r.msg);
       return;
     }
-    ui.toast(r.msg, "warn");
+    ui.toast(`Done: halt. ${r.msg}`, "warn");
     onClose();
   };
   return (
     <Dialog
-      title={`Pull the andon cord on ${name}`}
-      kicker={`Andon · ${scope}`}
-      sub={`A soft, resumable pause. Agents on this ${scope} stop at their current step until someone resumes it. Use a kill for a hard stop.`}
+      title={scope === "project" ? "Halt the line" : `Halt ${name}`}
+      kicker={`Andon · ${scope === "project" ? name : "repo"}`}
+      sub={scope === "project" ? "Running agents finish their current step; nothing new starts until the line is resumed." : `A soft, resumable pause. Agents on this repo stop at their current step until someone resumes it.`}
       onClose={onClose}
       body={
         <div className="form-grid">
@@ -296,7 +296,7 @@ export function HaltDialog({ scope, id, projectId, onClose }: { scope: "project"
           </div>
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: `Halt ${scope}`, kind: "danger", submit: true, id: "rsn-ok", guard: d.pending ? null : d, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: scope === "project" ? "Halt line" : "Halt repo", kind: "danger", submit: true, id: "rsn-ok", guard: d.pending ? null : d, onClick: () => void submit() }]}
     />
   );
 }
