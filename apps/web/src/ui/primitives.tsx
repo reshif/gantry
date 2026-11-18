@@ -401,6 +401,11 @@ export function SearchBox({ id, value, onChange, placeholder = "Search", label }
   );
 }
 
+/** A single-line text input (additive primitive so views carry no raw `<input>`); wrap it in `Field` for label, hint and error. */
+export function TextInput({ id, value, onChange, ...rest }: { id?: string; value: string; onChange?: (v: string) => void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value" | "id">) {
+  return <input id={id} className="input" type="text" autoComplete="off" value={value} onChange={(e) => onChange?.(e.target.value)} {...rest} />;
+}
+
 /** Prototype .panel: drafting corner marks, a header with the section number (counted by CSS per page), a body. */
 export function Panel({ title, children, cls = "", tools, flush, id }: { title?: ReactNode; children: ReactNode; cls?: string; tools?: ReactNode; flush?: boolean; id?: string }) {
   return (
