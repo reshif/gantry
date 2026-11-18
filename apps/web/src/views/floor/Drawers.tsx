@@ -1,18 +1,17 @@
 /** Station and gate detail drawers of the floor (legacy floor.js openStation / openGate). They always show the live floor. */
 import { useState, type ReactNode } from "react";
-import { COMBINED_GATES, approvalText, fmt, gateDef, gateKind, gateKindText, gateLock, gateOffNote, type Gate } from "@gantry/domain";
+import { COMBINED_GATES, approvalText, fmt, gateDef, gateKind, gateKindText, gateLock, type Gate } from "@gantry/domain";
 import { useAgents, useMcpServers, useSkills, useWorkOrder } from "../../api/queries";
 import { ops } from "../../api/ops";
 import type { WorkOrder } from "../../api/types";
-import { Btn, Chip, Who, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Empty, StateChip, Who, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
-import { navigate } from "../../lib/router";
-import { useOpenTraveler } from "../../shell/useTraveler";
+import { hashFor, navigate } from "../../lib/router";
 import { canSeeRoute } from "../../lib/routes";
 import { useMe } from "../../api/queries";
-import { FloorCtx, WoToken, gateHaveNeed, gateOfStation, isLive, mcpFor, since, stationIdx, useFloorCtx, useFloorValue } from "./kit";
+import { FloorCtx, WoToken, gateOfStation, isLive, mcpFor, stationIdx, useFloorCtx, useFloorValue } from "./kit";
 
 /** Provides the live floor to a drawer, which renders outside the floor view. */
 export function DrawerRoot({ projectId, children }: { projectId: string; children: ReactNode }) {
@@ -21,18 +20,56 @@ export function DrawerRoot({ projectId, children }: { projectId: string; childre
   return <FloorCtx.Provider value={value}>{children}</FloorCtx.Provider>;
 }
 
-const Head = ({ kicker, id, chip, title, close, label }: { kicker: string; id: ReactNode; chip?: ReactNode; title: string; close: () => void; label: string }) => (
-  <div className="drawer-head">
-    <div>
-      <div className="kicker">{kicker}</div>
-      <div className="drawer-id">{id}{chip}</div>
-      <h2 className="drawer-title">{title}</h2>
+/** Prototype drawer frame: eyebrow, title, sub-line, close; the body scrolls; an optional footer of links. */
+const Frame = ({ kicker, title, sub, close, label, children, footer }: { kicker: string; title: string; sub?: ReactNode; close: () => void; label: string; children: ReactNode; footer?: ReactNode }) => (
+  <div className="drawer-inner fl-drawer">
+    <div className="drawer-head">
+      <div>
+        <div className="kicker">{kicker}</div>
+        <h2 className="drawer-title">{title}</h2>
+        {sub ? <p className="drawer-desc">{sub}</p> : null}
+      </div>
+      <button type="button" className="icon-btn drawer-close" aria-label={label} onClick={close}>
+        <Icon name="x" />
+      </button>
     </div>
-    <button type="button" className="icon-btn drawer-close" aria-label={label} onClick={close}>
-      <Icon name="x" />
-    </button>
+    <div className="drawer-scroll">{children}</div>
+    {footer ? <div className="drawer-foot fl-drawer-foot">{footer}</div> : null}
   </div>
 );
+
+/** A work order as a row of the prototype list: record link, title, state chip. */
+const WoRow = ({ w, project, extra }: { w: WorkOrder; project: string; extra?: ReactNode }) => (
+  <li data-wo={w.id}>
+    <a className="pri mono" href={hashFor("record", w.id, project)}>{w.id}</a>
+    <span className="grow trunc">{w.title}</span>
+    {extra ?? <StateChip state={w.state} />}
+  </li>
+);
+
+/** Work orders, filtered. The Work orders screen reads the filter from the URL query; the route itself always opens. */
+function WorkOrdersLink({ label, params, project, close }: { label: string; params: Record<string, string>; project: string; close: () => void }) {
+  const q = new URLSearchParams(params).toString();
+  return (
+    <a
+      className="btn"
+      id="floor-drawer-wos"
+      href={hashFor("work-orders", null, project)}
+      onClick={(e) => {
+        e.preventDefault();
+        close();
+        navigate("work-orders", null, project);
+        try {
+          window.history.replaceState(window.history.state, "", `${window.location.pathname}?${q}${window.location.hash}`);
+        } catch {
+          /* no history access */
+        }
+      }}
+    >
+      {label}
+    </a>
+  );
+}
 
 function ApproverSummary({ gid }: { gid: string }) {
   const ctx = useFloorCtx();
@@ -129,7 +166,6 @@ export function GateDrawer({ gid, close, onStation }: { gid: string; close: () =
   const here = ctx.wos.filter((w) => isLive(w) && w.gates?.[gid] && w.station === atIdx);
   const waiting = here.filter((w) => w.gates[gid]?.status === "waiting" && !w.bay);
   const failing = here.filter((w) => w.gates[gid]?.status === "failed");
-  const off = !p.flow.gates[gid]?.enabled && gid !== "G0G1";
   const kind = gateKind(ctx.cat, p, gid);
   const recent: Array<{ w: WorkOrder; at: number; by?: string | undefined; text: string; via?: string | undefined; mode: string }> = [];
   for (const w of ctx.wos) {
@@ -140,29 +176,32 @@ export function GateDrawer({ gid, close, onStation }: { gid: string; close: () =
     if (gs.decision?.mode === "trust") recent.push({ w, at: gs.decision.at, text: gs.decision.reason || `passed under trust at L${gs.decision.trust}`, mode: "trust" });
   }
   recent.sort((a, b) => b.at - a.at);
+  const checks = g.checks?.length ? g.checks.join(", ") : "Person decides";
   return (
-    <div className="drawer-inner">
-      <Head
-        kicker={`Gate · after ${after?.no ?? ""} ${after?.name ?? g.after}`}
-        id={
-          <>
-            <span className="fl-dgate" aria-hidden="true" />
-            <span className="mono big-id">{g.label}</span>
-          </>
-        }
-        chip={<Chip text={gateKindText(kind)} />}
-        title={g.name}
-        close={close}
-        label="Close gate details"
-      />
-      <div className="drawer-scroll">
-        {off ? (
-          <div className="callout">
-            <Icon name="alert" />
-            <span>{`${g.name} (${g.label}) is off in ${p.name}. ${gateOffNote}`}</span>
-          </div>
-        ) : null}
-        <p className="drawer-desc">{g.purpose}</p>
+    <Frame kicker={`${g.label} · GATE`} title={g.name} sub={g.purpose} close={close} label="Close gate details">
+      <div className="fl-drawer-body">
+        <dl className="kv" id="floor-gate-kv">
+          <dt>Kind</dt>
+          <dd><Chip text={gateKindText(kind)} cls={kind === "auto" ? "info" : "warn"} /></dd>
+          <dt>After station</dt>
+          <dd>{after?.name ?? g.after}</dd>
+          <dt>Checks</dt>
+          <dd>{checks}</dd>
+        </dl>
+        <h3 className="sub-h">Waiting now</h3>
+        {waiting.length ? (
+          <ul className="list fl-bordered" id="floor-gate-waiting">
+            {waiting.map((w) => (
+              <li key={w.id} data-wo={w.id}>
+                <a className="pri mono" href={hashFor("record", w.id, p.id)}>{w.id}</a>
+                <span className="grow trunc">{w.title}</span>
+                {kind === "auto" ? <span className="small muted">Checks running</span> : <GateRowActions w={w} gid={gid} />}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Empty title="Gate is open" text="No work orders are waiting here." />
+        )}
         {COMBINED_GATES[gid] ? <p className="small muted">{`${g.label}: ${COMBINED_GATES[gid]}`}</p> : null}
         {gateLock(g, p).locked ? <p className="small muted"><Icon name="lock" />{` Always on. ${gateLock(g, p).reason}`}</p> : null}
         <h3 className="sub-h">Approvals needed</h3>
@@ -174,23 +213,6 @@ export function GateDrawer({ gid, close, onStation }: { gid: string; close: () =
             <TrustLink id="floor-gate-trust-link" />
           </div>
         ) : null}
-        <h3 className="sub-h">{`Waiting here (${waiting.length})`}</h3>
-        {waiting.length ? (
-          <ul className="fl-gate-list">
-            {waiting.map((w) => {
-              const hn = gateHaveNeed(ctx, w, gid);
-              return (
-                <li key={w.id}>
-                  <WoToken w={w} compact idPrefix="floor-gtok-" />
-                  <div className="small">{kind === "auto" ? "Checks running" : `${hn.have} of ${hn.need} approvals · waiting ${fmt.dur(Math.max(0, ctx.now - since(w)))}`}</div>
-                  {kind === "auto" ? null : <GateRowActions w={w} gid={gid} />}
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="muted small">{`Nothing is waiting at ${g.name} (${g.label}).`}</p>
-        )}
         {failing.length ? <h3 className="sub-h">{`Failing (${failing.length})`}</h3> : null}
         {failing.length ? (
           <ul className="fl-gate-list">
@@ -243,16 +265,9 @@ export function GateDrawer({ gid, close, onStation }: { gid: string; close: () =
           </button>
         </p>
       </div>
-    </div>
+    </Frame>
   );
 }
-
-const kv = (k: string, v: ReactNode) => (
-  <div key={k}>
-    <dt>{k}</dt>
-    <dd>{v}</dd>
-  </div>
-);
 
 export function StationDrawer({ sid, close, onGate }: { sid: string; close: () => void; onGate: (gid: string) => void }) {
   const ctx = useFloorCtx();
@@ -262,14 +277,10 @@ export function StationDrawer({ sid, close, onGate }: { sid: string; close: () =
   const st = ctx.cat.stations.find((s) => s.id === sid);
   if (!st) return null;
   const p = ctx.project;
-  const conf = p.flow.stations[sid];
   const i = stationIdx(ctx.cat, sid);
   const ag = agents?.find((a) => a.id === st.agent);
   const here = ctx.wos.filter((w) => w.station === i && isLive(w) && !w.bay);
   const g = gateOfStation(ctx.cat, p, sid);
-  const durs: number[] = [];
-  for (const w of ctx.wos) for (const e of w.history) if (e.station === sid && e.endedAt) durs.push(e.endedAt - e.startedAt);
-  const avg = durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : 0;
   const sk = (ag?.skills ?? []).map((id) => {
     const x = skills?.find((s) => s.id === id);
     return x ? `${x.name} ${x.version}` : id;
@@ -277,37 +288,38 @@ export function StationDrawer({ sid, close, onGate }: { sid: string; close: () =
   const model = p.regulated && sid !== "intake" ? "bedrock-claude-sonnet-5-5" : (ag?.overrides?.[p.id]?.model ?? ag?.model ?? "none");
   const mcps = mcpFor(p, sid, servers);
   return (
-    <div className="drawer-inner">
-      <Head
-        kicker={`Station · ${p.name}`}
-        id={
-          <>
-            <span className="mono big-id">{st.no}</span>
-            {conf?.enabled ? <Chip text={`${here.length} / ${conf.wip} WIP`} /> : <Chip text="off in this project" />}
-          </>
-        }
-        title={st.name}
-        close={close}
-        label="Close station details"
-      />
-      <div className="drawer-scroll">
+    <Frame
+      kicker={`${st.no} · STATION`}
+      title={st.name}
+      sub={st.purpose}
+      close={close}
+      label="Close station details"
+      footer={<WorkOrdersLink label="Work orders here" params={{ station: sid }} project={p.id} close={close} />}
+    >
+      <div className="fl-drawer-body">
         {ctx.replay ? (
           <div className="callout callout-warn">
             <Icon name="replay" />
             <span>Replay is on. This drawer shows the station as it is now.</span>
           </div>
         ) : null}
-        <p className="drawer-desc">{st.purpose}</p>
-        <dl className="titleblock tb-drawer">
-          {kv("Agent", ag ? `${ag.name} ${ag.version}` : st.agent)}
-          {kv("Model", model)}
-          {kv("Autonomy", ag?.autonomy ?? "gate")}
-          {kv("Average time", fmt.dur(avg))}
-          {kv("WIP limit", String(conf?.wip ?? 0))}
-          {kv("In progress", String(here.length))}
-          {sid === "build" ? kv("Coding slots", `${ctx.floor.slots.used} of ${p.flow.slots} busy`) : kv("Gate after", g ? `${g.name} · ${g.label}` : "none")}
-          {kv("MCP servers", String(mcps.length))}
+        <dl className="kv" id="floor-station-kv">
+          <dt>Agent</dt>
+          <dd>{ag ? <a href={hashFor("agents", ag.id, p.id)}>{ag.name}</a> : st.agent}</dd>
+          <dt>Model</dt>
+          <dd>{model}</dd>
+          <dt>Autonomy</dt>
+          <dd>{ag?.autonomy ?? "gate"}</dd>
+          <dt>In station</dt>
+          <dd>{`${here.length} work order${here.length === 1 ? "" : "s"}`}</dd>
         </dl>
+        {here.length ? (
+          <ul className="list fl-bordered" id="floor-station-wos">
+            {here.map((w) => <WoRow key={w.id} w={w} project={p.id} />)}
+          </ul>
+        ) : (
+          <Empty title="Nothing in this station" text="Work orders appear here as they arrive." />
+        )}
         <div className="fl-trust">
           <h3 className="sub-h">{`Trust for ${ag?.name ?? "the agent"} in this project`}</h3>
           <p className="small muted">{g && gateKind(ctx.cat, p, g.id) !== "auto" && g.id !== "G0G1" ? `Applies at ${g.label}, the gate that judges this station's work.` : "No human gate judges this station's work, so trust does not change who approves here."}</p>
@@ -330,46 +342,33 @@ export function StationDrawer({ sid, close, onGate }: { sid: string; close: () =
         {g ? <h3 className="sub-h">{`Gate after: ${g.label} ${g.name}`}</h3> : null}
         {g ? <ApproverSummary gid={g.id} /> : null}
         {g ? <Btn label={`Open ${g.label} details`} small icon="diamond" id={`floor-st-gate-${g.id}`} onClick={() => onGate(g.id)} /> : null}
-        <h3 className="sub-h">{`Work here (${here.length})`}</h3>
-        {here.length ? (
-          <div className="fl-tokgrid">
-            {here.map((w) => (
-              <WoToken key={w.id} w={w} idPrefix="floor-stok-" />
-            ))}
-          </div>
-        ) : (
-          <p className="muted small">{`Nothing at ${st.name} right now.`}</p>
-        )}
         <p className="footnote">Change agents, skills and instructions on the Agents screen; WIP limits and gates in Project config.</p>
       </div>
-    </div>
+    </Frame>
   );
 }
 
 /** OUT: the work orders that cleared the last gate (prototype "Released" drawer). */
 export function ReleasedDrawer({ close }: { close: () => void }) {
   const ctx = useFloorCtx();
-  const open = useOpenTraveler();
   const done = ctx.wos.filter((w) => w.state === "done" && !w.split).sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
   return (
-    <div className="drawer-inner">
-      <Head kicker={`Out · ${ctx.project.name}`} id={<span className="mono big-id">OUT</span>} title="Released" close={close} label="Close released work orders" />
-      <div className="drawer-scroll">
-        <p className="drawer-desc">Work orders that cleared the last gate.</p>
-        {done.length ? (
-          <ul className="list" id="floor-released">
-            {done.slice(0, 20).map((w) => (
-              <li key={w.id}>
-                <Btn label={w.id} kind="ghost" small onClick={() => { close(); open(w.id); }} />
-                <span className="grow trunc">{w.title}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted small">Nothing released yet. Released work orders collect here.</p>
-        )}
-      </div>
-    </div>
+    <Frame
+      kicker="OUT · TERMINUS"
+      title="Released"
+      sub="Work orders that cleared the last gate."
+      close={close}
+      label="Close released work orders"
+      footer={<WorkOrdersLink label="Work orders" params={{ state: "done" }} project={ctx.project.id} close={close} />}
+    >
+      {done.length ? (
+        <ul className="list fl-bordered" id="floor-released">
+          {done.slice(0, 12).map((w) => <WoRow key={w.id} w={w} project={ctx.project.id} extra={<span className="chip ok">done</span>} />)}
+        </ul>
+      ) : (
+        <Empty title="Nothing released yet" text="Released work orders collect here." />
+      )}
+    </Frame>
   );
 }
 

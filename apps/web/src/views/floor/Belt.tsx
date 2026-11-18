@@ -4,6 +4,9 @@
  */
 import { useState } from "react";
 import { flowOf, fmt, route as routeOf } from "@gantry/domain";
+import { ops } from "../../api/ops";
+import { useUI } from "../../ui/overlay-context";
+import { hashFor } from "../../lib/router";
 import { Btn, Panel } from "../../ui/primitives";
 import { useMe } from "../../api/queries";
 import { updatePrefs, usePrefs } from "../../lib/prefs";
@@ -68,6 +71,7 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
   const ctx = useFloorCtx();
   const prefs = usePrefs();
   const open = useOpenTraveler();
+  const ui = useUI();
   const [hover, setHover] = useState<string | null>(null);
   const [routes, setRoutes] = useState(false);
   const [density, setDensity] = useQueryParam("density");
@@ -114,28 +118,34 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
         <div className="card-grid" aria-label="Off the line">
           {bays.map((b) => {
             const list = ctx.wos.filter((w) => w.bay === b.id && w.state !== "killed");
-            const shown = b.id === "declined" ? list.slice(-3) : list;
             return (
-              <div key={b.id} className={`card fl-bay fl-bay-${b.id}${list.length ? " has-work" : ""}`} data-bay={b.id}>
+              <div key={b.id} className={`card fl-bay fl-bay-${b.id}`} data-bay={b.id}>
                 <div className="row fl-bay-h">
                   <h3 className="fl-bay-n">{b.name}</h3>
                   <span className="spacer" />
                   <span className={`chip ${list.length ? "warn" : "plain"} fl-bay-c`}>{String(list.length)}</span>
                 </div>
                 <div className="small muted">{b.desc}</div>
-                {shown.map((w) => (
-                  <div key={w.id} className="row small" data-wo={w.id}>
-                    <Btn label={w.id} kind="ghost" small id={`floor-bay-${w.id}`} onClick={() => open(w.id)} />
-                    <span className="trunc grow">{w.title}</span>
+                {list.map((w) => (
+                  <div key={w.id} className="fl-bay-wo" data-wo={w.id}>
+                    <div className="row small">
+                      <a className="pri mono" id={`floor-bay-${w.id}`} href={hashFor("record", w.id, p.id)}>{w.id}</a>
+                      <span className="trunc grow">{w.title}</span>
+                    </div>
+                    {(b.id === "person" || b.id === "sechold") && (w.bayReason || w.failReason) ? <div className="small muted fl-bay-why">{w.bayReason || w.failReason}</div> : null}
+                    {b.id === "person" ? (
+                      <div className="row small fl-bay-acts">
+                        {w.state === "failed" ? <Btn label="Retry" small icon="refresh" id={`floor-bay-retry-${w.id}`} disabledReason={ctx.replay ? "Replay is showing the past. Go back to live to act." : null} onClick={async () => { const r = await ops.retry(w.id); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}
+                        <Btn label="Assign" small id={`floor-bay-assign-${w.id}`} disabledReason={ctx.replay ? "Replay is showing the past. Go back to live to act." : null} onClick={() => open(w.id)} />
+                      </div>
+                    ) : null}
                   </div>
                 ))}
-                {b.id === "declined" && list.length > 3 ? <span className="muted small">{`${list.length - 3} older`}</span> : null}
               </div>
             );
           })}
         </div>
       </Panel>
-      <p className="fl-foot faint small">{`${p.flow.order.filter((sid) => p.flow.stations[sid]?.enabled).length} stations on · flow version ${ctx.floor.flowVersion}.`}</p>
     </>
   );
 }

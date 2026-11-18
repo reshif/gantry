@@ -253,3 +253,10 @@ export function useFloorState(projectId: string | null | undefined, rp: Omit<Rep
 }
 
 export const useFloorValue = (projectId: string | null | undefined, rp: Omit<ReplayCtx, "state"> | null): FloorCtxValue | null => useFloorState(projectId, rp).value;
+
+/** The gate a work order waits at (the prototype's waitingGate): the gate whose status is waiting, else the gate its station ends in. Null when it waits at none. */
+export function waitingGateId(ctx: FloorCtxValue, w: FWo): string | null {
+  if (w.state !== "waiting" || w.bay) return null;
+  const hit = Object.entries(w.gates ?? {}).find(([, g]) => g.status === "waiting");
+  return hit ? hit[0] : (gateForWO(ctx.cat, ctx.project, w)?.id ?? null);
+}

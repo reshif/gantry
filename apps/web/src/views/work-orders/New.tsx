@@ -19,7 +19,6 @@ import { registerCommand } from "../../lib/commands";
 import { navigate } from "../../lib/router";
 import { setProject, usePrefs } from "../../lib/prefs";
 import { ClassChip, classOf, useCatalog } from "../projects/kit";
-import { ClassificationCard } from "./intake";
 
 const STAGE_NAMES: Record<string, string> = { ...Object.fromEntries(ONBOARD_STAGES.map((s) => [s.id, s.name])), failed: "Failed", person: "Needs a person" };
 const ready = (r: Repo): boolean => r.onboarding.stage === "ready" || !!r.onboarding.exception;
@@ -115,18 +114,25 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
     }
     onClose();
     const id = (r as unknown as { id?: string }).id;
-    if (id) ui.open((close) => <ClassificationCard woId={id} onClose={close} />);
-    else ui.toast(r.msg, "ok");
+    if (id) {
+      ui.toast(`${id} submitted to Intake`, "ok");
+      navigate("record", id, projectId);
+    } else ui.toast(r.msg, "ok");
   };
   return (
     <Dialog
-      title="New work order"
-      kicker="Intake · S0"
+      title="Submit a work order"
       wide
       onClose={onClose}
-      sub="It starts at S0 Intake. The Intake agent classifies it, proposes a route and opens a conversation to complete the brief."
+      sub="It starts at S0 Intake, where the Intake agent classifies it and completes the brief with you."
       body={
         <div className="form-grid">
+          <Field label="Title" htmlFor="nwo-title" hint="A short, specific request.">
+            <input id="nwo-title" className="input" value={title} placeholder="Add idempotency keys to refund endpoint" autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
+          </Field>
+          <Field label="What should change and why" htmlFor="nwo-desc" hint="Acceptance criteria help the Spec agent.">
+            <textarea id="nwo-desc" className="input" rows={4} placeholder="What should change, and how will we know it is done?" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          </Field>
           <div className="form-row">
             <Field label="Project" htmlFor="nwo-project">
               <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
@@ -154,12 +160,6 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
               </div>
             ) : null}
           </div>
-          <Field label="Title" htmlFor="nwo-title">
-            <input id="nwo-title" className="input" value={title} placeholder="Add idempotency keys to refund endpoint" autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
-          </Field>
-          <Field label="Description" htmlFor="nwo-desc" hint="Acceptance criteria help the Spec agent.">
-            <textarea id="nwo-desc" className="input" rows={4} placeholder="What should change, and how will we know it is done?" value={desc} onChange={(e) => setDesc(e.target.value)} />
-          </Field>
           <Field label="Attachment names" htmlFor="nwo-att" hint="Names only; files are not uploaded here.">
             <input id="nwo-att" className="input" placeholder="trace.log, screenshot.png" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
           </Field>
@@ -168,7 +168,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
               <Select id="nwo-cls" options={[{ value: "", label: "Let the Intake agent decide" }, ...classes.map((c) => ({ value: c.id, label: c.name }))]} value={cls} onChange={setCls} />
             </Field>
             <Field label="Priority" htmlFor="nwo-prio">
-              <Select id="nwo-prio" options={[{ value: "auto", label: "From class" }, { value: "P1", label: "P1 · urgent" }, { value: "P2", label: "P2 · normal" }, { value: "P3", label: "P3 · when free" }]} value={prio} onChange={setPrio} />
+              <Select id="nwo-prio" options={[{ value: "auto", label: "From class" }, { value: "P0", label: "P0 · critical" }, { value: "P1", label: "P1 · urgent" }, { value: "P2", label: "P2 · normal" }, { value: "P3", label: "P3 · when free" }]} value={prio} onChange={setPrio} />
             </Field>
             <Field label="Source" htmlFor="nwo-source">
               <Select id="nwo-source" options={[{ value: "web", label: "Web" }, { value: "console", label: "Console" }, { value: "slack", label: "Slack message" }, { value: "github", label: "GitHub issue" }]} value={source} onChange={setSource} />

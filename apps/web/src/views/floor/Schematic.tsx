@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAgents } from "../../api/queries";
-import { gateOfStation, isLive, stationIdx, gateStateOf, useFloorCtx, type FWo } from "./kit";
+import { waitingGateId, gateOfStation, isLive, stationIdx, gateStateOf, useFloorCtx, type FWo } from "./kit";
 
 const fit = (t: string, px: number, cw: number): string => {
   const n = Math.max(3, Math.floor(px / cw));
@@ -44,16 +44,19 @@ function Chevrons({ pts, id }: { pts: Pt[]; id: string }) {
 }
 
 function Tag({ w, x, y, tw, th, detail, onOpen }: { w: FWo; x: number; y: number; tw: number; th: number; detail: boolean; onOpen: (id: string) => void }) {
+  const ctx = useFloorCtx();
   const kind = tagKind(w);
   const cy = y + th / 2;
+  const gate = kind === "wait" ? waitingGateId(ctx, w) : null;
   const word = tagWord(w);
+  const wordFull = gate ? `${word} ${gate}` : word;
   const open = () => onOpen(w.id);
   const idText = detail || tw >= 72 ? w.id : w.id.replace(/^WO-/, "");
-  const wordW = word.length * 6.6 + 8;
+  const wordW = wordFull.length * 6.6 + 8;
   const tx = x + 22 + w.id.length * 6.6 + 8;
   return (
-    <g className={`f-tag ${kind}`} tabIndex={0} role="button" aria-label={`${w.id} ${w.title}, ${word}`} data-wo={w.id} id={`floor-tok-${w.id}`} onClick={open} onKeyDown={keyOnEnter(open)}>
-      <title>{`${w.id} · ${w.title}\n${w.state} · ${w.priority}`}</title>
+    <g className={`f-tag ${kind}`} tabIndex={0} role="button" aria-label={`${w.id} ${w.title}, ${wordFull}`} data-wo={w.id} id={`floor-tok-${w.id}`} onClick={open} onKeyDown={keyOnEnter(open)}>
+      <title>{`${w.id} · ${w.title}\n${gate ? `Waiting at gate ${gate}` : w.state} · ${w.priority} · ${ctx.project.name}`}</title>
       <rect x={x} y={y} width={tw} height={th} rx={2} className="f-tb" />
       {kind === "bad" ? <rect x={x} y={y} width={tw} height={th} rx={2} fill="url(#hatch)" pointerEvents="none" /> : null}
       <rect x={x} y={y} width={17} height={th} rx={2} className="f-bd" />
@@ -65,7 +68,7 @@ function Tag({ w, x, y, tw, th, detail, onOpen }: { w: FWo; x: number; y: number
       {detail ? (
         <>
           <text x={tx} y={cy + 4} className="f-ttl">{fit(w.title, tw - (tx - x) - wordW - 6, 6.6)}</text>
-          <text x={x + tw - 6} y={cy + 4} textAnchor="end" className={`f-st ${kind}`}>{word}</text>
+          <text x={x + tw - 6} y={cy + 4} textAnchor="end" className={`f-st ${kind}`}>{wordFull}</text>
         </>
       ) : null}
     </g>

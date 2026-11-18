@@ -143,7 +143,7 @@ describe("New work order", () => {
   it("submits once with an Idempotency-Key even when the button is clicked twice, then shows the classification and route", async () => {
     const calls = await open({ "POST /api/v1/projects/payments/work-orders": submitOk });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
-    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Refund crashes on a zero amount. Steps to reproduce: post zero." } });
+    fireEvent.change(screen.getByLabelText("What should change and why"), { target: { value: "Refund crashes on a zero amount. Steps to reproduce: post zero." } });
     expect(await screen.findByText("Classifier preview:")).toBeTruthy();
     const submit = document.getElementById("nwo-submit") as HTMLElement;
     fireEvent.click(submit);
@@ -152,11 +152,9 @@ describe("New work order", () => {
     const post = calls.find((c) => c.method === "POST" && c.path === "/api/v1/projects/payments/work-orders") as Call;
     expect(post.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
     expect(post.body).toMatchObject({ repo: "payments-api", title: "Fix refund crash", source: "web" });
-    // the card the legacy app showed after a submit: class, confidence and the proposed route
-    expect(await screen.findByText("WO-3000 classified as Bug")).toBeTruthy();
-    expect(screen.getByText("Proposed route")).toBeTruthy();
-    expect(document.querySelector(".int-route")).toBeTruthy();
-    expect(screen.getByText(/91%/)).toBeTruthy();
+    // like the prototype: a toast and the new record opens
+    expect(await screen.findByText("WO-3000 submitted to Intake")).toBeTruthy();
+    expect(window.location.hash).toContain("WO-3000");
   });
 
   it("shows the server's refusal inline and keeps the dialog open", async () => {
