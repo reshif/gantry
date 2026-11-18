@@ -3,7 +3,7 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Children, Fragment, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
@@ -361,6 +361,7 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
 export interface Crumb {
   label: ReactNode;
   href?: string;
+  onClick?: () => void;
 }
 
 /** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
@@ -380,7 +381,7 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, cru
             crumbs.map((c, i) => (
               <span key={i} className="crumb">
                 {i ? <span aria-hidden="true">/ </span> : null}
-                {c.href ? <a href={c.href}>{c.label}</a> : <span>{c.label}</span>}
+                {c.href ? <a href={c.href} onClick={c.onClick ? (e) => { e.preventDefault(); c.onClick?.(); } : undefined}>{c.label}</a> : <span>{c.label}</span>}
               </span>
             ))
           ) : (

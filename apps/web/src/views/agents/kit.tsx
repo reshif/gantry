@@ -94,9 +94,11 @@ export function useModels() {
   const routing = useRouting().data;
   const list: ModelOpt[] = [];
   for (const v of vendors) for (const m of v.models ?? []) if (m.enabled && v.connected) list.push({ id: m.id, name: m.name, vendor: v.name });
+  const all: ModelOpt[] = vendors.flatMap((v) => (v.models ?? []).map((m) => ({ id: m.id, name: m.name, vendor: v.name })));
   const find = (id: string) => vendors.flatMap((v) => (v.models ?? []).map((m) => ({ m, v }))).find((x) => x.m.id === id);
   return {
     list,
+    all,
     name: (id: string): string => find(id)?.m.name ?? id,
     usable: (id: string): boolean => { const x = find(id); return !!(x && x.m.enabled && x.v.connected); },
     defaultModel: routing?.defaultModel ?? "",

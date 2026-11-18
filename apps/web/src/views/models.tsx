@@ -8,83 +8,59 @@
  * Not ported, on purpose: the "Test connection" button (it only simulated an answer; health and latency now come from the metering of real calls), the simulated
  * wording of the connect dialogs, and the client-side route resolver (the preview asks GET /routing/resolve).
  */
-import { fmt } from "@gantry/domain";
-import { useCan } from "../api/can";
-import { useAgents, useProjects, useRouting, useVendors } from "../api/queries";
-import { Btn, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
-import { navigate, useHash } from "../lib/router";
+import { useProjects, useRouting, useVendors } from "../api/queries";
+import { Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { useRouteTab } from "../lib/routeQuery";
 import { Async, qState } from "../ui/async";
-import { useUI } from "../ui/overlay-context";
 import { useCatalog } from "./projects/kit";
-import { useAllRepos } from "./govern/data";
-import { Callout } from "./models/Callout";
-import { AddVendorDialog } from "./models/Templates";
-import { BudgetsPanel, PricesPanel, VendorBudgets } from "./models/Prices";
+import { ModelPrices, ProjectBudgets } from "./models/Prices";
 import { RoutingPanel } from "./models/Routing";
 import { VendorPanel } from "./models/Vendor";
-import { dec } from "./models/kit";
+import { usd } from "./models/kit";
 
-type Tab = "vendors" | "routing" | "prices";
 
 export default function ModelsView() {
-  const ui = useUI();
-  const perm = dec(useCan("model.edit"));
   const vq = useVendors();
   const rq = useRouting();
   const vendors = vq.data ?? [];
-  const agents = useAgents().data ?? [];
   const projects = useProjects().data ?? [];
   const cat = useCatalog();
-  const { repos } = useAllRepos();
 
   const mtd = vendors.reduce((t, v) => t + (v.mtd || 0), 0);
   const bud = vendors.reduce((t, v) => t + (v.budget || 0), 0);
-  const allN = vendors.reduce((t, v) => t + (v.connected ? v.models.length : 0), 0);
-  const enabledN = vendors.reduce((t, v) => t + (v.connected ? v.models.filter((m) => m.enabled).length : 0), 0);
-  const degraded = vendors.filter((v) => v.connected && v.health !== "healthy");
+  const allN = vendors.reduce((t, v) => t + v.models.length, 0);
+  const enabledN = vendors.reduce((t, v) => t + v.models.filter((m) => m.enabled).length, 0);
   const defaultModel = vendors.flatMap((v) => v.models.map((m) => ({ m, v }))).find((x) => x.m.id === rq.data?.defaultModel);
 
-  const hash = useHash();
-  const tab: Tab = hash.id === "models" && (hash.param === "routing" || hash.param === "prices") ? hash.param : "vendors";
-  const setTab = (t: string) => navigate("models", t === "vendors" ? null : t);
-
-  const scrollTo = (id: string) => setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
+  const [tab, setTab] = useRouteTab(["vendors", "routing", "prices"], "vendors");
 
   return (
     <div className="view view-models">
       <ViewHead
         title="Models"
+        kicker="All lines"
         sub="Vendors, routing and what each station spends."
-        actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} />}
       />
       <StatRow id="md-stats">
-        <Stat label="Models" value={qState(vq, () => String(allN))} sub={`${enabledN} enabled`} />
-        <Stat label="Vendors" value={qState(vq, () => String(vendors.length))} sub={vendors.some((v) => !v.connected) ? `${vendors.filter((v) => !v.connected).length} not connected` : "all connected"} />
-        <Stat label="Spend MTD" value={qState(vq, () => fmt.money0(mtd))} sub={bud ? `of ${fmt.money0(bud)}` : "month to date"} />
-        <Stat label="Default" value={qState(rq, (r) => defaultModel?.m.name ?? r.defaultModel ?? "–")} sub={defaultModel ? defaultModel.v.name : undefined} />
+        <Stat label="Models" value={qState(vq, () => String(allN))} sub={`${enabledN} enabled`} tone="info" />
+        <Stat label="Vendors" value={qState(vq, () => String(vendors.length))} sub="all connected" />
+        <Stat label="Spend MTD" value={qState(vq, () => usd(mtd))} sub={bud ? `of ${usd(bud)}` : "month to date"} />
+        <Stat label="Default" value={qState(rq, (r) => defaultModel?.m.name ?? r.defaultModel ?? "–")} sub="unless overridden" />
       </StatRow>
       <Tabs idPrefix="md-tab" active={tab} onChange={setTab} items={[{ id: "vendors", label: "Vendors", count: vq.data ? vendors.length : null }, { id: "routing", label: "Routing" }, { id: "prices", label: "Prices and budgets" }]} />
       <Async query={vq} what="model vendors" id="models">
         {() => (
           <Async query={rq} what="model routing" id="models-routing">
             {(r) => tab === "vendors" ? (
-              <>
-                {degraded.length ? (
-                  <Callout warn icon="alert" cls="md-incident" role="status">
-                    {`${degraded.map((v) => `${v.name} is ${v.health}${v.latency ? ` (p50 ${v.latency} ms)` : ""}.`).join(" ")} Calls to it fall back to the same model on another allowed vendor when it errors.`}
-                  </Callout>
-                ) : null}
-                <div className="card-grid vendor-grid">
-                  {vendors.map((v) => <VendorPanel key={v.id} v={v} vendors={vendors} routing={r} agents={agents} cat={cat} />)}
-                </div>
-              </>
+              <div className="card-grid vendor-grid">
+                {vendors.map((v) => <VendorPanel key={v.id} v={v} />)}
+              </div>
             ) : tab === "routing" ? (
-              <RoutingPanel routing={r} vendors={vendors} agents={agents} repos={repos} projects={projects} cat={cat} />
+              <RoutingPanel routing={r} vendors={vendors} cat={cat} />
             ) : (
-              <div className="md-stack">
-                <PricesPanel vendors={vendors} />
-                <VendorBudgets vendors={vendors} />
-                <BudgetsPanel projects={projects} />
+              <div className="stack md-stack">
+                <ModelPrices vendors={vendors} />
+                <ProjectBudgets projects={projects} />
               </div>
             )}
           </Async>

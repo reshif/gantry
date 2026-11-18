@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG, VENDOR_TEMPLATES } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -99,158 +99,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Models screen (legacy models.js on the real API)", () => {
-  it("shows the vendor hub: health from real calls, key mask, residency, models and the title block", async () => {
-    setup();
-    mount();
-    const a = await byId("vendor-anthropic");
-    expect(within(a).getByText("Anthropic")).toBeTruthy();
-    expect(a.textContent).toContain("sk-ant-••••••••3f9a");
-    expect(a.textContent).toContain("$4,182 / $9,000");
-    expect(a.querySelector(".md-def")?.textContent).toBe("factory default");
-    expect(within(a).getAllByText(/^Used by/).length).toBeGreaterThan(0);
-    expect(a.querySelector("#mt-claude-haiku-5-5")).toBeTruthy();
-    expect((a.querySelector("#mt-claude-haiku-5-5") as HTMLInputElement).checked).toBe(false);
-    const b = await byId("vendor-bedrock");
-    expect(b.querySelector(".vendor-head .status")?.textContent).toContain("Degraded");
-    expect(b.textContent).toContain("Data retention: zero");
-    const l = await byId("vendor-local");
-    expect(l.classList.contains("is-off")).toBe(true);
-    expect(l.textContent).toContain("Not connected");
-    expect(l.querySelector("#vendor-connect-local")?.textContent).toContain("Connect Local models");
-    expect(document.querySelector(".md-incident")?.textContent).toContain("Amazon Bedrock is degraded (p50 1460 ms)");
-    expect(document.body.textContent).toContain("Vendors41 not connected");
-    expect(document.getElementById("vendor-test-anthropic")).toBeNull();
-  });
-
-  it("toggles a model through the real command, and locks the factory default and a primary model with the reason", async () => {
-    const calls = setup({ "PATCH /api/v1/models/claude-haiku-5-5": () => ok({ msg: "Claude Haiku 5.5 enabled." }) });
-    mount();
-    fireEvent.click(await byId("mt-claude-haiku-5-5"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "PATCH", path: "/api/v1/models/claude-haiku-5-5", body: { enabled: true } });
-    expect((await byId("mt-claude-opus-5-5")).getAttribute("data-reason")).toMatch(/factory default/);
-    expect((await byId("mt-claude-sonnet-5-5")).getAttribute("data-reason")).toMatch(/Primary model of Build agent/);
-    expect((await byId("md-rm-claude-opus-5-5")).getAttribute("data-reason")).toMatch(/factory default/);
-    expect((await byId("md-rm-claude-sonnet-5-5")).getAttribute("data-reason")).toMatch(/fallback order/);
-    expect((await byId("mt-local-coder")).getAttribute("data-reason")).toMatch(/Connect Local models first/);
-    expect(writes(calls)).toHaveLength(1);
-  });
-
-  it("connects a vendor: the key goes to the server, never into the screen afterwards; validation before the call", async () => {
-    const calls = setup({ "PATCH /api/v1/vendors/local": () => ok({ msg: "Local models connected." }) });
-    mount();
-    fireEvent.click(await byId("vendor-connect-local"));
-    const ep = await byId("vc-endpoint");
-    expect((ep as HTMLInputElement).value).toBe("http://gpu-pool.internal:8000/v1");
-    type(ep, "ftp://nope");
-    fireEvent.click(await byId("vc-submit"));
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/http:\/\/ or https:\/\//));
-    expect(writes(calls)).toHaveLength(0);
-    type(ep, "http://gpu-pool.internal:8000/v1");
-    type(await byId("vc-key"), "tok-" + "9".repeat(12));
-    type(await byId("vc-budget"), "250");
-    type(await byId("vc-retention"), "zero");
-    fireEvent.click(await byId("vc-submit"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    const w = writes(calls)[0]!;
-    expect(w).toMatchObject({ method: "PATCH", path: "/api/v1/vendors/local", body: { action: "vendor.connect", patch: { key: "tok-" + "9".repeat(12), connected: true, budget: 250, retention: "zero", endpoint: "http://gpu-pool.internal:8000/v1" } } });
-    expect(document.body.innerHTML).not.toContain("tok-" + "9".repeat(12));
-  });
-
-  it("refuses a short hosted key before calling, and shows the server's refusal", async () => {
-    const calls = setup({ "PATCH /api/v1/vendors/anthropic": () => ({ status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } }) });
-    mount();
-    fireEvent.click(await byId("vendor-connect-anthropic"));
-    type(await byId("vc-key"), "short");
-    fireEvent.click(await byId("vc-submit"));
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/at least 8 characters/));
-    expect(writes(calls)).toHaveLength(0);
-    type(await byId("vc-key"), "k".repeat(20));
-    fireEvent.click(await byId("vc-submit"));
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/changed since you loaded/));
-    expect(writes(calls)[0]!.headers).toBeTruthy();
-  });
-
-  it("disconnect is locked while the factory default is on the vendor", async () => {
-    const calls = setup({ "PATCH /api/v1/vendors/bedrock": () => ok({ msg: "Amazon Bedrock disconnected." }) });
-    mount();
-    fireEvent.click(await byId("vendor-disc-anthropic"));
-    expect((await byId("vd-submit")).getAttribute("data-reason")).toMatch(/factory default model is on Anthropic/);
-    fireEvent.click(await byId("vd-submit"));
-    expect(writes(calls)).toHaveLength(0);
-    cleanup();
-    mount();
-    fireEvent.click(await byId("vendor-disc-bedrock"));
-    fireEvent.click(await byId("vd-submit"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "PATCH", path: "/api/v1/vendors/bedrock", body: { patch: { connected: false }, action: "vendor.disconnect" } });
-  });
-
-  it("adds a custom vendor and a model with prices and a same-model link, each with an idempotency key", async () => {
-    const calls = setup({
-      "POST /api/v1/vendors": () => ok({ msg: "Acme gateway added.", vendor: { id: "acme-gateway", name: "Acme gateway" } }),
-      "POST /api/v1/models": () => ok({ msg: "Mistral Large added to Mistral EU." }),
-    });
-    mount();
-    fireEvent.click(await byId("md-add-vendor"));
-    fireEvent.click(await byId("va-manual"));
-    fireEvent.click(await byId("va-ok"));
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toBe("Name the vendor."));
-    type(await byId("va-name"), "Acme gateway");
-    type(await byId("va-endpoint"), "http://insecure.example.com");
-    fireEvent.click(await byId("va-ok"));
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/https:\/\//));
-    type(await byId("va-endpoint"), "https://llm.acme.dev/v1");
-    type(await byId("va-key"), "k".repeat(16));
-    type(await byId("va-region"), "eu-west-1");
-    type(await byId("va-retention"), "zero");
-    fireEvent.click(await byId("va-ok"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/vendors", body: { name: "Acme gateway", endpoint: "https://llm.acme.dev/v1", key: "k".repeat(16), region: "eu-west-1", retention: "zero" } });
-    expect(writes(calls)[0]!.headers["idempotency-key"]).toBeTruthy();
-
-    cleanup();
-    mount();
-    fireEvent.click(await byId("vendor-addmodel-mistral-eu"));
-    type(await byId("ma-name"), "Mistral Large");
-    type(await byId("ma-id"), "mistral-large");
-    type(await byId("ma-in"), "2");
-    type(await byId("ma-out"), "6");
-    type(await byId("ma-tier"), "frontier");
-    type(await byId("ma-same"), "claude-sonnet-5-5");
-    fireEvent.click(await byId("ma-ok"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls)[1]).toMatchObject({ method: "POST", path: "/api/v1/models", body: { vendor: "mistral-eu", def: { id: "mistral-large", name: "Mistral Large", inPrice: "2", outPrice: "6", tier: "frontier", canonical: "claude-sonnet-5-5" } } });
-    expect(writes(calls)[1]!.headers["idempotency-key"]).toBeTruthy();
-  });
-
-  it("removes a model through the dialog", async () => {
-    const calls = setup({ "DELETE /api/v1/models/local-coder": () => ok({ msg: "coder-34b removed." }) });
-    mount();
-    fireEvent.click(await byId("md-rm-local-coder"));
-    fireEvent.click(await byId("md-rm-ok"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "DELETE", path: "/api/v1/models/local-coder" });
-  });
-
-  it("shows station qualification for a custom vendor and records it", async () => {
-    const calls = setup({ "POST /api/v1/vendors/mistral-eu/qualify": () => ok({ msg: "Mistral EU is qualified for Verify." }) });
-    mount();
-    const q = await byId("vendor-qual-mistral-eu");
-    expect(q.textContent).toContain("S5 Build: qualified");
-    expect(q.textContent).toMatch(/Verify: not qualified/);
-    type(await byId("vendor-qual-station-mistral-eu"), "verify");
-    fireEvent.click(await byId("vendor-qual-go-mistral-eu"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/vendors/mistral-eu/qualify", body: { station: "verify" } });
-    expect(writes(calls)[0]!.headers["if-match"]).toBe("5");
-    expect(document.getElementById("vendor-qual-anthropic")).toBeNull();
-  });
-});
-
 describe("routing policy", () => {
-  beforeEach(() => { window.location.hash = "#models/routing"; });
+  beforeEach(() => { window.location.hash = "#models?tab=routing"; });
   it("changes the default model with If-Match from the loaded version", async () => {
     const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
     mount();
@@ -262,99 +112,16 @@ describe("routing policy", () => {
     expect(w.headers["if-match"]).toBe("4");
   });
 
-  it("sets a station override and a class override, and clears one", async () => {
-    const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
+  it("Routing carries the prototype's panels only: default and per-station, fallback chain (read-only), routing rules, then the kept routing versions", async () => {
+    setup();
     mount();
-    type(await byId("rt-st-build"), "claude-sonnet-5-5");
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body.routing.overrides).toEqual({ intake: "claude-haiku-5-5", build: "claude-sonnet-5-5" });
-    type(await byId("rt-cl-hotfix"), "claude-opus-5-5");
-    await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls)[1]!.body.routing.classOverrides).toEqual({ hotfix: "claude-opus-5-5" });
-    type(await byId("rt-st-intake"), "");
-    await waitFor(() => expect(writes(calls)).toHaveLength(3));
-    expect(writes(calls)[2]!.body.routing.overrides).toEqual({});
-  });
-
-  it("reorders and edits the fallback order; the last fallback cannot be removed; unavailable ones are marked", async () => {
-    const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
-    mount();
-    expect((await byId("rt-fb-up-0")).getAttribute("data-reason")).toBe("Already first.");
-    expect((await byId("rt-fb-down-1")).getAttribute("data-reason")).toBe("Already last.");
-    fireEvent.click(await byId("rt-fb-down-0"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body.routing.fallback).toEqual(["claude-sonnet-5-5", "claude-opus-5-5"]);
-    type(await byId("rt-fb-add"), "bedrock-claude-sonnet-5-5");
-    await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls)[1]!.body.routing.fallback).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "bedrock-claude-sonnet-5-5"]);
-    fireEvent.click(await byId("rt-fb-rm-1"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(3));
-    expect(writes(calls)[2]!.body.routing.fallback).toEqual(["claude-opus-5-5"]);
-  });
-
-  it("the cross-model switch is off by default and saves the factory switch", async () => {
-    const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
-    mount();
-    const sw = (await byId("rt-cross")) as HTMLInputElement;
-    expect(sw.checked).toBe(false);
-    fireEvent.click(sw);
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body.routing.crossModelFallback).toBe(true);
-  });
-
-  it("adds and removes a residency rule; refuses a duplicate tag and the same vendor twice before calling", async () => {
-    const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
-    mount();
-    fireEvent.click(await byId("rr-del-RR-1"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body.routing.rules).toEqual([]);
-    // The duplicate check uses the loaded rules (RR-1 is regulated).
-    fireEvent.submit(await byId("rr-form"));
-    await new Promise((r) => setTimeout(r, 30));
-    expect(writes(calls)).toHaveLength(1);
-    type(await byId("rr-tag"), "pci");
-    type(await byId("rr-use"), "bedrock");
-    type(await byId("rr-alt"), "bedrock");
-    fireEvent.submit(await byId("rr-form"));
-    await new Promise((r) => setTimeout(r, 30));
-    expect(writes(calls)).toHaveLength(1);
-    type(await byId("rr-alt"), "local");
-    type(await byId("rr-region"), "eu-central-1");
-    type(await byId("rr-note"), "Card data stays in the EU");
-    fireEvent.submit(await byId("rr-form"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls)[1]!.body.routing.rules.at(-1)).toEqual({ id: "RR-2", tag: "pci", use: "bedrock", region: "eu-central-1", alt: "local", note: "Card data stays in the EU" });
-  });
-
-  it("saves a per-project policy: allowed vendors, regions, retention and the cross-model opt-in (locked until the factory switch is on)", async () => {
-    const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
-    mount();
-    type(await byId("rt-proj"), "risk");
-    fireEvent.click(await byId("rt-proj-v-bedrock"));
-    type(await byId("rt-proj-regions"), "eu-central-1, on-prem");
-    fireEvent.click(await byId("rt-proj-r-zero"));
-    expect((await byId("rt-proj-cross")).getAttribute("data-reason")).toMatch(/switched off for the factory/);
-    fireEvent.click(await byId("rt-proj-save"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body.routing.projects).toEqual({ risk: { allowedVendors: ["bedrock"], allowedRegions: ["eu-central-1", "on-prem"], allowedRetention: ["zero"] } });
-  });
-
-  it("previews the route from the API's resolver and follows the repo and station", async () => {
-    const calls = setup();
-    mount();
-    await waitFor(() => expect(document.querySelector(".md-result")?.textContent).toContain("bedrock-claude-sonnet-5-5"));
-    expect(calls.filter((c) => c.path === "/api/v1/routing/resolve").at(-1)!.query.get("repo")).toBe("risk-engine");
-    expect(document.querySelector(".md-steps")?.textContent).toContain("RR-1");
-    type(await byId("rt-prev-repo"), "payments-api");
-    await waitFor(() => expect(document.querySelector(".md-result")?.textContent).toContain("claude-opus-5-5"));
-    type(await byId("rt-prev-station"), "review");
-    await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/routing/resolve").at(-1)!.query.get("station")).toBe("review"));
-  });
-
-  it("shows a blocked route", async () => {
-    setup({ "GET /api/v1/routing/resolve": () => ({ body: { model: null, vendor: null, wanted: "claude-opus-5-5", layer: "default", steps: ["RR-1: no allowed vendor serves claude-opus-5-5."], blocked: "x", crossModel: false, sameModelFallback: false, rule: null } }) });
-    mount();
-    await waitFor(() => expect(document.querySelector(".md-result.is-block")?.textContent).toContain("Blocked: no allowed model"));
+    await byId("rt-default");
+    expect(document.getElementById("rt-cross")).toBeNull();
+    expect(document.getElementById("rt-proj")).toBeNull();
+    expect(document.body.textContent).not.toContain("Where would this request go");
+    expect(document.body.textContent).not.toContain("Per-project policy");
+    const titles = [...document.querySelectorAll(".panel h2, .panel h3, .panel-head")].map((t) => t.textContent ?? "").join("|");
+    for (const t of ["Default and per-station", "Fallback chain", "Routing rules", "Routing versions"]) expect(titles).toContain(t);
   });
 });
 
@@ -364,163 +131,21 @@ describe("vendors summary", () => {
     setup({});
     mount();
     const tile = await waitFor(() => { const e = [...document.querySelectorAll("#md-stats .stat-tile")].find((x) => x.textContent?.includes("Models")); if (!e) throw new Error("no tile"); return e; });
-    const connectedModels = VENDORS.filter((v) => v.connected).reduce((n, v) => n + v.models.length, 0);
-    await waitFor(() => expect(tile.textContent).toContain(`${connectedModels}`));
+    const allModels = VENDORS.reduce((n, v) => n + v.models.length, 0);
+    await waitFor(() => expect(tile.textContent).toContain(`${allModels}`));
     const off = (await byId("vendor-local")).querySelector(".tb-vendor dd")!;
-    expect(off.textContent).toBe("–");
+    expect(off.textContent).toBe("0 ms");
   });
 });
 
 describe("routing versions", () => {
-  beforeEach(() => { window.location.hash = "#models/routing"; });
+  beforeEach(() => { window.location.hash = "#models?tab=routing"; });
   it("lists the published versions with who and why", async () => {
     setup({ "GET /api/v1/routing/versions": () => ({ body: [{ version: 4, publishedAt: new Date().toISOString(), publishedBy: "asha", note: "Default model changed" }, { version: 3, publishedAt: new Date().toISOString(), publishedBy: "system", note: "" }] }) });
     mount();
     const t = await byId("rv-table");
     await waitFor(() => expect(t.textContent).toContain("Default model changed"));
     expect(t.querySelector("tbody tr")?.textContent).toContain("v4");
-  });
-});
-
-describe("prices and budgets", () => {
-  beforeEach(() => { window.location.hash = "#models/prices"; });
-  it("lists price versions with their effective dates and publishes a price from a date, with an idempotency key", async () => {
-    const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "Price version 3 is in force.", version: 3 }) });
-    mount();
-    const t = await byId("pv-table");
-    await waitFor(() => expect(t.textContent).toContain("Price cut"));
-    expect(t.querySelector("tbody tr")?.textContent).toContain("in force");
-    type(await byId("pv-in-claude-sonnet-5-5"), "");
-    fireEvent.submit(await byId("pv-form"));
-    await new Promise((r) => setTimeout(r, 30));
-    expect(writes(calls)).toHaveLength(0);
-    type(await byId("pv-in-claude-sonnet-5-5"), "3.5");
-    type(await byId("pv-out-claude-sonnet-5-5"), "16");
-    type(await byId("pv-note"), "Rate card");
-    fireEvent.submit(await byId("pv-form"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/prices", body: { prices: { "claude-sonnet-5-5": { in: 3.5, out: 16 } }, note: "Rate card" } });
-    expect(writes(calls)[0]!.body.effectiveFrom).toBeUndefined();
-    expect(writes(calls)[0]!.headers["idempotency-key"]).toBeTruthy();
-  });
-
-  it("publishes several changed models as one version and leaves the unchanged ones out", async () => {
-    const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "Price version 3 is in force.", version: 3 }) });
-    mount();
-    await byId("pv-edit");
-    const ids = [...document.querySelectorAll<HTMLInputElement>("#pv-edit input[id^='pv-in-']")].map((i) => i.id.replace("pv-in-", ""));
-    expect(ids.length).toBeGreaterThan(1);
-    for (const id of ids.slice(0, 2)) { type(await byId(`pv-in-${id}`), "7"); type(await byId(`pv-out-${id}`), "9"); }
-    fireEvent.submit(await byId("pv-form"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(Object.keys(writes(calls)[0]!.body.prices).sort()).toEqual(ids.slice(0, 2).sort());
-  });
-
-  it("shows each vendor's spend against its budget, read-only", async () => {
-    setup({});
-    mount();
-    const t = await byId("vb-table");
-    expect(t.querySelectorAll("tbody tr").length).toBeGreaterThan(0);
-    expect(t.querySelector("input")).toBeNull();
-  });
-
-  it("schedules a price for a future date", async () => {
-    const calls = setup({ "POST /api/v1/prices": () => ok({ msg: "scheduled", version: 3 }) });
-    mount();
-    type(await byId("pv-in-claude-sonnet-5-5"), "4");
-    type(await byId("pv-out-claude-sonnet-5-5"), "20");
-    const later = new Date(Date.now() + 5 * 86400000);
-    later.setMinutes(later.getMinutes() - later.getTimezoneOffset());
-    type(await byId("pv-eff"), later.toISOString().slice(0, 16));
-    fireEvent.submit(await byId("pv-form"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(Date.parse(writes(calls)[0]!.body.effectiveFrom)).toBeGreaterThan(Date.now() + 4 * 86400000);
-  });
-
-  it("sets the per-work-order cap of a project", async () => {
-    const calls = setup({ "PUT /api/v1/budgets/payments": () => ok({ msg: "Each work order in Payments Platform may spend up to $15." }) });
-    mount();
-    const input = await byId("bd-wo-payments");
-    type(input, "15");
-    fireEvent.click(await byId("bd-save-payments"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/budgets/payments", body: { perWorkOrder: 15 } });
-    expect((await byId("bd-wo-risk") as HTMLInputElement).value).toBe("20");
-  });
-});
-
-describe("permissions", () => {
-  it("without model.edit every control shows why it is locked and nothing is sent", async () => {
-    const calls = setup({}, ["model.edit", "project.config"]);
-    mount();
-    const locked = async (ids: string[]) => {
-      for (const id of ids) {
-        const el = await byId(id);
-        await waitFor(() => expect(el.getAttribute("data-reason")).toMatch(/Needs Factory Admin\. No role holds/));
-        fireEvent.click(el);
-      }
-    };
-    await locked(["md-add-vendor", "vendor-connect-anthropic", "vendor-addmodel-anthropic", "vendor-disc-anthropic", "vendor-qual-go-mistral-eu"]);
-    expect((await byId("mt-claude-haiku-5-5")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
-    window.location.hash = "#models/routing";
-    await locked(["rr-del-RR-1", "rr-add", "rt-proj-save"]);
-    expect((await byId("rt-default") as HTMLSelectElement).disabled).toBe(true);
-    expect((await byId("rt-st-build") as HTMLSelectElement).disabled).toBe(true);
-    expect((await byId("rt-fb-rm-0")).getAttribute("data-reason")).toMatch(/No role holds model.edit/);
-    window.location.hash = "#models/prices";
-    await locked(["pv-add", "bd-save-payments"]);
-    window.location.hash = "#models/routing";
-    await waitFor(() => expect(document.body.textContent).toContain("Read-only for you: routing."));
-    expect(writes(calls)).toHaveLength(0);
-  });
-});
-
-describe("vendor templates and model discovery", () => {
-  it("picks Bedrock, shows only its fields, connects, then lists the discovered models with switches", async () => {
-    const calls = setup({
-      "POST /api/v1/vendors/from-template": () => ok({ msg: "AWS Bedrock connected.", vendor: { id: "aws-bedrock", name: "AWS Bedrock", template: "bedrock" }, discovery: { found: 2, models: [{ id: "bedrock-sonnet", name: "Claude Sonnet 4.5", enabled: false, priced: true }, { id: "bedrock-x", name: "Mystery", enabled: false, priced: false }], warnings: ["Inference profiles were not listed: denied"] } }),
-      "PATCH /api/v1/models/bedrock-sonnet": () => ok({ msg: "on" }),
-    });
-    mount();
-    fireEvent.click(await byId("md-add-vendor"));
-    for (const id of ["anthropic", "bedrock", "openai", "azure-openai", "gemini", "vertex", "openai-compatible"]) await byId(`vt-pick-${id}`);
-    fireEvent.click(await byId("vt-pick-bedrock"));
-    await byId("vt-f-region");
-    expect(document.getElementById("vt-f-apiKey")).toBeNull();
-    fireEvent.click(await byId("vt-submit"));
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toBe("Access key id is required."));
-    expect(writes(calls)).toHaveLength(0);
-    type(await byId("vt-f-region"), "eu-west-1");
-    type(await byId("vt-f-accessKeyId"), "AKIAABCDEFGHIJKLMNOP");
-    type(await byId("vt-f-secretAccessKey"), "s".repeat(40));
-    fireEvent.click(await byId("vt-submit"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/vendors/from-template", body: { template: "bedrock", fields: { region: "eu-west-1", accessKeyId: "AKIAABCDEFGHIJKLMNOP" }, retention: "standard" } });
-    expect(writes(calls)[0]!.headers["idempotency-key"]).toBeTruthy();
-    await byId("vt-found");
-    expect(document.body.textContent).toContain("Inference profiles were not listed");
-    expect(document.body.textContent).toContain("Claude Sonnet 4.5");
-    expect(document.body.textContent).toContain("needs a price");
-    expect((await byId("vt-m-bedrock-x")).getAttribute("data-reason")).toBeTruthy();
-  });
-
-  it("shows the server's reason when the credentials are refused and keeps the form", async () => {
-    setup({ "POST /api/v1/vendors/from-template": () => ({ status: 422, body: { ok: false, msg: "Anthropic rejected the credentials (HTTP 401). Check the key and its permissions." } }) });
-    mount();
-    fireEvent.click(await byId("md-add-vendor"));
-    fireEvent.click(await byId("vt-pick-anthropic"));
-    type(await byId("vt-f-apiKey"), "sk-ant-" + "x".repeat(20));
-    fireEvent.click(await byId("vt-submit"));
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/rejected the credentials/));
-    expect(document.getElementById("vt-f-apiKey")).not.toBeNull();
-  });
-
-  it("Refresh models on a vendor posts discover and toasts the result", async () => {
-    const calls = setup({ "POST /api/v1/vendors/anthropic/discover": () => ok({ msg: "Anthropic: found 3 models, 1 new." }) });
-    mount();
-    fireEvent.click(await byId("vendor-refresh-anthropic"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/vendors/anthropic/discover" });
   });
 });
 

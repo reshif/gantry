@@ -53,7 +53,10 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   sortSelect?: boolean;
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
+  /** Additive: false hides the phone "Sort by" select (screens whose prototype has none). */
+  sortSelect?: boolean;
   pageSize?: number;
+  /** With `pageSize`: the prototype's footer ("1–12 of 13", Prev / Page n / N / Next) instead of "Show more"; sortable headers carry the ↕ hint. Without `pageSize` it is only the count footer. */
   empty?: { title: string; text?: string; action?: ReactNode };
   /** Server paging: more rows exist on the server. */
   hasMore?: boolean;
@@ -62,7 +65,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   /** Total on the server, for the "Showing x of y" line. */
   total?: number;
   /** Numbered paging (prototype footer "1–15 of 77", Prev / Next, "Page 1 / 6"); `page` is 0-based and is the caller's (a URL) state. Replaces "Show more". Optional, additive. */
-  pager?: { page: number; size: number; onPage: (page: number) => void };
+  pager?: boolean | { page: number; size: number; onPage: (page: number) => void };
   /** "blueprint": sort arrows ▲ / ▼ and a quiet ↕ hint on sortable headers that are not sorted. Optional, additive. */
   glyphs?: "blueprint";
   /** The "Sort by" select shown above the stacked cards on a phone (default on); the prototype's list has none. */
@@ -80,6 +83,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const [seen, setSeen] = useState(`${pageSize ?? 0}:${rows.length}`);
   if (seen !== `${pageSize ?? 0}:${rows.length}`) {
     setSeen(`${pageSize ?? 0}:${rows.length}`);
+    setPage(0);
     setShown(pageSize ?? 0);
     setPage(0);
   }
@@ -118,10 +122,11 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
   if (cur && col) list.sort((a, b) => { const x = val(col, a); const y = val(col, b); return (x > y ? 1 : x < y ? -1 : 0) * cur.dir; });
-  const size = pager ? pager.size : proto && pageSize ? pageSize : 0;
+  const boolPager = pager === true;
+  const size = typeof pager === "object" ? pager.size : boolPager ? (pageSize || list.length) : proto && pageSize ? pageSize : 0;
   const pages = size ? Math.max(1, Math.ceil(list.length / size)) : 1;
-  const pageAt = size ? Math.min(Math.max(pager ? pager.page : page, 0), pages - 1) : 0;
-  const goPage = (n: number): void => (pager ? pager.onPage(n) : setPage(n));
+  const pageAt = size ? Math.min(Math.max(typeof pager === "object" ? pager.page : page, 0), pages - 1) : 0;
+  const goPage = (n: number): void => (typeof pager === "object" ? pager.onPage(n) : setPage(n));
   const visible = size ? list.slice(pageAt * size, (pageAt + 1) * size) : shown ? list.slice(0, shown) : list;
   const pick = (key: string, dir?: 1 | -1): void => {
     const active = cur?.key === key;
@@ -134,7 +139,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const ownedKeys = new Set(own1 ? own1.split("\u0000") : []);
   const sortable = columns.filter((c) => c.sort);
   const regionProps = overflow ? { role: "region", tabIndex: 0, "aria-label": caption ?? "Table" } : {};
-  const clientMore = !proto && shown && rows.length > shown;
+  const clientMore = !proto && !pager && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
       {sortable.length && mobileSort && sortSelect && !proto ? (

@@ -16,6 +16,8 @@ export interface RouteLocation {
   param: string | null;
   /** The project id from `#/p/<id>/...`, null for factory routes and legacy hashes. */
   project: string | null;
+  /** The `?a=b` part of the hash (prototype form `#/models?tab=prices`); empty when absent. Tabs, filters and drawers live here. */
+  q: Record<string, string>;
 }
 
 const dec = (v: string): string => {
@@ -32,7 +34,11 @@ export const hashPath = (hash: string): string => (hash.includes("?") ? hash.sli
 export const hashQuery = (hash: string): string => (hash.includes("?") ? hash.slice(hash.indexOf("?")) : "");
 
 export function parseHash(hash: string): RouteLocation {
-  const raw = hashPath(hash).replace(/^#\/?/, "");
+  const full = hash.replace(/^#\/?/, "");
+  const at = full.indexOf("?");
+  const raw = at < 0 ? full : full.slice(0, at);
+  const q: Record<string, string> = {};
+  if (at >= 0) new URLSearchParams(full.slice(at + 1)).forEach((v, k) => { q[k] = v; });
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {
@@ -40,7 +46,7 @@ export function parseHash(hash: string): RouteLocation {
     [head = "", ...rest] = rest.slice(1);
   }
   const tail = rest.join("/");
-  return { id: head, param: tail ? dec(tail) : null, project };
+  return { id: head, param: tail ? dec(tail) : null, project, q };
 }
 
 export function formatHash(id: string, param?: string | null, project?: string | null): string {

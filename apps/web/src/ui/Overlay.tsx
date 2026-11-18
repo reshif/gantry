@@ -306,7 +306,7 @@ interface StackItem {
 export function OverlayProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [stack, setStack] = useState<StackItem[]>([]);
-  const [drawer, setDrawer] = useState<{ key: string; render: (close: () => void) => ReactNode } | null>(null);
+  const [drawer, setDrawer] = useState<{ key: string; render: (close: () => void) => ReactNode; onClose?: (() => void) | undefined } | null>(null);
   const [pop, setPop] = useState<PopState | null>(null);
   const seq = useRef(1);
   const stackRef = useRef<StackItem[]>([]);
@@ -376,7 +376,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       },
       closeAllDialogs: () => setStack([]),
       drawer: {
-        open: (key, render) => setDrawer({ key, render }),
+        open: (key, render, onClose) => setDrawer({ key, render, onClose }),
         close: () => setDrawer(null),
         isOpen: (key) => !!drawerRef.current && (!key || drawerRef.current.key === key),
       },
@@ -438,7 +438,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("hashchange", onHash);
   }, [closePopover]);
 
-  const drawerClose = useCallback(() => setDrawer(null), []);
+  const drawerClose = useCallback(() => { drawerRef.current?.onClose?.(); setDrawer(null); }, []);
 
   return (
     <UIContext.Provider value={api}>

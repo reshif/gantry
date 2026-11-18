@@ -28,3 +28,6 @@ export function repoTags(r: Repo, projects: Project[]): string[] {
   if (p?.regulated && !t.includes("regulated")) t.push("regulated");
   return t;
 }
+
+/** Money as the Blueprint prints it: cents only when there are some ($6,383.20, $9,000). */
+export const usd = (n: number | null | undefined): string => `$${(n || 0).toLocaleString("en-US", { minimumFractionDigits: (n || 0) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;

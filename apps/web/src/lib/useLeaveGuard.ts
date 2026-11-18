@@ -39,7 +39,9 @@ function onHashChange(): void {
     lastHref = window.location.href;
     return;
   }
-  if (pageDirty.size && !window.confirm(LEAVE_MESSAGE)) {
+  // a tab or filter in the hash query (`#agents/ag-build?tab=skills`) is the same page: nothing is left
+  const route = (h: string): string => { const u = new URL(h); return u.origin + u.pathname + u.search + (u.hash.split("?")[0] ?? ""); };
+  if (pageDirty.size && route(lastHref) !== route(window.location.href) && !window.confirm(LEAVE_MESSAGE)) {
     reverting = true;
     window.location.replace(lastHref);
     return;
