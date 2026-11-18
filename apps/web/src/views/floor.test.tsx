@@ -215,6 +215,18 @@ describe("Floor: fidelity round 1", () => {
     expect(screen.getByText("Traveler")).toBeTruthy();
     expect(document.querySelector(".drawer .drawer-h")).toBeTruthy();
     expect(document.querySelector(".drawer .pipe .st")).toBeTruthy();
+    fireEvent.click(screen.getByText("Traveler"));
+    await waitFor(() => expect(window.location.hash).toMatch(/\/traveler\/WO-/));
+    expect(document.querySelector(".drawer .drawer-h")).toBeNull();
+  });
+
+  it("shows the prototype empty states: no gates waiting, and an empty belt", async () => {
+    mockApi({ "GET /api/v1/projects/payments/floor": () => ({ body: floorRead({ gates: [], workOrders: [] }) }) });
+    mount(<FloorView />);
+    await screen.findByRole("button", { name: /Line control/ });
+    expect(await screen.findByText("No gates waiting")).toBeTruthy();
+    expect(document.querySelectorAll(".belt .tok").length).toBe(0);
+    expect(document.querySelector("#floor-kpis")?.textContent).toMatch(/On belt\s*0/);
   });
 
   it("shows Review only for a work order with an open gate approval, and it opens the approval dialog", async () => {
