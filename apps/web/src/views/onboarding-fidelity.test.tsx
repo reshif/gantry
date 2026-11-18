@@ -90,12 +90,13 @@ describe("Onboarding fidelity round 2", () => {
     expect(document.querySelector("#onb-list-sort-select, .dtable-sortsel")).toBeNull(); // no Sort by select above the cards
   });
 
-  it("the Guidelines panel has no Edit button", async () => {
+  it("the Guidelines panel has an Edit guidelines button that opens the versioned editor by click", async () => {
     api([ASSESSED]);
     window.history.replaceState(null, "", "/?tab=guidelines");
     window.location.hash = "#/p/storefront/onboarding";
     mount(<OnboardingView />);
     await byId("onb-gl-sw-" + SEED.guidelines.items[0]!.id);
-    expect(document.getElementById("onb-gl-edit")).toBeNull();
+    fireEvent.click(await byId("onb-gl-edit"));
+    expect(await byId("onb-gl-save")).toBeTruthy(); // the editor (guideline text, agent instructions, versions) renders
   });
 });

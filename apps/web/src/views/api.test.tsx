@@ -167,6 +167,14 @@ describe("API & triggers: reference, playground, log, limits", () => {
     expect(document.getElementById("api-ref-example-copy")!.parentElement!.className).toContain("stack");
   });
 
+  it("the Playground tab is reachable by clicking and renders the request form", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("api-tab-playground"));
+    expect(await byId("api-pg-send")).toBeTruthy();
+    expect(document.getElementById("api-pg-secret")).toBeTruthy();
+  });
+
   it("the request log is a 'Last requests' panel: relative times, key id, status chips, Search and a Status filter", async () => {
     setup();
     mount();
