@@ -174,6 +174,21 @@ describe("Onboarding session", () => {
     expect(document.getElementById("osx-conv-state")!.textContent).toMatch(/Waiting for you/);
   });
 
+  it("on a wide screen the panel is sized to the room left under the header, so the composer is on screen at open", async () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    Object.assign(window, { innerWidth: 1440, innerHeight: 900 });
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) { return { top: this.id === "osx-split" ? 278 : 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }; });
+    try {
+      api(session());
+      mount(<OnboardingView />);
+      const conv = await byId("osx-conv");
+      await waitFor(() => expect(conv.style.getPropertyValue("--osx-conv-h")).toBe(`${900 - 278 - 12}px`));
+    } finally {
+      rect.mockRestore();
+      Object.assign(window, { innerWidth: w, innerHeight: h });
+    }
+  });
+
   it("?focus=chat marks the conversation and puts the cursor in the composer", async () => {
     window.location.hash = "#/p/storefront/onboarding/mobile-app?focus=chat";
     api(session());

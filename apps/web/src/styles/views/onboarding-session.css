@@ -77,7 +77,7 @@
 @media (min-width: 1100px) {
   .osx-split { grid-template-columns: minmax(0, 1fr) minmax(380px, 440px); grid-template-areas: "findings conv"; }
   .osx-findings { grid-area: findings; }
-  .osx-conv { grid-area: conv; position: sticky; top: calc(var(--topbar-h, 52px) + var(--s3, 12px)); height: calc(100dvh - var(--topbar-h, 52px) - 2 * var(--s3, 12px) - 24px); min-height: 420px; }
+  .osx-conv { grid-area: conv; position: sticky; top: calc(var(--topbar-h, 52px) + var(--s3, 12px)); height: var(--osx-conv-h, calc(100dvh - var(--topbar-h, 52px) - 2 * var(--s3, 12px) - 24px)); min-height: 420px; }
   .osx-split .osx-conv .osx-thread { flex: 1; max-height: none; }
 }
 
@@ -99,3 +99,7 @@
 @keyframes osx-blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .osx-typing i { animation: none; } }
 .osx-conv .osx-file { flex-wrap: wrap; gap: 6px 10px; }
+/* inside the conversation a card has one border: the parts to confirm and blockers are a rule on the left, not a nested box */
+.osx-conv .osx-sensitive, .osx-conv .osx-blocker { border: 0; border-left: 3px solid var(--warn, #b7791f); border-radius: 0; margin: 4px 0; padding: 2px 0 2px 8px; }
+.osx-conv .osx-blocker { border-left-color: var(--danger, #c53030); }
+.osx-conv .osx-proposal.is-pending .osx-status { color: var(--wait, var(--ink-2)); font-weight: 600; }

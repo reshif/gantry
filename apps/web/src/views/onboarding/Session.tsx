@@ -269,6 +269,22 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
     if (box && !box.disabled) box.focus({ preventScroll: true });
   }, [chatFocus, ready]);
 
+  // size the wide-screen panel to the room actually left under the header, stepper and tabs, so the composer is on screen at open
+  useEffect(() => {
+    if (!ready || tab !== "findings") return;
+    const fit = () => {
+      const el = document.getElementById("osx-conv");
+      const split = document.getElementById("osx-split");
+      if (!el || !split) return;
+      if (window.innerWidth < 1100) { el.style.removeProperty("--osx-conv-h"); return; }
+      const pageTop = split.getBoundingClientRect().top + window.scrollY;
+      el.style.setProperty("--osx-conv-h", `${Math.max(420, Math.floor(window.innerHeight - pageTop - 12))}px`);
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [ready, tab]);
+
   const waiting = !r ? availQ.data?.available?.find((a) => a.repo === repoId || a.repo.replace("/", "--") === repoId) : undefined;
   if (!r && waiting) return <NotStarted projectId={projectId} projectName={projectName} name={waiting.repo} lang={waiting.lang} />;
   if (!r) return reposQ.data && (availQ.isSuccess || availQ.isError) ? <div><ViewHead title="Onboarding" /><Panel><Empty title="Nothing to show" text="That repo does not exist." action={<Btn label="Work orders" onClick={() => navigate("work-orders")} />} /></Panel></div> : <Async query={reposQ} what="this repo" id="onb-session-repo">{() => null}</Async>;
