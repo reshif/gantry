@@ -61,7 +61,14 @@ export default function ModelsView() {
   return (
     <Page eyebrow="Workforce" title="Models" cls="view-models"
         sub="Which models agents may use, what they cost and where they are used."
-        acts={tab === "models" ? <Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} /> : <>
+        acts={tab === "models" ? <>
+          {/* KEEP: vendors, routing and prices stay one click away from the catalog (owner, 2026-11-18) */}
+          <Btn label="Vendors" id="md-go-vendors" onClick={() => navigate("models", "vendors")} />
+          <Btn label="Routing" id="md-go-routing" onClick={() => navigate("models", "routing")} />
+          <Btn label="Prices" id="md-go-prices" onClick={() => navigate("models", "prices")} />
+          <Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} />
+          <Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={(id) => { navigate("models", "vendors"); scrollTo(id); }} />)} />
+        </> : <>
           <Btn label="All models" id="md-back" onClick={() => navigate("models")} />
           {tab === "vendors" ? <Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} /> : null}
         </>}>
