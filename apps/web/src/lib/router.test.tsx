@@ -20,6 +20,8 @@ describe("hash parsing", () => {
     expect(parseHash("#/evals?tab=suites")).toEqual({ id: "evals", param: "suites", project: null, q: { tab: "suites" } });
     expect(parseHash("#/trust?tab=rules&x=1")).toEqual({ id: "trust", param: "rules", project: null, q: { tab: "rules", x: "1" } });
     expect(parseHash("#evals/factory")).toEqual({ id: "evals", param: "factory", project: null, q: {} });
+    expect(parseHash("#/integrations?tab=catalogue")).toEqual({ id: "integrations", param: "catalogue", project: null, q: { tab: "catalogue" } });
+    expect(parseHash("#/mcp/mcp-docs?tab=tools")).toEqual({ id: "mcp", param: "mcp-docs", project: null, q: { tab: "tools" } });
   });
   it("ignores a query on the hash: #/p/x/floor?view=board is the floor route", () => {
     expect(parseHash("#/p/payments/floor?view=board")).toEqual({ id: "floor", param: null, project: "payments", q: { view: "board" } });

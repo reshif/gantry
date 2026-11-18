@@ -4,18 +4,18 @@
  * several per type, each scoped to projects. A new connection is switched off until someone turns it on (spec 15.3).
  * Not ported, on purpose: the simulated connection test and its footnote. The test calls the service for real.
  */
-import { useState } from "react";
 import { DAY, INTEGRATION_CATEGORIES, type IntegrationInstance } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useDeliveries } from "../api/queries";
-import { Btn, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
+import { useTab } from "./connect/kit";
 import { Async, qState } from "../ui/async";
 import { Dialog } from "../ui/Overlay";
 import { useUI } from "../ui/overlay-context";
 import { AddIntegration } from "./integrations/AddDialog";
-import { EditIntegration, InstanceDrawer, RemoveIntegration, ToggleIntegration, TypeDrawer } from "./integrations/Instance";
+import { EditIntegration, InstanceDrawer, RemoveIntegration, ToggleIntegration } from "./integrations/Instance";
 import { CatalogueTab, ConnectedTab, CustomTab } from "./integrations/Tabs";
-import { statusOf, useIntegrationData, type TypeRow } from "./integrations/kit";
+import { statusOf, useIntegrationData } from "./integrations/kit";
 import { ops } from "../api/ops";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -24,10 +24,7 @@ export default function IntegrationsView() {
   const ui = useUI();
   const d = useIntegrationData();
   const add = dec(useCan("integration.add"));
-  const [tab, setTab] = useState("connected");
-  const [q, setQ] = useState("");
-  const [cat, setCat] = useState("all");
-  const [status, setStatus] = useState("all");
+  const [tab, setTab] = useTab(["connected", "catalogue", "builder"]);
   const failedQ = useDeliveries({ status: "failed", limit: 200 });
   const failedItems = Array.isArray(failedQ.data) ? failedQ.data : failedQ.data?.items ?? [];
   const failedDay = failedItems.filter((x) => x.at > Date.now() - DAY);
@@ -58,51 +55,42 @@ export default function IntegrationsView() {
     ));
   };
   const addDialog = (typeId: string | null): void => {
-    ui.open((close) => <AddIntegration typeId={typeId} types={d.types} insts={d.insts} live={d.live} projects={d.projects} close={close} onAdded={(id) => { setTab("connected"); openInstance(id); }} />);
+    ui.open((close) => <AddIntegration typeId={typeId} types={d.types} insts={d.insts} close={close} onAdded={(id) => { setTab("connected"); openInstance(id); }} />);
   };
-  const openType = (id: string): void => {
-    ui.drawer.open(`int-type:${id}`, (close) => (
-      <TypeDrawer
-        id={id} close={close} onAdd={addDialog} onOpen={openInstance}
-        onRemove={(t: TypeRow) => ui.open((c) => (
-          <Dialog title={`Remove ${t.name} from the catalogue?`} kicker="Integrations · custom type" onClose={c} actions={[{ label: "Cancel" }, { label: "Remove type", kind: "danger", id: "int-t-remove-go", guard: add, onClick: async () => {
-            const r = await ops.removeIntegrationType(t.id);
-            ui.toast(r.msg, r.ok ? "ok" : "error");
-            if (r.ok) { c(); close(); }
-          } }]} body={<p>No connection uses it. New connections of this type can no longer be added. The removal is audited.</p>} />
-        ))}
-      />
+  const removeType = (id: string): void => {
+    const t = d.types.find((x) => x.id === id);
+    if (!t) return;
+    ui.open((c) => (
+      <Dialog title={`Remove ${t.name} from the catalogue?`} kicker="Integrations · custom type" onClose={c} actions={[{ label: "Cancel" }, { label: "Remove type", kind: "danger", id: "int-t-remove-go", guard: add, onClick: async () => {
+        const r = await ops.removeIntegrationType(t.id);
+        ui.toast(r.msg, r.ok ? "ok" : "error");
+        if (r.ok) c();
+      } }]} body={<p>No connection uses it. New connections of this type can no longer be added. The removal is audited.</p>} />
     ));
   };
 
   const all = d.insts;
   const failing = all.filter((i) => statusOf(i) === "failing").length;
   const off = all.filter((i) => !i.connected).length;
-  const customN = d.types.filter((t) => t.custom).length;
-  const nav = { q, setQ, cat, setCat, status, setStatus };
-  const tabs = [{ id: "connected", label: "Connected", count: all.length }, { id: "catalogue", label: "Catalogue", count: d.types.length }, { id: "custom", label: "Custom builder", count: customN }];
+  const tabs = [{ id: "connected", label: "Connected", count: all.length }, { id: "catalogue", label: "Catalogue", count: d.types.length }, { id: "builder", label: "Custom builder" }];
 
   return (
     <div className="view cx int-view">
-      <ViewHead
-        title="Integrations"
-        sub="Where Gantry reads requests from and writes results to."
-        actions={<><Btn label="Add integration" kind="primary" icon="plus" id="int-add" guard={add} onClick={() => addDialog(null)} /><Btn label="Build custom integration" icon="tool" id="int-build" guard={add} onClick={() => setTab("custom")} /></>}
-      />
+      <ViewHead title="Integrations" kicker="All lines" sub="Where Gantry reads requests from and writes results to." />
       <StatRow id="int-stats">
         <Stat label="Connected" value={qState(d.instsQ, () => String(all.length - off))} sub={`of ${all.length}`} tone="done" />
-        <Stat label="Needs attention" value={qState(d.instsQ, () => String(failing + off + failed))} sub={failing + failed ? "need a look" : off ? "switched off" : "all well"} tone={failing + off + failed ? "wait" : undefined} />
-        <Stat label="Catalogue" value={qState(d.typesQ, () => String(d.types.length))} sub={qState(d.typesQ, () => `types, ${customN} custom`)} />
+        <Stat label="Needs attention" value={qState(d.instsQ, () => String(failing + off + failed))} tone={failing + off + failed ? "wait" : undefined} />
+        <Stat label="Catalogue" value={qState(d.typesQ, () => String(d.types.length))} sub="types" />
         <Stat label="Categories" value={String(INTEGRATION_CATEGORIES.length)} />
       </StatRow>
       <Tabs idPrefix="int-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="int-tab-panel" role="tabpanel" aria-labelledby={`int-tab-${tab}`}>
         {tab === "catalogue" ? (
-          <Async query={d.typesQ} what="the integration catalogue" id="int-cat">{() => <CatalogueTab nav={nav} openType={openType} onAdd={addDialog} goBuild={() => setTab("custom")} />}</Async>
-        ) : tab === "custom" ? (
-          <Async query={d.typesQ} what="custom integration types" id="int-custom">{() => <CustomTab onAddInstance={addDialog} openType={openType} />}</Async>
+          <Async query={d.typesQ} what="the integration catalogue" id="int-cat">{() => <CatalogueTab onRemove={removeType} onAdd={addDialog} goBuild={() => setTab("builder")} />}</Async>
+        ) : tab === "builder" ? (
+          <Async query={d.typesQ} what="custom integration types" id="int-custom">{() => <CustomTab onDone={() => setTab("catalogue")} />}</Async>
         ) : (
-          <Async query={d.instsQ} what="connected integrations" id="int">{() => <ConnectedTab nav={nav} openInstance={openInstance} onToggle={toggleInst} />}</Async>
+          <Async query={d.instsQ} what="connected integrations" id="int">{() => <ConnectedTab openInstance={openInstance} onToggle={toggleInst} />}</Async>
         )}
       </div>
     </div>

@@ -65,6 +65,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -79,11 +80,49 @@ describe("Integrations screen", () => {
     expect(table.textContent).toContain("Slack (production)");
     expect(table.textContent).toContain("GitHub org");
     expect(table.textContent).toContain("failing");
-    expect(table.textContent).toContain("disabled");
+    expect(table.textContent).toContain("disconnected");
     expect(table.textContent).toContain("Payments Platform");
-    expect(document.getElementById("int-attn-int-gh-1")?.textContent).toBe("GitHub org");
-    expect(text()).toContain("Catalogue3types, 0 custom");
-    expect(locked(await byId("int-add"))).toBe(false);
+    expect(document.getElementById("int-attn-int-gh-1")).toBeNull(); // no attention banner above the grid
+    expect(text()).toContain("Catalogue3types");
+    // the prototype's header has no actions: connecting is from the Catalogue tab, building from the Custom builder tab
+    expect(document.getElementById("int-add")).toBeNull();
+    expect(document.getElementById("int-build")).toBeNull();
+    expect(text()).toContain("All lines");
+  });
+
+  it("holds the active tab in the URL and falls back to Connected for an unknown one", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("int-tab-catalogue"));
+    await waitFor(() => expect(window.location.hash).toContain("?tab=catalogue"));
+    fireEvent.click(await byId("int-tab-builder"));
+    await waitFor(() => expect(window.location.hash).toContain("?tab=builder"));
+    cleanup();
+    window.history.replaceState(null, "", "/#/integrations?tab=nonsense");
+    mount();
+    await byId("int-table");
+  });
+
+  it("lists the catalogue as a panel with a Connect button per row, and opens one wide dialog 'Connect <type>'", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("int-tab-catalogue"));
+    const panel = await byId("int-cat");
+    expect(panel.textContent).toContain("Available integrations");
+    expect(panel.textContent).toContain("Direction");
+    expect(panel.textContent).toContain("Connected");
+    expect(document.getElementById("int-cat-add-slack")?.textContent).toBe("Connect");
+    fireEvent.click(await byId("int-cat-add-slack"));
+    await waitFor(() => expect(document.querySelector("[role=dialog]")?.textContent).toContain("Connect Slack"));
+    expect(document.getElementById("int-add-go")?.textContent).toBe("Connect");
+  });
+
+  it("titles the disconnect dialog 'Disconnect <name>?' with a danger submit", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("int-toggle-int-slack-1"));
+    await waitFor(() => expect(document.querySelector("[role=dialog]")?.textContent).toContain("Disconnect Slack (production)?"));
+    expect(document.getElementById("int-dis-go")?.textContent).toBe("Disconnect");
   });
 
   it("shows the catalogue with a type that cannot be connected yet", async () => {
@@ -99,9 +138,8 @@ describe("Integrations screen", () => {
     setup({ "GET /api/v1/integrations": () => ({ body: [] }) });
     mount();
     await waitFor(() => expect(text()).toContain("Nothing connected"));
-    expect(text()).toContain("Add an integration to start.");
+    expect(text()).toContain("Connect an integration from the Catalogue tab.");
     expect(document.getElementById("int-table")).toBeNull();
-    expect(locked(await byId("int-add"))).toBe(false);
   });
 
   it("shows the failure with a retry, not a blank list, and recovers on retry", async () => {
@@ -130,17 +168,16 @@ describe("Integrations screen", () => {
   it("locks the write controls with the reason when the viewer may not add integrations, and sends nothing", async () => {
     const calls = setup({}, ["integration.add"]);
     mount();
-    const add = await byId("int-add");
+    fireEvent.click(await byId("int-tab-catalogue"));
+    const add = await byId("int-cat-add-slack");
     await waitFor(() => expect(locked(add)).toBe(true));
     expect(add.getAttribute("data-reason")).toMatch(/Factory Admin/);
-    expect(locked(await byId("int-build"))).toBe(true);
     fireEvent.click(add);
     expect(document.querySelector("[role=dialog]")).toBeNull();
-    fireEvent.click(await byId("int-tab-custom"));
+    fireEvent.click(await byId("int-tab-builder"));
     const save = await byId("int-b-save");
     await waitFor(() => expect(locked(save)).toBe(true));
     expect(((await byId("int-b-name")) as HTMLInputElement).disabled).toBe(true);
-    expect(locked(await byId("int-b-f-add"))).toBe(true);
     expect(writes(calls)).toHaveLength(0);
   });
 
@@ -178,7 +215,8 @@ describe("Integrations screen", () => {
   it("opens the add dialog for someone who may add integrations", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("int-add"));
+    fireEvent.click(await byId("int-tab-catalogue"));
+    fireEvent.click(await byId("int-cat-add-slack"));
     await waitFor(() => expect(document.querySelector("[role=dialog]")).toBeTruthy());
   });
 });

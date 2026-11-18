@@ -45,7 +45,7 @@ export interface MockOptions {
    * Computed answers for parameterised paths (`projects/p1/floor`). Return undefined to fall through to the defaults.
    * The fidelity compare tool (fidelity/compare.mjs) feeds the whole demo seed through this.
    */
-  resolve?: (method: string, path: string, url: URL) => unknown;
+  resolve?: (method: string, path: string, url: URL, body?: unknown) => unknown;
 }
 
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -89,7 +89,7 @@ export async function mockApi(page: Page, o: MockOptions = {}): Promise<string[]
     seen.push(`${method} ${path}`);
     const h = o.overrides?.[`${method} ${path}`] ?? o.overrides?.[path];
     if (h) return h(route);
-    const computed = o.resolve?.(method, path, url);
+    const computed = o.resolve?.(method, path, url, method === "GET" ? undefined : (() => { try { return route.request().postDataJSON(); } catch { return undefined; } })());
     if (computed !== undefined) {
       const failed = computed as { __status?: number; body?: unknown } | null;
       if (failed && typeof failed === "object" && typeof failed.__status === "number") return json(route, failed.body ?? { ok: false, msg: "Not found" }, failed.__status);

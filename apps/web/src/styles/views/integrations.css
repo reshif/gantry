@@ -105,3 +105,6 @@
 .int-tile .int-sub { margin-bottom: 0; }
 .int-n { border-color: var(--done); color: var(--done); }
 .int-drawer .drawer-scroll { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; overflow-wrap: anywhere; }
+
+/* A labelled filter inside the toolbar sits on the search box baseline (the prototype .fbar has no field margin). */
+.cx .fbar .field { margin-bottom: 0; }

@@ -1,6 +1,7 @@
 /* MCP servers. Tokens only. */
 .mcp-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4); align-items: start; }
-.mcp-detail { display: grid; gap: var(--s4); min-width: 0; }
+.mcp-detail { display: block; min-width: 0; }
+.mcp-detail > [role="tabpanel"] { margin-top: var(--s4); }
 .mcp-reg td { vertical-align: top; }
 .mcp-name { font-weight: 600; color: var(--ink); text-decoration: none; }
 .mcp-name:hover { color: var(--accent); }

@@ -243,6 +243,15 @@ export function Tabs({ items, active, onChange, idPrefix = "tab", revealActive }
       window.removeEventListener("resize", measure);
     };
   }, [items.length]);
+  // the active tab is brought into view inside the strip (the page itself never scrolls), as the prototype does for a deep link to a far tab
+  useEffect(() => {
+    const el = bar.current;
+    const t = el?.querySelector<HTMLElement>(".tab.is-active");
+    if (!el || !t || !el.clientWidth) return;
+    const left = t.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
+    if (left < el.scrollLeft) el.scrollLeft = left - 8;
+    else if (left + t.offsetWidth > el.scrollLeft + el.clientWidth - 40) el.scrollLeft = left + t.offsetWidth - el.clientWidth + 48;
+  }, [active]);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const tabs = Array.from(bar.current?.querySelectorAll<HTMLButtonElement>(".tab") ?? []);
