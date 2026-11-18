@@ -50,8 +50,9 @@
 /* round three: Claude mode, streaming, entity chips */
 .con-mode-line { display: flex; gap: 6px 10px; flex-wrap: wrap; color: var(--muted); margin: 0; border-bottom: 1px solid var(--line); }
 .con-mode-line a { color: var(--accent); }
-.con-model { display: inline-flex; align-items: center; gap: 6px; }
-.con-model select { min-width: 200px; max-width: 280px; font-family: var(--f-mono); font-size: var(--t-xs); }
+.con-model { display: block; width: 100%; max-width: 560px; }
+.con-model select { width: 100%; text-overflow: clip; font-size: var(--t-xs); padding-inline: 8px; }
+.con2-settings .con-model { margin: 8px 0; }
 .con-mode-line .ic { width: 12px; height: 12px; flex: none; position: relative; }
 .con-mode-line a { white-space: nowrap; }
 .view-console .msg-text { white-space: pre-wrap; }
