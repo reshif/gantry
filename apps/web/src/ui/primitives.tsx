@@ -289,11 +289,15 @@ export function StateChip({ state, compact }: { state: string; compact?: boolean
 export const Chip = ({ text, cls = "" }: { text: ReactNode; cls?: string }) => <span className={`chip ${cls}`}>{text}</span>;
 export const Mono = ({ children, cls = "" }: { children: ReactNode; cls?: string }) => <span className={`mono ${cls}`}>{children}</span>;
 
-export function Avatar({ id, size }: { id: string | null | undefined; size?: string }) {
+/** `name` is for a person the directory cannot resolve by id (a demo account): the initials come from the name, not "?". */
+export function Avatar({ id, size, name }: { id: string | null | undefined; size?: string; name?: string }) {
   const actor = useActors()(id);
+  const known = actor.kind !== "other" || !name;
+  const title = known ? actor.name : name;
+  const initials = known ? actor.initials : name.split(" ").map((w) => w[0] ?? "").join("").slice(0, 2);
   return (
-    <span className={`av ${actor.kind === "agent" ? "av-agent" : "av-person"}${size ? ` av-${size}` : ""}`} title={actor.name} aria-hidden="true">
-      {actor.initials}
+    <span className={`av ${actor.kind === "agent" ? "av-agent" : "av-person"}${size ? ` av-${size}` : ""}`} title={title} aria-hidden="true">
+      {initials}
     </span>
   );
 }

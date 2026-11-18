@@ -67,6 +67,23 @@ describe("user menu", () => {
     expect(menu.textContent).toContain("factory admin");
     expect(menu.textContent).toContain("Sign out");
   });
+  it("a persona the directory cannot resolve by id still shows initials, never ?", async () => {
+    const list = [{ id: "idp-zed", name: "Zed Quill", email: "zed@acme.dev", role: "engineer", note: "" }];
+    const me = meRead({ config: { demoAccounts: true, demoAccountList: list } });
+    mockApi({ "GET /api/v1/me": () => ({ body: me }) });
+    mount(<TopBar me={me as never} crumb={[]} project={PAYMENTS as never} current="home" navOpen={false} onOpenNav={() => undefined} onOpenPalette={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Account menu/ }));
+    const menu = await screen.findByRole("menu");
+    expect(menu.textContent).toContain("ZQ");
+  });
+  it("says 'Now viewing as <name>' once the session is that person after a persona switch", async () => {
+    const me = meRead({ config: { demoAccounts: true } });
+    window.sessionStorage.setItem("gantry.personaSwitch", me.person!.name);
+    mockApi({ "GET /api/v1/me": () => ({ body: me }) });
+    mount(<TopBar me={me as never} crumb={[]} project={PAYMENTS as never} current="home" navOpen={false} onOpenNav={() => undefined} onOpenPalette={() => undefined} />);
+    expect(await screen.findByText(`Now viewing as ${me.person!.name}`)).toBeTruthy();
+    expect(window.sessionStorage.getItem("gantry.personaSwitch")).toBeNull();
+  });
   it("hides the persona switch where demo accounts are off", async () => {
     const me = meRead({ config: { demoAccounts: false } });
     mockApi({ "GET /api/v1/me": () => ({ body: me }) });

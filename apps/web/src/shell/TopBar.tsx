@@ -1,5 +1,5 @@
 /** Top bar: hamburger, brand, project switcher, search, theme switch and menu, notifications bell, user menu. */
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { ops } from "../api/ops";
 import type { Me } from "../api/types";
 import { applyTheme, updatePrefs, usePrefs, type Theme } from "../lib/prefs";
@@ -13,6 +13,7 @@ import { MenuDivider, MenuHead, MenuRow, CrMenu } from "./CrMenu";
 import { useNotifications, useOpenNotifications } from "./NotificationsDrawer";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 
+export const SWITCH_KEY = "gantry.personaSwitch";
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform || "");
 
 /** Theme choices in the order the prototype's menu lists them. */
@@ -28,6 +29,17 @@ export function TopBar({ me, crumb, project, current, navOpen, onOpenNav, onOpen
   const v = me.person;
   const roleNames = Array.from(new Set(v.roles.map((g) => g.role.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" "))));
   const subtitle = [v.title, roleNames.join(", ")].filter(Boolean).join(" · ");
+
+  // A persona switch is a sign-in round trip (the identity provider signs the other account in), so the confirmation toast
+  // is shown here, on the page the person comes back to, once the session really is that person.
+  useEffect(() => {
+    try {
+      const want = window.sessionStorage.getItem(SWITCH_KEY);
+      if (!want) return;
+      window.sessionStorage.removeItem(SWITCH_KEY);
+      if (want === v.name) ui.toast(`Now viewing as ${v.name}`, "info");
+    } catch { /* storage blocked: no toast */ }
+  }, [v.name, ui]);
 
   const signOut = async (what?: string) => {
     ui.closeAllDialogs();
@@ -46,10 +58,13 @@ export function TopBar({ me, crumb, project, current, navOpen, onOpenNav, onOpen
   const switchTo = async (d: (typeof personas)[number]) => {
     ui.closeAllDialogs();
     ui.drawer.close();
-    ui.toast(`Now viewing as ${d.name}`, "info");
+    try { window.sessionStorage.setItem(SWITCH_KEY, d.name); } catch { /* storage blocked */ }
     const r = await ops.signOut();
     if (r.ok) window.location.assign(loginUrlWithReturn("sso", d.email));
-    else ui.toast(r.msg, "error");
+    else {
+      try { window.sessionStorage.removeItem(SWITCH_KEY); } catch { /* storage blocked */ }
+      ui.toast(r.msg, "error");
+    }
   };
 
   const setTheme = (t: Theme) => {
@@ -72,7 +87,7 @@ export function TopBar({ me, crumb, project, current, navOpen, onOpenNav, onOpen
               <MenuDivider />
               <MenuHead>Switch persona (demo)</MenuHead>
               {personas.map((d) => (
-                <MenuRow key={d.id} lead={<Avatar id={d.id} size="sm" />} label={d.name} tag={d.role === "Demo account" ? undefined : d.role} onClick={() => { close(); void switchTo(d); }} />
+                <MenuRow key={d.id} lead={<Avatar id={d.id} name={d.name} size="sm" />} label={d.name} tag={d.role === "Demo account" ? undefined : d.role} onClick={() => { close(); void switchTo(d); }} />
               ))}
             </>
           ) : null}
