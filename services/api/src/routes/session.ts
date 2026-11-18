@@ -12,7 +12,7 @@
  */
 import type { FastifyRequest } from "fastify";
 import { randomBytes } from "node:crypto";
-import { visibleProjects, type SecuritySettings } from "@gantry/domain";
+import { factoryAdmins, needsStepUp, visibleProjects, type SecuritySettings } from "@gantry/domain";
 import { appendEvent, withTx } from "@gantry/db";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
@@ -333,7 +333,28 @@ export const sessionRoutes: FastifyPluginAsync = async (app) => {
     const st = await policyState(req);
     const now = Date.now();
     const p = req.gx.principal;
-    return { results: checks.map((c) => decideFor(st, p, c.action, { project: c.project ?? null, repo: c.repo ?? null, time: c.time ?? now })).map((d) => ({ allowed: d.allowed, reason: d.reason, rule: d.rule, needs: d.needs })) };
+    const decided = checks.map((c) => ({ c, d: decideFor(st, p, c.action, { project: c.project ?? null, repo: c.repo ?? null, time: c.time ?? now }) }));
+    // Step-up (spec 14.1): an action that needs a fresh sign-in reports `needs: "step_up"` when this session's sign-in is older than the window, so the UI offers the sign-in instead of a dead control.
+    const stepUpActions = p?.kind === "person" ? decided.filter(({ c, d }) => d.allowed && needsStepUp(c.action)) : [];
+    const sec = stepUpActions.length ? await readSecurity(g.pool, g.orgId).then((r) => r.value).catch(() => null) : null;
+    const authTime = req.gx.session?.authTime ?? null;
+    const soleAdmin = p?.kind === "person" && decided.some(({ c }) => c.action === "restore.factory")
+      ? ((fa) => fa.length === 1 && fa[0]?.id === p.id)(factoryAdmins(st.people)) && st.activeStops.some((s2) => s2.scope === "factory" && s2.mode === "kill") && (sec?.restoreFactoryNeedsTwo ?? (await readSecurity(g.pool, g.orgId).then((r) => r.value.restoreFactoryNeedsTwo).catch(() => true)))
+      : false;
+    return {
+      results: decided.map(({ c, d }) => {
+        const base = { allowed: d.allowed, reason: d.reason, rule: d.rule, needs: d.needs };
+        // Only a Factory Admin override would allow it: a freeze or halt on a gate or release, or the sole Factory Admin restoring the factory. The UI asks for a reason (at least 5 characters).
+        const ov = (d.override && !d.allowed) || (soleAdmin && c.action === "restore.factory" && d.allowed) ? { override: true, overrideReason: "required" as const } : {};
+        if (d.allowed && p?.kind === "person" && needsStepUp(c.action)) {
+          const exempt = c.action.startsWith("kill.") && sec?.killNeedsStepUp === false;
+          const win = (sec?.stepUpWindowMinutes ?? 15) * 60;
+          const since = authTime ? Math.max(0, Math.round((now - authTime) / 1000)) : null;
+          if (!exempt && (since === null || since > win)) return { allowed: false, reason: "Sign in again to confirm this change.", rule: { kind: "step-up", id: "STEP-UP", name: "Fresh sign-in required", windowSec: win, signedInSecAgo: since, action: c.action }, needs: "step_up", ...ov };
+        }
+        return { ...base, ...ov };
+      }),
+    };
   });
 
   // Its own budget: a reconnecting tab must not eat the per-IP allowance of ordinary requests, nor the reverse.

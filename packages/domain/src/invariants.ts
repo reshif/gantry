@@ -2,7 +2,7 @@
  * Rules the engine itself enforces on configuration: spec 5.1 (I1-I9) and 14.4.
  * Each check returns a Result so the command pipeline can refuse with a typed error.
  */
-import { CONSOLE_RIGHTS, DEFAULT_CATALOG, roleMayHold } from "./catalog.js";
+import { DEFAULT_CATALOG, roleMayHold } from "./catalog.js";
 import { err, gantryError, ok } from "./result.js";
 import type { GantryError, Result, RuleRef } from "./result.js";
 import type { Catalog, Matrix, Person, RoleGrant } from "./types.js";
@@ -116,11 +116,10 @@ export function checkMatrixEdit(matrix: Matrix, people: Person[], edit: { role: 
     const act = catalog.actions.find((a) => a.id === edit.action)?.name ?? edit.action;
     return err(gantryError("denied", `${role} is a project-level role, so it cannot hold the factory-wide right "${act}". Factory-wide settings (access, security, system health, vendors, prices, budgets, routing) belong to factory-level roles only.`, { rule: rule("INV-FACTORY-ONLY", "Factory rights stay on factory roles"), needs: "Grant it to a factory-level role (Factory Admin, or a role whose level is Factory)" }));
   }
-  if (edit.role === "factory_admin" && !edit.value && (PROTECTED_RIGHTS as readonly string[]).includes(edit.action)) {
-    return err(gantryError("denied", "Factory Admin cannot lose the right to " + edit.action + ".", { rule: rule("INV-14.4-ADMIN", "Factory Admin rights"), needs: "Keep it on Factory Admin" }));
-  }
-  if (edit.role === "factory_admin" && !edit.value && CONSOLE_RIGHTS.includes(edit.action)) {
-    return err(gantryError("denied", "Factory Admin always keeps every console right (" + edit.action + ").", { rule: rule("INV-CONSOLE-ADMIN", "Factory Admin console rights"), needs: "Keep it on Factory Admin" }));
+  /* Owner decision 2026-11-19: Factory Admin is universal. Every cell of its column is locked on; no right can be switched off. */
+  if (edit.role === "factory_admin" && !edit.value) {
+    const protectedRight = (PROTECTED_RIGHTS as readonly string[]).includes(edit.action);
+    return err(gantryError("denied", protectedRight ? "Factory Admin cannot lose the right to " + edit.action + "." : "Factory Admin always keeps every right (" + edit.action + "). Its column cannot be switched off.", { rule: rule(protectedRight ? "INV-14.4-ADMIN" : "INV-ADMIN-ALL", "Factory Admin rights"), needs: "Keep it on Factory Admin" }));
   }
   const next: Matrix = { ...matrix, [edit.role]: { ...(matrix[edit.role] ?? {}), [edit.action]: edit.value } };
   const before = new Set(lockedOutRights(matrix, people));
