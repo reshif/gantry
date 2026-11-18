@@ -59,7 +59,7 @@ export function AtWork({ needs = 0, onInbox, onNew }: { needs?: number; onInbox?
                     {jobs.length ? (
                       jobs.slice(0, 3).map((w) => (
                         <div key={w.id} className="small">
-                          <div className="trunc"><span className="mono">{w.id}</span>{" " + w.title}</div>
+                          <div className="wrap-text"><span className="mono">{w.id}</span>{" " + w.title}</div>
                           <div style={{ marginTop: 4 }}><Meter value={w.progress} max={100} label={`${w.id} progress`} /></div>
                           <div style={{ marginTop: 6 }}><WoActions wo={w.id} project={w.project} repo={w.repo} idPrefix="ws-at" /></div>
                         </div>

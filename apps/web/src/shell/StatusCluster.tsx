@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useCanMany } from "../api/can";
 import { useConnection } from "../lib/connection/store";
-import { useFreezes, useMe, usePolicies } from "../api/queries";
+import { useFreezes, useMe, usePolicies, useRepos } from "../api/queries";
 import { statusInfo, type StatusInfo } from "../lib/status";
 import { usePrefs } from "../lib/prefs";
 import { useUI } from "../ui/overlay-context";
@@ -38,9 +38,12 @@ export function StatusCluster() {
   const conn = useConnection().state;
   const cp = me?.projects.find((p) => p.id === prefs.project) ?? me?.projects[0] ?? null;
   const killed = !!me?.factory.killed;
+  const repos = useRepos(cp?.id).data ?? [];
   const checks = useCanMany([
     { action: cp?.halted ? "line.resume" : "line.halt", project: cp?.id },
     { action: killed ? "restore.factory" : "kill.factory" },
+    { action: "line.halt", project: cp?.id },
+    { action: "line.resume", project: cp?.id },
   ]);
   if (!s || !me) return null;
   const anyHalted = me.projects.some((p) => p.halted);
@@ -54,8 +57,11 @@ export function StatusCluster() {
     ui.menu(anchor, null, [
       { head: "Line control" },
       cp
-        ? { label: cp.halted ? "Resume line" : "Halt line", icon: cp.halted ? "right" : "pause", guard: guardOf(0), onClick: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) }
+        ? { label: cp.halted ? "Resume line" : "Halt line (pause the project)", icon: cp.halted ? "right" : "pause", guard: guardOf(0), onClick: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) }
         : { label: "Halt line", icon: "pause", guard: { allowed: false, reason: "No project to halt.", needs: "" } },
+      ...(cp && repos.length ? [{ head: "Pause one repo" }] : []),
+      ...(cp ? repos.map((r) => ({ label: r.halted ? `Resume ${r.name}` : `Pause ${r.name}`, icon: r.halted ? "right" : "pause", guard: guardOf(r.halted ? 3 : 2), onClick: () => (r.halted ? void stop.resumeRepo(r.id) : stop.haltRepo(r.id, cp.id)) })) : []),
+      { head: "Whole factory" },
       { label: killed ? "Restore factory" : "Emergency stop", icon: "stop", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
     ]);
   };
