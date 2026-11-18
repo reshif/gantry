@@ -81,8 +81,9 @@ function SkillDrawer({ sk, agents, stations, close }: { sk: SkillRow; agents: Ag
         <pre className="code" style={{ fontSize: 12 }}>{`---\nname: ${sk.id}\n---\n# ${sk.name}\n\n${sk.body || sk.desc}`}</pre>
       </div>
       <div className="drawer-f">
+        <Btn label="Skill page" id="sk-drawer-page" onClick={() => { close(); navigate("skills", sk.id); }} />
         <Btn label="Close" onClick={close} />
-        <Btn label="Edit draft" kind="primary" id="sk-drawer-edit" onClick={() => ui_.toast(`Opened a draft of ${sk.name}`, "info", { label: "Open skill page", id: "sk-drawer-page", onClick: () => { close(); navigate("skills", sk.id); } })} />
+        <Btn label="Edit draft" kind="primary" id="sk-drawer-edit" onClick={() => ui_.toast(`Opened a draft of ${sk.name}`, "info")} />
       </div>
     </div>
   );

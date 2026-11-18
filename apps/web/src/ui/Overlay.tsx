@@ -311,8 +311,13 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     const timers = toastTimers.current;
     return () => { for (const t of timers) clearTimeout(t); timers.clear(); };
   }, []);
+  const toastsNow = useRef<ToastItem[]>([]);
+  toastsNow.current = toasts;
   const toast = useCallback((text: string, kind: ToastKind = "info", action?: ToastAction) => {
+    // The same message shown again while it is still up does not stack a second copy.
+    if (toastsNow.current.some((t) => !t.out && t.text === text && t.kind === kind)) return;
     const id = seq.current++;
+    toastsNow.current = [...toastsNow.current, { id, text, kind, out: false, action }];
     setToasts((l) => [...l, { id, text, kind, out: false, action }].slice(-3));
     const timers = toastTimers.current;
     const later = (fn: () => void, ms: number): void => {

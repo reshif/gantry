@@ -137,7 +137,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   // "Save as new version": the working copy is saved first (one audited change), then a candidate snapshots it. Promotion stays a separate step on Versions.
   const saveVersion = () => {
     if ((d.instructions ?? "").trim().length < 40) { ui_.toast("Instructions are too short.", "warn"); return; }
-    if ((d.instructions ?? "") === (a.instructions ?? "") && !dirty) { ui_.toast("No changes to save. Edit the instructions first.", "warn"); return; }
+    if ((d.instructions ?? "") === (a.instructions ?? "") && !dirty) { ui_.toast("Instructions are too short.", "warn"); return; }
     confirmNewVersion(ui_, a, () => {
       void (async () => {
         let rev = a.rev;
