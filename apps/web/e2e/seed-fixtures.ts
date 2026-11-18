@@ -24,7 +24,7 @@ export const personaFromSeed = (seed: Seed, id = "p-asha"): Persona => {
 
 const page = <T>(items: T[]) => ({ items, total: items.length });
 
-export function seedResolver(seed: Seed): (method: string, path: string, url: URL) => unknown {
+export function seedResolver(seed: Seed): (method: string, path: string, url: URL, body?: unknown) => unknown {
   const NOW: number = seed.NOW;
   const wos: Seed[] = seed.work_orders;
   const gateInfo = (w: Seed) => {
@@ -151,7 +151,16 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     summary: { generated: `${w.title}. ${w.state === "waiting" ? "It is waiting at a gate." : "It is on the line."}`, written: null },
     events: (w.log ?? []).map((l: Seed, i: number) => ({ seq: i + 1, at: new Date(l.at).toISOString(), type: "wo.log", by: l.who, outcome: "ok", detail: { text: l.text } })),
   });
-  return (method, path, url) => {
+  return (method, path, url, body) => {
+    /* ---- connect group: server-rendered card preview (POST card-templates/preview) ---- */
+    if (method === "POST" && path === "card-templates/preview") {
+      const head: Record<string, string> = { gate: "WO-2404 needs approval at G5", question: "Intake has a question for you", release: "WO-2405 released to production" };
+      const kinds: Record<string, string[]> = { gate: ["approve", "reject", "open"], question: ["answer", "open"], release: ["notes", "open"] };
+      const tpl = String((body as Seed | undefined)?.template ?? "gate");
+      const proj = seed.projects[0];
+      return { ok: true, sample: { event: tpl, template: tpl, tone: "wait", head: head[tpl] ?? `Sample ${tpl} card`, body: "", woId: "WO-2404", title: "Add refund idempotency", repo: "payments-api", cls: "feature", clsName: "Feature", prio: "P2", approvers: "Asha, Meera", gate: null, instance: null, link: "https://gantry.acme.dev/#/record/WO-2404", project: { id: proj.id, key: proj.key, name: proj.name }, at: seed.NOW }, rows: [["Repo", "payments-api"], ["Class", "Feature"], ["Priority", "P2"]], actions: kinds[tpl] ?? ["open"], webhook: {}, email: { subject: head[tpl] ?? "Sample", text: "", html: "" } };
+    }
+    /* ---- end connect group ---- */
     if (method !== "GET") return undefined;
     const seg = path.split("/");
     const q = (k: string) => url.searchParams.get(k);

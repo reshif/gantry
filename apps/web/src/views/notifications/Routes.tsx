@@ -1,7 +1,9 @@
 /** The Routes tab: routes of one project (event, destinations, card, conditions), the route editor and the card designer (legacy routesTab, editor, designer). */
 import { useEffect, useMemo, useState } from "react";
 import { ops } from "../../api/ops";
-import { Btn, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Segmented, Select, Table, Toggle, type Decision } from "../../ui/primitives";
+import { Btn, Empty, Field, LockNote, Panel, Segmented, Select, Toggle, type Decision } from "../../ui/primitives";
+import { Dialog } from "../../ui/Overlay";
+import { ListView } from "../connect/kit";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ClassChip, useCatalog } from "../projects/kit";
@@ -12,16 +14,45 @@ type Nt = ReturnType<typeof useNtData>;
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const norm = (r: Route | Draft): Draft => ({ ...(clone(r) as Draft), id: r.id ?? null, fields: { ...ALL_FIELDS, ...(r.fields ?? {}) }, cond: { ...(r.cond ?? {}), classes: r.cond?.classes ?? [], priority: r.cond?.priority ?? [], hours: r.cond?.hours ?? "any" } });
 
+const CHANNELS = ["slack", "teams", "email", "webhook", "paging"];
+
+/** The prototype's "Add a route" dialog: When, Channel, Send to. The card and conditions are edited from the row afterwards. */
+function AddRoute({ p, nt, perm, close }: { p: Project; nt: Nt; perm: Decision; close: () => void }) {
+  const ui = useUI();
+  const [v, setV] = useState({ event: events()[0]?.value ?? "gate.waiting", channel: "slack", target: "" });
+  const [err, setErr] = useState<{ field: "target" | "channel"; msg: string } | null>(null);
+  const save = async (): Promise<void> => {
+    const inst = nt.destInsts.find((i) => i.type === v.channel && i.connected) ?? nt.destInsts.find((i) => i.type === v.channel);
+    if (!inst) return setErr({ field: "channel", msg: `No ${v.channel} connection is open to ${p.name}. Connect one in Integrations first.` });
+    const target = v.target.trim() || (inst.type === "webhook" ? inst.targetId || inst.id : "");
+    if (target.length < 2) return setErr({ field: "target", msg: "Send to is required." });
+    const e = draftError({ dest: [{ channel: inst.type, target, integration: inst.id }] }, { project: p, instOf: nt.instOf, typeOf: nt.typeOf });
+    if (e) return setErr({ field: "target", msg: e });
+    const r = await ops.saveRoute(p.id, null, { event: v.event, dest: [{ channel: inst.type, target, integration: inst.id }], template: DEF_TPL[v.event] || "submitted", cond: { classes: [], priority: [], hours: "any" }, enabled: true, fields: { ...ALL_FIELDS } });
+    if (!r.ok) return setErr({ field: "target", msg: r.msg });
+    ui.toast("Route added", "ok");
+    close();
+  };
+  return (
+    <Dialog title="Add a route" kicker={p.name} onClose={close} actions={[{ label: "Cancel" }, { label: "Save", kind: "primary", submit: true, id: "nt-add-go", guard: perm, onClick: () => void save() }]} body={(
+      <div className="form-grid">
+        <Field label="When" htmlFor="nt-add-event"><Select id="nt-add-event" options={events()} value={v.event} onChange={(x) => setV({ ...v, event: x })} /></Field>
+        <Field label="Channel" htmlFor="nt-add-channel" error={err?.field === "channel" ? err.msg : undefined}><Select id="nt-add-channel" options={CHANNELS} value={v.channel} onChange={(x) => { setV({ ...v, channel: x }); setErr(null); }} /></Field>
+        <Field label="Send to (required)" htmlFor="nt-add-target" hint="A channel, a person or an address." error={err?.field === "target" ? err.msg : undefined}>
+          <input id="nt-add-target" className="input mono" value={v.target} placeholder="#channel or address" onChange={(e) => setV({ ...v, target: e.target.value })} />
+        </Field>
+      </div>
+    )} />
+  );
+}
+
 export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision }) {
   const ui = useUI();
   const list = nt.routes as Route[];
   const [sel, setSel] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [preview, setPreview] = useState("d0");
-  const [q, setQ] = useState("");
-  const [ch, setCh] = useState("all");
-  const shown = list.filter((r) => (ch === "all" || r.dest.some((d) => d.channel === ch)) && (!q.trim() || `${r.event} ${evName(r.event)} ${r.dest.map((d) => d.target + d.channel).join(" ")}`.toLowerCase().includes(q.trim().toLowerCase())));
-  // The selection follows the data: a deleted route, or a project switch, falls back to the first route.
+  // The selection follows the data: a deleted route, or a project switch, falls back to none.
   useEffect(() => {
     if (sel !== null && sel !== "new" && !list.some((r) => r.id === sel)) setSel(null);
   }, [list, sel]);
@@ -37,46 +68,52 @@ export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
   const select = (id: string | null) => { setSel(id); setPreview("d0"); };
   const toggleRoute = async (r: Route, v: boolean) => {
     const res = await ops.saveRoute(p.id, r.id, { enabled: v }, nt.versions.get(r.id) !== undefined ? { ifMatch: nt.versions.get(r.id)! } : undefined);
-    ui.toast(res.ok ? `${r.id}${v ? " on." : " off."}` : res.msg, res.ok ? "ok" : "error");
+    ui.toast(res.ok ? (v ? "Route enabled" : "Route paused") : res.msg, res.ok ? "ok" : "error");
   };
-  const condText = (r: Route): string[] => {
-    const c: string[] = [];
-    if (r.cond.classes.length) c.push(r.cond.classes.join("/"));
-    if (r.cond.priority.length) c.push(r.cond.priority.join("/"));
+  const locked = (r: Route): Decision | null => (!perm.allowed ? perm : r.event === "kill" || r.event === "restore" ? { allowed: false, reason: "Kill and restore notifications cannot be switched off or removed." } : null);
+  const remove = (r: Route): void => {
+    ui.dialog({
+      title: "Remove this route?", kicker: p.name, body: <p>People will stop hearing about {r.event}.</p>,
+      actions: [{ label: "Cancel" }, { label: "Remove", kind: "danger", id: "nt-rm-go", guard: perm, onClick: async (close) => {
+        const res = await ops.deleteRoute(p.id, r.id, nt.versions.get(r.id) !== undefined ? { ifMatch: nt.versions.get(r.id)! } : undefined);
+        ui.toast(res.ok ? "Route removed" : res.msg, res.ok ? "ok" : "error");
+        if (res.ok) { close(); if (sel === r.id) select(null); }
+      } }],
+    });
+  };
+  const condText = (r: Route): string => {
+    const c: string[] = [...r.cond.classes, ...r.cond.priority];
     if (r.cond.hours === "business") c.push("business hours");
-    return c;
+    return c.length ? c.join(", ") : "Always";
   };
   return (
-    <div className="nt-routes">
-      <Panel title={`Who hears about what, in ${p.name}`} flush tools={<Btn label="Add route" small icon="plus" kind="primary" id="nt-add" guard={perm} onClick={() => select("new")} />}>
-        <FilterBar count={`${shown.length} ${shown.length === 1 ? "route" : "routes"}`}>
-          <SearchBox id="nt-q" label="Search" placeholder="Search..." value={q} onChange={setQ} />
-          <Field label="Channel" htmlFor="nt-ch"><Select id="nt-ch" options={[{ value: "all", label: "All" }, ...["slack", "teams", "email", "webhook", "paging"].map((c) => ({ value: c, label: c }))]} value={ch} onChange={setCh} /></Field>
-        </FilterBar>
-        <Table>
-          <thead><tr><th>Event</th><th>Sent to</th><th>Condition</th><th>On</th></tr></thead>
-          <tbody>
-            {shown.length ? shown.map((r) => {
-              const c = condText(r);
-              return (
-                <tr key={r.id} className={`row-link${sel === r.id ? " is-selected" : ""}${r.enabled ? "" : " nt-off"}`} id={`nt-row-${r.id}`} onClick={(e) => { if ((e.target as HTMLElement).closest("button,input,.switch")) return; select(r.id); }}>
-                  <td><div><button type="button" className="linkish nt-ev" id={`nt-open-${r.id}`} onClick={() => select(r.id)}><b>{evName(r.event)}</b></button></div><span className="sub mono small">{r.event}</span></td>
-                  <td>
-                    <div className="row">
-                      {r.dest.map((d, i) => {
-                        const inst = nt.instOf(d);
-                        const st = instState(inst);
-                        return <span key={i} className={`chip plain${st !== "healthy" ? " bad" : ""}`} title={st !== "healthy" ? st : undefined}>{inst?.type ?? d.channel} · {d.target}</span>;
-                      })}
-                    </div>
-                  </td>
-                  <td className="small">{c.length ? c.join(" · ") : "Always"}</td>
-                  <td><Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={!perm.allowed ? perm : r.event === "kill" || r.event === "restore" ? { allowed: false, reason: "Kill and restore notifications cannot be switched off." } : null} label={`Route ${r.id} enabled`} onChange={(v) => void toggleRoute(r, v)} /></td>
-                </tr>
-              );
-            }) : <tr><td colSpan={4} className="muted">{list.length ? "No route matches." : "No routes yet."}</td></tr>}
-          </tbody>
-        </Table>
+    <div className="stack nt-routes">
+      <Panel title={`Who hears about what, in ${p.name}`} flush id="nt-routes-panel" tools={<Btn label="Add route" small icon="plus" kind="primary" id="nt-add" guard={perm} onClick={() => ui.open((close) => <AddRoute p={p} nt={nt} perm={perm} close={close} />)} />}>
+        <ListView<Route>
+          id="routes" noun="route" rows={list} rowKey={(r) => r.id} rowId={(r) => `nt-row-${r.id}`}
+          text={(r) => `${r.event} ${evName(r.event)} ${r.dest.map((d) => d.target + d.channel).join(" ")}`}
+          filters={[{ key: "channel", label: "Channel", options: CHANNELS, test: (r, v) => r.dest.some((d) => d.channel === v) }]}
+          empty={<Empty title="No routes yet" text="Add a route to start sending notifications." />}
+          columns={[
+            { key: "e", label: "Event", sort: (r) => r.event, render: (r) => <div><b>{evName(r.event)}</b><span className="sub mono">{r.event}</span></div> },
+            { key: "d", label: "Sent to", render: (r) => (
+              <div className="row">
+                {r.dest.map((d, i) => {
+                  const st = instState(nt.instOf(d));
+                  return <span key={i} className={`chip plain${st !== "healthy" ? " bad" : ""}`} title={st !== "healthy" ? st : undefined}>{d.channel} · {d.target}</span>;
+                })}
+              </div>
+            ) },
+            { key: "c", label: "Condition", render: condText },
+            { key: "on", label: "On", render: (r) => <Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={locked(r)} label="Enabled" onChange={(v) => void toggleRoute(r, v)} /> },
+            { key: "x", label: "", align: "end", render: (r) => (
+              <span className="row">
+                <Btn label="Edit" small kind="ghost" id={`nt-open-${r.id}`} onClick={() => select(r.id)} aria={`Edit route ${r.id}`} />
+                <Btn small kind="ghost" cls="icon" icon="trash" aria="Remove route" id={`nt-rm-${r.id}`} guard={locked(r)} onClick={() => remove(r)} />
+              </span>
+            ) },
+          ]}
+        />
       </Panel>
       {sel !== null ? <div className="nt-split"><Editor p={p} nt={nt} perm={perm} cur={cur} draft={draft} setDraft={setDraft} onSaved={select} /></div> : null}
       {sel !== null && draft ? <Designer p={p} nt={nt} perm={perm} draft={draft} setDraft={setDraft} preview={preview} setPreview={setPreview} /> : null}
@@ -168,9 +205,9 @@ function Editor({ p, nt, perm, cur, draft, setDraft, onSaved }: { p: Project; nt
                     const keep = ni.type === x.channel && ni.type !== "webhook";
                     setDest(i, { integration: ni.id, channel: ni.type, ...(keep ? {} : { target: defaultTarget(ni.type, p, ni) }) });
                   }} />
-                  {inst?.type === "webhook"
-                    ? <input id={`nt-dest-t-${i}`} className="input mono" value={inst.targetId || inst.id} readOnly aria-label="Webhook endpoint id" title={typeof inst.config.url === "string" ? inst.config.url : ""} />
-                    : <input id={`nt-dest-t-${i}`} className="input mono" value={x.target} disabled={ro} aria-label={nt.typeOf(x.channel).targetLabel || "Target"} placeholder={x.channel === "slack" ? "#channel or @person" : x.channel === "email" ? "address or submitter" : nt.typeOf(x.channel).targetLabel || "Target"} onChange={(e) => setDest(i, { target: e.target.value })} />}
+                  <input id={`nt-dest-t-${i}`} className="input mono" {...(inst?.type === "webhook"
+                    ? { value: inst.targetId || inst.id, readOnly: true, "aria-label": "Webhook endpoint id", title: typeof inst.config.url === "string" ? inst.config.url : "" }
+                    : { value: x.target, disabled: ro, "aria-label": nt.typeOf(x.channel).targetLabel || "Target", placeholder: x.channel === "slack" ? "#channel or @person" : x.channel === "email" ? "address or submitter" : nt.typeOf(x.channel).targetLabel || "Target", onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDest(i, { target: e.target.value }) })} />
                   {st === "healthy" ? null : <span className="chip chip-warn" title={inst ? `${inst.name} is ${st}` : "No connection"}><Icon name="plug" />{st}</span>}
                   <Btn label="Send test" small icon="send" id={`nt-test-${i}`} guard={!d.id ? { allowed: false, reason: "Save the route before sending a test." } : perm} onClick={() => void sendTest(x)} />
                   <Btn small kind="ghost" icon="x" aria={`Remove destination ${i + 1}`} id={`nt-dest-rm-${i}`} guard={ro ? perm : d.dest.length < 2 ? { allowed: false, reason: "A route needs at least one destination." } : null} onClick={() => upd({ dest: d.dest.filter((_, n) => n !== i) })} />

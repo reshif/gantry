@@ -80,7 +80,7 @@ function mount(node: React.ReactElement) {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider>{node}</OverlayProvider></QueryClientProvider>);
 }
-beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; });
+beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; window.history.replaceState(null, "", "/"); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("Integrations", () => {
@@ -100,7 +100,7 @@ describe("Integrations", () => {
     expect(within(table).getByText("Acme Slack")).toBeTruthy();
     expect(within(table).getByText("Staging Slack")).toBeTruthy();
     expect(within(table).getAllByText("All projects").length).toBe(2);
-    expect(within(table).getByText("disabled")).toBeTruthy();
+    expect(within(table).getByText("disconnected")).toBeTruthy();
     expect((await byId("int-attn-int-off")).textContent).toBe("Staging Slack");
     expect(document.body.textContent).not.toMatch(/simulated/i);
     fireEvent.click(await byId("int-open-int-slack"));
@@ -125,20 +125,20 @@ describe("Integrations", () => {
       "POST /api/v1/integrations": () => ({ body: { ok: true, msg: "Pay Slack added. It is switched off until you turn it on.", integration: { ...INST, id: "int-new", name: "Pay Slack", connected: false, version: 1 } } }),
     });
     mount(<IntegrationsView />);
-    fireEvent.click(await screen.findByText("Add integration"));
-    fireEvent.click(await byId("int-add-type-slack"));
+    fireEvent.click(await byId("int-tab-catalogue"));
+    fireEvent.click(await byId("int-cat-add-slack"));
+    expect(await screen.findByText("Connect Slack")).toBeTruthy();
     fireEvent.change(await byId("int-add-name"), { target: { value: "Pay Slack" } });
-    fireEvent.click(await byId("int-add-next"));
-    expect((await byId("int-add-err")).textContent).toBe("Fill in Workspace.");
+    fireEvent.click(await byId("int-add-go"));
+    expect(await screen.findByText("Workspace is required.")).toBeTruthy();
     fireEvent.change(await byId("int-f-workspace"), { target: { value: "acme" } });
     fireEvent.change(await byId("int-f-botToken"), { target: { value: "xoxb" + "-" + "1".repeat(12) + "-" + "a".repeat(24) } });
     fireEvent.change(await byId("int-f-signingSecret"), { target: { value: "s".repeat(24) } });
-    fireEvent.click(await byId("int-add-next"));
-    expect(await screen.findByText("Connection works")).toBeTruthy();
+    fireEvent.click(await byId("int-add-test-run"));
+    expect(await screen.findByText(/Connection works/)).toBeTruthy();
     const draft = calls.find((c) => c.path === "/api/v1/integration-types/slack/test")!;
     expect(draft.body).toMatchObject({ config: { workspace: "acme" }, secrets: { botToken: expect.stringMatching(/^xoxb-/), signingSecret: "s".repeat(24) } });
     expect(screen.getByText("Authenticated as gantry in Acme.")).toBeTruthy();
-    fireEvent.click(await byId("int-add-next"));
     fireEvent.click(await byId("int-add-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/integrations")).toBe(true));
     const create = calls.find((c) => c.method === "POST" && c.path === "/api/v1/integrations")!;
@@ -146,20 +146,18 @@ describe("Integrations", () => {
     expect(create.headers["idempotency-key"]).toBeTruthy();
   });
 
-  it("a failed connection test blocks the next step and shows what failed", async () => {
+  it("a failed connection test shows what failed", async () => {
     setup({ "POST /api/v1/integration-types/webhook/test": () => ({ body: { ok: true, msg: "x", test: { ok: false, ms: 5, lines: [["fail", "hooks.example.com answered HTTP 503."]] } } }) });
     mount(<IntegrationsView />);
-    fireEvent.click(await screen.findByText("Add integration"));
-    fireEvent.click(await byId("int-add-type-webhook"));
+    fireEvent.click(await byId("int-tab-catalogue"));
+    fireEvent.click(await byId("int-cat-add-webhook"));
     fireEvent.change(await byId("int-add-name"), { target: { value: "Lake" } });
     fireEvent.change(await byId("int-f-url"), { target: { value: "https://hooks.example.com/in" } });
     fireEvent.change(await byId("int-f-secret"), { target: { value: "whsec_" + "k".repeat(20) } });
     fireEvent.change(await byId("int-add-target"), { target: { value: "audit-lake" } });
-    fireEvent.click(await byId("int-add-next"));
+    fireEvent.click(await byId("int-add-test-run"));
     expect(await screen.findByText("Connection failed")).toBeTruthy();
     expect(screen.getByText("hooks.example.com answered HTTP 503.")).toBeTruthy();
-    const next = await byId("int-add-next");
-    expect(next.getAttribute("data-reason")).toBe("Pass the connection test first.");
   });
 
   it("enabling sends the version it loaded; disabling asks first and lists what depends on the connection", async () => {
@@ -173,7 +171,7 @@ describe("Integrations", () => {
     expect(on.headers["if-match"]).toBe("2");
     fireEvent.click(await byId("int-open-int-slack"));
     fireEvent.click(await byId("int-d-toggle"));
-    expect(await screen.findByText("Disable Acme Slack?")).toBeTruthy();
+    expect(await screen.findByText("Disconnect Acme Slack?")).toBeTruthy();
     expect(screen.getAllByText(/Payments Platform route NR-1/).length).toBeGreaterThan(0);
     fireEvent.click(await byId("int-dis-go"));
     await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/integrations/int-slack" && c.method === "PATCH").length).toBe(1));
@@ -199,17 +197,24 @@ describe("Integrations", () => {
     expect(calls.find((c) => c.path === "/api/v1/chat-links" && c.method === "POST")!.body).toMatchObject({ channel: "slack", integration: "int-slack" });
   });
 
-  it("the custom builder offers no source-control category and explains what is missing", async () => {
-    setup({ "POST /api/v1/integration-types": () => ({ body: { ok: true, msg: "Audit lake added to the catalogue.", type: { id: "audit-lake", name: "Audit lake" } } }) });
+  it("the custom builder is one panel with the five prototype fields and validates them inline", async () => {
+    const calls = setup({ "POST /api/v1/integration-types": () => ({ body: { ok: true, msg: "Audit lake added to the catalogue.", type: { id: "audit-lake", name: "Audit lake" } } }) });
     mount(<IntegrationsView />);
-    fireEvent.click(await screen.findByText("Custom builder"));
+    fireEvent.click(await byId("int-tab-builder"));
     const cat = (await byId("int-b-cat")) as HTMLSelectElement;
-    expect(Array.from(cat.options).map((o) => o.value)).not.toContain("source");
-    expect((await byId("int-b-err")).textContent).toMatch(/name the integration/i);
-    fireEvent.change(await byId("int-b-name"), { target: { value: "Audit lake" } });
-    await waitFor(() => expect(document.getElementById("int-b-err")!.textContent).toBe("Ready to add."));
+    expect(cat.value).toBe("source");
+    expect(Array.from(cat.options).length).toBe(8);
+    expect(Array.from((await byId("int-b-auth") as HTMLSelectElement).options).map((o) => o.value)).toEqual(["token", "basic", "oauth", "hmac"]);
+    expect(document.getElementById("int-b-extra")).toBeTruthy();
     fireEvent.click(await byId("int-b-save"));
-    expect(await screen.findByText("Audit lake added to the catalogue.")).toBeTruthy();
+    expect(await screen.findByText("Name is required.")).toBeTruthy();
+    expect(screen.getByText("Base URL is required.")).toBeTruthy();
+    fireEvent.change(await byId("int-b-name"), { target: { value: "Audit lake" } });
+    fireEvent.change(await byId("int-b-url"), { target: { value: "http://x" } });
+    expect(await screen.findByText("Use an https:// URL.")).toBeTruthy();
+    fireEvent.change(await byId("int-b-url"), { target: { value: "https://lake.example.com" } });
+    fireEvent.click(await byId("int-b-save"));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/integration-types")).toBe(true));
   });
 });
 
@@ -307,7 +312,7 @@ describe("Notifications", () => {
     fireEvent.click(await byId("nt-tab-log"));
     const row = await byId("nt-dl-DLV-9");
     expect(within(row).getByText(/channel_not_found/)).toBeTruthy();
-    expect(within(row).getByText("✕ failed")).toBeTruthy();
+    expect(within(row).getByText("failed")).toBeTruthy();
     expect(document.getElementById("nt-retry-DLV-8")).toBeNull(); // a delivered one is not retried
     fireEvent.click(await byId("nt-retry-DLV-9"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/deliveries/DLV-9/retry" && c.method === "POST")).toBe(true));
@@ -345,5 +350,65 @@ describe("Notifications", () => {
     expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/card-templates")!.body).toMatchObject({ name: "Gate request (copy)", kind: "gate", actions: ["approve", "reject", "open"] });
     await waitFor(() => expect((document.getElementById("nt-ct-kind") as HTMLSelectElement).value).toBe("gate"));
     expect((document.getElementById("nt-ct-name") as HTMLInputElement).value).toBe("Gate request (copy)");
+  });
+
+  it("holds the tab in the URL; the tab strip is Routes, Card templates (3), Repo overrides, Delivery log", async () => {
+    setup();
+    mount(<NotificationsView />);
+    fireEvent.click(await byId("nt-tab-log"));
+    await waitFor(() => expect(window.location.search).toContain("tab=log"));
+    expect(document.getElementById("nt-tab-templates")!.textContent).toContain("3");
+    expect(document.getElementById("nt-tab-overrides")!.textContent).toBe("Repo overrides");
+  });
+
+  it("Add route opens a narrow 'Add a route' dialog (When, Channel, Send to) and says 'Route added'", async () => {
+    const calls = setup({ "POST /api/v1/projects/payments/routes": () => ({ body: { ok: true, msg: "Route NR-9 created.", id: "NR-9" } }) });
+    mount(<NotificationsView />);
+    fireEvent.click(await byId("nt-add"));
+    expect(await screen.findByText("Add a route")).toBeTruthy();
+    expect(document.getElementById("nt-add-event")).toBeTruthy();
+    expect(document.getElementById("nt-add-channel")).toBeTruthy();
+    expect(document.getElementById("nt-add-go")!.textContent).toBe("Save");
+    fireEvent.click(await byId("nt-add-go"));
+    expect(await screen.findByText("Send to is required.")).toBeTruthy();
+    fireEvent.change(await byId("nt-add-target"), { target: { value: "#pay-new" } });
+    fireEvent.click(await byId("nt-add-go"));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/projects/payments/routes")).toBe(true));
+    expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/projects/payments/routes")!.body).toMatchObject({ dest: [{ channel: "slack", target: "#pay-new", integration: "int-slack" }], enabled: true });
+    expect(await screen.findByText("Route added")).toBeTruthy();
+  });
+
+  it("each route row has a trash button that confirms 'Remove this route?' and deletes with the version; kill is locked", async () => {
+    const calls = setup({ "DELETE /api/v1/projects/payments/routes/NR-1": () => ({ body: { ok: true, msg: "Route removed." } }) });
+    mount(<NotificationsView />);
+    expect((await byId("nt-rm-NR-2")).getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(await byId("nt-rm-NR-1"));
+    expect(await screen.findByText("Remove this route?")).toBeTruthy();
+    fireEvent.click(await byId("nt-rm-go"));
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE")).toBe(true));
+    expect(calls.find((c) => c.method === "DELETE")!.headers["if-match"]).toBe("2");
+  });
+
+  it("Card templates shows the Gate, Question and Release card previews drawn by the server", async () => {
+    setup();
+    mount(<NotificationsView />);
+    fireEvent.click(await byId("nt-tab-templates"));
+    for (const k of ["gate", "question", "release"]) expect(await byId(`nt-card-${k}`)).toBeTruthy();
+    expect((await byId("nt-card-gate")).textContent).toContain("G2 Spec approved is waiting on WO-1042");
+  });
+
+  it("Repo overrides is a 'Repos that change the routes' list that links the repo and says when there are none", async () => {
+    setup();
+    mount(<NotificationsView />);
+    fireEvent.click(await byId("nt-tab-overrides"));
+    const panel = await byId("nt-overrides");
+    expect(panel.textContent).toContain("gate.waiting");
+    expect(panel.querySelector("a.pri")!.getAttribute("href")).toContain("onboarding/payments-api");
+    cleanup();
+    window.history.replaceState(null, "", "/?tab=overrides");
+    setup({ "GET /api/v1/projects/payments/repos": () => ({ body: [] }) });
+    mount(<NotificationsView />);
+    expect(await screen.findByText("No overrides")).toBeTruthy();
+    expect(screen.getByText("Repos use the project routes.")).toBeTruthy();
   });
 });

@@ -1,16 +1,17 @@
 /** The Repo overrides, Delivery log and Card templates tabs (legacy overridesTab, deliveriesTab, templatesTab). */
 import { useEffect, useState } from "react";
-import { Async, qState } from "../../ui/async";
-import { fmt, type Delivery, type Project } from "@gantry/domain";
+import { Async } from "../../ui/async";
+import { type Delivery, type Project } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { useDeliveries } from "../../api/queries";
 import { ops } from "../../api/ops";
 import { Btn, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
-import { Icon } from "../../ui/Icon";
+import { ListView, ago } from "../connect/kit";
+import { hashFor } from "../../lib/router";
 import { useUI } from "../../ui/overlay-context";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { useProjectRepos } from "../floor/kit";
-import { ACTION_LABEL, DEF_TPL, DestCard, FIELDS, KIND_EVENT, TPL, WebhookCard, chanIcon, defaultTarget, evName, events, instState, targetError, usePreview, type useNtData } from "./kit";
+import { ACTION_LABEL, ALL_FIELDS, DEF_TPL, DestCard, FIELDS, KIND_EVENT, TPL, WebhookCard, defaultTarget, events, instState, targetError, usePreview, type useNtData } from "./kit";
 
 type Nt = ReturnType<typeof useNtData>;
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -46,33 +47,29 @@ export function OverridesTab({ p, nt }: { p: Project; nt: Nt }) {
     if (r.ok) setO({ ...o, target: "" });
   };
   return (
-    <div className="form-grid">
-      <p className="muted">A repo can add a destination to a project route (also) or replace the route's destinations for that repo (instead). Project routes still decide which events and conditions apply.</p>
-      <Panel title={`Overrides on ${p.name} repos`} flush>
-        <div className="table-scroll">
-          <table className="table table-compact">
-            <thead><tr><th>Repo</th><th>Event</th><th>Mode</th><th>Destination</th><th><span className="sr">Actions</span></th></tr></thead>
-            <tbody>
-              {rows.length ? rows.map((x) => (
-                <tr key={`${x.repo.id}-${x.i}`}>
-                  <td className="mono">{x.repo.name}</td>
-                  <td>{evName(x.o.event)}</td>
-                  <td><span className={`chip${x.o.mode === "instead" ? " chip-warn" : ""}`}>{x.o.mode === "instead" ? "instead of route" : "also"}</span></td>
-                  <td>{(x.o.dest ?? []).map((dd, k) => { const ii = nt.instOf(dd); return <span className="nt-ov-dest" key={k}><Icon name={chanIcon(ii?.type ?? dd.channel)} /> <span className="small">{ii ? `${ii.name} ` : ""}</span><span className="mono">{dd.target}</span></span>; })}</td>
-                  <td className="num"><Btn label="Remove" small kind="ghost" id={`nt-ov-rm-${x.repo.id}-${x.i}`} guard={perm} onClick={async () => {
-                    const list = (x.repo.notifyOverrides ?? []).filter((_, j) => j !== x.i);
-                    const v = (x.repo as { version?: number }).version;
-                    done(await ops.configureRepo(x.repo.id, { notifyOverrides: list }, v !== undefined ? { ifMatch: v } : undefined), `Override removed from ${x.repo.name}.`);
-                  }} /></td>
-                </tr>
-              )) : <tr><td colSpan={5} className="muted">No repo overrides. Every repo follows the project routes.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+    <div className="stack">
+      <Panel title="Repos that change the routes" flush id="nt-overrides">
+        {rows.length ? (
+          <ul className="list">
+            {rows.map((x) => (
+              <li key={`${x.repo.id}-${x.i}`}>
+                <a className="pri" href={hashFor("onboarding", x.repo.id, p.id)}>{x.repo.name}</a>
+                <div className="grow small muted">{x.o.event} → {(x.o.dest ?? []).map((dd) => `${nt.instOf(dd)?.type ?? dd.channel} ${dd.target}`).join(", ")}</div>
+                <span className="chip info">{x.o.mode === "instead" ? "instead" : "also"}</span>
+                <Btn label="Remove" small kind="ghost" id={`nt-ov-rm-${x.repo.id}-${x.i}`} guard={perm} onClick={async () => {
+                  const list = (x.repo.notifyOverrides ?? []).filter((_, j) => j !== x.i);
+                  const v = (x.repo as { version?: number }).version;
+                  done(await ops.configureRepo(x.repo.id, { notifyOverrides: list }, v !== undefined ? { ifMatch: v } : undefined), `Override removed from ${x.repo.name}.`);
+                }} />
+              </li>
+            ))}
+          </ul>
+        ) : <Empty title="No overrides" text="Repos use the project routes." />}
       </Panel>
       <Panel title="Add an override">
         <div className="form-grid">
           <LockNote decision={perm} what="Repo overrides" />
+          <p className="muted small">A repo can add a destination to a project route (also) or replace the route's destinations for that repo (instead).</p>
           <div className="form-row">
             <Field label="Repo" htmlFor="nt-ov-repo"><Select id="nt-ov-repo" options={repos.map((r) => ({ value: r.id, label: r.name }))} value={o.repo} disabled={ro} onChange={(v) => setO({ ...o, repo: v })} /></Field>
             <Field label="Event" htmlFor="nt-ov-event"><Select id="nt-ov-event" options={events()} value={o.event} disabled={ro} onChange={(v) => setO({ ...o, event: v })} /></Field>
@@ -93,57 +90,44 @@ export function DeliveriesTab({ p, nt }: { p: Project; nt: Nt }) {
   const ui = useUI();
   const openTraveler = useOpenTraveler();
   const perm = dec(useCan("notify.edit", { project: p.id }));
-  const [f, setF] = useState({ status: "all", integration: "all", event: "all" });
-  const [limit, setLimit] = useState(40);
-  const q = useDeliveries({ project: p.id, limit, ...(f.status !== "all" ? { status: f.status } : {}), ...(f.integration !== "all" ? { integration: f.integration } : {}), ...(f.event !== "all" ? { event: f.event } : {}) });
+  const [limit, setLimit] = useState(200);
+  // the log is across every project (as in the prototype); retries are checked against the delivery's own project by the server
+  const q = useDeliveries({ limit });
   const page = Array.isArray(q.data) ? { items: q.data, next: null } : q.data ?? { items: [] as Delivery[], next: null };
   const list = page.items;
-  const failedQ = useDeliveries({ project: p.id, status: "failed", limit: 200 });
-  const failed = (Array.isArray(failedQ.data) ? failedQ.data : failedQ.data?.items ?? []).length;
-  const instName = (d: Delivery): string => { const ii = d.integration ? nt.insts.find((i) => i.id === d.integration) : nt.instOf({ channel: d.channel, target: d.target }); return ii ? ii.name : `${d.channel}${d.integration ? " (removed)" : ""}`; };
   const retry = async (d: Delivery) => {
     const r = await ops.retryDelivery(d.id);
-    ui.toast(r.msg, r.ok ? "ok" : "error");
+    ui.toast(r.ok ? "Delivered on retry" : r.msg, r.ok ? "ok" : "error");
   };
+  const tone = (s: string): string => (s === "delivered" ? "ok" : s === "failed" ? "bad" : "warn");
   return (
-    <div className="form-grid">
-      <div className="toolbar">
-        <div className="filters">
-          <Field label="Status" htmlFor="nt-dl-status"><Select id="nt-dl-status" options={[{ value: "all", label: "All" }, { value: "delivered", label: "Delivered" }, { value: "pending", label: "Pending" }, { value: "failed", label: "Failed" }]} value={f.status} onChange={(v) => { setF({ ...f, status: v }); setLimit(40); }} /></Field>
-          <Field label="Connection" htmlFor="nt-dl-channel"><Select id="nt-dl-channel" options={[{ value: "all", label: "All" }, ...nt.destInsts.map((c) => ({ value: c.id, label: c.name }))]} value={f.integration} onChange={(v) => { setF({ ...f, integration: v }); setLimit(40); }} /></Field>
-          <Field label="Event" htmlFor="nt-dl-event"><Select id="nt-dl-event" options={[{ value: "all", label: "All" }, ...events()]} value={f.event} onChange={(v) => { setF({ ...f, event: v }); setLimit(40); }} /></Field>
-        </div>
-        <div className="kv-row">
-          <div><div className="kv-k">Shown</div><div className="kv-v mono">{qState(q, () => String(list.length))}</div></div>
-          <div><div className="kv-k">Failed</div><div className={`kv-v mono${failed ? " neg" : ""}`}>{qState(failedQ, () => String(failed))}</div></div>
-        </div>
-      </div>
+    <div className="stack">
       <Async query={q} what="the delivery log" id="nt-dl">{() => (
-      <Panel flush>
-        <div className="table-scroll">
-          <table className="table table-compact nt-dl">
-            <thead><tr><th>Time (IST)</th><th>Id</th><th>Event</th><th>Connection</th><th>Target</th><th>Work order</th><th>Status</th><th className="num">Tries</th><th>Error</th><th><span className="sr">Retry</span></th></tr></thead>
-            <tbody>
-              {list.length ? list.map((d) => (
-                <tr key={d.id} id={`nt-dl-${d.id}`}>
-                  <td className="mono">{fmt.istDate(d.at)} {fmt.ist(d.at)}</td>
-                  <td className="mono">{d.id}{d.test ? <span className="tag nt-testtag">test</span> : null}</td>
-                  <td>{evName(d.event)}</td>
-                  <td><Icon name={chanIcon(d.channel)} /> {instName(d)}</td>
-                  <td className="mono">{d.target}</td>
-                  <td>{d.wo ? <button type="button" className="linkish mono" id={`nt-dl-wo-${d.id}`} onClick={() => openTraveler(d.wo!)}>{d.wo}</button> : <span className="muted">–</span>}</td>
-                  <td><span className={`outcome o-${d.status === "failed" ? "failed" : "ok"}`}>{d.status === "failed" ? (d.state === "failed" && d.attempts > 0 ? "↻ retrying" : "✕ failed") : d.status === "pending" ? "… pending" : "✓ delivered"}</span></td>
-                  <td className="num mono">{d.attempts}</td>
-                  <td className="small nt-err">{d.error || ""}</td>
-                  <td className="num">{d.status === "failed" ? <Btn label="Retry" small icon="refresh" id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : null}</td>
-                </tr>
-              )) : <tr><td colSpan={10} className="muted">No deliveries match these filters.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
+        <Panel title="Deliveries" flush id="nt-deliveries">
+          <ListView<Delivery>
+            id="dlv" noun="delivery" rows={list} rowKey={(d) => d.id} rowId={(d) => `nt-dl-${d.id}`}
+            text={(d) => `${d.event} ${d.target} ${d.channel} ${nt.projects.find((x) => x.id === d.project)?.name ?? d.project ?? ""}`}
+            filters={[
+              { key: "status", label: "Status", options: ["delivered", "failed", "pending"] },
+              { key: "channel", label: "Channel", options: ["slack", "email", "teams", "webhook", "paging"] },
+            ]}
+            columns={[
+              { key: "id", label: "Id", render: (d) => <span className="mono">{d.id}{d.test ? <span className="tag nt-testtag">test</span> : null}</span> },
+              { key: "at", label: "When", sort: (d) => d.at, render: (d) => ago(d.at) },
+              { key: "event", label: "Event", render: (d) => (
+                <div>{d.event}{d.wo ? <span className="sub"><button type="button" className="linkish mono" id={`nt-dl-wo-${d.id}`} onClick={() => openTraveler(d.wo!)}>{d.wo}</button></span> : null}</div>
+              ) },
+              { key: "to", label: "To", render: (d) => `${d.channel} \u00b7 ${d.target}` },
+              { key: "project", label: "Project", render: (d) => nt.projects.find((x) => x.id === d.project)?.name ?? d.project ?? "\u2014" },
+              { key: "status", label: "Status", render: (d) => (
+                <div><span className={`chip ${tone(d.status)}`}>{d.status}</span>{d.status !== "delivered" && (d.error || d.attempts) ? <span className="sub nt-err">{d.attempts ? `${d.attempts} ${d.attempts === 1 ? "try" : "tries"}` : ""}{d.error ? ` \u00b7 ${d.error}` : ""}</span> : null}</div>
+              ) },
+              { key: "a", label: "", align: "end", render: (d) => (d.status !== "delivered" ? <Btn label="Retry" small id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : null) },
+            ]}
+          />
+        </Panel>
       )}</Async>
-      {page.next ? <div className="more"><Btn label="Show 40 more" id="nt-dl-more" onClick={() => setLimit(limit + 40)} /></div> : null}
+      {page.next ? <div className="more"><Btn label="Show more" id="nt-dl-more" onClick={() => setLimit(limit + 200)} /></div> : null}
       <LockNote decision={perm} what={`Retries on ${p.name}`} />
     </div>
   );
@@ -251,6 +235,37 @@ export function TemplatesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decisi
         </div>
       </Panel>
       {!rows.length ? <Empty title="No templates" /> : null}
+    </div>
+  );
+}
+
+/* ---------- card templates tab: the three built-in cards as the server draws them, then the custom-card editor ---------- */
+
+const PREVIEW_KINDS: Array<[string, string]> = [["gate", "Gate card"], ["question", "Question card"], ["release", "Release card"]];
+
+function CardPreview({ p, kind, title }: { p: Project; kind: string; title: string }) {
+  const q = usePreview(p.id, { event: KIND_EVENT[kind] ?? kind, template: kind, fields: { ...ALL_FIELDS } });
+  const s = q.data?.sample;
+  const target = p.notifications.find((r) => r.template === kind)?.dest[0]?.target;
+  return (
+    <Panel title={title} id={`nt-card-${kind}`}>
+      {s ? (
+        <div className="card">
+          {target ? <div className="micro">{target}</div> : null}
+          <b>{s.head}</b>
+          <div className="small muted">{s.project.name} · {s.prio} · {s.clsName}</div>
+          <div className="row">{(q.data?.actions ?? []).map((a, i) => <span key={a} className={`chip ${i === 0 && a === "approve" ? "ok" : "info"}`}>{ACTION_LABEL[a] ?? a}</span>)}</div>
+        </div>
+      ) : <p className="muted small">{q.isError ? "The preview could not be drawn." : "Drawing the preview…"}</p>}
+    </Panel>
+  );
+}
+
+export function CardsTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision }) {
+  return (
+    <div className="stack">
+      <div className="cols w3" id="nt-card-previews">{PREVIEW_KINDS.map(([k, t]) => <CardPreview key={k} p={p} kind={k} title={t} />)}</div>
+      <TemplatesTab p={p} nt={nt} perm={perm} />
     </div>
   );
 }

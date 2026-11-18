@@ -46,12 +46,12 @@ export function AddMcp({ close, onAdded }: { close: () => void; onAdded: (id: st
 
   const submit = async () => {
     if (!name.trim() || !url.trim()) return setErr("Name and URL are required.");
-    if (!/^https?:\/\/\S+\.?\S*/.test(url.trim())) return setErr("HTTP and SSE servers need an https URL.");
+    if (!/^https?:\/\/\S+\.?\S*/.test(url.trim())) return setErr("Use an https:// URL.");
     if (authMode !== "none" && secret.length < 6) return setErr(`Enter the secret for ${authMode === "bearer" ? "the bearer token" : "the API key"} (6 characters or more).`);
     if (!tools) return setErr("Discover tools before adding the server.");
     const r = await ops.addMCP({ ...conn(), sensitivity: sens, tools: tools.map((t) => ({ name: t.name, write: t.write, allowed: t.allowed })) });
     if (!r.ok) return setErr(r.msg);
-    ui.toast(r.msg, "ok");
+    ui.toast("Server registered", "ok");
     close();
     const id = (r as unknown as { server?: { id: string } }).server?.id;
     if (id) onAdded(id);
@@ -59,9 +59,9 @@ export function AddMcp({ close, onAdded }: { close: () => void; onAdded: (id: st
   const set = (i: number, patch: Partial<Found>) => setTools((l) => (l ? l.map((t, j) => (j === i ? { ...t, ...patch } : t)) : l));
 
   return (
-    <Dialog title="Add an MCP server" kicker="MCP registry" wide onClose={close} actions={[
+    <Dialog title="Register an MCP server" kicker="MCP registry" wide onClose={close} actions={[
       { label: "Cancel", onClick: () => close() },
-      { label: "Add server", kind: "primary", submit: true, id: "mcp-add-go", guard: perm, onClick: () => void submit() },
+      { label: "Save", kind: "primary", submit: true, id: "mcp-add-go", guard: perm, onClick: () => void submit() },
     ]} body={(
       <div className="form-grid">
         <LockNote decision={perm} what="MCP registry" />
@@ -78,7 +78,7 @@ export function AddMcp({ close, onAdded }: { close: () => void; onAdded: (id: st
           <Field label="Secret" htmlFor="mcp-add-secret" hint="Stored sealed; never shown again.">
             <input id="mcp-add-secret" className="input mono" type="password" value={secret} autoComplete="off" disabled={authMode === "none"} onChange={(e) => touch(setSecret)(e.target.value)} />
           </Field>
-          <Field label="Sensitivity" htmlFor="mcp-add-sens"><Select id="mcp-add-sens" options={SENS} value={sens} onChange={setSens} /></Field>
+          <Field label="Data sensitivity" htmlFor="mcp-add-sens"><Select id="mcp-add-sens" options={SENS} value={sens} onChange={setSens} /></Field>
         </div>
         <div className="mcp-disc">
           <Btn label={tools ? "Discover again" : "Discover tools"} icon="search" id="mcp-add-discover" guard={busy ? { allowed: false, reason: "Still connecting." } : perm} onClick={() => void discover()} />

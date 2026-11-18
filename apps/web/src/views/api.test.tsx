@@ -75,7 +75,8 @@ function mount() {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><ApiView /></OverlayProvider></QueryClientProvider>);
 }
-const tab = async (name: string) => fireEvent.click(await byId(`api-tab-${name}`));
+const tab = async (name: string) => fireEvent.click(await byId(`api-tab-${name === "ref" ? "reference" : name === "play" ? "reference" : name}`));
+const openTrig = async (id = "TR-1") => fireEvent.click(await byId(`api-tr-open-${id}`));
 beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -93,7 +94,7 @@ describe("API & triggers: keys", () => {
     expect(await screen.findByRole("heading", { name: "API & triggers" })).toBeTruthy();
     const row = await byId("api-key-row-key-1");
     expect(within(row).getByText("Jira bridge")).toBeTruthy();
-    expect(within(row).getByText(/gk_7hq2c91x…/)).toBeTruthy();
+    expect(within(row).getByText("gk_••••key-1")).toBeTruthy();
     expect(within(row).getByText("Payments Platform")).toBeTruthy();
     expect(within(row).getByText("wo.submit")).toBeTruthy();
     expect(within(row).getByText("active")).toBeTruthy();
@@ -104,7 +105,7 @@ describe("API & triggers: keys", () => {
     const meta = document.getElementById("api-stats")!.textContent ?? "";
     expect(meta).toMatch(/Active keys\s*1/);
     expect(meta).toMatch(/Requests, 24 h\s*2/);
-    expect(meta).toMatch(/1 rate limited/);
+    expect(meta).toMatch(/errors/);
     expect(document.body.textContent).not.toMatch(/local sample logic|simulated/i);
   });
 
@@ -114,7 +115,7 @@ describe("API & triggers: keys", () => {
     mount();
     fireEvent.click(await byId("api-key-new"));
     fireEvent.click(await byId("api-key-go"));
-    expect((await screen.findByText("Name the key.")).getAttribute("role")).toBe("alert");
+    expect((await screen.findByText("Name is required.")).getAttribute("role")).toBe("alert");
     fireEvent.change(await byId("api-key-name"), { target: { value: "ServiceNow bridge" } });
     fireEvent.click(await byId("api-key-act-triggers-run"));
     fireEvent.click(await byId("api-key-act-wo-read")); // off again
@@ -126,13 +127,9 @@ describe("API & triggers: keys", () => {
     expect(post.body).toEqual({ name: "ServiceNow bridge", project: "payments", actions: ["wo.submit", "triggers.run"], expiresInDays: 30 });
     expect(post.headers["idempotency-key"]).toBeTruthy();
     const done = await byId("api-secret-done");
-    expect(done.getAttribute("aria-disabled")).toBe("true");
-    expect(done.getAttribute("data-reason")).toBe("Confirm you stored the key first.");
+    expect(done.textContent).toBe("Close");
+    expect(document.body.textContent).toContain("Copy your key now");
     fireEvent.click(done);
-    expect(document.getElementById("api-secret-value")).toBeTruthy();
-    fireEvent.click(await byId("api-secret-ack"));
-    await waitFor(() => expect(document.getElementById("api-secret-done")!.getAttribute("aria-disabled")).toBeNull());
-    fireEvent.click(await byId("api-secret-done"));
     await waitFor(() => expect(document.getElementById("api-secret-value")).toBeNull());
     expect(document.body.textContent).not.toContain(SECRET);
   });
@@ -159,9 +156,11 @@ describe("API & triggers: reference, playground, log, limits", () => {
     setup();
     mount();
     await tab("ref");
-    expect(await screen.findByText("/api/v1/projects/{project}/work-orders")).toBeTruthy();
-    expect(screen.getByText("/api/v1/work-orders/{id}/messages")).toBeTruthy();
-    expect(screen.getByText("/api/v1/triggers/{id}/fire")).toBeTruthy();
+    expect((await screen.findAllByText("/api/v1/projects/{project}/work-orders")).length).toBeGreaterThan(1);
+    expect((await byId("api-ref-endpoints")).textContent).toContain("Purpose");
+    expect((await byId("api-ref-example")).textContent).toContain("curl -X POST");
+    expect(screen.getAllByText("/api/v1/work-orders/{id}/messages").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("/api/v1/triggers/{id}/fire").length).toBeGreaterThan(0);
     const curl = (await byId("api-ref-copy-0")).closest(".api-code")!.querySelector("pre")!.textContent!;
     expect(curl).toContain("-H \"Authorization: Bearer $GANTRY_KEY\"");
     expect(curl).toContain("Idempotency-Key");
@@ -204,18 +203,20 @@ describe("API & triggers: reference, playground, log, limits", () => {
     expect(document.getElementById("api-pg-open")).toBeNull();
   });
 
-  it("the request log lists requests and filters by status through the API", async () => {
-    const calls = setup();
+  it("the request log is a 'Last requests' panel: relative times, key id, status chips, Search and a Status filter", async () => {
+    setup();
     mount();
     await tab("log");
+    const panel = await byId("api-log-panel");
+    expect(panel.textContent).toContain("Last requests");
     const table = await screen.findByRole("table");
     expect(within(table).getByText("/api/v1/projects/payments/work-orders")).toBeTruthy();
-    expect(within(table).getByText("✓ 200")).toBeTruthy();
-    expect(within(table).getAllByText("Jira bridge").length).toBe(2);
-    fireEvent.change(await byId("api-log-status"), { target: { value: "429" } });
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/api-requests" && /status=429/.test(c.url))).toBe(true));
-    await waitFor(() => expect(within(screen.getByRole("table")).queryByText("✓ 200")).toBeNull());
-    expect(within(screen.getByRole("table")).getByText("◆ 429")).toBeTruthy();
+    expect(within(table).getByText("200")).toBeTruthy();
+    expect(within(table).getAllByText("key-1").length).toBe(2);
+    expect(panel.textContent).toContain("ago");
+    fireEvent.change(await byId("rq-f-status"), { target: { value: "429" } });
+    await waitFor(() => expect(within(screen.getByRole("table")).queryByText("200")).toBeNull());
+    expect(within(screen.getByRole("table")).getByText("429")).toBeTruthy();
   });
 
   it("limits: saves the whole settings with the version it loaded, validates, and the master switch for triggers is off", async () => {
@@ -223,10 +224,10 @@ describe("API & triggers: reference, playground, log, limits", () => {
     mount();
     await tab("limits");
     expect((await byId("api-lim-triggers") as HTMLInputElement).checked).toBe(false);
-    expect((await byId("api-lim-sign")).querySelectorAll("option").length).toBe(1); // only the scheme the delivery implements
+    expect((await byId("api-limits-panel")).textContent).toContain("HMAC-SHA256"); // read-only: the only scheme the delivery implements
     fireEvent.change(await byId("api-lim-rate"), { target: { value: "0" } });
     fireEvent.click(await byId("api-lim-save"));
-    expect(await screen.findByText(/Use whole numbers/)).toBeTruthy();
+    expect(await screen.findByText("Requests per minute must be at least 1.")).toBeTruthy();
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
     fireEvent.change(await byId("api-lim-rate"), { target: { value: "120" } });
     fireEvent.click(await byId("api-lim-triggers"));
@@ -252,11 +253,13 @@ describe("API & triggers: triggers", () => {
     const calls = setup({ "PATCH /api/v1/triggers/TR-1": () => ({ body: { ok: true, msg: "Issues labelled factory enabled.", version: 3 } }) });
     mount();
     await tab("triggers");
-    const item = await byId("api-tr-open-TR-1");
-    expect(item.textContent).toContain("Acme GitHub · Issue with label · Payments Platform");
-    expect(item.textContent).toContain("off");
+    const item = await byId("api-tr-row-TR-1");
+    expect(item.textContent).toContain("Payments Platform · issue");
+    expect(document.getElementById("api-triggers-panel")!.textContent).toContain("Last run");
+    expect(document.getElementById("api-triggers-panel")!.textContent).toContain("Enabled");
+    await openTrig();
     expect((await byId("api-tr-master")).textContent).toMatch(/switched off for the organisation/);
-    expect(screen.getByText("✓ created")).toBeTruthy();
+    expect(screen.getAllByText("✓ created").length).toBeGreaterThan(0);
     expect(screen.getByText("◆ held")).toBeTruthy();
     expect(screen.getByText("TP-aa")).toBeTruthy();
     fireEvent.click(await byId("api-tr-enabled"));
@@ -286,6 +289,7 @@ describe("API & triggers: triggers", () => {
     const calls = setup({ "PATCH /api/v1/triggers/TR-1": () => ({ body: { ok: true, msg: "Saved Issues labelled factory.", version: 3 } }) });
     mount();
     await tab("triggers");
+    await openTrig();
     fireEvent.change(await byId("api-tr-label"), { target: { value: "ship-it" } });
     fireEvent.click(await byId("api-tr-lm-add"));
     fireEvent.change(await byId("api-tr-lm-l-1"), { target: { value: "docs" } });
@@ -312,6 +316,7 @@ describe("API & triggers: triggers", () => {
     });
     mount();
     await tab("triggers");
+    await openTrig();
     fireEvent.click(await byId("api-tr-sim"));
     expect(await screen.findByText(/Sends a sample issue through this trigger's real rules/)).toBeTruthy();
     fireEvent.change(await byId("api-sim-author"), { target: { value: "tomas-acme" } });
@@ -343,6 +348,7 @@ describe("API & triggers: triggers", () => {
     });
     mount();
     await tab("triggers");
+    await openTrig();
     const held = await byId("api-tr-held");
     expect(held.textContent).toContain("Drive-by request");
     expect(held.textContent).toContain("does not map to a Gantry identity");
@@ -359,6 +365,7 @@ describe("API & triggers: triggers", () => {
     setup({ "GET /api/v1/trigger-proposals": () => ({ body: [PROPOSAL] }) }, ["wo.submit"]);
     mount();
     await tab("triggers");
+    await openTrig();
     const rel = await byId("api-tr-rel-TP-aa");
     await waitFor(() => expect(rel.getAttribute("aria-disabled")).toBe("true"));
     expect(rel.getAttribute("data-reason")).toMatch(/No role holds wo.submit/);
@@ -368,6 +375,7 @@ describe("API & triggers: triggers", () => {
     setup({}, ["triggers.edit"]);
     mount();
     await tab("triggers");
+    await openTrig();
     const save = await byId("api-tr-save");
     await waitFor(() => expect(save.getAttribute("aria-disabled")).toBe("true"));
     expect(save.getAttribute("data-reason")).toMatch(/No role holds triggers.edit/);
@@ -380,11 +388,12 @@ describe("API & triggers: triggers", () => {
     setup({ "GET /api/v1/triggers": () => ({ body: [TRIG({ id: "TR-3", type: "schedule", name: "Weekly chores", source: "schedule", schedule: "Mon 06:00 IST", title: "Weekly dependency updates", cls: "chore", who: "system", nextRun: Date.now() + 86_400_000, label: undefined, labelMap: undefined }), TRIG({ id: "TR-4", type: "ci", name: "Failing CI on main", who: "proposal", cls: "hotfix", label: undefined, labelMap: undefined })] }) });
     mount();
     await tab("triggers");
+    await openTrig("TR-3");
     expect((await byId("api-tr-schedule") as HTMLInputElement).value).toBe("Mon 06:00 IST");
     expect((await byId("api-tr-title") as HTMLInputElement).value).toBe("Weekly dependency updates");
     expect(screen.getByText(/Next run/)).toBeTruthy();
     expect(document.getElementById("api-tr-label")).toBeNull();
-    fireEvent.click(await byId("api-tr-open-TR-4"));
+    await openTrig("TR-4");
     expect((await byId("api-tr-cls") as HTMLSelectElement).value).toBe("hotfix");
     expect(screen.getByText(/opens a proposal and asks a person to confirm/i)).toBeTruthy();
     expect((await byId("api-tr-sim")).textContent).toBe("Simulate incoming CI failure");

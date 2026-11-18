@@ -324,16 +324,22 @@ export function Empty({ title, text, action, id, icon, tone }: { title: ReactNod
 }
 
 /** Page header (prototype .ph): eyebrow with the sheet's drawing number, one h1, a quiet subtitle, the action cluster. */
-export function ViewHead({ kicker, title, status, sub, meta, actions, sheet }: { sheet?: string; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
+export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, crumbs }: { sheet?: string; /** Breadcrumb for a detail page (prototype pageHeader crumbs): replaces the drawing number in the eyebrow. */ crumbs?: Array<{ label: ReactNode; href?: string }>; kicker?: ReactNode; title: ReactNode; status?: ReactNode; sub?: ReactNode; meta?: Array<[ReactNode, ReactNode]>; actions?: ReactNode }) {
   const hashId = useHash().id || "home";
   const route = sheet ?? hashId;
   return (
     <header className="ph vhead">
       <div className="title vhead-main">
-        <div className="eyebrow kicker">
-          <span title="Drawing number">{drawingNo(route)}</span>
-          {kicker ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
-        </div>
+        {crumbs ? (
+          <nav className="eyebrow kicker" aria-label="Breadcrumb">
+            {crumbs.map((c, i) => <span key={i}>{i ? <span aria-hidden="true">/ </span> : null}{c.href ? <a href={c.href}>{c.label}</a> : <span aria-current="page">{c.label}</span>}</span>)}
+          </nav>
+        ) : (
+          <div className="eyebrow kicker">
+            <span title="Drawing number">{drawingNo(route)}</span>
+            {kicker ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
+          </div>
+        )}
         {status ? <div className="row vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
         {sub ? <p className="sub vsub">{sub}</p> : null}
         {meta ? (

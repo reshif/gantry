@@ -129,7 +129,9 @@ export function usePreview(project: string | null | undefined, o: { event: strin
     queryFn: async () => {
       const r = await ops.previewCardTemplate({ project, event: o.event, template: o.template, fields: o.fields, ...(o.actions ? { actions: o.actions } : {}) });
       if (!r.ok) throw new Error(r.msg);
-      return r as unknown as Preview;
+      const pv = r as unknown as Preview;
+      if (!pv.sample) throw new Error("The preview came back empty.");
+      return pv;
     },
     staleTime: 15_000,
   });

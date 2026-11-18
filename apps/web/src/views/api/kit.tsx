@@ -66,10 +66,11 @@ export function useApiData(): ApiData {
   const items = Array.isArray(raw) ? raw : raw?.items ?? [];
   const extra = (!Array.isArray(raw) && raw ? (raw as unknown as { last24h?: number; limited24h?: number }) : {}) as { last24h?: number; limited24h?: number };
   const day = Date.now() - 86_400_000;
+  void day;
   return {
     me, vis, visIds, pname: (id) => projects.find((p) => p.id === id)?.name ?? id,
     keys: (keysQ.data ?? []).filter((k) => visIds.includes(k.project)), cfg: cfgQ.data, triggers: (trigQ.data ?? []).filter((t) => visIds.includes(t.project)),
-    log: items, last24h: extra.last24h ?? items.filter((x) => x.at > day).length, limited24h: extra.limited24h ?? items.filter((x) => x.at > day && x.status === 429).length,
+    log: items, last24h: extra.last24h ?? items.length, limited24h: extra.limited24h ?? items.filter((x) => x.at > day && x.status === 429).length,
     insts, typeOf: (id) => types.find((t) => t.id === id), loading: keysQ.isPending || trigQ.isPending, keysQ, trigQ, logQ, cfgQ,
   };
 }

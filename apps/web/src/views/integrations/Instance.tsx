@@ -84,14 +84,14 @@ export function ToggleIntegration({ inst, close }: { inst: IntegrationInstance; 
   const u = d.usage(inst);
   const [err, setErr] = useState("");
   return (
-    <Dialog title={`Disable ${inst.name}?`} kicker={d.typeOf(inst).name} onClose={close} actions={[{ label: "Cancel" }, { label: `Disable ${inst.name}`, kind: "danger", id: "int-dis-go", guard: perm, onClick: async () => {
+    <Dialog title={`Disconnect ${inst.name}?`} kicker={d.typeOf(inst).name} onClose={close} actions={[{ label: "Cancel" }, { label: "Disconnect", kind: "danger", id: "int-dis-go", guard: perm, onClick: async () => {
       const r = await ops.updateIntegration(inst.id, { connected: false }, inst.version !== undefined ? { ifMatch: inst.version } : undefined);
       if (!r.ok) return setErr(r.msg);
-      ui.toast(`${inst.name} disabled.`, "ok");
+      ui.toast(`${inst.name} disconnected.`, "ok");
       close();
     } }]} body={(
       <div className="form-grid">
-        <p>Gantry stops using it straight away. Settings are kept, so enabling it again restores everything.</p>
+        <p>Stations that use it will fail until it is reconnected. Settings are kept, so reconnecting restores everything.</p>
         <div className="callout callout-block"><Icon name="alert" /><span>Deliveries to it fail and show in the delivery log; triggers from it stop firing; repos that use it as their source cannot open or merge PRs. Kill and restore notices still go out.</span></div>
         <h3 className="sub-h">Depends on it</h3>
         <ImpactList u={u} inst={inst} pname={d.pname} />

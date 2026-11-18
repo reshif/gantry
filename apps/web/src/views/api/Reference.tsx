@@ -1,6 +1,7 @@
 /** The Endpoints tab (legacy refTab): the public API with copyable curl requests and sample responses, and how to verify outbound webhook signatures. */
-import { Panel } from "../../ui/primitives";
-import { Icon } from "../../ui/Icon";
+import { Btn, Panel, useCopy } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
+import { PlayTab } from "./Playground";
 import { BASE, CodeBlock, type ApiData } from "./kit";
 
 interface Endpoint { m: string; p: string; d: string; scope: string; body?: unknown; res: unknown; idem?: boolean }
@@ -37,16 +38,31 @@ T=$(date +%s); SIG=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$
 curl -X POST ${BASE}/hooks/trigger/<connection id> \\
   -H "Content-Type: application/json" -H "X-Gantry-Signature: t=$T,v1=$SIG" -d "$BODY"`;
 
+const purpose = (e: Endpoint): string => e.d.split(/(?<=\.)\s/)[0]!.replace(/\.$/, "");
+
 export function RefTab({ d }: { d: ApiData }) {
   const cfg = d.cfg;
+  const copy = useCopy();
+  const example = curl(ENDPOINTS[0]!);
   return (
-    <div className="form-grid">
+    <div className="stack">
+      <Panel title="Endpoints" flush id="api-ref-endpoints">
+        <DataTable id="api-ref-table" caption="Endpoints" rows={ENDPOINTS} rowKey={(e) => e.m + e.p} columns={[
+          { key: "m", label: "Method", render: (e) => <span className="mono">{e.m}</span> },
+          { key: "p", label: "Path", render: (e) => <span className="mono">{e.p}</span> },
+          { key: "d", label: "Purpose", render: purpose },
+        ]} />
+      </Panel>
+      <Panel title="Example" id="api-ref-example">
+        <div className="stack">
+          <pre className="pre" aria-label="Example request">{example}</pre>
+          <div><Btn label="Copy" small id="api-ref-example-copy" onClick={() => copy(example)} /></div>
+        </div>
+      </Panel>
       <div className="callout">
-        <Icon name="api" />
-        <span>
-          Base URL <span className="mono">{BASE}</span>. Bearer keys from the Keys tab. Rate limit <strong className="mono">{(cfg?.rateLimit ?? 60) + "/min"}</strong> per key with a burst of <span className="mono">{String(cfg?.burst ?? 20)}</span> (429 with Retry-After
-          over it); idempotency keys are remembered for <span className="mono">{(cfg?.idempotencyHours ?? 24) + "h"}</span>. Every request is recorded on the Request log tab.
-        </span>
+        <b>Base URL {BASE}</b>
+        Bearer keys from the Keys tab. Rate limit <span className="mono">{(cfg?.rateLimit ?? 60) + "/min"}</span> per key with a burst of <span className="mono">{String(cfg?.burst ?? 20)}</span> (429 with Retry-After
+        over it); idempotency keys are remembered for <span className="mono">{(cfg?.idempotencyHours ?? 24) + "h"}</span>. Every request is recorded on the Request log tab.
       </div>
       {ENDPOINTS.map((e, i) => (
         <section key={e.p + e.m} className="panel api-ep" aria-label={`${e.m} ${e.p}`}>
@@ -64,6 +80,7 @@ export function RefTab({ d }: { d: ApiData }) {
       ))}
       <Panel title="Sending events from a custom source"><CodeBlock id="api-ref-hook" text={HOOK} label="POST /hooks/trigger/{connection}: kind is issue, comment or ci; id makes a replay harmless" /></Panel>
       <Panel title="Verifying webhook signatures"><CodeBlock id="api-ref-sig" text={SIG} label={`Signature check (${cfg?.webhookSigning ?? "HMAC-SHA256"})`} /></Panel>
+      <PlayTab d={d} />
     </div>
   );
 }
