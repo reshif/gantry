@@ -283,6 +283,7 @@ export function Schematic({ detail, route, onStation, onGate, onWo, onOut }: { d
       valves.push(
         <g key={`v-${gate.id}`} className={`f-valve${kindCls}${route && !route.includes(s.id) ? " f-bypass" : ""}`} data-gate={gate.id} id={`floor-gate-${gate.id}`} tabIndex={0} role="button" style={{ cursor: "pointer" }} aria-label={`Gate ${gate.label} ${gate.name}, ${gate.kind}, ${gs.state === "off" ? "off" : `${wcount} waiting`}`} onClick={openG} onKeyDown={keyOnEnter(openG)}>
           <title>{label}</title>
+          <rect className="f-hit" x={vx - 26} y={vy - 24} width={vertical ? 190 : 52} height={vertical ? 48 : 64} fill="transparent" pointerEvents="all" />
           {wcount ? <circle cx={vx} cy={vy} r={13} className="f-pulse" /> : null}
           <line x1={vx} x2={vx} y1={vy - 9} y2={vy - 19} stroke="var(--ink2)" strokeWidth={1.5} />
           <line x1={vx - 6} x2={vx + 6} y1={vy - 19} y2={vy - 19} stroke="var(--ink2)" strokeWidth={2} />

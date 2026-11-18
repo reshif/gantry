@@ -11,11 +11,9 @@ import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
 import { Btn, Empty, Panel, ViewHead, type Decision } from "../ui/primitives";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
-import { useUI } from "../ui/overlay-context";
 import { pickProject } from "../lib/routes";
 import { hashFor } from "../lib/router";
 import { usePrefs } from "../lib/prefs";
-import { makeStopActions } from "../shell/stopActions";
 import { Belt } from "./floor/Belt";
 import { useDrawers } from "./floor/Drawers";
 import { FloorCtx, WoChip, isLive, since, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
@@ -72,48 +70,15 @@ function useFacts(): string {
   return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)})${ctx.replay ? ", live figure" : ""}`;
 }
 
-function Header({ replaying, onReplay, view, onView }: { replaying: boolean; onReplay: (on: boolean) => void; view: string; onView: (v: string | null) => void }) {
+function Header({ view, onView }: { view: string; onView: (v: string | null) => void }) {
   const ctx = useFloorCtx();
-  const ui = useUI();
   const me = useMe();
   const p = ctx.project;
   const newWo = useNewWorkOrder();
   const dSubmit = useCan("wo.submit", { project: p.id });
-  const dHalt = useCan("line.halt", { project: p.id });
-  const dResume = useCan("line.resume", { project: p.id });
-  const dKill = useCan("kill.project", { project: p.id });
-  const dRestore = useCan("restore.project", { project: p.id });
   if (!me) return null;
-  const stop = makeStopActions(ui, me);
-  const lockIf = (d: Decision | null): Decision | null => (ctx.replay ? REPLAY_LOCK : d);
   const block = projectSubmitBlock(me, p, ctx.repos);
-  const newGuard = lockIf(!dSubmit.allowed && !dSubmit.pending ? dSubmit : block ? { allowed: false, reason: block, needs: "" } : null);
-  const factoryKilled = !!me.factory.killed;
-  const killItem = p.killed
-    ? { label: `Restore ${p.name}`, icon: "power", hint: "after a kill", guard: dRestore.pending ? null : dRestore, onClick: () => stop.restore("project", p.id) }
-    : { label: `Kill ${p.name}`, icon: "st-kill", hint: "stop now", guard: factoryKilled ? { allowed: false, reason: "The whole factory is killed; restore it from Home.", needs: "" } : dKill.pending ? null : dKill, onClick: () => stop.kill("project", p.id) };
-  // One menu for everything that stops or restarts the line. Each item is locked, with the server's reason, for people who may not use it.
-  const lineMenu = (anchor: HTMLElement) => {
-    if (replaying) {
-      ui.menu(anchor, `Line control · ${p.name}`, [{ label: "Back to live", icon: "play", hint: "leave replay", onClick: () => onReplay(false) }]);
-      return;
-    }
-    ui.menu(anchor, `Line control · ${p.name}`, [
-      replaying ? { label: "Back to live", icon: "play", hint: "leave replay", onClick: () => onReplay(false) } : { label: "Replay the past", icon: "replay", hint: "read-only", onClick: () => onReplay(true) },
-      { sep: true },
-      p.halted
-        ? { label: `Resume ${p.name}`, icon: "play", hint: "whole project", guard: dResume.pending ? null : dResume, onClick: () => void stop.resume(p.id) }
-        : { label: `Halt ${p.name}`, icon: "halt", hint: "whole project", guard: dHalt.pending ? null : dHalt, onClick: () => stop.halt(p.id) },
-      ...ctx.repos.map((r) =>
-        r.halted
-          ? { label: `Resume ${r.name}`, icon: "play", hint: "halted", guard: dResume.pending ? null : dResume, onClick: () => void stop.resumeRepo(r.id) }
-          : { label: `Halt ${r.name}`, icon: "halt", hint: "repo only", guard: dHalt.pending ? null : dHalt, onClick: () => stop.haltRepo(r.id, p.id) },
-      ),
-      { sep: true },
-      killItem,
-    ]);
-  };
-  const stateLabel = p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Line control";
+  const newGuard: Decision | null = ctx.replay ? REPLAY_LOCK : !dSubmit.allowed && !dSubmit.pending ? dSubmit : block ? { allowed: false, reason: block, needs: "" } : null;
   return (
     <div id="floor-head">
       <ViewHead
@@ -127,7 +92,6 @@ function Header({ replaying, onReplay, view, onView }: { replaying: boolean; onR
                 <Btn key={v} label={v === "belt" ? "Belt" : "Board"} id={`floor-view-${v}`} aria-pressed={view === v} onClick={() => onView(v === "board" ? "board" : null)} />
               ))}
             </div>
-            <Btn icon={p.killed ? "st-kill" : "halt"} title={stateLabel} id="floor-line" aria={`${stateLabel}: halt or resume the project or a repo, kill or restore the project`} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" {...(p.halted || p.killed ? { kind: "danger" as const } : {})} />
             <Btn label="Submit work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
           </>
         }
@@ -175,10 +139,10 @@ function FloorBody({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <Header replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} view={view} onView={setView} />
+      <Header view={view} onView={setView} />
       <Kpis />
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
-      {view === "board" ? <BoardPanel /> : <Belt onStation={drawers.station} onGate={drawers.gate} onOut={drawers.out} onWo={drawers.wo} />}
+      {view === "board" ? <BoardPanel /> : <Belt replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} onStation={drawers.station} onGate={drawers.gate} onOut={drawers.out} onWo={drawers.wo} />}
           </>
   );
 }

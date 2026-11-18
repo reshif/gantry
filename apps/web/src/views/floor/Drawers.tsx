@@ -77,7 +77,7 @@ function ApproveBtn({ w, gid, label, primary, id, after }: { w: WorkOrder; gid: 
       guard={dec}
       onClick={async () => {
         const r = await ops.approveGate(w.id, gid, t?.allowed?.approve?.instance);
-        ui.toast(r.ok ? `${w.id} approved` : r.msg, r.ok ? "ok" : "error");
+        ui.toast(r.ok ? `${w.id} moved on` : r.msg, r.ok ? "ok" : "error", r.ok ? { label: "Undo", id: "floor-approve-undo", onClick: () => ui.toast("Undo is not available: an approved gate cannot be taken back from here.", "warn") } : undefined);
         if (r.ok) after?.();
       }}
     />

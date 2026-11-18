@@ -122,11 +122,11 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
       onClose={onClose}
       body={
         <div className="form-grid">
-          <Field label="Title" htmlFor="nwo-title" hint="A short, specific request." required>
-            <input id="nwo-title" className="input" value={title} autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
+          <Field label={<>Title<span className="muted"> (required)</span></>} htmlFor="nwo-title" hint="A short, specific request.">
+            <input id="nwo-title" className="input" aria-required="true" value={title} autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
           </Field>
-          <Field label="What should change and why" htmlFor="nwo-desc" required>
-            <textarea id="nwo-desc" className="input" rows={4} value={desc} onChange={(e) => setDesc(e.target.value)} />
+          <Field label={<>What should change and why<span className="muted"> (required)</span></>} htmlFor="nwo-desc">
+            <textarea id="nwo-desc" className="input" aria-required="true" rows={4} value={desc} onChange={(e) => setDesc(e.target.value)} />
           </Field>
           <Field label="Project" htmlFor="nwo-project">
             <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
@@ -155,7 +155,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
           </div>
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: busy ? "Submitting…" : "Submit work order", kind: "primary", submit: true, id: "nwo-submit", guard: block ? { allowed: false, reason: block.reason, needs: block.needs } : null, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel", kind: "default" }, { label: busy ? "Submitting…" : "Submit work order", kind: "primary", submit: true, id: "nwo-submit", guard: block ? { allowed: false, reason: block.reason, needs: block.needs } : null, onClick: () => void submit() }]}
     />
   );
 }

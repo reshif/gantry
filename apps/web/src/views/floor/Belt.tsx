@@ -64,7 +64,7 @@ function RoutePill({ id, hover, onHover }: { id: string; hover: string | null; o
   );
 }
 
-export function Belt({ onStation, onGate, onOut, onWo }: { onStation: (sid: string) => void; onGate: (gid: string) => void; onOut: () => void; onWo: (id: string) => void }) {
+export function Belt({ onStation, onGate, onOut, onWo, replaying, onReplay }: { replaying?: boolean; onReplay?: (on: boolean) => void; onStation: (sid: string) => void; onGate: (gid: string) => void; onOut: () => void; onWo: (id: string) => void }) {
   const ctx = useFloorCtx();
   const prefs = usePrefs();
   const [hover, setHover] = useState<string | null>(null);
@@ -77,6 +77,13 @@ export function Belt({ onStation, onGate, onOut, onWo }: { onStation: (sid: stri
   const detail = density === "detail";
   const tools = (
     <>
+      {onReplay ? (
+        <div className="seg" role="group" aria-label="Live or replay">
+          <Btn label="Live" id="floor-mode-live" aria-pressed={!replaying} onClick={() => onReplay(false)} />
+          <Btn label="Replay" id="floor-mode-replay" title="Rebuild the floor from the event log at a past time (read-only)" aria-pressed={replaying} onClick={() => onReplay(true)} />
+        </div>
+      ) : null}
+      <Btn label="Routes" id="floor-routes-toggle" title="Show the route of each work class" aria-pressed={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
       <div className="seg" role="group" aria-label="Density">
         {([["fit", "Fit", "Compact tags so the whole line fits one screen"], ["detail", "Detail", "One tag per row with title and state"]] as const).map(([v, l, t]) => (
           <Btn key={v} label={l} title={t} aria-pressed={(detail ? "detail" : "fit") === v} onClick={() => setDensity(v === "fit" ? null : v)} />
@@ -105,7 +112,6 @@ export function Belt({ onStation, onGate, onOut, onWo }: { onStation: (sid: stri
             <span className="lg"><i className="valve" />Valve: solid = person, dashed = automatic check</span>
             <span className="lg"><i className="hop" />Hopper = work in progress against the limit, red when over</span>
             <span className="lg"><i className="rw" />Rework return line</span>
-            <Btn label="Routes by class" icon="branch" small kind="ghost" id="floor-routes-toggle" aria-expanded={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
           </div>
         </div>
       </Panel>

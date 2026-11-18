@@ -109,14 +109,14 @@ describe("Floor: belt", () => {
     expect(document.getElementById("floor-route-docs")?.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("lists routes by short class name with the explanation on the pill, behind the Routes by class toggle", async () => {
+  it("lists routes by short class name with the explanation on the pill, behind the Routes toggle", async () => {
     mockApi();
     mount(<FloorView />);
     await screen.findByText("PAY");
     const toggle = document.getElementById("floor-routes-toggle") as HTMLElement;
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
     const docs = document.getElementById("floor-route-docs") as HTMLElement;
     expect(docs.querySelector(".fl-route-n")?.textContent).toBe("Docs");
     expect(docs.getAttribute("aria-label")).toMatch(/^Docs: /);
@@ -135,6 +135,8 @@ describe("Floor: belt", () => {
     await waitFor(() => expect(approve.getAttribute("aria-disabled")).toBeNull());
     fireEvent.click(approve);
     await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/approve")).toHaveLength(1));
+    expect(await screen.findByText("WO-2408 moved on")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
   });
 
   it("locks Approve with the server's reason when this person may not approve (separation of duties)", async () => {
@@ -241,8 +243,7 @@ describe("Floor: replay", () => {
     });
     mount(<FloorView />);
     await screen.findByText("PAY");
-    fireEvent.click(document.getElementById("floor-line") as HTMLElement);
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Replay the past/ }));
+    fireEvent.click(document.getElementById("floor-mode-replay") as HTMLElement);
     const bar = await screen.findByRole("region", { name: "Replay controls" });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/projects/payments/floor" && c.query.has("at"))).toBe(true));
     expect(within(bar).getByText("Replay · not live")).toBeTruthy();
@@ -254,45 +255,6 @@ describe("Floor: replay", () => {
     fireEvent.click(document.getElementById("floor-rp-live") as HTMLElement);
     await waitFor(() => expect(document.getElementById("floor-replay")).toBeNull());
     expect(document.getElementById("floor-new-wo")?.getAttribute("aria-disabled")).toBeNull();
-  });
-});
-
-describe("Floor: andon and kill", () => {
-  it("halts the project with a reason and resumes it", async () => {
-    const calls = mockApi({
-      "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform halted." } }),
-      "DELETE /api/v1/stops/project%3Apayments": () => ({ body: { ok: true, msg: "Payments Platform resumed." } }),
-    });
-    mount(<FloorView />);
-    await screen.findByText("PAY");
-    fireEvent.click(document.getElementById("floor-line") as HTMLElement);
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Halt Payments Platform/ }));
-    fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Duplicate refunds seen" } });
-    fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
-    await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/stops")).toHaveLength(1));
-    expect(bodyOf(calls, "POST", "/api/v1/stops")[0]?.body).toMatchObject({ scope: "project", id: "payments", mode: "halt", reason: "Duplicate refunds seen" });
-  });
-
-  it("locks Kill project in the Line control menu for someone without the right, with the reason", async () => {
-    mockApi({}, { denied: ["kill.project"] });
-    mount(<FloorView />);
-    await screen.findByText("PAY");
-    await waitFor(() => expect(document.getElementById("floor-line")).toBeTruthy());
-    fireEvent.click(document.getElementById("floor-line") as HTMLElement);
-    const kill = await screen.findByRole("menuitem", { name: /Kill Payments Platform/ });
-    await waitFor(() => expect(kill.getAttribute("aria-disabled")).toBe("true"));
-    expect(kill.getAttribute("data-reason")).toMatch(/Factory Admin/);
-  });
-
-  it("locks Halt in the Line control menu for someone who may not halt, with the reason", async () => {
-    mockApi({}, { denied: ["line.halt"] });
-    mount(<FloorView />);
-    await screen.findByText("PAY");
-    await waitFor(() => expect(document.getElementById("floor-line")).toBeTruthy());
-    fireEvent.click(document.getElementById("floor-line") as HTMLElement);
-    const halt = await screen.findByRole("menuitem", { name: /Halt Payments Platform/ });
-    await waitFor(() => expect(halt.getAttribute("aria-disabled")).toBe("true"));
-    expect(halt.getAttribute("data-reason")).toMatch(/No role holds it/);
   });
 });
 
@@ -336,14 +298,32 @@ describe("Floor: prototype drawers and links", () => {
     expect(screen.queryByText("Journey")).toBeNull();
   });
 
-  it("keeps the header to Belt/Board, Line control and Submit, and reads ?view=board from the hash", async () => {
+  it("keeps the header to Belt/Board and Submit (no Line control menu), and reads ?view=board from the hash", async () => {
     mockApi();
     window.location.hash = "#/p/payments/floor?view=board";
     mount(<FloorView />);
     await screen.findByText("PAY");
     expect(document.getElementById("floor-board")).toBeTruthy();
     expect(document.getElementById("floor-view-board")?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.getElementById("floor-line")).toBeNull();
     expect(screen.queryByRole("button", { name: "Replay" })).toBeNull();
+    window.location.hash = "";
+  });
+
+  it("keeps the view in the URL only: Board does not survive a remount without ?view=board", async () => {
+    mockApi();
+    window.location.hash = "#/p/payments/floor";
+    const first = mount(<FloorView />);
+    await screen.findByText("PAY");
+    fireEvent.click(document.getElementById("floor-view-board") as HTMLElement);
+    expect(document.getElementById("floor-board")).toBeTruthy();
+    expect(window.location.hash).toMatch(/view=board/);
+    (first as { unmount?: () => void } | undefined)?.unmount?.();
+    window.location.hash = "#/p/payments/floor";
+    mount(<FloorView />);
+    await screen.findByText("PAY");
+    expect(document.getElementById("floor-board")).toBeNull();
+    expect(document.getElementById("floor-belt")).toBeTruthy();
     window.location.hash = "";
   });
 
@@ -354,8 +334,11 @@ describe("Floor: prototype drawers and links", () => {
     const card = document.querySelector('[data-bay="person"] [data-wo="WO-2409"]') as HTMLElement;
     expect(Array.from(card.children).map((c) => c.tagName)).toEqual(["A", "SPAN"]);
     expect(screen.queryByRole("button", { name: "Assign" })).toBeNull();
-    expect(document.querySelector(".flegend #floor-routes-toggle")).toBeTruthy();
-    expect(document.querySelector(".panel-tools #floor-routes-toggle")).toBeNull();
+    expect(document.querySelectorAll(".flegend .lg")).toHaveLength(6);
+    expect(document.querySelector(".flegend #floor-routes-toggle")).toBeNull();
+    expect(document.querySelector(".panel-tools #floor-routes-toggle")).toBeTruthy();
+    expect(document.querySelector(".panel-tools #floor-mode-live")).toBeTruthy();
+    expect(document.querySelector(".f-valve .f-hit")).toBeTruthy();
   });
 
   it("opens the gate drawer with Kind, After station, Checks and a Waiting now list", async () => {
