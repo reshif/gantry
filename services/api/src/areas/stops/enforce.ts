@@ -12,6 +12,7 @@ import type { Queryable, Tx } from "@gantry/db";
 import { cancelAttempts, closeEntry, closeInstance, dispatchQueued, enterStation, ev, flushFx, note, openGate, releaseSlot, stationIdOf, type Fx } from "../workorders/engine.js";
 import { lockWo, saveWo, toWo, WO_COLS, type Wo } from "../workorders/model.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
+import { job } from "../../core/jobs-contract.js";
 import type { ScopeType } from "./targets.js";
 
 /** Spec 4.5: how long a halted run may still checkpoint and report before teardown. Default 20 s (below the reaper's 30 s re-enqueue age). */
@@ -164,6 +165,14 @@ async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<v
 async function resume(fx: Fx, w: Wo, sid: string, catalog: Catalog, afterKill: boolean, s: Pick<StopDb, "fencing">): Promise<void> {
   if (w.position !== sid && !catalog.bays.some((b) => b.id === w.position)) w.position = sid;
   if (catalog.bays.some((b) => b.id === w.position)) return; // in a bay: the bay's own rules apply (the queue is dispatched by the caller)
+  // An approved merge that a stop deferred (the merge job skips work in a stopped scope) is requested again, for the same approved head. The G5 approval is
+  // still on the record (`data.merging`); nothing is merged that a person did not approve.
+  const merging = w.data.merging as { prNumber?: number; headSha?: string } | undefined;
+  if (w.state === "waiting" && merging?.prNumber && merging.headSha) {
+    fx.jobs.push(job("merge.request", { woId: w.id, prNumber: merging.prNumber, headSha: merging.headSha }, { dedupeKey: `merge:${w.id}:${merging.prNumber}:${merging.headSha}:resume:${s.fencing}` }));
+    note(w, fx, fx.actor, `Resumed: the approved merge of #${merging.prNumber} is requested again.`);
+    return;
+  }
   // An attempt older than the stop is superseded by it (F3) even when the stop was lifted before it was enforced: it does not count as live,
   // and the fresh attempt started below replaces it.
   const live = (await fx.tx.query(`select 1 from attempts where org_id = $1 and wo_id = $2 and state in ('queued','running') and fencing > $3`, [fx.orgId, w.id, s.fencing])).rowCount;

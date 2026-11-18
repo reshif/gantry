@@ -448,7 +448,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const cls = classOf(c, f.project, wo.cls);
     const gdef = gateWaiting ? c.gates.find((x) => x.id === gateWaiting[0]) : null;
     // A failed or blocked work order is not being worked on: it waits for a person, with the reason, and Retry or another agent is what moves it.
-    const stuck = !closed && (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && wo.bayCause === "failed"));
+    const stuck = !closed && (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && (wo.bayCause === "failed" || wo.bayCause === "merge")));
     const stuckWhy = (wo.state === "failed" ? wo.failReason : wo.state === "blocked" ? wo.blockReason : wo.bayReason) || `${stationName(c, sid)} did not finish.`;
     const next = closed ? { actor: "nobody", text: wo.bay === "declined" ? "The request was declined." : wo.state === "done" ? "The work order is finished." : "The work order was killed." }
       : stuck ? { actor: "you", text: `${stationName(c, sid)} ${wo.state === "blocked" ? "is blocked" : "stopped"}: ${stuckWhy} A person can retry it or assign another agent.` }

@@ -16,7 +16,7 @@ export { loadPolicyState, loadFlowState, type FlowLoadOptions } from "./read/sta
 export * from "./jobs-contract.js";
 export { issueRunToken, revokeRunTokens, runIdOfToken, type IssuedRunToken, type RevokeTarget } from "../areas/internal/tokens.js";
 // Flow engine entry points for the worker (wave 3, flow API): station results, leases, merges, timers and stop reconciliation.
-export { applyStationResult, expireLeases, recordMerged, recordNewHead, handleFlowTimer, MAX_STATION_FAILURES, type StationResult, type ApplyOutcome } from "../areas/workorders/station.js";
+export { applyStationResult, expireLeases, recordMerged, recordNewHead, parkMergeBlocked, handleFlowTimer, MAX_STATION_FAILURES, type StationResult, type ApplyOutcome } from "../areas/workorders/station.js";
 export { applyScoutResult } from "../areas/workorders/swarm.js";
 export { reconcileStop, pendingStops, type ReconcileResult } from "../areas/stops/enforce.js";
 export { flushFx, startAttempt, attemptIsCurrent, heartbeatAttempt, dispatchQueued } from "../areas/workorders/engine.js";

@@ -9,7 +9,7 @@
  */
 import { evaluateGuardrails, stationDef } from "@gantry/domain";
 import { schedule, type Tx } from "@gantry/db";
-import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, type Fx } from "./engine.js";
+import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, leaveBay, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, type Fx } from "./engine.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { lockWo, saveWo, type Wo } from "./model.js";
 import { ensureStationDocument } from "./station-docs.js";
@@ -144,7 +144,7 @@ async function failCount(tx: Tx, orgId: string, woId: string, station: string): 
   return Number((await tx.query(`select count(*)::int as n from attempts where org_id = $1 and wo_id = $2 and station = $3 and state = 'failed' and (data->>'streakBroken') is null`, [orgId, woId, station])).rows[0].n);
 }
 
-async function needsPerson(fx: Fx, w: Wo, reason: string, cause?: "failed"): Promise<void> {
+async function needsPerson(fx: Fx, w: Wo, reason: string, cause?: "failed" | "merge"): Promise<void> {
   const from = stationIdOf(fx.catalog, w);
   w.data.bayFrom = from;
   w.data.bayReason = reason;
@@ -308,6 +308,14 @@ export async function recordMerged(tx: Tx, orgId: string, woId: string, o: { prN
   const merging = asObj(w.data.merging);
   if (merging.prNumber !== o.prNumber) return { applied: false, reason: "No merge was waiting for that pull request." };
   const fx = await fxFor(tx, orgId, "system", o.now ?? new Date());
+  // The pull request merged while the order waited for a person (a blocked merge that was fixed on GitHub): it leaves the bay and moves on.
+  if (bayOf(fx.catalog, w)) {
+    await leaveBay(fx, w);
+    for (const k of ["bayReason", "bayAt", "bayCause"]) delete w.data[k];
+    w.position = String(w.data.bayFrom ?? w.position);
+    delete w.data.bayFrom;
+    w.state = "waiting";
+  }
   delete w.data.merging;
   w.data.blockReason = null;
   note(w, fx, "system", `Pull request #${o.prNumber} merged${o.mergeSha ? ` at ${o.mergeSha.slice(0, 7)}` : ""}.`);
@@ -316,6 +324,23 @@ export async function recordMerged(tx: Tx, orgId: string, woId: string, o: { prN
   await saveWo(tx, orgId, w);
   await flushFx(fx);
   return { applied: true };
+}
+
+/**
+ * The approved merge cannot happen (the pull request was closed without merging, or GitHub still refuses it after the last retry): the order goes to
+ * Needs a person with the reason instead of waiting as "merging" for ever. The approval stays on record (`data.merging`); Retry merge asks again for
+ * the same approved head and never without it. Idempotent: nothing happens unless a merge of that pull request is still waiting.
+ */
+export async function parkMergeBlocked(tx: Tx, orgId: string, woId: string, o: { prNumber: number; reason: string; now?: Date }): Promise<{ parked: boolean }> {
+  const w = await lockWo(tx, orgId, woId);
+  if (asObj(w.data.merging).prNumber !== o.prNumber || w.state === "done" || w.state === "killed") return { parked: false };
+  const fx = await fxFor(tx, orgId, "system", o.now ?? new Date());
+  if (bayOf(fx.catalog, w)) return { parked: false };
+  w.data.blockReason = null;
+  await needsPerson(fx, w, o.reason, "merge");
+  await saveWo(tx, orgId, w);
+  await flushFx(fx);
+  return { parked: true };
 }
 
 /** A new head commit on the pull request closes the open gate instance (spec 9.5) and, when the work order was waiting at a human gate, opens a fresh one on the new head. */
