@@ -10,13 +10,13 @@ import type { Cited } from "./types";
 export function EntityChip({ e }: { e: Cited }) {
   const me = useMe();
   const openRecord = useOpenRecordRoute();
-  const icon = ({ wo: "page", project: "project", repo: "branch", agent: "agent", gate: "gate", person: "people" } as Record<string, string>)[e.type] ?? "dots";
+  const icon = ({ wo: "record", project: "project", repo: "branch", agent: "agent", gate: "gate", person: "people" } as Record<string, string>)[e.type] ?? "dots";
   const link = (label: string, go: () => void) => (
-    <a className={`chip entity-chip entity-${e.type}`} href={`#${e.type === "wo" ? "record" : e.type === "person" ? "people" : "floor"}`} data-entity={`${e.type}:${e.id}`} onClick={(ev) => { ev.preventDefault(); go(); }}>
+    <a className={`chip plain entity-chip entity-${e.type}`} href={`#${e.type === "wo" ? "record" : e.type === "person" ? "people" : "floor"}`} data-entity={`${e.type}:${e.id}`} onClick={(ev) => { ev.preventDefault(); go(); }}>
       <Icon name={icon} /><span>{label}</span>
     </a>
   );
-  const plain = (label: string) => <span className="chip entity-chip is-plain" data-entity={`${e.type}:${e.id}`}><Icon name={icon} /><span>{label}</span></span>;
+  const plain = (label: string) => <span className="chip plain entity-chip is-plain" data-entity={`${e.type}:${e.id}`}><Icon name={icon} /><span>{label}</span></span>;
   if (e.type === "wo") return link(e.label && e.label !== e.id ? `${e.id} ${e.label}` : e.id, () => openRecord(e.id, e.project ?? null));
   if (e.type === "project") return link(e.label ?? e.id, () => { setProject(e.id); navigate("floor"); });
   if (e.type === "repo") return link(e.label ?? e.id, () => { if (e.project) setProject(e.project); navigate("onboarding"); });

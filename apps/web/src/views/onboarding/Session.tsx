@@ -7,12 +7,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fmt, type SessionCard } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { commands } from "../../api/commands";
-import { useProjects, useRepos } from "../../api/queries";
+import { useMe, useProjects, useRepos } from "../../api/queries";
 import { hashFor, navigate } from "../../lib/router";
 import { ActBtn, Kv } from "../projects/proto";
 import { useTab } from "../projects/proto";
 import { useQueryParam } from "../connect/kit";
 import { Avatar, Btn, Chip, Empty, Panel, Tabs, ViewHead, Who } from "../../ui/primitives";
+import { useActors } from "../../ui/actors";
 import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -27,6 +28,8 @@ const ME: Record<string, true> = { user: true };
 /** The person's request for changes is posted as their own message with this prefix: show their words, not a banner. */
 const CHANGES = /^Changes requested:\s*/;
 const ACTORS: Record<string, string> = { system: "Gantry", "ag-onboard": "Onboarding Agent", ci: "CI" };
+/** The mark drawn for the agent and system authors, so the avatar never depends on the people or agent lists a viewer may not read. */
+const AGENT_MARK: Record<string, string> = { system: "G", "ag-onboard": "OA", ci: "CI" };
 /** Quiet lines (pipeline updates and timeline entries) fold into one row per run; the agent's and the person's words stay as bubbles. */
 type Item = { at: number; kind: "m"; m: SessionMessage } | { at: number; kind: "t"; t: { who: string; text: string; at: number } };
 type Block = { t: "turn"; item: Item } | { t: "quiet"; items: Item[] };
@@ -61,7 +64,7 @@ export function LiveStatus({ live }: { live: { text: string; tools: string[]; ca
   const notes = live.cards.flatMap((c) => (c.kind === "progress" ? [c.text] : []));
   return (
     <>
-      {live.text ? <div className="msg is-live"><Avatar id="ag-onboard" /><div className="osx-turn"><div className="bub"><div className="who">Onboarding Agent</div><p className="osx-text">{live.text}</p></div></div></div> : null}
+      {live.text ? <div className="msg is-live"><span className="avatar bot av-agent" title="Onboarding Agent" aria-hidden="true">OA</span><div className="osx-turn"><div className="bub"><div className="who">Onboarding Agent</div><p className="osx-text">{live.text}</p></div></div></div> : null}
       <div className="osx-live small muted" id="osx-live" role="status" aria-busy="true">
         <span className="osx-typing" aria-hidden="true"><i /><i /><i /></span>
         <details className="osx-steps">
@@ -73,7 +76,6 @@ export function LiveStatus({ live }: { live: { text: string; tools: string[]; ca
   );
 }
 
-const nameOf = (who: string): React.ReactNode => ACTORS[who] ?? (who.startsWith("github:") ? who : <Who id={who} />);
 
 /* ------------------------------------------------------------------ cards ---- */
 
@@ -217,6 +219,10 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   const availQ = useAvailableRepos(projectId, true);
   const q = useSession(repoId, !!r);
   const s = q.data;
+  const actors = useActors();
+  const meId = useMe()?.person.id;
+  /** Who wrote a message: the viewer is "You", the agent and system have fixed names, anyone else is their real name. */
+  const nameOf = (who: string): string => (meId && who === meId ? "You" : ACTORS[who] ?? (who.startsWith("github:") ? who : actors(who).name.replace(" (agent)", "")));
   const ui = useUI();
   const [live, setLive] = useState<{ text: string; tools: string[]; cards: SessionCard[] } | null>(null);
   const [draft, setDraft] = useState("");
@@ -338,7 +344,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
                   {blocks.map((b) =>
                     b.t === "quiet" ? <QuietRow key={`q${lineOf(b.items[0]!).key}`} items={b.items} /> : b.item.kind === "m" ? (
                       <div key={b.item.m.id} className={`msg${b.item.m.role in ME ? " me" : ""}${b.item.m.data.kind === "update" ? " is-update" : ""}`}>
-                        <Avatar id={b.item.m.author in ACTORS ? "ag-onboard" : b.item.m.author} />
+                        {b.item.m.author in ACTORS ? <span className="avatar bot av-agent" title={ACTORS[b.item.m.author]} aria-hidden="true">{AGENT_MARK[b.item.m.author] ?? "G"}</span> : <Avatar id={b.item.m.author} />}
                         <div className="osx-turn">
                           {b.item.m.text ? (
                             <div className="bub">

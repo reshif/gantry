@@ -100,14 +100,14 @@ describe("Agents at work", () => {
     return calls;
   };
 
-  it("Agents at work has a Conversations button (with the count that need you) to the inbox, where side threads re-open, and a New chat button", async () => {
+  it("Agents at work has an Agent chats button (with the count that need you) to the inbox, where side threads re-open, and a New chat button", async () => {
     window.location.hash = "#workspace";
     show();
-    const btn = await screen.findByRole("button", { name: "Conversations · 1 need you" });
+    const btn = await screen.findByRole("button", { name: "Agent chats · 1 need you" });
     expect(screen.getByRole("button", { name: "New chat" })).toBeTruthy();
     fireEvent.click(btn);
     await waitFor(() => expect(window.location.hash).toBe("#workspace/inbox"));
-    const inbox = await screen.findByRole("navigation", { name: "Conversations" });
+    const inbox = await screen.findByRole("navigation", { name: "Agent chats" });
     fireEvent.click(within(inbox).getByRole("tab", { name: /Active/ }));
     expect(within(within(inbox).getByRole("region", { name: "Side threads" })).getByText("Researcher about WO-1")).toBeTruthy();
   });
@@ -115,7 +115,7 @@ describe("Agents at work", () => {
   it("opens on what needs the person, groups the rest by kind, and pins and archives from a row's menu", async () => {
     window.location.hash = "#workspace/inbox";
     const calls = show({ "PATCH /api/v1/workspace/threads/wo%3AWO-2": () => ({ body: { ok: true, msg: "Pinned." } }) });
-    const inbox = await screen.findByRole("navigation", { name: "Conversations" });
+    const inbox = await screen.findByRole("navigation", { name: "Agent chats" });
     await waitFor(() => expect(within(inbox).getByRole("tab", { name: /Needs me/ }).getAttribute("aria-selected")).toBe("true"));
     expect(within(inbox).getByText("Gate waits on me")).toBeTruthy();
     expect(within(inbox).getByText("G2: yours to decide")).toBeTruthy();
@@ -136,7 +136,7 @@ describe("Agents at work", () => {
   it("filters by name as the person types, and Enter searches inside messages, documents and sources with the matches marked", async () => {
     window.location.hash = "#workspace/inbox";
     show({ "GET /api/v1/workspace/search": (c) => ({ body: { items: c.query.get("q") === "rounding" ? [{ kind: "document", key: "wo:WO-1", ref: "a1", title: "WO-1 · research.md v2", snippet: "the ⟦rounding⟧ is half-up", at: now, rank: 0.5, project: "payments", by: "ag-research" }] : [] } }) });
-    const inbox = await screen.findByRole("navigation", { name: "Conversations" });
+    const inbox = await screen.findByRole("navigation", { name: "Agent chats" });
     fireEvent.click(within(inbox).getByRole("tab", { name: /Active/ }));
     const q = within(inbox).getByRole("searchbox");
     fireEvent.change(q, { target: { value: "gates" } });

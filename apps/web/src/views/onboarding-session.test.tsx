@@ -69,6 +69,24 @@ describe("Onboarding session", () => {
     expect(screen.getByLabelText("Added lines of AGENTS.md").textContent).toContain("+ Run vitest run");
   });
 
+  it("names the speakers: the agent has its own mark, the viewer is You with their initials, another person has a readable name (T-D1)", async () => {
+    const s = clone(session()) as any;
+    s.messages.push({ id: "om-2", role: "user", author: daniel.id, text: "Tests run with make check.", at: NOW - 2000, data: {} });
+    s.messages.push({ id: "om-3", role: "user", author: "p-zed", text: "Agreed.", at: NOW - 1000, data: {} });
+    api(s);
+    mount(<OnboardingView />);
+    await screen.findByText("Tests run with make check.");
+    const whoOf = (t: string) => screen.getByText(t).closest(".bub")!.querySelector(".who")!.textContent;
+    const avOf = (t: string) => screen.getByText(t).closest(".msg")!.querySelector(".avatar")!.textContent;
+    expect(whoOf("Tests run with make check.")).toBe("You");
+    expect(whoOf("Agreed.")).toBe("Zed");
+    expect(avOf("Agreed.")).toBe("Z");
+    expect(avOf("Tests run with make check.")).not.toBe("?");
+    expect(avOf(s.messages[0].text)).toBe("OA");
+    expect(whoOf(s.messages[0].text)).toBe("Onboarding Agent");
+    expect(document.querySelector(".osx-thread")!.textContent).not.toContain("p-zed");
+  });
+
   it("Approve calls the decision endpoint for that proposal; Discard likewise; Request changes sends the words and then asks the agent to continue", async () => {
     const calls = api(session(), {
       "POST /api/v1/repos/mobile-app/onboarding/session/proposals/om-1/P-1": () => ok("Gantry is opening the PR."),

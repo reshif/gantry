@@ -140,11 +140,16 @@ describe("Console (legacy console.js on the real API)", () => {
           { id: "cm-2", threadId: "ct-1", role: "assistant", text: "WO-1042 is waiting at G2.", at: Date.now(), data: { mode: "model", cited: [{ type: "wo", id: "WO-1042", project: "payments" }], proposals: [], tools: ["get_work_order"] } }] } }),
       });
       mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-mode")!.textContent).toBe("Model"));
+      await waitFor(() => expect(document.getElementById("con-mode")!.textContent).toBe("claude-test-1"));
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("claude-test-1");
-      expect(document.getElementById("con-mode-reason")!.textContent).toContain("read-only");
+      // T-3: the reason is the factory switch and who can flip it, never a made-up "read-only for you"
+      expect(document.getElementById("con-mode-reason")!.textContent).toContain("switched off for this factory");
+      expect(document.getElementById("con-mode-reason")!.textContent).toContain("A Factory Admin can switch them on");
+      expect(document.getElementById("con-mode-reason")!.textContent).not.toContain("read-only");
       await ask("Why is WO-1042 stuck?");
-      await waitFor(() => expect(document.querySelector(".msg-mode.is-model")?.textContent).toBe("claude-test-1"));
+      await waitFor(() => expect(text()).toContain("WO-1042 is waiting at G2."));
+      // T-14: the model is named once, in the header chip, not under every reply
+      expect(document.querySelector(".msg-mode.is-model")).toBeNull();
       expect(text()).toContain("WO-1042 is waiting at G2.");
       const chip = document.querySelector(".msg-chips .entity-chip[data-entity='wo:WO-1042']");
       expect(chip).toBeTruthy();
@@ -371,6 +376,8 @@ describe("Console (legacy console.js on the real API)", () => {
       setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: false, canUse: true, isFactoryAdmin: false, proposals: rights(() => false) } }) });
       mount("/settings");
       await waitFor(() => expect(document.getElementById("con-readonly")).toBeTruthy());
+      expect(document.getElementById("con-readonly")!.textContent).toContain("no console right to propose changes is granted");
+      expect(document.getElementById("con-readonly")!.textContent).not.toContain("read-only");
       expect(document.querySelectorAll("#con-rights li.ok").length).toBe(0);
       expect(document.getElementById("con-manage-perms")).toBeNull();
     });
@@ -736,7 +743,8 @@ describe("Console page layout", () => {
     expect(document.querySelector(".con2 > .con2-main")).toBeTruthy();
     await ask("status of WO-1042");
     await waitFor(() => expect(document.querySelector(".msg.me .bub .who")).toBeTruthy());
-    expect(document.querySelector(".msg:not(.me) .who")?.textContent).toBe("Gantry");
+    expect(document.querySelector(".msg:not(.me) .who")?.textContent).toMatch(/^Gantry( · \d\d:\d\d)?$/);
+    expect(document.querySelector(".msg:not(.me) .avatar")?.textContent).toBe("G");
   });
 });
 
@@ -815,10 +823,11 @@ describe("Console chats in the URL and the chat list", () => {
     await waitFor(() => expect(window.location.hash).toBe("#console"));
   });
 
-  it("New work order is one click from the Console header", async () => {
+  it("Submit work order is one click from the Console header, named as on every other screen", async () => {
     chats();
     mount();
     const b = await byId("con-new-wo");
+    expect(b.textContent).toContain("Submit work order");
     expect(document.querySelector(".vhead")!.contains(b)).toBe(true);
   });
 });

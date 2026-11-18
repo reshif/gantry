@@ -29,7 +29,7 @@ export function AtWork({ needs = 0, onInbox, onNew }: { needs?: number; onInbox?
   return (
     <div className="view ws-atwork">
       <ViewHead title="Agents at work" kicker={scope.kicker} sub="Who is doing what right now, across the line." actions={onInbox || onNew ? <>
-        {onInbox ? <Btn icon="chat" label={needs ? `Conversations · ${needs} need you` : "Conversations"} id="ws-at-inbox" onClick={onInbox} /> : null}
+        {onInbox ? <Btn icon="chat" label={needs ? `Agent chats · ${needs} need you` : "Agent chats"} id="ws-at-inbox" onClick={onInbox} /> : null}
         {onNew ? <Btn kind="primary" icon="plus" label="New chat" id="ws-at-new" onClick={onNew} /> : null}
       </> : undefined} />
       <StatRow id="ws-stats">
