@@ -147,7 +147,7 @@ function Header({ view, onView, model, parts, onParts, focus, onFocus, replaying
 
 function BoardPanel({ model, focus }: { model: FloorModel; focus: boolean }) {
   const ctx = useFloorCtx();
-  const needs = new Set(model.groups.flatMap((g) => g.wos.map((w) => w.id)));
+  const needs = new Set([...model.groups.flatMap((g) => g.wos.map((w) => w.id)), ...model.all.filter((b) => b.kind === "stuck" || b.kind === "gate").map((b) => b.w.id)]);
   const line = ctx.project.flow.order.map((id) => ctx.cat.stations.find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s && !!ctx.project.flow.stations[s.id]?.enabled);
   return (
     <Panel title="Board" flush>

@@ -47,12 +47,8 @@ export const wrapText = (t: string, n: number): string[] => {
   return out.length ? out : [""];
 };
 const LH = 12; // extra height of each wrapped text line
-const MAXLINES = 4;
 const capChars = (w: number): number => Math.max(8, Math.floor((w - 20) / 6.4));
-const capLines = (t: string, w: number): string[] => {
-  const all = wrapText(t, capChars(w));
-  return all.length <= MAXLINES ? all : [...all.slice(0, MAXLINES - 1), trunc(all.slice(MAXLINES - 1).join(" "), capChars(w))];
-};
+const capLines = (t: string, w: number): string[] => wrapText(t, capChars(w)); // never cut: the box grows with the lines
 
 /* ---------- sheet geometry ---------- */
 const W = 1180;

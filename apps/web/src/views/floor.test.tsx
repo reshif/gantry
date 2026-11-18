@@ -303,6 +303,11 @@ describe("Floor: prototype drawers and links", () => {
     expect(document.getElementById("floor-new-wo")).toBeTruthy();
     fireEvent.click(document.getElementById("floor-focus") as HTMLElement);
     expect(document.getElementById("floor-board")?.className).toMatch(/is-focus/);
+    // a blocked or stuck part needs a person, so Focus on me must not dim it
+    for (const c of Array.from(document.querySelectorAll("#floor-board .card"))) {
+      const w = WOS.find((x) => x.id === (c as HTMLElement).dataset.wo);
+      if (w && ["blocked", "failed", "killed"].includes(w.state)) expect(c.className).toMatch(/need/);
+    }
     fireEvent.click(document.getElementById("floor-parts-toggle") as HTMLElement);
     expect(document.getElementById("floor-parts")).toBeTruthy();
     window.location.hash = "";
@@ -530,6 +535,8 @@ describe("wrapText (captions are shown whole, never cut with an ellipsis)", () =
     expect(wrapText("holding 1 for G0+G1 · oldest 13h 08m", 20)).toEqual(["holding 1 for G0+G1", "· oldest 13h 08m"]);
     expect(wrapText("abcdefghij", 4)).toEqual(["abcd", "efgh", "ij"]);
     expect(wrapText("", 10)).toEqual([""]);
+    const long = "WO-2417 · Verify needs secret SEPA_SANDBOX_KEY; the Test Engineer has no secrets access on payout service until a person grants it for this run";
+    expect(wrapText(long, 20).join(" ")).toBe(long); // no line cap: the caption is whole
     expect(wrapText("WO-2407 · Support partial refunds on Amex", 20).join(" ")).not.toMatch(/…/);
   });
 });

@@ -153,12 +153,14 @@ describe("shell fidelity", () => {
     await waitFor(() => expect(document.querySelector("#palette-list .pal-hint")?.textContent).toBe("Go to · Overview"));
   });
 
-  it("the Line control menu holds only Halt line and Emergency stop", async () => {
+  it("the Line control menu matches the Floor one: project halt, repos, whole factory", async () => {
     api();
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /Line control/ }));
     await screen.findByRole("menuitem", { name: /Halt line/ });
-    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Halt line", "Emergency stop"]);
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(expect.arrayContaining(["Halt line (pause the project)", "Emergency stop"]));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)[0]).toBe("Halt line (pause the project)");
+    expect(screen.getByText("Whole factory")).toBeTruthy(); // same sections as the Floor menu
   });
 
   it("the account menu has My account, a View as group with the three sheets (the session's own marked), and Sign out", async () => {
