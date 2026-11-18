@@ -79,7 +79,7 @@ afterEach(() => {
 });
 
 describe("Skills screen", () => {
-  it("shows the library in the prototype's columns, opens the drawer from the name and the page from the drawer", async () => {
+  it("shows the library in the prototype's columns, opens the page from the name and a drawer peek from the row", async () => {
     setup();
     mount();
     const row = await byId("sk-row-sk-review");
@@ -87,6 +87,12 @@ describe("Skills screen", () => {
     expect(row.textContent).toContain("1.2.0");
     expect(locked(await byId("sk-new"))).toBe(false);
     fireEvent.click(row.querySelector("a.sk-name")!);
+    expect(window.location.hash).toBe("#skills/sk-review");
+    expect(((await byId("sk-name")) as HTMLInputElement).value).toBe("Code review");
+    for (const t of ["Definition", "Agents", "Projects", "Versions"]) expect(text()).toContain(t);
+    cleanup();
+    mount();
+    fireEvent.click((await byId("sk-row-sk-review")).querySelectorAll("td")[3]!);
     expect(window.location.hash).not.toContain("sk-review");
     expect((await byId("sk-drawer")).textContent).toContain("Skill \u00b7 v1.2.0");
     fireEvent.click(await byId("sk-drawer-edit"));

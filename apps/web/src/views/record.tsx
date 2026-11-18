@@ -15,7 +15,7 @@ export default function RecordView() {
   const [rawId = "", rawTab = ""] = (hash.param || "").split("/");
   const id = (rawId || prefs.record || "").toUpperCase() || null;
   const [qTab] = useRouteState("tab", "overview");
-  useClearRouteStateOnLeave(["tab"]);
+  useClearRouteStateOnLeave(["tab", "call"]);
   const tab = tabFromParam(rawTab || qTab);
   // the hash is the address; keep the legacy in-memory pref in step so other screens agree
   useEffect(() => {

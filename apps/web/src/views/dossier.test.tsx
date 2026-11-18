@@ -21,11 +21,11 @@ async function show(extra: Parameters<typeof mockApi>[0] = {}, hash = `#record/$
 }
 
 describe("Work order page", () => {
-  it("puts the title, route and actions in the header and the seven prototype tabs under it", async () => {
+  it("puts the title, route and actions in the header and the prototype tabs under it, with Prompts before Events", async () => {
     await show({}, `#record/${W.id}/journey`);
     expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
     expect(screen.getByRole("list", { name: new RegExp(`Route of ${W.id}`) })).toBeTruthy();
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Overview", "Journey", "Gates", "Attempts and runs", "Conversation", "Cost", "Events"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Overview", "Journey", "Gates", "Attempts and runs", "Conversation", "Cost", "Prompts", "Events"]);
     expect(screen.getByRole("tab", { name: "Journey" }).getAttribute("aria-selected")).toBe("true");
     expect(document.getElementById("dz-more")).toBeTruthy();
     // the conversation is a tab, not a header button
@@ -228,5 +228,41 @@ describe("Changes page", () => {
     expect(document.getElementById("chg")).toBeTruthy();
     fireEvent.click(document.getElementById("chg-back") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toContain(`record/${W.id}`));
+  });
+
+  const H = "a".repeat(64);
+  const CALL = { requestId: "r1", run: "run-1", wo: W.id, project: "payments", surface: "run", station: "build", turn: null, model: "claude-test-1", inputTokens: 1200, outputTokens: 300, costMicros: 15000, promptHash: "b".repeat(64), trace: H, outcome: "ok", at: new Date().toISOString() };
+  const TRACE = { v: 1, kind: "service-call", manifest: { hash: "b".repeat(64), parts: [
+    { kind: "repo_context", name: "Repository context", source: "runs.data.repoContext", version: null, sha256: "c".repeat(64), bytes: 512 },
+    { kind: "layer", name: "Agent", source: "instructions", version: 2, sha256: "d".repeat(64), bytes: 80 },
+    { kind: "skill", name: "Code review", source: "skill_versions sk-review", version: 3, sha256: "e".repeat(64), bytes: 40 },
+  ] }, request: { system: "You are the build agent." }, response: { content: [{ type: "text", text: "Built it." }] } };
+
+  it("reaches a work order's prompt records by clicking the Prompts tab and then a call", async () => {
+    const calls = await show({
+      "GET /api/v1/prompt-calls": () => ({ body: { ok: true, calls: [CALL] } }),
+      [`GET /api/v1/prompt-traces/${H}`]: () => ({ body: { ok: true, trace: TRACE } }),
+    }, `#record/${W.id}`);
+    fireEvent.click(screen.getByRole("tab", { name: "Prompts" }));
+    expect(await screen.findByRole("heading", { name: "Prompts" })).toBeTruthy();
+    const row = await waitFor(() => { const r = document.getElementById(`dz-prompt-${H.slice(0, 12)}`); if (!r) throw new Error("no row"); return r; });
+    expect(row.textContent).toContain("claude-test-1");
+    expect(row.textContent).toContain("$0.0150");
+    expect(calls.some((c) => c.path === "/api/v1/prompt-calls" && c.query.get("wo") === W.id)).toBe(true);
+    fireEvent.click(row.querySelector("button")!);
+    const detail = await waitFor(() => { const d = document.getElementById("dz-prompt-detail"); if (!d) throw new Error("no detail"); return d; });
+    for (const t of ["Repository context", "Agent layer", "Skill", "Code review", "skill_versions sk-review"]) expect(detail.textContent).toContain(t);
+    expect(document.getElementById("dz-prompt-system")?.textContent).toBe("You are the build agent.");
+    expect(document.getElementById("dz-prompt-answer")?.textContent).toContain("Built it.");
+    expect(window.location.href).toContain(`call=${H}`);
+  });
+
+  it("says the prompt records are not visible when the server refuses them, and says so when there are none", async () => {
+    await show({ "GET /api/v1/prompt-calls": () => ({ status: 403, body: { ok: false, msg: "No." } }) }, `#record/${W.id}/prompts`);
+    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    cleanup();
+    resetApp();
+    await show({ "GET /api/v1/prompt-calls": () => ({ body: { ok: true, calls: [] } }) }, `#record/${W.id}/prompts`);
+    expect(await screen.findByText("No model calls are recorded for this work order yet.")).toBeTruthy();
   });
 });

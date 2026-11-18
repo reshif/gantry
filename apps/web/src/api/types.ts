@@ -364,3 +364,16 @@ export interface AgentSuite {
   agent: string | null;
   threshold: number;
 }
+
+/** One recorded model call of a work order (GET /api/v1/prompt-calls). */
+export interface PromptCall {
+  requestId: string | null; run: string | null; wo: string | null; project: string | null; surface: string | null; station: string | null; turn: string | null;
+  model: string; inputTokens: number; outputTokens: number; costMicros: number; promptHash: string | null;
+  /** sha256 of the stored trace (GET /api/v1/prompt-traces/{trace}). */
+  trace: string | null; outcome: string; at: string;
+}
+/** One part of a prompt manifest: where the text came from, its version, hash and size (layer, skill, repo_context, system, tools ...). */
+export interface PromptPart { kind: string; name: string; source: string; version: number | null; sha256: string; bytes: number }
+export interface PromptManifest { v?: number; kind?: string; hash: string; parts: PromptPart[]; handoff?: { bytes: number; sha256: string }; conversation?: { messages: number; bytes: number }; compact?: boolean }
+/** A stored trace. The request and answer are shown as the edge stored them; only the manifest has a fixed shape. */
+export interface PromptTrace { v?: number; kind?: string; manifest?: PromptManifest; request?: unknown; response?: unknown; answer?: unknown; [k: string]: unknown }
