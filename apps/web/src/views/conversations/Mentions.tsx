@@ -3,12 +3,11 @@
  * Picking one writes `@Name` into the message and remembers the person; only people whose `@Name` is still in the text when the message is sent are mentioned.
  * A mention is a notification: it never opens the project to anyone.
  */
-import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { api, get } from "../../api/client";
-import { qk } from "../../api/keys";
+import { useMentionCandidates, type MentionCandidate } from "./session-api";
 
-export interface Candidate { id: string; name: string; title: string; access: boolean }
+export type Candidate = MentionCandidate;
+const NONE: Candidate[] = [];
 export interface Picked { id: string; name: string }
 
 /** The `@word` the caret is in, if any: where it starts and what was typed after the `@`. */
@@ -22,15 +21,6 @@ export function mentionAt(text: string, caret: number): { start: number; query: 
 /** The people still named in the text, as the ids to send. */
 export const mentionIds = (text: string, picked: Picked[]): string[] => [...new Set(picked.filter((p) => text.includes(`@${p.name}`)).map((p) => p.id))];
 
-export const useMentionCandidates = (woId: string, query: string | null) =>
-  useQuery({
-    queryKey: qk.convMentionable(woId, query),
-    queryFn: () => get<{ people: Candidate[] }>(api(`work-orders/${encodeURIComponent(woId)}/session/people`), { q: query ?? "" }),
-    enabled: !!query,
-    staleTime: 30_000,
-    select: (r) => r.people,
-  });
-
 /** State and key handling for the composer: spread `props` on the textarea, render `<MentionList>` beside it. */
 export function useMentions(woId: string, draft: string, setDraft: (v: string) => void, enabled: boolean) {
   const [caret, setCaret] = useState(0);
@@ -40,7 +30,8 @@ export function useMentions(woId: string, draft: string, setDraft: (v: string) =
   const at = enabled ? mentionAt(draft, caret) : null;
   const open = !!at && at.query.length > 0 && dismissed !== at.start;
   const found = useMentionCandidates(woId, open ? at!.query : null);
-  const list = useMemo(() => (open ? found.data ?? [] : []), [open, found.data]);
+  const people = found.data;
+  const list = useMemo<Candidate[]>(() => (open && people ? people : NONE), [open, people]);
   useEffect(() => setActive(0), [at?.query]);
 
   const pick = (c: Candidate) => {

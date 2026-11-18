@@ -4,12 +4,13 @@
  * belt (a station finished, a gate decided) arrive in the same thread. The composer is always there; a status line always says who waits on whom. Side panel: the work
  * order, the belt, the brief as it stands, what is proposed, what it cost.
  */
+import { fromAgentModel, fromPerson } from "../../lib/wo-message";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMe } from "../../api/queries";
 import type { WoCard } from "@gantry/domain";
 import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { Avatar, Btn, Chip, Empty, Who } from "../../ui/primitives";
+import { Avatar, Btn, Chip, Empty, TextArea, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
@@ -150,7 +151,7 @@ export function WoSessionPage({ woId, back, embedded, bare, panel, events }: { w
     : { cls: "is-live", text: s.waiting?.text ?? s.next.text };
   const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."} Type @ to ask an agent in a side thread.` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}, or type @ to ask another agent in a side thread or to mention a person`;
   // a station's message carries its agent's id: show the agent's name, as everywhere else
-  const tag = (m: WoSessionMessage) => (bare && m.role === "user" ? plainName(actor(m.author).name) : m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
+  const tag = (m: WoSessionMessage) => (bare && fromPerson(m) ? plainName(actor(m.author).name) : fromPerson(m) ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
 
   const sideBody = (
     <>
@@ -192,13 +193,23 @@ export function WoSessionPage({ woId, back, embedded, bare, panel, events }: { w
   );
   const quick = s.ruleQuestion;
   const writeFirst = () => { document.getElementById("wos-input")?.focus(); ui.toast("Write a message first", "error"); };
-  const panelName = (m: WoSessionMessage): string => (m.role === "user" || (m.author && m.author.startsWith("ag-")) ? actorOf(m.author).name.replace(" (agent)", "") : m.author === "system" ? "Gantry" : m.data.agent ?? agentName);
+  // a person the people list does not resolve (it needs a permission some viewers lack) is "A teammate", never a raw id
+  const panelName = (m: WoSessionMessage): string => {
+    if (m.author === "system") return "Gantry";
+    if (fromPerson(m) || (m.author && m.author.startsWith("ag-"))) {
+      const a = actorOf(m.author);
+      return a.kind === "other" ? (fromPerson(m) ? "A teammate" : agentName) : a.name.replace(" (agent)", "");
+    }
+    return m.data.agent ?? agentName;
+  };
   const lastFrom = s.messages.length ? panelName(s.messages[s.messages.length - 1]!) : agentName;
   if (panel) {
     const blocks = buildTranscript(s, events !== false);
     const pending = sent && s.messages.length <= sent.base;
     return (
       <div className="wos wos-panel cv-body" id="wos" data-wo={s.woId} role="region" aria-label={`Conversation ${s.woId}`}>
+        {/* a scrolling region must be reachable by keyboard (axe: scrollable-region-focusable) */}
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
         <div className="cv-scroll" id="wos-thread" role="log" aria-live="polite" tabIndex={0} aria-label="Messages" ref={scroll.ref} onScroll={scroll.onScroll}>
           <div className="chat cv-inner" ref={scroll.inner}>
             {!s.messages.length && !live && !quick ? <Empty title="No conversation yet" text="Agents talk here when they need you." /> : null}
@@ -230,7 +241,7 @@ export function WoSessionPage({ woId, back, embedded, bare, panel, events }: { w
             {error ? <p className="callout warn small" role="alert">{error}</p> : null}
           </div>
         </div>
-        {scroll.away ? <Btn small kind="primary" icon="down" cls="cv-jump" id="wos-jump" label="New messages" onClick={scroll.toEnd} /> : null}
+        {scroll.away ? <div className="cv-jump-row"><Btn small kind="primary" icon="down" id="wos-jump" label="New messages" onClick={scroll.toEnd} /></div> : null}
         <form className="wos-reply cv-composer" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { writeFirst(); return; } scroll.stick(); submit(); }}>
           {choices.length ? (
             <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
@@ -239,7 +250,7 @@ export function WoSessionPage({ woId, back, embedded, bare, panel, events }: { w
           ) : null}
           <div className="wos-compose">
             <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
-            <textarea id="wos-input" className="input" rows={2} placeholder="Reply to the agent…" aria-label="Reply" value={draft} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!draft.trim()) writeFirst(); else { scroll.stick(); submit(); } } }} />
+            <TextArea id="wos-input" rows={1} placeholder="Reply to the agent…" aria-label="Reply" value={draft} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!draft.trim()) writeFirst(); else { scroll.stick(); submit(); } } }} />
             <Btn kind="primary" type="submit" id="wos-send" icon="send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || (!mention && !s.can.talk)} />
           </div>
           {mention ? <span className="small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</span> : null}
@@ -269,7 +280,7 @@ export function WoSessionPage({ woId, back, embedded, bare, panel, events }: { w
           </div>}
           <div className={`osx-thread${bare ? " chat" : ""}`} role="log" aria-live="polite" ref={thread}>
             {(bare ? s.messages.slice(-8) : s.messages).map((m, i) => (
-              <div key={m.id} className={bare ? `msg${m.role === "user" ? " me" : ""}` : undefined}>
+              <div key={m.id} className={bare ? `msg${fromPerson(m) ? " me" : ""}` : undefined}>
                 {bare && m.data.kind !== "update" ? <Avatar id={m.author} /> : null}
                 {i === 0 && m.data.mode === "legacy" ? <p className="small muted wos-legacy-h">Earlier: the scripted intake questions</p> : null}
                 {i === firstSession && firstSession > 0 ? <p className="small muted wos-legacy-h">The conversation with {agentName}</p> : null}
@@ -277,7 +288,7 @@ export function WoSessionPage({ woId, back, embedded, bare, panel, events }: { w
                   {m.data.kind === "update" ? null : <div className={bare ? "who" : "osx-who small strong"}>{tag(m)}{bare ? ` · ${fmtDate(m.at)}` : ""}{m.data.mode === "rule-based" ? <span className="muted"> · rule-based</span> : null}</div>}
                   {m.data.kind === "update" ? <p className="osx-event small"><span className="muted">{fmt.stamp(m.at)}</span> {m.text}</p>
                     : m.data.kind === "answer" ? <AnswerText m={m} s={s} />
-                    : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
+                    : m.text ? (fromAgentModel(m) && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
                   {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
                   <Cards m={m} s={s} agent={agentName} send={(b) => send(b)} last={m.id === lastId} />
                 </div>
@@ -308,7 +319,7 @@ export function WoSessionPage({ woId, back, embedded, bare, panel, events }: { w
             ) : null}
             <div className="wos-compose">
               <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
-            <textarea id="wos-input" className="input" rows={2} aria-label={`Message to ${agentName}`} value={draft} placeholder={placeholder} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
+            <TextArea id="wos-input" rows={2} aria-label={`Message to ${agentName}`} value={draft} placeholder={placeholder} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
             </div>
             {mention ? <span className="small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</span> : null}
             <Btn kind="primary" type="submit" id="wos-send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || !draft.trim() || (!mention && !s.can.talk)} />

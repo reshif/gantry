@@ -84,6 +84,9 @@ describe("the chat opens at the newest message and keeps the composer in view", 
     expect(await screen.findByText("One more thing.", {}, { timeout: 4000 })).toBeTruthy();
     expect(area.scrollTop).toBe(100);
     const jump = await screen.findByRole("button", { name: "New messages" });
+    // it has its own strip between the messages and the composer: it never floats over message text
+    expect(area.contains(jump)).toBe(false);
+    expect(jump.closest(".cv-jump-row")?.nextElementSibling?.classList.contains("cv-composer")).toBe(true);
     fireEvent.click(jump);
     expect(area.scrollTop).toBe(5000);
     expect(screen.queryByRole("button", { name: "New messages" })).toBeNull();
@@ -193,6 +196,32 @@ describe("the thread list", () => {
   });
 });
 
+describe("names and flat cards", () => {
+  it("a person the people list does not resolve is 'A teammate', never a raw id; the viewer is 'You'", async () => {
+    const msgs: WoSessionMessage[] = [...MSGS, { id: "u9", role: "user", author: "p-unknown-7", text: "Looks fine to me", at: now - 2000, data: { kind: "message", cards: [] } }];
+    await open(session({ messages: msgs }));
+    await screen.findByText("Looks fine to me");
+    expect(screen.getByText(/A teammate/)).toBeTruthy();
+    expect(screen.queryByText(/p-unknown-7/)).toBeNull();
+  });
+
+  it("a message that is only a card (no text) has no bubble of its own, so the card is not a box in a box", async () => {
+    const msgs: WoSessionMessage[] = MSGS.map((m) => (m.id === "m5" ? { ...m, text: "" } : m));
+    await open(session({ messages: msgs }));
+    await screen.findByText("I wrote the plan.");
+    const card = screen.getByLabelText("Question from Build");
+    expect(card.closest(".cv-msg")?.classList.contains("is-cards")).toBe(true);
+  });
+
+  it("the header keeps tabs, state and the events toggle on one row, and the waiting banner on one line below", async () => {
+    await open(session());
+    const bar = document.querySelector(".cv-head-bar") as HTMLElement;
+    expect(within(bar).getByRole("tab", { name: "Conversation" })).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: "Hide line events" })).toBeTruthy();
+    expect(bar.nextElementSibling?.id).toBe("conv-waiting");
+  });
+});
+
 describe("side threads", () => {
   const side: InboxItem = { key: "ct-side1", kind: "side", scope: { kind: "work_order", id: W.id, label: W.id }, project: "payments", title: "Researcher about the branch", agent: "ag-research", agentName: "Researcher", waitingOn: "nobody", unread: false, latest: null, updatedAt: now, archived: null, pinned: false, mine: true, shared: true, owner: "p-tomas", visibility: "project", spendUsd: null };
   const thread = { id: "ct-side1", title: "Researcher about the branch", pinned: [], createdAt: now, updatedAt: now, expiresAt: now + 1e9, retentionDays: 90, owner: "p-tomas", scope: { kind: "work_order", id: W.id }, projectId: "payments", agentId: "ag-research", visibility: "project", status: "active", archivedAt: null, archivedBy: null, members: [], can: { post: true, manage: true },
@@ -214,7 +243,7 @@ describe("side threads", () => {
   });
   it("the hub route still works", async () => {
     await open(session());
-    fireEvent.click(screen.getByRole("button", { name: "Side threads and chats" }));
+    fireEvent.click(screen.getByRole("button", { name: "All side threads" }));
     await waitFor(() => expect(window.location.hash).toBe("#workspace/inbox"));
   });
 });

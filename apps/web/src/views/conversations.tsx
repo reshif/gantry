@@ -10,7 +10,7 @@ import { useMe, useProject } from "../api/queries";
 import { hashFor, hashPath, navigate, replaceHash, useHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Btn, Empty, ViewHead } from "../ui/primitives";
+import { Btn, Empty } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { ConvPane } from "./conversations/ConvPane";
 import { ThreadList } from "./conversations/ThreadList";
@@ -56,7 +56,12 @@ export default function ConversationsView() {
   const pane = { tab: query.tab === "side" ? ("side" as const) : ("chat" as const), thread: query.thread ?? null, events: query.events !== "hide" };
   return (
     <div className="view conv-view" data-open={hash.param ? "chat" : "list"}>
-      <ViewHead kicker={project?.key ?? ""} title="Conversations" sub="The dialogue between people and the agents at each station." actions={<Btn icon="chat" label="Side threads and chats" id="conv-all" onClick={() => navigate("workspace", "inbox")} />} />
+      <header className="cv-top">
+        <h1 className="cv-h1" title="The dialogue between people and the agents at each station.">Conversations</h1>
+        {project?.key ? <span className="mono muted small">{project.key}</span> : null}
+        <span className="grow" />
+        <Btn small icon="chat" label="All side threads" id="conv-all" onClick={() => navigate("workspace", "inbox")} />
+      </header>
       <div className="cv-grid">
         <section className="panel cv-listpane" id="conv-threads" aria-label="Threads">
           <Async query={q} what="conversations" id="conv-list">{() => (

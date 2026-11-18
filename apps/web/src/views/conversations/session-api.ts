@@ -96,3 +96,14 @@ export async function markWoSeen(woId: string): Promise<void> {
   const r = await post(api(`work-orders/${enc(woId)}/session/seen`));
   if (r.ok) invalidateSlices(["home"]);
 }
+
+/** The people an `@` in the composer can name (the server also says who cannot read the project yet). */
+export interface MentionCandidate { id: string; name: string; title: string; access: boolean }
+export const useMentionCandidates = (woId: string, query: string | null) =>
+  useQuery({
+    queryKey: qk.convMentionable(woId, query),
+    queryFn: () => get<{ people: MentionCandidate[] }>(api(`work-orders/${enc(woId)}/session/people`), { q: query ?? "" }),
+    enabled: !!query,
+    staleTime: 30_000,
+    select: (r) => r.people,
+  });

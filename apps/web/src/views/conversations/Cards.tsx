@@ -1,8 +1,9 @@
 /** The cards of a work-order message (proposal, document, station question, assumptions, objection, research plan, scouts) and the person's answer text. */
+import { fromPerson } from "../../lib/wo-message";
 import { useState, type ReactNode } from "react";
 import type { WoCard } from "@gantry/domain";
 import { isBriefScaffold } from "@gantry/domain";
-import { Btn, Chip, Who } from "../../ui/primitives";
+import { Btn, Chip, TextArea, Who } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ProgressLine, QuestionCard } from "../session/kit";
@@ -93,7 +94,7 @@ function ProposalCard({ m, c, s, agent, send }: { m: WoSessionMessage; c: Propos
       {pending && asking ? (
         <div className="osx-ask">
           <label className="small" htmlFor={`wos-changes-text-${c.id}`}>What should change?</label>
-          <textarea id={`wos-changes-text-${c.id}`} className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: also cover the retry path, and leave the admin API out." />
+          <TextArea id={`wos-changes-text-${c.id}`} rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: also cover the retry path, and leave the admin API out." />
           <Btn id={`wos-changes-send-${c.id}`} kind="primary" small label="Send" disabled={busy || text.trim().length < 3} onClick={() => void run("changes")} />
         </div>
       ) : null}
@@ -160,7 +161,7 @@ export function Cards({ m, s, agent, send, last, view }: { m: WoSessionMessage; 
           if (c.kind === "station_question") {
             const q = s.dialogue.questions.find((x) => x.id === c.id);
             const v = view.views.get(c.id);
-            if (!q || m.role === "user" || v?.shown === false) return null;
+            if (!q || fromPerson(m) || v?.shown === false) return null;
             if (q.status !== "open") return <QuestionLine key={i} q={q} />;
             return (
               <div key={i} className="cv-q">
@@ -176,7 +177,7 @@ export function Cards({ m, s, agent, send, last, view }: { m: WoSessionMessage; 
           }
           if (c.kind === "objection") {
             const o = s.dialogue.objections.find((x) => x.id === c.id);
-            return !o || m.role === "user" ? null : <Folded key={i} title={`Objection from ${cap(o.station)}`}><ObjectionCard woId={s.woId} o={o} canDecide={s.research.canDecide} /></Folded>;
+            return !o || fromPerson(m) ? null : <Folded key={i} title={`Objection from ${cap(o.station)}`}><ObjectionCard woId={s.woId} o={o} canDecide={s.research.canDecide} /></Folded>;
           }
         }
         if (c.kind === "progress") return <ProgressLine key={i} text={c.text} detail={c.detail} />;
@@ -185,13 +186,13 @@ export function Cards({ m, s, agent, send, last, view }: { m: WoSessionMessage; 
         if (c.kind === "swarm") return s.swarm ? <SwarmBoard key={i} woId={s.woId} sw={s.swarm} canStop={!!s.can.park} stopWhy={s.can.parkWhy} /> : null;
         if (c.kind === "objection") {
           const o = s.dialogue.objections.find((x) => x.id === c.id);
-          return !o || m.role === "user" ? null : <ObjectionCard key={i} woId={s.woId} o={o} canDecide={s.research.canDecide} />;
+          return !o || fromPerson(m) ? null : <ObjectionCard key={i} woId={s.woId} o={o} canDecide={s.research.canDecide} />;
         }
-        if (c.kind === "research_plan") return m.role === "user" ? null : <ResearchPlanCard key={i} woId={s.woId} r={s.research} />;
+        if (c.kind === "research_plan") return fromPerson(m) ? null : <ResearchPlanCard key={i} woId={s.woId} r={s.research} />;
         if (c.kind === "station_question") {
           const q = s.dialogue.questions.find((x) => x.id === c.id);
           // A person's answer quotes the question it answers; the card itself lives on the agent's message.
-          if (!q || m.role === "user") return null;
+          if (!q || fromPerson(m)) return null;
           return <StationQuestionCard key={i} woId={s.woId} q={q} mine={q.mine} canAnswer={s.can.talk} why={s.can.talkWhy} />;
         }
         if (c.kind === "assumptions") {

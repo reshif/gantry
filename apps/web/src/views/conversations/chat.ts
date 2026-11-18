@@ -2,6 +2,7 @@
  * The Conversations page, as data: how the thread list is grouped and how a work order's messages are laid out as a chat. Pure functions over what the
  * API already returns (the sessions list, the session's messages and station questions); nothing here talks to the server.
  */
+import { fromPerson } from "../../lib/wo-message";
 import type { StationQuestion } from "../documents/api";
 import type { WoSession, WoSessionMessage, WoSessionRow } from "./session-api";
 
@@ -19,8 +20,9 @@ export const groupOf = (r: WoSessionRow): ThreadGroup => (r.waitingOn === "you" 
 export function reasonOf(r: WoSessionRow): { text: string; tone: "info" | "warn" | "" } {
   if (r.closed) return { text: "Done", tone: "" };
   if (r.waitingOn === "you") return r.gate ? { text: `Gate ${r.gate}`, tone: "warn" } : { text: `Question from ${r.stationName}`, tone: "info" };
-  if (r.waitingOn === "approver") return { text: "With an approver", tone: "" };
-  if (r.waitingOn === "person") return { text: "Waiting on someone", tone: "" };
+  const others: Partial<Record<WoSessionRow["waitingOn"], string>> = { approver: "With an approver", person: "Waiting on someone" };
+  const other = others[r.waitingOn];
+  if (other) return { text: other, tone: "" };
   return { text: r.agentName ? `${r.agentName} at work` : "At work", tone: "" };
 }
 
@@ -51,12 +53,12 @@ export type Block =
   | { t: "turn"; key: string; side: Side; author: string; msgs: WoSessionMessage[] };
 
 export const isEvent = (m: WoSessionMessage): boolean => m.data.kind === "update";
-export const sideOf = (m: WoSessionMessage): Side => (m.role === "user" ? "person" : "agent");
+export const sideOf = (m: WoSessionMessage): Side => (fromPerson(m) ? "person" : "agent");
 
 /** A station message whose only content was a question that was asked again later: the later copy carries it. */
 function folded(m: WoSessionMessage, views: Map<string, QuestionView>): boolean {
   const cards = m.data.cards ?? [];
-  if (m.role === "user" || !cards.length) return false;
+  if (fromPerson(m) || !cards.length) return false;
   return cards.every((c) => c.kind === "station_question" && views.get(c.id)?.shown === false);
 }
 

@@ -1,4 +1,5 @@
 /** The conversation as a chat: agent turns on the left with the station's avatar, the person's on the right, line events folded into one quiet row per run. */
+import { fromAgentModel } from "../../lib/wo-message";
 import { useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { Avatar } from "../../ui/primitives";
@@ -46,9 +47,9 @@ export function Transcript({ s, blocks, agent, nameOf, mine, send, lastId }: { s
             <div className="cv-col">
               <div className="cv-who">{you ? "You" : nameOf(first)}<span className="muted">{` · ${panelDate(first.at)}`}</span></div>
               {b.msgs.map((m) => (
-                <div key={m.id} className={`cv-msg${m.data.kind === "answer" ? " is-answer" : ""}`} title={panelDate(m.at)}>
+                <div key={m.id} className={`cv-msg${m.data.kind === "answer" ? " is-answer" : ""}${!m.text && (m.data.cards ?? []).length ? " is-cards" : ""}`} title={panelDate(m.at)}>
                   {m.data.kind === "answer" ? <Reply m={m} s={s} />
-                    : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="cv-text"><Markdown text={m.text} /></div> : <p className="cv-text">{m.text}</p>) : null}
+                    : m.text ? (fromAgentModel(m) && m.data.mode === "agent" ? <div className="cv-text"><Markdown text={m.text} /></div> : <p className="cv-text">{m.text}</p>) : null}
                   {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
                   <Cards m={m} s={s} agent={agent} send={send} last={m.id === lastId} view={view} />
                 </div>

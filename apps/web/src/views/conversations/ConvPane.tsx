@@ -38,24 +38,25 @@ export function ConvPane({ woId, row, state, setState, back, openRecord }: { woI
         <div className="cv-head-top">
           <Btn small kind="ghost" icon="back" cls="cv-back" id="conv-back" label="Conversations" onClick={back} />
           <span className="mono cv-id">{woId}</span>
-          <h2 className="cv-title">{title}</h2>
+          <h2 className="cv-title" title={title}>{title}</h2>
+          <Btn small label="Open record" aria="Open record" icon="record" cls="cv-icon-sm" id="conv-open-record" onClick={openRecord} />
         </div>
-        <div className="cv-head-meta">
-          {stationName ? <Chip text={stationName} /> : null}
-          {s || row ? <Chip text={cap(s?.wo.state ?? row!.state)} cls="info" /> : null}
-          {s?.wo.gate ? <Chip text={`Gate ${s.wo.gate.label}`} /> : null}
-          <span className="grow" />
-          <Btn small kind="ghost" icon="list" id="conv-events" cls={state.events ? "" : "is-off"} aria-pressed={state.events} label={state.events ? "Hide line events" : "Show line events"} onClick={() => setState({ events: state.events ? "hide" : null })} />
-          <Btn small label="Open record" icon="record" id="conv-open-record" onClick={openRecord} />
+        <div className="cv-head-bar">
+          <Tabs idPrefix="conv-tab" active={state.tab} onChange={(t) => setState({ tab: t === "chat" ? null : t })} items={[{ id: "chat", label: "Conversation" }, { id: "side", label: `Side threads (${side.length})` }]} />
+          <div className="cv-head-meta">
+            {stationName ? <Chip text={stationName} cls="cv-hide-sm" /> : null}
+            {s || row ? <Chip text={cap(s?.wo.state ?? row!.state)} cls="info" /> : null}
+            {s?.wo.gate ? <Chip text={`Gate ${s.wo.gate.label}`} cls="cv-hide-sm" /> : null}
+            {state.tab === "chat" ? <Btn small kind="ghost" icon="list" id="conv-events" cls={`cv-icon-sm${state.events ? "" : " is-off"}`} aria={state.events ? "Hide line events" : "Show line events"} aria-pressed={state.events} label={state.events ? "Hide line events" : "Show line events"} onClick={() => setState({ events: state.events ? "hide" : null })} /> : null}
+          </div>
         </div>
         {wait ? (
           <div className="cv-wait" id="conv-waiting" role="status">
             <Icon name="human" />
-            <span className="cv-wait-t"><strong>{`${cap(wait.station)} is waiting for you`}</strong><span className="muted">{` · ${wait.question}`}</span></span>
+            <span className="cv-wait-t" title={wait.question}><strong>{`${cap(wait.station)} is waiting for you`}</strong><span className="muted">{` · ${wait.question}`}</span></span>
             <Btn small kind="primary" label="Go to the question" id="conv-jump-q" onClick={jump} />
           </div>
         ) : null}
-        <Tabs idPrefix="conv-tab" active={state.tab} onChange={(t) => setState({ tab: t === "chat" ? null : t })} items={[{ id: "chat", label: "Conversation" }, { id: "side", label: `Side threads (${side.length})` }]} />
       </header>
       {state.tab === "side" ? (
         <div className="cv-side" id="conv-side">
