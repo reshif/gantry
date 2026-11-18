@@ -1,4 +1,5 @@
 /** The Session and Settings tabs of Onboarding (the prototype's last two tabs). */
+import { useState } from "react";
 import { navigate } from "../../lib/router";
 import { updatePrefs } from "../../lib/prefs";
 import type { Project } from "@gantry/domain";
@@ -55,9 +56,28 @@ const SETTINGS: Array<[string, string, string]> = [
  * Settings: the prototype's four onboarding switches. The API stores no project-level onboarding policy, so a switch says so when it is used
  * instead of pretending to save. The Onboarding agent and its versioned guidelines open from the card's action (a drawer), not inline.
  */
-export function SettingsTab({ project }: { project: Project }) {
+export function SettingsTab({ project: _project }: { project: Project }) {
   const ui = useUI();
-  const agent = () => ui.drawer.open("onb-agent", (close) => (
+  const [on, setOn] = useState<Record<string, boolean>>({});
+  const isOn = (id: string) => on[id] !== false;
+  return (
+    <Card title="Onboarding settings" flush>
+      <div className="list">
+        {SETTINGS.map(([id, title, sub]) => (
+          <div key={id} className="setrow">
+            <div className="tx"><b>{title}</b>{sub ? <span>{sub}</span> : null}</div>
+            <Toggle id={`onb-set-${id}`} checked={isOn(id)} label={title} onChange={(v) => { setOn((x) => ({ ...x, [id]: v })); ui.toast(`${v ? "Enabled" : "Disabled"} ${title} (this session only: the API stores no onboarding policy yet)`, v ? "ok" : "info"); }} />
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** The Onboarding agent and its versioned guidelines, in a drawer: opened from the wizard's Guidelines step. */
+export function useAgentDrawer(project: Project) {
+  const ui = useUI();
+  return () => ui.drawer.open("onb-agent", (close) => (
     <div className="drawer-inner onb-drawer" id="onb-agent-drawer">
       <div className="drawer-head">
         <div><div className="small muted">Onboarding</div><div className="drawer-id"><span className="big-id">Onboarding agent and guidelines</span></div></div>
@@ -69,16 +89,4 @@ export function SettingsTab({ project }: { project: Project }) {
       </div>
     </div>
   ));
-  return (
-    <Card title="Onboarding settings" flush acts={<Btn small kind="ghost" icon="agent" id="onb-agent-open" label="Agent and guidelines" onClick={agent} />}>
-      <div className="list">
-        {SETTINGS.map(([id, title, sub]) => (
-          <div key={id} className="setrow">
-            <div className="tx"><b>{title}</b><span>{sub}</span></div>
-            <Toggle id={`onb-set-${id}`} checked label={title} onChange={() => ui.toast("Not available yet: the onboarding policy is a server default and is not stored per project.", "info")} />
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
 }

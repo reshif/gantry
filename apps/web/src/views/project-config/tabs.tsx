@@ -8,11 +8,13 @@ import { useState, type ReactNode } from "react";
 import { flowOf, gateModeLock, type ApproverRule, type GateKind, type Repo } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { useFreezes, useMe, useRepos } from "../../api/queries";
+import { useFreezes, useKillImpact, useMe, useRepos } from "../../api/queries";
+import { StepUpNotice, isStepUp } from "../../ui/stepup";
+type CommandRefusal = Parameters<typeof StepUpNotice>[0]["result"];
 import { hashFor } from "../../lib/router";
 import { Btn, Chip, Field, Panel, Select, Toggle, Who } from "../../ui/primitives";
 import { Input, TextArea } from "../../ui/inputs";
-import { Card, Stats } from "../../ui/cr";
+import { Card, CrIcon, Stats } from "../../ui/cr";
 import { DataTable } from "../../ui/DataTable";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
@@ -27,6 +29,8 @@ export interface TabProps extends PcProps {
   setEdit: (v: string) => void;
   /** Opens another tab of this screen (General's "more settings" links). */
   goTab: (tab: string) => void;
+  /** Opens the "Project tools" menu (the advanced editors and extra pages the prototype does not draw) under an anchor. */
+  tools?: (anchor: HTMLElement) => void;
   /** The advanced editor for this tab, rendered under the table while `edit` is set. */
   advanced: ReactNode;
 }
@@ -42,7 +46,7 @@ const Editor = ({ open, label, onClose, children }: { open: boolean; label: stri
 
 /* ------------------------------------------------------------------ General ---- */
 
-export function GeneralTab({ p, s, set, people }: TabProps) {
+export function GeneralTab({ p, s, set, people, tools }: TabProps) {
   const ui = useUI();
   const d = useCan("project.config", { project: p.id });
   const repos = useRepos(p.id).data;
@@ -65,7 +69,7 @@ export function GeneralTab({ p, s, set, people }: TabProps) {
   return (
     <div className="grid g-main2">
       <div className="stack">
-        <Card title="General" acts={<span className="hint">Changes save when you leave a field</span>}>
+        <Card title="General" acts={<><span className="hint">Changes save when you leave a field</span>{tools ? <Btn small kind="ghost" id="pcf-tools" label="Project tools" onClick={(e) => tools(e.currentTarget as HTMLElement)} /> : null}</>}>
           <div className="stack">
             <Field label="Name" htmlFor="pcf-name">
               <Input id="pcf-name" value={name} disabled={!d.allowed} onChange={(e) => set({ text: { ...s.text, name: e.target.value } })} onBlur={() => { if (name.trim() !== p.name) notStored("name"); clear("name"); }} />
@@ -76,7 +80,7 @@ export function GeneralTab({ p, s, set, people }: TabProps) {
             <Field label="Owner" htmlFor="pcf-owner">
               <Select id="pcf-owner" disabled={!d.allowed} options={owners.map((x) => ({ value: x.id, label: x.name }))} value={p.owner} onChange={async (v) => { if (v !== p.owner) res(await ops.setProject(p.id, "owner", v, { ifMatch: p.version }), "Saved owner"); }} />
             </Field>
-            <div className="row">
+            <div className="row" style={{ flexWrap: "nowrap", alignItems: "center" }}>
               <Toggle id="pcf-regulated" checked={!!p.regulated} decision={d} label="Regulated project" onChange={() => notStored("regulated status")} />
               <span>Regulated project (caps autonomy at L2, adds security gate)</span>
             </div>
@@ -381,7 +385,7 @@ export function DangerCard({ p }: TabProps) {
   const archived = p.status === "archived";
   const rows: Array<[string, string, ReactNode]> = archived ? [["Archived", "This project is read-only and refuses new work.", <Btn key="u" kind="danger" id="pcf-unarchive" guard={ad} label="Unarchive" onClick={async () => res(await ops.unarchiveProject(p.id, { ifMatch: p.version }), "Unarchived")} />]] : [
     ["Halt line", "Stops new work entering stations. In-flight runs finish.", <Btn key="h" kind="danger" id="pcf-halt" guard={halt} label={halted ? "Resume line" : "Halt line"} onClick={() => (halted ? void stop?.resume(p.id) : ui.open((close) => <HaltLine p={p} close={close} />))} />],
-    ["Emergency stop", "Stops all agents on this project immediately.", <Btn key="k" kind="danger" id={killed ? "pcf-restore" : "pcf-kill"} guard={killed ? rd : kd} label={killed ? "Restore project" : "Emergency stop…"} onClick={() => (killed ? stop?.restore("project", p.id) : stop?.kill("project", p.id))} />],
+    ["Emergency stop", "Stops all agents on this project immediately.", <Btn key="k" kind="danger" id={killed ? "pcf-restore" : "pcf-kill"} guard={killed ? rd : kd} label={killed ? "Restore project" : "Emergency stop…"} onClick={() => (killed ? stop?.restore("project", p.id) : ui.open((close) => <EmergencyStop p={p} close={close} />))} />],
     ["Archive project", "Hides the project. History is kept for audit.", <Btn key="a" kind="danger" id="pcf-archive" guard={ad} label="Archive…" onClick={() => ui.typedConfirm({
       title: `Archive ${p.name}?`, sub: "It disappears from lists. History stays for audit. You can restore it from the audit ledger.", phrase: p.key, okLabel: "Archive", kind: "danger", guard: ad,
       body: <p className="small muted">Type the project key ({p.key}) to confirm.</p>,
@@ -400,6 +404,66 @@ export function DangerCard({ p }: TabProps) {
 }
 
 /** The prototype's "Halt <project>" dialog: a reason and "Halt line". Regulated projects need a longer reason (the server says how long). */
+/**
+ * The prototype's "Emergency stop: <project>" dialog: a bad banner with what is in flight, a reason and the STOP phrase. The server's own
+ * name check is met with the project name once the person has typed STOP; a step-up refusal shows the usual prompt.
+ */
+function EmergencyStop({ p, close }: { p: PcProps["p"]; close: () => void }) {
+  const ui = useUI();
+  const d = useCan("kill.project", { project: p.id });
+  const imp = useKillImpact("project", p.id, d.allowed && !d.pending).data;
+  const [reason, setReason] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [err, setErr] = useState<{ reason?: string; confirm?: string; form?: string }>({});
+  const [step, setStep] = useState<CommandRefusal | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (busy) return;
+    const e: typeof err = {};
+    if (!reason.trim()) e.reason = "Reason is required.";
+    else if (reason.trim().length < 10) e.reason = "Reason needs at least 10 characters.";
+    if (!confirm) e.confirm = "Type STOP to confirm is required.";
+    else if (confirm !== "STOP") e.confirm = "Type STOP in capitals.";
+    setErr(e);
+    if (e.reason || e.confirm) return;
+    setBusy(true);
+    const r = await ops.kill("project", p.id, { reason: reason.trim(), mode: "hold", confirmText: p.name });
+    setBusy(false);
+    if (!r.ok) {
+      if (isStepUp(r)) { setErr({}); setStep(r); } else setErr({ form: r.msg });
+      return;
+    }
+    ui.toast(`Emergency stop applied to ${p.name}`, "error");
+    close();
+  };
+  const n = imp?.workOrders;
+  return (
+    <Dialog
+      title={`Emergency stop: ${p.name}`}
+      sub="Stops agents immediately and blocks new work. Restoring needs a Project Admin."
+      dirty={!!(reason || confirm)}
+      onClose={close}
+      body={
+        <div className="form-grid">
+          <div className="banner bad"><CrIcon name="stop" /><div className="grow">{typeof n === "number" ? `${n} work ${n === 1 ? "order" : "orders"} in flight will pause at their current station.` : "Work orders in flight will pause at their current station."} Nothing is deleted.</div></div>
+          <Field label="Reason" htmlFor="pcf-stop-reason" required error={err.reason} hint="Recorded in the audit ledger.">
+            <TextArea id="pcf-stop-reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>
+          <Field label="Type STOP to confirm" htmlFor="pcf-stop-confirm" required error={err.confirm}>
+            <Input id="pcf-stop-confirm" mono autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          </Field>
+          {step ? <StepUpNotice result={step} what="an emergency stop" draft={{ kind: "kill", scope: "project", id: p.id, values: { reason, mode: "hold", confirm: p.name } }} /> : null}
+          {err.form ? <div className="form-err" role="alert">{err.form}</div> : null}
+        </div>
+      }
+      actions={[
+        { label: "Cancel" },
+        { label: busy ? "Stopping…" : "Stop now", kind: "danger", submit: true, id: "pcf-stop-ok", guard: d.pending ? null : d, onClick: () => void submit() },
+      ]}
+    />
+  );
+}
+
 function HaltLine({ p, close }: { p: PcProps["p"]; close: () => void }) {
   const res = useRes();
   const d = useCan("line.halt", { project: p.id });

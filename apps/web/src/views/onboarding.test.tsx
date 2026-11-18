@@ -50,12 +50,22 @@ function api(repos: Array<Repo & { version: number }>, extra: Record<string, (c:
       "GET /api/v1/integrations": () => ({ body: [] }),
       "GET /api/v1/integration-types": () => ({ body: [] }),
       "GET /api/v1/audit": () => ({ body: [] }),
-      "GET /api/v1/projects/storefront/repos/available": () => ({ body: { available: [{ repo: "acme/new-service", lang: "Go" }, { repo: "acme/ledger", lang: "Java" }] } }),
+      "GET /api/v1/projects/storefront/repos/available": () => ({ body: { available: [{ repo: "acme/new-service", lang: "Go" }, { repo: "acme/ledger", lang: "Java" }, { repo: repos[0]?.name ?? "acme/none", lang: "TypeScript" }] } }),
       ...extra,
     },
     { me: { person: daniel, projects: [STOREFRONT] }, ...o },
   );
 }
+/** The agent and its guidelines open from the wizard's Guidelines step: pick the already connected repo (the last one listed) and continue twice. */
+const openAgentDrawer = async () => {
+  window.history.replaceState(null, "", "/?tab=wizard");
+  const radios = await waitFor(() => { const r = Array.from(document.querySelectorAll<HTMLInputElement>("input[id^=onb-w-av-]")); if (r.length < 3) throw new Error("no repos"); return r; });
+  fireEvent.click(radios[radios.length - 1]!);
+  fireEvent.click(document.getElementById("onb-w-next")!);
+  await screen.findByText(/^Assessment of /);
+  fireEvent.click(document.getElementById("onb-w-next")!);
+  fireEvent.click(await byId("onb-agent-open"));
+};
 const posts = (calls: Call[], method: string, path: string) => calls.filter((c) => c.method === method && c.path === path);
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
 const open = async (repoId: string) => { fireEvent.click(await byId(`onb-detail-${repoId}`)); return byId("onb-act-rerun"); };
@@ -127,11 +137,8 @@ describe("Onboarding: pipeline", () => {
   it("the Guidelines tab shows the agent's guidelines and the profile button opens the agent", async () => {
     api([find("web-storefront"), GREEN]);
     mount(<OnboardingView />);
-    await byId("onb-row-mobile-app");
-    fireEvent.click(document.getElementById("onb-tab-settings")!);
-    fireEvent.click(await byId("onb-agent-open"));
+    await openAgentDrawer();
     await byId("onb-agent-off");
-    expect(document.getElementById("onb-tab-settings")!.getAttribute("aria-selected")).toBe("true");
     fireEvent.click(document.getElementById("onb-agent-profile")!);
     await waitFor(() => expect(window.location.hash).toContain("agents"));
   });
@@ -363,6 +370,7 @@ describe("Onboarding: settings and the connect wizard", () => {
     expect(await screen.findByText("Assessment of acme/new-service")).toBeTruthy();
     expect(document.querySelector(".kv")?.textContent).toMatch(/not available/);
     fireEvent.click(document.getElementById("onb-w-next")!);
+    expect(Array.from((await byId("onb-w-pack")).querySelectorAll("option")).map((o) => o.textContent)).toEqual(["Standard v2", "Strict (regulated)", "Minimal"]);
     fireEvent.change(await byId("onb-w-notes"), { target: { value: "Use pnpm." } });
     fireEvent.click(document.getElementById("onb-w-next")!);
     await waitFor(() => expect(posts(calls, "PATCH", "/api/v1/repos/new-service/config")).toHaveLength(1));
@@ -391,8 +399,7 @@ describe("Onboarding: the agent and its guidelines", () => {
   const tab = async (extra: Record<string, (c: Call) => { status?: number; body: unknown } | undefined> = {}, denied: string[] = [], project: Partial<Project> = {}) => {
     const calls = api([find("web-storefront")], { "GET /api/v1/projects": () => ({ body: [{ ...STOREFRONT, ...project }] }), "GET /api/v1/agents": () => ({ body: [agent] }), ...extra }, { denied });
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-tab-settings"));
-    fireEvent.click(await byId("onb-agent-open")); // the agent and its guidelines open in a drawer from the Settings card
+    await openAgentDrawer(); // the agent and its guidelines open in a drawer from the wizard's Guidelines step
     await byId("onb-gl-save");
     return calls;
   };
@@ -555,8 +562,7 @@ describe("Onboarding: the agent tab says when the agent cannot run", () => {
   const tab = async (vendors: unknown, a = agent) => {
     api([find("web-storefront")], { "GET /api/v1/agents": () => ({ body: [a] }), "GET /api/v1/vendors": () => ({ body: vendors }) });
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-tab-settings"));
-    fireEvent.click(await byId("onb-agent-open")); // the agent and its guidelines open in a drawer from the Settings card
+    await openAgentDrawer(); // the agent and its guidelines open in a drawer from the wizard's Guidelines step
     await byId("onb-gl-save");
   };
 
@@ -608,7 +614,21 @@ describe("Onboarding: fidelity round 2", () => {
     expect(document.body.textContent).not.toMatch(/default branch main/);
   });
 
-  it("Settings is the four switches only, not faded; the agent and guidelines open from the card", async () => {
+  it("Settings switches really toggle (aria-checked, Enabled/Disabled toast) and carry no extra header action", async () => {
+    window.history.replaceState(null, "", "/?tab=settings");
+    api([find("web-storefront")]);
+    mount(<OnboardingView />);
+    const sw = (await byId("onb-set-onb.auto")) as HTMLInputElement;
+    expect(sw.checked).toBe(true);
+    fireEvent.click(sw);
+    expect(await screen.findByText(/^Disabled Assess new repos automatically/)).toBeTruthy();
+    expect((document.getElementById("onb-set-onb.auto") as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(document.getElementById("onb-set-onb.auto")!);
+    expect(await screen.findByText(/^Enabled Assess new repos automatically/)).toBeTruthy();
+    expect(document.getElementById("onb-agent-open")).toBeNull();
+  });
+
+  it("Settings is the four switches only, not faded", async () => {
     window.history.replaceState(null, "", "/?tab=settings");
     api([find("web-storefront")]);
     mount(<OnboardingView />);
@@ -616,7 +636,6 @@ describe("Onboarding: fidelity round 2", () => {
     expect(Array.from(document.querySelectorAll("#main .card h2, .card h2")).map((h) => h.textContent)).toEqual(["Onboarding settings"]);
     expect(document.getElementById("onb-agent-off")).toBeNull();
     expect(document.querySelector("#onb-set-onb\\.pr")?.getAttribute("aria-disabled")).toBeNull();
-    expect(document.getElementById("onb-agent-open")).toBeTruthy();
   });
 
   it("the Session tab names the speaker 'Onboarding Agent', has no repo subtitle, and Open conversation goes to that repo's session", async () => {

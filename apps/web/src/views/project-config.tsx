@@ -9,7 +9,7 @@ import { useMe, usePeople, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { hashFor, replaceHash, useHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
-import { Btn, Empty, IconBtn, Select, Tabs } from "../ui/primitives";
+import { Btn, Empty, Select, Tabs } from "../ui/primitives";
 import { Page, CrIcon } from "../ui/cr";
 import { Async } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
@@ -84,20 +84,6 @@ export default function ProjectConfigView() {
       setParams({ tab: n === "general" ? null : n, edit: t === "approvers" && gate ? gate : null });
     } else if (gate) setParams({ edit: gate });
   };
-  const props = { p, cat, people, s: state, set, edit, setEdit, goTab };
-  const body = ({
-    general: <GeneralTab {...props} advanced={null} />,
-    stations: <StationsTab {...props} advanced={<FlowTab {...props} />} />,
-    classes: <ClassesTable {...props} advanced={<ClassesTab {...props} />} />,
-    approvers: <ApproversTable {...props} advanced={<ApproversTab {...props} />} />,
-    members: <MembersTable {...props} advanced={null} />,
-    freezes: <FreezesTab {...props} advanced={null} />,
-    danger: <DangerCard {...props} advanced={null} />,
-    overlay: <OverlayTab {...props} advanced={null} />, oncall: <OnCallTab {...props} advanced={null} />,
-    budget: <BudgetTab {...props} />, notifications: <NotificationsTab {...props} />, mcp: <McpTab {...props} />, history: <HistoryTab {...props} />,
-  } as Record<string, React.ReactNode>)[tab];
-  const stop = makeStopActions(ui, me);
-  const by = p.halted ? actor(p.halted.by).name : "";
   const tools = (anchor: HTMLElement) => ui.menu(anchor, "Project tools", [
     { label: "Edit stations, gates and routes", icon: "tool", onClick: () => setParams({ tab: "stations", edit: "flow" }) },
     { label: "Edit classes", icon: "tool", onClick: () => setParams({ tab: "classes", edit: "classes" }) },
@@ -111,6 +97,20 @@ export default function ProjectConfigView() {
     { label: "Onboarding", icon: "branch", onClick: () => { window.location.hash = hashFor("onboarding", null, p.id); } },
     { label: "Save as template", icon: "copy", guard: tplGuard, onClick: () => saveAs(p) },
   ]);
+  const props = { p, cat, people, s: state, set, edit, setEdit, goTab, tools };
+  const body = ({
+    general: <GeneralTab {...props} advanced={null} />,
+    stations: <StationsTab {...props} advanced={<FlowTab {...props} />} />,
+    classes: <ClassesTable {...props} advanced={<ClassesTab {...props} />} />,
+    approvers: <ApproversTable {...props} advanced={<ApproversTab {...props} />} />,
+    members: <MembersTable {...props} advanced={null} />,
+    freezes: <FreezesTab {...props} advanced={null} />,
+    danger: <DangerCard {...props} advanced={null} />,
+    overlay: <OverlayTab {...props} advanced={null} />, oncall: <OnCallTab {...props} advanced={null} />,
+    budget: <BudgetTab {...props} />, notifications: <NotificationsTab {...props} />, mcp: <McpTab {...props} />, history: <HistoryTab {...props} />,
+  } as Record<string, React.ReactNode>)[tab];
+  const stop = makeStopActions(ui, me);
+  const by = p.halted ? actor(p.halted.by).name : "";
   const switchTo = (id: string) => { if (id !== p.id) window.location.hash = hashFor("project-config", id, id); };
 
   return (
@@ -119,7 +119,7 @@ export default function ProjectConfigView() {
       eyebrow={`Portfolio · ${p.key}`}
       title={p.name}
       sub="Project configuration: line, people, approvals and safety."
-      acts={<><Select id="pcf-switch" aria-label="Switch project" style={{ width: "auto" }} options={projects.filter((x) => x.status !== "archived" || x.id === p.id).map((x) => ({ value: x.id, label: x.name }))} value={p.id} onChange={switchTo} /><IconBtn icon="tool" id="pcf-tools" label="Project tools" onClick={() => { const el = document.getElementById("pcf-tools"); if (el) tools(el); }} /></>}
+      acts={<><Select id="pcf-switch" aria-label="Switch project" style={{ width: "auto" }} options={projects.filter((x) => x.status !== "archived" || x.id === p.id).map((x) => ({ value: x.id, label: x.name }))} value={p.id} onChange={switchTo} /></>}
     >
       <Tabs idPrefix="pcf-tab" items={PCF_TABS.map((t) => ({ id: t[0], label: t[1] }))} active={PCF_TABS.some((t) => t[0] === tab) ? tab : "general"} onChange={goTab} />
       {p.halted || p.killed ? (

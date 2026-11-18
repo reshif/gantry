@@ -61,7 +61,7 @@ export default function ProjectsView() {
   const openWizard = (tplId?: string) => {
     ui.open((close) => <NewProjectWizard tplId={tplId} projects={all} close={close} />);
   };
-  const openNew = () => ui.open((close) => <NewProjectDialog projects={all} close={close} more={() => openWizard()} />);
+  const openNew = () => ui.open((close) => <NewProjectDialog projects={all} close={close} />);
   useEffect(() => registerCommand("newProject", () => { if (create.allowed) openNew(); }), [create.allowed, all.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(() => {
@@ -160,7 +160,7 @@ export default function ProjectsView() {
         <Select id="prj-reg" aria-label="Regulated" value={reg} onChange={(v) => setParams({ reg: v === "all" ? null : v })} options={[{ value: "all", label: "Regulated: all" }, { value: "yes", label: "Yes" }, { value: "no", label: "No" }]} />
       </FilterBar>
       {view === "templates" ? (
-        <Async query={tplsQ} what="templates" id="prj-tpl">{() => <TemplatesTab projects={all} current={current} onUse={openWizard} />}</Async>
+        <Async query={tplsQ} what="templates" id="prj-tpl">{() => <TemplatesTab projects={all} current={current} onUse={openWizard} onWizard={() => openWizard()} />}</Async>
       ) : (
         <Async query={projectsQ} what="projects" id="prj-pf">{() => (view === "cards" ? cards : table)}</Async>
       )}

@@ -12,6 +12,7 @@ import { Card, CrIcon } from "../../ui/cr";
 import { Btn, Chip, Field, Meter, Select } from "../../ui/primitives";
 import { Input, TextArea } from "../../ui/inputs";
 import { useUI } from "../../ui/overlay-context";
+import { useAgentDrawer } from "./Tabs";
 import { gaps, orgOf, useAvailableRepos, useIntegrationsFor, usePrFiles, type RepoV } from "./kit";
 
 export interface Wiz {
@@ -21,9 +22,11 @@ export interface Wiz {
   /** null: the notes box shows what the repo already has. */
   notes: string | null;
   tick: boolean;
+  /** The pack picked in step 3 (shown, not stored: the API has no guideline packs). */
+  pack: string;
   busy: boolean;
 }
-export const WIZ0: Wiz = { step: 1, repo: "", repoId: null, notes: null, tick: false, busy: false };
+export const WIZ0: Wiz = { step: 1, repo: "", repoId: null, notes: null, tick: false, pack: "Standard v2", busy: false };
 export const STEPS = ["Choose repo", "Assessment", "Guidelines", "Pull request"];
 
 /** What the assessment says about one thing: the finding whose check name matches, in words; "not available" when the assessment has no such check. */
@@ -36,6 +39,7 @@ function fact(r: RepoV | null, re: RegExp): string {
 
 export function OnbWizard({ project, repos, w, set, onDone }: { project: Project; repos: RepoV[]; w: Wiz; set: (p: Partial<Wiz>) => void; onDone: (repoId: string) => void }) {
   const ui = useUI();
+  const openAgent = useAgentDrawer(project);
   const dec = useCan("repo.onboard", { project: project.id });
   const merge = useCan("onboarding.merge", { project: project.id });
   const { sources } = useIntegrationsFor(project.id);
@@ -130,7 +134,7 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
       <Card title={`Assessment of ${w.repo}`}>
         <div className="grid g2">
           <dl className="kv">
-            {([["Tests", /test/i], ["Coverage", /coverage/i], ["Flaky suites", /flak/i], ["CI", /\bci\b|workflow|checks/i], ["Secrets scan", /secret/i], ["Sensitive paths", /sensitive|protected|codeowners/i]] as Array<[string, RegExp]>).map(([k, re]) => {
+            {([["Tests", /^tests?\b/i], ["Coverage", /coverage/i], ["Flaky suites", /flak/i], ["CI", /^ci\b|\bci (checks|status)|workflow/i], ["Secrets scan", /secret/i], ["Sensitive paths", /sensitive|protected|codeowners/i]] as Array<[string, RegExp]>).map(([k, re]) => {
               const v = fact(connected, re);
               return <div key={k}><dt>{k}</dt><dd className={v === NA ? "dim" : ""}>{v}</dd></div>;
             })}
@@ -150,10 +154,10 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
     );
   } else if (w.step === 3) {
     inner = (
-      <Card title="Guidelines">
+      <Card title="Guidelines" acts={<Btn small kind="ghost" icon="agent" id="onb-agent-open" label="Agent and guidelines" onClick={openAgent} />}>
         <div className="stack">
-          <Field label="Guideline pack" htmlFor="onb-w-pack" hint="Packs are not available yet: the factory and project guidelines apply.">
-            <Select id="onb-w-pack" disabled options={[{ value: "default", label: "Project default" }]} value="default" />
+          <Field label="Guideline pack" htmlFor="onb-w-pack" hint="Packs are not stored yet: the factory and project guidelines apply whichever you pick.">
+            <Select id="onb-w-pack" options={["Standard v2", "Strict (regulated)", "Minimal"]} value={w.pack} onChange={(v) => set({ pack: v })} />
           </Field>
           <Field label="Extra repo notes for agents" htmlFor="onb-w-notes">
             <TextArea id="onb-w-notes" rows={4} value={w.notes ?? connected?.guidelines ?? ""} onChange={(e) => set({ notes: e.target.value })} />

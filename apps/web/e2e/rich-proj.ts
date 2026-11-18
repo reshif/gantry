@@ -51,18 +51,18 @@ const BASE: RepoSpec[] = [
 
 const PR_FILES = [".github/workflows/gantry.yml", "CODEOWNERS", "gantry/guidelines.md", "gantry/stations.yml", "gantry/gates.yml", "README.md"];
 const finding = (i: number, check: string, detail: string) => ({ id: `f${i}`, check, ok: true, sev: "medium", fix: "", file: null, detail, source: "observed" });
-const findingsFor = (tests: number) => [
-  finding(0, "Tests run in CI", "Run in 4m 12s"), finding(1, "Coverage reported", `${tests}%`), finding(2, "Flaky suites", "1 (integration/queue)"),
+const findingsFor = (tests: number, flaky = false) => [
+  finding(0, "Tests run in CI", "Run in 4m 12s"), finding(1, "Coverage reported", `${tests}%`), flaky ? { ...finding(2, "Flaky suites", "1 (integration/queue)"), ok: false, fix: "Builds retry the flaky suite once." } : finding(2, "Flaky suites", "1 (integration/queue)"),
   finding(3, "CI checks", "GitHub Actions, green on main"), finding(4, "Secrets scan", "Clean"), finding(5, "Sensitive paths", ".github/workflows, CODEOWNERS"),
 ];
 
-const repoOf = (s: RepoSpec, over: { stage?: string; pr?: unknown } = {}) => {
+const repoOf = (s: RepoSpec, over: { stage?: string; pr?: unknown; flaky?: boolean } = {}) => {
   const stage = over.stage ?? s.stage ?? "ready";
   return {
     id: s.name, name: `acme/${s.name}`, project: s.project, team: "platform", tags: [], lang: s.lang, halted: null, freeze: !!s.frozen,
     config: { defaultBranch: "main", branchPrefix: "gantry/", merge: "squash", tagging: "semver", requiredChecks: ["ci/test"], protectedPaths: [".github/workflows/**", "CODEOWNERS"] },
     mcp: [], notifyOverrides: [], triggers: true, guidelines: "", version: 1,
-    onboarding: { stage, startedAt: NOW - 9 * DAY, readyAt: stage === "ready" ? NOW - 8 * DAY : undefined, exception: null, timeline: [], busy: null, verification: null, findings: stage === "connected" ? [] : findingsFor(s.tests), pr: over.pr ?? null },
+    onboarding: { stage, startedAt: NOW - 9 * DAY, readyAt: stage === "ready" ? NOW - 8 * DAY : undefined, exception: null, timeline: [], busy: null, verification: null, findings: stage === "connected" ? [] : findingsFor(s.tests, over.flaky), pr: over.pr ?? null },
   };
 };
 
@@ -74,14 +74,15 @@ export function richGroupProj(): Record<string, Handler> {
   const ov: Record<string, Handler> = {};
   /** Repos connected through the wizard in this page's life, with their stage and pull request. */
   const added: Array<{ spec: RepoSpec; stage: string; pr: unknown }> = [];
-  const all = () => [...BASE.map((s) => repoOf(s)), ...added.map((a) => repoOf(a.spec, { stage: a.stage, pr: a.pr }))];
+  const all = () => [...BASE.map((s) => repoOf(s)), ...added.map((a) => repoOf(a.spec, { stage: a.stage, pr: a.pr, flaky: true }))];
   for (const id of PROJECT_IDS) ov[`projects/${id}/repos`] = (r) => fulfillJson(r, all().filter((x) => x.project === id));
   ov["POST projects/payments/repos"] = (r) => {
     const body = r.request().postDataJSON() as { name?: string };
     const name = String(body?.name ?? "acme/new-repo");
-    const spec: RepoSpec = { project: "payments", name: name.split("/")[1] ?? name, lang: AVAILABLE.find((a) => a.repo === name)?.lang ?? "Go", tests: 78 };
-    added.push({ spec, stage: "assessed", pr: null });
-    return fulfillJson(r, { ok: true, repo: repoOf(spec, { stage: "assessed" }) });
+    const spec: RepoSpec = { project: "payments", name: name.split("/")[1] ?? name, lang: AVAILABLE.find((a) => a.repo === name)?.lang ?? "Go", tests: 71 };
+    // the Onboarding Agent has already opened PR #3 (the prototype's step 4 shows it)
+    added.push({ spec, stage: "pr_checks", pr: mkPr("open") });
+    return fulfillJson(r, { ok: true, repo: repoOf(spec, { stage: "pr_checks", pr: mkPr("open"), flaky: true }) });
   };
   ov["projects/payments/repos/available"] = (r) => fulfillJson(r, { available: AVAILABLE.filter((a) => !added.some((x) => `acme/${x.spec.name}` === a.repo)) });
   const sessionFor = (id: string, project: string) => ({

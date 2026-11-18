@@ -187,6 +187,9 @@ describe("Projects: prototype parity", () => {
   });
 });
 
+/** The full wizard opens from the template library; the New project dialog is the prototype's small one. */
+const openFullWizard = async () => { act(() => writeParams({ view: "templates" })); fireEvent.click(await byId("prj-tpl-wizard")); };
+
 describe("Projects: templates and wizard", () => {
   it("lists templates; built-in ones are read-only, a custom one opens the editor", async () => {
     const calls = setup({ "PATCH /api/v1/templates/tpl-mine": () => ok({ version: 5 }) });
@@ -203,14 +206,12 @@ describe("Projects: templates and wizard", () => {
   it("keeps what was typed in the wizard when it is closed and opened again, and starts fresh from a template card", async () => {
     setup();
     mount(<ProjectsView />);
-    fireEvent.click(await byId("prj-new"));
-    fireEvent.click(await byId("prj-nd-more"));
+    await openFullWizard();
     fireEvent.click(await byId("prj-wz-next"));
     fireEvent.change(await byId("prj-wz-name"), { target: { value: "Half Done" } });
     fireEvent.click(await byId("prj-wz-cancel"));
     await waitFor(() => expect(document.getElementById("prj-wz-name")).toBeNull());
-    fireEvent.click(await byId("prj-new"));
-    fireEvent.click(await byId("prj-nd-more"));
+    await openFullWizard();
     expect(((await byId("prj-wz-name")) as HTMLInputElement).value).toBe("Half Done");
   });
 
@@ -220,8 +221,7 @@ describe("Projects: templates and wizard", () => {
       "POST /api/v1/projects/orders-hub/repos": () => ok(),
     });
     mount(<ProjectsView />);
-    fireEvent.click(await byId("prj-new"));
-    fireEvent.click(await byId("prj-nd-more"));
+    await openFullWizard();
     fireEvent.click(await byId("prj-wz-tpl-tpl-mine"));
     fireEvent.click(await byId("prj-wz-next"));
     // validation: name and team are required
@@ -254,8 +254,7 @@ describe("Projects: templates and wizard", () => {
   it("refuses a name that already exists before calling the server", async () => {
     const calls = setup();
     mount(<ProjectsView />);
-    fireEvent.click(await byId("prj-new"));
-    fireEvent.click(await byId("prj-nd-more"));
+    await openFullWizard();
     fireEvent.click(await byId("prj-wz-next"));
     fireEvent.change(await byId("prj-wz-name"), { target: { value: "Payments" } });
     fireEvent.change(await byId("prj-wz-team-add"), { target: { value: "growth" } });
@@ -530,6 +529,47 @@ describe("Fidelity round 2 (projects, onboarding links, project config)", () => 
     expect(document.body.textContent).not.toMatch(/Renaming is not available/);
     expect(Array.from(document.querySelectorAll("#pcf-tab-panel .li .chip")).map((c) => c.textContent)).toEqual(["Ready", "Frozen"]);
     expect((document.getElementById("pcf-name") as HTMLInputElement).readOnly).toBe(false);
+  });
+
+  it("round 3: the header carries only the switcher; Project tools sits in the General card", async () => {
+    withPayments();
+    mount(<ProjectConfigView />);
+    await byId("pcf-switch");
+    const tools = await byId("pcf-tools");
+    expect(tools.closest(".page-h, header, .acts")).toBeNull();
+    expect(tools.closest(".card")?.querySelector("h2")?.textContent).toBe("General");
+  });
+
+  it("round 3: Emergency stop opens the prototype dialog (banner, reason, STOP phrase) and kills only after both are valid", async () => {
+    const calls = withPayments({ "POST /api/v1/stops": () => ok({ msg: "Killed" }) });
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-danger"));
+    fireEvent.click(await byId("pcf-kill"));
+    expect(await screen.findByText("Emergency stop: Payments Platform")).toBeTruthy();
+    expect(document.querySelector(".dlg-b .banner.bad, .modal .banner.bad")).not.toBeNull();
+    expect(document.body.textContent).not.toMatch(/Kill switch|hold in place|who gets notified/i);
+    fireEvent.click(await byId("pcf-stop-ok"));
+    expect((await screen.findAllByRole("alert")).map((a) => a.textContent).join(" ")).toMatch(/Reason is required/);
+    fireEvent.change(await byId("pcf-stop-reason"), { target: { value: "Payouts are looping" } });
+    fireEvent.change(await byId("pcf-stop-confirm"), { target: { value: "stop" } });
+    fireEvent.click(await byId("pcf-stop-ok"));
+    expect(await screen.findByText("Type STOP in capitals.")).toBeTruthy();
+    expect(calls.find((c) => c.path === "/api/v1/stops")).toBeUndefined();
+    fireEvent.change(await byId("pcf-stop-confirm"), { target: { value: "STOP" } });
+    fireEvent.click(await byId("pcf-stop-ok"));
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/stops")?.body).toMatchObject({ scope: "project", id: "payments", mode: "kill", reason: "Payouts are looping" }));
+  });
+
+  it("round 3: the New project dialog has only Cancel and Create project, and an empty submit shows both inline alerts", async () => {
+    setup();
+    mount(<ProjectsView />);
+    fireEvent.click(await byId("prj-new"));
+    await byId("prj-nd-create");
+    expect(document.getElementById("prj-nd-more")).toBeNull();
+    fireEvent.click(await byId("prj-nd-create"));
+    expect(await screen.findByText("Name is required.")).toBeTruthy();
+    expect(screen.getByText("Key is required.")).toBeTruthy();
+    expect(document.querySelectorAll("[role=alert]").length).toBeGreaterThanOrEqual(2);
   });
 
   it("the Project tools menu reaches every editor and extra page the tabs no longer carry", async () => {

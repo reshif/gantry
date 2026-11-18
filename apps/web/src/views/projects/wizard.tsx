@@ -370,10 +370,10 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
 
 /**
  * New project, the prototype's small dialog: Name, Key (three capitals), Owner, Template. The server fills in approvers, notifications and the
- * flow from the template; "More options" opens the full wizard above (owning teams, budget, repos, approver and notification presets).
+ * flow from the template. The full wizard above (owning teams, budget, approver and notification presets) opens from a template in the library.
  * After the create it toasts "Created <name>" and opens the new project's configuration.
  */
-export function NewProjectDialog({ projects, close, more }: { projects: PView[]; close: () => void; more: () => void }) {
+export function NewProjectDialog({ projects, close }: { projects: PView[]; close: () => void }) {
   const ui = useUI();
   const me = useMe();
   const people = usePeople().data;
@@ -436,7 +436,6 @@ export function NewProjectDialog({ projects, close, more }: { projects: PView[];
       }
       actions={[
         { label: "Cancel", id: "prj-nd-cancel" },
-        { label: "More options", id: "prj-nd-more", onClick: (ask) => { ask(); more(); } },
         { label: busy ? "Creating…" : "Create project", kind: "primary", submit: true, id: "prj-nd-create", guard: d.pending ? null : d, onClick: () => void submit() },
       ]}
     />
