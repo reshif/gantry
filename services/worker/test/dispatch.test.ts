@@ -182,4 +182,17 @@ d("attempt.dispatch and run.result", () => {
     expect(wo).toMatchObject({ state: "parked", position: "person" });
     expect(wo.data.bayReason).toMatch(/eval suite/);
   });
+
+  it("gap 10: the prompt hash recorded at dispatch names the prompt the run is given, repository context included", async () => {
+    await w.q(`update repos set github_full_name = 'acme/payments-api' where org_id = $1 and id = 'payments-api'`, [w.orgId]);
+    await w.q(`insert into repo_config (org_id, repo_id, data) values ($1,'payments-api','{"baseSha":"${"4".repeat(40)}"}') on conflict (org_id, repo_id) do update set data = excluded.data`, [w.orgId]);
+    const h = "e".repeat(64);
+    w.broker.repoContext = { commit: "4".repeat(40), hash: h, files: [{ path: "AGENTS.md", bytes: 12, sha256: h, inlined: true, truncated: false, content: "Test: pytest" }] };
+    const { runId } = await w.workOrderAt("WO-9050", { agent: "ag-build" });
+    await w.drain();
+    const run = (await w.q(`select data from runs where id = $1`, [runId]))[0].data;
+    expect(run.promptManifest.parts.map((p: { kind: string }) => p.kind)).toContain("repo_context");
+    expect(run.promptHash).toBe(run.promptManifest.hash);
+    expect(run.dispatchPromptHash).toBe(run.promptManifest.hash);
+  });
 });

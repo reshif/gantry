@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { applyStationResult, attemptIsCurrent, refuseStationRun, stationRunBlock, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
+import { applyStationResult, attemptIsCurrent, recordDispatchPrompt, refuseStationRun, stationRunBlock, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
 import type { RepoContext } from "@gantry/domain";
 import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
@@ -80,7 +80,11 @@ async function prepareRun(deps: Deps, a: AttemptInfo, runId: string): Promise<{ 
 
 async function recordRepoContext(deps: Deps, a: AttemptInfo, runId: string, rc: RepoContext | null): Promise<void> {
   const value = rc ? { ...rc, offeredAt: deps.now().toISOString() } : { commit: null, files: [], hash: null, offeredAt: deps.now().toISOString(), unavailable: true };
-  await withTx(deps.pool, (tx) => tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ repoContext: value })]));
+  await withTx(deps.pool, async (tx) => {
+    await tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ repoContext: value })]);
+    // The prompt is now fully known: the hash recorded for the run names exactly what it will be given, repository context included.
+    if (!a.woData.eval && !isCarrier(a.woData)) await recordDispatchPrompt(tx, a.orgId, runId);
+  });
 }
 
 async function markStarted(deps: Deps, a: AttemptInfo, runId: string, startupLeaseMs: number): Promise<void> {
