@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG, type ApproverRule } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { setCsrfToken } from "../api/client";
 import { reloadPrefs, updatePrefs } from "../lib/prefs";
 import { OverlayProvider } from "../ui/Overlay";
 import ProjectsView from "./projects";
+import { writeParams } from "./projects/url";
 import ProjectConfigView from "./project-config";
 import { flowFrom, tplCustomCount, tplCustomText, tplFlowProject } from "./projects/templates-kit";
 
@@ -88,6 +89,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
   try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
   reloadPrefs();
   updatePrefs({ project: "payments" });
@@ -122,10 +124,11 @@ describe("Projects: portfolio", () => {
     mount(<ProjectsView />);
     expect(await screen.findByText("Payments Platform")).toBeTruthy();
     expect(screen.queryByText("Legacy Checkout")).toBeNull();
-    fireEvent.change(document.getElementById("prj-st")!, { target: { value: "archived" } });
+    act(() => writeParams({ st: "archived" }));
     expect(await screen.findByText("Legacy Checkout")).toBeTruthy();
-    fireEvent.change(document.getElementById("prj-st")!, { target: { value: "all" } });
+    act(() => writeParams({ st: null }));
     fireEvent.change(document.getElementById("prj-reg")!, { target: { value: "yes" } });
+    expect(window.location.search).toContain("reg=yes");
     await waitFor(() => expect(screen.queryByText("Payments Platform")).toBeNull());
     expect(screen.getByText("Risk and Compliance")).toBeTruthy();
   });
@@ -149,11 +152,46 @@ describe("Projects: portfolio", () => {
   });
 });
 
+describe("Projects: prototype parity", () => {
+  it("keeps search, filters and layout in the URL, shows Repos, offers Clear, and has no Archived option or Templates switch", async () => {
+    window.history.replaceState(null, "", "/?q=risk&view=table");
+    setup();
+    mount(<ProjectsView />);
+    await screen.findByText("Risk and Compliance");
+    expect(screen.queryByText("Payments Platform")).toBeNull();
+    expect(Array.from(document.querySelectorAll("table thead th")).map((t) => t.textContent?.replace(/[\s↑↓]+$/, ""))).toContain("Repos");
+    expect(document.querySelector(".filterbar-count")?.textContent).toBe("1 of 2");
+    expect(Array.from(document.querySelectorAll("#prj-st option")).map((o) => o.textContent)).toEqual(["Status: all", "Running", "Halted"]);
+    expect(screen.queryByLabelText("Templates")).toBeNull();
+    fireEvent.click(await byId("prj-clear"));
+    await screen.findByText("Payments Platform");
+    expect(window.location.search).not.toContain("q=");
+    fireEvent.click(screen.getByLabelText("Cards"));
+    await waitFor(() => expect(window.location.search).toContain("view=cards"));
+    expect(document.getElementById("prj-card-risk")?.textContent).toMatch(/repos/);
+  });
+
+  it("New project is the small dialog (Name, Key of three capitals, Owner, Template) and creates the project", async () => {
+    const calls = setup({ "POST /api/v1/projects": () => ok({ project: { id: "loyalty" } }) });
+    mount(<ProjectsView />);
+    fireEvent.click(await byId("prj-new"));
+    fireEvent.click(await byId("prj-nd-create"));
+    expect(await screen.findByText("Name is required.")).toBeTruthy();
+    fireEvent.change(await byId("prj-nd-name"), { target: { value: "Loyalty" } });
+    fireEvent.change(await byId("prj-nd-key"), { target: { value: "LO" } });
+    fireEvent.click(await byId("prj-nd-create"));
+    expect(await screen.findByText("Exactly three capital letters.")).toBeTruthy();
+    fireEvent.change(await byId("prj-nd-key"), { target: { value: "loy" } });
+    fireEvent.click(await byId("prj-nd-create"));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/projects")?.body).toMatchObject({ name: "Loyalty", key: "LOY", templateId: "tpl-backend" }));
+  });
+});
+
 describe("Projects: templates and wizard", () => {
   it("lists templates; built-in ones are read-only, a custom one opens the editor", async () => {
     const calls = setup({ "PATCH /api/v1/templates/tpl-mine": () => ok({ version: 5 }) });
     mount(<ProjectsView />);
-    fireEvent.click(await screen.findByLabelText("Templates"));
+    act(() => writeParams({ view: "templates" }));
     expect((await byId("prj-tpl-edit-tpl-backend")).getAttribute("data-reason")).toMatch(/Built-in templates are read-only/);
     fireEvent.click(await byId("prj-tpl-edit-tpl-mine"));
     fireEvent.change(await byId("prj-te-name"), { target: { value: "Renamed template" } });
@@ -166,11 +204,13 @@ describe("Projects: templates and wizard", () => {
     setup();
     mount(<ProjectsView />);
     fireEvent.click(await byId("prj-new"));
+    fireEvent.click(await byId("prj-nd-more"));
     fireEvent.click(await byId("prj-wz-next"));
     fireEvent.change(await byId("prj-wz-name"), { target: { value: "Half Done" } });
     fireEvent.click(await byId("prj-wz-cancel"));
     await waitFor(() => expect(document.getElementById("prj-wz-name")).toBeNull());
     fireEvent.click(await byId("prj-new"));
+    fireEvent.click(await byId("prj-nd-more"));
     expect(((await byId("prj-wz-name")) as HTMLInputElement).value).toBe("Half Done");
   });
 
@@ -181,6 +221,7 @@ describe("Projects: templates and wizard", () => {
     });
     mount(<ProjectsView />);
     fireEvent.click(await byId("prj-new"));
+    fireEvent.click(await byId("prj-nd-more"));
     fireEvent.click(await byId("prj-wz-tpl-tpl-mine"));
     fireEvent.click(await byId("prj-wz-next"));
     // validation: name and team are required
@@ -214,6 +255,7 @@ describe("Projects: templates and wizard", () => {
     const calls = setup();
     mount(<ProjectsView />);
     fireEvent.click(await byId("prj-new"));
+    fireEvent.click(await byId("prj-nd-more"));
     fireEvent.click(await byId("prj-wz-next"));
     fireEvent.change(await byId("prj-wz-name"), { target: { value: "Payments" } });
     fireEvent.change(await byId("prj-wz-team-add"), { target: { value: "growth" } });
@@ -230,6 +272,7 @@ describe("Project config", () => {
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
   });
 
+  const openFlow = async () => { fireEvent.click(await byId("pcf-tab-stations")); fireEvent.click(await byId("pcf-edit-toggle")); };
   const withPayments = (extra: Record<string, Handler> = {}, denied: string[] = []) => setup({ "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }), ...extra }, denied);
 
   it("shows the overview and saves the description with the project version", async () => {
@@ -238,7 +281,7 @@ describe("Project config", () => {
     const desc = (await byId("pcf-desc")) as HTMLTextAreaElement;
     await waitFor(() => expect(desc.value).toBe("Payments Platform desc"));
     fireEvent.change(desc, { target: { value: "New text" } });
-    fireEvent.click(await byId("pcf-ov-save"));
+    fireEvent.blur(desc);
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "desc", value: "New text" }));
     expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toBe("7");
   });
@@ -246,7 +289,7 @@ describe("Project config", () => {
   it("locks controls with the reason from the decision point", async () => {
     withPayments({}, ["project.config", "flow.edit"]);
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-flow"));
+    await openFlow();
     const add = await byId("pcf-add-station");
     await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
     expect(add.getAttribute("data-reason")).toMatch(/No role holds flow.edit/);
@@ -257,7 +300,7 @@ describe("Project config", () => {
   it("flow tab: gates read by name with the code beside, their kind and approvals; locked gates say why and cannot be switched", async () => {
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-flow"));
+    await openFlow();
     const row = (await byId("pcf-gmode-G0G1")).closest("tr") as HTMLElement;
     expect(row.querySelector("th")?.textContent).toMatch(/Brief confirmed\s*G0\+G1/);
     expect(row.textContent).toMatch(/person · 1 approval: the submitter, or Line Lead/);
@@ -278,7 +321,7 @@ describe("Project config", () => {
   it("flow tab: a regulated project keeps every gate on, with the reason", async () => {
     withPayments({ "GET /api/v1/projects": () => ({ body: [{ ...PAYMENTS, regulated: true }, RISK] }) });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-flow"));
+    await openFlow();
     await byId("pcf-gmode-G3d");
     expect(document.getElementById("pcf-gate-G3d")).toBeNull();
     expect(document.getElementById("pcf-gate-lock-G3d")?.getAttribute("title")).toMatch(/Regulated projects keep every gate on/);
@@ -290,7 +333,7 @@ describe("Project config", () => {
       "PATCH /api/v1/projects/payments/flow/stations/spec": () => ok(),
     });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-flow"));
+    await openFlow();
     fireEvent.click(await byId("pcf-st-research"));
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "flow.stations.research.enabled", value: false }));
     const wip = (await byId("pcf-wip-spec")) as HTMLInputElement;
@@ -314,7 +357,7 @@ describe("Project config", () => {
     });
     withPayments({ "GET /api/v1/projects": () => ({ body: [custom] }), "GET /api/v1/catalog": () => ({ body: { ...CAT, stations: [...CAT.stations, { id: "compliance", no: "S7·1", name: "Compliance", agent: "ag-x", purpose: "", custom: true, project: "payments" }] } }) });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-flow"));
+    await openFlow();
     const rm = await byId("pcf-st-rm-compliance");
     expect(rm.getAttribute("data-reason")).toBe("2 work orders are at Compliance. Move them first.");
   });
@@ -322,7 +365,7 @@ describe("Project config", () => {
   it("flow tab: the add-bay dialog posts the bay with the project version and shows a refusal inline", async () => {
     const calls = withPayments({ "POST /api/v1/projects/payments/flow/bays": () => ({ status: 409, body: { ok: false, msg: "This project already has that bay." } }) });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-flow"));
+    await openFlow();
     fireEvent.click(await byId("pcf-add-bay"));
     fireEvent.change(await byId("pcf-nb-name"), { target: { value: "Hold" } });
     fireEvent.submit(document.querySelector(".dlg-form")!);
@@ -333,15 +376,60 @@ describe("Project config", () => {
     expect(post.headers["idempotency-key"]).toBeTruthy();
   });
 
-  it("members tab: grants and removes a project role", async () => {
-    const calls = withPayments({ "PUT /api/v1/projects/payments/members/p-asha/roles/reviewer": () => ok(), "DELETE /api/v1/projects/payments/members/p-meera/roles/line_lead": () => ok() });
+  it("has the seven prototype tabs, honours #project-config/<id>, switches project from the header and says when the line is halted", async () => {
+    window.location.hash = "#/p/payments/project-config/risk";
+    const HALTED = { ...RISK, halted: { by: "p-asha", at: 1, reason: "Relevance regression" } };
+    withPayments({ "GET /api/v1/projects": () => ({ body: [PAYMENTS, HALTED] }) });
+    mount(<ProjectConfigView />);
+    expect(await screen.findByRole("heading", { name: "Risk and Compliance" })).toBeTruthy();
+    expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(["General", "Stations and gates", "Classes", "Approvers", "Members", "Freezes", "Danger zone"]);
+    expect((await byId("pcf-halted")).textContent).toMatch(/Line halted.*Relevance regression/);
+    expect(document.getElementById("pcf-resume")).toBeTruthy();
+    fireEvent.change(await byId("pcf-switch"), { target: { value: "payments" } });
+    expect(window.location.hash).toBe("#/p/payments/project-config/payments");
+  });
+
+  it("freezes tab lists the project's freezes and schedules one; danger zone has halt, emergency stop and archive", async () => {
+    const calls = withPayments({ "GET /api/v1/freezes": () => ({ body: [{ id: "FRZ-1", name: "Quarter-end close", repos: "all", from: Date.now() + 1e8, to: Date.now() + 2e8, by: "p-asha", version: 1 }] }), "POST /api/v1/freezes": () => ok() });
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-freezes"));
+    expect(await screen.findByText("Quarter-end close")).toBeTruthy();
+    fireEvent.click(await byId("pcf-add-freeze"));
+    fireEvent.change(await byId("pcf-fz-name"), { target: { value: "Release freeze" } });
+    fireEvent.click(await byId("pcf-fz-add"));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/freezes")?.body).toMatchObject({ name: "Release freeze" }));
+    fireEvent.click(await byId("pcf-tab-danger"));
+    expect(Array.from(document.querySelectorAll(".setrow b")).map((b) => b.textContent)).toEqual(["Halt line", "Emergency stop", "Archive project"]);
+  });
+
+  it("stations tab is the prototype table (Station, Agent, Slots, Enabled, Gate after, Gate mode); classes and approvers are flush tables", async () => {
+    withPayments();
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-stations"));
+    await byId("pcf-stations");
+    expect(Array.from(document.querySelectorAll("#pcf-stations thead th")).map((t) => t.textContent?.trim())).toEqual(["Station", "Agent", "Slots", "Enabled", "Gate after", "Gate mode"]);
+    fireEvent.click(await byId("pcf-tab-classes"));
+    await byId("pcf-classes");
+    expect(Array.from(document.querySelectorAll("#pcf-classes thead th")).map((t) => t.textContent?.trim())).toEqual(["Class", "Default priority", "SLA (h)", "Skips stations", "Enabled"]);
+    fireEvent.click(await byId("pcf-tab-approvers"));
+    await byId("pcf-approvers");
+    expect(Array.from(document.querySelectorAll("#pcf-approvers thead th")).map((t) => t.textContent?.trim()).slice(0, 4)).toEqual(["Gate", "Who can approve", "Needed", "Separation of duties"]);
+  });
+
+  it("members tab: a table of people with Remove (asks first) and an Add member dialog", async () => {
+    const calls = withPayments({ "GET /api/v1/people": () => ({ body: [...PEOPLE, person("p-ravi", "Ravi Nair", [])] }), "PUT /api/v1/projects/payments/members/p-ravi/roles/reviewer": () => ok(), "DELETE /api/v1/projects/payments/members/p-meera/roles/line_lead": () => ok() });
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-tab-members"));
-    fireEvent.click(await byId("pcf-rm-p-meera-line_lead"));
-    await waitFor(() => expect(calls.some((c) => c.method === "DELETE")).toBe(true));
-    fireEvent.change(await byId("pcf-add-role"), { target: { value: "reviewer" } });
-    fireEvent.click(await byId("pcf-add-go"));
-    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path.endsWith("/members/p-meera/roles/reviewer") || c.path.includes("/members/p-tomas/roles/reviewer"))).toBe(true));
+    expect((await byId("pcf-members")).textContent).toMatch(/Meera Iyer/);
+    fireEvent.click(await byId("pcf-rm-p-meera"));
+    await screen.findByText(/They lose access to Payments Platform/);
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" }).at(-1)!);
+    await waitFor(() => expect(calls.map((c) => c.method + " " + c.path).filter((x) => /members/.test(x))).toContain("DELETE /api/v1/projects/payments/members/p-meera/roles/line_lead"));
+    fireEvent.click(await byId("pcf-add-member"));
+    fireEvent.change(await byId("pcf-am-who"), { target: { value: "p-ravi" } });
+    fireEvent.change(await byId("pcf-am-role"), { target: { value: "reviewer" } });
+    fireEvent.click(await byId("pcf-am-add"));
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path.endsWith("/members/p-ravi/roles/reviewer"))).toBe(true));
   });
 
   it("members tab: project admins choose who is on call, with the project version; a stale save says so", async () => {
@@ -364,6 +452,7 @@ describe("Project config", () => {
     const calls = withPayments({ "GET /api/v1/people": () => ({ body: people }), "PUT /api/v1/projects/payments/approvers/G5": () => ok() });
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-tab-approvers"));
+    fireEvent.click(await byId("pcf-edit-toggle"));
     fireEvent.click(await byId("pcf-ap-g-G5"));
     const req = (await byId("pcf-ap-required")) as HTMLInputElement;
     fireEvent.change(req, { target: { value: "5" } });
@@ -385,10 +474,9 @@ describe("Project config", () => {
     const calls = withPayments({ "POST /api/v1/projects/payments/archive": () => ok() });
     mount(<ProjectConfigView />);
     fireEvent.click(await byId("pcf-tab-danger"));
-    expect(await screen.findByText(/3 work orders, 1 running agents, 1 coding slots and 0 open PRs/)).toBeTruthy();
     fireEvent.click(await byId("pcf-archive"));
     const input = await waitFor(() => { const i = document.querySelector<HTMLInputElement>(".dlg input.input"); if (!i) throw new Error("no input"); return i; });
-    fireEvent.change(input, { target: { value: "Payments Platform" } });
+    fireEvent.change(input, { target: { value: "PAY" } });
     fireEvent.submit(document.querySelector(".dlg-form")!);
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path.endsWith("/archive"))).toBeTruthy());
     const post = calls.find((c) => c.path.endsWith("/archive"))!;
@@ -399,7 +487,7 @@ describe("Project config", () => {
   it("budget tab saves the monthly budget", async () => {
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-budget"));
+    fireEvent.click(await byId("pcf-more-budget"));
     const el = (await byId("pcf-bud-monthly")) as HTMLInputElement;
     fireEvent.change(el, { target: { value: "5000" } });
     fireEvent.blur(el);

@@ -10,6 +10,7 @@ import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { Card, CrIcon } from "../../ui/cr";
 import { Btn, Chip, Field, Meter, Select } from "../../ui/primitives";
+import { Input, TextArea } from "../../ui/inputs";
 import { useUI } from "../../ui/overlay-context";
 import { gaps, orgOf, useAvailableRepos, useIntegrationsFor, usePrFiles, type RepoV } from "./kit";
 
@@ -58,7 +59,7 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
         const x = await ops.connectRepo(project.id, w.repo.trim(), project.teams[0] ?? "platform", src && src.type === "github" ? src.id : undefined);
         set({ busy: false });
         if (!x.ok) return ui.toast(x.msg, "error");
-        const repo = (x as unknown as { repo: RepoV }).repo;
+        const repo = (x as typeof x & { repo: RepoV }).repo;
         ui.toast(`${w.repo.trim()} connected. Gantry is assessing it.`, "ok");
         return set({ repoId: repo.id, step: 2 });
       }
@@ -100,7 +101,7 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
             <div className="list" style={{ border: "1px solid var(--line)", borderRadius: 6 }}>
               {available.map((a, i) => (
                 <label key={a.repo} className="li click" htmlFor={`onb-w-av-${i}`}>
-                  <input type="radio" className="cb" name="repo" id={`onb-w-av-${i}`} checked={w.repo === a.repo} onChange={() => set({ repo: a.repo })} />
+                  <Input type="radio" name="repo" id={`onb-w-av-${i}`} checked={w.repo === a.repo} onChange={() => set({ repo: a.repo })} />
                   <span className="main1"><span className="t1 mono">{a.repo}</span><span className="t2">{`${a.lang} · default branch main · contributors not available`}</span></span>
                   <span className="tag">{a.lang}</span>
                 </label>
@@ -114,7 +115,7 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
         )}
         <div style={{ marginTop: 12 }}>
           <Field label="Or type a repo" htmlFor="onb-w-name" hint="As org/name. The GitHub App must be installed on it.">
-            <input id="onb-w-name" className="input mono" value={w.repo} autoComplete="off" placeholder="org/repo-name" onChange={(e) => set({ repo: e.target.value })} />
+            <Input id="onb-w-name" mono value={w.repo} autoComplete="off" placeholder="org/repo-name" onChange={(e) => set({ repo: e.target.value })} />
           </Field>
         </div>
       </Card>
@@ -153,7 +154,7 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
             <Select id="onb-w-pack" disabled options={[{ value: "default", label: "Project default" }]} value="default" />
           </Field>
           <Field label="Extra repo notes for agents" htmlFor="onb-w-notes">
-            <textarea id="onb-w-notes" className="input" rows={4} value={w.notes ?? connected?.guidelines ?? ""} onChange={(e) => set({ notes: e.target.value })} />
+            <TextArea id="onb-w-notes" rows={4} value={w.notes ?? connected?.guidelines ?? ""} onChange={(e) => set({ notes: e.target.value })} />
           </Field>
         </div>
       </Card>
@@ -171,7 +172,7 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
               ))}
             </div>
             <div className="stack" style={{ marginTop: 12 }}>
-              <label className="switch"><input type="checkbox" className="cb" id="onb-w-tick" checked={w.tick} onChange={(e) => set({ tick: e.target.checked })} /><span>I checked the sensitive files (workflow and CODEOWNERS)</span></label>
+              <label className="switch" htmlFor="onb-w-tick"><Input type="checkbox" id="onb-w-tick" checked={w.tick} onChange={(e) => set({ tick: e.target.checked })} /><span>I checked the sensitive files (workflow and CODEOWNERS)</span></label>
             </div>
           </>
         ) : (

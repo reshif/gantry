@@ -15,11 +15,9 @@ import { DataTable } from "../ui/DataTable";
 import { Page, Stats } from "../ui/cr";
 import { useUI } from "../ui/overlay-context";
 import { TemplatesTab } from "./projects/templates";
-import { NewProjectDialog } from "./projects/NewProjectDialog";
-import { NewProjectWizard } from "./projects/wizard";
-import { goProject, metricsOf, type PView } from "./projects/kit";
+import { NewProjectDialog, NewProjectWizard } from "./projects/wizard";
+import { goProject, metricsOf, useRepoCounts, type PView } from "./projects/kit";
 import { EmptyState } from "./projects/kit";
-import { useRepoCounts } from "./projects/repo-counts";
 import { useParam, useParams } from "./projects/url";
 
 const stateOf = (p: PView): "halted" | "running" | "archived" => (p.status === "archived" ? "archived" : p.killed || p.halted || metricsOf(p).health.id === "halted" || metricsOf(p).health.id === "killed" ? "halted" : "running");
@@ -35,9 +33,8 @@ export default function ProjectsView() {
   const prefs = usePrefs();
   const projectsQ = useProjects();
   const tplsQ = useTemplates();
-  const people = usePeople().data ?? [];
+  const people = usePeople().data;
   const all = ((projectsQ.data ?? []) as PView[]).slice();
-  const tpls = tplsQ.data ?? [];
   const create = useCan("project.create");
   const [, setParams] = useParams();
   const [view] = useParam("view", "table", ["table", "cards", "templates"]);
@@ -59,7 +56,7 @@ export default function ProjectsView() {
   const projects = all.filter((p) => (st === "archived" ? stateOf(p) === "archived" : stateOf(p) !== "archived"));
   const repoCounts = useRepoCounts(projects.map((p) => p.id));
   const current = all.find((p) => p.id === prefs.project) ?? null;
-  const nameOf = (id: string) => people.find((x) => x.id === id)?.name ?? "";
+  const nameOf = (id: string) => people?.find((x) => x.id === id)?.name ?? "";
 
   const openWizard = (tplId?: string) => {
     ui.open((close) => <NewProjectWizard tplId={tplId} projects={all} close={close} />);
@@ -149,7 +146,7 @@ export default function ProjectsView() {
       ]} />
       <FilterBar
         label="Filter projects"
-        count={view === "templates" ? `${tpls.length} template${tpls.length === 1 ? "" : "s"}` : `${rows.length} of ${projects.length}`}
+        count={view === "templates" ? `${tplsQ.data?.length ?? 0} templates` : `${rows.length} of ${projects.length}`}
         actions={
           <>
             {filtered ? <Btn small kind="ghost" id="prj-clear" label="Clear" onClick={clear} /> : null}

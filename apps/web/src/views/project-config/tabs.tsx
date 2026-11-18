@@ -10,7 +10,8 @@ import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useFreezes, useMe, useRepos } from "../../api/queries";
 import { hashFor } from "../../lib/router";
-import { Btn, Chip, Field, Select, Toggle, Who } from "../../ui/primitives";
+import { Btn, Chip, Field, Panel, Select, Toggle, Who } from "../../ui/primitives";
+import { Input, TextArea } from "../../ui/inputs";
 import { Card, Stats } from "../../ui/cr";
 import { DataTable } from "../../ui/DataTable";
 import { Dialog } from "../../ui/Overlay";
@@ -22,7 +23,6 @@ import { useSaveFromProject } from "../projects/templates";
 import { ifMatchOf } from "../govern/data";
 import { membersOf, type PcProps } from "./ctx";
 import { KINDS } from "./flow";
-import { OnCallPanel } from "./overview";
 import { stageName } from "../onboarding/kit";
 
 export interface TabProps extends PcProps {
@@ -49,7 +49,7 @@ export function GeneralTab({ p, s, set, goTab, people }: TabProps) {
   const d = useCan("project.config", { project: p.id });
   const td = useCan("template.edit");
   const saveAs = useSaveFromProject();
-  const repos = useRepos(p.id).data ?? [];
+  const repos = useRepos(p.id).data;
   const m = metricsOf(p);
   const res = useRes();
   const desc = s.text.desc ?? p.desc ?? "";
@@ -69,25 +69,23 @@ export function GeneralTab({ p, s, set, goTab, people }: TabProps) {
         <Card title="General" acts={<span className="hint">Changes save when you leave a field</span>}>
           <div className="stack">
             <Field label="Name" htmlFor="pcf-name" hint="Renaming is not available: the API has no rename for a project.">
-              <input id="pcf-name" className="input" value={p.name} readOnly />
+              <Input id="pcf-name" value={p.name} readOnly />
             </Field>
             <Field label="Description" htmlFor="pcf-desc">
-              <textarea id="pcf-desc" className="input" rows={2} disabled={!d.allowed} value={desc} onChange={(e) => set({ text: { ...s.text, desc: e.target.value } })} onBlur={() => void saveDesc()} />
+              <TextArea id="pcf-desc" rows={2} disabled={!d.allowed} value={desc} onChange={(e) => set({ text: { ...s.text, desc: e.target.value } })} onBlur={() => void saveDesc()} />
             </Field>
             <Field label="Owner" htmlFor="pcf-owner">
               <Select id="pcf-owner" disabled={!d.allowed} options={owners.map((x) => ({ value: x.id, label: x.name }))} value={p.owner} onChange={async (v) => { if (v !== p.owner) res(await ops.setProject(p.id, "owner", v, { ifMatch: p.version }), "Saved owner"); }} />
             </Field>
             <div className="row">
-              <label className="switch" title="Not available: the API cannot change this yet.">
-                <Toggle id="pcf-regulated" checked={!!p.regulated} decision={{ allowed: false, reason: "Not available: the API cannot change whether a project is regulated yet.", needs: "" }} label="Regulated project" />
-                <span>Regulated project (caps autonomy at L2, adds security gate)</span>
-              </label>
+              <Toggle id="pcf-regulated" checked={!!p.regulated} decision={{ allowed: false, reason: "Not available: the API cannot change whether a project is regulated yet.", needs: "" }} label="Regulated project" />
+              <span>Regulated project (caps autonomy at L2, adds security gate)</span>
             </div>
           </div>
         </Card>
         <Card title="Instructions overlay" hint="Added to every agent's instructions for this project, after the factory base and before per-repo guidelines.">
           <div className="stack">
-            <textarea id="pcf-overlay" className="input mono" rows={5} aria-label="Instructions overlay" disabled={!d.allowed} value={overlay} onChange={(e) => set({ text: { ...s.text, overlay: e.target.value } })} />
+            <TextArea id="pcf-overlay" mono rows={5} aria-label="Instructions overlay" disabled={!d.allowed} value={overlay} onChange={(e) => set({ text: { ...s.text, overlay: e.target.value } })} />
             <div className="row">
               <Btn kind="primary" small id="pcf-ov-save" guard={d} label="Save overlay" onClick={async () => {
                 if (overlay === (p.overlay ?? "")) return void ui.toast("No changes to save.", "info");
@@ -102,7 +100,7 @@ export function GeneralTab({ p, s, set, goTab, people }: TabProps) {
       <div className="stack">
         <Stats items={[{ l: "On belt", v: m.wip + m.bays, tone: "info" }, { l: "Blocked", v: m.bad, tone: m.bad ? "bad" : "ok" }]} />
         <Card title="Repositories" flush acts={<a className="btn sm ghost" id="pcf-to-onb" href={hashFor("onboarding", null, p.id)}>Onboarding</a>}>
-          {repos.length ? <div className="list">{repos.map((r) => <div key={r.id} className="li"><span className="mono" style={{ flex: 1 }}>{r.name}</span>{repoChip(r)}</div>)}</div> : <p className="dim" style={{ padding: 16 }}>No repos yet. Connect one in Onboarding.</p>}
+          {repos?.length ? <div className="list">{repos.map((r) => <div key={r.id} className="li"><span className="mono" style={{ flex: 1 }}>{r.name}</span>{repoChip(r)}</div>)}</div> : <p className="dim" style={{ padding: 16 }}>No repos yet. Connect one in Onboarding.</p>}
         </Card>
         <Card title="More settings" flush>
           <div className="list">
@@ -124,31 +122,24 @@ export function StationsTab({ p, cat, edit, setEdit, advanced }: TabProps) {
   const d = useCan("flow.edit", { project: p.id });
   const f = flowOf(cat, p);
   const locked = (id: string) => id === "intake" || id === "build";
+  const gateOf = (stationId: string) => f.gates.find((x) => x.after === stationId);
   return (
     <div className="stack">
       <Card title="Stations and gates" flush hint="Build cannot be disabled">
-        <div className="tw cards" style={{ border: 0 }}>
-          <table className="t" id="pcf-stations">
-            <thead><tr><th>Station</th><th>Agent</th><th className="r">Slots</th><th>Enabled</th><th>Gate after</th><th>Gate mode</th></tr></thead>
-            <tbody>
-              {f.stations.map((st) => {
-                const cfg = p.flow.stations[st.id]!;
-                const g = f.gates.find((x) => x.after === st.id);
-                const opts = g ? KINDS.filter((o) => o.value === g.mode || !gateModeLock(g, o.value as GateKind, p)) : [];
-                return (
-                  <tr key={st.id}>
-                    <td data-l="Station"><b>{st.name}</b></td>
-                    <td data-l="Agent"><Who id={st.agent} /></td>
-                    <td data-l="Slots" className="r mono"><NumInput id={`pcf-wip-${st.id}`} value={cfg.wip} min={1} max={30} locked={!d.allowed} label={`${st.name} slots`} onCommit={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `Saved ${st.name} slots`)} /></td>
-                    <td data-l="Enabled"><Toggle id={`pcf-st-${st.id}`} checked={cfg.enabled} decision={locked(st.id) ? { allowed: false, reason: `${st.name} cannot be disabled.`, needs: "" } : d} label={`${st.name} enabled`} onChange={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " enabled" : " disabled"}`)} /></td>
-                    <td data-l="Gate">{g ? <><span className="mono">{g.label}</span> {g.name}</> : <span className="dim">—</span>}</td>
-                    <td data-l="Mode">{g ? <Select id={`pcf-gmode-${g.id}`} aria-label={`Mode ${g.label}`} disabled={!d.allowed || g.id === "G0G1"} options={opts} value={g.mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), "Saved")} /> : null}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable<(typeof f.stations)[number]>
+          id="pcf-stations"
+          caption="Stations and gates"
+          rows={f.stations}
+          rowKey={(st) => st.id}
+          columns={[
+            { key: "name", label: "Station", render: (st) => <b>{st.name}</b> },
+            { key: "agent", label: "Agent", render: (st) => <Who id={st.agent} /> },
+            { key: "slots", label: "Slots", align: "end", render: (st) => <NumInput id={`pcf-sg-wip-${st.id}`} value={p.flow.stations[st.id]!.wip} min={1} max={30} locked={!d.allowed} label={`${st.name} slots`} onCommit={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `Saved ${st.name} slots`)} /> },
+            { key: "on", label: "Enabled", render: (st) => <Toggle id={`pcf-sg-on-${st.id}`} checked={p.flow.stations[st.id]!.enabled} decision={locked(st.id) ? { allowed: false, reason: `${st.name} cannot be disabled.`, needs: "" } : d} label={`${st.name} enabled`} onChange={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " enabled" : " disabled"}`)} /> },
+            { key: "gate", label: "Gate after", render: (st) => { const g = gateOf(st.id); return g ? <><span className="mono">{g.label}</span> {g.name}</> : <span className="dim">—</span>; } },
+            { key: "mode", label: "Gate mode", render: (st) => { const g = gateOf(st.id); return g ? <Select id={`pcf-sg-mode-${g.id}`} aria-label={`Mode ${g.label}`} disabled={!d.allowed || g.id === "G0G1"} options={KINDS.filter((o) => o.value === g.mode || !gateModeLock(g, o.value as GateKind, p))} value={g.mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), "Saved")} /> : null; } },
+          ]}
+        />
       </Card>
       <Editor open={edit === "flow"} label="Edit stations, gates and routes" onToggle={() => setEdit(edit === "flow" ? "" : "flow")}>{advanced}</Editor>
     </div>
@@ -166,26 +157,23 @@ export function ClassesTable({ p, cat, edit, setEdit, advanced }: TabProps) {
   return (
     <div className="stack">
       <Card title="Work order classes" flush>
-        <div className="tw cards" style={{ border: 0 }}>
-          <table className="t" id="pcf-classes">
-            <thead><tr><th>Class</th><th>Default priority</th><th className="r">SLA (h)</th><th>Skips stations</th><th>Enabled</th></tr></thead>
-            <tbody>
-              {p.flow.classes.map((c) => (
-                <tr key={c.id}>
-                  <td data-l="Class"><b>{c.name}</b></td>
-                  <td data-l="Priority"><span className="tag">{c.priority}</span></td>
-                  <td data-l="SLA" className="r">
-                    <input id={`pcf-sla-${c.id}`} className="in mono" style={{ width: 72, textAlign: "right" }} inputMode="numeric" disabled={!d.allowed} aria-label={`SLA hours for ${c.name}`} value={sla[c.id] ?? String(c.slaH)}
-                      onChange={(e) => setSla({ ...sla, [c.id]: e.target.value })}
-                      onBlur={async () => { const n = parseInt(sla[c.id] ?? "", 10); const cur = sla[c.id]; setSla((x) => { const y = { ...x }; delete y[c.id]; return y; }); if (cur === undefined || !(n > 0) || n === c.slaH) return; res(await ops.updateClass(p.id, c.id, { slaH: n }, { ifMatch: p.version }), "Saved SLA"); }} />
-                  </td>
-                  <td data-l="Skips">{c.skips.length ? c.skips.map((x) => <span key={x} className="tag">{stName(x)}</span>) : <span className="dim">none</span>}</td>
-                  <td data-l="Enabled"><Toggle id={`pcf-cl-en-${c.id}`} checked={c.enabled !== false} decision={d} label={`${c.name} enabled`} onChange={async (v) => res(await ops.updateClass(p.id, c.id, { enabled: v }, { ifMatch: p.version }), `${c.name}${v ? " enabled" : " disabled"}`)} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable<(typeof p.flow.classes)[number]>
+          id="pcf-classes"
+          caption="Work order classes"
+          rows={p.flow.classes}
+          rowKey={(c) => c.id}
+          columns={[
+            { key: "name", label: "Class", render: (c) => <b>{c.name}</b> },
+            { key: "pri", label: "Default priority", render: (c) => <span className="tag">{c.priority}</span> },
+            { key: "sla", label: "SLA (h)", align: "end", render: (c) => (
+              <Input id={`pcf-sla-${c.id}`} mono style={{ width: 72, textAlign: "right" }} inputMode="numeric" disabled={!d.allowed} aria-label={`SLA hours for ${c.name}`} value={sla[c.id] ?? String(c.slaH)}
+                onChange={(e) => setSla({ ...sla, [c.id]: e.target.value })}
+                onBlur={async () => { const n = parseInt(sla[c.id] ?? "", 10); const cur = sla[c.id]; setSla((x) => { const y = { ...x }; delete y[c.id]; return y; }); if (cur === undefined || !(n > 0) || n === c.slaH) return; res(await ops.updateClass(p.id, c.id, { slaH: n }, { ifMatch: p.version }), "Saved SLA"); }} />
+            ) },
+            { key: "skips", label: "Skips stations", render: (c) => (c.skips.length ? <>{c.skips.map((x) => <span key={x} className="tag">{stName(x)}</span>)}</> : <span className="dim">none</span>) },
+            { key: "on", label: "Enabled", render: (c) => <Toggle id={`pcf-cx-en-${c.id}`} checked={c.enabled !== false} decision={d} label={`${c.name} enabled`} onChange={async (v) => res(await ops.updateClass(p.id, c.id, { enabled: v }, { ifMatch: p.version }), `${c.name}${v ? " enabled" : " disabled"}`)} /> },
+          ]}
+        />
       </Card>
       <Editor open={edit === "classes"} label="Edit classes" onToggle={() => setEdit(edit === "classes" ? "" : "classes")}>{advanced}</Editor>
     </div>
@@ -207,25 +195,19 @@ export function ApproversTable({ p, cat, people, s, edit, setEdit, advanced }: T
   return (
     <div className="stack">
       <Card title="Approvers per gate" flush>
-        <div className="tw cards" style={{ border: 0 }}>
-          <table className="t" id="pcf-approvers">
-            <thead><tr><th>Gate</th><th>Who can approve</th><th className="r">Needed</th><th>Separation of duties</th><th></th></tr></thead>
-            <tbody>
-              {f.gates.map((g) => {
-                const r = p.approvers[g.id];
-                return (
-                  <tr key={g.id}>
-                    <td data-l="Gate"><b className="mono">{g.label}</b> {g.name}</td>
-                    <td data-l="Approvers">{g.mode === "auto" ? <span className="dim">no approvers (automatic)</span> : who(r)}</td>
-                    <td data-l="Needed" className="r">{r && g.mode !== "auto" ? <Select id={`pcf-need-${g.id}`} style={{ width: 64 }} aria-label={`Approvers needed for ${g.label}`} disabled={!d.allowed} options={["1", "2"]} value={String(r.required)} onChange={(v) => void save(g.id, { required: Number(v) }, `Saved ${g.label}`)} /> : <span className="dim">—</span>}</td>
-                    <td data-l="SoD">{r && g.mode !== "auto" ? <Toggle id={`pcf-sod-${g.id}`} checked={r.sod} decision={d} label={`Separation of duties at ${g.label}`} onChange={(v) => void save(g.id, { sod: v }, `Saved ${g.label}`)} /> : <span className="dim">—</span>}</td>
-                    <td data-l="" className="nol r">{g.mode === "auto" ? null : <Btn small kind="ghost" id={`pcf-gate-ap-${g.id}`} label="Edit rule" onClick={() => setEdit(g.id)} />}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable<(typeof f.gates)[number]>
+          id="pcf-approvers"
+          caption="Approvers per gate"
+          rows={f.gates}
+          rowKey={(g) => g.id}
+          columns={[
+            { key: "gate", label: "Gate", render: (g) => <><b className="mono">{g.label}</b> {g.name}</> },
+            { key: "who", label: "Who can approve", render: (g) => (g.mode === "auto" ? <span className="dim">no approvers (automatic)</span> : <>{who(p.approvers[g.id])}</>) },
+            { key: "need", label: "Needed", align: "end", render: (g) => { const r = p.approvers[g.id]; return r && g.mode !== "auto" ? <Select id={`pcf-need-${g.id}`} style={{ width: 64 }} aria-label={`Approvers needed for ${g.label}`} disabled={!d.allowed} options={["1", "2"]} value={String(r.required)} onChange={(v) => void save(g.id, { required: Number(v) }, `Saved ${g.label}`)} /> : <span className="dim">—</span>; } },
+            { key: "sod", label: "Separation of duties", render: (g) => { const r = p.approvers[g.id]; return r && g.mode !== "auto" ? <Toggle id={`pcf-sod-${g.id}`} checked={r.sod} decision={d} label={`Separation of duties at ${g.label}`} onChange={(v) => void save(g.id, { sod: v }, `Saved ${g.label}`)} /> : <span className="dim">—</span>; } },
+            { key: "edit", label: "", align: "end", render: (g) => (g.mode === "auto" ? null : <Btn small kind="ghost" id={`pcf-ax-edit-${g.id}`} label="Edit rule" onClick={() => setEdit(g.id)} />) },
+          ]}
+        />
       </Card>
       <Editor open={!!edit && edit !== "closed"} label="Edit approver rules" onToggle={() => setEdit(edit ? "" : s.gate || "G5")}>{advanced}</Editor>
     </div>
@@ -256,21 +238,19 @@ export function MembersTable({ p, cat, people }: TabProps) {
   return (
     <div className="stack">
       <Card title="Members" flush acts={<Btn small kind="primary" icon="plus" id="pcf-add-member" guard={d} label="Add member" onClick={add} />}>
-        <div className="tw cards" style={{ border: 0 }}>
-          <table className="t" id="pcf-members">
-            <thead><tr><th>Person</th><th>Title</th><th>Role in project</th><th></th></tr></thead>
-            <tbody>
-              {mem.map((x) => (
-                <tr key={x.id}>
-                  <td data-l="Person"><a className="rl" href={hashFor("person", x.id)}>{x.name}</a></td>
-                  <td data-l="Title" className="muted">{x.title}</td>
-                  <td data-l="Role">{x.roles.filter((g) => g.scope === p.id).map((g) => <Chip key={g.role} text={roleName(cat, g.role)} cls="info" />)}</td>
-                  <td data-l="" className="nol r"><Btn small kind="ghost" cls="danger" id={`pcf-rm-${x.id}`} label="Remove" guard={d} onClick={() => void remove(x.id, x.name)} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable<(typeof mem)[number]>
+          id="pcf-members"
+          caption="Members"
+          rows={mem}
+          rowKey={(x) => x.id}
+          columns={[
+            { key: "person", label: "Person", render: (x) => <a className="rl" href={hashFor("person", x.id)}>{x.name}</a> },
+            { key: "title", label: "Title", render: (x) => <span className="muted">{x.title}</span> },
+            { key: "role", label: "Role in project", render: (x) => <>{x.roles.filter((g) => g.scope === p.id).map((g) => <Chip key={g.role} text={roleName(cat, g.role)} cls="info" />)}</> },
+            { key: "rm", label: "", align: "end", render: (x) => <Btn small kind="ghost" cls="danger" id={`pcf-rm-${x.id}`} label="Remove" guard={d} onClick={() => void remove(x.id, x.name)} /> },
+          ]}
+          empty={{ title: "No members yet", text: "Add someone to give them a role on this project." }}
+        />
       </Card>
       <OnCallPanel p={p} people={people} canSet={d} />
     </div>
@@ -313,7 +293,8 @@ export function FreezesTab({ p }: TabProps) {
   const actor = useActors();
   const perm = useCan("policy.edit");
   const q = useFreezes();
-  const repos = useRepos(p.id).data ?? [];
+  const reposQ = useRepos(p.id).data;
+  const repos = reposQ ?? [];
   const ids = new Set(repos.map((r) => r.id));
   const all = Array.isArray(q.data) ? q.data : null;
   const mine = (all ?? []).filter((f) => f.repos === "all" || f.repos.some((r) => ids.has(r)));
@@ -357,7 +338,7 @@ function AddFreeze({ repos, close }: { repos: Repo[]; close: () => void }) {
       onClose={close}
       body={
         <div className="form-grid">
-          <Field label="Name" htmlFor="pcf-fz-name" error={err} required><input id="pcf-fz-name" className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="Name" htmlFor="pcf-fz-name" error={err} required><Input id="pcf-fz-name" value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Field label="Repositories" htmlFor="pcf-fz-repo"><Select id="pcf-fz-repo" options={[{ value: "all", label: "All repos of this project" }, ...repos.map((r) => ({ value: r.id, label: r.name }))]} value={repo} onChange={setRepo} /></Field>
           <Field label="Days" htmlFor="pcf-fz-days"><Select id="pcf-fz-days" options={["1", "3", "7", "14"]} value={days} onChange={setDays} /></Field>
         </div>
@@ -407,5 +388,59 @@ export function DangerCard({ p }: TabProps) {
         ))}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Who is on call for this project (owner decision 7). Factory Admins always are; the project's admins choose who else is.
+ * Nobody can put themselves on call; the person on call can hand over to someone with a role here.
+ */
+export function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["people"]; canSet: ReturnType<typeof useCan> }) {
+  const res = useRes();
+  const me = useMe();
+  const list = Array.isArray(p.oncall) ? p.oncall : [];
+  const v = (p as { version?: number }).version;
+  const isFA = (x: (typeof people)[number]) => x.roles.some((g) => g.role === "factory_admin" && g.scope === "factory");
+  const pool = people.filter((x) => x.status === "active" && !isFA(x) && x.roles.some((g) => g.scope === p.id || g.scope === "factory"));
+  const addable = pool.filter((x) => !list.includes(x.id));
+  const [pick, setPick] = useState("");
+  const [to, setTo] = useState("");
+  const mine = !!me && list.includes(me.person.id);
+  const handTo = pool.filter((x) => x.id !== me?.person.id);
+  const admins = people.filter((x) => x.status === "active" && isFA(x));
+  const save = (next: string[]) => ops.setProjectOncall(p.id, next, { ifMatch: v }).then((r) => res(r));
+  return (
+    <Panel title="On call">
+      <div className="form-grid" id="pcf-oncall">
+        <p className="small muted">{`On-call rules on ${p.name} (on-call policies, and approver conditions such as hotfix sign-off) apply only to the people on call here. Nobody can put themselves on call.`}</p>
+        {list.length ? (
+          <ul className="plain-list" id="pcf-oncall-list">
+            {list.map((id) => (
+              <li key={id} className="row gap-sm">
+                <Who id={id} />
+                <Btn small kind="ghost" icon="x" id={`pcf-oncall-rm-${id}`} aria={`Take ${people.find((x) => x.id === id)?.name ?? id} off call`} guard={canSet} onClick={() => void save(list.filter((x) => x !== id))} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="small muted" id="pcf-oncall-none">Nobody besides the Factory Admins is on call for {p.name}.</p>
+        )}
+        <p className="small muted">{`Always on call: ${admins.map((x) => x.name).join(", ") || "no Factory Admin"} (Factory Admin).`}</p>
+        <div className="filters">
+          <Field label="Put on call" htmlFor="pcf-oncall-pick">
+            <Select id="pcf-oncall-pick" disabled={!canSet.allowed || !addable.length} options={addable.length ? addable.map((x) => ({ value: x.id, label: x.name })) : [{ value: "", label: "Everyone with a role is on call" }]} value={pick || addable[0]?.id || ""} onChange={setPick} />
+          </Field>
+          <Btn small icon="plus" id="pcf-oncall-add" guard={canSet} disabledReason={addable.length ? null : "Everyone with a role here is already on call."} label="Add" onClick={() => void save([...list, pick || addable[0]!.id])} />
+        </div>
+        {mine ? (
+          <div className="filters" id="pcf-oncall-handover">
+            <Field label="Hand over to" htmlFor="pcf-oncall-to">
+              <Select id="pcf-oncall-to" options={handTo.map((x) => ({ value: x.id, label: x.name }))} value={to || handTo[0]?.id || ""} onChange={setTo} />
+            </Field>
+            <Btn small icon="swap" id="pcf-oncall-hand" disabledReason={handTo.length ? null : "Nobody else holds a role here."} label="Hand over" onClick={async () => res(await ops.handOverOncall(p.id, to || handTo[0]!.id, { ifMatch: v }))} />
+          </div>
+        ) : null}
+      </div>
+    </Panel>
   );
 }

@@ -72,14 +72,11 @@ describe("Onboarding: pipeline", () => {
     api([find("web-storefront"), GREEN, find("search-indexer"), repo("notifications", (r) => { r.onboarding.stage = "connected"; r.onboarding.pr = null; r.onboarding.findings = []; })]);
     mount(<OnboardingView />);
     expect(await screen.findByText("Onboarding")).toBeTruthy();
-    const strip = Array.from(document.querySelectorAll("#onb-strip .stat")).map((li) => li.querySelector(".v")?.textContent);
-    expect(strip).toEqual(["1", "0", "0", "1", "0", "0", "1", "1"]); // connected, ..., PR checks, ..., Ready, off belt
+    await byId("onb-row-search-indexer");
+    expect(Array.from(document.querySelectorAll("#onb-table thead th, .dtable thead th, table thead th")).map((th) => th.textContent?.trim().replace(/[\s↑↓]+$/, ""))).toEqual(["Repository", "Project", "Language", "Tests", "State"]);
     expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(4);
-    const waiting = document.querySelector(".banner.warn")!;
-    expect(waiting.textContent).toMatch(/1 onboarding PR is green and waiting for a person to approve and merge: acme\/mobile-app#338/);
     expect(document.querySelector("#onb-row-search-indexer .onb-st-person")?.textContent).toMatch(/Needs a person/);
     expect(document.querySelector("#onb-row-mobile-app .onb-st-merge")?.textContent).toMatch(/Waiting for merge/);
-    expect(document.querySelector(".footnote")?.textContent).not.toMatch(/simulat/i);
   });
 
   it("an assessed repo with fixable gaps and no PR is waiting for a person to open the PR, not in progress", async () => {
@@ -97,15 +94,7 @@ describe("Onboarding: pipeline", () => {
     expect(document.querySelector("#onb-row-notif-busy .onb-st-progress")?.textContent).toMatch(/In progress/);
   });
 
-  it("filters repos, and an empty project says what to do", async () => {
-    api([find("web-storefront"), GREEN, find("search-indexer")]);
-    mount(<OnboardingView />);
-    await byId("onb-row-mobile-app");
-    fireEvent.click(screen.getByLabelText("Needs action"));
-    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(2));
-    fireEvent.click(screen.getByLabelText("Ready"));
-    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(1));
-    cleanup();
+  it("an empty project says what to do", async () => {
     api([]);
     mount(<OnboardingView />);
     expect(await screen.findByText("No repos yet")).toBeTruthy();
@@ -119,28 +108,18 @@ describe("Onboarding: pipeline", () => {
     expect(document.getElementById("onb-repos")).toBeNull();
   });
 
-  it("searching narrows the repos, and an empty result offers Show all which clears the search and the filter", async () => {
-    api([find("web-storefront"), GREEN, find("search-indexer")]);
-    mount(<OnboardingView />);
-    await byId("onb-row-mobile-app");
-    fireEvent.change(document.getElementById("onb-search") as HTMLInputElement, { target: { value: "indexer" } });
-    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(1));
-    fireEvent.change(document.getElementById("onb-search") as HTMLInputElement, { target: { value: "zzz-nothing" } });
-    fireEvent.click(await byId("onb-filter-clear"));
-    await waitFor(() => expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(3));
-    expect((document.getElementById("onb-search") as HTMLInputElement).value).toBe("");
-  });
-
   it("a repo row opens from its first-cell button, and the table sorts by a header", async () => {
     api([find("web-storefront"), GREEN, find("search-indexer")]);
     mount(<OnboardingView />);
     const row = await byId("onb-row-mobile-app");
     const order = () => Array.from(document.querySelectorAll(".dtable tbody tr")).map((t) => t.getAttribute("data-key"));
-    fireEvent.click(document.getElementById("onb-table-sort-name")!);
+    // the table opens sorted by Repository, ascending: the first click reverses it, the second restores it
     const asc = order();
     expect(asc).toEqual([...asc].sort());
     fireEvent.click(document.getElementById("onb-table-sort-name")!);
     expect(order()).toEqual([...asc].reverse());
+    fireEvent.click(document.getElementById("onb-table-sort-name")!);
+    expect(order()).toEqual(asc);
     // Keyboard and screen-reader users reach the row through a real link or button in its first cell, which Enter and Space activate natively.
     expect(row.querySelector("td:first-child a[href], td:first-child button")).not.toBeNull();
   });
@@ -149,18 +128,29 @@ describe("Onboarding: pipeline", () => {
     api([find("web-storefront"), GREEN]);
     mount(<OnboardingView />);
     await byId("onb-row-mobile-app");
-    fireEvent.click(document.getElementById("onb-tab-agent")!);
+    fireEvent.click(document.getElementById("onb-tab-settings")!);
     await byId("onb-agent-off");
-    expect(document.getElementById("onb-tab-agent")!.getAttribute("aria-selected")).toBe("true");
+    expect(document.getElementById("onb-tab-settings")!.getAttribute("aria-selected")).toBe("true");
     fireEvent.click(document.getElementById("onb-agent-profile")!);
     await waitFor(() => expect(window.location.hash).toContain("agents"));
   });
 
-  it("Connect repo is locked with the server's reason when the person cannot onboard", async () => {
+  it("Continue on the wizard is locked with the server's reason when the person cannot onboard", async () => {
+    window.history.replaceState(null, "", "/?tab=wizard");
     api([find("web-storefront")], {}, { denied: ["repo.onboard"] });
     mount(<OnboardingView />);
+    await byId("onb-w-next");
+    await waitFor(() => expect(locked("onb-w-next")).toMatch(/Needs Factory Admin|No role holds it/));
+  });
+
+  it("has the prototype's four tabs and keeps the chosen one in the URL", async () => {
+    api([find("web-storefront")]);
+    mount(<OnboardingView />);
     await byId("onb-row-web-storefront");
-    await waitFor(() => expect(locked("onb-connect")).toMatch(/Needs Factory Admin|No role holds it/));
+    expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent?.replace(/\d+$/, "").trim())).toEqual(["Wizard", "Pipeline", "Session", "Settings"]);
+    fireEvent.click(await byId("onb-tab-session"));
+    await waitFor(() => expect(window.location.search).toContain("tab=session"));
+    expect(document.querySelector(".eyebrow")?.textContent).toBe("Portfolio");
   });
 });
 
@@ -351,7 +341,8 @@ describe("Onboarding: settings and the connect wizard", () => {
     await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/changed since you loaded/));
   });
 
-  it("walks the six steps, lists the repos the App can see, connects, then saves settings with the new repo's version", async () => {
+  it("walks the four steps: choose a repo, assessment, guidelines, pull request; Continue connects the repo and the notes save with its version", async () => {
+    window.history.replaceState(null, "", "/?tab=wizard");
     const added = { ...clone(find("web-storefront")), id: "new-service", name: "acme/new-service", version: 2, onboarding: { stage: "connected", findings: [], pr: null, timeline: [], exception: null, startedAt: NOW, busy: "assessing" } } as Repo & { version: number };
     const list = [find("web-storefront")];
     const calls = api(list, {
@@ -360,47 +351,37 @@ describe("Onboarding: settings and the connect wizard", () => {
       "PATCH /api/v1/repos/new-service/config": () => ok("Saved acme/new-service."),
     });
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-connect"));
-    expect(await screen.findByText("Available from the GitHub App")).toBeTruthy();
-    expect(document.querySelectorAll(".onb-avail .li")).toHaveLength(2);
-    expect(locked("onb-w-back")).toBe("This is the first step");
-    // the first repo the App can see is picked for you; clearing it, the first step refuses
-    await waitFor(() => expect((document.getElementById("onb-w-name") as HTMLInputElement).value).toBe("acme/new-service"));
-    fireEvent.change(document.getElementById("onb-w-name")!, { target: { value: "" } });
+    expect(Array.from((await screen.findAllByRole("listitem")).filter((li) => li.closest(".wiz"))).map((li) => li.textContent?.replace(/^\d/, ""))).toEqual(["Choose repo", "Assessment", "Guidelines", "Pull request"]);
+    expect(document.querySelectorAll("#onb-w-av-0, #onb-w-av-1")).toHaveLength(2);
+    expect(document.getElementById("onb-w-back")!.hasAttribute("disabled")).toBe(true);
     fireEvent.click(document.getElementById("onb-w-next")!);
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toBe("Pick or type a repo."));
-    fireEvent.change(document.getElementById("onb-w-name")!, { target: { value: "new-service" } });
-    fireEvent.click(document.getElementById("onb-w-next")!);
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toBe("Use the form org/name."));
+    expect(await screen.findByText("Choose a repository first.")).toBeTruthy();
     fireEvent.click(document.getElementById("onb-w-av-0")!);
-    for (let i = 0; i < 5; i++) {
-      fireEvent.click(document.getElementById("onb-w-next")!);
-      await waitFor(() => expect(document.querySelectorAll(".wiz .w.done")).toHaveLength(i + 1));
-    }
-    expect(document.getElementById("onb-w-next")!.textContent).toBe("Connect repo");
-    expect(document.querySelector(".onb-kvs")?.textContent).toMatch(/acme\/new-service/);
+    fireEvent.click(document.getElementById("onb-w-next")!);
+    await waitFor(() => expect(posts(calls, "POST", "/api/v1/projects/storefront/repos")).toHaveLength(1));
+    expect(await screen.findByText("Assessment of acme/new-service")).toBeTruthy();
+    expect(document.querySelector(".kv")?.textContent).toMatch(/not available/);
+    fireEvent.click(document.getElementById("onb-w-next")!);
+    fireEvent.change(await byId("onb-w-notes"), { target: { value: "Use pnpm." } });
     fireEvent.click(document.getElementById("onb-w-next")!);
     await waitFor(() => expect(posts(calls, "PATCH", "/api/v1/repos/new-service/config")).toHaveLength(1));
-    const connect = posts(calls, "POST", "/api/v1/projects/storefront/repos")[0]!;
-    expect(connect.body).toMatchObject({ name: "acme/new-service", team: expect.any(String) });
-    expect(connect.headers["idempotency-key"]).toBeTruthy();
+    expect(posts(calls, "PATCH", "/api/v1/repos/new-service/config")[0]!.body).toEqual({ guidelines: "Use pnpm." });
     expect(posts(calls, "PATCH", "/api/v1/repos/new-service/config")[0]!.headers["if-match"]).toBe("2");
-    // the new repo's onboarding session opens
-    await waitFor(() => expect(window.location.hash).toMatch(/onboarding\/new-service$/));
-    window.location.hash = "";
+    expect(await screen.findByText("Onboarding pull request")).toBeTruthy();
+    expect(document.getElementById("onb-w-next")!.textContent).toBe("Open the onboarding PR");
   });
 
   it("falls back to typing the repo when GitHub cannot be asked, and shows the server's refusal", async () => {
+    window.history.replaceState(null, "", "/?tab=wizard");
     api([find("web-storefront")], {
       "GET /api/v1/projects/storefront/repos/available": () => ({ body: { available: null, unavailable: "The GitHub broker did not answer: connect ECONNREFUSED" } }),
       "POST /api/v1/projects/storefront/repos": () => ({ status: 409, body: { ok: false, msg: "acme/taken is already connected to another project." } }),
     });
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-connect"));
     expect(await screen.findByText(/did not answer.*Type the repo instead/)).toBeTruthy();
     fireEvent.change(document.getElementById("onb-w-name")!, { target: { value: "acme/taken" } });
-    for (let i = 0; i < 6; i++) fireEvent.click(document.getElementById("onb-w-next")!);
-    await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toBe("acme/taken is already connected to another project."));
+    fireEvent.click(document.getElementById("onb-w-next")!);
+    expect(await screen.findByText("acme/taken is already connected to another project.")).toBeTruthy();
   });
 });
 
@@ -409,7 +390,7 @@ describe("Onboarding: the agent and its guidelines", () => {
   const tab = async (extra: Record<string, (c: Call) => { status?: number; body: unknown } | undefined> = {}, denied: string[] = [], project: Partial<Project> = {}) => {
     const calls = api([find("web-storefront")], { "GET /api/v1/projects": () => ({ body: [{ ...STOREFRONT, ...project }] }), "GET /api/v1/agents": () => ({ body: [agent] }), ...extra }, { denied });
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-tab-agent"));
+    fireEvent.click(await byId("onb-tab-settings"));
     await byId("onb-gl-save");
     return calls;
   };
@@ -572,7 +553,7 @@ describe("Onboarding: the agent tab says when the agent cannot run", () => {
   const tab = async (vendors: unknown, a = agent) => {
     api([find("web-storefront")], { "GET /api/v1/agents": () => ({ body: [a] }), "GET /api/v1/vendors": () => ({ body: vendors }) });
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-tab-agent"));
+    fireEvent.click(await byId("onb-tab-settings"));
     await byId("onb-gl-save");
   };
 

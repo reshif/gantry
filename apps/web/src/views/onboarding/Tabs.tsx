@@ -28,7 +28,7 @@ function SessionCard({ repo }: { repo: RepoV }) {
           <>
             {s.messages.length ? s.messages.slice(-6).map((m) => (
               <div key={m.id} className="msg" style={{ maxWidth: "100%" }}>
-                <div className="who">{m.role === "user" ? actors(m.author).name : m.author === "system" ? "Gantry" : actors(m.author).name.replace(" (agent)", "")}</div>
+                <div className="who">{actors(m.author).name.replace(" (agent)", "")}</div>
                 <div className="bub">{m.text}</div>
               </div>
             )) : <p className="muted">Nothing has been said yet.</p>}
