@@ -6,7 +6,7 @@
 export const esc = (s: unknown): string =>
   String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 
-export function Spark({ values, w = 84, h = 22, min, max, cls, label }: { values: number[]; w?: number; h?: number; min?: number; max?: number; cls?: string; label?: string }) {
+export function Spark({ values, w = 84, h = 22, min, max, cls, label, area = true }: { values: number[]; w?: number; h?: number; min?: number; max?: number; cls?: string; label?: string; /** false draws the plain polyline (the prototype's agent cards). */ area?: boolean }) {
   if (values.length < 2) return null;
   const pad = 2;
   let lo = min ?? Math.min(...values);
@@ -18,8 +18,9 @@ export function Spark({ values, w = 84, h = 22, min, max, cls, label }: { values
   const pts = values.map((v, i) => [pad + (i * (w - pad * 2)) / (values.length - 1), h - pad - ((v - lo) / (hi - lo)) * (h - pad * 2)] as const);
   const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join("");
   const lastPt = pts[pts.length - 1] ?? [0, 0];
-  const area = `${d}L${lastPt[0].toFixed(1)} ${h - pad}L${pad} ${h - pad}Z`;
-  const svg = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><path d="${area}" class="spark-area"/><path d="${d}" class="spark-line"/><circle cx="${lastPt[0].toFixed(1)}" cy="${lastPt[1].toFixed(1)}" r="2.4" class="spark-dot"/></svg>`;
+  const areaD = `${d}L${lastPt[0].toFixed(1)} ${h - pad}L${pad} ${h - pad}Z`;
+  const showArea = area;
+  const svg = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${showArea ? `<path d="${areaD}" class="spark-area"/>` : ""}<path d="${d}" class="spark-line"/><circle cx="${lastPt[0].toFixed(1)}" cy="${lastPt[1].toFixed(1)}" r="2.4" class="spark-dot"/></svg>`;
   return <span className={`spark${cls ? ` ${cls}` : ""}`} role="img" aria-label={label || `Trend, latest ${values[values.length - 1]}`} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 

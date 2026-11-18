@@ -115,6 +115,11 @@ function BoardBody({ projectId }: { projectId: string }) {
   );
 }
 
+/** The `station` query of the address (set by Home's station rows), or null. */
+function stationParam(): string | null {
+  try { return new URL(window.location.href).searchParams.get("station"); } catch { return null; }
+}
+
 export default function WorkOrdersView() {
   const me = useMe();
   const prefs = usePrefs();
@@ -123,7 +128,8 @@ export default function WorkOrdersView() {
   const open = useOpenTraveler();
   const newWo = useNewWorkOrder();
   const home = useHome().data;
-  const [f, setF] = useState<Filters>(NONE);
+  // Deep link from Home's "Line at a glance": #/work-orders?station=<id> opens with that station filtered.
+  const [f, setF] = useState<Filters>(() => ({ ...NONE, where: stationParam() ?? "all" }));
   const [tab, setTab] = useState<TabId>("all");
   const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: "age", dir: 1 });
   const ui = useUI();

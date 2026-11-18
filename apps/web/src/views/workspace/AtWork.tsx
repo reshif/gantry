@@ -2,26 +2,24 @@
  * Agents at work (#workspace, no conversation open): who is doing what right now, as the Blueprint prototype draws it. Stat tiles and a grid of
  * agent cards. Conversations (the inbox and every thread) are one click away and keep their own pane.
  */
-import type { ReactNode } from "react";
 import { fmt } from "@gantry/domain";
-import { useAgents, useHome, useWorkOrders } from "../../api/queries";
-import { usePrefs } from "../../lib/prefs";
+import { useAgents, useProjects, useWorkOrdersOf } from "../../api/queries";
+import { useScope } from "../work/scope";
 import { Async } from "../../ui/async";
 import { Spark } from "../../ui/charts";
 import { Avatar, Chip, Empty, Meter, Stat, StatRow, ViewHead } from "../../ui/primitives";
 import { useCatalog } from "../projects/kit";
-import type { HomeFull } from "../home/data";
 
-export function AtWork({ needs, actions }: { needs: number; actions: ReactNode }) {
+/** The prototype's page: tiles and the agent grid, nothing else. Conversations, the Console and the Operator view are their own pages. */
+export function AtWork() {
   const agentsQ = useAgents();
-  const prefs = usePrefs();
-  const wosQ = useWorkOrders(prefs.project);
+  const scope = useScope();
+  const projects = useProjects().data;
+  const ids = scope.project ? [scope.project] : (projects ?? []).map((p) => p.id);
+  const wosQ = useWorkOrdersOf(ids);
   const cat = useCatalog();
-  const home: HomeFull | undefined = useHome().data as HomeFull | undefined;
   const agents = agentsQ.data ? agentsQ.data.filter((a) => a.station) : [];
-  const raw = wosQ.data;
-  const wos = Array.isArray(raw) ? raw : raw ? raw.items : [];
-  const running = wos.filter((w) => w.state === "running");
+  const running = wosQ.data.filter((w) => w.state === "running");
   const agentOf = (w: { station: number }): string | undefined => cat?.stations[w.station]?.agent;
   const jobsOf = (id: string) => running.filter((w) => agentOf(w) === id);
   const active = agents.filter((a) => jobsOf(a.id).length).length;
@@ -29,10 +27,10 @@ export function AtWork({ needs, actions }: { needs: number; actions: ReactNode }
   const stationName = (id: string | null): string => cat?.stations.find((s) => s.id === id)?.name ?? "its station";
   return (
     <div className="view ws-atwork">
-      <ViewHead title="Agents at work" sub={needs ? `Who is doing what right now. ${needs} conversation${needs === 1 ? "" : "s"} need you.` : "Who is doing what right now, across the line."} actions={actions} />
+      <ViewHead title="Agents at work" kicker={scope.kicker} sub="Who is doing what right now, across the line." />
       <StatRow id="ws-stats">
-        <Stat label="Agents active" value={String(active)} sub={`of ${agents.length}`} tone="done" />
-        <Stat label="Running runs" value={String(home?.sections?.motion?.running ?? running.length)} sub="work orders" />
+        <Stat label="Agents active" value={String(active)} sub={`of ${agents.length}`} tone="info" />
+        <Stat label="Running runs" value={String(running.length)} sub="work orders" tone="done" />
         <Stat label="Tokens today" value={fmt.k(tokens)} sub="current runs" />
         <Stat label="Autonomy: gate" value={String(agents.filter((a) => a.autonomy === "gate").length)} sub="agents need approval" />
       </StatRow>
@@ -48,7 +46,7 @@ export function AtWork({ needs, actions }: { needs: number; actions: ReactNode }
                       <Avatar id={a.id} />
                       <div className="grow">
                         <h3>{a.name}</h3>
-                        <div className="small muted">{a.model}</div>
+                        <div className="small muted" style={{ whiteSpace: "nowrap" }}>{a.model}</div>
                       </div>
                       <Chip text={jobs.length ? "working" : "idle"} cls={jobs.length ? "ok" : "plain"} />
                     </div>
@@ -63,7 +61,7 @@ export function AtWork({ needs, actions }: { needs: number; actions: ReactNode }
                       <div className="small muted">{`Waiting for work at ${stationName(a.station)}`}</div>
                     )}
                     <div className="row small muted">
-                      <Spark values={a.spark} w={80} h={22} />
+                      <Spark values={a.spark} w={80} h={22} area={false} />
                       <span>{`success ${fmt.pct(a.evalScore)}`}</span>
                     </div>
                   </a>

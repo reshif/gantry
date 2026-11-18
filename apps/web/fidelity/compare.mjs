@@ -138,7 +138,7 @@ async function shoot(kind, route, w, theme) {
       await page.clock.install({ time: new Date(SEED.NOW) });
       // a stream that stays open (the fixture server cannot hold a connection), so the chip reads Live as on a healthy stack
       await page.addInitScript(() => { window.EventSource = class { constructor() { this.readyState = 1; setTimeout(() => this.onopen && this.onopen({}), 0); } addEventListener() {} removeEventListener() {} close() {} }; });
-      await page.addInitScript(([t, p]) => { try { localStorage.setItem("gantry.prefs", JSON.stringify({ theme: t, project: p })); } catch { /* */ } }, [theme, cfg.project]);
+      await page.addInitScript(([t, p]) => { try { localStorage.setItem("gantry.prefs", JSON.stringify({ theme: t, project: p })); } catch { /* */ } }, [theme, cfg.projectRoutes.includes(route.split("/")[0]) ? cfg.project : null]);
       await page.goto(`http://127.0.0.1:${REAL_PORT}/${realHash(route)}`);
       await page.waitForSelector("#root > *");
       await page.waitForLoadState("networkidle");

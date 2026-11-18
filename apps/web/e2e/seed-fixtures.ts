@@ -4,6 +4,7 @@
  * is fed from the same data the prototype draws. Both sides therefore show the same factory.
  * `resolve` answers parameterised and list endpoints; anything it does not know falls through to e2e/fixtures.ts.
  */
+import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Me } from "../src/api/types";
 import type { Persona } from "./fixtures";
 
@@ -40,19 +41,26 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
   const stationId = (w: Seed) => (cat.stations as Seed[])[w.station]?.id ?? "intake";
   const approvals = waiting.map((w) => {
     const g = gateInfo(w)!;
-    return { wo: w.id, title: w.title, gate: g.id, gateLabel: g.id, gateName: gateName(g.id), instance: `${w.id}:${g.id}:1`, project: w.project, projectName: projName(w.project), have: 0, need: 1, waitMs: NOW - g.since, pr: w.pr?.number };
+    return { wo: w.id, title: w.title, gate: g.id, gateLabel: g.id, gateName: gateName(g.id), instance: `${w.id}:${g.id}:1`, project: w.project, projectName: projName(w.project), have: 0, need: 1, waitMs: NOW - g.since, pr: w.pr?.number, priority: w.priority /* ops1 */ };
   });
-  const conversations = wos.filter((w) => w.state === "blocked").map((w) => ({ wo: w.id, title: w.title, project: w.project, question: w.blockReason, stuck: { state: "blocked", station: stationId(w), reason: w.blockReason ?? "", actions: ["retry"] } }));
+  // --- ops1 (Home, Inbox, Agents at work): blocked and failed work orders are "stuck"; work orders whose conversation awaits an answer are questions.
+  const stuckOf = (w: Seed) => ({ wo: w.id, title: w.title, project: w.project, question: w.blockReason ?? w.failReason ?? null, stuck: { state: w.state as string, station: stationId(w), reason: (w.blockReason ?? w.failReason ?? "") as string, actions: ["retry"] } });
+  const questionOf = (w: Seed) => ({ wo: w.id, title: w.title, project: w.project, question: (w.conv?.questions?.[w.conv?.qi ?? 0]?.text as string | undefined) ?? null, from: w.conv?.messages?.[w.conv.messages.length - 1]?.from ?? null });
+  const conversations = [
+    ...wos.filter((w) => w.state === "blocked" || w.state === "failed").map(stuckOf),
+    ...wos.filter((w) => w.conv?.awaiting && w.state !== "done").map(questionOf), // the prototype's list: every conversation awaiting an answer on a work order not done
+  ];
+  // --- end ops1
   const live = wos.filter((w) => w.state !== "done");
   const projectMetrics = (pid: string) => {
     const mine = live.filter((w) => w.project === pid && w.state !== "killed");
     const byPosition: Record<string, { n: number; blocked: number }> = {};
     const byGate: Record<string, number> = {};
     for (const w of mine) {
-      const st = stationId(w);
+      const st = w.bay ?? stationId(w); // the server keys a parked work order by its bay, not its station
       byPosition[st] = byPosition[st] ?? { n: 0, blocked: 0 };
       byPosition[st].n += 1;
-      if (w.state === "blocked") byPosition[st].blocked += 1;
+      if (w.state === "blocked" || w.state === "failed") byPosition[st].blocked += 1;
       const g = w.state === "waiting" ? gateInfo(w) : null;
       if (g) byGate[g.id] = (byGate[g.id] ?? 0) + 1;
     }
@@ -60,7 +68,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
   };
   const done = wos.filter((w) => w.state === "done");
   const byStation: Record<string, number> = {};
-  for (const w of live) byStation[stationId(w)] = (byStation[stationId(w)] ?? 0) + 1;
+  for (const w of live) if (!w.bay) byStation[stationId(w)] = (byStation[stationId(w)] ?? 0) + 1;
   const spent = seed.projects.reduce((a: number, p: Seed) => a + (p.budget?.mtd ?? 0), 0);
   const home = {
     approvals,
@@ -201,6 +209,8 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     }
     if (path === "console/status") return { configured: true, vendor: "anthropic", model: "claude-sonnet-5-5", actionsEnabled: false, canUse: true, retentionDays: 90, tools: [], proposals: [], models: [] };
     if (path === "console/threads") return { items: [], retentionDays: 90 };
+    // ops1: the factory catalogue is the built-in line plus the seed's custom stations (the server appends them), so Home's line shows S7.1 where it has work.
+    if (path === "catalog") return { ...DEFAULT_CATALOG, stations: [...DEFAULT_CATALOG.stations, ...(seed.catalog.stations as Seed[]).filter((x) => x.custom)] };
     if (path === "people") return seed.people;
     if (path === "teams") return seed.teams;
     if (path === "templates") return seed.templates;

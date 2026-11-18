@@ -1,6 +1,7 @@
 /** Typed reads for this slice of /api/v1. Keys come from ../keys (`qk`). */
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, get, getText } from "../client";
+import { ops } from "../ops";
 import { qk } from "../keys";
 import type { Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
 
@@ -45,6 +46,19 @@ export const useWorkOrdersAcross = (projectIds: string[], q: { limit?: number } 
     })),
     combine: (rs) => rs.flatMap((r) => (Array.isArray(r.data) ? r.data : (r.data?.items ?? []))),
   });
+/** The work orders of several projects at once (the factory-wide scope), under the same keys as `useWorkOrders` so the two share the cache. */
+export const useWorkOrdersOf = (projectIds: string[]) =>
+  useQueries({
+    queries: projectIds.map((id) => ({
+      queryKey: qk.workOrders(id, {}),
+      queryFn: () => get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(id)}/work-orders`), {}),
+    })),
+    combine: (rs) => ({
+      data: rs.flatMap((r) => (Array.isArray(r.data) ? r.data : (r.data?.items ?? []))),
+      pending: rs.some((r) => r.isPending),
+      failed: rs.find((r) => r.isError)?.error ?? null,
+    }),
+  });
 export const useWorkOrder = (id: string | null | undefined) =>
   useQuery({ queryKey: qk.workOrder(id ?? ""), queryFn: () => get<WorkOrder>(api(`work-orders/${encodeURIComponent(id ?? "")}`)), enabled: !!id });
 export const useConversations = (q: { project?: string; awaitingMe?: boolean } = {}) =>
@@ -74,3 +88,6 @@ export const useReposAcross = (projectIds: string[]): Array<Repo & { projectId: 
     combine: (rs) => rs.flatMap((r, i) => (Array.isArray(r.data) ? r.data : []).map((x) => ({ ...x, projectId: projectIds[i] ?? "" }))),
   });
 export const useGuidelines = () => useQuery({ queryKey: qk.guidelines(), queryFn: () => get<OrgGuidelines>(api("guidelines")) });
+
+/** The four writes a gate decision can make (approve, confirm the brief, reject, decline it), for the Approve and Reject dialogs; views run them through useCommand. */
+export const gateOps = { approveGate: ops.approveGate, confirmBrief: ops.confirmBrief, rejectGate: ops.rejectGate, decline: ops.decline };
