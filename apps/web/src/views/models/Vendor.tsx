@@ -8,6 +8,7 @@ import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { AddModelDialog, ConnectDialog, DisconnectDialog, RemoveModelDialog } from "./Dialogs";
 import { dec, hasEndpoint, no, usedBy } from "./kit";
+import { spendText, vendorKind } from "./VendorCards";
 
 /** Switches a model on or off through the command and says what happened (shared with the model catalog tab). */
 export function useModelSwitch(): (id: string, on: boolean) => void {
@@ -34,17 +35,17 @@ export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; v
     <section className={`panel vendor${v.connected ? "" : " is-off"}`} aria-label={v.name} id={`vendor-${v.id}`}>
       <div className="vendor-head">
         <div>
-          <div className="kicker">{v.product || (v.custom ? "Custom vendor · OpenAI-compatible" : "Vendor")}</div>
+          {vendorKind(v) ? <div className="kicker">{vendorKind(v)}</div> : null}
           <h2 className="vendor-name">{v.name}</h2>
         </div>
         <Status tone={!v.connected ? "neutral" : v.health === "healthy" ? "done" : v.health === "degraded" ? "wait" : "block"}>{v.connected ? v.health.charAt(0).toUpperCase() + v.health.slice(1) : "Not connected"}</Status>
       </div>
       <div className="vendor-facts">
         <dl className="kv tb-vendor">
-          <div><dt>Latency p50</dt><dd className="mono">{!v.connected ? "–" : v.latency ? `${v.latency} ms` : "Not measured yet"}</dd></div>
+          <div><dt>Latency, last check</dt><dd className="mono">{!v.connected ? "–" : v.latency ? `${v.latency} ms` : "Not measured yet"}</dd></div>
           <div><dt>{endpointVendor ? "Endpoint" : "Region"}</dt><dd className="mono" title={endpointVendor ? v.endpoint : v.region}>{(endpointVendor ? v.endpoint : v.region) || "–"}</dd></div>
           <div><dt>Key</dt><dd className="mono">{v.keyMask || "none"}</dd></div>
-          <div><dt>Spend MTD</dt><dd className="mono">{fmt.money0(v.mtd || 0) + (v.budget ? ` / ${fmt.money0(v.budget)}` : "")}</dd></div>
+          <div><dt>Spend this month</dt><dd className="mono">{spendText(v.mtd || 0) + (v.budget ? ` / ${fmt.money0(v.budget)}` : "")}</dd></div>
         </dl>
         <div className="vendor-side">
           {v.budget ? (
@@ -54,7 +55,7 @@ export function VendorPanel({ v, vendors, routing, agents, cat }: { v: Vendor; v
               <span className={`mono small${pct >= 0.8 ? " warn-text" : ""}`}>{fmt.pct(pct)}</span>
             </div>
           ) : (
-            <div className="budget-row md-budget"><span className="small muted">{v.custom ? "No monthly budget set" : "No per-token cost"}</span></div>
+            <div className="budget-row md-budget"><span className="small muted">No budget set</span></div>
           )}
           <p className="residency small">
             <Icon name="shield" />

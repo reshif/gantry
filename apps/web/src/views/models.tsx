@@ -90,7 +90,7 @@ export default function ModelsView() {
               <>
                 {degraded.length ? (
                   <Callout warn icon="alert" cls="md-incident" role="status">
-                    {`${degraded.map((v) => `${v.name} is ${v.health}${v.latency ? ` (p50 ${v.latency} ms)` : ""}.`).join(" ")} Calls to it fall back to the same model on another allowed vendor when it errors.`}
+                    {`${degraded.map((v) => `${v.name} is ${v.health}${v.latency ? ` (last check ${v.latency} ms)` : ""}.`).join(" ")} Calls to it fall back to the same model on another allowed vendor when it errors.`}
                   </Callout>
                 ) : null}
                 <div className="vendor-grid">
