@@ -529,30 +529,55 @@ describe("Project config", () => {
     expect(document.getElementById("pcf-ov-save")!.textContent).toBe("Save");
   });
 
-  it("Flow line: stations and gates in flow order, each gate between its stations; every control labelled", async () => {
+  it("Flow: two panels of compact rows (Stations, Gates), gates in flow order with an S1 → S2 hint; every control labelled", async () => {
     withPayments({});
     tab("flow");
     mount(<ProjectConfigView />);
     await byId("pcf-wip-spec");
-    const ids = Array.from(document.querySelectorAll("#flw .flw-line > li")).map((li) => li.id);
-    expect(ids.slice(0, 6)).toEqual(["flw-st-intake", "flw-g-G0G1", "flw-st-research", "flw-g-G1f", "flw-st-spec", "flw-g-G2"]);
-    expect(document.getElementById("flw-g-G2")!.textContent).toMatch(/Between S2 Spec and S3 Design/);
+    expect(Array.from(document.querySelectorAll("#flw .flw-cols > section > h2, #flw .panel-title")).map((h) => h.textContent)).toEqual(["Stations", "Gates"]);
+    expect(Array.from(document.querySelectorAll("#flw .flw-list:not(.flw-gates) > li")).slice(0, 3).map((li) => li.id)).toEqual(["flw-st-intake", "flw-st-research", "flw-st-spec"]);
+    expect(Array.from(document.querySelectorAll("#flw .flw-gates > li")).slice(0, 3).map((li) => li.id)).toEqual(["flw-g-G0G1", "flw-g-G1f", "flw-g-G2"]);
+    expect(document.querySelector("#flw-g-G2 .flw-hint")!.textContent).toBe("S2 → S3");
+    expect(document.querySelector("#flw-st-intake")!.textContent).toMatch(/Always on/);
+    expect(document.querySelector("#flw-st-intake input[role=switch]")).toBeNull();
+    expect(document.querySelectorAll("#flw .flw-cols .panel").length).toBe(2); // no card grid
     for (const el of Array.from(document.querySelectorAll("#flw input, #flw select"))) {
       expect(el.getAttribute("aria-label") || document.querySelector(`label[for="${el.id}"]`), el.id).toBeTruthy();
     }
     expect(screen.getByLabelText("Spec WIP limit")).toBeTruthy();
     expect(screen.getByLabelText("Research station on")).toBeTruthy();
+    expect(screen.getByLabelText("Spec approved on")).toBeTruthy();
+    // a row opens in place, and that is in the URL
+    expect(document.querySelector("#flw-st-spec")!.textContent).not.toMatch(/Routes:/);
+    fireEvent.click(await byId("flw-x-s-spec"));
     expect(document.querySelector("#flw-st-spec")!.textContent).toMatch(/Routes:/);
+    expect(window.location.search).toMatch(/open=s%3Aspec|open=s:spec/);
   });
 
-  it("Flow line: mode labels map to the API values and Off is the gate's enabled flag", async () => {
+  it("Flow: hovering a station lights the gates on either side of it, and a gate lights its two stations", async () => {
     withPayments({});
     tab("flow");
     mount(<ProjectConfigView />);
-    const sel = (await byId("pcf-gmode-G3d")) as HTMLSelectElement;
+    await byId("pcf-wip-spec");
+    fireEvent.mouseEnter(document.getElementById("flw-st-spec")!);
+    expect(Array.from(document.querySelectorAll("#flw .is-link")).map((e) => e.id)).toEqual(["flw-g-G1f", "flw-g-G2"]);
+    fireEvent.mouseLeave(document.getElementById("flw-st-spec")!);
+    expect(document.querySelector("#flw .is-link")).toBeNull();
+    fireEvent.focus(document.getElementById("pcf-gmode-G2")!);
+    expect(Array.from(document.querySelectorAll("#flw .is-link")).map((e) => e.id)).toEqual(["flw-st-spec", "flw-st-design"]);
+  });
+
+  it("Flow: the mode select offers plain labels, and Off is the On switch (the gate's enabled flag)", async () => {
+    withPayments({});
+    tab("flow");
+    mount(<ProjectConfigView />);
+    const sel = (await byId("pcf-gmode-G1f")) as HTMLSelectElement;
     const byLabel = Object.fromEntries(Array.from(sel.options).map((o) => [o.textContent, o.value]));
-    expect(byLabel).toMatchObject({ "Person approves": "human", "Off": "off" });
-    expect(sel.closest("li")!.textContent).toMatch(/A person must approve/);
+    expect(byLabel).toMatchObject({ "Person approves": "human", "Automatic check": "auto", "Mixed": "mixed" });
+    expect(byLabel).not.toHaveProperty("Off");
+    expect((screen.getByLabelText("Feasibility on") as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(await byId("flw-x-g-G1f"));
+    expect(sel.closest("li")!.textContent).toMatch(/Passes by itself/);
   });
 
   it("Flow line: edits are a draft, Review lists before and after, Save sends the same requests with If-Match", async () => {
@@ -563,6 +588,7 @@ describe("Project config", () => {
     const before = wip.value;
     fireEvent.change(wip, { target: { value: "9" } });
     fireEvent.change(await byId("pcf-gmode-G1f"), { target: { value: "human" } });
+    expect(document.getElementById("flw-count")!.textContent).toMatch(/2 unsaved changes/);
     expect(calls.some((c) => c.method === "PATCH")).toBe(false); // nothing is written until Save
     fireEvent.click(await byId("flw-review"));
     const list = (await byId("flw-changes")).textContent ?? "";
@@ -586,10 +612,12 @@ describe("Project config", () => {
     expect((await byId("flw-warn-G2")).textContent).toMatch(/cannot pass as configured/);
   });
 
-  it("Flow line: at 390 px the line is a vertical single column (CSS), declared for max-width 640", () => {
-    // jsdom has no layout: check the stylesheet carries the vertical rule so a regression is caught.
+  it("Flow: at narrow widths the two panels stack and rows wrap (CSS), and the card grid is gone", () => {
+    // jsdom has no layout: check the stylesheet carries the rules so a regression is caught.
     const css = readFileSync(join(__dirname, "../styles/views/project-config.css"), "utf8");
-    expect(css).toMatch(/@media \(max-width: 640px\)\s*{[^}]*\.flw-line\s*{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    expect(css).toMatch(/@media \(max-width: 1100px\)\s*{\s*\.flw-cols\s*{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    expect(css).toMatch(/@media \(max-width: 640px\)\s*{[^}]*\.flw-line/);
+    expect(css).not.toMatch(/flw-card/);
   });
 
   it("Approvers: an overview table with Edit; Edit opens a dialog that saves the rule with If-Match", async () => {
@@ -714,7 +742,8 @@ describe("Project config", () => {
     withPayments({ "GET /api/v1/projects": () => ({ body: [withGc, RISK] }), "GET /api/v1/catalog": () => ({ body: { ...CAT, gates: [...CAT.gates, { id: "GC", label: "GC", name: "Compliance sign-off", kind: "human", checks: [] }] } }) });
     tab("flow");
     mount(<ProjectConfigView />);
-    expect((await byId("pcf-gmode-GC") as HTMLSelectElement).value).toBe("off");
+    expect(((await byId("pcf-gate-GC")) as HTMLInputElement).checked).toBe(false);
+    expect((document.getElementById("pcf-gmode-GC") as HTMLSelectElement).disabled).toBe(true);
     expect(screen.getByText("Compliance sign-off")).toBeTruthy();
   });
 });
