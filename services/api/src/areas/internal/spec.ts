@@ -1,5 +1,5 @@
 import type { Queryable } from "@gantry/db";
-import { REPO_CONTEXT_LAYER_NAME, RepoContext, renderRepoContext } from "@gantry/domain";
+import { REPO_CONTEXT_LAYER_NAME, RepoContext, checkMatches, renderRepoContext } from "@gantry/domain";
 import { compactPrevious, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
 import { testCommandRules } from "../onboarding/testcmd.js";
@@ -206,6 +206,51 @@ export async function changeFact(db: Queryable, c: RunCtx, prior: StationResultR
   };
 }
 
+/**
+ * The GitHub check runs the platform has stored for the work order's open pull request head, as a fact for the stations after Build. A station's own
+ * list of checks (an agent's `output.checks`) is that agent's report, not GitHub's: this is what GitHub said. Nothing is judged here; the agent decides what
+ * a missing or running check means. A check run reports only its job name ("test"), a required context may read "ci/test": both are shown.
+ */
+export async function ciFact(db: Queryable, c: RunCtx): Promise<Record<string, unknown> | null> {
+  const pr = (await db.query<{ repo_id: string; number: number; head_sha: string | null }>(`select repo_id, number, head_sha from pull_requests where org_id = $1 and wo_id = $2 and state = 'open' order by number desc limit 1`, [c.orgId, c.woId])).rows[0];
+  if (!pr || !pr.head_sha) return null;
+  const rows = (await db.query<{ name: string; status: string; conclusion: string | null; github_id: string | null }>(`select name, status, conclusion, github_id::text from checks where org_id = $1 and repo_id = $2 and head_sha = $3 order by name`, [c.orgId, pr.repo_id, pr.head_sha])).rows;
+  const required = (await db.query<{ required_checks: string[] | null }>(`select required_checks from repo_config where org_id = $1 and repo_id = $2`, [c.orgId, pr.repo_id])).rows[0]?.required_checks ?? [];
+  return {
+    observedBy: "github", pullRequest: pr.number, headSha: pr.head_sha, requiredChecks: required,
+    checkRuns: rows.map((r) => ({ name: r.name, status: r.status, conclusion: r.conclusion, required: required.some((n) => checkMatches(n, r.name)), ...(r.github_id ? { githubCheckId: r.github_id } : {}) })),
+    note: rows.length ? "These are GitHub's own check results for the pull request head. A check list in an earlier station's output is that station's report, not GitHub's." : "GitHub has reported no check run for this head yet. That is not a failure: say it is not known, and do not mark a check failed because you could not see its log.",
+  };
+}
+
+/**
+ * What the Review station checks against, stated as facts: the spec's acceptance criteria (each one to be answered in `criteria`), the pull request and the changed
+ * files the platform recorded, the ci fact (top level `ci`) and how to read the diff. Nothing is judged here: the agent decides per criterion whether the diff meets it.
+ */
+export async function reviewFact(db: Queryable, c: RunCtx, brief: unknown): Promise<Record<string, unknown> | null> {
+  if (c.station !== "review") return null;
+  const b = (brief && typeof brief === "object" ? brief : {}) as Record<string, unknown>;
+  const wb = ((c.woData?.brief ?? {}) as Record<string, unknown>);
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : []);
+  const acceptanceCriteria = [b.ac, b.acceptanceCriteria, wb.ac].map(list).find((l) => l.length) ?? [];
+  const pr = (await db.query<{ number: number; title: string; url: string | null; head_sha: string | null; state: string }>(`select number, title, url, head_sha, state from pull_requests where org_id = $1 and wo_id = $2 order by (state = 'open') desc, number desc limit 1`, [c.orgId, c.woId])).rows[0];
+  const files = (Array.isArray(c.woData?.files) ? (c.woData.files as Array<{ path?: string; plus?: number; minus?: number }>) : []).filter((f) => f && typeof f.path === "string").slice(0, 200).map((f) => ({ path: f.path as string, additions: Number(f.plus) || 0, deletions: Number(f.minus) || 0 }));
+  return {
+    acceptanceCriteria,
+    pullRequest: pr ? { number: pr.number, title: pr.title, url: pr.url, headSha: pr.head_sha, state: pr.state } : null,
+    changedFiles: { observedBy: "platform", files },
+    instruction: "Check every acceptance criterion against the diff (see `change.diffCommand`) and the changed files. Answer each in `criteria` as { criterion, result: pass|fail|untested, evidence } where the evidence names the file and what you saw; a criterion the diff does not meet is a fail, and so is a helper or function that was added but is never used. Set verdict to changes_requested when any criterion fails, and name in `sendBackTo` the station that should redo the work (default build). Your `pullRequestDescription` is written to the pull request.",
+  };
+}
+
+/** The send-backs and review findings that returned this station: what to do differently this time. Empty on a first visit. */
+function returnedFact(c: RunCtx): Record<string, unknown> | null {
+  const sb = (Array.isArray(c.woData?.sendbacks) ? (c.woData.sendbacks as Array<{ to?: string; from?: string; note?: string; at?: number; by?: string }>) : []).filter((x) => x && x.to === c.station);
+  if (!sb.length) return null;
+  const last = sb[sb.length - 1]!;
+  return { times: sb.length, latest: { from: last.from ?? null, by: last.by ?? null, note: String(last.note ?? "").slice(0, 8000) }, note: "This station was run again: the latest note says what the person or the reviewer wants different. Address it point by point." };
+}
+
 /** Station handoff (spec 10.2): the latest confirmed brief and the previous stations' structured results, not a transcript. */
 async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   const brief = (await db.query(`select body from brief_versions where org_id = $1 and wo_id = $2 order by version desc limit 1`, [c.orgId, c.woId])).rows[0]?.body;
@@ -232,8 +277,11 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   const sw = swarmOf(c.woData);
   const scouts = !sc && sw?.endedAt && sw.station === c.station ? sw.scouts.map((x) => ({ id: x.id, question: x.question, focus: x.focus, state: x.state, summary: x.summary ?? "" })) : undefined;
   const change = await changeFact(db, c, prior as StationResultRow[]);
+  const ci = c.station === "build" ? null : await ciFact(db, c);
+  const review = await reviewFact(db, c, brief);
+  const returned = returnedFact(c);
   return {
-    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, ...(change ? { change } : {}), previous: compactPrevious(prior as StationResultRow[], c.woId), documents, dialogue, sources, research,
+    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, ...(change ? { change } : {}), ...(ci ? { ci } : {}), ...(review ? { review } : {}), ...(returned ? { returned } : {}), previous: compactPrevious(prior as StationResultRow[], c.woId), documents, dialogue, sources, research,
     ...(sc ? { scout: { id: sc.id, question: sc.question, focus: sc.focus, note: `You are scout ${sc.id}. Answer only this question, write your findings to research/scout-${sc.id.toLowerCase()}.md with write_document, cite web sources, and end. You cannot send scouts or propose a plan.` } } : {}),
     ...(scouts ? { scouts } : {}),
   };

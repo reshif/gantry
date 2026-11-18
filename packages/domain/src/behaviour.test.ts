@@ -301,7 +301,12 @@ describe("intake: classification, conversation and brief", () => {
     expect(wo).toMatchObject({ cls: "bug", state: "waiting", station: 0, priority: "P2", risk: "normal" });
     expect(wo.gates.G0G1!.status).toBe("waiting");
     expect(Object.keys(wo.gates)).toEqual(expect.arrayContaining(["G0G1", "G2", "G5"]));
-    expect(wo.conv.questions.map((q) => q.id)).toEqual(expect.arrayContaining(["scope", "ac", "testdata", "repro", "extra"]));
+    expect(wo.conv.questions.map((q) => q.id)).toEqual(["scope", "ac", "extra"]);
+    // Fallback form only: no canned answer chips, and nothing invented in the history (no model, tokens or cost before anything ran).
+    expect(wo.conv.questions.every((q) => q.chips.length === 0)).toBe(true);
+    expect(wo.conv.misses).toEqual([]);
+    expect(wo.history).toEqual([{ station: "intake", agent: "ag-intake", model: "", startedAt: NOW, endedAt: null, tokens: 0, cost: 0, outcome: null, note: "" }]);
+    expect(JSON.stringify(wo)).not.toMatch(/claude-haiku|"tokens":4200|"cost":0.02/);
     expect(wo.brief.route[0]).toBe("intake");
     expect(wo.slaDue - wo.createdAt).toBe(48 * 3600000);
   });
@@ -311,14 +316,46 @@ describe("intake: classification, conversation and brief", () => {
     let t = NOW;
     while (!wo.conv.done) {
       const frozen = JSON.stringify(wo.conv);
-      const q = wo.conv.questions[wo.conv.qi]!;
-      const r = answerConversation(S.catalog, payments, wo, q.chips[0]!, "p-tomas", (t += 60000));
+      const r = answerConversation(S.catalog, payments, wo, "A typed answer", "p-tomas", (t += 60000));
       expect(JSON.stringify(wo.conv)).toBe(frozen);
       wo = { ...wo, conv: r.conv, brief: r.brief };
     }
     expect(wo.brief.open).toEqual([]);
     expect(wo.brief.scopeIn.length).toBe(1);
     expect(wo.conv.messages.at(-1)!.text).toMatch(/brief is ready/);
+  });
+
+  it("keeps the class a person chose, even when the keyword guess is confident and different (G-01)", () => {
+    const payments = S.projects.find((p) => p.id === "payments")!;
+    const mk = (title: string, requestedCls: string | null) => buildWorkOrder(S.catalog, payments, { id: "WO-9100", project: "payments", repo: "payments-api", title, requestedCls, requestedBy: "p-tomas", createdAt: NOW });
+    expect(classify(S.catalog, "Fix the rounding bug", null).cls).toBe("bug");
+    const chosen = mk("Fix the rounding bug", "chore");
+    expect(chosen.cls).toBe("chore");
+    expect(chosen.clsSuggested).toBe("bug");
+    expect(chosen.clsConfidence).toBe(1);
+    expect(chosen.clsRationale).toMatch(/Chosen by the submitter/);
+    expect(chosen.clsRationale).toMatch(/rule-based keyword match/i);
+    // No choice: the keyword match is only a labelled first guess.
+    const guess = mk("Fix the rounding bug", null);
+    expect(guess.cls).toBe("bug");
+    expect(guess.clsRationale).toMatch(/^Provisional rule-based keyword match \(no agent has read the request yet/);
+  });
+
+  it("writes no agent voice and no invented epic split: scripted notes are Gantry's, children come from an agent or a person", () => {
+    const payments = S.projects.find((p) => p.id === "payments")!;
+    let wo = buildWorkOrder(S.catalog, payments, { id: "WO-9101", project: "payments", repo: "payments-api", title: "Three report jobs for the billing team", requestedCls: "epic", requestedBy: "p-tomas", createdAt: NOW });
+    expect(wo.cls).toBe("epic");
+    expect(wo.conv.questions.some((q) => q.id === "children" || /data model|child work orders/i.test(q.text))).toBe(false);
+    expect(wo.conv.messages.every((m) => m.from === "system" && m.scripted === true)).toBe(true);
+    expect(wo.conv.messages.some((m) => /Intake Clerk|I read this/.test(m.text))).toBe(false);
+    expect(wo.conv.awaiting).toBe("submitter");
+    let t = NOW;
+    while (!wo.conv.done) {
+      const r = answerConversation(S.catalog, payments, wo, "A typed answer", "p-tomas", (t += 60000));
+      wo = { ...wo, conv: r.conv, brief: r.brief };
+      expect(wo.brief.children).toEqual([]);
+    }
+    expect(wo.conv.awaiting).toBe("approver");
   });
 
   it("classifies a regulated project's work as high risk and honours requested class below 0.8 confidence", () => {

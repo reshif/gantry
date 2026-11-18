@@ -79,6 +79,8 @@ export interface BrokerClient {
   publish(b: PublishRequest): Promise<PublishOutcome>;
   gateCheck(b: { woId: string; repo: string; headSha: string; state: "passing" | "failing" | "pending"; summary?: string }): Promise<{ ok: boolean; skipped?: string }>;
   convertToDraft(b: { woId: string; repo: string; number: number }): Promise<{ ok: boolean; skipped?: string }>;
+  /** Writes the Review agent's description (and optional title) to the work order's pull request. A refusal (fenced, closed, not the work order's) is a value. */
+  describePr(b: { woId: string; repo: string; number: number; title?: string; body: string }): Promise<{ ok: true; changed: boolean; redacted: number } | { ok: false; code: string; msg: string }>;
   pullState(repo: string, number: number): Promise<PullState>;
   merge(b: { woId: string; repo: string; number: number; headSha: string; method: "squash" | "merge" | "rebase"; commitTitle?: string }): Promise<MergeOutcome>;
   reconcile(b: { repo: string; branchPrefix: string }): Promise<Record<string, unknown>>;
@@ -141,6 +143,11 @@ export function brokerClient(base: string, token: string, fetchImpl?: typeof fet
       // Already merged or closed: there is nothing to convert.
       if (r.status === 409 && ["not_open", "fenced"].includes(codeOf(r))) return { ok: false, skipped: msgOf(r) };
       return failFor("github draft", r);
+    },
+    async describePr(b) {
+      const r = await call<{ changed: boolean; redacted: number }>("POST", "/v1/pulls/describe", b, 60_000);
+      if (ok(r)) return { ok: true, changed: r.body.changed === true, redacted: Number(r.body.redacted) || 0 };
+      return refusal(r) ?? failFor("github describe", r);
     },
     async pullState(repo, number) {
       const r = await call<PullState>("GET", `/v1/pull-state?repo=${encodeURIComponent(repo)}&number=${number}`);

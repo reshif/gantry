@@ -7,7 +7,7 @@ import { loadFlowState } from "../../core/read/state.js";
 import { closeConversation, replaceConversation, saveConversation } from "./conversation.js";
 import { createWorkOrder, newWoId } from "./create.js";
 import {
-  bayOf, cancelAttempts, closeEntry, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
+  bayOf, cancelAttempts, closeEntry, advance, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, makeFx, person, type CmdResult } from "./ctx.js";
 import { saveWo, type Wo } from "./model.js";
@@ -53,6 +53,61 @@ export async function submitWO(tx: Tx, actor: Actor, projectId: string, b: Submi
   return done(fx, `${id} submitted to ${project.name} as ${classOf(fx.catalog, project, c.classification.cls).name}.`, projectId, { id, wo, classification: c.classification, route: c.route, gates: c.gates, version: c.wo.version });
 }
 
+/** What a person changed in the brief by hand. Kept on the work order and laid over any brief Gantry recomputes from the scripted answers, so a later answer never wipes it. */
+export interface BriefEdits { scopeIn?: string[]; scopeOut?: string[]; children?: string[]; by?: string; at?: number }
+
+/** Lays a person's edits over a brief. Children only apply to an epic. */
+export function withBriefEdits<B extends { scopeIn: string[]; scopeOut: string[]; children: string[] }>(brief: B, edits: BriefEdits | undefined, cls: string): B {
+  if (!edits) return brief;
+  return { ...brief, ...(edits.scopeIn ? { scopeIn: edits.scopeIn } : {}), ...(edits.scopeOut ? { scopeOut: edits.scopeOut } : {}), ...(edits.children && cls === "epic" ? { children: edits.children } : {}) };
+}
+const editsOf = (w: Wo): BriefEdits | undefined => (w.data.briefEdits && typeof w.data.briefEdits === "object" ? (w.data.briefEdits as BriefEdits) : undefined);
+
+export interface BriefEditInput { scopeIn?: string[]; scopeOut?: string[]; children?: string[]; reason?: string }
+
+const clipList = (v: string[], n = 300): string[] => v.map((x) => x.trim().slice(0, n)).filter(Boolean).slice(0, 12);
+
+/** A person edits the brief's scope, and the child work orders of an epic, before confirming it. Only while the brief is open at Intake. The change is audited (before and after) and an agent's pending brief proposal is refused on approval because the brief moved (its fingerprint no longer matches). */
+export async function editBrief(tx: Tx, actor: Actor, woId: string, b: BriefEditInput): Promise<CmdResult> {
+  const { fx, w } = await begin(tx, actor, woId, "wo.answer");
+  const by = person(actor, "Brief edits are");
+  const { wo } = await flowFor(fx, w);
+  const open = !bayOf(fx.catalog, w) && stationIdOf(fx.catalog, w) === "intake" && !!wo.gates.G0G1 && wo.gates.G0G1.status !== "passed";
+  // An epic the plan left unsplit waits in Needs a person: a person's children there are the split.
+  const unsplit = bayOf(fx.catalog, w) === "person" && w.cls === "epic" && w.data.bayFrom === "plan" && !w.data.split;
+  if (unsplit && b.children?.length) {
+    const kids = clipList(b.children);
+    if (/\b(api[_-]?key|password|secret|token)\s*[:=]\s*\S{8,}/i.test(JSON.stringify(kids))) throw invalid("The brief appears to contain a credential. Never put secrets in a brief.");
+    const by0 = person(actor, "Brief edits are");
+    const before0 = { children: wo.brief.children };
+    w.data.briefEdits = { ...(editsOf(w) ?? {}), children: kids, by: by0, at: fx.now.getTime() };
+    w.data.brief = { ...wo.brief, children: kids };
+    note(w, fx, by0, `Added the epic's child work orders (${kids.length}).${b.reason ? ` ${b.reason}` : ""}`);
+    ev(fx, w, "wo.brief.edit", { text: "children", fields: ["children"], reason: b.reason ?? null, edited: { children: kids } }, { before: before0 });
+    await leaveBay(fx, w);
+    for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete w.data[k];
+    w.position = "plan";
+    w.state = "running";
+    await advance(fx, w, by0);
+    await saveWo(fx.tx, fx.orgId, w);
+    return done(fx, "Children added; the epic is split.", w.project, { brief: w.data.brief, version: w.version });
+  }
+  if (!open) throw conflict("The brief can only be edited at Intake, before it is confirmed.");
+  if (b.scopeIn === undefined && b.scopeOut === undefined && b.children === undefined) throw invalid("Nothing to change: send scopeIn, scopeOut or children.");
+  if (b.children !== undefined && w.cls !== "epic") throw invalid("Only an epic has child work orders.");
+  const next = { ...(b.scopeIn !== undefined ? { scopeIn: clipList(b.scopeIn) } : {}), ...(b.scopeOut !== undefined ? { scopeOut: clipList(b.scopeOut) } : {}), ...(b.children !== undefined ? { children: clipList(b.children) } : {}) };
+  if (next.scopeIn && !next.scopeIn.length) throw invalid("Say what is in scope.");
+  if (/\b(api[_-]?key|password|secret|token)\s*[:=]\s*\S{8,}/i.test(JSON.stringify(next))) throw invalid("The brief appears to contain a credential. Never put secrets in a brief.");
+  const before = { scopeIn: wo.brief.scopeIn, scopeOut: wo.brief.scopeOut, children: wo.brief.children };
+  const edits: BriefEdits = { ...(editsOf(w) ?? {}), ...next, by, at: fx.now.getTime() };
+  w.data.briefEdits = edits;
+  w.data.brief = withBriefEdits(wo.brief, edits, w.cls);
+  note(w, fx, by, `Edited the brief (${Object.keys(next).join(", ")}).${b.reason ? ` ${b.reason}` : ""}`);
+  ev(fx, w, "wo.brief.edit", { text: Object.keys(next).join(", "), fields: Object.keys(next), reason: b.reason ?? null, edited: next }, { before });
+  await saveWo(fx.tx, fx.orgId, w);
+  return done(fx, "Brief updated. A brief an agent proposed earlier must be proposed again.", w.project, { brief: w.data.brief, version: w.version });
+}
+
 export interface MessageInput {
   text: string;
   kind?: "answer" | "question";
@@ -83,7 +138,7 @@ export async function postMessage(tx: Tx, actor: Actor, woId: string, b: Message
   }
   const prev = wo.conv.messages.length;
   const r = answerConversation(fx.catalog, project, wo, text, by, fx.now.getTime());
-  w.data.brief = r.brief;
+  w.data.brief = withBriefEdits(r.brief, editsOf(w), w.cls);
   const returned = "returned" in r.outcome && r.outcome.returned;
   await saveConversation(fx, w.id, r.conv, prev, returned ? "open" : undefined);
   if (returned && w.position === "person") {
@@ -157,7 +212,7 @@ export async function reclassify(tx: Tx, actor: Actor, woId: string, cls: string
       brief = r.brief;
     }
   }
-  w.data.brief = brief;
+  w.data.brief = withBriefEdits(brief, editsOf(w), cls);
   await replaceConversation(fx, w.id, conv);
   note(w, fx, by, `Class overridden: ${before} → ${cls} (${reason.trim()}).`);
   ev(fx, w, "wo.classify", { text: reason.trim(), from: before, to: cls }, { before: { cls: before } });
@@ -224,7 +279,7 @@ export async function addFollowup(tx: Tx, actor: Actor, woId: string, b: Followu
     conv.questions.splice(at, 0, nq);
   }
   const { buildBrief } = await import("@gantry/domain");
-  w.data.brief = buildBrief(fx.catalog, project, { cls: w.cls, title: w.title, conv });
+  w.data.brief = withBriefEdits(buildBrief(fx.catalog, project, { cls: w.cls, title: w.title, conv }), editsOf(w), w.cls);
   await saveConversation(fx, w.id, conv, wo.conv.messages.length, "open");
   note(w, fx, by, "Follow-up question added to the intake conversation.");
   ev(fx, w, "wo.followup", { text: text.slice(0, 200) });

@@ -46,3 +46,20 @@ describe("briefDiff against a seeded brief", () => {
     expect(briefDiff({ ...current, scopeIn: ["Mobile app"] }, next).find((x) => x.field === "scopeIn")!.removed).toEqual(["Mobile app"]);
   });
 });
+
+describe("an epic's children in a brief draft", () => {
+  it("an agent may propose children; a person's list is kept when a draft names none; the diff shows the change", async () => {
+    const { resolveBriefDraft, applyBriefDraft, briefDiff, briefBase } = await import("./workorder-session.js");
+    const base = { goal: "g", scopeIn: ["a"], scopeOut: [], ac: ["x"], risks: [], open: [], decisions: [], estimate: "M", route: [], children: ["Report A: first"] };
+    const withKids = resolveBriefDraft({ goal: "A full sentence goal.", scopeIn: ["a"], ac: ["x"], children: ["Report A: first", " Report B: second ", ""] });
+    expect(withKids.ok && withKids.draft.children).toEqual(["Report A: first", "Report B: second"]);
+    if (!withKids.ok) throw new Error("unreachable");
+    expect(applyBriefDraft(base, withKids.draft).children).toEqual(["Report A: first", "Report B: second"]);
+    expect(briefDiff(base, withKids.draft).find((c) => c.field === "children")?.added).toEqual(["Report B: second"]);
+    const none = resolveBriefDraft({ goal: "A full sentence goal.", scopeIn: ["a"], ac: ["x"] });
+    if (!none.ok) throw new Error("unreachable");
+    expect(applyBriefDraft(base, none.draft).children).toEqual(["Report A: first"]);
+    expect(briefDiff(base, none.draft).some((c) => c.field === "children")).toBe(false);
+    expect(briefBase(base)).not.toBe(briefBase({ ...base, children: [] }));
+  });
+});

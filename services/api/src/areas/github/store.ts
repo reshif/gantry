@@ -5,6 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Tx } from "@gantry/db";
+import { checkMatches } from "@gantry/domain";
 import type { EventSpec } from "../../core/command.js";
 import { recheckAutoGate, recordMerged, recordNewHead } from "../workorders/station.js";
 import type { CheckFact, GithubFacts, IssueFact, PublishedCommitFact, PullRequestFact, ReviewFact } from "./facts.js";
@@ -195,7 +196,7 @@ async function storeCheck(tx: Tx, orgId: string, repoId: string, c: CheckFact): 
   const id = `ck-${repoId}-${c.headSha}-${sha256(c.name).slice(0, 12)}`;
   const prev = (await tx.query<{ status: string; conclusion: string | null }>(`select status, conclusion from checks where org_id = $1 and id = $2`, [orgId, id])).rows[0];
   const pr = (await tx.query<{ id: string }>(`select id from pull_requests where org_id = $1 and repo_id = $2 and head_sha = $3 order by number desc limit 1`, [orgId, repoId, c.headSha])).rows[0];
-  const required = !!(await tx.query(`select 1 from repo_config where org_id = $1 and repo_id = $2 and $3 = any(required_checks)`, [orgId, repoId, c.name])).rowCount;
+  const required = ((await tx.query<{ required_checks: string[] | null }>(`select required_checks from repo_config where org_id = $1 and repo_id = $2`, [orgId, repoId])).rows[0]?.required_checks ?? []).some((n) => checkMatches(n, c.name));
   await tx.query(
     `insert into checks (org_id, id, repo_id, pr_id, head_sha, name, status, conclusion, required, github_id, completed_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      on conflict (org_id, id) do update set pr_id = coalesce(excluded.pr_id, checks.pr_id), status = excluded.status, conclusion = excluded.conclusion, required = excluded.required, github_id = coalesce(excluded.github_id, checks.github_id), completed_at = excluded.completed_at, updated_at = now()`,

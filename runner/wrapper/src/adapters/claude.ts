@@ -7,7 +7,7 @@
  * edge reporting are exercised in tests against a stand-in executable that emits stream-json lines.
  */
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -20,6 +20,38 @@ import { startRelay } from "../relay.js";
 import { narrowShell } from "../tools.js";
 
 /** Writable scratch space: the root filesystem is read-only, /tmp is a tmpfs. */
+/** Package caches live on the run's workspace volume, not the 64M /tmp tmpfs. A dot-directory kept out of git (see excludeCacheFromGit). */
+export const CACHE_DIRNAME = ".gantry-cache";
+
+/**
+ * Caches for uv, pip, npm and anything that honours XDG_CACHE_HOME, under `<workspace>/.gantry-cache`. They cannot be set by the agent
+ * (that command form needs approval) and the /tmp tmpfs is too small for a toolchain download.
+ */
+export function cacheEnv(workspace: string): Record<string, string> {
+  const root = join(workspace, CACHE_DIRNAME);
+  return { UV_CACHE_DIR: join(root, "uv"), PIP_CACHE_DIR: join(root, "pip"), XDG_CACHE_HOME: join(root, "xdg"), npm_config_cache: join(root, "npm") };
+}
+
+/**
+ * Keep the cache out of every commit: `.gantry-cache/` goes in the repository's .git/info/exclude (local, never committed), so `git add -A` and
+ * `git commit -a` skip it. Idempotent. The publisher reads only committed objects, so an excluded file cannot reach a pull request.
+ */
+export async function excludeCacheFromGit(workspace: string): Promise<void> {
+  const gitDir = join(workspace, ".git");
+  try {
+    if (!(await stat(gitDir)).isDirectory()) return;
+  } catch {
+    return; // not a git workspace
+  }
+  const file = join(gitDir, "info", "exclude");
+  const line = `/${CACHE_DIRNAME}/`;
+  let cur = "";
+  try { cur = await readFile(file, "utf8"); } catch { /* absent */ }
+  if (cur.split("\n").some((l) => l.trim() === line)) return;
+  await mkdir(join(gitDir, "info"), { recursive: true });
+  await writeFile(file, `${cur}${cur === "" || cur.endsWith("\n") ? "" : "\n"}${line}\n`);
+}
+
 export const SCRATCH = process.env.GANTRY_SCRATCH ?? "/tmp/gantry";
 
 const MAX_ARG_BYTES = 100_000;
@@ -116,12 +148,13 @@ export function buildClaudeInvocation(spec: RunSpec, env: RunEnv, relayUrl: stri
   args.push("--allowedTools", [...narrowShell(spec.toolAllowList), ...STATION_TOOL_NAMES].join(","));
 
   const cloneEnv: Record<string, string> = {};
-  for (const k of ["PATH", "LANG", "LC_ALL", "TZ"]) {
+  for (const k of ["PATH", "LANG", "LC_ALL", "TZ", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_PREFERENCE", "UV_PYTHON_DOWNLOADS", "UV_LINK_MODE", "UV_NO_PROGRESS"]) {
     const v = baseEnv[k];
     if (v !== undefined) cloneEnv[k] = v;
   }
   Object.assign(cloneEnv, {
     HOME: join(SCRATCH, "home"),
+    ...cacheEnv(env.workspace),
     CLAUDE_CONFIG_DIR: join(SCRATCH, "claude-config"),
     // The harness talks to the edge's model gateway through the loopback relay, which adds the run token; the vendor key never enters the runner.
     // The placeholder only satisfies the harness's need for some credential. Nothing in this environment is a secret.
@@ -295,6 +328,9 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): Adapter {
       }
       await mkdir(join(SCRATCH, "home"), { recursive: true, mode: 0o700 });
       await mkdir(join(SCRATCH, "claude-config"), { recursive: true, mode: 0o700 });
+      // Best effort: a workspace that cannot hold the cache leaves the tools to create it (or fail) themselves.
+      await mkdir(join(env.workspace, CACHE_DIRNAME), { recursive: true, mode: 0o700 }).catch(() => undefined);
+      await excludeCacheFromGit(env.workspace).catch(() => undefined);
       await writeFile(inv.mcpConfigPath, JSON.stringify(inv.mcpConfig), { mode: 0o600 });
 
       const child = spawn(bin, inv.args, { cwd: env.workspace, env: inv.env, stdio: ["pipe", "pipe", "pipe"] });

@@ -1,8 +1,9 @@
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { buildClaudeInvocation, builtinTools, toolAllowed, composeSystemPrompt, createClaudeAdapter, extractStructuredOutput, parseStreamLine, usageFromResult } from "../src/adapters/claude.js";
+import { buildClaudeInvocation, cacheEnv, excludeCacheFromGit, builtinTools, toolAllowed, composeSystemPrompt, createClaudeAdapter, extractStructuredOutput, parseStreamLine, usageFromResult } from "../src/adapters/claude.js";
 import { EdgeClient } from "../src/edge.js";
 import { EXIT, runWrapper } from "../src/main.js";
 import { RunSpec } from "../src/spec.js";
@@ -279,5 +280,32 @@ describe("process handling with a stand-in harness executable", () => {
   it("reports a missing harness binary", async () => {
     const { calls } = await run("/nonexistent/claude");
     expect(calls.at(-1)!.body).toMatchObject({ status: "failed", error: { code: "harness_unavailable" } });
+  });
+});
+
+describe("package caches live on the workspace volume, not the /tmp tmpfs", () => {
+  it("puts UV_CACHE_DIR and the pip, npm and XDG caches under a dot-directory of the workspace", () => {
+    const inv = buildClaudeInvocation(spec, env, RELAY, { PATH: "/usr/bin", UV_CACHE_DIR: "/tmp/uv-cache" });
+    expect(inv.env.UV_CACHE_DIR).toBe("/workspace/.gantry-cache/uv");
+    expect(inv.env.PIP_CACHE_DIR).toBe("/workspace/.gantry-cache/pip");
+    expect(inv.env.XDG_CACHE_HOME).toBe("/workspace/.gantry-cache/xdg");
+    expect(inv.env.npm_config_cache).toBe("/workspace/.gantry-cache/npm");
+    for (const v of Object.values(cacheEnv("/workspace"))) expect(v.startsWith("/workspace/.gantry-cache/")).toBe(true);
+    expect(inv.env.HOME).not.toContain("/workspace");
+  });
+
+  it("keeps the cache out of commits: git add -A and commit -a skip it", async () => {
+    const ws = await mkdtemp(join(tmpdir(), "gantry-cache-"));
+    const g = (...a: string[]) => execFileSync("git", ["-C", ws, ...a], { encoding: "utf8" });
+    g("init", "-q", "--template=");
+    await writeFile(join(ws, "a.txt"), "a");
+    await excludeCacheFromGit(ws);
+    await excludeCacheFromGit(ws); // idempotent
+    expect((await readFile(join(ws, ".git/info/exclude"), "utf8")).match(/\.gantry-cache/g)).toHaveLength(1);
+    await mkdir(join(ws, ".gantry-cache/uv"), { recursive: true });
+    await writeFile(join(ws, ".gantry-cache/uv/blob"), "x");
+    g("add", "-A");
+    expect(g("ls-files").trim().split("\n")).toEqual(["a.txt"]);
+    expect((await stat(join(ws, ".gantry-cache/uv/blob"))).isFile()).toBe(true);
   });
 });

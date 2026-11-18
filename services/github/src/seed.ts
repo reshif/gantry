@@ -4,7 +4,7 @@
  * The installation token reaches `git` only through the environment of that one child process (an HTTP header); it is never written to disk or to argv.
  */
 import { createHash } from "node:crypto";
-import { lstat, mkdtemp, readFile, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { buildRepoContext, CONVENTION_FILES, type RawConventionFile, type RepoContext } from "@gantry/domain";
@@ -77,6 +77,9 @@ export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: tru
     const run = (args: string[], env?: Record<string, string>) => git(args, { gitBin: d.cfg.gitBin, cwd: work, ...(env ? { env } : {}), config: d.gitConfig ?? [] });
     await git(["init", "--quiet", "--template=", work], { gitBin: d.cfg.gitBin, cwd: scratch });
     await run(["remote", "add", "origin", url]);
+    // The runner keeps its package caches in /workspace/.gantry-cache (runner/wrapper cacheEnv). Excluding it here keeps `git add -A` from ever staging it.
+    await mkdir(join(work, ".git", "info"), { recursive: true });
+    await writeFile(join(work, ".git", "info", "exclude"), "/.gantry-cache/\n");
     await d.app.withRepo(b.repo, "seed", async (c) => {
       const auth = `Authorization: Basic ${Buffer.from(`x-access-token:${c.token}`).toString("base64")}`;
       const authEnv = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraHeader", GIT_CONFIG_VALUE_0: auth };
