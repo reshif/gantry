@@ -275,6 +275,8 @@ describe("signed in", () => {
       fireEvent.keyDown(document, { key: "k", ctrlKey: true });
     });
     const input = await screen.findByRole("combobox", { name: "Search commands" });
+    expect(input.getAttribute("placeholder")).toBe("Jump to a screen, work order, agent, person…");
+    expect(document.querySelector(".pal-foot")?.textContent).toContain("↑↓ move · Enter open · Esc close");
     fireEvent.change(input, { target: { value: "people" } });
     const opt = await waitFor(() => {
       const el = document.querySelector("#palette-list .pal-label");

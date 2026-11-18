@@ -132,11 +132,11 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
   };
 
   const rows: ReactNode[] = [];
-  if (!shown.length) rows.push(<li key="empty" className="palette-empty" role="presentation">No match. Try a WO id like WO-2417 or a repo name.</li>);
+  if (!shown.length) rows.push(<li key="empty" className="palette-empty" role="presentation">No results</li>);
   let lastSec: string | null = null;
   shown.forEach((row, i) => {
     const it = row.it;
-    if (row.sec && row.sec !== lastSec && !(row.sec === "All" && lastSec === null)) rows.push(<li key={`sec-${row.sec}-${i}`} className="palette-sec" role="presentation">{row.sec}</li>);
+    if (row.sec && row.sec !== lastSec) rows.push(<li key={`sec-${row.sec}-${i}`} className="palette-sec" role="presentation">{row.sec === "All" ? "Go to" : row.sec}</li>);
     lastSec = row.sec;
     const locked = !!it.guard && !it.guard.allowed;
     const isPinned = !!it.key && prefs.palettePinned.includes(it.key);
@@ -198,7 +198,6 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
   return (
     <Dialog
       title="Command palette"
-      kicker="Ctrl/Cmd K · Alt+P pins the highlighted item"
       cls="dlg-palette"
       onClose={onClose}
       body={
@@ -206,7 +205,7 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
           <input
             id="palette-input"
             className="palette-input"
-            placeholder="Type a view, project, WO id, repo, agent or action"
+            placeholder="Jump to a screen, work order, agent, person…"
             autoComplete="off"
             aria-controls="palette-list"
             aria-label="Search commands"
@@ -223,9 +222,10 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
           <ul id="palette-list" className="palette-list" role="listbox" aria-label="Results" ref={listRef}>
             {rows}
           </ul>
+          <div className="pal-foot mono">↑↓ move · Enter open · Esc close<span className="sr-only"> · Alt+P pins the highlighted item</span></div>
         </div>
       }
-      actions={[{ label: "Close" }]}
+      actions={[]}
     />
   );
 }

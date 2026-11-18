@@ -7,6 +7,7 @@
 import { useMemo } from "react";
 import { CrEmpty, CrIcon, Page } from "../ui/cr";
 import { hashQuery } from "../lib/router";
+import { useAccessMatrix, useMe } from "../api/queries";
 
 export const SHARED_STATES = ["loading", "empty", "error", "forbidden", "conflict"] as const;
 export type SharedStateKind = (typeof SHARED_STATES)[number];
@@ -62,6 +63,25 @@ function EmptyCard() {
   );
 }
 
+/** The refused card names the viewer's role from the session; the missing permission is only known to a real refusal, so the preview says it is not available. */
+function ForbiddenCard() {
+  const me = useMe();
+  const roles = useAccessMatrix().data?.roles ?? [];
+  const ids = (me?.person.roles ?? []).map((g) => g.role);
+  const names = [...new Set(ids)].map((id) => roles.find((r) => r.id === id)?.name ?? id);
+  const who = names.length ? names.join(", ") : "not available";
+  return (
+    <div className="card">
+      <CrEmpty
+        icon="lock"
+        title="You do not have access to this"
+        text={`Your role (${who}) cannot open this area. Ask a Factory Admin for the permission it needs (permission name: not available in this preview), or return to a screen you can use.`}
+        action={<a className="btn" href="#home">Back to Home</a>}
+      />
+    </div>
+  );
+}
+
 export function SharedState({ kind }: { kind: SharedStateKind }) {
   switch (kind) {
     case "loading":
@@ -71,7 +91,7 @@ export function SharedState({ kind }: { kind: SharedStateKind }) {
     case "error":
       return <ErrorCard />;
     case "forbidden":
-      return <div className="card"><CrEmpty icon="lock" title="You do not have access to this" text="Your role cannot open this area. Ask a Factory Admin for the permission it needs, or return to a screen you can use." action={<a className="btn" href="#home">Back to Home</a>} /></div>;
+      return <ForbiddenCard />;
     case "conflict":
       return (
         <>

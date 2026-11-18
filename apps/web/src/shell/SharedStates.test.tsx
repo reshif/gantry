@@ -1,9 +1,30 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { hashQuery, parseHash } from "../lib/router";
 import { NotFoundPage, SharedStatePage, sharedStateFromUrl, SHARED_STATES } from "./SharedStates";
 import { protoEyebrow } from "./SharedStates";
 import { SignIn, emailProblem, signInFootnote } from "./SignIn";
+
+const render = (ui: ReactElement) => rtlRender(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>);
+
+describe("ds round 3", () => {
+  it("the forbidden state names the role and says the permission is not available", () => {
+    render(<SharedStatePage kind="forbidden" eyebrow="x" title="y" />);
+    expect(screen.getByText(/Your role \(.+\) cannot open this area\./)).toBeTruthy();
+    expect(screen.getByText(/permission name: not available/)).toBeTruthy();
+  });
+  it("dialogs paint above their scrim so the pointer reaches them", () => {
+    const css = readFileSync("src/styles/base.css", "utf8");
+    expect(css).toMatch(/\.dlg-wrap > \.dlg \{[^}]*z-index: 1/);
+  });
+  it("the sample table stays a table at phone width", () => {
+    const css = readFileSync("src/styles/cr/compat.css", "utf8");
+    expect(css).toMatch(/\.ds-theme \.tw\.cards table\{display:table/);
+  });
+});
 
 describe("hash query and shared states", () => {
   it("keeps the route clean when the hash carries ?state=", () => {
