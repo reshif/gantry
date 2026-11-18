@@ -31,6 +31,11 @@ describe("design system page (prototype parity)", () => {
     expect(screen.getAllByRole("button", { name: "Drawer" }).length).toBe(2);
     expect(screen.getAllByRole("button", { name: "Command palette" }).length).toBe(2);
   });
+  it("shows the visible switch label and the pipeline at station 5", () => {
+    const { container } = mount();
+    expect(screen.getAllByText("Switch on").length).toBeGreaterThan(1);
+    expect(container.querySelector(".pipe .st.cur")?.textContent).toContain("Build");
+  });
   it("the example dialog validates its Name field", () => {
     mount();
     fireEvent.click(screen.getAllByRole("button", { name: "Dialog" })[0]!);

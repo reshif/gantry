@@ -57,7 +57,7 @@ function Samples() {
           <Field label="Title" hint="A short imperative sentence."><Input id="ds-title" defaultValue="Rate limit payouts" /></Field>
           <Field label="Priority"><Select id="ds-pri" options={["P1", "P2", "P3"]} value="P2" /></Field>
           <Field label="With an error" error="Title needs at least 8 characters."><Input id="ds-err" defaultValue="x" /></Field>
-          <Toggle id="ds-sw" checked={on} onChange={setOn} label="Switch on" />
+          <label className="row" style={{ gap: 8 }} htmlFor="ds-sw"><Toggle id="ds-sw" checked={on} onChange={setOn} label="Switch on" /><span>Switch on</span></label>
         </div></div>
         <div>
           <div className="label" style={{ marginBottom: 8 }}>Tabs and segmented control</div>
@@ -68,7 +68,7 @@ function Samples() {
         </div>
       </div>
       <div><div className="label" style={{ marginBottom: 8 }}>Pipeline, meter, spark, donut</div>
-        <PipeSample />
+        <PipeSample current={5} />
         <div className="row" style={{ gap: 24, marginTop: 8 }}><div style={{ width: 160 }}><Meter value={72} max={100} /></div><div style={{ width: 160 }}><Meter value={92} max={100} /></div><Spark data={[3, 5, 4, 7, 6, 9, 8]} /><Donut size={64} parts={[{ l: "a", v: 6, c: "ok" }, { l: "b", v: 3, c: "warn" }, { l: "c", v: 1, c: "bad" }]} /></div>
       </div>
       <div><div className="label" style={{ marginBottom: 8 }}>Floor tokens</div><div className="row" style={{ maxWidth: 520 }}>
