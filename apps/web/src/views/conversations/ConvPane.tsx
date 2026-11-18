@@ -39,7 +39,7 @@ export function ConvPane({ woId, row, state, setState, back, openRecord }: { woI
           <Btn small kind="ghost" icon="back" cls="cv-back" id="conv-back" label="Conversations" onClick={back} />
           <span className="mono cv-id">{woId}</span>
           <h2 className="cv-title" title={title}>{title}</h2>
-          <Btn small label="Open record" aria="Open record" icon="record" cls="cv-icon-sm" id="conv-open-record" onClick={openRecord} />
+          <Btn small label="Record" aria={`Record for ${woId}`} icon="record" cls="cv-icon-sm" id="conv-open-record" onClick={openRecord} />
         </div>
         <div className="cv-head-bar">
           <Tabs idPrefix="conv-tab" active={state.tab} onChange={(t) => setState({ tab: t === "chat" ? null : t })} items={[{ id: "chat", label: "Conversation" }, { id: "side", label: `Side threads (${side.length})` }]} />
