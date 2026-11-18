@@ -109,6 +109,8 @@ export class FakeBroker {
   failSeed = 0;
   /** What the seed answers as the repository context (the broker reads the convention files while it has the checkout). */
   repoContext: unknown = undefined;
+  /** What the seed answers as the head of the requested base branch (null: the branch could not be read). */
+  seedBase: string | null = null;
   publishResponse: Record<string, any> | { status: number; body: Record<string, any> } | null = null;
   mergeResponse: { status: number; body: Record<string, any> } | null = null;
   gateCheckStatus = 200;
@@ -138,7 +140,7 @@ export class FakeBroker {
     if (path === "/v1/workspaces/seed") {
       this.calls.push({ op: "seed", at: Date.now(), body: b });
       if (this.failSeed > 0) { this.failSeed--; return send(res, 502, { ok: false, code: "fetch_failed", msg: "GitHub is down" }); }
-      return send(res, 200, { ok: true, ...b, ...(this.repoContext !== undefined ? { repoContext: this.repoContext } : {}) });
+      return send(res, 200, { ok: true, ...b, base: b.baseBranch ? this.seedBase : null, ...(this.repoContext !== undefined ? { repoContext: this.repoContext } : {}) });
     }
     if (path === "/v1/publish") {
       this.calls.push({ op: "publish", at: Date.now(), body: b });

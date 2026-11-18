@@ -84,6 +84,7 @@ export function approvalText(
   rule: ApproverRule | undefined | null,
   roleName: (id: string) => string = (x) => x,
   personName: (id: string) => string = (x) => x,
+  cls?: string | null,
 ): string {
   if (mode === "auto") return "No approvals: passes when its checks pass";
   const who = rule ? [...rule.roles.map(roleName), ...rule.people.map(personName)] : [];
@@ -91,7 +92,7 @@ export function approvalText(
     const others = rule ? rule.roles.filter((r) => r !== "engineer").map(roleName) : [];
     return `1 approval: the submitter${others.length ? `, or ${others.join(" / ")}` : ""}`;
   }
-  const n = rule ? Math.max(1, rule.required) : 1;
+  const n = rule ? requiredFor(rule, cls) : 1;
   const from = who.length ? who.join(" / ") : "a Factory Admin (no rule set)";
   return `${mode === "mixed" ? "Checks, then " : ""}${plural(n, "approval")}: ${from}`;
 }
@@ -110,3 +111,21 @@ export const gateOf = (c: Pick<Catalog, "gates">, id: string): Gate | undefined 
 
 /** Explain a gate state the way the floor shows it: "nothing waiting" etc. */
 export const gateOffNote = "Turned off: new work orders skip it and pass straight through. Work orders already in flight keep the flow they started with.";
+
+/** Approvals a work order of this class needs at a gate: the class's override when the rule lists one, else the base count. Never below 1. */
+export function requiredFor(rule: Pick<ApproverRule, "required" | "classRequired"> | null | undefined, cls: string | null | undefined): number {
+  const o = cls && rule?.classRequired && Object.prototype.hasOwnProperty.call(rule.classRequired, cls) ? rule.classRequired[cls] : undefined;
+  return Math.max(1, Math.floor(Number(o ?? rule?.required) || 1));
+}
+
+/** Why a class-count override is invalid, or null. Counts are whole numbers from 1 to 9; `classes` (when given) are the class ids the project has. */
+export function classRequiredError(map: Record<string, number> | null | undefined, classes?: ReadonlySet<string>): string | null {
+  if (map == null) return null;
+  if (typeof map !== "object" || Array.isArray(map)) return "Per-class approvals must be a list of class and count.";
+  for (const [cls, n] of Object.entries(map)) {
+    if (!Number.isInteger(n) || n < 1) return `Approvals required for ${cls} must be a whole number of at least 1.`;
+    if (n > 9) return `Approvals required for ${cls} cannot be more than 9.`;
+    if (classes && !classes.has(cls)) return `Approvals override names a class this project does not have: ${cls}.`;
+  }
+  return null;
+}

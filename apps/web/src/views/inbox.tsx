@@ -71,6 +71,7 @@ function GateRule({ wo, gate, project }: { wo: string; gate: string; project: st
     <div className="inb-rule">
       <div className="inb-rule-h">Who can approve and why</div>
       <p className="small">{a.rule.text}</p>
+      {typeof a.rule.classOverride === "number" ? <p className="small muted">{`This work order's class needs ${a.rule.classOverride} instead of the gate's base ${a.rule.base}.`}</p> : null}
       <p className="small"><strong>{`${a.progress.have} of ${a.progress.need}`}</strong>{a.progress.approvals.length ? ` · approved by ${a.progress.approvals.map((x) => x.name).join(", ")}` : ""}{a.progress.unmet.length ? ` · still needs ${a.progress.unmet.join("; ")}` : ""}</p>
       {!a.satisfiable ? <p className="small inb-warn" role="alert">{a.warning}</p> : null}
       {a.eligible.length ? <p className="small muted">{`Can decide: ${a.eligible.map((e) => e.name + (e.away ? " (away)" : "")).join(", ")}.`}</p> : <p className="small muted">Nobody is eligible today.</p>}

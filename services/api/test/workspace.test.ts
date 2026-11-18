@@ -74,8 +74,9 @@ d("the agent workspace", () => {
     const r = await call(tomas, "POST", "/api/v1/console/messages", { threadId: tid, text: "Why did you say half-up?" });
     expect(r.status).toBe(200);
     expect(r.events.at(-1)).toMatchObject({ event: "done", data: { text: "I read the refund job: it rounds half-up, nightly." } });
-    // The call is metered on the work order and its project, not as an anonymous console call.
-    expect(edge.calls[0]!.headers).toMatchObject({ "x-gantry-surface": "workorder", "x-gantry-work-order": id, "x-gantry-trace-project": "payments" });
+    // The call is metered on its project, not as an anonymous console call, but never on the work order (side-thread cost stays off the work order).
+    expect(edge.calls[0]!.headers).toMatchObject({ "x-gantry-surface": "workorder", "x-gantry-trace-project": "payments" });
+    expect(edge.calls[0]!.headers["x-gantry-work-order"]).toBeUndefined();
     const sent = edge.calls[0]!.body;
     expect(String(sent.system)).toContain(`You are ${researcher.name}`);
     expect(String(sent.system)).toContain("This is a side thread. You cannot change anything here");

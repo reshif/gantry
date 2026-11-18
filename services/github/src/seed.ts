@@ -19,6 +19,11 @@ export const SeedBody = z.object({
   repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
   commit: z.string().regex(/^[0-9a-f]{40}$/),
   volume: z.string().regex(VOLUME_NAME),
+  /**
+   * The branch the work order's pull request targets. When given, the checkout also holds that branch's head (`refs/gantry/base`) and enough history for the
+   * merge base, so `git diff <base>...<head>` works offline in the runner. The runner has no network git and no token: this is the only place the base arrives.
+   */
+  baseBranch: z.string().min(1).max(250).regex(/^[A-Za-z0-9._/-]+$/).refine((b) => !b.includes("..") && !b.startsWith("/") && !b.endsWith("/") && !b.endsWith(".lock"), "invalid branch").optional(),
 }).strict();
 export type SeedBody = z.infer<typeof SeedBody>;
 
@@ -59,7 +64,11 @@ export async function readRepoContext(work: string, commit: string): Promise<Rep
   return buildRepoContext(commit, found, { scan: (path, text) => scanText(path, text, { longLines: true }), sha256: (b) => createHash("sha256").update(b).digest("hex") });
 }
 
-export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: true; repo: string; commit: string; volume: string; repoContext: RepoContext }> {
+/** How much history a seed with a base carries: a pull request's own commits plus the point it left the target branch. Deepened once when the merge base is further back. */
+const BASE_DEPTH = 100;
+const DEEPEN_BY = 1000;
+
+export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: true; repo: string; commit: string; volume: string; repoContext: RepoContext; base: string | null; baseBranch: string | null }> {
   splitRepo(b.repo);
   const scratch = await mkdtemp(join(d.cfg.scratchDir, "gantry-seed-"));
   const work = join(scratch, "work");
@@ -70,19 +79,37 @@ export async function seedWorkspace(d: SeedDeps, b: SeedBody): Promise<{ ok: tru
     await run(["remote", "add", "origin", url]);
     await d.app.withRepo(b.repo, "seed", async (c) => {
       const auth = `Authorization: Basic ${Buffer.from(`x-access-token:${c.token}`).toString("base64")}`;
+      const authEnv = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraHeader", GIT_CONFIG_VALUE_0: auth };
       try {
-        await run(["fetch", "--quiet", "--depth", "1", "--no-tags", "--no-recurse-submodules", "origin", b.commit], { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraHeader", GIT_CONFIG_VALUE_0: auth });
+        await run(["fetch", "--quiet", "--depth", String(b.baseBranch ? BASE_DEPTH : 1), "--no-tags", "--no-recurse-submodules", "origin", b.commit], authEnv);
       } catch (e) {
         if (e instanceof GitError) throw new BrokerError(502, "fetch_failed", `Could not fetch ${b.commit.slice(0, 7)} from ${b.repo}: ${e.stderr.trim().split("\n").pop() ?? e.message}`);
         throw e;
       }
     }).catch((e: unknown) => { throw e instanceof BrokerError ? e : e instanceof GitError ? e : (() => { const a = toApiError(e); return new BrokerError(a.status === 404 ? 404 : 502, "github", a.message); })(); });
-    await run(["checkout", "--quiet", "--detach", "FETCH_HEAD"]);
+    await run(["checkout", "--quiet", "--detach", b.commit]);
+    // The base is best effort: a target branch that is gone or unreadable leaves the checkout as it was (no base), and the agents are told there is none.
+    let base: string | null = null;
+    if (b.baseBranch) {
+      const branch = b.baseBranch;
+      await d.app.withRepo(b.repo, "seed", async (c) => {
+        const authEnv = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraHeader", GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`x-access-token:${c.token}`).toString("base64")}` };
+        const fetchBase = (extra: string[]) => run(["fetch", "--quiet", ...extra, "--no-tags", "--no-recurse-submodules", "origin", `+refs/heads/${branch}:refs/gantry/base`], authEnv);
+        await fetchBase(["--depth", String(BASE_DEPTH)]);
+        const joined = () => run(["merge-base", "refs/gantry/base", b.commit]).then(() => true, () => false);
+        if (!(await joined())) {
+          await run(["fetch", "--quiet", "--deepen", String(DEEPEN_BY), "--no-tags", "--no-recurse-submodules", "origin", b.commit], authEnv).catch(() => undefined);
+          await fetchBase(["--deepen", String(DEEPEN_BY)]).catch(() => undefined);
+        }
+        if (await joined()) base = (await gitText(["rev-parse", "refs/gantry/base"], { gitBin: d.cfg.gitBin, cwd: work })).trim();
+      }).catch(() => undefined);
+      if (!base) await run(["update-ref", "-d", "refs/gantry/base"]).catch(() => undefined);
+    }
     const head = (await gitText(["rev-parse", "HEAD"], { gitBin: d.cfg.gitBin, cwd: work })).trim();
     if (head !== b.commit) throw new BrokerError(502, "fetch_failed", `Fetched ${head}, expected ${b.commit}.`);
     const repoContext = await readRepoContext(work, head);
     await d.store.seed(b.volume, work, { uid: RUNNER_UID, gid: RUNNER_UID });
-    return { ok: true, repo: b.repo, commit: head, volume: b.volume, repoContext };
+    return { ok: true, repo: b.repo, commit: head, volume: b.volume, repoContext, base, baseBranch: base ? (b.baseBranch ?? null) : null };
   } finally {
     await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
   }

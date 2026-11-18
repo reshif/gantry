@@ -197,6 +197,17 @@ d("repo onboarding", () => {
       expect([403, 404]).toContain(denied.status);
     });
 
+    it("a person confirms the project's test commands: stored beside the repo's settings, audited, and one that could run arbitrary code is refused", async () => {
+      const r = await connect();
+      const bad = await call(lena, "PATCH", `/api/v1/repos/${r.id}/config`, { config: { testCommands: ["make test", "bash -c 'rm -rf /'"] } }, { "if-match": await version(r.id) });
+      expect(bad.status).toBe(422);
+      const ok = await call(lena, "PATCH", `/api/v1/repos/${r.id}/config`, { config: { testCommands: ["make  test", "uv run pytest"] } }, { "if-match": await version(r.id) });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      const row = (await q(`select data from repo_config where repo_id = $1`, [r.id]))[0]!.data;
+      expect(row).toMatchObject({ testCommands: ["make test", "uv run pytest"], testCommandsConfirmedBy: expect.any(String) });
+      expect((await events("repo.config")).at(-1)!.after).toMatchObject({ config: { testCommands: ["make test", "uv run pytest"] } });
+    });
+
     it("is denied for someone without onboarding.manage, and audited", async () => {
       const r = await connect();
       const before = (await events("onboarding.manage.denied")).length;
@@ -217,6 +228,12 @@ d("repo onboarding", () => {
       expect((await q(`select count(*)::int as n from onboarding_findings where org_id = $1 and run_id = $2`, [t.orgId, r.runId]))[0].n).toBe(findings.length);
       expect((await q(`select status from onboarding_runs where org_id = $1 and id = $2`, [t.orgId, r.runId]))[0].status).toBe("succeeded");
       expect((await q(`select data->>'baseSha' as sha from repo_config where org_id = $1 and repo_id = $2`, [t.orgId, r.id]))[0].sha).toBe(SHA("a"));
+      // the detected test command is kept as a proposal beside the settings; it grants nothing until a person confirms it
+      const test = dd.findings.find((f: any) => f.id === "test");
+      const cfg = (await q(`select data from repo_config where org_id = $1 and repo_id = $2`, [t.orgId, r.id]))[0].data;
+      expect(test).toMatchObject({ ok: true });
+      expect(cfg.testCommandProposed).toEqual({ command: String(test.detail).replace(/ \(.*\)$/, ""), source: expect.any(String) });
+      expect(cfg.testCommands).toBeUndefined();
       expect((await q(`select lang from repos where org_id = $1 and id = $2`, [t.orgId, r.id]))[0].lang).toBe("TypeScript");
 
       const open = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/open-pr`);

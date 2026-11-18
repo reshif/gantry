@@ -227,6 +227,11 @@ export interface ApproverRule {
   roles: string[];
   people: Id[];
   required: number;
+  /**
+   * Per-work-class override of `required`: class id -> approvals needed for work orders of that class. It changes the COUNT only, for a listed class.
+   * A class without an entry uses `required`. It never touches `sod` and never makes a gate optional (every count is a whole number of at least 1).
+   */
+  classRequired?: Record<string, number>;
   sod: boolean;
   conditions: ApproverCondition[];
   escalateH: number;
