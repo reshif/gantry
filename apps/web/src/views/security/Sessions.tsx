@@ -53,15 +53,15 @@ export function SessionsTab({ perm, sessions, currentId, viewerId }: { perm: Dec
     <Panel title="Active sessions" flush id="sec-sessions-panel">
       <ListBar
         id="sec-ses" label="Sessions" q={q} onQ={(v) => setQ(v || null)} filters={[]} shown={rows.length} total={sessions.length} noun="session" onClear={() => setQ(null)}
-        extra={<Btn label="Revoke all other sessions" kind="danger" small icon="logout" id="sec-ses-all"
+      />
+      <DataTable sortHint id="sec-ses-table" caption="Active sessions" columns={cols} rows={rows} rowKey={(s) => s.id} pageSize={12} pager
+        empty={sessions.length ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="sec-ses-empty-clear" onClick={() => setQ(null)} /> } : { title: "Nothing here yet", text: "Items will appear here when they exist." }} />
+      <div className="tfoot"><Btn label="Revoke all other sessions" kind="danger" small icon="logout" id="sec-ses-all"
           guard={!perm.allowed ? perm : !others.length ? lockd("No other active sessions.") : null}
           onClick={() => ui.dialog({
             title: `Revoke ${others.length} sessions?`, kicker: "Sessions", sub: "Everyone except you is signed out and must sign in again.", body: null,
             actions: [{ label: "Cancel" }, { label: `Revoke ${others.length}`, kind: "danger", id: "sec-ses-all-ok", onClick: (close) => void (async () => { let n = 0; for (const x of others) if ((await revokeSession(x.id)).ok) n++; close(); ui.toast(`${n} sessions revoked.`, "ok"); })() }],
-          })} />}
-      />
-      <DataTable sortHint id="sec-ses-table" caption="Active sessions" columns={cols} rows={rows} rowKey={(s) => s.id} pageSize={12} pager
-        empty={sessions.length ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="sec-ses-empty-clear" onClick={() => setQ(null)} /> } : { title: "Nothing here yet", text: "Items will appear here when they exist." }} />
+          })} /></div>
     </Panel>
   );
 }

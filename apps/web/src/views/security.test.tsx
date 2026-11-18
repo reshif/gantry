@@ -151,6 +151,8 @@ describe("Security screen", () => {
     await byId("sec-ses-rv-s2");
     expect(Array.from(document.querySelectorAll("#sec-ses-table th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["Person", "Device", "Method", "Started", "Last seen", ""]);
     expect(document.querySelector("#sec-ses-table .chip.bad")?.textContent).toBe("revoked");
+    expect(document.querySelector(".filterbar #sec-ses-all")).toBeNull();
+    expect(document.querySelector("#sec-sessions-panel .tfoot #sec-ses-all")).toBeTruthy();
     expect(text()).toContain("3 sessions");
     fireEvent.change(document.querySelector("#sec-ses-q") as HTMLElement, { target: { value: "zzz" } });
     await waitFor(() => expect(text()).toContain("0 of 3 sessions"));

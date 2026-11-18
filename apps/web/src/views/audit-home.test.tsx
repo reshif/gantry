@@ -98,6 +98,8 @@ describe("Audit", () => {
     expect(document.querySelectorAll("[role=tab]")).toHaveLength(0);
     expect(document.getElementById("aud-export")).toBeTruthy();
     expect(document.getElementById("aud-verify")).toBeTruthy();
+    expect(document.getElementById("aud-export")!.parentElement!.contains(document.getElementById("aud-verify"))).toBe(false);
+    expect(document.getElementById("aud-verify")!.closest("#aud-verify-row")).toBeTruthy();
     expect(Array.from(document.querySelectorAll("#aud-table th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["When", "Actor", "Action", "Target", "Category", "Outcome"]);
     expect(document.querySelectorAll("#aud-table tbody tr")).toHaveLength(3);
     expect(document.querySelector("#aud-table .chip.bad")?.textContent).toBe("denied");

@@ -158,7 +158,6 @@ export default function AuditView() {
         sub="An append-only record of every decision and change. Entries cannot be edited."
         actions={<>
           <Btn label="Export CSV" icon="dl" id="aud-export" guard={exporting ? { allowed: false, reason: "Exporting now." } : null} onClick={() => void exportCsv()} />
-          {canVerify ? <Btn label={checking ? "Verifying..." : "Verify chain"} icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify()} /> : null}
         </>}
       />
       <StatRow id="aud-stats">
@@ -203,6 +202,7 @@ export default function AuditView() {
           </>
         )}</Async>
       </Panel>
+      {canVerify ? <div className="footnote" id="aud-verify-row"><Btn small label={checking ? "Verifying..." : "Verify chain"} icon="shield" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify()} /></div> : null}
       <p className="footnote">Each entry carries a SHA-256 digest of its fields and the digest before it, written by the database. Any edit or removal breaks every digest after it, and Verify chain finds the first break.</p>
     </div>
   );
