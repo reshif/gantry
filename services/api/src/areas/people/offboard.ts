@@ -52,7 +52,10 @@ export async function openWorkOf(tx: Tx, orgId: string, id: string, now: number)
       const pinned = await stateWithPinned(tx, orgId, st, { project: wo.project, flowVersion: row.flow_version });
       for (const gid of waiting) {
         const ga = gateApprovers(pinned, wo, gid, now);
-        if (ga && ga.eligible.length === 1 && ga.eligible[0]!.id === id) {
+        // Factory Admins can always approve any gate (owner decision 2026-11-19), so they are the standing fallback, not the people the rule names:
+        // the person is the "sole approver" when nobody else the rule reaches can approve, whichever admins exist.
+        const named = ga?.eligible.filter((e) => e.id === id || !pinned.people.some((p) => p.id === e.id && p.roles.some((g) => g.role === "factory_admin" && g.scope === "factory"))) ?? [];
+        if (ga && named.length === 1 && named[0]!.id === id) {
           gate = gid;
           roles.push("sole_approver");
           break;
