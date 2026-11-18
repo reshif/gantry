@@ -81,39 +81,64 @@
 .vt-local { margin-top: 2px; color: var(--accent); font-weight: 500; }
 
 /* Models tab: vendor summary cards and the grouped model table. Tokens only. */
+.md-tabs { margin-bottom: var(--s4); }
 .md-catalog { display: grid; gap: var(--s4); min-width: 0; }
-.md-vcs { display: grid; grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr)); gap: var(--s3); }
+.md-vcs { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: var(--s3); }
 .md-vc { position: relative; display: flex; border: 1px solid var(--line-strong); background: var(--panel); border-radius: var(--r1); min-width: 0; }
 .md-vc.is-off { border-style: dashed; }
 .md-vc.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.md-vc-main { display: grid; gap: 6px; width: 100%; padding: 12px 40px 12px 14px; text-align: left; background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer; align-content: start; min-width: 0; }
-.md-vc-main:hover { background: var(--surface); }
-.md-vc-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
-.md-vc-name { font-weight: 600; font-size: var(--t-panel, 16px); letter-spacing: -0.01em; }
-.md-vc-spend { display: grid; gap: 4px; }
-.md-vc-res { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; align-items: start; }
-.md-vc-res .ic { width: 13px; height: 13px; margin-top: 2px; }
-.ell2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.md-vc-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: nowrap; }
+.md-vc-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-weight: 600; font-size: var(--t-panel, 16px); letter-spacing: -0.01em; flex: 0 1 auto; }
+.md-vc-head .status, .md-vc-head > :not(.md-vc-name) { flex: none; }
+.md-vc-stats { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: var(--s3); align-items: start; }
+.md-vc-cell { display: grid; gap: 2px; min-width: 0; align-content: start; }
+.md-vc-meter { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.md-vc-res { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; align-items: center; }
+.md-vc-res .ic { width: 13px; height: 13px; }
 .md-vc-menu { position: absolute; top: 6px; right: 6px; z-index: 1; }
-.md-vc-add { align-items: center; justify-content: center; gap: 10px; padding: 14px; border-style: dashed; color: inherit; font: inherit; cursor: pointer; text-align: left; min-height: 6rem; }
-.md-vc-add:hover, .md-vc-add:focus-visible { border-color: var(--accent); background: var(--surface); }
+.md-vc-add .ic { flex: none; }
 .md-vc-add span { display: grid; gap: 2px; }
+.md-vc-add:hover, .md-vc-add:focus-visible { border-color: var(--accent); background: var(--surface); }
 .md-groups { display: grid; gap: var(--s3); min-width: 0; }
 .md-grp { min-width: 0; }
-.md-grp-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 4px; background: transparent; border: 0; border-bottom: 1px solid var(--line); color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .md-grp-head .ic { width: 14px; height: 14px; transition: transform 0.12s; transform: rotate(0deg); }
 .md-grp-head[aria-expanded="true"] .ic { transform: rotate(90deg); }
+.md-grp-empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
 .md-needs { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-.md-used { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-@media (max-width: 640px) { .md-vcs { grid-template-columns: minmax(0, 1fr); } }
-.md-vc .btn.md-vc-main { height: auto; min-height: 0; border: 0; border-radius: 0; background: transparent; justify-content: flex-start; align-items: stretch; font-weight: 400; white-space: normal; }
+.md-used { display: inline-flex; flex-wrap: nowrap; gap: 4px; align-items: center; min-width: 0; max-width: 100%; }
+.md-used-t { min-width: 0; flex: 0 1 auto; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.md-used .btn { flex: none; }
+.md-use-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.md-use-list li { display: grid; gap: 2px; }
+/* one set of column positions for every vendor group: the tables share fixed widths, so Tier, Context and Price line up down the page */
+.md-groups .dtable { table-layout: fixed; }
+.md-groups .dtable td { overflow: hidden; }
+.md-groups .dtable .md-name { display: grid; min-width: 0; }
+.md-vc .btn.md-vc-main { display: grid; gap: 8px; width: 100%; height: auto; min-height: 0; padding: 12px 40px 12px 14px; text-align: left; align-content: start; justify-items: stretch; flex: 1; min-width: 0; border: 0; border-radius: 0; background: transparent; justify-content: flex-start; align-items: stretch; font-weight: 400; white-space: normal; color: inherit; cursor: pointer; }
 .md-vc .btn.md-vc-main:hover { background: var(--surface); }
-.md-vc .btn.md-vc-add, .btn.md-vc-add { height: auto; font-weight: 400; white-space: normal; justify-content: center; }
-.btn.md-grp-head { height: auto; justify-content: flex-start; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; font-weight: 400; }
-.md-vc .btn.md-vc-main { display: grid; gap: 6px; width: 100%; padding: 12px 40px 12px 14px; text-align: left; align-content: start; justify-items: stretch; flex: 1; min-width: 0; }
 .md-vc .btn.md-vc-main > * { min-width: 0; }
-.md-vc .btn.md-vc-main .ell { display: block; }
+.md-vc .btn.md-vc-main .md-vc-kind, .md-vc .btn.md-vc-main .ell { display: block; }
 .md-vc .btn.md-vc-main .md-vc-head { display: flex; }
-.md-vc .btn.md-vc-main .md-vc-res { display: grid; }
-.btn.md-vc-add { display: flex; flex: 1; padding: 14px; text-align: left; min-height: 6rem; }
-.btn.md-grp-head { display: flex; width: 100%; padding: 8px 4px; }
+.md-vc .btn.md-vc-main .md-vc-stats { display: grid; }
+.md-vc .btn.md-vc-main .md-vc-cell, .md-vc .btn.md-vc-main .md-vc-meter, .md-vc .btn.md-vc-main .md-vc-res { display: grid; }
+.btn.md-vc-add { display: flex; flex: 1; height: auto; min-height: 6rem; padding: 14px; align-items: center; justify-content: center; gap: 10px; text-align: left; font-weight: 400; white-space: normal; border-style: dashed; }
+.btn.md-grp-head { display: flex; align-items: center; gap: 8px; width: 100%; height: auto; padding: 8px 4px; justify-content: flex-start; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; font-weight: 400; background: transparent; }
+/* phone: the vendors are one swipeable strip, not a stack that pushes the table off the screen */
+@media (max-width: 640px) {
+  .md-vcs { display: flex; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 6px; }
+  .md-vcs > .md-vc { flex: 0 0 15.5rem; scroll-snap-align: start; }
+  .md-vcs > .md-vc-add { flex-basis: 12rem; }
+  .md-catalog .md-groups .dtable td { overflow: visible; }
+  .md-used { flex-wrap: wrap; }
+  .md-used-t { white-space: normal; }
+  .md-catalog .md-groups .dtable td { padding: 2px 0; }
+  .md-catalog .md-groups .dtable tr { padding: 6px 10px; display: flex; flex-wrap: wrap; column-gap: 0; }
+  .md-catalog .md-groups .dtable td { flex: 1 1 100%; display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); align-items: center; }
+  .md-catalog .md-groups .dtable td:first-child { display: block; padding-bottom: 4px; }
+  .md-catalog .md-groups .dtable td:first-child::before { display: none; }
+  .md-catalog .md-groups .dtable td:nth-child(2), .md-catalog .md-groups .dtable td:nth-child(3) { flex: 1 1 50%; grid-template-columns: 4.5rem minmax(0, 1fr); text-align: left; }
+  .md-catalog .md-groups .dtable td:nth-child(2) .chip { justify-self: start; }
+  .md-catalog .filterbar #mc-vendor, .md-catalog .filterbar #mc-group { display: none; }
+  .md-catalog .filterbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .md-catalog .filterbar > .search, .md-catalog .filterbar > .searchbox, .md-catalog .filterbar > .meta { grid-column: 1 / -1; }
+}

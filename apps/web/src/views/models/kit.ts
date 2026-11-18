@@ -28,3 +28,6 @@ export function repoTags(r: Repo, projects: Project[]): string[] {
   if (p?.regulated && !t.includes("regulated")) t.push("regulated");
   return t;
 }
+
+/** Models a vendor has switched on; a vendor that is not connected has none in use. One count for the card and the table group. */
+export const enabledCount = (v: Vendor): number => (v.connected ? v.models.filter((m) => m.enabled).length : 0);

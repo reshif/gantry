@@ -11,12 +11,12 @@ import { useCan } from "../../api/can";
 import { Btn, Chip, Field, FilterBar, SearchBox, Select, Toggle, reasonText } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/DataTable";
 import { useModelSwitch } from "./Vendor";
-import { dec, hasEndpoint, no, usedBy } from "./kit";
-import { VendorCards } from "./VendorCards";
+import { dec, enabledCount, hasEndpoint, no, usedBy } from "./kit";
+import { VendorCards, useVendorActions } from "./VendorCards";
 import { AddVendorDialog } from "./Templates";
 import { navigate } from "../../lib/router";
 
-type Row = { id: string; name: string; tier: string; context: number; inPrice: number; outPrice: number; enabled: boolean; needsPrice: boolean; invocable: boolean; vendor: Vendor; used: string[] };
+type Row = { id: string; name: string; tier: string; context: number; inPrice: number; outPrice: number; enabled: boolean; needsPrice: boolean; invocable: boolean; vendor: Vendor; used: Use[] };
 const tierTone = (t: string): string => (t === "frontier" ? "agent" : t === "fast" ? "ok" : "info");
 
 /** Set price (prototype dialog): input and output USD per million tokens, both above zero; published as one price version. */
@@ -48,19 +48,48 @@ function SetPriceDialog({ m, close }: { m: Row; close: () => void }) {
   );
 }
 
-/** Where a model is used: routing default, station and class overrides, fallback slot, and the agents that name it. Only what the API holds. */
-function usage(routing: Routing, agents: Agent[], id: string): string[] {
-  const out: string[] = [];
-  if (routing.defaultModel === id) out.push("Factory default");
-  for (const [s, m] of Object.entries(routing.overrides ?? {})) if (m === id) out.push(`Station ${s}`);
-  for (const [c, m] of Object.entries(routing.classOverrides ?? {})) if (m === id) out.push(`Class ${c}`);
+type Use = { title: string; items: string[] };
+/** Where a model is used, grouped by kind: routing default, station and class overrides, fallback slot, and the agents that name it. Only what the API holds. */
+function usage(routing: Routing, agents: Agent[], id: string): Use[] {
+  const out: Use[] = [];
+  if (routing.defaultModel === id) out.push({ title: "Factory default", items: [] });
+  const st = Object.entries(routing.overrides ?? {}).filter(([, m]) => m === id).map(([k]) => k);
+  if (st.length) out.push({ title: "Stations", items: st });
+  const cl = Object.entries(routing.classOverrides ?? {}).filter(([, m]) => m === id).map(([k]) => k);
+  if (cl.length) out.push({ title: "Classes", items: cl });
   const fb = (routing.fallback ?? []).indexOf(id);
-  if (fb >= 0) out.push(`Fallback ${fb + 1}`);
-  for (const a of usedBy(agents, id)) out.push(a.model === id ? a.name : `${a.name} (fallback)`);
+  if (fb >= 0) out.push({ title: `Fallback ${fb + 1}`, items: [] });
+  const ag = usedBy(agents, id).map((a) => (a.model === id ? a.name : `${a.name} (fallback)`));
+  if (ag.length) out.push({ title: "Agents", items: ag });
   return out;
+}
+const usageText = (u: Use, max = 2): string => (u.items.length ? `${u.title}: ${u.items.slice(0, max).join(", ")}${u.items.length > max ? ` +${u.items.length - max}` : ""}` : u.title);
+const usageCount = (l: Use[]): number => l.reduce((n, u) => n + Math.max(1, u.items.length), 0);
+
+/** The full list of where a model is used (the table cell shows the first few). */
+function UsedDialog({ m, close }: { m: Row; close: () => void }) {
+  return (
+    <Dialog title={`Where ${m.name} is used`} onClose={close}
+      body={<ul className="md-use-list">{m.used.map((u) => <li key={u.title}><b>{u.title}</b>{u.items.length ? <span>{u.items.join(", ")}</span> : null}</li>)}</ul>}
+      actions={[{ label: "Close", kind: "primary" }]} />
+  );
 }
 
 const unpriced = (m: { needsPrice: boolean; inPrice: number; outPrice: number; vendor: Vendor }): boolean => m.needsPrice || (!m.inPrice && !m.outPrice && !hasEndpoint(m.vendor));
+
+/** A vendor with no models yet: the next steps are here, not only in the card menu. */
+function EmptyGroup({ v, vendors, routing, agents }: { v: Vendor; vendors: Vendor[]; routing: Routing; agents: Agent[] }) {
+  const act = useVendorActions(v, vendors, routing, agents);
+  const perm = dec(useCan("model.edit"));
+  return (
+    <div className="md-grp-empty">
+      <span className="small muted">{v.connected ? `${v.name} has no models listed.` : `${v.name} is not connected.`}</span>
+      {!v.connected ? <Btn label={`Connect ${v.name}`} small id={`mc-connect-${v.id}`} guard={perm} onClick={act.connect} /> : null}
+      <Btn label="Add model" small icon="plus" id={`mc-addmodel-${v.id}`} guard={perm} onClick={act.addModel} />
+      {act.canDiscover ? <Btn label="Discover models" small icon="refresh" id={`mc-discover-${v.id}`} guard={perm} onClick={act.discover} /> : null}
+    </div>
+  );
+}
 
 export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; routing: Routing; agents: Agent[] }) {
   const setEnabled = useModelSwitch();
@@ -86,22 +115,27 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
     : m.enabled && usedBy(agents, m.id).some((a) => a.model === m.id) ? "Primary model of an agent. Change that agent first." : null;
   const setPrice = (m: Row): void => { ui.open((close) => <SetPriceDialog m={m} close={close} />); };
   const cols: SortCol<Row>[] = [
-    { key: "name", label: "Model", sort: (m) => m.name.toLowerCase(), render: (m) => { const l = lockFor(m) ?? (inUse(m) ? no(inUse(m)!) : null); return <span className="md-name"><b className="ell">{m.name}</b><span className="mono dim ell" style={{ fontSize: 11 }} title={l && perm.allowed ? reasonText(l) : undefined}>{m.id}</span></span>; } },
+    { key: "name", label: "Model", width: "22%", sort: (m) => m.name.toLowerCase(), render: (m) => { const l = lockFor(m) ?? (inUse(m) ? no(inUse(m)!) : null); return <span className="md-name"><b className="ell">{m.name}</b><span className="mono dim ell" style={{ fontSize: 11 }} title={l && perm.allowed ? reasonText(l) : undefined}>{m.id}</span></span>; } },
     ...(grouped ? [] : [{ key: "vendor", label: "Vendor", sort: (m: Row) => m.vendor.name.toLowerCase(), render: (m: Row) => <span className="ell">{m.vendor.name}</span> }]),
-    { key: "tier", label: "Tier", sort: true, render: (m) => <Chip text={m.tier} cls={`${tierTone(m.tier)} plain`} /> },
-    { key: "context", label: "Context", sort: true, align: "end", render: (m) => <span className="mono">{fmt.k(m.context)}</span> },
-    { key: "price", label: "In / out per Mtok", sort: (m) => (unpriced(m) ? -1 : m.outPrice), align: "end", render: (m) => unpriced(m)
+    { key: "tier", label: "Tier", width: "6.5rem", sort: true, render: (m) => <Chip text={m.tier} cls={`${tierTone(m.tier)} plain`} /> },
+    { key: "context", label: "Context", width: "6rem", sort: true, align: "end", render: (m) => <span className="mono">{fmt.k(m.context)}</span> },
+    { key: "price", label: "In / out per Mtok", mobileLabel: "Price", width: "13.5rem", sort: (m) => (unpriced(m) ? -1 : m.outPrice), align: "end", render: (m) => unpriced(m)
       ? <span className="md-needs"><span className="warn-text small">Needs a price</span><Btn label="Set price" small id={`mc-price-${m.id}`} guard={perm} aria={`Set price for ${m.name}`} onClick={() => setPrice(m)} /></span>
-      : <span className="mono">{m.inPrice || m.outPrice ? `$${m.inPrice} / $${m.outPrice}` : "Self-hosted, no per-token price"}</span> },
-    { key: "use", label: "Used by", render: (m) => m.used.length ? <span className="md-used" title={m.used.join(", ")}>{m.used.slice(0, 3).map((s) => <span key={s} className="tag">{s}</span>)}{m.used.length > 3 ? <span className="dim small">+{m.used.length - 3}</span> : null}</span> : <span className="dim">Not used yet</span> },
-    { key: "en", label: "Enabled", render: (m) => <Toggle id={`mc-${m.id}`} checked={m.enabled} label={`Enable ${m.name}`} decision={lockFor(m)} onChange={(on) => { const why = inUse(m); if (why) { ui.toast(why, "warn"); return; } setEnabled(m.id, on); }} /> },
+      : <span className="mono" title={m.inPrice || m.outPrice ? undefined : "No per-token price"}>{m.inPrice || m.outPrice ? `$${m.inPrice} / $${m.outPrice}` : "Self-hosted"}</span> },
+    { key: "use", label: "Used by", render: (m) => m.used.length ? (
+      <span className="md-used">
+        <span className="md-used-t ell" title={m.used.map((u) => [u.title, ...u.items].join(": ")).join(" · ")}>{m.used.map((u) => usageText(u)).join(" \u00b7 ")}</span>
+        {usageCount(m.used) > 1 ? <Btn label={`All ${usageCount(m.used)}`} small kind="ghost" id={`mc-used-${m.id}`} aria={`Show everywhere ${m.name} is used`} onClick={() => ui.open((close) => <UsedDialog m={m} close={close} />)} /> : null}
+      </span>
+    ) : <span className="dim">Not used yet</span> },
+    { key: "en", label: "Enabled", width: "6.5rem", render: (m) => <Toggle id={`mc-${m.id}`} checked={m.enabled} label={`Enable ${m.name}`} decision={lockFor(m)} onChange={(on) => { const why = inUse(m); if (why) { ui.toast(why, "warn"); return; } setEnabled(m.id, on); }} /> },
   ];
   const any = !!(r.q || r.tier || r.vendor || r.en || r.price);
   const clear = (): void => { setQText(""); setR({ q: "", tier: "", vendor: "", en: "", price: "" }); };
   const sortProps = { sort: { key: r.sort, dir: (r.dir === "desc" ? -1 : 1) as 1 | -1 }, onSort: (x: { key: string; dir: 1 | -1 }) => setR({ sort: x.key, dir: x.dir === -1 ? "desc" : "asc" }) };
   const empty = { title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="mc-empty-clear" onClick={clear} /> };
   const toggleFold = (id: string): void => { const s = new Set(folded); if (s.has(id)) s.delete(id); else s.add(id); setR({ fold: [...s].join(",") }); };
-  const groups = vendors.map((v) => ({ v, rows: rows.filter((m) => m.vendor.id === v.id) })).filter((g) => g.rows.length || (!any && g.v.models.length === 0));
+  const groups = vendors.map((v) => ({ v, rows: rows.filter((m) => m.vendor.id === v.id) })).filter((g) => g.rows.length || (!(r.q || r.tier || r.en || r.price) && (!r.vendor || r.vendor === g.v.id) && g.v.models.length === 0));
   const addVendor = (): void => { ui.open((close) => <AddVendorDialog close={close} onAdded={(id) => { navigate("models", "vendors"); setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 60); }} />); };
   return (
     <div className="md-catalog">
@@ -114,18 +148,19 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
         <Select id="mc-price-filter" aria-label="Price" value={r.price} onChange={(v) => setR({ price: v })} options={[{ value: "", label: "Price: any" }, { value: "needs", label: "Needs a price" }]} />
         <Select id="mc-group" aria-label="Group by" value={r.group} onChange={(v) => setR({ group: v })} options={[{ value: "vendor", label: "Group: vendor" }, { value: "none", label: "No grouping" }]} />
       </FilterBar>
-      {grouped && rows.length ? (
+      {grouped && groups.length ? (
         <div id="mc-table" className="md-groups">
           {groups.map(({ v, rows: gr }) => {
             const open = !folded.has(v.id);
-            const on = gr.filter((m) => m.enabled).length;
+            const on = enabledCount(v);
             return (
               <section key={v.id} className="md-grp" id={`mc-group-${v.id}`} aria-label={`${v.name} models`}>
                 <Btn kind="ghost" cls="md-grp-head" id={`mc-fold-${v.id}`} aria-expanded={open} onClick={() => toggleFold(v.id)}>
                   <Icon name="chevron" /><b>{v.name}</b>
-                  <span className="small muted">{gr.length ? `${gr.length} ${gr.length === 1 ? "model" : "models"}, ${on} enabled` : "No models yet"}</span>
+                  <span className="small muted">{gr.length ? `${gr.length === v.models.length ? `${gr.length}` : `${gr.length} of ${v.models.length}`} ${v.models.length === 1 ? "model" : "models"}, ${on} enabled${v.connected ? "" : ", not connected"}` : "No models yet"}</span>
                 </Btn>
                 {open && gr.length ? <DataTable id={`mc-table-${v.id}`} caption={`${v.name} models`} columns={cols} rows={gr} rowKey={(m) => m.id} {...sortProps} /> : null}
+                {open && !gr.length ? <EmptyGroup v={v} vendors={vendors} routing={routing} agents={agents} /> : null}
               </section>
             );
           })}

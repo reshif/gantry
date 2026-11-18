@@ -131,7 +131,7 @@ describe("Models screen (legacy models.js on the real API)", () => {
     expect(document.querySelector(".md-incident")?.textContent).toContain("Amazon Bedrock is degraded (last check 1460 ms)");
     expect(document.querySelector(".ph .sub")!.textContent).toBe("Which models agents may use, what they cost and where they are used.");
     expect(document.getElementById("md-discover")).toBeNull();
-    expect(document.getElementById("md-back")).toBeTruthy();
+    expect(document.getElementById("md-tab-models")).toBeTruthy();
     expect(document.getElementById("vendor-test-anthropic")).toBeNull();
   });
 
@@ -586,7 +586,7 @@ describe("models catalog in the prototype layout", () => {
     setup();
     mount();
     await byId("mc-table");
-    expect([...document.querySelectorAll("#md-stats .label")].map((x) => x.textContent)).toEqual(["Enabled", "Needs a price", "Spend, 30 days", "Fallbacks fired"]);
+    expect([...document.querySelectorAll("#md-stats .label")].map((x) => x.textContent)).toEqual(["Enabled", "Needs a price", "Spend this month", "Vendors connected"]);
     expect([...document.querySelectorAll("#mc-table-anthropic thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193\u2195]/g, "").trim())).toEqual(["Model", "Tier", "Context", "In / out per Mtok", "Used by", "Enabled"]);
     expect(document.getElementById("md-discover")).toBeTruthy();
   });
@@ -613,12 +613,12 @@ describe("models screen has no tab strip (prototype)", () => {
     window.location.hash = "#models";
     mount();
     await byId("mc-table");
-    expect(document.getElementById("md-tab-models")).toBeNull();
+    expect(document.getElementById("md-tab-models")!.getAttribute("aria-selected")).toBe("true");
     expect(document.getElementById("mc-vendors")).toBeNull();
     fireEvent.click(await byId("md-add-vendor"));
     expect(await screen.findByRole("dialog")).toBeTruthy();
     cleanup();
-    for (const [btn, sub] of [["md-go-vendors", "vendors"], ["md-go-routing", "routing"], ["md-go-prices", "prices"]] as const) {
+    for (const [btn, sub] of [["md-tab-vendors", "vendors"], ["md-tab-routing", "routing"], ["md-tab-prices", "prices"]] as const) {
       window.location.hash = "#models";
       mount();
       fireEvent.click(await byId(btn));
@@ -639,15 +639,16 @@ describe("models screen has no tab strip (prototype)", () => {
 
 describe("work1 residual round 2: models", () => {
   beforeEach(() => { window.location.hash = "#models"; });
-  it("the header carries Discover models and a primary Add vendor; Vendors, Routing, Prices and Add vendor sit in a quiet row below the tiles", async () => {
+  it("the header carries only Discover models; Add vendor is the one dashed card; Vendors, Routing and Prices are a tab strip", async () => {
     setup();
     mount();
     await byId("mc-table");
     const head = document.querySelector(".ph")!;
-    expect([...head.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Discover models", "Add vendor"]);
-    expect(head.querySelector("#md-add-vendor")!.className).toContain("primary");
+    expect([...head.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Discover models"]);
+    expect(document.querySelectorAll("#md-add-vendor")).toHaveLength(1);
+    expect(document.getElementById("md-add-vendor")!.closest(".md-vcs")).toBeTruthy();
     const manage = await byId("md-manage");
-    expect([...manage.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Vendors", "Routing", "Prices", "Add vendor"]);
+    expect([...manage.querySelectorAll("[role=tab]")].map((b) => b.textContent!.trim())).toEqual(["Models", "Vendors", "Routing", "Prices"]);
   });
   it("lists tiers frontier, standard, fast in the filter and in the add-model dialog", async () => {
     setup();
@@ -678,11 +679,12 @@ describe("models page: vendor cards and one grouped table", () => {
     expect(a.textContent).toContain("$34.83");
     expect(a.textContent).not.toContain("/ $0");
     expect(a.querySelector('[role="progressbar"], .meter')).toBeNull();
-    expect(a.textContent).toContain("2/3 models enabled");
+    expect(a.textContent).toContain("2/3 enabled");
     expect(a.textContent).toContain("Last check 820 ms");
     const b = await card("bedrock");
     expect(b.textContent).toContain("Bedrock runtime");
-    expect(b.textContent).toContain("of $3,000 this month");
+    expect(b.textContent).toContain("of $3,000");
+    expect(b.querySelector(".meter, [role=\"meter\"], [role=\"progressbar\"]")).toBeTruthy();
   });
   it("an unpriced model says Needs a price with Set price, never $0 / $0", async () => {
     const vendors = VENDORS.map((v) => v.id === "anthropic" ? { ...v, models: v.models.map((m) => m.id === "claude-haiku-5-5" ? { ...m, inPrice: 0, outPrice: 0 } : m) } : v);
@@ -741,13 +743,13 @@ describe("models page: vendor cards and one grouped table", () => {
     await byId("mc-table");
     const opus = document.getElementById("mc-claude-opus-5-5")!.closest("tr")!;
     expect(opus.textContent).toContain("Factory default");
-    expect(document.getElementById("mc-claude-haiku-5-5")!.closest("tr")!.textContent).toContain("Station intake");
+    expect(document.getElementById("mc-claude-haiku-5-5")!.closest("tr")!.textContent).toContain("Stations: intake");
     expect(document.getElementById("mc-bedrock-claude-sonnet-5-5")!.closest("tr")!.textContent).toContain("Not used yet");
   });
   it("the Add vendor card opens the template picker", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("md-add-vendor-card"));
+    fireEvent.click(await byId("md-add-vendor"));
     expect(await screen.findByRole("dialog")).toBeTruthy();
   });
   it("every Models action stays reachable from the vendor card menu", async () => {
@@ -781,5 +783,62 @@ describe("models page: vendor cards and one grouped table", () => {
     mount();
     expect(await byId("vendor-addmodel-anthropic")).toBeTruthy();
     expect(document.getElementById("md-rm-claude-haiku-5-5")).toBeTruthy();
+  });
+  it("a vendor that is not connected shows Not connected and its budget only, no meter, no percentage", async () => {
+    const vendors = VENDORS.map((v) => v.id === "local" ? { ...v, budget: 1000 } : v);
+    setup({ "GET /api/v1/vendors": () => ({ body: vendors }) });
+    mount();
+    const c = await card("local");
+    expect(c.textContent).toContain("Not connected");
+    expect(c.textContent).toContain("$1,000");
+    expect(c.textContent).not.toContain("% ");
+    expect(c.textContent).not.toMatch(/\d+% of budget/);
+    expect(c.querySelector('.meter, [role="meter"], [role="progressbar"]')).toBeNull();
+  });
+  it("the card count and the table group agree, and an empty vendor offers Add model and Discover in its group", async () => {
+    const vendors = VENDORS.map((v) => v.id === "mistral-eu" ? { ...v, models: [] } : v);
+    setup({ "GET /api/v1/vendors": () => ({ body: vendors }) });
+    mount();
+    await byId("mc-table");
+    const c = await card("mistral-eu");
+    expect(c.textContent).toContain("None yet");
+    const g = await byId("mc-group-mistral-eu");
+    expect(g.textContent).toContain("No models yet");
+    expect(g.querySelector("#mc-addmodel-mistral-eu")).toBeTruthy();
+    expect(g.querySelector("#mc-discover-mistral-eu")).toBeTruthy();
+    fireEvent.click(g.querySelector("#mc-addmodel-mistral-eu")!);
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    const a = await card("anthropic");
+    const ga = await byId("mc-group-anthropic");
+    expect(a.textContent).toContain("2/3 enabled");
+    expect(ga.textContent).toContain("3 models, 2 enabled");
+  });
+  it("vendor groups share one set of column widths so Tier, Context and Price line up", async () => {
+    setup();
+    mount();
+    await byId("mc-table");
+    const w = (id: string) => [...document.querySelectorAll(`#${id} thead th`)].map((h) => (h as HTMLElement).style.width);
+    expect(w("mc-table-anthropic")).toEqual(w("mc-table-bedrock"));
+    expect(w("mc-table-anthropic").filter(Boolean).length).toBeGreaterThan(3);
+  });
+  it("Add vendor is offered once on the models tab, and Vendors, Routing and Prices are real tabs", async () => {
+    setup();
+    mount();
+    await byId("mc-table");
+    expect([...document.querySelectorAll("button")].filter((b) => b.textContent!.trim() === "Add vendor")).toHaveLength(0);
+    expect(document.querySelectorAll("#md-add-vendor")).toHaveLength(1);
+    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(4);
+  });
+  it("a model used in several places lists them by kind and has a button for the rest", async () => {
+    const routing = { ...ROUTING, overrides: { intake: "claude-haiku-5-5", plan: "claude-haiku-5-5", spec: "claude-haiku-5-5" }, classOverrides: { docs: "claude-haiku-5-5" } };
+    setup({ "GET /api/v1/routing": () => ({ body: routing }) });
+    mount();
+    await byId("mc-table");
+    const row = document.getElementById("mc-claude-haiku-5-5")!.closest("tr")!;
+    expect(row.textContent).toContain("Stations: intake, plan +1");
+    fireEvent.click(row.querySelector("#mc-used-claude-haiku-5-5")!);
+    const d = await screen.findByRole("dialog");
+    expect(d.textContent).toContain("spec");
+    expect(d.textContent).toContain("docs");
   });
 });
