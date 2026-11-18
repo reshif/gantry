@@ -7,7 +7,9 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
-import { useCan } from "../api/can";
+import { useCan, useCanMany } from "../api/can";
+import { makeStopActions } from "../shell/stopActions";
+import { useUI } from "../ui/overlay-context";
 import { useMe } from "../api/queries";
 import { Btn, Empty, Panel, ViewHead, type Decision } from "../ui/primitives";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
@@ -70,6 +72,35 @@ function useFacts(): string {
   return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)})${ctx.replay ? ", live figure" : ""}`;
 }
 
+/** Line control in the Floor header: halt or resume this project's line, and the factory emergency stop (each asks for step-up in its dialog). */
+function LineControl() {
+  const ctx = useFloorCtx();
+  const me = useMe();
+  const ui = useUI();
+  const p = ctx.project;
+  const killed = !!me?.factory.killed;
+  const halted = !!me?.projects.find((x) => x.id === p.id)?.halted;
+  const checks = useCanMany([{ action: halted ? "line.resume" : "line.halt", project: p.id }, { action: killed ? "restore.factory" : "kill.factory" }]);
+  if (!me) return null;
+  const stop = makeStopActions(ui, me);
+  const guardOf = (i: number) => (ctx.replay ? REPLAY_LOCK : checks[i]?.pending ? undefined : checks[i]);
+  return (
+    <Btn
+      label="Line control"
+      icon="pause"
+      id="floor-line-control"
+      aria-haspopup="menu"
+      onClick={(e) =>
+        ui.menu(e.currentTarget as HTMLElement, null, [
+          { head: "Line control" },
+          { label: halted ? "Resume line" : "Halt line", icon: halted ? "right" : "pause", guard: guardOf(0), onClick: () => (halted ? void stop.resume(p.id) : stop.halt(p.id)) },
+          { label: killed ? "Restore factory" : "Emergency stop", icon: "stop", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
+        ])
+      }
+    />
+  );
+}
+
 function Header({ view, onView }: { view: string; onView: (v: string | null) => void }) {
   const ctx = useFloorCtx();
   const me = useMe();
@@ -92,6 +123,7 @@ function Header({ view, onView }: { view: string; onView: (v: string | null) => 
                 <Btn key={v} label={v === "belt" ? "Belt" : "Board"} id={`floor-view-${v}`} aria-pressed={view === v} onClick={() => onView(v === "board" ? "board" : null)} />
               ))}
             </div>
+            <LineControl />
             <Btn label="Submit work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
           </>
         }

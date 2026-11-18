@@ -100,6 +100,6 @@ describe("Design system scopes and account menu", () => {
     const { readFileSync } = await import("node:fs");
     const top = readFileSync("src/shell/TopBar.tsx", "utf8");
     expect(top).toContain('label: "My account"');
-    expect(top).toContain('navigate("person", v.id)');
+    expect(top).toContain('navigate("account")');
   });
 });

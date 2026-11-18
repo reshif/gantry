@@ -7,6 +7,7 @@ import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
+import { clearGovernQS } from "../views/govern/kit";
 import { formatHash, hashQuery, navigate, replaceHash, useHash } from "../lib/router";
 import { setProject, usePrefs } from "../lib/prefs";
 import { Btn, Empty, Panel, ViewHead } from "../ui/primitives";
@@ -78,6 +79,11 @@ export function Shell({ me }: { me: Me }) {
     m.focus({ preventScroll: true });
     setNavOpen(false);
   }, [routeId, loc.param]);
+
+  // the Access and People screens keep `acc.*` / `ppl.*` in the real query string: leaving them drops those keys, so another screen never inherits a tab
+  useEffect(() => {
+    clearGovernQS(routeId);
+  }, [routeId]);
 
   useEffect(() => {
     document.title = unknown ? `${loc.id} · Gantry Blueprint` : `${denied?.title ?? def?.title ?? "Home"} · Gantry Blueprint`;

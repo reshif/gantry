@@ -238,7 +238,7 @@ describe("Floor: prototype drawers and links", () => {
     expect(screen.queryByText("Journey")).toBeNull();
   });
 
-  it("keeps the header to Belt/Board and Submit (no Line control menu), and reads ?view=board from the hash", async () => {
+  it("keeps the header to Belt/Board, Line control and Submit, and reads ?view=board from the hash", async () => {
     mockApi();
     window.location.hash = "#/p/payments/floor?view=board";
     mount(<FloorView />);
@@ -248,6 +248,15 @@ describe("Floor: prototype drawers and links", () => {
     expect(document.getElementById("floor-line")).toBeNull();
     expect(screen.queryByRole("button", { name: "Replay" })).toBeNull();
     window.location.hash = "";
+  });
+
+  it("Line control in the header opens the halt and emergency stop entries", async () => {
+    mockApi();
+    mount(<FloorView />);
+    fireEvent.click(await screen.findByRole("button", { name: /Line control/ }));
+    expect(await screen.findByRole("menuitem", { name: /Halt line/ })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Emergency stop/ }));
+    expect(await screen.findByText("Emergency stop the factory")).toBeTruthy();
   });
 
   it("keeps the view in the URL only: Board does not survive a remount without ?view=board", async () => {

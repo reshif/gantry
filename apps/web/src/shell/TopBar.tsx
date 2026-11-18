@@ -11,7 +11,7 @@ import { ProjectSwitcher } from "./ProjectSwitcher";
 import { StatusCluster } from "./StatusCluster";
 import { openNotifications, useUnread } from "./NotificationsDrawer";
 import { navigate } from "../lib/router";
-import { useCan, useCanMany } from "../api/can";
+import { useCanMany } from "../api/can";
 
 const PERSONAS: Record<string, string> = { admin: "Factory admin", approver: "Approver", viewer: "Read-only viewer" };
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform || "");
@@ -24,7 +24,6 @@ export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me:
   const waiting = (home?.approvals.length ?? 0) + (home?.conversations.length ?? 0);
   const unread = useUnread(waiting);
   const v = me.person;
-  const people = useCan("people.view");
   // Which sheet the server gives this session: the same three the prototype lists under "View as".
   // the session's own decisions (not the preview): they decide which sheets it may preview
   const ownChecks = useCanMany([{ action: "kill.factory" }, { action: "wo.submit" }, { action: "line.halt" }], { raw: true });
@@ -65,8 +64,8 @@ export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me:
     }));
     ui.menu(userRef.current, null, [
       { head: prefs.viewAs ? `${v.name} · viewing as ${PERSONAS[prefs.viewAs]}` : `${v.name} · ${v.email}` },
-      // own person page (the prototype's target); a session without the people read right keeps the Account page
-      { label: "My account", icon: "user", onClick: () => (people.allowed ? navigate("person", v.id) : navigate("account")) },
+      // the Account page (profile, access, sessions, preferences, linked accounts); its Profile tab links on to the person page
+      { label: "My account", icon: "user", onClick: () => navigate("account") },
       { sep: true },
       { head: "View as" },
       ...viewAs,
