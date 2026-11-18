@@ -120,13 +120,19 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   };
   return (
     <Dialog
-      title="New work order"
+      title="Submit a work order"
       kicker="Intake · S0"
       wide
       onClose={onClose}
       sub="It starts at S0 Intake. The Intake agent classifies it, proposes a route and opens a conversation to complete the brief."
       body={
         <div className="form-grid">
+          <Field label="Title" htmlFor="nwo-title" hint="A short, specific request.">
+            <input id="nwo-title" className="input" value={title} placeholder="Add idempotency keys to refund endpoint" autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
+          </Field>
+          <Field label="What should change and why" htmlFor="nwo-desc" hint="Acceptance criteria help the Spec agent.">
+            <textarea id="nwo-desc" className="input" rows={4} placeholder="What should change, and how will we know it is done?" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          </Field>
           <div className="form-row">
             <Field label="Project" htmlFor="nwo-project">
               <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
@@ -154,17 +160,11 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
               </div>
             ) : null}
           </div>
-          <Field label="Title" htmlFor="nwo-title">
-            <input id="nwo-title" className="input" value={title} placeholder="Add idempotency keys to refund endpoint" autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
-          </Field>
-          <Field label="Description" htmlFor="nwo-desc" hint="Acceptance criteria help the Spec agent.">
-            <textarea id="nwo-desc" className="input" rows={4} placeholder="What should change, and how will we know it is done?" value={desc} onChange={(e) => setDesc(e.target.value)} />
-          </Field>
           <Field label="Attachment names" htmlFor="nwo-att" hint="Names only; files are not uploaded here.">
             <input id="nwo-att" className="input" placeholder="trace.log, screenshot.png" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
           </Field>
           <div className="form-row">
-            <Field label="Requested class" htmlFor="nwo-cls" hint="The classifier may disagree; overrides are audited.">
+            <Field label="Class" htmlFor="nwo-cls" hint="The classifier may disagree; overrides are audited.">
               <Select id="nwo-cls" options={[{ value: "", label: "Let the Intake agent decide" }, ...classes.map((c) => ({ value: c.id, label: c.name }))]} value={cls} onChange={setCls} />
             </Field>
             <Field label="Priority" htmlFor="nwo-prio">

@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -55,6 +55,10 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   loadingMore?: boolean;
   /** Total on the server, for the "Showing x of y" line. */
   total?: number;
+  /** Numbered paging (prototype footer "1–15 of 77", Prev / Next, "Page 1 / 6"); `page` is 0-based and is the caller's (a URL) state. Replaces "Show more". Optional, additive. */
+  pager?: { page: number; size: number; onPage: (page: number) => void };
+  /** "blueprint": sort arrows ▲ / ▼ and a quiet ↕ hint on sortable headers that are not sorted. Optional, additive. */
+  glyphs?: "blueprint";
 }) {
   const uid = useId().replace(/:/g, "");
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
@@ -100,7 +104,9 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
   if (cur && col) list.sort((a, b) => { const x = val(col, a); const y = val(col, b); return (x > y ? 1 : x < y ? -1 : 0) * cur.dir; });
-  const visible = shown ? list.slice(0, shown) : list;
+  const pages = pager ? Math.max(1, Math.ceil(list.length / pager.size)) : 1;
+  const pageAt = pager ? Math.min(Math.max(pager.page, 0), pages - 1) : 0;
+  const visible = pager ? list.slice(pageAt * pager.size, (pageAt + 1) * pager.size) : shown ? list.slice(0, shown) : list;
   const pick = (key: string, dir?: 1 | -1): void => {
     const active = cur?.key === key;
     const next: SortState = { key, dir: dir ?? (active ? (cur!.dir === 1 ? -1 : 1) : 1) };
@@ -134,7 +140,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{glyphs === "blueprint" ? (active ? (cur!.dir > 0 ? " ▲" : " ▼") : <span className="sorthint"> ↕</span>) : active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
                       </button>
                     ) : c.label}
                   </th>
@@ -174,7 +180,18 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </tbody>
         </table>
       </div>
-      {clientMore || hasMore ? (
+      {pager ? (
+        <div className="tfoot dtable-more">
+          <span className="dtable-count" role="status">{`${pageAt * pager.size + 1}–${pageAt * pager.size + visible.length} of ${list.length}`}</span>
+          {pages > 1 ? (
+            <div className="row">
+              <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-prev`} disabled={pageAt === 0} onClick={() => pager.onPage(pageAt - 1)}>Prev</button>
+              <span>{`Page ${pageAt + 1} / ${pages}`}</span>
+              <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-next`} disabled={pageAt >= pages - 1} onClick={() => pager.onPage(pageAt + 1)}>Next</button>
+            </div>
+          ) : null}
+        </div>
+      ) : clientMore || hasMore ? (
         <div className="tfoot dtable-more">
           <span className="dtable-count" role="status">{total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>
           {clientMore ? (

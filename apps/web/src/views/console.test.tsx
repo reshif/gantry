@@ -107,11 +107,10 @@ describe("Console (legacy console.js on the real API)", () => {
       await waitFor(() => expect(badge.textContent).toBe("No model"));
       expect(badge.className).toContain("ask-absent");
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("No model is configured");
-      expect(text()).toContain("slash commands read live data directly");
       expect(text()).not.toContain("is answered by");
     });
 
-    it("a question gets the clear notice, not an answer", async () => {
+    it("a question is answered at once from live state, or with what can be asked, never by a model that is not there", async () => {
       const calls = setup({
         "GET /api/v1/console/status": () => ({ body: NO_MODEL }),
         "POST /api/v1/console/messages": () => ({ sse: sse(["thread", { threadId: "ct-1", messageId: "cm-1", created: true }], ["unavailable", { code: "no_model_configured", msg: NO_MODEL.reason, messageId: "cm-2" }], ["done", { messageId: "cm-2", text: NO_MODEL.reason, mode: "none", cited: [], proposals: [] }]) }),
@@ -119,13 +118,13 @@ describe("Console (legacy console.js on the real API)", () => {
       });
       mount();
       await ask("What is waiting on me?");
-      await waitFor(() => expect(document.querySelectorAll(".msg-mode.is-none").length).toBe(1));
-      expect(document.querySelector(".msg-mode.is-none")!.textContent).toBe("No model configured");
-      expect(text()).toContain("Ask a Factory Admin to connect a model vendor");
-      const post = calls.find((c) => c.path === "/api/v1/console/messages")!;
-      expect(post.body).toEqual({ text: "What is waiting on me?", via: "console", project: "payments" });
-      expect(post.headers["idempotency-key"]).toBeTruthy();
-      expect(post.headers["x-csrf-token"]).toBe("c");
+      // with no model the page answers at once from live state and calls nothing
+      await waitFor(() => expect(text()).toContain("Nothing is waiting on a person."));
+      await ask("tell me a joke");
+      await waitFor(() => expect(text()).toContain("I can answer questions about work orders"));
+      await ask("status of WO-9999");
+      await waitFor(() => expect(text()).toContain("I cannot find WO-9999."));
+      expect(calls.some((c) => c.path === "/api/v1/console/messages")).toBe(false);
     });
   });
 
@@ -499,10 +498,10 @@ describe("Console model picker", () => {
     mount();
     await byId("con-bar");
     expect(document.querySelector(".vhead .ask-badge")).toBeTruthy();
-    for (const id of ["con-threads", "con-new", "con-clear"]) expect(document.getElementById(id)).toBeTruthy();
-    await waitFor(() => expect([...document.querySelectorAll(".ctx .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
+    for (const id of ["con-new", "con-clear"]) expect(document.getElementById(id)).toBeTruthy();
+    await waitFor(() => expect([...document.querySelectorAll(".con-more .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
     expect(document.getElementById("con-open-audit")).toBeTruthy();
-    expect([...document.querySelectorAll(".ctx .panel-title")][1]!.textContent).toMatch(/^What .* can do/);
+    expect([...document.querySelectorAll(".con-more .panel-title")][0]!.textContent).toMatch(/^What .* can do/);
   });
 
   it("the status line sits below the header rule: no negative margin pulls it into the heading", () => {
@@ -630,5 +629,25 @@ describe("Console chats", () => {
     fireEvent.change(name, { target: { value: "Release notes Nov" } });
     fireEvent.click(await byId("con-chat-rename-ok"));
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ title: "Release notes Nov" }));
+  });
+});
+
+describe("Console page layout (prototype)", () => {
+  it("has the four suggested questions, a one-line Console message input, and Conversation and Pinned work orders panels in 2fr / 1fr", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
+    mount();
+    const input = (await byId("con-input")) as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
+    expect(input.getAttribute("aria-label")).toBe("Console message");
+    const chips = [...document.querySelectorAll("#con-chips .chipbtn")].map((c) => c.textContent);
+    expect(chips).toContain("What is blocked?");
+    expect(chips).toContain("What waits on a person?");
+    expect(chips).toContain("Spend this month");
+    expect(document.querySelector(".cols.w21")).toBeTruthy();
+    expect([...document.querySelectorAll(".panel-title")].map((h) => h.textContent)).toEqual(expect.arrayContaining(["Conversation", "Pinned work orders"]));
+    expect(document.getElementById("con-pins")?.textContent).toContain("Nothing pinned.");
+    fireEvent.click(document.querySelector("#con-chips .chipbtn") as HTMLElement);
+    await waitFor(() => expect(document.querySelector(".msg.me .bub .who")).toBeTruthy());
+    expect(document.querySelector(".msg:not(.me) .who")?.textContent).toBe("Factory");
   });
 });

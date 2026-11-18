@@ -64,15 +64,16 @@ describe("Conversations list", () => {
     expect(screen.queryByText("Nothing waits on you")).toBeNull();
   });
 
-  it("lists work-order sessions with who waits on whom and the latest message; it has no forms; a row opens that work order's session", async () => {
+  it("lists the threads (WO-id · title, last message, an asks chip) linking to conversations/<id>, with the picked one in a second panel and Open record", async () => {
     showList([row(), row({ id: "WO-9", title: "Other", waitingOn: "agent", unread: false, latest: null, started: false })]);
-    expect(await screen.findByText("Waiting on you")).toBeTruthy();
+    expect(await screen.findByText("asks")).toBeTruthy();
     expect(screen.getByText(/Which endpoint is this for\?/)).toBeTruthy();
-    expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
-    expect(screen.queryAllByRole("textbox")).toHaveLength(0);
-    expect(document.querySelectorAll("textarea, form, input").length).toBe(0);
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(W.id) }));
-    await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/conversations/${W.id}`));
+    const link = screen.getByRole("link", { name: new RegExp(`${W.id} · `) });
+    expect(link.getAttribute("href")).toBe(`#/p/payments/conversations/${W.id}`);
+    expect(screen.queryByRole("link", { name: /WO-9/ })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Open record" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open record" }));
+    await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/record/${W.id}`));
   });
 
   it("an older deep link (the openConversation preference) lands on the session", async () => {
@@ -86,14 +87,14 @@ describe("Work-order session", () => {
   it("makes it obvious the dialogue is open: the agent waits for you, the composer is always there, a suggested answer is one click", async () => {
     const calls = await showSession(session(), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
     expect(await screen.findByText("Intake Clerk is waiting for you")).toBeTruthy();
-    expect(screen.getByLabelText("Message to Intake Clerk")).toBeTruthy();
+    expect(screen.getByLabelText("Reply")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Traveler" })).toBeTruthy();
     expect(screen.getByRole("list", { name: "The belt" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "POST /refunds" }));
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
     expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)[0]!.body).toMatchObject({ kind: "message", text: "POST /refunds" });
     // Free text on Enter.
-    const box = screen.getByLabelText("Message to Intake Clerk");
+    const box = screen.getByLabelText("Reply");
     fireEvent.change(box, { target: { value: "gimme a brief" } });
     fireEvent.keyDown(box, { key: "Enter" });
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(2));
@@ -109,12 +110,12 @@ describe("Work-order session", () => {
       },
     );
     expect(await screen.findByText(/Lena Okafor cannot open this project yet\. Mentioning them did not give them access/)).toBeTruthy();
-    const box = screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement;
+    const box = screen.getByLabelText("Reply") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "hey @Len", selectionStart: 8 } });
     const list = await screen.findByRole("listbox", { name: "People to mention" });
     expect(list.textContent).toMatch(/cannot open this project yet/);
     fireEvent.keyDown(box, { key: "Enter" });
-    await waitFor(() => expect((screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement).value).toBe("hey @Lena Okafor "));
+    await waitFor(() => expect((screen.getByLabelText("Reply") as HTMLTextAreaElement).value).toBe("hey @Lena Okafor "));
     expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(0);
     fireEvent.change(box, { target: { value: "hey @Lena Okafor can you check?" } });
     fireEvent.keyDown(box, { key: "Enter" });
@@ -154,7 +155,7 @@ describe("Work-order session", () => {
     expect(screen.getByText("What is in scope?")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Only the API" }));
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
-    expect((screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement).disabled).toBe(false);
+    expect((screen.getByLabelText("Reply") as HTMLTextAreaElement).disabled).toBe(false);
   });
 
   it("the agent starts the dialogue by itself when the session has none yet", async () => {
@@ -385,5 +386,15 @@ describe("Scouts and objections", () => {
     fireEvent.change(document.getElementById("ob-O-AT9-1-note")!, { target: { value: "The docs are explicit." } });
     fireEvent.click(up);
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/objections/${ob.id}`)[0]?.body).toEqual({ decision: "upheld", note: "The docs are explicit." }));
+  });
+});
+
+describe("Conversation panel composer", () => {
+  it("Send with nothing written says so and keeps the focus in the Reply box", async () => {
+    await showSession(session());
+    const box = await screen.findByLabelText("Reply");
+    expect((box as HTMLTextAreaElement).placeholder).toBe("Reply to the agent…");
+    fireEvent.click(document.getElementById("wos-send") as HTMLElement);
+    expect(await screen.findByText("Write a message first")).toBeTruthy();
   });
 });

@@ -9,11 +9,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { useCanMany } from "../api/can";
-import { useAudit, useMe, useProjects, useWorkOrders } from "../api/queries";
+import { useAudit, useHome, useMe, useProjects, useWorkOrders } from "../api/queries";
 import { setProject, usePrefs } from "../lib/prefs";
-import { navigate } from "../lib/router";
+import { hashFor, navigate } from "../lib/router";
 import { Icon } from "../ui/Icon";
-import { Avatar, Btn, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
+import { Avatar, Btn, Empty, Field, IconBtn, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { useOpenTraveler } from "../shell/useTraveler";
@@ -25,6 +25,8 @@ import { ProposalCard } from "./console/Confirm";
 import { Markdown } from "./console/Markdown";
 import { ModelPicker } from "./console/ModelPicker";
 import { plan as planSlash, SLASH } from "./console/slash";
+import { helpText, isInFlight, liveAnswer, type LiveCtx, type LiveWo } from "./console/live";
+import { useCatalog } from "./projects/kit";
 import type { Card, Cited, Msg, Proposal, ThreadMessage } from "./console/types";
 
 let seq = 1;
@@ -101,7 +103,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const [draft, setDraft] = useState("");
   const [slashIdx, setSlashIdx] = useState(0);
   const ac = useRef<AbortController | null>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
 
   const setLocal = useCallback((f: (x: Msg[]) => Msg[]) => setLocalState((x) => { const n = f(x); localCache.set(meId, n); return n; }), [meId]);
@@ -121,9 +123,21 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const roles = useMemo(() => (me?.person.roles ?? []).filter((g) => g.scope === "factory" || g.scope === cur?.id).map((g) => g.role), [me, cur?.id]);
   const woQ = useMemo(() => ({ limit: 40 }), []);
   const wos = useWorkOrdersLite(cur?.id ?? null, woQ);
+  const cat = useCatalog();
+  const home = useHome().data;
   const stuck = wos.find((w) => w.state === "waiting" || w.state === "blocked" || w.bay)?.id ?? wos.find((w) => !["done", "killed"].includes(w.state))?.id ?? null;
   const doneWo = wos.filter((w) => w.state === "done").slice(-1)[0]?.id ?? null;
   const suggestions = [...new Set(suggestionsFor(roles, cur?.name ?? "my projects", cur?.id ?? null, stuck, doneWo))];
+  // The Console page (not the workspace's embedded chat): the prototype's four questions, answered at once from live state.
+  const page = !embed;
+  const statusWo = stuck ?? wos.find(isInFlight)?.id ?? null;
+  const liveChips = ["What is blocked?", "What waits on a person?", ...(statusWo ? [`Status of ${statusWo}`] : []), "Spend this month"];
+  const liveCtx: LiveCtx = {
+    wos: wos.map((w): LiveWo => ({ ...w, ...(typeof w.station === "number" && cat?.stations[w.station] ? { stationName: cat.stations[w.station]!.name } : {}) })),
+    waiting: (home?.approvals ?? []).filter((a) => a.wo).map((a) => ({ wo: a.wo!, ...(a.gate ? { gate: a.gate } : {}) })),
+    spend: visible.length ? { mtd: visible.reduce((n, p) => n + (p.budget?.mtd ?? 0), 0), monthly: visible.reduce((n, p) => n + (p.budget?.monthly ?? 0), 0) } : null,
+    project: cur?.name ?? null,
+  };
 
   const serverMsgs = useMemo(() => {
     const all = thread.data?.messages ?? [];
@@ -255,8 +269,20 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     if (streaming) { ui.toast("Wait for the current answer or stop it.", "warn"); return; }
     setDraft("");
     setSlashIdx(0);
-    if (text.startsWith("/")) await runSlash(text);
-    else await askModel(text);
+    if (text.startsWith("/")) { await runSlash(text); return; }
+    // On the Console page the four suggested questions (and, with no model configured, any question about a work order, what waits, what is blocked
+    // or spend) are answered at once from live state. Other questions go to the model; with no model the page says what can be asked.
+    if (page) {
+      const isChip = liveChips.some((c) => c.toLowerCase() === text.toLowerCase()) || /^status of wo-?\d+\??$/i.test(text);
+      const modelOff = !!st && !st.configured;
+      const answer = isChip || modelOff ? liveAnswer(text, liveCtx) ?? (modelOff ? helpText(liveCtx) : null) : null;
+      if (answer !== null) {
+        addLocal({ role: "user", text, mode: "pending", by: meId });
+        addLocal({ role: "factory", mode: "live", text: answer });
+        return;
+      }
+    }
+    await askModel(text);
   };
 
   // The question an @mention carried here is asked once, when the chat has loaded.
@@ -326,7 +352,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   /* ---------- composer ---------- */
   const slash = draft.startsWith("/") && !draft.includes(" ") ? SLASH.filter((x) => x.cmd.startsWith(draft.toLowerCase())) : [];
   const idx = slashIdx >= slash.length ? 0 : slashIdx;
-  const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
     if (slash.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); setSlashIdx((idx + (e.key === "ArrowDown" ? 1 : slash.length - 1)) % slash.length); return; }
     if (slash.length && e.key === "Tab") { e.preventDefault(); toDraft(slash[idx]!.cmd); return; }
     if (slash.length && e.key === "Escape") { e.preventDefault(); setDraft(`${draft} `); return; }
@@ -378,6 +404,72 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
           </Panel>
     </>
   );
+  /* ---------- the Console page (prototype `console`): §1 Conversation, §2 Pinned work orders ---------- */
+  if (page) {
+    const empty = msgs.length === 1 && msgs[0]!.id === "m0" && !streaming;
+    const woById = new Map(wos.map((w) => [w.id, w]));
+    const modeOf = (m: Msg): string => (m.mode === "model" ? `${st?.model ?? "Model"}${m.stopped ? " · stopped" : ""}` : m.mode === "live" ? "Live work-order state" : m.mode === "slash" ? "Slash command · live data" : m.mode === "none" ? "No model configured" : "Model did not answer");
+    return (
+      <div className="view view-console view-console-page">
+        <ViewHead kicker="ALL LINES" title="Console" status={modeChip} sub="Ask the factory a question in plain language. Answers are read from live work-order state." actions={modePicker} />
+        <div className="cols w21">
+          <Panel title="Conversation" tools={<span className="row" id="con-bar"><Btn label="New" small icon="plus" id="con-new" disabledReason={streaming ? "Wait for the answer or stop it." : null} onClick={newChat} /><Btn label="Clear" small kind="ghost" icon="x" id="con-clear" disabledReason={threadId || local.length ? null : "There is nothing to clear."} onClick={() => void clear()} /></span>}>
+            <div className="conv" id="con-conv">
+              <div className="chat" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
+                {empty ? <Empty id="con-empty" title="Ask anything about the line" text="Try one of the suggestions below." /> : msgs.map((m) => (
+                  <div className={`msg msg-${m.role}${m.role === "user" ? " me" : ""}`} key={m.id}>
+                    {m.role === "user" ? <Avatar id={m.by} /> : <span className="avatar bot" title="Factory" aria-hidden="true">OA</span>}
+                    <div className="bub">
+                      <div className="who">{m.role === "user" ? (m.by && m.by !== meId ? actorOf(m.by).name : me.person.name) : "Factory"}</div>
+                      {m.streaming ? <div id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div id={`con-msg-text-${m.id}`}>{m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
+                      {m.role === "factory" && m.mode !== "pending" && m.mode !== "live" ? (
+                        <div className="small muted msg-meta"><span className={`msg-mode is-${m.mode}`}>{modeOf(m)}</span>{m.note ? <span className="msg-note">{` · ${m.note}`}</span> : null}{retryable && retryable.errId === m.id ? <> <Btn label="Retry" small kind="ghost" icon="send" id="con-retry" onClick={retry} /></> : null}</div>
+                      ) : m.streaming ? <div className="small muted msg-meta"><span className="msg-mode is-pending">Model · streaming</span></div> : null}
+                      {m.cited?.length ? <div className="chips msg-chips" aria-label="Used in this answer"><span className="kicker">Used</span>{m.cited.map((e) => <EntityChip key={`${e.type}:${e.id}`} e={e} />)}</div> : null}
+                      {m.cards?.map((c, i) => c.type === "proposal" && c.proposal
+                        ? <ProposalCard key={`${m.id}-${c.proposal.id}`} p={c.proposal} mid={m.id} serverId={m.serverId} />
+                        : <ResultCard key={`${m.id}-${i}`} type={c.type} data={c.data} c={cardCtx(m.id)} />)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="chips" id="con-chips">{liveChips.map((sg, i) => <button type="button" key={sg} className="chipbtn" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
+              <form className="row nowrap" id="con-form" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { ui.toast("Type a question first", "error"); return; } void send(draft); }}>
+                {slash.length ? (
+                  <ul className="slash-menu" id="con-slash" role="listbox" aria-label="Commands">
+                    {slash.map((x, i) => <li key={x.cmd} role="option" id={`con-slash-${i}`} className={i === idx ? "is-active" : ""} aria-selected={i === idx} onMouseDown={(e) => { e.preventDefault(); toDraft(x.cmd); }}><span className="mono">{x.cmd.trim()}</span><span className="muted">{x.hint}</span></li>)}
+                  </ul>
+                ) : null}
+                <input id="con-input" ref={input} className="input" type="text" autoFocus placeholder={'Ask the factory: "what is blocked?", "status of WO-2417"…'} aria-label="Console message" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
+                {streaming ? <Btn label="Stop" kind="danger" icon="x" id="con-stop" onClick={() => ac.current?.abort()} /> : null}
+                <Btn label="Send" kind="primary" type="submit" id="con-send" disabledReason={streaming ? "Wait for the answer or stop it." : null} />
+              </form>
+            </div>
+          </Panel>
+          <div className="stack">
+            <Panel title="Pinned work orders" flush id="con-pins">
+              {pinned.length ? (
+                <ul className="list pins">{pinned.map((id) => { const w = woById.get(id); return (
+                  <li key={id}>
+                    <a className="pri mono" id={`con-pin-${id}`} href={hashFor("record", id, cur?.id ?? null)}>{id}</a>
+                    {w ? <span className="grow wrap2" title={w.title}>{w.title}</span> : <span className="grow" />}
+                    {w ? <StateChip state={w.state} /> : null}
+                    <IconBtn icon="x" label={`Unpin ${id}`} id={`con-unpin-${id}`} onClick={() => { if (threadId) void savePinned(threadId, pinned.filter((x) => x !== id)).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) })); }} />
+                  </li>
+                ); })}</ul>
+              ) : <div className="empty" title="Pin a work order from a why card.">Nothing pinned.</div>}
+            </Panel>
+            <Panel title="Chats" flush id="con-chats-panel">
+              <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />
+            </Panel>
+            <p className="con-mode-line small muted" id="con-mode-reason"><span>{modeLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p>
+            <details className="con-more panel" id="con-more"><summary className="micro">What you and the console can do here</summary>{ctxPanels}</details>
+            <p className="footnote small muted">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={embed ? "view-console ws-chat" : "view view-console"}>
       {embed ? embed.header : <ViewHead title="Console" status={modeChip} sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you." actions={modePicker} />}
@@ -456,9 +548,9 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
 }
 
 /** Recent work orders of a project, for the suggested questions only (a stuck one, a finished one). */
-function useWorkOrdersLite(projectId: string | null, q: { limit: number }): Array<{ id: string; state: string; bay: string | null }> {
+function useWorkOrdersLite(projectId: string | null, q: { limit: number }): Array<LiveWo & { bay: string | null }> {
   const r = useWorkOrders(projectId, q);
   const d = r.data;
   const items = Array.isArray(d) ? d : d?.items ?? [];
-  return items as Array<{ id: string; state: string; bay: string | null }>;
+  return items as Array<LiveWo & { bay: string | null }>;
 }

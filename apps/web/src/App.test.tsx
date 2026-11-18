@@ -131,7 +131,7 @@ describe("signed in", () => {
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
     expect(await screen.findByText("Couldn't load the floor")).toBeTruthy(); // the shared failed state (ui/async)
     expect(within(nav).getByText("Floor").closest("a")?.getAttribute("aria-current")).toBe("page");
-    await waitFor(() => expect(within(nav).getByTitle("3 conversations waiting for you").textContent).toBe("3"));
+    await waitFor(() => expect(within(nav).getAllByTitle("3 conversations waiting for you")[0]?.textContent).toBe("3"));
     expect(document.title).toBe("Floor · Payments Platform · Gantry Software Factory");
     expect(window.location.hash).toBe("#/p/payments/floor");
     expect(FakeES.instances[0]?.url).toBe("/api/v1/stream");

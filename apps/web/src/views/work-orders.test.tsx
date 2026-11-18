@@ -7,6 +7,7 @@ import { useRegisterNewWorkOrder } from "./work-orders/New";
 import { PAYMENTS, WOS, REPOS, mockApi, mount, resetApp, type Call } from "./floor/testkit";
 
 beforeEach(() => {
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
   resetApp();
   updatePrefs({ project: "payments" });
 });
@@ -30,43 +31,51 @@ describe("Work orders table", () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
     mount(<WorkOrdersView />);
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
-    expect(screen.queryByText("No work orders match")).toBeNull();
+    expect(screen.queryByText("Nothing matches these filters")).toBeNull();
     // the tabs carry no count at all while the read is refused, never a 0
     expect(document.querySelectorAll("#wo-tab-all .tab-count, #wo-tab-shipped .tab-count")).toHaveLength(0);
   });
 
-  it("asks the server for the sorted, filtered page and pages with the cursor", async () => {
-    const first = WOS.slice(0, 3);
-    const calls = mockApi({
-      "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("cursor") ? page(WOS.slice(3, 5), null, 5) : c.query.get("limit") === "1" ? page([], null, 7) : page(first, "c1", 5) }),
-    });
+  it("sends the filters, keeps tab, filters, sort and page in the URL, and pages 15 at a time with Prev / Next", async () => {
+    const many = Array.from({ length: 17 }, (_, k) => ({ ...WOS[0]!, id: `WO-${5000 + k}`, createdAt: 1000 + k }));
+    const calls = mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 17) : page(many, null, 17) }) });
     mount(<WorkOrdersView />);
-    expect(await screen.findByText("WO-2398")).toBeTruthy();
-    expect(document.querySelectorAll("#wo-table tbody tr")).toHaveLength(3);
-    expect(screen.getByText("3 of 5 shown")).toBeTruthy();
-    // header sort is server-side: the id column starts descending, a click flips it
-    fireEvent.click(document.getElementById("wo-table-sort-where") as HTMLElement);
-    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "where" && c.query.get("dir") === "asc")).toBe(true));
-    // filters are sent, "all" is not
+    expect(await screen.findByText("WO-5016")).toBeTruthy();
+    expect(document.querySelectorAll("#wo-table tbody tr")).toHaveLength(15);
+    expect(screen.getByText("1–15 of 17")).toBeTruthy();
+    expect(screen.getByText("Page 1 / 2")).toBeTruthy();
+    // default order is created, newest first
+    expect(document.querySelector("#wo-table tbody tr a.pri")?.textContent).toBe("WO-5016");
+    fireEvent.click(document.getElementById("wo-table-next") as HTMLElement);
+    expect(await screen.findByText("16–17 of 17")).toBeTruthy();
+    expect(window.location.search).toContain("page=2");
+    fireEvent.click(document.getElementById("wo-table-sort-id") as HTMLElement);
+    await waitFor(() => expect(window.location.search).toContain("sort=id"));
+    expect(window.location.search).not.toContain("page=");
     fireEvent.change(document.getElementById("wo-f-cls") as HTMLElement, { target: { value: "bug" } });
     await waitFor(() => expect(lists(calls).some((c) => c.query.get("cls") === "bug")).toBe(true));
-    fireEvent.change(document.getElementById("wo-f-where") as HTMLElement, { target: { value: "spec" } });
-    await waitFor(() => expect(lists(calls).some((c) => c.query.get("where") === "spec" && c.query.get("cls") === "bug")).toBe(true));
-    fireEvent.click(document.getElementById("wo-table-more") as HTMLElement);
-    await waitFor(() => expect(lists(calls).some((c) => c.query.get("cursor") === "c1")).toBe(true));
-    expect(await screen.findByText("5 of 5 shown")).toBeTruthy();
+    expect(window.location.search).toContain("cls=bug");
   });
 
-  it("has a mobile sort select and direction toggle that drive the same server sort", async () => {
-    const calls = mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 7) : page(WOS.slice(0, 3)) }) });
+  it("opens the record from the id link and from the row, and the conversation from its own icon", async () => {
+    mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 3) : page(WOS.slice(0, 3), null, 3) }) });
     mount(<WorkOrdersView />);
-    expect(await screen.findByText("WO-2398")).toBeTruthy();
-    const sel = document.getElementById("wo-sort-select") as HTMLSelectElement;
-    expect(Array.from(sel.options).map((o) => o.value)).toEqual(["id", "title", "cls", "where", "state", "prio", "age"]);
-    fireEvent.change(sel, { target: { value: "age" } });
-    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "age" && c.query.get("dir") === "asc")).toBe(true));
-    fireEvent.click(document.getElementById("wo-sort-dir") as HTMLElement);
-    await waitFor(() => expect(lists(calls).some((c) => c.query.get("sort") === "age" && c.query.get("dir") === "desc")).toBe(true));
+    const link = await screen.findByRole("link", { name: "WO-2398" });
+    expect(link.getAttribute("href")).toBe("#/p/payments/record/WO-2398");
+    fireEvent.click(document.getElementById("wo-conv-WO-2398") as HTMLElement);
+    await waitFor(() => expect(window.location.hash).toBe("#/p/payments/conversations/WO-2398"));
+  });
+
+  it("the List / Board switch is in the URL and the board is a panel of station columns with cards linking to the record", async () => {
+    mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 5) : page(WOS.slice(0, 5), null, 5) }) });
+    mount(<WorkOrdersView />);
+    await screen.findByText("WO-2398");
+    expect(screen.getByRole("radiogroup", { name: "View" })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Board"));
+    await waitFor(() => expect(window.location.search).toContain("view=board"));
+    expect(await screen.findByRole("heading", { name: "Board" })).toBeTruthy();
+    expect(document.querySelectorAll(".board .col").length).toBeGreaterThan(3);
+    expect(document.querySelector('.board a.card[href^="#/p/payments/record/"]')).toBeTruthy();
   });
 
   it("reads every page for the tabs it works out itself, and says when the list is cut short", async () => {
@@ -120,8 +129,8 @@ describe("Work orders table", () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([], null, 0) }) });
     mount(<WorkOrdersView />);
     fireEvent.change(await screen.findByLabelText("Priority"), { target: { value: "P0" } });
-    expect(await screen.findByText("No work orders match")).toBeTruthy();
-    fireEvent.click(document.getElementById("wo-clear") as HTMLElement);
+    expect(await screen.findByText("Nothing matches these filters")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     await waitFor(() => expect((screen.getByLabelText("Priority") as HTMLSelectElement).value).toBe("all"));
   });
 });
@@ -143,7 +152,7 @@ describe("New work order", () => {
   it("submits once with an Idempotency-Key even when the button is clicked twice, then shows the classification and route", async () => {
     const calls = await open({ "POST /api/v1/projects/payments/work-orders": submitOk });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
-    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Refund crashes on a zero amount. Steps to reproduce: post zero." } });
+    fireEvent.change(screen.getByLabelText("What should change and why"), { target: { value: "Refund crashes on a zero amount. Steps to reproduce: post zero." } });
     expect(await screen.findByText("Classifier preview:")).toBeTruthy();
     const submit = document.getElementById("nwo-submit") as HTMLElement;
     fireEvent.click(submit);

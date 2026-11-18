@@ -41,11 +41,10 @@ export const ROUTES: readonly RouteDef[] = [
   { id: "inbox", title: "Inbox", group: "Overview", icon: "inbox" },
   { id: "projects", title: "Projects", group: "Overview", icon: "folder" },
   { id: "workspace", title: "Agents at work", group: "Overview", icon: "chat" },
-  // The Console and Conversations now live in the workspace; their links still work and land there.
-  { id: "console", title: "Console", group: "Overview", icon: "console", nav: false },
+  { id: "console", title: "Console", group: "Overview", icon: "console" },
   { id: "floor", title: "Floor", group: "Project", icon: "belt", project: true },
   { id: "work-orders", title: "Work orders", group: "Project", icon: "list", project: true },
-  { id: "conversations", title: "Conversations", group: "Project", icon: "chat", project: true, nav: false },
+  { id: "conversations", title: "Conversations", group: "Project", icon: "chat", project: true },
   { id: "onboarding", title: "Onboarding", group: "Project", icon: "rocket", project: true },
   { id: "project-config", title: "Project config", group: "Project", icon: "filter", project: true },
   { id: "record", title: "Work order", group: "Project", icon: "record", project: true, nav: false },
