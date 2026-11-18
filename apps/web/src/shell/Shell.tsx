@@ -15,7 +15,7 @@ import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
 import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
-import { NotFoundPage, SharedStatePage, sharedStateFromUrl } from "./SharedStates";
+import { NotFoundPage, protoEyebrow, SharedStatePage, sharedStateFromUrl } from "./SharedStates";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StatusBar } from "./StatusBar";
@@ -83,7 +83,7 @@ export function Shell({ me }: { me: Me }) {
   }, [routeId, loc.param]);
 
   useEffect(() => {
-    document.title = `${denied?.title ?? def?.title ?? "Home"}${scoped && project ? ` · ${project.name}` : ""} · Gantry Software Factory`;
+    document.title = `${denied?.title ?? def?.title ?? "Home"}${scoped && project ? ` · ${project.name}` : ""} · Gantry Control Room`;
   }, [def, denied, scoped, project]);
 
   const openPalette = useCallback(() => {
@@ -149,7 +149,7 @@ export function Shell({ me }: { me: Me }) {
           ) : unknownRoute ? (
             <NotFoundPage name={loc.id} />
           ) : ready && sharedState ? (
-            <SharedStatePage kind={sharedState} eyebrow={def?.group ?? ""} title={def?.title ?? ""} />
+            <SharedStatePage kind={sharedState} eyebrow={protoEyebrow(def?.id ?? "", def?.group ?? "")} title={def?.title ?? ""} />
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
           ) : null}

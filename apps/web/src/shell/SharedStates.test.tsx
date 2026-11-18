@@ -2,6 +2,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { hashQuery, parseHash } from "../lib/router";
 import { NotFoundPage, SharedStatePage, sharedStateFromUrl, SHARED_STATES } from "./SharedStates";
+import { protoEyebrow } from "./SharedStates";
 import { SignIn, emailProblem, signInFootnote } from "./SignIn";
 
 describe("hash query and shared states", () => {
@@ -56,5 +57,21 @@ describe("sign-in", () => {
     render(<SignIn config={{ demoAccounts: false, emailLinkLogin: true, allowedDomain: "acme.dev" }} />);
     fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
     expect(screen.getByRole("alert").textContent).toBe("Email is required.");
+  });
+  it("has no GitHub button, and the email button is enabled", () => {
+    render(<SignIn config={{ demoAccounts: false, githubLogin: true }} />);
+    expect(screen.queryByRole("button", { name: /GitHub/ })).toBeNull();
+    expect((screen.getByRole("button", { name: "Email me a sign-in link" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+  it("shows the wrong-domain message", () => {
+    render(<SignIn config={{ demoAccounts: false, allowedDomain: "acme.dev" }} />);
+    fireEvent.change(document.getElementById("auth-email") as HTMLInputElement, { target: { value: "a@gmail.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
+    expect(screen.getByRole("alert").textContent).toBe("Use an acme.dev address.");
+  });
+  it("maps shared-state eyebrows to the prototype groups", () => {
+    expect(protoEyebrow("floor", "Project")).toBe("Operate");
+    expect(protoEyebrow("projects", "Project")).toBe("Portfolio");
+    expect(protoEyebrow("agents", "Agents")).toBe("Workforce");
   });
 });

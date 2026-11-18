@@ -60,13 +60,13 @@ afterEach(() => {
 });
 
 describe("signed out", () => {
-  it("shows the sign-in screen with SSO and GitHub, and no demo accounts by default", async () => {
+  it("shows the sign-in screen with SSO (no GitHub button, as the prototype), and no demo accounts by default", async () => {
     mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Sign in.", config: { demoAccounts: false } } }) });
     render(<App />);
     await screen.findByText("Continue with SSO");
-    expect(screen.getByText("Continue with GitHub")).toBeTruthy();
+    expect(screen.queryByText("Continue with GitHub")).toBeNull();
     expect(screen.queryByText(/Demo accounts/)).toBeNull();
-    expect(document.querySelector(".auth-preview .tok")).toBeTruthy(); // the belt-card preview of the prototype
+    expect(document.querySelector(".belt-card .tok")).toBeTruthy(); // the belt-card preview of the prototype
   });
 
   it("shows the guided two-step setup screen when the server says a Factory Admin needs a second factor", async () => {
@@ -109,14 +109,13 @@ describe("signed out", () => {
     expect(text).toContain("People & teams");
   });
 
-  it("SSO and GitHub buttons go to /auth/login with the method", async () => {
+  it("the SSO button goes to /auth/login with the method", async () => {
     mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "x" } }) });
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign, hash: "", search: "" });
     render(<App />);
     fireEvent.click(await screen.findByText("Continue with SSO"));
-    fireEvent.click(screen.getByText("Continue with GitHub"));
-    expect(assign.mock.calls).toEqual([["/auth/login?method=sso"], ["/auth/login?method=github"]]);
+    expect(assign.mock.calls).toEqual([["/auth/login?method=sso"]]);
   });
 });
 
@@ -132,7 +131,7 @@ describe("signed in", () => {
     expect(await screen.findByText("Couldn't load the floor")).toBeTruthy(); // the shared failed state (ui/async)
     expect(within(nav).getByText("Floor").closest("a")?.getAttribute("aria-current")).toBe("page");
     await waitFor(() => expect(within(nav).getByTitle("3 conversations waiting for you").textContent).toBe("3"));
-    expect(document.title).toBe("Floor · Payments Platform · Gantry Software Factory");
+    expect(document.title).toBe("Floor · Payments Platform · Gantry Control Room");
     expect(window.location.hash).toBe("#/p/payments/floor");
     expect(document.querySelector("#app.app > .top")).toBeTruthy();
     expect(document.querySelector("#app.app > footer.sbar #status-cluster")).toBeTruthy();

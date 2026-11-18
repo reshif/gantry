@@ -11,4 +11,9 @@ describe("design system page", () => {
     expect(document.querySelectorAll("[data-theme=light]").length).toBeGreaterThan(0);
     expect(document.querySelectorAll(".tabs-w .tab").length).toBe(6);
   });
+  it("draws the sample meters in the prototype tones (warn at 72, bad at 92)", () => {
+    render(<OverlayProvider><DesignSystemView /></OverlayProvider>);
+    expect(document.querySelectorAll(".meter.warn").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".meter.bad").length).toBeGreaterThan(0);
+  });
 });

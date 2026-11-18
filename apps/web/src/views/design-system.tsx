@@ -4,7 +4,7 @@
  */
 import { useState } from "react";
 import { Card, CrIcon, Page, Spark, Stats } from "../ui/cr";
-import { Btn, Chip, DataTableDemo, Donut, Field, Meter, NameBody, PipeSample, Segmented, Select, Tabs, Toggle } from "./design-system/parts";
+import { Btn, Chip, DataTableDemo, Donut, Field, NameBody, PipeSample, Segmented, Select, Tabs, Toggle } from "./design-system/parts";
 import { IconBtn, Input } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 
@@ -20,6 +20,12 @@ const TYPE: Array<[string, string, string]> = [
   ["Label", "600 11px mono caps", "WORK ORDER"],
 ];
 const STATE_LINKS: Array<[string, string]> = [["loading", "Loading"], ["empty", "Empty"], ["error", "Error"], ["forbidden", "No access"], ["conflict", "Conflict"]];
+
+/** Prototype meter: ok to 65, warn to 85, bad above (the design-system sample shows 72 and 92). */
+function ToneMeter({ value }: { value: number }) {
+  const tone = value > 85 ? "bad" : value > 65 ? "warn" : "ok";
+  return <div className={`meter ${tone}`} role="meter" aria-label="Usage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}><i style={{ width: `${value}%` }} /></div>;
+}
 
 function Samples() {
   const ui = useUI();
@@ -42,7 +48,7 @@ function Samples() {
   const openPalette = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
   return (
     <div className="stack" style={{ gap: 16 }}>
-      <div><div className="label" style={{ marginBottom: 8 }}>Chips</div><div className="row">
+      <div><div className="label" style={{ marginBottom: 8 }}>Chips</div><div className="row ds-chips">
         <Chip text="Healthy" cls="ok" /><Chip text="Gate waiting" cls="warn" /><Chip text="Blocked" cls="bad" /><Chip text="Running" cls="info" /><Chip text="Agent" cls="agent" /><Chip text="Queued" cls="idle" />
         <span className="tag pri p1" title="Priority P1">P1</span><span className="tag pri p2" title="Priority P2">P2</span><span className="tag pri p3" title="Priority P3">P3</span><span className="tag">payments-api</span>
       </div></div>
@@ -69,7 +75,7 @@ function Samples() {
       </div>
       <div><div className="label" style={{ marginBottom: 8 }}>Pipeline, meter, spark, donut</div>
         <PipeSample current={5} />
-        <div className="row" style={{ gap: 24, marginTop: 8 }}><div style={{ width: 160 }}><Meter value={72} max={100} /></div><div style={{ width: 160 }}><Meter value={92} max={100} /></div><Spark data={[3, 5, 4, 7, 6, 9, 8]} /><Donut size={64} parts={[{ l: "a", v: 6, c: "ok" }, { l: "b", v: 3, c: "warn" }, { l: "c", v: 1, c: "bad" }]} /></div>
+        <div className="row" style={{ gap: 24, marginTop: 8 }}><div style={{ width: 160 }}><ToneMeter value={72} /></div><div style={{ width: 160 }}><ToneMeter value={92} /></div><Spark data={[3, 5, 4, 7, 6, 9, 8]} /><Donut size={64} parts={[{ l: "a", v: 6, c: "ok" }, { l: "b", v: 3, c: "warn" }, { l: "c", v: 1, c: "bad" }]} /></div>
       </div>
       <div><div className="label" style={{ marginBottom: 8 }}>Floor tokens</div><div className="row" style={{ maxWidth: 520 }}>
         <div style={{ width: 96 }}><span className="tok run"><span className="id">1004</span><span className="pr p1">P1</span></span></div>

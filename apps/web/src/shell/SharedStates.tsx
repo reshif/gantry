@@ -71,7 +71,7 @@ export function SharedState({ kind }: { kind: SharedStateKind }) {
     case "error":
       return <ErrorCard />;
     case "forbidden":
-      return <div className="card"><CrEmpty icon="lock" title="You do not have access to this" text="Your roles do not include this area. Ask a Factory Admin for the permission it needs, or return to a screen you can use." action={<a className="btn" href="#home">Back to Home</a>} /></div>;
+      return <div className="card"><CrEmpty icon="lock" title="You do not have access to this" text="Your role cannot open this area. Ask a Factory Admin for the permission it needs, or return to a screen you can use." action={<a className="btn" href="#home">Back to Home</a>} /></div>;
     case "conflict":
       return (
         <>
@@ -85,6 +85,15 @@ export function SharedState({ kind }: { kind: SharedStateKind }) {
         </>
       );
   }
+}
+
+/** The prototype's eyebrow for a route: its nav group there (Operate, Portfolio, Workforce, Govern, Connect, Reference). */
+const PORTFOLIO = new Set(["projects", "onboarding", "project-config"]);
+export function protoEyebrow(routeId: string, group: string): string {
+  if (PORTFOLIO.has(routeId)) return "Portfolio";
+  if (group === "Overview" || group === "Project") return "Operate";
+  if (group === "Agents") return "Workforce";
+  return group;
 }
 
 /** A route's page frame with one shared state inside it (prototype `G.pageShell`). */

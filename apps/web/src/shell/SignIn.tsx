@@ -66,16 +66,19 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
   const form = useRef<HTMLFormElement>(null);
   const [email, setEmail] = useState("");
   const [problem, setProblem] = useState("");
+  const [notice, setNotice] = useState("");
   const emailLink = config?.emailLinkLogin === true;
   const submitEmail = () => {
     const bad = emailProblem(email, config?.allowedDomain);
     setProblem(bad);
+    setNotice("");
     if (bad) {
       // the error is rendered on the next paint; focus returns to the field after it
       window.setTimeout(() => { if (form.current) focusFirstInvalid(form.current); }, 0);
       return;
     }
-    go("sso", email.trim());
+    if (emailLink) go("sso", email.trim());
+    else setNotice("Email sign-in links are not available on this server. Use Continue with " + (config?.idpName ?? "SSO") + ".");
   };
   const foot = signInFootnote(config);
   return (
@@ -117,8 +120,8 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
             <Field label={<>Work email <span className="dim">(required)</span></>} error={problem || undefined}>
               <Input id="auth-email" type="email" name="email" autoComplete="email" placeholder={config?.allowedDomain ? `you@${config.allowedDomain}` : "you@company.com"} value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
-            <Btn label="Email me a sign-in link" id="auth-email-link" disabledReason={emailLink ? null : "Email sign-in links are not available on this server."} onClick={submitEmail} />
-            <Btn label="Continue with GitHub" id="auth-gh" icon="github" disabledReason={config?.githubLogin === false ? "GitHub sign-in is turned off in Security settings." : null} onClick={() => go("github")} />
+            <Btn label="Email me a sign-in link" id="auth-email-link" onClick={submitEmail} />
+            {notice ? <div className="callout" role="status"><Icon name="info" /><span>{notice}</span></div> : null}
             {foot ? <div className="dim" style={{ fontSize: 12 }}>{foot}</div> : null}
             {demo ? (
               <div className="auth-demo">
