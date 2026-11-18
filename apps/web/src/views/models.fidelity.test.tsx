@@ -98,7 +98,7 @@ describe("Models screen (Blueprint layout)", () => {
 
   it("matches the prototype's header and vendor cards: Add vendor in the header, static 'all connected', no Manage rows, no dashed Local card, any model switch is usable", async () => {
     mount("#models");
-    const card = await byId("vendor-anthropic");
+    await byId("vendor-anthropic");
     expect(document.getElementById("md-add-vendor")).not.toBeNull();
     expect(document.getElementById("md-stats")!.textContent).toContain("1 connected");
     expect(document.body.textContent).not.toContain("not connected");
