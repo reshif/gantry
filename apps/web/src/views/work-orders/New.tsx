@@ -112,7 +112,8 @@ export function NewWorkOrderDialog({ preset, onClose, variant = "dialog", aside 
     pick.click();
   };
   const applyTemplate = (v: string) => {
-    setTpl(v);
+    // The prototype returns the select to "Start from template…" once a template has filled the form.
+    setTpl("");
     const t = v === "bug" ? { title: "Fix: ", desc: "Steps to reproduce:\n1. \nExpected:\nActual:", cls: "bug" } : v === "feat" ? { title: "Add ", desc: "Goal:\nAcceptance criteria:\n- ", cls: "feature" } : v === "chore" ? { title: "Bump dependencies", desc: "Update minor versions and run tests.", cls: "chore" } : null;
     if (!t) return;
     setTitle(t.title);

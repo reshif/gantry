@@ -63,6 +63,8 @@ describe("Console (submit a work order, prototype layout)", () => {
     expect((await title()).value).toBe("Fix: ");
     expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toMatch(/Steps to reproduce/);
     expect((screen.getByLabelText("Class") as HTMLSelectElement).value).toBe("bug");
+    // the select returns to "Start from template…" after filling the form
+    expect((screen.getByLabelText("Template") as HTMLSelectElement).value).toBe("");
     fireEvent.click(document.getElementById("nwo-reset") as HTMLElement);
     expect((await title()).value).toBe("");
     expect((screen.getByLabelText("Class") as HTMLSelectElement).value).toBe("");

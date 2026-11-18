@@ -25,7 +25,7 @@ import { CrIcon, Page as CrPage } from "../ui/cr";
 import { Icon } from "../ui/Icon";
 import { navigate } from "../lib/router";
 import { pickProject } from "../lib/routes";
-import { updatePrefs, usePrefs } from "../lib/prefs";
+import { usePrefs } from "../lib/prefs";
 import { classOf, useCatalog } from "./projects/kit";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 import { useUrlState } from "./work-orders/url-state";
@@ -34,7 +34,7 @@ import { useUI } from "../ui/overlay-context";
 type TabId = "all" | "mine" | "gate" | "blocked";
 const VIEWS: Array<{ id: TabId; label: string }> = [{ id: "all", label: "All" }, { id: "mine", label: "Requested by me" }, { id: "gate", label: "At a gate" }, { id: "blocked", label: "Blocked" }];
 import { STATE_OPTIONS, WoStateChip, stateOf } from "./work-orders/state";
-const URL_KEYS = ["view", "q", "st", "cls", "pri", "station", "sort", "dir", "page"] as const;
+const URL_KEYS = ["view", "q", "st", "cls", "pri", "station", "sort", "dir", "page", "mode"] as const;
 const PRIOS = ["P1", "P2", "P3"];
 const PAGE_SIZE = 12;
 const SNAPSHOT = 200;
@@ -82,7 +82,8 @@ function WorkOrdersView() {
   const park = useParkMany();
   const [u, setU] = useUrlState(URL_KEYS, { view: "all", sort: "id", dir: "desc", page: "1" });
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
-  const mode: "table" | "board" = prefs.floorView === "board" ? "board" : "table";
+  // The prototype list is a table only: the board stays reachable from a link (`?mode=board`) but has no toggle on the page.
+  const mode: "table" | "board" = u.mode === "board" ? "board" : "table";
   const projectId = me ? pickProject(me, prefs.project) : null;
   const projectQ = useProject(projectId);
   const project = projectQ.data ?? null;
@@ -252,11 +253,10 @@ function WorkOrdersView() {
         </>
       }
     >
-      <div className="row spread wo-views" style={{ marginBottom: 12 }}>
+      <div className="row wo-views" style={{ marginBottom: 12 }}>
         {mode === "table" ? (
           <Segmented name="wo-tab" label="Work order views" items={VIEWS.map((t) => ({ id: t.id, label: t.label }))} value={tab} onChange={(id) => change({ view: id === "all" ? "" : id, st: "" })} />
         ) : <span />}
-        <Segmented name="wo-mode" label="Table or board" items={[{ id: "table", label: "Table", icon: "list" }, { id: "board", label: "Board", icon: "board" }]} value={mode} onChange={(v) => updatePrefs({ floorView: v })} />
       </div>
       {mode === "table" ? (
         <FilterBar
@@ -293,6 +293,7 @@ function WorkOrdersView() {
                 rowKey={(w) => w.id}
                 pageSize={PAGE_SIZE}
                 pager
+                sortHints
                 selectable
                 selected={sel}
                 onSelect={setSel}

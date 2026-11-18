@@ -34,7 +34,9 @@ describe("Work orders table", () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page(WOS.slice(0, 3)) }) });
     mount(<WorkOrdersView />);
     expect(await screen.findByText("WO-2398")).toBeTruthy();
-    expect(Array.from(document.querySelectorAll('.seg-label')).map((l) => l.textContent)).toEqual(["All", "Requested by me", "At a gate", "Blocked", "Table", "Board"]);
+    expect(Array.from(document.querySelectorAll('.seg-label')).map((l) => l.textContent)).toEqual(["All", "Requested by me", "At a gate", "Blocked"]);
+    expect(document.getElementById("wo-mode-table")).toBeNull();
+    expect(document.getElementById("wo-mode-board")).toBeNull();
     expect(document.getElementById("wo-opts-btn")).toBeNull();
     expect(document.getElementById("wo-opts")).toBeNull();
     // the filter options are the prototype's, not the server's state names
@@ -44,8 +46,9 @@ describe("Work orders table", () => {
     expect(Array.from(document.querySelectorAll(".filterbar select")).map((e) => e.id)).toEqual(["wo-f-state", "wo-f-cls", "wo-f-prio", "wo-f-where"]);
     expect((document.querySelector(".filterbar input") as HTMLInputElement).placeholder).toBe("Search id, title, repo");
     expect(screen.queryByRole("button", { name: /All records/ })).toBeNull();
-    expect(document.getElementById("wo-mode-table")).toBeTruthy();
-    expect(Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => t.textContent?.replace(/[↑↓]/g, "").trim())).toEqual(["", "ID", "Title", "Project", "Class", "Pri", "Station", "State", "Age"]);
+    expect(document.getElementById("wo-mode-table")).toBeNull();
+    expect(document.querySelectorAll("#wo-table thead .th-arrow-idle").length).toBeGreaterThan(5);
+    expect(Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, "").trim())).toEqual(["", "ID", "Title", "Project", "Class", "Pri", "Station", "State", "Age"]);
   });
 
   it("puts the view, filters, sort and page in the URL and filters the rows here (the count says shown of all)", async () => {
@@ -112,13 +115,14 @@ describe("Work orders table", () => {
     expect(document.querySelector("#wo-table .pager")?.textContent).toMatch(/1–12 of 1000/);
   }, 20_000);
 
-  it("keeps Table / Board beside the tabs and has no sort select, group by, columns or saved views", async () => {
+  it("has no Table / Board toggle (the prototype list is a table), a faint sort arrow on every sortable column, and no sort select, group by, columns or saved views", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page(WOS.slice(0, 3)) }) });
     mount(<WorkOrdersView />);
     expect(await screen.findByText("WO-2398")).toBeTruthy();
     for (const id of ["wo-sort-select", "wo-group", "wo-f-assignee", "wo-col-by", "wo-view-save", "wo-f-repo", "wo-f-source"]) expect(document.getElementById(id)).toBeNull();
-    expect(document.getElementById("wo-mode-table")).toBeTruthy();
-    expect(Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => t.textContent?.replace(/[↑↓]/g, "").trim())).toEqual(["", "ID", "Title", "Project", "Class", "Pri", "Station", "State", "Age"]);
+    expect(document.getElementById("wo-mode-table")).toBeNull();
+    expect(document.querySelectorAll("#wo-table thead .th-arrow-idle").length).toBeGreaterThan(5);
+    expect(Array.from(document.querySelectorAll("#wo-table thead th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, "").trim())).toEqual(["", "ID", "Title", "Project", "Class", "Pri", "Station", "State", "Age"]);
   });
 
   it("the state chip says Queued for a waiting work order with no gate and Gate <id> for one waiting at a gate", async () => {
