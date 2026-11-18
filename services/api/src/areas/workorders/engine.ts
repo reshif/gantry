@@ -9,7 +9,7 @@
  * supersedes every older attempt inside its scope without the stop path having to touch attempts.
  */
 import {
-  gateAfter, gateDef, gateKind, gateProgress, requiredFor, nextStationId, riskTagsOf, route, routeGates, stationDef,
+  checkMatches, gateAfter, gateDef, gateKind, gateProgress, requiredFor, nextStationId, riskTagsOf, route, routeGates, stationDef,
   type Catalog, type Person, type Project, type WorkOrder,
 } from "@gantry/domain";
 import { appendEvent, cancel, enqueue, schedule, type EventCategory, type EventChannel, type Tx } from "@gantry/db";
@@ -431,7 +431,7 @@ async function ciEvidence(fx: Fx, w: Wo, headSha: string | null): Promise<{ chec
   const ids: Array<number | string> = [];
   let unsettled = false;
   for (const name of names) {
-    const r = rows.find((x) => x.name === name);
+    const r = rows.find((x) => x.name === name) ?? rows.find((x) => checkMatches(name, x.name));
     if (!r || r.status !== "completed") {
       unsettled = true;
       continue;

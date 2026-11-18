@@ -76,7 +76,17 @@ function absorbOutput(w: Wo, station: string, r: StationResult): { checks: Obser
       w.data.diff = { plus: files.reduce((a, f) => a + (Number(f.additions) || 0), 0), minus: files.reduce((a, f) => a + (Number(f.deletions) || 0), 0), files: files.length };
     }
   }
-  const tests = r.observed?.tests ?? (out.tests && typeof out.tests === "object" ? (out.tests as { passed: number; failed: number; added: number }) : null);
+  // Verify's report: the per-criterion verdicts and the test runs are kept (agent-reported, labelled) so the record shows them. Counts come from the platform's
+  // observation when there is one, else the agent's own `tests`, else the runs it listed (a pass and a fail each count once; a flaky run counts as neither).
+  if (station === "verify") {
+    const criteria = (Array.isArray(out.criteria) ? out.criteria : []).filter((x): x is Record<string, unknown> => !!x && typeof x === "object").map((x) => ({ criterion: String(x.criterion ?? ""), result: String(x.result ?? "untested"), evidence: String(x.evidence ?? "") }));
+    const testsRun = (Array.isArray(out.testsRun) ? out.testsRun : []).filter((x): x is Record<string, unknown> => !!x && typeof x === "object").map((x) => ({ name: String(x.name ?? ""), command: String(x.command ?? ""), result: String(x.result ?? ""), ...(Number.isFinite(Number(x.ms)) && x.ms !== undefined && x.ms !== null ? { ms: Number(x.ms) } : {}) }));
+    const observedFailed = r.observed?.tests ? Number(r.observed.tests.failed) || 0 : undefined;
+    w.data.verification = { criteria, testsRun, ...(observedFailed !== undefined ? { observedFailed } : {}) };
+  }
+  const runs = station === "verify" && Array.isArray((w.data.verification as { testsRun?: unknown[] } | undefined)?.testsRun) ? ((w.data.verification as { testsRun: Array<{ result: string }> }).testsRun) : [];
+  const fromRuns = runs.length ? { passed: runs.filter((t) => t.result === "pass").length, failed: runs.filter((t) => t.result === "fail").length, added: 0 } : null;
+  const tests = r.observed?.tests ?? (out.tests && typeof out.tests === "object" ? (out.tests as { passed: number; failed: number; added: number }) : fromRuns);
   if (tests) w.data.tests = { passed: Number(tests.passed) || 0, failed: Number(tests.failed) || 0, added: Number(tests.added) || 0 };
   // Gate checks are system evidence only (worker-observed, or GitHub check runs read when the gate opens). An agent's own `output.checks` is shown but never judged.
   const checks = r.observed?.checks;
