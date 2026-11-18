@@ -42,7 +42,7 @@ export interface ChatMeta {
 }
 
 const enc = encodeURIComponent;
-export const wk = { inbox: (all: boolean) => ["workspace", "inbox", all] as const, search: (q: string, kinds: string) => ["workspace", "search", q, kinds] as const, operator: () => ["workspace", "operator"] as const };
+export const wk = { all: () => ["workspace"] as const, inbox: (all: boolean) => ["workspace", "inbox", all] as const, search: (q: string, kinds: string) => ["workspace", "search", q, kinds] as const, operator: () => ["workspace", "operator"] as const };
 
 export const useInbox = (all = false) => useQuery({ queryKey: wk.inbox(all), queryFn: () => get<{ items: InboxItem[] }>(api(`workspace/inbox${all ? "?all=1" : ""}`)), refetchInterval: 30_000 });
 export const useWsAgents = (wo: string | null) => useQuery({ queryKey: qk.wsAgents(wo ?? ""), queryFn: () => get<{ items: WsAgent[] }>(api(`workspace/agents${wo ? `?wo=${enc(wo)}` : ""}`)), staleTime: 60_000 });
