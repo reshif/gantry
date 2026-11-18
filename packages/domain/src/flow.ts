@@ -483,7 +483,11 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
   const delegateFor = state.people.find((x) => x.away && x.away.delegate === personId && x.away.to > now && (rule.people.includes(x.id) || rule.roles.some((r) => rolesIn(x, project.id).includes(r))));
   const conds = conditionsFor(project, wo, gateId);
   const byCond = conds.find((cd) => satisfies(person, project, cd.needs));
-  if (!byRole && !byName && !delegateFor && !byCond) {
+  // Once the gate has waited past its escalation limit the rule's fallback approver (the project owner when none is named) may approve it. Only after escalation, and still under
+  // can() and separation of duties above: the fallback gains no right to approve that the person's own roles do not give.
+  const fallbackId = st.escalated ? rule.fallback ?? project.owner : null;
+  const byFallback = !!fallbackId && fallbackId === personId;
+  if (!byRole && !byName && !delegateFor && !byCond && !byFallback) {
     const cn = conds.filter((cd) => cd.needs.oncall && cd.needs.roles.some((r) => roles.includes(r)));
     const roleList = (rs: string[]) => rs.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ");
     if (cn.length && !isOnCall({ projects: [project] }, person, project.id)) return deny((cn[0] as ApproverCondition).text + "; " + person.name + " is not on call.", "On-call " + roleList((cn[0] as ApproverCondition).needs.roles), "APR-" + gateId);
@@ -494,7 +498,7 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
     );
   }
   /* I4: with separation of duties off the requester may vote, but never alone. Their vote is accepted; the gate needs someone else too (see gateProgress). */
-  const why = byName ? "Named approver for " + g.label + "." : byRole ? "Approver rule allows " + rule.roles.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ") + "." : delegateFor ? "Delegate for " + delegateFor.name + " while they are away." : "Meets condition: " + (byCond as ApproverCondition).text + ".";
+  const why = byName ? "Named approver for " + g.label + "." : byRole ? "Approver rule allows " + rule.roles.map((r) => state.catalog.roles.find((x) => x.id === r)?.name ?? r).join(" or ") + "." : delegateFor ? "Delegate for " + delegateFor.name + " while they are away." : byCond ? "Meets condition: " + (byCond as ApproverCondition).text + "." : "Fallback approver for " + g.label + ": the gate has waited past its escalation limit.";
   return { allowed: true, reason: why + (base.rule.kind === "policy" ? " " + base.reason : ""), rule: aprRule, needs: "" };
 }
 

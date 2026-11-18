@@ -492,6 +492,8 @@ export interface GateInstance {
   waitingSince?: Ms;
   decision?: GateDecisionRecord;
   trustNote?: string | null;
+  /** The gate waited past its escalation limit: the rule's fallback approver (else the project owner) may approve it from then on. */
+  escalated?: boolean;
 }
 
 export interface HistorySkill {

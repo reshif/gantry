@@ -90,6 +90,35 @@ describe("per-class approvals required", () => {
     expect(d.reason).toMatch(/author/i);
     expect(gateDecision(S, "p-meera", wo, "G5", NOW).allowed).toBe(true); // someone else may
   });
+  it("S-10: the rule's fallback approver (else the project owner) may approve only once the gate has escalated, and the author still may not", () => {
+    const S = seedState();
+    const project = S.projects.find((p) => p.id === "payments")!;
+    project.approvers.G5 = { roles: ["release_manager"], people: [], required: 1, sod: true, conditions: [], escalateH: 8, fallback: "p-meera" };
+    const wo = structuredClone(S.workOrders.find((w) => w.project === "payments" && w.gates.G5))!;
+    wo.gates.G5!.status = "waiting";
+    wo.gates.G5!.approvals = [];
+    wo.requestedBy = "p-tomas";
+    const asMeera = () => gateDecision(S, "p-meera", wo, "G5", NOW);
+    // Meera is not in the rule; before escalation she is refused by the approver rule.
+    const before = asMeera();
+    expect(before.allowed).toBe(false);
+    expect(before.rule.kind).toBe("approver");
+    wo.gates.G5!.escalated = true;
+    const after = asMeera();
+    expect(after.allowed, after.reason).toBe(true);
+    expect(after.reason).toMatch(/Fallback approver/);
+    // The fallback gains nothing for anyone else, and not the author under separation of duties.
+    expect(gateDecision(S, "p-rui", wo, "G5", NOW).allowed).toBe(false);
+    wo.requestedBy = "p-meera";
+    expect(asMeera().allowed).toBe(false);
+    // No fallback named: the project owner.
+    wo.requestedBy = "p-tomas";
+    project.approvers.G5 = { ...project.approvers.G5!, fallback: null };
+    project.owner = "p-meera";
+    expect(asMeera().allowed).toBe(true);
+    wo.gates.G5!.escalated = false;
+    expect(asMeera().allowed).toBe(false);
+  });
   it("rejects 0, negative, fractional and huge counts, and unknown classes", () => {
     const classes = new Set(["docs", "feature"]);
     expect(classRequiredError({ docs: 0 }, classes)).toMatch(/at least 1/);
