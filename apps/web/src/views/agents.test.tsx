@@ -110,7 +110,7 @@ function mountAgent(id = "ag-build") {
 const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra } });
 const writes = (calls: Call[], method: string) => calls.filter((c) => c.method === method && c.path !== "/api/v1/can");
 /** The page has seven tabs (the prototype's); the former Settings, Per-project, Versions, Trust and History tabs live inside them. */
-const PARENT: Record<string, string> = { settings: "model", overrides: "model", versions: "instructions", trust: "guardrails", history: "guardrails" };
+const PARENT: Record<string, string> = { settings: "guardrails", overrides: "guardrails", versions: "instructions", trust: "guardrails", history: "guardrails" };
 const tab = async (id: string) => fireEvent.click(await byId(`ag-tab-${PARENT[id] ?? id}`));
 
 beforeEach(() => {
@@ -132,7 +132,7 @@ describe("Agents screen", () => {
     mount(<AgentsView />);
     const row = await byId("ag-row-ag-build");
     const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim());
-    expect(heads).toEqual(["Agent", "Station", "Model", "Autonomy", "Version", "Eval", "Runs 7d", "Status"]);
+    expect(heads).toEqual(["Agent", "Station", "Model", "Autonomy", "Version", "Eval", "Runs 30d", "Status"]);
     expect(row.textContent).toContain("Builder");
     expect(row.textContent).toContain("Build");
     expect(row.textContent).toContain("opus-5-5");
@@ -144,7 +144,7 @@ describe("Agents screen", () => {
     const head = document.getElementById("ag-stats")!.textContent!;
     expect(head).toContain("Agents2");
     expect(head).toContain("Avg eval score0.88");
-    expect(head).toContain("Runs, 7 days");
+    expect(head).toContain("Runs, 30 days");
     expect(head).toContain("Avg rework");
     expect(document.querySelector(".ph .sub")!.textContent).toBe("One agent per station. Each has instructions, tools, a model, a budget and an autonomy level people granted.");
     expect(document.getElementById("agent-create")!.textContent).toContain("New agent");
@@ -213,13 +213,12 @@ describe("Agents screen", () => {
     mountAgent();
     await tab("model");
     const budget = (await byId("ag-budget")) as HTMLInputElement;
-    expect(document.getElementById("ag-savebar")!.className).not.toContain("is-dirty");
-    expect(document.getElementById("ag-save")!.getAttribute("data-reason")).toBe("No changes to save.");
+    expect(document.getElementById("ag-savebar")).toBeNull();
     fireEvent.change(budget, { target: { value: "15" } });
     await tab("guardrails");
     fireEvent.change(await byId("ag-maxdiff"), { target: { value: "600" } });
     await tab("tools");
-    fireEvent.click(await byId("ag-tool-merge"));
+    fireEvent.click(await byId("ag-tool-postSlack"));
     await waitFor(() => expect(document.getElementById("ag-savebar")!.className).toContain("is-dirty"));
     fireEvent.click(document.getElementById("ag-save")!);
     await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
@@ -567,6 +566,10 @@ describe("Skills screen", () => {
     expect(drawer.textContent).toContain("Skill \u00b7 v1.2.0");
     expect(drawer.textContent).toContain("Skill file");
     fireEvent.click(await byId("sk-drawer-edit"));
+    await waitFor(() => expect(document.body.textContent).toContain("Opened a draft of Test design"));
+    expect(window.location.hash).toBe("");
+    expect(document.getElementById("sk-drawer")).not.toBeNull();
+    fireEvent.click(await byId("sk-drawer-page"));
     expect(window.location.hash).toBe("#skills/sk-a");
     cleanup();
     window.location.hash = "#skills";
@@ -657,12 +660,13 @@ describe("Skills screen", () => {
     await waitFor(() => expect(document.body.textContent).toContain("at least 10 characters"));
     fireEvent.change(await byId("sk-new-desc"), { target: { value: "Diff the spec against the code." } });
     fireEvent.change(await byId("sk-new-station"), { target: { value: "review" } });
-    fireEvent.change(await byId("sk-new-attach"), { target: { value: "ag-review" } });
+    expect(document.getElementById("sk-new-attach")).toBeNull();
     fireEvent.click(await byId("sk-new-ok"));
     await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
     expect(writes(calls, "POST")[0]!.headers["idempotency-key"]).toBeTruthy();
     expect(writes(calls, "POST")[0]!.body).toMatchObject({ name: "API review", desc: "Diff the spec against the code." });
-    await waitFor(() => expect(writes(calls, "PUT")).toHaveLength(1));
+    await waitFor(() => expect(document.body.textContent).toContain("Draft created"));
+    expect(writes(calls, "PUT")).toHaveLength(0);
     expect(window.location.hash).toBe("");
   });
 });
@@ -694,5 +698,39 @@ describe("agent page layout (prototype)", () => {
     expect(document.getElementById("ag-pause")).toBeNull();
     expect(document.getElementById("ag-back-link")).toBeTruthy();
     expect(document.getElementById("ag-talk")).toBeTruthy();
+  });
+});
+
+describe("work1 round 3 fixes", () => {
+  it("New agent has Name, Station and Model only (no template field)", async () => {
+    setup();
+    mount(<AgentsView />);
+    fireEvent.click(await byId("agent-create"));
+    await byId("na-name");
+    expect(document.getElementById("na-tpl")).toBeNull();
+    expect(document.getElementById("na-station")).not.toBeNull();
+    expect(document.getElementById("na-model")).not.toBeNull();
+  });
+  it("Runs are a 30-day figure and the Model tab holds only Model and Budget", async () => {
+    setup();
+    mountAgent();
+    await tab("model");
+    await byId("ag-budget");
+    expect(document.getElementById("ag-model")).not.toBeNull();
+    expect(document.getElementById("ag-aut-auto")).toBeNull();
+    expect(document.getElementById("ag-fb-add")).toBeNull();
+    await tab("guardrails");
+    await byId("ag-fb-add");
+  });
+  it("sensitive tools are switched off and locked; toast reads Enabled/Disabled <tool>", async () => {
+    setup();
+    mountAgent();
+    await tab("tools");
+    const merge = (await byId("ag-tool-merge")) as HTMLInputElement;
+    expect(merge.getAttribute("aria-disabled")).toBe("true");
+    expect(merge.getAttribute("aria-label")).toBe("merge");
+    fireEvent.click(await byId("ag-tool-postSlack"));
+    await waitFor(() => expect(document.body.textContent).toContain("Disabled postSlack"));
+    expect(document.body.textContent).not.toContain("Save the agent to keep it");
   });
 });

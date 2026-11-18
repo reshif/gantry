@@ -155,3 +155,6 @@
 .ws-f{margin-top:auto;padding-top:var(--s2)}.ws-idle{display:flex;flex-direction:column;gap:var(--s1);min-height:112px}
 @media (max-width:1280px){.proj-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:720px){.proj-grid{grid-template-columns:minmax(0,1fr)}}
+
+/* work1: the agent eval-trend chart uses the prototype .chart (no box); base.css .chart draws a card box. */
+.ag-trend .chart{background:none;border:0;border-radius:0;padding:0 0 0 24px}

@@ -53,6 +53,7 @@ export default function ModelsView() {
   const discover = (): void => {
     const targets = vendors.filter((v) => v.connected && (v.template || v.custom || v.id === "anthropic"));
     if (!targets.length) { ui.toast("No connected vendor can list its models.", "warn"); return; }
+    ui.toast("Checking the vendor for new models\u2026", "info");
     void (async () => { for (const v of targets) { const r = await discoverCmd.run(v.id); if (r) ui.toast(r.msg, r.ok ? "ok" : "error"); } })();
   };
   const scrollTo = (id: string) => setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);

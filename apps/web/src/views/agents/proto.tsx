@@ -13,12 +13,14 @@ import { Bars, Card, CrIcon, Stats } from "../../ui/cr";
 import { DataTable, type SortCol } from "../../ui/DataTable";
 import { useUI } from "../../ui/overlay-context";
 import { lineDiff } from "../../ui/linediff";
-import { TOOLS, liveVersion, nextVersion, useModels, useStations, type AgentRow } from "./kit";
+import { TOOLS, liveVersion, useModels, useStations, type AgentRow } from "./kit";
 import type { TabProps } from "./Config";
 
 /** The server has three autonomy modes; they map onto the prototype's ladder: suggest = L0 (every output goes to a person), gate = L2 (acts, a person decides at the gate), auto = L4 (moves work on unattended). */
 export const levelOf = (a: Pick<AgentRow, "autonomy">): number => (a.autonomy === "auto" ? 4 : a.autonomy === "gate" ? 2 : 0);
 const NA = "not available";
+/** Finished attempts over the last four weekly buckets (28 days, the longest whole-week window the scorecard keeps); null when the server sent none. */
+export const runs30 = (c: { trend?: { n?: number[] } } | undefined): number | null => (c?.trend?.n?.length ? c.trend.n.slice(-4).reduce((t, x) => t + x, 0) : null);
 const SENSITIVE = /^(merge|readSecrets|sendEmail|openPR)$/;
 
 export function useAgentFacts(a: AgentRow) {
@@ -51,6 +53,7 @@ export function OverviewTab({ a, d, onTab }: TabProps & { onTab: (t: string) => 
   const st = useStations();
   const { sc, evalRuns } = useAgentFacts(a);
   const recent = useRecentRuns(a);
+  const skillList = useSkills().data ?? [];
   const trend = evalRuns.slice(0, 8).reverse().map((r) => Math.round(r.score * 100));
   const spark = (sc?.trend.success?.length ?? 0) > 1 ? sc!.trend.success : a.spark;
   const station = st.find(a.station);
@@ -66,7 +69,7 @@ export function OverviewTab({ a, d, onTab }: TabProps & { onTab: (t: string) => 
         <Stats items={[
           { l: "Eval score", v: Number.isFinite(a.evalScore) ? a.evalScore.toFixed(2) : "—", tone: "ok", ...(spark && spark.length > 1 ? { spark } : {}) },
           { l: "Rework", v: sc ? `${Math.round(sc.rework * 100)}%` : "—" },
-          { l: "Runs, 7d", v: sc?.counts ? sc.counts.attempts : "—", tone: "info" },
+          { l: "Runs, 30d", v: runs30(sc) ?? "—", tone: "info" },
           { l: "Autonomy", v: `L${levelOf(a)}`, tone: "agent" },
         ]} />
         <Card title="Recent runs" flush>
@@ -81,11 +84,11 @@ export function OverviewTab({ a, d, onTab }: TabProps & { onTab: (t: string) => 
             ["Version", <span key="v" className="m">{a.version}</span>],
             ["Owner", <span key="o" className="dim">{NA}</span>],
             ["Budget", `$${d.budget} per run`],
-            ["Skills", d.skills.length ? <span key="s" className="row">{d.skills.map((s) => <span key={s} className="tag">{s.replace("sk-", "")}</span>)}</span> : "—"],
+            ["Skills", d.skills.length ? <span key="s" className="row">{d.skills.map((s) => <span key={s} className="tag">{skillList.find((x) => x.id === s)?.name ?? s.replace("sk-", "")}</span>)}</span> : "—"],
           ]} />
         </Card>
         <Card title="Eval trend" hint="Score of the last runs, percent">
-          {trend.length ? <Bars data={trend} label={`${a.name} eval score`} /> : <p className="dim">No eval runs yet.</p>}
+          {trend.length ? <div className="ag-trend"><Bars data={trend} h={72} label={`${a.name} eval score`} /></div> : <p className="dim">No eval runs yet.</p>}
         </Card>
         <Card title="Guardrails" acts={<Btn label="Open" small id="ag-open-guardrails" onClick={() => onTab("guardrails")} />}>
           <KvList rows={[["Max diff", `${d.guardrails.maxDiff} lines`], ["Forbidden paths", `${d.guardrails.paths.length} patterns`], ["On violation", "Stop and ask a person"]]} />
@@ -136,7 +139,7 @@ export function confirmNewVersion(ui: ReturnType<typeof useUI>, a: AgentRow, run
   ui.dialog({
     title: `Save a new version of ${a.name}?`,
     sub: "The eval suite runs first. If the score drops below the threshold it will not go live.",
-    body: <p className="dim">{`Saved as candidate ${nextVersion(a)}. Promoting it is a separate, audited step on the Versions tab.`}</p>,
+    body: null,
     actions: [{ label: "Cancel" }, { label: "Save and run evals", kind: "primary", submit: true, id: "ag-instr-confirm", onClick: (done) => { run(); done(); } }],
   });
 }
@@ -146,13 +149,13 @@ export function ToolsTab({ d, perm, ro, edit }: TabProps) {
   return (
     <Card title="Tools" flush>
       <div className="list">
-        {TOOLS.map(([id, label]) => {
+        {TOOLS.map(([id]) => {
           const danger = SENSITIVE.test(id);
           const on = !!d.tools[id];
           return (
             <div key={id} className="setrow">
               <div className="tx"><b className="mono">{id}</b><span>{danger ? "Sensitive: needs a Factory Admin" : "Allowed for this station"}</span></div>
-              <Toggle id={`ag-tool-${id}`} checked={on} label={`${label}`} decision={ro ? perm : danger && !perm.allowed ? perm : null} onChange={(v) => { edit(() => { d.tools[id] = v; }); ui.toast(`${v ? "Enabled" : "Disabled"} ${id}. Save the agent to keep it.`, "ok"); }} />
+              <Toggle id={`ag-tool-${id}`} checked={on} label={id} decision={ro ? perm : danger ? { allowed: false, needs: "Factory Admin", reason: "Sensitive: needs a Factory Admin" } : null} onChange={(v) => { edit(() => { d.tools[id] = v; }); ui.toast(`${v ? "Enabled" : "Disabled"} ${id}`, "ok"); }} />
             </div>
           );
         })}
@@ -161,7 +164,7 @@ export function ToolsTab({ d, perm, ro, edit }: TabProps) {
   );
 }
 
-export function ModelTab({ a, d, ro, perm, edit }: TabProps) {
+export function ModelTab({ d, ro, edit }: TabProps) {
   const m = useModels();
   const opts = m.list.map((x) => ({ value: x.id, label: x.id })).concat(m.list.some((x) => x.id === d.model) ? [] : [{ value: d.model, label: `${d.model} (not available)` }]);
   return (
@@ -174,9 +177,13 @@ export function ModelTab({ a, d, ro, perm, edit }: TabProps) {
           <input id="ag-budget" className="input mono" type="number" min="0" step="0.1" value={String(d.budget)} disabled={ro} onChange={(e) => edit(() => { d.budget = +e.target.value || 0; })} />
         </Field>
       </div>
-      <FallbackChain a={a} d={d} ro={ro} perm={perm} edit={edit} />
     </Card>
   );
+}
+
+/** The fallback order is kept (a working feature), on the Guardrails tab, since the prototype's Model tab holds only Model and Budget. */
+export function FallbackCard({ a, d, ro, perm, edit }: TabProps) {
+  return <Card title="Fallback models"><FallbackChain a={a} d={d} ro={ro} perm={perm} edit={edit} /></Card>;
 }
 
 /** The fallback order stays (the model chain is a working feature): primary first, then each fallback with move and remove. */
@@ -185,7 +192,7 @@ function FallbackChain({ d, ro, perm, edit }: Pick<TabProps, "a" | "d" | "ro" | 
   const addable = m.list.filter((x) => x.id !== d.model && !d.fallbacks.includes(x.id));
   const move = (i: number, to: number) => edit(() => { const [x] = d.fallbacks.splice(i, 1); d.fallbacks.splice(to, 0, x as string); });
   return (
-    <div className="field" style={{ marginTop: 16 }}>
+    <div className="field">
       <div className="field-label label">Fallbacks, tried in order</div>
       {d.fallbacks.length ? (
         <ol className="chain">
@@ -222,7 +229,7 @@ export function SkillsListTab({ d, perm, ro, edit }: TabProps) {
             return (
               <div key={s.id} className="setrow">
                 <div className="tx"><b>{s.name}</b><span>{s.desc}</span></div>
-                <Toggle id={`ag-sk-${s.id}`} checked={on} label={`${s.name} enabled`} decision={lock} onChange={(v) => { edit(() => { d.skills = v ? [...d.skills, s.id] : d.skills.filter((x) => x !== s.id); }); ui.toast(`${v ? "Enabled" : "Disabled"} ${s.name}. Save the agent to keep it.`, "ok"); }} />
+                <Toggle id={`ag-sk-${s.id}`} checked={on} label={`${s.name} enabled`} decision={lock} onChange={(v) => { edit(() => { d.skills = v ? [...d.skills, s.id] : d.skills.filter((x) => x !== s.id); }); ui.toast(`${v ? "Enabled" : "Disabled"} ${s.name}`, "ok"); }} />
               </div>
             );
           })}

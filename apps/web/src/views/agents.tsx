@@ -33,7 +33,7 @@ import { SkillsTab } from "./agents/SkillsMcp";
 import { VersionsTab } from "./agents/Versions";
 import { TrustStrip, TrustTab } from "./agents/Trust";
 import { NewAgentDialog } from "./agents/NewAgent";
-import { EvalsTab, GuardrailsTab, InstructionsCard, ModelTab, OverviewTab, SkillsListTab, ToolsTab, confirmNewVersion, levelOf } from "./agents/proto";
+import { EvalsTab, FallbackCard, GuardrailsTab, runs30, InstructionsCard, ModelTab, OverviewTab, SkillsListTab, ToolsTab, confirmNewVersion, levelOf } from "./agents/proto";
 
 const NA = "not available";
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -49,7 +49,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
   const rows = agents.filter((a) => (!r.station || a.station === r.station) && (!r.lv || String(levelOf(a)) === r.lv)
     && (!term || [a.name, a.id, a.model, a.station ?? ""].join(" ").toLowerCase().includes(term)));
   const any = !!(r.q || r.station || r.lv);
-  const runs = (a: AgentRow): number | null => scorecards?.[a.id]?.counts?.attempts ?? null;
+  const runs = (a: AgentRow): number | null => runs30(scorecards?.[a.id]);
   const cols: SortCol<AgentRow>[] = [
     { key: "name", label: "Agent", sort: (a) => a.name.toLowerCase(), render: (a) => (
       <span className="row nowrap">
@@ -65,7 +65,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
     { key: "autonomy", label: "Autonomy", sort: (a) => levelOf(a), render: (a) => <span className="lvl" style={{ "--l": levelOf(a), cursor: "default" } as React.CSSProperties}>{`L${levelOf(a)}`}</span> },
     { key: "version", label: "Version", sort: true, render: (a) => <span className="mono">{a.version}</span> },
     { key: "evalScore", label: "Eval", sort: true, align: "end", render: (a) => Number.isFinite(a.evalScore) ? <span className="mono">{a.evalScore.toFixed(2)}</span> : <span className="dim">{"\u2014"}</span> },
-    { key: "runs", label: "Runs 7d", sort: (a) => runs(a) ?? -1, align: "end", render: (a) => { const n = runs(a); return n == null ? <span className="dim">{NA}</span> : <span className="mono">{n}</span>; } },
+    { key: "runs", label: "Runs 30d", sort: (a) => runs(a) ?? -1, align: "end", render: (a) => { const n = runs(a); return n == null ? <span className="dim">{NA}</span> : <span className="mono">{n}</span>; } },
     { key: "status", label: "Status", sort: (a) => (a.status === "paused" ? "paused" : (a.running ?? 0) > 0 ? "busy" : "idle"), render: (a) => a.status === "paused" ? <Chip text="Paused" cls="idle" /> : (a.running ?? 0) > 0 ? <Chip text="Busy" cls="info" /> : <Chip text="Idle" cls="idle" /> },
   ];
   const clear = <Btn label="Clear" small kind="ghost" id="ag-clear" onClick={() => { setQText(""); setR({ q: "", station: "", lv: "" }); }} />;
@@ -137,6 +137,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   // "Save as new version": the working copy is saved first (one audited change), then a candidate snapshots it. Promotion stays a separate step on Versions.
   const saveVersion = () => {
     if ((d.instructions ?? "").trim().length < 40) { ui_.toast("Instructions are too short.", "warn"); return; }
+    if ((d.instructions ?? "") === (a.instructions ?? "") && !dirty) { ui_.toast("No changes to save. Edit the instructions first.", "warn"); return; }
     confirmNewVersion(ui_, a, () => {
       void (async () => {
         let rev = a.rev;
@@ -162,10 +163,11 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const tp: TabProps = { a, d, ro, perm, projects, policies, edit };
   const body = tab === "instructions" ? <><InstructionsCard a={a} d={d} ro={ro} edit={edit} onSaveVersion={saveVersion} saving={draft.saving || draft.syncing} /><InstructionsTab {...tp} /><VersionsTab a={a} dirty={dirty} perm={perm} /></>
     : tab === "tools" ? <ToolsTab {...tp} />
-    : tab === "model" ? <><ModelTab {...tp} /><ConfigTab {...tp} /><OverridesTab {...tp} /></>
+    : tab === "model" ? <ModelTab {...tp} />
     : tab === "skills" ? <><SkillsListTab {...tp} /><SkillsTab {...tp} /></>
     : tab === "guardrails" ? <>
         <GuardrailsTab {...tp} />
+        <FallbackCard {...tp} /><ConfigTab {...tp} /><OverridesTab {...tp} />
         <Card title="Agent status" hint={paused ? "Paused: its stations queue work until it resumes." : "Pause it to stop new work reaching this agent."}>
           <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving\u2026")} onClick={toggleStatus} />
         </Card>
@@ -175,6 +177,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
     : tab === "evals" ? <><EvalsTab a={a} /><Btn label="Open the eval suite" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} /></>
     : <OverviewTab {...tp} onTab={setTab} />;
   const showSave = SAVE_TABS.includes(tab);
+  const showBar = showSave && (dirty || draft.saving || !!draft.conflict);
   return (
     <Page id="agent-detail" eyebrow="Workforce · Agent" title={a.name} cls="agent-detail"
       sub={`${station ? `${station.name} station \u00b7 ` : ""}${a.model}${running ? ` \u00b7 ${running} work order${running === 1 ? "" : "s"} now` : ""}${paused ? " \u00b7 paused" : ""}`}
@@ -186,7 +189,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
       <Tabs idPrefix="ag-tab" items={tabs} active={tab} onChange={setTab} />
       <div className="ag-body">{body}</div>
       {showSave ? <DraftConflictBanner id="ag-conflict" conflict={draft.conflict} onKeepMine={draft.keepMine} onDiscard={draft.discard} /> : null}
-      {showSave ? (
+      {showBar ? (
         <div className={`savebar${dirty ? " is-dirty" : ""}`} id="ag-savebar">
           <span className="muted small savebar-text">Edits stay in a draft while you switch tabs or screens. Saving writes one audited change.</span>
           <Btn label="Discard" id="ag-discard" guard={!perm.allowed ? perm : null} onClick={draft.discard} />
@@ -235,14 +238,14 @@ export default function AgentsView() {
   const cards = agents.map((a) => scorecards?.[a.id]).filter((x): x is NonNullable<typeof x> => !!x);
   const scored = agents.filter((a) => Number.isFinite(a.evalScore));
   const avgEval = scored.length ? scored.reduce((t, a) => t + a.evalScore, 0) / scored.length : null;
-  const runs = cards.some((c) => c.counts) ? cards.reduce((t, c) => t + (c.counts?.attempts ?? 0), 0) : null;
+  const runs = cards.some((c) => runs30(c) != null) ? cards.reduce((t, c) => t + (runs30(c) ?? 0), 0) : null;
   const rework = cards.length ? cards.reduce((t, c) => t + c.rework, 0) / cards.length : null;
   return head(
     <>
       <Stats id="ag-stats" items={[
         { l: "Agents", v: agents.length, tone: "agent" },
         { l: "Avg eval score", v: avgEval == null ? NA : avgEval.toFixed(2), tone: "ok" },
-        { l: "Runs, 7 days", v: runs == null ? NA : fmt.k(runs), tone: "info" },
+        { l: "Runs, 30 days", v: runs == null ? NA : fmt.k(runs), tone: "info" },
         { l: "Avg rework", v: rework == null ? NA : `${Math.round(rework * 100)}%` },
       ]} />
       <Roster agents={agents} />

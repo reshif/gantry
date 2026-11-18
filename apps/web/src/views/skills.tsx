@@ -60,6 +60,7 @@ const enabledOf = (sk: SkillRow): boolean => sk.projects === "all" || sk.project
 
 /** The skill drawer (prototype `skopen`): description, key facts, the skill file; the full page (definition, agents, projects, versions) is one button away. */
 function SkillDrawer({ sk, agents, stations, close }: { sk: SkillRow; agents: AgentRow[]; stations: string; close: () => void }) {
+  const ui_ = useUI();
   const users = agents.filter((a) => a.skills.includes(sk.id) || (a.liveSkills ?? []).some((l) => l.id === sk.id));
   const updated = sk.versions[sk.versions.length - 1]?.at;
   return (
@@ -81,7 +82,7 @@ function SkillDrawer({ sk, agents, stations, close }: { sk: SkillRow; agents: Ag
       </div>
       <div className="drawer-f">
         <Btn label="Close" onClick={close} />
-        <Btn label="Edit draft" kind="primary" id="sk-drawer-edit" onClick={() => { close(); navigate("skills", sk.id); }} />
+        <Btn label="Edit draft" kind="primary" id="sk-drawer-edit" onClick={() => ui_.toast(`Opened a draft of ${sk.name}`, "info", { label: "Open skill page", id: "sk-drawer-page", onClick: () => { close(); navigate("skills", sk.id); } })} />
       </div>
     </div>
   );
@@ -308,29 +309,24 @@ function Detail({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
   );
 }
 
-function NewSkill({ agents, close }: { agents: AgentRow[]; close: () => void }) {
+function NewSkill({ close }: { close: () => void }) {
   const ui_ = useUI();
   const st = useStations();
   const perm = dec(useCan("skill.edit"));
-  const attachGuard = dec(useCan("agent.edit"));
-  const [f, setF] = useState({ name: "", station: "", desc: "", attach: "" });
+  const [f, setF] = useState({ name: "", station: "", desc: "" });
   const [err, setErr] = useState<{ name?: string; desc?: string; form?: string }>({});
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   const station = f.station || st.all[0]?.id || "";
-  const offered = agents.filter((a) => a.station === station);
   return (
     <Dialog title="New skill" onClose={close} dirty={!!(f.name || f.desc)}
       body={(
         <div className="form-grid">
           <LockNote decision={perm} what="Creating skills" />
           <Field label="Name (required)" htmlFor="sk-new-name" error={err.name}><input id="sk-new-name" className="input" value={f.name} onChange={set("name")} aria-invalid={err.name ? true : undefined} /></Field>
-          <Field label="Station" htmlFor="sk-new-station" hint="Skills carry no station of their own: it is the station of the agents that use them. It lists the agents you may attach it to.">
-            <Select id="sk-new-station" value={station} options={[...st.all.map((s) => ({ value: s.id, label: s.name })), { value: "onboarding", label: "Onboarding" }]} onChange={(v) => setF((x) => ({ ...x, station: v, attach: "" }))} />
+          <Field label="Station" htmlFor="sk-new-station">
+            <Select id="sk-new-station" value={station} options={st.all.map((s) => ({ value: s.id, label: s.name }))} onChange={(v) => setF((x) => ({ ...x, station: v }))} />
           </Field>
           <Field label="What it teaches (required)" htmlFor="sk-new-desc" error={err.desc}><textarea id="sk-new-desc" className="input" rows={4} value={f.desc} onChange={set("desc")} aria-invalid={err.desc ? true : undefined} /></Field>
-          <Field label="Attach (optional)" htmlFor="sk-new-attach" hint={attachGuard.allowed ? undefined : `Attaching needs Configure agents: ${attachGuard.reason}`}>
-            <Select id="sk-new-attach" disabled={!attachGuard.allowed} value={f.attach} options={[{ value: "", label: "Do not attach yet" }, ...offered.map((a) => ({ value: a.id, label: `Attach to ${a.name}` }))]} onChange={(v) => setF((x) => ({ ...x, attach: v }))} />
-          </Field>
           <div className="form-err" role="alert">{err.form ?? ""}</div>
         </div>
       )}
@@ -346,10 +342,8 @@ function NewSkill({ agents, close }: { agents: AgentRow[]; close: () => void }) 
             if (!desc) e.desc = "Describe what it teaches."; else if (desc.length < 10) e.desc = "Say a little more: at least 10 characters.";
             setErr(e);
             if (e.name || e.desc) { document.getElementById(e.name ? "sk-new-name" : "sk-new-desc")?.focus(); return; }
-            void ops.saveSkill(null, { name, desc, when: "", body: desc, resources: [] }).then(async (r) => {
+            void ops.saveSkill(null, { name, desc, when: "", body: desc, resources: [] }).then((r) => {
               if (!r.ok) { setErr({ form: r.msg }); return; }
-              const created = (r as unknown as { skill?: SkillRow }).skill;
-              if (created && f.attach) { const r2 = await ops.attachSkill(f.attach, created.id, true); if (!r2.ok) ui_.toast(r2.msg, "error"); }
               ui_.toast("Draft created", "ok");
               done();
             });
@@ -370,7 +364,7 @@ export default function SkillsView() {
   const wanted = route.id === "skills" ? route.param : null;
   useCrumbTail(wanted ? skills.find((s) => s.id === wanted)?.name : null);
   const sub = "Reusable know-how that agents load. Versioned, reviewed, and measured by evals.";
-  const newBtn = <Btn label="New skill" kind="primary" icon="plus" id="sk-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill agents={agents} close={close} />)} />;
+  const newBtn = <Btn label="New skill" kind="primary" icon="plus" id="sk-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill close={close} />)} />;
   const head = (children: React.ReactNode) => <Page eyebrow="Workforce" title="Skills" sub={sub} acts={newBtn} cls="view-skills">{children}</Page>;
   if (q.data === undefined) return head(<Async query={q} what="skills" id="skills">{() => null}</Async>);
   if (wanted) {
@@ -379,6 +373,6 @@ export default function SkillsView() {
     ui.sel = current.id;
     return <Detail sk={current} agents={agents} />;
   }
-  if (!skills.length) return head(<div className="card"><CrEmpty title="Nothing here yet" text="Create the first skill." action={<Btn label="New skill" kind="primary" icon="plus" id="skills-empty-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill agents={agents} close={close} />)} />} /></div>);
+  if (!skills.length) return head(<div className="card"><CrEmpty title="Nothing here yet" text="Create the first skill." action={<Btn label="New skill" kind="primary" icon="plus" id="skills-empty-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill close={close} />)} />} /></div>);
   return head(<Library skills={skills} agents={agents} />);
 }

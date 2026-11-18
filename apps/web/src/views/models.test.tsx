@@ -573,15 +573,19 @@ describe("models catalog in the prototype layout", () => {
 });
 
 describe("models screen has no tab strip (prototype)", () => {
-  it("the catalog links to vendors, routing and prices instead, and Add vendor lives on the vendors page", async () => {
+  it("the catalog has no buttons to vendors, routing or prices; Spend by model replaces Spend by vendor; Add vendor lives on the vendors page", async () => {
     setup();
     window.location.hash = "#models";
     mount();
     await byId("mc-table");
     expect(document.getElementById("md-tab-models")).toBeNull();
     expect(document.getElementById("md-add-vendor")).toBeNull();
-    fireEvent.click(await byId("mc-vendors"));
+    expect(document.getElementById("mc-vendors")).toBeNull();
+    expect(document.body.textContent).toContain("Spend by model");
+    expect(document.body.textContent).not.toContain("Spend by vendor");
+    cleanup();
+    window.location.hash = "#models/vendors";
+    mount();
     await byId("md-add-vendor");
-    expect(window.location.hash).toBe("#models/vendors");
   });
 });

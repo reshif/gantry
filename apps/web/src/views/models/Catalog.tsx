@@ -6,7 +6,6 @@ import { useRouteState, useDebouncedParam } from "../../lib/routeState";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { fmt, type Agent, type Routing, type Vendor } from "@gantry/domain";
-import { navigate } from "../../lib/router";
 import { useCan } from "../../api/can";
 import { Btn, Chip, Field, FilterBar, Meter, SearchBox, Select, Toggle, reasonText } from "../../ui/primitives";
 import { Card } from "../../ui/cr";
@@ -57,24 +56,24 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
   const term = qText.trim().toLowerCase();
   const rows = all.filter((m) => (!tier || m.tier === tier) && (!term || `${m.name} ${m.id}`.toLowerCase().includes(term)));
   const tiers = [...new Set(all.map((m) => m.tier))];
+  /** Locks that stop the switch from being used at all (permission, price, vendor). */
   const lockFor = (m: Row) => !perm.allowed ? perm
     : m.needsPrice && !m.enabled ? no("Set a price first.")
     : !m.vendor.connected ? no(`Connect ${m.vendor.name} first.`)
-    : !m.enabled && !m.invocable ? no("The model gateway cannot call this vendor's models yet.")
-    : m.enabled && routing.defaultModel === m.id ? no("This is the factory default model. Pick another default first.")
-    : m.enabled && usedBy(agents, m.id).some((a) => a.model === m.id) ? no("Primary model of an agent. Change that agent first.") : null;
+    : !m.enabled && !m.invocable ? no("The model gateway cannot call this vendor's models yet.") : null;
+  /** Refusals on switching off a model in use: the switch stays full colour and the click says why (nothing is written). */
+  const inUse = (m: Row) => m.enabled && routing.defaultModel === m.id ? "This is the factory default model. Pick another default first."
+    : m.enabled && usedBy(agents, m.id).some((a) => a.model === m.id) ? "Primary model of an agent. Change that agent first." : null;
   const cols: SortCol<Row>[] = [
-    { key: "name", label: "Model", sort: (m) => m.name.toLowerCase(), render: (m) => { const l = lockFor(m); return <span className="stack" style={{ gap: 0 }}><b className="ell">{m.name}</b><span className="mono dim ell" style={{ fontSize: 11 }} title={l && perm.allowed ? reasonText(l) : undefined}>{m.id}</span></span>; } },
-    { key: "tier", label: "Tier", sort: true, render: (m) => <Chip text={m.tier} cls={tierTone(m.tier)} /> },
+    { key: "name", label: "Model", sort: (m) => m.name.toLowerCase(), render: (m) => { const l = lockFor(m) ?? (inUse(m) ? no(inUse(m)!) : null); return <span className="stack" style={{ gap: 0 }}><b className="ell">{m.name}</b><span className="mono dim ell" style={{ fontSize: 11 }} title={l && perm.allowed ? reasonText(l) : undefined}>{m.id}</span></span>; } },
+    { key: "tier", label: "Tier", sort: true, render: (m) => <Chip text={m.tier} cls={`${tierTone(m.tier)} plain`} /> },
     { key: "context", label: "Context", sort: true, align: "end", render: (m) => <span className="mono">{fmt.k(m.context)}</span> },
     { key: "price", label: "In / out per Mtok", sort: (m) => m.outPrice, align: "end", render: (m) => m.needsPrice ? <Btn label="Set price" small id={`mc-price-${m.id}`} guard={perm} onClick={() => ui.open((close) => <SetPriceDialog m={m} close={close} />)} /> : <span className="mono">{m.inPrice || m.outPrice ? `$${m.inPrice} / $${m.outPrice}` : "self-hosted"}</span> },
     { key: "use", label: "Used at", render: (m) => { const at = Object.entries(routing.overrides ?? {}).filter(([, id]) => id === m.id).map(([s]) => s); return at.length ? <span className="row">{at.map((s) => <span key={s} className="tag">{s}</span>)}</span> : <span className="dim">{"\u2014"}</span>; } },
-    { key: "en", label: "Enabled", render: (m) => <Toggle id={`mc-${m.id}`} checked={m.enabled} label={`${m.name} enabled`} decision={lockFor(m)} onChange={(on) => setEnabled(m.id, on)} /> },
+    { key: "en", label: "Enabled", render: (m) => <Toggle id={`mc-${m.id}`} checked={m.enabled} label={`${m.name} enabled`} decision={lockFor(m)} onChange={(on) => { const why = inUse(m); if (why) { ui.toast(why, "warn"); return; } setEnabled(m.id, on); }} /> },
   ];
   const any = !!(r.q || r.tier);
   const clear = (): void => { setQText(""); setR({ q: "", tier: "" }); };
-  const spend = vendors.filter((v) => v.connected);
-  const top = Math.max(1, ...spend.map((v) => v.mtd || 0));
   return (
     <div className="grid g-main">
       <div>
@@ -85,16 +84,15 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
         <DataTable id="mc-table" caption="Models" columns={cols} rows={rows} rowKey={(m) => m.id} pageSize={12} pager sort={{ key: r.sort, dir: r.dir === "desc" ? -1 : 1 }} onSort={(x) => setR({ sort: x.key, dir: x.dir === -1 ? "desc" : "asc" })}
           empty={{ title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="mc-empty-clear" onClick={clear} /> }} />
       </div>
-      <Card title="Spend by vendor" hint="Month to date. Spend per model is not available: the meter records vendors.">
+      <Card title="Spend by model" hint="Last 30 days">
         <div className="stack" style={{ gap: 10 }}>
-          {spend.map((v) => (
-            <div key={v.id}>
-              <div className="row spread"><span className="ell">{v.name}</span><span className="mono">{fmt.money0(v.mtd || 0)}</span></div>
-              <Meter value={v.mtd || 0} max={v.budget || top} label={`${v.name} spend`} />
+          {all.filter((m) => m.enabled).map((m) => (
+            <div key={m.id}>
+              <div className="row spread"><span className="ell">{m.name}</span><span className="mono dim">not available</span></div>
+              <Meter value={0} max={1} label={`${m.name} spend`} />
             </div>
           ))}
         </div>
-        <span className="row" style={{ marginTop: 12 }}><Btn label="Vendors" small id="mc-vendors" onClick={() => navigate("models", "vendors")} /><Btn label="Routing" small id="mc-routing" onClick={() => navigate("models", "routing")} /><Btn label="Prices" small id="mc-prices" onClick={() => navigate("models", "prices")} /></span>
       </Card>
     </div>
   );

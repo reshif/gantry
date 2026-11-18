@@ -90,6 +90,9 @@ describe("Skills screen", () => {
     expect(window.location.hash).not.toContain("sk-review");
     expect((await byId("sk-drawer")).textContent).toContain("Skill \u00b7 v1.2.0");
     fireEvent.click(await byId("sk-drawer-edit"));
+    await waitFor(() => expect(document.body.textContent).toContain("Opened a draft of Code review"));
+    expect(window.location.hash).not.toContain("sk-review");
+    fireEvent.click(await byId("sk-drawer-page"));
     expect(window.location.hash).toBe("#skills/sk-review");
     cleanup();
     mount("sk-review");
