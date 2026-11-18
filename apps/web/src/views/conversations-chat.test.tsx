@@ -127,6 +127,35 @@ describe("Conversation pane", () => {
     expect(document.querySelectorAll(".sq-card").length).toBe(1);
     expect(document.getElementById("wos-status")!.textContent).toContain("Build is waiting for you");
     expect(screen.getByRole("button", { name: "Jump to question" })).toBeTruthy();
+    // the header chip agrees with the banner, and an unknown agent id is shown as its station, never as the raw id or a "?"
+    expect(document.getElementById("conv-state")!.textContent).toBe("Waiting on you");
+    expect(document.getElementById("wos")!.querySelector(".conv-h .av")!.textContent).toBe("B");
+    expect(document.getElementById("wos")!.querySelector(".conv-h")!.textContent).not.toContain("ag-build");
+  });
+
+  it("sizes the two panes to the viewport below their own top edge, so the page does not scroll", async () => {
+    const orig = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () { return this.classList.contains("conv") ? ({ top: 120, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 120, toJSON() {} } as DOMRect) : orig.call(this); };
+    try {
+      await open(session([agentMsg("a", "hi", T0)]));
+      const el = document.querySelector<HTMLElement>(".conv")!;
+      await waitFor(() => expect(el.style.height).toBe(`${window.innerHeight - 120 - 16}px`));
+    } finally { HTMLElement.prototype.getBoundingClientRect = orig; }
+  });
+
+  it("labels the events switch visibly, and the scroll box can be reached by keyboard", async () => {
+    await open(session([agentMsg("a", "hi", T0)]));
+    expect(document.querySelector('label[for="conv-events"]')!.textContent).toBe("Events");
+    const box = document.getElementById("conv-scroll")!;
+    expect(box.getAttribute("tabindex")).toBe("0");
+    expect(box.getAttribute("aria-label")).toBe("Conversation messages");
+  });
+
+  it("gives the title its full text in the header (wrapped, with a tooltip)", async () => {
+    await open(session([agentMsg("a", "hi", T0)]));
+    const t = document.querySelector(".conv-h-title")!;
+    expect(t.textContent).toBe(W.title);
+    expect(t.getAttribute("title")).toBe(W.title);
   });
 
   it("shows a person's answer compactly with a one-line reference to its question, not the whole quote", async () => {
@@ -138,7 +167,11 @@ describe("Conversation pane", () => {
     expect(ref.getAttribute("aria-expanded")).toBe("false");
     expect(document.querySelector(".cmsg.is-me .bub")!.textContent).toBe("EUR");
     expect(document.querySelector(".wos-answer-q")).toBeNull();
-    expect(document.querySelector(".conv-ql")!.textContent).toContain("Answered: EUR");
+    // the answer is the person's own bubble; the question line does not repeat it
+    expect(document.querySelector(".conv-ql")!.textContent).toContain("Answered below");
+    expect(document.querySelector(".conv-ql")!.textContent).not.toContain("EUR");
+    expect(document.querySelector(".conv-ql")!.textContent).toContain("Tomás");
+    expect(document.querySelector(".conv-ql .who")).toBeNull();
   });
 });
 
@@ -164,5 +197,21 @@ describe("Conversation list and side threads", () => {
     expect(document.getElementById("conv-side-back")).toBeTruthy();
     expect(document.getElementById("conv-scroll")).toBeNull();
     expect(window.location.hash).toContain("/conversations/");
+  });
+
+  it("renders a real side thread body (messages, scope, members) in the pane without failing", async () => {
+    const item = { key: "ct-9", kind: "side", scope: { kind: "work_order", id: W.id, label: W.id }, project: "payments", title: "Is the refund idempotent?", agent: "ag-research", agentName: "Researcher", waitingOn: "nobody", unread: false, latest: null, updatedAt: T0, archived: null, pinned: false, mine: true, shared: false, owner: "p-tomas", visibility: "project", spendUsd: 0 };
+    const now = Date.now();
+    window.location.hash = `#/p/payments/conversations/${W.id}`;
+    window.history.replaceState(null, "", "/?side=ct-9");
+    await open(session([agentMsg("a", "hi", T0)]), {
+      "GET /api/v1/workspace/inbox": () => ({ body: { items: [item] } }),
+      "GET /api/v1/console/threads/ct-9": () => ({ body: { id: "ct-9", title: "Is the refund idempotent?", pinned: [], createdAt: now, updatedAt: now, expiresAt: now + 1e9, retentionDays: 90, owner: "p-tomas", scope: { kind: "work_order", id: W.id }, projectId: "payments", agentId: "ag-research", visibility: "project", status: "active", archivedAt: null, archivedBy: null, members: [], can: { post: true, manage: true },
+        messages: [{ id: "cm-1", threadId: "ct-9", role: "user", author: "p-tomas", text: "Is it idempotent?", at: now - 5000, data: {} }, { id: "cm-2", threadId: "ct-9", role: "assistant", author: "ag-research", text: "Yes, keyed by the refund id.", at: now - 4000, data: { mode: "model", agent: "ag-research", agentName: "Researcher" } }] } }),
+      "GET /api/v1/console/threads": () => ({ body: { items: [], retentionDays: 90 } }),
+      "GET /api/v1/console/status": () => ({ body: { configured: true, vendor: "anthropic", model: "claude-test", proposals: [], canUse: true, actionsEnabled: false, retentionDays: 90, tools: [] } }),
+    });
+    expect(await screen.findByText("Yes, keyed by the refund id.", {}, { timeout: 4000 })).toBeTruthy();
+    expect(screen.queryByText(/failed to render/i)).toBeNull();
   });
 });

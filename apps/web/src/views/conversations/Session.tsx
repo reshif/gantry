@@ -11,7 +11,6 @@ import { ops } from "../../api/ops";
 import { Btn, Chip, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { agoShort } from "./ago";
-import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { setProject } from "../../lib/prefs";
@@ -35,6 +34,7 @@ import { Tabs, Toggle, StateChip } from "../../ui/primitives";
 import { useUrlState } from "../work-orders/url-state";
 import { ChatFeed } from "./ChatFeed";
 import { QuestionLine } from "./QuestionLine";
+import { StationAvatar, useAgentLabel } from "./StationAvatar";
 import { useStickyEnd } from "./sticky-end";
 import { blockingQuestion, buildFeed, questionView, type QuestionView } from "./thread-model";
 import { mentionChoices, mentionOf, queueAsk } from "../workspace/mention";
@@ -164,7 +164,7 @@ function Cards({ m, s, agent, send, last, qv }: { m: WoSessionMessage; s: WoSess
           if (!q || m.role === "user") return null;
           if (!qv) return <StationQuestionCard key={i} woId={s.woId} q={q} mine={q.mine} canAnswer={s.can.talk} why={s.can.talkWhy} />;
           if (qv.superseded.has(q.id)) return null;
-          if (q.status !== "open") return <QuestionLine key={i} q={q} times={qv.times.get(q.id) ?? 1} />;
+          if (q.status !== "open") return <QuestionLine key={i} q={q} times={qv.times.get(q.id) ?? 1} replied={s.messages.some((x) => x.data.kind === "answer" && (x.data.cards ?? []).some((k) => k.kind === "station_question" && k.id === q.id))} />;
           const n = qv.times.get(q.id) ?? 1;
           return <div key={i} className="conv-q">{n > 1 ? <p className="small muted conv-q-times" id={`sq-times-${q.id.replace(/[^A-Za-z0-9_-]/g, "-")}`}>{`asked ${n} times`}</p> : null}<StationQuestionCard woId={s.woId} q={q} mine={q.mine} canAnswer={s.can.talk} why={s.can.talkWhy} /></div>;
         }
@@ -250,7 +250,7 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
   const ui = useUI();
   const openTraveler = useOpenTraveler();
   const openRecord = useOpenRecordRoute();
-  const actorOf = useActors();
+  const labelOf = useAgentLabel();
   const [draft, setDraft] = useState("");
   const [showSide, setShowSide] = useState(false);
   const opened = useRef(false);
@@ -262,6 +262,18 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
   const [pane, setPane] = useUrlState(["ev", "side"] as const);
   const sticky = useStickyEnd<HTMLDivElement>(s?.messages.length, live?.text, live?.cards.length, pane.side);
   const inbox = useInbox(false);
+  // The header says what the station waits for, unless that question's card is already on screen.
+  const blockId = s ? blockingQuestion(s)?.id : undefined;
+  const [cardSeen, setCardSeen] = useState(false);
+  useEffect(() => {
+    setCardSeen(false);
+    const root = sticky.ref.current;
+    const el = blockId ? document.getElementById(`sq-${blockId.replace(/[^A-Za-z0-9_-]/g, "-")}`) : null;
+    if (!el || !root || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((es) => setCardSeen(es.some((e) => e.isIntersecting)), { root, threshold: 0.6 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [blockId, s?.messages.length, pane.side]); // eslint-disable-line react-hooks/exhaustive-deps
   const qv = useMemo(() => (s ? questionView(s.dialogue.questions) : null), [s]);
   const feed = useMemo(() => (s && qv ? buildFeed(s.messages, qv) : []), [s, qv]);
   const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => { turn.current = body; if (body.kind === "message") void markWoSeen(woId); void start(); };
@@ -303,7 +315,7 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
     : { cls: "is-live", text: s.waiting?.text ?? s.next.text };
   const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."} Type @ to ask an agent in a side thread.` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}, or type @ to ask another agent in a side thread or to mention a person`;
   // a station's message carries its agent's id: show the agent's name, as everywhere else
-  const tag = (m: WoSessionMessage) => (m.role === "user" ? (proto ? actorOf(m.author).name.replace(" (agent)", "") : <Who id={m.author} />) : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? (proto ? actorOf(m.author).name.replace(" (agent)", "") : <Who id={m.author} />) : (m.data.agent ?? agentName));
+  const tag = (m: WoSessionMessage) => (m.role === "user" ? (proto ? labelOf(m.author) : <Who id={m.author} />) : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? (proto ? labelOf(m.author) : <Who id={m.author} />) : (m.data.agent ?? agentName));
 
   const threadBody = (<>
             {proto && qv ? (
@@ -385,6 +397,9 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
     const cap = (x: string) => `${x.charAt(0).toUpperCase()}${x.slice(1)}`;
     const sideItems = Array.isArray(inbox.data?.items) ? inbox.data.items.filter((i) => i.kind === "side" && i.scope.kind === "work_order" && i.scope.id === s.woId) : null;
     const blocker = blockingQuestion(s);
+    const lastAgent = [...s.messages].reverse().find((m) => m.role === "assistant" && m.author.startsWith("ag-"))?.author;
+    const headAgent = blocker?.askedBy ?? lastAgent ?? s.agent.id;
+    const headName = labelOf(headAgent, s.wo.stationName);
     const blockerStation = blocker ? (s.steps.find((x) => x.id === blocker.station)?.name ?? cap(blocker.station)) : "";
     const jumpTo = (id: string) => { if (pane.side) setPane({ side: "" }); window.setTimeout(() => document.getElementById(id)?.scrollIntoView?.({ block: "center" }), 0); };
     const open = pane.side ? "side" : "chat";
@@ -393,29 +408,31 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
       <section className="card conv-thread conv-chat wos" id="wos" data-wo={s.woId} aria-label={`Conversation ${s.woId}`}>
         <div className="card-h conv-h">
           <Btn small kind="ghost" cls="nodesk-back" id="wos-back" label="← Back" onClick={back} />
-          <Who id={s.agent.id} />
+          <StationAvatar id={headAgent} fallback={headName} />
           <div className="conv-h-t">
             <a className="mono" id="wos-record" href={hashFor("record", s.woId, s.project)}>{s.woId}</a>
             <span className="conv-h-title" title={s.wo.title}>{s.wo.title}</span>
           </div>
-          <span className="conv-h-chips"><span className="chip">{s.wo.bay ? `Bay · ${s.wo.bay}` : s.wo.stationName}</span><StateChip state={s.wo.state} /></span>
+          <span className="conv-h-chips"><span className="chip">{s.wo.bay ? `Bay · ${s.wo.bay}` : s.wo.stationName}</span>{blocker ? <span className="state state-waiting" id="conv-state"><Icon name="human" /><span>Waiting on you</span></span> : <StateChip state={s.wo.state} />}</span>
           <span className="row nowrap conv-h-acts">
-            <Toggle id="conv-events" checked={pane.ev === "1"} onChange={(v) => setPane({ ev: v ? "1" : "" })} label="Line events" />
+            <span className="conv-ev"><Toggle id="conv-events" checked={pane.ev === "1"} onChange={(v) => setPane({ ev: v ? "1" : "" })} label="Line events" /><label className="small" htmlFor="conv-events">Events</label></span>
             <Btn small kind="ghost" id="wos-details" cls="conv-details" label="Details" aria={showSide ? "Hide brief, gate and proposals" : "Show brief, gate and proposals"} onClick={() => setShowSide(!showSide)} />
             <a className="btn btn-sm sm" id="wos-open-record" href={hashFor("record", s.woId, s.project)}>Open record</a>
           </span>
         </div>
-        {blocker ? (
+        {blocker && !cardSeen ? (
           <div className="wos-status is-you conv-wait" id="wos-status" role="status" aria-live="polite">
             <span className="wos-dot" aria-hidden="true" />
             <span className="conv-wait-t">{`${blockerStation} is waiting for you`}<span className="muted small">{`: ${blocker.question}`}</span></span>
             <Btn small kind="ghost" id="conv-jump-q" label="Jump to question" onClick={() => jumpTo(`sq-${blocker.id.replace(/[^A-Za-z0-9_-]/g, "-")}`)} />
           </div>
-        ) : status.cls === "is-live" && !live ? null : <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite"><span className="wos-dot" aria-hidden="true" /><span>{status.text}</span></div>}
+        ) : blocker ? null : status.cls === "is-live" && !live ? null : <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite"><span className="wos-dot" aria-hidden="true" /><span>{status.text}</span></div>}
         <Tabs idPrefix="conv-pane" active={open} onChange={(id) => setPane({ side: id === "side" ? "list" : "" })} items={[{ id: "chat", label: "Conversation" }, { id: "side", label: "Side threads", count: sideItems ? sideItems.length : null }]} />
         {open === "chat" ? (
           <div className="conv-scroll-w">
-            <div className="card-b stack thread conv-scroll" role="log" aria-live="polite" ref={sticky.ref} onScroll={sticky.onScroll} id="conv-scroll">
+            {/* a scrolling region must be reachable by keyboard (axe scrollable-region-focusable) */}
+            {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+            <div className="card-b stack thread conv-scroll" role="log" aria-live="polite" aria-label="Conversation messages" tabIndex={0} ref={sticky.ref} onScroll={sticky.onScroll} id="conv-scroll">
               {threadBody}
             </div>
             {sticky.unseen ? <Btn small kind="primary" cls="conv-new" id="conv-new" icon="down" label="New messages" onClick={sticky.jump} /> : null}

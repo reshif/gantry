@@ -16,6 +16,7 @@ import { Async } from "../ui/async";
 import { EmptyState, useCatalog } from "./projects/kit";
 import { WoSessionPage } from "./conversations/Session";
 import { useWoSessions } from "./conversations/session-api";
+import { useFitViewport } from "./conversations/fit-viewport";
 import { useUrlState } from "./work-orders/url-state";
 
 export default function ConversationsView() {
@@ -27,6 +28,7 @@ export default function ConversationsView() {
   const projectQ = useProject(projectId);
   const project = projectQ.data ?? null;
   const q = useWoSessions(projectId ?? undefined);
+  const fit = useFitViewport<HTMLDivElement>();
   const [url, setUrl] = useUrlState(["q", "c", "f"] as const);
   // A deep link from an older screen (the work orders table, the bell, the record) asks for one conversation: land on its session.
   const pending = prefs.openConversation;
@@ -51,7 +53,7 @@ export default function ConversationsView() {
   const cur2 = asked ?? (wide ? (shown[0]?.id ?? null) : null);
   return (
     <Page eyebrow="Operate" title="Conversations" cls="conv-view" sub="Talk to the agent on a work order. Answers are recorded on the record.">
-      <div className={`conv${cur2 ? " has" : ""}`}>
+      <div ref={fit} className={`conv${cur2 ? " has" : ""}`}>
         <div className="card conv-list" hidden={false}>
           <div className="card-b" style={{ padding: 8 }}>
             <SearchBox id="conv-q" value={url.q} onChange={(v) => setUrl({ q: v })} placeholder="Search conversations" label="Search conversations" />

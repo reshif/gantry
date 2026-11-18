@@ -136,7 +136,7 @@
 }
 
 /* Conversations (chat layout): two panes that fit the viewport, the thread scrolls in its own box, the composer stays pinned */
-.conv-view .conv { height: calc(100dvh - 190px); min-height: 440px; align-items: stretch; }
+.conv-view .conv { height: calc(100dvh - 190px); min-height: 360px; align-items: stretch; }
 .conv-view .conv > * { min-height: 0; min-width: 0; }
 .conv .conv-list { display: flex; flex-direction: column; max-height: none; height: 100%; }
 .conv .conv-list > .card-b:first-child { display: grid; gap: var(--s2); flex: none; }
@@ -150,7 +150,7 @@
 .conv-row .main1 { min-width: 0; display: grid; gap: 2px; }
 .conv-row-t { display: flex; gap: 6px; align-items: center; }
 .conv-row-id { font-size: 11px; color: var(--text-2); }
-.conv-row-title { font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.conv-row-title { font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
 .conv-row .t2 { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; color: var(--text-2); }
 .conv-why { font-size: 11px; padding: 0 6px; }
 .conv-why.is-you { color: var(--warn, var(--text)); border-color: currentColor; font-weight: 600; }
@@ -160,7 +160,9 @@
 .conv-chat > * { flex: none; min-width: 0; }
 .conv-h { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 .conv-h-t { display: grid; min-width: 0; flex: 1 1 160px; }
-.conv-h-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-h-title { font-weight: 600; overflow-wrap: anywhere; line-height: 1.25; }
+.conv-ev { display: inline-flex; align-items: center; gap: 6px; }
+.conv-ev label { color: var(--text-2); cursor: pointer; }
 .conv-h-chips { display: flex; gap: 6px; align-items: center; }
 .conv-h-acts { margin-left: auto; gap: var(--s2); align-items: center; }
 .conv-wait { border-bottom: 1px solid var(--line); }
@@ -171,7 +173,7 @@
 .conv-compose { flex: none; border-top: 1px solid var(--line); position: relative; background: var(--surface); }
 .conv-side-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .conv-side-l { list-style: none; margin: 0; padding: 0; }
-.conv-side-row { display: grid; width: 100%; text-align: left; gap: 2px; padding: var(--s2) var(--s3); border-radius: 0; border-bottom: 1px solid var(--line); height: auto; }
+.btn.conv-side-row { display: grid; justify-content: stretch; justify-items: start; align-items: start; width: 100%; text-align: left; gap: 2px; padding: var(--s2) var(--s3); border-radius: 0; border: 0; border-bottom: 1px solid var(--line); height: auto; min-height: 0; white-space: normal; }
 .conv-side-none, .conv-side-bar { padding: var(--s3); }
 .conv-chat .wos-more { flex: none; max-height: 40%; overflow-y: auto; border-top: 1px solid var(--line); }
 
@@ -201,8 +203,8 @@
 
 /* questions, documents, assumptions */
 .conv-q-times { margin: 0 0 2px; }
-.conv-ql { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; margin: var(--s2) 0 0; color: var(--text-2); }
-.conv-ql .ic { width: 12px; height: 12px; align-self: center; }
+.conv-ql { display: block; margin: var(--s2) 0 0; color: var(--text-2); overflow-wrap: anywhere; }
+.conv-ql .ic { width: 12px; height: 12px; vertical-align: -1px; color: var(--done, currentColor); }
 .conv-ql-a { color: var(--text); }
 .conv-fold { margin-top: var(--s2); }
 .conv-fold > summary { cursor: pointer; color: var(--text-2); }
@@ -210,14 +212,20 @@
 .cmsg .wos-doc .wos-doc-open, .cmsg .wos-doc .muted { display: none; }
 
 @media (max-width: 767px) {
-  .conv-view .conv { height: calc(100dvh - 150px); }
   .conv-thread .nodesk-back { display: inline-flex; }
   .conv.has .conv-list { display: none; }
   .conv:not(.has) > .card:not(.conv-list) { display: none; }
   .conv:not(.has) .conv-list { height: 100%; }
   .cmsg-b, .cmsg.is-agent .cmsg-b { max-width: 100%; }
   .cmsg-av { width: 24px; }
-  .conv-h-acts { margin-left: 0; width: 100%; }
+  .conv-h-acts { margin-left: 0; width: 100%; justify-content: space-between; }
+  .conv-h { gap: 6px var(--s2); padding-block: 8px; }
+  .conv-h-t { flex-basis: 120px; }
+  .conv-wait { padding-block: 4px; }
+  .conv-wait-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-basis: 120px; }
+  .conv-wait-t .muted { display: none; }
+  .conv-chat .conv-scroll { padding: var(--s2); }
 }
 @media (min-width: 768px) { .conv-view .conv { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); } }
 @media (max-width: 767px) { .conv-view .conv { grid-template-columns: minmax(0, 1fr); } }
+.conv-chat .conv-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
