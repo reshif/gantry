@@ -3,6 +3,7 @@ import type { Project, Role, Team } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { getPrefs } from "../../lib/prefs";
 import { useUI } from "../../ui/overlay-context";
+import { DirtyMark } from "../../ui/DirtyMark";
 import { Field, LockNote, Select, type Decision } from "../../ui/primitives";
 
 /** The invite form (legacy G.inviteDialog). Sends POST /invites; the email goes out through the outbox. */
@@ -57,6 +58,7 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
 
   return (
     <div className="form-grid">
+      <DirtyMark dirty={Boolean(name.trim() || email.trim() || reason.trim())} />
       <LockNote decision={perm} what="Inviting people" />
       <Field label="Full name" htmlFor="ppl-inv-name" required error={errs.name}>
         <input id="ppl-inv-name" className="input" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />

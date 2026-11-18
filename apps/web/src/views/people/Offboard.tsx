@@ -11,7 +11,6 @@ import { useUI } from "../../ui/overlay-context";
 import { Icon } from "../../ui/Icon";
 import { Field, LockNote, type Decision } from "../../ui/primitives";
 import { usePeopleLoad } from "../govern/load";
-import { useOutcome } from "../govern/data";
 
 type OpenWork = OpenWorkItem & { why?: string };
 
@@ -63,7 +62,7 @@ function WorkList({ work, projects, onGo }: { work: OpenWork[]; projects: Projec
 export function DeactivateForm({ p, projects, perm, onDone, registerSubmit }: {
   p: Person; projects: Project[]; perm: Decision; onDone: (r: { keep: boolean; work: OpenWork[] | null }) => void; registerSubmit: (fn: () => void) => void;
 }) {
-  const outcome = useOutcome();
+  const ui = useUI();
   const keysQ = useApiKeys();
   const load = usePeopleLoad(projects);
   const lists = useQueries({
@@ -100,7 +99,7 @@ export function DeactivateForm({ p, projects, perm, onDone, registerSubmit }: {
         setRule(r.rule ? `${r.rule.name ? `${r.rule.name} ` : ""}[${r.rule.id}]` : "");
         return;
       }
-      outcome(r, `${p.name} deactivated`);
+      ui.toast(`${p.name} deactivated`, "warn");
       onDone({ keep, work: r.openWork ?? null });
     })();
   });
