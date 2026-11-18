@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG, type ApproverRule } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -150,7 +150,7 @@ describe("Projects: portfolio", () => {
     setup();
     mount(<ProjectsView />);
     await byId("prj-table");
-    expect(Array.from(document.querySelectorAll("#prj-table thead th")).map((t) => t.textContent?.replace(/[↑↓]/, ""))).toEqual(["Project", "Owner", "In flight", "Budget", "Status"]);
+    expect(Array.from(document.querySelectorAll("#prj-table thead th")).map((t) => t.textContent?.replace(/[↑↓↕]/, "").trim())).toEqual(["Project", "Owner", "In flight", "Budget", "Status"]);
     expect(document.querySelector("#prj-table tbody a.pri")?.getAttribute("href")).toBe("#/p/payments/project-config");
     expect(document.querySelector("#prj-table .tfoot")?.textContent).toBe("1–3 of 3");
     expect(document.querySelector("#prj-table .count")?.textContent).toBe("3 projects");
@@ -442,8 +442,8 @@ describe("Project config", () => {
 
   it("danger zone: archiving needs the typed project name and sends If-Match", async () => {
     const calls = withPayments({ "POST /api/v1/projects/payments/archive": () => ok() });
+    window.history.replaceState(null, "", "/?tab=archive"); // Archive is not on the Blueprint's Line control tab: it is its own page
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-danger"));
     fireEvent.click(await byId("pcf-archive"));
     const input = await waitFor(() => { const i = document.querySelector<HTMLInputElement>(".dlg input.input"); if (!i) throw new Error("no input"); return i; });
     fireEvent.change(input, { target: { value: "Payments Platform" } });
@@ -486,8 +486,10 @@ describe("Project config", () => {
     expect(window.location.search).toBe("?tab=flow");
     expect(document.getElementById("pcf-tab-flow")!.getAttribute("aria-selected")).toBe("true");
     fireEvent.click(await byId("pcf-tab-overview"));
-    fireEvent.click(await byId("pcf-more-members"));
-    expect(window.location.search).toBe("?tab=members");
+    expect(document.getElementById("pcf-more")).toBeNull(); // no "Also:" row of extra pages under the tab
+    cleanup();
+    window.history.replaceState(null, "", "/?tab=members");
+    mount(<ProjectConfigView />);
     await byId("pcf-oncall-none");
     expect(document.getElementById("pcf-tab-overview")!.getAttribute("aria-selected")).toBe("true"); // the page belongs to Overview
     fireEvent.click(await byId("pcf-back"));
@@ -500,7 +502,10 @@ describe("Project config", () => {
     await byId("pcf-desc");
     expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Details", "Summary"]);
     expect(Array.from(document.querySelectorAll(".kv dt")).map((d) => d.textContent)).toEqual(["Key", "Template", "Teams", "Regulated", "Repos"]);
-    expect((document.getElementById("pcf-name") as HTMLInputElement).value).toBe("Payments Platform");
+    const name = document.getElementById("pcf-name") as HTMLInputElement;
+    expect(name.value).toBe("Payments Platform");
+    expect(name.disabled).toBe(false); // an editable required field, not a read-only one with a hint
+    expect(document.getElementById("pcf-more")).toBeNull();
     expect(document.getElementById("pcf-ov-save")!.textContent).toBe("Save");
   });
 
@@ -516,14 +521,14 @@ describe("Project config", () => {
     expect(await screen.findByText("Spec WIP 9")).toBeTruthy();
     fireEvent.change(await byId("pcf-gmode-G1f"), { target: { value: "human" } });
     expect(await screen.findByText("G1f → human")).toBeTruthy();
-    expect(document.getElementById("pcf-more-flow-advanced")).toBeTruthy(); // the add / order / route-matrix editor stays one click away
+    expect(document.getElementById("pcf-more")).toBeNull(); // no "Also:" row under the two panels
   });
 
   it("Approvers: an overview table with Edit; Edit opens a dialog that saves the rule with If-Match", async () => {
     const calls = withPayments({ "PUT /api/v1/projects/payments/approvers/G5": () => ok() });
     tab("approvers");
     mount(<ProjectConfigView />);
-    expect(Array.from((await waitFor(() => { const t = document.querySelectorAll("#pcf-appr thead th"); if (!t.length) throw new Error("no table"); return t; }))).map((t) => t.textContent?.replace(/[↑↓]/, ""))).toEqual(["Gate", "Roles", "Needed", "Separation", "Escalate", ""]);
+    expect(Array.from((await waitFor(() => { const t = document.querySelectorAll("#pcf-appr thead th"); if (!t.length) throw new Error("no table"); return t; }))).map((t) => t.textContent?.replace(/[↑↓↕]/, "").trim())).toEqual(["Gate", "Roles", "Needed", "Separation", "Escalate", ""]);
     fireEvent.click(await byId("pcf-ap-edit-G5"));
     expect(await screen.findByText("Approvers for G5")).toBeTruthy();
     fireEvent.change(document.getElementById("fd-required")!, { target: { value: "2" } });
@@ -532,7 +537,7 @@ describe("Project config", () => {
     const put = calls.find((c) => c.method === "PUT")!;
     expect((put.body as { value: ApproverRule }).value).toMatchObject({ required: 2, sod: true });
     expect(put.headers["if-match"]).toBe("7");
-    expect(document.getElementById("pcf-more-rules")).toBeTruthy(); // the full rule editor stays one click away
+    expect(document.getElementById("pcf-more")).toBeNull();
   });
 
   it("MCP: a switch row per server with its url; the tab count is the servers attached", async () => {
@@ -563,5 +568,54 @@ describe("Project config", () => {
     expect(document.getElementById("pcf-halt")!.textContent).toBe("Halt project");
     expect(document.getElementById("pcf-kill")!.textContent).toBe("Kill project");
     expect(document.getElementById("pcf-tab-danger")!.textContent).toBe("Line control");
+  });
+
+  it("Name is editable and required (3 characters); a rename goes to the server and its refusal is shown on the field", async () => {
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ({ status: 409, body: { ok: false, msg: "Renaming a project is not supported." } }) });
+    mount(<ProjectConfigView />);
+    const name = (await byId("pcf-name")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "ab" } });
+    fireEvent.click(await byId("pcf-ov-save"));
+    expect(await screen.findByText("Name needs at least 3 characters.")).toBeTruthy();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    fireEvent.change(name, { target: { value: "Payments Core" } });
+    fireEvent.click(await byId("pcf-ov-save"));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "name", value: "Payments Core" }));
+    expect(await screen.findByText("Renaming a project is not supported.")).toBeTruthy();
+  });
+
+  it("Repos lists only live repositories (not the ones still being onboarded), and Summary counts the same", async () => {
+    const ready = (id: string) => ({ id, name: `acme/${id}`, project: "payments", team: "payments", tags: [], lang: "Go", halted: null, onboarding: { stage: "ready", findings: [], pr: null, timeline: [], exception: null } });
+    const moving = { ...ready("moving"), onboarding: { stage: "assessed", findings: [], pr: null, timeline: [], exception: null } };
+    withPayments({ "GET /api/v1/projects/payments/repos": () => ({ body: [ready("a"), ready("b"), moving] }) });
+    tab("repos");
+    mount(<ProjectConfigView />);
+    await waitFor(() => expect(document.querySelectorAll(".list li").length).toBe(2));
+    expect(document.body.textContent).not.toMatch(/acme\/moving/);
+  });
+
+  it("Line control is one Halt and stop panel; Kill asks for the project key (and a reason for the audit trail), not the shell's kill dialog", async () => {
+    const calls = withPayments({ "POST /api/v1/stops/project/payments/kill": () => ok(), "POST /api/v1/stops": () => ok() });
+    tab("danger");
+    mount(<ProjectConfigView />);
+    await byId("pcf-kill");
+    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Halt and stop"]); // no Archive panel
+    fireEvent.click(document.getElementById("pcf-kill")!);
+    expect(await screen.findByText("Type the project key (PAY)")).toBeTruthy();
+    fireEvent.change(document.getElementById("fd-c")!, { target: { value: "WRONG" } });
+    fireEvent.change(document.getElementById("fd-reason")!, { target: { value: "Runaway agent" } });
+    fireEvent.click(within(document.querySelector(".dlg") as HTMLElement).getByRole("button", { name: "Kill project" }));
+    expect(await screen.findByText("Type PAY exactly.")).toBeTruthy();
+    expect(calls.some((c) => c.method === "POST" && /kill|stops/.test(c.path))).toBe(false);
+  });
+
+  it("Flow lists the Compliance sign-off gate (off) when the project's flow carries it", async () => {
+    const withGc = { ...PAYMENTS, flow: { ...PAYMENTS.flow, gates: { ...PAYMENTS.flow.gates, GC: { enabled: false, mode: "human", absent: true } } } };
+    withPayments({ "GET /api/v1/projects": () => ({ body: [withGc, RISK] }), "GET /api/v1/catalog": () => ({ body: { ...CAT, gates: [...CAT.gates, { id: "GC", label: "GC", name: "Compliance sign-off", kind: "human", checks: [] }] } }) });
+    tab("flow");
+    mount(<ProjectConfigView />);
+    expect(await byId("pcf-gate-GC")).toBeTruthy();
+    expect(screen.getByText("Compliance sign-off")).toBeTruthy();
+    expect((document.getElementById("pcf-gate-GC") as HTMLInputElement).checked).toBe(false);
   });
 });

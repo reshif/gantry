@@ -61,7 +61,7 @@ export default function ProjectConfigView() {
   const props = { p, cat, people, s: { ...s, tab }, set };
   const body = ({
     overview: <OverviewProto {...props} />, flow: <FlowProto {...props} />, approvers: <ApproversProto {...props} />, mcp: <McpProto {...props} />, budget: <BudgetProto {...props} />, repos: <ReposProto {...props} />,
-    danger: <div className="stack"><LineProto {...props} /><ArchivePanel p={p} /></div>,
+    danger: <LineProto {...props} />, archive: <ArchivePanel p={p} />,
     members: <MembersTab {...props} />, classes: <ClassesTab {...props} />, notifications: <NotificationsTab {...props} />, history: <HistoryTab {...props} />, more: <OverviewTab {...props} />,
     "flow-advanced": <FlowTab {...props} />, rules: <ApproversTab {...props} />, spend: <BudgetTab {...props} />,
   } as Record<string, React.ReactNode>)[tab] ?? <OverviewProto {...props} />;

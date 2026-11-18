@@ -54,7 +54,7 @@ export function ProtoList<R>({ id, noun, rows, rowKey, text, filters = [], cols,
   const filtered = !!(q || Object.values(f).some(Boolean));
   const clear = () => { setQ(""); setF({}); setPage(0); };
   return (
-    <div id={id}>
+    <div id={id} className="proto-list">
       {search || filters.length ? (
         <div className="fbar" style={{ "--fs": filters.length } as React.CSSProperties}>
           {search ? (
@@ -82,6 +82,8 @@ export function ProtoList<R>({ id, noun, rows, rowKey, text, filters = [], cols,
             rows={vis}
             rowKey={rowKey}
             linkRows
+            sortHint
+            sortSelect={false}
             {...(sort ? { sort } : {})}
             onSort={(s) => { setSort(s); setPage(0); }}
           />

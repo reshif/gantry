@@ -1,6 +1,6 @@
 /** Onboarding (#onboarding): the Blueprint's pipeline of repositories moving to Ready, the guidelines, and one session page per repository. */
 import { useCan } from "../api/can";
-import { useGuidelines, useMe, useProjects, useRepos } from "../api/queries";
+import { useGuidelines, useMe, useProjects, useRepos, useReposOf } from "../api/queries";
 import { navigate, hashFor, useHash } from "../lib/router";
 import { Btn, Chip, Empty, Panel, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
@@ -28,6 +28,8 @@ export default function OnboardingView() {
   const repos = (reposQ.data ?? []) as RepoV[];
   const availQ = useAvailableRepos(project?.id ?? "", !!project);
   const gl = useGuidelines().data;
+  const allRepos = useReposOf(projects.map((p) => p.id));
+  const live = allRepos.reduce((n, q) => n + (q.data ? q.data.filter((r) => r.onboarding.stage === "ready").length : 0), 0);
   const connect = useCan("repo.onboard", { project: project?.id });
   const [tab, setTab] = useTab(["pipeline", "guidelines"], "pipeline");
   if (!me) return null;
@@ -42,7 +44,8 @@ export default function OnboardingView() {
   }
   const connected = new Set(repos.map((r) => r.name.toLowerCase()));
   const rows: OnbRow[] = [
-    ...repos.map((r) => ({ id: r.id, name: r.name, lang: r.lang, stage: protoStage(r), gaps: r.onboarding.findings.length ? gaps(r).length : null, repo: r })),
+    // the pipeline is what is moving to Ready: a repository that is already live is counted in the Ready figure and listed in Project config
+    ...repos.filter((r) => r.onboarding.stage !== "ready").map((r) => ({ id: r.id, name: r.name, lang: r.lang, stage: protoStage(r), gaps: r.onboarding.findings.length ? gaps(r).length : null, repo: r })),
     ...(availQ.data?.available ?? []).filter((a) => !connected.has(a.repo.toLowerCase())).map((a) => ({ id: a.repo, name: a.repo, lang: a.lang, stage: 0, gaps: null, repo: null })),
   ];
   // in progress first, then the ones waiting to start, then the ready ones (the Blueprint lists what is moving)
@@ -50,7 +53,7 @@ export default function OnboardingView() {
   rows.sort((a, b) => order(a) - order(b));
   const waiting = rows.filter((r) => r.stage === 0).length;
   const moving = rows.filter((r) => r.stage > 0 && r.stage < 4).length;
-  const ready = rows.filter((r) => r.stage === 4).length;
+  const ready = live;
   const onboard = (pick?: OnbRow) => ui.open((close) => <OnboardDialog rows={rows} projects={projects} project={project} pick={pick} close={close} />);
   const href = (r: OnbRow): string => hashFor("onboarding", r.repo ? r.repo.id : null, project.id);
   return (
@@ -62,7 +65,7 @@ export default function OnboardingView() {
       <StatRow>
         <Stat label="Waiting" value={qState(reposQ, () => String(waiting))} sub="not started" />
         <Stat label="In progress" value={qState(reposQ, () => String(moving))} tone="info" />
-        <Stat label="Ready" value={qState(reposQ, () => String(ready))} tone="done" sub="repos live" />
+        <Stat label="Ready" value={allRepos.every((q) => q.isSuccess) ? String(ready) : "…"} tone="done" sub="repos live" />
         <Stat label="Guidelines" value={gl ? String(gl.items.length) : "…"} sub={gl ? `v${gl.version}` : ""} />
       </StatRow>
       <Tabs idPrefix="onb-tab" items={[{ id: "pipeline", label: "Pipeline", count: rows.filter((r) => r.stage > 0).length }, { id: "guidelines", label: "Guidelines", count: gl?.items.length ?? null }]} active={tab} onChange={setTab} />

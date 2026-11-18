@@ -1,5 +1,5 @@
 /** Typed reads for this slice of /api/v1. Keys come from ../keys (`qk`). */
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, get, getText } from "../client";
 import { qk } from "../keys";
 import type { Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
@@ -58,4 +58,7 @@ export const useKillImpact = (scope: string, id: string | null, enabled = true) 
 
 export const useRepos = (projectId: string | null | undefined) =>
   useQuery({ queryKey: qk.repos(projectId ?? ""), queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(projectId ?? "")}/repos`)), enabled: !!projectId });
+/** The repositories of several projects (the portfolio count of live repos); one query per project, sharing the per-project key. */
+export const useReposOf = (projectIds: string[]) =>
+  useQueries({ queries: projectIds.map((id) => ({ queryKey: qk.repos(id), queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(id)}/repos`)) })) });
 export const useGuidelines = () => useQuery({ queryKey: qk.guidelines(), queryFn: () => get<OrgGuidelines>(api("guidelines")) });

@@ -34,6 +34,7 @@ beforeEach(() => {
   updatePrefs({ project: "storefront" });
 });
 afterEach(() => {
+  window.history.replaceState(null, "", "/");
   cleanup();
   vi.unstubAllGlobals();
 });
@@ -85,7 +86,7 @@ describe("Onboarding: pipeline", () => {
     expect(Array.from(document.querySelectorAll(".stats .stat .micro")).map((d) => d.textContent)).toEqual(["Waiting", "In progress", "Ready", "Guidelines"]);
     expect(Array.from(document.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Pipeline", "Guidelines"]);
     await byId("onb-list");
-    expect(Array.from(document.querySelectorAll("#onb-list thead th")).map((t) => t.textContent?.replace(/[↑↓]/, ""))).toEqual(["Repository", "Stage", "Status", "Gaps", ""]);
+    expect(Array.from(document.querySelectorAll("#onb-list thead th")).map((t) => t.textContent?.replace(/[↑↓↕]/, "").trim())).toEqual(["Repository", "Stage", "Status", "Gaps", ""]);
     expect(document.getElementById("onb-agent-profile")).toBeNull();
     expect(document.querySelector(".onb-callout, .footnote")).toBeNull();
     expect(document.getElementById("onb-detail-mobile-app")).toBeNull();
@@ -108,11 +109,11 @@ describe("Onboarding: pipeline", () => {
     mount(<OnboardingView />);
     await byId("onb-open-mobile-app");
     const count = () => document.querySelector("#onb-list .fbar .count")?.textContent;
-    expect(count()).toBe("5 repos");
+    expect(count()).toBe("4 repos");
     fireEvent.change(document.getElementById("onb-list-f-stage") as HTMLSelectElement, { target: { value: "0" } });
-    await waitFor(() => expect(count()).toBe("2 repos of 5"));
+    await waitFor(() => expect(count()).toBe("2 repos of 4"));
     fireEvent.click(await screen.findByRole("button", { name: "Clear" }));
-    await waitFor(() => expect(count()).toBe("5 repos"));
+    await waitFor(() => expect(count()).toBe("4 repos"));
     fireEvent.change(screen.getByLabelText("Search repo"), { target: { value: "zzz-nothing" } });
     expect(await screen.findByText("Nothing matches these filters")).toBeTruthy();
   });
@@ -147,7 +148,7 @@ describe("Onboarding: pipeline", () => {
   it("Onboard a repo is locked with the server's reason when the person cannot onboard", async () => {
     api([find("web-storefront")], {}, { denied: ["repo.onboard"] });
     mount(<OnboardingView />);
-    await byId("onb-open-web-storefront");
+    await byId("onb-start-acme/new-service");
     await waitFor(() => expect(locked("onb-connect")).toMatch(/Needs Factory Admin|No role holds it/));
   });
 });
@@ -344,9 +345,8 @@ describe("Onboarding: the agent and its guidelines", () => {
   const agent = SEED.agents.find((a) => a.id === "ag-onboard")!;
   const tab = async (extra: Record<string, (c: Call) => { status?: number; body: unknown } | undefined> = {}, denied: string[] = [], project: Partial<Project> = {}) => {
     const calls = api([find("web-storefront")], { "GET /api/v1/projects": () => ({ body: [{ ...STOREFRONT, ...project }] }), "GET /api/v1/agents": () => ({ body: [agent] }), "GET /api/v1/skills": () => ({ body: SEED.skills }), ...extra }, { denied });
+    window.history.replaceState(null, "", "/?tab=guidelines&edit=1"); // the versioned editor and the agent profile open from `?edit=1`, not from a button the Blueprint lacks
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-tab-guidelines"));
-    fireEvent.click(await byId("onb-gl-edit")); // the versioned editor and the agent profile live behind Edit
     await byId("onb-gl-save");
     return calls;
   };
@@ -508,9 +508,8 @@ describe("Onboarding: the agent tab says when the agent cannot run", () => {
   const vendor = (connected: boolean, enabled = true) => ({ id: "anthropic", name: "Anthropic", connected, models: [{ id: agent.model, name: "Sonnet", enabled, canonical: agent.model }] });
   const tab = async (vendors: unknown, a = agent) => {
     api([find("web-storefront")], { "GET /api/v1/agents": () => ({ body: [a] }), "GET /api/v1/vendors": () => ({ body: vendors }) });
+    window.history.replaceState(null, "", "/?tab=guidelines&edit=1"); // the versioned editor and the agent profile open from `?edit=1`, not from a button the Blueprint lacks
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-tab-guidelines"));
-    fireEvent.click(await byId("onb-gl-edit")); // the versioned editor and the agent profile live behind Edit
     await byId("onb-gl-save");
   };
 

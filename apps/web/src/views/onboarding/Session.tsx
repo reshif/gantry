@@ -16,7 +16,7 @@ import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { decide, markSeen, sendTurn, useSession, type Session, type SessionMessage } from "./session-api";
-import { busyText, type RepoV } from "./kit";
+import { busyText, useAvailableRepos, type RepoV } from "./kit";
 import { PSTAGES, protoStage } from "./proto";
 import { QuestionCard, useThreadEnd } from "../session/kit";
 
@@ -119,6 +119,42 @@ function Cards({ m, s, send, last }: { m: SessionMessage; s: Session; send: (b: 
 
 /* ------------------------------------------------------------------ the page ---- */
 
+const STEPS = (st: number) => (
+  <div className="stepper" id="osx-steps">
+    {PSTAGES.map((n, i) => <div key={n} className={i < st ? "done" : i === st ? "on" : ""} aria-current={i === st ? "step" : undefined}>{`${i + 1}. ${n}`}</div>)}
+  </div>
+);
+
+/** A repository the sources can see that has not been started: the same page with nothing assessed yet (the Blueprint's stage 0). */
+function NotStarted({ projectId, projectName, name, lang }: { projectId: string; projectName: string; name: string; lang: string }) {
+  const [tab, setTab] = useTab(["findings", "pr", "settings"], "findings");
+  const none = "Start the assessment from the Onboarding list first.";
+  return (
+    <div className="osx" id="osx">
+      <ViewHead crumbs={[{ label: "Onboarding", href: hashFor("onboarding", null, projectId) }, { label: name }]} title={name} sub="Onboarding session" />
+      {STEPS(0)}
+      <Tabs idPrefix="osx-tab" items={[{ id: "findings", label: "Findings", count: 0 }, { id: "pr", label: "Pull request" }, { id: "settings", label: "Settings" }]} active={tab} onChange={setTab} />
+      <div className="stack">
+        {tab === "findings" ? (
+          <>
+            <Panel title="Assessment against guidelines" flush><ul className="list" /></Panel>
+            <Panel title="Conversation with the Onboarding agent"><div className="chat" /></Panel>
+          </>
+        ) : tab === "pr" ? (
+          <Panel title="Onboarding pull request">
+            <Empty title="No pull request yet" text="Open one and the agent writes AGENTS.md, CODEOWNERS and the factory config." action={<>
+              <Btn kind="primary" id="osx-openpr" label="Open pull request" disabled disabledReason={none} />
+              <Btn id="osx-openanyway" label="Open anyway" disabled disabledReason={none} />
+            </>} />
+          </Panel>
+        ) : (
+          <Panel title="Settings"><Kv rows={[["Repository", name], ["Language", lang], ["Project", projectName], ["Default branch", "—"]]} /></Panel>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function SessionPage({ projectId, repoId, back, details }: { projectId: string; repoId: string; back: () => void; details: () => void }) {
   const reposQ = useRepos(projectId);
   const repos = (reposQ.data ?? []) as RepoV[];
@@ -127,7 +163,8 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   const manage = useCan("onboarding.manage", { project: projectId, repo: repoId });
   const merge = useCan("onboarding.merge", { project: projectId, repo: repoId });
   const [tab, setTab] = useTab(["findings", "pr", "settings"], "findings");
-  const q = useSession(repoId);
+  const availQ = useAvailableRepos(projectId, true);
+  const q = useSession(repoId, !!r);
   const s = q.data;
   const ui = useUI();
   const [live, setLive] = useState<{ text: string; tools: string[]; cards: SessionCard[] } | null>(null);
@@ -169,7 +206,9 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
     return [...msgs, ...tl].sort((a, b) => a.at - b.at);
   }, [s, r]);
 
-  if (!r) return reposQ.data ? <div><ViewHead title="Onboarding" /><Panel><Empty title="Nothing to show" text="That repo does not exist." action={<Btn label="Work orders" onClick={() => navigate("work-orders")} />} /></Panel></div> : <Async query={reposQ} what="this repo" id="onb-session-repo">{() => null}</Async>;
+  const waiting = !r ? availQ.data?.available?.find((a) => a.repo === repoId || a.repo.replace("/", "--") === repoId) : undefined;
+  if (!r && waiting) return <NotStarted projectId={projectId} projectName={projectName} name={waiting.repo} lang={waiting.lang} />;
+  if (!r) return reposQ.data && (availQ.isSuccess || availQ.isError) ? <div><ViewHead title="Onboarding" /><Panel><Empty title="Nothing to show" text="That repo does not exist." action={<Btn label="Work orders" onClick={() => navigate("work-orders")} />} /></Panel></div> : <Async query={reposQ} what="this repo" id="onb-session-repo">{() => null}</Async>;
   if (!s) return <div className="osx"><Async query={q} what="this onboarding session" id="onb-session">{() => null}</Async><Btn label="Onboarding" small kind="ghost" icon="back" onClick={back} /></div>;
 
   const o = r.onboarding;
@@ -179,6 +218,15 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   const composerNote = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not change onboarding for this repo."}` : ruleBased ? "Connect a model vendor to talk to the Onboarding Agent" : "Answer a question, give a fact (for example: tests run with make check), or ask for a change";
   const submit = () => { const t = draft.trim(); if (!t) return; setDraft(""); void send({ kind: "message", text: t }); };
   const list = o.findings;
+  // the person answers in words only when the agent has asked something that is still open
+  const asked = s.messages.some((m) => (m.data.cards ?? []).some((c) => c.kind === "question" && !c.answered)) || !!live;
+  const recheck = async () => { const x = await commands.rerunAssessment(r.id); ui.toast(x.ok ? "Checking the repository again" : x.msg, x.ok ? "ok" : "error"); };
+  // Gantry reads check results from GitHub: this refreshes them and says what they are
+  const checks = async () => {
+    const fresh = ((await reposQ.refetch()).data as RepoV[] | undefined)?.find((x) => x.id === r.id);
+    const green = fresh?.onboarding.pr?.checks === "green";
+    ui.toast(green ? "Checks passing" : "Checks are not passing yet", green ? "ok" : "error");
+  };
   const nGaps = o.findings.filter((f) => !f.ok).length;
   const prOpen = !!o.pr && o.pr.state === "open";
   const busyNote = o.busy ? busyText(r) ?? "Working" : null;
@@ -196,9 +244,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   return (
     <div className="osx" id="osx">
       <ViewHead crumbs={[{ label: "Onboarding", href: hashFor("onboarding", null, projectId) }, { label: r.name }]} title={r.name} sub="Onboarding session" />
-      <div className="stepper" id="osx-steps">
-        {PSTAGES.map((n, i) => <div key={n} className={i < st ? "done" : i === st ? "on" : ""} aria-current={i === st ? "step" : undefined}>{`${i + 1}. ${n}`}</div>)}
-      </div>
+      {STEPS(st)}
       <Tabs idPrefix="osx-tab" items={tabs} active={tab} onChange={setTab} />
       <div className="stack">
         {tab === "findings" ? (
@@ -209,19 +255,22 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
                   {list.map((f) => (
                     <li key={f.id}>
                       <Chip text={f.ok ? "met" : "gap"} cls={f.ok ? "ok" : f.required !== false ? "bad" : "warn"} />
-                      <div className="grow">{f.check}<div className="small muted">{f.required !== false ? "Required" : "Advisory"}{!f.ok && f.fix ? ` · ${f.fix}` : ""}</div></div>
+                      <div className="grow">{f.check}<div className="small muted">{f.required !== false ? "Required" : "Advisory"}</div></div>
+                      {!f.ok && st < 3 ? <Btn small id={`osx-fixed-${f.id}`} label="Mark fixed" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => void recheck()} /> : null}
                     </li>
                   ))}
                 </ul>
-              ) : <Empty title="Not assessed yet" text="Gantry lists findings once the assessment finishes." />}
+              ) : <ul className="list" />}
             </Panel>
-            <Panel title="Conversation with the Onboarding agent" tools={<Chip text={ruleBased ? "Rule-based (no agent)" : `Onboarding Agent v${s.agent.mode === "agent" ? s.agent.version : ""}`} cls={ruleBased ? "" : "accent"} />}>
+            <Panel title="Conversation with the Onboarding agent">
               <div className="osx-main">
-                <p className="small" id="osx-next"><strong>{{ agent: "Onboarding Agent", you: "You", gantry: "Gantry", github: "GitHub", reviewer: "A reviewer", nobody: "" }[s.next.actor]}</strong>{s.next.actor === "nobody" ? "" : " — "}{s.next.text}</p>
                 <div className="chat osx-thread" role="log" aria-live="polite" ref={thread}>
                   {items.map((it) =>
                     it.kind === "t" ? (
-                      <p key={`t${it.at}${it.t.text.slice(0, 12)}`} className="osx-event small"><span className="muted">{fmt.stamp(it.t.at)}</span> {nameOf(it.t.who)}: {it.t.text}</p>
+                      <div key={`t${it.at}${it.t.text.slice(0, 12)}`} className="msg">
+                        <Avatar id={it.t.who in ACTORS ? "ag-onboard" : it.t.who} />
+                        <div className="bub"><div className="who">{nameOf(it.t.who)}</div>{it.t.text}</div>
+                      </div>
                     ) : (
                       <div key={it.m.id} className={`msg${it.m.role in ME ? " me" : ""}${it.m.data.kind === "update" ? " is-update" : ""}`}>
                         <Avatar id={it.m.author in ACTORS ? "ag-onboard" : it.m.author} />
@@ -247,11 +296,13 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
                   {s.busy ? <p className="osx-event small muted">{`Gantry is working: ${s.next.text}.`}</p> : null}
                   {error ? <p className="callout callout-warn small" role="alert">{error}</p> : null}
                 </div>
-                <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-                  <textarea id="osx-input" className="input" rows={2} aria-label="Message to the Onboarding Agent" value={draft} placeholder={composerNote} disabled={!s.can.talk || ruleBased || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
-                  <Btn kind="primary" type="submit" id="osx-send" label="Send" disabled={!s.can.talk || ruleBased || !!live || !draft.trim()} />
-                  {ruleBased ? <p className="small muted osx-reason" id="osx-mode-note">{`Connect a model vendor to talk to the Onboarding Agent. ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
-                </form>
+                {asked ? (
+                  <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+                    <textarea id="osx-input" className="input" rows={2} aria-label="Message to the Onboarding Agent" value={draft} placeholder={composerNote} disabled={!s.can.talk || ruleBased || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
+                    <Btn kind="primary" type="submit" id="osx-send" label="Send" disabled={!s.can.talk || ruleBased || !!live || !draft.trim()} />
+                    {ruleBased ? <p className="small muted osx-reason" id="osx-mode-note">{`Connect a model vendor to talk to the Onboarding Agent. ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
+                  </form>
+                ) : null}
               </div>
             </Panel>
           </>
@@ -265,6 +316,7 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
                   ["Files", <div key="f" className="pre">{o.pr.files.map((f) => f.path).join("\n")}</div>],
                 ]} />
                 {s.prNeedsUpdate ? <p className="small muted">A later assessment found this pull request out of date. Approve the update in the conversation.</p> : null}
+                {st === 2 ? <Btn id="osx-checks" label="Mark checks passing" guard={manage} onClick={() => void checks()} /> : null}
                 {o.pr.state !== "merged" && st >= 3 ? <Btn kind="primary" id="osx-merge" label="Merge and go live" guard={merge} disabledReason={mergeReason} onClick={() => void mergeAsk()} /> : null}
               </div>
             ) : (
@@ -275,8 +327,8 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
             )}
           </Panel>
         ) : (
-          <Panel title="Settings" tools={<Btn small id="osx-details" label="Details and settings" onClick={details} />}>
-            <Kv rows={[["Repository", r.name], ["Language", r.lang], ["Project", projectName], ["Default branch", r.config.defaultBranch], ["Cost so far", fmt.money(s.costUsd)]]} />
+          <Panel title="Settings" tools={<Btn small kind="ghost" id="osx-details" label="Details and settings" onClick={details} />}>
+            <Kv rows={[["Repository", r.name], ["Language", r.lang], ["Project", projectName], ["Default branch", r.config.defaultBranch]]} />
           </Panel>
         )}
       </div>

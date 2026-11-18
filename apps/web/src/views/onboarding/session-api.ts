@@ -34,7 +34,7 @@ export interface Session {
 
 const enc = encodeURIComponent;
 export const sessionKey = (repoId: string) => ["repos", "session", repoId] as const;
-export const useSession = (repoId: string) => useQuery({ queryKey: sessionKey(repoId), queryFn: () => get<Session>(api(`repos/${enc(repoId)}/onboarding/session`)), refetchInterval: 15_000 });
+export const useSession = (repoId: string, enabled = true) => useQuery({ queryKey: sessionKey(repoId), queryFn: () => get<Session>(api(`repos/${enc(repoId)}/onboarding/session`)), refetchInterval: 15_000, enabled });
 
 export type TurnEvent =
   | { event: "text"; data: { delta: string } }

@@ -12,6 +12,7 @@ import { useMcpServers, useMe, useRepos, useTemplates } from "../../api/queries"
 import { hashFor } from "../../lib/router";
 import { makeStopActions } from "../../shell/stopActions";
 import { Btn, Chip, Empty, Field, Input, LockNote, Meter, Panel, Select, Toggle } from "../../ui/primitives";
+import { isStepUp } from "../../ui/stepup";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { Async } from "../../ui/async";
@@ -22,20 +23,12 @@ import { ProtoList } from "../projects/protolist";
 import { nextVersion } from "../govern/data";
 import type { PcProps } from "./ctx";
 
+/** A repository is part of the project once it is Ready; the ones still being onboarded are in Onboarding. */
+const isLive = (r: { onboarding: { stage: string } }): boolean => r.onboarding.stage === "ready";
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const KINDS = ["human", "auto", "mixed"];
 
-/** Links to the pages that are not tabs. */
-function More({ items, set }: { items: Array<[string, string]>; set: PcProps["set"] }) {
-  return (
-    <div className="row small" id="pcf-more" style={{ marginTop: 12 }}>
-      <span className="muted">Also:</span>
-      {items.map(([id, label]) => <Btn key={id} small kind="ghost" id={`pcf-more-${id}`} label={label} onClick={() => set({ tab: id })} />)}
-    </div>
-  );
-}
-
-export function OverviewProto({ p, people, set }: PcProps) {
+export function OverviewProto({ p, people }: PcProps) {
   const ui = useUI();
   const res = useRes();
   const actor = useActors();
@@ -43,15 +36,20 @@ export function OverviewProto({ p, people, set }: PcProps) {
   const cfg = useCan("project.config", { project: p.id });
   const teams = useTeams();
   const tpls = useTemplates().data;
-  const repos = useRepos(p.id).data;
+  const repos = useRepos(p.id).data?.filter(isLive);
+  const [name, setName] = useState(p.name);
   const [desc, setDesc] = useState(p.desc ?? "");
   const [owner, setOwner] = useState(p.owner);
   const [errs, setErrs] = useState<Record<string, string>>({});
   const owners = people.filter((x) => x.status === "active");
   const save = async () => {
+    const nm = name.trim();
+    if (!nm) { setErrs({ name: "Name is required." }); return; }
+    if (nm.length < 3) { setErrs({ name: "Name needs at least 3 characters." }); return; }
     setErrs({});
     let ver = p.version;
     let ok = true;
+    if (nm !== p.name) { const r = await ops.setProject(p.id, "name", nm, { ifMatch: ver }); if (!r.ok) { setErrs({ name: r.msg }); return; } ver = nextVersion(r, ver); }
     if (desc !== (p.desc ?? "")) { const r = res(await ops.setProject(p.id, "desc", desc.trim(), { ifMatch: ver })); ok = r.ok; if (r.ok) ver = nextVersion(r, ver); }
     if (ok && owner !== p.owner) { const r = res(await ops.setProject(p.id, "owner", owner, { ifMatch: ver })); ok = r.ok; }
     if (ok) ui.toast("Project saved", "ok");
@@ -61,9 +59,9 @@ export function OverviewProto({ p, people, set }: PcProps) {
       <div className="cols">
         <Panel title="Details">
           <form noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
-            <div className="stack">
-              <Field label={<>Name <span className="muted">(required)</span></>} error={errs.name} hint="Renaming a project is not available yet.">
-                <Input id="pcf-name" value={p.name} disabled readOnly />
+            <div>
+              <Field label={<>Name <span className="muted">(required)</span></>} error={errs.name}>
+                <Input id="pcf-name" aria-required value={name} disabled={!cfg.allowed} onChange={(e) => setName(e.target.value)} />
               </Field>
               <Field label="Description"><Input id="pcf-desc" value={desc} disabled={!cfg.allowed} onChange={(e) => setDesc(e.target.value)} /></Field>
               <Field label="Owner"><Select id="pcf-owner" disabled={!cfg.allowed} value={owner} onChange={setOwner} options={owners.map((x) => ({ value: x.id, label: x.name }))} /></Field>
@@ -82,16 +80,25 @@ export function OverviewProto({ p, people, set }: PcProps) {
           <span className="sr">{actor(p.owner).name}</span>
         </Panel>
       </div>
-      <More set={set} items={[["members", "Members and roles"], ["classes", "Work classes"], ["notifications", "Notification routes"], ["history", "History"], ["more", "Instructions overlay and templates"]]} />
     </div>
   );
 }
 
-export function FlowProto({ p, cat, set }: PcProps) {
+/** The prototype lets a locked control be tried and answers with a toast; a locked Toggle would look washed out, so the reason is spoken on the attempt instead. */
+function useRefuse() {
+  const ui = useUI();
+  return (reason: string) => ui.toast(reason, "error");
+}
+
+export function FlowProto({ p, cat }: PcProps) {
   const res = useRes();
   const ui = useUI();
+  const refuse = useRefuse();
   const d = useCan("project.config", { project: p.id });
   const f = flowOf(cat, p);
+  // every gate the project's flow lists, including one that is absent (the Compliance sign-off gate shows as off)
+  const gates = cat.gates.filter((g) => p.flow.gates[g.id]);
+  const rowStyle = { padding: "8px 0", borderBottom: "1px dotted var(--line)", flexWrap: "nowrap" } as const;
   return (
     <div className="stack">
       <div className="cols">
@@ -100,11 +107,16 @@ export function FlowProto({ p, cat, set }: PcProps) {
             {f.stations.map((st) => {
               const cfg = p.flow.stations[st.id] ?? { enabled: false, wip: 5 };
               return (
-                <div key={st.id} className="row" style={{ padding: "8px 0", borderBottom: "1px dotted var(--line)", flexWrap: "nowrap" }}>
+                <div key={st.id} className="row" style={rowStyle}>
                   <span className="mono small" style={{ width: 34, color: "var(--accent)" }}>{st.no}</span>
-                  <span className="grow">{st.name}</span>
-                  <span className="row small" style={{ flexWrap: "nowrap" }}>WIP <span style={{ width: 64, display: "inline-block" }}><NumInput id={`pcf-wip-${st.id}`} value={cfg.wip} min={1} max={30} locked={!d.allowed} label={`${st.name} WIP limit`} onCommit={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `${st.name} WIP ${v}`)} /></span></span>
-                  {st.id === "intake" ? <Toggle id={`pcf-st-${st.id}`} checked label={`${st.name} enabled`} decision={{ allowed: false, reason: "Intake is always on: every work order starts there.", needs: "" }} /> : <Toggle id={`pcf-st-${st.id}`} checked={cfg.enabled} decision={d} label={`${st.name} enabled`} onChange={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " on" : " off"}`)} />}
+                  <span>{st.name}</span>
+                  <span className="row small" style={{ flexWrap: "nowrap" }}>WIP <span style={{ width: 64, display: "inline-block" }}><NumInput id={`pcf-wip-${st.id}`} value={cfg.wip} min={1} max={30} locked={false} label={`${st.name} WIP limit`} onCommit={async (v) => (d.allowed ? res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `${st.name} WIP ${v}`) : refuse(d.reason))} /></span></span>
+                  <Toggle id={`pcf-st-${st.id}`} checked={st.id === "intake" ? true : cfg.enabled} decision={null} label={`${st.name} enabled`}
+                    onChange={async (v) => {
+                      if (!d.allowed) return refuse(d.reason);
+                      if (st.id === "intake") return refuse("Intake is always on: every work order starts there.");
+                      res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " on" : " off"}`);
+                    }} />
                 </div>
               );
             })}
@@ -112,17 +124,26 @@ export function FlowProto({ p, cat, set }: PcProps) {
         </Panel>
         <Panel title="Gates">
           <div>
-            {f.gates.map((g) => {
-              const on = p.flow.gates[g.id]?.enabled ?? false;
+            {gates.map((g) => {
+              const gc = p.flow.gates[g.id]!;
+              const on = gc.enabled ?? false;
+              const mode = (f.gates.find((x) => x.id === g.id)?.mode ?? gc.mode ?? "human") as GateKind;
               const lock = gateLock(g, p);
-              const opts = KINDS.filter((o) => o === g.mode || !gateModeLock(g, o as GateKind, p));
               return (
-                <div key={g.id} className="row" style={{ padding: "8px 0", borderBottom: "1px dotted var(--line)", flexWrap: "nowrap" }}>
+                <div key={g.id} className="row" style={rowStyle}>
                   <span className="mono small" style={{ width: 52, color: "var(--accent)" }}>{g.label}</span>
-                  <span className="grow">{g.name}</span>
-                  <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.name} mode`} style={{ width: 110 }} disabled={!d.allowed || g.id === "G0G1"} options={opts} value={g.mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), `${g.label} → ${v}`)} />
-                  <Toggle id={`pcf-gate-${g.id}`} checked={on} label={`${g.name} enabled`} decision={lock.locked ? { allowed: false, reason: lock.reason, needs: "" } : d}
+                  <span>{g.name}</span>
+                  <Select id={`pcf-gmode-${g.id}`} aria-label={`${g.name} mode`} style={{ width: 110 }} options={KINDS} value={mode}
                     onChange={async (v) => {
+                      if (!d.allowed) return refuse(d.reason);
+                      const why = gateModeLock(g, v as GateKind, p);
+                      if (why) return refuse(why);
+                      res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), `${g.label} → ${v}`);
+                    }} />
+                  <Toggle id={`pcf-gate-${g.id}`} checked={on} decision={null} label={`${g.name} enabled`}
+                    onChange={async (v) => {
+                      if (!d.allowed) return refuse(d.reason);
+                      if (lock.locked) return refuse(lock.reason);
                       if (!v && g.id !== "G1f") {
                         const ok = await ui.confirm({ title: `Turn off ${g.name}?`, kicker: `Flow · ${p.name}`, ok: "Turn off", body: `${g.name} (${g.label}) is skipped for new work orders. Work orders already in flight keep the flow they started with. This needs a recent sign-in and is audited.` });
                         if (!ok) return;
@@ -135,12 +156,11 @@ export function FlowProto({ p, cat, set }: PcProps) {
           </div>
         </Panel>
       </div>
-      <More set={set} items={[["flow-advanced", "Add stations, gates and bays, order, route matrix"]]} />
     </div>
   );
 }
 
-export function ApproversProto({ p, cat, set }: PcProps) {
+export function ApproversProto({ p, cat }: PcProps) {
   const ui = useUI();
   const d = useCan("flow.edit", { project: p.id });
   const rows = Object.entries(p.approvers).map(([g, a]) => ({ g, ...a }));
@@ -179,13 +199,13 @@ export function ApproversProto({ p, cat, set }: PcProps) {
           ]}
         />
       </Panel>
-      <More set={set} items={[["rules", "Full rule editor: roles, people, conditions, drafts"]]} />
     </div>
   );
 }
 
 export function McpProto({ p }: PcProps) {
   const res = useRes();
+  const ui = useUI();
   const d = useCan("project.config", { project: p.id });
   const q = useMcpServers();
   return (
@@ -197,8 +217,7 @@ export function McpProto({ p }: PcProps) {
             {servers.map((s) => {
               const on = p.mcp.includes(s.id);
               const scopeOk = s.projects === "all" || s.projects.includes(p.id);
-              const dec = d.allowed && !scopeOk && !on ? { allowed: false, reason: `${s.name} is not scoped to ${p.name}. Change its scope in MCP servers first.`, needs: "" } : d;
-              return <ToggleRow key={s.id} id={`pcf-mcp-${s.id}`} label={s.name} hint={s.url} checked={on} decision={dec} onChange={async (v) => res(await ops.setProject(p.id, "mcp", v ? [...p.mcp, s.id] : p.mcp.filter((x) => x !== s.id), { ifMatch: p.version }), `${s.name}${v ? " attached" : " detached"}`)} />;
+              return <ToggleRow key={s.id} id={`pcf-mcp-${s.id}`} label={s.name} hint={s.url} checked={on} decision={d} onChange={async (v) => (v && !scopeOk ? ui.toast(`${s.name} is not scoped to ${p.name}. Change its scope in MCP servers first.`, "error") : res(await ops.setProject(p.id, "mcp", v ? [...p.mcp, s.id] : p.mcp.filter((x) => x !== s.id), { ifMatch: p.version }), `${s.name}${v ? " attached" : " detached"}`))} />;
             })}
           </div>
         )}
@@ -207,7 +226,7 @@ export function McpProto({ p }: PcProps) {
   );
 }
 
-export function BudgetProto({ p, set }: PcProps) {
+export function BudgetProto({ p }: PcProps) {
   const ui = useUI();
   const res = useRes();
   const d = useCan("project.config", { project: p.id });
@@ -240,7 +259,7 @@ export function BudgetProto({ p, set }: PcProps) {
         </Panel>
         <Panel title="Limits">
           <form id="pcf-budget" noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
-            <div className="stack">
+            <div>
               <LockNote decision={d} what="Budget" />
               <Field label={<>Monthly budget ($) <span className="muted">(required)</span></>} error={errs.monthly}><Input id="pcf-bud-monthly" type="number" min={100} value={monthly} disabled={!d.allowed} onChange={(e) => setMonthly(e.target.value)} /></Field>
               <Field label={<>Alert at (% used) <span className="muted">(required)</span></>} error={errs.alert}><Input id="pcf-bud-alert" type="number" min={10} value={alert} disabled={!d.allowed} onChange={(e) => setAlert(e.target.value)} /></Field>
@@ -249,7 +268,6 @@ export function BudgetProto({ p, set }: PcProps) {
           </form>
         </Panel>
       </div>
-      <More set={set} items={[["spend", "Spend by station and most expensive work orders"]]} />
     </div>
   );
 }
@@ -261,7 +279,7 @@ export function ReposProto({ p }: PcProps) {
       <Async query={q} what="repos" id="pcf-repos" empty={<Empty id="pcf-repos-empty" title="No repos yet" text="Connect a repo in Onboarding. It must be Ready before work orders can target it." />}>
         {(repos) => (
           <ul className="list">
-            {repos.map((x) => (
+            {repos.filter(isLive).map((x) => (
               <li key={x.id}>
                 <a className="pri grow" href={hashFor("dossier", x.id, p.id)}>{x.name}</a>
                 <Chip text={x.lang} cls="plain" />
@@ -282,13 +300,33 @@ export function LineProto({ p }: PcProps) {
   const kd = useCan("kill.project", { project: p.id });
   const rd = useCan("restore.project", { project: p.id });
   const stop = me ? makeStopActions(ui, me) : null;
+  // the prototype's dialog: type the project key. The server also wants a reason for the audit trail, so that is the one added field.
+  const kill = () => ui.open((close) => (
+    <FormDialog
+      title={`Kill ${p.name}`} submit="Kill project" danger close={close} intro="All running work stops now."
+      values={{ c: "", reason: "" }}
+      fields={[
+        { k: "c", label: `Type the project key (${p.key})`, req: true, validate: (v) => (v !== p.key ? `Type ${p.key} exactly.` : "") },
+        { k: "reason", label: "Reason", req: true, minLen: 5, hint: "Posted to the notification routes and the audit log." },
+      ]}
+      onSubmit={async (v) => {
+        const r = await ops.kill("project", p.id, { reason: String(v.reason).trim(), mode: "hold", confirmText: p.name });
+        if (!r.ok) {
+          if (isStepUp(r)) { close(); stop?.kill("project", p.id); return undefined; } // the shell's kill dialog carries the sign-in re-check
+          return r.msg;
+        }
+        ui.toast(`${p.name} killed`, "error");
+        return undefined;
+      }}
+    />
+  ));
   return (
     <Panel title="Halt and stop">
       <div className="stack">
         <p>Halting lets running agents finish their current step. A kill stops them now.</p>
         <div className="row">
           {p.halted ? <Btn icon="pause" id="pcf-resume" label="Resume project" guard={hd} onClick={() => void stop?.resume(p.id)} /> : <Btn icon="pause" id="pcf-halt" label="Halt project" guard={hd} onClick={() => stop?.halt(p.id)} />}
-          {p.killed ? <Btn kind="primary" icon="power" id="pcf-restore" label="Restore project" guard={rd} onClick={() => stop?.restore("project", p.id)} /> : <Btn kind="danger" icon="stop" id="pcf-kill" label="Kill project" guard={kd} onClick={() => stop?.kill("project", p.id)} />}
+          {p.killed ? <Btn kind="primary" icon="power" id="pcf-restore" label="Restore project" guard={rd} onClick={() => stop?.restore("project", p.id)} /> : <Btn kind="danger" icon="stop" id="pcf-kill" label="Kill project" guard={kd} onClick={kill} />}
         </div>
       </div>
     </Panel>

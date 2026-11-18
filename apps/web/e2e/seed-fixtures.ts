@@ -6,6 +6,7 @@
  */
 import type { Me } from "../src/api/types";
 import type { Persona } from "./fixtures";
+import { DEFAULT_CATALOG } from "@gantry/domain";
 import { projOnboarding } from "./proj-fixtures";
 
 type Seed = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -157,6 +158,8 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     const seg = path.split("/");
     const q = (k: string) => url.searchParams.get(k);
     if (path === "home") return home;
+    // PROJ GROUP: the catalogue the prototype draws (its extra Compliance sign-off gate and role) on top of the real one
+    if (path === "catalog") return { ...DEFAULT_CATALOG, gates: [...DEFAULT_CATALOG.gates, ...(seed.catalog.gates as Seed[]).filter((g) => !DEFAULT_CATALOG.gates.some((x) => x.id === g.id))], roles: [...DEFAULT_CATALOG.roles, ...(seed.catalog.roles as Seed[]).filter((r) => !DEFAULT_CATALOG.roles.some((x) => x.id === r.id))] };
     if (path === "projects") return seed.projects.map((p: Seed) => ({ ...p, metrics: projectMetrics(p.id) }));
     if (seg[0] === "projects" && seg[1]) {
       const p = seed.projects.find((x: Seed) => x.id === seg[1]);

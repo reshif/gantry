@@ -13,4 +13,5 @@ export const commands = {
   saveGuidelines: ops.saveGuidelines,
   setProject: ops.setProject,
   setGateMode: ops.setGateMode,
+  kill: ops.kill,
 };

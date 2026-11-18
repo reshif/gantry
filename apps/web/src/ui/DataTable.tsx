@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, linkRows, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, linkRows, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, sortHint, sortSelect = true }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -47,6 +47,10 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   /** Prototype list: a click on the row (outside its own controls) follows the row's primary link `a.pri`. Adds no control of its own. */
   linkRows?: boolean;
   sort?: SortState | undefined;
+  /** Show the faint up-down mark on sortable headers that are not the sort column (the Blueprint's `sorthint`). */
+  sortHint?: boolean;
+  /** The "Sort by" select shown above the cards on a phone; the Blueprint has none. Default true. */
+  sortSelect?: boolean;
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
   pageSize?: number;
@@ -116,7 +120,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const clientMore = shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
-      {sortable.length ? (
+      {sortable.length && sortSelect ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
           <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>
@@ -136,7 +140,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : sortHint ? <span className="sorthint"> ↕</span> : ""}</span>
                       </button>
                     ) : c.label}
                   </th>

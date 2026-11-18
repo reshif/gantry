@@ -164,3 +164,4 @@
 @media (min-width: 1200px) { .prj .hm-proj-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .prj .pf-compact .searchbox > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .prj .pf-compact { margin-top: var(--s2); }
+.proto-list .fbar .field { margin-bottom: 0; }
