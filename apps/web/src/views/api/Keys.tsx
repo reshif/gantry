@@ -145,6 +145,7 @@ export function KeysTab({ d, url }: { d: ApiData; url: { v: { q: string; sort: s
         rowId={(k) => `api-key-row-${k.id}`}
         pageSize={10}
         pager
+        idleGlyph
         page={Math.max(0, Number(url.v.page) || 0)}
         onPage={(p) => url.set({ page: String(p) })}
         sort={{ key: url.v.sort || "created", dir: url.v.dir ? (url.v.dir === "asc" ? 1 : -1) : -1 }}
@@ -152,7 +153,7 @@ export function KeysTab({ d, url }: { d: ApiData; url: { v: { q: string; sort: s
         empty={d.keys.length ? { title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="clear-filters" onClick={() => url.clear()} /> } : { title: "No keys on your projects", text: "Create a key to let another system submit work." }}
         columns={[
           { key: "name", label: "Name", sort: (k) => k.name.toLowerCase(), render: (k) => <b className="ell" title={`Created by ${who(k.by).name}`}>{k.name}</b> },
-          { key: "prefix", label: "Key", render: (k) => <span className="mono">{k.prefix.replace(/…+$/, "")}…</span> },
+          { key: "prefix", label: "Key", sort: (k) => k.prefix, render: (k) => <span className="mono">{k.prefix.replace(/…+$/, "")}…</span> },
           { key: "project", label: "Project", sort: (k) => pkey(k.project), render: (k) => <span className="tag">{pkey(k.project)}</span> },
           { key: "actions", label: "Actions", hideSmall: true, render: (k) => <>{k.actions.map((a) => <span key={a} className="tag">{a}</span>)}</> },
           { key: "used", label: "Last used", sort: (k) => k.lastUsed ?? 0, render: (k) => <span className="mono dim">{agoShort(k.lastUsed)}</span> },

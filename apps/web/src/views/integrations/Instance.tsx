@@ -188,10 +188,20 @@ export function InstanceDrawer({ id, close, onEdit, onToggle, onRemove }: { id: 
     ui.toast(good ? `${inst.name} is reachable.` : `${inst.name}: ${r.msg || "the test failed"}. Still failing.`, good ? "ok" : "error");
   };
   const why = st === "failing" ? (failed.length ? `${lastFailed ? `Last ${recent.length} deliveries failed` : `${failed.length} of ${day.length} deliveries failed in the last day`}${failed[0]?.error ? `: ${failed[0].error}` : ""}.` : "The last connection test failed.") : st === "degraded" ? "Responses are slow or partly failing." : st === "offline" ? "The service did not answer." : st === "disabled" ? "This connection is switched off. Nothing is sent through it until you enable it." : "";
+  const sec = (title: React.ReactNode, children: React.ReactNode, id?: string) => (
+    <div className="card" id={id}><div className="card-h"><h3>{title}</h3></div><div className="card-b">{children}</div></div>
+  );
   return (
     <CrDrawer
       eyebrow={`Integration · ${t.id}`} title={inst.name} close={close}
-      foot={<><Btn label="Test connection" id="int-d-test" guard={perm} onClick={() => void test()} /><Btn label="Disconnect…" kind="danger" id="int-d-remove" guard={perm} onClick={() => onRemove(inst)} /></>}
+      foot={(
+        <>
+          <Btn label="Test connection" id="int-d-test" guard={perm} onClick={() => void test()} />
+          <Btn label="Edit" id="int-d-edit" guard={perm} onClick={() => onEdit(inst)} />
+          <Btn label={inst.connected ? "Disable" : "Enable"} id="int-d-toggle" guard={perm} onClick={() => onToggle(inst)} />
+          <Btn label="Disconnect…" kind="danger" id="int-d-remove" guard={perm} onClick={() => onRemove(inst)} />
+        </>
+      )}
     >
       <div className="row"><Health st={st} /></div>
       {why && st !== "healthy" ? <div className={`banner ${st === "failing" ? "bad" : "warn"}`} id="int-d-why"><CrIcon name="warn" /><div className="grow">{why}</div></div> : null}
@@ -202,19 +212,14 @@ export function InstanceDrawer({ id, close, onEdit, onToggle, onRemove }: { id: 
         ["Connected by", <span key="b" className="row nowrap" style={{ gap: 6 }}><Avatar id={inst.createdBy} /><span className="ell">{actor(inst.createdBy).name}</span></span>],
         ["Last sync", agoShort(inst.lastSync)],
       ]} />
-      <details className="int-more" id="int-d-more">
-        <summary>Settings, usage and recent deliveries</summary>
-        <div className="int-drawer-actions">
-          <Btn label="Edit" small icon="dots" id="int-d-edit" guard={perm} onClick={() => onEdit(inst)} />
-          <Btn label={inst.connected ? "Disable" : "Enable"} small kind={inst.connected ? "ghost" : "primary"} icon="power" id="int-d-toggle" guard={perm} onClick={() => onToggle(inst)} />
+      {inst.lastTest ? (
+        <div className={`callout ${inst.lastTest.ok ? "callout-ok" : "callout-warn"}`} role="status" id="int-d-lasttest">
+          <Icon name={inst.lastTest.ok ? "check" : "alert"} />
+          <span>Last test {fmt.ago(inst.lastTest.at, Date.now())} by {actor(inst.lastTest.by).name}: {inst.lastTest.ok ? "answered." : "failed."}</span>
         </div>
-        {inst.lastTest ? (
-          <div className={`callout ${inst.lastTest.ok ? "callout-ok" : "callout-warn"}`} role="status" id="int-d-lasttest">
-            <Icon name={inst.lastTest.ok ? "check" : "alert"} />
-            <span>Last test {fmt.ago(inst.lastTest.at, Date.now())} by {actor(inst.lastTest.by).name}: {inst.lastTest.ok ? "answered." : "failed."}</span>
-          </div>
-        ) : null}
-        <dl className="int-kv int-kv-drawer">
+      ) : null}
+      {t.fields.some((f) => f.type !== "secret") || inst.targetId ? sec("Settings", (
+        <dl className="int-kv int-kv-drawer" id="int-d-settings">
           {t.fields.filter((f) => f.type !== "secret").map((f) => {
             const v = f.type === "bool" ? (inst.config[f.key] ? "yes" : "no") : inst.config[f.key];
             return (
@@ -227,18 +232,16 @@ export function InstanceDrawer({ id, close, onEdit, onToggle, onRemove }: { id: 
           {inst.targetId ? <div><dt>Endpoint id</dt><dd className="mono">{inst.targetId}</dd></div> : null}
           <div><dt>Last 24h</dt><dd className={`mono${failed.length ? " neg" : ""}`}>{day.length} sent{failed.length ? `, ${failed.length} failed` : ""}</dd></div>
         </dl>
-        {inst.type === "slack" && me ? <LinkAccount inst={inst} /> : null}
-        <h3 className="sub-h">Depends on it ({usageCount(u)})</h3>
-        <ImpactList u={u} inst={inst} pname={d.pname} />
-        <h3 className="sub-h">Recent deliveries</h3>
-        {dl.length ? (
-          <ul className="plain-list" id="int-d-deliveries">
-            {dl.slice(0, 8).map((x) => (
-              <li key={x.id}><span className="mono dim">{agoShort(x.at)}</span><span>{evName(x.event)} to <span className="mono">{x.target}</span></span><span className={`outcome o-${x.status === "failed" ? "failed" : "ok"}`}>{x.status === "failed" ? "failed" : x.status === "pending" ? "pending" : "delivered"}</span></li>
-            ))}
-          </ul>
-        ) : <p className="muted small">{t.destination ? "Nothing sent yet." : "Source integrations send events to Gantry; nothing is delivered to them."}</p>}
-      </details>
+      )) : null}
+      {inst.type === "slack" && me ? <div className="card"><div className="card-b"><LinkAccount inst={inst} /></div></div> : null}
+      {sec(`Depends on it (${usageCount(u)})`, <ImpactList u={u} inst={inst} pname={d.pname} />, "int-d-usage")}
+      {sec("Recent deliveries", dl.length ? (
+        <ul className="plain-list" id="int-d-deliveries">
+          {dl.slice(0, 8).map((x) => (
+            <li key={x.id}><span className="mono dim">{agoShort(x.at)}</span><span>{evName(x.event)} to <span className="mono">{x.target}</span></span><span className={`outcome o-${x.status === "failed" ? "failed" : "ok"}`}>{x.status === "failed" ? "failed" : x.status === "pending" ? "pending" : "delivered"}</span></li>
+          ))}
+        </ul>
+      ) : <p className="muted small">{t.destination ? "Nothing sent yet." : "Source integrations send events to Gantry; nothing is delivered to them."}</p>)}
     </CrDrawer>
   );
 }

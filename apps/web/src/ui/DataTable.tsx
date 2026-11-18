@@ -29,7 +29,9 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, page: pageProp, onPage }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, page: pageProp, onPage, idleGlyph }: {
+  /** Show the prototype's faint two-way arrow on sortable headers that are not the active sort. */
+  idleGlyph?: boolean;
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -153,7 +155,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={{ ...(c.width ? { width: c.width } : {}), ...(c.align === "center" ? { textAlign: "center" as const } : {}) }} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true" style={!active && idleGlyph ? { opacity: 0.45, fontSize: 10 } : undefined}>{active ? (cur!.dir > 0 ? "↑" : "↓") : idleGlyph ? "↕" : ""}</span>
                       </button>
                     ) : c.label}
                   </th>

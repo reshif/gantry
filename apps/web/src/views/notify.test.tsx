@@ -101,17 +101,35 @@ describe("Integrations", () => {
     expect(within(table).getByText("Staging Slack")).toBeTruthy();
     expect(within(table).getAllByText("all").length).toBe(2);
     expect(within(table).getByText("Disabled")).toBeTruthy();
-    expect((await byId("int-attn-int-off")).textContent).toBe("Staging Slack");
+    expect(document.getElementById("int-attn")).toBeNull(); // no attention disclosure under the table (prototype)
     expect(document.body.textContent).not.toMatch(/simulated/i);
     fireEvent.click(await byId("int-open-int-slack"));
     expect(await screen.findByText("xoxb-••••••••aaaa")).toBeTruthy(); // a masked secret, never the value
     expect(screen.getByText("Test connection")).toBeTruthy();
   });
 
+  it("sortable headers carry the prototype's sort arrow, and the connection drawer keeps its actions in the foot with usage and deliveries as cards (no disclosure)", async () => {
+    setup();
+    mount(<IntegrationsView />);
+    const table = await byId("int-table");
+    expect(table.querySelectorAll("thead .th-arrow").length).toBe(5);
+    expect(Array.from(table.querySelectorAll("thead .th-arrow")).filter((a) => a.textContent === "↕").length).toBe(4);
+    fireEvent.click(await byId("int-open-int-slack"));
+    await byId("int-d-test");
+    expect(document.getElementById("int-d-more")).toBeNull();
+    expect(document.querySelector("details")).toBeNull();
+    const foot = document.querySelector(".drawer-f")!.textContent!;
+    for (const b of ["Test connection", "Edit", "Disable", "Disconnect…"]) expect(foot).toContain(b);
+    expect(document.getElementById("int-d-usage")).toBeTruthy();
+    expect(document.getElementById("int-d-deliveries") ?? document.querySelector(".drawer-b")!.textContent!.includes("Recent deliveries")).toBeTruthy();
+  });
+
   it("lists types the version cannot connect as not yet available, with the reason, and locks Add for people without the right", async () => {
     setup({}, ["integration.add"]);
     mount(<IntegrationsView />);
-    fireEvent.click(await screen.findByText("Catalogue"));
+    await byId("int-table");
+    window.history.replaceState(null, "", "?view=catalogue");
+    window.dispatchEvent(new Event("gantry:urlstate"));
     const add = await byId("int-cat-add-teams");
     expect(add.getAttribute("aria-disabled")).toBe("true");
     expect(add.getAttribute("data-reason")).toMatch(/not yet available/i);
@@ -191,7 +209,9 @@ describe("Integrations", () => {
   it("the custom builder offers no source-control category and explains what is missing", async () => {
     setup({ "POST /api/v1/integration-types": () => ({ body: { ok: true, msg: "Audit lake added to the catalogue.", type: { id: "audit-lake", name: "Audit lake" } } }) });
     mount(<IntegrationsView />);
-    fireEvent.click(await byId("int-view-custom"));
+    await byId("int-table");
+    window.history.replaceState(null, "", "?view=custom");
+    window.dispatchEvent(new Event("gantry:urlstate"));
     const cat = (await byId("int-b-cat")) as HTMLSelectElement;
     expect(Array.from(cat.options).map((o) => o.value)).not.toContain("source");
     expect((await byId("int-b-err")).textContent).toMatch(/name the integration/i);
@@ -202,7 +222,7 @@ describe("Integrations", () => {
   });
 });
 
-const openRoutes = async () => { fireEvent.click(await byId("nt-more-routes")); await byId("nt-table"); };
+const openRoutes = async () => { fireEvent.click(await byId("nt-tab-channels")); fireEvent.click(await byId("nt-more-routes")); await byId("nt-table"); };
 
 describe("Notifications", () => {
   it("says Not visible to you when the delivery log is refused, instead of no deliveries", async () => {
@@ -305,7 +325,7 @@ describe("Notifications", () => {
   it("repo overrides list what the repo adds and remove one with the repo's version", async () => {
     const calls = setup({ "PATCH /api/v1/repos/payments-api/config": () => ({ body: { ok: true, msg: "Saved." } }) });
     mount(<NotificationsView />);
-    fireEvent.click(await screen.findByText("Repo overrides"));
+    fireEvent.click(await byId("nt-tab-channels")); fireEvent.click(await byId("nt-more-overrides"));
     expect((await screen.findAllByText("acme/payments-api")).length).toBeGreaterThan(0);
     fireEvent.click(await byId("nt-ov-rm-payments-api-0"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/repos/payments-api/config")).toBe(true));
@@ -317,7 +337,7 @@ describe("Notifications", () => {
   it("card templates: save a custom card, and deleting one that a route uses is refused with the reason", async () => {
     const calls = setup({ "POST /api/v1/card-templates": () => ({ body: { ok: true, msg: "Tight gate card saved.", template: { id: "CT-1" } } }) });
     mount(<NotificationsView />);
-    fireEvent.click(await screen.findByText("Card templates"));
+    fireEvent.click(await byId("nt-tab-channels")); fireEvent.click(await byId("nt-more-templates"));
     expect(await screen.findByText("Tight gate card")).toBeTruthy();
     fireEvent.click(await byId("nt-ct-f-repo"));
     fireEvent.click(await byId("nt-ct-save"));
@@ -328,7 +348,7 @@ describe("Notifications", () => {
   it("duplicating a built-in card keeps its kind and buttons, and the copy is what the editor shows next", async () => {
     const calls = setup({ "POST /api/v1/card-templates": () => ({ body: { ok: true, msg: "Saved.", template: { id: "CT-2", name: "Gate request (copy)", kind: "gate", fields: ["title", "repo", "class", "priority", "approvers", "link", "actions"], actions: ["approve", "reject", "open"] } } }) });
     mount(<NotificationsView />);
-    fireEvent.click(await screen.findByText("Card templates"));
+    fireEvent.click(await byId("nt-tab-channels")); fireEvent.click(await byId("nt-more-templates"));
     fireEvent.click(await byId("nt-ct-dup-gate"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/card-templates")).toBe(true));
     expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/card-templates")!.body).toMatchObject({ name: "Gate request (copy)", kind: "gate", actions: ["approve", "reject", "open"] });
@@ -350,6 +370,17 @@ describe("Notifications: the Control Room tabs", () => {
     const sw = (await byId("nt-mx-gate.waiting-slack")) as HTMLInputElement;
     expect(sw.checked).toBe(true);
     expect((await byId("nt-mx-gate.waiting-inapp")).getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("the matrix lists the prototype's nine events with In-app, Slack, Email and Pager, and MCP definition changed is locked (no backend event)", async () => {
+    setup();
+    mount(<NotificationsView />);
+    await byId("nt-matrix");
+    const rows = document.querySelectorAll("#nt-matrix tbody tr");
+    expect(Array.from(rows).map((r) => r.querySelector("td")!.textContent)).toEqual(["Work order submitted", "Question for a person", "Gate waiting", "Gate decided", "Work order stuck", "Work order released", "Emergency stop", "Trust proposal", "MCP definition changed"]);
+    expect(Array.from(document.querySelectorAll("#nt-matrix thead th")).map((t) => t.textContent)).toEqual(["Event", "In-app", "Slack", "Email", "Pager"]);
+    expect((await byId("nt-mx-mcp-slack")).getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById("nt-more-routes")).toBeNull(); // the route editor is not under the matrix
   });
 
   it("a matrix switch saves the route through the API with its version and toasts what changed", async () => {

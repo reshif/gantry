@@ -1,7 +1,6 @@
 /**
  * Notifications (spec 8.8, 12.2), the Control Room screen: tabs Matrix (who hears about what: event by channel switches), Deliveries and
- * Channels (`?tab=`). The route editor, card templates and repo overrides stay one step away behind the "Routes and cards" and "Repo overrides"
- * buttons (`?tab=routes|templates|overrides`). Kill and restore cannot be switched off. Destinations are connections from Integrations.
+ * Channels (`?tab=`). The route editor, card templates and repo overrides stay one step away, listed under the channels (`?tab=routes|templates|overrides`). Kill and restore cannot be switched off. Destinations are connections from Integrations.
  */
 import { useCan } from "../api/can";
 import { useDeliveries } from "../api/queries";
@@ -19,7 +18,7 @@ import { oneOf, useUrlState } from "./connect/kit";
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 const MAIN = ["matrix", "deliveries", "channels"] as const;
 const MORE = ["routes", "templates", "overrides"] as const;
-const MORE_LABEL = { routes: "Routes and cards", templates: "Card templates", overrides: "Repo overrides" } as const;
+export const MORE_LABEL = { routes: "Routes and cards", templates: "Card templates", overrides: "Repo overrides" } as const;
 
 export default function NotificationsView() {
   const nt = useNtData();
@@ -52,17 +51,12 @@ export default function NotificationsView() {
       )}
       <div id="nt-tab-panel" role="tabpanel" aria-labelledby={`nt-tab-${tab}`}>
         {tab === "deliveries" ? <DeliveriesTab p={p} url={url} />
-          : tab === "channels" ? <ChannelsTab p={p} nt={nt} perm={perm} />
+          : tab === "channels" ? <ChannelsTab p={p} nt={nt} perm={perm} onMore={(m) => url.set({ tab: m })} />
           : tab === "routes" ? <RoutesTab key={p.id} p={p} nt={nt} perm={perm} />
           : tab === "templates" ? <TemplatesTab p={p} nt={nt} perm={perm} />
           : tab === "overrides" ? <OverridesTab p={p} nt={nt} />
           : (
-            <>
-              <MatrixTab p={p} nt={nt} perm={perm} />
-              <div className="row" style={{ marginTop: 12 }}>
-                {MORE.map((m) => <Btn key={m} label={MORE_LABEL[m]} small kind="ghost" id={`nt-more-${m}`} onClick={() => url.set({ tab: m })} />)}
-              </div>
-            </>
+            <MatrixTab p={p} nt={nt} perm={perm} />
           )}
       </div>
     </Page>

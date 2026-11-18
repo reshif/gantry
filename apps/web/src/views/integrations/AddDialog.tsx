@@ -14,7 +14,9 @@ import { type FormVals, ScopePicker, configOf, control, emptyVals, secretsOf, va
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
-export function AddIntegration({ typeId, types, insts, live, projects, close, onAdded }: {
+export function AddIntegration({ typeId, types, insts, live, projects, close, onAdded, onBrowse }: {
+  /** Opens the connector catalogue and custom types (the screens behind this dialog). */
+  onBrowse?: () => void;
   typeId: string | null;
   types: TypeRow[];
   insts: Array<{ id: string; type: string }>;
@@ -108,6 +110,7 @@ export function AddIntegration({ typeId, types, insts, live, projects, close, on
             </label>
           </details>
           <div className="form-err" role="alert" id="int-add-err">{err}</div>
+          {onBrowse ? <p className="muted small">Not in the list? <a className="rl" id="int-add-browse" href="#integrations" onClick={(e) => { e.preventDefault(); close(); onBrowse(); }}>Browse the connector catalogue or build a custom type</a>.</p> : null}
         </div>
       )}
     />

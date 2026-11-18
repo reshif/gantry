@@ -71,7 +71,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The catalogue and custom types are screens behind the Add dialog's link (`?view=`); a pasted link reaches them too. */
+const goView = async (view: string) => {
+  await byId("int-table");
+  window.history.replaceState(null, "", `?view=${view}`);
+  window.dispatchEvent(new Event("gantry:urlstate"));
+};
+
 describe("Integrations screen", () => {
+  it("the Add dialog links to the connector catalogue", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("int-add"));
+    fireEvent.click(await byId("int-add-browse"));
+    await waitFor(() => expect(window.location.search).toContain("view=catalogue"));
+    await waitFor(() => expect(text()).toContain("Linear"));
+  });
+
   it("lists the connections with their status, scope and the header counts", async () => {
     setup();
     mount();
@@ -82,7 +98,8 @@ describe("Integrations screen", () => {
     expect(table.textContent).toContain("Disabled");
     expect(table.textContent).toContain("payments");
     expect(table.textContent).not.toContain("Payments Platform");
-    expect(document.getElementById("int-attn-int-gh-1")?.textContent).toBe("GitHub org");
+    expect(document.getElementById("int-attn")).toBeNull(); // the prototype has no attention disclosure under the table
+    expect(document.getElementById("int-view-catalogue")).toBeNull(); // the catalogue opens from the Add dialog, not from the filter bar
     expect(text()).toContain("Healthy1");
     expect(text()).not.toContain("enabled and reachable");
     expect(document.getElementById("int-stats")?.textContent).toMatch(/Connected3.*Healthy1.*Degraded0.*Failing1/);
@@ -92,7 +109,7 @@ describe("Integrations screen", () => {
   it("shows the catalogue with a type that cannot be connected yet", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("int-view-catalogue"));
+    await goView("catalogue");
     await waitFor(() => expect(text()).toContain("Linear"));
     expect(text()).toContain("Slack");
     expect(text()).toContain("GitHub");
@@ -124,7 +141,7 @@ describe("Integrations screen", () => {
   it("says the catalogue is not visible when the read is refused with 403", async () => {
     setup({ "GET /api/v1/integration-types": () => ({ status: 403, body: { ok: false, msg: "Needs Integrations access." } }) });
     mount();
-    fireEvent.click(await byId("int-view-catalogue"));
+    await goView("catalogue");
     const hidden = await byId("int-cat-hidden");
     expect(hidden.textContent).toContain("Not visible to you");
     expect(hidden.textContent).toContain("Needs Integrations access.");
@@ -139,7 +156,7 @@ describe("Integrations screen", () => {
     expect(document.getElementById("int-build")).toBeNull();
     fireEvent.click(add);
     expect(document.querySelector("[role=dialog]")).toBeNull();
-    fireEvent.click(await byId("int-view-custom"));
+    await goView("custom");
     const save = await byId("int-b-save");
     await waitFor(() => expect(locked(save)).toBe(true));
     expect(((await byId("int-b-name")) as HTMLInputElement).disabled).toBe(true);
@@ -159,7 +176,7 @@ describe("Integrations screen", () => {
     setup({ "GET /api/v1/integration-types": () => ({ status: 500, body: { ok: false, msg: "Types are down." } }) });
     mount();
     await byId("int-table");
-    fireEvent.click(await byId("int-view-catalogue"));
+    await goView("catalogue");
     const err = await byId("int-cat-error");
     expect(err.textContent).toContain("Couldn't load the integration catalogue");
     expect(err.textContent).toContain("Types are down.");
@@ -168,7 +185,7 @@ describe("Integrations screen", () => {
   it("locks Add on a type this version cannot connect, with its reason, and keeps the others open", async () => {
     const calls = setup();
     mount();
-    fireEvent.click(await byId("int-view-catalogue"));
+    await goView("catalogue");
     const linear = await byId("int-cat-add-linear");
     expect(locked(linear)).toBe(true);
     expect(linear.getAttribute("data-reason")).toContain("Not available in this version.");

@@ -16,7 +16,7 @@ import { useUI } from "../ui/overlay-context";
 import { AddMcp } from "./mcp/AddDialog";
 import { ServerDrawer } from "./mcp/Drawer";
 import { ReapproveDialog } from "./mcp/Reapprove";
-import { Health, SensChip, authLabel, dec } from "./mcp/kit";
+import { Health, authLabel, dec } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
 import { ClearOnClose, NothingMatches, oneOf, useUrlState } from "./connect/kit";
 
@@ -35,7 +35,7 @@ export default function McpView() {
 
   const openServer = (id: string): void => {
     url.set({ open: id });
-    ui.drawer.open(`mcp:${id}`, (close) => <ClearOnClose param="open" id={id}><ServerDrawer id={id} close={close} /></ClearOnClose>);
+    ui.drawer.open(`mcp:${id}`, (close) => <ClearOnClose param="open" id={id}><ServerDrawer id={id} close={close} onUsage={() => url.set({ view: "usage" })} /></ClearOnClose>);
   };
   const [opened, setOpened] = useState("");
   useEffect(() => {
@@ -66,7 +66,6 @@ export default function McpView() {
           <FilterBar label="Filter servers" count={`${shown.length} of ${servers.length}`} actions={(
             <>
               {url.v.q ? <Btn label="Clear" small kind="ghost" id="mcp-clear" onClick={() => url.clear("view", "open")} /> : null}
-              <Btn label="Usage log" small kind="ghost" id="mcp-view-usage" onClick={() => url.set({ view: "usage" })} />
             </>
           )}>
             <SearchBox id="mcp-q" label="Search servers" placeholder="Search servers" value={url.v.q} onChange={(q) => url.set({ q })} />
@@ -87,7 +86,7 @@ export default function McpView() {
                     <div className="card-b stack" style={{ gap: 12 }}>
                       <div className="row">
                         <span className="tag">{authLabel(m)}</span>
-                        <SensChip s={m.sensitivity} />
+                        <span className={`chip ${m.sensitivity === "restricted" ? "bad" : "idle"} plain`}>{m.sensitivity}</span>
                         <span className="dim">{m.tools.length} tools, {w} write</span>
                       </div>
                       <div className="row">

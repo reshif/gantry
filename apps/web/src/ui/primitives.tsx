@@ -414,7 +414,8 @@ export function Meter({ value, max, label, warnAt = 0.85 }: { value: number; max
 }
 
 /** Table in the standard scroll wrapper. */
-export function Table({ compact, children, className = "" }: { compact?: boolean; children: ReactNode; className?: string }) {
+export function Table({ compact, children, className = "", bare }: { compact?: boolean; children: ReactNode; className?: string; /** A plain `<table>` with no wrapper or classes, for a parent that draws it (the prototype's `.matrix`). */ bare?: boolean }) {
+  if (bare) return <table>{children}</table>;
   return (
     <div className="table-scroll">
       <table className={`table${compact ? " table-compact" : ""} ${className}`.trim()}>{children}</table>

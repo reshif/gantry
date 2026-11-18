@@ -75,7 +75,7 @@ function mount() {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><McpView /></OverlayProvider></QueryClientProvider>);
 }
-const openDocs = async () => { fireEvent.click(await byId("mcp-open-mcp-docs-1a2b")); await byId("mcp-d-more"); };
+const openDocs = async () => { fireEvent.click(await byId("mcp-open-mcp-docs-1a2b")); fireEvent.click(await byId("mcp-d-more")); await waitFor(() => { if (!document.querySelector(".dlg")) throw new Error("no dialog"); }); };
 const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra } });
 const patches = (calls: Call[]) => calls.filter((c) => c.method === "PATCH");
 
@@ -113,7 +113,7 @@ describe("MCP servers screen", () => {
     expect(row.textContent).toContain("3 tools, 1 write");
     expect(row.textContent).toContain("Agents: Build agent");
     expect(row.textContent).toContain("update_page");
-    expect(within(row).getByText("Internal")).toBeTruthy();
+    expect(within(row).getByText("internal")).toBeTruthy();
     expect(within(row).getByText("Manage tools")).toBeTruthy();
     const banner = await byId("mcp-changed-mcp-chg-0001");
     expect(banner.textContent).toContain("changed a tool definition. It stays paused until re-approved.");
@@ -134,6 +134,20 @@ describe("MCP servers screen", () => {
     fireEvent.change(await byId("mcp-q"), { target: { value: "zzz" } });
     fireEvent.click(await byId("clear-filters"));
     await waitFor(() => expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeTruthy());
+  });
+
+  it("the registry has no extra Usage log button, shows the sensitivity as a plain lower-case chip, and the drawer offers Scope and access and the usage log", async () => {
+    setup();
+    mount();
+    const row = await byId("mcp-row-mcp-docs-1a2b");
+    expect(document.getElementById("mcp-view-usage")).toBeNull();
+    const chip = within(row).getByText("internal");
+    expect(chip.className).toContain("plain");
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
+    await byId("mcp-d-refresh");
+    expect(document.getElementById("mcp-d-more")!.textContent).toBe("Scope and access…");
+    expect(document.querySelector("details")).toBeNull();
+    expect(document.getElementById("mcp-d-usage")).toBeTruthy();
   });
 
   it("Manage tools opens a drawer: eyebrow MCP SERVER, URL/Auth/Health, a Tools card with switches and Refresh definitions in the foot", async () => {
@@ -241,7 +255,7 @@ describe("MCP servers screen", () => {
     const calls = setup({ "POST /api/v1/mcp/servers/mcp-chg-0001/approve": () => ok({ server: { ...CHANGED, enabled: true } }) });
     mount();
     fireEvent.click(await byId("mcp-open-mcp-chg-0001"));
-    await byId("mcp-d-more");
+    fireEvent.click(await byId("mcp-d-more"));
     const note = await byId("mcp-disabled-note");
     expect(note.textContent).toContain("Definition of search changed");
     expect(document.querySelector(".mcp-tools tbody")!.textContent).toContain("changed");
@@ -317,7 +331,8 @@ describe("MCP servers screen", () => {
   it("Usage log: filters by server, agent, project and outcome, charts calls per server, labels removed servers and real outcomes", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("mcp-view-usage"));
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
+    fireEvent.click(await byId("mcp-d-usage"));
     const rows = () => document.querySelectorAll(".mcp-usage tbody tr");
     await waitFor(() => expect(rows()).toHaveLength(3));
     expect(document.querySelector(".mcp-usage")!.textContent).toContain("mcp-gone (removed)");

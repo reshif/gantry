@@ -75,10 +75,38 @@ function mount() {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><ApiView /></OverlayProvider></QueryClientProvider>);
 }
-const openTr = async (id: string) => { fireEvent.click(await byId(`api-tr-open-${id}`)); await byId("api-tr-sim"); };
+const openTr = async (id: string) => { fireEvent.click(await byId(`api-tr-open-${id}`)); fireEvent.click(await byId("api-tr-more")); await byId("api-tr-sim"); };
+/** Quick start, then one of the sections linked under the curl (ref, play, log, limits). */
+const docs = async (sec: string) => { await tab("docs"); fireEvent.click(await byId(`api-sec-${sec}`)); };
 const tab = async (name: string) => fireEvent.click(await byId(`api-tab-${name}`));
 beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+describe("API & triggers: quick start", () => {
+  it("shows the prototype card (one curl, no copy bar, no disclosures) with the reference, playground, log and limits linked under it", async () => {
+    setup();
+    mount();
+    await tab("docs");
+    const pre = await byId("api-quickstart");
+    expect(pre.textContent).toContain('-H "Idempotency-Key: $(uuidgen)"');
+    expect(document.getElementById("api-quickstart-copy")).toBeNull();
+    expect(document.querySelector("details")).toBeNull();
+    for (const s of ["ref", "play", "log", "limits"]) expect(document.getElementById(`api-sec-${s}`)).toBeTruthy();
+    fireEvent.click(await byId("api-sec-ref"));
+    expect(window.location.search).toContain("sec=ref");
+    expect(await screen.findByText("/api/v1/work-orders/{id}/messages")).toBeTruthy();
+  });
+
+  it("the trigger drawer is the prototype's (no disclosure); the rule editor opens from its foot", async () => {
+    setup();
+    mount();
+    await tab("triggers");
+    fireEvent.click(await byId("api-tr-open-TR-1"));
+    await byId("api-tr-more");
+    expect(document.querySelector("details")).toBeNull();
+    expect(document.querySelector(".drawer-f")!.textContent).toContain("Edit rule");
+  });
+});
 
 describe("API & triggers: keys", () => {
   it("says Not visible to you when the keys read is refused, and the key count is not a 0", async () => {
@@ -150,7 +178,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("documents the real public API with copyable curl requests, and the real webhook signature", async () => {
     setup();
     mount();
-    await tab("docs");
+    await docs("ref");
     expect(await screen.findByText("/api/v1/projects/{project}/work-orders")).toBeTruthy();
     expect(screen.getByText("/api/v1/work-orders/{id}/messages")).toBeTruthy();
     expect(screen.getByText("/api/v1/triggers/{id}/fire")).toBeTruthy();
@@ -165,7 +193,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("the playground sends a real request with the pasted key as an external client would, and shows the response", async () => {
     const calls = setup({ "POST /api/v1/projects/payments/work-orders": () => ({ body: { ok: true, msg: "WO-2500 submitted to Payments Platform as Feature.", id: "WO-2500" } }) });
     mount();
-    await tab("docs");
+    await docs("play");
     const send = await byId("api-pg-send");
     expect(send.getAttribute("aria-disabled")).toBe("true");
     expect(send.getAttribute("data-reason")).toMatch(/Paste a key/);
@@ -188,7 +216,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("a refused request shows its status and message without leaving the screen", async () => {
     setup({ "POST /api/v1/projects/payments/work-orders": () => ({ status: 401, body: { ok: false, msg: "The API key is not valid." } }) });
     mount();
-    await tab("docs");
+    await docs("play");
     fireEvent.change(await byId("api-pg-secret"), { target: { value: "gk_" + "00000000_" + "z".repeat(30) } });
     fireEvent.click(await byId("api-pg-send"));
     expect(await screen.findByText("The API key is not valid.", { selector: ".api-resline span" })).toBeTruthy();
@@ -199,7 +227,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("the request log lists requests and filters by status through the API", async () => {
     const calls = setup();
     mount();
-    await tab("docs");
+    await docs("log");
     const table = await screen.findByRole("table");
     expect(within(table).getByText("/api/v1/projects/payments/work-orders")).toBeTruthy();
     expect(within(table).getByText("✓ 200")).toBeTruthy();
@@ -213,7 +241,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("limits: saves the whole settings with the version it loaded, validates, and the master switch for triggers is off", async () => {
     const calls = setup({ "PATCH /api/v1/api-config": () => ({ body: { ok: true, msg: "API settings saved.", version: 4 } }) });
     mount();
-    await tab("docs");
+    await docs("limits");
     expect((await byId("api-lim-triggers") as HTMLInputElement).checked).toBe(false);
     expect((await byId("api-lim-sign")).querySelectorAll("option").length).toBe(1); // only the scheme the delivery implements
     fireEvent.change(await byId("api-lim-rate"), { target: { value: "0" } });
@@ -232,7 +260,7 @@ describe("API & triggers: reference, playground, log, limits", () => {
   it("limits are read-only with the reason for someone without the right", async () => {
     setup({}, ["integration.edit"]);
     mount();
-    await tab("docs");
+    await docs("limits");
     await waitFor(() => expect(document.body.textContent).toMatch(/No role holds integration.edit/));
     expect((document.getElementById("api-lim-rate") as HTMLInputElement).disabled).toBe(true);
     expect(document.getElementById("api-lim-save")!.getAttribute("aria-disabled")).toBe("true");
@@ -247,7 +275,7 @@ describe("API & triggers: triggers", () => {
     const item = await byId("api-tr-open-TR-1");
     expect(item.textContent).toContain("Issues labelled factory");
     await openTr("TR-1");
-    for (const w of ["Acme GitHub", "Issue with label", "Payments Platform"]) expect(document.querySelector(".drawer-b")!.textContent).toContain(w);
+    for (const w of ["Acme GitHub", "Issue with label", "Payments Platform"]) expect(document.body.textContent).toContain(w);
     expect(document.querySelector(".drawer-h")!.textContent).toContain("TR-1");
     expect((await byId("api-tr-master")).textContent).toMatch(/switched off for the organisation/);
     expect(screen.getByText("✓ created")).toBeTruthy();
@@ -344,7 +372,7 @@ describe("API & triggers: triggers", () => {
     expect(held.textContent).toContain("Drive-by request");
     expect(held.textContent).toContain("does not map to a Gantry identity");
     fireEvent.click(await byId("api-tr-dec-TP-aa"));
-    const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
+    const dlg = await waitFor(() => { const e = Array.from(document.querySelectorAll<HTMLElement>(".dlg")).pop(); if (!e) throw new Error("no dialog"); return e; });
     fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Not our work" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Decline" }));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/trigger-proposals/TP-aa/decline")).toBe(true));
@@ -384,9 +412,11 @@ describe("API & triggers: triggers", () => {
     expect((await byId("api-tr-title") as HTMLInputElement).value).toBe("Weekly dependency updates");
     expect(screen.getByText(/Next run/)).toBeTruthy();
     expect(document.getElementById("api-tr-label")).toBeNull();
+    fireEvent.click(within(document.querySelector<HTMLElement>(".dlg")!).getByRole("button", { name: "Close" }));
     fireEvent.click(document.querySelector<HTMLElement>(".drawer-h [aria-label=Close]")!);
     await waitFor(() => expect(document.getElementById("api-tr-schedule")).toBeNull());
     fireEvent.click(await byId("api-tr-open-TR-4"));
+    fireEvent.click(await byId("api-tr-more"));
     await waitFor(() => expect((document.getElementById("api-tr-cls") as HTMLSelectElement | null)?.value).toBe("hotfix"));
     expect((await byId("api-tr-cls") as HTMLSelectElement).value).toBe("hotfix");
     expect(screen.getByText(/opens a proposal and asks a person to confirm/i)).toBeTruthy();

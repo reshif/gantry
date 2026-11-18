@@ -8,7 +8,6 @@ import { DataTable } from "../../ui/DataTable";
 import { Btn, Chip, FilterBar, SearchBox, Select, type Decision } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { agoShort, oneOf, sortFrom, useUrlState } from "../connect/kit";
-import { evName } from "./kit";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 export const dlStatus = (d: Delivery): "delivered" | "failed" | "retrying" | "pending" => (d.status === "failed" ? (d.state === "failed" && d.attempts > 0 ? "retrying" : "failed") : d.status === "pending" ? "pending" : "delivered");
@@ -44,6 +43,7 @@ export function DeliveriesTab({ p, url }: { p: Project; url: ReturnType<typeof u
           rowId={(d) => `nt-dl-${d.id}`}
           pageSize={10}
           pager
+          idleGlyph
           page={Math.max(0, Number(url.v.page) || 0)}
           onPage={(n) => url.set({ page: String(n) })}
           sort={sortFrom(url.v.sort, url.v.dir, "at", -1)}
@@ -52,11 +52,11 @@ export function DeliveriesTab({ p, url }: { p: Project; url: ReturnType<typeof u
           columns={[
             { key: "id", label: "ID", sort: (d) => d.id, render: (d) => <span className="mono">{d.id}</span> },
             { key: "at", label: "When", sort: (d) => d.at, render: (d) => <span className="mono dim">{agoShort(d.at)}</span> },
-            { key: "event", label: "Event", sort: (d) => evName(d.event), render: (d) => evName(d.event) },
+            { key: "event", label: "Event", sort: (d) => d.event, render: (d) => d.event },
             { key: "channel", label: "Channel", sort: (d) => d.channel, render: (d) => <span className="tag">{d.channel}</span> },
             { key: "target", label: "Target", sort: (d) => d.target, render: (d) => <span className="mono ell">{d.target}</span> },
             { key: "st", label: "Status", sort: (d) => dlStatus(d), render: (d) => <Chip cls={TONE[dlStatus(d)]} text={WORD[dlStatus(d)]} /> },
-            { key: "act", label: "", align: "end", render: (d) => (d.status === "failed" ? <Btn label="Retry" small icon="refresh" id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : null) },
+            { key: "act", label: "", align: "end", render: (d) => (dlStatus(d) === "failed" ? <Btn label="Retry" small id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : null) },
           ]}
         />
       )}</Async>

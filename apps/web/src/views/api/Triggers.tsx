@@ -353,6 +353,7 @@ export function TriggersTab({ d, url, openTrigger }: { d: ApiData; url: TriggerU
         rowId={(x) => `api-tr-row-${x.id}`}
         pageSize={10}
         pager
+        idleGlyph
         page={Math.max(0, Number(url.v.page) || 0)}
         onPage={(p) => url.set({ page: String(p) })}
         sort={{ key: url.v.sort || "name", dir: url.v.dir === "desc" ? -1 : 1 }}
@@ -372,16 +373,27 @@ export function TriggersTab({ d, url, openTrigger }: { d: ApiData; url: TriggerU
   );
 }
 
-/** The trigger drawer (prototype anatomy), with the full rule editor, held proposals and Simulate in a disclosure. */
-export function TriggerDrawer({ id, close }: { id: string; close: () => void }) {
+/** The rule editor, held proposals and Simulate for one trigger, with its own simulation state (it lives in a dialog opened from the drawer foot). */
+function DetailHost({ id }: { id: string }) {
   const d = useApiDataLive();
   const t = d.triggers.find((x) => x.id === id);
   const [sim, setSim] = useState<SimResult | undefined>(undefined);
+  return t ? <Detail t={t} d={d} res={sim} setRes={setSim} /> : null;
+}
+
+/** The trigger drawer (prototype anatomy: Source, Project, Who may fire, Reply, Dedupe, Recent runs). The full rule editor, held proposals and Simulate open from its foot. */
+export function TriggerDrawer({ id, close }: { id: string; close: () => void }) {
+  const d = useApiDataLive();
+  const t = d.triggers.find((x) => x.id === id);
+  const ui = useUI();
   if (!t) return null;
   const runs = [...t.runs].reverse().slice(0, 3);
   const who = t.who === "org" ? "Members of the org" : t.who === "system" ? "System creates the work order" : "Held for a person";
   return (
-    <CrDrawer eyebrow={`Trigger ${t.id}`} title={t.name} close={close}>
+    <CrDrawer
+      eyebrow={`Trigger ${t.id}`} title={t.name} close={close}
+      foot={<Btn label="Edit rule, simulate and held proposals…" id="api-tr-more" onClick={() => ui.open((c) => <Dialog title={t.name} kicker={`Trigger ${t.id}`} wide onClose={c} actions={[{ label: "Close" }]} body={<DetailHost id={t.id} />} />)} />}
+    >
       <Kv rows={[
         ["Source", <span key="s" className="tag">{t.type}</span>],
         ["Project", d.pname(t.project)],
@@ -400,10 +412,6 @@ export function TriggerDrawer({ id, close }: { id: string; close: () => void }) 
           )) : <div className="li"><div className="main1"><span className="t2">No runs yet.</span></div></div>}
         </div>
       </div>
-      <details className="int-more" id="api-tr-more">
-        <summary>Edit rule, simulate and held proposals</summary>
-        <Detail t={t} d={d} res={sim} setRes={setSim} />
-      </details>
     </CrDrawer>
   );
 }

@@ -3,10 +3,9 @@
  * when an enabled route for the event has a destination on that channel. A switch adds or removes that destination on the event's route,
  * or creates the route with the first open connection of that channel. In-app is not a routable channel in the backend, so its column is shown off and locked.
  */
-import { NOTIFY_EVENTS, type Project } from "@gantry/domain";
+import { type Project } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { DataTable } from "../../ui/DataTable";
-import { Toggle, type Decision } from "../../ui/primitives";
+import { Table, Toggle, type Decision } from "../../ui/primitives";
 import { Card } from "../../ui/cr";
 import { useUI } from "../../ui/overlay-context";
 import { ALL_FIELDS, DEF_TPL, accepts, defaultTarget, type Route, type useNtData } from "./kit";
@@ -14,6 +13,18 @@ import { ALL_FIELDS, DEF_TPL, accepts, defaultTarget, type Route, type useNtData
 type Nt = ReturnType<typeof useNtData>;
 export const MATRIX_CHANNELS = [{ id: "inapp", label: "In-app", type: "" }, { id: "slack", label: "Slack", type: "slack" }, { id: "email", label: "Email", type: "email" }, { id: "pager", label: "Pager", type: "paging" }] as const;
 type Ch = (typeof MATRIX_CHANNELS)[number];
+/** The prototype's nine events, each mapped to the backend event that carries it (`route`). "MCP definition changed" has no backend event yet: its switches are shown locked. */
+export const MATRIX_EVENTS: ReadonlyArray<{ id: string; label: string; route: string }> = [
+  { id: "submitted", label: "Work order submitted", route: "submitted" },
+  { id: "question", label: "Question for a person", route: "question" },
+  { id: "gate.waiting", label: "Gate waiting", route: "gate.waiting" },
+  { id: "gate.decided", label: "Gate decided", route: "gate.decided" },
+  { id: "stuck", label: "Work order stuck", route: "blocked" },
+  { id: "done", label: "Work order released", route: "released" },
+  { id: "kill", label: "Emergency stop", route: "kill" },
+  { id: "trust", label: "Trust proposal", route: "trust.changed" },
+  { id: "mcp", label: "MCP definition changed", route: "" },
+];
 
 export function MatrixTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision }) {
   const ui = useUI();
@@ -51,27 +62,26 @@ export function MatrixTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
   };
 
   return (
-    <Card title="Who hears about what" hint={`Applies to ${p.name}`} flush id="nt-matrix-card">
+    <Card title="Who hears about what" hint={`Applies to ${p.name}`} id="nt-matrix-card">
       <div className="matrix" id="nt-matrix">
-        <DataTable<(typeof NOTIFY_EVENTS)[number]>
-          id="nt-matrix-table"
-          caption="Who hears about what"
-          rows={[...NOTIFY_EVENTS]}
-          rowKey={(e) => e.id}
-          rowId={(e) => `nt-mx-${e.id}`}
-          columns={[
-            { key: "event", label: "Event", render: (e) => e.name },
-            ...MATRIX_CHANNELS.map((ch) => ({
-              key: ch.id, label: ch.label, align: "center" as const,
-              render: (e: (typeof NOTIFY_EVENTS)[number]) => {
-                const on = isOn(e.id, ch);
-                const mandatory = (e.id === "kill" || e.id === "restore") && on;
-                const d: Decision | null = !ch.type ? { allowed: false, reason: "In-app delivery is not routable yet: the notification bell lists every event." } : !perm.allowed ? perm : mandatory ? { allowed: false, reason: "Kill and restore notifications cannot be switched off." } : null;
-                return <span className="perm-cell"><Toggle id={`nt-mx-${e.id}-${ch.id}`} checked={on} decision={d} label={`${e.name} via ${ch.label}`} onChange={(v) => void flip(e, ch, v)} /></span>;
-              },
-            })),
-          ]}
-        />
+        <Table bare>
+          <thead><tr><th>Event</th>{MATRIX_CHANNELS.map((ch) => <th key={ch.id}>{ch.label}</th>)}</tr></thead>
+          <tbody>
+            {MATRIX_EVENTS.map((e) => (
+              <tr key={e.id} id={`nt-mx-${e.id}`}>
+                <td>{e.label}</td>
+                {MATRIX_CHANNELS.map((ch) => {
+                  const on = ch.id === "inapp" ? true : isOn(e.route, ch);
+                  const mandatory = e.route === "kill" && on;
+                  const d: Decision | null = ch.id === "inapp" ? { allowed: false, reason: "In-app is always on: the notification bell lists every event." }
+                    : !e.route ? { allowed: false, reason: "Gantry has no notification event for this yet." }
+                    : !perm.allowed ? perm : mandatory ? { allowed: false, reason: "Kill and restore notifications cannot be switched off." } : null;
+                  return <td key={ch.id}><span className="perm-cell"><Toggle id={`nt-mx-${e.id}-${ch.id}`} checked={on && !!e.route || ch.id === "inapp"} decision={d} label={`${e.label} via ${ch.label}`} onChange={(v) => void flip({ id: e.route, name: e.label }, ch, v)} /></span></td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </Table>
       </div>
     </Card>
   );

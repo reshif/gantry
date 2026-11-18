@@ -20,10 +20,11 @@ import { EditIntegration, InstanceDrawer, RemoveIntegration, ToggleIntegration, 
 import { CatalogueTab, CustomTab } from "./integrations/Tabs";
 import { Health, statusOf, useIntegrationData, type TypeRow } from "./integrations/kit";
 import { ClearOnClose, NothingMatches, agoShort, oneOf, sortFrom, useUrlState } from "./connect/kit";
-import { Icon } from "../ui/Icon";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
-const STATUSES = ["healthy", "degraded", "failing", "disabled"] as const;
+const STATUSES = ["healthy", "degraded", "failing", "offline", "disabled"] as const;
+/** The prototype offers healthy, degraded and failing; offline and disabled are listed only when a connection is in that state. */
+const CORE_STATUSES = ["healthy", "degraded", "failing"] as const;
 const VIEWS = ["connected", "catalogue", "custom"] as const;
 
 export default function IntegrationsView() {
@@ -56,7 +57,7 @@ export default function IntegrationsView() {
     ));
   };
   const addDialog = (typeId: string | null): void => {
-    ui.open((close) => <AddIntegration typeId={typeId} types={d.types} insts={d.insts} live={d.live} projects={d.projects} close={close} onAdded={(id) => { url.set({ view: "connected" }); openInstance(id); }} />);
+    ui.open((close) => <AddIntegration typeId={typeId} onBrowse={() => url.set({ view: "catalogue" })} types={d.types} insts={d.insts} live={d.live} projects={d.projects} close={close} onAdded={(id) => { url.set({ view: "connected" }); openInstance(id); }} />);
   };
   const openType = (id: string): void => {
     ui.drawer.open(`int-type:${id}`, (close) => (
@@ -90,7 +91,6 @@ export default function IntegrationsView() {
   const rows = all.filter((i) => (type === "all" || i.type === type) && (st === "all" || statusOf(i) === st) && (!needle || `${i.name} ${i.type} ${i.projects === "all" ? "all" : i.projects.join(" ")}`.toLowerCase().includes(needle)));
   const filtered = !!(url.v.q || type !== "all" || st !== "all");
   const count = (s: string): number => all.filter((i) => statusOf(i) === s).length;
-  const bad = all.filter((i) => statusOf(i) !== "healthy");
   const stat = (n: number): string => String(n);
 
   const connected = (
@@ -98,13 +98,11 @@ export default function IntegrationsView() {
       <FilterBar label="Filter integrations" count={`${rows.length} of ${all.length}`} actions={(
         <>
           {filtered ? <Btn label="Clear" small kind="ghost" id="int-clear" onClick={() => url.clear("view", "open")} /> : null}
-          <Btn label="Catalogue" small kind="ghost" id="int-view-catalogue" onClick={() => url.set({ view: "catalogue" })} />
-          <Btn label="Custom types" small kind="ghost" id="int-view-custom" onClick={() => url.set({ view: "custom" })} />
         </>
       )}>
         <SearchBox id="int-q" label="Search integrations" placeholder="Search integrations" value={url.v.q} onChange={(q) => url.set({ q })} />
         <Select id="int-type" aria-label="Type" value={type} options={[{ value: "all", label: "Type: all" }, ...typeIds.map((t) => ({ value: t, label: t }))]} onChange={(v) => url.set({ type: v })} />
-        <Select id="int-status" aria-label="Status" value={st} options={[{ value: "all", label: "Status: all" }, ...STATUSES.map((s) => ({ value: s, label: s }))]} onChange={(v) => url.set({ st: v })} />
+        <Select id="int-status" aria-label="Status" value={st} options={[{ value: "all", label: "Status: all" }, ...STATUSES.filter((s) => (CORE_STATUSES as readonly string[]).includes(s) || all.some((i) => statusOf(i) === s)).map((s) => ({ value: s, label: s }))]} onChange={(v) => url.set({ st: v })} />
       </FilterBar>
       <DataTable<IntegrationInstance>
         id="int-table"
@@ -114,6 +112,7 @@ export default function IntegrationsView() {
         rowId={(i) => `int-row-${i.id}`}
         pageSize={12}
         pager
+        idleGlyph
         page={Math.max(0, Number(url.v.page) || 0)}
         onPage={(p) => url.set({ page: String(p) })}
         sort={sortFrom(url.v.sort, url.v.dir, "name", 1)}
@@ -128,14 +127,6 @@ export default function IntegrationsView() {
         ]}
       />
       {all.length && filtered && !rows.length ? <div className="card"><NothingMatches onClear={() => url.clear("view", "open")} /></div> : null}
-      {bad.length ? (
-        <details className="int-more" id="int-attn">
-          <summary>{bad.length === 1 ? "1 connection needs attention" : `${bad.length} connections need attention`}</summary>
-          <ul className="plain-list">
-            {bad.map((i) => <li key={i.id}><Icon name="alert" /><a className="rl" id={`int-attn-${i.id}`} href="#integrations" onClick={(e) => { e.preventDefault(); openInstance(i.id); }}>{i.name}</a><span> is {statusOf(i)}</span></li>)}
-          </ul>
-        </details>
-      ) : null}
     </>
   );
 
