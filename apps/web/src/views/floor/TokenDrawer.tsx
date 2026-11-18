@@ -5,7 +5,6 @@ import { Btn, IconBtn, Who } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 import { setProject } from "../../lib/prefs";
-import { useOpenTraveler } from "../../shell/useTraveler";
 import { useRepoName } from "../traveler/repo";
 import { beltGateLabels, tokenState } from "./conveyor";
 import { openApproval } from "./Approval";
@@ -39,7 +38,6 @@ function Body({ woId, close }: { woId: string; close: () => void }) {
     if (cur && box) box.scrollLeft = Math.max(0, cur.offsetLeft - box.clientWidth / 2 + cur.offsetWidth / 2);
   });
   const ui = useUI();
-  const openTraveler = useOpenTraveler();
   const w = ctx.wos.find((x) => x.id === woId);
   const repo = useRepoName(w?.project, w?.repo);
   if (!w) return <Dr eyebrow={woId} title="Work order not on this floor" close={close} label="Close work order details"><p className="muted small">It is done, or it belongs to another project.</p></Dr>;
@@ -62,7 +60,7 @@ function Body({ woId, close }: { woId: string; close: () => void }) {
       foot={
         <>
           {gate && gd ? <Btn label="Review gate" kind="ok" id="floor-tok-review" onClick={() => openApproval(ui, ctx.project.id, w.id, gate.gate, glabel, gd.name)} /> : null}
-          <Btn label="Traveler" id="floor-tok-traveler" onClick={() => { close(); openTraveler(w.id); }} />
+          <Btn label="Traveler" id="floor-tok-traveler" onClick={() => { close(); setProject(w.project); navigate("traveler", w.id); }} />
           <Btn label="Open record" kind="primary" id="floor-tok-record" onClick={() => { close(); setProject(w.project); navigate("record", w.id); }} />
         </>
       }
