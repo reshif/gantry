@@ -52,8 +52,18 @@ describe("Gate approver transparency", () => {
     expect(document.getElementById("trv-approve-why")!.textContent).toMatch(/Separation of duties/);
     expect(screen.getByRole("button", { name: "Edit rule" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Grant a role" })).toBeTruthy();
+    expect(screen.getByText(/Factory Admins are eligible approvers like anyone else\. Asha Raman wrote this work order/)).toBeTruthy();
+    expect(screen.queryByText(/may approve as an override/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Approve as override" }));
     await waitFor(() => expect(posts(calls, path)).toHaveLength(1));
+  });
+
+  it("lists an eligible Factory Admin as a normal approver and shows no override line when none is needed", async () => {
+    await show({ [`GET /api/v1/work-orders/${W.id}/gates/${gate}/approvers`]: () => ({ body: approvers({ eligible: [{ id: "p-asha", name: "Asha Raman", why: "Factory Admin may approve any gate.", away: false, oncall: false }], overrides: [], satisfiable: true, warning: null, viewerCanOverride: false }) }) });
+    expect(await screen.findByText("Asha Raman")).toBeTruthy();
+    expect(document.getElementById("apr-warning")).toBeNull();
+    expect(screen.queryByText(/override with a reason/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve as override" })).toBeNull();
   });
 
   it("says when the work order's class has its own count instead of the gate's base", async () => {
