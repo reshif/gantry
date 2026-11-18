@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { updatePrefs } from "../lib/prefs";
 import ConsoleSubmitView from "./console-submit";
+import WorkspaceView from "./workspace";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 
 beforeEach(() => {
@@ -36,7 +37,7 @@ describe("Console (submit a work order, prototype layout)", () => {
     expect(cs.some((c) => c.method === "POST" && c.path.endsWith("/work-orders"))).toBe(false);
   });
 
-  it("has the prototype form: label, placeholder, hint, field order, template select, no Source and no Chat button", async () => {
+  it("has the prototype form: label, placeholder, hint, field order, template select, no Source and a Chats entry to the conversations", async () => {
     mockApi();
     mount(<ConsoleSubmitView />);
     const t = await title();
@@ -102,5 +103,18 @@ describe("Console (submit a work order, prototype layout)", () => {
     vi.restoreAllMocks();
     fireEvent.click(screen.getByRole("button", { name: "Remove trace.log" }));
     await waitFor(() => expect(screen.queryByText("trace.log")).toBeNull());
+  });
+
+  it("Chats on the Console page reaches the conversations hub: New chat, search, filters and archive", async () => {
+    mockApi({ "GET /api/v1/workspace/inbox": () => ({ body: { items: [] } }) });
+    window.location.hash = "#console";
+    mount(<ConsoleSubmitView />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+    await waitFor(() => expect(window.location.hash).toMatch(/workspace\/chats/));
+    cleanup();
+    mount(<WorkspaceView />);
+    await waitFor(() => expect(document.getElementById("ws-new")).toBeTruthy());
+    expect(document.getElementById("ws-q")).toBeTruthy();
+    expect(document.getElementById("ws-f-archived")).toBeTruthy();
   });
 });

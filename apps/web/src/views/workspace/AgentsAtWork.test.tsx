@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { updatePrefs } from "../../lib/prefs";
 import { AgentsAtWork } from "./AgentsAtWork";
+import WorkspaceView from "../workspace";
 import { mockApi, mount, resetApp } from "../floor/testkit";
 
 beforeEach(() => {
@@ -42,11 +43,11 @@ describe("Agents at work (prototype workspace)", () => {
     await waitFor(() => expect(document.querySelectorAll(".ws-card").length).toBeLessThan(all));
   });
 
-  it("matches the prototype: no Conversations action, Cost per hour tile, and Talk opens that work order's conversation", async () => {
+  it("matches the prototype: Conversations and New chat entries, Cost per hour tile, and Talk opens that work order's conversation", async () => {
     mockApi();
     mount(<AgentsAtWork />);
     await waitFor(() => expect(document.querySelectorAll(".ws-card").length).toBeGreaterThan(5));
-    expect(document.getElementById("ws-open-chats")).toBeNull();
+    expect(document.getElementById("ws-open-chats")).toBeTruthy();
     expect(screen.getByText("Cost per hour")).toBeTruthy();
     expect(screen.queryByText("Cost so far")).toBeNull();
     expect(screen.getByText("Tokens in flight").closest(".stat")?.textContent).toMatch(/last hour/);
@@ -78,5 +79,26 @@ describe("Agents at work (prototype workspace)", () => {
     mockApi({ "GET /api/v1/projects/payments/floor": () => ({ status: 403, body: { ok: false, msg: "Needs a role on this project." } }) });
     mount(<AgentsAtWork />);
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
+  });
+
+  it("Conversations and New chat on the header reach the hub and a new Console chat by clicking", async () => {
+    mockApi({ "GET /api/v1/workspace/inbox": () => ({ body: { items: [] } }) });
+    window.location.hash = "#workspace";
+    mount(<AgentsAtWork />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Conversations/ }));
+    await waitFor(() => expect(window.location.hash).toMatch(/workspace\/chats/));
+    cleanup();
+    mount(<WorkspaceView />);
+    expect(await screen.findByRole("navigation", { name: "Conversations" })).toBeTruthy();
+    expect(document.getElementById("ws-f-archived")).toBeTruthy();
+    cleanup();
+    window.location.hash = "#workspace";
+    mount(<AgentsAtWork />);
+    fireEvent.click(await screen.findByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(window.location.hash).toMatch(/workspace\/new/));
+    cleanup();
+    mount(<WorkspaceView />);
+    expect(await screen.findByRole("navigation", { name: "Conversations" })).toBeTruthy();
+    expect(document.querySelector(".ws-main")).toBeTruthy();
   });
 });

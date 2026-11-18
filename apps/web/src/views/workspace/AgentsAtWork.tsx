@@ -9,7 +9,8 @@ import { ops } from "../../api/ops";
 import { useActivity, useAgents, useHome } from "../../api/queries";
 import { scopeToken, useScope } from "../../lib/scope";
 import { invalidateSlices } from "../../api/keys";
-import { hashFor } from "../../lib/router";
+import { hashFor, navigate } from "../../lib/router";
+import { filterInbox, useInbox } from "./api";
 import { eventRows, eventText } from "../../lib/eventText";
 import { setRouteState, useClearRouteStateOnLeave, useRouteState } from "../../lib/queryState";
 import { useOpenTraveler } from "../../shell/useTraveler";
@@ -36,6 +37,8 @@ export function AgentsAtWork() {
   const { value: ctx, error: floorErr } = useScopedFloorState(scope.all ? { all: true, projectIds } : { all: false, projectId }, null);
   const floorQ = { data: ctx ?? undefined, error: floorErr instanceof Error ? floorErr : null, isPending: !ctx && !floorErr, isError: !ctx && !!floorErr, refetch: () => invalidateSlices(["workOrders"]) };
   const actors = useActors();
+  const inbox = useInbox(false);
+  const needs = filterInbox(inbox.data?.items ?? [], "needs").length;
   const open = useOpenTraveler();
   const [q, setQ] = useRouteState("q", "");
   const [act, setAct] = useRouteState("st", "all");
@@ -90,6 +93,10 @@ export function AgentsAtWork() {
   return (
     <Page
       eyebrow="Operate" title="Agents at work" cls="ws-agents"
+      acts={<>
+        <Btn id="ws-open-chats" label={needs ? `Conversations · ${needs} need you` : "Conversations"} icon="chat" onClick={() => navigate("workspace", "chats")} />
+        <Btn id="ws-new-chat" kind="primary" icon="plus" label="New chat" onClick={() => navigate("workspace", "new")} />
+      </>}
       sub="What each station's agent is doing right now. You can open a conversation or stop a run."
     >
       {override ? <StateBody state={override} /> : <Async query={floorQ} what={scope.all ? "the agents across all projects" : "the agents on this project"} id="ws-agents" isEmpty={() => false}>{() => (
