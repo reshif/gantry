@@ -1,5 +1,5 @@
 import { useAuditEntry } from "../../api/queries";
-import { Avatar, Empty } from "../../ui/primitives";
+import { Avatar, Empty, IconBtn } from "../../ui/primitives";
 import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
 import { CAT_ICON, CAT_NAME, type AuditDetail } from "./data";
@@ -54,7 +54,7 @@ export function AuditDrawer({ seq, projectName, close }: { seq: number; projectN
           <div className="kicker eyebrow">{"Audit entry #" + e.seq}</div>
           <h2 className="drawer-title">{e.action}</h2>
         </div>
-        <button type="button" className="icon-btn drawer-close" id="aud-drawer-close" aria-label="Close" onClick={close}><Icon name="x" /></button>
+        <IconBtn icon="x" label="Close" className="drawer-close" id="aud-drawer-close" onClick={close} />
       </div>
       <div className="drawer-scroll">
         <dl className="aud-kvs">

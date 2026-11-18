@@ -156,7 +156,7 @@ describe("Security screen", () => {
     expect(writes(calls)[0]).toMatchObject({ body: { path: "ipAllow", value: ["10.0.0.0/8"] } });
   });
 
-  it("lists sessions in a sortable, paged table with Sign out and no Revoke-all, and the sign-in history below it", async () => {
+  it("lists sessions in a sortable, paged table with Sign out and no Revoke-all, and nothing appended below it", async () => {
     window.history.replaceState(null, "", "/?tab=sessions");
     setup();
     mount();
@@ -164,12 +164,25 @@ describe("Security screen", () => {
     expect(document.getElementById("sec-ses-rv-s3")).toBeNull();
     expect(document.getElementById("sec-ses-all")).toBeNull();
     expect(document.getElementById("sec-ses-rv-s2")?.textContent).toBe("Sign out");
-    expect([...document.querySelectorAll("#sec-sessions-table th")].map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["Person", "Device", "IP", "Started", "MFA", ""]);
-    await waitFor(() => expect(text()).toContain("mallory@evil.test"));
-    expect(text()).toContain("Domain not allowed");
+    expect([...document.querySelectorAll("#sec-sessions-table th")].map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["Person", "Device", "IP", "Started", "MFA", ""]);
+    expect(document.getElementById("sec-history-card")).toBeNull();
+    expect(document.querySelectorAll("#sec-tab-panel .card").length).toBe(0);
+    // sortable headers carry the prototype's sort glyph
+    expect(document.querySelector("#sec-sessions-table th .th-arrow")?.textContent).toBeTruthy();
   });
 
-  it("an old ?tab=history or ?tab=stop link lands on the section that now holds it", async () => {
+  it("opens the sign-in history in a drawer from the page header, not under the sessions table", async () => {
+    window.history.replaceState(null, "", "/?tab=sessions");
+    setup();
+    mount();
+    fireEvent.click(await byId("sec-history-open"));
+    await byId("sec-history-card");
+    await waitFor(() => expect(text()).toContain("mallory@evil.test"));
+    expect(text()).toContain("Domain not allowed");
+    expect(document.getElementById("sec-drawer-close")?.className).toContain("icon-btn");
+  });
+
+  it("an old ?tab=history or ?tab=stop link opens the drawer that now holds it", async () => {
     window.history.replaceState(null, "", "/?tab=history");
     setup();
     mount();
@@ -180,10 +193,22 @@ describe("Security screen", () => {
     await byId("sec-stop-kill");
   });
 
+  it("keeps the network tab to the IP allow list and the restore rules; the emergency stop is a header button", async () => {
+    window.history.replaceState(null, "", "/?tab=network");
+    setup({ "GET /api/v1/stops": () => ({ body: { items: [] } }) });
+    mount();
+    await byId("sec-ip");
+    expect(document.getElementById("sec-stop-card")).toBeNull();
+    expect(document.getElementById("sec-stop-kill")).toBeNull();
+    fireEvent.click(await byId("sec-stop-open"));
+    await byId("sec-stop-kill");
+  });
+
   it("shows an empty sign-in history as zero rows rather than a blank panel", async () => {
     window.history.replaceState(null, "", "/?tab=sessions");
     setup({ "GET /api/v1/signins": () => ({ body: [] }) });
     mount();
+    fireEvent.click(await byId("sec-history-open"));
     await waitFor(() => expect(text()).toContain("0 sign-ins · 0 failures in the last 24 hours"));
     expect(document.getElementById("sec-history-error")).toBeNull();
   });
@@ -253,10 +278,11 @@ describe("Security screen", () => {
     expect(writes(calls)[0]!.ifMatch).toBe("3");
   });
 
-  it("shows a failed sign-in history read under the sessions table while the rest of the page works", async () => {
+  it("shows a failed sign-in history read in its drawer while the rest of the page works", async () => {
     window.history.replaceState(null, "", "/?tab=sessions");
     setup({ "GET /api/v1/signins": () => ({ status: 500, body: { ok: false, msg: "History is unavailable." } }) });
     mount();
+    fireEvent.click(await byId("sec-history-open"));
     const err = await byId("sec-history-error");
     expect(err.textContent).toContain("History is unavailable.");
   });
@@ -266,7 +292,7 @@ describe("Security screen: emergency stop tab", () => {
   it("offers the factory kill with who may do it, lists the stops in force, and warns when a restore could not be approved", async () => {
     setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0]] }), "GET /api/v1/stops": () => ({ body: { items: [{ id: "project:payments", row: "r1", scope: "project", mode: "halt", reason: "Flaky tests", inFlight: null, by: "p-asha", at: NOW - 60000, version: 1, fencing: 1 }] } }) });
     mount();
-    fireEvent.click(await byId("sec-tab-network"));
+    fireEvent.click(await byId("sec-stop-open"));
     expect(locked(await byId("sec-stop-kill"))).toBe(false);
     expect((await byId("sec-stop-warn")).textContent).toContain("a restore could not be approved");
     await waitFor(() => expect(document.getElementById("sec-stops-table")?.textContent).toContain("Flaky tests"));
@@ -276,7 +302,7 @@ describe("Security screen: emergency stop tab", () => {
   it("locks the kill with the server's reason when kill.factory is denied", async () => {
     setup({ "GET /api/v1/stops": () => ({ body: { items: [] } }) }, ["kill.factory"]);
     mount();
-    fireEvent.click(await byId("sec-tab-network"));
+    fireEvent.click(await byId("sec-stop-open"));
     const kill = await byId("sec-stop-kill");
     await waitFor(() => expect(locked(kill)).toBe(true));
     expect(kill.getAttribute("data-reason")).toContain("No role holds kill.factory");

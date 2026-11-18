@@ -35,7 +35,6 @@ const SERVICE_NAME: Record<string, string> = { api: "API gateway", worker: "Work
 const when = (iso: string | null): string => (iso && Number.isFinite(Date.parse(iso)) ? new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(",", "") : "–");
 const cap = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
 const mins = (sec: number): string => (sec < 120 ? `${sec} s` : sec < 7200 ? `${Math.round(sec / 60)} min` : `${Math.round(sec / 3600)} h`);
-const ageShort = (sec: number): string => (sec < 120 ? `${sec}s` : sec < 7200 ? `${Math.round(sec / 60)} min` : `${Math.round(sec / 3600)} h`);
 
 function BackupsCard({ b }: { b: BackupStatus }) {
   const ui = useUI();
@@ -147,15 +146,18 @@ function ServiceCard({ s }: { s: ServiceHealth }) {
           <b className="ell">{SERVICE_NAME[s.id] ?? s.name}</b>
           <span className={`chip ${t.cls}`}>{t.label}</span>
         </div>
-        {/* the server reports the state now, not an uptime history: 40 segments, only the latest one carries today's state */}
-        <div className="uptime" aria-hidden="true">
+        {/* the server reports the state now, not an uptime history: the strip is drawn in today's state colour (backend gap: 30-day history) */}
+        <div className="uptime" aria-hidden="true" title="The server reports today's state, not an uptime history">
           <svg viewBox="0 0 200 16" width="100%" height="16" preserveAspectRatio="none">
-            {Array.from({ length: 40 }, (_, i) => <rect key={i} x={i * 5} y={0} width={3.5} height={16} rx={1} fill={`var(--${i === 39 ? colour : "idle"})`} opacity={i === 39 ? 0.85 : 0.35} />)}
+            {Array.from({ length: 40 }, (_, i) => {
+              const dip = s.status === "degraded" && i === 8;
+              return <rect key={i} x={i * 5} y={dip ? 4 : 0} width={3.5} height={dip ? 12 : 16} rx={1} fill={`var(--${s.status === "degraded" && !dip ? "ok" : colour})`} opacity={0.85} />;
+            })}
           </svg>
         </div>
         <div className="row spread mono dim" style={{ fontSize: 11 }}>
-          <span title="Uptime over 30 days is not reported by the server">– 30d</span>
-          <span className="ell" title={s.detail}>{s.heartbeatAgeSeconds != null ? ageShort(s.heartbeatAgeSeconds) : s.latencyMs === null ? s.detail : `${s.latencyMs} ms`}</span>
+          <span title={s.uptime30d == null ? "Uptime over 30 days is not reported by the server" : undefined}>{s.uptime30d == null ? "n/a" : `${s.uptime30d}%`} 30d</span>
+          <span className="ell" title={s.detail}>{s.detail}</span>
         </div>
       </div>
     </section>

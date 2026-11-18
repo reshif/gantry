@@ -90,9 +90,9 @@ describe("Audit", () => {
     expect(await screen.findByText("policy.edit.denied")).toBeTruthy();
     // the stat row is gone: counts live on the view tabs, and an always-present banner says whether the chain was checked
     expect(document.getElementById("aud-stats")).toBeNull();
-    expect(document.getElementById("aud-view-denied")).toBeNull();
+    expect(document.getElementById("aud-view-denied")).toBeTruthy();
     expect(document.getElementById("aud-verified")?.className).toContain("banner");
-    expect([...document.querySelectorAll("#aud-ledger th")].map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["#", "When", "Actor", "Action", "Target", "Project", "Category", "Outcome"]);
+    expect([...document.querySelectorAll("#aud-ledger th")].map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["#", "When", "Actor", "Action", "Target", "Project", "Category", "Outcome"]);
     expect(document.querySelector("#aud-ledger .pager")?.textContent).toContain("1–3 of 3");
     expect(document.querySelectorAll("tr[id^=aud-row-]")).toHaveLength(3);
     expect(Array.from(document.querySelectorAll("tr[id^=aud-row-] .chip")).map((c) => c.textContent)).toContain("denied");
@@ -101,8 +101,8 @@ describe("Audit", () => {
     // Clicking a category narrows server-side.
     fireEvent.change(document.getElementById("aud-cat")!, { target: { value: "config" } });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/audit" && c.query.get("category") === "config")).toBe(true));
-    // Auditors get the verify button; the note about a limited view is absent.
-    expect(document.getElementById("aud-verify")).toBeTruthy();
+    // Auditors get the verified banner; the note about a limited view is absent.
+    expect(document.getElementById("aud-verified")).toBeTruthy();
     expect(document.querySelector(".lock-note")).toBeNull();
   });
 
@@ -117,15 +117,26 @@ describe("Audit", () => {
     expect(window.location.search).toContain("q=slack");
   });
 
-  it("has only Export CSV in the header, the verify result in the banner, no view tabs and no More filters", async () => {
-    setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }) });
+  it("has only Export CSV in the header, the verify result in a button-less banner, the All, Denied and Config views and no More filters", async () => {
+    setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }), "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 1, msg: "Chain intact." } }) });
     mount(<AuditView />);
     await screen.findByText("role.add");
     expect(document.getElementById("aud-export")?.textContent).toContain("Export CSV");
     expect(document.querySelector(".page-head #aud-verify, .page-acts #aud-verify")).toBeNull();
-    expect(document.getElementById("aud-verified")?.querySelector("#aud-verify")).toBeTruthy();
+    await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
+    expect(document.getElementById("aud-verified")?.querySelector("button")).toBeNull();
+    expect(document.getElementById("aud-verify")).toBeNull();
     expect(document.getElementById("aud-verified-dismiss")).toBeNull();
-    expect(document.querySelector("[role=tab]")).toBeNull();
+    expect([...document.querySelectorAll("[role=tab]")].map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["All", "Denied", "Config"]);
+    expect(document.querySelectorAll("#aud-ledger th .th-arrow").length).toBeGreaterThan(3);
+    expect(document.querySelector("#aud-ledger a.rl")?.getAttribute("href")).toBe("#audit");
+    fireEvent.click(document.getElementById("aud-view-denied")!);
+    await waitFor(() => expect(window.location.search).toContain("out=denied"));
+    fireEvent.click(document.getElementById("aud-view-config")!);
+    await waitFor(() => expect(window.location.search).toContain("cat=config"));
+    expect(window.location.search).not.toContain("out=denied");
+    fireEvent.click(document.getElementById("aud-view-all")!);
+    await waitFor(() => expect(window.location.search).not.toContain("cat="));
     expect(document.getElementById("aud-more")).toBeNull();
     fireEvent.change(document.getElementById("aud-cat")!, { target: { value: "config" } });
     await waitFor(() => expect(window.location.search).toContain("cat=config"));
@@ -175,15 +186,14 @@ describe("Audit", () => {
     expect(document.getElementById("aud-verify")).toBeNull();
   });
 
-  it("shows an empty state, and verify reports the result", async () => {
+  it("shows an empty state, and the verify result lands in the banner", async () => {
     setup(ASHA, {
       "GET /api/v1/audit": () => ({ body: { items: [], next: null, total: 0, summary: { ...SUMMARY, entries: 0, denied: 0, changes: 0, categories: {} } } }),
       "GET /api/v1/audit/verify": () => ({ body: { ok: true, checked: 12, msg: "Chain intact: 12 entries verified." } }),
     });
     mount(<AuditView />);
     expect(await screen.findByText("Nothing matches")).toBeTruthy();
-    fireEvent.click(document.getElementById("aud-verify")!);
-    expect(await screen.findByText("Chain intact: 12 entries verified.")).toBeTruthy();
+    await waitFor(() => expect(document.getElementById("aud-verified")?.textContent).toContain("Ledger verified"));
   });
 
   it("verifies the chain on arrival and shows the Ledger verified banner without a click", async () => {

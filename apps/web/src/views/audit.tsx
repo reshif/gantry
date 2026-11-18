@@ -7,7 +7,7 @@ import { useQueryState } from "../lib/queryState";
 import { useAuditVerify, useMe, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { DataTable } from "../ui/DataTable";
-import { Btn, SearchBox, Select } from "../ui/primitives";
+import { Btn, SearchBox, Select, Tabs } from "../ui/primitives";
 import { CrIcon, Page } from "../ui/cr";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
@@ -46,7 +46,6 @@ export default function AuditView() {
     if (asConsole && myId) qs.set({ via: "console", actor: myId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asConsole, myId]);
-  const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState<{ ok: boolean; msg: string; at: number } | null>(null);
   const [typed, setTyped] = useState(v.q);
   useEffect(() => setTyped(v.q), [v.q]);
@@ -63,6 +62,9 @@ export default function AuditView() {
   const projectKey = (id: string | null): string => (id ? projects.find((p) => p.id === id)?.key ?? id : "factory");
   const canVerify = !!me?.person.roles.some((g) => g.scope === "factory" && (FACTORY_READ as readonly string[]).includes(g.role));
   const dirty = !!(v.q || v.cat || v.out || v.actor || v.proj || v.via || v.topic || v.diff);
+  // All, Denied and Config are views over the outcome and category filters, so they stay in the URL with them
+  const view = v.out === "denied" && !v.cat ? "denied" : v.cat === "config" && !v.out ? "config" : !v.out && !v.cat ? "all" : "";
+  const setView = (id: string) => qs.set({ out: id === "denied" ? "denied" : null, cat: id === "config" ? "config" : null });
   const clear = () => { setTyped(""); qs.clear(); };
 
   const open = (seq: number) => ui.drawer.open(`audit:${seq}`, (close) => <AuditDrawer seq={seq} projectName={projectName} close={close} />);
@@ -75,16 +77,16 @@ export default function AuditView() {
   const scoped = !perm.pending && !perm.allowed;
 
   const runVerify = async (quiet = false) => {
-    setChecking(true);
     const r = await verify.refetch();
-    setChecking(false);
     const d = r.data as { ok: boolean; msg?: string } | undefined;
     const res = d ? { ok: d.ok, msg: d.msg ?? (d.ok ? "Chain intact." : "The chain is broken."), at: Date.now() } : { ok: false, msg: "The chain could not be verified.", at: Date.now() };
     setChecked(res);
     if (!quiet || !res.ok) ui.toast(res.msg, res.ok ? "ok" : "error");
   };
   // The prototype shows the verified banner on arrival: check once, quietly, when the person may.
-  useEffect(() => { if (canVerify && !checked) void runVerify(true); }, [canVerify]); // eslint-disable-line react-hooks/exhaustive-deps
+  // and again when the ledger grows, so the banner never describes an older chain
+  const entries = sum?.entries;
+  useEffect(() => { if (canVerify) void runVerify(true); }, [canVerify, entries]); // eslint-disable-line react-hooks/exhaustive-deps
   const exportCsv = async () => {
     try {
       // every entry the filters match, not only the pages loaded so far
@@ -115,14 +117,16 @@ export default function AuditView() {
         <Btn label={<span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><CrIcon name="dl" />Export CSV</span>} aria="Export CSV" id="aud-export" onClick={() => void exportCsv()} />
       </>}
     >
-      <div className={`banner ${checked ? (checked.ok ? "ok" : "bad") : "info"}`} role="status" id="aud-verified">
-        <Icon name={checked ? (checked.ok ? "check" : "alert") : "shield"} />
-        <div className="grow">
-          <b>{checked ? (checked.ok ? "Ledger verified" : "The chain is broken") : "Ledger not checked in this session"}</b>{" "}
-          <span className="mono">{checked ? `${sum?.entries ?? total} entries, last check ${fmt.ago(checked.at, Date.now())}, ${checked.ok ? "no gaps" : checked.msg}` : `${sum?.entries ?? total} entries. Press Verify chain to check them now.`}</span>
+      {canVerify ? (
+        <div className={`banner ${checked ? (checked.ok ? "ok" : "bad") : "info"}`} role="status" id="aud-verified">
+          <Icon name={checked ? (checked.ok ? "check" : "alert") : "shield"} />
+          <div className="grow">
+            <b>{checked ? (checked.ok ? "Ledger verified" : "The chain is broken") : "Verifying the ledger"}</b>{" "}
+            <span className="mono">{checked ? `${sum?.entries ?? total} entries, last check ${fmt.ago(checked.at, Date.now())}, ${checked.ok ? "no gaps" : checked.msg}` : `${sum?.entries ?? total} entries`}</span>
+          </div>
         </div>
-        {canVerify ? <Btn label={checking ? "Verifying..." : "Verify chain"} small kind="ghost" id="aud-verify" guard={checking ? { allowed: false, reason: "Checking the chain now." } : null} onClick={() => void runVerify(false)} /> : null}
-      </div>
+      ) : null}
+      <Tabs idPrefix="aud-view" active={view} onChange={setView} items={[{ id: "all", label: "All" }, { id: "denied", label: "Denied", count: sum?.denied ?? 0 }, { id: "config", label: "Config", count: sum?.categories.config ?? 0 }]} />
       {scoped ? (
         <div className="lock-note" role="note">
           <Icon name="lock" />
@@ -150,6 +154,7 @@ export default function AuditView() {
           rowLabel={(e) => `Open audit entry ${e.seq}: ${e.action}`}
           pageSize={15}
           pager
+          sortHints
           sort={{ key: "at", dir: -1 }}
           hasMore={!!feed.hasNextPage}
           onLoadMore={() => void feed.fetchNextPage()}

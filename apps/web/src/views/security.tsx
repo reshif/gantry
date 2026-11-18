@@ -1,15 +1,15 @@
 /**
- * Security (spec 8.9, 14.1), in the Control Room prototype's layout: exactly three tabs, Sign-in, Sessions and Network and restore.
- * The two working features the prototype has no tab for sit inside them: the sign-in history under the sessions table, and the
- * emergency stop under the restore rules. Against GET/PATCH /security, /sessions and /signins.
+ * Security (spec 8.9, 14.1), in the Control Room prototype's layout: exactly three tabs, Sign-in, Sessions and Network and restore,
+ * each exactly the prototype's cards. The two working features the prototype has no tab for (the sign-in history and the
+ * emergency stop) open in a drawer from the page header, so the tabs stay the prototype's. Against GET/PATCH /security, /sessions and /signins.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fmt } from "@gantry/domain";
 import type { SecuritySettings, Session, SignIn } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useCan } from "../api/can";
 import { useMe, usePeople, useSecurity, useSessions, useSignins } from "../api/queries";
-import { Btn, Field, LockNote, Segmented, Select, Tabs, Toggle, Who, type Decision } from "../ui/primitives";
+import { Btn, Field, IconBtn, LockNote, Segmented, Select, Tabs, Toggle, Who, type Decision } from "../ui/primitives";
 import { Card, Page } from "../ui/cr";
 import { DataTable } from "../ui/DataTable";
 import { Modal } from "../ui/Modal";
@@ -27,6 +27,42 @@ export const SEC_TABS = ["signin", "sessions", "network"] as const;
 const TAB_ALIAS: Record<string, string> = { history: "sessions", stop: "network" };
 const QS = ["tab", "show", "hist", "method"] as const;
 
+/** A drawer in the prototype's markup: kicker, title, close, scrolling body. */
+function PanelDrawer({ kicker, title, close, children }: { kicker: string; title: string; close: () => void; children: React.ReactNode }) {
+  return (
+    <div className="drawer-inner">
+      <div className="drawer-head">
+        <div>
+          <div className="kicker eyebrow">{kicker}</div>
+          <h2 className="drawer-title">{title}</h2>
+        </div>
+        <IconBtn icon="x" label="Close" className="drawer-close" id="sec-drawer-close" onClick={close} />
+      </div>
+      <div className="drawer-scroll">{children}</div>
+    </div>
+  );
+}
+
+function HistoryDrawer({ close }: { close: () => void }) {
+  const q = useSignins({ limit: 200, all: "1" });
+  const raw = q.data;
+  const signins: SignIn[] = Array.isArray(raw) ? raw : raw?.items ?? [];
+  return (
+    <PanelDrawer kicker="Security" title="Sign-in history" close={close}>
+      <Async query={q} what="sign-in history" id="sec-history">{() => <HistoryTab signins={signins} />}</Async>
+    </PanelDrawer>
+  );
+}
+
+function StopDrawer({ close, onSignIn }: { close: () => void; onSignIn: () => void }) {
+  const q = useSecurity();
+  return (
+    <PanelDrawer kicker="Security" title="Emergency stop" close={close}>
+      <Async query={q} what="security settings" id="sec-stop-sec">{(sec) => <StopTab sec={sec} onSignIn={() => { close(); onSignIn(); }} />}</Async>
+    </PanelDrawer>
+  );
+}
+
 /** One security setting change: PATCH /security {path, value} with the version we read. */
 function useSet(sec: SecuritySettings | undefined) {
   const outcome = useOutcome();
@@ -39,12 +75,21 @@ export default function SecurityView() {
   const secQ = useSecurity();
   const sec = secQ.data;
   const sessionsQ = useSessions({ all: true });
-  const signinsQ = useSignins({ limit: 200, all: "1" });
   const sessions = sessionsQ.data ?? [];
-  const signinsRaw = signinsQ.data;
-  const signins: SignIn[] = Array.isArray(signinsRaw) ? signinsRaw : signinsRaw?.items ?? [];
   const perm = dec(useCan("security.manage"));
   const qs = useQueryState(QS);
+  const ui = useUI();
+  const setTabTo = qs.set;
+  const openHistory = () => ui.drawer.open("sec-history", (close) => <HistoryDrawer close={close} />);
+  const openStop = () => ui.drawer.open("sec-stop", (close) => <StopDrawer close={close} onSignIn={() => setTabTo({ tab: null })} />);
+  const alias = qs.values.tab;
+  // an old ?tab=history or ?tab=stop link opens the drawer that now holds it
+  useEffect(() => {
+    if (!sec || (alias !== "history" && alias !== "stop")) return;
+    setTabTo({ tab: alias === "history" ? "sessions" : "network" });
+    if (alias === "history") openHistory(); else openStop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alias, !!sec]);
   const rawTab = TAB_ALIAS[qs.values.tab] ?? qs.values.tab;
   const tab = (SEC_TABS as readonly string[]).includes(rawTab) ? rawTab : "signin";
   const setTab = (t: string) => qs.set({ tab: t === "signin" ? null : t });
@@ -56,7 +101,10 @@ export default function SecurityView() {
   const thisIp = me.session.ip;
 
   return (
-    <Page {...head} cls="view-security">
+    <Page {...head} cls="view-security" acts={<>
+      <Btn label="Sign-in history" id="sec-history-open" onClick={openHistory} />
+      <Btn label="Emergency stop" kind="danger" id="sec-stop-open" onClick={openStop} />
+    </>}>
       {!perm.allowed ? <div className="sec-lock"><LockNote decision={perm} what="Security settings" /><ExplainDenial id="sec-explain" action="security.manage" /></div> : null}
       <Tabs idPrefix="sec-tab" active={tab} onChange={setTab} items={[{ id: "signin", label: "Sign-in" }, { id: "sessions", label: "Sessions", count: active }, { id: "network", label: "Network and restore" }]} />
       <div id="sec-tab-panel" role="tabpanel">
@@ -65,14 +113,10 @@ export default function SecurityView() {
             <IpPanel perm={perm} sec={sec} thisIp={thisIp} />
             <div style={{ height: 16 }} />
             <RestorePanel perm={perm} sec={sec} />
-            <div style={{ height: 16 }} />
-            <Card title="Emergency stop" id="sec-stop-card"><StopTab sec={sec} onSignIn={() => setTab("signin")} /></Card>
           </div>
         ) : tab === "sessions" ? (
           <>
             <Async query={sessionsQ} what="sessions" id="sec-sessions">{() => <SessionsTab perm={perm} sessions={sessions} currentId={me.session.id} viewerId={me.person.id} />}</Async>
-            <div style={{ height: 16 }} />
-            <Async query={signinsQ} what="sign-in history" id="sec-history">{() => <HistoryTab signins={signins} />}</Async>
           </>
         ) : (
           <div className="grid g2">
@@ -224,6 +268,7 @@ function SessionsTab({ perm, sessions, currentId, viewerId }: { perm: Decision; 
         rowKey={(x) => x.id}
         pageSize={10}
         pager
+        sortHints
         sort={{ key: "started", dir: -1 }}
         empty={{ title: "No active sessions", text: "Nobody is signed in." }}
         columns={[

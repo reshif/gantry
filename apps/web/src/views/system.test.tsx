@@ -55,6 +55,20 @@ describe("System health view", () => {
     expect(ROUTES.find((r) => r.id === "system")).toMatchObject({ group: "Govern", perm: "integrations.view" });
   });
 
+  it("draws each service as the prototype does: a 40-bar strip in the state colour, a 30d figure and the server's note", async () => {
+    setup({ health: { ...HEALTH, services: [{ id: "api", name: "API", status: "ok", detail: "p95 84ms", latencyMs: 84, uptime30d: 99.98 }, { id: "outbox", name: "Outbox", status: "degraded", detail: "2 dead letters", latencyMs: null }] } });
+    mount();
+    const api = await waitFor(() => { const e = document.querySelector("[data-service='api']"); if (!e) throw new Error("no api"); return e; });
+    const bars = [...api.querySelectorAll("svg rect")];
+    expect(bars).toHaveLength(40);
+    expect(new Set(bars.map((b) => b.getAttribute("fill")))).toEqual(new Set(["var(--ok)"]));
+    expect(api.textContent).toContain("99.98% 30d");
+    expect(api.textContent).toContain("p95 84ms");
+    const ob = document.querySelector("[data-service='outbox']")!;
+    expect(ob.textContent).toContain("n/a 30d");
+    expect([...ob.querySelectorAll("svg rect")].filter((b) => b.getAttribute("height") === "12")).toHaveLength(1);
+  });
+
   it("shows services, the stale-backup warning, an unknown drill, dead letters and stuck jobs", async () => {
     setup();
     mount();
