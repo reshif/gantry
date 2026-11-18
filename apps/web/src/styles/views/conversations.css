@@ -117,3 +117,10 @@
 .conv-fu-card { border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--r1); padding: var(--s2) var(--s3); display: grid; gap: var(--s2); }
 .conv-fu-card .input { background: var(--surface); }
 .conv-fu-act { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: flex-end; }
+
+/* Conversations screen (Control Room prototype): Back shows when the thread replaces the list on a phone */
+.conv-thread .wos-more > summary { cursor: pointer; }
+@media (max-width: 720px) {
+  .conv-thread .nodesk-back { display: inline-flex; }
+  .conv.has .conv-list { display: none; }
+}

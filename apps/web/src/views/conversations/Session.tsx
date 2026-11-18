@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WoCard } from "@gantry/domain";
 import { fmt, isBriefScaffold } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { Btn, Chip, Who } from "../../ui/primitives";
+import { Avatar, Btn, Chip, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -25,7 +25,7 @@ import { AssumptionList, StationQuestionCard } from "../documents/Dialogue";
 import { ResearchPlanCard } from "../documents/Research";
 import { LiveRun, RunTimelineView } from "../documents/Timeline";
 import { GateNotes, ObjectionCard, SwarmBoard } from "../documents/Swarm";
-import { navigate } from "../../lib/router";
+import { hashFor, navigate } from "../../lib/router";
 import { createThread, useWsAgents } from "../workspace/api";
 import { mentionChoices, mentionOf, queueAsk } from "../workspace/mention";
 
@@ -224,7 +224,10 @@ function SideDialogue({ s }: { s: WoSession }) {
 
 /* ------------------------------------------------------------------ the page ---- */
 
-export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean }) {
+/** The multi-line composer of the work order page and the workspace (the prototype thread uses the one-line input below). */
+const Composer = "textarea" as const;
+
+export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: string; back: () => void; /** The Conversations screen: the prototype thread card (header, bubbles, one-line send row) with the work order panel folded under it. */ proto?: boolean; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean }) {
   const q = useWoSession(woId);
   const s = q.data;
   const ui = useUI();
@@ -279,35 +282,16 @@ export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; ba
   // a station's message carries its agent's id: show the agent's name, as everywhere else
   const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
 
-  return (
-    <div className={`osx wos${bare ? " is-bare" : ""}`} id="wos" data-wo={s.woId}>
-      {bare ? null : <div className="osx-top">
-        {embedded ? null : <Btn small icon="back" id="wos-back" label="Conversations" onClick={back} />}
-        <h2 className="osx-title"><span className="mono">{s.wo.id}</span> {s.wo.title}</h2>
-        <span className="chip">{s.wo.clsName}</span>
-        <span className="chip">{s.wo.bay ? `Bay · ${s.wo.bay}` : s.wo.stationName}</span>
-        <Chip text={ruleBased ? "Rule-based (no agent)" : `${agentName} v${s.agent.mode === "agent" ? s.agent.version : ""}`} cls={ruleBased ? "" : "chip-accent"} />
-        <span className="osx-spacer" />
-        <Btn small id="wos-traveler" label="Traveler" onClick={() => openTraveler(s.woId)} />
-        <Btn small icon="record" id="wos-record" label="Full record" onClick={() => openRecord(s.woId, s.project)} />
-      </div>}
-      <div className="osx-grid">
-        <section className="osx-main" aria-label={`Conversation ${s.woId}`}>
-          <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite">
-            <span className="wos-dot" aria-hidden="true" />
-            <span>{status.text}</span>
-            {(s.next.actor === "you" && !live) || s.next.text === status.text ? null : <span className="muted small">{` · ${s.next.text}`}</span>}
-          </div>
-          <div className="osx-thread" role="log" aria-live="polite" ref={thread}>
+  const threadBody = (<>
             {s.messages.map((m, i) => (
               <div key={m.id}>
                 {i === 0 && m.data.mode === "legacy" ? <p className="small muted wos-legacy-h">Earlier: the scripted intake questions</p> : null}
                 {i === firstSession && firstSession > 0 ? <p className="small muted wos-legacy-h">The conversation with {agentName}</p> : null}
-                <div className={`osx-msg is-${m.role}${m.data.kind === "update" ? " is-update" : ""}${m.data.mode === "legacy" ? " is-legacy" : ""}`}>
-                  {m.data.kind === "update" ? null : <div className="osx-who small strong">{tag(m)}{m.data.mode === "rule-based" ? <span className="muted"> · rule-based</span> : null}</div>}
+                <div className={proto && m.data.kind !== "update" ? `msg${m.role === "user" ? " me" : ""}` : `osx-msg is-${m.role}${m.data.kind === "update" ? " is-update" : ""}${m.data.mode === "legacy" ? " is-legacy" : ""}`}>
+                  {m.data.kind === "update" ? null : <div className={proto ? "who" : "osx-who small strong"}>{tag(m)}{m.data.mode === "rule-based" ? <span className="muted"> · rule-based</span> : null}{proto ? <span className="mono dim">{` ${fmt.ago(m.at, Date.now())}`}</span> : null}</div>}
                   {m.data.kind === "update" ? <p className="osx-event small"><span className="muted">{fmt.stamp(m.at)}</span> {m.text}</p>
                     : m.data.kind === "answer" ? <AnswerText m={m} s={s} />
-                    : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
+                    : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className={proto ? "bub" : "osx-text"} style={proto ? { whiteSpace: "normal" } : undefined}><Markdown text={m.text} /></div> : <p className={proto ? "bub" : "osx-text"}>{m.text}</p>) : null}
                   {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
                   <Cards m={m} s={s} agent={agentName} send={(b) => send(b)} last={m.id === lastId} />
                 </div>
@@ -329,21 +313,8 @@ export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; ba
             ) : null}
             {error ? <p className="callout callout-warn small" role="alert">{error}</p> : null}
             {ruleBased ? <p className="small muted osx-reason" id="wos-mode-note">{`Rule-based (no agent): ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
-          </div>
-          <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-            {choices.length ? (
-              <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
-                {choices.map((a) => <li key={a.id} role="option" aria-selected="false" id={`wos-mention-${a.id}`} onMouseDown={(e) => { e.preventDefault(); setDraft(`@${a.name} `); }}><span className="strong">{`@${a.name}`}</span><span className="muted">{`${a.stationName} · answers in a side thread`}</span></li>)}
-              </ul>
-            ) : null}
-            <div className="wos-compose">
-              <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
-            <textarea id="wos-input" className="input" rows={2} aria-label={`Message to ${agentName}`} value={draft} placeholder={placeholder} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
-            </div>
-            {mention ? <span className="small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</span> : null}
-            <Btn kind="primary" type="submit" id="wos-send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || !draft.trim() || (!mention && !s.can.talk)} />
-          </form>
-        </section>
+  </>);
+  const sideEl = (
         <aside className="osx-side" aria-label="Work order">
           <dl className="osx-facts small">
             <dt>Work order</dt><dd><span className="mono">{s.wo.id}</span> · {s.wo.priority}</dd>
@@ -380,6 +351,78 @@ export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; ba
             <dt>Cost so far</dt><dd className="mono" id="wos-cost">{`${fmt.money(s.costUsd)} of ${fmt.money(s.budget.limitUsd)} budget`}</dd>
           </dl>
         </aside>
+  );
+  if (proto) {
+    const aid = s.agent.id;
+    return (
+      <section className="card conv-thread wos" id="wos" data-wo={s.woId} aria-label={`Conversation ${s.woId}`}>
+        <div className="card-h">
+          <div className="row nowrap">
+            <Btn small kind="ghost" cls="nodesk-back" id="wos-back" label="← Back" onClick={back} />
+            <span className="row nowrap" style={{ gap: 6 }}><Avatar id={aid} size="sm" /><span className="ell">{agentName}</span></span>
+            <a className="mono" id="wos-record" href={hashFor("record", s.woId, s.project)}>{s.woId}</a>
+          </div>
+          <span className="dim">Agent proposes; people decide</span>
+        </div>
+        <div className="card-b stack thread" style={{ minHeight: 280, maxHeight: "52vh", overflow: "auto" }} role="log" aria-live="polite" ref={thread}>
+          <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite"><span className="wos-dot" aria-hidden="true" /><span>{status.text}</span></div>
+          {threadBody}
+        </div>
+        <form className="card-b row nowrap" style={{ borderTop: "1px solid var(--line)", position: "relative" }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          {choices.length ? (
+            <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
+              {choices.map((a) => <li key={a.id} role="option" aria-selected="false" id={`wos-mention-${a.id}`} onMouseDown={(e) => { e.preventDefault(); setDraft(`@${a.name} `); }}><span className="strong">{`@${a.name}`}</span><span className="muted">{`${a.stationName} · answers in a side thread`}</span></li>)}
+            </ul>
+          ) : null}
+          <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
+          <input id="wos-input" className="input in" aria-label={`Message to ${agentName}`} autoComplete="off" value={draft} placeholder={s.can.talk ? `Message ${agentName}…` : `Read-only: ${s.can.talkWhy || "you may not act on this work order."}`} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter") { e.preventDefault(); submit(); } }} />
+          <Btn kind="primary" type="submit" id="wos-send" icon="send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || !draft.trim() || (!mention && !s.can.talk)} />
+        </form>
+        {mention ? <p className="card-b small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</p> : null}
+        <details className="card-b wos-more" id="wos-more">
+          <summary className="btn sm ghost">Brief, gate and proposals</summary>
+          <div className="osx-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>{sideEl}</div>
+        </details>
+      </section>
+    );
+  }
+  return (
+    <div className={`osx wos${bare ? " is-bare" : ""}`} id="wos" data-wo={s.woId}>
+      {bare ? null : <div className="osx-top">
+        {embedded ? null : <Btn small icon="back" id="wos-back" label="Conversations" onClick={back} />}
+        <h2 className="osx-title"><span className="mono">{s.wo.id}</span> {s.wo.title}</h2>
+        <span className="chip">{s.wo.clsName}</span>
+        <span className="chip">{s.wo.bay ? `Bay · ${s.wo.bay}` : s.wo.stationName}</span>
+        <Chip text={ruleBased ? "Rule-based (no agent)" : `${agentName} v${s.agent.mode === "agent" ? s.agent.version : ""}`} cls={ruleBased ? "" : "chip-accent"} />
+        <span className="osx-spacer" />
+        <Btn small id="wos-traveler" label="Traveler" onClick={() => openTraveler(s.woId)} />
+        <Btn small icon="record" id="wos-record" label="Full record" onClick={() => openRecord(s.woId, s.project)} />
+      </div>}
+      <div className="osx-grid">
+        <section className="osx-main" aria-label={`Conversation ${s.woId}`}>
+          <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite">
+            <span className="wos-dot" aria-hidden="true" />
+            <span>{status.text}</span>
+            {(s.next.actor === "you" && !live) || s.next.text === status.text ? null : <span className="muted small">{` · ${s.next.text}`}</span>}
+          </div>
+          <div className="osx-thread" role="log" aria-live="polite" ref={thread}>
+            {threadBody}
+          </div>
+          <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+            {choices.length ? (
+              <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
+                {choices.map((a) => <li key={a.id} role="option" aria-selected="false" id={`wos-mention-${a.id}`} onMouseDown={(e) => { e.preventDefault(); setDraft(`@${a.name} `); }}><span className="strong">{`@${a.name}`}</span><span className="muted">{`${a.stationName} · answers in a side thread`}</span></li>)}
+              </ul>
+            ) : null}
+            <div className="wos-compose">
+              <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
+            <Composer id="wos-input" className="input" rows={2} aria-label={`Message to ${agentName}`} value={draft} placeholder={placeholder} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
+            </div>
+            {mention ? <span className="small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</span> : null}
+            <Btn kind="primary" type="submit" id="wos-send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || !draft.trim() || (!mention && !s.can.talk)} />
+          </form>
+        </section>
+        {sideEl}
       </div>
     </div>
   );

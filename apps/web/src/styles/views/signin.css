@@ -24,7 +24,3 @@
   .auth-panel { padding: 24px 20px; }
 }
 .auth-steps { margin: 0; padding-left: 1.25rem; display: grid; gap: 8px; font-size: var(--t-sm); max-width: 46ch; }
-/* prototype sign-in box: full-width 40px buttons, dim 12px footnote */
-.signin .box > .btn { height: 40px; justify-content: center; }
-.signin .auth-foot { font-size: 12px; }
-.signin .box .hint { font-size: 12px; color: var(--text-3); }

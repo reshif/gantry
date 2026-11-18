@@ -17,7 +17,6 @@ import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
-import { NotFoundPage, SharedStatePage, sharedStateFromUrl } from "./SharedStates";
 import { StatusBar } from "./StatusBar";
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
@@ -115,9 +114,6 @@ export function Shell({ me }: { me: Me }) {
   const switcherProject = scoped ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
   const ready = !scoped || (!!project && synced === project.id);
   const killed = !!me.factory.killed;
-  // `?state=` previews a shared state inside the route's page frame; an id no route owns is a 404 (prototype), not a silent Home
-  const previewState = sharedStateFromUrl();
-  const notFound = loc.id !== "" && !routeDef(wanted) && !routeDef(loc.id) ? loc.id : null;
   return (
     <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
       <AppErrorBoundary level="chrome">
@@ -144,10 +140,6 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
             </div>
-          ) : notFound ? (
-            <NotFoundPage name={notFound} />
-          ) : previewState && def ? (
-            <SharedStatePage kind={previewState} eyebrow={def.group} title={def.title} />
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
           ) : null}

@@ -1,15 +1,14 @@
 /**
  * Console (#console), the Control Room prototype's "submit a work order" screen: the New work order form on the left (the same fields,
  * validation, classifier preview and guarded submit as the dialog), the route preview and the latest submissions on the right.
- * The chat with the factory Console lives in the conversations hub (`#workspace/new`).
+ * The chat with the factory Console lives in Agents at work (`#workspace`, New chat).
  */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useMe } from "../api/queries";
 import { pickProject } from "../lib/routes";
-import { navigate } from "../lib/router";
 import { usePrefs } from "../lib/prefs";
-import { Btn, Status, type Tone } from "../ui/primitives";
+import { Status, type Tone } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Card, Page } from "../ui/cr";
 import { NewWorkOrderDialog } from "./work-orders/New";
@@ -40,8 +39,7 @@ export default function ConsoleSubmitView() {
     </Card>
   );
   return (
-    <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit"
-      acts={<Btn label="Chat with the Console" icon="chat" id="con-chat" onClick={() => navigate("workspace", "new")} />}>
+    <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit">
       <NewWorkOrderDialog key={n} variant="page" preset={{ source: "console" }} onClose={() => setN((x) => x + 1)} aside={aside} />
     </Page>
   );

@@ -9,6 +9,7 @@ import type { WoSession, WoSessionRow } from "./conversations/session-api";
 
 beforeEach(() => {
   resetApp();
+  window.history.replaceState(null, "", "/");
   updatePrefs({ project: "payments" });
 });
 afterEach(() => {
@@ -66,8 +67,11 @@ describe("Conversations list", () => {
 
   it("lists work-order sessions with who waits on whom and the latest message; a row opens that work order's session beside the list", async () => {
     showList([row(), row({ id: "WO-9", title: "Other", waitingOn: "agent", unread: false, latest: null, started: false })]);
-    expect(await screen.findByText("Waiting on you")).toBeTruthy();
-    expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "Unread" })).toBeTruthy();
+    // the prototype row has two lines: no third "Waiting on you" line, no Waiting / Open / Closed tabs, no New work order button
+    expect(screen.queryByText("Waiting on you")).toBeNull();
+    expect(screen.queryByRole("tab", { name: /Waiting on me/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New work order" })).toBeNull();
     expect(document.querySelector(".conv .conv-list")).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: new RegExp(W.id) }));
     await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/conversations/${W.id}`));
@@ -80,12 +84,30 @@ describe("Conversations list", () => {
   });
 });
 
+describe("Conversations URL state (prototype ?c= and ?q=)", () => {
+  it("opens the conversation named by ?c= and keeps the search in ?q=", async () => {
+    window.history.replaceState(null, "", `/?c=${W.id}`);
+    const calls = mockApi({ ...readsFor(W), "GET /api/v1/work-order-sessions": () => ({ body: { items: [row(), row({ id: "WO-9", title: "Other thing", started: false, latest: null })] } }), [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ body: session() }), [`POST /api/v1/work-orders/${W.id}/session/seen`]: () => ({ body: { ok: true, msg: "Seen." } }) });
+    mount(<ConversationsView />);
+    expect(await screen.findByRole("region", { name: `Conversation ${W.id}` }, { timeout: 4000 })).toBeTruthy();
+    expect(calls.some((c) => c.path === `/api/v1/work-orders/${W.id}/session`)).toBe(true);
+    fireEvent.change(screen.getByLabelText("Search conversations"), { target: { value: "other" } });
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("q")).toBe("other"));
+    expect(screen.queryByText(row().title)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Search conversations"), { target: { value: "zzz" } });
+    expect(await screen.findByText("No conversations")).toBeTruthy();
+    expect(document.querySelector(".conv-list .empty p")?.textContent ?? "").toBe("");
+  });
+});
+
 describe("Work-order session", () => {
   it("makes it obvious the dialogue is open: the agent waits for you, the composer is always there, a suggested answer is one click", async () => {
     const calls = await showSession(session(), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
     expect(await screen.findByText("Intake Clerk is waiting for you")).toBeTruthy();
     expect(screen.getByLabelText("Message to Intake Clerk")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Traveler" })).toBeTruthy();
+    // the prototype thread header: the work order id links to the record, Back is for narrow screens
+    expect((document.getElementById("wos-record") as HTMLAnchorElement).getAttribute("href")).toMatch(/\/record\/WO-2398$/);
+    expect(document.getElementById("wos-back")).toBeTruthy();
     expect(screen.getByRole("list", { name: "The belt" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "POST /refunds" }));
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));

@@ -27,8 +27,7 @@ const dec = (v: string): string => {
 };
 
 export function parseHash(hash: string): RouteLocation {
-  // a query on the hash (`#/p/x/floor?state=loading`) is not part of the route
-  const raw = hash.replace(/^#\/?/, "").replace(/\?.*$/, "");
+  const raw = hash.replace(/^#\/?/, "");
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {
@@ -42,12 +41,6 @@ export function parseHash(hash: string): RouteLocation {
 export function formatHash(id: string, param?: string | null, project?: string | null): string {
   const pre = project ? `#/p/${encodeURIComponent(project)}/` : "#";
   return param ? `${pre}${id}/${encodeURIComponent(param)}` : `${pre}${id}`;
-}
-
-/** The query string carried on the hash (`#/p/x/floor?state=loading`), or on the page URL when the hash has none. */
-export function hashQuery(hash: string = window.location.hash, search: string = window.location.search): URLSearchParams {
-  const i = hash.indexOf("?");
-  return new URLSearchParams(i >= 0 ? hash.slice(i + 1) : search);
 }
 
 /** The hash for a route id: project routes get the current project (last chosen) unless one is given. */
