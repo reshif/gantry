@@ -387,6 +387,12 @@ export async function advance(fx: Fx, w: Wo, by: string, project?: Project): Pro
   const sid = stationIdOf(fx.catalog, w);
   const idx = fx.catalog.stations.findIndex((s) => s.id === sid);
   if (w.cls === "epic" && sid === "plan" && Array.isArray(w.data.brief?.children) && w.data.brief.children.length && !w.data.split) return splitEpic(fx, w, p, by);
+  // An epic with no split is never silently built as one work order: Gantry asks a person (who may add children to the brief or send it back to the Plan agent).
+  if (w.cls === "epic" && sid === "plan" && !w.data.split && !(Array.isArray(w.data.brief?.children) && w.data.brief.children.length)) {
+    const { parkInto } = await import("./intake.js");
+    note(w, fx, "system", "The plan did not split this epic into child work orders.");
+    return parkInto(fx, w, "person", "This epic has no split into child work orders. Add children to the brief, or return it to Plan so the Plan agent proposes one.");
+  }
   const next = nextStationId(fx.catalog, p, { cls: w.cls, station: idx });
   if (!next) {
     const g6 = routeGates(fx.catalog, p, w.cls).includes("G6");

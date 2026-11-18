@@ -7,7 +7,7 @@ import { loadFlowState } from "../../core/read/state.js";
 import { closeConversation, replaceConversation, saveConversation } from "./conversation.js";
 import { createWorkOrder, newWoId } from "./create.js";
 import {
-  bayOf, cancelAttempts, closeEntry, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
+  bayOf, cancelAttempts, closeEntry, advance, closeOpenInstances, dispatchQueued, enterBay, enterStation, ev, leaveBay, loadOne, note, openInstanceOf, projectOf, releaseSlot, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, makeFx, person, type CmdResult } from "./ctx.js";
 import { saveWo, type Wo } from "./model.js";
@@ -73,6 +73,25 @@ export async function editBrief(tx: Tx, actor: Actor, woId: string, b: BriefEdit
   const by = person(actor, "Brief edits are");
   const { wo } = await flowFor(fx, w);
   const open = !bayOf(fx.catalog, w) && stationIdOf(fx.catalog, w) === "intake" && !!wo.gates.G0G1 && wo.gates.G0G1.status !== "passed";
+  // An epic the plan left unsplit waits in Needs a person: a person's children there are the split.
+  const unsplit = bayOf(fx.catalog, w) === "person" && w.cls === "epic" && w.data.bayFrom === "plan" && !w.data.split;
+  if (unsplit && b.children?.length) {
+    const kids = clipList(b.children);
+    if (/\b(api[_-]?key|password|secret|token)\s*[:=]\s*\S{8,}/i.test(JSON.stringify(kids))) throw invalid("The brief appears to contain a credential. Never put secrets in a brief.");
+    const by0 = person(actor, "Brief edits are");
+    const before0 = { children: wo.brief.children };
+    w.data.briefEdits = { ...(editsOf(w) ?? {}), children: kids, by: by0, at: fx.now.getTime() };
+    w.data.brief = { ...wo.brief, children: kids };
+    note(w, fx, by0, `Added the epic's child work orders (${kids.length}).${b.reason ? ` ${b.reason}` : ""}`);
+    ev(fx, w, "wo.brief.edit", { text: "children", fields: ["children"], reason: b.reason ?? null, edited: { children: kids } }, { before: before0 });
+    await leaveBay(fx, w);
+    for (const k of ["bayReason", "bayFrom", "bayAt", "bayCause"]) delete w.data[k];
+    w.position = "plan";
+    w.state = "running";
+    await advance(fx, w, by0);
+    await saveWo(fx.tx, fx.orgId, w);
+    return done(fx, "Children added; the epic is split.", w.project, { brief: w.data.brief, version: w.version });
+  }
   if (!open) throw conflict("The brief can only be edited at Intake, before it is confirmed.");
   if (b.scopeIn === undefined && b.scopeOut === undefined && b.children === undefined) throw invalid("Nothing to change: send scopeIn, scopeOut or children.");
   if (b.children !== undefined && w.cls !== "epic") throw invalid("Only an epic has child work orders.");
