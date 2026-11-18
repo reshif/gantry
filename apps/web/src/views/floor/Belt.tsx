@@ -4,10 +4,10 @@
  */
 import { useState } from "react";
 import { flowOf, fmt, route as routeOf } from "@gantry/domain";
+import { hashFor } from "../../lib/router";
 import { Btn, Panel } from "../../ui/primitives";
 import { useMe } from "../../api/queries";
 import { updatePrefs, usePrefs } from "../../lib/prefs";
-import { useOpenTraveler } from "../../shell/useTraveler";
 import { ClassChip, classOf } from "../projects/kit";
 import { FloorCtx, bayName, gateHaveNeed, openEntry, since, useFloorCtx } from "./kit";
 import { Schematic } from "./Schematic";
@@ -64,10 +64,9 @@ function RoutePill({ id, hover, onHover }: { id: string; hover: string | null; o
   );
 }
 
-export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) => void; onGate: (gid: string) => void; onOut: () => void }) {
+export function Belt({ onStation, onGate, onOut, onWo, replaying, onReplay }: { replaying?: boolean; onReplay?: (on: boolean) => void; onStation: (sid: string) => void; onGate: (gid: string) => void; onOut: () => void; onWo: (id: string) => void }) {
   const ctx = useFloorCtx();
   const prefs = usePrefs();
-  const open = useOpenTraveler();
   const [hover, setHover] = useState<string | null>(null);
   const [routes, setRoutes] = useState(false);
   const [density, setDensity] = useQueryParam("density");
@@ -78,7 +77,13 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
   const detail = density === "detail";
   const tools = (
     <>
-      <Btn label="Routes by class" icon="branch" small kind="ghost" id="floor-routes-toggle" aria-expanded={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
+      {onReplay ? (
+        <div className="seg" role="group" aria-label="Live or replay">
+          <Btn label="Live" id="floor-mode-live" aria-pressed={!replaying} onClick={() => onReplay(false)} />
+          <Btn label="Replay" id="floor-mode-replay" title="Rebuild the floor from the event log at a past time (read-only)" aria-pressed={replaying} onClick={() => onReplay(true)} />
+        </div>
+      ) : null}
+      <Btn label="Routes" id="floor-routes-toggle" title="Show the route of each work class" aria-pressed={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
       <div className="seg" role="group" aria-label="Density">
         {([["fit", "Fit", "Compact tags so the whole line fits one screen"], ["detail", "Detail", "One tag per row with title and state"]] as const).map(([v, l, t]) => (
           <Btn key={v} label={l} title={t} aria-pressed={(detail ? "detail" : "fit") === v} onClick={() => setDensity(v === "fit" ? null : v)} />
@@ -99,7 +104,7 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
               ))}
             </div>
           ) : null}
-          <Schematic detail={detail} route={route} onStation={onStation} onGate={onGate} onWo={open} onOut={onOut} />
+          <Schematic detail={detail} route={route} onStation={onStation} onGate={onGate} onWo={onWo} onOut={onOut} />
           <div className="flegend" aria-label="Legend">
             <span className="lg"><i className="run" />Running</span>
             <span className="lg"><i className="wait" />At a gate (person approves)</span>
@@ -114,28 +119,25 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
         <div className="card-grid" aria-label="Off the line">
           {bays.map((b) => {
             const list = ctx.wos.filter((w) => w.bay === b.id && w.state !== "killed");
-            const shown = b.id === "declined" ? list.slice(-3) : list;
             return (
-              <div key={b.id} className={`card fl-bay fl-bay-${b.id}${list.length ? " has-work" : ""}`} data-bay={b.id}>
+              <div key={b.id} className={`card fl-bay fl-bay-${b.id}`} data-bay={b.id}>
                 <div className="row fl-bay-h">
                   <h3 className="fl-bay-n">{b.name}</h3>
                   <span className="spacer" />
                   <span className={`chip ${list.length ? "warn" : "plain"} fl-bay-c`}>{String(list.length)}</span>
                 </div>
                 <div className="small muted">{b.desc}</div>
-                {shown.map((w) => (
+                {list.map((w) => (
                   <div key={w.id} className="row small" data-wo={w.id}>
-                    <Btn label={w.id} kind="ghost" small id={`floor-bay-${w.id}`} onClick={() => open(w.id)} />
+                    <a className="pri mono" id={`floor-bay-${w.id}`} href={hashFor("record", w.id, p.id)}>{w.id}</a>
                     <span className="trunc grow">{w.title}</span>
                   </div>
                 ))}
-                {b.id === "declined" && list.length > 3 ? <span className="muted small">{`${list.length - 3} older`}</span> : null}
               </div>
             );
           })}
         </div>
       </Panel>
-      <p className="fl-foot faint small">{`${p.flow.order.filter((sid) => p.flow.stations[sid]?.enabled).length} stations on · flow version ${ctx.floor.flowVersion}.`}</p>
     </>
   );
 }

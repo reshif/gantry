@@ -118,18 +118,17 @@
 }
 
 /* ---------- bays (off the line, under it) ---------- */
-.fl-bays { border-top: 1px solid var(--line); background: var(--surface); padding: var(--s3) var(--s4) var(--s4); min-width: 0; }
+.fl-bays { min-width: 0; }
 .fl-bays-h { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 6px; }
 .fl-bays-t { font-weight: 600; font-size: var(--t-md); }
 .fl-bays-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
-.fl-bay { min-width: 0; display: grid; gap: 4px; align-content: start; padding: 4px 6px 6px; background: var(--panel); border-left: 3px solid var(--line-strong); }
+.fl-bay { min-width: 0; }
+.fl-bay-wo { display: grid; gap: 4px; }
+.fl-bay-acts { gap: 6px; }
 .fl-bay-h { display: flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 600; }
 .fl-bay-h .ic { width: 14px; height: 14px; color: var(--muted); }
 .fl-bay-c { margin-left: auto; font-size: var(--t-xs); background: var(--sunk); padding: 0 5px; border-radius: 2px; }
 .fl-bay-toks { display: grid; gap: 4px; }
-.fl-bay-sechold.has-work { border-left-color: var(--block); } .fl-bay-sechold.has-work .ic { color: var(--block); }
-.fl-bay-person.has-work { border-left-color: var(--wait); } .fl-bay-person.has-work .ic { color: var(--wait); }
-.fl-bay-queue.has-work { border-left-color: var(--run); }
 .fl-bay-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- shipped strip ---------- */
@@ -389,3 +388,14 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 .fl-facts b{color:var(--ink);font-size:14px}.fl-facts b.warn{color:var(--warn)}
 .floorpg .vhead .vtitle-badge{margin-left:10px}
 .f-valve.off{opacity:.45}.f-valve.off circle{stroke-dasharray:3 2}
+
+/* ---------- drawers (prototype frame) ---------- */
+.fl-drawer-body { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.fl-bordered { border: 1px solid var(--line); }
+.fl-drawer-foot { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--surface2, var(--panel)); }
+.fl-bay-why { overflow-wrap: anywhere; }
+
+/* Floor round 3: drawer typography as the prototype's .drw (mono eyebrow, 18px title, hairline rule) */
+.fl-drawer .drawer-head { border-bottom: 1px solid var(--line); }
+.fl-drawer .drawer-head .kicker { font: 600 11px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink3); margin-bottom: 2px; }
+.fl-drawer .drawer-title { font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }

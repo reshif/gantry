@@ -26,9 +26,13 @@ const dec = (v: string): string => {
   }
 };
 
+/** The hash without its query: `#/p/x/floor?view=board` is the route `#/p/x/floor`. Views keep their own state in the query (rule F-15). */
+export const hashPath = (hash: string): string => (hash.includes("?") ? hash.slice(0, hash.indexOf("?")) : hash);
+/** The query of a hash (`?view=board`), "" when absent. */
+export const hashQuery = (hash: string): string => (hash.includes("?") ? hash.slice(hash.indexOf("?")) : "");
+
 export function parseHash(hash: string): RouteLocation {
-  // a prototype-style link carries its page state after a `?` in the hash (`#/inbox?tab=stuck`): the route is what comes before it
-  const raw = hash.replace(/^#\/?/, "").split("?")[0] ?? "";
+  const raw = hashPath(hash).replace(/^#\/?/, "");
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {

@@ -6,20 +6,18 @@
  * GET /projects/{id}/floor; every control is a command through the API.
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { DAY, fmt } from "@gantry/domain";
+import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
-import { Btn, Empty, Panel, Segmented, StateChip, Status, ViewHead, type Decision, type Tone } from "../ui/primitives";
+import { Btn, Empty, Panel, ViewHead, type Decision } from "../ui/primitives";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
-import { useUI } from "../ui/overlay-context";
 import { pickProject } from "../lib/routes";
+import { hashFor } from "../lib/router";
 import { usePrefs } from "../lib/prefs";
-import { makeStopActions } from "../shell/stopActions";
-import { Belt, useBeltStatus } from "./floor/Belt";
+import { Belt } from "./floor/Belt";
 import { useDrawers } from "./floor/Drawers";
-import { FloorCtx, isLive, since, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
+import { FloorCtx, WoChip, isLive, since, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
 import { useQueryParam } from "./floor/urlState";
-import { useOpenTraveler } from "../shell/useTraveler";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 
@@ -35,95 +33,66 @@ function useTick(ms: number): void {
 
 function Kpis() {
   const ctx = useFloorCtx();
-  const { project: p, wos, now } = ctx;
+  const { wos } = ctx;
   const live = wos.filter((w) => isLive(w) && w.bay !== "declined");
   const waiting = live.filter((w) => w.state === "waiting" && !w.bay);
-  const stuck = live.filter((w) => w.state === "blocked" || w.state === "failed" || w.bay === "sechold" || w.bay === "person").length;
+  const stuck = wos.filter((w) => (w.state === "blocked" || w.state === "failed" || w.state === "killed") && !w.split && !w.bay).length;
   const parked = live.filter((w) => w.bay).length;
   const released = wos.filter((w) => w.state === "done" && !w.split);
-  const shipped7 = released.filter((w) => (w.doneAt ?? 0) > now - 7 * DAY).length;
-  const slots = ctx.replay ? wos.filter((w) => !w.bay && w.state === "running" && ctx.cat.stations[w.station]?.id === "build").slice(0, p.flow.slots).length : ctx.floor.slots.used;
-  const spendPct = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
-  const killed = wos.filter((w) => w.state === "killed").length;
-  const items: Array<{ k: string; v: string; sub: ReactNode; tone?: string }> = [
-    { k: "In flight", v: String(live.length), sub: `${live.filter((w) => w.state === "running").length} running now`, tone: "info" },
-    { k: "At gates", v: String(waiting.length), sub: waiting.length ? `oldest ${fmt.dur(waiting.reduce((m, w) => Math.max(m, now - since(w)), 0))}` : "none waiting", ...(waiting.length ? { tone: "warn" } : {}) },
-    { k: "Stuck", v: String(stuck), sub: "blocked, failed, held, asking", ...(stuck ? { tone: "bad" } : {}) },
+  const oldest = waiting.length ? fmt.dur(waiting.reduce((m, w) => Math.max(m, ctx.now - since(w)), 0)) : "";
+  const facts = useFacts();
+  const items: Array<{ k: string; v: string; sub: ReactNode; tone?: string; title?: string }> = [
+    { k: "In flight", v: String(live.length), sub: "on the line", tone: "info", title: facts },
+    { k: "At gates", v: String(waiting.length), sub: "people to approve", tone: "warn", ...(oldest ? { title: `Oldest has waited ${oldest}` } : {}) },
+    { k: "Stuck", v: String(stuck), sub: "blocked or failed", tone: "bad" },
     { k: "Parked", v: String(parked), sub: "in side bays" },
-    { k: "Released", v: String(released.length), sub: `${shipped7} in 7 days`, tone: "ok" },
+    { k: "Released", v: String(released.length), sub: "done", tone: "ok" },
   ];
-  if (killed) items.push({ k: "Killed", v: String(killed), sub: "work orders stopped", tone: "bad" });
-  const alert = spendPct >= p.budget.alertAt;
   return (
-    <>
     <div className="fstrip" id="floor-kpis">
       {items.map((x) => (
-        <div key={x.k} className={`fs${x.tone ? ` ${x.tone}` : ""} stat-tile`}>
+        <div key={x.k} className={`fs${x.tone ? ` ${x.tone}` : ""}`} title={x.title}>
           <span className="micro">{x.k}</span>
-          <b className="num stat-val">{x.v}</b>
+          <b className="num">{x.v}</b>
           <span className="small muted">{x.sub}</span>
         </div>
       ))}
     </div>
-    <p className="small muted fl-facts" id="floor-facts">
-      <span className="stat-tile"><span className="micro">Coding slots</span> <b className="mono stat-val">{`${slots}/${p.flow.slots}`}</b> {slots >= p.flow.slots ? "all busy" : `${p.flow.slots - slots} free`}</span>
-      <span className="stat-tile"><span className="micro">Spend, month to date</span> <b className={`mono stat-val${alert ? " warn" : ""}`}>{fmt.money0(p.budget.mtd)}</b> {ctx.replay ? "Live figure, not replayed." : <>{`${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)}. `}<a href="#project-config">Set in Project settings</a></>}</span>
-    </p>
-    </>
   );
 }
 
-const statusTone = (cls: string): Tone => (cls.includes("is-killed") ? "block" : cls.includes("is-halted") || cls.includes("is-partial") ? "wait" : cls.includes("is-replay") ? "accent" : "done");
-
-function Header({ replaying, onReplay, view, onView }: { replaying: boolean; onReplay: (on: boolean) => void; view: string; onView: (v: string | null) => void }) {
+/** Coding slots and month-to-date spend (kept from the platform): they ride as the tooltip of the In flight figure, so the strip stays the prototype's five cells. */
+function useFacts(): string {
   const ctx = useFloorCtx();
-  const ui = useUI();
+  const { project: p, wos } = ctx;
+  const slots = ctx.replay ? wos.filter((w) => !w.bay && w.state === "running" && ctx.cat.stations[w.station]?.id === "build").slice(0, p.flow.slots).length : ctx.floor.slots.used;
+  const spendPct = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
+  return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)})${ctx.replay ? ", live figure" : ""}`;
+}
+
+function Header({ view, onView }: { view: string; onView: (v: string | null) => void }) {
+  const ctx = useFloorCtx();
   const me = useMe();
-  const status = useBeltStatus();
   const p = ctx.project;
   const newWo = useNewWorkOrder();
   const dSubmit = useCan("wo.submit", { project: p.id });
-  const dHalt = useCan("line.halt", { project: p.id });
-  const dResume = useCan("line.resume", { project: p.id });
-  const dKill = useCan("kill.project", { project: p.id });
-  const dRestore = useCan("restore.project", { project: p.id });
   if (!me) return null;
-  const stop = makeStopActions(ui, me);
-  const lockIf = (d: Decision | null): Decision | null => (ctx.replay ? REPLAY_LOCK : d);
   const block = projectSubmitBlock(me, p, ctx.repos);
-  const newGuard = lockIf(!dSubmit.allowed && !dSubmit.pending ? dSubmit : block ? { allowed: false, reason: block, needs: "" } : null);
-  const factoryKilled = !!me.factory.killed;
-  const killItem = p.killed
-    ? { label: `Restore ${p.name}`, icon: "power", hint: "after a kill", guard: dRestore.pending ? null : dRestore, onClick: () => stop.restore("project", p.id) }
-    : { label: `Kill ${p.name}`, icon: "st-kill", hint: "stop now", guard: factoryKilled ? { allowed: false, reason: "The whole factory is killed; restore it from Home.", needs: "" } : dKill.pending ? null : dKill, onClick: () => stop.kill("project", p.id) };
-  // One menu for everything that stops or restarts the line. Each item is locked, with the server's reason, for people who may not use it.
-  const lineMenu = (anchor: HTMLElement) => {
-    ui.menu(anchor, `Line control · ${p.name}`, [
-      p.halted
-        ? { label: `Resume ${p.name}`, icon: "play", hint: "whole project", guard: dResume.pending ? null : dResume, onClick: () => void stop.resume(p.id) }
-        : { label: `Halt ${p.name}`, icon: "halt", hint: "whole project", guard: dHalt.pending ? null : dHalt, onClick: () => stop.halt(p.id) },
-      ...ctx.repos.map((r) =>
-        r.halted
-          ? { label: `Resume ${r.name}`, icon: "play", hint: "halted", guard: dResume.pending ? null : dResume, onClick: () => void stop.resumeRepo(r.id) }
-          : { label: `Halt ${r.name}`, icon: "halt", hint: "repo only", guard: dHalt.pending ? null : dHalt, onClick: () => stop.haltRepo(r.id, p.id) },
-      ),
-      { sep: true },
-      killItem,
-    ]);
-  };
-  const stateLabel = p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Line control";
+  const newGuard: Decision | null = ctx.replay ? REPLAY_LOCK : !dSubmit.allowed && !dSubmit.pending ? dSubmit : block ? { allowed: false, reason: block, needs: "" } : null;
   return (
     <div id="floor-head">
       <ViewHead
         title="Floor"
-        kicker={<>{p.name}<span className="vtitle-badge"><Status tone={statusTone(status.cls)} icon={status.icon} id="floor-status">{status.label}</Status></span></>}
+        kicker={p.key}
         sub="Every work order on the production line, station by station. Click a station, a valve or a tag."
         actions={
           <>
-            <Segmented name="floor-view" label="Belt or board" items={[{ id: "belt", label: "Belt" }, { id: "board", label: "Board" }]} value={view} onChange={(v) => onView(v === "board" ? "board" : null)} />
-            <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
-            <Btn label={stateLabel} icon={p.killed ? "st-kill" : "halt"} id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" {...(p.halted || p.killed ? { kind: "danger" as const } : {})} />
-            <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
+            <div className="seg" role="group" aria-label="View">
+              {(["belt", "board"] as const).map((v) => (
+                <Btn key={v} label={v === "belt" ? "Belt" : "Board"} id={`floor-view-${v}`} aria-pressed={view === v} onClick={() => onView(v === "board" ? "board" : null)} />
+              ))}
+            </div>
+            <Btn label="Submit work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
           </>
         }
       />
@@ -133,7 +102,6 @@ function Header({ replaying, onReplay, view, onView }: { replaying: boolean; onR
 
 function BoardPanel() {
   const ctx = useFloorCtx();
-  const open = useOpenTraveler();
   const line = ctx.project.flow.order.map((id) => ctx.cat.stations.find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s && !!ctx.project.flow.stations[s.id]?.enabled);
   return (
     <Panel title="Board" flush>
@@ -145,11 +113,11 @@ function BoardPanel() {
               <h3><span>{`${s.no} ${s.name}`}</span><span>{list.length}</span></h3>
               <div className="cards">
                 {list.length ? list.map((w) => (
-                  <div key={w.id} className="card" data-wo={w.id}>
-                    <div className="row"><Btn label={w.id} kind="ghost" small id={`floor-tok-${w.id}`} onClick={() => open(w.id)} /><span className="spacer" /><StateChip state={w.state} /></div>
+                  <a key={w.id} className="card" data-wo={w.id} id={`floor-tok-${w.id}`} href={hashFor("record", w.id, ctx.project.id)}>
+                    <div className="row"><span className="mono small">{w.id}</span><span className="spacer" /><WoChip w={w} /></div>
                     <div>{w.title}</div>
                     <div className="small muted">{`${ctx.project.name} · ${w.priority}`}</div>
-                  </div>
+                  </a>
                 )) : <div className="small muted">Empty</div>}
               </div>
             </div>
@@ -171,12 +139,11 @@ function FloorBody({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <Header replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} view={view} onView={setView} />
+      <Header view={view} onView={setView} />
       <Kpis />
-      <p className="muted small fl-live-note">{rp ? "Replaying recorded history. Nothing here changes the live floor." : "Live: changes from other people and the factory appear as they happen."}</p>
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
-      {view === "board" ? <BoardPanel /> : <Belt onStation={drawers.station} onGate={drawers.gate} onOut={drawers.out} />}
-    </>
+      {view === "board" ? <BoardPanel /> : <Belt replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} onStation={drawers.station} onGate={drawers.gate} onOut={drawers.out} onWo={drawers.wo} />}
+          </>
   );
 }
 

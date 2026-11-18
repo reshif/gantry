@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAgents } from "../../api/queries";
-import { gateOfStation, isLive, stationIdx, gateStateOf, useFloorCtx, type FWo } from "./kit";
+import { waitingGateId, gateOfStation, isLive, stationIdx, gateStateOf, useFloorCtx, type FWo } from "./kit";
 
 const fit = (t: string, px: number, cw: number): string => {
   const n = Math.max(3, Math.floor(px / cw));
@@ -44,16 +44,19 @@ function Chevrons({ pts, id }: { pts: Pt[]; id: string }) {
 }
 
 function Tag({ w, x, y, tw, th, detail, onOpen }: { w: FWo; x: number; y: number; tw: number; th: number; detail: boolean; onOpen: (id: string) => void }) {
+  const ctx = useFloorCtx();
   const kind = tagKind(w);
   const cy = y + th / 2;
+  const gate = kind === "wait" ? waitingGateId(ctx, w) : null;
   const word = tagWord(w);
+  const wordFull = gate ? `${word} ${gate}` : word;
   const open = () => onOpen(w.id);
   const idText = detail || tw >= 72 ? w.id : w.id.replace(/^WO-/, "");
-  const wordW = word.length * 6.6 + 8;
+  const wordW = wordFull.length * 6.6 + 8;
   const tx = x + 22 + w.id.length * 6.6 + 8;
   return (
-    <g className={`f-tag ${kind}`} tabIndex={0} role="button" aria-label={`${w.id} ${w.title}, ${word}`} data-wo={w.id} id={`floor-tok-${w.id}`} onClick={open} onKeyDown={keyOnEnter(open)}>
-      <title>{`${w.id} · ${w.title}\n${w.state} · ${w.priority}`}</title>
+    <g className={`f-tag ${kind}`} tabIndex={0} role="button" aria-label={`${w.id} ${w.title}, ${wordFull}`} data-wo={w.id} id={`floor-tok-${w.id}`} onClick={open} onKeyDown={keyOnEnter(open)}>
+      <title>{`${w.id} · ${w.title}\n${gate ? `Waiting at gate ${gate}` : w.state} · ${w.priority} · ${ctx.project.name}`}</title>
       <rect x={x} y={y} width={tw} height={th} rx={2} className="f-tb" />
       {kind === "bad" ? <rect x={x} y={y} width={tw} height={th} rx={2} fill="url(#hatch)" pointerEvents="none" /> : null}
       <rect x={x} y={y} width={17} height={th} rx={2} className="f-bd" />
@@ -65,7 +68,7 @@ function Tag({ w, x, y, tw, th, detail, onOpen }: { w: FWo; x: number; y: number
       {detail ? (
         <>
           <text x={tx} y={cy + 4} className="f-ttl">{fit(w.title, tw - (tx - x) - wordW - 6, 6.6)}</text>
-          <text x={x + tw - 6} y={cy + 4} textAnchor="end" className={`f-st ${kind}`}>{word}</text>
+          <text x={x + tw - 6} y={cy + 4} textAnchor="end" className={`f-st ${kind}`}>{wordFull}</text>
         </>
       ) : null}
     </g>
@@ -216,7 +219,7 @@ export function Schematic({ detail, route, onStation, onGate, onWo, onOut }: { d
     const tgw = detail ? bw - 16 : (bw - 16 - (tcols - 1) * 4) / tcols;
     blocks.push(
       <g key={s.id} className={bypassed ? "f-bypass" : undefined} data-station={s.id}>
-        <g role="button" tabIndex={0} id={`floor-st-${s.id}`} aria-label={`${s.no} ${s.name}: ${list.length} in progress, limit ${lim}${over ? ", over limit" : ""}, agent ${ag?.name ?? "none"}. Open station details`} style={{ cursor: "pointer" }} onClick={open} onKeyDown={keyOnEnter(open)}>
+        <g role="button" tabIndex={0} id={`floor-st-${s.id}`} aria-label={`${s.name}: ${list.length} work order${list.length === 1 ? "" : "s"}, limit ${lim}${over ? ", over limit" : ""}, agent ${ag?.name ?? "none"}`} style={{ cursor: "pointer" }} onClick={open} onKeyDown={keyOnEnter(open)}>
           <title>{`${s.name} · ${s.purpose}`}</title>
           <rect x={q.x} y={q.y} width={bw} height={BH} className={`f-block${bad ? " jam" : over ? " over" : ""}`} />
           <rect x={q.x} y={q.y} width={bw} height={28} className="f-head" />
@@ -280,6 +283,7 @@ export function Schematic({ detail, route, onStation, onGate, onWo, onOut }: { d
       valves.push(
         <g key={`v-${gate.id}`} className={`f-valve${kindCls}${route && !route.includes(s.id) ? " f-bypass" : ""}`} data-gate={gate.id} id={`floor-gate-${gate.id}`} tabIndex={0} role="button" style={{ cursor: "pointer" }} aria-label={`Gate ${gate.label} ${gate.name}, ${gate.kind}, ${gs.state === "off" ? "off" : `${wcount} waiting`}`} onClick={openG} onKeyDown={keyOnEnter(openG)}>
           <title>{label}</title>
+          <rect className="f-hit" x={vx - 26} y={vy - 24} width={vertical ? 190 : 52} height={vertical ? 48 : 64} fill="transparent" pointerEvents="all" />
           {wcount ? <circle cx={vx} cy={vy} r={13} className="f-pulse" /> : null}
           <line x1={vx} x2={vx} y1={vy - 9} y2={vy - 19} stroke="var(--ink2)" strokeWidth={1.5} />
           <line x1={vx - 6} x2={vx + 6} y1={vy - 19} y2={vy - 19} stroke="var(--ink2)" strokeWidth={2} />
