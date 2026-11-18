@@ -9,6 +9,7 @@ import { useCan } from "../api/can";
 import { ops, type StopScope } from "../api/ops";
 import { useKillImpact, useMe } from "../api/queries";
 import type { CommandRefusal } from "../api/client";
+import { CrIcon } from "../ui/cr";
 import { Dialog } from "../ui/Overlay";
 import { useUI } from "../ui/overlay-context";
 import { Field, LockNote } from "../ui/primitives";
@@ -37,8 +38,10 @@ export function EmergencyStopDialog({ scope, id, onClose }: { scope: "factory" |
   const submit = async () => {
     if (busy) return;
     const next: typeof err = {};
-    if (reason.trim().length < 10) next.reason = "Give a reason of at least 10 characters.";
-    if (!/^STOP$/.test(confirm)) next.confirm = "Type STOP in capitals.";
+    if (!reason.trim()) next.reason = "Reason is required.";
+    else if (reason.trim().length < 10) next.reason = "Give a reason of at least 10 characters.";
+    if (!confirm.trim()) next.confirm = "Type STOP to confirm is required.";
+    else if (!/^STOP$/.test(confirm)) next.confirm = "Type STOP in capitals.";
     setErr(next);
     if (next.reason || next.confirm) return;
     setBusy(true);
@@ -62,6 +65,7 @@ export function EmergencyStopDialog({ scope, id, onClose }: { scope: "factory" |
         <div className="form-grid" id="emergency-stop">
           <LockNote decision={d.pending ? null : d} what="The emergency stop" />
           <div className="banner bad" role="note">
+            <CrIcon name="stop" />
             <div className="grow">{`${n === undefined ? "Work orders" : `${n} work order${n === 1 ? "" : "s"}`} in flight will pause at their current station. Nothing is deleted.`}</div>
           </div>
           <Field label="Reason" required hint="Recorded in the audit ledger." error={err.reason}>

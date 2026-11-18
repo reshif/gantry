@@ -552,7 +552,7 @@ describe("models catalog in the prototype layout", () => {
     mount();
     await byId("mc-table");
     expect([...document.querySelectorAll("#md-stats .label")].map((x) => x.textContent)).toEqual(["Enabled", "Needs a price", "Spend, 30 days", "Fallbacks fired"]);
-    expect([...document.querySelectorAll("#mc-table thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim())).toEqual(["Model", "Tier", "Context", "In / out per Mtok", "Used at", "Enabled"]);
+    expect([...document.querySelectorAll("#mc-table thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193\u2195]/g, "").trim())).toEqual(["Model", "Tier", "Context", "In / out per Mtok", "Used at", "Enabled"]);
     expect(document.getElementById("md-discover")).toBeTruthy();
   });
   it("offers Set price for a model without one, rejects a price of zero and publishes a positive one", async () => {

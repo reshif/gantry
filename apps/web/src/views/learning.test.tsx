@@ -240,7 +240,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     expect(f1.textContent).toContain("Spec agent");
     expect(f1.textContent).toContain("Open");
     const f3 = await byId("ln-f-F-3");
-    expect(f3.textContent).toContain("Addressed");
+    expect(f3.textContent).toContain("Triaged");
     expect(f3.querySelector("a[href*='record']") ?? f3.querySelector(".mono")).not.toBeNull();
     expect(Array.from(document.querySelectorAll("#ln-f-table tbody tr")).map((e) => e.id)).toEqual(["ln-f-F-1", "ln-f-F-2", "ln-f-F-3"]);
     fireEvent.change(await byId("ln-search"), { target: { value: "zzz" } });

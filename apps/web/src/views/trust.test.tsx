@@ -364,9 +364,6 @@ describe("Trust screen: matrix", () => {
     await waitFor(() => expect(document.querySelector("[role=dialog], .dlg")!.textContent).toContain("Propose a change"));
     expect(document.body.textContent).toContain("New level");
     expect(document.body.textContent).toContain("Submit proposal");
-    fireEvent.click(await byId("tr-mx-ladder"));
-    await byId("tr-matrix");
-    expect(window.location.search).toContain("tab=ladder");
   });
   it("keeps the ladder link out of the propose dialog and the runtime switch out of the ceilings list", async () => {
     setup();

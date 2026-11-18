@@ -267,7 +267,7 @@ describe("Floor: fidelity round 2", () => {
     await screen.findByRole("button", { name: /Line control/ });
   };
 
-  it("keeps the toolbar to search and the three selects; the line controls sit in the belt legend row", async () => {
+  it("keeps the toolbar to search and the three selects; the line controls sit with the header actions", async () => {
     await ready();
     expect(document.getElementById("floor-extra")).toBeNull();
     expect(document.querySelector(".ph")?.textContent).not.toMatch(/Running|live/);
@@ -275,10 +275,10 @@ describe("Floor: fidelity round 2", () => {
     expect(document.querySelector(".fl-tools #floor-new-wo")).toBeNull();
     expect(document.querySelector(".fl-tools .fl-extra")).toBeNull();
     expect(document.querySelectorAll(".fl-tools select").length).toBe(3);
-    expect(document.querySelector(".belt-legend #floor-line")).toBeTruthy();
-    expect(document.querySelector(".belt-legend #floor-new-wo")).toBeTruthy();
-    expect(document.querySelector(".belt-legend input[name=floor-mode]")).toBeTruthy();
-    expect(document.querySelectorAll(".ph .acts .btn").length).toBe(2);
+    expect(document.querySelector(".belt-legend #floor-line")).toBeNull();
+    expect(document.querySelector(".ph .acts #floor-line")).toBeTruthy();
+    expect(document.querySelector(".ph .acts #floor-new-wo")).toBeTruthy();
+    expect(document.querySelector(".ph .acts input[name=floor-mode]")).toBeTruthy();
   });
 
   it("names each gate header by its belt label, never the raw catalogue id", async () => {

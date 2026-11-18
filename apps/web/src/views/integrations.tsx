@@ -19,7 +19,7 @@ import { AddIntegration } from "./integrations/AddDialog";
 import { InstanceDrawer, RemoveIntegration, TypeDrawer } from "./integrations/Instance";
 import { CatalogueTab, CustomTab } from "./integrations/Tabs";
 import { Health, statusOf, useIntegrationData, type TypeRow } from "./integrations/kit";
-import { NothingMatches, agoShort, oneOf, sortFrom, useUrlState } from "./connect/kit";
+import { agoShort, oneOf, sortFrom, useUrlState } from "./connect/kit";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 const STATUSES = ["healthy", "degraded", "failing", "offline", "disabled"] as const;
@@ -94,7 +94,7 @@ export default function IntegrationsView() {
         onPage={(p) => url.set({ page: String(p) })}
         sort={sortFrom(url.v.sort, url.v.dir, "name", 1)}
         onSort={(s) => url.set({ sort: s.key, dir: s.dir === 1 ? "asc" : "desc", page: "0" })}
-        empty={all.length && filtered ? undefined : { title: "Nothing connected", text: "Add an integration to start." }}
+        empty={all.length && filtered ? { title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="clear-filters" onClick={() => url.clear("view")} /> } : { title: "Nothing connected", text: "Add an integration to start." }}
         columns={[
           { key: "name", label: "Integration", sort: (i) => i.name.toLowerCase(), render: (i) => <a className="rl ell" id={`int-open-${i.id}`} href="#integrations" onClick={(e) => { e.preventDefault(); openInstance(i.id); }}>{i.name}</a> },
           { key: "type", label: "Type", sort: (i) => i.type, hideSmall: true, render: (i) => <span className="tag">{i.type}</span> },
@@ -103,7 +103,6 @@ export default function IntegrationsView() {
           { key: "status", label: "Status", sort: (i) => statusOf(i), render: (i) => <Health st={statusOf(i)} /> },
         ]}
       />
-      {all.length && filtered && !rows.length ? <div className="card"><NothingMatches onClear={() => url.clear("view")} /></div> : null}
     </>
   );
 

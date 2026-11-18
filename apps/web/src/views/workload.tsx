@@ -187,6 +187,7 @@ export default function WorkloadView() {
                   </tbody>
                 </table>
               </div>
+              <div className="swipe">Swipe sideways for more →</div>
               {load.partial ? <p className="muted small" style={{ padding: "8px 12px", margin: 0 }} role="status">Some work lists could not be read, so these counts may be low.</p> : null}
             </Card>
           </div>

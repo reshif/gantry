@@ -93,7 +93,7 @@ describe("System health view", () => {
     expect(document.getElementById("sys-refresh")).toBeNull();
     fireEvent.click(await byId("sys-tab-outbox"));
     expect(document.querySelector("tr[data-key='ob-1']")?.textContent).toContain("HTTP 500 from slack");
-    expect([...document.querySelectorAll("#sys-dead th")].map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["ID", "Topic", "Error", "Attempts", ""]);
+    expect([...document.querySelectorAll("#sys-dead th")].map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["ID", "Topic", "Error", "Attempts", ""]);
     fireEvent.click(await byId("sys-discard-ob-1"));
     await waitFor(() => expect(document.body.textContent).toContain("Discard ob-1?"));
     expect(document.body.textContent).toContain("The message is dropped and recorded in the audit ledger.");

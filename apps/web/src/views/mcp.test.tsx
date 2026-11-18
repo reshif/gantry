@@ -135,7 +135,7 @@ describe("MCP servers screen", () => {
     expect(document.getElementById("mcp-row-mcp-chg-0001")).toBeTruthy();
     expect(document.body.textContent).toContain("1 of 2");
     fireEvent.change(await byId("mcp-q"), { target: { value: "zzz" } });
-    fireEvent.click(await byId("clear-filters"));
+    fireEvent.click(await byId("mcp-clear"));
     await waitFor(() => expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeTruthy());
   });
 

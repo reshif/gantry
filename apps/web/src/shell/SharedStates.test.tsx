@@ -11,10 +11,10 @@ import { SignIn, emailProblem, signInFootnote } from "./SignIn";
 const render = (ui: ReactElement) => rtlRender(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>);
 
 describe("ds round 3", () => {
-  it("the forbidden state names the role and says the permission is not available", () => {
+  it("the forbidden state names the role and names a sample permission", () => {
     render(<SharedStatePage kind="forbidden" eyebrow="x" title="y" />);
     expect(screen.getByText(/Your role \(.+\) cannot open this area\./)).toBeTruthy();
-    expect(screen.getByText(/permission name: not available/)).toBeTruthy();
+    expect(screen.getByText(/people\.manage/)).toBeTruthy();
   });
   it("dialogs paint above their scrim so the pointer reaches them", () => {
     const css = readFileSync("src/styles/base.css", "utf8");

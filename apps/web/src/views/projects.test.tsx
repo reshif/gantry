@@ -476,7 +476,7 @@ describe("Project config", () => {
     fireEvent.click(await byId("pcf-tab-danger"));
     fireEvent.click(await byId("pcf-archive"));
     const input = await waitFor(() => { const i = document.querySelector<HTMLInputElement>(".dlg input.input"); if (!i) throw new Error("no input"); return i; });
-    fireEvent.change(input, { target: { value: "PAY" } });
+    fireEvent.change(input, { target: { value: "Payments Platform" } });
     fireEvent.submit(document.querySelector(".dlg-form")!);
     await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path.endsWith("/archive"))).toBeTruthy());
     const post = calls.find((c) => c.path.endsWith("/archive"))!;

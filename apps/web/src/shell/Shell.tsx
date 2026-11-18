@@ -18,7 +18,8 @@ import { makeStopActions } from "./stopActions";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StatusBar } from "./StatusBar";
-import { NotFoundPage, StatePreview, isPreviewState } from "./StatePreview";
+import { NotFoundPage } from "./StatePreview";
+import { SHARED_STATES, SharedStatePage, protoEyebrow, type SharedStateKind } from "./SharedStates";
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
@@ -155,8 +156,8 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
             </div>
-          ) : ready && isPreviewState(loc.state) ? (
-            <StatePreview state={loc.state} eyebrow={def?.group ?? ""} title={def?.title ?? ""} />
+          ) : ready && (SHARED_STATES as readonly string[]).includes(loc.state ?? "") ? (
+            <SharedStatePage kind={loc.state as SharedStateKind} eyebrow={protoEyebrow(routeId, def?.group ?? "")} title={def?.title ?? ""} />
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
           ) : null}

@@ -31,7 +31,7 @@ const NOW = Date.parse("2026-01-15T10:00:00Z");
 /** prototype route -> real hash (the same table, in prose, is apps/web/fidelity/MAP.md) */
 const P = "/#/p/payments";
 export const ROUTE_MAP = {
-  home: "/#home", inbox: "/#inbox", workspace: "/#workspace", console: "/#workspace", conversations: `${P}/conversations`, projects: "/#projects",
+  home: "/#home", inbox: "/#inbox", workspace: "/#workspace", console: "/#console", conversations: `${P}/conversations`, projects: "/#projects",
   floor: `${P}/floor`, "work-orders": `${P}/work-orders`, record: `${P}/record/WO-1004`, traveler: `${P}/traveler/WO-1004`, dossier: `${P}/dossier/WO-1004`, changes: `${P}/changes/WO-1004`,
   onboarding: `${P}/onboarding`, "project-config": `${P}/project-config`,
   agents: "/#agents", skills: "/#skills", models: "/#models", evals: "/#evals", trust: "/#trust", learning: "/#learning",

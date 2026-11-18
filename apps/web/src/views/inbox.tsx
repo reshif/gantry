@@ -119,8 +119,8 @@ export default function InboxView() {
   const [tab, setTab] = useRouteState("tab", "approvals");
   const [search, setSearch] = useRouteState("q", "");
   const [type, setType] = useRouteState("type", "all");
-  const [sortKey, setSortKey] = useRouteState("sort", "");
-  const [sortDir, setSortDir] = useRouteState("dir", "asc");
+  const [sortKey] = useRouteState("sort", "");
+  const [sortDir] = useRouteState("dir", "asc");
   useClearRouteStateOnLeave(KEYS);
   const override = useStateOverride();
   const approvals = items.filter((i) => i.group === "gate" || i.group === "onboarding" || i.group === "other");
@@ -159,8 +159,8 @@ export default function InboxView() {
                 neutralArrow
                 pager
                 sort={sort}
-                onSort={(s) => { setSortKey(s.key); setSortDir(s.dir === -1 ? "desc" : "asc"); }}
-                empty={approvals.length ? { title: "Nothing matches these filters", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="inbox-reset" onClick={clear} /> } : { title: "Inbox zero", text: "Nothing is waiting for you." }}
+                onSort={(s) => setRouteState({ sort: s.key, dir: s.dir === -1 ? "desc" : "asc" })}
+                empty={{ title: "Inbox zero", text: approvals.length ? "Nothing matches these filters. Try clearing a filter or searching for something else." : "Nothing is waiting for you.", ...(approvals.length ? { action: <Btn label="Clear filters" id="inbox-reset" onClick={clear} /> } : {}) }}
                 columns={[
                   { key: "title", label: "Request", sort: (i) => String(titleOf(i).title), render: (i) => { const t = titleOf(i); return (<><ReviewLink it={i}>{t.title}</ReviewLink><span className="dim ell" style={{ fontSize: 12 }}>{t.sub}</span></>); } },
                   { key: "type", label: "Type", sort: (i) => typeOf(i), render: (i) => { const t = titleOf(i); return <Chip text={t.type} cls={t.tone} />; } },

@@ -131,7 +131,7 @@ describe("Agents screen", () => {
     setup();
     mount(<AgentsView />);
     const row = await byId("ag-row-ag-build");
-    const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim());
+    const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193\u2195]/g, "").trim());
     expect(heads).toEqual(["Agent", "Station", "Model", "Autonomy", "Version", "Eval", "Runs 30d", "Status"]);
     expect(row.textContent).toContain("Builder");
     expect(row.textContent).toContain("Build");
@@ -194,7 +194,7 @@ describe("Agents screen", () => {
     await waitFor(() => expect(window.location.search).toContain("tab=guardrails"));
     expect(document.getElementById("ag-maxdiff")).toBeTruthy();
     fireEvent.click(await byId("ag-talk"));
-    expect(window.location.hash).toBe("#conversations");
+    expect(window.location.hash).toBe("#/p/payments/conversations");
     window.location.hash = "#agents/ag-build";
     fireEvent.click(await byId("ag-back-link"));
     expect(window.location.hash).toBe("#agents");
@@ -204,7 +204,7 @@ describe("Agents screen", () => {
     setup();
     mount(<AgentsView />);
     const row = await byId("ag-row-ag-build");
-    const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim());
+    const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193\u2195]/g, "").trim());
     expect([...row.querySelectorAll("td")].map((c) => c.getAttribute("data-label"))).toEqual(heads);
   });
 
@@ -546,7 +546,7 @@ describe("Skills screen", () => {
     const calls = setup({ "PUT /api/v1/skills/sk-a/projects": () => ok() });
     mount(<SkillsView />);
     const row = await byId("sk-row-sk-a");
-    const heads = [...document.querySelectorAll("#sk-lib thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim());
+    const heads = [...document.querySelectorAll("#sk-lib thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193\u2195]/g, "").trim());
     expect(heads).toEqual(["Skill", "Station", "Used by", "Version", "Uses", "Enabled"]);
     expect(row.textContent).toContain("Test design");
     expect(row.textContent).toContain("Build");

@@ -12,7 +12,7 @@ import { Card, CrIcon } from "../../ui/cr";
 import { Field, Select, Table } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { setUrlParams } from "../urlState";
-import { code, rerender, type CellOut } from "./kit";
+import { code, type CellOut } from "./kit";
 
 interface Target { agent: { id: string; name: string }; project: Project; cells: CellOut[]; switchOn: boolean }
 
@@ -122,7 +122,6 @@ export function MatrixTab({ cells, projects, agents, switchOn, demotions = 0 }: 
       <style>{".mx-swipe{display:none;font:500 11px var(--mono);color:var(--text-3);padding:6px 2px 0}@media (max-width:760px){.mx-swipe{display:block}}"}</style>
       <div className="mx-swipe">Swipe sideways for more {"\u2192"}</div>
       <div className="row dim mono" style={{ marginTop: 12, fontSize: 11 }}><span>L0 every output reviewed</span><span>{"·"}</span><span>L2 sample reviewed</span><span>{"·"}</span><span>L4 runs unattended, audited</span>
-        <span>{"·"}</span><a href="#trust" id="tr-mx-ladder" onClick={(e) => { e.preventDefault(); setUrlParams({ tab: "ladder" }); rerender(); }}>Open the ladder</a>
         {demotions ? <><span>{"·"}</span><a href="#trust" id="tr-demos-link" onClick={(e) => { e.preventDefault(); setUrlParams({ tab: "demotions" }); }}>{`${demotions} demotion${demotions === 1 ? "" : "s"} in 7 days`}</a></> : null}
       </div>
     </Card>

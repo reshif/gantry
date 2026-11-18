@@ -18,7 +18,7 @@ import { ScopeDialog } from "./mcp/Scope";
 import { ReapproveDialog } from "./mcp/Reapprove";
 import { Health, authLabel, dec } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
-import { NothingMatches, oneOf, useUrlState } from "./connect/kit";
+import { oneOf, useUrlState } from "./connect/kit";
 
 export default function McpView() {
   const ui = useUI();
@@ -93,7 +93,7 @@ export default function McpView() {
                 );
               })}
             </div>
-          ) : <div className="card"><NothingMatches onClear={() => url.clear("view", "server")} /></div>}
+          ) : <div className="grid g3" id="mcp-none" />}
         </>
       )}
     </Async>

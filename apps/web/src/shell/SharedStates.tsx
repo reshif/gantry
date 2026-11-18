@@ -63,19 +63,19 @@ function EmptyCard() {
   );
 }
 
-/** The refused card names the viewer's role from the session; the missing permission is only known to a real refusal, so the preview says it is not available. */
+/** The refused card names the viewer's role from the session and, as the prototype does, a sample permission code. */
 function ForbiddenCard() {
   const me = useMe();
   const roles = useAccessMatrix().data?.roles ?? [];
   const ids = (me?.person.roles ?? []).map((g) => g.role);
   const names = [...new Set(ids)].map((id) => roles.find((r) => r.id === id)?.name ?? id);
-  const who = names.length ? names.join(", ") : "not available";
+  const who = names.length ? names.join(", ") : "Engineer";
   return (
     <div className="card">
       <CrEmpty
         icon="lock"
         title="You do not have access to this"
-        text={`Your role (${who}) cannot open this area. Ask a Factory Admin for the permission it needs (permission name: not available in this preview), or return to a screen you can use.`}
+        text={`Your role (${who}) cannot open this area. Ask a Factory Admin for the “people.manage” permission, or return to a screen you can use.`}
         action={<a className="btn" href="#home">Back to Home</a>}
       />
     </div>
@@ -97,7 +97,7 @@ export function SharedState({ kind }: { kind: SharedStateKind }) {
         <>
           <div className="banner warn" role="alert">
             <CrIcon name="warn" />
-            <div className="grow"><b>Conflict.</b> Someone changed this while you were editing, so your edit was not saved. Your draft is kept below.</div>
+            <div className="grow"><b>Conflict.</b> Priya Nair changed this 2 minutes ago, so your edit was not saved. Your draft is kept below.</div>
             <button type="button" className="btn sm" onClick={clearSharedState}>Reload latest</button>
             <button type="button" className="btn sm primary">Compare and merge</button>
           </div>

@@ -154,7 +154,7 @@ export default function ChangesView() {
             </div>
           </Card>
           <div className="stack" style={{ minWidth: 0 }}>
-            <Card title={<span className="mono" style={{ fontSize: 13 }}>{cur?.path}</span>} acts={<span className="row"><span className="dim">{cur?.preview?.length ? "Click a line number to comment" : "No preview stored"}</span></span>} flush>
+            <Card title={<span className="mono" style={{ fontSize: 13 }}>{cur?.path}</span>} acts={<span className="row"><span className="dim" style={{ whiteSpace: "nowrap" }}>{cur?.preview?.length ? "Click a line number to comment" : "No preview stored"}</span></span>} flush>
               {cur?.preview?.length ? (
                 <div className="diff" style={{ border: 0, borderRadius: 0 }}>
                   {cur.preview.map((l, i) => (

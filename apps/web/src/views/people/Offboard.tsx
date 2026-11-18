@@ -100,7 +100,7 @@ export function DeactivateForm({ p, projects, perm, onDone, registerSubmit }: {
         setRule(r.rule ? `${r.rule.name ? `${r.rule.name} ` : ""}[${r.rule.id}]` : "");
         return;
       }
-      outcome(r, `${p.name} is deactivated.`);
+      outcome(r, `${p.name} deactivated`);
       onDone({ keep, work: r.openWork ?? null });
     })();
   });

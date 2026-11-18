@@ -2,7 +2,7 @@
  * Sign-in screen (legacy auth.js). Sign-in is delegated to the identity provider: the buttons leave
  * the SPA for /auth/login. Demo accounts appear only when the API config says demoAccounts is on.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PublicConfig } from "../api/types";
 import { loginUrlWithReturn as loginUrl } from "../lib/session/returnTo";
 import { DEMO_ACCOUNTS } from "../lib/demo";
@@ -60,6 +60,7 @@ function MfaSetup() {
 }
 
 export function SignIn({ config, error, needs }: { config: PublicConfig | null; error?: string | null; needs?: string | null }) {
+  useEffect(() => { document.title = "Sign in · Gantry Control Room"; }, []);
   const demo = !!config?.demoAccounts;
   const accounts = config?.demoAccountList?.length ? config.demoAccountList : DEMO_ACCOUNTS;
   const go = (method: "sso" | "github", email?: string) => window.location.assign(loginUrl(method, email));

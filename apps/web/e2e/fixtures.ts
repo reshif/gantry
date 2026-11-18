@@ -21,7 +21,7 @@ const project = (id: string, name: string) => ({ id, name, key: id.slice(0, 3).t
 
 function makeMe(id: string, name: string, roles: Array<{ role: string; scope: string }>): Me {
   return {
-    person: { id, name, title: "Test persona", email: `${id}@example.test`, teams: ["platform"], roles, status: "active", oncall: false, github: id, away: null },
+    person: { id, name, title: "Head of Engineering", email: `${id}@example.test`, teams: ["platform"], roles, status: "active", oncall: false, github: id, away: null },
     session: { id: `s-${id}`, person: id, method: "sso", device: "e2e", ip: "127.0.0.1", started: 0, lastSeen: 0, revoked: false },
     csrf: "csrf-e2e",
     projects: [project("payments", "Payments Platform"), project("risk", "Risk Engine")],

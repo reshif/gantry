@@ -11,7 +11,7 @@ describe("DataTable prototype pager and selection", () => {
     expect(screen.getByText("1 / 3")).toBeTruthy();
     fireEvent.click(screen.getByText("Next"));
     expect(screen.getByRole("status").textContent).toBe("13–24 of 30");
-    fireEvent.click(screen.getByLabelText("Select all rows on this page"));
+    fireEvent.click(screen.getByLabelText("Select page"));
     expect((screen.getByLabelText("Select R13") as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByText("Prev"));
     expect((screen.getByLabelText("Select R1") as HTMLInputElement).checked).toBe(false);

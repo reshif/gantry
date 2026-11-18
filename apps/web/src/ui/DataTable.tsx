@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage, sortHints, neutralArrow, sortGlyphs, idleGlyph, sortHint }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage }: {
   /** Show the prototype's dim up/down arrow on sortable headers that are not the active sort. */
   neutralArrow?: boolean;
   /** Additive: show a faint two-way arrow on every sortable column that is not the current sort (Control Room prototype). */
@@ -162,14 +162,14 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           {caption ? <caption className="sr-only">{caption}</caption> : null}
           <thead>
             <tr>
-              {selectable ? <th scope="col" className="cbcol"><input type="checkbox" className="cb" aria-label="Select all rows on this page" checked={allPicked} onChange={toggleAll} /></th> : null}
+              {selectable ? <th scope="col" className="cbcol"><input type="checkbox" className="cb" aria-label="Select page" checked={allPicked} onChange={toggleAll} /></th> : null}
               {columns.map((c) => {
                 const active = cur?.key === c.key;
                 return (
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={{ ...(c.width ? { width: c.width } : {}), ...(c.align === "center" ? { textAlign: "center" as const } : {}) }} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
-                      <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : (neutralArrow || sortHints || sortGlyphs || idleGlyph || sortHint) ? <span className="th-arrow-idle">↕</span> : ""}</span>
+                      <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} title={`Sort by ${c.label}`} onClick={() => pick(c.key)}>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : <span className="th-arrow-idle">↕</span>}</span>
                       </button>
                     ) : c.label}
                   </th>
@@ -185,6 +185,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                 <tr
                   key={key}
                   data-key={key}
+                  {...(picked.has(key) ? { className: "sel" } : {})}
                   {...(rowId ? { id: rowId(r) } : {})}
                   {...(action ? { onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest(INTERACTIVE)) return; if (onRow) onRow(r); else if (rowHref) window.location.assign(rowHref(r)); } } : {})}
                 >

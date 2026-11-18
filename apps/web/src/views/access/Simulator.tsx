@@ -139,7 +139,7 @@ export function Simulator({ roles, people, actions, sim, setSim, evaluated, onEv
                     </>
                   );
                 })()}
-                {rd.needs && !rd.allowed ? <span>{` To allow it: ${rd.needs}.`}</span> : null}
+                
               </div>
             </div>
             <div className="decision-rule" style={{ marginTop: 10 }}>

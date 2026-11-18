@@ -167,7 +167,7 @@ function whenText(p: Policy): string {
     const hours = w.from === "00:00" && w.to === "24:00" ? "" : `${w.from}–${w.to}`;
     text = [days, hours].filter(Boolean).join(" ") || "always";
   }
-  return p.oncallOnly ? `${text}, on call` : text;
+  return p.oncallOnly && !p.when && !p.where.freeze ? text : p.oncallOnly ? `${text}, on call` : text;
 }
 /** The projects a policy covers, by id, or "all". */
 const scopeText = (p: Policy): string => (p.where.freeze || !p.where.projects?.length ? "all" : p.where.projects.join(", "));

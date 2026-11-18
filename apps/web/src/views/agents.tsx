@@ -161,18 +161,20 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
     { id: "skills", label: "Skills" }, { id: "guardrails", label: "Guardrails" }, { id: "evals", label: "Evals" },
   ];
   const tp: TabProps = { a, d, ro, perm, projects, policies, edit };
-  const body = tab === "instructions" ? <><InstructionsCard a={a} d={d} ro={ro} edit={edit} onSaveVersion={saveVersion} saving={draft.saving || draft.syncing} /><InstructionsTab {...tp} /><VersionsTab a={a} dirty={dirty} perm={perm} /></>
+  const body = tab === "instructions" ? <><InstructionsCard a={a} d={d} ro={ro} edit={edit} onSaveVersion={saveVersion} saving={draft.saving || draft.syncing} /><More label="Layers and versions" id="ag-more-instr"><InstructionsTab {...tp} /><VersionsTab a={a} dirty={dirty} perm={perm} /></More></>
     : tab === "tools" ? <ToolsTab {...tp} />
     : tab === "model" ? <ModelTab {...tp} />
-    : tab === "skills" ? <><SkillsListTab {...tp} /><SkillsTab {...tp} /></>
+    : tab === "skills" ? <><SkillsListTab {...tp} /><More label="Skill pins and MCP servers" id="ag-more-skills"><SkillsTab {...tp} /></More></>
     : tab === "guardrails" ? <>
         <GuardrailsTab {...tp} />
+        <More label="More guardrails, status, trust and history" id="ag-more-guard">
         <FallbackCard {...tp} /><ConfigTab {...tp} /><OverridesTab {...tp} />
         <Card title="Agent status" hint={paused ? "Paused: its stations queue work until it resumes." : "Pause it to stop new work reaching this agent."}>
           <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving\u2026")} onClick={toggleStatus} />
         </Card>
         <TrustStrip a={a} projects={projects} /><TrustTab a={a} projects={projects} />
         <div className="ag-hist"><EntityHistory type="agent" id={a.id} limit={40} /></div>
+        </More>
       </>
     : tab === "evals" ? <><EvalsTab a={a} /><Btn label="Open the eval suite" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} /></>
     : <OverviewTab {...tp} onTab={setTab} />;
@@ -198,6 +200,11 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
       ) : null}
     </Page>
   );
+}
+
+/** Working features beyond the prototype's card stay one click away instead of stacking under it. */
+function More({ label, id, children }: { label: string; id: string; children: React.ReactNode }) {
+  return <details className="ag-more" id={id} style={{ marginTop: 12 }}><summary className="muted" style={{ cursor: "pointer", padding: "6px 0" }}>{label}</summary><div className="stack" style={{ marginTop: 8 }}>{children}</div></details>;
 }
 
 const SUB = "One agent per station. Each has instructions, tools, a model, a budget and an autonomy level people granted.";

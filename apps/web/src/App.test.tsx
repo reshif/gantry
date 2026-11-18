@@ -165,7 +165,7 @@ describe("signed in", () => {
     await screen.findByRole("navigation", { name: "Main" });
     const top = document.querySelector("#topbar") as HTMLElement;
     expect(top.textContent).not.toContain("Demo accounts on");
-    expect(top.querySelector(".dev-dot")).toBeTruthy();
+    expect(top.querySelector(".dev-dot")).toBeNull();
     expect((top.querySelector("#user-menu") as HTMLElement).title).toContain("non-production");
     expect(top.querySelector("#palette-btn")?.textContent).toContain("Search or jump to");
     expect(top.querySelectorAll(".themesw button").length).toBe(3);
@@ -339,13 +339,13 @@ describe("signed in", () => {
     expect(getPrefs().theme).toBe("dark");
   });
 
-  it("the user menu heads with the title and role names and carries Account and Sign out, not theme rows", async () => {
+  it("the user menu heads with the title and role names and links to the account page and carries Sign out, not theme rows", async () => {
     shellApi();
     render(<App />);
     fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
     const menu = await screen.findByRole("menu", { name: "Account menu" });
     expect(menu.querySelector(".mh")?.textContent).toBe("Asha RamanHead · Factory Admin");
-    expect(within(menu).getByText("Account")).toBeTruthy();
+    expect(menu.querySelector(".mh")?.getAttribute("role")).toBe("link");
     expect(within(menu).getByText("Sign out")).toBeTruthy();
     expect(within(menu).queryByText(/Theme/)).toBeNull();
   });

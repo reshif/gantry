@@ -116,6 +116,7 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
         <>
           <Btn label={paused ? "Resume belt" : "Pause belt"} icon={paused ? "play" : "pause"} id="floor-pause" aria-pressed={paused} onClick={onPause} />
           <Btn label="Halt line" kind="danger" icon="halt" id="floor-halt" aria="Emergency stop: halt the line" guard={lockIf(factoryKilled || p.killed ? { allowed: false, reason: "The line is already stopped. Use Start restore.", needs: "" } : dKill.pending ? null : dKill)} onClick={() => stop.emergency("project", p.id)} />
+          {lineControl}
         </>
       }
     >
@@ -164,7 +165,7 @@ function FloorBody({ projectId }: { projectId: string }) {
 
   return (
     <Header replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} paused={paused} onPause={() => setPaused((v) => !v)}>
-      {(lineControl) => (<>
+      {() => (<>
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
       <Kpis open={open} ticker={ticker} />
       <FloorTools
@@ -181,7 +182,7 @@ function FloorBody({ projectId }: { projectId: string }) {
         open={filtersOpen}
         onToggle={() => setFiltersOpen((o) => !o)}
       />
-      <Conveyor legendExtra={lineControl} stations={stations} released={released} paused={paused} onToken={drawers.token} onStation={drawers.station} onGate={drawers.gate} onPile={drawers.station} />
+      <Conveyor stations={stations} released={released} paused={paused} onToken={drawers.token} onStation={drawers.station} onGate={drawers.gate} onPile={drawers.station} />
       <div className="grid g2" style={{ marginTop: 16, alignItems: "start" }}>
         <Card title="Waiting at gates" flush hint="Oldest first" id="floor-gates">
           <div className="list">

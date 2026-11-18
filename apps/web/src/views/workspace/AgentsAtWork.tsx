@@ -8,7 +8,7 @@ import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useActivity, useAgents, useMe } from "../../api/queries";
 import { pickProject } from "../../lib/routes";
-import { hashFor, navigate } from "../../lib/router";
+import { hashFor } from "../../lib/router";
 import { eventRows, eventText } from "../../lib/eventText";
 import { setRouteState, useClearRouteStateOnLeave, useRouteState } from "../../lib/queryState";
 import { usePrefs } from "../../lib/prefs";
@@ -18,14 +18,14 @@ import { useUI } from "../../ui/overlay-context";
 import { useTravelerWo } from "../traveler/model";
 import { useActors } from "../../ui/actors";
 import { Avatar, Btn, Chip, FilterBar, SearchBox, Select } from "../../ui/primitives";
-import { CrEmpty, Page, Stats } from "../../ui/cr";
+import { Page, Stats } from "../../ui/cr";
 import { StateBody, useStateOverride } from "../ops1/stateOverride";
 import { buildBelt, NO_FILTER } from "../floor/conveyor";
 import { useCatalog } from "../projects/kit";
 import { openEntry, useFloorRead, useFloorState, type FWo } from "../floor/kit";
 
 const short = (m: string) => m.replace(/^claude-/, "");
-const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n)));
 
 export function AgentsAtWork() {
   const me = useMe();
@@ -61,14 +61,14 @@ export function AgentsAtWork() {
     if (act === "busy" ? !c.running.length : act === "idle" ? c.running.length : false) return false;
     return !needle || `${c.s.agent} ${c.s.name} ${c.running.map((w) => `${w.id} ${w.title}`).join(" ")}`.toLowerCase().includes(needle);
   });
-  const busy = cards.filter((c) => c.running.length).length;
-  const runs = cards.reduce((n, c) => n + c.running.length, 0);
+  const busy = list.filter((c) => c.running.length).length;
+  const runs = list.reduce((n, c) => n + c.running.length, 0);
   /* Tokens in the last hour and cost per hour, from the open runs' own totals: a run older than an hour contributes its last hour pro rata (an estimate, said so on the tile);
      the hourly cost is what the runs have spent over the time they have been running. */
   const now = ctx?.now ?? Date.now();
   const HOUR = 3_600_000;
   let tokens = 0, cost = 0, hours = 0;
-  for (const c of cards) for (const w of c.running) {
+  for (const c of list) for (const w of c.running) {
     const e = openEntry(w);
     if (!e) continue;
     const el = Math.max(60_000, now - (e.startedAt ?? w.createdAt));
@@ -91,7 +91,7 @@ export function AgentsAtWork() {
       {override ? <StateBody state={override} /> : <Async query={floorQ} what="the agents on this project" id="ws-agents" isEmpty={() => false}>{() => (
         <>
           <Stats items={[
-            { l: "Agents busy", v: `${busy} / ${cards.length}`, tone: "info" },
+            { l: "Agents busy", v: `${busy} / ${list.length}`, tone: "info" },
             { l: "Runs in flight", v: runs, tone: "agent" },
             { l: "Tokens in flight", v: compact(tokens), d: "last hour, est." },
             { l: "Cost per hour", v: `$${perHour.toFixed(2)}` },
@@ -135,7 +135,7 @@ export function AgentsAtWork() {
                       <div className="row spread ws-f">
                         <span className="mono" style={{ fontSize: 12 }}><span className="muted">{Math.min(running.length, s.slots)}/{s.slots} slots</span>{over ? <> · <span style={{ color: "var(--warn)" }}>+{over} over capacity</span></> : null}</span>
                         <span className="row">
-                          <Btn small label="Talk" id={`ws-talk-${s.id}`} onClick={() => navigate("conversations", w ? w.id : null, projectId)} />
+                          <a className="btn sm" id={`ws-talk-${s.id}`} href={hashFor("conversations", w ? w.id : null, projectId)}>Talk</a>
                           {w ? <StopRun woId={w.id} station={s.name} /> : null}
                         </span>
                       </div>
@@ -145,7 +145,7 @@ export function AgentsAtWork() {
               })}
             </div>
           ) : (
-            <div className="card"><CrEmpty icon="chat" title="No agents match" text="Clear the search or the activity filter." /></div>
+            <div className="grid g3 ws" id="ws-none" />
           )}
         </>
       )}</Async>}
