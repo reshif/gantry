@@ -157,11 +157,40 @@ describe("Models screen: a read the person may not make", () => {
   });
 });
 
+describe("Add vendor opens the template picker first", () => {
+  it("lists every template from the API with what it needs, marks local models, and keeps by hand as a secondary link", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("md-add-vendor"));
+    for (const t of TEMPLATES) await byId(`vt-pick-${t.id}`);
+    expect(document.getElementById("vt-pick-bedrock")!.textContent).toContain("AWS access key");
+    expect(document.getElementById("vt-pick-vertex")!.textContent).toContain("Service account");
+    expect(document.getElementById("vt-pick-openai-compatible")!.textContent).toMatch(/Local or self-hosted models \(Ollama, vLLM\)/);
+    expect(document.getElementById("vt-pick-anthropic")!.querySelector("[data-testid=vt-local]")).toBeNull();
+    expect(document.getElementById("va-name")).toBeNull();
+    fireEvent.click(await byId("va-manual"));
+    await byId("va-name");
+  });
+
+  it("choosing a template opens its connect form, connects and lists what was found", async () => {
+    const calls = setup({ "POST /api/v1/vendors/from-template": () => ok({ msg: "OpenAI connected.", vendor: { id: "openai", name: "OpenAI" }, discovery: { models: [{ id: "gpt-x", name: "GPT X", enabled: false, priced: true }], warnings: [] } }) });
+    mount();
+    fireEvent.click(await byId("md-add-vendor"));
+    fireEvent.click(await byId("vt-pick-openai"));
+    expect(document.querySelector("[role=dialog]")!.textContent).toContain("Connect OpenAI");
+    type(await byId("vt-f-apiKey"), "sk-" + "x".repeat(40));
+    fireEvent.click(await byId("vt-submit"));
+    await byId("vt-found");
+    expect(writes(calls).find((c) => c.path === "/api/v1/vendors/from-template")?.body).toMatchObject({ template: "openai" });
+  });
+});
+
 describe("Reachability: every dialog and panel is a click away", () => {
   it("Add vendor in the header opens the add-vendor dialog and posts", async () => {
     const calls = setup({ "POST /api/v1/vendors": () => ok({ vendor: { id: "acme-llm" } }) });
     mount();
     fireEvent.click(await byId("md-add-vendor"));
+    fireEvent.click(await byId("va-manual"));
     type(await byId("va-name"), "Acme LLM");
     fireEvent.click(await byId("va-ok"));
     await waitFor(() => expect(writes(calls).find((c) => c.method === "POST" && c.path === "/api/v1/vendors")?.body).toMatchObject({ name: "Acme LLM" }));

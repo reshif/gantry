@@ -16,7 +16,7 @@ import { useRouteTab } from "../lib/routeQuery";
 import { Async, qState } from "../ui/async";
 import { useCatalog } from "./projects/kit";
 import { ModelPrices, PriceVersions, ProjectBudgets, VendorBudgets } from "./models/Prices";
-import { ManualVendorDialog } from "./models/Dialogs";
+import { AddVendorDialog } from "./models/Templates";
 import { RoutingPanel } from "./models/Routing";
 import { VendorPanel } from "./models/Vendor";
 import { dec, usd } from "./models/kit";
@@ -46,7 +46,7 @@ export default function ModelsView() {
         title="Models"
         kicker="All lines"
         sub="Vendors, routing and what each station spends."
-        actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <ManualVendorDialog close={close} onAdded={(id) => { setTab("vendors"); setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView?.({ block: "center" }), 150); }} />)} />}
+        actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={(id) => { setTab("vendors"); setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView?.({ block: "center" }), 150); }} />)} />}
       />
       <StatRow id="md-stats">
         <Stat label="Models" value={qState(vq, () => String(allN))} sub={`${enabledN} enabled`} tone="info" />
