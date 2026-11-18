@@ -148,7 +148,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
     const custom = (r as unknown as { custom?: { failed: string[] } }).custom ?? { failed: [] };
     const failedRepos: string[] = [];
     for (const [name, team] of Object.entries(wz.repos)) {
-      const c = await ops.connectRepo(project.id, name, team || wz.teams[0] || "platform");
+      const c = await ops.connectRepo(project.id, name, team || wz.teams[0] || null);
       if (!c.ok) failedRepos.push(`${name}: ${c.msg}`);
     }
     const n = Object.keys(wz.repos).length - failedRepos.length;
@@ -217,8 +217,8 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
       <div className="form-grid">
         <p className="small muted">Each repo is connected through the source-control integration and starts onboarding: the Onboarding agent assesses it and opens a PR. Work orders can target a repo once it is Ready. You can also add repos later.</p>
         <div className="inline-form">
-          <Field label="Repo" htmlFor="prj-wz-repo-add"><input id="prj-wz-repo-add" className="input mono" value={wz.extraRepo} placeholder="acme/new-service" onChange={(e) => upd({ extraRepo: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const n = wz.extraRepo.trim(); if (n) upd({ repos: { ...wz.repos, [n]: wz.teams[0] || "platform" }, extraRepo: "" }); } }} /></Field>
-          <Btn small icon="plus" id="prj-wz-repo-go" label="Add repo" onClick={() => { const n = wz.extraRepo.trim(); if (!n) return; upd({ repos: { ...wz.repos, [n]: wz.teams[0] || "platform" }, extraRepo: "" }); focus("prj-wz-repo-add"); }} />
+          <Field label="Repo" htmlFor="prj-wz-repo-add"><input id="prj-wz-repo-add" className="input mono" value={wz.extraRepo} placeholder="acme/new-service" onChange={(e) => upd({ extraRepo: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const n = wz.extraRepo.trim(); if (n) upd({ repos: { ...wz.repos, [n]: wz.teams[0] || "" }, extraRepo: "" }); } }} /></Field>
+          <Btn small icon="plus" id="prj-wz-repo-go" label="Add repo" onClick={() => { const n = wz.extraRepo.trim(); if (!n) return; upd({ repos: { ...wz.repos, [n]: wz.teams[0] || "" }, extraRepo: "" }); focus("prj-wz-repo-add"); }} />
         </div>
         {picked.length ? (
           <ul className="plain-list prj-wz-repos">
