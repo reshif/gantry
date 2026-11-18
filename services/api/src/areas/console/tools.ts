@@ -535,7 +535,7 @@ const PROPOSE: ToolDef[] = [
       const t = await stopTarget(ctx, scope, str(i.id));
       if ("error" in t) return t;
       return mk(ctx, {
-        kind: "restore", title: `Restore ${t.label}`, summary: str(i.reason) ?? "", steps: ["Held work resumes; cancelled work orders stay killed until restored one by one", ...(scope === "factory" ? ["The factory may need two different Factory Admins"] : [])],
+        kind: "restore", title: `Restore ${t.label}`, summary: str(i.reason) ?? "", steps: ["Held work resumes, and the work orders it killed come back from where they were", ...(scope === "factory" ? ["The factory may need two different Factory Admins"] : [])],
         call: { method: "POST", path: `/api/v1/stops/${encodeURIComponent(t.apiId)}/restore`, body: { reason: str(i.reason) ?? "", via: "console" }, idempotent: false },
         perm: { action: stopAction("restore", scopeFromApi(scope)), project: t.project }, needsReason: 4, phrase: null, danger: false, entities: [], scope: { project: t.project, wo: t.wo ?? null },
       });

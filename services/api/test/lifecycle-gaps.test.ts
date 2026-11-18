@@ -154,4 +154,45 @@ d("lifecycle gaps", () => {
     await finishChild("WO-9312");
     expect((await w.get("WO-9310")).state).toBe("done");
   });
+
+  it("gap 4: restoring a project killed with 'cancel' revives the orders it killed, from their saved state, with no per-order restore", async () => {
+    const id = await w.atStation("research", "Killed with the project");
+    const waiting = await atG5("Killed while waiting at a gate");
+    const name = (await w.q(`select name from projects where id = 'payments'`))[0].name as string;
+    const k = await w.call("p-asha", "POST", "/api/v1/stops", { scope: "project", id: "payments", mode: "kill", reason: "Bad release suspected", confirmText: name, inFlight: "cancel" });
+    expect(k.status, JSON.stringify(k.body)).toBe(200);
+    const { reconcileStop } = await import("../src/areas/stops/enforce.js");
+    const stop = String(k.body.stop);
+    expect((await w.tx((tx) => reconcileStop(tx, stop))).action).toBe("enforced");
+    expect(await w.get(id)).toMatchObject({ state: "killed" });
+    expect(await w.get(waiting)).toMatchObject({ state: "killed" });
+    // The single-order restore is not a way out: no stop of its own covers the order.
+    expect((await w.call("p-daniel", "POST", `/api/v1/stops/${encodeURIComponent(`workorder:${id}`)}/restore`, { reason: "The incident is over" })).status).toBe(409);
+    const r = await w.call("p-asha", "POST", `/api/v1/stops/${encodeURIComponent("project:payments")}/restore`, { reason: "The incident is over" });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await w.tx((tx) => reconcileStop(tx, stop))).action).toBe("restored");
+    const back = await w.get(id);
+    expect(back.state).toBe("running");
+    expect((await w.liveAttempt(id))?.station).toBe("research");
+    expect(back.killed).toBeFalsy();
+    // The order that was waiting at a gate is waiting at that gate again.
+    const gate = await w.get(waiting);
+    expect(gate.state).toBe("waiting");
+    expect(gate.allowed.approve?.gate).toBe("G5");
+    expect(String(r.body.msg)).not.toMatch(/one by one/);
+  });
+
+  it("gap 4: the same holds for the factory scope", async () => {
+    const id = await w.atStation("research", "Killed with the factory");
+    const k = await w.call("p-asha", "POST", "/api/v1/stops", { scope: "factory", mode: "kill", reason: "Security incident", confirmText: "KILL FACTORY", inFlight: "cancel" }, {}, { authAgeSec: 5 });
+    expect(k.status, JSON.stringify(k.body)).toBe(200);
+    const { reconcileStop } = await import("../src/areas/stops/enforce.js");
+    const stop = String(k.body.stop);
+    await w.tx((tx) => reconcileStop(tx, stop));
+    expect(await w.get(id)).toMatchObject({ state: "killed" });
+    await t.db.admin.query(`update settings set value = jsonb_set(value, '{restoreFactoryNeedsTwo}', 'false') where key = 'security'`).catch(() => undefined);
+    for (const who of ["p-asha", "p-omar"]) await w.call(who, "POST", `/api/v1/stops/${encodeURIComponent("factory:")}/restore`, { reason: "The incident is over" });
+    await w.tx((tx) => reconcileStop(tx, stop));
+    expect((await w.get(id)).state).toBe("running");
+  });
 });

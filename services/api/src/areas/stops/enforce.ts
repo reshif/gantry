@@ -141,9 +141,12 @@ async function enforceOn(fx: Fx, w: Wo, s: StopDb, graceMs: number): Promise<{ c
 
 /** One work order after its stop was lifted. */
 async function restoreOne(fx: Fx, w: Wo, s: StopDb, catalog: Catalog): Promise<void> {
-  const killed = w.data.killed as { prev?: { state: string; position: string; station: string; bayFrom: string | null } } | null | undefined;
-  const heldThisScope = w.data.heldByKill === (s.scope_type === "wo" ? "workorder" : s.scope_type);
-  if (w.state === "killed" && killed && s.scope_type === "wo" && s.mode === "kill") {
+  const killed = w.data.killed as { scope?: string; prev?: { state: string; position: string; station: string; bayFrom: string | null } } | null | undefined;
+  const scopeName = s.scope_type === "wo" ? "workorder" : s.scope_type;
+  const heldThisScope = w.data.heldByKill === scopeName;
+  // An order this very scope killed (a work order's own kill, or a project, repo or factory kill with 'cancel') comes back from the state it was killed in.
+  // One that an inner stop killed first (its own kill) keeps that kill: `stillCovered` already kept it out of here while that stop is active.
+  if (w.state === "killed" && killed && s.mode === "kill" && (s.scope_type === "wo" || killed.scope === scopeName)) {
     const prev = killed.prev ?? { state: "running", position: w.position, station: w.position, bayFrom: null };
     w.data.restoredFrom = killed;
     delete w.data.killed;
