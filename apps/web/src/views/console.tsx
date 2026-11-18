@@ -9,15 +9,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { useCanMany } from "../api/can";
-import { useAudit, useMe, useProjects, useWorkOrders } from "../api/queries";
+import { useAudit, useMe, useProjects } from "../api/queries";
 import { setProject, usePrefs } from "../lib/prefs";
 import { navigate } from "../lib/router";
 import { Icon } from "../ui/Icon";
 import { Avatar, Btn, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
-import { useOpenTraveler } from "../shell/useTraveler";
-import { callTool, ck, clearThread, renameThread, savePinned, sendMessage, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
+import { callTool, ck, clearThread, renameThread, sendMessage, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
 import { ChatList } from "./console/ChatList";
 import { ResultCard, unmark, type CardCtx } from "./console/Cards";
 import { EntityChip } from "./console/Chips";
@@ -45,15 +44,6 @@ const fromServer = (m: ThreadMessage, me: string): Msg => {
   };
 };
 
-/** Suggested questions by role and current project (legacy `suggestions()`). */
-function suggestionsFor(roles: string[], pn: string, projectId: string | null, stuck: string | null, done: string | null): string[] {
-  const summ = done ?? stuck;
-  if (roles.includes("factory_admin")) return ["Which gates are slowing us down?", `What changed in ${pn} this week?`, summ ? `Summarise ${summ} for a manager` : "/projects", `Who can release ${pn} tonight and why?`, "/bottlenecks"];
-  if (roles.includes("auditor")) return [`What changed in ${pn} this week?`, "Show kills and halts in the last 7 days", `Who can kill ${pn} and why?`, `/trust ${projectId ?? ""}`.trim(), summ ? `Summarise ${summ} for a manager` : "/projects"];
-  if (roles.includes("project_admin") || roles.includes("line_lead")) return ["Which gates are slowing us down?", "Who is the only approver on waiting gates?", stuck ? `Why is ${stuck} stuck?` : "/status", `What changed in ${pn} this week?`, `/trust ${projectId ?? ""}`.trim()];
-  return ["What is waiting on me?", stuck ? `Why is ${stuck} stuck?` : "/status", summ ? `Summarise ${summ} for a manager` : "/projects", `What changed in ${pn} this week?`, "/status"];
-}
-
 const CAPS: Array<[string, string]> = [["wo.submit", "Submit work orders"], ["gate.approve", "Approve gates"], ["line.halt", "Halt (andon)"], ["line.resume", "Resume"], ["repo.onboard", "Connect repos"], ["triggers.edit", "Edit triggers"], ["kill.workorder", "Kill a work order"], ["kill.project", "Kill this project"], ["restore.project", "Restore this project"], ["kill.factory", "Kill the factory"]];
 
 /**
@@ -65,7 +55,10 @@ export interface ConsoleEmbed {
   threadId: string | null;
   onThread: (id: string) => void;
   header?: ReactNode;
+  /** The side column: a node, or null for none (the Console page has its settings in the header instead). */
   aside?: ReactNode;
+  /** The project this chat asks about: an id, or null for All projects. Left out, the app's current project. */
+  project?: string | null;
   readOnly?: string | null;
   agent?: { name: string; about: string } | null;
   /** A question to ask as soon as the chat is open (an @mention from a work order's thread). */
@@ -77,10 +70,9 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const ui = useUI();
   const qc = useQueryClient();
   const prefs = usePrefs();
-  const status = useConsoleStatus(prefs.project);
+  const status = useConsoleStatus(embed && embed.project !== undefined ? embed.project : prefs.project);
   const threads = useThreads();
   const projects = useProjects().data ?? [];
-  const openTraveler = useOpenTraveler();
   const actorOf = useActors();
 
   const meId = me?.person.id ?? "";
@@ -112,17 +104,11 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   }, [embed, threads.data, threadId, fresh, setThreadId]);
 
   const visible = projects.filter((p) => p.status !== "archived");
-  const cur = visible.find((p) => p.id === prefs.project) ?? visible[0] ?? null;
+  const scoped = !!embed && embed.project !== undefined;
+  const cur = scoped ? (visible.find((p) => p.id === embed!.project) ?? null) : visible.find((p) => p.id === prefs.project) ?? visible[0] ?? null;
   const st = status.data;
   const actionsOn = !!st?.actionsEnabled;
   const proposalFor = (tool: string) => st?.proposals?.find((x) => x.tool === tool);
-  const roles = useMemo(() => (me?.person.roles ?? []).filter((g) => g.scope === "factory" || g.scope === cur?.id).map((g) => g.role), [me, cur?.id]);
-  const woQ = useMemo(() => ({ limit: 40 }), []);
-  const wos = useWorkOrdersLite(cur?.id ?? null, woQ);
-  const stuck = wos.find((w) => w.state === "waiting" || w.state === "blocked" || w.bay)?.id ?? wos.find((w) => !["done", "killed"].includes(w.state))?.id ?? null;
-  const doneWo = wos.filter((w) => w.state === "done").slice(-1)[0]?.id ?? null;
-  const suggestions = [...new Set(suggestionsFor(roles, cur?.name ?? "my projects", cur?.id ?? null, stuck, doneWo))];
-
   const serverMsgs = useMemo(() => {
     const all = thread.data?.messages ?? [];
     const hidden = new Set<string>();
@@ -134,7 +120,6 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     }
     return all.filter((m) => !hidden.has(m.id)).map((m) => fromServer(m, meId));
   }, [thread.data, meId, redo]);
-  const pinned = thread.data?.pinned ?? [];
 
   const msgs = useMemo(() => {
     // The optimistic rows (question + live answer) give way to the saved ones as soon as the server has them: a refetch mid-stream
@@ -151,8 +136,8 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     const all = [...serverMsgs, ...local, ...rows].sort((a, b) => a.at - b.at);
     if (all.length) return all;
     if (embed?.agent) return [{ id: "m0", role: "factory", at: 0, mode: "pending", text: `Ask ${embed.agent.name} about ${embed.agent.about}. ${embed.agent.name} answers from what the work has produced so far (documents, questions, sources) and reads live data with your permissions. Nothing changes from here: answers, corrections and send-backs belong in the primary thread.` } satisfies Msg];
-    return [{ id: "m0", role: "factory", at: 0, mode: "pending", cards: [{ type: "suggest" }], text: `Ask about your projects in plain language, or use a slash command. ${st?.configured ? `Questions are answered by ${st.model} using tools over the live factory.` : "No model is configured, so questions cannot be answered yet; slash commands read live data directly."} Anything that changes state shows a confirm card and runs only when you click it. Questions without a project use your current project, ${cur?.name ?? "none"}.` } satisfies Msg];
-  }, [serverMsgs, local, tail, st, cur, embed?.agent]);
+    return [];
+  }, [serverMsgs, local, tail, embed?.agent]);
 
   const lastMsg = msgs[msgs.length - 1];
   const prevMsg = msgs[msgs.length - 2];
@@ -166,17 +151,12 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const focusComposer = (): void => { setTimeout(() => { const c = input.current; if (c) { c.focus(); c.setSelectionRange(c.value.length, c.value.length); } }, 30); };
   const toDraft = (t: string): void => { setDraft(t); setSlashIdx(0); focusComposer(); };
 
-  const pin = (woId: string): void => {
-    if (!threadId || pinned.includes(woId)) return;
-    void savePinned(threadId, [...pinned, woId]).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) }));
-  };
-
   const addLocal = (m: Omit<Msg, "id" | "at">): Msg => {
     const msg = { ...m, id: nextId("l"), at: Date.now() } as Msg;
     setLocal((x) => [...x, msg]);
     return msg;
   };
-  const cardCtx = (mid: string): CardCtx => ({ send: (t) => void send(t), draft: toDraft, mid, pinned, pin, suggestions, actionsEnabled: st?.proposals ? !!proposalFor("propose_approve_gate")?.allowed : actionsOn });
+  const cardCtx = (mid: string): CardCtx => ({ send: (t) => void send(t), draft: toDraft, mid, actionsEnabled: st?.proposals ? !!proposalFor("propose_approve_gate")?.allowed : actionsOn });
 
   /* ---------- slash commands: tools, directly ---------- */
   const runSlash = async (text: string): Promise<void> => {
@@ -356,7 +336,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   return (
     <div className={embed ? "view-console ws-chat" : "view view-console"}>
       {embed ? embed.header : <ViewHead title="Console" status={modeChip} sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you." actions={modePicker} />}
-      <div className={`console-grid${embed ? " is-embedded" : ""}`}>
+      <div className={`console-grid${embed ? " is-embedded" : ""}${embed && embed.aside === null ? " is-solo" : ""}`}>
         {embed ? null : <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />}
         <section className="console-main" aria-label="Conversation">
           {embed ? null : (
@@ -369,6 +349,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
           )}
           {embed?.agent ? null : <p className="con-mode-line small" id="con-mode-reason">{embed ? modeChip : <Icon name={st?.configured ? "check" : "dots"} />}<span>{modeLine}</span>{embed ? <span className="con-mode-pick">{modePicker}</span> : null}{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>}
           <div className="thread" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
+            {msgs.length ? null : <p className="con-empty muted" id="con-empty">{embed?.project !== undefined ? "Ask about any project, work order, gate or agent. Type / for commands." : "Nothing here yet."}</p>}
             {msgs.map((m) => (
               <div className={`msg msg-${m.role}`} key={m.id}>
                 <div className="msg-who">
@@ -400,7 +381,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             ) : null}
             <textarea id="con-input" ref={input} className="input composer-input" rows={2} placeholder={embed?.agent ? `Ask ${embed.agent.name}` : "Ask or instruct. Type / for commands."} aria-label="Message the factory" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
             <div className="composer-foot">
-              <div className="chips">{embed?.agent ? null : <span className="try-lbl muted small">Try</span>}{embed?.agent ? null : suggestions.slice(0, 3).map((sg, i) => <button type="button" key={sg} className="sugg" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
+              <span />
               {streaming ? (
                 <div className="row gap-sm"><Btn label="Stop" kind="danger" small icon="x" id="con-stop" onClick={() => ac.current?.abort()} /><Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" disabledReason="Wait for the answer or stop it." /></div>
               ) : <Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" />}
@@ -408,7 +389,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
           </form>
           )}
         </section>
-        {embed?.aside ?? (
+        {embed && embed.aside !== undefined ? embed.aside : (
         <aside className="ctx" aria-label="Console context">
           <Panel title={`What ${me.person.name.split(" ")[0]} can do${cur ? ` in ${cur.name}` : ""}`}>
             <div className="con-ctx">
@@ -416,10 +397,6 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
               {cur ? <div><StateChip state={cur.killed ? "killed" : cur.halted ? "blocked" : "running"} /></div> : null}
             </div>
             <ul className="caps">{CAPS.map(([action, text], i) => { const d = caps[i]!; return <li key={action} className={d.allowed ? "ok" : "no"} tabIndex={0} data-tip={d.reason}><Icon name={d.allowed ? "check" : "lock"} /><span>{text}</span><code className="cap-code mono" title="The permission that governs this action. Admins find it under Govern, Access.">{action}</code></li>; })}</ul>
-          </Panel>
-          <Panel title="Pinned work orders">
-            {pinned.length ? <ul className="pins">{pinned.map((id) => <li key={id}><button type="button" className="linkish" id={`con-pin-${id}`} onClick={() => openTraveler(id)}><span className="mono">{id}</span></button>
-              <button type="button" className="icon-btn icon-btn-sm" id={`con-unpin-${id}`} aria-label={`Unpin ${id}`} onClick={() => threadId && void savePinned(threadId, pinned.filter((x) => x !== id)).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) }))}><Icon name="x" /></button></li>)}</ul> : <p className="muted small">Pin a work order from a why card.</p>}
           </Panel>
           <Panel title="Your console actions">
             {recent.length ? <ul className="mini-log con-log">{recent.map((a) => <li key={a.id}><span className="mono muted">{fmt.ist(a.at)}</span><span>{`${a.action} · ${unmark(a.target)}`}</span><span className={`outcome o-${a.outcome}`}>{a.outcome}</span></li>)}</ul> : <p className="muted small">Actions you confirm here are written to the audit ledger with via console.</p>}
@@ -439,12 +416,4 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
       </div>
     </div>
   );
-}
-
-/** Recent work orders of a project, for the suggested questions only (a stuck one, a finished one). */
-function useWorkOrdersLite(projectId: string | null, q: { limit: number }): Array<{ id: string; state: string; bay: string | null }> {
-  const r = useWorkOrders(projectId, q);
-  const d = r.data;
-  const items = Array.isArray(d) ? d : d?.items ?? [];
-  return items as Array<{ id: string; state: string; bay: string | null }>;
 }

@@ -122,7 +122,7 @@ describe("All projects: Floor", () => {
     mount(<FloorView />);
     fireEvent.click(await screen.findByRole("button", { name: /New work order/ }));
     fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(RISK.name) }));
-    expect(window.location.hash).toBe("#console");
+    expect(window.location.hash).toBe("#console/submit");
     expect(getPrefs().scopeAll).toBe(true); // the choice is this work order's, not a new scope
     cleanup();
     mount(<ConsoleSubmitView />);

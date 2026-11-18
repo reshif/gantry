@@ -100,14 +100,15 @@ afterEach(() => {
 
 describe("Console (legacy console.js on the real API)", () => {
   describe("no model", () => {
-    it("says so in the badge and the mode line, and the first message offers slash commands only", async () => {
+    it("says so in the badge and the mode line, and nothing canned is said for the agent", async () => {
       setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
       mount();
       const badge = await byId("con-mode");
       await waitFor(() => expect(badge.textContent).toBe("No model"));
       expect(badge.className).toContain("ask-absent");
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("No model is configured");
-      expect(text()).toContain("slash commands read live data directly");
+      expect(text()).not.toContain("slash commands read live data directly");
+      expect(document.getElementById("con-empty")).toBeTruthy();
       expect(text()).not.toContain("is answered by");
     });
 
@@ -214,7 +215,7 @@ describe("Console (legacy console.js on the real API)", () => {
       expect(document.querySelector(".who-denied summary")!.textContent).toBe("1 denied");
     });
 
-    it("/why shows the record's bullets, an Approve button only when actions are on, and can pin", async () => {
+    it("/why shows the record's bullets, an Approve button only when actions are on", async () => {
       const wo = { id: "WO-1042", title: "<untrusted>Add refund keys</untrusted>", project: "payments", state: "waiting", station: "spec", bay: null, createdAt: Date.now() - 3600_000, gates: [{ gate: "G2", status: "waiting", approvals: [{ by: "p-meera" }] }], stop: null };
       setup({ "POST /api/v1/console/tools/get_work_order": () => ({ body: { ok: true, tool: "get_work_order", result: wo, proposals: [], cited: [{ type: "wo", id: "WO-1042" }] } }) });
       mount();
@@ -392,7 +393,9 @@ describe("Console (legacy console.js on the real API)", () => {
       });
       mount();
       await waitFor(() => expect(text()).toContain("earlier answer"));
-      expect(document.getElementById("con-pin-WO-1042")).toBeTruthy();
+      // no pinned work orders panel; the work orders a chat names are chips inside it
+      expect(text()).not.toContain("Pinned work orders");
+      expect(document.getElementById("con-pin-WO-1042")).toBeNull();
       fireEvent.click(await byId("con-clear"));
       await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/console/threads/ct-9")).toBe(true));
       await waitFor(() => expect(text()).not.toContain("earlier answer"));

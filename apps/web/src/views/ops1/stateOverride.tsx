@@ -26,7 +26,7 @@ const reload = () => setRouteState({ state: null });
 function Empty() {
   return (
     <div className="card">
-      <CrEmpty title="Nothing here yet" text="When there is something to show it will appear here. You can start by creating the first item." action={<a className="btn primary" href={hashFor("console")}>Submit a work order</a>} />
+      <CrEmpty title="Nothing here yet" text="When there is something to show it will appear here. You can start by creating the first item." action={<a className="btn primary" href={hashFor("console", "submit")}>Submit a work order</a>} />
     </div>
   );
 }

@@ -58,7 +58,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
     const target = cp ?? me.projects.find((p) => p.id === prefs.project) ?? me.projects[0] ?? null;
     // in the rail's order, with the rail's icons
     for (const r of NAV_LAYOUT.flatMap((g) => g.ids).map((id) => ROUTES.find((x) => x.id === id)).filter((x): x is (typeof ROUTES)[number] => !!x)) if (canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, group: "Go to", icon: NAV_ICON[r.id] ?? r.icon, label: r.title, keys: r.id, run: () => (r.project ? (target ? navigateProject(target.id, r.id) : navigate("projects")) : navigate(r.id)) });
-    items.push({ group: "Actions", icon: "plus", label: "Submit a work order", keys: "new submit create", guard: guard(3), run: () => navigate("console") });
+    items.push({ group: "Actions", icon: "plus", label: "Submit a work order", keys: "new submit create", guard: guard(3), run: () => navigate("console", "submit") });
     items.push({ group: "Actions", icon: "sun", label: "Toggle theme (dark / light)", keys: "theme dark light", run: () => {
       const dark = document.documentElement.getAttribute("data-theme") === "dark" || (prefs.theme === "system" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
       const next = dark ? "light" : "dark";

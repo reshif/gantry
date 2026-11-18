@@ -26,9 +26,6 @@ export interface CardCtx {
   draft: (text: string) => void;
   /** Ids of the card (unique per message). */
   mid: string;
-  pinned: string[];
-  pin: (woId: string) => void;
-  suggestions: string[];
   actionsEnabled: boolean;
 }
 
@@ -42,10 +39,6 @@ function Help({ c }: { c: CardCtx }) {
       <li key={x.cmd}><button type="button" className="linkish mono" id={`con-help-${c.mid}-${i}`} onClick={() => c.draft(x.cmd)}>{x.cmd.trim()}</button><span className="muted">{x.hint}</span></li>
     ))}</ul></div>
   );
-}
-
-export function Suggest({ c }: { c: CardCtx }) {
-  return <div className="ccard"><div className="chips">{c.suggestions.map((t, i) => <button type="button" key={t} className="sugg" id={`con-sug-${c.mid}-${i}`} onClick={() => c.send(t)}>{t}</button>)}</div></div>;
 }
 
 function Projects({ d, c }: { d: unknown[]; c: CardCtx }) {
@@ -154,8 +147,7 @@ function Explain({ d, c }: { d: J; c: CardCtx }) {
       <ul className="bullets">{bullets.map((b) => <li key={b}>{b}</li>)}</ul>
       <div className="kv-row">{kv("State", s(d.state))}{kv("Station", s(d.station))}{kv("Created", d.createdAt ? fmt.stamp(Date.parse(s(d.createdAt))) : "–")}</div>
       <div className="ccard-actions"><Btn label="Open traveler" small id={`con-ex-open-${c.mid}`} onClick={() => open(s(d.id))} />
-        {d.state === "waiting" && waiting && c.actionsEnabled ? <Btn label="Approve…" small kind="primary" icon="check" id={`con-ex-appr-${c.mid}`} guard={can.allowed ? null : can} onClick={() => c.send(`/approve ${s(d.id)}`)} /> : null}
-        <Btn label={c.pinned.includes(s(d.id)) ? "Pinned" : "Pin"} small kind="ghost" icon="pin" id={`con-ex-pin-${c.mid}`} disabledReason={c.pinned.includes(s(d.id)) ? "Already pinned in the context panel." : null} onClick={() => c.pin(s(d.id))} /></div>
+        {d.state === "waiting" && waiting && c.actionsEnabled ? <Btn label="Approve…" small kind="primary" icon="check" id={`con-ex-appr-${c.mid}`} guard={can.allowed ? null : can} onClick={() => c.send(`/approve ${s(d.id)}`)} /> : null}</div>
     </div>
   );
 }
@@ -233,7 +225,6 @@ function Trust({ d, c }: { d: J; c: CardCtx }) {
 export function ResultCard({ type, data, c }: { type: string; data: unknown; c: CardCtx }) {
   switch (type) {
     case "help": return <Help c={c} />;
-    case "suggest": return <Suggest c={c} />;
     case "projects": return <Projects d={Array.isArray(data) ? data : []} c={c} />;
     case "status": return <Status d={o(data)} c={c} />;
     case "onboarding": return <Onboarding d={a(data)} c={c} />;

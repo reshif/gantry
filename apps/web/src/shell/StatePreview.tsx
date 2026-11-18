@@ -28,7 +28,7 @@ function Body({ state }: { state: PreviewState }) {
         </div>
       );
     case "empty":
-      return <div className="card"><CrEmpty title="Nothing here yet" text="When there is something to show it will appear here. You can start by creating the first item." action={<a className="btn primary" href="#console">Submit a work order</a>} /></div>;
+      return <div className="card"><CrEmpty title="Nothing here yet" text="When there is something to show it will appear here. You can start by creating the first item." action={<a className="btn primary" href="#console/submit">Submit a work order</a>} /></div>;
     case "error":
       return (
         <div className="card">
@@ -45,7 +45,7 @@ function Body({ state }: { state: PreviewState }) {
             <div className="grow"><b>Conflict.</b> Someone else changed this while you were editing, so your edit was not saved. Your draft is kept below.</div>
             <Btn label="Reload latest" small onClick={() => window.location.reload()} />
           </div>
-          <div className="card"><CrEmpty title="Nothing here yet" text="When there is something to show it will appear here. You can start by creating the first item." action={<a className="btn primary" href="#console">Submit a work order</a>} /></div>
+          <div className="card"><CrEmpty title="Nothing here yet" text="When there is something to show it will appear here. You can start by creating the first item." action={<a className="btn primary" href="#console/submit">Submit a work order</a>} /></div>
         </>
       );
   }

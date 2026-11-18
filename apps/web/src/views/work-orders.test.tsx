@@ -192,7 +192,7 @@ describe("Work orders table", () => {
     mount(<WorkOrdersView />);
     await screen.findByText("WO-2398");
     fireEvent.click(document.getElementById("wo-new") as HTMLElement);
-    expect(window.location.hash).toBe("#console");
+    expect(window.location.hash).toBe("#console/submit");
     (URL as unknown as { createObjectURL: () => string }).createObjectURL = () => "blob:x";
     fireEvent.click(document.getElementById("wo-export") as HTMLElement);
     expect(await screen.findByText("Exported 3 rows")).toBeTruthy();
