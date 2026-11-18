@@ -54,6 +54,9 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
   const data = {
     description: built.description, attachments: built.attachments, clsConfidence: built.clsConfidence, clsRationale: built.clsRationale, clsSuggested: built.clsSuggested, clsOverridden: null, requestedCls: built.requestedCls,
     progress: 0, history: [], log: [{ at: now, who: i.requestedBy, text: `Submitted from ${i.source}.` }], diff: { plus: 0, minus: 0, files: 0 }, tests: { passed: 0, failed: 0, added: 0 },
+    clsBy: i.requestedCls || i.forceCls ? { kind: "person", at: now } : { kind: "rule", at: now },
+    // No class was requested: the Intake agent classifies it next (a job). Until then the keyword match above is provisional.
+    ...(!i.requestedCls && !i.forceCls && !i.childOf ? { classifyPending: "pending" } : {}),
     blockReason: null, failReason: null, paths: built.paths, brief: built.brief, children: [], gateStatus: {}, ...(i.submittedBy ? { submittedBy: i.submittedBy } : {}),
   };
   await fx.tx.query(
