@@ -1,40 +1,29 @@
 /**
- * Conversations (#conversations): the LIST of work-order sessions for the current project (who is waiting on whom, the latest message, the station) and, with a work order
- * in the route (`#/p/<project>/conversations/<WO>`), that work order's agent conversation (views/conversations/Session.tsx). The list has no forms: every row opens a session.
+ * Conversations (#conversations): the prototype's two panels. §1 Threads lists the work orders that have a conversation (the first 30, with the last
+ * speaker's avatar, "WO-id · title", the last message and an "asks" chip when an agent waits on the person); §2 is the picked one, at
+ * `#/p/<project>/conversations/<WO>` (the first thread that asks, or the first, when none is named): the work order's agent conversation
+ * (views/conversations/Session.tsx) with an "Open record" button in the panel's tools. The list has no forms: every row opens a session.
  * Older links that ask for a conversation through the `openConversation` preference land on the session too.
  */
-import { useEffect, useMemo, useState } from "react";
-import { fmt } from "@gantry/domain";
-import { useCan } from "../api/can";
+import { useEffect, useMemo } from "react";
 import { useMe, useProject } from "../api/queries";
+import { hashFor, navigate, useHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
-import { navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Btn, Tabs, ViewHead } from "../ui/primitives";
-import { Async, qState } from "../ui/async";
-import { ClassChip, EmptyState, classOf, useCatalog } from "./projects/kit";
+import { Avatar, Btn, Chip, Empty, Panel, ViewHead } from "../ui/primitives";
+import { Async } from "../ui/async";
 import { WoSessionPage } from "./conversations/Session";
-import { useWoSessions, type WoSessionRow } from "./conversations/session-api";
-import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
-import { useProjectRepos } from "./floor/kit";
+import { useWoSessions } from "./conversations/session-api";
 
-type Tab = "waiting" | "open" | "closed";
-
-const WAIT: Record<WoSessionRow["waitingOn"], string> = { you: "Waiting on you", approver: "Waiting on an approver", person: "Waiting on someone else", agent: "Agent working", nobody: "Closed" };
+const THREADS = 30;
 
 export default function ConversationsView() {
   const hash = useHash();
   const me = useMe();
   const prefs = usePrefs();
-  const cat = useCatalog();
   const projectId = me ? pickProject(me, prefs.project) : null;
-  const projectQ = useProject(projectId);
-  const project = projectQ.data ?? null;
-  const submit = useCan("wo.submit", projectId ? { project: projectId } : {});
-  const repos = useProjectRepos(projectId);
-  const newWoDialog = useNewWorkOrder();
+  const project = useProject(projectId).data ?? null;
   const q = useWoSessions(projectId ?? undefined);
-  const [tab, setTab] = useState<Tab | null>(null);
   // A deep link from an older screen (the work orders table, the bell, the record) asks for one conversation: land on its session.
   const pending = prefs.openConversation;
   useEffect(() => {
@@ -42,54 +31,38 @@ export default function ConversationsView() {
     updatePrefs({ openConversation: null });
     navigate("conversations", pending);
   }, [pending]);
-  const items = useMemo(() => q.data?.items ?? [], [q.data]);
-  const groups = useMemo(() => {
-    const byLatest = (a: WoSessionRow, b: WoSessionRow) => (b.latest?.at ?? b.createdAt) - (a.latest?.at ?? a.createdAt);
-    return {
-      waiting: items.filter((w) => !w.closed && w.waitingOn === "you").sort(byLatest),
-      open: items.filter((w) => !w.closed).sort(byLatest),
-      closed: items.filter((w) => w.closed).sort(byLatest),
-    };
-  }, [items]);
-  if (hash.param) return <div className="view conv-view"><WoSessionPage woId={hash.param} back={() => navigate("conversations", null)} /></div>;
-  if (!me || !cat) return <div className="view conv-view" />;
-  if (!projectId) return <div className="view"><EmptyState title="No project" text="You do not have a project to show." /></div>;
-  if (!project) return <div className="view"><Async query={projectQ} what="this project" id="conv-project">{() => null}</Async></div>;
-  const cur: Tab = tab ?? (groups.waiting.length ? "waiting" : "open");
-  const list = groups[cur];
-  const block = projectSubmitBlock(me, project, repos);
-  const unread = items.filter((w) => w.unread).length;
+  const threads = useMemo(() => {
+    return (q.data?.items ?? []).filter((w) => !!w.latest || w.started).sort((a, b) => Number(b.waitingOn === "you") - Number(a.waitingOn === "you"));
+  }, [q.data]);
+  if (!me) return <div className="view conv-view" />;
+  const sel = threads.find((w) => w.id === hash.param) ?? (hash.param ? null : threads.find((w) => w.waitingOn === "you") ?? threads[0] ?? null);
+  const picked = hash.param ?? sel?.id ?? null;
   return (
     <div className="view conv-view">
-      <ViewHead
-        title="Conversations"
-        sub="One conversation per work order, for its whole life, with the agent at its current station. Open one to talk to the agent, review its proposals and see what happened."
-        meta={[["Waiting on me", qState(q, () => String(groups.waiting.length))], ["Open", qState(q, () => String(groups.open.length))], ["Unread", qState(q, () => String(unread))]]}
-        actions={<Btn label="New work order" kind="primary" icon="plus" id="conv-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWoDialog({ project: project.id })} />}
-      />
-      <Tabs idPrefix="conv-tab" items={[{ id: "waiting", label: "Waiting on me", count: groups.waiting.length }, { id: "open", label: "Open", count: groups.open.length }, { id: "closed", label: "Closed", count: groups.closed.length }]} active={cur} onChange={(t) => setTab(t as Tab)} />
-      <Async query={q} what="conversations" id="conv-list">{() => list.length ? (
-        <ul className="wos-list-rows" aria-label="Work-order conversations" data-keep-scroll="conv-list">
-          {list.map((w) => (
-            <li key={w.id}>
-              <button type="button" className={`wos-row${w.unread ? " is-unread" : ""}${w.waitingOn === "you" ? " is-mine" : ""}`} id={`conv-item-${w.id}`} onClick={() => navigate("conversations", w.id)}>
-                <span className="wos-row-top">
-                  <span className="mono strong">{w.id}</span>
-                  <ClassChip cls={classOf(cat, project, w.cls)} small />
-                  <span className="chip">{w.bay ? `Bay · ${w.bay}` : w.stationName}</span>
-                  <span className={`chip wos-wait is-${w.waitingOn}`}>{w.waitingOn === "agent" && w.agentName ? `${w.agentName} working` : WAIT[w.waitingOn]}</span>
-                  {w.unread ? <span className="wos-unread" role="img" aria-label="Unread" /> : null}
-                  <span className="mono muted small wos-row-t">{fmt.ago(w.latest?.at ?? w.createdAt, Date.now())}</span>
-                </span>
-                <span className="wos-row-title">{w.title}</span>
-                <span className="wos-row-last small muted">{w.latest ? `${w.latest.role === "user" ? "You or a teammate" : w.latest.role === "assistant" ? (w.agentName ?? "Agent") : "Gantry"}: ${w.latest.text.replace(/\s+/g, " ").slice(0, 140)}` : w.started ? "" : "The conversation has not started yet."}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <EmptyState id="conv-empty" icon="chat" title={cur === "waiting" ? "Nothing waits on you" : cur === "open" ? "No open conversations" : "Nothing closed yet"} text={cur === "waiting" ? "When an agent asks you something or proposes a brief, the conversation shows here." : "Submit a work order to start a conversation with its Intake agent."} />
-      )}</Async>
+      <ViewHead kicker={project?.key ?? ""} title="Conversations" sub="The dialogue between people and the agents at each station." />
+      <div className="cols w12">
+        <Panel title="Threads" flush id="conv-threads">
+          <Async query={q} what="conversations" id="conv-list">{() => threads.length ? (
+            <ul className="list" aria-label="Work-order conversations" data-keep-scroll="conv-list">
+              {threads.slice(0, THREADS).map((w) => (
+                <li key={w.id} id={`conv-item-${w.id}`} style={w.id === picked ? { background: "var(--accent-soft)" } : undefined} aria-current={w.id === picked ? "true" : undefined}>
+                  <Avatar id={w.latest?.by ?? w.agent} />
+                  <div className="grow">
+                    <a className="pri trunc" style={{ display: "block" }} href={hashFor("conversations", w.id, w.project)}>{`${w.id} · ${w.title}`}</a>
+                    <div className="small muted trunc">{w.latest?.text ?? ""}</div>
+                  </div>
+                  {w.waitingOn === "you" ? <Chip text="asks" cls="info" /> : null}
+                </li>
+              ))}
+            </ul>
+          ) : <Empty id="conv-empty" title="No conversations" text="" />}</Async>
+        </Panel>
+        {picked ? (
+          <Panel title={sel ? `${picked} · ${sel.title}` : picked} id="conv-detail" tools={<Btn small label="Open record" icon="record" id="conv-open-record" onClick={() => navigate("record", picked, sel?.project ?? projectId)} />}>
+            <WoSessionPage key={picked} woId={picked} panel back={() => navigate("conversations", null)} />
+          </Panel>
+        ) : <Panel id="conv-detail"><Empty title="No conversations" text="" /></Panel>}
+      </div>
     </div>
   );
 }

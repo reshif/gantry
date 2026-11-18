@@ -120,3 +120,8 @@
 .wo-more>summary{cursor:pointer;color:var(--ink3);padding:4px 0}
 .wo-more-row{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:end;padding:8px 0 10px}
 .wo-bar{padding:0}
+
+/* List | Board toggle: the selected segment is an accent fill (prototype .seg button[aria-pressed=true]). */
+.wo-view-seg .seg { border-color: var(--line2, var(--line)); }
+.wo-view-seg .seg-label { background: var(--surface); color: var(--ink-2); }
+.wo-view-seg .seg-input:checked + .seg-label { background: var(--accent); color: var(--accent-ink); font-weight: 600; }

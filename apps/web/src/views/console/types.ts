@@ -98,8 +98,8 @@ export interface Msg {
   role: "user" | "factory";
   at: number;
   text: string;
-  /** model: answered by the model; slash: read directly from live data; none: no model, a notice; error: the answer failed. */
-  mode: "model" | "slash" | "none" | "error" | "pending";
+  /** model: answered by the model; slash: read directly from live data; live: worked out at once from live work-order state; none: no model, a notice; error: the answer failed. */
+  mode: "model" | "slash" | "live" | "none" | "error" | "pending";
   by?: string;
   cited?: Cited[];
   cards?: Card[];

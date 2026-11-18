@@ -5,11 +5,13 @@
  * order, the belt, the brief as it stands, what is proposed, what it cost.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMe } from "../../api/queries";
 import type { WoCard } from "@gantry/domain";
 import { fmt, isBriefScaffold } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { Btn, Chip, Who } from "../../ui/primitives";
+import { Avatar, Btn, Chip, Empty, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
+import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { setProject } from "../../lib/prefs";
@@ -224,19 +226,30 @@ function SideDialogue({ s }: { s: WoSession }) {
 
 /* ------------------------------------------------------------------ the page ---- */
 
-export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean }) {
+/** The prototype's message time: "13 Nov 15:43" (IST, as everywhere in the app). */
+export const panelDate = (t: number): string => new Date(t).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata", hour12: false }).replace(",", "");
+
+export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean; /** The Conversations page: the prototype's chat bubbles and composer inside the page's own panel. */ panel?: boolean }) {
   const q = useWoSession(woId);
+  const me = useMe();
   const s = q.data;
   const ui = useUI();
   const openTraveler = useOpenTraveler();
   const openRecord = useOpenRecordRoute();
+  const actorOf = useActors();
   const [draft, setDraft] = useState("");
   const opened = useRef(false);
   const turn = useRef<{ kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }>({ kind: "open" });
   const run = useCallback((on: Parameters<typeof sendWoTurn>[2], signal: AbortSignal) => sendWoTurn(woId, turn.current, on, signal), [woId]);
-  const { live, error, start } = useLiveTurn<WoCard>(run, (m) => ui.toast(m, "error"));
+  const { live, error, start } = useLiveTurn<WoCard>(run, (m) => { setSent(null); ui.toast(m || "The message could not be sent. Try again.", "error"); });
   const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text);
-  const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => { turn.current = body; void start(); };
+  /** The person's own words show at once; they give way to the saved copy as soon as the thread has grown. */
+  const [sent, setSent] = useState<{ text: string; base: number; at: number } | null>(null);
+  const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => {
+    turn.current = body;
+    if (body.kind === "message" && body.text) setSent({ text: body.text, base: s?.messages.length ?? 0, at: Date.now() });
+    void start();
+  };
   const agents = useWsAgents(woId).data?.items ?? [];
   const mentions = useMentions(woId, draft, setDraft, !!s?.can.talk && !live);
 
@@ -278,6 +291,114 @@ export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; ba
   const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."} Type @ to ask an agent in a side thread.` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}, or type @ to ask another agent in a side thread or to mention a person`;
   // a station's message carries its agent's id: show the agent's name, as everywhere else
   const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
+
+  const sideBody = (
+    <>
+          <dl className="osx-facts small">
+            <dt>Work order</dt><dd><span className="mono">{s.wo.id}</span> · {s.wo.priority}</dd>
+            <dt>Class</dt><dd>{`${s.wo.clsName} · ${Math.round(s.wo.confidence * 100)}%`}</dd>
+            <dt>Station</dt><dd>{s.wo.bay ? `${s.wo.stationName} (in the ${s.wo.bay} bay)` : s.wo.stationName}</dd>
+            {/* a gate's name is the outcome it waits for ("Brief confirmed"): say it is waiting, so it never reads as already passed */}
+            <dt>Gate</dt><dd id="wos-gate" data-tip={s.wo.gate?.purpose || undefined}>{s.wo.gate ? `${s.wo.gate.label} waiting · passes when: ${s.wo.gate.name.toLowerCase()}` : "none waiting"}</dd>
+            <dt>Next</dt><dd id="wos-next"><strong>{{ agent: agentName, you: "You", approver: "An approver", person: "Someone else", nobody: "" }[s.next.actor]}</strong>{s.next.actor === "nobody" ? "" : " — "}{s.next.text}</dd>
+          </dl>
+          <ol className="osx-steps" id="wos-steps" aria-label="The belt">
+            {s.steps.map((st) => (
+              <li key={st.id} className={`is-${st.state}`} aria-current={st.state === "current" ? "step" : undefined}>
+                <span className="osx-dot" aria-hidden="true">{st.state === "done" ? <Icon name="check" /> : null}</span>
+                <span>{st.name}</span>
+              </li>
+            ))}
+          </ol>
+          {s.wo.gate && s.wo.gate.id !== "G0G1" ? <GateNotes assumptions={s.dialogue.assumptions} objections={s.dialogue.objections} jump={(id) => document.getElementById(id)?.scrollIntoView?.({ block: "center" })} /> : null}
+          {s.wo.gate && s.wo.gate.id !== "G0G1" ? <ApproversPanel woId={s.woId} gate={s.wo.gate.id} project={s.project} /> : null}
+          <SideDialogue s={s} />
+          <h3 className="sub-h">Brief</h3>
+          {s.brief.goal ? <><p className="small muted">{s.briefConfirmed ? "Confirmed." : "Draft: not confirmed yet."}</p><BriefBlock b={{ goal: s.brief.goal, scopeIn: s.brief.scopeIn, scopeOut: s.brief.scopeOut, ac: s.brief.ac, risks: s.brief.risks, open: s.brief.open, decisions: s.brief.decisions, estimate: s.brief.estimate }} /></> : <p className="muted small">Not drafted yet.</p>}
+          {s.ruleReady ? <Btn kind="primary" small id="wos-rule-confirm" label="Confirm brief" disabled={!s.can.confirm} disabledReason={!s.can.confirm ? s.can.confirmWhy : undefined} onClick={async () => { const r = await ops.confirmBrief(s.woId); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}
+          <h3 className="sub-h">Proposals</h3>
+          {s.pending.length ? (
+            <ul className="osx-pending" id="wos-pending">
+              {s.pending.map((p) => (
+                <li key={`${p.mid}${p.id}`}><button type="button" className="linkish" onClick={() => document.getElementById(`wos-prop-${p.id}`)?.scrollIntoView?.({ block: "center" })}>{p.title}</button></li>
+              ))}
+            </ul>
+          ) : <p className="muted small">None waiting.</p>}
+          <dl className="osx-facts small">
+            <dt>Agent</dt><dd>{s.agent.mode === "agent" ? `${agentName} v${s.agent.version} · ${s.agent.model}` : "Rule-based (no agent)"}</dd>
+            <dt>Cost so far</dt><dd className="mono" id="wos-cost">{`${fmt.money(s.costUsd)} of ${fmt.money(s.budget.limitUsd)} budget`}</dd>
+          </dl>
+    </>
+  );
+  const quick = s.ruleQuestion;
+  const writeFirst = () => { document.getElementById("wos-input")?.focus(); ui.toast("Write a message first", "error"); };
+  const panelName = (m: WoSessionMessage): string => (m.role === "user" || (m.author && m.author.startsWith("ag-")) ? actorOf(m.author).name.replace(" (agent)", "") : m.author === "system" ? "Gantry" : m.data.agent ?? agentName);
+  const lastFrom = s.messages.length ? panelName(s.messages[s.messages.length - 1]!) : agentName;
+  if (panel) {
+    return (
+      <div className="wos wos-panel stack" id="wos" data-wo={s.woId} role="region" aria-label={`Conversation ${s.woId}`}>
+        <div className="chat" id="wos-thread" role="log" aria-live="polite" ref={thread}>
+          {!s.messages.length && !live && !quick ? <Empty title="No conversation yet" text="Agents talk here when they need you." /> : null}
+          {s.messages.map((m) => (
+            <div key={m.id} className="wos-turn">
+              {m.data.kind === "update" ? (
+                <p className="osx-event small muted"><span>{fmt.stamp(m.at)}</span> {m.text}</p>
+              ) : (
+                <div className={`msg${m.role === "user" ? " me" : ""}`}>
+                  <Avatar id={m.author} />
+                  <div className="bub">
+                    <div className="who">{panelName(m)}{` · ${panelDate(m.at)}`}</div>
+                    {m.data.kind === "answer" ? <AnswerText m={m} s={s} /> : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
+                    {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
+                    <Cards m={m} s={s} agent={agentName} send={(b) => send(b)} last={m.id === lastId} />
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {sent && s.messages.length <= sent.base ? (
+            <div className="msg me" id="wos-sent">
+              <Avatar id={me?.person.id} />
+              <div className="bub"><div className="who">{`${actorOf(me?.person.id).name} · ${panelDate(sent.at)}`}</div><p className="osx-text">{sent.text}</p></div>
+            </div>
+          ) : null}
+          {quick && !s.wo.closed && !(sent && s.messages.length <= sent.base) ? (
+            <div className="callout" id="wos-asks-callout">
+              <b>{`${lastFrom} asks`}</b>{quick.text}
+              {quick.chips.length ? <div className="chips" style={{ marginTop: 8 }}>{quick.chips.map((o) => <button key={o} type="button" className="chipbtn" disabled={!s.can.talk} onClick={() => send({ kind: "message", text: o })}>{o}</button>)}</div> : null}
+            </div>
+          ) : null}
+          {live ? (
+            <div className="msg" aria-busy="true">
+              <Avatar id={s.agent.id} />
+              <div className="bub">
+                <div className="who">{agentName}</div>
+                {live.tools.length ? <p className="osx-progress small muted">{`Working: ${live.tools.map((t) => t.replace(/_/g, " ")).join(", ")}`}</p> : null}
+                <div className="osx-text">{live.text ? <Markdown text={live.text} /> : "Reading the request…"}</div>
+                {live.cards.map((c, i) => (c.kind === "progress" ? <ProgressLine key={i} text={c.text} /> : null))}
+              </div>
+            </div>
+          ) : null}
+          {error ? <p className="callout warn small" role="alert">{error}</p> : null}
+        </div>
+        <form className="wos-reply" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { writeFirst(); return; } submit(); }}>
+          {choices.length ? (
+            <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
+              {choices.map((a) => <li key={a.id} role="option" aria-selected="false" id={`wos-mention-${a.id}`} onMouseDown={(e) => { e.preventDefault(); setDraft(`@${a.name} `); }}><span className="strong">{`@${a.name}`}</span><span className="muted">{`${a.stationName} · answers in a side thread`}</span></li>)}
+            </ul>
+          ) : null}
+          <div className="wos-compose">
+            <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
+            <textarea id="wos-input" className="input" rows={2} placeholder="Reply to the agent…" aria-label="Reply" value={draft} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!draft.trim()) writeFirst(); else submit(); } }} />
+          </div>
+          {mention ? <span className="small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</span> : null}
+          <div className="row" style={{ marginTop: 8, justifyContent: "flex-end" }}>
+            <Btn kind="primary" type="submit" id="wos-send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || (!mention && !s.can.talk)} />
+          </div>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className={`osx wos${bare ? " is-bare" : ""}`} id="wos" data-wo={s.woId}>
@@ -345,40 +466,7 @@ export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; ba
           </form>
         </section>
         <aside className="osx-side" aria-label="Work order">
-          <dl className="osx-facts small">
-            <dt>Work order</dt><dd><span className="mono">{s.wo.id}</span> · {s.wo.priority}</dd>
-            <dt>Class</dt><dd>{`${s.wo.clsName} · ${Math.round(s.wo.confidence * 100)}%`}</dd>
-            <dt>Station</dt><dd>{s.wo.bay ? `${s.wo.stationName} (in the ${s.wo.bay} bay)` : s.wo.stationName}</dd>
-            {/* a gate's name is the outcome it waits for ("Brief confirmed"): say it is waiting, so it never reads as already passed */}
-            <dt>Gate</dt><dd id="wos-gate" data-tip={s.wo.gate?.purpose || undefined}>{s.wo.gate ? `${s.wo.gate.label} waiting · passes when: ${s.wo.gate.name.toLowerCase()}` : "none waiting"}</dd>
-            <dt>Next</dt><dd id="wos-next"><strong>{{ agent: agentName, you: "You", approver: "An approver", person: "Someone else", nobody: "" }[s.next.actor]}</strong>{s.next.actor === "nobody" ? "" : " — "}{s.next.text}</dd>
-          </dl>
-          <ol className="osx-steps" id="wos-steps" aria-label="The belt">
-            {s.steps.map((st) => (
-              <li key={st.id} className={`is-${st.state}`} aria-current={st.state === "current" ? "step" : undefined}>
-                <span className="osx-dot" aria-hidden="true">{st.state === "done" ? <Icon name="check" /> : null}</span>
-                <span>{st.name}</span>
-              </li>
-            ))}
-          </ol>
-          {s.wo.gate && s.wo.gate.id !== "G0G1" ? <GateNotes assumptions={s.dialogue.assumptions} objections={s.dialogue.objections} jump={(id) => document.getElementById(id)?.scrollIntoView?.({ block: "center" })} /> : null}
-          {s.wo.gate && s.wo.gate.id !== "G0G1" ? <ApproversPanel woId={s.woId} gate={s.wo.gate.id} project={s.project} /> : null}
-          <SideDialogue s={s} />
-          <h3 className="sub-h">Brief</h3>
-          {s.brief.goal ? <><p className="small muted">{s.briefConfirmed ? "Confirmed." : "Draft: not confirmed yet."}</p><BriefBlock b={{ goal: s.brief.goal, scopeIn: s.brief.scopeIn, scopeOut: s.brief.scopeOut, ac: s.brief.ac, risks: s.brief.risks, open: s.brief.open, decisions: s.brief.decisions, estimate: s.brief.estimate }} /></> : <p className="muted small">Not drafted yet.</p>}
-          {s.ruleReady ? <Btn kind="primary" small id="wos-rule-confirm" label="Confirm brief" disabled={!s.can.confirm} disabledReason={!s.can.confirm ? s.can.confirmWhy : undefined} onClick={async () => { const r = await ops.confirmBrief(s.woId); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}
-          <h3 className="sub-h">Proposals</h3>
-          {s.pending.length ? (
-            <ul className="osx-pending" id="wos-pending">
-              {s.pending.map((p) => (
-                <li key={`${p.mid}${p.id}`}><button type="button" className="linkish" onClick={() => document.getElementById(`wos-prop-${p.id}`)?.scrollIntoView?.({ block: "center" })}>{p.title}</button></li>
-              ))}
-            </ul>
-          ) : <p className="muted small">None waiting.</p>}
-          <dl className="osx-facts small">
-            <dt>Agent</dt><dd>{s.agent.mode === "agent" ? `${agentName} v${s.agent.version} · ${s.agent.model}` : "Rule-based (no agent)"}</dd>
-            <dt>Cost so far</dt><dd className="mono" id="wos-cost">{`${fmt.money(s.costUsd)} of ${fmt.money(s.budget.limitUsd)} budget`}</dd>
-          </dl>
+          {sideBody}
         </aside>
       </div>
     </div>

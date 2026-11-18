@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, proto }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -55,7 +55,13 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   loadingMore?: boolean;
   /** Total on the server, for the "Showing x of y" line. */
   total?: number;
-  /** The Blueprint prototype's list: triangle sort glyphs with a faint hint on sortable headers, no "Sort by" select, and a paged footer ("1–12 of 17", Prev, Page 1 / 2, Next) instead of "Show more". Needs `pageSize`. */
+  /** Numbered paging (prototype footer "1–15 of 77", Prev / Next, "Page 1 / 6"); `page` is 0-based and is the caller's (a URL) state. Replaces "Show more". Optional, additive. */
+  pager?: { page: number; size: number; onPage: (page: number) => void };
+  /** "blueprint": sort arrows ▲ / ▼ and a quiet ↕ hint on sortable headers that are not sorted. Optional, additive. */
+  glyphs?: "blueprint";
+  /** The "Sort by" select shown above the stacked cards on a phone (default on); the prototype's list has none. */
+  mobileSort?: boolean;
+  /** The Blueprint prototype's list: triangle sort glyphs with a faint hint on sortable headers, no "Sort by" select, and a paged footer ("1–12 of 17", Prev, Page 1 / 2, Next) instead of "Show more". Needs `pageSize`. */  /** The Blueprint prototype's list: triangle sort glyphs with a faint hint, no "Sort by" select, and a paged footer when `pageSize` is set (or `pager` is given). */
   proto?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
@@ -104,9 +110,11 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
   if (cur && col) list.sort((a, b) => { const x = val(col, a); const y = val(col, b); return (x > y ? 1 : x < y ? -1 : 0) * cur.dir; });
-  const pages = proto && pageSize ? Math.max(1, Math.ceil(list.length / pageSize)) : 1;
-  const pg = Math.min(page, pages - 1);
-  const visible = proto && pageSize ? list.slice(pg * pageSize, (pg + 1) * pageSize) : shown ? list.slice(0, shown) : list;
+  const size = pager ? pager.size : proto && pageSize ? pageSize : 0;
+  const pages = size ? Math.max(1, Math.ceil(list.length / size)) : 1;
+  const pageAt = size ? Math.min(Math.max(pager ? pager.page : page, 0), pages - 1) : 0;
+  const goPage = (n: number): void => (pager ? pager.onPage(n) : setPage(n));
+  const visible = size ? list.slice(pageAt * size, (pageAt + 1) * size) : shown ? list.slice(0, shown) : list;
   const pick = (key: string, dir?: 1 | -1): void => {
     const active = cur?.key === key;
     const next: SortState = { key, dir: dir ?? (active ? (cur!.dir === 1 ? -1 : 1) : 1) };
@@ -121,7 +129,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const clientMore = !proto && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
-      {sortable.length && !proto ? (
+      {sortable.length && mobileSort && !proto ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
           <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>
@@ -146,7 +154,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                         </button>
                       ) : (
                         <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                          {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                          {c.label}<span className="th-arrow" aria-hidden="true">{glyphs === "blueprint" ? (active ? (cur!.dir > 0 ? " ▲" : " ▼") : <span className="sorthint"> ↕</span>) : active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
                         </button>
                       )
                     ) : c.label}
@@ -187,14 +195,14 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </tbody>
         </table>
       </div>
-      {proto && pageSize ? (
-        <div className="tfoot">
-          <span role="status">{`${pg * pageSize + 1}–${pg * pageSize + visible.length} of ${list.length}`}</span>
+      {size ? (
+        <div className="tfoot dtable-more">
+          <span className="dtable-count" role="status">{`${pageAt * size + 1}–${pageAt * size + visible.length} of ${list.length}`}</span>
           {pages > 1 ? (
             <div className="row">
-              <button type="button" className="btn sm" id={`${id ?? "dt"}-prev`} disabled={pg === 0} title={pg ? undefined : "First page"} onClick={() => setPage(pg - 1)}>Prev</button>
-              <span>{`Page ${pg + 1} / ${pages}`}</span>
-              <button type="button" className="btn sm" id={`${id ?? "dt"}-next`} disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next</button>
+              <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-prev`} disabled={pageAt === 0} onClick={() => goPage(pageAt - 1)}>Prev</button>
+              <span>{`Page ${pageAt + 1} / ${pages}`}</span>
+              <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-next`} disabled={pageAt >= pages - 1} onClick={() => goPage(pageAt + 1)}>Next</button>
             </div>
           ) : null}
         </div>

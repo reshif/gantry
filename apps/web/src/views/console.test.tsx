@@ -75,15 +75,17 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
 }
 
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-function mount() {
+function mount(aux?: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
-  return render(<QueryClientProvider client={qc}><OverlayProvider><ConsoleView /></OverlayProvider></QueryClientProvider>);
+  const r = render(<QueryClientProvider client={qc}><OverlayProvider><ConsoleView /></OverlayProvider></QueryClientProvider>);
+  if (aux) void ask(aux); // /settings or /chats opens the panel the prototype page does not carry
+  return r;
 }
 const writes = (calls: Call[]) => calls.filter((c) => c.method !== "GET" && c.path !== "/api/v1/can");
 const firstOf = (sel: string) => waitFor(() => { const e = document.querySelector<HTMLElement>(sel); if (!e) throw new Error(`no ${sel}`); return e; });
 const type = (el: HTMLElement, v: string) => fireEvent.change(el, { target: { value: v } });
-const ask = async (text: string) => { type(await byId("con-input"), text); fireEvent.submit(document.getElementById("con-form")!); };
+async function ask(text: string) { type(await byId("con-input"), text); fireEvent.submit(document.getElementById("con-form")!); }
 const text = () => document.body.textContent ?? "";
 
 beforeEach(() => {
@@ -102,30 +104,29 @@ describe("Console (legacy console.js on the real API)", () => {
   describe("no model", () => {
     it("says so in the badge and the mode line, and the first message offers slash commands only", async () => {
       setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
-      mount();
+      mount("/settings");
       const badge = await byId("con-mode");
       await waitFor(() => expect(badge.textContent).toBe("No model"));
       expect(badge.className).toContain("ask-absent");
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("No model is configured");
-      expect(text()).toContain("slash commands read live data directly");
       expect(text()).not.toContain("is answered by");
     });
 
-    it("a question gets the clear notice, not an answer", async () => {
+    it("a question is answered at once from live state, or with what can be asked, never by a model that is not there", async () => {
       const calls = setup({
         "GET /api/v1/console/status": () => ({ body: NO_MODEL }),
         "POST /api/v1/console/messages": () => ({ sse: sse(["thread", { threadId: "ct-1", messageId: "cm-1", created: true }], ["unavailable", { code: "no_model_configured", msg: NO_MODEL.reason, messageId: "cm-2" }], ["done", { messageId: "cm-2", text: NO_MODEL.reason, mode: "none", cited: [], proposals: [] }]) }),
         "GET /api/v1/console/threads/ct-1": () => ({ body: { id: "ct-1", title: "x", pinned: [], createdAt: 0, updatedAt: 0, expiresAt: 0, retentionDays: 90, messages: [{ id: "cm-1", threadId: "ct-1", role: "user", text: "What is waiting on me?", at: Date.now() - 10, data: {} }, { id: "cm-2", threadId: "ct-1", role: "system", text: NO_MODEL.reason, at: Date.now(), data: { kind: "no_model" } }] } }),
       });
-      mount();
+      mount("/settings");
       await ask("What is waiting on me?");
-      await waitFor(() => expect(document.querySelectorAll(".msg-mode.is-none").length).toBe(1));
-      expect(document.querySelector(".msg-mode.is-none")!.textContent).toBe("No model configured");
-      expect(text()).toContain("Ask a Factory Admin to connect a model vendor");
-      const post = calls.find((c) => c.path === "/api/v1/console/messages")!;
-      expect(post.body).toEqual({ text: "What is waiting on me?", via: "console", project: "payments" });
-      expect(post.headers["idempotency-key"]).toBeTruthy();
-      expect(post.headers["x-csrf-token"]).toBe("c");
+      // with no model the page answers at once from live state and calls nothing
+      await waitFor(() => expect(text()).toContain("Nothing is waiting on a person."));
+      await ask("tell me a joke");
+      await waitFor(() => expect(text()).toContain("I can answer questions about work orders"));
+      await ask("status of WO-9999");
+      await waitFor(() => expect(text()).toContain("I cannot find WO-9999."));
+      expect(calls.some((c) => c.path === "/api/v1/console/messages")).toBe(false);
     });
   });
 
@@ -138,7 +139,7 @@ describe("Console (legacy console.js on the real API)", () => {
           { id: "cm-1", threadId: "ct-1", role: "user", text: "Why is WO-1042 stuck?", at: Date.now() - 10, data: {} },
           { id: "cm-2", threadId: "ct-1", role: "assistant", text: "WO-1042 is waiting at G2.", at: Date.now(), data: { mode: "model", cited: [{ type: "wo", id: "WO-1042", project: "payments" }], proposals: [], tools: ["get_work_order"] } }] } }),
       });
-      mount();
+      mount("/settings");
       await waitFor(() => expect(document.getElementById("con-mode")!.textContent).toBe("Model"));
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("claude-test-1");
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("read-only");
@@ -165,7 +166,7 @@ describe("Console (legacy console.js on the real API)", () => {
         }),
         "GET /api/v1/console/threads/ct-1": () => ({ body: { id: "ct-1", title: "x", pinned: [], createdAt: 0, updatedAt: 0, expiresAt: 0, retentionDays: 90, messages: [{ id: "cm-1", threadId: "ct-1", role: "user", text: "q", at: 1, data: {} }, { id: "cm-2", threadId: "ct-1", role: "assistant", text: "Looking at the gates", at: 2, data: { mode: "model", stopped: true } }] } }),
       });
-      mount();
+      mount("/settings");
       await ask("Look at the gates");
       await waitFor(() => expect(text()).toContain("Looking at the gates"));
       expect(document.getElementById("con-send")!.getAttribute("aria-disabled")).toBe("true");
@@ -175,12 +176,11 @@ describe("Console (legacy console.js on the real API)", () => {
       expect(document.getElementById("con-stop")).toBeNull();
     });
 
-    it("a refused send is shown as the reason, not as an answer", async () => {
+    it("on the Console page a send the model cannot answer gets the prototype's help line", async () => {
       setup({ "POST /api/v1/console/messages": () => ({ status: 404, body: { ok: false, msg: "No such conversation." } }) });
-      mount();
+      mount("/settings");
       await ask("hello");
-      await waitFor(() => expect(document.querySelector(".msg-mode.is-error")?.textContent).toBe("Model did not answer"));
-      expect(text()).toContain("No such conversation.");
+      await waitFor(() => expect(text()).toContain("I can answer questions about work orders"));
     });
   });
 
@@ -254,7 +254,7 @@ describe("Console (legacy console.js on the real API)", () => {
 
     it("a halt asks for a reason, then calls the ordinary endpoint with via console and an Idempotency-Key", async () => {
       const calls = setup({ ...ON, ...tool("propose_halt", proposal()), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform halted." } }) });
-      mount();
+      mount("/settings");
       await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
       await ask("/halt payments duplicate refunds");
       const ok = await firstOf("[id^='con-cf-ok-']");
@@ -278,7 +278,7 @@ describe("Console (legacy console.js on the real API)", () => {
 
     it("a kill needs the typed phrase and carries the in-flight choice", async () => {
       const calls = setup({ ...ON, ...tool("propose_kill", proposal({ kind: "kill", title: "Kill Payments Platform", phrase: "Payments Platform", danger: true, call: { method: "POST", path: "/api/v1/stops", body: { scope: "project", id: "payments", mode: "kill", reason: "bad deploy", inFlight: "hold", confirmText: "", via: "console" }, idempotent: true }, perm: { action: "kill.project", project: "payments" } })), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Killed." } }) });
-      mount();
+      mount("/settings");
       await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
       await ask("/kill payments bad deploy");
       const card = await waitFor(() => { const c = document.querySelector<HTMLElement>(".ccard-confirm.is-danger"); if (!c) throw new Error("no card"); return c; });
@@ -299,7 +299,7 @@ describe("Console (legacy console.js on the real API)", () => {
         ...ON, ...tool("propose_halt", proposal({ check: { allowed: false, reason: "Only a Line Lead may halt this line.", needs: "Needs Line Lead", rule: "MATRIX" } })),
         "POST /api/v1/console/explain": () => ({ body: { ok: true, mode: "trace", explanation: null, note: "No model is configured, so this is the policy engine's own trace.", person: "Asha", action: "line.halt (Halt)", decision: { allowed: false, reason: "x", rule: { id: "MATRIX" }, needs: "" }, trace: ["Roles in scope: none.", "Deciding rule: MATRIX Role matrix."] } }),
       });
-      mount();
+      mount("/settings");
       await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
       await ask("/halt payments dup");
       const perm = await waitFor(() => { const e = document.querySelector(".perm.neg"); if (!e) throw new Error("no perm"); return e; });
@@ -322,7 +322,7 @@ describe("Console (legacy console.js on the real API)", () => {
         "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Halted." } }),
         "PUT /api/v1/console/messages/cm-2/proposals/PROP-1": () => ({ body: { ok: true, msg: "Saved." } }),
       });
-      mount();
+      mount("/settings");
       await ask("halt payments, duplicate refunds");
       const ok = await waitFor(() => { const e = document.querySelector<HTMLElement>("[id^='con-cf-ok-']"); if (!e) throw new Error("no card"); return e; });
       fireEvent.click(ok);
@@ -332,7 +332,7 @@ describe("Console (legacy console.js on the real API)", () => {
 
     it("a refusal from the endpoint ends the card as failed and says why", async () => {
       setup({ ...ON, ...tool("propose_halt", proposal()), "POST /api/v1/stops": () => ({ status: 403, body: { ok: false, msg: "Payments Platform is halted already." } }) });
-      mount();
+      mount("/settings");
       await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
       await ask("/halt payments dup refunds");
       fireEvent.click(await firstOf("[id^='con-cf-ok-']"));
@@ -344,7 +344,7 @@ describe("Console (legacy console.js on the real API)", () => {
   describe("context panel and settings", () => {
     it("lists what the person can do in the current project, with reasons for what they cannot", async () => {
       setup({}, ["kill.factory"]);
-      mount();
+      mount("/settings");
       const caps = await waitFor(() => { const c = document.querySelector(".caps"); if (!c || !c.querySelector("li.no")) throw new Error("not yet"); return c; });
       const no = caps.querySelector("li.no")!;
       expect(no.textContent).toContain("Kill the factory");
@@ -355,7 +355,7 @@ describe("Console (legacy console.js on the real API)", () => {
 
     it("the panel lists what the console can do for you with a check or lock and the reason; no global toggle; admins get the manage link", async () => {
       setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: true, canUse: true, isFactoryAdmin: true, proposals: rights((k) => k !== "kill") } }) });
-      const r = mount();
+      const r = mount("/settings");
       await waitFor(() => expect(document.getElementById("con-right-halt")).toBeTruthy());
       expect(document.getElementById("con-actions")).toBeNull();
       expect(document.getElementById("con-right-halt")!.className).toBe("ok");
@@ -369,7 +369,7 @@ describe("Console (legacy console.js on the real API)", () => {
       canBatcher.clear();
       // An Engineer: nothing allowed, read-only message, no admin link.
       setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: false, canUse: true, isFactoryAdmin: false, proposals: rights(() => false) } }) });
-      mount();
+      mount("/settings");
       await waitFor(() => expect(document.getElementById("con-readonly")).toBeTruthy());
       expect(document.querySelectorAll("#con-rights li.ok").length).toBe(0);
       expect(document.getElementById("con-manage-perms")).toBeNull();
@@ -377,7 +377,7 @@ describe("Console (legacy console.js on the real API)", () => {
 
     it("a slash action the person has no console right for says which right is missing and calls nothing", async () => {
       const calls = setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: false, canUse: true, proposals: rights(() => false) } }) });
-      mount();
+      mount("/settings");
       await waitFor(() => expect(document.getElementById("con-right-halt")).toBeTruthy());
       await ask("/halt payments duplicate refunds");
       await waitFor(() => expect(text()).toContain("Console: propose halt"));
@@ -390,7 +390,7 @@ describe("Console (legacy console.js on the real API)", () => {
         "GET /api/v1/console/threads/ct-9": () => ({ body: { id: "ct-9", title: "t", pinned: ["WO-1042"], createdAt: 0, updatedAt: 0, expiresAt: 0, retentionDays: 90, messages: [{ id: "cm-1", threadId: "ct-9", role: "user", text: "earlier question", at: 1, data: {} }, { id: "cm-2", threadId: "ct-9", role: "assistant", text: "earlier answer", at: 2, data: { mode: "model" } }] } }),
         "DELETE /api/v1/console/threads/ct-9": () => ({ body: { ok: true, msg: "Conversation cleared." } }),
       });
-      mount();
+      mount("/chats");
       await waitFor(() => expect(text()).toContain("earlier answer"));
       expect(document.getElementById("con-pin-WO-1042")).toBeTruthy();
       fireEvent.click(await byId("con-clear"));
@@ -449,7 +449,7 @@ describe("Console model picker", () => {
 
   it("lists the callable models grouped by vendor with tier and price, defaulting to the routing default", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: WITH }) });
-    mount();
+    mount("/settings");
     const sel = (await byId("con-model")) as HTMLSelectElement;
     expect(document.getElementById("con-mode")).toBeNull();
     expect([...sel.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Anthropic", "Amazon Bedrock"]);
@@ -463,7 +463,7 @@ describe("Console model picker", () => {
 
   it("saves the person's choice on the server, and choosing the default clears it", async () => {
     const calls = setup({ "GET /api/v1/console/status": () => ({ body: WITH }), "PUT /api/v1/console/model": () => ({ body: { ok: true, msg: "Saved." } }) });
-    mount();
+    mount("/settings");
     const sel = (await byId("con-model")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "claude-haiku-5-5" } });
     await waitFor(() => expect(calls.find((c) => c.method === "PUT" && c.path === "/api/v1/console/model")!.body).toEqual({ model: "claude-haiku-5-5" }));
@@ -473,13 +473,13 @@ describe("Console model picker", () => {
 
   it("shows the saved choice when there is one", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: { ...WITH, choice: "claude-haiku-5-5", effectiveModel: "claude-haiku-5-5" } }) });
-    mount();
+    mount("/settings");
     expect(((await byId("con-model")) as HTMLSelectElement).value).toBe("claude-haiku-5-5");
   });
 
   it("with nothing callable, a Factory Admin is offered Connect a model vendor", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: { ...NO_MODEL, models: [], canManageModels: true } }) });
-    mount();
+    mount("/settings");
     const link = await byId("con-connect-vendor");
     expect(link.textContent).toBe("Connect a model vendor");
     expect(document.getElementById("con-mode")!.textContent).toBe("No model");
@@ -489,20 +489,39 @@ describe("Console model picker", () => {
 
   it("with nothing callable, anyone else is told to ask a Factory Admin", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: { ...NO_MODEL, models: [], canManageModels: false } }) });
-    mount();
+    mount("/settings");
     await waitFor(() => expect(document.getElementById("con-mode-reason")!.textContent).toContain("Ask a Factory Admin"));
     expect(document.getElementById("con-connect-vendor")).toBeNull();
   });
 
-  it("shows the status chip in the header, the toolbar above the thread, and the permission code on each capability", async () => {
+  it("the page itself carries no model chip, toolbar, chat list or disclosure; /settings and /chats open them on request", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
     mount();
-    await byId("con-bar");
-    expect(document.querySelector(".vhead .ask-badge")).toBeTruthy();
-    for (const id of ["con-threads", "con-new", "con-clear"]) expect(document.getElementById(id)).toBeTruthy();
-    await waitFor(() => expect([...document.querySelectorAll(".ctx .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
+    await byId("con-form");
+    expect(document.querySelector(".vhead .ask-badge")).toBeNull();
+    for (const id of ["con-bar", "con-new", "con-clear", "con-chats-panel", "con-more", "con-settings"]) expect(document.getElementById(id)).toBeNull();
+    expect(document.querySelectorAll(".panel-title").length).toBe(2);
+    await ask("/settings");
+    await byId("con-settings");
+    expect(document.querySelector("#con-settings .ask-badge")).toBeTruthy();
+    await waitFor(() => expect([...document.querySelectorAll("#con-settings .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
     expect(document.getElementById("con-open-audit")).toBeTruthy();
-    expect([...document.querySelectorAll(".ctx .panel-title")][1]!.textContent).toMatch(/^What .* can do/);
+    await ask("/chats");
+    await byId("con-chats-panel");
+    expect(document.getElementById("con-new-chat")).toBeTruthy();
+  });
+
+  it("pins come from the chat, link to the record, and the status question names the pinned work order; an empty Send says so", async () => {
+    setup({
+      "GET /api/v1/console/threads": () => ({ body: { items: [{ id: "ct-p", title: "t", pinned: ["WO-1042"], updatedAt: 1, expiresAt: 2, retentionDays: 90 }], retentionDays: 90 } }),
+      "GET /api/v1/console/threads/ct-p": () => ({ body: { id: "ct-p", title: "t", pinned: ["WO-1042"], createdAt: 0, updatedAt: 0, expiresAt: 0, retentionDays: 90, messages: [] } }),
+    });
+    mount();
+    const pin = await byId("con-pin-WO-1042");
+    expect(pin.getAttribute("href")).toContain("record/WO-1042");
+    await waitFor(() => expect(text()).toContain("Status of WO-1042"));
+    fireEvent.submit(document.getElementById("con-form")!);
+    await waitFor(() => expect(text()).toContain("Type a question first"));
   });
 
   it("the status line sits below the header rule: no negative margin pulls it into the heading", () => {
@@ -601,7 +620,7 @@ describe("Console chats", () => {
 
   it("lists saved chats newest first, opens the latest, and switches to another", async () => {
     chats();
-    mount();
+    mount("/chats");
     expect((await byId("con-chat-ct-a")).getAttribute("aria-current")).toBe("true");
     await waitFor(() => expect(text()).toContain("Which gates wait on me?"));
     fireEvent.click(await byId("con-chat-ct-b"));
@@ -612,7 +631,7 @@ describe("Console chats", () => {
 
   it("New chat starts an empty conversation without deleting the others", async () => {
     const calls = chats();
-    mount();
+    mount("/chats");
     await waitFor(() => expect(text()).toContain("Which gates wait on me?"));
     fireEvent.click(await byId("con-new-chat"));
     await waitFor(() => expect(text()).not.toContain("Which gates wait on me?"));
@@ -622,7 +641,7 @@ describe("Console chats", () => {
 
   it("renames a chat from its menu", async () => {
     const calls = chats();
-    mount();
+    mount("/chats");
     fireEvent.click(await byId("con-chat-more-ct-b"));
     fireEvent.click(await waitFor(() => { const m = [...document.querySelectorAll("[role=menuitem]")].find((e) => /Rename/.test(e.textContent ?? "")); if (!m) throw new Error("no menu"); return m as HTMLElement; }));
     const name = (await byId("con-chat-name")) as HTMLInputElement;
@@ -630,5 +649,25 @@ describe("Console chats", () => {
     fireEvent.change(name, { target: { value: "Release notes Nov" } });
     fireEvent.click(await byId("con-chat-rename-ok"));
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ title: "Release notes Nov" }));
+  });
+});
+
+describe("Console page layout (prototype)", () => {
+  it("has the four suggested questions, a one-line Console message input, and Conversation and Pinned work orders panels in 2fr / 1fr", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
+    mount();
+    const input = (await byId("con-input")) as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
+    expect(input.getAttribute("aria-label")).toBe("Console message");
+    const chips = [...document.querySelectorAll("#con-chips .chipbtn")].map((c) => c.textContent);
+    expect(chips).toContain("What is blocked?");
+    expect(chips).toContain("What waits on a person?");
+    expect(chips).toContain("Spend this month");
+    expect(document.querySelector(".cols.w21")).toBeTruthy();
+    expect([...document.querySelectorAll(".panel-title")].map((h) => h.textContent)).toEqual(expect.arrayContaining(["Conversation", "Pinned work orders"]));
+    expect(document.getElementById("con-pins")?.textContent).toContain("Nothing pinned.");
+    fireEvent.click(document.querySelector("#con-chips .chipbtn") as HTMLElement);
+    await waitFor(() => expect(document.querySelector(".msg.me .bub .who")).toBeTruthy());
+    expect(document.querySelector(".msg:not(.me) .who")?.textContent).toBe("Factory");
   });
 });

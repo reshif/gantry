@@ -9,11 +9,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { useCanMany } from "../api/can";
-import { useAudit, useMe, useProjects, useWorkOrders } from "../api/queries";
+import { useAudit, useHome, useMe, useProjects, useWorkOrders } from "../api/queries";
 import { setProject, usePrefs } from "../lib/prefs";
-import { navigate } from "../lib/router";
+import { hashFor, navigate } from "../lib/router";
 import { Icon } from "../ui/Icon";
-import { Avatar, Btn, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
+import { Avatar, Btn, Chip, Empty, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { useOpenTraveler } from "../shell/useTraveler";
@@ -25,6 +25,8 @@ import { ProposalCard } from "./console/Confirm";
 import { Markdown } from "./console/Markdown";
 import { ModelPicker } from "./console/ModelPicker";
 import { plan as planSlash, SLASH } from "./console/slash";
+import { helpText, isInFlight, liveAnswer, type LiveCtx, type LiveWo } from "./console/live";
+import { useCatalog } from "./projects/kit";
 import type { Card, Cited, Msg, Proposal, ThreadMessage } from "./console/types";
 
 let seq = 1;
@@ -98,10 +100,12 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const [streaming, setStreaming] = useState(false);
   /** Questions asked again with Retry: their earlier saved copy and error are hidden so the question shows once. */
   const [redo, setRedo] = useState<Array<{ text: string; cut: number }>>([]);
+  /** A panel the person asked for with /chats or /settings (the prototype page has neither). */
+  const [aux, setAux] = useState<"chats" | "settings" | null>(null);
   const [draft, setDraft] = useState("");
   const [slashIdx, setSlashIdx] = useState(0);
   const ac = useRef<AbortController | null>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
 
   const setLocal = useCallback((f: (x: Msg[]) => Msg[]) => setLocalState((x) => { const n = f(x); localCache.set(meId, n); return n; }), [meId]);
@@ -121,9 +125,21 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const roles = useMemo(() => (me?.person.roles ?? []).filter((g) => g.scope === "factory" || g.scope === cur?.id).map((g) => g.role), [me, cur?.id]);
   const woQ = useMemo(() => ({ limit: 40 }), []);
   const wos = useWorkOrdersLite(cur?.id ?? null, woQ);
+  const cat = useCatalog();
+  const home = useHome().data;
   const stuck = wos.find((w) => w.state === "waiting" || w.state === "blocked" || w.bay)?.id ?? wos.find((w) => !["done", "killed"].includes(w.state))?.id ?? null;
   const doneWo = wos.filter((w) => w.state === "done").slice(-1)[0]?.id ?? null;
   const suggestions = [...new Set(suggestionsFor(roles, cur?.name ?? "my projects", cur?.id ?? null, stuck, doneWo))];
+  // The Console page (not the workspace's embedded chat): the prototype's four questions, answered at once from live state.
+  const page = !embed;
+  const statusWo = thread.data?.pinned?.[0] ?? wos.find((w) => w.state === "blocked")?.id ?? stuck ?? wos.find(isInFlight)?.id ?? null;
+  const liveChips = ["What is blocked?", "What waits on a person?", ...(statusWo ? [`Status of ${statusWo}`] : []), "Spend this month"];
+  const liveCtx: LiveCtx = {
+    wos: wos.map((w): LiveWo => ({ ...w, ...(typeof w.station === "number" && cat?.stations[w.station] ? { stationName: cat.stations[w.station]!.name } : {}) })),
+    waiting: (home?.approvals ?? []).filter((a) => a.wo).map((a) => ({ wo: a.wo!, ...(a.gate ? { gate: a.gate } : {}) })),
+    spend: projects.length ? { mtd: projects.reduce((n, p) => n + (p.budget?.mtd ?? 0), 0), monthly: projects.reduce((n, p) => n + (p.budget?.monthly ?? 0), 0) } : null,
+    project: cur?.name ?? null,
+  };
 
   const serverMsgs = useMemo(() => {
     const all = thread.data?.messages ?? [];
@@ -182,6 +198,8 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
 
   /* ---------- slash commands: tools, directly ---------- */
   const runSlash = async (text: string): Promise<void> => {
+    // The chat list and the model and rights panel are not on the page (the prototype has neither): /chats and /settings open them.
+    if (page && /^\/(chats|settings)\s*$/i.test(text)) { setAux(/chats/i.test(text) ? "chats" : "settings"); return; }
     addLocal({ role: "user", text, mode: "pending", by: meId });
     const p = planSlash(text, visible, cur ? { id: cur.id, name: cur.name, key: cur.key } : null, Date.now());
     if (p.kind === "help") { addLocal({ role: "factory", mode: "slash", text: "Slash commands and plain sentences both work. Anything that changes state shows a confirm card first.", cards: [{ type: "help" }] }); return; }
@@ -219,7 +237,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
       if (e.event === "thread") { tid = e.data.threadId; setFresh(false); setThreadId(tid); if (e.data.messageId) setTail((t) => t.map((m) => (m.id === uid ? { ...m, serverId: e.data.messageId } : m))); }
       else if (e.event === "text") patchLive((m) => ({ ...m, text: m.text + e.data.delta }));
       else if (e.event === "proposal") patchLive((m) => ({ ...m, cards: [...(m.cards ?? []), { type: "proposal", proposal: e.data.proposal }], serverId: e.data.messageId }));
-      else if (e.event === "unavailable" || e.event === "error") patchLive((m) => ({ ...m, text: e.data.msg, mode: e.event === "error" ? "error" : "none", streaming: false }));
+      else if (e.event === "unavailable" || e.event === "error") patchLive((m) => (page ? { ...m, text: helpText(liveCtx), mode: "live", streaming: false } : { ...m, text: e.data.msg, mode: e.event === "error" ? "error" : "none", streaming: false }));
       else if (e.event === "done") patchLive((m) => ({ ...m, text: e.data.text || m.text, mode: e.data.mode === "none" ? "none" : "model", streaming: false, cited: e.data.cited, stopped: !!e.data.stopped, serverId: e.data.messageId }));
     };
     const r = await sendMessage({ text, ...(threadId ? { threadId } : {}), ...(cur ? { project: cur.id } : {}) }, onEvent, ctl.signal);
@@ -229,12 +247,13 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
         if (r.status === 404) { setThreadId(null); setFresh(true); }
         // Interrupted mid-answer: the server may still finish and save it, so look before showing an error.
         if (tid && r.status !== 404) await Promise.all([qc.refetchQueries({ queryKey: ck.thread(tid) }), qc.invalidateQueries({ queryKey: ck.threads() })]);
-        patchLive((m) => ({ ...m, text: r.msg, mode: "error", streaming: false }));
+        // On the Console page a question the model cannot answer gets the prototype's help line (what can be asked), not a bare error.
+        patchLive((m) => (page ? { ...m, text: helpText(liveCtx), mode: "live", streaming: false } : { ...m, text: r.msg, mode: "error", streaming: false }));
         return;
       }
       if (tid) await Promise.all([qc.refetchQueries({ queryKey: ck.thread(tid) }), qc.invalidateQueries({ queryKey: ck.threads() })]);
       // The saved answer (the merge above) replaces the streamed one. If the stream ended without one, never leave a partial row marked streaming.
-      patchLive((m) => (m.streaming ? { ...m, streaming: false, mode: m.text ? "model" : "error", text: m.text || "The answer ended without a reply. Try again.", note: m.text ? "The answer was cut short." : undefined } as Msg : m));
+      patchLive((m) => (m.streaming ? { ...m, streaming: false, mode: m.text ? "model" : page ? "live" : "error", text: m.text || (page ? helpText(liveCtx) : "The answer ended without a reply. Try again."), note: m.text ? "The answer was cut short." : undefined } as Msg : m));
       // The tail is kept: the merge hides it once the saved question and answer are in the thread, and shows it (with Retry) if they never arrive.
     } finally {
       // Only now (after the saved thread is loaded) can Retry be offered: it needs to know which saved rows it replaces.
@@ -255,8 +274,20 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     if (streaming) { ui.toast("Wait for the current answer or stop it.", "warn"); return; }
     setDraft("");
     setSlashIdx(0);
-    if (text.startsWith("/")) await runSlash(text);
-    else await askModel(text);
+    if (text.startsWith("/")) { await runSlash(text); return; }
+    // On the Console page the four suggested questions (and, with no model configured, any question about a work order, what waits, what is blocked
+    // or spend) are answered at once from live state. Other questions go to the model; with no model the page says what can be asked.
+    if (page) {
+      const isChip = liveChips.some((c) => c.toLowerCase() === text.toLowerCase()) || /^status of wo-?\d+\??$/i.test(text);
+      const modelOff = !!st && !st.configured;
+      const answer = isChip || modelOff ? liveAnswer(text, liveCtx) ?? (modelOff ? helpText(liveCtx) : null) : null;
+      if (answer !== null) {
+        addLocal({ role: "user", text, mode: "pending", by: meId });
+        addLocal({ role: "factory", mode: "live", text: answer });
+        return;
+      }
+    }
+    await askModel(text);
   };
 
   // The question an @mention carried here is asked once, when the chat has loaded.
@@ -326,7 +357,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   /* ---------- composer ---------- */
   const slash = draft.startsWith("/") && !draft.includes(" ") ? SLASH.filter((x) => x.cmd.startsWith(draft.toLowerCase())) : [];
   const idx = slashIdx >= slash.length ? 0 : slashIdx;
-  const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
     if (slash.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); setSlashIdx((idx + (e.key === "ArrowDown" ? 1 : slash.length - 1)) % slash.length); return; }
     if (slash.length && e.key === "Tab") { e.preventDefault(); toDraft(slash[idx]!.cmd); return; }
     if (slash.length && e.key === "Escape") { e.preventDefault(); setDraft(`${draft} `); return; }
@@ -378,6 +409,79 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
           </Panel>
     </>
   );
+  /* ---------- the Console page (prototype `console`): §1 Conversation, §2 Pinned work orders ---------- */
+  if (page) {
+    const empty = msgs.length === 1 && msgs[0]!.id === "m0" && !streaming;
+    const woById = new Map(wos.map((w) => [w.id, w]));
+    const modeOf = (m: Msg): string => (m.mode === "model" ? `${st?.model ?? "Model"}${m.stopped ? " · stopped" : ""}` : m.mode === "live" ? "Live work-order state" : m.mode === "slash" ? "Slash command · live data" : m.mode === "none" ? "No model configured" : "Model did not answer");
+    return (
+      <div className="view view-console view-console-page">
+        <ViewHead kicker="ALL LINES" title="Console" sub="Ask the factory a question in plain language. Answers are read from live work-order state." />
+        <div className="cols w21">
+          <Panel title="Conversation">
+            <div className="conv" id="con-conv">
+              <div className="chat" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
+                {empty ? <Empty id="con-empty" title="Ask anything about the line" text="Try one of the suggestions below." /> : msgs.map((m) => (
+                  <div className={`msg msg-${m.role}${m.role === "user" ? " me" : ""}`} key={m.id}>
+                    {m.role === "user" ? <Avatar id={m.by} /> : <span className="avatar bot" title="Factory" aria-hidden="true">OA</span>}
+                    <div className="bub">
+                      <div className="who">{m.role === "user" ? (m.by && m.by !== meId ? actorOf(m.by).name : me.person.name) : "Factory"}</div>
+                      {m.streaming ? <div id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div id={`con-msg-text-${m.id}`}>{m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
+                      {m.role === "factory" && m.mode !== "pending" && m.mode !== "live" ? (
+                        <div className="small muted msg-meta"><span className={`msg-mode is-${m.mode}`}>{modeOf(m)}</span>{m.note ? <span className="msg-note">{` · ${m.note}`}</span> : null}{retryable && retryable.errId === m.id ? <> <Btn label="Retry" small kind="ghost" icon="send" id="con-retry" onClick={retry} /></> : null}</div>
+                      ) : m.streaming ? <div className="small muted msg-meta"><span className="msg-mode is-pending">Model · streaming</span></div> : null}
+                      {m.cited?.length ? <div className="chips msg-chips" aria-label="Used in this answer"><span className="kicker">Used</span>{m.cited.map((e) => <EntityChip key={`${e.type}:${e.id}`} e={e} />)}</div> : null}
+                      {m.cards?.map((c, i) => c.type === "proposal" && c.proposal
+                        ? <ProposalCard key={`${m.id}-${c.proposal.id}`} p={c.proposal} mid={m.id} serverId={m.serverId} />
+                        : <ResultCard key={`${m.id}-${i}`} type={c.type} data={c.data} c={cardCtx(m.id)} />)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="chips" id="con-chips">{liveChips.map((sg, i) => <button type="button" key={sg} className="chipbtn" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
+              <form className="row nowrap" id="con-form" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { ui.toast("Type a question first", "error"); return; } void send(draft); }}>
+                {slash.length ? (
+                  <ul className="slash-menu" id="con-slash" role="listbox" aria-label="Commands">
+                    {slash.map((x, i) => <li key={x.cmd} role="option" id={`con-slash-${i}`} className={i === idx ? "is-active" : ""} aria-selected={i === idx} onMouseDown={(e) => { e.preventDefault(); toDraft(x.cmd); }}><span className="mono">{x.cmd.trim()}</span><span className="muted">{x.hint}</span></li>)}
+                  </ul>
+                ) : null}
+                <input id="con-input" ref={input} className="input" type="text" autoFocus placeholder={'Ask the factory: "what is blocked?", "status of WO-2417"…'} aria-label="Console message" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
+                {streaming ? <Btn label="Stop" kind="danger" icon="x" id="con-stop" onClick={() => ac.current?.abort()} /> : null}
+                <Btn label="Send" kind="primary" type="submit" id="con-send" disabledReason={streaming ? "Wait for the answer or stop it." : null} />
+              </form>
+            </div>
+          </Panel>
+          <>
+            <Panel title="Pinned work orders" flush id="con-pins">
+              {pinned.length ? (
+                <ul className="list">{pinned.map((id) => { const w = woById.get(id); return (
+                  <li key={id}>
+                    <a className="pri mono" id={`con-pin-${id}`} href={hashFor("record", id, cur?.id ?? null)}>{id}</a>
+                    {w ? <span className="grow wrap2" title={w.title}>{w.title}</span> : <span className="grow" />}
+                    {w ? <Chip text={w.state} cls={PIN_TONE[w.state] ?? "plain"} /> : null}
+                  </li>
+                ); })}</ul>
+              ) : <div className="empty" title="Pin a work order from a why card.">Nothing pinned.</div>}
+            </Panel>
+            {aux === "chats" ? (
+              <Panel title="Chats" flush id="con-chats-panel" tools={<Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} />}>
+                <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />
+                <div className="row" style={{ padding: 8 }}><Btn label="Clear conversation" small kind="ghost" icon="x" id="con-clear" disabledReason={threadId || local.length ? null : "There is nothing to clear."} onClick={() => void clear()} /></div>
+              </Panel>
+            ) : null}
+            {aux === "settings" ? (
+              <Panel title="Console settings" id="con-settings" tools={<Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} />}>
+                <div className="row">{modeChip}{modePicker}</div>
+                <p className="con-mode-line small muted" id="con-mode-reason"><span>{modeLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p>
+                {ctxPanels}
+                <p className="footnote small muted">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
+              </Panel>
+            ) : null}
+          </>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={embed ? "view-console ws-chat" : "view view-console"}>
       {embed ? embed.header : <ViewHead title="Console" status={modeChip} sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you." actions={modePicker} />}
@@ -456,9 +560,11 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
 }
 
 /** Recent work orders of a project, for the suggested questions only (a stuck one, a finished one). */
-function useWorkOrdersLite(projectId: string | null, q: { limit: number }): Array<{ id: string; state: string; bay: string | null }> {
+const PIN_TONE: Record<string, string> = { running: "info", waiting: "warn", blocked: "bad", failed: "bad", killed: "bad", done: "ok" };
+
+function useWorkOrdersLite(projectId: string | null, q: { limit: number }): Array<LiveWo & { bay: string | null }> {
   const r = useWorkOrders(projectId, q);
   const d = r.data;
   const items = Array.isArray(d) ? d : d?.items ?? [];
-  return items as Array<{ id: string; state: string; bay: string | null }>;
+  return items as Array<LiveWo & { bay: string | null }>;
 }
