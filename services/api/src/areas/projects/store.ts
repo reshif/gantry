@@ -135,3 +135,13 @@ export async function openByClass(db: Queryable, orgId: string, projectId: strin
 }
 
 export type { Catalog };
+
+/** The caller holds a factory-scope Factory Admin grant now (decided from the role assignments, never from a role name in a request). Null when not. */
+export async function factoryAdminActor(tx: Tx, a: { orgId: string; personId: string | null; now: Date }): Promise<{ id: string; name: string } | null> {
+  if (!a.personId) return null;
+  const { rows } = await tx.query<{ name: string }>(
+    `select p.name from people p where p.org_id = $1 and p.id = $2 and p.status = 'active' and exists (select 1 from effective_role_assignments r where r.org_id = p.org_id and r.person_id = p.id and r.role_id = 'factory_admin' and r.project_id is null and r.revoked_at is null and (r.expires_at is null or r.expires_at > now()))`,
+    [a.orgId, a.personId],
+  );
+  return rows[0] ? { id: a.personId, name: rows[0].name } : null;
+}

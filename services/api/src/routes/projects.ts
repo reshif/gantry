@@ -14,7 +14,7 @@
  * the tables: work in flight, gates waiting, flow efficiency, trust coverage and the health chip). Every state-changing handler goes
  * through command() (docs/BUILD.md, spec 15.4): decision point and audit on success and denial, state and event in one transaction.
  */
-import { visibleProjects, type Project } from "@gantry/domain";
+import { gateLockView, isFactoryAdmin, OVERRIDE_REASON_MIN, visibleProjects, type Project } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { command, policyState, type Actor, type CommandResult, type CommandSpec, readTemplates, readProjects, readRepos, refuse, type PolicyStateLoaded } from "../core/index.js";
@@ -64,7 +64,17 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const halted: Record<string, number> = {};
     for (const r of repos) if (r.halted) halted[r.project] = (halted[r.project] ?? 0) + 1;
     const metrics = await portfolioMetrics(g.pool, g.orgId, mine, !!st.stops?.factory, halted);
-    return { projects: mine.map((p) => ({ ...p, metrics: metrics[p.id] })), st };
+    // The flow's locks, from the server: which gates are always on (with the reason), whether the viewer may override them (a Factory Admin, never G5), and the marker of any
+    // override in force (who, when, why). The Flow screen shows "Always on" with a lock to everyone else and "Switch off (admin override, reason)" to an admin.
+    const catalog = await readCatalog(g.pool, g.orgId);
+    const admin = isFactoryAdmin(st, who);
+    return {
+      projects: mine.map((p) => ({
+        ...p, metrics: metrics[p.id],
+        flowOverride: { viewerMayOverride: admin, minReasonLength: OVERRIDE_REASON_MIN, locks: Object.fromEntries(catalog.gates.filter((gt) => p.flow.gates[gt.id] && !p.flow.gates[gt.id]!.absent).map((gt) => [gt.id, gateLockView(gt, p, admin)])) },
+      })),
+      st,
+    };
   }
 
   app.get("/api/v1/projects", async (req) => (await visible(req)).projects);
@@ -149,11 +159,11 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const scope = { project: id };
     const ifMatch = projectVersion(g.orgId, id);
     // Anything that lowers the human oversight on a route (a gate to automatic or mixed) needs a fresh sign-in too.
-    if ("gate" in body) return inProject(req, { action: "project.config", scope, ifMatchRequired: true, ifMatch, ...(body.mode !== "human" ? { stepUp: true as const } : {}) }, id, "edit", (tx, a) => changeGateMode(tx, a, id, body.gate, body.mode));
+    if ("gate" in body) return inProject(req, { action: "project.config", scope, ifMatchRequired: true, ifMatch, ...(body.mode !== "human" ? { stepUp: true as const } : {}) }, id, "edit", (tx, a) => changeGateMode(tx, a, id, body.gate, body.mode, body.reason));
     const edit = parseConfigEdit(body.path, body.value);
     // Turning a gate or a station off (its gate leaves the route) removes a check on future work: it needs a fresh sign-in on top of project.config (spec 14.1).
     const stepUp = (edit.kind === "gate-enabled" || edit.kind === "station-enabled") && !edit.value ? { stepUp: true as const } : {};
-    return inProject(req, { action: actionFor(edit), scope, ifMatchRequired: true, ifMatch, ...stepUp }, id, "edit", (tx, a) => setConfig(tx, a, id, edit, body.path));
+    return inProject(req, { action: actionFor(edit), scope, ifMatchRequired: true, ifMatch, ...stepUp }, id, "edit", (tx, a) => setConfig(tx, a, id, edit, body.path, body.reason));
   });
 
   /* --------------------------------------------------------------------- flow */

@@ -29,8 +29,14 @@ d("wave 6 authz: flow locks, card templates, effective instructions, stops, gran
     it("turning off the Verify or Review station is refused: its gate would leave the route", async () => {
       for (const st of ["verify", "review"]) {
         const r = await flow(ASHA, { path: `flow.stations.${st}.enabled`, value: false });
-        expect(r.status, JSON.stringify(r.body)).toBe(409);
-        expect(String(r.body.msg)).toMatch(/cannot be turned off/);
+        // Owner decision 2026-11-19: a Factory Admin may override the lock with a reason (Verify, G4); Review carries G5 and stays on for everyone.
+        if (st === "review") {
+          expect(r.status, JSON.stringify(r.body)).toBe(409);
+          expect(String(r.body.msg)).toMatch(/cannot be turned off/);
+        } else {
+          expect(r.status, JSON.stringify(r.body)).toBe(403);
+          expect(r.body.needs).toBe("override_reason");
+        }
       }
       const gates = await routeOf("feature");
       expect(gates).toContain("G4");
@@ -40,15 +46,18 @@ d("wave 6 authz: flow locks, card templates, effective instructions, stops, gran
     it("a regulated project keeps every station that carries a gate", async () => {
       await w.q(`update projects set regulated = true where id = 'payments'`);
       try {
-        expect((await flow(ASHA, { path: "flow.stations.design.enabled", value: false })).status).toBe(409);
-        expect((await flow(ASHA, { gate: "G3G3s", mode: "auto" })).status).toBe(422);
+        // a Factory Admin may override, with a reason; without one they are asked for it
+        expect((await flow(ASHA, { path: "flow.stations.design.enabled", value: false })).status).toBe(403);
+        expect((await flow(ASHA, { gate: "G3G3s", mode: "auto" })).status).toBe(403);
+        expect((await flow("p-daniel", { path: "flow.stations.design.enabled", value: false })).status).toBe(409);
       } finally {
         await w.q(`update projects set regulated = false where id = 'payments'`);
       }
     });
 
     it("plan and security (G3G3s) stays a person's decision in a project that is not regulated", async () => {
-      expect((await flow(ASHA, { gate: "G3G3s", mode: "auto" })).status).toBe(422);
+      expect((await flow("p-daniel", { gate: "G3G3s", mode: "auto" })).status).toBe(422);
+      expect((await flow(ASHA, { gate: "G3G3s", mode: "auto" })).status).toBe(403); // the Factory Admin may override it, with a reason
       expect(gateModeLock({ id: "G3G3s", kind: "mixed", checks: ["x"] }, "auto", null)).not.toBeNull();
       expect(gateModeLock({ id: "G3G3s", kind: "mixed", checks: ["x"] }, "mixed", null)).toBeNull();
       expect(gateModeLock({ id: "G3G3s", kind: "mixed", checks: ["x"] }, "human", null)).toBeNull();

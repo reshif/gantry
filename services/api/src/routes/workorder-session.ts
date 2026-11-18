@@ -14,7 +14,7 @@
  * With no usable model the scripted questionnaire answers instead, labelled "Rule-based (no agent)".
  */
 import { appendEvent, withTx, type Queryable } from "@gantry/db";
-import { can, SESSION_BUDGET_DEFAULT_USD, WO_AGENT_LABEL, classOf, classesOf, route, stationDef, visibleProjects, type Catalog, type FlowState, type Project, type WoCard, type WorkOrder } from "@gantry/domain";
+import { briefGateOff, can, SESSION_BUDGET_DEFAULT_USD, WO_AGENT_LABEL, classOf, classesOf, route, stationDef, visibleProjects, type Catalog, type FlowState, type Project, type WoCard, type WorkOrder } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { runConversation, ModelUnavailable, readiness } from "../areas/console/model.js";
@@ -26,7 +26,7 @@ import { agentBudgetUsd, historyFrom, openSse, stationAgentGate, turnCostMicros 
 import { postMessage, reclassify, decline } from "../areas/workorders/intake.js";
 import { applyAgentClass, claimClassifications, settleClassification } from "../areas/workorders/classify.js";
 import { loadFlow, readWoRow, stateWithPinned, woVersion } from "../areas/workorders/model.js";
-import { confirmAgentBrief } from "../areas/workorders/session/approve.js";
+import { autoConfirmProposedBrief, confirmAgentBrief } from "../areas/workorders/session/approve.js";
 import { addWoMessage, legacyMessages, listWoMessages, lockWoMessage, newWoMessageId, saveWoMessageData, supersedeWoPending, woSessionSpend, markWoSeen, type WoMessage } from "../areas/workorders/session/store.js";
 import { executeWoTool, stationName, woToolDefs, type WoSessionCtx } from "../areas/workorders/session/tools.js";
 import { openIntakeSessions, scanWoEvents } from "../areas/workorders/session/updates.js";
@@ -285,9 +285,17 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const model = r.model ?? o.ag.pin.model;
     const micros = await turnCostMicros(g.pool, g.orgId, model, r.usage);
     const text = r.text || (r.stopped ? "" : r.truncated ? "My answer was cut off at the output limit before I finished, so nothing was proposed. Ask me to continue." : "The model returned no text.");
-    return persist(o.row, "assistant", o.ag.agentId, text, {
+    const savedId = await persist(o.row, "assistant", o.ag.agentId, text, {
       mode: "agent", model, agent: o.ag.agentName, version: o.ag.pin.version, station: o.ag.station, context: sc.turn, cards: ctx.cards, drafts: ctx.drafts, tools: ctx.used, usage: r.usage, costMicros: micros, ...(r.stopped ? { stopped: true } : {}), ...(r.truncated ? { truncated: true } : {}),
     }, o.who.id, { mode: "agent", model, agent: o.ag.agentId, version: o.ag.pin.version, skills: sc.turn.skillVersions, instructionHash: sc.turn.instructionHash, promptHash: sc.turn.promptHash, tuple: sc.turn.tupleId, tools: ctx.used, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costMicros: micros });
+    // The brief gate (G0+G1) switched off by an admin override: a brief the agent proposes is the brief; nobody has to approve the card for the work order to move on.
+    if (briefGateOff(f.project)) {
+      for (const c of ctx.cards) {
+        if (c.kind !== "proposal" || c.what !== "brief") continue;
+        await withTx(g.pool, (tx) => autoConfirmProposedBrief(tx, g.orgId, o.row.id, savedId, c.id)).catch((e: Error) => app.log.error({ err: e, wo: o.row.id }, "auto-confirm of the proposed brief failed; the card stays for a person"));
+      }
+    }
+    return savedId;
   }
 
   /** Follow-ups: an update that asked for one (data.followUp = pending) gets an agent turn that says what it means and puts up the next proposal. Never writes anything about the work. */

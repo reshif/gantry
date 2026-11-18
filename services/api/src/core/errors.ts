@@ -14,7 +14,7 @@ export class Refusal extends Error {
   }
 }
 
-export const refuse = (kind: Kind, msg: string, extra: { rule?: RuleRef; needs?: string; current?: Record<string, unknown> } = {}): Refusal => new Refusal(gantryError(kind, msg, extra));
+export const refuse = (kind: Kind, msg: string, extra: { rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> } = {}): Refusal => new Refusal(gantryError(kind, msg, extra));
 
 export const notFound = (msg: string): Refusal => refuse("not_found", msg);
 export const invalid = (msg: string): Refusal => refuse("invalid", msg);
