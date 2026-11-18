@@ -102,9 +102,9 @@ function OutboxCard({ h }: { h: SystemHealth }) {
         empty={{ title: "No dead letters", text: "Everything was delivered." }}
         columns={[
           { key: "id", label: "ID", render: (r) => <span className="mono">{r.id}</span> },
-          { key: "destination", label: "Topic", sort: true, render: (r) => <span className="mono" title={r.scope === "project" ? "Belongs to a project's notifications" : undefined}>{r.destination}</span> },
+          { key: "destination", label: "Topic", render: (r) => <span className="mono" title={r.scope === "project" ? "Belongs to a project's notifications" : undefined}>{r.destination}</span> },
           { key: "lastError", label: "Error", render: (r) => <span title={r.lastError ?? undefined}>{r.lastError ?? "No error recorded."}</span> },
-          { key: "attempts", label: "Attempts", sort: true, render: (r) => <span className="mono">{r.attempts}</span> },
+          { key: "attempts", label: "Attempts", render: (r) => <span className="mono">{r.attempts}</span> },
           { key: "act", label: "", align: "end", render: (r) => <ActionBtns r={r} canRetry={canRetry} /> },
         ]}
       />

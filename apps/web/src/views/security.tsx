@@ -234,7 +234,7 @@ function RestorePanel({ perm, sec }: { perm: Decision; sec: SecuritySettings }) 
       <div className="stack">
         <div className="row spread">
           <div><b>Restoring after emergency stop needs two Factory Admins</b><div className="dim small">Recommended. Prevents a single compromised account from restarting the line.</div></div>
-          <Toggle id="sec-two" label="Two admins to restore" checked={sec.restoreFactoryNeedsTwo} decision={perm} onChange={(v) => void set("restoreFactoryNeedsTwo", v, v ? "Factory restore needs two Factory Admins." : "One Factory Admin can restore the factory.")} />
+          <Toggle id="sec-two" label="Two admins to restore" checked={sec.restoreFactoryNeedsTwo} decision={perm} onChange={(v) => void set("restoreFactoryNeedsTwo", v, `${v ? "Enabled" : "Disabled"} Two admins to restore`)} />
         </div>
       </div>
     </Card>

@@ -70,10 +70,8 @@ export default function AuditView() {
   const open = (seq: number) => ui.drawer.open(`audit:${seq}`, (close) => <AuditDrawer seq={seq} projectName={projectName} close={close} />);
 
   const cats = [...BASE_CATS, ...Object.keys(sum?.categories ?? {}).filter((c) => !BASE_CATS.includes(c))].filter((c) => BASE_CATS.includes(c) || (sum?.categories[c] ?? 0) > 0);
-  const actorOpts = [
-    { value: "human", label: "People" }, { value: "agent", label: "Agents" }, { value: "system", label: "API keys, triggers, system" },
-    ...(sum?.facets.actors ?? []).map((a) => ({ value: a.id, label: a.name })),
-  ];
+  // the prototype lists the first 12 people by name
+  const actorOpts = (sum?.facets.actors ?? []).slice(0, 12).map((a) => ({ value: a.id, label: a.name }));
   const scoped = !perm.pending && !perm.allowed;
 
   const runVerify = async (quiet = false) => {
