@@ -2,11 +2,41 @@
  * Sign-in screen (legacy auth.js). Sign-in is delegated to the identity provider: the buttons leave
  * the SPA for /auth/login. Demo accounts appear only when the API config says demoAccounts is on.
  */
+import { useRef, useState } from "react";
 import type { PublicConfig } from "../api/types";
 import { loginUrlWithReturn as loginUrl } from "../lib/session/returnTo";
 import { DEMO_ACCOUNTS } from "../lib/demo";
-import { Icon, Logo } from "../ui/Icon";
-import { Btn } from "../ui/primitives";
+import { Icon } from "../ui/Icon";
+import { Btn, Field, focusFirstInvalid, Input } from "../ui/primitives";
+
+/** The Gantry mark, the same one the top bar draws (prototype `G.logo`). */
+function BrandMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M5 14h14" stroke="currentColor" strokeWidth="2" />
+      <path d="M7 14V8h4v6M13 14V6h4v8" fill="none" stroke="var(--accent)" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+/** The work-email check, with the prototype's messages. The domain comes from the server's config; none named means any address passes. */
+export function emailProblem(value: string, domain?: string | null): string {
+  const v = value.trim();
+  if (!v) return "Email is required.";
+  if (!/^[^@\s]+@[^@\s]+$/.test(v)) return "Enter a valid email address.";
+  if (domain && !v.toLowerCase().endsWith(`@${domain.toLowerCase()}`)) return `Use an ${domain} address.`;
+  return "";
+}
+
+/** The dim line under the sign-in form. Every clause comes from the server's config; nothing is stated that the server did not say. */
+export function signInFootnote(config: PublicConfig | null): string {
+  return [
+    config?.allowedDomain ? `Access is limited to the ${config.allowedDomain} domain.` : "",
+    config?.mfaRequiredForAdmins ? "MFA is required for admins." : "",
+    config?.demoAccounts ? "Development sign-in is on: seeded demo accounts can sign in. Use this only on a local stack." : "",
+  ].filter(Boolean).join(" ");
+}
 
 /** The guided screen for a Factory Admin whose sign-in had no second factor (the server answered `needs: "mfa_setup"`). */
 function MfaSetup() {
@@ -32,74 +62,91 @@ function MfaSetup() {
 export function SignIn({ config, error, needs }: { config: PublicConfig | null; error?: string | null; needs?: string | null }) {
   const demo = !!config?.demoAccounts;
   const accounts = config?.demoAccountList?.length ? config.demoAccountList : DEMO_ACCOUNTS;
-  const go = (method: "sso" | "github") => window.location.assign(loginUrl(method));
+  const go = (method: "sso" | "github", email?: string) => window.location.assign(loginUrl(method, email));
+  const form = useRef<HTMLFormElement>(null);
+  const [email, setEmail] = useState("");
+  const [problem, setProblem] = useState("");
+  const [notice, setNotice] = useState("");
+  const emailLink = config?.emailLinkLogin === true;
+  const submitEmail = () => {
+    const bad = emailProblem(email, config?.allowedDomain);
+    setProblem(bad);
+    setNotice("");
+    if (bad) {
+      // the error is rendered on the next paint; focus returns to the field after it
+      window.setTimeout(() => { if (form.current) focusFirstInvalid(form.current); }, 0);
+      return;
+    }
+    if (emailLink) go("sso", email.trim());
+    else setNotice("Email sign-in links are not available on this server. Use Continue with " + (config?.idpName ?? "SSO") + ".");
+  };
+  const foot = signInFootnote(config);
   return (
     <div id="auth" className="auth signin">
-        <section className="auth-brand art" aria-label="About Gantry">
-          <div className="auth-logo row" style={{ gap: 12 }}>
-            <Logo />
-            <b className="brand-name" style={{ fontSize: 18, letterSpacing: ".04em" }}>GANTRY</b>
-          </div>
-          <div>
-            <div className="label">Control room</div>
-            <h1 className="auth-title" style={{ font: "700 36px/44px var(--font)", maxWidth: "14ch", margin: "8px 0" }}>Agents propose. People approve.</h1>
-            <p className="auth-lede muted" style={{ maxWidth: "40ch" }}>Sign in to run the line: watch work travel the belt, decide at gates and keep every change on the record.</p>
-          </div>
-          <div>
-            <div className="belt-card auth-preview" aria-hidden="true" style={{ padding: 12, display: "flex", alignItems: "center" }}>
-              <span className="tok tok-running" style={{ width: 110 }}><span className="tok-top"><span className="tok-id mono">WO-1004</span><span className="tok-time">P1</span></span></span>
-              <span className="tok tok-waiting" style={{ width: 110, marginLeft: 80 }}><span className="tok-top"><span className="tok-id mono">WO-1021 ⏸</span><span className="tok-time">P2</span></span></span>
-            </div>
-            <p className="auth-note auth-demo-note">
-              <Icon name={demo ? "alert" : "key"} />
-              <span>{demo ? "Development sign-in is on: seeded demo accounts can sign in. Use this only on a local stack." : "Sign-in is handled by your organisation's identity provider. You return to the page you asked for."}</span>
-            </p>
-          </div>
-        </section>
-        <div className="form">
-        {needs === "mfa_setup" ? <MfaSetup /> : <section className="auth-panel box" aria-labelledby="auth-h">
-          <div>
-            <h1 className="auth-h" id="auth-h">{`Sign in to ${config?.orgName ?? "Gantry"}`}</h1>
-            <p className="muted auth-sub">{demo ? "Choose how to sign in. Demo accounts are listed below." : "Choose how to sign in."}</p>
-          </div>
-          {error ? (
-            <div className="callout callout-block" role="alert">
-              <Icon name="alert" />
-              <span>{error}</span>
-            </div>
-          ) : null}
-          <Btn label="Continue with SSO" kind="primary" id="auth-sso-go" icon="key" onClick={() => go("sso")} />
-          <div className="auth-or">
-            <span>or</span>
-          </div>
-          <Btn label="Continue with GitHub" id="auth-gh" icon="github" disabledReason={config?.githubLogin === false ? "GitHub sign-in is turned off in Security settings." : null} onClick={() => go("github")} />
-          {demo ? (
-            <div className="auth-demo">
-              <h2 className="auth-demo-h">Demo accounts<span>one click, development only</span></h2>
-              <ul className="demo-list">
-                {accounts.map((d) => (
-                  <li key={d.id}>
-                    <a className="demo-acc" id={`demo-${d.id}`} href={loginUrl("sso", d.email)}>
-                      <span className="av av-person av-sm" aria-hidden="true">
-                        {d.name
-                          .split(" ")
-                          .map((w) => w[0] ?? "")
-                          .join("")
-                          .slice(0, 2)}
-                      </span>
-                      <span className="demo-main">
-                        <strong>{d.name}</strong>
-                        <span className="muted small">{`${d.role} · ${d.note}`}</span>
-                      </span>
-                      <Icon name="chevron" />
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </section>}
+      <section className="auth-brand art" aria-label="About Gantry">
+        <div className="row" style={{ gap: 12, color: "var(--text)" }}>
+          <BrandMark />
+          <b style={{ fontSize: 18, letterSpacing: ".04em" }}>GANTRY</b>
         </div>
+        <div>
+          <div className="label">Control room</div>
+          <h1 style={{ font: "700 36px/44px var(--font)", maxWidth: "14ch", margin: "8px 0" }}>Agents propose. People approve.</h1>
+          <p className="muted" style={{ maxWidth: "40ch" }}>Sign in to run the line: watch work travel the belt, decide at gates and keep every change on the record.</p>
+        </div>
+        <div className="belt-card" style={{ padding: 0 }} aria-hidden="true">
+          <div className="lanes" style={{ padding: 12 }}>
+            <div className="lane">
+              <span className="tok run" style={{ width: 110 }}><span className="id">WO-1004</span><span className="pr p1">P1</span></span>
+              <span className="tok is-gate" style={{ width: 110, marginLeft: 80 }}><span className="id">WO-1021 ⏸</span><span className="pr p2">P2</span></span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <div className="form">
+        {needs === "mfa_setup" ? <MfaSetup /> : (
+          <form className="auth-panel box" id="signin" noValidate ref={form} aria-labelledby="auth-h" onSubmit={(e) => { e.preventDefault(); submitEmail(); }}>
+            <div>
+              <h1 className="auth-h" id="auth-h">Sign in</h1>
+              <p className="muted auth-sub">Use your company account.</p>
+            </div>
+            {error ? (
+              <div className="callout callout-block" role="alert">
+                <Icon name="alert" />
+                <span>{error}</span>
+              </div>
+            ) : null}
+            <Btn label={`Continue with ${config?.idpName ?? "SSO"}`} kind="primary" id="auth-sso-go" onClick={() => go("sso")} />
+            <div className="row" style={{ gap: 12 }}><span className="divider" style={{ flex: 1 }} /><span className="dim">or</span><span className="divider" style={{ flex: 1 }} /></div>
+            <Field label={<>Work email <span className="dim">(required)</span></>} error={problem || undefined}>
+              <Input id="auth-email" type="email" name="email" autoComplete="email" placeholder={config?.allowedDomain ? `you@${config.allowedDomain}` : "you@company.com"} value={email} onChange={(e) => setEmail(e.target.value)} />
+            </Field>
+            <Btn label="Email me a sign-in link" id="auth-email-link" onClick={submitEmail} />
+            {notice ? <div className="callout" role="status"><Icon name="info" /><span>{notice}</span></div> : null}
+            {foot ? <div className="dim" style={{ fontSize: 12 }}>{foot}</div> : null}
+            {demo ? (
+              <div className="auth-demo">
+                <h2 className="auth-demo-h">Demo accounts<span>one click, development only</span></h2>
+                <ul className="demo-list">
+                  {accounts.map((d) => (
+                    <li key={d.id}>
+                      <a className="demo-acc" id={`demo-${d.id}`} href={loginUrl("sso", d.email)}>
+                        <span className="av av-person av-sm" aria-hidden="true">
+                          {d.name.split(" ").map((w) => w[0] ?? "").join("").slice(0, 2)}
+                        </span>
+                        <span className="demo-main">
+                          <strong>{d.name}</strong>
+                          <span className="muted small">{`${d.role} · ${d.note}`}</span>
+                        </span>
+                        <Icon name="chevron" />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </form>
+        )}
+      </div>
     </div>
   );
 }

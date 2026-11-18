@@ -115,6 +115,11 @@ export function Toggle({ id, checked, onChange, decision, label }: { id: string;
   );
 }
 
+/** A text control in the Control Room language (`.in`). Additive: wrap it in Field for its label, hint and error. */
+export function Input({ className = "", ...rest }: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...rest} className={`in ${className}`.trim()} />;
+}
+
 export interface Option {
   value: string;
   label: string;

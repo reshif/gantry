@@ -63,8 +63,6 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   /** Optional controlled page (0-based) so a view can keep the page in the URL. With onPage. */
   page?: number;
   onPage?: (page: number) => void;
-  /** Show the dim two-way glyph on sortable headers that are not the active sort (prototype look). */
-  sortHint?: boolean;
   /** A leading checkbox column with select-all (selection is local to the table). */
   selectable?: boolean;
   empty?: { title: string; text?: string; action?: ReactNode };

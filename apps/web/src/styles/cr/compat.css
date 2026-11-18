@@ -83,3 +83,11 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 
 /* gov2: the search icon is centred on the field at every width */
 .searchbox.search .ic{top:50%;transform:translateY(-50%)}
+/* ds group: design-system page panels match the prototype (no tile shadow, tight chip row, tone meters). Scoped to .ds-theme. */
+.ds-theme .stat, .ds-theme .stat-tile { box-shadow: none; }
+.ds-theme .ds-chips { gap: 4px; }
+.ds-theme .meter.warn i { background: var(--warn-fill, var(--warn)); }
+.ds-theme .meter.bad i { background: var(--bad); }
+.ds-theme .meter i { display: block; height: 100%; border-radius: 3px; }
+/* ds round 3: the sample table stays a real table at phone width, as in the prototype */
+@media (max-width:720px){.ds-theme .tw.cards{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);overflow:auto}.ds-theme .tw.cards table{display:table;width:100%}.ds-theme .tw.cards tbody{display:table-row-group}.ds-theme .tw.cards thead{display:table-header-group}.ds-theme .tw.cards tr{display:table-row;background:none;border:0;margin:0;padding:0}.ds-theme .tw.cards td{display:table-cell;width:auto;border-bottom:1px solid var(--line);padding:0 12px;text-align:left}.ds-theme .tw.cards td.r{text-align:right}.ds-theme .tw.cards td::before{display:none}.ds-theme .tw.cards td:first-child{border-bottom:1px solid var(--line);margin:0;padding-bottom:0}}

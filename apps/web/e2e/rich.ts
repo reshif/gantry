@@ -334,5 +334,7 @@ export async function installRich(page: Page): Promise<void> {
 
 /** Signed-out API for the sign-in screen: /me answers 401, nothing else is needed. */
 export async function installSignedOut(page: Page): Promise<void> {
-  await mockApi(page, { persona: null });
+  // --- ds group: the public config the prototype's sign-in screen names (provider, domain, MFA policy) ---
+  await mockApi(page, { persona: null, overrides: { me: (r) => r.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ ok: false, msg: "Not signed in", config: { demoAccounts: false, githubLogin: true, idpName: "Okta", allowedDomain: "acme.dev", mfaRequiredForAdmins: true } }) }) } });
+  // --- end ds group ---
 }

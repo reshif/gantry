@@ -30,6 +30,12 @@ const dec = (v: string): string => {
   }
 };
 
+/** The query carried by the hash (`#/p/x/floor?state=loading`), falling back to the URL's own search string. */
+export function hashQuery(hash: string = window.location.hash, search: string = window.location.search): URLSearchParams {
+  const i = hash.indexOf("?");
+  return new URLSearchParams(i >= 0 ? hash.slice(i + 1) : search);
+}
+
 export function parseHash(hash: string): RouteLocation {
   const full = hash.replace(/^#\/?/, "");
   const qi = full.indexOf("?");
