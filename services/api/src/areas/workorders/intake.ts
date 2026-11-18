@@ -148,7 +148,10 @@ export async function postMessage(tx: Tx, actor: Actor, woId: string, b: Message
     await resumeAt(fx, w, back);
   } else note(w, fx, by, "Answered an intake question.");
   ev(fx, w, "wo.answer", { text: text.slice(0, 200) });
+  // The brief gate switched off by an admin override: a finished conversation is the brief, and the work order moves on with nobody confirming.
+  const passed = r.conv.done && !returned ? await (await import("./gates.js")).passBriefIfGateOff(fx, w) : false;
   await saveWo(fx.tx, fx.orgId, w);
+  if (passed) return done(fx, "Brief complete. The brief gate is off, so the work order moved on without a confirmation.", w.project, { version: w.version, conv: { done: true, qi: r.conv.qi }, passed: true });
   return done(fx, returned ? `Answer sent; ${w.id} is back on the belt.` : r.conv.done ? "Brief is ready to confirm." : "Answer recorded.", w.project, { version: w.version, conv: { done: r.conv.done, qi: r.conv.qi } });
 }
 

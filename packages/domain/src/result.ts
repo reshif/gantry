@@ -27,21 +27,22 @@ export interface RuleRef {
  * `current` carries what is true now (for example the open gate instance), so a caller can refresh and retry.
  */
 export type GantryError =
-  | { kind: "denied"; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> }
-  | { kind: "conflict"; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> }
-  | { kind: "stale"; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> }
-  | { kind: "stopped"; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> }
-  | { kind: "invalid"; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> }
-  | { kind: "precondition"; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> }
-  | { kind: "not_found"; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> };
+  | { kind: "denied"; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> }
+  | { kind: "conflict"; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> }
+  | { kind: "stale"; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> }
+  | { kind: "stopped"; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> }
+  | { kind: "invalid"; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> }
+  | { kind: "precondition"; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> }
+  | { kind: "not_found"; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> };
 
 export type GantryErrorKind = GantryError["kind"];
 
-export function gantryError(kind: GantryErrorKind, msg: string, extra?: { rule?: RuleRef; needs?: string; current?: Record<string, unknown> }): GantryError {
+export function gantryError(kind: GantryErrorKind, msg: string, extra?: { rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> }): GantryError {
   const e: GantryError = { kind, msg };
   if (extra?.current !== undefined) e.current = extra.current;
   if (extra?.rule !== undefined) e.rule = extra.rule;
   if (extra?.needs !== undefined && extra.needs !== "") e.needs = extra.needs;
+  if (extra?.overrideKind) e.overrideKind = extra.overrideKind;
   return e;
 }
 
@@ -64,10 +65,11 @@ export function httpStatusFor(kind: GantryErrorKind): 403 | 404 | 409 | 422 | 42
 }
 
 /** The `{ ok:false, msg, rule?, needs? }` body of a refused command. */
-export function refusalBody(e: GantryError): { ok: false; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> } {
-  const body: { ok: false; msg: string; rule?: RuleRef; needs?: string; current?: Record<string, unknown> } = { ok: false, msg: e.msg };
+export function refusalBody(e: GantryError): { ok: false; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> } {
+  const body: { ok: false; msg: string; rule?: RuleRef; needs?: string; overrideKind?: string; current?: Record<string, unknown> } = { ok: false, msg: e.msg };
   if (e.current) body.current = e.current;
   if (e.rule) body.rule = e.rule;
   if (e.needs) body.needs = e.needs;
+  if (e.overrideKind) body.overrideKind = e.overrideKind;
   return body;
 }

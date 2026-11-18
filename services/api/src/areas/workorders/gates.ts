@@ -1,8 +1,8 @@
 /** Gate votes and decisions (spec 9.5): approve, reject and the brief confirmation. Each approver counts once (F6) and a vote is judged by the rule in force at that moment. */
-import { gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
+import { briefGateOff, gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
 import type { Actor } from "../../core/command.js";
 import { invalid, refuse } from "../../core/errors.js";
-import { coveringStop, closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
+import { coveringStop, pinned, closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
 import { appendMessage, closeConversation } from "./conversation.js";
 import { recordBriefDocument } from "./station-docs.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
@@ -167,8 +167,35 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   return done(fx, `${msg} ${w.id} is at ${fx.catalog.bays.find((b) => b.id === here)?.name ?? stationDef(fx.catalog, here)?.name ?? here}.`, w.project, { passed: true, have: prog.have, need, instance: inst.id, version: w.version });
 }
 
-/** G0+G1 passed: the brief becomes version N, the conversation closes and the route starts. */
-async function confirmBrief(fx: Fx, w: Wo, by: string): Promise<void> {
+/**
+ * G0+G1 switched off by a Factory Admin override: once the intake conversation is done and the brief is written, the work order leaves Intake with no person
+ * confirming. The gate's instance is passed as an automatic decision that names the override (who turned it off, when, why), so nothing waits at it forever.
+ * Returns false when there is nothing to pass (the gate is on, the brief is not complete, or the work order is not at Intake).
+ */
+export async function passBriefIfGateOff(fx: Fx, w: Wo): Promise<boolean> {
+  const project = await pinned(fx, w);
+  if (!briefGateOff(project)) return false;
+  if (bayOf(fx.catalog, w) || stationIdOf(fx.catalog, w) !== "intake") return false;
+  const inst = await openInstanceOf(fx.tx, fx.orgId, w.id, "G0G1");
+  if (!inst) return false;
+  const { wo } = await flowFor(fx, w);
+  if (!wo.conv.done) return false;
+  const mark = project.flow?.gates.G0G1?.override?.off;
+  const why = mark ? `turned off by ${mark.byName} on ${new Date(mark.at).toISOString().slice(0, 10)}: ${mark.reason}` : "turned off";
+  await fx.tx.query(
+    `insert into gate_decisions (org_id, id, gate_instance_id, wo_id, decision, rule, flow_version, detail, at) values ($1,$2,$3,$4,'auto_passed',$5,$6,$7::jsonb,$8)`,
+    [fx.orgId, `GD-${inst.id}`, inst.id, w.id, "OVERRIDE-G0G1", w.flowVersion, JSON.stringify({ mode: "override", override: true, overrideBy: mark?.by ?? null, reason: mark?.reason ?? "", channel: "system" }), fx.now],
+  );
+  await closeInstance(fx, inst.id, "decision");
+  note(w, fx, "system", `G0+G1 brief gate is off (${why}); the brief goes on without a person confirming it.`);
+  ev(fx, w, "gate.decision", { gate: "G0G1", mode: "override", by: "system", instance: inst.id, text: why, override: true }, { category: "approvals" });
+  await confirmBrief(fx, w, "system", `Brief complete. The brief gate (G0+G1) is switched off by an administrator override, so no person confirms it.`);
+  await advance(fx, w, "system");
+  return true;
+}
+
+/** G0+G1 passed: the brief becomes version N, the conversation closes and the route starts. `autoText` is the conversation line when no person confirmed it. */
+async function confirmBrief(fx: Fx, w: Wo, by: string, autoText?: string): Promise<void> {
   const brief = w.data.brief ?? {};
   const v = Number((await fx.tx.query(`select coalesce(max(version), 0) + 1 as v from brief_versions where org_id = $1 and wo_id = $2`, [fx.orgId, w.id])).rows[0].v);
   const project = (await flowFor(fx, w)).st.projects.find((p) => p.id === w.project)!;
@@ -177,10 +204,10 @@ async function confirmBrief(fx: Fx, w: Wo, by: string): Promise<void> {
   const names = r.map((s) => stationDef(fx.catalog, s)?.name ?? s).join(" → ");
   const who = (await fx.tx.query<{ name: string }>(`select name from people where org_id = $1 and id = $2`, [fx.orgId, by])).rows[0]?.name ?? by;
   await recordBriefDocument(fx.tx, { orgId: fx.orgId, woId: w.id, version: v, brief: brief as Record<string, unknown>, cls: w.cls, route: r.map((s) => stationDef(fx.catalog, s)?.name ?? s), by, byName: who });
-  await appendMessage(fx, w.id, "system", `Brief confirmed by ${who}. Starting the route: ${names}.`);
+  await appendMessage(fx, w.id, "system", `${autoText ?? `Brief confirmed by ${who}.`} Starting the route: ${names}.`);
   await closeConversation(fx, w.id);
   closeEntry(w, fx, "passed");
-  note(w, fx, by, "G0+G1 brief confirmed.");
+  note(w, fx, by, autoText ? "G0+G1 brief passed (gate off)." : "G0+G1 brief confirmed.");
 }
 
 /** Approving the merge gate asks the GitHub broker to merge the pull request at the approved head commit (F4: the intent is the job's dedupe key). Returns false when there is no pull request to merge. */
