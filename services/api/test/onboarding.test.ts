@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { withTx } from "@gantry/db";
 import { RepoFacts, assess, judgeCanary, judgeOwners, judgeProtections, judgeRunner, judgeGuidelines, planPr, type AssessContext, type PlanContext, type ReadinessResult } from "@gantry/domain";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyAssessment, applyMergeRefused, applyMerged, applyPrFailed, applyPrObservation, applyPrOpened, applyVerification, READINESS_STRIKES } from "../src/areas/onboarding/apply.js";
+import { applyAssessment, applyJobDead, applyMergeRefused, applyMerged, applyPrFailed, applyPrObservation, applyPrOpened, applyVerification, READINESS_STRIKES } from "../src/areas/onboarding/apply.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 
 const d = TEST_URL ? describe : describe.skip;
@@ -557,6 +557,19 @@ d("repo onboarding", () => {
         const m = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
         expect(m.status, JSON.stringify(m.body)).toBe(200);
       }
+    });
+  });
+
+  describe("a dead job", () => {
+    it("S-5: after a dead job is handed back, the person can re-run the step (the repo is not busy forever)", async () => {
+      const r = await connect();
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/verify`)).status).toBe(409); // busy: assessing
+      const out = await asWorker((tx) => applyJobDead(tx, t.orgId, { repoId: r.id, now: new Date(), error: "lease expired" }));
+      expect(out.applied).toBe(true);
+      expect(await doc(r.id)).toMatchObject({ stage: "person", busy: null, blocker: expect.stringMatching(/lease expired/) });
+      const again = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`);
+      expect(again.status, JSON.stringify(again.body)).toBe(200);
+      expect(await doc(r.id)).toMatchObject({ busy: "assessing" });
     });
   });
 

@@ -1,6 +1,6 @@
 // What the worker's onboarding jobs use (exported through @gantry/api/core).
 export {
-  applyAgentStarted, applyAssessment, applyMergeRefused, applyMerged, applyPrFailed, applyPrObservation, applyPrOpened, applyVerification, liftReadinessHalt, raiseReadinessHalt, READINESS_STRIKES,
+  applyAgentStarted, applyAssessment, applyJobDead, applyMergeRefused, applyMerged, applyPrFailed, applyPrObservation, applyPrOpened, applyVerification, liftReadinessHalt, raiseReadinessHalt, READINESS_STRIKES,
   type Applied, type AssessmentResult, type OpenedPr, type PrObservation, type VerificationInput,
 } from "./apply.js";
 export { guidelinesFor, readOrgGuidelines, readProjectGuidelines } from "./guidelines.js";

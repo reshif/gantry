@@ -327,6 +327,32 @@ export async function applyMergeRefused(tx: Tx, orgId: string, o: { repoId: stri
   return { applied: true };
 }
 
+/* ------------------------------------------------------------------ a job that died ---- */
+
+/**
+ * A job of this repo's current step used up its attempts (or its lease) and is dead: nothing will ever clear `busy`, so every command would be refused. This clears it and says
+ * why, with the job's error as the blocker. The repo moves to Needs a person, except where that would take a place away: an open onboarding PR keeps its stage (it stays synced
+ * and mergeable, as after a failed assessment) and a Ready repo stays Ready. Re-run (assess, open PR, merge, verify) works from there.
+ */
+export async function applyJobDead(tx: Tx, orgId: string, o: { repoId: string; now: Date; error: string }): Promise<Applied> {
+  const c = await current(tx, orgId, o.repoId, null, o.now);
+  if (isApplied(c)) return c;
+  const { repo, doc } = c;
+  if (!doc.busy) return skipped("This repo is not waiting for a job.");
+  const step = doc.busy;
+  const msg = `The ${step.replace("_", " ")} step stopped: ${o.error.slice(0, 300) || "the job died"}. Run it again.`;
+  doc.busy = null;
+  doc.blocker = msg;
+  const keepPr = doc.pr?.state === "open" && (doc.stage === "pr_opened" || doc.stage === "pr_checks");
+  if (doc.stage !== "ready" && !keepPr) doc.stage = "person";
+  stamp(doc, SYSTEM, `Needs a person: ${msg}`, o.now);
+  if (step === "assessing" && doc.runId) await finishRun(tx, orgId, doc.runId, "needs_person", { blocker: msg, data: { jobDead: true } });
+  await sysEvent(tx, orgId, repo, "onboarding.job.dead", { outcome: "failed", after: { step, error: o.error.slice(0, 300), stage: doc.stage }, occurredAt: o.now });
+  await note(tx, orgId, repo, doc, o.now, `${doc.runId ?? repo.id}:dead:${step}:${o.now.getTime()}`, "job.dead", msg);
+  await finish(tx, orgId, repo, doc, ["home"]);
+  return { applied: true };
+}
+
 /* ------------------------------------------------------------------ verification and readiness ---- */
 
 export interface VerificationInput { repoId: string; runId: string | null; trigger: "merge" | "manual" | "schedule"; by: string | null; now: Date; results: ReadinessResult[] }
