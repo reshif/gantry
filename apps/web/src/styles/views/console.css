@@ -136,13 +136,13 @@
 .view-console .msg-factory .msg-text.is-thinking { background: transparent; padding-left: 0; }
 .view-console .msg-user .msg-text { border-radius: var(--r2); }
 .msg-name { font-size: var(--t-sm); }
-.msg-mode { font-family: var(--f-body); font-size: var(--t-xs); text-transform: none; letter-spacing: 0; padding: 1px 8px; border-radius: 999px; background: var(--surface); }
+.msg-mode { font-family: var(--f-body); font-size: var(--t-xs); text-transform: none; letter-spacing: 0; padding: 1px 8px; border-radius: 3px; background: var(--surface); }
 .msg-chips .kicker { font-size: var(--t-xs); color: var(--muted); }
 .composer { border-top: 1px solid var(--line); background: var(--surface); padding: 12px 16px 14px; }
 .composer-input { border-radius: var(--r2); min-height: 64px; resize: vertical; }
 .composer-foot { align-items: center; }
 .composer-foot .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.sugg { border-radius: 999px; background: var(--surface); border-color: var(--line); font-size: var(--t-xs); }
+.sugg { border-radius: 3px; background: var(--surface); border-color: var(--line); font-size: var(--t-xs); }
 .try-lbl { margin-right: 2px; }
 .view-console .ctx .panel-title, .ws-chat .ctx .panel-title { font-size: var(--t-md); }
 .ctx .panel-head { min-height: 40px; padding: 10px 14px; }

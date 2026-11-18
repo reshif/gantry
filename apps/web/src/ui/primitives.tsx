@@ -489,9 +489,9 @@ export function SearchBox({ id, value, onChange, placeholder = "Search", label, 
 }
 
 /** Prototype .panel: drafting corner marks, a header with the section number (counted by CSS per page), a body. */
-export function Panel({ title, children, cls = "", tools, flush, id }: { title?: ReactNode; children: ReactNode; cls?: string; tools?: ReactNode; flush?: boolean; id?: string }) {
+export function Panel({ title, children, cls = "", tools, flush, id, hot }: { title?: ReactNode; children: ReactNode; cls?: string; tools?: ReactNode; flush?: boolean; id?: string; /** The one drawing canvas of a page (Flow, Replay): keeps the corner ticks. */ hot?: boolean }) {
   return (
-    <section id={id} className={`panel ${cls}`.trim()} aria-label={typeof title === "string" ? title : undefined}>
+    <section id={id} className={`panel ${cls}`.trim()} {...(hot ? { "data-hot": "" } : {})} aria-label={typeof title === "string" ? title : undefined}>
       {title || tools ? (
         <header className="panel-head">
           {title ? <h2 className="panel-title"><span className="sec" aria-hidden="true" />{title}</h2> : <span />}

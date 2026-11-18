@@ -31,17 +31,55 @@ describe("design tokens", () => {
     for (const bg of ["--bg", "--surface", "--panel", "--sunk"]) expect(ratio(resolve(light, "--faint"), resolve(light, bg)), bg).toBeGreaterThanOrEqual(4.5);
   });
 
+  describe("precision theme", () => {
+    it("defines the seven new tokens in light and both dark blocks", () => {
+      const { light, darkMedia, darkAttr } = parseThemes(tokens);
+      for (const n of ["--station", "--station-head", "--split", "--split-soft", "--on-warn", "--warn-solid", "--hatch", "--control-line"]) {
+        for (const v of [light, darkMedia, darkAttr]) expect(v[n], n).toBeTruthy();
+      }
+    });
+    it("meaning colours are readable text on every surface in both themes", () => {
+      const { light, darkAttr } = parseThemes(tokens);
+      for (const [name, v] of [["light", light], ["dark", darkAttr]] as const) {
+        for (const fg of ["--ink", "--ink2", "--ink3", "--accent", "--warn", "--bad", "--ok", "--split"]) {
+          for (const bg of ["--bg", "--surface", "--surface2"]) expect(ratio(resolve(v, fg), resolve(v, bg)), `${name} ${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+        }
+        expect(ratio(resolve(v, "--on-warn"), resolve(v, "--warn-solid")), `${name} on-warn`).toBeGreaterThanOrEqual(4.5);
+        expect(ratio(resolve(v, "--bg"), resolve(v, "--ink")), `${name} primary btn`).toBeGreaterThanOrEqual(4.5);
+        expect(ratio(resolve(v, "--control-line"), resolve(v, "--surface")), `${name} control border`).toBeGreaterThanOrEqual(3);
+      }
+    });
+    it("uses the Precision palette: deep blueprint dark, cool paper light", () => {
+      const { light, darkAttr } = parseThemes(tokens);
+      expect(darkAttr["--bg"]).toBe("#050f1e");
+      expect(darkAttr["--accent"]).toBe("#46d6ff");
+      expect(light["--bg"]).toBe("#e5e9f0");
+      expect(light["--warn-solid"]).toBe("#f4b429");
+    });
+    it("panels carry no offset shadow and no permanent corner ticks; only data-hot keeps them", () => {
+      const css = fs.readFileSync(path.join(srcDir, "styles", "precision.css"), "utf8");
+      expect(css).toMatch(/\.panel, \.stat, \.card[^{]*\{ box-shadow: none; \}/);
+      expect(css).toMatch(/\.panel::before, \.panel::after \{ content: none; \}/);
+      expect(css).toMatch(/\.panel\[data-hot\]::before/);
+      expect(tokens).toContain("--t-title: 21px");
+    });
+    it("precision.css is the last stylesheet loaded", () => {
+      const idx = fs.readFileSync(path.join(srcDir, "styles", "index.ts"), "utf8").trim().split("\n");
+      expect(idx[idx.length - 1]).toContain("precision.css");
+    });
+  });
+
   describe("the checker itself", () => {
     it("computes known ratios", () => {
       expect(ratio("#000000", "#ffffff")).toBeCloseTo(21, 0);
       expect(ratio("#777777", "#ffffff")).toBeCloseTo(4.48, 1);
     });
     it("flags a pair that fails, so a regression in tokens.css is caught", () => {
-      const bad = tokens.replace("--ink3:#566478;", "--ink3:#d0d5dc;");
+      const bad = tokens.replace("--ink3:#52668c;", "--ink3:#d0d5dc;");
       expect(contrastFailures(bad).some((f) => f.fg === "--faint" && f.theme === "light")).toBe(true);
     });
     it("flags dark blocks that drift", () => {
-      const bad = tokens.replace(/(:root\[data-theme="dark"\] \{[\s\S]*?--ink3:)#93aed1/, "$1#999999");
+      const bad = tokens.replace(/(:root\[data-theme="dark"\] \{[\s\S]*?--ink3:)#86a1cc/, "$1#999999");
       expect(darkBlocksDiff(bad)).toContain("--ink3");
     });
   });

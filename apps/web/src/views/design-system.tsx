@@ -43,7 +43,7 @@ function StateTile({ kind, title, text }: { kind: "empty" | "error" | "lock"; ti
 function LoadingTile() {
   return (
     <div style={{ border: "1px dashed var(--line2)" }}>
-      <div className="state" aria-busy="true" aria-label="Loading">
+      <div className="state" role="status" aria-busy="true" aria-label="Loading">
         {[90, 78, 66].map((w) => <div key={w} className="skel" style={{ width: `${w}%`, marginLeft: "auto", marginRight: "auto" }} />)}
       </div>
     </div>
@@ -63,7 +63,8 @@ function FloorLegend() {
   return (
     <div className="scrollwrap">
       <div className="sh">scroll →</div>
-      <div className="tw">
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+      <div className="tw" role="region" aria-label="Floor symbols, scrollable" tabIndex={0}>
         <svg viewBox="0 0 520 130" width={520} height={130} role="img" aria-label="Floor symbols">
           <rect x={10} y={10} width={100} height={60} className="f-block" />
           <rect x={10} y={10} width={100} height={22} className="f-head" />
@@ -249,7 +250,7 @@ function Gallery({ sc }: { sc: string }) {
             <div className="row"><Spark plain values={SPARK} w={100} h={28} label="Sample trend" />sparkline</div>
             <BarList label="Sample bars" labelWidth={70} items={[{ label: "Specs", value: 14 }, { label: "Plans", value: 9, tone: "warn" }, { label: "Builds", value: 4 }]} />
             <div className="heat" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
-              {[0.62, 0.7, 0.8, 0.9, 0.97].map((v) => <div key={v} style={{ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 70)}%, var(--surface))` }}>{Math.round(v * 100)}</div>)}
+              {[0.62, 0.7, 0.8, 0.9, 0.97].map((v) => <div key={v} style={{ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 45)}%, var(--surface))` }}>{Math.round(v * 100)}</div>)}
             </div>
           </div>
         </div>

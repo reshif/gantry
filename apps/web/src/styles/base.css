@@ -57,12 +57,6 @@ kbd { font-family: var(--f-mono); font-size: var(--t-xs); border: 1px solid var(
 /* ---------- buttons and inputs ---------- */
 .btn-sm { height: 26px; padding: 0 8px; font-size: var(--t-sm); }
 .btn-sm .ic { width: 14px; height: 14px; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
-.btn-ghost:hover { background: var(--sunk); border-color: transparent; }
-.btn-andon { border-color: var(--block); color: var(--block); background: var(--surface); }
-.btn-andon:hover { background: var(--block-soft); border-color: var(--block); }
 /* Natively disabled (nothing to send yet, busy, read-only): quiet, without the lock mark a permission lock carries. */
 .linkish { background: none; border: 0; padding: 0; color: var(--accent); text-align: left; text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 2px; }
 .linkish:hover { text-decoration-color: var(--accent); }
@@ -75,7 +69,6 @@ textarea.input { height: auto; padding: 6px 8px; resize: vertical; line-height: 
 select.input { padding-right: 4px; }
 .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
 .input:disabled { background: var(--sunk); color: var(--muted); cursor: not-allowed; }
-.field-label { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); }
 .field-hint { font-size: var(--t-sm); color: var(--muted); }
 .form-grid { display: grid; gap: var(--s3); }
 .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--s3); }
@@ -87,9 +80,6 @@ select.input { padding-right: 4px; }
 .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px var(--s3); }
 
 /* ---------- chips and state ---------- */
-.chip-accent { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
-.chip-warn { border-color: var(--wait); background: var(--wait-soft); color: var(--wait); }
-.chip-block { border-color: var(--block); background: var(--block-soft); color: var(--block); }
 .tag { font-family: var(--f-mono); font-size: 10px; padding: 0 4px; border: 1px solid var(--line-strong); color: var(--ink-2); border-radius: 2px; text-transform: lowercase; }
 .prio-P1 { border-color: var(--block); color: var(--block); background: var(--block-soft); font-family: var(--f-mono); }
 .prio-P2 { font-family: var(--f-mono); }
@@ -129,7 +119,6 @@ select.input { padding-right: 4px; }
 
 /* ---------- tabs ---------- */
 /* edge fades appear only on the side(s) where the strip actually has more tabs (data-more set by Tabs) */
-.tab-count { font-family: var(--f-mono); font-size: var(--t-xs); background: var(--sunk); padding: 0 5px; border-radius: 8px; }
 
 /* ---------- feedback blocks ---------- */
 .lock-note { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px dashed var(--line-strong); background: var(--panel); color: var(--ink-2); font-size: var(--t-sm); border-radius: var(--r1); }

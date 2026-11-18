@@ -238,7 +238,6 @@
 /* Models: station qualification, per-project policy, cross-model switch, price and budget forms (w4mdl-) */
 .md-qual { display: grid; gap: 6px; padding: 0 16px 10px; }
 .md-qual-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.chip-ok { border-color: var(--done); background: var(--done-soft); color: var(--done); }
 .md-qual-form { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .md-cross { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
 .md-policy { display: grid; gap: 10px; }

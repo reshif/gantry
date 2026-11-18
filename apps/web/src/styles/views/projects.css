@@ -42,7 +42,7 @@
 
 /* wizard: pill steps and soft radio cards */
 .prj-wz-steps { gap: 6px; }
-.prj-wz-steps li { margin-right: 0; border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px 3px 4px; }
+.prj-wz-steps li { margin-right: 0; border: 1px solid var(--line); border-radius: 3px; padding: 3px 12px 3px 4px; }
 .prj-wz-steps li span { border-radius: 50%; border-color: var(--line-strong); }
 .prj-wz .radio-card { border-radius: var(--r2); padding: 12px 12px 12px 34px; border-color: var(--line); background: var(--surface); gap: 4px; }
 .prj-wz .radio-card input { left: 12px; top: 14px; }

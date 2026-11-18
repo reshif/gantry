@@ -51,13 +51,6 @@ kbd { font-size: var(--t-xs); border: 1px solid var(--line); border-bottom-width
 
 /* ---------- buttons ---------- */
 .btn-sm { height: 28px; padding: 0 8px; font-size: var(--t-sm); }
-.btn-primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-.btn-primary:hover { background: var(--ink); border-color: var(--ink); opacity: 0.9; }
-.btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
-.btn-ghost:hover { background: var(--panel); border-color: transparent; }
-.btn-andon { background: var(--surface); border-color: var(--block); color: var(--block); }
-.btn-andon:hover { background: var(--block-soft); border-color: var(--block); }
-.btn-primary.is-locked, .btn-primary.is-locked:hover, .btn-primary:disabled { background: var(--panel); color: var(--faint); border-color: var(--line); }
 .linkish { color: var(--accent); }
 
 /* ---------- forms ---------- */
@@ -65,7 +58,6 @@ kbd { font-size: var(--t-xs); border: 1px solid var(--line); border-bottom-width
 textarea.input { padding: 7px 10px; }
 .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
 .input[aria-invalid="true"] { border-color: var(--block); }
-.field-label { font-size: var(--t-md); font-weight: 500; color: var(--ink); }
 .field-hint { color: var(--faint); }
 
 /* ---------- segmented control ---------- */
@@ -74,12 +66,8 @@ textarea.input { padding: 7px 10px; }
 .seg-input:focus-visible + .seg-label { outline-offset: -2px; }
 
 /* ---------- tabs ---------- */
-.tab-count { font-family: var(--f-body); font-size: var(--t-xs); color: var(--faint); background: var(--panel); border-radius: 8px; padding: 0 6px; }
 
 /* ---------- chips and one status look ---------- */
-.chip-accent { background: var(--accent-soft); color: var(--accent); }
-.chip-warn { background: var(--wait-soft); color: var(--wait); }
-.chip-block { background: var(--block-soft); color: var(--block); }
 .tag { border-color: var(--line); border-radius: 4px; color: var(--muted); font-family: var(--f-mono); }
 .health, .hk-health { border-radius: 5px; padding: 1px 7px 1px 5px; }
 .state-running { color: var(--run); background: var(--run-soft); }
@@ -88,7 +76,7 @@ textarea.input { padding: 7px 10px; }
 .outcome { border-radius: 4px; }
 .cls { border-radius: 5px; background: var(--surface); }
 .bay-chip { border-radius: 5px; }
-.ask-badge { border-radius: 999px; background: var(--panel); }
+.ask-badge { border-radius: 3px; background: var(--panel); }
 
 /* ---------- avatars ---------- */
 
@@ -100,8 +88,6 @@ textarea.input { padding: 7px 10px; }
 
 /* ---------- empty, loading, error, denied ---------- */
 .empty-title { color: var(--ink); font-weight: 600; }
-.empty-state .empty-icon { width: 40px; height: 40px; border-radius: 50%; background: var(--panel); display: grid; place-items: center; color: var(--faint); margin-bottom: 0; }
-.empty-state .empty-icon .ic, .empty-state .empty-icon svg { width: 20px; height: 20px; }
 /* a page that is not open to this person: a quiet dashed card, left aligned */
 .async-bar { background: linear-gradient(90deg, var(--panel), var(--line), var(--panel)); background-size: 200% 100%; border-radius: 6px; }
 

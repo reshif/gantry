@@ -1,6 +1,6 @@
 /* Audit ledger. Tokens only. */
 .aud-cats { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
-.aud-catbtn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); font-size: var(--t-sm); }
+.aud-catbtn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); color: var(--ink-2); font-size: var(--t-sm); }
 .aud-catbtn .ic { width: 13px; height: 13px; }
 .aud-catbtn:hover { background: var(--sunk); }
 .aud-catbtn.is-on { background: var(--ink); border-color: var(--ink); color: var(--surface); }
@@ -63,7 +63,7 @@
 /* round three: topic filter across categories */
 .aud-topics { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; }
 .aud-topics .kicker { margin-right: 4px; }
-.aud-topic { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); font-size: var(--t-sm); }
+.aud-topic { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); color: var(--ink-2); font-size: var(--t-sm); }
 .aud-topic .ic { width: 12px; height: 12px; }
 .aud-topic:hover { background: var(--sunk); }
 .aud-topic.is-on { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
