@@ -30,7 +30,7 @@ export function richGroupE(): Record<string, Handler> {
   ov["POST card-templates/preview"] = (r) =>
     fulfillJson(r, {
       ok: true,
-      sample: { event: "gate.waiting", template: "gate", tone: "wait", head: "Gate G5 is waiting", body: "Add idempotency keys to refund endpoint needs 1 more approval.", woId: "WO-1004", title: "Add idempotency keys to refund endpoint", repo: "acme/payments-api", cls: "feature", clsName: "Feature", prio: "P1", approvers: "Meera Iyer", gate: { id: "G5", label: "G5", name: "Review and merge" }, instance: null, link: "https://gantry.example/wo/WO-1004", project: { id: "payments", key: "PAY", name: "Payments Platform" }, at: NOW },
+      sample: { event: "gate.waiting", template: "gate", tone: "wait", head: "Gate G5 is waiting", body: "Rate limit the payout API per merchant needs 1 more approval.", woId: "WO-1004", title: "Rate limit the payout API per merchant", repo: "acme/payments-api", cls: "feature", clsName: "Feature", prio: "P1", approvers: "Meera Iyer", gate: { id: "G5", label: "G5", name: "Review and merge" }, instance: null, link: "https://gantry.example/wo/WO-1004", project: { id: "payments", key: "PAY", name: "Payments Platform" }, at: NOW },
       rows: [["Work order", "WO-1004"], ["Class", "Feature"], ["Priority", "P1"]],
       actions: ["approve", "reject", "open"],
       webhook: {},

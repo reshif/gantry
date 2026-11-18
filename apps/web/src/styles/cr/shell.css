@@ -1,0 +1,64 @@
+/* Shell fidelity: menus, notifications drawer, command palette sheet and the phone nav, in the prototype's look (js/app.js, css/app.css). */
+.pop.pop-cr{background:var(--raised);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:var(--s1);max-height:min(70vh,520px)}
+.pop-cr .crm{display:flex;flex-direction:column}
+.pop-cr .mi{display:flex;align-items:center;gap:var(--s2);width:100%;min-height:32px;height:32px;padding:0 var(--s3);border:0;background:none;border-radius:var(--r);cursor:pointer;text-align:left;color:var(--text);font:inherit;text-decoration:none}
+.pop-cr .mi:hover,.pop-cr .mi:focus-visible{background:var(--surface-2);outline:0}
+.pop-cr .mi:focus-visible{box-shadow:inset 0 0 0 2px var(--focus)}
+.pop-cr .mi .ic,.pop-cr .mi svg{flex:none}
+.pop-cr .mh{padding:var(--s2) var(--s3);color:var(--text-3)}
+.pop-cr .mh b{color:var(--text)}
+.pop-cr .divider{margin:var(--s1) 0}
+.pop-cr .menu-hd{padding:var(--s1)}
+.pop-cr .menu-hd .in{width:100%;height:32px;padding:0 var(--s3);border:1px solid var(--line-strong);border-radius:var(--r);background:var(--surface);color:var(--text);font:inherit}
+.pop-cr .menu-hd .in:focus-visible{outline:2px solid var(--focus);outline-offset:-1px}
+
+/* command palette: a top sheet without a title bar */
+.dlg-wrap:has(.pal-cr){align-items:start;padding-top:12vh}
+.dlg.pal-cr{width:min(640px,100%);margin:0;align-self:start;padding:0;background:var(--raised);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.pal-cr .dlg-head,.pal-cr .dlg-foot{display:none}
+.pal-cr .dlg-body{padding:0;overflow:visible}
+.pal-cr .palette-input{display:block;border:0;border-bottom:1px solid var(--line);background:transparent;height:48px;padding:0 var(--s4);width:100%;font-size:15px;outline:0;color:var(--text)}
+.pal-cr .palette-input:focus-visible{box-shadow:none}
+.pal-cr .pal-res{list-style:none;margin:0;max-height:50vh;overflow:auto;padding:var(--s2)}
+.pal-cr .pal-it{display:flex;gap:var(--s3);align-items:center;padding:0 var(--s3);height:36px;border-radius:var(--r);cursor:pointer;color:var(--text-2);grid-template-columns:none}
+.pal-cr .pal-it.is-active{background:color-mix(in srgb,var(--accent) 16%,var(--surface-2));color:var(--text);box-shadow:none}
+.pal-cr .pal-it small{margin-left:auto;font:500 11px var(--mono);color:var(--text-3)}
+.pal-cr .pal-it.is-locked{opacity:.6}
+.pal-cr .pal-grp{padding:var(--s2) var(--s3) var(--s1)}
+.pal-cr .pal-foot{display:flex;justify-content:space-between;padding:var(--s2) var(--s3);border-top:1px solid var(--line);font-size:11px}
+.pal-cr .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+@media (max-width:720px){
+  .dlg-wrap:has(.pal-cr){padding:0;align-items:start}
+  .dlg.pal-cr{width:100%;border-radius:0 0 var(--r-lg) var(--r-lg);border-top:0}
+}
+
+/* the notifications drawer uses the prototype's drawer head, body and foot */
+.drawer .drawer-h h2{font:700 16px/24px var(--font)}
+
+/* phone and tablet rail: it slides in under the top bar; a transparent layer under it closes it on an outside click */
+@media (max-width:1100px){
+  .nav-scrim:not([hidden]){display:block;position:fixed;inset:48px 0 24px 0;background:transparent;z-index:79}
+}
+.drawer-s.scrim{-webkit-backdrop-filter:none;backdrop-filter:none}
+/* the prototype gives .scrim z-index 100; inside a dialog wrapper the panel must sit above its own scrim */
+.dlg-wrap>.scrim{z-index:0}
+.dlg-wrap>.dlg{z-index:1}
+
+/* the prototype's dialogs: no eyebrow, no close button (Esc and the scrim close) */
+.dlg-plain .kicker,.dlg-plain .dlg-head .icon-btn{display:none}
+.dlg-plain .dlg-b{display:flex;flex-direction:column;gap:var(--s4)}
+/* phone: dialogs are bottom sheets */
+@media (max-width:720px){
+  .dlg-wrap:not(:has(.pal-cr)){padding:0;align-items:end}
+  .dlg-wrap:not(:has(.pal-cr))>.dlg{width:100%;max-width:100%;border-radius:var(--r-lg) var(--r-lg) 0 0;margin:0;max-height:calc(100dvh - 48px)}
+}
+
+/* toasts: the prototype's raised card with a tone stripe on the left, no icon */
+.toasts .toast{background:var(--raised);color:var(--text);border:1px solid var(--line-strong);border-left:3px solid var(--c,var(--info));border-radius:var(--r);box-shadow:var(--shadow);padding:var(--s3) var(--s4);display:flex;gap:var(--s3);align-items:center;min-width:260px}
+.toasts .toast.ok{--c:var(--ok)}.toasts .toast.bad{--c:var(--bad)}.toasts .toast.warn{--c:var(--warn-fill)}
+.toasts .toast .toast-x{color:var(--text-3);opacity:1}
+.pal-cr .pal-it{min-width:0}
+.pal-cr .pal-label{flex:1 1 auto;min-width:0}
+.pal-cr .pal-it small{flex:none;max-width:35%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dlg-wrap{grid-template-columns:minmax(0,1fr)}
+.dlg.pal-cr{max-width:100%}

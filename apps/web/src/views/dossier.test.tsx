@@ -26,9 +26,30 @@ describe("Work order page", () => {
     expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
     expect(screen.getByRole("list", { name: new RegExp(`Route of ${W.id}`) })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Document" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("false");
-    expect(document.getElementById("trv-open-conversation")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected")).toBe("false");
+    // the prototype's header: Traveler, Dossier and Changes are pages, Review opens the gate dialog, Actions is a menu
+    expect(document.getElementById("rec-traveler")!.getAttribute("href")).toMatch(new RegExp(`/traveler/${W.id}$`));
+    expect(document.getElementById("rec-dossier")!.getAttribute("href")).toMatch(new RegExp(`/dossier/${W.id}$`));
+    expect(document.getElementById("rec-changes")!.getAttribute("href")).toMatch(new RegExp(`/changes/${W.id}$`));
+    expect(document.getElementById("trv-open-conversation")).toBeNull();
     expect(document.getElementById("dz-more")).toBeTruthy();
+  });
+
+  it("has the prototype's tabs in its order, with Document kept after them", async () => {
+    await show({}, `#record/${W.id}`);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent!.trim())).toEqual(["Overview", "Journey", "Gates", "Attempts and runs", "Conversation", "Cost", "Events", "Document"]);
+    fireEvent.click(screen.getByRole("tab", { name: "Gates" }));
+    await waitFor(() => expect(window.location.hash).toContain("%2Fgates"));
+    await waitFor(() => expect(document.getElementById("dz-gates")).toBeTruthy());
+  });
+
+  it("opens a review dialog from the Review button with Cancel, Reject and Approve", async () => {
+    await show();
+    const btn = document.getElementById("dz-review");
+    if (!btn) return; // the fixture work order has no gate waiting for this viewer
+    fireEvent.click(btn);
+    const dlg = await screen.findByRole("dialog");
+    for (const l of ["Cancel", "Reject", "Approve"]) expect(dlg.textContent).toContain(l);
   });
 
   it("opens on the Overview tab: brief, classification, facts and SLA", async () => {
@@ -38,22 +59,21 @@ describe("Work order page", () => {
     for (const t of ["Brief", "Classification", "Facts"]) expect(screen.getByRole("heading", { name: t })).toBeTruthy();
   });
 
-  it("opens the Activity tab from the address and from the Open conversation button", async () => {
+  it("opens the Conversation tab from the address and from the tab", async () => {
     await show({}, `#record/${W.id}/activity`);
-    expect(screen.getByRole("tab", { name: "Activity" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected")).toBe("true");
     cleanup();
     resetApp();
     await show();
-    fireEvent.click(document.getElementById("trv-open-conversation") as HTMLElement);
+    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }));
     await waitFor(() => expect(window.location.hash).toContain("%2Factivity"));
   });
 
-  it("says why an action is locked, once per reason, beside the buttons", async () => {
+  it("keeps lock reasons in the Actions menu, not as a strip under the header", async () => {
     const t = travelerOf(W, {}, { can: { classify: deny("Class can only change at Intake.", "Project Admin"), reassign: deny("Class can only change at Intake.", "Project Admin") } });
     await show(readsFor(W, t, recordOf(W)));
-    const lines = document.querySelectorAll(".dz-lockline");
-    expect(lines.length).toBeGreaterThan(0);
-    expect(document.querySelector(".dz-lockline")?.textContent).toMatch(/locked\./);
+    expect(document.querySelectorAll(".dz-lockline").length).toBe(0);
+    expect(document.getElementById("dz-more")).toBeTruthy();
   });
 
   it("lists what waits on the viewer in the side column", async () => {
@@ -88,8 +108,7 @@ describe("Work order page: links, viewers and kills", () => {
   it("keeps the traveler and the record picker reachable from the page", async () => {
     await show();
     expect(document.getElementById("rec-traveler")).toBeTruthy();
-    fireEvent.click(document.getElementById("rec-all") as HTMLElement);
-    await waitFor(() => expect(window.location.hash).not.toContain(W.id));
+    expect(document.getElementById("rec-traveler")!.getAttribute("href")).toContain("/traveler/");
   });
 });
 

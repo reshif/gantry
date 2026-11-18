@@ -32,7 +32,7 @@ const NOW = Date.parse("2026-01-15T10:00:00Z");
 const P = "/#/p/payments";
 export const ROUTE_MAP = {
   home: "/#home", inbox: "/#inbox", workspace: "/#workspace", console: "/#workspace", conversations: `${P}/conversations`, projects: "/#projects",
-  floor: `${P}/floor`, "work-orders": `${P}/work-orders`, record: `${P}/record/WO-1004`, traveler: `${P}/record/WO-1004?traveler=WO-1004`, dossier: `${P}/record/WO-1004`, changes: `${P}/changes/WO-1004`,
+  floor: `${P}/floor`, "work-orders": `${P}/work-orders`, record: `${P}/record/WO-1004`, traveler: `${P}/traveler/WO-1004`, dossier: `${P}/dossier/WO-1004`, changes: `${P}/changes/WO-1004`,
   onboarding: `${P}/onboarding`, "project-config": `${P}/project-config`,
   agents: "/#agents", skills: "/#skills", models: "/#models", evals: "/#evals", trust: "/#trust", learning: "/#learning",
   integrations: "/#integrations", mcp: "/#mcp", api: "/#api", notifications: "/#notifications",
@@ -45,6 +45,8 @@ const realHash = (route) => {
   const base = ROUTE_MAP[name];
   if (base === undefined) throw new Error(`no mapping for route "${name}" (see ROUTE_MAP)`);
   if (base === null) return null;
+  // the fixtures name the signed-in admin p-admin where the prototype says p-asha; people have one real route id, "person"
+  if (name === "people" && param) return `/#person/${{ "p-asha": "p-admin", "p-meera": "p-lead" }[param] ?? param}`;
   return param && !base.includes("WO-") ? `${base}/${param}` : base;
 };
 
@@ -117,6 +119,8 @@ async function main() {
         let right;
         const rc = await browser.newContext(common);
         await rc.addInitScript(([t, nowMs]) => { try { localStorage.setItem("gantry.prefs", JSON.stringify({ theme: t, project: "payments", recentProjects: ["payments"], pinnedProjects: [], navRail: false })); } catch { /* ignore */ } void nowMs; }, [theme, NOW]);
+        // the fixtures cannot hold a server-sent-events response open, so a stand-in EventSource reports an open stream (the connection reads LIVE)
+        await rc.addInitScript(() => { window.EventSource = class { constructor(u) { this.url = u; this.readyState = 1; this.l = {}; setTimeout(() => { (this.l.open ?? []).forEach((f) => f({ type: "open" })); if (this.onopen) this.onopen({ type: "open" }); }, 50); } addEventListener(t, f) { (this.l[t] ??= []).push(f); } removeEventListener() {} close() { this.readyState = 2; } }; });
         const rp = await rc.newPage();
         await rp.clock.install({ time: new Date(NOW) });
         if (route === "signin") await rich.installSignedOut(rp); else await rich.installRich(rp);

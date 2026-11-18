@@ -4,15 +4,16 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useMe, usePeople, useProjects } from "../api/queries";
-import { navigate, parseHash } from "../lib/router";
+import { navigateProject, parseHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
-import { usePrefs } from "../lib/prefs";
-import { Btn, Empty, Tabs } from "../ui/primitives";
+import { setProject, usePrefs } from "../lib/prefs";
+import { Empty, Select, Tabs } from "../ui/primitives";
 import { Page } from "../ui/cr";
 import { Async } from "../ui/async";
-import { HealthChip, useCatalog, type PView } from "./projects/kit";
-import { TABS, membersOf, type CfgState } from "./project-config/ctx";
+import { useCatalog, type PView } from "./projects/kit";
+import { TABS, type CfgState } from "./project-config/ctx";
 import { OverviewTab, MembersTab } from "./project-config/overview";
+import { FreezesTab } from "./project-config/freezes";
 import { FlowTab } from "./project-config/flow";
 import { ClassesTab } from "./project-config/classes";
 import { ApproversTab } from "./project-config/approvers";
@@ -47,27 +48,20 @@ export default function ProjectConfigView() {
   if (!p) return <div className="view pcf">{projectsQ.data ? <Empty id="pcf-gone" title="Project not found" text="It may have been removed, or you no longer have a role on it." /> : <Async query={projectsQ} what="this project" id="pcf-project">{() => null}</Async>}</div>;
   if (!cat) return <div className="view pcf" />;
 
-  const dirtyN = Object.keys(s.drafts).filter((g) => JSON.stringify(s.drafts[g]) !== JSON.stringify(p.approvers[g])).length;
-  const count = (id: string): number | null => (id === "approvers" && dirtyN ? dirtyN : id === "members" ? membersOf(people, p).length : id === "classes" ? p.flow.classes.filter((c) => c.enabled !== false).length : id === "flow" ? p.flow.order.length : null);
   const props = { p, cat, people, s, set };
   const body = ({
     overview: <OverviewTab {...props} />, members: <MembersTab {...props} />, flow: <FlowTab {...props} />, classes: <ClassesTab {...props} />, approvers: <ApproversTab {...props} />,
-    notifications: <NotificationsTab {...props} />, mcp: <McpTab {...props} />, budget: <BudgetTab {...props} />, history: <HistoryTab {...props} />, danger: <DangerTab {...props} />,
+    freezes: <FreezesTab {...props} />, notifications: <NotificationsTab {...props} />, mcp: <McpTab {...props} />, budget: <BudgetTab {...props} />, history: <HistoryTab {...props} />, danger: <DangerTab {...props} />,
   } as Record<string, React.ReactNode>)[s.tab] ?? <OverviewTab {...props} />;
   return (
     <Page
       cls="pcf"
       eyebrow={`Portfolio · ${p.key}`}
-      title={<>{p.name} <HealthChip p={p} /></>}
-      sub={p.desc || "No description yet."}
-      acts={
-        <>
-          <Btn icon="belt" id="pcf-to-floor" label="Open floor" onClick={() => navigate("floor")} />
-          <Btn icon="ledger" id="pcf-to-history" label="History" onClick={() => set({ tab: "history" })} />
-        </>
-      }
+      title={p.name}
+      sub="Project configuration: line, people, approvals and safety."
+      acts={<Select id="pcf-switch" aria-label="Switch project" value={p.id} onChange={(v) => { setProject(v); navigateProject(v, "project-config"); }} options={projects.map((x) => ({ value: x.id, label: x.name }))} />}
     >
-      <Tabs idPrefix="pcf-tab" items={TABS.map((t) => ({ id: t[0], label: t[1], count: count(t[0]) }))} active={s.tab} onChange={(id) => set({ tab: id })} />
+      <Tabs idPrefix="pcf-tab" items={TABS.map((t) => ({ id: t[0], label: t[1] }))} active={s.tab} onChange={(id) => set({ tab: id })} />
       <div className="pcf-body" id="pcf-tab-panel" role="tabpanel" aria-labelledby={`pcf-tab-${s.tab}`}>{body}</div>
     </Page>
   );

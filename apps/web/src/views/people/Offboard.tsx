@@ -19,7 +19,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 const isOpen = (w: WorkOrder) => w.state !== "done" && w.state !== "killed";
 
 /** Open work the person requested, or where they are the only named approver of a waiting gate, among the work this viewer can see. Only a preview: the server counts requester, assignee and sole approver across everything and returns the real list. */
-function previewWork(p: Person, projects: Project[], lists: Array<WorkOrder[] | undefined>): OpenWork[] {
+export function previewWork(p: Person, projects: Project[], lists: Array<WorkOrder[] | undefined>): OpenWork[] {
   const out: OpenWork[] = [];
   projects.forEach((pr, i) => {
     for (const w of lists[i] ?? []) {

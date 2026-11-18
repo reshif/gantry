@@ -7,7 +7,7 @@ import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
-import { formatHash, replaceHash, useHash } from "../lib/router";
+import { formatHash, navigate, replaceHash, useHash } from "../lib/router";
 import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { useCrumbTailValue } from "../lib/crumb";
 import { Empty } from "../ui/primitives";
@@ -18,6 +18,7 @@ import { makeStopActions } from "./stopActions";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StatusBar } from "./StatusBar";
+import { NotFoundPage, StatePreview, isPreviewState } from "./StatePreview";
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
@@ -44,6 +45,8 @@ export function Shell({ me }: { me: Me }) {
   const resolved = resolveRoute(wanted, me, ctx);
   const permDenied = resolved.denied === null && wanted !== "home" && routeDef(wanted) && access.denied(wanted) ? routeDef(wanted)! : null;
   const routeId = permDenied ? "home" : resolved.id;
+  // a hash that names no page is a 404 of its own, not a silent Home
+  const notFound = loc.id !== "" && !routeDef(wanted);
   const denied = permDenied ?? resolved.denied;
   const def = routeDef(routeId);
   const scoped = isProjectRoute(routeId);
@@ -80,27 +83,37 @@ export function Shell({ me }: { me: Me }) {
   }, [routeId, loc.param]);
 
   useEffect(() => {
-    document.title = `${denied?.title ?? def?.title ?? "Home"}${scoped && project ? ` · ${project.name}` : ""} · Gantry Software Factory`;
-  }, [def, denied, scoped, project]);
+    document.title = `${notFound ? "Page not found" : (denied?.title ?? def?.title ?? "Home")}${scoped && project ? ` · ${project.name}` : ""} · Gantry Control Room`;
+  }, [def, denied, scoped, project, notFound]);
 
   const openPalette = useCallback(() => {
     ui.open((close) => <PaletteDialog projectId={projectId} onClose={close} />);
   }, [ui, projectId]);
 
   useEffect(() => {
+    let chord = 0;
+    const typing = (t: EventTarget | null) => /^(input|textarea|select)$/i.test((t as HTMLElement | null)?.tagName ?? "") || !!(t as HTMLElement | null)?.isContentEditable;
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
         openPalette();
       } else if (e.key === "Escape" && navOpen) setNavOpen(false);
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target)) {
+        if (e.key === "?") ui.toast("Shortcuts: Ctrl+K palette, g then h Home, Esc closes", "info");
+        else if (e.key === "g" && !document.querySelector("#layer-dialog > *, #layer-drawer > *")) chord = Date.now();
+        else if (e.key === "h" && chord && Date.now() - chord < 1500) {
+          chord = 0;
+          navigate("home");
+        } else chord = 0;
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [openPalette, navOpen]);
+  }, [openPalette, navOpen, ui]);
 
   const toggleNav = () => {
     let wide = true;
-    try { wide = window.matchMedia("(min-width: 861px)").matches; } catch { /* assume desktop */ }
+    try { wide = window.matchMedia("(min-width: 1101px)").matches; } catch { /* assume desktop */ }
     if (wide) updatePrefs({ navRail: !prefs.navRail });
     else setNavOpen((o) => !o);
   };
@@ -117,7 +130,7 @@ export function Shell({ me }: { me: Me }) {
   return (
     <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
       <AppErrorBoundary level="chrome">
-        <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
+        <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} navOpen={navOpen} onOpenNav={toggleNav} onOpenPalette={openPalette} />
       </AppErrorBoundary>
       <AppErrorBoundary level="chrome">
         <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
@@ -127,7 +140,9 @@ export function Shell({ me }: { me: Me }) {
         {killed ? <div className="sysbanner" id="sysbanner"><StopBanner projectId={null} /></div> : null}
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
-          {noAccess ? (
+          {notFound ? (
+            <NotFoundPage name={loc.id} />
+          ) : noAccess ? (
             <div className="view">
               <Empty id="no-access" title="No access yet" text="Ask a Factory Admin or Project Admin to give you a role. Until then only your own profile is available." />
             </div>
@@ -140,6 +155,8 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
             </div>
+          ) : ready && isPreviewState(loc.state) ? (
+            <StatePreview state={loc.state} eyebrow={def?.group ?? ""} title={def?.title ?? ""} />
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
           ) : null}

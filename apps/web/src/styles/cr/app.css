@@ -15,7 +15,7 @@ h1,h2,h3,h4,p{margin:0}
 .app{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);grid-template-rows:48px minmax(0,1fr) 24px;height:100vh;height:100dvh;grid-template-areas:"top top" "rail main" "rail sbar"}
 .top{grid-area:top;display:flex;align-items:center;gap:var(--s2);padding:0 var(--s3);background:var(--surface);border-bottom:1px solid var(--line);min-width:0}
 .rail{grid-area:rail;background:var(--surface);border-right:1px solid var(--line);overflow-y:auto;padding:var(--s1) var(--s2) var(--s6);scrollbar-width:thin;overscroll-behavior:contain}
-.rail.more{-webkit-mask-image:linear-gradient(180deg,#000 calc(100% - 36px),transparent);mask-image:linear-gradient(180deg,#000 calc(100% - 36px),transparent)}
+.rail.rail-more{-webkit-mask-image:linear-gradient(180deg,#000 calc(100% - 36px),transparent);mask-image:linear-gradient(180deg,#000 calc(100% - 36px),transparent)}
 .main{grid-area:main;overflow:auto;min-width:0;scroll-behavior:auto}
 .sbar{grid-area:sbar;display:flex;align-items:center;gap:var(--s4);padding:0 var(--s3);border-top:1px solid var(--line);background:var(--surface);font:500 11px/16px var(--mono);color:var(--text-2);overflow:hidden;white-space:nowrap}
 .sbar b{color:var(--text);font-weight:600}

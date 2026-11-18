@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
-import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
+import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type PopoverOpts, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
 import { tip } from "./Tip";
 import { DirtyScope, useLeaveGuard, type DirtyScopeApi } from "../lib/useLeaveGuard";
 import "../lib/data.css";
@@ -94,12 +94,14 @@ interface PopState {
   render: (close: () => void) => ReactNode;
   onClose?: (() => void) | undefined;
   rect: DOMRect;
+  opts?: PopoverOpts | undefined;
 }
 
 function PopoverView({ state, onClose }: { state: PopState; onClose: () => void }) {
   const pop = useRef<HTMLDivElement>(null);
   const { anchor, rect } = state;
-  const w = Math.min(380, window.innerWidth - 16);
+  const w = Math.min(state.opts?.width ?? 380, window.innerWidth - 16);
+  const left = state.opts?.align === "left" ? rect.left : rect.right - w;
   useEffect(() => {
     anchor.setAttribute("aria-expanded", "true");
     const t = setTimeout(() => pop.current?.querySelector<HTMLElement>("button,select,input,a")?.focus(), 10);
@@ -108,7 +110,7 @@ function PopoverView({ state, onClose }: { state: PopState; onClose: () => void 
   return (
     <>
       <div className="pop-shield" onClick={onClose} />
-      <div ref={pop} className="pop" role="dialog" aria-label={anchor.getAttribute("aria-label") || "Menu"} style={{ width: w, top: rect.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - w - 8, rect.right - w)) }} onKeyDown={trapKeys(() => pop.current, onClose)}>
+      <div ref={pop} className={`pop${state.opts?.cls ? ` ${state.opts.cls}` : ""}`} role={state.opts?.role ?? "dialog"} aria-label={state.opts?.label ?? (anchor.getAttribute("aria-label") || "Menu")} style={{ width: w, top: rect.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - w - 8, left)) }} onKeyDown={trapKeys(() => pop.current, onClose)}>
         {state.render(onClose)}
       </div>
     </>
@@ -368,8 +370,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
         close: () => setDrawer(null),
         isOpen: (key) => !!drawerRef.current && (!key || drawerRef.current.key === key),
       },
-      popover: (anchor, render, onClose) => {
-        setPop({ anchor, render, onClose, rect: anchor.getBoundingClientRect() });
+      popover: (anchor, render, onClose, opts) => {
+        setPop({ anchor, render, onClose, opts, rect: anchor.getBoundingClientRect() });
         return closePopover;
       },
       menu: (anchor, title, items) => {
@@ -440,9 +442,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       <div id="layer-pop" data-inert-exempt="">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
       <div className="toasts" id="toasts" role="status" aria-live="polite" data-inert-exempt="">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.kind} ${t.kind === "error" ? "bad" : t.kind === "warn" ? "warn" : "ok"}${t.out ? " out" : ""}`}>
-            <Icon name={t.kind === "error" ? "alert" : t.kind === "warn" ? "halt" : "check"} />
-            <span>{t.text}</span>
+          <div key={t.id} className={`toast toast-${t.kind} ${t.kind === "error" ? "bad" : t.kind === "warn" ? "warn" : t.kind === "ok" ? "ok" : ""}${t.out ? " out" : ""}`}>
+            <span className="grow" style={{ flex: 1 }}>{t.text}</span>
             {t.action ? (
               <button
                 type="button"

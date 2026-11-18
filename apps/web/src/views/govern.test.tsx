@@ -194,6 +194,8 @@ describe("People", () => {
     setup({ "PUT /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ status: 403, body: { ok: false, msg: "Sign in again to confirm this change.", needs: "step_up" } }) });
     window.location.hash = "#person/p-tomas";
     mount(<PersonView />);
+    // the factory role is on the Access tab, with the roles held
+    fireEvent.click(await waitFor(() => { const t = document.getElementById("person-tab-access"); if (!t) throw new Error("no tab"); return t; }));
     const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "factory_admin" } });
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Covering for Asha" } });
@@ -208,6 +210,8 @@ describe("People", () => {
     });
     window.location.hash = "#person/p-tomas";
     mount(<PersonView />);
+    // the factory role is on the Access tab, with the roles held
+    fireEvent.click(await waitFor(() => { const t = document.getElementById("person-tab-access"); if (!t) throw new Error("no tab"); return t; }));
     const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: "factory_admin" } });
     expect(await screen.findByText(/A factory role applies on every project/)).toBeTruthy();

@@ -18,7 +18,6 @@ import { DataTable, type SortCol } from "../ui/SortTable";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { useOutcome } from "./govern/data";
-import { evalsFocus } from "./evals/kit";
 import { useDraft } from "../lib/useDraft";
 import { DraftDot } from "../ui/DraftDot";
 import { useLeaveGuard } from "../lib/useLeaveGuard";
@@ -29,8 +28,10 @@ import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
 import { InstructionsTab } from "./agents/Instructions";
 import { SkillsTab } from "./agents/SkillsMcp";
 import { VersionsTab } from "./agents/Versions";
-import { TrustStrip, TrustTab } from "./agents/Trust";
+import { TrustTab } from "./agents/Trust";
 import { CreateAgent } from "./agents/Create";
+import { AgentEvals, AgentOverview } from "./agents/Overview";
+import { CrIcon } from "../ui/cr";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
@@ -134,37 +135,38 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
     const resume = a.status === "paused";
     void statusCmd.run(resume).then((r) => { if (r?.ok) ui_.toast(resume ? `${a.name} is active.` : `${a.name} is paused. Its stations queue work until it resumes.`, "ok"); });
   };
-  const running = a.running ?? 0;
+  const paused = a.status === "paused";
   const tabs = [
-    { id: "config", label: "Configuration" }, { id: "instructions", label: "Instructions" }, { id: "skills", label: "Skills and MCP", count: d.skills.length },
+    { id: "overview", label: "Overview" }, { id: "instructions", label: "Instructions" }, { id: "tools", label: "Tools" }, { id: "model", label: "Model and budget" },
+    { id: "skills", label: "Skills", count: d.skills.length }, { id: "guardrails", label: "Guardrails" }, { id: "evals", label: "Evals" },
     { id: "overrides", label: "Per-project", count: Object.keys(d.overrides ?? {}).length }, { id: "versions", label: "Versions", count: a.versions.length }, { id: "trust", label: "Trust" }, { id: "history", label: "History" },
   ];
   const tp: TabProps = { a, d, ro, perm, projects, policies, edit };
+  const goTab = (t: string) => { ui.tab = t; rerender(); };
   const body = ui.tab === "instructions" ? <InstructionsTab {...tp} />
+    : ui.tab === "tools" ? <ConfigTab {...tp} show={["tools"]} />
+    : ui.tab === "model" ? <ConfigTab {...tp} show={["identity", "model", "staffing", "budget"]} />
+    : ui.tab === "guardrails" ? <ConfigTab {...tp} show={["autonomy", "guardrails", "gate"]} />
     : ui.tab === "skills" ? <SkillsTab {...tp} />
+    : ui.tab === "evals" ? <AgentEvals a={a} />
     : ui.tab === "overrides" ? <OverridesTab {...tp} />
     : ui.tab === "versions" ? <VersionsTab a={a} dirty={dirty} perm={perm} />
     : ui.tab === "trust" ? <TrustTab a={a} projects={projects} />
     : ui.tab === "history" ? <div className="ag-hist"><EntityHistory type="agent" id={a.id} limit={40} /></div>
-    : <ConfigTab {...tp} />;
-  const showSave = ["config", "instructions", "skills", "overrides"].includes(ui.tab);
-  const paused = a.status === "paused";
+    : <AgentOverview a={a} projects={projects} goTab={goTab} pause={<Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving\u2026")} onClick={toggleStatus} />} />;
+  const showSave = ["tools", "model", "guardrails", "instructions", "skills", "overrides"].includes(ui.tab);
   const here = st.find(a.station);
-  const after = here ? st.all[st.all.indexOf(here) + 1] : undefined;
-  const nextLine = !here ? "off the line" : after ? `next after this station: ${after.name}` : "last station on the line";
   return (
     <section className="agent-detail" id="agent-detail" aria-label={`${a.name} configuration`}>
-      <a className="back-link" id="ag-back-link" href={hashFor("agents")} onClick={(e) => { e.preventDefault(); navigate("agents"); }}><Icon name="back" />All agents</a>
       <ViewHead
-        kicker={`Agent · ${st.label(a.station, projects)}${a.builtin ? " · built-in" : ""}`}
-        title={<span className="ag-title"><span>{a.name}</span><Status tone={paused ? "neutral" : "done"}>{paused ? "Paused" : "Active"}</Status></span>}
-        sub={<span className="ad-meta mono">{[a.version, a.model, `${running} work order${running === 1 ? "" : "s"} now`, a.suite ? `${a.suite} ${fmt.pct(a.evalScore)}` : "", nextLine].filter(Boolean).join(" · ")}</span>}
+        kicker="Workforce · Agent"
+        title={<span className="ag-title"><span>{a.name}</span>{paused ? <Status tone="neutral">Paused</Status> : null}</span>}
+        sub={`${here ? `${here.name} station` : "Off the line"} \u00b7 ${a.model}`}
         actions={<>
-          <Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving…")} onClick={toggleStatus} />
-          <Btn label="Evals" icon="eval" id="ag-evals" onClick={() => { evalsFocus({ agent: a.id, suite: a.suite }); navigate("evals"); }} />
+          <a className="btn" id="ag-back-link" href={hashFor("agents")}>All agents</a>
+          <a className="btn" id="ag-talk" href={hashFor("conversations")}><CrIcon name="chat" />Talk</a>
         </>}
       />
-      <TrustStrip a={a} projects={projects} />
       <LockNote decision={perm} what="Agent configuration" />
       <div className="panel ag-panel">
       <Tabs idPrefix="ag-tab" items={tabs} active={ui.tab} onChange={(t) => { ui.tab = t; rerender(); }} />

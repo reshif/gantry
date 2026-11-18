@@ -69,7 +69,7 @@ export function nextVersion(a: AgentRow): string {
 
 /* ---------- screen state, kept across tabs and screens like legacy `ui` ---------- */
 
-export const ui = { sel: null as string | null, tab: "config", ctxProject: null as string | null, ctxRepo: null as string | null, newVer: "", newNote: "" };
+export const ui = { sel: null as string | null, tab: "overview", ctxProject: null as string | null, ctxRepo: null as string | null, newVer: "", newNote: "" };
 let tick = 0;
 const listeners = new Set<() => void>();
 export const rerender = (): void => {

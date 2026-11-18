@@ -13,6 +13,8 @@ export type Theme = "system" | "light" | "dark";
 export interface Prefs {
   theme: Theme;
   project: string | null;
+  /** Factory pages show every project (the prototype's "All projects" scope) until a project is picked in the switcher. */
+  scopeAll: boolean;
   /** Projects the person starred in the switcher, and the last few entered (most recent first). */
   pinnedProjects: string[];
   recentProjects: string[];
@@ -33,12 +35,13 @@ export interface Prefs {
   activeClass: string | null;
 }
 
-const PERSISTED = ["theme", "project", "pinnedProjects", "recentProjects", "floorView", "boardSwim", "navCollapsed", "navRail", "palettePinned", "paletteRecent", "portfolio"] as const;
+const PERSISTED = ["theme", "project", "scopeAll", "pinnedProjects", "recentProjects", "floorView", "boardSwim", "navCollapsed", "navRail", "palettePinned", "paletteRecent", "portfolio"] as const;
 
 export function defaultPrefs(): Prefs {
   return {
     theme: "system",
     project: null,
+    scopeAll: true,
     pinnedProjects: [],
     recentProjects: [],
     floorView: "belt",
@@ -76,6 +79,7 @@ export function parsePrefs(raw: string | null): Prefs {
   const s = v as Record<string, unknown>;
   if (isTheme(s.theme)) out.theme = s.theme;
   if (typeof s.project === "string" && s.project) out.project = s.project;
+  if (typeof s.scopeAll === "boolean") out.scopeAll = s.scopeAll;
   if (isStrArray(s.pinnedProjects)) out.pinnedProjects = s.pinnedProjects;
   if (isStrArray(s.recentProjects)) out.recentProjects = s.recentProjects;
   if (typeof s.floorView === "string") out.floorView = s.floorView;
