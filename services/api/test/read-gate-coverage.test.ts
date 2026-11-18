@@ -47,6 +47,8 @@ const SELF_AUTHORIZING: Record<string, Probe> = {
   "/api/v1/audit/verify": { why: "requireVerifier: Auditor or Factory Admin only", expect: "refuse" },
   "/api/v1/work-orders/:id": { why: "scopeOf() resolves the project, then project.view is decided", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/changes": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
+  "/api/v1/work-orders/:id/patches/:patchId": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo", patchId: "x" } },
+  "/api/v1/work-orders/:id/diff": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/record": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/record.md": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
   "/api/v1/work-orders/:id/record/export": { why: "scopeOf() then project.view", expect: "refuse", params: { id: "$wo" } },
