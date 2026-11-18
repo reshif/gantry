@@ -18,6 +18,7 @@ import type { ResearchPlan } from "./research.js";
 import { applyScoutResult, scoutRequest, startSwarm } from "./swarm.js";
 import { addWoMessage, updateId } from "./session/store.js";
 import { isResearchHost } from "../../core/research-host.js";
+import { enforceReview, parseReview, queueDescribe, reviewOf } from "./review.js";
 
 /** The whole summary goes in the thread (lists truncate their own previews); the cap only guards against a runaway output. */
 const clip = (t: string): string => (t.length > 8000 ? `${t.slice(0, 8000)}…` : t);
@@ -56,7 +57,7 @@ async function addUsage(w: Wo, r: StationResult): Promise<void> {
 }
 
 /** Folds the structured output of a station into the work order record (the labelled outputs per station). System-observed values replace what the agent reported. */
-function absorbOutput(w: Wo, station: string, r: StationResult): { checks: ObservedChecks[] | undefined; headSha: string | null | undefined } {
+function absorbOutput(w: Wo, station: string, r: StationResult, o: { attempt: string; now: Date }): { checks: ObservedChecks[] | undefined; headSha: string | null | undefined } {
   const out = asObj(r.output);
   (w.data.outputs ??= {})[station] = { ...out, _labels: { agentReported: Object.keys(out), systemObserved: Object.keys(r.observed ?? {}) } };
   const brief = (w.data.brief ??= {}) as Record<string, unknown>;
@@ -67,6 +68,8 @@ function absorbOutput(w: Wo, station: string, r: StationResult): { checks: Obser
     if (Array.isArray(out.acceptanceCriteria ?? out.ac)) brief.ac = strs(out.acceptanceCriteria ?? out.ac);
   }
   if (station === "plan" && Array.isArray(out.children)) brief.children = strs(out.children);
+  // Review's verdict, per-criterion results, findings and PR description (agent-reported, labelled): enforced after the result is applied.
+  if (station === "review") w.data.review = parseReview(out, { attempt: o.attempt, headSha: r.observed?.headSha ?? (typeof out.headSha === "string" ? out.headSha : null), now: o.now.getTime() });
   // The recorded diff is what the platform saw in the published commits. A Build's own `files` list is shown as its report (outputs) but never becomes the stats.
   {
     const files = r.observed?.files ?? [];
@@ -188,16 +191,20 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
   const p = await project(fx, w);
   let next = "";
   if (result.status === "succeeded") {
-    const { checks, headSha } = absorbOutput(w, sid, result);
+    const { checks, headSha } = absorbOutput(w, sid, result, { attempt: attemptId, now });
     await recordGuardrail(tx, orgId, w, fx.actor);
     const dl = await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue: asObj(result.output).dialogue, now });
     await ensureStationDocument(tx, { orgId, woId: w.id, attemptId, station: sid, stationName: stationDef(fx.catalog, sid)?.name ?? sid, result });
     await postStationMessage(fx, w, sid, attemptId, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${clip(result.summary)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`, dl.questions, dl.assumptions);
-    closeEntry(w, fx, "passed", result.summary ?? "");
+    const rv = sid === "review" ? reviewOf(w) : null;
+    closeEntry(w, fx, rv?.verdict === "changes_requested" ? "changes requested" : "passed", result.summary ?? "");
     w.data.progress = 100;
     note(w, fx, fx.actor, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${clip(result.summary)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`);
     ev(fx, w, "wo.station.done", { station: sid, attempt: attemptId, text: result.summary ?? "" });
-    await arriveAtGate(fx, w, fx.actor, { project: p, ...(checks ? { checks } : {}), ...(headSha !== undefined ? { headSha } : {}) });
+    if (rv) queueDescribe(fx, w, rv);
+    // Review's verdict is enforced: "changes requested" goes back to the station the agent named (Build by default) or to Needs a person, never to the gate.
+    const where = rv ? await enforceReview(fx, w, p, rv, fx.actor, (reason) => needsPerson(fx, w, reason)) : "gate";
+    if (where === "gate") await arriveAtGate(fx, w, fx.actor, { project: p, ...(checks ? { checks } : {}), ...(headSha !== undefined ? { headSha } : {}) });
     next = bayOf(fx.catalog, w) ?? stationIdOf(fx.catalog, w);
   } else if (result.status === "needs_person" && asObj(result.output).scouts !== undefined && scoutRequest(asObj(result.output).scouts, w).ok) {
     // Phase 3: the run split its question among scouts. The work order stays at the station while they work; then the station runs again.

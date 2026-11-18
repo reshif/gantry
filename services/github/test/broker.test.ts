@@ -567,3 +567,44 @@ describe("deliveries and polling", () => {
     env.api.repos = [];
   });
 });
+
+describe("describe a pull request (finding 17)", () => {
+  const send = (over: Record<string, unknown> = {}) => env.call("POST", "/v1/pulls/describe", { woId: "WO-1", repo: REPO, number: 31, title: "Add the key", body: "## Summary\nAdds the key.", ...over });
+  it("patches the title and body of the work order's own pull request, fenced as a pr write, and skips an unchanged description", async () => {
+    env.gh.pulls.length = 0;
+    env.gh.addPull({ number: 31, title: "old", body: "Gantry work order WO-1", state: "open", head: { sha: "a".repeat(40), ref: "gantry/WO-1" } });
+    const r = await send();
+    expect(r.body).toMatchObject({ ok: true, changed: true, number: 31 });
+    const patch = env.gh.of("PATCH", /\/pulls\/31$/);
+    expect(patch).toHaveLength(1);
+    expect(patch[0]!.body).toEqual({ title: "Add the key", body: "## Summary\nAdds the key." });
+    expect(env.api.fences().at(-1)!.body.purpose).toBe("pr");
+    expect((await send()).body).toMatchObject({ ok: true, changed: false });
+    expect(env.gh.of("PATCH", /\/pulls\/31$/)).toHaveLength(1);
+  });
+  it("redacts secrets before they reach GitHub", async () => {
+    env.gh.pulls.length = 0;
+    env.gh.addPull({ number: 31, title: "t", body: "x", state: "open", head: { sha: "a".repeat(40), ref: "gantry/WO-1" } });
+    const key = "ghp_" + "a".repeat(36);
+    const r = await send({ body: `Token ${key} and AKIAIOSFODNN7EXAMPLE and https://u:hunter2pass@host/x` });
+    expect(r.body.redacted).toBe(3);
+    const body = String(env.gh.of("PATCH", /\/pulls\/31$/)[0]!.body.body);
+    expect(body).not.toContain(key);
+    expect(body).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(body).not.toContain("hunter2pass");
+  });
+  it("refuses a pull request that is not the work order's, a closed one, and a fenced (stopped) work order", async () => {
+    env.gh.pulls.length = 0;
+    env.gh.addPull({ number: 31, title: "t", body: "x", state: "open", head: { sha: "a".repeat(40), ref: "someone/else" } });
+    expect((await send()).status).toBe(409);
+    env.gh.pulls.length = 0;
+    env.gh.addPull({ number: 31, title: "t", body: "x", state: "closed", head: { sha: "a".repeat(40), ref: "gantry/WO-1" } });
+    expect((await send()).body.code).toBe("not_open");
+    env.gh.pulls.length = 0;
+    env.gh.addPull({ number: 31, title: "t", body: "x", state: "open", head: { sha: "a".repeat(40), ref: "gantry/WO-1" } });
+    env.api.fence = () => ({ allow: false, code: "stopped", reason: "Halted at project scope." });
+    expect((await send()).status).toBe(409);
+    expect(env.gh.of("PATCH", /\/pulls\/31$/)).toHaveLength(0);
+    env.api.fence = (c) => ({ allow: true, woId: "WO-1", branch: "gantry/WO-1", repo: "acme/payments-api", ...(c.body?.purpose ? {} : {}) });
+  });
+});

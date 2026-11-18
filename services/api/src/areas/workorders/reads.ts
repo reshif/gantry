@@ -212,7 +212,7 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
     classification: { predicted: wo.clsSuggested, final: wo.cls, confidence: wo.clsConfidence, rationale: wo.clsRationale, requested: wo.requestedCls, overridden: wo.clsOverridden },
     route: route(st.catalog, project, wo.cls), flowVersion: row.flowVersion,
     clarification: wo.conv.messages, briefVersions: wo.briefVersions ?? [], brief: wo.brief, criteria: full.criteria,
-    journey: wo.history, gates, sendbacks: wo.sendbacks ?? [], bayStays: stays.map((s) => ({ bay: s.bay, reason: s.reason, by: s.entered_by, from: iso(s.entered_at), to: iso(s.left_at) })),
+    journey: wo.history, gates, review: row.data.review ?? null, sendbacks: wo.sendbacks ?? [], bayStays: stays.map((s) => ({ bay: s.bay, reason: s.reason, by: s.entered_by, from: iso(s.entered_at), to: iso(s.left_at) })),
     attempts: attempts.map((a) => ({ id: a.id, station: a.station, visit: a.visit, fencing: Number(a.fencing), state: a.state, outcome: a.outcome, startedAt: iso(a.started_at), endedAt: iso(a.ended_at), tuple: a.tuple_id, agent: a.data.agent ?? null })),
     results: results.map((r) => ({ id: r.id, attempt: r.attempt_id, station: r.station, outcome: r.outcome, summary: r.summary, at: iso(r.created_at), output: obj(r.body).output ?? null })),
     runs: runs.map((r) => ({ id: r.id, attempt: r.attempt_id, state: r.state, model: r.model_id, at: iso(r.created_at) })),

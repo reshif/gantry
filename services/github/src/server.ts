@@ -5,7 +5,7 @@ import type { ApiClient } from "./api.js";
 import type { GithubConfig } from "./config.js";
 import { BrokerError } from "./errors.js";
 import type { GithubApp } from "./github.js";
-import { DraftBody, GateCheckBody, MergeBody, Poller, convertToDraft, listDeliveries, mergePullRequest, readPrState, readProtections, reconcileDeliveries, reconcileRepo, setGateCheck, type OpDeps } from "./ops.js";
+import { DescribeBody, DraftBody, GateCheckBody, MergeBody, Poller, convertToDraft, describePullRequest, listDeliveries, mergePullRequest, readPrState, readProtections, reconcileDeliveries, reconcileRepo, setGateCheck, type OpDeps } from "./ops.js";
 import { CanaryBody, InspectBody, OnboardMergeBody, PrBody, inspectRepo, listAvailable, mergeOnboardingPr, openOnboardingPr, runCanary } from "./onboarding.js";
 import { PublishBody, publishWorkspace } from "./publish.js";
 import { SeedBody, seedWorkspace, type SeedDeps } from "./seed.js";
@@ -70,6 +70,7 @@ export async function buildServer(d: ServerDeps): Promise<{ server: FastifyInsta
     return { ok: true, ...(await readPrState(ops, q.repo, q.number)) };
   });
   server.post("/v1/pulls/draft", async (req) => convertToDraft(ops, DraftBody.parse(req.body)));
+  server.post("/v1/pulls/describe", async (req) => describePullRequest(ops, DescribeBody.parse(req.body)));
   server.post("/v1/pulls/merge", async (req) => mergePullRequest(ops, MergeBody.parse(req.body)));
   // Repository onboarding and readiness (spec 11.3).
   server.post("/v1/onboarding/inspect", async (req) => { const b = InspectBody.parse(req.body); return inspectRepo(ops, b.repo, { scan: b.scan }); });
