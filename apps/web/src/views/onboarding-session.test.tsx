@@ -63,11 +63,13 @@ describe("Onboarding session", () => {
     expect(document.querySelector("#osx-next")).toBeNull(); // the Blueprint has no "Next:" line or chat header chip above the thread
     expect(document.querySelector(".osx-event .muted")).toBeNull(); // no timestamp lines: events are bubbles
     expect(document.querySelector(".crumbs, .eyebrow")?.textContent).toMatch(/Onboarding\/acme\/mobile-app/i);
+    expect(screen.queryByLabelText("Added lines of AGENTS.md")).toBeNull(); // the file-by-file diff is collapsed until asked for
+    fireEvent.click(await byId("osx-diff-P-1"));
     fireEvent.click(screen.getByText("AGENTS.md").closest("button")!);
     expect(screen.getByLabelText("Added lines of AGENTS.md").textContent).toContain("+ Run vitest run");
   });
 
-  it("Approve calls the decision endpoint for that proposal; Discard likewise; Ask for changes sends the words and then asks the agent to continue", async () => {
+  it("Approve calls the decision endpoint for that proposal; Discard likewise; Request changes sends the words and then asks the agent to continue", async () => {
     const calls = api(session(), {
       "POST /api/v1/repos/mobile-app/onboarding/session/proposals/om-1/P-1": () => ok("Gantry is opening the PR."),
       "POST /api/v1/repos/mobile-app/onboarding/session/messages": () => ok("Saved."),
@@ -115,8 +117,8 @@ describe("Onboarding session", () => {
     api(session({ agent: { mode: "rule-based", reason: "No model is configured." }, messages: [{ id: "om-1", role: "system", author: "system", text: "Gantry assessed acme/mobile-app (rule-based, no agent): 4 checks, 2 gaps.", at: NOW - 3000, data: { mode: "rule-based", cards: [rule] } }], next: { actor: "you", text: "review the proposed changes and approve, ask for changes or discard" } }));
     mount(<OnboardingView />);
     expect((await screen.findAllByText(/Rule-based \(no agent\)/)).length).toBeGreaterThan(0);
-    expect(document.getElementById("osx-input")).toBeNull(); // no composer unless the agent asked something that is still open
-    expect(document.getElementById("osx-send")).toBeNull();
+    expect((document.getElementById("osx-input") as HTMLTextAreaElement).disabled).toBe(true); // the composer is always pinned; without a model it is disabled and says why
+    expect(document.getElementById("osx-mode-note")).toBeTruthy();
     expect((await byId("osx-approve-P-1")).hasAttribute("disabled")).toBe(false);
   });
 
@@ -155,5 +157,79 @@ describe("Onboarding session", () => {
     const chip = await byId("osx-waiting");
     expect(chip.textContent).toMatch(/Waiting for CI on PR #2 since .*checked .*we'll post here and notify you/);
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/session/seen"))).toBe(true));
+  });
+
+  it("the conversation comes before the findings, the composer sits outside the scroll area, and the thread opens at the newest message", async () => {
+    api(session());
+    mount(<OnboardingView />);
+    const conv = await byId("osx-conv");
+    const findings = document.querySelector(".osx-findings")!;
+    expect(conv.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(conv.closest("#osx-split")).toBeTruthy();
+    const thread = conv.querySelector(".osx-thread") as HTMLElement;
+    const composer = conv.querySelector(".osx-composer") as HTMLElement;
+    expect(thread.contains(composer)).toBe(false);
+    expect(composer.parentElement).toBe(thread.parentElement);
+    Object.defineProperty(thread, "scrollHeight", { configurable: true, value: 900 });
+    expect(document.getElementById("osx-conv-state")!.textContent).toMatch(/Waiting for you/);
+  });
+
+  it("on a wide screen the panel is sized to the room left under the header, so the composer is on screen at open", async () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    const setWin = (x: number, y: number) => { Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: x }); Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: y }); };
+    setWin(1440, 900);
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) { return { top: this.id === "osx-split" ? 278 : 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }; });
+    try {
+      api(session());
+      mount(<OnboardingView />);
+      const conv = await byId("osx-conv");
+      await waitFor(() => expect(conv.style.getPropertyValue("--osx-conv-h")).toBe(`${900 - 278 - 12}px`));
+    } finally {
+      rect.mockRestore();
+      setWin(w, h);
+    }
+  });
+
+  it("?focus=chat marks the conversation and puts the cursor in the composer", async () => {
+    window.location.hash = "#/p/storefront/onboarding/mobile-app?focus=chat";
+    api(session());
+    mount(<OnboardingView />);
+    const conv = await byId("osx-conv");
+    await waitFor(() => expect(conv.className).toContain("is-focus"));
+    await waitFor(() => expect(document.activeElement?.id).toBe("osx-input"));
+  });
+
+  it("pipeline updates fold into one quiet row, the person's change request reads as their message, and a progress-only message is not a bubble", async () => {
+    const msgs = [
+      { id: "u1", role: "system", author: "system", text: "Assessment started.", at: NOW - 9000, data: { kind: "update" } },
+      { id: "u2", role: "assistant", author: "ag-onboard", text: "", at: NOW - 8000, data: { mode: "agent", cards: [{ kind: "progress", text: "Read the repository: 18 files on main" }] } },
+      { id: "a1", role: "assistant", author: "ag-onboard", text: "I found two gaps.", at: NOW - 7000, data: { mode: "agent", cards: [PROPOSAL] } },
+      { id: "c1", role: "user", author: "p-daniel", text: "Changes requested: tests run with make check", at: NOW - 6000, data: {} },
+    ];
+    api(session({ messages: msgs }));
+    mount(<OnboardingView />);
+    await screen.findByText("I found two gaps.");
+    expect(document.querySelectorAll(".osx-conv .osx-quiet").length).toBe(2); // the two updates, and the assessment timeline entry after the turn
+    expect(document.querySelector(".osx-quiet summary")!.textContent).toMatch(/2 updates/);
+    expect(document.querySelectorAll(".osx-conv .msg").length).toBe(2);
+    const mine = document.querySelector(".osx-conv .msg.me")!;
+    expect(mine.textContent).toContain("tests run with make check");
+    expect(mine.textContent).not.toContain("Changes requested:");
+    expect(document.querySelectorAll("#osx-prop-P-1").length).toBe(1);
+    expect(document.querySelector(".osx-turn .osx-card")).toBeTruthy(); // the card sits beneath the reply, not inside the bubble
+    expect(document.querySelector(".bub .osx-card")).toBeNull();
+  });
+
+  it("while the agent works it shows one quiet status line with the steps collapsed, not a Working: list", async () => {
+    const { render } = await import("@testing-library/react");
+    const { LiveStatus } = await import("./onboarding/Session");
+    const tools = ["get_onboarding_state", "inspect_repository", "read_file", "read_file", "read_file"];
+    render(<LiveStatus live={{ text: "", tools, cards: [{ kind: "progress", text: "Read the repository: 18 files on main" }] }} />);
+    const line = document.getElementById("osx-live")!;
+    expect(line.querySelector("summary")!.textContent).toBe("Reading 3 files...");
+    expect((line.querySelector("details") as HTMLDetailsElement).open).toBe(false);
+    expect(line.textContent).not.toMatch(/Working:/);
+    expect(line.querySelectorAll("li").length).toBe(6); // the steps are there to expand, listed nowhere else
+    expect(document.querySelector(".msg")).toBeNull(); // no bubble until the agent has words
   });
 });

@@ -11,6 +11,7 @@ import { useProjects, useRepos } from "../../api/queries";
 import { hashFor, navigate } from "../../lib/router";
 import { ActBtn, Kv } from "../projects/proto";
 import { useTab } from "../projects/proto";
+import { useQueryParam } from "../connect/kit";
 import { Avatar, Btn, Chip, Empty, Panel, Tabs, ViewHead, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
@@ -23,7 +24,55 @@ import { QuestionCard, useThreadEnd } from "../session/kit";
 type Proposal = Extract<SessionCard, { kind: "proposal" }>;
 /** Message roles drawn on the right (the person's own words). */
 const ME: Record<string, true> = { user: true };
+/** The person's request for changes is posted as their own message with this prefix: show their words, not a banner. */
+const CHANGES = /^Changes requested:\s*/;
 const ACTORS: Record<string, string> = { system: "Gantry", "ag-onboard": "Onboarding Agent", ci: "CI" };
+/** Quiet lines (pipeline updates and timeline entries) fold into one row per run; the agent's and the person's words stay as bubbles. */
+type Item = { at: number; kind: "m"; m: SessionMessage } | { at: number; kind: "t"; t: { who: string; text: string; at: number } };
+type Block = { t: "turn"; item: Item } | { t: "quiet"; items: Item[] };
+const progressOnly = (m: SessionMessage): boolean => !m.text.trim() && (m.data.cards ?? []).length > 0 && (m.data.cards ?? []).every((c) => c.kind === "progress");
+const quiet = (it: Item): boolean => it.kind === "t" || progressOnly(it.m) || (it.m.data.kind === "update" && !it.m.text.trim().endsWith("?") && !(it.m.data.cards ?? []).some((c) => c.kind !== "progress"));
+export function foldQuiet(items: Item[]): Block[] {
+  const out: Block[] = [];
+  for (const it of items) {
+    const last = out.at(-1);
+    if (quiet(it)) { if (last?.t === "quiet") last.items.push(it); else out.push({ t: "quiet", items: [it] }); }
+    else out.push({ t: "turn", item: it });
+  }
+  return out;
+}
+const lineOf = (it: Item): { key: string; at: number; who: string; text: string } => (it.kind === "t" ? { key: `t${it.at}${it.t.text.slice(0, 12)}`, at: it.at, who: it.t.who, text: it.t.text } : { key: it.m.id, at: it.m.at, who: it.m.author, text: [it.m.text, ...(it.m.data.cards ?? []).flatMap((c) => (c.kind === "progress" ? [c.detail ? `${c.text} (${c.detail})` : c.text] : []))].filter(Boolean).join(" ") });
+function QuietRow({ items }: { items: Item[] }) {
+  const lines = items.map(lineOf);
+  if (lines.length === 1) return <p className="osx-quiet small muted"><span>{fmt.stamp(lines[0]!.at)}</span>{` ${lines[0]!.text}`}</p>;
+  return (
+    <details className="osx-quiet small muted">
+      <summary>{`${lines.length} updates`}<span>{` · ${fmt.stamp(lines[0]!.at)}`}</span></summary>
+      <ul>{lines.map((l) => <li key={l.key}><span>{fmt.stamp(l.at)}</span>{` ${l.text}`}</li>)}</ul>
+    </details>
+  );
+}
+
+/** While the agent works: one quiet status line (what it is doing, a typing indicator), its tool steps behind a toggle, and its words as they arrive. */
+export function LiveStatus({ live }: { live: { text: string; tools: string[]; cards: SessionCard[] } }) {
+  const reads = live.tools.filter((t) => /read|file/i.test(t)).length;
+  const last = live.tools.at(-1)?.replace(/_/g, " ");
+  const what = reads ? `Reading ${reads} file${reads === 1 ? "" : "s"}` : last ? `Working: ${last}` : "Reading the repository";
+  const notes = live.cards.flatMap((c) => (c.kind === "progress" ? [c.text] : []));
+  return (
+    <>
+      {live.text ? <div className="msg is-live"><Avatar id="ag-onboard" /><div className="osx-turn"><div className="bub"><div className="who">Onboarding Agent</div><p className="osx-text">{live.text}</p></div></div></div> : null}
+      <div className="osx-live small muted" id="osx-live" role="status" aria-busy="true">
+        <span className="osx-typing" aria-hidden="true"><i /><i /><i /></span>
+        <details className="osx-steps">
+          <summary>{`${what}...`}</summary>
+          <ul>{live.tools.map((t, i) => <li key={i}>{t.replace(/_/g, " ")}</li>)}{notes.map((n, i) => <li key={`n${i}`}>{n}</li>)}</ul>
+        </details>
+      </div>
+    </>
+  );
+}
+
 const nameOf = (who: string): React.ReactNode => ACTORS[who] ?? (who.startsWith("github:") ? who : <Who id={who} />);
 
 /* ------------------------------------------------------------------ cards ---- */
@@ -35,6 +84,7 @@ function Source({ source }: { source: "observed" | "agent" }) {
 function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Session; send: (b: { kind: "continue" }) => void }) {
   const ui = useUI();
   const [open, setOpen] = useState<string | null>(null);
+  const [diffs, setDiffs] = useState(false);
   const [asking, setAsking] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -57,10 +107,10 @@ function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Se
     <article className={`osx-card osx-proposal is-${c.status}`} id={`osx-prop-${c.id}`} aria-label={c.title}>
       <header className="osx-card-h">
         <strong>{c.title}</strong>
-        <Chip text={c.mode === "agent" ? "Drafted by the Onboarding Agent" : "Rule-based (no agent)"} cls={c.mode === "agent" ? "chip-accent" : ""} />
+        <span className="muted small">{c.mode === "agent" ? "Drafted by the Onboarding Agent" : "Rule-based (no agent)"}</span>
         <span className={`osx-status st-${c.status}`}>{label[c.status]}{c.decidedBy && c.status !== "superseded" ? <> · <Who id={c.decidedBy} /></> : null}</span>
       </header>
-      <p className="small">{c.summary}</p>
+      <p className="small osx-sum">{c.summary}{c.files.length ? <span className="muted">{` ${c.files.length} file${c.files.length === 1 ? "" : "s"}, `}<span className="mono osx-plus">{`+${total.plus}`}</span>{" "}<span className="mono osx-minus">{`-${total.minus}`}</span>{c.diffCap ? ` (cap ${c.diffCap} lines)` : ""}</span> : null}</p>
       {sensitive.length ? (
         <div className="osx-sensitive" role="group" aria-label="Parts to confirm">
           <strong className="small">Needs your explicit confirmation</strong>
@@ -70,7 +120,7 @@ function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Se
         </div>
       ) : null}
       {(c.blockers ?? []).map((b) => <div key={b.id} className="osx-blocker small" role="alert"><strong>{b.message}</strong><p>{b.fix}</p></div>)}
-      {c.files.length ? (
+      {c.files.length && diffs ? (
         <ul className="osx-files">
           {c.files.map((f) => (
             <li key={f.path}>
@@ -87,12 +137,13 @@ function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Se
           ))}
         </ul>
       ) : null}
-      {c.files.length ? <p className="muted small">{`${c.files.length} file${c.files.length === 1 ? "" : "s"}, +${total.plus} -${total.minus}${c.diffCap ? ` (cap ${c.diffCap} lines)` : ""}. Nothing is written to GitHub until a person approves.`}</p> : null}
-      {pending ? (
+      {pending ? <p className="muted small">Nothing is written to GitHub until a person approves.</p> : null}
+      {pending || c.files.length ? (
         <div className="osx-actions">
-          <Btn kind="primary" id={`osx-approve-${c.id}`} label={c.what === "merge" ? "Approve and merge" : c.what === "exception" ? "Approve the exception" : c.what === "update_pr" ? "Approve and update the PR" : "Approve and open the PR"} disabled={busy || !mayApprove || (sensitive.length > 0 && !confirmed)} disabledReason={!mayApprove ? why : sensitive.length > 0 && !confirmed ? "Confirm the parts listed above first." : undefined} onClick={() => void run("approve")} />
-          {c.what !== "merge" && c.what !== "exception" ? <Btn id={`osx-changes-${c.id}`} label="Ask for changes" disabled={busy || !s.can.talk} onClick={() => setAsking(!asking)} /> : null}
-          <Btn id={`osx-discard-${c.id}`} label="Discard" disabled={busy || !s.can.talk} onClick={() => void run("discard")} />
+          {pending ? <Btn kind="primary" small id={`osx-approve-${c.id}`} label={c.what === "merge" ? "Approve and merge" : c.what === "exception" ? "Approve the exception" : c.what === "update_pr" ? "Approve and update the PR" : "Approve and open the PR"} disabled={busy || !mayApprove || (sensitive.length > 0 && !confirmed)} disabledReason={!mayApprove ? why : sensitive.length > 0 && !confirmed ? "Confirm the parts listed above first." : undefined} onClick={() => void run("approve")} /> : null}
+          {pending && c.what !== "merge" && c.what !== "exception" ? <Btn small id={`osx-changes-${c.id}`} label="Request changes" disabled={busy || !s.can.talk} onClick={() => setAsking(!asking)} /> : null}
+          {c.files.length ? <Btn small id={`osx-diff-${c.id}`} label={diffs ? "Hide diff" : "View diff"} aria-expanded={diffs} onClick={() => setDiffs(!diffs)} /> : null}
+          {pending ? <Btn small id={`osx-discard-${c.id}`} label="Discard" disabled={busy || !s.can.talk} onClick={() => void run("discard")} /> : null}
         </div>
       ) : null}
       {pending && asking ? (
@@ -171,7 +222,9 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const opened = useRef(false);
-  const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text);
+  const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text, tab);
+  const [focus] = useQueryParam("focus");
+  const chatFocus = focus === "chat";
 
   const send = async (body: { kind: "message" | "open" | "continue"; text?: string }) => {
     if (live) return;
@@ -199,12 +252,38 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
   const seenKey = s ? `${s.messages.length}:${s.messages.at(-1)?.id ?? ""}` : "";
   useEffect(() => { if (seenKey) void markSeen(repoId); }, [seenKey, repoId]);
 
-  const items = useMemo(() => {
+  const items = useMemo<Item[]>(() => {
     if (!s || !r) return [];
     const msgs = s.messages.map((m) => ({ at: m.at, kind: "m" as const, m }));
     const tl = r.onboarding.timeline.map((t) => ({ at: t.at, kind: "t" as const, t }));
     return [...msgs, ...tl].sort((a, b) => a.at - b.at);
   }, [s, r]);
+  const blocks = useMemo(() => foldQuiet(items), [items]);
+  // `?focus=chat` (the list's Conversation action): bring the conversation into view and put the cursor in the composer
+  const ready = !!s;
+  useEffect(() => {
+    if (!chatFocus || !ready) return;
+    const el = document.getElementById("osx-conv");
+    el?.scrollIntoView?.({ block: "start" });
+    const box = el?.querySelector<HTMLTextAreaElement>("#osx-input");
+    if (box && !box.disabled) box.focus({ preventScroll: true });
+  }, [chatFocus, ready]);
+
+  // size the wide-screen panel to the room actually left under the header, stepper and tabs, so the composer is on screen at open
+  useEffect(() => {
+    if (!ready || tab !== "findings") return;
+    const fit = () => {
+      const el = document.getElementById("osx-conv");
+      const split = document.getElementById("osx-split");
+      if (!el || !split) return;
+      if (window.innerWidth < 1100) { el.style.removeProperty("--osx-conv-h"); return; }
+      const pageTop = split.getBoundingClientRect().top + window.scrollY;
+      el.style.setProperty("--osx-conv-h", `${Math.max(420, Math.floor(window.innerHeight - pageTop - 12))}px`);
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [ready, tab]);
 
   const waiting = !r ? availQ.data?.available?.find((a) => a.repo === repoId || a.repo.replace("/", "--") === repoId) : undefined;
   if (!r && waiting) return <NotStarted projectId={projectId} projectName={projectName} name={waiting.repo} lang={waiting.lang} />;
@@ -227,6 +306,9 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
     const green = fresh?.onboarding.pr?.checks === "green";
     ui.toast(green ? "Checks passing" : "Checks are not passing yet", green ? "ok" : "error");
   };
+  const pendingProposal = s.messages.some((m) => (m.data.cards ?? []).some((c) => c.kind === "proposal" && c.status === "pending"));
+  const agentState: { label: string; cls: string } = live || s.busy ? { label: "Thinking", cls: "info" } : asked || pendingProposal ? { label: "Waiting for you", cls: "warn" } : { label: "Idle", cls: "" };
+  const talkCount = s.messages.filter((m) => m.data.kind !== "update").length;
   const nGaps = o.findings.filter((f) => !f.ok).length;
   const prOpen = !!o.pr && o.pr.state === "open";
   const busyNote = o.busy ? busyText(r) ?? "Working" : null;
@@ -248,7 +330,41 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
       <Tabs revealActive idPrefix="osx-tab" items={tabs} active={tab} onChange={setTab} />
       <div className="stack">
         {tab === "findings" ? (
-          <>
+          <div className="osx-split" id="osx-split">
+            {/* the conversation comes first in the document: beside the findings on a wide screen, above them on a narrow one */}
+            <Panel title="Conversation with the Onboarding agent" cls={`osx-conv${chatFocus ? " is-focus" : ""}`} id="osx-conv" tools={<span className="osx-conv-state" id="osx-conv-state"><Chip text={agentState.label} cls={agentState.cls} />{talkCount ? <span className="muted small">{`${talkCount} message${talkCount === 1 ? "" : "s"}`}</span> : null}</span>}>
+              <div className="osx-main">
+                <div className="chat osx-thread" role="log" aria-live="polite" ref={thread}>
+                  {blocks.map((b) =>
+                    b.t === "quiet" ? <QuietRow key={`q${lineOf(b.items[0]!).key}`} items={b.items} /> : b.item.kind === "m" ? (
+                      <div key={b.item.m.id} className={`msg${b.item.m.role in ME ? " me" : ""}${b.item.m.data.kind === "update" ? " is-update" : ""}`}>
+                        <Avatar id={b.item.m.author in ACTORS ? "ag-onboard" : b.item.m.author} />
+                        <div className="osx-turn">
+                          {b.item.m.text ? (
+                            <div className="bub">
+                              <div className="who">{nameOf(b.item.m.author)}{b.item.m.data.mode === "rule-based" ? " · rule-based" : ""}{b.item.m.role in ME && CHANGES.test(b.item.m.text) ? " · requested changes" : ""}</div>
+                              <p className="osx-text">{b.item.m.role in ME ? b.item.m.text.replace(CHANGES, "") : b.item.m.text}</p>
+                            </div>
+                          ) : null}
+                          <Cards m={b.item.m} s={s} send={(x) => void send(x)} last={b.item.m.id === lastMsg} />
+                        </div>
+                      </div>
+                    ) : null)}
+                  {live ? <LiveStatus live={live} /> : null}
+                  {s.waiting ? <p className="osx-waiting small" id="osx-waiting" role="status"><Icon name="clock" /> {`${s.waiting.text}${s.waiting.since ? ` since ${fmt.ago(s.waiting.since, Date.now())}` : ""}${s.waiting.checkedAt ? ` · checked ${fmt.ago(s.waiting.checkedAt, Date.now())}` : ""} · we'll post here and notify you`}</p> : null}
+                  {s.busy ? <p className="osx-event small muted">{`Gantry is working: ${s.next.text}.`}</p> : null}
+                  {error ? <p className="callout callout-warn small" role="alert">{error}</p> : null}
+                </div>
+                {(
+                  <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+                    <textarea id="osx-input" className="input" rows={2} aria-label="Message to the Onboarding Agent" value={draft} placeholder={composerNote} disabled={!s.can.talk || ruleBased || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
+                    <Btn kind="primary" type="submit" id="osx-send" label="Send" disabled={!s.can.talk || ruleBased || !!live || !draft.trim()} />
+                    {ruleBased ? <p className="small muted osx-reason" id="osx-mode-note">{`Connect a model vendor to talk to the Onboarding Agent. ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
+                  </form>
+                )}
+              </div>
+            </Panel>
+            <div className="osx-findings">
             <Panel title="Assessment against guidelines" flush>
               {list.length ? (
                 <ul className="list">
@@ -262,50 +378,8 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
                 </ul>
               ) : <ul className="list" />}
             </Panel>
-            <Panel title="Conversation with the Onboarding agent">
-              <div className="osx-main">
-                <div className="chat osx-thread" role="log" aria-live="polite" ref={thread}>
-                  {items.map((it) =>
-                    it.kind === "t" ? (
-                      <div key={`t${it.at}${it.t.text.slice(0, 12)}`} className="msg">
-                        <Avatar id={it.t.who in ACTORS ? "ag-onboard" : it.t.who} />
-                        <div className="bub"><div className="who">{nameOf(it.t.who)}</div>{it.t.text}</div>
-                      </div>
-                    ) : (
-                      <div key={it.m.id} className={`msg${it.m.role in ME ? " me" : ""}${it.m.data.kind === "update" ? " is-update" : ""}`}>
-                        <Avatar id={it.m.author in ACTORS ? "ag-onboard" : it.m.author} />
-                        <div className="bub">
-                          <div className="who">{nameOf(it.m.author)}{it.m.data.mode === "rule-based" ? " · rule-based" : ""}</div>
-                          {it.m.text ? <p className="osx-text">{it.m.text}</p> : null}
-                          <Cards m={it.m} s={s} send={(b) => void send(b)} last={it.m.id === lastMsg} />
-                        </div>
-                      </div>
-                    ))}
-                  {live ? (
-                    <div className="msg is-live" aria-busy="true">
-                      <Avatar id="ag-onboard" />
-                      <div className="bub">
-                        <div className="who">Onboarding Agent</div>
-                        {live.tools.length ? <p className="osx-progress small muted">{`Working: ${live.tools.map((t) => t.replace(/_/g, " ")).join(", ")}`}</p> : null}
-                        <p className="osx-text">{live.text || "Reading the repository..."}</p>
-                        {live.cards.map((c, i) => (c.kind === "progress" ? <p key={i} className="osx-progress small"><Icon name="check" /> {c.text}</p> : null))}
-                      </div>
-                    </div>
-                  ) : null}
-                  {s.waiting ? <p className="osx-waiting small" id="osx-waiting" role="status"><Icon name="clock" /> {`${s.waiting.text}${s.waiting.since ? ` since ${fmt.ago(s.waiting.since, Date.now())}` : ""}${s.waiting.checkedAt ? ` · checked ${fmt.ago(s.waiting.checkedAt, Date.now())}` : ""} · we'll post here and notify you`}</p> : null}
-                  {s.busy ? <p className="osx-event small muted">{`Gantry is working: ${s.next.text}.`}</p> : null}
-                  {error ? <p className="callout callout-warn small" role="alert">{error}</p> : null}
-                </div>
-                {asked ? (
-                  <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-                    <textarea id="osx-input" className="input" rows={2} aria-label="Message to the Onboarding Agent" value={draft} placeholder={composerNote} disabled={!s.can.talk || ruleBased || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
-                    <Btn kind="primary" type="submit" id="osx-send" label="Send" disabled={!s.can.talk || ruleBased || !!live || !draft.trim()} />
-                    {ruleBased ? <p className="small muted osx-reason" id="osx-mode-note">{`Connect a model vendor to talk to the Onboarding Agent. ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
-                  </form>
-                ) : null}
-              </div>
-            </Panel>
-          </>
+            </div>
+          </div>
         ) : tab === "pr" ? (
           <Panel title="Onboarding pull request">
             {o.pr ? (

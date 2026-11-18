@@ -102,6 +102,11 @@ describe("Onboarding: pipeline", () => {
     expect(row("acme/notifications").querySelector("#onb-start-notifications")?.textContent).toBe("Start");
     expect(row("acme/new-service").querySelector("button")?.textContent).toBe("Start"); // a repo the App sees, not connected yet
     expect(document.getElementById("onb-open-mobile-app")?.textContent).toBe("Open");
+    // the Conversation action opens the session focused on the chat (URL state)
+    expect(document.getElementById("onb-chat-notifications")).toBeNull();
+    // not started: nothing to talk about yet
+    fireEvent.click(document.getElementById("onb-chat-mobile-app")!);
+    expect(window.location.hash).toMatch(/onboarding\/mobile-app\?focus=chat$/);
   });
 
   it("filters by stage and searches, with a live count and Clear", async () => {
