@@ -1,12 +1,5 @@
 /* The work-order session (views/conversations/Session.tsx) and the conversations list. Reuses the .osx-* layout of the onboarding session; only what differs is here. */
-.wos-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--line-strong); background: var(--sunk); font-size: var(--t-sm); }
-.wos-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); flex: none; }
-.wos-status.is-you { background: var(--surface); border-left: 3px solid var(--accent, var(--ink)); }
-.wos-status.is-you .wos-dot { background: var(--accent, var(--ink)); }
-.wos-status.is-live .wos-dot { background: var(--ok, var(--ink)); animation: wos-pulse 1.2s ease-in-out infinite; }
 .wos-status.is-wait .wos-dot { background: var(--warn, var(--ink-2)); }
-@keyframes wos-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .wos-status.is-live .wos-dot { animation: none; } }
 .wos-legacy-h { margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.04em; font-size: var(--t-xs); }
 .osx-msg.is-legacy { opacity: 0.8; }
 .wos-goal { margin: 0 0 6px; overflow-wrap: anywhere; }
@@ -16,13 +9,6 @@
 .wos-plus { color: var(--ok, inherit); overflow-wrap: anywhere; }
 .wos-resolved { color: var(--muted); overflow-wrap: anywhere; }
 .wos-minus { color: var(--block, inherit); overflow-wrap: anywhere; }
-.osx-answered { margin: 0; }
-.osx-question.is-answered { opacity: 0.75; }
-.wos-unread { width: 8px; height: 8px; border-radius: 50%; background: var(--accent, var(--ink)); display: inline-block; }
-.wos-open-conv { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line-strong); background: var(--surface); }
-.wos-open-conv.is-you { border-left: 3px solid var(--accent, var(--ink)); }
-.wos-compose { position: relative; flex: 1; min-width: 200px; display: flex; }
-.wos-compose textarea { flex: 1; min-width: 0; }
 .wos-mentions { position: absolute; bottom: 100%; left: 0; right: 0; margin: 0 0 4px; padding: 4px 0; list-style: none; max-height: 220px; overflow-y: auto; background: var(--surface); border: 1px solid var(--line-strong); z-index: 5; }
 .wos-mentions li { padding: 6px 12px; cursor: pointer; overflow-wrap: anywhere; }
 .wos-mentions li.is-active, .wos-mentions li:hover { background: var(--surface-2, var(--line)); }

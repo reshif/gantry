@@ -7,32 +7,14 @@
 /* ---------- main grid ---------- */
 
 /* ---------- control panel ---------- */
-.hm-step-n { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid var(--line-strong); flex: none; }
 
 /* ---------- activity ---------- */
 
 /* ---------- onboarding pipeline ---------- */
 
 /* ---------- spend bars ---------- */
-.hm-bars { list-style: none; display: grid; gap: 6px; }
-.hm-bar-row { display: grid; grid-template-columns: minmax(80px, 9em) minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: var(--t-sm); border-radius: 2px; }
-.hm-bar-row:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.hm-bar-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hm-bar-track { position: relative; height: 12px; background: var(--sunk); border-radius: 2px; }
-.hm-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 0 4px 4px 0; }
-.is-warn .hm-bar-fill { background: var(--wait); }
-.is-over .hm-bar-fill { background: var(--block); background-image: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.18) 0 4px, transparent 4px 8px); }
-.hm-bar-v { white-space: nowrap; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 3px; }
-.hm-bar-v .ic { width: 12px; height: 12px; color: var(--block); }
-.is-warn .hm-bar-v .ic { color: var(--wait); }
 
 /* ---------- responsive ---------- */
-@media (max-width: 560px) {
-  .hm-bar-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .hm-bar-track { grid-column: 1 / -1; grid-row: 2; }
-  .hm-att-item { grid-template-columns: 26px minmax(0, 1fr); }
-  .hm-att-item > .btn { grid-column: 2; justify-self: start; }
-}
 
 /* ---------- human attention ---------- */
 /* rows layout: secondary figures sit under the main number so the table fits beside the nav at 1440 */

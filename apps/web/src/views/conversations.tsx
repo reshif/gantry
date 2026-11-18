@@ -17,6 +17,9 @@ import { ConvPane } from "./conversations/ConvPane";
 import { ThreadList } from "./conversations/ThreadList";
 import type { ThreadFilter } from "./conversations/chat";
 import { useWoSessions } from "./conversations/session-api";
+import "../styles/views/conversations.css";
+import "../styles/views/conv-chat.css";
+import "../styles/views/wosession.css";
 
 const KEEP = ["q", "f", "events"] as const;
 const withQuery = (path: string, q: Record<string, string>): string => {

@@ -1,0 +1,23 @@
+
+.floorpg {
+  /* Local stand-ins for the theme's new tokens (--station, --station-head, --hatch, --split, --split-soft, --on-warn, --warn-solid);
+     point them at the real tokens once tokens.css defines them. */
+  --fp-st: var(--surface2);
+  --fp-sthd: var(--sunk);
+  --fp-hatch: color-mix(in srgb, var(--bad) 55%, transparent);
+  --fp-split: #8d7ce0;
+  --fp-splitf: color-mix(in srgb, #8d7ce0 16%, transparent);
+  --fp-onwarn: #1c1200;
+  --fp-warns: #f4b429;
+  --fp-out: var(--line2);
+  --fp-hair: var(--line);
+  --fp-bomw: 404px;
+}
+.floorpg .seg { display: inline-flex; border: 1px solid var(--fp-out); border-radius: 3px; overflow: hidden; }
+.floorpg .seg .btn { border: 0; border-radius: 0; box-shadow: none; }
+.floorpg .seg .btn + .btn { border-left: 1px solid var(--fp-out); }
+.floorpg .btn[aria-pressed="true"] { background: var(--fp-warns); border-color: var(--fp-warns); color: var(--fp-onwarn); }
+.floorpg #floor-parts-toggle[aria-pressed="true"], .floorpg .seg .btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.floorpg #floor-head .ph { margin-bottom: var(--s2); padding-bottom: var(--s2); }
+.board.is-focus .card:not(.need) { opacity: .3; }
+.wrap-text { overflow-wrap: anywhere; min-width: 0; }

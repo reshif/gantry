@@ -19,6 +19,7 @@ export const commands = {
   setSkillProjects: ops.setSkillProjects,
   editBrief: ops.editBrief,
   sendBack: ops.sendBack,
+  setTeams: ops.setTeams,
   setFactoryRole: ops.setFactoryRole,
   setMemberRole: ops.setMemberRole,
   setProjectOncall: ops.setProjectOncall,

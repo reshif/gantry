@@ -19,6 +19,7 @@ import { FindingsTab } from "./learning/Findings";
 import { ProposalsTab } from "./learning/Proposals";
 import { SignalsTab } from "./learning/Signals";
 import { takeLearningFocus } from "./learning/focus";
+import "../styles/views/learning.css";
 
 export { learningFocus } from "./learning/focus";
 

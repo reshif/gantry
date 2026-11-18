@@ -14,6 +14,7 @@ import { ChangesIndex } from "./changes/Index";
 import { FileDiff, whyNoDiff } from "./changes/Diff";
 import { useWoDiff, type DiffFile } from "../api/queries";
 import { useChangesRead, useRecordData, sum, type RecFile } from "./record/data";
+import "../styles/views/dossier.css";
 
 export default function ChangesView() {
   const hash = useHash();

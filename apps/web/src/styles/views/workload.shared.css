@@ -1,0 +1,9 @@
+
+.view-workload { min-width: 0; }
+.barlist{--lw:150px;list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.barlist li{display:grid;grid-template-columns:minmax(80px,var(--lw)) minmax(0,1fr) 28px;gap:8px;align-items:center;font-size:12px}
+.barlist-l{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.barlist-t{display:block;height:15px}
+.barlist-b{display:block;height:100%;background:var(--accent);opacity:.85}
+.barlist li.is-warn .barlist-b{background:var(--warn)}
+.barlist-v{color:var(--muted)}

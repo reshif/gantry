@@ -1,7 +1,7 @@
 /** Team membership of one person: a checklist of teams (PUT /people/{id}/teams). Used by the person page ("Change" next to Teams) and by a team's "Add member". */
 import { useState } from "react";
 import type { Person } from "@gantry/domain";
-import { ops } from "../../api/ops";
+import { commands } from "../../api/commands";
 import { useUI } from "../../ui/overlay-context";
 import { Btn, LockNote, Toggle, type Decision } from "../../ui/primitives";
 import { useOutcome } from "../govern/data";
@@ -15,7 +15,7 @@ function TeamsForm({ p, teams, perm, close, registerSubmit }: { p: Person; teams
   registerSubmit(() => {
     void (async () => {
       if (!picked.length) return setErr("Keep at least one team.");
-      const r = await ops.setTeams(p.id, picked);
+      const r = await commands.setTeams(p.id, picked);
       outcome(r, "Teams saved");
       if (!r.ok) return setErr(r.msg);
       close();
@@ -67,7 +67,7 @@ function AddMemberList({ team, candidates, close, guard }: { team: TeamRef; cand
   const outcome = useOutcome();
   const [err, setErr] = useState("");
   const add = async (p: Person) => {
-    const r = await ops.setTeams(p.id, [...(p.teams ?? []), team.id]);
+    const r = await commands.setTeams(p.id, [...(p.teams ?? []), team.id]);
     outcome(r, `${p.name} added to ${team.name}`);
     if (!r.ok) return setErr(r.msg);
     close();

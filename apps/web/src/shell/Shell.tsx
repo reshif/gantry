@@ -17,10 +17,13 @@ import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
 import { isTypingTarget, toggleNavRail, useNavRail } from "./navRail";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
-import { PaletteDialog } from "./Palette";
+import { lazyRetry } from "../lib/errors/lazyRetry";
 import { ReadOnlyBanner, StopBanner, ViewAsBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
+
+// The palette loads on first use (Ctrl+K), not with the shell.
+const PaletteDialog = lazyRetry(() => import("./Palette").then((m) => ({ default: m.PaletteDialog })));
 
 export function Shell({ me }: { me: Me }) {
   const ui = useUI();
@@ -108,7 +111,7 @@ export function Shell({ me }: { me: Me }) {
   }, []);
 
   const openPalette = useCallback(() => {
-    ui.open((close) => <PaletteDialog projectId={projectId} onClose={close} />);
+    ui.open((close) => <Suspense fallback={null}><PaletteDialog projectId={projectId} onClose={close} /></Suspense>);
   }, [ui, projectId]);
 
   useEffect(() => {

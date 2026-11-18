@@ -16,6 +16,7 @@ import { FactoryTab } from "./evals/Factory";
 import { LinkedOutcomes, ScorecardsTab } from "./evals/Scorecards";
 import { SuitesTab } from "./evals/Suites";
 import { agentOf, evalsUi, suiteOf, useEvalsData, useEvalsUi, type EvalsData, type RunRow } from "./evals/kit";
+import "../styles/views/evals.css";
 
 const DAY = 86_400_000;
 

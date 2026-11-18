@@ -12,4 +12,3 @@
 .sk-vers li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 8px 0 8px 18px; border-left: 2px solid var(--line); position: relative; }
 .sk-vers li::before { content: ""; position: absolute; left: -6px; top: 13px; width: 10px; height: 10px; background: var(--surface); border: 2px solid var(--line-strong); transform: rotate(45deg); }
 .sk-vers li.is-current::before { background: var(--accent); border-color: var(--accent); }
-.view-skills .tag, .view-models .tag { margin-left: 6px; }

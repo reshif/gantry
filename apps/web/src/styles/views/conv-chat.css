@@ -1,7 +1,4 @@
 /* Conversations page (views/conversations.tsx): two panes that fit the window, a chat with its own scroll and the composer pinned. Tokens only. */
-.conv-view { display: flex; flex-direction: column; height: calc(100dvh - 52px - 40px); min-height: 420px; gap: 12px; }
-.content:has(.conv-view) { padding-bottom: 20px; }
-.conv-view > .view-head, .conv-view > header { flex: none; }
 .cv-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 16px; }
 .cv-grid > .panel { margin-bottom: 0; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 
@@ -113,10 +110,8 @@
   .cv-pane > .cv-head { padding: 6px 10px 0; gap: 4px; }
   .cv-wait { margin: 0 -10px; }
   .cv-title { font-size: 15px; }
-  .conv-view { height: calc(100dvh - 61px - 40px); }
   .cv-grid { grid-template-columns: minmax(0, 1fr); }
   .conv-view[data-open="list"] .cv-pane, .conv-view[data-open="chat"] .cv-listpane { display: none; }
-  .conv-view[data-open="chat"] > .view-head, .conv-view[data-open="chat"] > header { display: none; }
   .cv-back { display: inline-flex; }
   .cv-turn { max-width: 100%; }
   .cv-qline-q, .cv-qline-a { white-space: normal; }

@@ -13,17 +13,11 @@
 
 .ag-title { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ag-panel { margin-top: 12px; }
-.agent-detail > .tabs { overflow-x: auto; }
-@media (max-width: 720px) { .agent-detail > .tabs { flex-wrap: wrap; overflow-x: visible; -webkit-mask-image: none; mask-image: none; } .agent-detail > .tabs .tab { padding: 6px 9px; } }
 .cfg .ag-wide { grid-column: 1 / -1; }
 .ag-ident { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .ag-ident .kv { display: grid; gap: 1px; }
 .ag-ident dd { margin: 0; }
 .ag-tool-d { display: block; font-size: var(--t-xs); }
-.toggle-row label { display: grid; }
-.rc-why { display: inline-flex; align-items: center; gap: 4px; }
-.rc-why .ic { width: 12px; height: 12px; }
-.chain .chip-warn .ic { width: 11px; height: 11px; margin-right: 3px; vertical-align: -1px; }
 
 /* instructions */
 .ag-instr-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -79,15 +73,12 @@
 .ag-create { display: grid; gap: 12px; }
 .ag-create .stepper { margin-bottom: 4px; }
 .ag-create-tools { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-.ag-review { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
-.ag-review dd { white-space: normal; }
 
 @media (max-width: 1100px) {
   .ag-instr-grid { grid-template-columns: minmax(0, 1fr); }
   .ag-eff-sec { border-top: 1px solid var(--line); }
 }
 @media (max-width: 760px) {
-  .cfg { grid-template-columns: minmax(0, 1fr); }
   .ag-newver { grid-template-columns: minmax(0, 1fr); }
 }
 .ag-ov .tag { margin-left: 6px; }
@@ -114,6 +105,4 @@
 .ag-trust .tag { margin-left: 6px; }
 
 /* a detail page is never wider than the screen: the tab bar scrolls inside it, long lines wrap */
-.view-agents, .agent-detail, .ag-panel, .ag-body { min-width: 0; max-width: 100%; }
-.agent-detail .vhead-actions { flex-wrap: wrap; }
 .ag-panel > .tabs { overflow-x: auto; }

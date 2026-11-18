@@ -15,6 +15,7 @@ import { NewProjectWizard } from "./projects/wizard";
 import { ActBtn } from "./projects/proto";
 import { useQueryParam } from "./projects/urlState";
 import type { PView } from "./projects/kit";
+import "../styles/views/projects.css";
 
 export default function ProjectsView() {
   const ui = useUI();

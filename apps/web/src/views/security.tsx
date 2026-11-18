@@ -17,6 +17,7 @@ import { ChatCapPanel, DomainsPanel, ResearchPanel, SignInExtras } from "./secur
 import { SessionsTab } from "./security/Sessions";
 import { SignInsTab } from "./security/SignIns";
 import { StopTab } from "./security/Stop";
+import "../styles/views/security.css";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 const TABS = ["auth", "sessions", "signins"];

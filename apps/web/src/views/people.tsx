@@ -19,6 +19,7 @@ import { useInviteDialog } from "./people/InviteDialog";
 import { useTeamDialogs } from "./people/TeamDialog";
 import { useAddMember } from "./people/PersonTeams";
 import { TeamRoles } from "./people/TeamRoles";
+import "../styles/views/people.css";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 

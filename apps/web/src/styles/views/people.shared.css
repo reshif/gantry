@@ -1,0 +1,19 @@
+
+.members { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; }
+.members > li + li { border-top: 1px solid var(--line); }
+.member { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; padding: 8px 12px; border: 0; background: transparent; border-radius: 0; color: inherit; text-decoration: none; }
+.member:hover { background: var(--sunk); }
+.member:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.team-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.person-stack { min-width: 0; }
+
+.person-stack .panel-tools { display: flex; flex-direction: row; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.person-stack .panel-tools select { max-width: 200px; }
+@media (max-width: 560px) {
+  .person-stack .panel-tools select { max-width: 100%; } }
+.chip-x { background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--muted); font: inherit; line-height: 1; }
+.chip-x:hover, .chip-x:focus-visible { color: var(--ink); }
+.chip-x[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.person-stack .caps li > span { min-width: 0; overflow-wrap: anywhere; }
+.view-people .fbar .field, .view-workload .fbar .field, .view-access .fbar .field { margin-bottom: 0; }
+.view-people .fbar:has(> .q + .tail), .view-workload .fbar:has(> .q + .tail), .view-access .fbar:has(> .q + .tail) { grid-template-columns: minmax(0, 1fr) auto; }

@@ -22,6 +22,7 @@ import { AddVendorCard, VendorCard } from "./models/Vendor";
 import VendorPage from "./models/VendorPage";
 import { useHash } from "../lib/router";
 import { dec, usd, vendorHref, vendorOfParam } from "./models/kit";
+import "../styles/views/models.css";
 
 
 export default function ModelsView() {

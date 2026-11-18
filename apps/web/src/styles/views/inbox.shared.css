@@ -1,0 +1,4 @@
+
+.act-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.act-bar .wo-acts { display: contents; }
+.act-stack .btn, .act-bar .btn { white-space: nowrap; }

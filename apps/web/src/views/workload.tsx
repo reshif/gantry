@@ -21,6 +21,7 @@ import { DelegateDialog } from "./workload/Delegate";
 import { useCatalog, metricsOf, type PView } from "./projects/kit";
 import { CountClear, PAGE_SIZE, Pager, parseSort, setQS, sortParam, useQS } from "./govern/kit";
 import { goConfig, goPerson, goTrust, useDelegateGuard } from "./workload/kit";
+import "../styles/views/workload.css";
 
 function SuggestionItem({ s, openDelegate }: { s: WorkloadSuggestion; m: Workload; openDelegate: (pid: string) => void }) {
   const a = s.action;

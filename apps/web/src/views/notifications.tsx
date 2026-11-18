@@ -13,6 +13,7 @@ import { CardsTab, DeliveriesTab, OverridesTab } from "./notifications/Other";
 import { RoutesTab } from "./notifications/Routes";
 import { useNtData } from "./notifications/kit";
 import { dec, useTab } from "./connect/kit";
+import "../styles/views/notifications.css";
 
 export default function NotificationsView() {
   const nt = useNtData();

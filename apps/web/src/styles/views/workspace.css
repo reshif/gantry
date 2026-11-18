@@ -78,17 +78,11 @@
 .ws-row:hover .ws-row-more, .ws-row-more:focus-visible, .ws-row.is-current .ws-row-more { opacity: 1; }
 
 /* a chat in the centre (the Console's conversation, embedded) */
-.ws-chat { display: flex; flex-direction: column; gap: var(--s2); height: 100%; min-height: 0; }
-.ws-chat .console-grid.is-embedded { grid-template-columns: minmax(0, 1fr) 300px; height: auto; flex: 1; min-height: 0; }
 .ws-chat-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 36px; padding-bottom: var(--s2); border-bottom: 1px solid var(--line-strong); }
 .ws-chat-title { margin: 0; font-family: var(--f-display); font-size: var(--t-xl); font-weight: 700; line-height: 1.1; min-width: 0; overflow-wrap: anywhere; }
 .ws-vis { display: inline-flex; align-items: center; gap: 4px; }
 .ws-vis .ic { display: inline-flex; }
 .ws-vis svg { width: 12px; height: 12px; }
-.con-mode-pick { margin-left: auto; }
-.composer-ro { display: flex; align-items: center; gap: 8px; margin: 0; padding: 12px 14px; color: var(--ink-2); background: var(--sunk); border-top: 1px solid var(--line); }
-.composer-ro .ic { display: inline-flex; flex: none; }
-.composer-ro svg { width: 14px; height: 14px; }
 .ws-ctx .panel p { margin: 0 0 8px; }
 .ws-people { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .ws-people li { display: flex; align-items: center; gap: 8px; }
@@ -125,11 +119,8 @@
 .ws-op-sub { margin: var(--s3) 0 var(--s2); }
 .ws-op-chat { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 8px; align-items: center; }
 .ws-op-chat > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-tr.is-over td { color: var(--fail); }
 
 @media (max-width: 1100px) {
-  .ws-chat .console-grid.is-embedded { grid-template-columns: minmax(0, 1fr); }
-  .ws-chat .console-grid.is-embedded .ctx { display: none; }
   .ws-op-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 820px) {
@@ -140,11 +131,6 @@ tr.is-over td { color: var(--fail); }
 }
 
 /* @mention in a work order's thread: the agent menu above the composer, and what Send will do */
-.osx-composer:has(.wos-mention-menu) { position: relative; }
-.wos-mention-menu { margin: 0; padding: 4px 0; z-index: 5; }
-.wos-mention-menu li { grid-template-columns: 180px 1fr; }
-.wos-mention-menu li:hover { background: var(--accent-soft); }
-.wos-mention-note { flex-basis: 100%; order: 3; margin: -2px 0 0; }
 
 /* the status banner: the dot stays beside the first line of text */
 .ws-main .wos-status { flex-wrap: nowrap; align-items: flex-start; }

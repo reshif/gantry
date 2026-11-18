@@ -8,6 +8,7 @@ import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Picker } from "./record/Picker";
 import { splitQuery } from "./dossier/hashQuery";
 import { Dossier, type DossierTab } from "./dossier/Dossier";
+import "../styles/views/record.css";
 
 export default function RecordView() {
   const hash = useHash();

@@ -15,6 +15,7 @@ import { TriggersTab } from "./api/Triggers";
 import { useApiData } from "./api/kit";
 import { Async, qState } from "../ui/async";
 import { useTab } from "./connect/kit";
+import "../styles/views/api.css";
 
 export default function ApiView() {
   const d = useApiData();

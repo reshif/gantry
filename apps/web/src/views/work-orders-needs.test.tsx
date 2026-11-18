@@ -106,7 +106,7 @@ describe("Work orders list: Project and Needs columns, row actions", () => {
   });
 
   it("the table is a card list on a phone and has no fixed pixel width that overflows a laptop", () => {
-    const css = readFileSync(resolve(__dirname, "../styles/views/workorders.css"), "utf8");
+    const css = readFileSync(resolve(__dirname, "../styles/views/workorders.css"), "utf8") + readFileSync(resolve(__dirname, "../styles/views/workorders.shared.css"), "utf8");
     expect(css).toMatch(/\.wo-table td \{ white-space: normal/);
     const dt = readFileSync(resolve(__dirname, "../ui/DataTable.tsx"), "utf8");
     expect(dt).toMatch(/card layout under 640px/);

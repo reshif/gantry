@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { ApiError, setUnauthorizedHandler } from "./api/client";
 import { bindQueryClient, invalidateSlices } from "./api/keys";
@@ -13,8 +13,9 @@ import { AppErrorBoundary } from "./lib/errors/AppErrorBoundary";
 import { applyTheme, reducedMotion, resetPrefsInMemory, usePrefs } from "./lib/prefs";
 import { OverlayProvider } from "./ui/Overlay";
 import { Tip } from "./ui/Tip";
+import type { PublicConfig } from "./api/types";
 import { Shell } from "./shell/Shell";
-import { SignIn } from "./shell/SignIn";
+import { lazyRetry } from "./lib/errors/lazyRetry";
 import { useDropStaleSearch } from "./lib/staleSearch";
 
 export function makeQueryClient(): QueryClient {
@@ -61,7 +62,7 @@ function Root() {
   // Branch on data FIRST: a failed refetch of /me must never unmount a signed-in app.
   if (me && onSigninRoute) {
     // the prototype keeps #/signin reachable while signed in: it draws the sign-in card (a route of its own, no redirect to Home)
-    return <SignIn config={null} error={null} needs={null} />;
+    return signIn({ config: null, error: null, needs: null });
   }
   if (me) {
     return (
@@ -74,7 +75,7 @@ function Root() {
   if (meState.data?.status === "out") {
     const qs = new URLSearchParams(window.location.search);
     const needs = qs.get("auth_needs") ?? meState.data.needs ?? null;
-    return <SignIn config={meState.data.config} error={qs.get("auth_error")} needs={needs} />;
+    return signIn({ config: meState.data.config, error: qs.get("auth_error"), needs });
   }
   if (session.state === "offline") {
     return (
@@ -85,6 +86,14 @@ function Root() {
   }
   return <div className="boot">Loading…</div>;
 }
+
+// The sign-in card is only needed when signed out, so it loads on demand and the signed-in entry does not carry it.
+const SignInCard = lazyRetry(() => import("./shell/SignIn").then((m) => ({ default: m.SignIn })));
+const signIn = (props: { config: PublicConfig | null; error: string | null; needs: string | null }) => (
+  <Suspense fallback={null}>
+    <SignInCard {...props} />
+  </Suspense>
+);
 
 export default function App() {
   const client = useMemo(() => makeQueryClient(), []);

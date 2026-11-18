@@ -32,13 +32,10 @@
 }
 
 /* One tidy action bar: decisions and links in one wrapping row (Home), or two fixed rows right-aligned in a table cell (Inbox). */
-.act-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
-.act-bar .wo-acts { display: contents; }
 .act-stack { display: grid; justify-items: end; gap: var(--s2); }
 .act-stack .wo-acts { display: flex; flex-wrap: nowrap; gap: var(--s2); justify-content: flex-end; }
 .act-decide { display: grid; grid-template-columns: 5rem 10rem 5rem; justify-content: end; gap: var(--s2); }
 .act-decide > .btn { width: 100%; justify-content: center; }
 .act-decide > :first-child { grid-column: 1; }
 .act-decide > :last-child { grid-column: 3; }
-.act-stack .btn, .act-bar .btn { white-space: nowrap; }
 @media (max-width: 560px) { .act-decide { display: flex; flex-wrap: wrap; justify-content: flex-start; } .act-decide > .btn { width: auto; } }

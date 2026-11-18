@@ -25,6 +25,9 @@ const STAGE_NAMES: Record<string, string> = { ...Object.fromEntries(ONBOARD_STAG
 const ready = (r: Repo): boolean => r.onboarding.stage === "ready" || !!r.onboarding.exception;
 
 /** Why submissions are refused for a project (and repo), or null. Mirrors the server's own checks, which decide in the end. */
+/** The Class select's default: no requested class is sent, the Intake agent classifies. */
+const AUTO_CLASS = "__auto";
+
 export function submitBlock(me: Me, project: Pick<Project, "id" | "name" | "status" | "killed">, repos: Repo[], repoId: string | null): { reason: string; onboarding: boolean } | null {
   const f = me.factory.killed;
   if (f) return { reason: `Submissions are refused. The factory is killed: ${f.reason}.`, onboarding: false };
@@ -66,7 +69,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const [title, setTitle] = useState(preset.title ?? "");
   const [desc, setDesc] = useState(preset.description ?? "");
   const [att, setAtt] = useState("");
-  // Class and priority open on the prototype's defaults (Feature, P2) but only what the person actually picks is sent: untouched, the Intake agent classifies and the class sets the priority.
+  // Class opens on "Let Intake classify" and sends no requested class until the person picks one; priority opens on P2 but only a picked one is sent. Untouched, the Intake agent classifies and the class sets the priority.
   const [cls, setCls] = useState("");
   const [prio, setPrio] = useState("");
   const [source] = useState(preset.source ?? "web");
@@ -95,7 +98,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const fullProject = asFull.flow ? asFull : null;
   // the prototype's class list is the whole catalogue
   const classes = cat.classes.filter((c) => c.enabled !== false);
-  const clsShown = cls || (classes.find((c) => c.id === "feature") ?? classes[0])?.id || "";
+  const clsShown = cls || AUTO_CLASS;
   const text = `${title} ${desc}`.trim();
   const preview = text.length >= 6 ? classify(cat, text, cls || null, fullProject) : null;
   const submit = async () => {
@@ -164,8 +167,8 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
           <Field label="Project" htmlFor="nwo-project">
             <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
           </Field>
-          <Field label="Class" htmlFor="nwo-cls" hint="Leave it as is and the Intake agent classifies the request.">
-            <Select id="nwo-cls" options={classes.map((c) => ({ value: c.id, label: c.name }))} value={clsShown} onChange={setCls} />
+          <Field label="Class" htmlFor="nwo-cls" hint="Pick a class to ask for it, or leave it on Let Intake classify. The preview below is Intake's suggestion.">
+            <Select id="nwo-cls" options={[{ value: AUTO_CLASS, label: "Let Intake classify" }, ...classes.map((c) => ({ value: c.id, label: c.name }))]} value={clsShown} onChange={(v) => setCls(v === AUTO_CLASS ? "" : v)} />
           </Field>
           <Field label="Priority" htmlFor="nwo-prio">
             <Select id="nwo-prio" options={["P0", "P1", "P2", "P3"].map((v) => ({ value: v, label: v }))} value={prio || "P2"} onChange={setPrio} />

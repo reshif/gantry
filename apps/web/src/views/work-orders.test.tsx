@@ -185,6 +185,12 @@ describe("Work orders empty tab and More panel", () => {
     expect(css).not.toMatch(/wo-need-t \{ font-weight: 600/);
     expect(css).not.toMatch(/overflow-wrap: anywhere/);
   });
+
+  it("the title column keeps 26ch on a laptop and Needs is no wider than 32ch, so titles do not wrap to many lines", async () => {
+    const css = (await import("node:fs")).readFileSync("src/styles/views/workorders.css", "utf8");
+    expect(css).toMatch(/min-width: 641px\) \{ \.wo-table \.wo-idcell \{ min-width: 26ch; \}/);
+    expect(css).toMatch(/\.wo-table \.wo-needs \{[^}]*max-width: 32ch/);
+  });
 });
 
 describe("New work order", () => {
@@ -226,20 +232,36 @@ describe("New work order", () => {
     await open({}, { me: { projects: [summary] } });
     fireEvent.change(screen.getByLabelText(/What should change/), { target: { value: "Please ask @ about the refund crash" } });
     expect(await screen.findByText("Classifier preview:")).toBeTruthy();
-    expect(screen.getByText(/Leave it as is and the Intake agent classifies/)).toBeTruthy();
+    expect(screen.getByText(/leave it on Let Intake classify/)).toBeTruthy();
   });
 
-  it("has the prototype's fields: Title, What should change and why, Project, Class (Feature), Priority (P2), and no Source", async () => {
+  it("has the prototype's fields: Title, What should change and why, Project, Class (Let Intake classify), Priority (P2), and no Source", async () => {
     await open();
     expect(screen.getByLabelText(/What should change and why/)).toBeTruthy();
     expect(document.getElementById("nwo-project")).toBeTruthy();
-    expect((document.getElementById("nwo-cls") as HTMLSelectElement).selectedOptions[0]?.textContent).toMatch(/Feature/);
+    expect((document.getElementById("nwo-cls") as HTMLSelectElement).selectedOptions[0]?.textContent).toBe("Let Intake classify");
     expect((document.getElementById("nwo-prio") as HTMLSelectElement).value).toBe("P2");
     expect(document.getElementById("nwo-source")).toBeNull();
     // the prototype's sheet: no repo picker, all ten classes
     expect(document.getElementById("nwo-repo")).toBeNull();
-    expect((document.getElementById("nwo-cls") as HTMLSelectElement).options.length).toBe(9);
+    expect((document.getElementById("nwo-cls") as HTMLSelectElement).options.length).toBe(10);
     expect(screen.queryByLabelText("Requested class")).toBeNull();
+  });
+
+  it("Class defaults to Let Intake classify (never a silent Feature); picking one sends it and picking Let Intake classify again sends none", async () => {
+    const calls = await open({ "POST /api/v1/projects/payments/work-orders": submitOk });
+    const sel = document.getElementById("nwo-cls") as HTMLSelectElement;
+    expect(sel.selectedOptions[0]?.textContent).toBe("Let Intake classify");
+    fireEvent.change(sel, { target: { value: "bug" } });
+    expect(sel.selectedOptions[0]?.textContent).toMatch(/Bug/);
+    fireEvent.change(sel, { target: { value: sel.options[0]!.value } });
+    expect(sel.selectedOptions[0]?.textContent).toBe("Let Intake classify");
+    fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: "Fix refund crash" } });
+    fireEvent.change(screen.getByLabelText(/What should change and why/), { target: { value: "Refunds crash when the amount is zero." } });
+    fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/projects/payments/work-orders")).toBe(true));
+    const post = calls.find((c) => c.method === "POST" && c.path === "/api/v1/projects/payments/work-orders") as Call;
+    expect(post.body).not.toHaveProperty("requestedCls");
   });
 
   it("shows the server's refusal inline and keeps the dialog open", async () => {
