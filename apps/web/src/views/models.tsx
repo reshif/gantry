@@ -12,7 +12,7 @@ import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useProjects, useRouting, useVendors } from "../api/queries";
 import { useDiscoverModels } from "../api/modelCommands";
-import { Btn } from "../ui/primitives";
+import { Btn, Tabs } from "../ui/primitives";
 import { Page, Stats } from "../ui/cr";
 import { navigate, useHash } from "../lib/router";
 import { Async, qState } from "../ui/async";
@@ -62,25 +62,18 @@ export default function ModelsView() {
   return (
     <Page eyebrow="Workforce" title="Models" cls="view-models"
         sub="Which models agents may use, what they cost and where they are used."
-        acts={tab === "models" ? <><Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} /><Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={openAddVendor} /></> : <>
-          <Btn label="All models" id="md-back" onClick={() => navigate("models")} />
-          {tab === "vendors" ? <Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} /> : null}
-        </>}>
+        acts={tab === "models" ? <Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} /> : tab === "vendors" ? <Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={openAddVendor} /> : undefined}>
       <Stats id="md-stats" items={[
         { l: "Enabled", v: qState(vq, () => `${enabledN}/${allN}`), tone: "ok" },
         { l: "Needs a price", v: qState(vq, () => needsPriceN), tone: "warn" },
-        { l: "Spend, 30 days", v: qState(vq, () => fmt.money0(mtd)), tone: "agent" },
-        { l: "Fallbacks fired", v: "\u2014", tone: "info" },
+        { l: "Spend this month", v: qState(vq, () => fmt.money0(mtd)), tone: "agent" },
+        { l: "Vendors connected", v: qState(vq, () => `${vendors.filter((v) => v.connected).length}/${vendors.length}`), tone: "info" },
       ]} />
-      {tab === "models" ? (
-        <div className="row md-manage" id="md-manage">
-          {/* KEEP: vendors, routing and prices stay one click away from the catalog (owner, 2026-11-18), as quiet links, not header actions */}
-          <Btn label="Vendors" kind="ghost" small id="md-go-vendors" onClick={() => navigate("models", "vendors")} />
-          <Btn label="Routing" kind="ghost" small id="md-go-routing" onClick={() => navigate("models", "routing")} />
-          <Btn label="Prices" kind="ghost" small id="md-go-prices" onClick={() => navigate("models", "prices")} />
-          <Btn label="Add vendor" kind="ghost" small icon="plus" id="md-add-vendor-link" guard={perm} onClick={openAddVendor} />
-        </div>
-      ) : null}
+      {/* KEEP: vendors, routing and prices stay one click away from the catalog (owner, 2026-11-18) */}
+      <div className="md-tabs" id="md-manage">
+        <Tabs idPrefix="md-tab" active={tab} onChange={(id) => navigate("models", id === "models" ? undefined : id)}
+          items={[{ id: "models", label: "Models" }, { id: "vendors", label: "Vendors" }, { id: "routing", label: "Routing" }, { id: "prices", label: "Prices" }]} />
+      </div>
       <Async query={vq} what="model vendors" id="models">
         {() => (
           <Async query={rq} what="model routing" id="models-routing">
@@ -90,7 +83,7 @@ export default function ModelsView() {
               <>
                 {degraded.length ? (
                   <Callout warn icon="alert" cls="md-incident" role="status">
-                    {`${degraded.map((v) => `${v.name} is ${v.health}${v.latency ? ` (p50 ${v.latency} ms)` : ""}.`).join(" ")} Calls to it fall back to the same model on another allowed vendor when it errors.`}
+                    {`${degraded.map((v) => `${v.name} is ${v.health}${v.latency ? ` (last check ${v.latency} ms)` : ""}.`).join(" ")} Calls to it fall back to the same model on another allowed vendor when it errors.`}
                   </Callout>
                 ) : null}
                 <div className="vendor-grid">
