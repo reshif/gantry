@@ -259,7 +259,7 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
 }
 
 async function interruptions(tx: Tx, orgId: string, woId: string, station: string): Promise<number> {
-  return Number((await tx.query(`select count(*)::int as n from attempts where org_id = $1 and wo_id = $2 and station = $3 and outcome in ('interrupted','lease_expired')`, [orgId, woId, station])).rows[0].n);
+  return Number((await tx.query(`select count(*)::int as n from attempts where org_id = $1 and wo_id = $2 and station = $3 and outcome in ('interrupted','lease_expired') and (data->>'streakBroken') is null`, [orgId, woId, station])).rows[0].n);
 }
 
 /**

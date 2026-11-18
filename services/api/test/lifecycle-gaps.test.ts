@@ -233,4 +233,18 @@ d("lifecycle gaps", () => {
     expect(setters).toEqual([]);
     expect((await w.q(`select count(*)::int n from work_orders where state = 'blocked'`))[0].n).toBe(0);
   });
+
+  it("gap 8: a person's Retry restarts the interruption count as it restarts the failure count", async () => {
+    const id = await w.atStation("research", "Interrupted again and again");
+    const interrupt = async () => w.apply((await w.liveAttempt(id))!, { status: "interrupted", summary: "The run was cut off." });
+    expect(await interrupt()).toMatchObject({ applied: true, next: "research" });
+    expect(await interrupt()).toMatchObject({ applied: true, next: "research" });
+    expect(await interrupt()).toMatchObject({ applied: true, next: "person" });
+    expect(await w.get(id)).toMatchObject({ state: "parked", bay: "person", bayCause: "failed" });
+    expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/retry`, {})).status).toBe(200);
+    expect((await w.get(id)).state).toBe("running");
+    // After the person's Retry the station gets a fresh count: one more interruption starts it again; it is not parked at once.
+    expect(await interrupt()).toMatchObject({ applied: true, next: "research" });
+    expect(await w.get(id)).toMatchObject({ state: "running" });
+  });
 });

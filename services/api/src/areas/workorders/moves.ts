@@ -190,8 +190,8 @@ export async function retry(tx: Tx, actor: Actor, woId: string): Promise<CmdResu
   const sid = stationIdOf(fx.catalog, w);
   if (failedBay) {
     await leaveBay(fx, w);
-    // The person's retry starts the station's failure count afresh.
-    await fx.tx.query(`update attempts set data = data || '{"streakBroken": true}'::jsonb, updated_at = now() where org_id = $1 and wo_id = $2 and station = $3 and state = 'failed'`, [fx.orgId, w.id, sid]);
+    // The person's retry starts the station's failure and interruption counts afresh.
+    await fx.tx.query(`update attempts set data = data || '{"streakBroken": true}'::jsonb, updated_at = now() where org_id = $1 and wo_id = $2 and station = $3 and (state = 'failed' or outcome in ('interrupted','lease_expired'))`, [fx.orgId, w.id, sid]);
   }
   await cancelAttempts(fx, w, "retried");
   const gs = (w.data.gateStatus ??= {}) as Record<string, string>;
