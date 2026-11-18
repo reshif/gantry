@@ -510,6 +510,44 @@ describe("Console model picker", () => {
     expect(document.body.textContent).not.toContain("Pinned work orders");
   });
 
+  it("the header has a visible New chat button (the only one on a phone, where the list is hidden) that opens a new chat", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
+    mount();
+    const b = await byId("con-head-new");
+    expect(document.getElementById("con-head")!.contains(b)).toBe(true);
+    fireEvent.click(b);
+    await waitFor(() => expect(location.hash).toBe("#console/new"));
+  });
+
+  it("the Console page no longer carries the old conversation bar, the legacy chat list or pinned-work-orders controls", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
+    mount();
+    await byId("con-form");
+    for (const id of ["con-bar", "con-threads", "con-new", "con-clear", "con-foot-sug-0", "con-unpin-WO-1042"]) expect(document.getElementById(id)).toBeNull();
+    expect(document.querySelector(".try-lbl")).toBeNull();
+  });
+
+  it("the workspace's embedded chat carries no hard-coded suggestion chips, no Try label and no dangling hint (G-03)", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
+    bindQueryClient(qc);
+    render(<QueryClientProvider client={qc}><OverlayProvider><ConsoleView embed={{ threadId: null, onThread: () => undefined, page: true }} /></OverlayProvider></QueryClientProvider>);
+    await byId("con-form");
+    expect(document.querySelector(".sugg, .try-lbl")).toBeNull();
+    expect(text()).not.toContain("Try one of the suggestions");
+    expect(text()).not.toContain("Pinned work orders");
+  });
+
+  it("opening the Console focuses the composer without scrolling the page (the title stays in view on a phone)", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
+    const spy = vi.spyOn(HTMLElement.prototype, "focus");
+    mount();
+    await byId("con-input");
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy.mock.calls.every((c) => (c[0] as FocusOptions | undefined)?.preventScroll === true)).toBe(true);
+    spy.mockRestore();
+  });
+
   it("Settings open in place under the chat header (not below the fold), with the model, the console's rights and the audit link; Close hides them", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: STATUS }) });
     mount();

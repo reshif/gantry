@@ -28,7 +28,6 @@ export interface CardCtx {
   mid: string;
   pinned: string[];
   pin: (woId: string) => void;
-  suggestions: string[];
   actionsEnabled: boolean;
 }
 
@@ -42,10 +41,6 @@ function Help({ c }: { c: CardCtx }) {
       <li key={x.cmd}><button type="button" className="linkish mono" id={`con-help-${c.mid}-${i}`} onClick={() => c.draft(x.cmd)}>{x.cmd.trim()}</button><span className="muted">{x.hint}</span></li>
     ))}</ul></div>
   );
-}
-
-export function Suggest({ c }: { c: CardCtx }) {
-  return <div className="ccard"><div className="chips">{c.suggestions.map((t, i) => <button type="button" key={t} className="sugg" id={`con-sug-${c.mid}-${i}`} onClick={() => c.send(t)}>{t}</button>)}</div></div>;
 }
 
 function Projects({ d, c }: { d: unknown[]; c: CardCtx }) {
@@ -233,7 +228,6 @@ function Trust({ d, c }: { d: J; c: CardCtx }) {
 export function ResultCard({ type, data, c }: { type: string; data: unknown; c: CardCtx }) {
   switch (type) {
     case "help": return <Help c={c} />;
-    case "suggest": return <Suggest c={c} />;
     case "projects": return <Projects d={Array.isArray(data) ? data : []} c={c} />;
     case "status": return <Status d={o(data)} c={c} />;
     case "onboarding": return <Onboarding d={a(data)} c={c} />;

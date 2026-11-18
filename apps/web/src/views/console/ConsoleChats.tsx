@@ -5,8 +5,7 @@
  */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Btn, Field } from "../../ui/primitives";
-import { Icon } from "../../ui/Icon";
+import { Btn, Field, IconBtn, TextInput } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { InviteForm } from "../workspace/InviteForm";
 import { invite, patchThread } from "../workspace/api";
@@ -35,7 +34,7 @@ function RenameForm({ initial, onSave, registerSubmit }: { initial: string; onSa
   return (
     <div className="form-grid">
       <Field label="Name" htmlFor="con-chat-name">
-        <input id="con-chat-name" className="input" value={v} maxLength={120} autoFocus onChange={(e) => setV(e.target.value)} />
+        <TextInput id="con-chat-name" value={v} maxLength={120} onChange={(e) => setV(e.target.value)} />
       </Field>
       <div className="form-err" role="alert">{err}</div>
     </div>
@@ -95,16 +94,13 @@ export function ConsoleChats({ rows, current, busy, onPick, onNew, onRename, onD
         <span className="con2-chat-meta small muted">{[t.scope, t.updatedAt ? (now - t.updatedAt < 86_400_000 ? fmt.ago(t.updatedAt, now) : fmt.istDate(t.updatedAt)) : null].filter(Boolean).join(" · ")}</span>
       </a>
       {t.mine ? (
-        <button
-          type="button" className="icon-btn icon-btn-sm con2-chat-more" id={`con-chat-more-${t.id}`} aria-label={`Options for ${t.title}`} aria-haspopup="menu"
-          onClick={(e) => ui.menu(e.currentTarget, null, [
+        <IconBtn icon="dots" label={`Options for ${t.title}`} className="icon-btn-sm con2-chat-more" id={`con-chat-more-${t.id}`} aria-haspopup="menu"
+          onClickCapture={(e) => ui.menu(e.currentTarget, null, [
             { label: "Rename", onClick: () => rename(t) },
             ...(t.canShare ? [{ label: t.visibility === "project" ? "Make private" : "Share with the project (read-only for them)", icon: "people", onClick: () => void share(t) }, { label: "Invite a person", icon: "user", onClick: () => addPerson(t) }] : []),
             { label: "Delete", icon: "x", onClick: () => void remove(t) },
           ])}
-        >
-          <Icon name="dots" />
-        </button>
+        />
       ) : null}
     </li>
   );
@@ -112,7 +108,7 @@ export function ConsoleChats({ rows, current, busy, onPick, onNew, onRename, onD
   return (
     <nav className="con2-list" aria-label="Your chats" id="con-chats">
       <Btn kind="primary" icon="plus" label="New chat" id="con-new-chat" cls="con2-new" disabledReason={busy ? "Wait for the answer or stop it." : null} onClick={onNew} />
-      <input type="search" className="input con2-q" id="con-chats-q" placeholder="Search chats" aria-label="Search chats" value={q} onChange={(e) => setQ(e.target.value)} />
+      <TextInput type="search" className="con2-q" id="con-chats-q" placeholder="Search chats" aria-label="Search chats" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="con2-scroll">
         {recent.length ? <><h3 className="kicker con2-group">Recent</h3><ul className="con2-rows">{recent.map(row)}</ul></> : null}
         {shared.length ? <><h3 className="kicker con2-group">Shared with me</h3><ul className="con2-rows">{shared.map(row)}</ul></> : null}

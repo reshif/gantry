@@ -14,11 +14,9 @@ import { setProject, usePrefs } from "../lib/prefs";
 import { formatHash, navigate, replaceHash, useHash } from "../lib/router";
 import { Icon } from "../ui/Icon";
 import { Avatar, Btn, Empty, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
-import { useOpenTraveler } from "../shell/useTraveler";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { callTool, ck, clearThread, renameThread, savePinned, sendMessage, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
-import { ChatList } from "./console/ChatList";
 import { ConsoleChats, type ChatRow } from "./console/ConsoleChats";
 import { useInbox, wk } from "./workspace/api";
 import { useNewWorkOrder } from "./work-orders/New";
@@ -33,6 +31,8 @@ import { useCatalog } from "./projects/kit";
 import type { Card, Cited, Msg, Proposal, ThreadMessage } from "./console/types";
 
 let seq = 1;
+/** Whether a message was written by a person (not the console). */
+const byPerson = (m: Msg): boolean => m.role === "user";
 const localIds = (l: Msg[]): Set<string> => new Set(l.map((m) => m.id));
 const nextId = (p: string): string => `${p}${Date.now().toString(36)}${seq++}`;
 /** The client-side answers to slash commands, per person: they are not part of the saved thread (the model's conversation is). */
@@ -49,15 +49,6 @@ const fromServer = (m: ThreadMessage, me: string): Msg => {
     ...(m.data.truncated ? { note: "The answer was cut short." } : {}),
   };
 };
-
-/** Suggested questions by role and current project (legacy `suggestions()`). */
-function suggestionsFor(roles: string[], pn: string, projectId: string | null, stuck: string | null, done: string | null): string[] {
-  const summ = done ?? stuck;
-  if (roles.includes("factory_admin")) return ["Which gates are slowing us down?", `What changed in ${pn} this week?`, summ ? `Summarise ${summ} for a manager` : "/projects", `Who can release ${pn} tonight and why?`, "/bottlenecks"];
-  if (roles.includes("auditor")) return [`What changed in ${pn} this week?`, "Show kills and halts in the last 7 days", `Who can kill ${pn} and why?`, `/trust ${projectId ?? ""}`.trim(), summ ? `Summarise ${summ} for a manager` : "/projects"];
-  if (roles.includes("project_admin") || roles.includes("line_lead")) return ["Which gates are slowing us down?", "Who is the only approver on waiting gates?", stuck ? `Why is ${stuck} stuck?` : "/status", `What changed in ${pn} this week?`, `/trust ${projectId ?? ""}`.trim()];
-  return ["What is waiting on me?", stuck ? `Why is ${stuck} stuck?` : "/status", summ ? `Summarise ${summ} for a manager` : "/projects", `What changed in ${pn} this week?`, "/status"];
-}
 
 const CAPS: Array<[string, string]> = [["wo.submit", "Submit work orders"], ["gate.approve", "Approve gates"], ["line.halt", "Halt (andon)"], ["line.resume", "Resume"], ["repo.onboard", "Connect repos"], ["triggers.edit", "Edit triggers"], ["kill.workorder", "Kill a work order"], ["kill.project", "Kill this project"], ["restore.project", "Restore this project"], ["kill.factory", "Kill the factory"]];
 
@@ -87,7 +78,6 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const status = useConsoleStatus(prefs.project);
   const threads = useThreads();
   const projects = useProjects().data ?? [];
-  const openTraveler = useOpenTraveler();
   const hash = useHash();
   const newWo = useNewWorkOrder();
   const inbox = useInbox(false);
@@ -136,14 +126,10 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const st = status.data;
   const actionsOn = !!st?.actionsEnabled;
   const proposalFor = (tool: string) => st?.proposals?.find((x) => x.tool === tool);
-  const roles = useMemo(() => (me?.person.roles ?? []).filter((g) => g.scope === "factory" || g.scope === cur?.id).map((g) => g.role), [me, cur?.id]);
   const woQ = useMemo(() => ({ limit: 40 }), []);
   const wos = useWorkOrdersLite(cur?.id ?? null, woQ);
   const cat = useCatalog();
   const home = useHome().data;
-  const stuck = wos.find((w) => w.state === "waiting" || w.state === "blocked" || w.bay)?.id ?? wos.find((w) => !["done", "killed"].includes(w.state))?.id ?? null;
-  const doneWo = wos.filter((w) => w.state === "done").slice(-1)[0]?.id ?? null;
-  const suggestions = [...new Set(suggestionsFor(roles, cur?.name ?? "my projects", cur?.id ?? null, stuck, doneWo))];
   const liveCtx: LiveCtx = {
     wos: wos.map((w): LiveWo => ({ ...w, ...(typeof w.station === "number" && cat?.stations[w.station] ? { stationName: cat.stations[w.station]!.name } : {}) })),
     waiting: (home?.approvals ?? []).filter((a) => a.wo).map((a) => ({ wo: a.wo!, ...(a.gate ? { gate: a.gate } : {}) })),
@@ -179,7 +165,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     const all = [...serverMsgs, ...local, ...rows].sort((a, b) => a.at - b.at);
     if (all.length) return all;
     if (embed?.agent) return [{ id: "m0", role: "factory", at: 0, mode: "pending", text: `Ask ${embed.agent.name} about ${embed.agent.about}. ${embed.agent.name} answers from what the work has produced so far (documents, questions, sources) and reads live data with your permissions. Nothing changes from here: answers, corrections and send-backs belong in the primary thread.` } satisfies Msg];
-    return [{ id: "m0", role: "factory", at: 0, mode: "pending", cards: [{ type: "suggest" }], text: `Ask about your projects in plain language, or use a slash command. ${st?.configured ? `Questions are answered by ${st.model} using tools over the live factory.` : "No model is configured, so questions cannot be answered yet; slash commands read live data directly."} Anything that changes state shows a confirm card and runs only when you click it. Questions without a project use your current project, ${cur?.name ?? "none"}.` } satisfies Msg];
+    return [{ id: "m0", role: "factory", at: 0, mode: "pending", text: `Ask about your projects in plain language, or use a slash command. ${st?.configured ? `Questions are answered by ${st.model} using tools over the live factory.` : "No model is configured, so questions cannot be answered yet; slash commands read live data directly."} Anything that changes state shows a confirm card and runs only when you click it. Questions without a project use your current project, ${cur?.name ?? "none"}.` } satisfies Msg];
   }, [serverMsgs, local, tail, st, cur, embed?.agent]);
 
   const lastMsg = msgs[msgs.length - 1];
@@ -192,7 +178,10 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs.length, tail, threadId, thread.data?.id]);
 
-  const focusComposer = (): void => { setTimeout(() => { const c = input.current; if (c) { c.focus(); c.setSelectionRange(c.value.length, c.value.length); } }, 30); };
+  const focusComposer = (): void => { setTimeout(() => { const c = input.current; if (c) { c.focus({ preventScroll: true }); c.setSelectionRange(c.value.length, c.value.length); } }, 30); };
+  // Opening the Console puts the cursor in the composer without scrolling the page (autoFocus scrolled the title off a phone screen).
+  const focused = useRef(false);
+  useEffect(() => { if (page && !focused.current && input.current) { focused.current = true; input.current.focus({ preventScroll: true }); } });
   const toDraft = (t: string): void => { setDraft(t); setSlashIdx(0); focusComposer(); };
 
   const pin = (woId: string): void => {
@@ -205,7 +194,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     setLocal((x) => [...x, msg]);
     return msg;
   };
-  const cardCtx = (mid: string): CardCtx => ({ send: (t) => void send(t), draft: toDraft, mid, pinned, pin, suggestions, actionsEnabled: st?.proposals ? !!proposalFor("propose_approve_gate")?.allowed : actionsOn });
+  const cardCtx = (mid: string): CardCtx => ({ send: (t) => void send(t), draft: toDraft, mid, pinned, pin, actionsEnabled: st?.proposals ? !!proposalFor("propose_approve_gate")?.allowed : actionsOn });
 
   /* ---------- slash commands: tools, directly ---------- */
   const runSlash = async (text: string): Promise<void> => {
@@ -469,6 +458,8 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
               <Btn label="Chats" small icon="list" id="con-open-chats" cls="con2-chats-btn" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)} />
               <h2 className="con2-title" id="con-title">{chatTitle}</h2>
               <span className="con2-spacer" />
+              <Btn label="New chat" small icon="plus" id="con-head-new" cls="con2-new-mobile" disabledReason={streaming ? "Wait for the answer or stop it." : null} onClick={newChat} />
+              <label className="con2-scope small muted" htmlFor="con-scope">Project</label>
               <Select id="con-scope" aria-label="Project this chat is about" value={scope} onChange={setScope} options={[{ value: "", label: "All projects" }, ...visible.map((x) => ({ value: x.id, label: x.name }))]} />
               {modeChip}
               <Btn label="Settings" small icon="gear" id="con-open-settings" aria-expanded={aux === "settings"} aria-controls="con-settings" onClick={() => setAux(aux === "settings" ? null : "settings")} />
@@ -485,12 +476,12 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             ) : null}
             <div className="chat con2-log" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
               {empty ? <Empty id="con-empty" title="Start a conversation" text="Ask about any project, work order, gate or spend. This chat reads all projects, or just one if you choose a scope above." /> : msgs.map((m) => (
-                  <div className={`msg msg-${m.role}${m.role === "user" ? " me" : ""}`} key={m.id}>
-                    {m.role === "user" ? <Avatar id={m.by} /> : <span className="avatar bot" title="Gantry" aria-hidden="true">OA</span>}
+                  <div className={`msg msg-${m.role}${byPerson(m) ? " me" : ""}`} key={m.id}>
+                    {byPerson(m) ? <Avatar id={m.by} /> : <span className="avatar bot" title="Gantry" aria-hidden="true">OA</span>}
                     <div className="bub">
-                      <div className="who">{m.role === "user" ? (m.by && m.by !== meId ? actorOf(m.by).name : me.person.name) : "Gantry"}</div>
-                      {m.streaming ? <div id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div id={`con-msg-text-${m.id}`}>{m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
-                      {m.role === "factory" && m.mode !== "pending" && m.mode !== "live" ? (
+                      <div className="who">{nameOf(m)}</div>
+                      {m.streaming ? <div id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div id={`con-msg-text-${m.id}`}>{!byPerson(m) && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
+                      {!byPerson(m) && m.mode !== "pending" && m.mode !== "live" ? (
                         <div className="small muted msg-meta"><span className={`msg-mode is-${m.mode}`}>{modeOf(m)}</span>{m.note ? <span className="msg-note">{` · ${m.note}`}</span> : null}{retryable && retryable.errId === m.id ? <> <Btn label="Retry" small kind="ghost" icon="send" id="con-retry" onClick={retry} /></> : null}</div>
                       ) : m.streaming ? <div className="small muted msg-meta"><span className="msg-mode is-pending">Model · streaming</span></div> : null}
                       {m.cited?.length ? <div className="chips msg-chips" aria-label="Used in this answer"><span className="kicker">Used</span>{m.cited.map((e) => <EntityChip key={`${e.type}:${e.id}`} e={e} />)}</div> : null}
@@ -508,7 +499,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
                     {slash.map((x, i) => <li key={x.cmd} role="option" id={`con-slash-${i}`} className={i === idx ? "is-active" : ""} aria-selected={i === idx} onMouseDown={(e) => { e.preventDefault(); toDraft(x.cmd); }}><span className="mono">{x.cmd.trim()}</span><span className="muted">{x.hint}</span></li>)}
                   </ul>
                 ) : null}
-                <input id="con-input" ref={input} className="input" type="text" autoFocus placeholder="Message Gantry" aria-label="Message Gantry" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
+                <input id="con-input" ref={input} className="input" type="text" placeholder="Message Gantry" aria-label="Message Gantry" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
                 {streaming ? <Btn label="Stop" kind="danger" icon="x" id="con-stop" onClick={() => ac.current?.abort()} /> : null}
                 <Btn label="Send" kind="primary" type="submit" id="con-send" disabledReason={streaming ? "Wait for the answer or stop it." : null} />
               </form>
@@ -518,38 +509,25 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
       </div>
     );
   }
+  // Only the workspace's embedded chat reaches here (the Console page returned above); it owns its header, list and context.
+  const emb = embed!;
   return (
-    <div className={embed ? "view-console ws-chat" : "view view-console"}>
-      {embed ? embed.header : <ViewHead title="Console" status={modeChip} sub="Talk to the factory in plain language or with slash commands. Anything that changes state shows a confirm card and waits for you." actions={modePicker} />}
-      <div className={`console-grid${embed ? " is-embedded" : ""}`}>
-        {embed ? null : <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />}
-        <section className={`console-main${embed?.page ? " panel" : ""}`} aria-label="Conversation">
-          {embed?.page ? <header><h2><span className="sec" aria-hidden="true" />Conversation</h2></header> : null}
-          {embed ? null : (
-            <div className="con-bar" id="con-bar">
-              <div className="con-bar-title"><b>{chatTitle}</b><span className="small muted">{`${threads.data?.items.length ?? 0} saved`}</span></div>
-              <Btn label="Conversations" small icon="list" id="con-threads" onClick={() => { const el = document.getElementById("con-chats"); el?.scrollIntoView({ block: "nearest" }); el?.querySelector<HTMLElement>("input, button")?.focus(); }} />
-              <Btn label="New" small icon="plus" id="con-new" disabledReason={streaming ? "Wait for the answer or stop it." : null} onClick={newChat} />
-              <Btn label="Clear conversation" small kind="ghost" icon="x" id="con-clear" disabledReason={threadId || local.length ? null : "There is nothing to clear."} onClick={() => void clear()} />
-            </div>
-          )}
-          {embed?.agent ? null : <p className="con-mode-line small" id="con-mode-reason">{embed ? modeChip : <Icon name={st?.configured ? "check" : "dots"} />}<span>{modeLine}</span>{embed ? <span className="con-mode-pick">{modePicker}</span> : null}{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>}
+    <div className="view-console ws-chat">
+      {emb.header}
+      <div className={`console-grid is-embedded`}>
+        <section className={`console-main${emb.page ? " panel" : ""}`} aria-label="Conversation">
+          {emb.page ? <header><h2><span className="sec" aria-hidden="true" />Conversation</h2></header> : null}
+          {emb.agent ? null : <p className="con-mode-line small" id="con-mode-reason">{modeChip}<span>{modeLine}</span><span className="con-mode-pick">{modePicker}</span>{noModels && st?.canManageModels ? <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a> : null}</p>}
           <div className="thread" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
-            {embed?.page && msgs.length === 1 && msgs[0]!.mode === "pending" && !streaming ? (
-              <div className="con-empty" id="con-empty">
-                <Icon name="inbox" />
-                <h3>Ask anything about the line</h3>
-                <p className="muted small">Try one of the suggestions below.</p>
-              </div>
-            ) : msgs.map((m) => (
+            {msgs.map((m) => (
               <div className={`msg msg-${m.role}`} key={m.id}>
                 <div className="msg-who">
-                  {m.role === "user" ? <Avatar id={m.by} size="sm" /> : <span className="av av-factory av-sm" aria-hidden="true">{embed?.agent ? embed.agent.name.slice(0, 1) : "G"}</span>}
+                  {byPerson(m) ? <Avatar id={m.by} size="sm" /> : <span className="av av-factory av-sm" aria-hidden="true">{embed?.agent ? embed.agent.name.slice(0, 1) : "G"}</span>}
                   <span className="msg-name">{nameOf(m)}</span>
                   {m.at ? <span className="mono muted small">{fmt.ist(m.at)}</span> : null}
                 </div>
-                {m.streaming ? <div className={`msg-text${m.text ? "" : " is-thinking"}`} id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div className={`msg-text${m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? " is-md" : ""}`} id={`con-msg-text-${m.id}`}>{m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
-                {m.role === "factory" && m.mode !== "pending" ? (
+                {m.streaming ? <div className={`msg-text${m.text ? "" : " is-thinking"}`} id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div className={`msg-text${!byPerson(m) && (m.mode === "model" || m.mode === "pending") ? " is-md" : ""}`} id={`con-msg-text-${m.id}`}>{!byPerson(m) && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
+                {!byPerson(m) && m.mode !== "pending" ? (
                   <div className="msg-meta">
                     <span className={`msg-mode is-${m.mode}`}>{m.mode === "model" ? `${st?.model ?? "Model"}${m.stopped ? " · stopped" : ""}` : m.mode === "slash" ? "Slash command · live data" : m.mode === "none" ? "No model configured" : "Model did not answer"}</span>
                     {m.note ? <span className="msg-note">{m.note}</span> : null}
@@ -572,7 +550,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             ) : null}
             <textarea id="con-input" ref={input} className="input composer-input" rows={embed?.page ? 1 : 2} placeholder={embed?.agent ? `Ask ${embed.agent.name}` : embed?.page ? "Ask the factory: \"what is blocked?\", \"status of WO-2417\"…" : "Ask or instruct. Type / for commands."} aria-label="Message the factory" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
             <div className="composer-foot">
-              <div className="chips">{embed?.agent ? null : <span className="try-lbl muted small">Try</span>}{embed?.agent ? null : suggestions.slice(0, embed?.page ? 4 : 3).map((sg, i) => <button type="button" key={sg} className="sugg" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
+              <span />
               {streaming ? (
                 <div className="row gap-sm"><Btn label="Stop" kind="danger" small icon="x" id="con-stop" onClick={() => ac.current?.abort()} /><Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" disabledReason="Wait for the answer or stop it." /></div>
               ) : <Btn label="Send" kind="primary" icon="send" type="submit" id="con-send" />}
@@ -582,10 +560,6 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
         </section>
         {embed?.aside ?? (
         <aside className="ctx" aria-label="Console context">
-          <Panel title="Pinned work orders">
-            {pinned.length ? <ul className="pins">{pinned.map((id) => <li key={id}><button type="button" className="linkish" id={`con-pin-${id}`} onClick={() => openTraveler(id)}><span className="mono">{id}</span></button>
-              <button type="button" className="icon-btn icon-btn-sm" id={`con-unpin-${id}`} aria-label={`Unpin ${id}`} onClick={() => threadId && void savePinned(threadId, pinned.filter((x) => x !== id)).then(() => qc.invalidateQueries({ queryKey: ck.thread(threadId) }))}><Icon name="x" /></button></li>)}</ul> : <p className="muted small">Pin a work order from a why card.</p>}
-          </Panel>
           {embed?.page ? <details className="con-more"><summary>What you and the console can do here</summary>{ctxPanels}</details> : ctxPanels}
           <p className="footnote">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Work order, issue and repository text is passed as untrusted data. Slash commands read the same tools directly and never need a model. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
         </aside>
