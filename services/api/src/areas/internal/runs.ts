@@ -334,7 +334,7 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
     if ("error" in spec) throw refuse("invalid", spec.error);
     // What this run was actually given: the manifest at spec time (parts, versions, hashes, handoff size). `pinnedHash` is what dispatch pinned on the tuple;
     // a difference means a layer or skill moved between dispatch and start, and the audit can see it. A repeated serve of the same spec writes nothing.
-    const pinned = c.instructionHash;
+    const pinned = typeof c.runData.dispatchPromptHash === "string" ? c.runData.dispatchPromptHash : c.instructionHash;
     if (c.runData.promptHash !== spec.promptManifest.hash || c.runData.pinnedHash !== pinned) {
       await command(req, svc("run.spec"), async (tx): Promise<CommandResult<Record<string, unknown>>> => {
         await tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [c.orgId, id, JSON.stringify({ promptManifest: spec.promptManifest, promptHash: spec.promptManifest.hash, pinnedHash: pinned, promptDrift: pinned !== null && pinned !== spec.promptManifest.hash })]);

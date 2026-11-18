@@ -93,7 +93,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   // onboarding
   [`POST ${P}/projects/:id/repos`]: A("repo.onboard"), [`PATCH ${P}/repos/:id/config`]: A("onboarding.manage"),
   [`POST ${P}/repos/:id/onboarding/assess`]: A("onboarding.manage"), [`POST ${P}/repos/:id/onboarding/open-pr`]: A("onboarding.manage"), [`POST ${P}/repos/:id/onboarding/verify`]: A("onboarding.manage"),
-  [`POST ${P}/repos/:id/onboarding/request-changes`]: A("onboarding.manage"), [`POST ${P}/repos/:id/onboarding/merge`]: A("onboarding.merge"), [`POST ${P}/repos/:id/onboarding/exception`]: A("onboarding.exception"),
+  [`POST ${P}/repos/:id/onboarding/request-changes`]: A("onboarding.manage"), [`POST ${P}/repos/:id/onboarding/merge`]: A("onboarding.merge"), [`POST ${P}/repos/:id/onboarding/exception`]: A("onboarding.exception"), [`POST ${P}/repos/:id/onboarding/exception/withdraw`]: A("onboarding.exception"),
   [`POST ${P}/repos/:id/onboarding/session/messages`]: A("onboarding.manage"), [`POST ${P}/repos/:id/onboarding/session/seen`]: SELF("marks the caller's own read position"),
   [`POST ${P}/repos/:id/onboarding/session/proposals/:mid/:pid`]: A("onboarding.manage", "onboarding.merge", "onboarding.exception"),
   [`PUT ${P}/guidelines`]: A("agent.edit"), [`PUT ${P}/projects/:id/guidelines`]: A("onboarding.guidelines"),

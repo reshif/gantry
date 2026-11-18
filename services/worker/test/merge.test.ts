@@ -60,6 +60,17 @@ d("merge.request (F4)", () => {
     expect((await w.jobs("merge.request"))[0]!.result.headSha).toBe("e".repeat(40));
   });
 
+  it("item 13: a head that moved after approval closes the merge (data.merging cleared) and reopens G5 on the new head", async () => {
+    await waitingOnMerge("WO-9210");
+    await w.q(`update pull_requests set head_sha = $1 where wo_id = 'WO-9210'`, ["f".repeat(40)]);
+    await w.drain();
+    expect(w.broker.merges).toHaveLength(0);
+    const r = (await w.q(`select state, data from work_orders where id = 'WO-9210'`))[0];
+    expect(r.data.merging).toBeUndefined();
+    expect(r.state).toBe("waiting");
+    expect((await w.q(`select head_sha from gate_instances where wo_id = 'WO-9210' and gate_id = 'G5' and status = 'open'`))[0].head_sha).toBe("f".repeat(40));
+  });
+
   it("does not merge in a stopped scope", async () => {
     await waitingOnMerge("WO-9204");
     await w.q(`insert into stops (org_id, id, scope_type, project_id, mode, reason, set_by) values ($1,'project:payments:1','project','payments','halt','x','p-asha')`, [w.orgId]);
@@ -78,4 +89,83 @@ d("merge.request (F4)", () => {
     expect((await w.q(`select outcome from events where type = 'github.merge.blocked'`))[0].outcome).toBe("failed");
     expect((await w.q(`select data from work_orders where id = 'WO-9205'`))[0].data.merging).toBeDefined();
   });
+
+  // ---- Lifecycle gap 1 (statechart model: FailedMergeShowsAWayForward): a merge that cannot happen must not leave the order "merging" forever.
+  const wo = async (id: string) => (await w.q(`select state, position, data from work_orders where id = $1`, [id]))[0];
+
+  it("gap 1: a pull request closed without merging sends the order to Needs a person with the reason", async () => {
+    await waitingOnMerge("WO-9206");
+    await w.q(`update pull_requests set state = 'closed' where wo_id = 'WO-9206'`);
+    await w.drain();
+    expect(w.broker.count("merge")).toBe(0);
+    const r = await wo("WO-9206");
+    expect(r).toMatchObject({ state: "parked", position: "person" });
+    expect(r.data.bayCause).toBe("merge");
+    expect(r.data.bayReason).toMatch(/closed without merging/i);
+    expect(r.data.merging).toMatchObject({ prNumber: 7, headSha: HEAD });
+  });
+
+  it("gap 1: GitHub reporting the pull request closed does the same", async () => {
+    await waitingOnMerge("WO-9207");
+    w.broker.prs.get(7)!.state = "closed";
+    await w.drain();
+    expect(w.broker.count("merge")).toBe(0);
+    expect(await wo("WO-9207")).toMatchObject({ state: "parked", position: "person" });
+  });
+
+  it("gap 1: a merge still blocked after its final retry sends the order to Needs a person", async () => {
+    await waitingOnMerge("WO-9208");
+    w.broker.mergeResponse = { status: 409, body: { ok: false, code: "not_mergeable", msg: "Required status check is expected" } };
+    await w.q(`update jobs set max_attempts = 2 where kind = 'merge.request'`);
+    await w.drain(3);
+    const r = await wo("WO-9208");
+    expect(r).toMatchObject({ state: "parked", position: "person" });
+    expect(r.data.bayCause).toBe("merge");
+    expect(r.data.bayReason).toContain("Required status check is expected");
+  });
+
+  it("gap 1: a stop covering the order when the merge job runs defers the merge until the stop is lifted", async () => {
+    await waitingOnMerge("WO-9209");
+    await w.q(`insert into stops (org_id, id, scope_type, project_id, mode, reason, set_by) values ($1,'project:payments:9','project','payments','halt','x','p-asha')`, [w.orgId]);
+    await w.drain();
+    expect(w.broker.merges).toHaveLength(0);
+    expect((await wo("WO-9209")).data.merging).toBeDefined();
+    // Resume: the stop is lifted and reconciled. The order is still waiting on the approved merge, so the merge is requested again.
+    await w.q(`update stops set lifted_at = now(), lifted_by = 'p-asha', version = version + 1 where id = 'project:payments:9'`);
+    await w.enqueue("stop.enforce", { stopId: "project:payments:9", scope: "project", targetId: "payments", mode: "halt" }, { dedupeKey: "stop.enforce:project:payments:9:lift" });
+    await w.drain();
+    expect(w.broker.merges).toEqual([{ number: 7, sha: HEAD }]);
+    expect((await wo("WO-9209")).data.merging).toBeUndefined();
+  });
+
+  // Item 12: a merge deferred by a stop of any scope is requested again for the approved head when the stop is lifted.
+  const SCOPES = [
+    { scope: "wo", col: "wo_id", val: "WO-9220" },
+    { scope: "project", col: "project_id", val: "payments" },
+    { scope: "repo", col: "repo_id", val: "payments-api" },
+    { scope: "factory", col: null, val: null },
+  ] as const;
+  for (const sc of SCOPES) {
+    for (const mode of ["halt", "kill"] as const) {
+      it(`item 12: a ${mode} at ${sc.scope} scope, then ${mode === "halt" ? "resume" : "restore"}, still merges the approved head once`, async () => {
+        await waitingOnMerge("WO-9220");
+        const id = `${sc.scope}:${sc.val ?? ""}:1`;
+        const cols = ["org_id", "id", "scope_type", ...(sc.col ? [sc.col] : []), "mode", "reason", "set_by", "in_flight"];
+        const vals = [w.orgId, id, sc.scope, ...(sc.val ? [sc.val] : []), mode, "test", "p-asha", mode === "kill" ? "cancel" : null];
+        await w.q(`insert into stops (${cols.join(",")}) values (${vals.map((_, i) => `$${i + 1}`).join(",")})`, vals);
+        // The stop is committed before the merge job gets to run: the job skips (or the stop handler cancels it).
+        await w.enqueue("stop.enforce", { stopId: id, scope: sc.scope, targetId: sc.val, mode }, { dedupeKey: `stop.enforce:${id}` });
+        await w.drain();
+        expect(w.broker.merges).toHaveLength(0);
+        expect((await wo("WO-9220")).data.merging).toBeDefined();
+        await w.q(`update stops set lifted_at = now(), lifted_by = 'p-asha', version = version + 1 where id = $1`, [id]);
+        await w.enqueue("stop.enforce", { stopId: id, scope: sc.scope, targetId: sc.val, mode }, { dedupeKey: `stop.enforce:${id}:lift` });
+        await w.drain();
+        expect(w.broker.merges, "the approved merge was never requested again").toEqual([{ number: 7, sha: HEAD }]);
+        const r = await wo("WO-9220");
+        expect(r.data.merging).toBeUndefined();
+        expect(r.state).not.toBe("killed");
+      });
+    }
+  }
 });

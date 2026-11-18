@@ -188,7 +188,7 @@ export async function restoreStop(tx: Tx, a: Actor, t: StopTarget, reason: strin
   }
   await lift(tx, a, kill);
   return {
-    msg: `${label} restored.${t.scope !== "wo" && kill.in_flight === "cancel" ? " Work orders killed with 'cancel' stay killed until restored one by one." : ""}`,
+    msg: `${label} restored.${t.scope !== "wo" && kill.in_flight === "cancel" ? " The work orders it killed come back from where they were." : ""}`,
     events: [{ type: "restore", category: "kill", subject, projectId: t.project, woId: t.wo, occurredAt: a.now, before: { stop: kill.id }, after: payload(t, { text: reason.trim(), stop: kill.id, apiId: apiStopId(t.scope, t.target) }) }],
     extra: { stop: kill.id, apiId: apiStopId(t.scope, t.target), pending: false, version: kill.version + 1 },
     changes: ["stops", "factory", "projects", "repos", "workOrders", "floor", "home"],

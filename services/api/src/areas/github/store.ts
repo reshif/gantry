@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import type { Tx } from "@gantry/db";
 import { checkMatches } from "@gantry/domain";
 import type { EventSpec } from "../../core/command.js";
-import { recheckAutoGate, recordMerged, recordNewHead } from "../workorders/station.js";
+import { parkMergeBlocked, recheckAutoGate, recordMerged, recordNewHead } from "../workorders/station.js";
 import type { CheckFact, GithubFacts, IssueFact, PublishedCommitFact, PullRequestFact, ReviewFact } from "./facts.js";
 
 export const sha256 = (b: Buffer | string): string => createHash("sha256").update(b).digest("hex");
@@ -185,6 +185,8 @@ async function storePullRequest(
     } else if (pr.state === "closed" && prev && prev.state === "open") {
       drift++;
       events.push({ ...base, type: "github.drift", outcome: "regression", before: { state: "open" }, after: { kind: "closed_without_merge", number: pr.number, repo: full } });
+      // An approved merge waiting on this pull request cannot happen: the order goes to Needs a person, with Retry merge.
+      if (linked) await parkMergeBlocked(tx, orgId, linked, { prNumber: pr.number, reason: `Pull request #${pr.number} was closed without merging.`, ...(now ? { now } : {}) });
     }
   }
   return { events, changed: !unchanged, drift, merged };

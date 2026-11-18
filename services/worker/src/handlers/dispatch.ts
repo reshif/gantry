@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { applyStationResult, attemptIsCurrent, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
+import { applyStationResult, attemptIsCurrent, recordDispatchPrompt, refuseStationRun, stationRunBlock, endCarrierAttempt, isCarrier, issueRunToken, parseJob, pinRunConfig, revokeRunTokens, type RunPin } from "@gantry/api/core";
 import type { RepoContext } from "@gantry/domain";
 import { enqueue, withTx, type Job, type Tx } from "@gantry/db";
 import type { Deps } from "../deps.js";
@@ -80,7 +80,11 @@ async function prepareRun(deps: Deps, a: AttemptInfo, runId: string): Promise<{ 
 
 async function recordRepoContext(deps: Deps, a: AttemptInfo, runId: string, rc: RepoContext | null): Promise<void> {
   const value = rc ? { ...rc, offeredAt: deps.now().toISOString() } : { commit: null, files: [], hash: null, offeredAt: deps.now().toISOString(), unavailable: true };
-  await withTx(deps.pool, (tx) => tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ repoContext: value })]));
+  await withTx(deps.pool, async (tx) => {
+    await tx.query(`update runs set data = data || $3::jsonb, updated_at = now() where org_id = $1 and id = $2`, [a.orgId, runId, JSON.stringify({ repoContext: value })]);
+    // The prompt is now fully known: the hash recorded for the run names exactly what it will be given, repository context included.
+    if (!a.woData.eval && !isCarrier(a.woData)) await recordDispatchPrompt(tx, a.orgId, runId);
+  });
 }
 
 async function markStarted(deps: Deps, a: AttemptInfo, runId: string, startupLeaseMs: number): Promise<void> {
@@ -143,6 +147,16 @@ export async function attemptDispatch(job: Job, ctx: HandlerCtx): Promise<unknow
   if (!cur.current) return { skipped: cur.reason };
   const stops = await coveringStops(deps.pool, job.orgId, a);
   if (stops.length) return { skipped: `${stops[0]!.mode} at ${stops[0]!.scopeType} scope` };
+
+  // A station's agent that is turned off (or whose live version never passed its eval suite) does not run: the order waits for a person with the way forward.
+  // Eval cases run the version the person picked and onboarding steps have their own gate, so neither is held here.
+  if (!a.woData.eval && !isCarrier(a.woData)) {
+    const block = await stationRunBlock(deps.pool, a.orgId, typeof a.attemptData.agent === "string" ? a.attemptData.agent : "");
+    if (block) {
+      const r = await withTx(deps.pool, (tx) => refuseStationRun(tx, a.attemptId, a.fencing, block));
+      return { skipped: "agent not available", reason: block, parked: r.applied };
+    }
+  }
 
   const runId = runIdFor(a.attemptId);
   // The launcher is the truth about containers: one that already runs means an earlier try got through and only the bookkeeping is missing.
