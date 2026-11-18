@@ -9,16 +9,9 @@
 .ppl-team-desc { margin: 0; }
 .team-lines { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0; }
 .team-roles { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0; }
-.members { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; }
-.members > li + li { border-top: 1px solid var(--line); }
-.member { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; padding: 8px 12px; border: 0; background: transparent; border-radius: 0; color: inherit; text-decoration: none; }
-.member:hover { background: var(--sunk); }
-.member:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.team-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* person page */
 .person-back { align-self: flex-start; }
-.person-stack { min-width: 0; }
 .person-top { display: flex; gap: 16px; align-items: flex-start; padding: 16px; flex-wrap: wrap; }
 .person-kicker { font-size: var(--t-sm); color: var(--muted); }
 .person-name { margin: 0; }
@@ -28,21 +21,14 @@
 .ppl-held { display: grid; gap: 12px; }
 .ppl-held .kicker { display: block; margin-bottom: 4px; }
 
-.person-stack .panel-tools { display: flex; flex-direction: row; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
-.person-stack .panel-tools select { max-width: 200px; }
-
 @media (max-width: 1100px) { .ppl-teams { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) {
   .person-actions .btn { flex: 1 1 auto; }
-  .person-stack .panel-tools select { max-width: 100%; }
 }
 
 /* Team roles and inherited roles. */
 .team-grants { display: contents; list-style: none; margin: 0; padding: 0; }
 .team-grant { display: inline-flex; gap: 6px; align-items: center; }
-.chip-x { background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--muted); font: inherit; line-height: 1; }
-.chip-x:hover, .chip-x:focus-visible { color: var(--ink); }
-.chip-x[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 
 /* Deactivated people and the deactivate dialog */
 .chip-muted { border-color: var(--line); color: var(--muted); white-space: nowrap; }
@@ -72,9 +58,6 @@
 .acct-linklist li { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .acct-linklist li .btn { margin-left: auto; }
 @media (max-width: 560px) { .acct-kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
-.person-stack .caps li > span { min-width: 0; overflow-wrap: anywhere; }
 
 /* Blueprint filter bars: the sheet's fields sit on one baseline (a Field's form margin does not apply inside the bar). */
-.view-people .fbar .field, .view-workload .fbar .field, .view-access .fbar .field { margin-bottom: 0; }
 /* A bar with only a search box: the count sits to its right (a zero filter count makes the grid track list invalid). */
-.view-people .fbar:has(> .q + .tail), .view-workload .fbar:has(> .q + .tail), .view-access .fbar:has(> .q + .tail) { grid-template-columns: minmax(0, 1fr) auto; }

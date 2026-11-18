@@ -22,6 +22,7 @@ import { useScope } from "./work/scope";
 import { makeStopActions } from "../shell/stopActions";
 import { useOpenTraveler } from "../shell/useTraveler";
 import { goAttention, type HomeFull } from "./home/data";
+import "../styles/views/inbox.css";
 
 /** One waiting item as a prototype list row: the work order and a tag, the title, a quiet line, the actions on the right. */
 function Row({ id, tag, project, title, sub, status, children, details, actions }: { id: string; tag: string; project: string; title: ReactNode; sub: ReactNode; status?: ReactNode; children?: ReactNode; details?: ReactNode; actions?: ReactNode }) {

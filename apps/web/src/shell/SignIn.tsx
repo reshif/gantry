@@ -11,6 +11,7 @@ import { DEMO_ACCOUNTS } from "../lib/demo";
 import { applyTheme, updatePrefs, usePrefs } from "../lib/prefs";
 import { Icon } from "../ui/Icon";
 import { Btn, Field, TextInput } from "../ui/primitives";
+import "../styles/views/signin.css";
 
 /** The prototype's brand mark: a framed grid square with the accent dot (brandMark() in js/shell.js). */
 function BrandMark() {

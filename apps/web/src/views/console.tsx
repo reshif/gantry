@@ -29,6 +29,8 @@ import { plan as planSlash, SLASH } from "./console/slash";
 import { helpText, liveAnswer, type LiveCtx, type LiveWo } from "./console/live";
 import { useCatalog } from "./projects/kit";
 import type { Card, Cited, Msg, Proposal, ThreadMessage } from "./console/types";
+import "../styles/views/console.css";
+import "../styles/views/console-page.css";
 
 let seq = 1;
 /** Whether a message was written by a person (not the console). */

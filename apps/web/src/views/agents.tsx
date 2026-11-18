@@ -25,6 +25,7 @@ import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
 import { InstructionsTab } from "./agents/Instructions";
 import { SkillsTab } from "./agents/SkillsMcp";
 import { VersionsTab } from "./agents/Versions";
+import "../styles/views/agents.css";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 

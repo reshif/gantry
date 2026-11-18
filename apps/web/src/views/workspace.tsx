@@ -20,6 +20,7 @@ import { NewChatForm } from "./workspace/NewChat";
 import { OperatorPanel } from "./workspace/Operator";
 import { SearchResults } from "./workspace/Search";
 import { createThread, filterInbox, useInbox, type InboxFilter } from "./workspace/api";
+import "../styles/views/workspace.css";
 
 /** Set when the Conversations link sent the person here: the first thread opens by itself (once). */
 let openFirstOnce = false;

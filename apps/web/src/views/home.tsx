@@ -14,6 +14,8 @@ import { useItems } from "./work/items";
 import { greetingAt } from "./work/format";
 import { useScope } from "./work/scope";
 import { metricsOf, type PView } from "./projects/kit";
+import "../styles/views/home.css";
+import "../styles/views/home-projects.css";
 
 export { openNewProject };
 

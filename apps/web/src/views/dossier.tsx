@@ -17,6 +17,7 @@ import { useProject } from "../api/queries";
 import { WoStatus } from "./dossier/stateTone";
 import { bayLabel } from "./traveler/model";
 import { useCatalog } from "./projects/kit";
+import "../styles/views/dossier.css";
 
 const useWos = (projectId: string | null) => {
   const read = useWorkOrders(projectId, { state: "all", limit: 200 });

@@ -15,6 +15,7 @@ import { fmtDay, ifMatchOf, lockd, useOutcome, useTeams } from "./govern/data";
 import { useOffboard } from "./people/Offboard";
 import { useGrantRole } from "./people/GrantRole";
 import { useEditTeams } from "./people/PersonTeams";
+import "../styles/views/people.css";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 

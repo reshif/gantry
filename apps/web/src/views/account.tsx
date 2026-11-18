@@ -16,6 +16,7 @@ import { DataTable, type Col } from "../ui/DataTable";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { useTeams } from "./govern/data";
+import "../styles/views/people.css";
 
 const TABS = [{ id: "profile", label: "Profile" }, { id: "access", label: "My access" }, { id: "sessions", label: "Sessions" }, { id: "prefs", label: "Preferences" }, { id: "linked", label: "Linked accounts" }];
 

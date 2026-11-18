@@ -1,7 +1,6 @@
 /* Floor view: the line (stations across, work orders down), shipped, bays, board and list, replay. Tokens only. */
 
 .view-floor > * { min-width: 0; }
-#floor-kpis { margin-bottom: var(--s3); }
 
 /* ---------- the line panel ---------- */
 .fl-belt { min-width: 0; overflow: hidden; }
@@ -161,10 +160,7 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 /* station row: name block on the left, its work orders flowing to the right */
 /* idle (and off) station: one slim row, name block on the left and the agent on the right, no token area.
    Same left edge, border and name column as the full card so the spine, wip counters and gate captions stay aligned. */
-
-@media (max-width: 560px) { .vhead-actions .seg { align-self: flex-start; width: auto; } }
 .f-bypass{opacity:.35}
-.f-valve.off{opacity:.45}.f-valve.off circle{stroke-dasharray:3 2}
 
 /* ---------- drawers (prototype frame) ---------- */
 .fl-drawer-body { display: grid; gap: 12px; align-content: start; min-width: 0; }

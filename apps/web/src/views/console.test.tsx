@@ -579,12 +579,12 @@ describe("Console model picker", () => {
     Object.defineProperty(log, "scrollHeight", { configurable: true, value: 900 });
     await ask("hello");
     await waitFor(() => expect(log.scrollTop).toBe(900));
-    const css = readFileSync(resolve(__dirname, "../styles/views/console.css"), "utf8");
+    const css = readFileSync(resolve(__dirname, "../styles/views/console.css"), "utf8") + readFileSync(resolve(__dirname, "../styles/views/console.shared.css"), "utf8");
     expect(/\.con2-log \{[^}]*overflow-y: auto/.test(css)).toBe(true);
   });
 
   it("the status line sits below the header rule: no negative margin pulls it into the heading", () => {
-    const css = readFileSync(resolve(__dirname, "../styles/views/console.css"), "utf8");
+    const css = readFileSync(resolve(__dirname, "../styles/views/console.css"), "utf8") + readFileSync(resolve(__dirname, "../styles/views/console.shared.css"), "utf8");
     const rule = /\.con-mode-line \{[^}]*\}/.exec(css)![0];
     expect(rule).not.toMatch(/margin:[^;]*calc\(-/);
   });

@@ -18,6 +18,7 @@ import { withQuery } from "../lib/routeQuery";
 import { invalidateSlices } from "../api/keys";
 import { type AgentRow } from "./agents/kit";
 import { SkillPage } from "./skills/Page";
+import "../styles/views/skills.css";
 
 type SkillRow = Skill & { rev: number };
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });

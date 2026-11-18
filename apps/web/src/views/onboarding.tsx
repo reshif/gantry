@@ -15,6 +15,8 @@ import { RepoDrawer } from "./onboarding/Drawer";
 import { PSTAGES, protoStage, stoppedLabel, type OnbRow } from "./onboarding/proto";
 import { gaps, useAvailableRepos, type RepoV } from "./onboarding/kit";
 import { SessionPage } from "./onboarding/Session";
+import "../styles/views/onboarding.css";
+import "../styles/views/onboarding-session.css";
 
 export default function OnboardingView() {
   const ui = useUI();

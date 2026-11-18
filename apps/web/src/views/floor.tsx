@@ -26,6 +26,8 @@ import { FloorCtx, WoChip, isLive, stationIdx, useFloorCtx, useFloorState, type 
 import { useQueryParam } from "./floor/urlState";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
+import "../styles/views/floor.css";
+import "../styles/views/floor-line.css";
 
 const REPLAY_LOCK: Decision = { allowed: false, reason: "Replay is showing the past. Go back to live to act.", needs: "" };
 

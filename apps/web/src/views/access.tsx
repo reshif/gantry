@@ -16,6 +16,7 @@ import { PolicyTable, usePolicyDialog } from "./access/Policies";
 import { RolesList, useRoleDialogs } from "./access/Roles";
 import { Simulator, nowIst, type Sim } from "./access/Simulator";
 import type { Project } from "@gantry/domain";
+import "../styles/views/access.css";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 const TABS = ["matrix", "roles", "policies", "freezes", "check"];

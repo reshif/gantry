@@ -20,6 +20,7 @@ import { AuditDrawer, useActorName } from "./audit/Detail";
 import { NO_FILTERS, useAuditFeed, useAuditStats, type AuditRow } from "./audit/data";
 import { ListBar, dayMon } from "./govern/listkit";
 import { useQueryParam } from "./floor/urlState";
+import "../styles/views/audit.css";
 
 const useDebounced = <T,>(v: T, ms: number): T => {
   const [x, setX] = useState(v);

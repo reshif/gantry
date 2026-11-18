@@ -21,6 +21,7 @@ import { dec } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
 import { ListView, healthTone, useTab } from "./connect/kit";
 import type { McpServer } from "@gantry/domain";
+import "../styles/views/mcp.css";
 
 const down = (m: McpServer): boolean => m.enabled !== false && (m.health === "failing" || m.health === "offline" || (m.health as string) === "down");
 

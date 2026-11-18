@@ -15,6 +15,7 @@ import { DemotionsTab, PolicyTab, ProposalsTab } from "./trust/Tabs";
 import { CellDrawer, LadderTab, useLadderProps } from "./trust/Ladder";
 import { trustFocus, trustUi, useTrustUi, type CellOut } from "./trust/kit";
 import { useScope, useTabParam } from "./tabparam";
+import "../styles/views/trust.css";
 
 const TABS = ["ladder", "proposals", "demotions", "rules"] as const;
 

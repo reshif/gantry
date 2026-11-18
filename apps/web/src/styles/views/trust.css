@@ -12,11 +12,6 @@
 .tr-rung { display: block; background: var(--line); border-radius: 1px; }
 .tr-rung.is-on { background: currentColor; }
 /* level colours: L0 stopped (red), L1 the default (grey), L2 checks plus a spot check (blue), L3 checks decide (green), L4 never granted (accent) */
-.lvl-0 { --lv: var(--block); --lv-soft: var(--block-soft); }
-.lvl-1 { --lv: var(--ink-2); --lv-soft: var(--sunk); }
-.lvl-2 { --lv: var(--run); --lv-soft: var(--run-soft); }
-.lvl-3 { --lv: var(--done); --lv-soft: var(--done-soft); }
-.lvl-4 { --lv: var(--accent); --lv-soft: var(--accent-soft); }
 .tr-lvl { display: inline-flex; align-items: center; gap: 5px; color: var(--lv); font-size: var(--t-sm); white-space: nowrap; }
 .tr-lvl .mono { font-weight: 600; }
 .tr-lvl-name { color: var(--ink-2); }

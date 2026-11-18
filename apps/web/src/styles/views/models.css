@@ -1,18 +1,5 @@
 /* Models view. Tokens only. Builds on round-one .vendor*, .health, .routing*, .rule-card* in views.css. */
-.view-models .vendor-grid { margin-bottom: var(--s4); }
-.view-models .vendor .tb-vendor dd { overflow: hidden; text-overflow: ellipsis; }
-.view-models .residency { display: flex; gap: 6px; align-items: flex-start; padding: 6px 16px 10px; color: var(--ink-2); }
-.view-models .residency .ic { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--accent); }
-.view-models .nowrap { white-space: nowrap; }
 .md-routing .sub-h { margin-top: 14px; }
-
-@media (max-width: 1100px) {
-  .view-models .vendor-grid { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 560px) {
-  .view-models .tb-vendor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-.view-models .vendor td:first-child { min-width: 150px; }
 
 /* Vendor template picker (spec 10.4 Vendor templates). */
 .vt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--s3, 0.75rem); }
@@ -21,41 +8,16 @@
 .vt-name { font-weight: 600; }
 
 /* Models, redesign layout: stats row, tabs, stacked vendor cards, routing as grouped panels. */
-.view-models .stat-row { margin-bottom: var(--s4); }
-.view-models .tabs { margin-bottom: var(--s4); }
-.view-models .vendor-head { padding: 14px 16px; align-items: center; }
-.view-models .vendor-head .kicker { font-family: var(--f-body); font-size: var(--t-sm); text-transform: none; letter-spacing: 0; color: var(--muted); }
-.view-models .vendor-name { font-family: var(--f-body); font-size: var(--t-panel, 16px); font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
 .vendor-facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--s5, 24px); padding: 14px 16px; align-items: start; }
-.view-models .kv.tb-vendor { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 0; border: 0; }
-.view-models .kv.tb-vendor > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: baseline; }
-.view-models .kv.tb-vendor dt { font-size: var(--t-sm); color: var(--muted); }
-.view-models .kv.tb-vendor dd { margin: 0; font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; }
 .vendor-side { display: grid; gap: 8px; min-width: 0; }
 .vendor-side .residency { padding: 0; }
-.view-models .vendor .table-scroll { border-top: 1px solid var(--line); }
 .md-stack { display: grid; gap: var(--s4); }
 .md-routing > .lock-note { margin-bottom: var(--s3); }
 @media (max-width: 720px) {
   .vendor-facts { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .view-models .kv.tb-vendor > div { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .view-models .kv.tb-vendor.md-kv { grid-template-columns: minmax(0, 1fr); }
-  .view-models .kv.tb-vendor.md-kv { gap: 0; }
-  .view-models .kv.tb-vendor.md-kv dt { border-bottom: 0; padding-bottom: 0; }
-  .view-models .kv.tb-vendor.md-kv dd { text-align: left; padding: 4px 0 8px; }
 }
-@media (max-width: 560px) { .view-models .stat-val { white-space: normal; overflow-wrap: anywhere; } }
-@media (max-width: 560px) { #pv-edit td:first-child { min-width: 150px; } }
 
 /* blueprint: vendor cards in a grid, models as toggle rows */
-.view-models .vendor-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-.view-models .vendor .md-models { display: flex; flex-direction: column; }
-.view-models .vendor .md-kv { grid-template-columns: minmax(80px, auto) minmax(0, 1fr); }
-.view-models .vendor .md-kv dd { text-align: right; }
-.view-models .vendor .vendor-head { padding: 0; border: 0; }
-.view-models .vendor .residency { padding: 0; display: block; }
-.view-models .vendor .vendor-name { font-size: 15px; }
-#md-stats .stat-tile:last-child .stat-value, #md-stats .stat-tile:last-child .v { font-size: var(--t-lg, 20px); }
 
 /* Vendor picker: what each vendor needs, and the local-models hint. */
 .vt-needs-k { text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--t-xs, 11px); margin-right: 4px; }
@@ -68,14 +30,10 @@
 .vt-local { border-top: 1px dashed var(--line); padding-top: 4px; font-family: var(--f-mono); font-size: var(--t-xs); }
 
 /* Vendor cards are links: one stretched link per card, the card is the click target. Vendor page: header actions wrap, the table scrolls inside its panel. */
-.view-models .md-vcard { position: relative; }
-.view-models .md-vcard:not(.md-vadd):hover { border-color: var(--accent); }
-.view-models .md-vcard:focus-within { border-color: var(--accent); }
 .view-models .md-vtitle { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .view-models .md-vopen { font-weight: 500; }
 .view-models .md-vopen::after { content: ""; position: absolute; inset: 0; }
 .view-models .md-vopen:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.view-models .md-vcard .md-vfoot { margin-top: auto; padding-top: 4px; }
 .view-vendor .vhead-actions { flex-wrap: wrap; }
 .view-vendor #vp-stats { margin-bottom: var(--s4); }
 .view-vendor .stat-sub { overflow-wrap: anywhere; }

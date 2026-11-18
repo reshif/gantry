@@ -1,0 +1,4 @@
+
+.brief { display: grid; gap: var(--s2); }
+.brief .int-route .int-rs-n { font-size: 12px; }
+.conv-view > * { min-width: 0; }

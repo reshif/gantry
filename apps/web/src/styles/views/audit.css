@@ -25,7 +25,6 @@
 .aud-cat .ic { width: 12px; height: 12px; }
 .aud-cat-kill { color: var(--kill); font-weight: 600; }
 .aud-cat-auth .ic, .aud-cat-access .ic { color: var(--accent); }
-.aud-table td { vertical-align: top; }
 .aud-target { min-width: 220px; max-width: 460px; overflow-wrap: anywhere; }
 .aud-row { cursor: pointer; }
 .aud-row:hover td { background: var(--accent-soft); }

@@ -1,0 +1,4 @@
+
+.osx-sensitive { border: 1px solid var(--warn, #b7791f); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.osx-sensitive ul { margin: 4px 0 6px 16px; }
+.osx-blocker { border: 1px solid var(--danger, #c53030); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }

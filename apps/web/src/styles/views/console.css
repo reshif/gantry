@@ -1,20 +1,6 @@
 /* Console. Builds on the round-one console styles in views.css. Tokens only. */
 /* the page fills the window: header, then the conversation and its context side by side; only the thread and the side column scroll */
-.view-console .console-grid { grid-template-columns: 220px minmax(0, 1fr) 300px; height: calc(100dvh - var(--topbar-h, 52px) - 210px); min-height: 460px; }
-.view-console .ctx { overflow-y: auto; min-height: 0; }
-.view-console .console-main { min-height: 0; }
-.view-console .thread { min-height: 0; }
-.view-console .msg { max-width: 820px; min-width: 0; }
-.view-console .msg-text { overflow-wrap: anywhere; }
 .av-factory { background: var(--ink); color: var(--surface); font-family: var(--f-display); font-weight: 700; }
-.ccard { min-width: 0; }
-.ccard .table-scroll { border: 1px solid var(--line); background: var(--surface); }
-.ccard-title { display: flex; gap: 6px; align-items: center; }
-.ccard-confirm.is-danger { border-left-color: var(--kill); border-left-width: 5px; padding-top: 16px; background-color: var(--panel); background-image: repeating-linear-gradient(-45deg, var(--kill) 0 6px, transparent 6px 12px); background-size: 100% 6px; background-repeat: no-repeat; background-position: top left; }
-.ccard-confirm.is-danger .ccard-title { color: var(--kill); }
-.ccard-confirm.is-danger.is-done { border-left-color: var(--kill); }
-.ccard .perm.pos { color: var(--done); }
-.ccard .perm.neg { color: var(--block); }
 .con-cf-fields { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--line); background: var(--surface); }
 .con-pstat { font-size: var(--t-xs); text-transform: uppercase; color: var(--muted); }
 .con-killed td { background: var(--kill-soft); }
@@ -30,32 +16,19 @@
 .con-evals li { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; font-size: var(--t-sm); }
 
 .con-ctx { display: grid; gap: 8px; }
-.ctx .caps li[tabindex]:focus-visible { outline: 2px solid var(--accent); }
 .mini-log { list-style: none; display: grid; gap: 4px; font-size: var(--t-xs); }
 .mini-log li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: baseline; }
 .mini-log li > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctx > .btn { justify-self: start; }
-
-@media (max-width: 1100px) {
-  .view-console .console-grid { grid-template-columns: minmax(0, 1fr); height: auto; }
-  .view-console .thread { max-height: 70vh; }
-}
 @media (max-width: 560px) {
   .con-trig li { grid-template-columns: 48px minmax(0, 1fr) auto; }
   .con-trig li > span:nth-child(4) { grid-column: 2; }
   .con-evals li { grid-template-columns: minmax(0, 1fr) auto; }
-  .view-console .composer-foot .chips { display: none; }
 }
 
 /* round three: Claude mode, streaming, entity chips */
-.con-mode-line { display: flex; gap: 6px 10px; flex-wrap: wrap; color: var(--muted); margin: 0; border-bottom: 1px solid var(--line); }
-.con-mode-line a { color: var(--accent); }
 .con-model { display: block; width: 100%; max-width: 560px; }
 .con-model select { width: 100%; text-overflow: clip; font-size: var(--t-xs); padding-inline: 8px; }
 .con2-settings .con-model { margin: 8px 0; }
-.con-mode-line .ic { width: 12px; height: 12px; flex: none; position: relative; }
-.con-mode-line a { white-space: nowrap; }
-.view-console .msg-text { white-space: pre-wrap; }
 .view-console .msg-text.is-thinking { color: var(--muted); font-style: italic; }
 .msg-meta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 2px; }
 .msg-mode { border: 1px solid var(--line-strong); color: var(--muted); }
@@ -68,63 +41,24 @@
 .con-list { list-style: none; display: grid; gap: 4px; margin: 0; padding: 0; }
 .con-list li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: var(--t-sm); padding: 3px 0; border-bottom: 1px dotted var(--line); }
 .con-ev { font-family: var(--f-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); }
-.ccard .explain { margin-top: 0; }
 .view-console .msg-factory { width: 100%; }
-.view-console .ccard { max-width: 100%; }
-.view-console .ccard .table-scroll { max-width: 100%; overflow-x: auto; }
-.view-console .thread { overflow-x: hidden; }
-.view-console .ccard > *, .view-console .msg > * { min-width: 0; }
 
 /* Markdown in answers (views/console/Markdown.tsx): block elements carry their own spacing, so the transcript's pre-wrap is turned off for them. */
-.view-console .msg-text.is-md, .view-console .msg-text:has(> p, > ul, > ol, > pre) { white-space: normal; }
-.view-console .msg-text p { margin: 0 0 8px; }
-.view-console .msg-text ul, .view-console .msg-text ol { margin: 0 0 8px; padding-left: 20px; }
-.view-console .msg-text > :last-child { margin-bottom: 0; }
-.view-console .msg-text code { font-family: var(--mono, monospace); font-size: 0.92em; padding: 0 4px; border-radius: 4px; background: var(--surface-2, rgba(127,127,127,.15)); }
-.view-console .msg-text pre.md-code { margin: 0 0 8px; padding: 8px 10px; overflow-x: auto; white-space: pre; border-radius: 6px; background: var(--surface-2, rgba(127,127,127,.15)); }
-.view-console .msg-text pre.md-code code { padding: 0; background: none; }
 
 /* Chat list (left column) */
 .con-chats { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .con-chats-q { height: 32px; }
-@media (max-width: 1360px) and (min-width: 1101px) {
-  .view-console .console-grid { grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: max(460px, calc(100dvh - var(--topbar-h, 52px) - 210px)) auto; height: auto; }
-  .view-console .console-grid > .ctx { grid-column: 1 / -1; height: auto; }
-}
 
 /* Console, redesign look: quiet status line, answer bubbles, composer, compact side panels. */
-.console-main { border-radius: var(--r2); box-shadow: var(--shadow-1); overflow: hidden; }
-.con-mode-line { padding: 10px 16px; background: var(--surface); font-size: var(--t-sm); align-items: center; border-radius: 0; }
-.con-mode-line .ic { top: 0; }
-.view-console .thread { padding: 16px; gap: 16px; }
 .view-console .msg-factory .msg-text { background: var(--sunk); border-radius: var(--r2); padding: 10px 12px; }
 .view-console .msg-factory .msg-text.is-thinking { background: transparent; padding-left: 0; }
-.view-console .msg-user .msg-text { border-radius: var(--r2); }
-.msg-name { font-size: var(--t-sm); }
 .msg-mode { font-family: var(--f-body); font-size: var(--t-xs); text-transform: none; letter-spacing: 0; padding: 1px 8px; border-radius: 3px; background: var(--surface); }
 .msg-chips .kicker { font-size: var(--t-xs); color: var(--muted); }
-.composer { border-top: 1px solid var(--line); background: var(--surface); padding: 12px 16px 14px; }
-.composer-input { border-radius: var(--r2); min-height: 64px; resize: vertical; }
-.composer-foot { align-items: center; }
-.composer-foot .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.sugg { border-radius: 3px; background: var(--surface); border-color: var(--line); font-size: var(--t-xs); }
-.view-console .ctx .panel-title, .ws-chat .ctx .panel-title { font-size: var(--t-md); }
-.ctx .panel-head { min-height: 40px; padding: 10px 14px; }
-.ctx .panel-body { padding: 12px 14px; }
-.ctx .caps li { grid-template-columns: 16px minmax(0, 1fr); }
-.ctx .footnote { font-size: var(--t-xs); color: var(--muted); margin: 0; }
-@media (max-width: 560px) {
-  .composer { padding: 10px 12px 12px; }
-  .view-console .thread { padding: 12px; }
-}
 
 /* header chip beside the title, toolbar above the thread, permission codes in the capability list */
-.vtitle-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ctx .caps .cap-code { grid-column: 2; font-size: var(--t-xs); color: var(--faint); background: none; padding: 0; margin-top: -2px; }
 .ctx .caps li.no .cap-code { color: var(--muted); }
 .con-audit-link { margin-top: 8px; }
-.con-mode-line > span:not(.ask-badge):not(.con-mode-pick) { flex: 1 1 240px; min-width: 0; }
-.con-mode-line .con-mode-pick { flex: 0 1 auto; max-width: 100%; }
 
 /* ---------- Console page (Blueprint): a general chat with Gantry. Chat list left, the chat right; only the messages scroll, the composer stays at the bottom. ---------- */
 .view-console-page .con2 { position: relative; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; height: calc(100dvh - var(--topbar-h, 52px) - 190px); min-height: 480px; }
@@ -176,10 +110,6 @@
 
 /* T-2: on a phone the Console fills the screen below the top bar, so the composer stays pinned and only the transcript scrolls */
 @media (max-width: 720px) {
-  .view-console-page { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-h, 52px) - 25px); min-height: 0; }
-  main:has(> .view-console-page) { padding-block: 8px; }
   .view-console-page .con2 { flex: 1 1 0; height: auto; min-height: 0; }
-  .view-console-page .vsub { display: none; }
-  .view-console-page { padding-block: 0; box-sizing: border-box; }
 }
 .con2-log { scroll-padding-top: 12px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px); mask-image: linear-gradient(to bottom, transparent 0, #000 12px); }

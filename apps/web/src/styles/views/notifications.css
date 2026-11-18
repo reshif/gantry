@@ -13,7 +13,6 @@
 .nt-destrow .chip { margin: 0; }
 .nt-destrow .chip .ic { width: 12px; height: 12px; }
 .nt-destrow > :nth-child(3):not(.chip) { grid-column: auto; }
-.nt-sub { font-family: var(--f-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
 .nt-checks { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
 .nt-cond2 { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s4); align-items: end; }
 .nt-inline { display: flex; gap: var(--s3); flex-wrap: wrap; min-height: 32px; align-items: center; }

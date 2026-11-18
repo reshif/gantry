@@ -17,6 +17,7 @@ import { EditIntegration, InstanceDrawer, RemoveIntegration, ToggleIntegration }
 import { CatalogueTab, ConnectedTab, CustomTab } from "./integrations/Tabs";
 import { statusOf, useIntegrationData } from "./integrations/kit";
 import { ops } from "../api/ops";
+import "../styles/views/integrations.css";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 

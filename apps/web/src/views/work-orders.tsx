@@ -36,6 +36,7 @@ import { needsOf, needsRank, waitingOf, type Needs, type WoWithReview } from "./
 import type { HomeFull } from "./home/data";
 import { WoBoard } from "./work-orders/Board";
 import { columnsKey, savedViewsKey, useStored, type GroupBy, type SavedView } from "./work-orders/saved";
+import "../styles/views/workorders.css";
 
 type TabId = "all" | "mine" | "waiting" | "intake" | "open" | "done" | "incidents" | "killed";
 interface Filters {

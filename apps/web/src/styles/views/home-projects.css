@@ -5,14 +5,10 @@
 .hm-sec { min-width: 0; }
 .hm-count { margin-left: 8px; padding: 0 7px; border-radius: 3px; background: var(--panel); color: var(--muted); font-size: var(--t-sm); font-weight: 500; }
 .hm-quiet { margin: 0; }
-.hm-lbl { font-size: var(--t-sm); color: var(--faint); letter-spacing: 0; text-transform: none; }
 .hm-sec .panel-head { border-bottom: 1px solid var(--line); }
 
 /* needs attention and waiting on you: rows that touch the card edges */
 .hm-att { list-style: none; margin: 0; padding: 0; display: grid; }
-.hm-att-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-.hm-att-item:last-child { border-bottom: 0; }
-.hm-att-item { border-left: 3px solid transparent; padding-left: 13px; }
 .hm-att-ic .ic { width: 18px; height: 18px; }
 .hm-att-t { font-weight: 600; font-size: var(--t-md); }
 .hm-att-w { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
@@ -26,7 +22,6 @@
 .hm-step .hm-step-n { width: 22px; height: 22px; display: grid; place-items: center; border: 1.5px solid var(--line-strong); border-radius: 50%; font-size: var(--t-xs); font-weight: 600; flex: none; }
 .hm-step.is-active .hm-step-n { border-color: var(--accent); color: var(--accent); }
 .hm-step.is-done .hm-step-n { background: var(--done); border-color: var(--done); color: var(--surface); }
-.hm-step-n .ic { width: 13px; height: 13px; }
 .hm-step-t { font-weight: 600; }
 
 /* in motion */
@@ -41,7 +36,6 @@
 
 /* factory health */
 @media (max-width: 640px) {
-  .hm-att-item { grid-template-columns: 24px minmax(0, 1fr); }
   .hm-att-acts { grid-column: 1 / -1; justify-content: flex-start; }
   .hm-att-acts .btn, .hm-step .btn { min-height: 44px; }
   .hm-step { grid-template-columns: 24px minmax(0, 1fr); }
@@ -51,4 +45,3 @@
 /* ---------- projects: the portfolio card ---------- */
 
 /* Projects page, prototype layout: toggle in the head, search + collapsed filters above the card grid. */
-.proto-list .fbar .field { margin-bottom: 0; }
