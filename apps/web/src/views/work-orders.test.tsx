@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runCommand } from "../lib/commands";
 import { updatePrefs } from "../lib/prefs";
@@ -25,6 +25,42 @@ function Host() {
   useRegisterNewWorkOrder();
   return <WorkOrdersView />;
 }
+
+describe("Work orders tabs, More, grouping, columns and saved views (reached by clicking)", () => {
+  const two = [{ ...WOS[0]!, id: "WO-6001", repo: "repo-a", requestedBy: "p-asha", createdAt: 2000 }, { ...WOS[0]!, id: "WO-6002", repo: "repo-b", requestedBy: "p-other", createdAt: 1000 }];
+  const boot = () => mockApi({ "GET /api/v1/projects/payments/work-orders": (c) => ({ body: c.query.get("limit") === "1" ? page([], null, 2) : page(two, null, 2) }) });
+
+  it("renders the tab strip without ?tab=, and a tab click filters and lands in the URL", async () => {
+    boot();
+    mount(<WorkOrdersView />);
+    expect(await screen.findByRole("tab", { name: /Requested by me/ })).toBeTruthy();
+    for (const n of ["All", "At a gate", "Intake", "Open", "Done", "Incidents", "Killed"]) expect(screen.getByRole("tab", { name: new RegExp(n) })).toBeTruthy();
+    expect(await screen.findByText("WO-6002")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /Requested by me/ }));
+    await waitFor(() => expect(window.location.hash).toContain("tab=mine"));
+    await waitFor(() => expect(screen.queryByText("WO-6002")).toBeNull());
+  });
+
+  it("More opens Group by, Repo, Source, Assignee, Columns and Save view; grouping, hiding a column and saving a view work", async () => {
+    boot();
+    mount(<WorkOrdersView />);
+    await screen.findByText("WO-6001");
+    expect(document.getElementById("wo-group")).toBeNull();
+    fireEvent.click(document.getElementById("wo-more") as HTMLElement);
+    for (const id of ["wo-group", "wo-f-repo", "wo-f-source", "wo-f-assignee", "wo-view-save", "wo-col-prio"]) expect(document.getElementById(id)).toBeTruthy();
+    fireEvent.change(document.getElementById("wo-group") as HTMLElement, { target: { value: "repo" } });
+    await waitFor(() => expect(document.querySelectorAll(".wo-group").length).toBe(2));
+    expect(window.location.hash).toContain("group=repo");
+    expect(document.querySelector("#wo-table-0 th")).toBeTruthy();
+    fireEvent.click(document.getElementById("wo-col-prio") as HTMLElement);
+    await waitFor(() => expect(document.getElementById("wo-table-0-sort-prio")).toBeNull());
+    fireEvent.click(document.getElementById("wo-view-save") as HTMLElement);
+    fireEvent.change(await screen.findByRole("textbox"), { target: { value: "Grouped by repo" } });
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Save view" }));
+    await waitFor(() => expect(document.getElementById("wo-views")).toBeTruthy());
+    expect(JSON.parse(window.localStorage.getItem("gantry.wo.views.payments") ?? "[]")[0]?.name).toBe("Grouped by repo");
+  });
+});
 
 describe("Work orders table", () => {
   it("says the work orders are not visible on a 403, and the header counts don't read as 0", async () => {

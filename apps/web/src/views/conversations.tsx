@@ -39,7 +39,7 @@ export default function ConversationsView() {
   const picked = hash.param ?? sel?.id ?? null;
   return (
     <div className="view conv-view">
-      <ViewHead kicker={project?.key ?? ""} title="Conversations" sub="The dialogue between people and the agents at each station." />
+      <ViewHead kicker={project?.key ?? ""} title="Conversations" sub="The dialogue between people and the agents at each station." actions={<Btn icon="chat" label="Side threads and chats" id="conv-all" onClick={() => navigate("workspace", "inbox")} />} />
       <div className="cols w12">
         <Panel title="Threads" flush id="conv-threads">
           <Async query={q} what="conversations" id="conv-list">{() => threads.length ? (

@@ -100,6 +100,18 @@ describe("Agents at work", () => {
     return calls;
   };
 
+  it("Agents at work has a Conversations button (with the count that need you) to the inbox, where side threads re-open, and a New chat button", async () => {
+    window.location.hash = "#workspace";
+    show();
+    const btn = await screen.findByRole("button", { name: "Conversations · 1 need you" });
+    expect(screen.getByRole("button", { name: "New chat" })).toBeTruthy();
+    fireEvent.click(btn);
+    await waitFor(() => expect(window.location.hash).toBe("#workspace/inbox"));
+    const inbox = await screen.findByRole("navigation", { name: "Conversations" });
+    fireEvent.click(within(inbox).getByRole("tab", { name: /Active/ }));
+    expect(within(within(inbox).getByRole("region", { name: "Side threads" })).getByText("Researcher about WO-1")).toBeTruthy();
+  });
+
   it("opens on what needs the person, groups the rest by kind, and pins and archives from a row's menu", async () => {
     window.location.hash = "#workspace/inbox";
     const calls = show({ "PATCH /api/v1/workspace/threads/wo%3AWO-2": () => ({ body: { ok: true, msg: "Pinned." } }) });

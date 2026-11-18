@@ -10,14 +10,15 @@
  */
 import { qk } from "../api/keys";
 import { useInfiniteQuery, useQuery, keepPreviousData } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { flowOf } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
 import { useHome, useMe, useProject } from "../api/queries";
 import { assigneeOf, useProjectRepos } from "./floor/kit";
 import type { Page, WorkOrder } from "../api/types";
-import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, ViewHead } from "../ui/primitives";
+import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, Tabs, Toggle, ViewHead } from "../ui/primitives";
+import { useUI } from "../ui/overlay-context";
 import { Async } from "../ui/async";
 import { DataTable, type Col } from "../ui/SortTable";
 import { useActors } from "../ui/actors";
@@ -31,6 +32,7 @@ import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 import { useUrlState } from "./work-orders/url";
 import { PrioChip, WoStateChip, agoShort } from "./work-orders/cells";
 import { WoBoard } from "./work-orders/Board";
+import { columnsKey, savedViewsKey, useStored, type GroupBy, type SavedView } from "./work-orders/saved";
 
 type TabId = "all" | "mine" | "waiting" | "intake" | "open" | "done" | "incidents" | "killed";
 interface Filters {
@@ -53,6 +55,10 @@ const SNAPSHOT = 200;
 const CAP = 1000;
 /** The prototype's eight columns, in its order. */
 const PROTO_COLS = ["id", "repo", "where", "state", "cls", "prio", "age", "by"];
+const TABS: Array<[TabId, string]> = [["all", "All"], ["mine", "Requested by me"], ["waiting", "At a gate"], ["intake", "Intake"], ["open", "Open"], ["done", "Done"], ["incidents", "Incidents"], ["killed", "Killed"]];
+const GROUPS: Array<{ id: GroupBy; label: string }> = [{ id: "none", label: "No grouping" }, { id: "station", label: "Station" }, { id: "repo", label: "Repo" }, { id: "cls", label: "Class" }, { id: "assignee", label: "Assignee" }];
+/** The columns a person can hide (the work order id always stays). */
+const OPTIONAL_COLS: Array<[string, string]> = [["repo", "Project"], ["where", "Station"], ["state", "State"], ["cls", "Class"], ["prio", "Priority"], ["age", "Created"], ["by", "Requested by"]];
 const STATES = ["running", "waiting", "parked", "blocked", "failed", "done", "killed"];
 
 const isIncident = (w: WorkOrder): boolean => w.state === "blocked" || w.state === "failed" || w.bay === "sechold" || w.bay === "person";
@@ -66,12 +72,17 @@ export default function WorkOrdersView() {
   const actor = useActors();
   const newWo = useNewWorkOrder();
   const home = useHome().data;
+  const ui = useUI();
   const [u, setU] = useUrlState(URL_DEFAULTS);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [applied, setApplied] = useState("");
   const mode: "list" | "board" = u.view === "board" ? "board" : "list";
   const tab = u.tab as TabId;
   const sort = { k: u.sort, dir: (u.dir === "asc" ? 1 : -1) as 1 | -1 };
   const f: Filters = { q: u.q, cls: u.cls, station: cat?.stations.find((x) => x.id === u.station || x.no === u.station)?.id ?? u.station, repo: u.repo, prio: u.prio, source: u.source, state: u.state, assignee: u.assignee };
   const projectId = me ? pickProject(me, prefs.project) : null;
+  const [hidden, setHidden] = useStored<string[]>(columnsKey(projectId ?? ""), []);
+  const [saved, setSaved] = useStored<SavedView[]>(savedViewsKey(projectId ?? ""), []);
   const projectQ = useProject(projectId);
   const project = projectQ.data ?? null;
   const repos = useProjectRepos(projectId);
@@ -151,6 +162,17 @@ export default function WorkOrdersView() {
     });
   }, [loaded, tab, me, waitingIds, f.state, f.station, f.cls, f.prio, f.repo, f.source, f.assignee, q, cat, project, actor]);
 
+  const assignees = useMemo(() => {
+    const a = new Set<string>(loaded.map(assigneeOf).filter((x): x is string => !!x));
+    if (f.assignee !== "all" && f.assignee !== "none") a.add(f.assignee);
+    return [...a].sort();
+  }, [loaded, f.assignee]);
+  const sources = useMemo(() => {
+    const a = new Set<string>(loaded.map((w) => w.source));
+    if (f.source !== "all") a.add(f.source);
+    return [...a].sort();
+  }, [loaded, f.source]);
+
   if (!me || !cat) return null;
   if (!projectId || !project) {
     return (
@@ -161,8 +183,9 @@ export default function WorkOrdersView() {
   }
   const fl = flowOf(cat, project);
   const filtered = (Object.keys(NONE) as Array<keyof Filters>).some((k) => (k === "q" ? f.q.trim() !== "" : f[k] !== "all")) || tab !== "all";
+  const groupBy = (GROUPS.some((g) => g.id === u.group) ? u.group : "none") as GroupBy;
   const set = (k: keyof Filters) => (v: string) => setU({ [k]: v, page: "1" } as Partial<typeof URL_DEFAULTS>);
-  const clear = () => setU({ ...NONE, tab: "all", page: "1" });
+  const clear = () => { setApplied(""); setU({ ...NONE, tab: "all", page: "1" }); };
   const block = projectSubmitBlock(me, project, repos);
   const allCols: Col<WorkOrder>[] = [
     {
@@ -190,10 +213,53 @@ export default function WorkOrdersView() {
     { key: "age", label: "Created", sort: (w) => w.createdAt, render: (w) => <span style={{ whiteSpace: "nowrap" }}>{agoShort(w.createdAt)}</span> },
     { key: "by", label: "By", render: (w) => <span title={`via ${w.source}`}>{actor(w.requestedBy).name.split(" ")[0]}</span> },
   ];
-  const cols = allCols.filter((c) => PROTO_COLS.includes(c.key));
+  const cols = allCols.filter((c) => PROTO_COLS.includes(c.key) && (c.key === "id" || !hidden.includes(c.key)));
   const cutNote = `Only the latest ${CAP} work orders are read for this view, so the project has more. Narrow it with the search or a filter.`;
   const total = snapItems?.length ?? loaded.length;
   const showCount = `${plural(rows.length, "work order")}${rows.length !== total ? ` of ${total}` : ""}`;
+  const groupKey = (w: WorkOrder): string => {
+    if (groupBy === "station") return w.bay ? w.bay : cat.stations[w.station]?.name ?? "?";
+    if (groupBy === "repo") return w.repo;
+    if (groupBy === "cls") return classOf(cat, project, w.cls).name;
+    const a = assigneeOf(w);
+    return a ? actor(a).name.replace(" (agent)", "") : "Unassigned";
+  };
+  const groups: Array<[string, WorkOrder[]]> = (() => {
+    if (groupBy === "none") return [["", rows]];
+    const m = new Map<string, WorkOrder[]>();
+    for (const w of rows) m.set(groupKey(w), [...(m.get(groupKey(w)) ?? []), w]);
+    return [...m.entries()].sort((x, y) => x[0].localeCompare(y[0]));
+  })();
+  const applyView = (id: string): void => {
+    const v = saved.find((x) => x.id === id);
+    setApplied(id);
+    if (!v) return;
+    setHidden(v.hidden);
+    setU({ ...NONE, ...v.filters, tab: v.tab, sort: v.sort.k, dir: v.sort.dir > 0 ? "asc" : "desc", group: v.groupBy, page: "1" });
+  };
+  const saveView = (): void => ui.reasonDialog({
+    title: "Save this view", kicker: "Work orders", sub: "Keeps the tab, filters, sort, grouping and columns you have now, for you in this browser.",
+    label: "Name", placeholder: "For example: My P1s", ok: "Save view", min: 2,
+    onOk: (name) => {
+      const id = `v${Date.now().toString(36)}`;
+      setSaved([...saved, { id, name: name.trim(), tab, filters: { ...f }, sort, groupBy, hidden }]);
+      setApplied(id);
+    },
+  });
+  const dropView = (): void => { setSaved(saved.filter((x) => x.id !== applied)); setApplied(""); };
+  const tabCount = (id: TabId): number | null => {
+    if (!snapItems && !counts) return null;
+    if (id === "all") return counts?.all ?? null;
+    if (id === "open") return counts?.open ?? null;
+    if (id === "done") return counts?.done ?? null;
+    if (id === "killed") return counts?.killed ?? null;
+    if (id === "intake") return counts?.intake ?? null;
+    if (!snapItems) return null;
+    if (id === "mine") return snapItems.filter((w) => w.requestedBy === me.person.id).length;
+    if (id === "waiting") return snapItems.filter((w) => waitingIds.has(w.id)).length;
+    return snapItems.filter(isIncident).length;
+  };
+  const moreActive = f.repo !== "all" || f.source !== "all" || f.assignee !== "all" || groupBy !== "none" || hidden.length > 0;
   const tableOf = (items: WorkOrder[], id: string, cap: string, paged: boolean) => (
     <DataTable
       id={id}
@@ -234,8 +300,9 @@ export default function WorkOrdersView() {
         <Async query={snap} what="the board" id="wo-board-read">{() => <WoBoard items={snapItems ?? []} cat={cat} project={project} />}</Async>
       ) : (
         <Panel title="All work orders" flush cls="wo-panel">
+          <Tabs items={TABS.map(([id, label]) => ({ id, label, count: tabCount(id) }))} active={tab} onChange={(id) => setU({ tab: id, page: "1" })} idPrefix="wo-tab" />
           <div className="wo-bar">
-            <FilterBar label="Filter work orders" count={showCount} actions={filtered ? <Btn label="Clear" small kind="ghost" id="wo-clear-top" onClick={clear} /> : undefined}>
+            <FilterBar label="Filter work orders" count={showCount} actions={<>{filtered ? <Btn label="Clear" small kind="ghost" id="wo-clear-top" onClick={clear} /> : null}<Btn label="More" small icon="columns" id="wo-more" aria-expanded={moreOpen || moreActive} onClick={() => setMoreOpen(!(moreOpen || moreActive))} /></>}>
               <SearchBox id="wo-q" value={f.q} onChange={set("q")} placeholder="Search id, title, project…" label="Search work order" />
               <Field label="State" htmlFor="wo-f-state">
                 <Select id="wo-f-state" options={[{ value: "all", label: "All" }, ...STATES.map((k) => ({ value: k, label: k }))]} value={f.state} onChange={set("state")} />
@@ -250,10 +317,29 @@ export default function WorkOrdersView() {
                 <Select id="wo-f-prio" options={[{ value: "all", label: "All" }, ...PRIOS.map((p) => ({ value: p, label: p }))]} value={f.prio} onChange={set("prio")} />
               </Field>
             </FilterBar>
+            {moreOpen || moreActive ? (
+              <FilterBar label="More filters, grouping, columns and saved views">
+                <Field label="Group by" htmlFor="wo-group"><Select id="wo-group" options={GROUPS.map((g) => ({ value: g.id, label: g.label }))} value={groupBy} onChange={(v) => setU({ group: v, page: "1" })} /></Field>
+                <Field label="Repo" htmlFor="wo-f-repo"><Select id="wo-f-repo" options={[{ value: "all", label: "All" }, ...repos.map((r) => ({ value: r.id, label: r.name }))]} value={f.repo} onChange={set("repo")} /></Field>
+                <Field label="Source" htmlFor="wo-f-source"><Select id="wo-f-source" options={[{ value: "all", label: "All" }, ...sources.map((x) => ({ value: x, label: x }))]} value={f.source} onChange={set("source")} /></Field>
+                <Field label="Assignee" htmlFor="wo-f-assignee"><Select id="wo-f-assignee" options={[{ value: "all", label: "Anyone" }, { value: "none", label: "Unassigned" }, ...assignees.map((a) => ({ value: a, label: actor(a).name.replace(" (agent)", "") }))]} value={f.assignee} onChange={set("assignee")} /></Field>
+                {saved.length ? <Field label="Saved views" htmlFor="wo-views"><Select id="wo-views" options={[{ value: "", label: "Choose a view" }, ...saved.map((v) => ({ value: v.id, label: v.name }))]} value={applied} onChange={applyView} /></Field> : null}
+                <div className="row wo-more-acts" role="group" aria-label="Columns and saved views">
+                  {OPTIONAL_COLS.map(([k, label]) => <label key={k} className="row small" htmlFor={`wo-col-${k}`}><Toggle id={`wo-col-${k}`} variant="check" label={`Show ${label}`} checked={!hidden.includes(k)} onChange={(on) => setHidden(on ? hidden.filter((x) => x !== k) : [...hidden, k])} />{label}</label>)}
+                  <Btn label="Save view" small id="wo-view-save" onClick={saveView} />
+                  {applied ? <Btn label="Delete view" small kind="ghost" id="wo-view-del" onClick={dropView} /> : null}
+                </div>
+              </FilterBar>
+            ) : null}
           </div>
           <Async query={list} what="work orders" id="wo-list">{() => rows.length ? (
             <div className="wo-table" id="wo-table-wrap">
-              {tableOf(rows, "wo-table", `Work orders in ${project.name}`, true)}
+              {groupBy === "none" ? tableOf(rows, "wo-table", `Work orders in ${project.name}`, true) : groups.map(([g, items], i) => (
+                <section key={g} className="wo-group" aria-labelledby={`wo-group-h-${i}`}>
+                  <h3 className="wo-group-h" id={`wo-group-h-${i}`}>{g} <span className="muted num">{items.length}</span></h3>
+                  {tableOf(items, `wo-table-${i}`, `Work orders in ${project.name}: ${g}`, false)}
+                </section>
+              ))}
               {cut ? <div className="wo-foot"><span className="muted small">{cutNote}</span></div> : null}
             </div>
           ) : (

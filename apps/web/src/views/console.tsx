@@ -416,7 +416,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     const modeOf = (m: Msg): string => (m.mode === "model" ? `${st?.model ?? "Model"}${m.stopped ? " · stopped" : ""}` : m.mode === "live" ? "Live work-order state" : m.mode === "slash" ? "Slash command · live data" : m.mode === "none" ? "No model configured" : "Model did not answer");
     return (
       <div className="view view-console view-console-page">
-        <ViewHead kicker="ALL LINES" title="Console" sub="Ask the factory a question in plain language. Answers are read from live work-order state." />
+        <ViewHead kicker="ALL LINES" title="Console" sub="Ask the factory a question in plain language. Answers are read from live work-order state." actions={<><Btn label="Chats" small icon="list" id="con-open-chats" aria-pressed={aux === "chats"} onClick={() => setAux(aux === "chats" ? null : "chats")} /><Btn label="Settings" small icon="gear" id="con-open-settings" aria-pressed={aux === "settings"} onClick={() => setAux(aux === "settings" ? null : "settings")} /></>} />
         <div className="cols w21">
           <Panel title="Conversation">
             <div className="conv" id="con-conv">

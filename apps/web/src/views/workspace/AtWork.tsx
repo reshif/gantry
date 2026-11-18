@@ -7,11 +7,11 @@ import { useAgents, useProjects, useWorkOrdersOf } from "../../api/queries";
 import { useScope } from "../work/scope";
 import { Async } from "../../ui/async";
 import { Spark } from "../../ui/charts";
-import { Avatar, Chip, Empty, Meter, Stat, StatRow, ViewHead } from "../../ui/primitives";
+import { Avatar, Btn, Chip, Empty, Meter, Stat, StatRow, ViewHead } from "../../ui/primitives";
 import { useCatalog } from "../projects/kit";
 
 /** The prototype's page: tiles and the agent grid, nothing else. Conversations, the Console and the Operator view are their own pages. */
-export function AtWork() {
+export function AtWork({ needs = 0, onInbox, onNew }: { needs?: number; onInbox?: () => void; onNew?: () => void } = {}) {
   const agentsQ = useAgents();
   const scope = useScope();
   const projects = useProjects().data;
@@ -27,7 +27,10 @@ export function AtWork() {
   const stationName = (id: string | null): string => cat?.stations.find((s) => s.id === id)?.name ?? "its station";
   return (
     <div className="view ws-atwork">
-      <ViewHead title="Agents at work" kicker={scope.kicker} sub="Who is doing what right now, across the line." />
+      <ViewHead title="Agents at work" kicker={scope.kicker} sub="Who is doing what right now, across the line." actions={onInbox || onNew ? <>
+        {onInbox ? <Btn icon="chat" label={needs ? `Conversations · ${needs} need you` : "Conversations"} id="ws-at-inbox" onClick={onInbox} /> : null}
+        {onNew ? <Btn kind="primary" icon="plus" label="New chat" id="ws-at-new" onClick={onNew} /> : null}
+      </> : undefined} />
       <StatRow id="ws-stats">
         <Stat label="Agents active" value={String(active)} sub={`of ${agents.length}`} tone="info" />
         <Stat label="Running runs" value={String(running.length)} sub="work orders" tone="done" />
