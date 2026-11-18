@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, range }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -55,6 +55,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   loadingMore?: boolean;
   /** Total on the server, for the "Showing x of y" line. */
   total?: number;
+  /** Prototype footer: always show the "1–n of N" range under the table. */
+  range?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
@@ -134,7 +136,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : "↕"}</span>
                       </button>
                     ) : c.label}
                   </th>
@@ -174,9 +176,12 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </tbody>
         </table>
       </div>
+      {range && !(clientMore || hasMore) ? (
+        <div className="tfoot dtable-range"><span role="status">{`1–${visible.length} of ${total ?? rows.length}`}</span></div>
+      ) : null}
       {clientMore || hasMore ? (
         <div className="tfoot dtable-more">
-          <span className="dtable-count" role="status">{total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>
+          <span className="dtable-count" role="status">{range ? `1–${visible.length} of ${total ?? rows.length}` : total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>
           {clientMore ? (
             <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-more`} onClick={() => setShown(shown + (pageSize ?? 0))}>{`Show ${Math.min(pageSize ?? 0, rows.length - shown)} more of ${rows.length - shown}`}</button>
           ) : (

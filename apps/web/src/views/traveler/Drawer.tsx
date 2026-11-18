@@ -111,7 +111,7 @@ export default function TravelerDrawer({ woId, onClose }: { woId: string; onClos
           <h2 className="drawer-title">{wo.title}</h2>
         </div>
         <div className="trv-headtools">
-          <Btn label="Open full record" small icon="record" id="trv-open-record" onClick={() => { close(); openRecord(wo.id, wo.project); }} />
+          <Btn label="Open full record" small icon="record" id="trv-open-record" onClick={() => { close(); openRecord(wo.id, wo.project, false, true); }} />
           <button type="button" className="icon-btn drawer-close" id="trv-close" aria-label="Close traveler" onClick={close}>
             <Icon name="x" />
           </button>

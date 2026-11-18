@@ -34,6 +34,14 @@ function ScrollWrap({ children }: { children: (w: number) => React.ReactNode }) 
     ro?.observe(el);
     return () => { el.removeEventListener("scroll", upd); ro?.disconnect(); };
   }, []);
+  // the diagram is re-drawn at the measured width after the first measure: look at the overflow again once it has
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ml = el.scrollLeft > 4;
+    const mr = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+    setEdge((e) => (e.ml === ml && e.mr === mr ? e : { ml, mr }));
+  }, [w]);
   return (
     <div className={`scrollwrap${edge.ml ? " ml" : ""}${edge.mr ? " mr" : ""}`}>
       <div className="sf l" />
@@ -88,7 +96,7 @@ export default function TravelerPage() {
         actions={<><Btn label="Record" id="trv-page-record" onClick={() => navigate("record", wo.id, wo.project)} /><Btn label="Print" icon="dl" id="trv-page-print" onClick={() => window.print()} /></>}
       />
       <Panel title="Route">
-        <div className="trv-route">
+        <div>
           <ScrollWrap>
             {(cw) => {
               const W = Math.max(cw, stations.length * 78);

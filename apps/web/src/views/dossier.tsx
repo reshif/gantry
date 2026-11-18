@@ -4,7 +4,7 @@
  */
 import { useMemo } from "react";
 import type { Repo, WorkOrder } from "@gantry/domain";
-import { useMe, useWorkOrders } from "../api/queries";
+import { useMe, useProjects, useWorkOrders } from "../api/queries";
 import { Async } from "../ui/async";
 import { Btn, Chip, Empty, Field, FilterBar, Panel, SearchBox, Select, Stat, StatRow, ViewHead } from "../ui/primitives";
 import { DataTable, type Col } from "../ui/DataTable";
@@ -38,7 +38,11 @@ function Missing({ title }: { title: string }) {
   );
 }
 
-function Index({ projectId }: { projectId: string | null }) {
+function Index({ projectId: scopeId }: { projectId: string | null }) {
+  const [projQ, setProj] = useQueryParam("project");
+  const projectsRead = useProjects();
+  // the Project filter (prototype) picks which project's repositories are listed; it starts at the project in the address
+  const projectId = projQ || scopeId;
   const repos = useProjectRepos(projectId);
   const project = useProject(projectId).data;
   const { items } = useWos(projectId);
@@ -48,8 +52,8 @@ function Index({ projectId }: { projectId: string | null }) {
   const needle = (q ?? "").trim().toLowerCase();
   const rows = repos.filter((r) => (!needle || `${r.name} ${r.lang} ${r.tags.join(" ")}`.toLowerCase().includes(needle)) && (!lang || lang === "all" || r.lang === lang));
   const langs = [...new Set(repos.map((r) => r.lang))];
-  const filtered = !!needle || (!!lang && lang !== "all");
-  const clear = () => { setQ(null); setLang(null); };
+  const filtered = !!needle || (!!lang && lang !== "all") || (!!projQ && projQ !== scopeId);
+  const clear = () => { setQ(null); setLang(null); setProj(null); };
   const cols: Col<Repo>[] = [
     { key: "name", label: "Repo", sort: (r) => r.name, render: (r) => <span className="pri-cell"><a className="pri" href={hashFor("dossier", r.id, projectId)} onClick={(e) => { e.preventDefault(); navigate("dossier", r.id, projectId); }}>{r.name}</a><span className="sub">{project?.name ?? r.project}</span></span> },
     { key: "lang", label: "Lang", sort: (r) => r.lang },
@@ -59,15 +63,18 @@ function Index({ projectId }: { projectId: string | null }) {
   ];
   return (
     <div className="view rec-view" id="dos-index">
-      <ViewHead plain title="Dossier" sub="Repositories under Gantry: configuration, guidelines and work." />
+      <ViewHead title="Dossier" kicker={project?.key} sub="Repositories under Gantry: configuration, guidelines and work." />
       <Panel flush>
         <FilterBar label="Filter repos" count={`${rows.length} ${rows.length === 1 ? "repo" : "repos"}`} actions={filtered ? <Btn label="Clear" small kind="ghost" id="dos-clear" onClick={clear} /> : undefined}>
-          <SearchBox id="dos-q" value={q ?? ""} onChange={(v) => setQ(v || null)} placeholder="Search repos" label="Search" />
+          <SearchBox id="dos-q" value={q ?? ""} onChange={(v) => setQ(v || null)} placeholder="Search…" label="Search" />
           <Field label="Language" htmlFor="dos-f-lang">
             <Select id="dos-f-lang" options={[{ value: "all", label: "All" }, ...langs.map((l) => ({ value: l, label: l }))]} value={lang ?? "all"} onChange={(v) => setLang(v === "all" ? null : v)} />
           </Field>
+          <Field label="Project" htmlFor="dos-f-project">
+            <Select id="dos-f-project" options={(Array.isArray(projectsRead.data) ? projectsRead.data : []).map((p) => ({ value: p.id, label: p.name }))} value={projectId ?? ""} onChange={(v) => setProj(v === scopeId ? null : v)} />
+          </Field>
         </FilterBar>
-        <DataTable id="dos-table" caption="Repositories" columns={cols} rows={rows} rowKey={(r) => r.id} pageSize={15} empty={{ title: filtered ? "Nothing matches these filters" : "No repositories", text: filtered ? "Try fewer filters." : "Onboard a repo to see it here.", action: filtered ? <Btn label="Clear filters" id="dos-clear-empty" onClick={clear} /> : undefined }} />
+        <DataTable id="dos-table" caption="Repositories" columns={cols} rows={rows} rowKey={(r) => r.id} rowHref={(r) => hashFor("dossier", r.id, projectId)} rowLabel={(r) => `Open the dossier of ${r.name}`} pageSize={15} range empty={{ title: filtered ? "Nothing matches these filters" : "No repositories", text: filtered ? "Try fewer filters." : "Onboard a repo to see it here.", action: filtered ? <Btn label="Clear filters" id="dos-clear-empty" onClick={clear} /> : undefined }} />
       </Panel>
     </div>
   );
@@ -93,7 +100,7 @@ function Detail({ projectId, repoId }: { projectId: string | null; repoId: strin
         <Stat label="Open" value={String(ws.filter((w) => w.state !== "done").length)} tone="info" />
         <Stat label="Done" value={String(ws.filter((w) => w.state === "done").length)} tone="done" />
         <Stat label="Merge" value={x.config.merge} sub={x.config.defaultBranch} />
-        <Stat label="Tagging" value={x.config.tagging} />
+        <Stat label="Tagging" value={x.config.tagging.length > 9 ? <span className="txtv-in" title={x.config.tagging}>{x.config.tagging}</span> : x.config.tagging} />
         <Stat label="Triggers" value={x.triggers ? "On" : "Off"} />
       </StatRow>
       <div className="cols">

@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import type { WorkOrder } from "@gantry/domain";
 import { useWorkOrders } from "../../api/queries";
-import { useMe } from "../../api/queries";
+import { useMe, useProject } from "../../api/queries";
 import { Async } from "../../ui/async";
 import { Btn, Chip, Field, FilterBar, Panel, SearchBox, Select, ViewHead } from "../../ui/primitives";
 import { DataTable, type Col } from "../../ui/DataTable";
@@ -19,6 +19,7 @@ export function ChangesIndex() {
   const prefs = usePrefs();
   const hash = useHash();
   const projectId = hash.project ?? (me ? pickProject(me, prefs.project) : null);
+  const project = useProject(projectId).data;
   const read = useWorkOrders(projectId, { state: "all", limit: 200 });
   const [q, setQ] = useQueryParam("q");
   const [checks, setChecks] = useQueryParam("checks");
@@ -41,13 +42,13 @@ export function ChangesIndex() {
   ];
   return (
     <div className="view rec-view" id="chg-index">
-      <ViewHead plain title="Changes" sub="Code changes produced by the line, one row per work order." />
+      <ViewHead title="Changes" kicker={project?.key} sub="Code changes produced by the line, one row per work order." />
       <Panel flush>
         <Async query={read} what="the changes" id="chg-index-read" isEmpty={() => false}>
           {() => (
             <>
               <FilterBar label="Filter changes" count={`${rows.length} ${rows.length === 1 ? "change" : "changes"}`} actions={filtered ? <Btn label="Clear" small kind="ghost" id="chg-clear" onClick={clear} /> : undefined}>
-                <SearchBox id="chg-q" value={q ?? ""} onChange={(v) => setQ(v || null)} placeholder="Search id or title" label="Search" />
+                <SearchBox id="chg-q" value={q ?? ""} onChange={(v) => setQ(v || null)} placeholder="Search…" label="Search" />
                 <Field label="Checks" htmlFor="chg-f-checks">
                   <Select id="chg-f-checks" options={[{ value: "all", label: "All" }, ...["passed", "pending", "failed"].map((v) => ({ value: v, label: v }))]} value={checks ?? "all"} onChange={(v) => setChecks(v === "all" ? null : v)} />
                 </Field>
@@ -60,7 +61,7 @@ export function ChangesIndex() {
                 rowKey={(w) => w.id}
                 rowHref={(w) => hashFor("changes", w.id, w.project)}
                 rowLabel={(w) => `Open the changes of ${w.id}`}
-                pageSize={12}
+                pageSize={12} range
                 empty={{ title: filtered ? "Nothing matches these filters" : "No changes yet", text: filtered ? "Try fewer filters." : "Work orders that change files appear here.", action: filtered ? <Btn label="Clear filters" id="chg-clear-empty" onClick={clear} /> : undefined }}
               />
             </>

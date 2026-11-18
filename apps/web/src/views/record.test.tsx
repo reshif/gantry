@@ -14,7 +14,7 @@ const W = waitingWo;
 
 async function showRecord(extra: Parameters<typeof mockApi>[0] = {}, o: Parameters<typeof mockApi>[1] = {}) {
   const calls = mockApi({ ...readsFor(W), ...extra }, o);
-  window.location.hash = `#record/${W.id}`;
+  window.location.hash = `#record/${W.id}?full=1`;
   mount(<RecordView />);
   await screen.findByText("Completeness", {}, { timeout: 4000 });
   return calls;

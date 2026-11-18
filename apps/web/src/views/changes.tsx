@@ -10,7 +10,6 @@ import { useActors } from "../ui/actors";
 import { splitQuery, useHashQuery } from "./dossier/hashQuery";
 import { Loading } from "../ui/async";
 import { ChangesIndex } from "./changes/Index";
-import { Changes } from "./record/sections2";
 import { useChangesRead, useRecordData, sum, type RecFile } from "./record/data";
 
 export default function ChangesView() {
@@ -43,7 +42,7 @@ export default function ChangesView() {
       </div>
     );
   }
-  const { wo, rec, project, cat } = d;
+  const { wo, rec } = d;
   const sel = files.find((f) => f.path === fileQ) ?? files[0];
   const commits = ch?.commits ?? rec.code.commits.map((x) => ({ sha: x.sha, message: x.message, author: x.author }));
   const pr = rec.code.pullRequests[0] ?? null;
@@ -98,10 +97,6 @@ export default function ChangesView() {
           </Panel>
         </div>
       </div>
-      <details className="dz-replay" id="chg-full">
-        <summary>Full change review: file tree, guardrail and plan</summary>
-        <Changes c={{ wo, rec, project, cat, pre: "chg-", compact: false, page: true }} />
-      </details>
     </div>
   );
 }

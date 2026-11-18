@@ -26,6 +26,7 @@ export function Dossier({ id, tab: pathTab }: { id: string; tab: DossierTab }) {
   // the tab is view state in the URL (?tab=activity); an old #record/WO-x/activity path still opens the same tab
   const [q, setQ] = useHashQuery("tab");
   const tab: DossierTab = q === "activity" || q === "gates" || q === "runs" || q === "document" ? q : pathTab;
+  const [full] = useHashQuery("full");
   const copyMd = useCopyMarkdown();
   const exportRec = useExportRecord();
   const actor = useActors();
@@ -112,7 +113,7 @@ export function Dossier({ id, tab: pathTab }: { id: string; tab: DossierTab }) {
               </div>
               <Props wo={wo} cat={cat} project={project} />
             </div>
-            <details className="dz-replay" id="dz-docs">
+            {full === "1" ? <details className="dz-replay" id="dz-docs" open>
               <summary>Station documents and full history</summary>
               <div className="dz-exp">
                 <Btn label="Copy as Markdown" small icon="copy" id="rec-copy" onClick={() => void copyMd(wo.id)} />
@@ -121,7 +122,7 @@ export function Dossier({ id, tab: pathTab }: { id: string; tab: DossierTab }) {
               <Meter rec={rec} pre="rec-" onJump={jump} />
               <Scrubber c={c} events={events} pre="rec-" />
               <Sections c={c} />
-            </details>
+            </details> : null}
           </>
         ) : tab === "gates" ? (
           <GatesPanel wo={wo} cat={cat} />

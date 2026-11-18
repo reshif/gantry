@@ -1,5 +1,5 @@
 /* The work order page (#record/<WO>): header card, tabs, document card, properties column, and the changes page. Tokens only. */
-.dz { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dz { display: block; min-width: 0; }
 .dz > * { min-width: 0; }
 .dz-head { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); }
 .dz-head > .body { display: flex; flex-direction: column; gap: 14px; padding: 14px 18px 16px; }
@@ -73,7 +73,7 @@
 .dz-sbody .rec-kv dt { font-family: var(--f-body); font-size: var(--t-md); letter-spacing: 0; text-transform: none; color: var(--faint); }
 .dz-sbody .rec-kv dd { margin: 0; }
 .dz-sbody .rec-lede { font-size: var(--t-lg); }
-.dz-replay { border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); }
+.dz-replay { margin-top: 16px; border: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); }
 .dz-replay > summary { padding: 8px 14px; cursor: pointer; font-size: var(--t-md); color: var(--muted); }
 .dz-replay[open] > summary { border-bottom: 1px solid var(--line); }
 .dz-replay .rec-scrub { border: 0; }
@@ -143,3 +143,6 @@
 .dz-conv .osx-msg.is-user { align-self: flex-end; background: var(--accent-soft); border-color: var(--accent); }
 .dz-conv .osx-msg.is-update { border: 0; background: none; padding: 0; max-width: 100%; }
 .dz-conv .osx-who { font: 600 11px var(--mono); color: var(--ink3); margin-bottom: 2px; }
+
+/* a long text value in a stat tile (prototype .v.txtv): smaller, one line */
+.stat .v .txtv-in { display: block; font-size: 19px; line-height: 31px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

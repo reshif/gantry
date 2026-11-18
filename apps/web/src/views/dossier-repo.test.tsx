@@ -20,6 +20,10 @@ describe("Repo dossier (prototype Dossier screen)", () => {
     for (const c of ["Repo", "Lang", "Tags", "Open WOs", "Status"]) expect((await screen.findAllByText(c)).length).toBeGreaterThan(0);
     expect(document.getElementById("dos-q")).toBeTruthy();
     expect(document.getElementById("dos-f-lang")).toBeTruthy();
+    expect(document.getElementById("dos-f-project")).toBeTruthy();
+    expect((document.getElementById("dos-q") as HTMLInputElement).placeholder).toBe("Search…");
+    expect(document.querySelector(".kicker")?.textContent).toMatch(/GNT-DOS-13/);
+    expect(await screen.findByText(/^1–\d+ of \d+$/)).toBeTruthy();
     const link = await screen.findByRole("link", { name: REPOS[0]!.name });
     fireEvent.click(link);
     await waitFor(() => expect(window.location.hash).toContain(`dossier/${REPOS[0]!.id}`));

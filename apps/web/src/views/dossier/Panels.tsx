@@ -76,14 +76,14 @@ export function GatesPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
   const def = (k: string) => cat.gates.find((x) => x.id === k);
   const cols: Col<(typeof rows)[number]>[] = [
     { key: "k", label: "Gate", render: (g) => <span className="pri-cell"><b className="mono">{g.k}</b><span className="sub">{def(g.k)?.name}</span></span> },
-    { key: "kind", label: "Kind", render: (g) => { const k = def(g.k)?.kind; return k === "auto" ? "Automatic" : k ? k[0]!.toUpperCase() + k.slice(1) : ""; } },
+    { key: "kind", label: "Kind", render: (g) => def(g.k)?.kind ?? "" },
     { key: "s", label: "Status", render: (g) => <Chip text={g.status} cls={g.status === "passed" ? "ok" : g.status === "waiting" ? "warn" : g.status === "failed" ? "bad" : "plain"} /> },
-    { key: "by", label: "Decided by", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? actor(d.by).name : g.decision?.mode === "trust" ? "Under trust" : "—"; } },
+    { key: "by", label: "Decided by", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? actor(d.by).name : g.decision?.mode === "auto" ? "Automatic" : g.decision?.mode === "trust" ? "Under trust" : "—"; } },
     { key: "at", label: "When", render: (g) => { const d = g.approvals[0] ?? g.rejections[0]; return d ? ago(d.at) : "—"; } },
   ];
   return (
     <Panel title="Gate decisions" flush>
-      <DataTable id="dz-gates" caption={`Gate decisions for ${wo.id}`} columns={cols} rows={rows} rowKey={(g) => g.k} pageSize={20} />
+      <DataTable id="dz-gates" caption={`Gate decisions for ${wo.id}`} columns={cols} rows={rows} rowKey={(g) => g.k} pageSize={20} range />
     </Panel>
   );
 }
@@ -101,7 +101,7 @@ export function RunsPanel({ wo, cat }: { wo: TWo; cat: Catalog }) {
   ];
   return (
     <Panel title="Station runs" flush>
-      <DataTable id="dz-runs" caption={`Station runs for ${wo.id}`} columns={cols} rows={wo.history} rowKey={(x) => `${x.station}-${x.startedAt}`} pageSize={20} />
+      <DataTable id="dz-runs" caption={`Station runs for ${wo.id}`} columns={cols} rows={wo.history} rowKey={(x) => `${x.station}-${x.startedAt}`} pageSize={20} range />
     </Panel>
   );
 }

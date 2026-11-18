@@ -133,7 +133,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
   };
   const iso = (t: number | undefined | null) => (t ? new Date(t).toISOString() : null);
   // --- group wo: the changes read carries the seed's commits (sha, message, author, at) so the Changes page lists them as the prototype does
-  const changesOf = (w: Seed) => ({ pullRequests: [], commits: (w.commits ?? []).map((c: Seed) => ({ sha: c.hash, message: c.message, author: c.agent, at: new Date(c.at).toISOString() })), files: w.files ?? [], patches: [] });
+  const changesOf = (w: Seed) => ({ pullRequests: [], commits: (w.commits ?? []).map((c: Seed) => ({ sha: c.hash, message: c.message, author: c.agent, at: new Date(c.at).toISOString(), files: ((c.files ?? []) as string[]).map((path) => { const f = (w.files ?? []).find((x: Seed) => x.path === path); return { path, status: f?.status ?? "modified", plus: f?.plus ?? 0, minus: f?.minus ?? 0 }; }) })), files: w.files ?? [], patches: [] });
   // --- end group wo
   const recordOf = (w: Seed) => ({
     id: w.id, version: 7, project: w.project, repo: w.repo, title: w.title, state: w.state,

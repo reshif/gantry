@@ -24,7 +24,8 @@ describe("Work order page", () => {
   it("puts the title, route and actions in the header and the document and activity in tabs", async () => {
     await show();
     expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
-    expect(screen.getByRole("list", { name: new RegExp(`Route of ${W.id}`) })).toBeTruthy();
+    // the prototype has no route disclosure between the chips and the tabs
+    expect(screen.queryByText(/Route of this work order/i)).toBeNull();
     expect(screen.getByRole("tab", { name: "Document" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: /^Activity/ }).getAttribute("aria-selected")).toBe("false");
     // Traveler and Changes sit beside the decision; everything else is in one Actions menu
@@ -49,6 +50,7 @@ describe("Work order page", () => {
     expect(items[2]).toMatch(/Send back/);
     expect(items[3]).toMatch(/Park in a bay|Resume/);
     expect(items[items.length - 1]).toMatch(/Kill work order/);
+    expect(items).toHaveLength(5);
     expect(items.some((t) => /Open conversation|Copy link|Halt repo/.test(t))).toBe(false);
   });
 
@@ -105,14 +107,55 @@ describe("Work order page: links, viewers and kills", () => {
   it("degrades cleanly for a viewer without access to the conversation", async () => {
     await show({ [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ status: 403, body: { ok: false, msg: "No access." } }) });
     expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
-    expect(document.getElementById("dz-docs")).toBeTruthy();
     expect(document.getElementById("dz-head")?.textContent).not.toMatch(/is next/);
   });
 
-  it("keeps the station documents and the export reachable behind one secondary section", async () => {
+  it("keeps the station documents and the export behind ?full=1 (opened by Open full record), not in the prototype's Document tab", async () => {
     await show();
+    expect(document.getElementById("dz-docs")).toBeNull();
+    expect(document.getElementById("rec-copy")).toBeNull();
+    cleanup();
+    await show({}, `#record/${W.id}?full=1`);
     expect(document.getElementById("dz-docs")?.querySelector("summary")?.textContent).toMatch(/Station documents/);
     expect(document.getElementById("rec-copy")).toBeTruthy();
+  });
+
+  it("labels the decline button Reject and asks for a note on Approve and a reason on Reject (prototype dialogs)", async () => {
+    await show();
+    const reject = screen.getByRole("button", { name: "Reject" });
+    expect(screen.queryByRole("button", { name: /Decline/ })).toBeNull();
+    fireEvent.click(document.getElementById("trv-approve") as HTMLElement);
+    expect(await screen.findByLabelText(/Note \(optional\)/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByLabelText(/Note \(optional\)/)).toBeNull());
+    fireEvent.click(reject);
+    expect(await screen.findByText(/Say what must change\./)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject and park" })).toBeTruthy();
+  });
+
+  it("opens the Edit title and Change priority dialogs from the Actions menu", async () => {
+    await show();
+    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Edit title/ }));
+    expect(await screen.findByLabelText(/Title/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByLabelText(/^Title/)).toBeNull());
+    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Change priority/ }));
+    expect(await screen.findByLabelText(/Priority/)).toBeTruthy();
+  });
+
+  it("opens the Send back dialog from the Actions menu", async () => {
+    await show();
+    fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Send back to a station/ }));
+    expect(await screen.findByLabelText(/Note for the agent/)).toBeTruthy();
+  });
+
+  it("shows gate kinds in lower case with the 1-n of N footer", async () => {
+    await show({}, `#record/${W.id}?tab=gates`);
+    expect(await screen.findByText(/^1–\d+ of \d+$/)).toBeTruthy();
+    expect(screen.queryByText("Human")).toBeNull();
   });
 });
 
@@ -125,6 +168,15 @@ describe("Changes page", () => {
     expect(document.getElementById("chg-back")).toBeNull();
     expect(document.querySelector(".kicker")?.textContent).not.toMatch(/CHG-14/);
     expect(document.querySelector(".kicker a[href*='record']")).toBeTruthy();
+    // no old-format "full change review" disclosure under the prototype's panels
+    expect(document.getElementById("chg-full")).toBeNull();
+  });
+
+  it("does not crash on a commit that lists no files (record with a PR)", async () => {
+    mockApi({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/changes`]: () => ({ body: { pullRequests: [], commits: [{ sha: "abc1234", message: "m", author: null, at: null }], files: [], patches: [] } }) });
+    window.location.hash = `#record/${W.id}?full=1`;
+    mount(<RecordView />);
+    expect(await screen.findByText("Completeness", {}, { timeout: 4000 })).toBeTruthy();
   });
 
   it("shows the prototype's empty state for a work order that does not exist", async () => {
@@ -143,6 +195,9 @@ describe("Changes page", () => {
     expect(await screen.findByText("1 change", {}, { timeout: 4000 })).toBeTruthy();
     expect(document.getElementById("chg-q")).toBeTruthy();
     expect(document.getElementById("chg-f-checks")).toBeTruthy();
+    expect((document.getElementById("chg-q") as HTMLInputElement).placeholder).toBe("Search…");
+    expect(document.querySelector(".kicker")?.textContent).toMatch(/GNT-CHG-14/);
+    expect(await screen.findByText(/^1–1 of 1$/)).toBeTruthy();
     expect(await screen.findByText(W.id)).toBeTruthy();
     for (const c of ["Work order", "Repo", "PR", "Checks", "Diff", "Files"]) expect(screen.getAllByText(c).length).toBeGreaterThan(0);
   });

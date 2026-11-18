@@ -9,6 +9,7 @@ import { makeStopActions } from "../../shell/stopActions";
 import { useCatalog } from "../projects/kit";
 import { useProjectRepos } from "../floor/kit";
 import { ReclassifyDialog } from "../work-orders/intake";
+import { ApproveGateDialog, RejectGateDialog } from "../record/GateDialogs";
 import { ParkDialog, ReassignDialog, SendBackDialog } from "./Dialogs";
 import { bayLabel, dec, isClosed, no, ok, stName, type TDecision, type TWo } from "./model";
 
@@ -63,43 +64,44 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
       key: "approve",
       label: page ? "Approve" : g.id === "G0G1" ? "Confirm brief" : g.id === "G6" ? "Confirm release" : `Approve ${g.label}`,
       kind: "primary",
-      icon: g.id === "G6" ? "rocket" : "check",
+      icon: page ? "" : g.id === "G6" ? "rocket" : "check",
       id: "trv-approve",
       guard: dA,
       group: "decide",
       ...(!dA.allowed ? { why: `${dA.reason}${dA.needs ? ` Needs: ${dA.needs}.` : ""}` } : {}),
       onClick: () => {
         const run = () => void (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm)).then((r) => res(r));
-        // the work order page asks first (prototype Approve dialog, with the gate's purpose); the drawer decides in one press
+        // the work order page asks first (prototype Approve dialog: the gate's purpose and an optional note); the drawer decides in one press
         if (!page) return run();
-        void ui.confirm({ title: `Approve ${g.label} for ${wo.id}`, body: g.purpose, ok: "Approve" }).then((yes) => yes && run());
+        void ui.open((close) => <ApproveGateDialog wo={wo} gate={g} guard={dA} run={(note) => (g.id === "G0G1" ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, g.id, ap.instance, undefined, ifm, note || undefined))} onClose={close} />);
       },
     });
     const dR: TDecision = g.id === "G0G1" ? (stop ? no(stopWhy) : dec(wo, "decline")) : ap;
     out.push({
       key: "reject",
-      label: g.id === "G0G1" ? "Decline" : page ? "Reject" : `Reject ${g.label}`,
+      label: page ? "Reject" : g.id === "G0G1" ? "Decline" : `Reject ${g.label}`,
       ...(page ? { kind: "danger" } : {}),
-      icon: "x",
+      icon: page ? "" : "x",
       id: "trv-reject",
       guard: dR,
       group: "decide",
-      onClick: () =>
+      onClick: () => {
+        if (page) return void ui.open((close) => <RejectGateDialog wo={wo} gate={g} guard={dR} run={(v) => (g.id === "G0G1" ? ops.decline(wo.id, v, undefined, ifm) : ops.rejectGate(wo.id, g.id, ap.instance, v, undefined, ifm))} onClose={close} />);
         ui.reasonDialog({
-          title: page ? `${g.id === "G0G1" ? "Decline" : `Reject ${g.label}`} for ${wo.id}` : `${g.id === "G0G1" ? "Decline " : `Reject ${g.label} on `}${wo.id}`,
-          ...(page ? { label: "Reason (required)" } : {}),
+          title: `${g.id === "G0G1" ? "Decline " : `Reject ${g.label} on `}${wo.id}`,
           kicker: `${g.label} ${g.name}`,
           ok: g.id === "G0G1" ? "Decline" : "Reject",
           kind: "danger",
-          min: page ? 8 : 5,
+          min: 5,
           sub: g.id === "G0G1" ? "The work order moves to Declined and the submitter is told why." : `The station's agent reworks ${stName(cat, stationId)} with your reason.`,
-          placeholder: g.id === "G0G1" ? "Why will the factory not do this?" : page ? "Say what must change." : "What must change before this passes?",
+          placeholder: g.id === "G0G1" ? "Why will the factory not do this?" : "What must change before this passes?",
           onOk: async (v) => {
             const r = g.id === "G0G1" ? await ops.decline(wo.id, v, undefined, ifm) : await ops.rejectGate(wo.id, g.id, ap.instance, v, undefined, ifm);
             if (r.ok) ui.toast(r.msg, "ok");
             return r;
           },
-        }),
+        });
+      },
     });
   }
   void approveGate;

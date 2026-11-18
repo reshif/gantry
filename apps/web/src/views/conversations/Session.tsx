@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WoCard } from "@gantry/domain";
 import { fmt, isBriefScaffold } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { Btn, Chip, Who } from "../../ui/primitives";
+import { Avatar, Btn, Chip, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -26,6 +26,8 @@ import { ResearchPlanCard } from "../documents/Research";
 import { LiveRun, RunTimelineView } from "../documents/Timeline";
 import { GateNotes, ObjectionCard, SwarmBoard } from "../documents/Swarm";
 import { navigate } from "../../lib/router";
+import { fmtDate, plainName } from "../dossier/time";
+import { useActors } from "../../ui/actors";
 import { createThread, useWsAgents } from "../workspace/api";
 import { mentionChoices, mentionOf, queueAsk } from "../workspace/mention";
 
@@ -227,6 +229,7 @@ function SideDialogue({ s }: { s: WoSession }) {
 export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean }) {
   const q = useWoSession(woId);
   const s = q.data;
+  const actor = useActors();
   const ui = useUI();
   const openTraveler = useOpenTraveler();
   const openRecord = useOpenRecordRoute();
@@ -277,7 +280,7 @@ export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; ba
     : { cls: "is-live", text: s.waiting?.text ?? s.next.text };
   const placeholder = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not act on this work order."} Type @ to ask an agent in a side thread.` : ruleBased ? "Reply to the scripted question (rule-based, no agent)" : `Message ${agentName}, or type @ to ask another agent in a side thread or to mention a person`;
   // a station's message carries its agent's id: show the agent's name, as everywhere else
-  const tag = (m: WoSessionMessage) => (m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
+  const tag = (m: WoSessionMessage) => (bare && m.role === "user" ? plainName(actor(m.author).name) : m.role === "user" ? <Who id={m.author} /> : m.data.mode === "legacy" ? "Intake Clerk (scripted)" : m.author === "system" ? "Gantry" : m.data.kind === "station" ? <Who id={m.author} /> : (m.data.agent ?? agentName));
 
   return (
     <div className={`osx wos${bare ? " is-bare" : ""}`} id="wos" data-wo={s.woId}>
@@ -293,18 +296,19 @@ export function WoSessionPage({ woId, back, embedded, bare }: { woId: string; ba
       </div>}
       <div className="osx-grid">
         <section className="osx-main" aria-label={`Conversation ${s.woId}`}>
-          <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite">
+          {bare && !live ? null : <div className={`wos-status ${status.cls}`} id="wos-status" role="status" aria-live="polite">
             <span className="wos-dot" aria-hidden="true" />
             <span>{status.text}</span>
             {(s.next.actor === "you" && !live) || s.next.text === status.text ? null : <span className="muted small">{` · ${s.next.text}`}</span>}
-          </div>
-          <div className="osx-thread" role="log" aria-live="polite" ref={thread}>
-            {s.messages.map((m, i) => (
-              <div key={m.id}>
+          </div>}
+          <div className={`osx-thread${bare ? " chat" : ""}`} role="log" aria-live="polite" ref={thread}>
+            {(bare ? s.messages.slice(-8) : s.messages).map((m, i) => (
+              <div key={m.id} className={bare ? `msg${m.role === "user" ? " me" : ""}` : undefined}>
+                {bare && m.data.kind !== "update" ? <Avatar id={m.author} /> : null}
                 {i === 0 && m.data.mode === "legacy" ? <p className="small muted wos-legacy-h">Earlier: the scripted intake questions</p> : null}
                 {i === firstSession && firstSession > 0 ? <p className="small muted wos-legacy-h">The conversation with {agentName}</p> : null}
-                <div className={`osx-msg is-${m.role}${m.data.kind === "update" ? " is-update" : ""}${m.data.mode === "legacy" ? " is-legacy" : ""}`}>
-                  {m.data.kind === "update" ? null : <div className="osx-who small strong">{tag(m)}{m.data.mode === "rule-based" ? <span className="muted"> · rule-based</span> : null}</div>}
+                <div className={`${bare ? "bub " : ""}osx-msg is-${m.role}${m.data.kind === "update" ? " is-update" : ""}${m.data.mode === "legacy" ? " is-legacy" : ""}`}>
+                  {m.data.kind === "update" ? null : <div className={bare ? "who" : "osx-who small strong"}>{tag(m)}{bare ? ` · ${fmtDate(m.at)}` : ""}{m.data.mode === "rule-based" ? <span className="muted"> · rule-based</span> : null}</div>}
                   {m.data.kind === "update" ? <p className="osx-event small"><span className="muted">{fmt.stamp(m.at)}</span> {m.text}</p>
                     : m.data.kind === "answer" ? <AnswerText m={m} s={s} />
                     : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
