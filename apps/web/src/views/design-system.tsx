@@ -91,7 +91,7 @@ function ExampleForm({ box }: { box: { name: string; setErr: (e: string) => void
   box.setErr = setErr;
   return (
     <Field label={<>Name<span className="muted"> (required)</span></>} error={err || undefined}>
-      <TextInput id="ds-dlg-name" aria-required="true" value={name} onChange={(v) => { setName(v); box.name = v; if (v.trim()) setErr(""); }} />
+      <TextInput id="ds-dlg-name" aria-required="true" value={name} onChange={(e) => { const v = e.target.value; setName(v); box.name = v; if (v.trim()) setErr(""); }} />
     </Field>
   );
 }
@@ -199,7 +199,7 @@ function Gallery({ sc }: { sc: string }) {
       </Panel>
       <Panel title="Form fields">
         <Field label={<>Title<span className="muted"> (required)</span></>} hint="Helper text sits under the field." error={titleErr || undefined}>
-          <TextInput id={`ds-title-${sc}`} aria-required="true" value={title} onChange={(v) => { setTitle(v); if (v.trim()) setTitleErr(""); }} />
+          <TextInput id={`ds-title-${sc}`} aria-required="true" value={title} onChange={(e) => { const v = e.target.value; setTitle(v); if (v.trim()) setTitleErr(""); }} />
         </Field>
         <Field label="Priority">
           <Select id={`ds-prio-${sc}`} value="P0" options={["P0", "P1", "P2"]} />

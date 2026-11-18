@@ -64,10 +64,12 @@ describe("signed out", () => {
   it("shows the sign-in screen with SSO and GitHub, and no demo accounts by default", async () => {
     mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Sign in.", config: { demoAccounts: false } } }) });
     render(<App />);
-    await screen.findByText("Continue with SSO");
-    expect(screen.getByText("Continue with GitHub")).toBeTruthy();
+    await screen.findByText("Continue with Okta SSO");
+    expect(screen.queryByText("Continue with GitHub")).toBeNull(); // only when Security settings turn it on
     expect(screen.queryByText(/Demo accounts/)).toBeNull();
-    expect(document.querySelector("main.signin .panel")).toBeTruthy();
+    expect((screen.getByLabelText("Password") as HTMLInputElement).disabled).toBe(false);
+    expect(document.querySelector("svg.brand-mark circle")).toBeTruthy();
+    expect(screen.getByLabelText("Work email")).toBeTruthy();
   });
 
   it("shows the guided two-step setup screen when the server says a Factory Admin needs a second factor", async () => {
@@ -111,13 +113,22 @@ describe("signed out", () => {
   });
 
   it("SSO and GitHub buttons go to /auth/login with the method", async () => {
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "x", config: { demoAccounts: false, githubLogin: true } } }) });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign, hash: "", search: "" });
+    render(<App />);
+    fireEvent.click(await screen.findByText("Continue with GitHub"));
+    expect(assign.mock.calls).toEqual([["/auth/login?method=github"]]);
+  });
+
+  it("the Sign in form sends the work email to the identity provider as a login hint", async () => {
     mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "x" } }) });
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign, hash: "", search: "" });
     render(<App />);
-    fireEvent.click(await screen.findByText("Continue with SSO"));
-    fireEvent.click(screen.getByText("Continue with GitHub"));
-    expect(assign.mock.calls).toEqual([["/auth/login?method=sso"], ["/auth/login?method=github"]]);
+    fireEvent.change(await screen.findByLabelText("Work email"), { target: { value: "asha@acme.dev" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(assign.mock.calls).toEqual([["/auth/login?login_hint=asha%40acme.dev"]]);
   });
 });
 

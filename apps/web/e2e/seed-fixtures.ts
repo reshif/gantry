@@ -7,7 +7,6 @@
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Me } from "../src/api/types";
 import type { Persona } from "./fixtures";
-import { DEFAULT_CATALOG } from "@gantry/domain";
 import { projOnboarding } from "./proj-fixtures";
 
 type Seed = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any

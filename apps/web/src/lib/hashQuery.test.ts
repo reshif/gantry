@@ -6,8 +6,8 @@ afterEach(() => { window.history.replaceState(null, "", "/"); });
 
 describe("prototype-style links carry page state after the hash route", () => {
   it("#/inbox?tab=stuck is the inbox route, not a route named 'inbox?tab=stuck'", () => {
-    expect(parseHash("#/inbox?tab=stuck")).toEqual({ id: "inbox", param: null, project: null });
-    expect(parseHash("#/p/payments/work-orders?station=build")).toEqual({ id: "work-orders", param: null, project: "payments" });
+    expect(parseHash("#/inbox?tab=stuck")).toEqual({ id: "inbox", param: null, project: null, q: expect.any(Object) });
+    expect(parseHash("#/p/payments/work-orders?station=build")).toEqual({ id: "work-orders", param: null, project: "payments", q: expect.any(Object) });
   });
 
   it("writing a key removes it from the hash query so the new value wins", () => {

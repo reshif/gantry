@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InboxView from "./inbox";
 import WorkspaceView from "./workspace";

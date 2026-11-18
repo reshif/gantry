@@ -164,7 +164,7 @@ button.mseg:hover, button.mseg:focus-visible { box-shadow: inset 0 0 0 2px var(-
 .dtable-scroll { overflow-x: auto; max-width: 100%; }
 .th-sort { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; display: inline-flex; gap: 4px; cursor: pointer; }
 .th-sort.is-active { color: var(--ink); }
-.th-arrow { min-width: 8px; }
+.th-arrow { min-width: 8px; margin-left: 4px; }
 .dtable-more { padding: var(--s2) 0; }
 @media (max-width: 640px) {
   /* the visually hidden header stays in the accessibility tree but nothing in it may reach past the viewport */
@@ -229,3 +229,4 @@ button.mseg:hover, button.mseg:focus-visible { box-shadow: inset 0 0 0 2px var(-
   .titleblock > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .titleblock > div:last-child, .titleblock > div:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
 }
+.vhead .crumb > span[aria-hidden="true"], .vhead nav.kicker > span[aria-hidden="true"] { margin: 0 .4em; }

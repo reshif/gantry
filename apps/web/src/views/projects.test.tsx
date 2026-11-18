@@ -574,7 +574,7 @@ describe("Project config", () => {
     tab("repos");
     mount(<ProjectConfigView />);
     const a = await waitFor(() => { const x = document.querySelector<HTMLAnchorElement>("#pcf-repos a.pri, .list a.pri"); if (!x) throw new Error("no link"); return x; });
-    expect(a.getAttribute("href")).toBe("#dossier/payments-api");
+    expect(a.getAttribute("href")).toBe("#/p/payments/dossier/payments-api");
     expect(a.closest("li")?.textContent).toMatch(/Go\s*active/i);
   });
 

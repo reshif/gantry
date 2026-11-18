@@ -9,7 +9,7 @@ import { useMe } from "../../api/queries";
 import type { WoCard } from "@gantry/domain";
 import { fmt, isBriefScaffold } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { Avatar, Btn, Chip, Who } from "../../ui/primitives";
+import { Avatar, Btn, Chip, Empty, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { useActors } from "../../ui/actors";
 import { Icon } from "../../ui/Icon";
@@ -29,7 +29,6 @@ import { LiveRun, RunTimelineView } from "../documents/Timeline";
 import { GateNotes, ObjectionCard, SwarmBoard } from "../documents/Swarm";
 import { navigate } from "../../lib/router";
 import { fmtDate, plainName } from "../dossier/time";
-import { useActors } from "../../ui/actors";
 import { createThread, useWsAgents } from "../workspace/api";
 import { mentionChoices, mentionOf, queueAsk } from "../workspace/mention";
 

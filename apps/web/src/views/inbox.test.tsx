@@ -13,17 +13,6 @@ const GATE = { wo: "WO-2398", title: "Add idempotency keys", gate: "G2", gateLab
 const ONB = { repo: "r1", repoName: "search-service", pr: 3, project: "payments", projectName: "Payments Platform" };
 const CONV = { wo: "WO-2407", title: "Support partial refunds", project: "payments", question: "Which currency?" };
 const home = (sections: Record<string, unknown>) => ({ approvals: [], conversations: [], badges: {}, sections });
-const approvers = {
-  label: "Spec approved",
-  rule: { text: "Two approvers from Reviewer or Approver, not the requester.", conditions: [] },
-  progress: { have: 1, need: 2, approvals: [{ name: "Meera Iyer" }], unmet: [] },
-  satisfiable: true,
-  warning: "",
-  eligible: [{ id: "p1", name: "Grace Liu", why: "Approver" }],
-  overrides: [],
-  viewerCanOverride: false,
-  can: { editRule: true, editWhy: "", grantRole: true, grantWhy: "" },
-};
 const traveler = (allowed: boolean) => ({ id: "WO-2398", project: "payments", allowed: { approve: { gate: "G2", instance: "WO-2398:G2:3", allowed, reason: allowed ? "" : "You wrote this work order; someone else must approve.", needs: "" } } });
 
 describe("Inbox", () => {

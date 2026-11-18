@@ -3,7 +3,7 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { Children, Fragment, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
@@ -384,15 +384,16 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, cru
   // the scope key follows the page: a project page shows that project, a factory page shows the chosen scope
   const prefs = usePrefs();
   const key = isProjectRoute(route) ? me?.projects.find((p) => p.id === loc.project)?.key : (prefs.scopeAll ? undefined : me?.projects.find((p) => p.id === prefs.project)?.key);
+  const Eyebrow = (crumbs ? "nav" : "div") as "div";
   return (
     <header className="ph vhead">
       <div className="title vhead-main">
-        <div className="eyebrow kicker">
+        <Eyebrow className="eyebrow kicker" {...(crumbs ? { "aria-label": "Breadcrumb" } : {})}>
           {crumbs ? (
             crumbs.map((c, i) => (
               <span key={i} className="crumb">
-                {i ? <span aria-hidden="true">/ </span> : null}
-                {c.href ? <a href={c.href} onClick={c.onClick ? (e) => { e.preventDefault(); c.onClick?.(); } : undefined}>{c.label}</a> : <span>{c.label}</span>}
+                {i ? <span aria-hidden="true">/</span> : null}
+                {c.href ? <a href={c.href} onClick={c.onClick ? (e) => { e.preventDefault(); c.onClick?.(); } : undefined}>{c.label}</a> : <span aria-current="page">{c.label}</span>}
               </span>
             ))
           ) : (
@@ -402,8 +403,8 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, cru
               <span>{key ?? "ALL LINES"}</span>
             </>
           )}
-          {kicker && !crumbs ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
-        </div>
+          {kicker && !crumbs && kicker !== (key ?? "ALL LINES") ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
+        </Eyebrow>
         {status ? <div className="row vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
         {sub ? <p className="sub vsub">{sub}</p> : null}
         {meta ? (
@@ -470,11 +471,6 @@ export function SearchBox({ id, value, onChange, placeholder = "Search", label, 
       <input id={id} className="input" type="search" value={value} placeholder={placeholder} aria-label={label ?? placeholder} onChange={(e) => onChange(e.target.value)} />
     </label>
   );
-}
-
-/** A single-line text input (additive primitive so views carry no raw `<input>`); wrap it in `Field` for label, hint and error. */
-export function TextInput({ id, value, onChange, ...rest }: { id?: string; value: string; onChange?: (v: string) => void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value" | "id">) {
-  return <input id={id} className="input" type="text" autoComplete="off" value={value} onChange={(e) => onChange?.(e.target.value)} {...rest} />;
 }
 
 /** Prototype .panel: drafting corner marks, a header with the section number (counted by CSS per page), a body. */

@@ -53,8 +53,6 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   sortSelect?: boolean;
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
-  /** Additive: false hides the phone "Sort by" select (screens whose prototype has none). */
-  sortSelect?: boolean;
   pageSize?: number;
   /** With `pageSize`: the prototype's footer ("1–12 of 13", Prev / Page n / N / Next) instead of "Show more"; sortable headers carry the ↕ hint. Without `pageSize` it is only the count footer. */
   empty?: { title: string; text?: string; action?: ReactNode };
@@ -93,7 +91,6 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
     setShown(pageSize ?? 0);
     setPage(0);
   }
-  const [page, setPage] = useState(0);
   const [own1, setOwn1] = useState<string>("");
   const [overflow, setOverflow] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -149,7 +146,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const clientMore = !proto && !pager && !paged && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
-      {sortable.length && mobileSort && sortSelect && !noSortSelect && !proto && !blueprintSort ? (
+      {sortable.length && mobileSort && sortSelect && !noSortSelect && !proto && !blueprintSort && !sortHint ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
           <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>
@@ -165,16 +162,18 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
             <tr>
               {columns.map((c) => {
                 const active = cur?.key === c.key;
+                const tri = glyphs === "blueprint" || blueprintSort;
+                const hint = tri || sortHint || boolPager;
                 return (
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       proto ? (
                         <button type="button" id={prefix ? prefix + c.key : undefined} onClick={() => pick(c.key)}>
-                          {c.label}{active ? (cur!.dir > 0 ? " ▲" : " ▼") : <span className="sorthint" aria-hidden="true"> ↕</span>}
+                          {c.label}<span className={`th-arrow${active ? "" : " sorthint"}`} aria-hidden="true">{active ? (cur!.dir > 0 ? "▲" : "▼") : "↕"}</span>
                         </button>
                       ) : (
                         <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                          {c.label}<span className="th-arrow" aria-hidden="true">{glyphs === "blueprint" || blueprintSort ? (active ? (cur!.dir > 0 ? " ▲" : " ▼") : <span className="sorthint"> ↕</span>) : active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                          {c.label}<span className={`th-arrow${hint && !active ? " sorthint" : ""}`} aria-hidden="true">{active ? (cur!.dir > 0 ? (tri ? " ▲" : "↑") : (tri ? " ▼" : "↓")) : hint ? "↕" : ""}</span>
                         </button>
                       )
                     ) : c.label}
@@ -216,11 +215,11 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </tbody>
         </table>
       </div>
-      {range && !(clientMore || hasMore) ? (
+      {range && !size && !(clientMore || hasMore) ? (
         <div className="tfoot dtable-range"><span role="status">{`1–${visible.length} of ${total ?? rows.length}`}</span></div>
       ) : null}
       {size && !(paged && pages <= 1) ? (
-        <div className="tfoot dtable-more">
+        <div className="tfoot dtable-more dtable-pager">
           <span className="dtable-count" role="status">{`${pageAt * size + 1}–${pageAt * size + visible.length} of ${list.length}`}</span>
           {pages > 1 ? (
             <div className="row">
@@ -230,8 +229,6 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
             </div>
           ) : null}
         </div>
-      ) : range && !(clientMore || hasMore) ? (
-        <div className="tfoot dtable-range"><span role="status">{`1–${visible.length} of ${total ?? rows.length}`}</span></div>
       ) : clientMore || hasMore ? (
         <div className="tfoot dtable-more">
           <span className="dtable-count" role="status">{range ? `1–${visible.length} of ${total ?? rows.length}` : total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>

@@ -34,7 +34,7 @@ export const hashPath = (hash: string): string => (hash.includes("?") ? hash.sli
 export const hashQuery = (hash: string): string => (hash.includes("?") ? hash.slice(hash.indexOf("?")) : "");
 
 export function parseHash(hash: string): RouteLocation {
-  // `#/evals?tab=suites` (the prototype's form) is the same route as `#evals/suites`: a `tab` query is the param when no segment gives one
+  // `#/evals?tab=suites` (the prototype's form) is the same route as `#evals/suites`: on the evals, trust and learning sheets a `tab` query is the param when no segment gives one
   const full = hash.replace(/^#\/?/, "");
   const at = full.indexOf("?");
   const raw = at < 0 ? full : full.slice(0, at);
@@ -47,7 +47,7 @@ export function parseHash(hash: string): RouteLocation {
     [head = "", ...rest] = rest.slice(1);
   }
   let tail = rest.join("/");
-  if (!tail) tail = q.tab ?? "";
+  if (!tail && (head === "evals" || head === "trust" || head === "learning")) tail = q.tab ?? "";
   return { id: head, param: tail ? dec(tail) : null, project, q };
 }
 

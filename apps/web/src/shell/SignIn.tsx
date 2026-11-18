@@ -1,115 +1,134 @@
 /**
- * Sign-in screen (legacy auth.js). Sign-in is delegated to the identity provider: the buttons leave
- * the SPA for /auth/login. Demo accounts appear only when the API config says demoAccounts is on.
+ * Sign-in screen in the Blueprint prototype's markup: one centred card (main.signin > .panel). Sign-in is delegated to
+ * the identity provider: the buttons leave the SPA for /auth/login. Demo accounts appear only when the API config says
+ * demoAccounts is on. The card carries the prototype's Work email / Password fields: the email goes to the identity provider as a
+ * login hint, the password is asked by the provider itself (the API offers no password login: backend gap), so that field is shown disabled.
  */
 import { useState } from "react";
 import type { PublicConfig } from "../api/types";
 import { loginUrlWithReturn as loginUrl } from "../lib/session/returnTo";
 import { DEMO_ACCOUNTS } from "../lib/demo";
+import { applyTheme, updatePrefs, usePrefs } from "../lib/prefs";
 import { Icon } from "../ui/Icon";
-import { Btn, Field } from "../ui/primitives";
-import { applyTheme, usePrefs } from "../lib/prefs";
-import { BrandMark } from "./Nav";
+import { Btn, Field, TextInput } from "../ui/primitives";
+
+/** The prototype's brand mark: a framed grid square with the accent dot (brandMark() in js/shell.js). */
+function BrandMark() {
+  return (
+    <svg className="brand-mark" viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="var(--accent)" strokeWidth="1.8" aria-hidden="true">
+      <rect x="3" y="3" width="26" height="26" />
+      <path d="M3 12h26M3 20h26M12 3v26M20 3v26" strokeWidth=".8" opacity=".6" />
+      <circle cx="16" cy="16" r="5" fill="var(--accent)" />
+    </svg>
+  );
+}
+
+function Brand({ sub }: { sub: string }) {
+  return (
+    <div className="row" style={{ marginBottom: 16 }}>
+      <BrandMark />
+      <div>
+        <h1 style={{ fontSize: 22 }} id="auth-h">Gantry</h1>
+        <div className="micro">{sub}</div>
+      </div>
+    </div>
+  );
+}
+
+function ThemeBtn() {
+  const prefs = usePrefs();
+  const dark = prefs.theme === "dark" || (prefs.theme === "system" && typeof window !== "undefined" && !!window.matchMedia?.("(prefers-color-scheme: dark)").matches);
+  const next = dark ? "light" : "dark";
+  return <Btn small kind="ghost" id="auth-theme" icon={dark ? "moon" : "sun"} label="Theme" onClick={() => { updatePrefs({ theme: next }); applyTheme(next); }} />;
+}
 
 /** The guided screen for a Factory Admin whose sign-in had no second factor (the server answered `needs: "mfa_setup"`). */
 function MfaSetup() {
   const sp = new URLSearchParams({ mfa: "1" });
   if (window.location.hash.length > 1) sp.set("return_to", `/${window.location.hash}`);
   return (
-    <section className="panel auth-panel" aria-labelledby="mfa-h" id="auth-mfa">
-      <div className="body stack">
-      <div>
-        <h1 className="auth-h" id="mfa-h">Set up two-step sign-in</h1>
-        <p className="muted auth-sub">Factory Admins can stop the line and change who may do what, so they sign in with a password and a one-time code.</p>
-      </div>
-      <ol className="auth-steps">
+    <div id="auth-mfa" aria-labelledby="auth-h" role="region">
+      <Brand sub="SOFTWARE FACTORY · TWO-STEP SIGN-IN" />
+      <h2 className="auth-h" id="mfa-h" style={{ fontSize: 16, marginBottom: 6 }}>Set up two-step sign-in</h2>
+      <p className="muted small">Factory Admins can stop the line and change who may do what, so they sign in with a password and a one-time code.</p>
+      <ol className="auth-steps" style={{ margin: "12px 0" }}>
         <li>Install an authenticator app on your phone (any app that makes six-digit codes).</li>
         <li>Continue below and sign in. Your identity provider shows a QR code the first time: scan it and enter the code it gives you.</li>
         <li>Next time, you enter the code from the app after your password.</li>
       </ol>
-      <Btn label="Set up and sign in" kind="primary" id="auth-mfa-go" icon="key" onClick={() => window.location.assign(`/auth/login?${sp.toString()}`)} />
-      <p className="muted small">If you have lost your authenticator app, ask another Factory Admin or your identity provider's administrator to reset it.</p>
-      </div>
-    </section>
+      <Btn label="Set up and sign in" kind="primary" id="auth-mfa-go" icon="key" cls="block" onClick={() => window.location.assign(`/auth/login?${sp.toString()}`)} />
+      <p className="muted small" style={{ marginTop: 12 }}>If you have lost your authenticator app, ask another Factory Admin or your identity provider's administrator to reset it.</p>
+      <div className="row" style={{ marginTop: 8 }}><ThemeBtn /></div>
+    </div>
   );
 }
 
 export function SignIn({ config, error, needs }: { config: PublicConfig | null; error?: string | null; needs?: string | null }) {
-  const [email, setEmail] = useState("");
   const demo = !!config?.demoAccounts;
-  const prefs = usePrefs();
   const accounts = config?.demoAccountList?.length ? config.demoAccountList : DEMO_ACCOUNTS;
-  const go = (method: "sso" | "github") => window.location.assign(loginUrl(method));
-  const dark = prefs.theme === "dark" || (prefs.theme === "system" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
+  const [pending, setPending] = useState<"sso" | "github" | null>(null);
+  const [email, setEmail] = useState(() => (config?.demoAccounts ? (config.demoAccountList?.[0]?.email ?? DEMO_ACCOUNTS[0]?.email ?? "") : ""));
+  const [password, setPassword] = useState("");
+  const go = (method: "sso" | "github") => { setPending(method); window.location.assign(loginUrl(method)); };
   return (
-    <main id="auth" className="auth signin">
-      {needs === "mfa_setup" ? <MfaSetup /> : (
-        <section className="panel" aria-labelledby="auth-h">
+    <>
+      <a className="skip" href="#main">Skip to content</a>
+      <main className="signin" id="main">
+        <form className="panel" style={{ width: "min(420px,100%)" }} onSubmit={(e) => { e.preventDefault(); if (needs !== "mfa_setup" && !pending) { setPending("sso"); window.location.assign(loginUrl("sso", email.trim() || undefined)); } }}>
           <div className="body">
-            <div className="row" style={{ marginBottom: 16 }}>
-              <BrandMark />
-              <div>
-                <h1 id="auth-h" style={{ fontSize: 22 }}>Gantry</h1>
-                <div className="micro">SOFTWARE FACTORY · SIGN-IN SHEET</div>
-              </div>
-            </div>
-            {error ? (
-              <div className="callout callout-block" role="alert">
-                <Icon name="alert" />
-                <span>{error}</span>
-              </div>
-            ) : null}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                // the identity provider asks for the password: the work email travels as its login hint
-                window.location.assign(loginUrl("sso", email.trim() || undefined));
-              }}
-            >
-              <Field label="Work email" htmlFor="auth-email">
-                <input id="auth-email" className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
-              </Field>
-              <Btn label="Sign in" kind="primary" id="auth-sso-go" type="submit" cls="block" />
-            </form>
-            <div className="row auth-or" style={{ margin: "12px 0" }}>
-              <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
-              <span className="small muted">or</span>
-              <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
-            </div>
-            <Btn label="Continue with SSO" id="auth-sso" cls="block" onClick={() => go("sso")} />
-            {config?.githubLogin === false ? null : <Btn label="Continue with GitHub" kind="ghost" id="auth-gh" icon="github" cls="block" onClick={() => go("github")} />}
-            <p className="small muted" style={{ marginTop: 12 }}>MFA is required for admins.</p>
-            {demo ? (
-              <div className="auth-demo">
-                <h2 className="auth-demo-h micro">Demo accounts · one click, development only</h2>
-                <ul className="demo-list">
-                  {accounts.map((d) => (
-                    <li key={d.id}>
-                      <a className="demo-acc" id={`demo-${d.id}`} href={loginUrl("sso", d.email)}>
-                        <span className="av av-person av-sm" aria-hidden="true">
-                          {d.name
-                            .split(" ")
-                            .map((w) => w[0] ?? "")
-                            .join("")
-                            .slice(0, 2)}
-                        </span>
-                        <span className="demo-main">
-                          <strong>{d.name}</strong>
-                          <span className="muted small">{`${d.role} · ${d.note}`}</span>
-                        </span>
-                        <Icon name="chevron" />
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <div className="row" style={{ marginTop: 8 }}>
-              <Btn kind="ghost" small icon={dark ? "moon" : "sun"} label="Theme" onClick={() => applyTheme(dark ? "light" : "dark")} />
-            </div>
+            {needs === "mfa_setup" ? <MfaSetup /> : (
+              <>
+                <Brand sub="SOFTWARE FACTORY · SIGN-IN SHEET" />
+                {error ? (
+                  <div className="callout bad" role="alert" style={{ marginBottom: 12 }}>
+                    <b>Sign-in failed</b>
+                    {error}
+                  </div>
+                ) : null}
+                <Field label="Work email">
+                  <TextInput id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" placeholder="you@company.com" />
+                </Field>
+                <Field label="Password">
+                  <TextInput id="auth-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+                </Field>
+                <Btn label={pending === "sso" ? "Opening your identity provider..." : "Sign in"} kind="primary" type="submit" id="auth-sso-go" cls="block" disabledReason={pending ? "Signing in" : null} />
+                <div className="row" style={{ margin: "12px 0" }}>
+                  <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
+                  <span className="small muted">or</span>
+                  <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
+                </div>
+                <Btn label="Continue with Okta SSO" id="auth-sso" cls="block" disabledReason={pending ? "Signing in" : null} onClick={() => go("sso")} />
+                {config?.githubLogin === true ? <Btn label="Continue with GitHub" id="auth-gh" cls="block" disabledReason={pending ? "Signing in" : null} onClick={() => go("github")} /> : null}
+                {demo ? (
+                  <div className="auth-demo" style={{ marginTop: 12 }}>
+                    <h2 className="micro auth-demo-h">Demo accounts · development only</h2>
+                    <ul className="demo-list">
+                      {accounts.map((d) => (
+                        <li key={d.id}>
+                          <a className="demo-acc" id={`demo-${d.id}`} href={loginUrl("sso", d.email)}>
+                            <span className="av av-person av-sm" aria-hidden="true">
+                              {d.name.split(" ").map((w) => w[0] ?? "").join("").slice(0, 2)}
+                            </span>
+                            <span className="demo-main">
+                              <strong>{d.name}</strong>
+                              <span className="muted small">{`${d.role} · ${d.note}`}</span>
+                            </span>
+                            <Icon name="chevron" />
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                <p className="small muted" style={{ marginTop: 12 }}>
+                  MFA is required for admins.{demo ? " Development sign-in is on." : ""}
+                </p>
+                <div className="row" style={{ marginTop: 8 }}><ThemeBtn /></div>
+              </>
+            )}
           </div>
-        </section>
-      )}
-    </main>
+        </form>
+      </main>
+    </>
   );
 }

@@ -194,7 +194,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
           </div>
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: busy ? "Submitting…" : "Submit work order", kind: "primary", submit: true, id: "nwo-submit", guard: block ? { allowed: false, reason: block.reason, needs: block.needs } : null, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel", kind: "default" }, { label: busy ? "Submitting…" : "Submit work order", kind: "primary", submit: true, id: "nwo-submit", guard: block ? { allowed: false, reason: block.reason, needs: block.needs } : null, onClick: () => void submit() }]}
     />
   );
 }
