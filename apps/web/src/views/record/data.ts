@@ -2,11 +2,23 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Brief, BriefVersion, ConvMessage, Criterion, HistoryEntry, Outcome, Project, Sendback } from "@gantry/domain";
 import { api, get } from "../../api/client";
+import type { DiffRead } from "../../api/types";
 import { qk } from "../../api/keys";
 import { useProject } from "../../api/queries";
 import { useCatalog } from "../projects/kit";
 import { bayLabel, stName, useTravelerWo, type RawRecEvent, type TWo } from "../traveler/model";
 
+/** The Review agent's recorded verdict (record.review, and on the gate instance as basis.review). */
+export interface RecReview {
+  verdict: "approve" | "changes_requested" | "none";
+  reported?: string;
+  criteria: Array<{ criterion: string; result: "pass" | "fail" | "untested"; evidence: string }>;
+  findings: Array<{ severity: string; file: string; line: number | null; issue: string; fix: string }>;
+  notes: string;
+  sendBackTo?: string | null;
+  headSha?: string | null;
+  at?: number;
+}
 export interface RecGate {
   id: string;
   gate: string;
@@ -17,7 +29,7 @@ export interface RecGate {
   openedAt: string | null;
   closedAt: string | null;
   pinned: { flowVersion: number; ruleVersion: number | null; policyVersion: number | null };
-  basis: { checks?: Array<{ name: string; ok: boolean }>; required?: number; riskTags?: string[]; forcedHuman?: boolean };
+  basis: { checks?: Array<{ name: string; ok: boolean }>; required?: number; riskTags?: string[]; forcedHuman?: boolean; review?: RecReview };
   votes: Array<{ by: string; vote: string; comment: string; at: string | null; via: string; role: string | null }>;
   decision: { decision: string; decided_by: string | null; rule: string | null; trust_level: string | null; detail: { mode?: string; reason?: string; via?: string; reasonCode?: string; samplingReason?: string } | null; at: string } | null;
 }
@@ -65,6 +77,7 @@ export interface RecordData {
   criteria: Criterion[];
   journey: HistoryEntry[];
   gates: RecGate[];
+  review?: RecReview | null;
   sendbacks: Sendback[];
   bayStays: Array<{ bay: string; reason: string; by: string | null; from: string | null; to: string | null }>;
   attempts: Array<{ id: string; station: string; visit: number; fencing: number; state: string; outcome: string | null; startedAt: string | null; endedAt: string | null; agent: string | null }>;
@@ -86,6 +99,10 @@ export interface ChangesData {
 
 export function useRecordRead(id: string | null | undefined) {
   return useQuery({ queryKey: qk.record(id ?? ""), queryFn: () => get<RecordData>(api(`work-orders/${encodeURIComponent(id ?? "")}/record`)), enabled: !!id });
+}
+/** The stored patch text of the work order as one entry per file across its commits, with hunks and line numbers (GET /work-orders/{id}/diff). */
+export function useDiffRead(id: string | null | undefined) {
+  return useQuery({ queryKey: qk.diff(id ?? ""), queryFn: () => get<DiffRead>(api(`work-orders/${encodeURIComponent(id ?? "")}/diff`)), enabled: !!id });
 }
 export function useChangesRead(id: string | null | undefined) {
   return useQuery({ queryKey: qk.changes(id ?? ""), queryFn: () => get<ChangesData>(api(`work-orders/${encodeURIComponent(id ?? "")}/changes`)), enabled: !!id });
@@ -184,8 +201,8 @@ export function briefDiff(a: BriefVersion["brief"] | undefined, b: BriefVersion[
 }
 export function critStatus(c: Criterion): { id: string; label: string; icon: string } {
   const s = c.status;
-  if (s === "met") return { id: "met", label: "Met", icon: "check" };
-  if (s === "not met" || s === "failed") return { id: "failed", label: "Not met", icon: "x" };
+  if (s === "met") return { id: "met", label: "Passed", icon: "check" };
+  if (s === "not met" || s === "failed") return { id: "failed", label: "Failed", icon: "x" };
   if (s === "pending") return { id: "pending", label: "Pending", icon: "st-wait" };
   return { id: "untested", label: "Not tested", icon: "dots" };
 }

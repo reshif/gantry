@@ -12,9 +12,9 @@ import { useRepoName } from "../traveler/repo";
 import type { TWo } from "../traveler/model";
 import type { WoSession } from "../conversations/session-api";
 import type { RecordData } from "../record/data";
-import { critStatus, srcName } from "../record/data";
+import { srcName } from "../record/data";
+import { CriteriaList } from "./Criteria";
 
-const CRIT_TONE: Record<string, string> = { met: "ok", failed: "bad", pending: "warn", untested: "idle" };
 
 /** The description as the prototype draws it: click it to edit. The server cannot save a changed description yet, and says so. */
 function InlineDesc({ wo }: { wo: TWo }) {
@@ -49,23 +49,7 @@ export function Overview({ wo, rec, cat, project }: { wo: TWo; rec: RecordData; 
         <Card title="Brief" hint="Click the description to edit it" acts={<Btn label="Edit" small icon="edit" id="dz-edit" onClick={() => void ui.open((close) => <EditDialog wo={wo} cat={cat} project={project} onClose={close} />)} />}>
           <p style={{ marginBottom: 12 }}><InlineDesc wo={wo} /></p>
           <div className="label" style={{ marginBottom: 8 }}>Acceptance criteria</div>
-          {crit.length ? (
-            <div className="list" style={{ border: "1px solid var(--line)", borderRadius: 6 }}>
-              {crit.map((c) => {
-                const s = critStatus(c);
-                return (
-                  <div className="li" key={c.id}>
-                    <span className="mono dim">{c.id}</span>
-                    <div className="main1">
-                      <span className="t1" style={{ whiteSpace: "normal" }}>{c.text}</span>
-                      {c.tests.length ? <span className="t2">{`test: ${c.tests.map((t) => t.name).join(", ")}`}</span> : null}
-                    </div>
-                    <span className={`chip ${CRIT_TONE[s.id] ?? "idle"}`}>{s.id === "met" ? "Pass" : s.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : <p className="muted small">No acceptance criteria yet.</p>}
+          <CriteriaList criteria={crit} tests={rec.code.tests} empty="No acceptance criteria yet." />
         </Card>
         <Card title="Classification">
           <dl className="kv kv2" style={{ margin: 0 }}>

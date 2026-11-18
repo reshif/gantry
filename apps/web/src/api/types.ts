@@ -376,4 +376,14 @@ export interface PromptCall {
 export interface PromptPart { kind: string; name: string; source: string; version: number | null; sha256: string; bytes: number }
 export interface PromptManifest { v?: number; kind?: string; hash: string; parts: PromptPart[]; handoff?: { bytes: number; sha256: string }; conversation?: { messages: number; bytes: number }; compact?: boolean }
 /** A stored trace. The request and answer are shown as the edge stored them; only the manifest has a fixed shape. */
-export interface PromptTrace { v?: number; kind?: string; manifest?: PromptManifest; request?: unknown; response?: unknown; answer?: unknown; [k: string]: unknown }
+export interface PromptTrace { v?: number; kind?: string; manifest?: PromptManifest; /** The run's own record of what the agent was given (a station run's edge trace holds only the messages). */ runPrompt?: { promptHash?: string | null; manifest?: PromptManifest; instructionPin?: unknown }; request?: unknown; response?: unknown; answer?: unknown; [k: string]: unknown }
+
+/** One line of a stored diff: add, delete or context, with the old and new line numbers (null where the line does not exist on that side). */
+export interface DiffLine { kind: "add" | "del" | "ctx"; old: number | null; new: number | null; text: string; noNewline?: true }
+export interface DiffHunk { oldStart: number; oldLines: number; newStart: number; newLines: number; header: string; lines: DiffLine[] }
+export type DiffStatus = "added" | "modified" | "deleted" | "renamed";
+/** What one commit did to one file (GET /work-orders/{id}/diff). `patch` is the stored patch's id; it is in `missingPatches` when its text is gone. */
+export interface DiffCommit { commit: string | null; patch: string; plus: number; minus: number; status: DiffStatus; hunks: DiffHunk[] }
+/** One file across every commit of the work order. `approximate` is true when more than one commit touched it (plus and minus are then sums). */
+export interface DiffFile { path: string; status: DiffStatus; oldPath: string | null; binary: boolean; plus: number; minus: number; approximate: boolean; commits: DiffCommit[] }
+export interface DiffRead { truncated: boolean; redactions: number; missingPatches: string[]; files: DiffFile[] }

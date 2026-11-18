@@ -16,6 +16,7 @@ import { useGateApprovers } from "../traveler/Approvers";
 import { decideGate } from "../traveler/Actions";
 import type { TWo } from "../traveler/model";
 import type { RecordData } from "../record/data";
+import { ReviewVerdict } from "./ReviewVerdict";
 
 const MIN = 10;
 
@@ -71,6 +72,7 @@ export function ReviewDialog({ wo, gate, rec, onClose }: { wo: TWo; gate: Gate; 
             <p>{gate.purpose}</p>
             {checks.length ? <ul className="plain-list small" style={{ marginTop: 6 }}>{checks.map((c) => <li key={c.name}>{`${c.ok ? "✓" : "✗"} ${c.name}`}</li>)}</ul> : null}
           </div>
+          {!intake && (inst?.basis.review ?? rec?.review) ? <ReviewVerdict review={inst?.basis.review ?? rec?.review} id="rv-verdict" /> : null}
           {file ? (
             <pre className="code diff" style={{ padding: 8 }} aria-label={`Diff of ${file.path}`}>
               {file.preview!.slice(0, 8).map((l, i) => <div key={i} className={l.t === "+" ? "add" : l.t === "-" ? "del" : ""}>{`${l.t} ${l.s}`}</div>)}

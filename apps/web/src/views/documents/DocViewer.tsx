@@ -102,7 +102,7 @@ export function DocViewer({ woId, initial, project }: { woId: string; initial?: 
           <header className="doc-head">
             <div className="doc-head-t">
               <h3 className="doc-title mono">{current.doc}</h3>
-              <p className="small muted doc-byline">{`Version ${current.version} · ${current.authorKind === "person" ? "edited by" : "written by"} ${author(current)}${current.authorKind === "person" ? "" : ` at ${stationLabel(current.station)}`} · ${fmt.stamp(current.createdAt)}${current.acceptedBy ? ` · accepted as station output by ${name(current.acceptedBy)}` : ""}`}</p>
+              <p className="small muted doc-byline">{`Version ${current.version} · ${current.authorKind === "system" ? `recorded by Gantry at ${stationLabel(current.station)}` : `${current.authorKind === "person" ? "edited by" : "written by"} ${author(current)}${current.authorKind === "person" ? "" : ` at ${stationLabel(current.station)}`}`} · ${fmt.stamp(current.createdAt)}${current.acceptedBy ? ` · accepted as station output by ${name(current.acceptedBy)}` : ""}`}</p>
             </div>
             <div className="doc-tools">
               {group && group.versions.length > 1 ? (
@@ -134,7 +134,7 @@ export function DocViewer({ woId, initial, project }: { woId: string; initial?: 
             </div>
           </div>
           <DocComments woId={woId} version={current} sections={sections} items={comments.filter((c) => c.doc === current.doc)} />
-          <p className="small muted doc-foot">{`${current.authorKind === "person" ? "Edited by a person" : "Agent-written"}. Stored with its hash ${current.contentHash.slice(0, 12)}${current.authorKind === "person" ? "." : "; secrets are redacted before it is saved."}`}</p>
+          <p className="small muted doc-foot">{`${current.authorKind === "person" ? "Edited by a person" : current.authorKind === "system" ? "Recorded by Gantry from what the station did, not written by an agent" : "Agent-written"}. Stored with its hash ${current.contentHash.slice(0, 12)}${current.authorKind === "person" ? "." : "; secrets are redacted before it is saved."}`}</p>
         </article>
       ) : null}
     </div>

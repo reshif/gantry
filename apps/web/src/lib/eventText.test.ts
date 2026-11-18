@@ -22,4 +22,9 @@ describe("activity rows from the live server (audit shape)", () => {
   it("still reads the prototype event shape", () => {
     expect(eventText(eventRows([{ id: 1, at: 1, type: "release", text: "WO-1" }])[0]!, null, name)).toBe("Released WO-1");
   });
+  it("reads the station an audit row recorded in its after text", () => {
+    const row = { id: 9, at: 1, actor: "p1", action: "wo.enter", target: "WO-1001", entity: { type: "wo", id: "WO-1001" }, after: JSON.stringify({ station: "build" }) };
+    expect(eventText(eventRows([row])[0]!, { stations: [{ id: "build", name: "Build" }], gates: [], bays: [] } as never, name)).toBe("WO-1001 entered Build");
+    expect(eventText(eventRows([{ ...row, after: "not json" }])[0]!, null, name)).toBe("WO-1001 entered a station");
+  });
 });

@@ -23,6 +23,7 @@ import { ProgressLine, QuestionCard, useLiveTurn, useThreadEnd } from "../sessio
 import { MentionList, useMentions } from "./Mentions";
 import { decideWo, markWoSeen, sendWoTurn, useWoSession, type WoSession, type WoSessionMessage } from "./session-api";
 import { DocViewer } from "../documents/DocViewer";
+import { EditBriefDialog } from "./EditBrief";
 import { AssumptionList, StationQuestionCard } from "../documents/Dialogue";
 import { ResearchPlanCard } from "../documents/Research";
 import { LiveRun, RunTimelineView } from "../documents/Timeline";
@@ -338,6 +339,7 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
           {s.wo.gate && s.wo.gate.id !== "G0G1" ? <ApproversPanel woId={s.woId} gate={s.wo.gate.id} project={s.project} /> : null}
           <SideDialogue s={s} />
           <h3 className="sub-h">Brief</h3>
+          {s.briefOpen && !s.briefConfirmed ? <Btn small icon="edit" id="wos-edit-brief" label="Edit brief" guard={s.can.talk ? null : { allowed: false, reason: s.can.talkWhy, needs: "" }} onClick={() => void ui.open((close) => <EditBriefDialog woId={s.woId} guard={s.can.talk ? null : { allowed: false, reason: s.can.talkWhy, needs: "" }} onClose={close} />)} /> : null}
           {s.brief.goal ? <><p className="small muted">{s.briefConfirmed ? "Confirmed." : "Draft: not confirmed yet."}</p><BriefBlock b={{ goal: s.brief.goal, scopeIn: s.brief.scopeIn, scopeOut: s.brief.scopeOut, ac: s.brief.ac, risks: s.brief.risks, open: s.brief.open, decisions: s.brief.decisions, estimate: s.brief.estimate }} /></> : <p className="muted small">Not drafted yet.</p>}
           {s.ruleReady ? <Btn kind="primary" small id="wos-rule-confirm" label="Confirm brief" disabled={!s.can.confirm} disabledReason={!s.can.confirm ? s.can.confirmWhy : undefined} onClick={async () => { const r = await ops.confirmBrief(s.woId); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}
           <h3 className="sub-h">Proposals</h3>

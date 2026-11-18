@@ -60,7 +60,7 @@ describe("Work order page", () => {
     await show({}, `#record/${W.id}`);
     fireEvent.click(document.getElementById("dz-more") as HTMLElement);
     const items = (await screen.findAllByRole("menuitem")).map((i) => (i.textContent ?? "").replace(/locked$/, "").trim());
-    expect(items).toEqual(["Edit title and priority", "Reassign", "Park", "Send back a station", "Stop this work order\u2026"]);
+    expect(items).toEqual(["Edit title and priority", "Reassign", "Park", "Send back a station", "Redo this station", "Stop this work order\u2026"]);
     expect(document.querySelectorAll('[role="menu"] hr, [role="menu"] [role="separator"]').length).toBe(1);
     expect(document.getElementById("dz-more")?.getAttribute("aria-haspopup")).toBe("menu");
   });

@@ -17,6 +17,8 @@ import { useCommand } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { goAttention } from "../home/data";
 import { dec, useTravelerWo } from "../traveler/model";
+import { useRecordRead } from "../record/data";
+import { ReviewVerdict } from "../dossier/ReviewVerdict";
 import { useGateApprovers } from "../traveler/Approvers";
 import { agoShort, titleOf, type Item } from "./kit";
 
@@ -31,6 +33,8 @@ function GateBody({ it, close }: { it: Extract<Item, { kind: "gate" }>; close: (
   const brief = gate === "G0G1";
   const [note, setNote] = useState("");
   const rule = useGateApprovers(wo, gate);
+  const rec = useRecordRead(brief ? null : wo).data;
+  const verdict = rec?.gates.filter((g) => g.gate === gate).at(-1)?.basis.review ?? null;
   const q = useTravelerWo(wo);
   const t = q.data;
   const ap = t?.allowed?.approve;
@@ -74,6 +78,7 @@ function GateBody({ it, close }: { it: Extract<Item, { kind: "gate" }>; close: (
           <div className="banner warn"><CrIcon name="lock" /><div className="grow">{base.reason || "You are not allowed to decide this."}</div></div>
         ) : null}
         <div><div className="label" style={{ marginBottom: 4 }}>Evidence</div><p>{a.title ?? ""}{r ? ` Progress: ${r.progress.have} of ${r.progress.need} approvals${r.progress.approvals?.length ? `, by ${(r.progress.approvals ?? []).map((x) => x.name).join(", ")}` : ""}.` : ""}</p></div>
+        {verdict ? <ReviewVerdict review={verdict} id="apd-verdict" /> : null}
         <dl className="kv" style={{ margin: 0 }}>
           <dt>Rule</dt>
           <dd>{r ? `${r.rule.text}${typeof r.rule.classOverride === "number" ? ` This class needs ${r.rule.classOverride} instead of the gate's base ${r.rule.base}.` : ""} (${r.progress.have} of ${r.progress.need} so far)` : (readFailed ? "Could not read the rule." : "Reading the rule…")}</dd>

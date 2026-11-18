@@ -426,3 +426,59 @@ describe("Scouts and objections", () => {
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/objections/${ob.id}`)[0]?.body).toEqual({ decision: "upheld", note: "The docs are explicit." }));
   });
 });
+
+describe("Edit the brief before confirming it", () => {
+  const url = `/api/v1/work-orders/${W.id}/brief`;
+  const open = async (s = session({ brief: { ...BRIEF, route: [], children: [] } as never }), extra: Parameters<typeof mockApi>[0] = {}) => {
+    const calls = await showSession(s, extra);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit brief" }));
+    await screen.findByRole("dialog", { name: `Edit the brief of ${W.id}` });
+    return calls;
+  };
+  const patches = (calls: ReturnType<typeof mockApi>) => calls.filter((c) => c.method === "PATCH" && c.path === url);
+
+  it("sends only what changed, with the work order's version as If-Match", async () => {
+    const calls = await open(undefined, { [`PATCH ${url}`]: () => ({ body: { ok: true, msg: "Brief updated." } }) });
+    fireEvent.change(document.getElementById("be-in") as HTMLElement, { target: { value: "POST /refunds\n\nGET /refunds/{id}  " } });
+    fireEvent.change(document.getElementById("be-out") as HTMLElement, { target: { value: "Partial refunds" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    await waitFor(() => expect(patches(calls)).toHaveLength(1));
+    expect(patches(calls)[0]!.body).toEqual({ scopeIn: ["POST /refunds", "GET /refunds/{id}"], scopeOut: ["Partial refunds"] });
+    expect(patches(calls)[0]!.headers["if-match"]).toBe("7");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: `Edit the brief of ${W.id}` })).toBeNull());
+  });
+
+  it("asks for something in scope and for a change before it sends", async () => {
+    const calls = await open();
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    expect(await screen.findByText("Nothing changed yet.")).toBeTruthy();
+    fireEvent.change(document.getElementById("be-in") as HTMLElement, { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    expect(await screen.findByText("Say what is in scope.")).toBeTruthy();
+    expect(patches(calls)).toHaveLength(0);
+  });
+
+  it("on a conflict keeps the person's text, says the brief changed and offers the latest one", async () => {
+    let n = 0;
+    const calls = await open(undefined, { [`PATCH ${url}`]: () => (++n === 1 ? { status: 409, body: { ok: false, msg: "The work order changed since you loaded it." } } : { body: { ok: true, msg: "Brief updated." } }) });
+    fireEvent.change(document.getElementById("be-in") as HTMLElement, { target: { value: "My version" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    expect(await screen.findByText("The work order changed since you loaded it.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Load the latest brief" })).toBeTruthy();
+    expect((document.getElementById("be-in") as HTMLTextAreaElement).value).toBe("My version");
+    fireEvent.click(screen.getByRole("button", { name: "Load the latest brief" }));
+    await waitFor(() => expect((document.getElementById("be-in") as HTMLTextAreaElement).value).toBe(W.brief.scopeIn.join("\n")));
+    expect(patches(calls)).toHaveLength(1);
+  });
+
+  it("is locked, with the reason, when this person may not talk in the conversation", async () => {
+    await showSession(session({ can: { talk: false, talkWhy: "Needs wo.answer on this project.", confirm: false, confirmWhy: "" } }));
+    const b = (await screen.findByRole("button", { name: /Edit brief/ })) as HTMLButtonElement;
+    expect(b.disabled || b.getAttribute("aria-disabled") === "true").toBe(true);
+  });
+
+  it("is not offered once the brief is confirmed", async () => {
+    await showSession(session({ briefConfirmed: true, briefOpen: false }));
+    expect(screen.queryByRole("button", { name: "Edit brief" })).toBeNull();
+  });
+});

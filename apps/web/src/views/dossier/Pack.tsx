@@ -13,6 +13,8 @@ import { useActors } from "../../ui/actors";
 import { navigate, useHash } from "../../lib/router";
 import { Picker } from "../record/Picker";
 import { useExportRecord } from "../record/Lifecycle";
+import { CriteriaList } from "./Criteria";
+import { ReviewVerdict } from "./ReviewVerdict";
 import { briefDiff, critStatus, useRecordData, type RecordData } from "../record/data";
 import type { TWo } from "../traveler/model";
 import { NotFound, splitParam, statusOf, when } from "./kit";
@@ -27,7 +29,6 @@ const TABS = [
 type PackTab = (typeof TABS)[number]["id"];
 const NA = "not available";
 const VERB: Record<string, string> = { approve: "approved", reject: "rejected", changes: "changes requested", decline: "declined" };
-const CRIT_TONE: Record<string, string> = { met: "ok", failed: "bad", pending: "warn", untested: "idle" };
 
 /** The checks the gates recorded, one row per named check (its latest run) with the gate that ran it. */
 const checksOf = (rec: RecordData) => {
@@ -53,7 +54,7 @@ function Summary({ wo, rec, cat }: { wo: TWo; rec: RecordData; cat: Catalog }) {
       <Stats items={[
         { l: "Criteria met", v: crit.length ? `${met}/${crit.length}` : NA, ...(crit.length ? { tone: met === crit.length ? "ok" as const : "warn" as const } : {}) },
         { l: "Checks passed", v: checks.length ? `${passed}/${checks.length}` : NA, ...(checks.length ? { tone: passed === checks.length ? "ok" as const : "warn" as const } : {}) },
-        { l: "Review findings", v: NA },
+        { l: "Review findings", v: rec.review ? String(rec.review.findings.length) : NA, ...(rec.review ? { tone: rec.review.verdict === "approve" ? "ok" as const : "warn" as const } : {}) },
         { l: "Diff", v: d.files ? `+${d.plus} −${d.minus}` : NA },
       ]} />
       <div className="grid g2">
@@ -63,6 +64,7 @@ function Summary({ wo, rec, cat }: { wo: TWo; rec: RecordData; cat: Catalog }) {
             <dt>Spec</dt><dd>{specV ? `v${specV.v}, ${when(specV.at)}` : NA}</dd>
             <dt>Plan</dt><dd>{NA}</dd>
             <dt>Tests</dt><dd>{t.passed + t.failed + t.added ? `${t.passed} passed, ${t.failed} failed, ${t.added} added` : NA}</dd>
+            <dt>Review verdict</dt><dd><ReviewVerdict review={rec.review} id="dz-review-verdict" /></dd>
             <dt>Sensitive paths</dt><dd>{rec.code.files.length ? (sens ? `${sens} touched` : "none touched") : NA}</dd>
           </dl>
         </Card>
@@ -159,23 +161,7 @@ export default function PackView() {
         {tab === "summary" ? <Summary wo={wo} rec={rec} cat={d.cat} />
         : tab === "criteria" ? (
           <Card title="Acceptance criteria against evidence" flush>
-            {(rec.criteria ?? []).length ? (
-              <div className="list">
-                {rec.criteria.map((c) => {
-                  const s = critStatus(c);
-                  return (
-                    <div className="li" key={c.id}>
-                      <span className="mono dim">{c.id}</span>
-                      <div className="main1">
-                        <span className="t1" style={{ whiteSpace: "normal" }}>{c.text}</span>
-                        <span className="t2">{c.tests.length ? `test: ${c.tests.map((t) => t.name).join(", ")}` : "not run yet"}</span>
-                      </div>
-                      <span className={`chip ${CRIT_TONE[s.id] ?? "idle"}`}>{s.id === "met" ? "Pass" : s.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : <Empty icon="page" title="No acceptance criteria" text="The brief has none yet." />}
+            <div style={{ padding: 12 }}><CriteriaList criteria={rec.criteria ?? []} tests={rec.code.tests} empty="The brief has no acceptance criteria yet." /></div>
           </Card>
         )
         : tab === "brief" ? <BriefVersions rec={rec} />

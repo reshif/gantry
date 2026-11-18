@@ -90,6 +90,7 @@ export const qk = {
   record: (id: string) => ["record", id] as const,
   recordMd: (id: string) => ["record", id, "md"] as const,
   changes: (id: string) => ["changes", id] as const,
+  diff: (id: string) => ["changes", id, "diff"] as const,
   killImpact: (scope: string, id: string | null) => ["stops", "impact", scope, id] as const,
   repos: (project: string) => ["repos", project] as const,
   guidelines: () => ["guidelines"] as const,

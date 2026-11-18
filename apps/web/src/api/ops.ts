@@ -111,6 +111,9 @@ export const ops = {
     run(["workOrders", "conversations"], post(api(`work-orders/${enc(woId)}/messages`), { ...q, kind: "followup" })),
   reclassify: (woId: string, cls: string, reason: string, v?: Versioned) =>
     run(["workOrders"], post(api(`work-orders/${enc(woId)}/reclassify`), { cls, reason }, opts(v))),
+  /** A person edits the brief's scope and an epic's child work orders before confirming it. `v.ifMatch` is the work order's version from the last read; a stale one is refused (409/412). */
+  editBrief: (woId: string, body: { scopeIn?: string[]; scopeOut?: string[]; children?: string[]; reason?: string }, v?: Versioned) =>
+    run(["workOrders", "conversations"], patch(api(`work-orders/${enc(woId)}/brief`), body, opts(v))),
   confirmBrief: (woId: string, via?: Via, v?: Versioned) => run(["workOrders"], post(api(`work-orders/${enc(woId)}/confirm-brief`), { via }, opts(v))),
   decline: (woId: string, reason: string, via?: Via, v?: Versioned) =>
     run(["workOrders"], post(api(`work-orders/${enc(woId)}/decline`), { reason, via }, opts(v))),
