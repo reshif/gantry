@@ -70,7 +70,7 @@ export function GeneralTab({ p, s, set, people, tools }: TabProps) {
   return (
     <div className="grid g-main2">
       <div className="stack">
-        <Card title="General" acts={<><span className="hint">Changes save when you leave a field</span>{tools ? <Btn small kind="ghost" id="pcf-tools" label="Project tools" onClick={(e) => tools(e.currentTarget as HTMLElement)} /> : null}</>}>
+        <Card title="General" acts={<span className="hint">Changes save when you leave a field</span>}>
           <div className="stack">
             <Field label="Name" htmlFor="pcf-name">
               <Input id="pcf-name" value={name} disabled={!d.allowed} onChange={(e) => set({ text: { ...s.text, name: e.target.value } })} onBlur={() => { if (name.trim() !== p.name) notStored("name"); clear("name"); }} />
@@ -85,6 +85,7 @@ export function GeneralTab({ p, s, set, people, tools }: TabProps) {
               <Toggle id="pcf-regulated" checked={!!p.regulated} decision={d} label="Regulated project" onChange={() => notStored("regulated status")} />
               <span>Regulated project (caps autonomy at L2, adds security gate)</span>
             </div>
+            {tools ? <div className="row" style={{ justifyContent: "flex-end" }}><Btn small kind="ghost" id="pcf-tools" label="Project tools" onClick={(e) => tools(e.currentTarget as HTMLElement)} /></div> : null}
           </div>
         </Card>
       </div>
@@ -470,7 +471,7 @@ function HaltLine({ p, close }: { p: PcProps["p"]; close: () => void }) {
   const d = useCan("line.halt", { project: p.id });
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
-  const min = p.regulated ? 20 : 4;
+  const min = p.regulated ? 20 : 5;
   return (
     <Dialog
       title={`Halt ${p.name}`}

@@ -651,4 +651,20 @@ describe("Fidelity round 2 (projects, onboarding links, project config)", () => 
     const t = (await screen.findByText(/→/)).textContent ?? "";
     expect(t).toMatch(/^\d\d \w{3} \d\d:\d\d → \d\d \w{3} \d\d:\d\d · all repos$/);
   });
+  it("residual r2: Project tools sits in the card body (the header is the prototype's), a wrong archive key says 'Type PAY.', and resuming toasts 'Line resumed'", async () => {
+    const HALTED = { ...PAYMENTS, halted: { by: "p-asha", at: 1, reason: "Relevance regression" } };
+    const calls = withPayments({ "GET /api/v1/projects": () => ({ body: [HALTED, RISK] }), "DELETE /api/v1/stops/project%3Apayments": () => ok({ msg: "Resumed payments" }) });
+    mount(<ProjectConfigView />);
+    const tools = await byId("pcf-tools");
+    expect(tools.closest(".card-h")).toBeNull();
+    fireEvent.click(await byId("pcf-resume"));
+    await waitFor(() => expect(screen.getByText("Line resumed")).toBeTruthy());
+    expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+    fireEvent.click(await byId("pcf-tab-danger"));
+    fireEvent.click(await byId("pcf-archive"));
+    const input = await waitFor(() => { const i = document.querySelector<HTMLInputElement>(".dlg input.input"); if (!i) throw new Error("no input"); return i; });
+    fireEvent.change(input, { target: { value: "nope" } });
+    fireEvent.submit(document.querySelector(".dlg-form")!);
+    expect(await screen.findByText(`Type ${PAYMENTS.key}.`)).toBeTruthy();
+  });
 });

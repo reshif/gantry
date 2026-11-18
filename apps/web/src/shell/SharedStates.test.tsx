@@ -35,7 +35,7 @@ describe("hash query and shared states", () => {
     expect(sharedStateFromUrl("#floor", "?state=error")).toBe("error");
   });
   it("draws every state the prototype draws", () => {
-    const want: Record<string, string> = { loading: "Loading…", empty: "Nothing here yet", error: "This view failed to load", forbidden: "You do not have access to this", conflict: "Conflict." };
+    const want: Record<string, string> = { loading: "Loading…", empty: "Nothing here yet", error: "This view failed to load", forbidden: "You do not have access to this", conflict: "Conflict.", notfound: "There is no “Floor” page" };
     for (const k of SHARED_STATES) {
       const { unmount } = render(<SharedStatePage kind={k} eyebrow="Project" title="Floor" />);
       expect(screen.getByText(want[k]!)).toBeTruthy();
