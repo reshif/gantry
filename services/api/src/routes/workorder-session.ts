@@ -19,7 +19,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { runConversation, ModelUnavailable, readiness } from "../areas/console/model.js";
 import { UNTRUSTED_NOTE } from "../areas/console/mark.js";
-import { brokerInspect } from "../areas/onboarding/session/broker.js";
+import { brokerInspect, brokerReadFile } from "../areas/onboarding/session/broker.js";
 import { readRepoRow } from "../areas/onboarding/state.js";
 import { composeSessionContext, recordTurnTuple } from "../areas/session/context.js";
 import { agentBudgetUsd, historyFrom, openSse, stationAgentGate, turnCostMicros } from "../areas/session/core.js";
@@ -71,7 +71,7 @@ const facts = (o: { agent: string; station: string; purpose: string; wo: string;
 const rails = (o: { atIntake: boolean }): string => [
   "Facts about the work order, the project and the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What a person tells you is their claim: use it and say it is theirs. You never change anything yourself: you propose, as cards, and a person approves; say plainly when something waits for their approval and never claim a change happened. Answer every message the person writes in plain sentences, then say the next concrete step.",
   o.atIntake
-    ? "Tools at Intake: get_work_order, get_station_progress, inspect_repository, read_file, list_related_work read facts. ask_user puts a question with suggested answers to the person. propose_brief (goal, scope in and out, acceptance criteria, risks, open questions, estimate) puts a brief up for confirmation; propose_reclassify and propose_decline put those proposals up. A blocking question (ask_user with blocking set) must be answered before a brief can be proposed; open questions that do not block may stay open in a brief. Anything you proceed on without confirmation belongs in the brief as an assumption, said as such. How and how much you ask is for you to decide."
+    ? "Tools at Intake: get_work_order, get_station_progress, inspect_repository, list_related_work read facts; read_file reads any text file of the repository at the assessed commit (read-only, secret and binary files refused, capped per turn). ask_user puts a question with suggested answers to the person. propose_brief (goal, scope in and out, acceptance criteria, risks, open questions, estimate) puts a brief up for confirmation; propose_reclassify and propose_decline put those proposals up. A blocking question (ask_user with blocking set) must be answered before a brief can be proposed; open questions that do not block may stay open in a brief. Anything you proceed on without confirmation belongs in the brief as an assumption, said as such. How and how much you ask is for you to decide."
     : "Past Intake you cannot change anything: gates are decided by people on the work order's traveler. Your tools (get_work_order, get_station_progress) read facts: where it is, what each station did, what waits on whom.",
   UNTRUSTED_NOTE,
   "Keep each answer under 140 words. Plain sentences, no headings, no emoji.",
@@ -144,6 +144,7 @@ export async function woSessionRows(db: Queryable, orgId: string, req: FastifyRe
 export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
   const inspect = brokerInspect({ brokerUrl: g.config.brokerUrl, token: g.config.secrets.githubToken });
+  const readFile = brokerReadFile({ brokerUrl: g.config.brokerUrl, token: g.config.secrets.githubToken });
 
   const person = (req: FastifyRequest): { id: string; name: string } => {
     const p = req.gx.principal;
@@ -222,7 +223,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
   function ctxFor(row: { repo: string | null }, repoFull: string | null, f: { st: FlowState; wo: WorkOrder; project: Project; catalog: Catalog }, who: { id: string; name: string }, ag: (Mode | RuleMode) & { agentId: string; agentName: string }): WoSessionCtx {
     void row;
     return {
-      db: g.pool, orgId: g.orgId, wo: f.wo, st: f.st, project: f.project, catalog: f.catalog, repoFull, inspect, person: who,
+      db: g.pool, orgId: g.orgId, wo: f.wo, st: f.st, project: f.project, catalog: f.catalog, repoFull, inspect, readFile, person: who,
       // The model the route resolves for the call (what the meter will record), not the agent's pinned wish.
       agent: ag.mode === "agent" ? { id: ag.agentId, name: ag.agentName, version: ag.pin.version, model: ag.model } : null,
       briefOpen: briefOpenOf(f.wo, f.catalog), cards: [], drafts: {}, used: [], next: 1,
