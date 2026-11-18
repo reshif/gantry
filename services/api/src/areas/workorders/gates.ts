@@ -98,12 +98,13 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   const classSet = !!project.approvers[gateId]?.classRequired && Object.prototype.hasOwnProperty.call(project.approvers[gateId]!.classRequired, w.cls);
   const need = classSet ? prog.need : Math.max(prog.need, Number(inst.basis.required) || 0);
   const ruled = gateId === "G0G1" ? true : prog.passes && prog.have >= need;
-  // Factory Admin break-glass: a vote the rule would not let pass the gate (author under separation of duties, N of M not reached,
-  // requester alone) passes it as an override, with a reason, flagged in the audit. Nobody else can override.
+  // Factory Admin is a normal approver on every gate (owner decision 2026-11-19): their vote is an ordinary vote, counted toward N of M.
+  // Break-glass is only for a vote the rule cannot accept from them: the author under separation of duties, or the author alone / an unmet
+  // condition blocking an otherwise full count. It needs a reason and is flagged in the audit. Nobody else can override.
   const isAdmin = (after.st.people.find((p) => p.id === by)?.roles ?? []).some((r) => r.role === "factory_admin" && r.scope === "factory");
   // Bypassing separation of duties is always an override, even when the count would be met with the author's vote.
   const sodBypass = isAdmin && gateId !== "G0G1" && !!project.approvers[gateId]?.sod && wo.requestedBy === by;
-  const override = isAdmin && (!ruled || sodBypass);
+  const override = isAdmin && ((!ruled && (prog.onlyRequester || prog.unmet.length > 0)) || sodBypass);
   if (override && (!overrideReason || overrideReason.trim().length < 5)) {
     throw refuse("denied", `As Factory Admin you can override ${g.label} (it needs ${need} approval${need === 1 ? "" : "s"}${prog.onlyRequester || wo.requestedBy === by ? ", and you are the author" : ""}). Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "approver", id: "APR-" + gateId, name: "Factory Admin override" } });
   }
@@ -121,7 +122,7 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
     await saveWo(fx.tx, fx.orgId, w);
     return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${unmet}).`, w.project, { passed: false, have: prog.have, need, instance: inst.id, version: w.version });
   }
-  await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, ...(override ? { override: true, reason: overrideReason!.trim() } : {}) });
+  await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, override, ...(override ? { reason: overrideReason!.trim() } : {}) });
   await closeInstance(fx, inst.id, "decision");
   note(w, fx, by, `${g.label} ${g.name} approved${via && via !== "web" ? ` via ${via}` : ""}.`);
   // Phase 3: what the approver had in front of them, recorded with the decision (not a block): assumptions nobody confirmed, objections nobody decided.
