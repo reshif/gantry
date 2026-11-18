@@ -1,22 +1,21 @@
 /**
  * Skills (spec 8.7) against /api/v1/skills, in the Blueprint layout: the library (search, one flush table) and a right-hand drawer for one skill
  * (`#skills/<id>`: when, owner, used by, body, Edit). Edit and New open one "Edit skill" dialog; every save is a new immutable version.
- * The drawer also keeps what the library needs beyond the prototype: attach to agents, the projects a skill is enabled on, its versions.
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { fmt, type Skill } from "@gantry/domain";
+import { type Skill } from "@gantry/domain";
 import { useCan } from "../api/can";
-import { useAgents, useLearningProposals, useProjects, useSkills } from "../api/queries";
+import { useAgents, useSkills } from "../api/queries";
 import { ops } from "../api/ops";
-import { Async, useCommand } from "../ui/async";
-import { Btn, Chip, Empty, Field, FilterBar, IconBtn, LockNote, Panel, SearchBox, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
+import { Async } from "../ui/async";
+import { Btn, Empty, Field, FilterBar, IconBtn, LockNote, Panel, SearchBox, ViewHead, type Decision } from "../ui/primitives";
 import { DataTable, type SortCol } from "../ui/SortTable";
 import { Dialog } from "../ui/Overlay";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { hashFor, navigate, replaceHash, useHash } from "../lib/router";
 import { invalidateSlices } from "../api/keys";
-import { agentsSelect, EntityHistory, useStations, type AgentRow } from "./agents/kit";
+import { type AgentRow } from "./agents/kit";
 
 type SkillRow = Skill & { rev: number };
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -60,109 +59,11 @@ function Library({ skills, agents, onEdit }: { skills: SkillRow[]; agents: Agent
       <FilterBar label="Filter skills" count={`${list.length} skill${list.length === 1 ? "" : "s"}${list.length !== skills.length ? ` of ${skills.length}` : ""}`} actions={q ? <Btn label="Clear" small kind="ghost" id="sk-clear" onClick={clear} /> : undefined}>
         <SearchBox id="sk-search" value={ui.q} onChange={(v) => { ui.q = v; rerender(); }} placeholder="Search…" label="Search skills" />
       </FilterBar>
-      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} pageSize={12} pager
+      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} pageSize={12} pager sortSelect={false}
         empty={skills.length ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="sk-clear-empty" onClick={clear} /> } : { title: "Nothing here yet", text: "Items will appear here when they exist." }} />
     </Panel>
   );
 }
-
-function AgentsTab({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
-  const attach = useCommand((agent: string, on: boolean) => ops.attachSkill(agent, sk.id, on));
-  const perm = dec(useCan("agent.edit"));
-  const st = useStations();
-  return (
-    <div>
-      <LockNote decision={perm} what="Attaching skills to agents" />
-      <p className="muted small sk-p">&quot;Runs with&quot; is what the version on the floor uses. &quot;Attached in draft&quot; is the agent&apos;s working copy: changing it is saved on the agent and audited, and reaches runs only in the next version that passes its eval suite.</p>
-      <div className="table-scroll">
-        <table className="table table-compact">
-          <thead><tr>{["Agent", "Station", "Runs with", "Draft position", "Attached in draft"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
-          <tbody>
-            {agents.map((a) => {
-              const pos = a.skills.indexOf(sk.id);
-              const station = st.find(a.station);
-              const liveSk = (a.liveSkills ?? []).find((l) => l.id === sk.id);
-              const drift = !!liveSk !== (pos >= 0);
-              return (
-                <tr key={a.id}>
-                  <td><a href="#agents" className="linkish" id={`sk-ag-link-${a.id}`} onClick={(e) => { e.preventDefault(); agentsSelect(a.id, "skills"); }}>{a.name}</a></td>
-                  <td className="small">{station ? `${station.no} ${station.name}` : "Off-belt"}</td>
-                  <td className="small" id={`sk-live-${a.id}`}>{liveSk ? <Chip text={liveSk.version ? `Live ${a.version} · skill v${liveSk.version}` : `Live ${a.version}`} cls="chip-ok" /> : <span className="muted">Not used by the live version</span>}{drift ? <div className="small warn-text">{pos >= 0 ? "Attached in draft only: runs after the next version is promoted." : "Detached in draft: still runs until the next version is promoted."}</div> : null}</td>
-                  <td className="mono small">{pos >= 0 ? `${pos + 1} of ${a.skills.length}` : "–"}</td>
-                  <td><Toggle id={`sk-att-${a.id}`} checked={pos >= 0} decision={perm} label={`Attach ${sk.name} to ${a.name} (draft)`} onChange={(v) => { void attach.run(a.id, v); }} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function ProjectsTab({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
-  const setProj = useCommand((v: "all" | string[]) => ops.setSkillProjects(sk.id, v));
-  const perm = dec(useCan("skill.edit"));
-  const projects = (useProjects().data ?? []).filter((p) => p.status !== "archived");
-  const all = sk.projects === "all";
-  const setProjects = (v: "all" | string[]) => { void setProj.run(v); };
-  return (
-    <div>
-      <LockNote decision={perm} what="Where this skill is enabled" />
-      <p className="muted small sk-p">An attached skill is loaded only on projects where it is enabled. Changing this does not create a new version.</p>
-      <div className="toggle-row sk-all">
-        <label htmlFor="sk-proj-all"><strong>All projects</strong><span className="muted small"> including projects created later</span></label>
-        <Toggle id="sk-proj-all" checked={all} decision={perm} onChange={(v) => setProjects(v ? "all" : projects.map((p) => p.id))} />
-      </div>
-      <div className="table-scroll">
-        <table className="table table-compact">
-          <thead><tr>{["Project", "Agents using it there", "Enabled"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
-          <tbody>
-            {projects.map((p) => {
-              const on = all || (sk.projects as string[]).includes(p.id);
-              const users = agents.filter((a) => a.skills.includes(sk.id) && (a.projects === "all" || a.projects.includes(p.id)));
-              const lock: Decision | null = !perm.allowed ? perm : all ? { allowed: false, needs: "", reason: "Enabled on all projects. Turn off All projects to choose." } : null;
-              return (
-                <tr key={p.id}>
-                  <td>{p.name}{p.regulated ? <span className="tag">regulated</span> : null}</td>
-                  <td className="small">{users.length ? users.map((a) => a.name).join(", ") : <span className="muted">none</span>}</td>
-                  <td><Toggle id={`sk-proj-${p.id}`} checked={on} decision={lock} label={`Enable on ${p.name}`} onChange={(v) => { const list = all ? [] : (sk.projects as string[]).slice(); setProjects(v ? [...list, p.id] : list.filter((x) => x !== p.id)); }} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function VersionsTab({ sk }: { sk: SkillRow }) {
-  const lp = (useLearningProposals().data ?? []).filter((x) => x.kind === "skill" && (x.change as { skill?: string } | undefined)?.skill === sk.id);
-  return (
-    <div>
-      <ol className="sk-vers">
-        {sk.versions.slice().reverse().map((v, i) => (
-          <li key={v.v} className={i === 0 ? "is-current" : ""}>
-            <span className="mono strong">{`v${v.v}`}</span>{i === 0 ? <Chip text="current" cls="chip-accent" /> : null}
-            <span className="muted small">{fmt.stamp(v.at)}</span><Who id={v.by} /><span className="small">{v.note}</span>
-          </li>
-        ))}
-      </ol>
-      {lp.length ? (
-        <div>
-          <h3 className="sub-h">From the learning loop</h3>
-          <ul className="plain-list small">
-            {lp.map((x) => <li key={x.id}><a href="#learning" className="linkish" id={`sk-lp-${x.id}`} onClick={(e) => { e.preventDefault(); navigate("learning"); }}>{`${x.id} ${x.title}`}</a>{` · ${x.status}`}</li>)}
-          </ul>
-        </div>
-      ) : null}
-      <h3 className="sub-h">Audit history</h3>
-      <EntityHistory type="skill" id={sk.id} limit={30} />
-    </div>
-  );
-}
-
 
 /** New and Edit skill: one dialog with the four prototype fields. Saving an existing skill cuts a new version (If-Match on the revision shown). */
 function SkillDialog({ sk, close }: { sk: SkillRow | null; close: () => void }) {
@@ -211,7 +112,7 @@ function SkillDialog({ sk, close }: { sk: SkillRow | null; close: () => void }) 
   );
 }
 
-/** The skill drawer: when, owner, used by, the body, and (beyond the prototype) where it is attached and enabled and its versions. */
+/** The skill drawer: when, owner, used by, the body, and Edit. */
 function SkillDrawer({ sk, agents, close, onEdit }: { sk: SkillRow; agents: AgentRow[]; close: () => void; onEdit: () => void }) {
   const actor = useActors();
   const perm = dec(useCan("skill.edit"));
@@ -234,15 +135,6 @@ function SkillDrawer({ sk, agents, close, onEdit }: { sk: SkillRow; agents: Agen
             <dt>Used by</dt><dd>{users.map((a) => a.name).join(", ") || "—"}</dd>
           </dl>
           <pre className="pre">{sk.body}</pre>
-          <details className="sk-more">
-            <summary>Agents, projects and versions</summary>
-            <h3 className="sub-h">Agents</h3>
-            <AgentsTab sk={sk} agents={agents} />
-            <h3 className="sub-h">Projects</h3>
-            <ProjectsTab sk={sk} agents={agents} />
-            <h3 className="sub-h">Versions</h3>
-            <VersionsTab sk={sk} />
-          </details>
         </div>
       </div>
       <footer><Btn label="Edit" id="sk-drawer-edit" guard={perm} onClick={onEdit} /></footer>

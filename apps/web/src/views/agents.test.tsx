@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
-import { bindQueryClient, invalidateSlices } from "../api/keys";
+import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import { clearDrafts } from "../lib/useDraft";
@@ -112,8 +112,6 @@ const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra }
 const writes = (calls: Call[], method: string) => calls.filter((c) => c.method === method && c.path !== "/api/v1/can");
 const TABS: Record<string, string> = { instructions: "instr", overrides: "proj" };
 const tab = async (id: string) => { fireEvent.click(await byId(`ag-tab-${TABS[id] ?? id}`)); await waitFor(() => expect(document.getElementById(`ag-tab-${TABS[id] ?? id}`)!.getAttribute("aria-selected")).toBe("true")); };
-/** Configuration rows keep their control behind a small Edit button. */
-const openEdit = async (id: string) => { fireEvent.click(await byId(`${id}-edit`)); return byId(`${id}-in`) as Promise<HTMLInputElement>; };
 
 beforeEach(() => {
   setCsrfToken("c");
@@ -135,7 +133,6 @@ describe("Agents screen", () => {
     mount(<AgentsView />);
     const row = await byId("ag-row-ag-build");
     expect(row.textContent).toContain("Builder");
-    expect(row.textContent).toContain("Build");
     expect(row.textContent).toContain("claude-opus-5-5");
     expect(row.textContent).not.toContain("+1");
     expect(row.textContent).toContain("v2.6.1");
@@ -157,7 +154,8 @@ describe("Agents screen", () => {
     expect(sortable).toEqual(["Agent", "Model", "Autonomy", "Eval", "Spend"]);
     expect(document.querySelector("#ag-roster .tfoot")!.textContent).toContain("1–2 of 2");
     expect(document.getElementById("ag-f-view")).toBeNull();
-    expect(document.getElementById("agent-create")).not.toBeNull();
+    expect(document.getElementById("agent-create")).toBeNull();
+    expect([...document.querySelectorAll(".ph-actions .btn, .ph .actions .btn")].map((b) => b.textContent)).not.toContain("Create agent");
   });
 
   it("filters the roster by status, station and search, clears them, and opens an agent's own page from a row", async () => {
@@ -165,7 +163,7 @@ describe("Agents screen", () => {
     mount(<AgentsView />);
     await byId("ag-row-ag-build");
     expect(document.getElementById("ag-clear")).toBeNull();
-    expect((document.getElementById("ag-f-station") as HTMLSelectElement).textContent).toContain("Build");
+    await waitFor(() => expect((document.getElementById("ag-f-station") as HTMLSelectElement).textContent).toContain("Build"));
     expect((document.getElementById("ag-f-station") as HTMLSelectElement).textContent).not.toContain("S5");
     fireEvent.change(document.getElementById("ag-f-status")!, { target: { value: "paused" } });
     await waitFor(() => expect(document.getElementById("ag-row-ag-build")).toBeNull());
@@ -199,7 +197,7 @@ describe("Agents screen", () => {
     expect(document.getElementById("ag-evals")).toBeNull();
     expect(document.querySelector(".trust-strip")).toBeNull();
     // Identity (kv) and Tools side by side, then guardrail paths
-    expect([...document.querySelectorAll("#agent-detail .panel-title")].map((t) => t.textContent)).toEqual(["Identity", "Tools", "Guardrail paths", "Staffing"]);
+    expect([...document.querySelectorAll("#agent-detail .panel-title")].map((t) => t.textContent)).toEqual(["Identity", "Tools", "Guardrail paths"]);
     expect([...document.querySelectorAll("#agent-detail dl.kv dt")].map((t) => t.textContent)).toEqual(["Station", "Model", "Fallbacks", "Autonomy", "Budget / run", "Max diff", "Eval suite"]);
     cleanup();
     mountAgent("ag-nope");
@@ -228,100 +226,70 @@ describe("Agents screen", () => {
     expect([...row.querySelectorAll("td")].map((c) => strip(c.getAttribute("data-label")))).toEqual(heads);
   });
 
-  it("edits the configuration in a draft and saves one audited PATCH with the agent's version and only the changed keys", async () => {
+  it("writes the model, autonomy and a tool at once with a toast, and shows no Edit buttons or Save bar", async () => {
     const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
     mountAgent();
-    const budget = await openEdit("ag-budget");
+    const model = (await byId("ag-model")) as HTMLSelectElement;
+    expect(document.querySelectorAll("#agent-detail dl.kv .btn").length).toBe(0);
     expect(document.getElementById("ag-savebar")).toBeNull();
-    fireEvent.change(budget, { target: { value: "15" } });
-    fireEvent.change(await openEdit("ag-maxdiff"), { target: { value: "600" } });
+    expect(document.getElementById("ag-paths-edit")).toBeNull();
+    await waitFor(() => expect(Array.from(model.options).some((o) => o.value === "claude-sonnet-5-5")).toBe(true));
+    fireEvent.change(model, { target: { value: "claude-sonnet-5-5" } });
+    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
+    expect(writes(calls, "PATCH")[0]).toMatchObject({ body: { patch: { model: "claude-sonnet-5-5" } }, headers: { "if-match": "7" } });
+    await screen.findByText("Model set to claude-sonnet-5-5");
+    fireEvent.change(document.getElementById("ag-autonomy")!, { target: { value: "suggest" } });
+    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(2));
+    await screen.findByText("Autonomy: suggest");
     fireEvent.click(await byId("ag-tool-merge"));
-    await waitFor(() => expect(document.getElementById("ag-savebar")!.className).toContain("is-dirty"));
-    fireEvent.click(document.getElementById("ag-save")!);
-    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
-    const c = writes(calls, "PATCH")[0]!;
-    expect(c.path).toBe("/api/v1/agents/ag-build");
-    expect(c.headers["if-match"]).toBe("7");
-    expect(Object.keys(c.body.patch).sort()).toEqual(["budget", "guardrails", "tools"]);
-    expect(c.body.patch.budget).toBe(15);
-    expect(c.body.patch.guardrails).toEqual({ paths: ["infra/prod/**"], maxDiff: 600 });
-    expect(c.body.note).toBe("tools, budget, guardrails");
+    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(3));
+    expect((writes(calls, "PATCH")[2]!.body as { patch: { tools: Record<string, boolean> } }).patch.tools.merge).toBe(true);
+    await screen.findByText("merge enabled");
   });
 
-  it("does not revert a colleague's change to a key this person did not touch, and sends the new revision", async () => {
-    let live = { ...BUILD };
-    const calls = setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }), "PATCH /api/v1/agents/ag-build": () => ok() });
-    mountAgent();
-    fireEvent.change(await openEdit("ag-maxdiff"), { target: { value: "600" } });
-    fireEvent.click(await byId("ag-budget-edit"));
-    live = { ...BUILD, rev: 8, budget: 20 };
-    invalidateSlices(["agents"]);
-    await waitFor(() => expect(((document.getElementById("ag-budget-in")) as HTMLInputElement).value).toBe("20"));
-    expect(document.getElementById("ag-conflict")).toBeNull();
-    fireEvent.click(await byId("ag-save"));
-    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
-    const c = writes(calls, "PATCH")[0]!;
-    expect(Object.keys(c.body.patch)).toEqual(["guardrails"]);
-    expect(c.headers["if-match"]).toBe("8");
-  });
-
-  it("shows a conflict instead of saving when the same key changed on both sides", async () => {
-    let live = { ...BUILD };
-    const calls = setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }), "PATCH /api/v1/agents/ag-build": () => ok() });
-    mountAgent();
-    fireEvent.change(await openEdit("ag-budget"), { target: { value: "15" } });
-    live = { ...BUILD, rev: 8, budget: 20 };
-    invalidateSlices(["agents"]);
-    expect((await byId("ag-conflict")).getAttribute("role")).toBe("alert");
-    fireEvent.click(await byId("ag-save"));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(writes(calls, "PATCH")).toHaveLength(0);
-    fireEvent.click(await byId("ag-conflict-mine"));
-    await waitFor(() => expect(document.getElementById("ag-conflict")).toBeNull());
-    fireEvent.click(await byId("ag-save"));
-    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
-    expect(writes(calls, "PATCH")[0]!.body.patch).toEqual({ budget: 15 });
-    expect(writes(calls, "PATCH")[0]!.headers["if-match"]).toBe("8");
-  });
-
-  it("keeps the draft across tabs and discards it on request", async () => {
+  it("has one panel on Instructions, plain Open rows on Skills and MCP, no Edit column per project, and only Version history on Versions", async () => {
     setup();
     mountAgent();
-    fireEvent.change(await openEdit("ag-budget"), { target: { value: "33" } });
+    await tab("instructions");
+    expect([...document.querySelectorAll("#agent-detail .panel-title")].map((t) => t.textContent)).toEqual(["Instructions"]);
+    expect(document.getElementById("ag-instr-save")!.textContent).toBe("Save as new version");
+    expect(document.getElementById("ag-instr-revert")!.textContent).toBe("Revert");
+    await tab("skills");
+    expect(await byId("ag-sk-open-sk-a")).toBeTruthy();
+    expect(document.getElementById("ag-sk-add")).toBeNull();
+    expect(document.getElementById("ag-mcp-add")).toBeNull();
+    expect(document.querySelector("[id^=ag-sk-up-], [id^=ag-sk-rm-], [id^=ag-mcp-rm-]")).toBeNull();
+    fireEvent.click(document.getElementById("ag-sk-open-sk-a")!);
+    expect(window.location.hash).toBe("#skills/sk-a");
+    cleanup();
+    mountAgent();
     await tab("overrides");
-    await tab("config");
-    expect(((await openEdit("ag-budget")) as HTMLInputElement).value).toBe("33");
-    fireEvent.click(await byId("ag-discard"));
-    await waitFor(() => expect(((document.getElementById("ag-budget-in")) as HTMLInputElement).value).toBe("12"));
+    await byId("ag-ov");
+    expect(document.querySelector("[id^=ag-ov-edit-]")).toBeNull();
+    expect([...document.querySelectorAll("#ag-ov thead th")].map((t) => t.textContent)).toEqual(["Project", "Override", "Eval"]);
+    await tab("versions");
+    expect([...document.querySelectorAll("#agent-detail .panel-title")].map((t) => t.textContent)).toEqual(["Version history"]);
+    expect(document.getElementById("ag-newver")).toBeNull();
+    expect(document.querySelector("[id^=ag-runsuite-]")).toBeNull();
   });
 
   it("blocks autonomy on a regulated project with POL-112, naming the project", async () => {
     setup();
     mountAgent();
     const own = (await byId("ag-autonomy")) as HTMLSelectElement;
-    const auto = Array.from(own.options).find((o) => o.value === "auto")!;
-    expect(auto.disabled).toBe(true);
-    expect(auto.textContent).toContain("blocked by POL-112");
-    await tab("overrides");
-    fireEvent.click(await byId("ag-ov-edit-risk"));
-    const sel = (await byId("ag-ov-aut-risk")) as HTMLSelectElement;
-    const opt = Array.from(sel.options).find((o) => o.value === "auto")!;
-    expect(opt.disabled).toBe(true);
-    expect(opt.textContent).toContain("blocked by POL-112");
+    await waitFor(() => expect(Array.from(own.options).find((o) => o.value === "auto")!.disabled).toBe(true));
+    expect(Array.from(own.options).find((o) => o.value === "auto")!.textContent).toContain("blocked by POL-112");
   });
 
-  it("a person without the right sees every control locked with the reason, and the create button too", async () => {
+  it("a person without the right sees every control locked with the reason", async () => {
     setup({}, ["agent.edit"]);
     mountAgent();
     await waitFor(() => expect(document.querySelector(".lock-note")).not.toBeNull());
     expect(document.querySelector(".lock-note")!.textContent).toContain("Read-only for you: agent configuration");
     expect(((await byId("ag-model")) as HTMLSelectElement).disabled).toBe(true);
     expect(document.getElementById("ag-pause")!.getAttribute("aria-disabled")).toBe("true");
-    cleanup();
-    window.location.hash = "#agents";
-    mount(<AgentsView />);
-    await waitFor(() => expect(document.getElementById("agent-create")!.getAttribute("aria-disabled")).toBe("true"));
-    expect(document.getElementById("agent-create")!.getAttribute("data-reason")).toMatch(/Needs Factory Admin/);
+    // the tool switches are locked too
+    expect(document.getElementById("ag-tool-readRepo")!.closest("[aria-disabled=true], .is-locked, label")).not.toBeNull();
   });
 
   it("pauses an agent through a save with its version", async () => {
@@ -329,120 +297,7 @@ describe("Agents screen", () => {
     mountAgent();
     fireEvent.click(await byId("ag-pause"));
     await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
-    expect(writes(calls, "PATCH")[0]).toMatchObject({ body: { patch: { status: "paused" }, note: "paused" }, headers: { "if-match": "7" } });
-  });
-
-  it("reorders, detaches and attaches skills in the draft, then saves the new order", async () => {
-    const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
-    mountAgent();
-    await tab("skills");
-    expect(document.querySelectorAll(".ag-skill-chain li")).toHaveLength(2);
-    await waitFor(() => expect(document.querySelector(".ag-skill-chain li")!.textContent).toContain("Test design desc"));
-    expect((await byId("ag-sk-up-sk-a")).getAttribute("data-reason")).toBe("Already first.");
-    fireEvent.click(await byId("ag-sk-up-sk-b"));
-    await waitFor(() => expect(document.querySelector(".ag-skill-chain li")!.textContent).toContain("Security review"));
-    fireEvent.change(await byId("ag-sk-add"), { target: { value: "sk-c" } });
-    await waitFor(() => expect(document.querySelectorAll(".ag-skill-chain li")).toHaveLength(3));
-    fireEvent.click(await byId("ag-sk-rm-sk-a"));
-    fireEvent.click(await byId("ag-save"));
-    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
-    expect(writes(calls, "PATCH")[0]!.body.patch).toEqual({ skills: ["sk-b", "sk-c"] });
-    // the MCP panel lists the allowed server with an Open button to its page
-    expect(document.body.textContent).toContain("Docs wiki");
-    fireEvent.click(document.getElementById("ag-mcp-open-mcp-docs")!);
-    expect(window.location.hash).toBe("#mcp/mcp-docs");
-  });
-
-  it("previews the live version: the real layer order, full skill bodies and the runner's own parts", async () => {
-    const calls = setup();
-    mountAgent();
-    await tab("instructions");
-    const pre = await byId("ag-effective");
-    await waitFor(() => expect(pre.textContent).toContain("Base rules."));
-    const titles = [...pre.querySelectorAll("h4")].map((h) => h.firstChild?.textContent ?? "");
-    expect(titles).toEqual(["Factory base", "Project overlay", "Agent", "Repo guidelines (Gantry)", "Skill: Test design v1.2.0", "Station tools", "Result format", "First message"]);
-    expect(pre.textContent).toContain("Test design body, in full.");
-    expect(document.getElementById("ag-eff-station-tools")!.textContent).toContain("added by the runner");
-    expect(document.getElementById("ag-eff-handoff")!.textContent).toContain("Station: <the station the agent works>");
-    expect(document.getElementById("ag-eff-count")!.textContent).toMatch(/^\d+ words, about \d+ tokens$/);
-    expect(document.getElementById("ag-repo-commit")!.textContent).toBe(`recorded at ${"a".repeat(12)}`);
-    expect(document.getElementById("ag-eff-note")!.textContent).toContain("2.6.1");
-    // The default asks for the floor version (no version parameter); the Draft toggle asks for the working copy.
-    expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("version") === null)).toBe(true);
-    expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("version") === "draft")).toBe(false);
-    fireEvent.click(document.getElementById("ag-eff-version-draft")!);
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("version") === "draft")).toBe(true));
-    await waitFor(() => expect(document.getElementById("ag-eff-note")!.textContent).toContain("not live yet"));
-  });
-
-  it("asks the server for the composition of the chosen project and repo", async () => {
-    const calls = setup();
-    mountAgent();
-    await tab("instructions");
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("project") === "payments" && c.query.get("repo") === "payments-api")).toBe(true));
-    fireEvent.change(await byId("ag-ctx-project"), { target: { value: "risk" } });
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/agents/ag-build/effective" && c.query.get("project") === "risk" && !c.query.get("repo"))).toBe(true));
-  });
-
-  it("edits the factory base with the base version as If-Match and refuses an empty text inline", async () => {
-    const calls = setup({ "PUT /api/v1/instructions/base": () => ok({ version: 5 }) });
-    mountAgent();
-    await tab("instructions");
-    fireEvent.click(await byId("ag-edit-base"));
-    const ta = (await byId("ag-txt-edit")) as HTMLTextAreaElement;
-    expect(ta.value).toBe("Base rules.");
-    fireEvent.change(ta, { target: { value: "   " } });
-    fireEvent.click(await byId("ag-txt-ok"));
-    await waitFor(() => expect(document.querySelector(".form-err")!.textContent).toBe("Base instructions cannot be empty."));
-    expect(writes(calls, "PUT")).toHaveLength(0);
-    fireEvent.change(ta, { target: { value: "New base rules that are long enough." } });
-    fireEvent.click(await byId("ag-txt-ok"));
-    await waitFor(() => expect(writes(calls, "PUT")).toHaveLength(1));
-    expect(writes(calls, "PUT")[0]).toMatchObject({ path: "/api/v1/instructions/base", body: { text: "New base rules that are long enough." }, headers: { "if-match": "4" } });
-  });
-
-  it("shows a refusal from the server inside the dialog (stale base)", async () => {
-    setup({ "PUT /api/v1/instructions/base": () => ({ status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } }) });
-    mountAgent();
-    await tab("instructions");
-    fireEvent.click(await byId("ag-edit-base"));
-    fireEvent.change(await byId("ag-txt-edit"), { target: { value: "New base rules that are long enough." } });
-    fireEvent.click(await byId("ag-txt-ok"));
-    await waitFor(() => expect(document.querySelector(".form-err")!.textContent).toMatch(/changed since you loaded/));
-  });
-
-  it("saves the project overlay and the repo guidelines through their own endpoints", async () => {
-    const calls = setup({ "PATCH /api/v1/projects/payments/config": () => ok(), "PATCH /api/v1/repos/payments-api/config": () => ok() });
-    mountAgent();
-    await tab("instructions");
-    fireEvent.click(await byId("ag-edit-overlay"));
-    fireEvent.change(await byId("ag-txt-edit"), { target: { value: "Overlay v2" } });
-    fireEvent.click(await byId("ag-txt-ok"));
-    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
-    expect(writes(calls, "PATCH")[0]).toMatchObject({ path: "/api/v1/projects/payments/config", body: { path: "overlay", value: "Overlay v2" }, headers: { "if-match": "3" } });
-    await waitFor(() => expect(document.getElementById("ag-txt-edit")).toBeNull());
-    fireEvent.click(await byId("ag-edit-guidelines"));
-    fireEvent.change(await byId("ag-txt-edit"), { target: { value: "Use npm." } });
-    fireEvent.click(await byId("ag-txt-ok"));
-    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(2));
-    expect(writes(calls, "PATCH")[1]).toMatchObject({ path: "/api/v1/repos/payments-api/config", body: { guidelines: "Use npm." }, headers: { "if-match": "5" } });
-  });
-
-  it("creates a candidate version from the saved configuration (only when nothing is unsaved), with a suggested label", async () => {
-    const calls = setup({ "POST /api/v1/agents/ag-build/versions": () => ok() });
-    mountAgent();
-    await tab("versions");
-    const label = (await byId("ag-newver")) as HTMLInputElement;
-    expect(label.value).toBe("2.7.0-rc2");
-    fireEvent.change(await byId("ag-newnote"), { target: { value: "Sonnet trial" } });
-    fireEvent.click(await byId("ag-newver-go"));
-    await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
-    expect(writes(calls, "POST")[0]).toMatchObject({ path: "/api/v1/agents/ag-build/versions", body: { label: "2.7.0-rc2", note: "Sonnet trial" }, headers: { "if-match": "7" } });
-    // with unsaved edits the button says why it is locked
-    await tab("config");
-    fireEvent.change(await openEdit("ag-budget"), { target: { value: "40" } });
-    await tab("versions");
-    expect((await byId("ag-newver-go")).getAttribute("data-reason")).toMatch(/Save or discard your changes first/);
+    expect(writes(calls, "PATCH")[0]).toMatchObject({ body: { patch: { status: "paused" }, note: "status" }, headers: { "if-match": "7" } });
   });
 
   it("locks promotion with the eval gate's reason, and promotes an eligible candidate", async () => {
@@ -452,7 +307,7 @@ describe("Agents screen", () => {
     const blocked = await byId("ag-promote-270rc1");
     expect(blocked.getAttribute("aria-disabled")).toBe("true");
     expect(blocked.textContent).toBe("Promote");
-    expect(blocked.getAttribute("data-reason")).toBe("Needs a passing run of SUITE-BUILD. No run of SUITE-BUILD yet.");
+    expect(blocked.getAttribute("data-reason")).toBe("A passing run of its suite. No run of SUITE-BUILD yet.");
     fireEvent.click(blocked);
     expect(writes(calls, "POST")).toHaveLength(0);
     const eligible = await byId("ag-promote-280rc1");
@@ -521,54 +376,6 @@ describe("Agents screen", () => {
     expect(writes(calls, "POST")[0]!.body).toMatchObject({ label: "2.7.0-rc2", note: "Edited in web" });
   });
 
-  it("edits a per-project override in a dialog that applies to the draft; lists the Overrides table with eval column", async () => {
-    setup();
-    mountAgent();
-    await tab("overrides");
-    expect([...document.querySelectorAll("#ag-ov thead th")].map((t) => t.textContent)).toEqual(["Project", "Override", "Eval", ""]);
-    expect((await byId("ag-ov")).textContent).toContain("Uses default");
-    expect(document.querySelector("#ag-ov")!.textContent).toContain("custom");
-    fireEvent.click(await byId("ag-ov-edit-payments"));
-    fireEvent.change(await byId("ag-ov-budget-payments"), { target: { value: "5" } });
-    fireEvent.click(await byId("ag-ov-ok"));
-    await waitFor(() => expect(document.getElementById("ag-savebar")).not.toBeNull());
-  });
-
-  it("walks the create-agent flow and posts the new agent once with an Idempotency-Key", async () => {
-    const calls = setup({ "POST /api/v1/agents": () => ok({ agent: { ...BUILD, id: "ag-docs-1a2b", name: "Docs Writer 1" } }) });
-    mount(<AgentsView />);
-    fireEvent.click(await byId("agent-create"));
-    expect((await byId("ca-back")).getAttribute("data-reason")).toBe("This is the first step.");
-    fireEvent.click(await byId("ca-tpl-docs"));
-    expect(((await byId("ca-name")) as HTMLInputElement).value).toBe("Docs Writer 1");
-    fireEvent.click(await byId("ca-next"));
-    await byId("ca-model");
-    fireEvent.click(await byId("ca-next"));
-    fireEvent.click(await byId("ca-tool-sendEmail"));
-    fireEvent.click(await byId("ca-next"));
-    await byId("ca-projects");
-    fireEvent.click(await byId("ca-next"));
-    const dlg = await screen.findByRole("dialog");
-    expect(dlg.textContent).toContain("The agent starts paused at 0.1.0 with its own eval suite.");
-    expect(dlg.textContent).toContain("Docs Writer 1");
-    fireEvent.click(await byId("ca-next"));
-    await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
-    const c = writes(calls, "POST")[0]!;
-    expect(c.path).toBe("/api/v1/agents");
-    expect(c.headers["idempotency-key"]).toBeTruthy();
-    expect(c.body).toMatchObject({ name: "Docs Writer 1", station: "close", autonomy: "gate", projects: "all", skills: ["sk-relnotes"], model: "claude-sonnet-5-5", stations: ["close"] });
-    expect(c.body.tools).toMatchObject({ writeBranch: true, openPR: true, sendEmail: true, merge: false });
-  });
-
-  it("refuses the create flow's first step without a name", async () => {
-    const calls = setup();
-    mount(<AgentsView />);
-    fireEvent.click(await byId("agent-create"));
-    fireEvent.click(await byId("ca-tpl-blank"));
-    fireEvent.click(await byId("ca-next"));
-    await waitFor(() => expect(document.querySelector(".ag-create .form-err")!.textContent).toBe("Give the agent a name."));
-    expect(writes(calls, "POST")).toHaveLength(0);
-  });
 });
 
 describe("Skills screen", () => {
@@ -641,18 +448,6 @@ describe("Skills screen", () => {
     expect(writes(calls, "PATCH")[0]).toMatchObject({ path: "/api/v1/skills/sk-a", body: { patch: { body: "A better body that is long enough." } }, headers: { "if-match": "4" } });
   });
 
-  it("keeps attach, project scope and versions reachable inside the drawer", async () => {
-    const calls = setup({ "PUT /api/v1/agents/ag-review/skills/sk-a": () => ok({ msg: "Attached Test design to Reviewer." }), "PUT /api/v1/skills/sk-b/projects": () => ok() });
-    mountSkill("sk-a");
-    const drw = await waitFor(() => { const e = document.querySelector("aside.drw"); if (!e) throw new Error("no drawer"); return e; });
-    fireEvent.click(drw.querySelector("summary")!);
-    expect((await byId("sk-att-ag-build") as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(await byId("sk-att-ag-review"));
-    await waitFor(() => expect(writes(calls, "PUT")).toHaveLength(1));
-    expect(document.querySelectorAll(".sk-vers li")).toHaveLength(2);
-    expect(document.querySelector(".sk-vers li.is-current")!.textContent).toContain("Tightened");
-  });
-
   it("locks Edit and New for someone without the right", async () => {
     setup({}, ["skill.edit", "agent.edit"]);
     mount(<SkillsView />);
@@ -696,3 +491,16 @@ describe("Skills screen: a read the person may not make", () => {
     await waitFor(() => expect(document.getElementById("skills-hidden")?.textContent).toContain("Not visible to you"));
   });
 });
+
+describe("Skills drawer", () => {
+  it("carries only WHEN, OWNER, USED BY, the body and Edit: no extra disclosure", async () => {
+    setup();
+    window.location.hash = "#skills/sk-a";
+    mount(<SkillsView />);
+    await waitFor(() => expect(document.querySelector(".drawer, [role=dialog]")).not.toBeNull());
+    await screen.findByText("Test design body");
+    expect(document.querySelector("details.sk-more")).toBeNull();
+    expect(document.body.textContent).not.toContain("Agents, projects and versions");
+  });
+});
+

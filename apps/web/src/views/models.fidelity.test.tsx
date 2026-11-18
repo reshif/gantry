@@ -72,7 +72,7 @@ describe("Models screen (Blueprint layout)", () => {
     expect([...document.querySelectorAll("#rt-panel .panel-title")].slice(0, 3).map((t) => t.textContent)).toEqual(["Default and per-station", "Fallback chain", "Routing rules"]);
     expect(document.querySelector("#rt-panel dl.kv dt")!.textContent).toBe("Default model");
     expect(document.querySelectorAll("#rt-panel ol.mono li")).toHaveLength(2);
-    expect([...document.querySelectorAll("#rr-table thead th")].map((t) => t.textContent)).toEqual(["Repo tag", "Use vendor", "Region", "Why", ""]);
+    expect([...document.querySelectorAll("#rr-table thead th")].map((t) => t.textContent)).toEqual(["Repo tag", "Use vendor", "Region", "Why"]);
     const st = document.querySelector("#rt-panel select[aria-label$=' model']:not(#rt-default)") as HTMLSelectElement;
     expect(st.options[0]!.textContent).toBe("Use default");
     fireEvent.click(document.getElementById("md-tab-prices")!);
@@ -93,5 +93,37 @@ describe("Models screen (Blueprint layout)", () => {
     expect(link.getAttribute("href")).toBe("#/p/payments/project-config");
     expect(document.body.textContent).toContain("$4,500 / $5,000");
     expect(document.querySelector(".md-stack .meter.warn")).not.toBeNull();
+  });
+
+  it("matches the prototype's header and vendor cards: no Add vendor, static 'all connected', no Manage rows, no dashed Local card, any model switch is usable", async () => {
+    mount("#models");
+    const card = await byId("vendor-anthropic");
+    expect(document.getElementById("md-add-vendor")).toBeNull();
+    expect(document.getElementById("md-stats")!.textContent).toContain("all connected");
+    expect(document.body.textContent).not.toContain("not connected");
+    expect(document.querySelector(".md-manage")).toBeNull();
+    expect((await byId("vendor-local")).className).not.toContain("is-off");
+    const sw = card.querySelector("#mt-claude-opus-5-5")!;
+    expect(sw.getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("routing tab: no Change the order, no Add rule or Remove, no per-class table; raw vendor ids in rules; Default model reachable by its label", async () => {
+    mount("#models?tab=routing");
+    await byId("rt-panel");
+    expect(document.querySelector("#rt-panel details.md-manage")).toBeNull();
+    expect(document.getElementById("rr-add-open")).toBeNull();
+    expect(document.querySelector("[id^=rr-del-]")).toBeNull();
+    expect(document.getElementById("rt-classes")).toBeNull();
+    expect(document.getElementById("rr-table")!.textContent).toContain("anthropic");
+    expect((document.querySelector("select[aria-label='Default model']") as HTMLSelectElement).id).toBe("rt-default");
+  });
+
+  it("prices tab: only Model prices and Project budgets (all projects, archived too); no Publish prices; local models have blank prices", async () => {
+    mount("#models?tab=prices");
+    await byId("md-prices");
+    expect([...document.querySelectorAll(".md-stack .panel-title")].map((t) => t.textContent)).toEqual(["Model prices", "Project budgets, this month"]);
+    expect(document.getElementById("pv-open")).toBeNull();
+    const local = [...document.querySelectorAll("#md-prices tbody tr")].find((r) => r.textContent!.includes("coder-34b"))!;
+    expect([...local.querySelectorAll("td .num")].map((n) => n.textContent)).toEqual(["", ""]);
   });
 });

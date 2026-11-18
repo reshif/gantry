@@ -1,8 +1,7 @@
 /**
  * Agents (spec 8.7, 10.2, 13.2) against /api/v1/agents. Two pages: the roster (`#agents`) and one agent (`#agents/<id>`) with its layered instructions, ordered skills,
- * model chain, autonomy, tools, MCP, staffing, budget, guardrails, per-project overrides, versions with eval-gated promotion and rollback, trust, history, and the create flow.
- * Edits stay in a draft (kept across tabs and screens) until Save; saving writes one audited change. A version is a snapshot of the saved configuration and is immutable.
- * "Run suite" opens Evals, which owns suite runs.
+ * model, autonomy, tools, skills and MCP, per-project overrides and versions with rollback. The model, autonomy and tool controls write at once (one audited change, toasted);
+ * instructions are saved as a new version. A version is a snapshot of the saved configuration and is immutable.
  */
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { fmt, type Project } from "@gantry/domain";
@@ -19,16 +18,11 @@ import { DataTable, type SortCol } from "../ui/SortTable";
 import { Spark } from "../ui/charts";
 import { useUI } from "../ui/overlay-context";
 import { useOutcome } from "./govern/data";
-import { useDraft } from "../lib/useDraft";
-import { useLeaveGuard } from "../lib/useLeaveGuard";
-import { DraftConflictBanner } from "../ui/DraftConflict";
-import { invalidateSlices } from "../api/keys";
-import { nextVersion, pick, ui, useAgentsUi, useStations, autonomyCheck, type AgentRow, type Draft } from "./agents/kit";
+import { nextVersion, ui, useAgentsUi, useStations, type AgentRow } from "./agents/kit";
 import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
 import { InstructionsTab } from "./agents/Instructions";
 import { SkillsTab } from "./agents/SkillsMcp";
 import { VersionsTab } from "./agents/Versions";
-import { CreateAgent } from "./agents/Create";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
@@ -78,7 +72,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
         <Field label="Autonomy" htmlFor="ag-f-autonomy"><Select id="ag-f-autonomy" value={autonomy} onChange={(v) => setRoster({ autonomy: v })} options={[{ value: "", label: "All" }, ...autonomies.map((x) => ({ value: x, label: x }))]} /></Field>
         <Field label="Status" htmlFor="ag-f-status"><Select id="ag-f-status" value={status} onChange={(v) => setRoster({ status: v })} options={[{ value: "", label: "All" }, { value: "active", label: "active" }, { value: "paused", label: "paused" }]} /></Field>
       </FilterBar>
-      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} pageSize={12} pager
+      <DataTable id="ag-roster" caption="Agents" columns={cols} rows={rows} rowKey={(a) => a.id} rowId={(a) => `ag-row-${a.id}`} onRow={open} pageSize={12} pager sortSelect={false}
         empty={agents.length ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="ag-clear-empty" onClick={clear} /> } : { title: "Nothing here yet", text: "Items will appear here when they exist." }} />
     </Panel>
   );
@@ -87,60 +81,40 @@ function Roster({ agents }: { agents: AgentRow[] }) {
 function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const ui_ = useUI();
   const out = useOutcome();
-  const statusCmd = useCommand((resume: boolean) => ops.saveAgent(a.id, { status: resume ? "active" : "paused" }, resume ? "resumed" : "paused", { ifMatch: a.rev }), { ok: false });
   const policies = usePolicies().data ?? [];
   const st = useStations();
   const perm = dec(useCan("agent.edit"));
   const ro = !perm.allowed;
-  const saved = pick(a);
-  // The draft remembers the revision it started from and sends only the keys changed here: a colleague's change to another key is kept, to the same key is a conflict.
-  const draft = useDraft<Draft>({
-    scope: "agent", id: a.id, server: saved, rev: a.rev,
-    save: (p, ifMatch) => {
-      const patch: Record<string, unknown> = { ...p };
-      if (typeof patch.name === "string") patch.name = patch.name.trim();
-      return ops.saveAgent(a.id, patch, Object.keys(patch).join(", "), { ifMatch });
-    },
-    refresh: () => invalidateSlices(["agents"]),
-  });
-  const d = draft.values;
-  const dirty = draft.dirty;
-  useLeaveGuard(dirty);
-  const autoChk = autonomyCheck(policies, projects, { station: a.station, projects: d.projects }, d.autonomy);
-  const edit = (fn: () => void): void => draft.edit(() => fn());
-  const save = () => {
-    if (!d.name.trim()) { out({ ok: false, msg: "The agent needs a name.", status: 422 }); return; }
-    if (!d.stations.length) { out({ ok: false, msg: "Pick at least one station the agent may staff.", status: 422 }); return; }
-    void draft.save().then((r) => { if (r) out(r); });
+  const write = useCommand((patch: Record<string, unknown>, note: string) => ops.saveAgent(a.id, patch, note, { ifMatch: a.rev }), { ok: false });
+  /** One change, written at once; the toast says what changed. */
+  const apply = (patch: Record<string, unknown>, msg: string): void => {
+    void write.run(patch, Object.keys(patch).join(", ")).then((r) => { if (r?.ok) ui_.toast(msg, "ok"); });
   };
-  const saveGuard: Decision | null = !perm.allowed ? perm : draft.saving || draft.syncing ? { allowed: false, needs: "", reason: "Saving…" } : !autoChk.allowed ? { allowed: false, needs: "", reason: autoChk.reason ?? "" } : null;
-  /** "Save as new version": the edited instructions are saved, then a candidate version snapshots them; it goes live after its suite passes. */
-  const saveAsVersion = (): void => {
-    if ((d.instructions ?? "").trim().length < 20) { ui_.toast("Instructions need at least 20 characters", "error"); return; }
+  /** "Save as new version": the edited text is saved, then a version snapshots it; it goes live after its suite passes. */
+  const saveAsVersion = (text: string): void => {
+    if (text.trim().length < 20) { ui_.toast("Instructions need at least 20 characters", "error"); return; }
     void (async () => {
-      if (dirty) { const r = await draft.save(); if (r && !r.ok) { out(r); return; } }
+      if (text !== a.instructions) {
+        const r = await ops.saveAgent(a.id, { instructions: text }, "instructions", { ifMatch: a.rev });
+        if (!r.ok) { out(r); return; }
+      }
       const label = nextVersion(a);
       const r2 = await ops.newAgentVersion(a.id, label, "Edited in web");
       if (r2.ok) ui_.toast(`Saved v${label}`, "ok"); else out(r2);
     })();
   };
-  const revert = (): void => edit(() => { d.instructions = saved.instructions; });
   const paused = a.status === "paused";
-  const toggleStatus = () => {
-    void statusCmd.run(paused).then((r) => { if (r?.ok) ui_.toast(`${a.name} ${paused ? "active" : "paused"}`, "ok"); });
-  };
   const [tab, setTab] = useRouteTab(["config", "instr", "skills", "proj", "versions"], "config");
   const tabs = [
-    { id: "config", label: "Configuration" }, { id: "instr", label: "Instructions" }, { id: "skills", label: "Skills and MCP", count: d.skills.length + d.mcp.length },
-    { id: "proj", label: "Per-project", count: Object.keys(d.overrides ?? {}).length }, { id: "versions", label: "Versions", count: a.versions.length },
+    { id: "config", label: "Configuration" }, { id: "instr", label: "Instructions" }, { id: "skills", label: "Skills and MCP", count: a.skills.length + a.mcp.length },
+    { id: "proj", label: "Per-project", count: Object.keys(a.overrides ?? {}).length }, { id: "versions", label: "Versions", count: a.versions.length },
   ];
-  const tp: TabProps = { a, d, ro, perm, projects, policies, edit, saveAsVersion, revert };
-  const body = tab === "instr" ? <InstructionsTab {...tp} />
+  const tp: TabProps = { a, ro, perm, projects, policies, apply, saveAsVersion };
+  const body = tab === "instr" ? <InstructionsTab key={`${a.id}-${a.rev}`} {...tp} />
     : tab === "skills" ? <SkillsTab {...tp} />
     : tab === "proj" ? <OverridesTab {...tp} />
-    : tab === "versions" ? <VersionsTab a={a} dirty={dirty} perm={perm} />
+    : tab === "versions" ? <VersionsTab a={a} perm={perm} />
     : <ConfigTab {...tp} />;
-  const showSave = tab !== "versions";
   const stn = st.find(a.station);
   return (
     <section className="agent-detail" id="agent-detail" aria-label={`${a.name} configuration`}>
@@ -148,7 +122,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
         crumbs={[{ label: "Agents", href: hashFor("agents"), onClick: () => navigate("agents") }, { label: a.name }]}
         title={a.name}
         sub={stn?.purpose ?? "Roaming agent"}
-        actions={<Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={statusCmd.wait("Saving…")} onClick={toggleStatus} />}
+        actions={<Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={write.wait("Saving…")} onClick={() => apply({ status: paused ? "active" : "paused" }, `${a.name} ${paused ? "active" : "paused"}`)} />}
       />
       <StatRow id="ag-detail-stats">
         <Stat label="Eval score" value={fmt.pct(a.evalScore)} sub={`suite ${a.suite}`} tone={a.evalScore > 0.9 ? "done" : "wait"} />
@@ -159,28 +133,17 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
       <LockNote decision={perm} what="Agent configuration" />
       <Tabs idPrefix="ag-tab" items={tabs} active={tab} onChange={setTab} />
       <div className="stack ag-body">{body}</div>
-      {showSave ? <DraftConflictBanner id="ag-conflict" conflict={draft.conflict} onKeepMine={draft.keepMine} onDiscard={draft.discard} /> : null}
-      {showSave && dirty ? (
-        <div className="savebar is-dirty" id="ag-savebar">
-          <span className="muted small savebar-text">Edits stay in a draft while you switch tabs or screens. Saving writes one audited change.</span>
-          <Btn label="Discard" id="ag-discard" guard={!perm.allowed ? perm : null} onClick={draft.discard} />
-          <Btn label="Save agent" kind="primary" id="ag-save" guard={saveGuard} onClick={save} />
-        </div>
-      ) : null}
     </section>
   );
 }
 
 export default function AgentsView() {
   useAgentsUi();
-  const ui_ = useUI();
   const prefs = usePrefs();
   const route = useHash();
   const q = useAgents();
   const agents = useMemo(() => (q.data ?? []) as unknown as AgentRow[], [q.data]);
   const projects = (useProjects().data ?? []) as Project[];
-  const policies = usePolicies().data ?? [];
-  const perm = dec(useCan("agent.edit"));
   const wanted = route.id === "agents" ? route.param : null;
   useCrumbTail(wanted ? agents.find((a) => a.id === wanted)?.name : null);
 
@@ -194,12 +157,11 @@ export default function AgentsView() {
   }, [prefs.agent, agents]);
 
   const sub = "The workers on the line: who they are, what they may touch, and how they have performed.";
-  const create = <Btn label="Create agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <CreateAgent agents={agents} projects={projects} policies={policies} perm={perm} close={close} />)} />;
 
   if (q.data === undefined) {
     return (
       <div className="view view-agents">
-        <ViewHead title="Agents" kicker="All lines" sub={sub} actions={q.isError ? create : undefined} />
+        <ViewHead title="Agents" kicker="All lines" sub={sub} />
         <Async query={q} what="agents" id="agents">{() => null}</Async>
       </div>
     );
@@ -220,7 +182,7 @@ export default function AgentsView() {
   const active = agents.filter((a) => a.status === "active").length;
   return (
     <div className="view view-agents">
-      <ViewHead title="Agents" kicker="All lines" sub={sub} actions={<><Btn label="Evals" onClick={() => navigate("evals")} /><Btn label="Trust ladder" onClick={() => navigate("trust")} />{create}</>} />
+      <ViewHead title="Agents" kicker="All lines" sub={sub} actions={<><Btn label="Evals" onClick={() => navigate("evals")} /><Btn label="Trust ladder" onClick={() => navigate("trust")} /></>} />
       <StatRow id="ag-stats">
         <Stat label="Agents" value={String(agents.length)} sub={`${active} active`} tone="info" />
         <Stat label="On autopilot" value={String(agents.filter((a) => a.autonomy === "auto").length)} sub="no gate" />

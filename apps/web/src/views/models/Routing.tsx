@@ -9,9 +9,8 @@ import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useRoutingResolve, useRoutingVersions } from "../../api/queries";
 import { useActors } from "../../ui/actors";
-import { Btn, Chip, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { Chip, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/SortTable";
-import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ProjectPolicy } from "./Policy";
@@ -25,8 +24,6 @@ export function RoutingPanel({ routing, vendors, repos, projects, cat }: { routi
   const ro = !perm.allowed;
   const r = routing;
   const enabled = enabledModels(vendors).map((m) => ({ value: m.value, label: m.label.replace(/ · [^·]*$/, "") }));
-  const vendorName = (id: string): string => vendors.find((v) => v.id === id)?.name ?? id;
-  const modelOf = (id: string) => vendors.flatMap((v) => v.models.map((m) => ({ m, v }))).find((x) => x.m.id === id);
 
   /** Apply fn to a copy of the routing and save it as a new version. */
   const change = async (fn: (x: Routing) => void, msg: string, label = msg) => {
@@ -39,7 +36,6 @@ export function RoutingPanel({ routing, vendors, repos, projects, cat }: { routi
   };
 
   const stations = cat?.stations ?? [];
-  const classes = cat?.classes ?? [];
   const stationLabel = (id: string): string => stations.find((s) => s.id === id)?.name ?? id;
   const withCurrent = (cur: string) => (cur && !enabled.some((m) => m.value === cur) ? [...enabled, { value: cur, label: `${cur} (unavailable)` }] : enabled);
 
@@ -65,56 +61,6 @@ export function RoutingPanel({ routing, vendors, repos, projects, cat }: { routi
     </>
   );
 
-  const classTable = (
-    <div className="table-scroll">
-      <table className="table table-compact" id="rt-classes">
-        <thead><tr><th scope="col">Work class</th><th scope="col">Model</th></tr></thead>
-        <tbody>
-          {classes.map((c) => {
-            const cur = r.classOverrides?.[c.id] ?? "";
-            return (
-              <tr key={c.id}>
-                <td className="nowrap">{c.name}</td>
-                <td>
-                  <Select id={`rt-cl-${c.id}`} aria-label={`${c.name} model`} disabled={ro} options={[{ value: "", label: "No class override" }, ...withCurrent(cur)]} value={cur}
-                    onChange={(v) => void change((x) => { x.classOverrides = { ...(x.classOverrides ?? {}) }; if (v) x.classOverrides[c.id] = v; else delete x.classOverrides[c.id]; }, `${c.name} work now uses ${v || "no class override"}.`, `Class ${c.id} → ${v || "none"}`)} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-
-  const fb = (
-    <ol className="chain">
-      {r.fallback.map((m, i) => {
-        const mm = modelOf(m);
-        const ok = !!mm && mm.m.enabled && mm.v.connected;
-        return (
-          <li key={m}>
-            <span className="mono chain-n">{i + 1}</span>
-            <span className="mono">{m}</span>
-            {ok ? null : <span className="chip chip-warn">unavailable, skipped</span>}
-            <span className="chain-tools">
-              <Btn small icon="up" id={`rt-fb-up-${i}`} aria={`Move ${m} up`} disabledReason={ro ? perm.reason : i === 0 ? "Already first." : null}
-                onClick={() => void change((x) => { x.fallback.splice(i, 1); x.fallback.splice(i - 1, 0, m); }, "Fallback order changed.", `Fallback order: ${m} up`)} />
-              <Btn small icon="down" id={`rt-fb-down-${i}`} aria={`Move ${m} down`} disabledReason={ro ? perm.reason : i === r.fallback.length - 1 ? "Already last." : null}
-                onClick={() => void change((x) => { x.fallback.splice(i, 1); x.fallback.splice(i + 1, 0, m); }, "Fallback order changed.", `Fallback order: ${m} down`)} />
-              <Btn small icon="x" id={`rt-fb-rm-${i}`} aria={`Remove ${m}`} disabledReason={ro ? perm.reason : r.fallback.length < 2 ? "Keep at least one fallback." : null}
-                onClick={() => void change((x) => { x.fallback.splice(i, 1); }, `${m} removed from the fallback order.`, `Removed ${m} from fallback`)} />
-            </span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-  const addable = enabled.filter((m) => !r.fallback.includes(m.value));
-  const addFb = (
-    <Select id="rt-fb-add" aria-label="Add model to fallback order" disabled={ro || !addable.length} options={[{ value: "", label: "Add to fallback order…" }, ...addable]} value=""
-      onChange={(v) => { if (v) void change((x) => { x.fallback.push(v); }, `${v} added to the fallback order.`, `Added ${v} to fallback`); }} />
-  );
   const cross = (
     <div className="md-cross" id="rt-cross-row">
       <Toggle id="rt-cross" checked={r.crossModelFallback === true} label="Allow fallback to a different model" decision={ro ? perm : null}
@@ -129,16 +75,12 @@ export function RoutingPanel({ routing, vendors, repos, projects, cat }: { routi
   // ---- residency and routing rules
   const ruleCols: SortCol<Routing["rules"][number]>[] = [
     { key: "tag", label: "Repo tag", render: (x) => <Chip text={x.tag} cls="info" /> },
-    { key: "use", label: "Use vendor", render: (x) => vendorName(x.use) + (x.alt ? ` or ${vendorName(x.alt)}` : "") },
+    { key: "use", label: "Use vendor", render: (x) => x.use + (x.alt ? ` or ${x.alt}` : "") },
     { key: "region", label: "Region", render: (x) => x.region || "—" },
     { key: "note", label: "Why", render: (x) => x.note || "—" },
-    { key: "rm", label: "", align: "end", render: (x) => <Btn label="Remove" small kind="ghost" id={`rr-del-${x.id}`} aria={`Remove rule ${x.id}`} guard={perm} onClick={() => void change((y) => { y.rules = y.rules.filter((z) => z.id !== x.id); }, `${x.id} removed.`, `Removed ${x.id} (${x.tag} → ${x.use})`)} /> },
   ];
-  const tags = new Set<string>(["regulated", "infra", "experimental", "pci"]);
-  repos.forEach((rp) => repoTags(rp, projects).forEach((t) => tags.add(t)));
-  const vendorOpts = vendors.map((v) => ({ value: v.id, label: v.name }));
   const rules = (
-    <DataTable id="rr-table" caption="Routing rules" columns={ruleCols} rows={r.rules} rowKey={(x) => x.id} pageSize={12} pager
+    <DataTable id="rr-table" caption="Routing rules" columns={ruleCols} rows={r.rules} rowKey={(x) => x.id} pageSize={12} pager sortSelect={false}
       empty={{ title: "No residency rules", text: "Without a rule, any allowed vendor can serve any repo." }} />
   );
 
@@ -156,21 +98,11 @@ export function RoutingPanel({ routing, vendors, repos, projects, cat }: { routi
           <ol className="mono" style={{ margin: 0, paddingLeft: 20 }}>
             {r.fallback.map((f) => <li key={f} style={{ padding: "6px 0" }}>{f}</li>)}
           </ol>
-          <details className="md-manage">
-            <summary className="small">Change the order</summary>
-            <p className="muted small">Tried in order when a model errors, times out or its vendor is down, and only if the project allows a different model. The same model on another allowed vendor is always tried first.</p>
-            {fb}
-            {addFb}
-            {cross}
-          </details>
+          {cross}
         </Panel>
       </div>
-      <Panel title="Routing rules" flush tools={<Btn label="Add rule" small icon="plus" id="rr-add-open" guard={perm} onClick={() => ui.open((close) => <RuleDialog close={close} tags={[...tags]} vendorOpts={vendorOpts} r={r} change={change} />)} />}>
+      <Panel title="Routing rules" flush>
         {rules}
-      </Panel>
-      <Panel title="Per-class overrides">
-        <p className="muted small">A work-order class overrides its station. Order: factory default, project, station, class.</p>
-        {classTable}
       </Panel>
       <div className="cols">
         <Panel title="Per-project policy">
@@ -182,38 +114,6 @@ export function RoutingPanel({ routing, vendors, repos, projects, cat }: { routi
       </div>
       <RoutingVersions current={r.version} />
     </div>
-  );
-}
-
-type ChangeFn = (fn: (x: Routing) => void, msg: string, label?: string) => Promise<{ ok: boolean }>;
-
-/** Add a residency rule (kept from the editor; the rules table itself is read-only like the prototype's). */
-function RuleDialog({ close, tags, vendorOpts, r, change }: { close: () => void; tags: string[]; vendorOpts: Array<{ value: string; label: string }>; r: Routing; change: ChangeFn }) {
-  const ui = useUI();
-  const perm = dec(useCan("model.edit"));
-  const ro = !perm.allowed;
-  const [draft, setDraft] = useState({ tag: "regulated", use: vendorOpts[0]?.value ?? "", region: "", alt: "", note: "" });
-  const addRule = async (done: () => void) => {
-    if (ro) return;
-    if (draft.alt && draft.alt === draft.use) { ui.toast("The alternative must be a different vendor.", "error"); return; }
-    if (r.rules.some((x) => x.tag === draft.tag)) { ui.toast(`A rule for ${draft.tag} already exists. Remove it first.`, "error"); return; }
-    const id = `RR-${r.rules.reduce((m, x) => Math.max(m, +x.id.slice(3) || 0), 0) + 1}`;
-    const rule = { id, tag: draft.tag, use: draft.use, region: draft.region.trim(), alt: draft.alt, note: draft.note.trim() };
-    const res = await change((x) => { x.rules.push(rule); }, `${id} added.`, `Added ${id}: ${rule.tag} → ${rule.use}${rule.region ? ` ${rule.region}` : ""}${rule.alt ? ` or ${rule.alt}` : ""}`);
-    if (res.ok) done();
-  };
-  return (
-    <Dialog title="Add routing rule" kicker="Models · routing" onClose={close}
-      body={(
-        <div className="form-grid md-rule-form" id="rr-form">
-          <Field label="When repo is tagged" htmlFor="rr-tag"><Select id="rr-tag" disabled={ro} options={tags} value={draft.tag} onChange={(v) => setDraft((d) => ({ ...d, tag: v }))} /></Field>
-          <Field label="Use only" htmlFor="rr-use"><Select id="rr-use" disabled={ro} options={vendorOpts} value={draft.use} onChange={(v) => setDraft((d) => ({ ...d, use: v }))} /></Field>
-          <Field label="Region (optional)" htmlFor="rr-region"><input id="rr-region" className="input mono" placeholder="eu-central-1" value={draft.region} disabled={ro} onChange={(e) => setDraft((d) => ({ ...d, region: e.target.value }))} /></Field>
-          <Field label="Or else" htmlFor="rr-alt"><Select id="rr-alt" disabled={ro} options={[{ value: "", label: "No alternative" }, ...vendorOpts]} value={draft.alt} onChange={(v) => setDraft((d) => ({ ...d, alt: v }))} /></Field>
-          <Field label="Note" htmlFor="rr-note"><input id="rr-note" className="input" placeholder="Why this rule exists" value={draft.note} disabled={ro} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} /></Field>
-        </div>
-      )}
-      actions={[{ label: "Cancel" }, { label: "Add rule", kind: "primary", submit: true, icon: "plus", id: "rr-add", guard: perm, onClick: (done) => void addRule(done) }]} />
   );
 }
 

@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, empty, hasMore, onLoadMore, loadingMore, total, sortSelect = true }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -47,6 +47,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   sort?: SortState | undefined;
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
+  /** Additive: false hides the phone "Sort by" select (screens whose prototype has none). */
+  sortSelect?: boolean;
   pageSize?: number;
   /** With `pageSize`: the prototype's footer ("1–12 of 13", Prev / Page n / N / Next) instead of "Show more"; sortable headers carry the ↕ hint. Without `pageSize` it is only the count footer. */
   pager?: boolean;
@@ -120,7 +122,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const clientMore = !pager && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
-      {sortable.length ? (
+      {sortSelect && sortable.length ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
           <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>
