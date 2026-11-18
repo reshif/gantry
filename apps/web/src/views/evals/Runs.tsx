@@ -1,5 +1,5 @@
 /** Runs tab (prototype): every suite run in one table, newest first, searchable. Plain rows: a run is read in its suite's detail (open the suite from the Suites tab). */
-import { fmt } from "@gantry/domain";
+import { agoShort } from "../conversations/ago";
 import { Avatar, Btn, Empty, FilterBar, SearchBox } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/DataTable";
 import { agentOf, ScoreMeter, type EvalsData, type RunRow } from "./kit";
@@ -15,7 +15,7 @@ export function RunsTab({ d, url, setUrl }: { d: EvalsData; url: Url; setUrl: (p
     { key: "suite", label: "Suite", sort: (r) => r.suite, render: (r) => <span className="mono">{r.suite}</span> },
     { key: "agent", label: "Agent", sort: (r) => nameOf(r).toLowerCase(), render: (r) => <span className="who"><Avatar id={r.agent} size="sm" /><span>{nameOf(r)}</span></span> },
     { key: "version", label: "Version", sort: (r) => r.version, render: (r) => <span className="mono">{r.version}</span> },
-    { key: "at", label: "When", sort: (r) => r.at, render: (r) => <span className="mono dim">{fmt.ago(r.at, Date.now())}</span> },
+    { key: "at", label: "When", sort: (r) => r.at, render: (r) => <span className="mono dim">{agoShort(r.at)}</span> },
     { key: "score", label: "Score", sort: (r) => r.score, render: (r) => r.status === "completed" ? <ScoreMeter score={r.score} gate={0.85} label={`${r.id} score`} /> : <span className="dim mono">{r.status}</span> },
   ];
   const sort = { key: url.sort || "at", dir: (url.sort ? (url.dir === "desc" ? -1 : 1) : -1) as 1 | -1 };

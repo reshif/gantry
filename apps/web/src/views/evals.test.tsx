@@ -115,7 +115,7 @@ describe("Evals screen: regressions", () => {
 });
 
 describe("Evals screen: suites and runs", () => {
-  const openSuites = async () => { fireEvent.click(await byId("ev-su-open-SUITE-BUILD")); await byId("ev-run-btn"); };
+  const openSuites = async () => { fireEvent.click(await byId("ev-su-SUITE-BUILD")); await byId("ev-run-btn"); };
   it("lists suites with the last score and its task count, and shows the run's task count and range", async () => {
     setup();
     mount();
@@ -255,5 +255,28 @@ describe("Evals screen: a read the person may not make", () => {
     await byId("ev-stats");
     expect(document.querySelector(".view-evals.view")).toBeNull();
     expect(document.body.textContent).not.toContain("Scores appear as they finish");
+  });
+});
+
+describe("Evals screen: residual round 2", () => {
+  it("shows a failed read as an error, and suite names are plain text (the row opens the details)", async () => {
+    setup({ "GET /api/v1/suites": () => ({ status: 500, body: { ok: false, msg: "boom" } }) });
+    mount();
+    await waitFor(() => expect(document.getElementById("evals-error")).not.toBeNull());
+  });
+  it("has no link in a suite row and writes relative times as 9h ago", async () => {
+    setup();
+    mount();
+    const row = await byId("ev-su-SUITE-BUILD");
+    expect(row.querySelector("a")).toBeNull();
+    expect(document.getElementById("ev-su-open-SUITE-BUILD")).toBeNull();
+  });
+  it("writes run times as 9h ago, not 9h 00m ago", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("ev-tab-runs"));
+    const t = await byId("ev-runs-table");
+    expect(t.textContent).toMatch(/\d+[mhd] ago|just now/);
+    expect(t.textContent).not.toMatch(/\d+h \d\dm ago/);
   });
 });

@@ -10,7 +10,7 @@ export const KINDS: Record<string, { name: string; icon: string }> = {
   guardrail: { name: "Guardrail", icon: "shield" }, approver: { name: "Approver rule", icon: "gate" }, route: { name: "Route change", icon: "branch" },
 };
 export const SIGNALS: Record<string, [string, string]> = {
-  rejection: ["Gate rejection", "x"], sendback: ["Send-back", "undo"], revert: ["Revert", "alert"], incident: ["Incident", "alert"], override: ["Class override", "swap"], miss: ["Intake miss", "chat"], regression: ["Eval regression", "eval"],
+  rejection: ["Gate rejection", "x"], override: ["Class override", "swap"], revert: ["Revert", "alert"], miss: ["Intake miss", "chat"], sendback: ["Send-back", "undo"], incident: ["Incident", "alert"], regression: ["Eval regression", "eval"],
 };
 export const sigName = (signal: string): string => (SIGNALS[signal]?.[0] ?? signal).toLowerCase();
 export const STATUS: Record<string, string> = { proposed: "Proposed", accepted: "Accepted and applied", verified: "Verified", declined: "Declined", rolled_back: "Rolled back" };

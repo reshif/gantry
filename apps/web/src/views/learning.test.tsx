@@ -348,8 +348,9 @@ describe("Learning screen: round 3 fidelity", () => {
     fireEvent.click(await byId("ln-tab-findings"));
     await waitFor(() => expect(document.getElementById("ln-switch")).toBeNull());
     fireEvent.click(await byId("ln-tab-proposals"));
-    // the switch is a small header action, not a banner under the cards
-    expect((await byId("ln-switch")).closest(".ph .acts")).not.toBeNull();
+    // the prototype has no header action: the switch is a quiet button inside the tab
+    expect((await byId("ln-switch")).closest(".ph .acts")).toBeNull();
+    expect((await byId("ln-switch")).closest("#ln-tab-panel")).not.toBeNull();
     expect(document.getElementById("ln-switch-row")).toBeNull();
   });
   it("draws a skill proposal with no earlier text as one added line, not an empty removed line", async () => {
@@ -380,5 +381,39 @@ describe("Learning screen: evidence", () => {
     const links = [...document.querySelectorAll<HTMLAnchorElement>("#ln-f-table a.mono")];
     expect(links.map((a) => a.textContent)).toEqual(["WO-1004", "WO-1013"]);
     expect(links[0]!.getAttribute("href")).toMatch(/record\/WO-1004$/);
+  });
+});
+
+describe("Learning screen: residual round 2", () => {
+  it("lists signals in the prototype order, draws Triaged as info, and shows the prototype toast when Accept returns no message", async () => {
+    setup({ "POST /api/v1/learning/proposals/LP-1/accept": () => ({ body: { ok: true } }) });
+    mount();
+    fireEvent.click(await byId("ln-tab-findings"));
+    await byId("ln-sig");
+    const opts = Array.from(document.querySelectorAll<HTMLOptionElement>("#ln-sig option")).map((o) => o.textContent);
+    expect(opts.filter((o) => o && !o.startsWith("Signal"))).toEqual(["rejection", "sendback", "regression"]);
+    expect(document.querySelector(".chip.ok.plain, .chip.warn.plain")).toBeNull();
+    fireEvent.click(await byId("ln-tab-proposals"));
+    fireEvent.click(await byId("ln-accept-LP-1"));
+    await waitFor(() => expect(document.body.textContent).toContain("Accepted. A new agent version will run evals first."));
+  });
+  it("shows the proposals empty state and a failed read", async () => {
+    setup({}, { proposals: [] });
+    mount();
+    fireEvent.click(await byId("ln-tab-proposals"));
+    await byId("ln-props-empty");
+  });
+  it("shows a failed read as an error with Try again, not an empty list", async () => {
+    setup({ "GET /api/v1/learning/findings": () => ({ status: 500, body: { ok: false, msg: "boom" } }) });
+    mount();
+    fireEvent.click(await byId("ln-tab-findings"));
+    await waitFor(() => expect(document.getElementById("ln-findings-error")).not.toBeNull());
+  });
+});
+
+import { SIGNALS as PROTO_SIGNALS } from "./learning/kit";
+describe("Learning kit: signal order", () => {
+  it("lists rejection, override, revert, miss first, as the prototype does", () => {
+    expect(Object.keys(PROTO_SIGNALS).slice(0, 4)).toEqual(["rejection", "override", "revert", "miss"]);
   });
 });

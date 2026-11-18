@@ -52,7 +52,7 @@ function ProposalCard({ lp, hi }: { lp: LearningProposal; hi: boolean }) {
   const early = lp.status === "accepted" && due && Date.now() < due ? `The window runs until ${fmt.istDate(due)}. It can be verified then.` : null;
   const act = [] as React.ReactNode[];
   if (lp.status === "proposed") {
-    act.push(<Btn key="a" label="Accept change" kind="ok" id={`ln-accept-${lp.id}`} guard={perm} disabledReason={off ?? mine} onClick={() => { void ops.acceptLearning(lp.id).then((r) => ui.toast(r.msg, r.ok ? "ok" : "error")); }} />);
+    act.push(<Btn key="a" label="Accept change" kind="ok" id={`ln-accept-${lp.id}`} guard={perm} disabledReason={off ?? mine} onClick={() => { void ops.acceptLearning(lp.id).then((r) => ui.toast(r.ok ? (r.msg || "Accepted. A new agent version will run evals first.") : r.msg, r.ok ? "ok" : "error")); }} />);
     act.push(<Btn key="d" label="Decline" kind="danger" id={`ln-decline-${lp.id}`} guard={perm} disabledReason={off} onClick={() => ui.reasonDialog({
       title: `Decline ${lp.id}`, kicker: `Learning · ${KINDS[lp.kind]?.name ?? lp.kind}`, sub: `${lp.title}. Nothing changes; the finding stays open.`, label: "Reason (required)", ok: "Decline", kind: "danger", min: 4, guard: perm,
       onOk: async (t) => { const r = await ops.declineLearning(lp.id, t); if (r.ok) ui.toast(r.msg, "ok"); return r; },

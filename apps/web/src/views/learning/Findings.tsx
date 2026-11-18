@@ -38,7 +38,7 @@ export function FindingsTab({ findings, hi, onDrafted, proposalsOn, url, setUrl 
     { key: "signal", label: "Signal", sort: (f) => f.signal, render: (f) => <Chip text={f.signal} cls="agent plain" /> },
     { key: "agent", label: "Agent", sort: (f) => f.agent ?? "", render: (f) => f.agent ? <span className="who"><Avatar id={f.agent} size="sm" /><span>{agName(f.agent)}</span></span> : <span className="dim">{"\u2013"}</span> },
     { key: "ev", label: "Evidence", render: (f) => <ChipList ids={f.evidence} max={3} project={f.project} /> },
-    { key: "st", label: "Status", sort: (f) => f.status, render: (f) => <Chip text={f.status === "open" ? "Open" : "Triaged"} cls={f.status === "open" ? "warn" : "ok"} /> },
+    { key: "st", label: "Status", sort: (f) => f.status, render: (f) => <Chip text={f.status === "open" ? "Open" : "Triaged"} cls={f.status === "open" ? "warn" : "info"} /> },
     { key: "draft", label: "", align: "end", render: (f) => <Btn label="Draft" small id={`ln-open-${f.id}`} aria={`Draft a proposal from ${f.id}: ${f.title}`} onClick={() => draft(f)} /> },
   ];
   const sort = { key: url.sort || "id", dir: (url.dir === "desc" ? -1 : 1) as 1 | -1 };

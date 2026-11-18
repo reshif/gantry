@@ -110,8 +110,8 @@ export function MatrixTab({ cells, projects, agents, switchOn }: { cells: CellOu
                   const l = levelOf(mine);
                   return (
                     <td key={p.id} style={{ textAlign: "center" }}>
-                      <a className="lvl" href="#trust" style={{ "--l": l } as CSSProperties} id={`tr-mx-${a.id}-${p.id}`} aria-label={`${a.name} on ${p.name}: level ${l}`}
-                        onClick={(e) => { e.preventDefault(); open({ agent: a, project: p, cells: mine, switchOn }, grant.allowed); }}>{`L${l}`}</a>
+                      <button type="button" className="lvl" style={{ "--l": l } as CSSProperties} id={`tr-mx-${a.id}-${p.id}`} aria-label={`${a.name} on ${p.name}: level ${l}`}
+                        onClick={() => open({ agent: a, project: p, cells: mine, switchOn }, grant.allowed)}>{`L${l}`}</button>
                     </td>
                   );
                 })}

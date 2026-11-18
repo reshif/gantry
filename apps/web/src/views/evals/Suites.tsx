@@ -283,7 +283,7 @@ export function SuitesTab({ d, url, setUrl, runner }: { d: EvalsData; url: Url; 
   const rows = all.filter((r) => !term || `${r.su.name} ${r.su.id} ${r.agentName}`.toLowerCase().includes(term));
   const open = (r: SuiteTableRow): void => { evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; setUrl({ suite: r.su.id, run: "" }); };
   const cols: SortCol<SuiteTableRow>[] = [
-    { key: "suite", label: "Suite", sort: (r) => r.su.name.toLowerCase(), render: (r) => <><b className="ell"><a href="#evals" id={`ev-su-open-${r.su.id}`} aria-label={`Open details of ${r.su.name}`} style={{ color: "inherit" }} onClick={(e) => { e.preventDefault(); open(r); }}>{r.su.name}</a></b><span className="mono dim" style={{ fontSize: 11 }}>{r.su.id}</span></> },
+    { key: "suite", label: "Suite", sort: (r) => r.su.name.toLowerCase(), render: (r) => <><b className="ell">{r.su.name}</b><span className="mono dim" style={{ fontSize: 11 }}>{r.su.id}</span></> },
     { key: "agent", label: "Agent", sort: (r) => r.agentName.toLowerCase(), render: (r) => <span className="who"><Avatar id={r.agentId} size="sm" /><span>{r.agentName}</span></span> },
     { key: "cases", label: "Cases", sort: (r) => r.cases, align: "end", render: (r) => <span className="mono">{r.cases}</span> },
     { key: "last", label: "Last score", sort: (r) => r.last ?? -1, render: (r) => r.last === null ? <span className="dim">{"\u2013"}</span> : <ScoreMeter score={r.last} gate={r.su.threshold} label={`${r.su.id} last score`} /> },
@@ -301,7 +301,7 @@ export function SuitesTab({ d, url, setUrl, runner }: { d: EvalsData; url: Url; 
         <SearchBox id="ev-search" value={url.q} onChange={(v) => setUrl({ q: v })} placeholder="Search suites" />
       </FilterBar>
       {rows.length ? (
-        <DataTable id="ev-su-table" caption="Eval suites" columns={cols} rows={rows} rowKey={(r) => r.su.id} rowId={(r) => `ev-su-${r.su.id}`} pageSize={12} pager sort={sort}
+        <DataTable id="ev-su-table" caption="Eval suites" columns={cols} rows={rows} rowKey={(r) => r.su.id} rowId={(r) => `ev-su-${r.su.id}`} onRow={open} rowLabel={(r) => `Open details of ${r.su.name}`} pageSize={12} pager sort={sort}
           onSort={(s) => setUrl({ sort: s.key, dir: s.dir === -1 ? "desc" : "asc" })} />
       ) : <Empty icon="search" title="Nothing matches" text="Try clearing a filter or searching for something else." action={<Btn label="Clear filters" id="ev-clear-empty" onClick={() => setUrl({ q: "" })} />} />}
       {evalsUi.suite ? (
