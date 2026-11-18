@@ -311,6 +311,8 @@ export interface HaltInfo {
   by: Id;
   at: Ms;
   reason: string;
+  /** Why the halt exists: `manual` (a person), `budget` or `readiness` (Gantry raised it). Absent on older data. */
+  cause?: string;
 }
 
 export interface Project {
@@ -505,6 +507,8 @@ export interface GateInstance {
   openedRequired?: number;
   decision?: GateDecisionRecord;
   trustNote?: string | null;
+  /** The gate waited past its escalation limit: the rule's fallback approver (else the project owner) may approve it from then on. */
+  escalated?: boolean;
 }
 
 export interface HistorySkill {

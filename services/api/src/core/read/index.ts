@@ -36,6 +36,7 @@ export interface ActiveStop {
   wo: string | null;
   mode: "halt" | "kill";
   reason: string;
+  cause: string;
   inFlight: "hold" | "cancel" | null;
   by: string;
   at: number;
@@ -45,17 +46,17 @@ export interface ActiveStop {
 /** Active (not lifted) stops. The `stops` table is the one source of stop state. */
 export async function readActiveStops(db: Queryable, orgId: string): Promise<ActiveStop[]> {
   const { rows } = await db.query(
-    `select id, scope_type, project_id, repo_id, wo_id, mode, reason, in_flight, set_by, set_at, version from stops where org_id = $1 and lifted_at is null order by set_at, id`,
+    `select id, scope_type, project_id, repo_id, wo_id, mode, reason, cause, in_flight, set_by, set_at, version from stops where org_id = $1 and lifted_at is null order by set_at, id`,
     [orgId],
   );
   return rows.map((r) => ({
-    id: r.id, scope: r.scope_type, project: r.project_id, repo: r.repo_id, wo: r.wo_id, mode: r.mode, reason: r.reason,
+    id: r.id, scope: r.scope_type, project: r.project_id, repo: r.repo_id, wo: r.wo_id, mode: r.mode, reason: r.reason, cause: String(r.cause ?? "manual"),
     inFlight: r.in_flight === "cancel" ? "cancel" : r.in_flight === "hold" ? "hold" : null, by: r.set_by, at: ms(r.set_at) ?? 0, version: r.version,
   }));
 }
 
 export const killInfo = (s: ActiveStop): KillInfo => ({ by: s.by, at: s.at, reason: s.reason, scope: s.scope === "wo" ? "workorder" : s.scope, mode: s.inFlight ?? "hold" });
-export const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reason: s.reason });
+export const haltInfo = (s: ActiveStop): HaltInfo => ({ by: s.by, at: s.at, reason: s.reason, cause: s.cause });
 
 /* ---------------------------------------------------------------- people --- */
 

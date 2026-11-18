@@ -338,12 +338,16 @@ d("onboarding jobs (spec 11.3)", () => {
       expect((await w.q(`select cause from stops where repo_id = $1`, [r.id]))[0].cause).toBe("readiness");
     });
 
-    it("a repo ready by exception is never re-checked", async () => {
+    it("S-6: a repo ready by exception is still re-checked on schedule and the result is reported, without halting it or unsetting the exception", async () => {
       const r = await repo({ stage: "ready", busy: null, exception: { by: "p-lena", at: Date.now(), reason: "accepted" } });
       w.broker.inspectFacts = goodFacts({ protection: null });
       await verify(r.id, "schedule");
-      expect(w.broker.calls.some((c) => c.op === "inspect")).toBe(false);
-      expect((await doc(r.id)).stage).toBe("ready");
+      await verify(r.id, "schedule");
+      expect(w.broker.calls.some((c) => c.op === "inspect")).toBe(true);
+      const x = await doc(r.id);
+      expect(x.stage).toBe("ready");
+      expect(x.d).toMatchObject({ exception: { reason: "accepted" }, verification: { ok: false, trigger: "schedule" } });
+      expect((await w.q(`select count(*)::int as n from stops where repo_id = $1`, [r.id]))[0].n).toBe(0);
     });
 
     it("the required guidelines count: a missing test command stops Ready even when every live check passes", async () => {
@@ -396,6 +400,33 @@ d("onboarding jobs (spec 11.3)", () => {
       w.broker.inspectFacts = goodFacts();
       await w.drain();
       expect((await w.jobs("onboarding.verify")).filter((j) => j.payload.repoId === r.id && j.payload.trigger === "schedule")).toHaveLength(1);
+    });
+  });
+
+  describe("a job that dies (S-5)", () => {
+    it("S-5: a dead assess job clears busy, hands the repo to a person with the job's error, and nothing else is touched", async () => {
+      const r = await repo();
+      const id = await w.enqueue("onboarding.assess", { repoId: r.id, runId: r.runId }, { maxAttempts: 1 });
+      // The worker took the job and died: the lease ran out with every attempt used.
+      await w.q(`update jobs set status = 'running', attempts = 1, lease_owner = 'gone', lease_until = now() - interval '1 minute', last_error = 'broker connection reset' where id = $1`, [id]);
+      await w.drain();
+      expect((await w.q(`select status from jobs where id = $1`, [id]))[0].status).toBe("dead");
+      expect((await doc(r.id)).d.busy).toBe("assessing");
+      await w.enqueue("reaper.sweep", {});
+      await w.drain();
+      const x = await doc(r.id);
+      expect(x.stage).toBe("person");
+      expect(x.d).toMatchObject({ busy: null, blocker: expect.stringMatching(/assess.*stopped.*broker connection reset/) });
+      expect((await w.q(`select status, blocker from onboarding_runs where org_id = $1 and id = $2`, [w.orgId, r.runId]))[0]).toMatchObject({ status: "needs_person", blocker: expect.stringMatching(/broker connection reset/) });
+      expect((await w.q(`select 1 from events where type = 'onboarding.job.dead' and subject->>'id' = $1`, [r.id])).length).toBe(1);
+    });
+
+    it("a repo whose job is still queued or running is left busy", async () => {
+      const r = await repo();
+      await w.enqueue("onboarding.assess", { repoId: r.id, runId: r.runId }, { runAt: new Date(Date.now() + 3600_000) });
+      await w.enqueue("reaper.sweep", {});
+      await w.drain();
+      expect((await doc(r.id)).d.busy).toBe("assessing");
     });
   });
 });
