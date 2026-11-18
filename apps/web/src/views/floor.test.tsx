@@ -247,7 +247,8 @@ describe("Floor: prototype drawers and links", () => {
     await screen.findByText("Requested by");
     expect(Array.from(document.querySelectorAll("#floor-wo-kv dt")).map((d) => d.textContent)).toEqual(["Station", "Requested by", "Created", "Progress", "Diff", "PR"]);
     expect(screen.getByRole("button", { name: "Approve G0G1" })).toBeTruthy();
-    expect(document.getElementById("floor-wo-record")?.getAttribute("href")).toBe("#/p/payments/record/WO-2398");
+    expect(screen.getByRole("button", { name: "Record for WO-2398" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Conversation for WO-2398" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Journey" })).toBeNull();
     // the Traveler button opens the traveler drawer, which holds Journey, Documents and Run
     fireEvent.click(document.getElementById("floor-wo-traveler") as HTMLElement);

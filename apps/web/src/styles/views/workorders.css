@@ -12,8 +12,18 @@
 .wo-table .dtable-wrap { border: 0; border-radius: 0; box-shadow: none; }
 .callout-info { border-color: var(--accent-line); background: var(--accent-soft); display: flex; gap: var(--s3); align-items: flex-start; }
 .callout-info > .ic { flex: none; margin-top: 2px; color: var(--accent); }
-.wo-table td { white-space: nowrap; }
-.wo-table td.wo-title { white-space: normal; }
+.wo-table td { white-space: normal; vertical-align: top; overflow-wrap: anywhere; }
+.wo-table td .wo-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; max-width: 34ch; line-height: 1.35; }
+.wo-table .wo-needs { display: grid; gap: 1px; max-width: 26ch; min-width: 0; }
+.wo-table .wo-needs.is-mine .wo-need-t { font-weight: 600; color: var(--ink); }
+.wo-table .wo-needs .sub { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.wo-acts { gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
+.wo-table td:last-child { width: 1%; }
+.wo-table td:last-child .wo-acts { flex-direction: column; align-items: stretch; }
+.wo-table td:last-child .wo-acts .btn { width: 100%; justify-content: center; }
+.wo-table th, .wo-table td { padding-inline: 8px; }
+@media (min-width: 641px) { .wo-table td:last-child .wo-acts { flex-direction: row; } }
+@media (max-width: 640px) { .wo-table td .wo-title { max-width: none; } .wo-table td { overflow-wrap: break-word; } .wo-acts { justify-content: flex-start; } }
 .wo-r-killed .wo-id, .wo-r-killed .wo-title { text-decoration: line-through; color: var(--kill); }
 .wo-r-done { color: var(--ink-2); }
 .wo-ovr { display: inline-flex; margin-left: 4px; color: var(--wait); vertical-align: middle; }

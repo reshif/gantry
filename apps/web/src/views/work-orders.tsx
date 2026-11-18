@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { flowOf } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
-import { useHome, useMe, useProject } from "../api/queries";
+import { useHome, useMe, useProject, useProjects } from "../api/queries";
 import { assigneeOf, useProjectRepos } from "./floor/kit";
 import type { Page, WorkOrder } from "../api/types";
 import { Btn, Empty, Field, FilterBar, Panel, SearchBox, Segmented, Select, Stat, StatRow, Tabs, Toggle, ViewHead } from "../ui/primitives";
@@ -31,6 +31,9 @@ import { allClasses } from "./work-orders/classes";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 import { useUrlState } from "./work-orders/url";
 import { PrioChip, WoStateChip, agoShort } from "./work-orders/cells";
+import { WoActions } from "./work/WoActions";
+import { needsOf, needsRank, waitingOf, type Needs, type WoWithReview } from "./work/needs";
+import type { HomeFull } from "./home/data";
 import { WoBoard } from "./work-orders/Board";
 import { columnsKey, savedViewsKey, useStored, type GroupBy, type SavedView } from "./work-orders/saved";
 
@@ -47,18 +50,18 @@ interface Filters {
 }
 const NONE: Filters = { q: "", cls: "all", station: "all", repo: "all", prio: "all", source: "all", state: "all", assignee: "all" };
 /** Everything the URL holds for this list, with the value that is left out of the address. */
-const URL_DEFAULTS = { view: "list", tab: "all", ...NONE, group: "none", sort: "age", dir: "desc", page: "1" };
+const URL_DEFAULTS = { view: "list", tab: "all", ...NONE, group: "none", sort: "needs", dir: "asc", page: "1" };
 const PRIOS = ["P0", "P1", "P2", "P3"];
 const PAGE = 15;
 const SNAPSHOT = 200;
 /** The most work orders read for the list. Beyond it the page says the list is cut short. */
 const CAP = 1000;
 /** The prototype's eight columns, in its order. */
-const PROTO_COLS = ["id", "repo", "where", "state", "cls", "prio", "age", "by"];
+const PROTO_COLS = ["id", "repo", "where", "cls", "prio", "needs", "age", "cost", "act"];
 const TABS: Array<[TabId, string]> = [["all", "All"], ["mine", "Requested by me"], ["waiting", "At a gate"], ["intake", "Intake"], ["open", "Open"], ["done", "Done"], ["incidents", "Incidents"], ["killed", "Killed"]];
 const GROUPS: Array<{ id: GroupBy; label: string }> = [{ id: "none", label: "No grouping" }, { id: "station", label: "Station" }, { id: "repo", label: "Repo" }, { id: "cls", label: "Class" }, { id: "assignee", label: "Assignee" }];
 /** The columns a person can hide (the work order id always stays). */
-const OPTIONAL_COLS: Array<[string, string]> = [["repo", "Project"], ["where", "Station"], ["state", "State"], ["cls", "Class"], ["prio", "Priority"], ["age", "Created"], ["by", "Requested by"]];
+const OPTIONAL_COLS: Array<[string, string]> = [["repo", "Project"], ["where", "Station"], ["cls", "Class"], ["prio", "Priority"], ["needs", "Needs"], ["age", "Last activity"], ["cost", "Cost"]];
 const STATES = ["running", "waiting", "parked", "blocked", "failed", "done", "killed"];
 
 const isIncident = (w: WorkOrder): boolean => w.state === "blocked" || w.state === "failed" || w.bay === "sechold" || w.bay === "person";
@@ -71,7 +74,8 @@ export default function WorkOrdersView() {
   const cat = useCatalog();
   const actor = useActors();
   const newWo = useNewWorkOrder();
-  const home = useHome().data;
+  const home = useHome().data as HomeFull | undefined;
+  const names = useProjects().data;
   const ui = useUI();
   const [u, setU] = useUrlState(URL_DEFAULTS);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -99,7 +103,9 @@ export default function WorkOrdersView() {
     placeholderData: keepPreviousData,
   });
   const loaded = useMemo(() => list.data?.pages.flatMap((p) => p.items) ?? [], [list.data]);
-  const waitingIds = useMemo(() => new Set((home?.approvals ?? []).filter((a) => a.project === projectId || !a.project).map((a) => a.wo).filter(Boolean)), [home, projectId]);
+  const waiting = useMemo(() => waitingOf(home), [home]);
+  const waitingIds = useMemo(() => new Set(waiting.approvals.filter((a) => a.project === projectId || !a.project).map((a) => a.wo).filter(Boolean)), [waiting, projectId]);
+  const needsById = useMemo(() => (cat ? new Map(loaded.map((w) => [w.id, needsOf(w as WoWithReview, cat, waiting, (id) => actor(id).name.replace(" (agent)", ""))] as [string, Needs])) : new Map<string, Needs>()), [loaded, cat, waiting, actor]);
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = list;
   useEffect(() => {
     if (hasNextPage && !isFetchingNextPage && loaded.length < CAP) void fetchNextPage();
@@ -187,31 +193,43 @@ export default function WorkOrdersView() {
   const set = (k: keyof Filters) => (v: string) => setU({ [k]: v, page: "1" } as Partial<typeof URL_DEFAULTS>);
   const clear = () => { setApplied(""); setU({ ...NONE, tab: "all", page: "1" }); };
   const block = projectSubmitBlock(me, project, repos);
+  const spans = new Set(loaded.map((w) => w.project)).size > 1;
+  const nameOfProject = (id: string): string => (id === project.id ? project.name : (names ?? []).find((x) => x.id === id)?.name ?? id);
+  const needs = (w: WorkOrder): Needs => needsById.get(w.id) ?? { kind: "none", text: "", mine: false };
+  const lastAt = (w: WorkOrder): number => { const e = w.history[w.history.length - 1]; return e?.endedAt ?? e?.startedAt ?? w.createdAt; };
+  const costOf = (w: WorkOrder): number => w.history.reduce((n, e) => n + (e.cost || 0), 0);
   const allCols: Col<WorkOrder>[] = [
     {
       key: "id",
       label: "Work order",
       sort: (w) => w.id,
       render: (w) => (
-        <div title={`${w.parent ? `Child of ${w.parent}. ` : ""}${w.children?.length ? `${w.children.length} children. ` : ""}`.trim() || undefined}>
-          <a className={`pri mono${w.state === "killed" ? " is-killed" : ""}`} id={`wo-id-${w.id}`} href={hashFor("record", w.id, projectId)}>{w.id}</a>
-          <span className="sub trunc" style={{ maxWidth: 380 }}>{w.title}</span>
+        <div className="wo-idcell" title={`${w.parent ? `Child of ${w.parent}. ` : ""}${w.children?.length ? `${w.children.length} children. ` : ""}`.trim() || undefined}>
+          <a className={`pri mono${w.state === "killed" ? " is-killed" : ""}`} id={`wo-id-${w.id}`} href={hashFor("record", w.id, w.project || projectId)}>{w.id}</a>
+          <span className="sub wo-title">{w.title}</span>
         </div>
       ),
     },
-    { key: "repo", label: "Project", sort: (w) => w.project ?? project.name, render: (w) => <div>{project.name}<span className="sub mono">{w.repo}</span></div> },
-    { key: "where", label: "Station", sort: (w) => w.station, render: (w) => <span className="small">{`${cat.stations[w.station]?.no ?? ""} ${cat.stations[w.station]?.name ?? "?"}`}</span> },
-    { key: "state", label: "State", sort: (w) => w.state, render: (w) => <WoStateChip w={w} cat={cat} project={project} /> },
+    ...(spans ? [{ key: "repo", label: "Project", sort: (w: WorkOrder) => nameOfProject(w.project), render: (w: WorkOrder) => <div>{nameOfProject(w.project)}<span className="sub mono">{w.repo}</span></div> }] : []),
+    { key: "where", label: "Station", sort: (w) => w.station, render: (w) => <div><span className="small">{`${cat.stations[w.station]?.no ?? ""} ${cat.stations[w.station]?.name ?? "?"}`}</span><span className="sub"><WoStateChip w={w} cat={cat} project={project} /></span></div> },
     {
       key: "cls",
       label: "Class",
+      sort: (w) => w.cls,
       render: (w) => (
         <span className="wo-cls" title={w.clsOverridden ? `Class overridden from ${classOf(cat, project, w.clsOverridden.from).name}` : undefined}>{classOf(cat, project, w.cls).name}</span>
       ),
     },
     { key: "prio", label: "Prio", sort: (w) => w.priority, render: (w) => <PrioChip p={w.priority} /> },
-    { key: "age", label: "Created", sort: (w) => w.createdAt, render: (w) => <span style={{ whiteSpace: "nowrap" }}>{agoShort(w.createdAt)}</span> },
-    { key: "by", label: "By", render: (w) => <span title={`via ${w.source}`}>{actor(w.requestedBy).name.split(" ")[0]}</span> },
+    {
+      key: "needs",
+      label: "Needs",
+      sort: (w) => needsRank(needs(w), lastAt(w)),
+      render: (w) => { const n = needs(w); return n.kind === "none" ? <span className="muted">—</span> : <div className={`wo-needs${n.mine ? " is-mine" : ""}`} data-need={n.kind}><span className="wo-need-t">{n.text}</span>{n.sub ? <span className="sub">{n.sub}</span> : null}</div>; },
+    },
+    { key: "age", label: "Last activity", sort: (w) => lastAt(w), render: (w) => <span style={{ whiteSpace: "nowrap" }} title={`Created ${agoShort(w.createdAt)}, via ${w.source}, by ${actor(w.requestedBy).name}`}>{agoShort(lastAt(w))}</span> },
+    { key: "cost", label: "Cost", sort: (w) => costOf(w), align: "end", render: (w) => <span className="num" style={{ whiteSpace: "nowrap" }}>{costOf(w) ? `$${costOf(w).toFixed(2)}` : "—"}</span> },
+    { key: "act", label: "Actions", render: (w) => <WoActions wo={w.id} project={w.project || projectId} repo={w.repo} needs={needs(w)} idPrefix="wo" /> },
   ];
   const cols = allCols.filter((c) => PROTO_COLS.includes(c.key) && (c.key === "id" || !hidden.includes(c.key)));
   const cutNote = `Only the latest ${CAP} work orders are read for this view, so the project has more. Narrow it with the search or a filter.`;
@@ -267,7 +285,7 @@ export default function WorkOrdersView() {
       columns={cols}
       rows={items}
       rowKey={(w) => w.id}
-      onRow={(w) => navigate("record", w.id, projectId)}
+      onRow={(w) => navigate("record", w.id, w.project || projectId)}
       sort={{ key: sort.k, dir: sort.dir }}
       onSort={(s) => setU({ sort: s.key, dir: s.dir > 0 ? "asc" : "desc", page: "1" })}
       glyphs="blueprint"

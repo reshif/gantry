@@ -73,8 +73,8 @@ describe("Conversations list", () => {
     const link = screen.getByRole("link", { name: new RegExp(`${W.id} · `) });
     expect(link.getAttribute("href")).toBe(`#/p/payments/conversations/${W.id}`);
     expect(screen.queryByRole("link", { name: /WO-9/ })).toBeNull();
-    expect(await screen.findByRole("button", { name: "Open record" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open record" }));
+    expect(await screen.findByRole("button", { name: /^Record for/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Record for/ }));
     await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/record/${W.id}`));
   });
 

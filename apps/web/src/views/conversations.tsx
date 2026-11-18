@@ -5,6 +5,7 @@
  * (views/conversations/Session.tsx) with an "Open record" button in the panel's tools. The list has no forms: every row opens a session.
  * Older links that ask for a conversation through the `openConversation` preference land on the session too.
  */
+import { WoActions } from "./work/WoActions";
 import { useEffect, useMemo } from "react";
 import { useMe, useProject } from "../api/queries";
 import { hashFor, navigate, useHash } from "../lib/router";
@@ -58,7 +59,7 @@ export default function ConversationsView() {
           ) : <Empty id="conv-empty" title="No conversations" text="" />}</Async>
         </Panel>
         {picked ? (
-          <Panel title={sel ? `${picked} · ${sel.title}` : picked} id="conv-detail" tools={<Btn small label="Open record" icon="record" id="conv-open-record" onClick={() => navigate("record", picked, sel?.project ?? projectId)} />}>
+          <Panel title={sel ? `${picked} · ${sel.title}` : picked} id="conv-detail" tools={picked ? <WoActions wo={picked} project={sel?.project ?? projectId ?? ""} idPrefix="conv" omit={["primary", "conversation"]} /> : null}>
             <WoSessionPage key={picked} woId={picked} panel back={() => navigate("conversations", null)} />
           </Panel>
         ) : <Panel id="conv-detail"><Empty title="No conversations" text="" /></Panel>}
