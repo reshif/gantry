@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { OverlayProvider } from "../ui/Overlay";
 import DesignSystemView from "./design-system";
@@ -15,5 +15,11 @@ describe("design system page", () => {
     render(<OverlayProvider><DesignSystemView /></OverlayProvider>);
     expect(document.querySelectorAll(".meter.warn").length).toBeGreaterThan(0);
     expect(document.querySelectorAll(".meter.bad").length).toBeGreaterThan(0);
+  });
+  it("keeps Table selected when the static segmented sample is clicked", () => {
+    render(<OverlayProvider><DesignSystemView /></OverlayProvider>);
+    fireEvent.click(document.querySelector("label[for=ds-seg-cards]") as Element);
+    expect((document.getElementById("ds-seg-table") as HTMLInputElement).checked).toBe(true);
+    expect((document.getElementById("ds-seg-cards") as HTMLInputElement).checked).toBe(false);
   });
 });

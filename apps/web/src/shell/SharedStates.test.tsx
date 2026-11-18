@@ -66,6 +66,16 @@ describe("sign-in", () => {
     expect(container.querySelector(".belt-card .lanes .lane .tok.run .pr.p1")).toBeTruthy();
     expect(container.querySelector(".belt-card .tok.is-gate")).toBeTruthy();
   });
+  it("sets the sign-in browser title, error id and conflict actions as the prototype does", () => {
+    render(<SignIn config={{ demoAccounts: false }} />);
+    expect(document.title).toBe("Sign in · Gantry Control Room");
+    const e = render(<SharedStatePage kind="error" eyebrow="x" title="y" />);
+    expect(e.container.textContent).toMatch(/Nothing was changed\. Error id: e-[a-z0-9]+/);
+    e.unmount();
+    render(<SharedStatePage kind="conflict" eyebrow="x" title="y" />);
+    expect(screen.getByRole("button", { name: "Compare and merge" })).toBeTruthy();
+    expect(screen.getByText(/Priya Nair changed this 2 minutes ago/)).toBeTruthy();
+  });
   it("falls back to SSO and states no domain the server did not name", () => {
     render(<SignIn config={{ demoAccounts: false }} />);
     expect(screen.getByRole("button", { name: "Continue with SSO" })).toBeTruthy();
