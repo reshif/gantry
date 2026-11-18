@@ -142,7 +142,7 @@ export default function HomeView() {
     <Page
       eyebrow="Operate"
       title={`${greet}, ${me.person.name.split(" ")[0]}`}
-      sub={`Plant overview. Agents propose, people approve.${away}`}
+      sub={`Plant overview for ${prefs.scopeAll ? "All projects" : (me.projects.find((p) => p.id === prefs.project)?.name ?? "All projects")}. Agents propose, people approve.${away}`}
       cls="hm"
       acts={
         <>

@@ -30,38 +30,37 @@ describe("Kill dialog", () => {
   it("shows what the kill touches, needs a reason and the typed name, then sends the stop", async () => {
     const calls = await start({
       "GET /api/v1/stops/impact": () => ({ body: { workOrders: 5, running: 2, slots: 1, prs: 3 } }),
-      "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform killed (cancel)." } }),
+      "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform killed." } }),
     });
     act(() => actions?.kill("project", "payments"));
     expect(await screen.findByText("Emergency stop: Payments Platform")).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("Running agents").nextElementSibling?.textContent).toBe("2"));
-    expect(screen.getByText("Open PRs").nextElementSibling?.textContent).toBe("3");
+    await waitFor(() => expect(document.getElementById("kill-banner")?.textContent).toMatch(/^5 work orders in flight will pause/));
+    expect(document.querySelector(".kicker")).toBeNull();
+    expect(screen.getByText("Recorded in the audit ledger.")).toBeTruthy();
     expect(calls.find((c) => c.path === "/api/v1/stops/impact")?.query.get("scope")).toBe("project");
     // nothing is sent until reason and phrase are right
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
-    expect(await screen.findByText(/reason of at least 5/)).toBeTruthy();
+    expect(await screen.findByText(/reason of at least 10/)).toBeTruthy();
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Runaway agent spend" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
-    expect(await screen.findByText("Type Payments Platform exactly.")).toBeTruthy();
+    expect(await screen.findByText("Type STOP in capitals.")).toBeTruthy();
     expect(posts(calls, "/api/v1/stops")).toHaveLength(0);
-    fireEvent.click(screen.getByLabelText("Cancel in-flight work"));
-    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: PAYMENTS.name } });
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "STOP" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     await waitFor(() => expect(posts(calls, "/api/v1/stops")).toHaveLength(1));
-    expect(posts(calls, "/api/v1/stops")[0]?.body).toMatchObject({ scope: "project", id: "payments", mode: "kill", reason: "Runaway agent spend", inFlight: "cancel", confirmText: PAYMENTS.name });
-    expect(await screen.findByText("Payments Platform killed (cancel).")).toBeTruthy();
+    expect(posts(calls, "/api/v1/stops")[0]?.body).toMatchObject({ scope: "project", id: "payments", mode: "kill", reason: "Runaway agent spend", inFlight: "hold", confirmText: PAYMENTS.name });
+    expect(await screen.findByText("Emergency stop applied to Payments Platform")).toBeTruthy();
   });
 
-  it("asks for KILL FACTORY on the factory scope", async () => {
+  it("asks for STOP and sends the API phrase for the factory scope", async () => {
     const calls = await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 10, workOrders: 6, running: 2, slots: 2, prs: 0 } }), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Factory killed." } }) });
     act(() => actions?.kill("factory", null));
     await screen.findByText("Emergency stop: the whole factory");
-    await waitFor(() => expect(screen.getByText("Projects").nextElementSibling?.textContent).toBe("10"));
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Credential leak suspected" } });
-    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "kill factory" } });
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "stop" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
-    expect(await screen.findByText("Type KILL FACTORY exactly.")).toBeTruthy();
-    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "KILL FACTORY" } });
+    expect(await screen.findByText("Type STOP in capitals.")).toBeTruthy();
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "STOP" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     await waitFor(() => expect(posts(calls, "/api/v1/stops")[0]?.body).toMatchObject({ scope: "factory", mode: "kill", confirmText: "KILL FACTORY" }));
   });
@@ -83,7 +82,7 @@ describe("Kill dialog", () => {
     act(() => actions?.kill("project", "payments"));
     await screen.findByText("Emergency stop: Payments Platform");
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Runaway agent spend" } });
-    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: PAYMENTS.name } });
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "STOP" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     expect(await screen.findByText("Payments Platform is already killed.")).toBeTruthy();
     expect(document.getElementById("kill-reason")).toBeTruthy();
@@ -99,15 +98,14 @@ describe("Step-up and the notify list", () => {
     act(() => actions?.kill("factory", null));
     await screen.findByText("Emergency stop: the whole factory");
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Credential leak suspected" } });
-    fireEvent.click(screen.getByLabelText("Cancel in-flight work"));
-    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "KILL FACTORY" } });
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "STOP" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     const note = await screen.findByText(/For safety, a kill needs a sign-in within the last 5 min\. You signed in 42 min ago\./);
     expect(note).toBeTruthy();
     expect(screen.queryByText("Sign in again to confirm this change.")).toBeNull();
     fireEvent.click(document.getElementById("stepup-go") as HTMLElement);
     const saved = JSON.parse(window.sessionStorage.getItem("gantry.stepup.draft") ?? "null");
-    expect(saved).toMatchObject({ kind: "kill", scope: "factory", values: { reason: "Credential leak suspected", mode: "cancel", confirm: "KILL FACTORY" } });
+    expect(saved).toMatchObject({ kind: "kill", scope: "factory", values: { reason: "Credential leak suspected", mode: "hold", confirm: "STOP" } });
     expect(posts(calls, "/api/v1/stops")).toHaveLength(1);
     // back from the sign-in: the same dialog, same typed values, nothing sent until the final click
     cleanup();
@@ -115,10 +113,9 @@ describe("Step-up and the notify list", () => {
     act(() => actions?.kill("factory", null));
     await screen.findByText("Emergency stop: the whole factory");
     expect((document.getElementById("kill-reason") as HTMLTextAreaElement).value).toBe("Credential leak suspected");
-    expect((document.getElementById("kill-confirm") as HTMLInputElement).value).toBe("KILL FACTORY");
-    expect((screen.getByLabelText("Cancel in-flight work") as HTMLInputElement).checked).toBe(true);
+    expect((document.getElementById("kill-confirm") as HTMLInputElement).value).toBe("STOP");
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
-    expect(await screen.findByText("Factory killed.")).toBeTruthy();
+    expect(await screen.findByText("Emergency stop applied to the whole factory")).toBeTruthy();
     expect(window.sessionStorage.getItem("gantry.stepup.draft")).toBeNull();
   });
 
@@ -139,22 +136,6 @@ describe("Step-up and the notify list", () => {
     fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
     expect(await screen.findByText(/For safety, a restore needs a sign-in/)).toBeTruthy();
     expect(document.getElementById("stepup-go")).toBeTruthy();
-  });
-
-  it("lists only destinations that will be delivered; the rest are greyed with a link to Integrations", async () => {
-    await start({
-      "GET /api/v1/stops/impact": () => ({ body: { workOrders: 0, running: 0, slots: 0, prs: 0 } }),
-      "GET /api/v1/projects/payments/routes/preview": () => ({ body: { event: "kill", items: [{ channel: "slack", target: "#incidents", deliverable: false, reason: "no slack connection is open to this project" }, { channel: "email", target: "project admins", deliverable: true, reason: "" }] } }),
-    });
-    act(() => actions?.kill("project", "payments"));
-    await screen.findByText("Emergency stop: Payments Platform");
-    await waitFor(() => expect(document.querySelectorAll("#notify-list li").length).toBe(2));
-    const [first, second] = [...document.querySelectorAll("#notify-list li")];
-    expect(first?.getAttribute("data-deliverable")).toBe("yes");
-    expect(first?.textContent).toBe("email project admins");
-    expect(second?.getAttribute("data-deliverable")).toBe("no");
-    expect(second?.textContent).toMatch(/not configured/);
-    expect(second?.querySelector("a")?.getAttribute("href")).toBe("#/integrations");
   });
 });
 

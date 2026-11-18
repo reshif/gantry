@@ -7,6 +7,8 @@ import { CrIcon } from "../ui/cr";
 import { Avatar } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { navigate } from "../lib/router";
+import { DEMO_ACCOUNTS } from "../lib/demo";
+import { loginUrlWithReturn } from "../lib/session/returnTo";
 import { MenuDivider, MenuHead, MenuRow, CrMenu } from "./CrMenu";
 import { useNotifications, useOpenNotifications } from "./NotificationsDrawer";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -34,6 +36,22 @@ export function TopBar({ me, crumb, project, current, navOpen, onOpenNav, onOpen
     ui.toast(r.ok ? (what ?? "Signed out.") : r.msg, r.ok ? "info" : "error");
   };
 
+  /** Demo accounts the person can switch to: the server's list when it sends one, else the seeded users; the prototype's four personas first. */
+  const personas = (() => {
+    const list = me.config.demoAccountList?.length ? me.config.demoAccountList : DEMO_ACCOUNTS;
+    const first = ["asha", "meera", "tom", "sam"].map((n) => list.find((d) => d.name.toLowerCase().startsWith(n))).filter((d): d is (typeof list)[number] => !!d);
+    return (first.length ? first : list.slice(0, 4));
+  })();
+  /** Switching signs out and signs in as that account: the identity provider does the real work. */
+  const switchTo = async (d: (typeof personas)[number]) => {
+    ui.closeAllDialogs();
+    ui.drawer.close();
+    ui.toast(`Now viewing as ${d.name}`, "info");
+    const r = await ops.signOut();
+    if (r.ok) window.location.assign(loginUrlWithReturn("sso", d.email));
+    else ui.toast(r.msg, "error");
+  };
+
   const setTheme = (t: Theme) => {
     updatePrefs({ theme: t });
     applyTheme(t);
@@ -55,7 +73,9 @@ export function TopBar({ me, crumb, project, current, navOpen, onOpenNav, onOpen
             <>
               <MenuDivider />
               <MenuHead>Switch persona (demo)</MenuHead>
-              <MenuRow icon="people" label="Switch demo account" onClick={() => { close(); void signOut("Signed out. Pick another demo account."); }} />
+              {personas.map((d) => (
+                <MenuRow key={d.id} lead={<Avatar id={d.id} size="sm" />} label={d.name} tag={d.role === "Demo account" ? undefined : d.role} onClick={() => { close(); void switchTo(d); }} />
+              ))}
             </>
           ) : null}
           <MenuDivider />

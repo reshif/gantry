@@ -2,9 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgents, useMe, usePeople, useWorkOrders } from "../api/queries";
 import { useCanMany } from "../api/can";
-import { ops } from "../api/ops";
 import { canSeeRoute, ROUTES } from "../lib/routes";
-import { hasCommand, runCommand } from "../lib/commands";
 import { navigate, navigateProject } from "../lib/router";
 import { applyTheme, setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { Dialog } from "../ui/Overlay";
@@ -15,7 +13,6 @@ import { NAV_ICON, NAV_LAYOUT, useRouteCtx } from "./Nav";
 import { makeStopActions } from "./stopActions";
 import { useNotifications } from "./NotificationsDrawer";
 import { markNotificationsRead } from "./notifRead";
-import { useOpenTraveler } from "./useTraveler";
 
 const GROUPS = ["Go to", "Actions", "Projects", "Work orders", "Agents", "People"] as const;
 type Group = (typeof GROUPS)[number];
@@ -38,7 +35,6 @@ export function usePaletteItems(projectId: string | null): Item[] {
   const ui = useUI();
   const prefs = usePrefs();
   const ctx = useRouteCtx();
-  const openTraveler = useOpenTraveler();
   const notif = useNotifications();
   const wos = useWorkOrders(projectId, { limit: 50 }).data;
   const canAgents = canSeeRoute("agents", me, ctx);
@@ -62,7 +58,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
     const target = cp ?? me.projects.find((p) => p.id === prefs.project) ?? me.projects[0] ?? null;
     // in the rail's order, with the rail's icons
     for (const r of NAV_LAYOUT.flatMap((g) => g.ids).map((id) => ROUTES.find((x) => x.id === id)).filter((x): x is (typeof ROUTES)[number] => !!x)) if (canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, group: "Go to", icon: NAV_ICON[r.id] ?? r.icon, label: r.title, keys: r.id, run: () => (r.project ? (target ? navigateProject(target.id, r.id) : navigate("projects")) : navigate(r.id)) });
-    if (hasCommand("newWorkOrder")) items.push({ group: "Actions", icon: "plus", label: "Submit a work order", keys: "new submit create", guard: guard(3), run: () => void runCommand("newWorkOrder") });
+    items.push({ group: "Actions", icon: "plus", label: "Submit a work order", keys: "new submit create", guard: guard(3), run: () => navigate("console") });
     items.push({ group: "Actions", icon: "sun", label: "Toggle theme (dark / light)", keys: "theme dark light", run: () => {
       const dark = document.documentElement.getAttribute("data-theme") === "dark" || (prefs.theme === "system" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
       const next = dark ? "light" : "dark";
@@ -72,14 +68,9 @@ export function usePaletteItems(projectId: string | null): Item[] {
     // The emergency stop is offered only to people who hold the right (the server decides); the dialogs ask for the reason and step-up.
     if (allowedNow(2)) items.push({ group: "Actions", icon: "stop", label: factoryKilled ? "Restore the factory…" : "Emergency stop the factory…", keys: "kill halt stop restore", guard: guard(2), run: () => (factoryKilled ? stop.restore("factory", null) : stop.kill("factory", null)) });
     items.push({ group: "Actions", icon: "bell", label: "Mark all notifications read", keys: "read", run: () => { markNotificationsRead(notif.signature); ui.toast("Marked read", "ok"); } });
-    if (cp) {
-      items.push({ group: "Actions", icon: "halt", label: `${cp.halted ? "Resume " : "Halt "}${cp.name}`, keys: "andon pause", guard: guard(0), run: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) });
-      if (allowedNow(1)) items.push({ group: "Actions", icon: "stop", label: `${cp.killed ? "Restore" : "Emergency stop"} ${cp.name}…`, keys: "kill switch", guard: guard(1), run: () => (cp.killed ? stop.restore("project", cp.id) : stop.kill("project", cp.id)) });
-    }
-    items.push({ group: "Actions", icon: "lock", label: "Sign out", keys: me.person.name, run: () => void ops.signOut() });
     for (const p of me.projects) items.push({ key: `project:${p.id}`, group: "Projects", icon: "projects", label: p.name, keys: `${p.key} ${p.id}`, tag: p.key, run: () => { setProject(p.id); navigateProject(p.id, "project-config"); } });
-    const woList = Array.isArray(wos) ? wos : (wos?.items ?? []);
-    for (const w of woList) items.push({ key: `wo:${w.id}`, group: "Work orders", icon: "wo", label: `${w.id} · ${w.title}`, keys: `${w.repo} ${w.state}`, tag: w.id, run: () => openTraveler(w.id) });
+    const woList = [...(Array.isArray(wos) ? wos : (wos?.items ?? []))].sort((x, y) => x.id.localeCompare(y.id, undefined, { numeric: true }));
+    for (const w of woList) items.push({ key: `wo:${w.id}`, group: "Work orders", icon: "wo", label: `${w.id} · ${w.title}`, keys: `${w.repo} ${w.state}`, tag: w.project ?? projectId ?? undefined, run: () => navigate("record", w.id, w.project ?? projectId) });
     if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, group: "Agents", icon: "agent", label: a.name, keys: `${a.id} ${a.model}`, run: () => { navigate("agents", a.id); } });
     if (canSeeRoute("people", me, ctx)) for (const p of Array.isArray(people) ? people : []) items.push({ key: `person:${p.id}`, group: "People", icon: "people", label: p.name, keys: `${p.email} ${p.title}`, run: () => navigate("person", p.id) });
     return items;
@@ -98,7 +89,7 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
     const needle = q.trim().toLowerCase();
     const hit = all.filter((it) => !needle || needle.split(/\s+/).every((w) => `${it.label} ${it.keys ?? ""}`.toLowerCase().includes(w)));
     // grouped in the prototype's order, 40 at most
-    return GROUPS.flatMap((g) => hit.filter((it) => it.group === g)).slice(0, needle ? 40 : 60);
+    return GROUPS.flatMap((g) => hit.filter((it) => it.group === g)).slice(0, 40);
   }, [q, all]);
 
   const cur = Math.min(active, Math.max(0, shown.length - 1));

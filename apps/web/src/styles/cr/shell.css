@@ -43,3 +43,22 @@
 /* the prototype gives .scrim z-index 100; inside a dialog wrapper the panel must sit above its own scrim */
 .dlg-wrap>.scrim{z-index:0}
 .dlg-wrap>.dlg{z-index:1}
+
+/* the prototype's dialogs: no eyebrow, no close button (Esc and the scrim close) */
+.dlg-plain .kicker,.dlg-plain .dlg-head .icon-btn{display:none}
+.dlg-plain .dlg-b{display:flex;flex-direction:column;gap:var(--s4)}
+/* phone: dialogs are bottom sheets */
+@media (max-width:720px){
+  .dlg-wrap:not(:has(.pal-cr)){padding:0;align-items:end}
+  .dlg-wrap:not(:has(.pal-cr))>.dlg{width:100%;max-width:100%;border-radius:var(--r-lg) var(--r-lg) 0 0;margin:0;max-height:calc(100dvh - 48px)}
+}
+
+/* toasts: the prototype's raised card with a tone stripe on the left, no icon */
+.toasts .toast{background:var(--raised);color:var(--text);border:1px solid var(--line-strong);border-left:3px solid var(--c,var(--info));border-radius:var(--r);box-shadow:var(--shadow);padding:var(--s3) var(--s4);display:flex;gap:var(--s3);align-items:center;min-width:260px}
+.toasts .toast.ok{--c:var(--ok)}.toasts .toast.bad{--c:var(--bad)}.toasts .toast.warn{--c:var(--warn-fill)}
+.toasts .toast .toast-x{color:var(--text-3);opacity:1}
+.pal-cr .pal-it{min-width:0}
+.pal-cr .pal-label{flex:1 1 auto;min-width:0}
+.pal-cr .pal-it small{flex:none;max-width:35%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dlg-wrap{grid-template-columns:minmax(0,1fr)}
+.dlg.pal-cr{max-width:100%}

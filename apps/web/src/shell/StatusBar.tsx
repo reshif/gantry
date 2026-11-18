@@ -1,6 +1,7 @@
 /** The thin status bar (prototype): live link, belt count, gates waiting, throughput, workers, and a ticking UTC clock on the right. */
 import { useEffect, useMemo, useState } from "react";
-import { useActivity, useHome } from "../api/queries";
+import { useActivity, useHome, useProjects } from "../api/queries";
+import { metricsOf, type PView } from "../views/projects/kit";
 import type { HomeFull } from "../views/home/data";
 import { eventRows } from "../lib/eventText";
 import { useConnection } from "../lib/connection/store";
@@ -34,6 +35,11 @@ export function StatusBar() {
   const home = useHome().data as HomeFull | undefined;
   const throughput = useThroughput();
   const motion = home?.sections?.motion;
+  const projectsData: unknown = useProjects().data;
+  const projects = (Array.isArray(projectsData) ? projectsData : []) as PView[];
+  // Workers are the coding slots: in use over configured, summed across the projects the person can see.
+  const slotTotal = projects.reduce((t, p) => t + (p.flow?.slots ?? 0), 0);
+  const slotUsed = projects.reduce((t, p) => t + metricsOf(p).slotsUsed, 0);
   const gates = home ? new Set(home.approvals.filter((a) => !a.repo).map((a) => a.wo ?? a.gate)).size : null;
   return (
     <footer className="sbar" id="statusbar" role="contentinfo">
@@ -41,8 +47,7 @@ export function StatusBar() {
       {motion ? <span>BELT <b>{motion.inFlight}</b> WOs</span> : null}
       {gates !== null ? <span>GATES WAITING <b>{gates}</b></span> : null}
       {throughput !== null ? <span className="hide-m" id="sb-throughput">THROUGHPUT <b>{throughput.toFixed(1)}</b>/h</span> : null}
-      {/* The API reports one worker service, not a pool size: no honest a/b figure to show (backend gap). */}
-      <span className="hide-m" id="sb-workers" title="The API does not report how many workers are running.">WORKERS <b>n/a</b></span>
+      <span className="hide-m" id="sb-workers" title="Coding slots in use over configured, across your projects.">WORKERS <b>{projects.length ? `${slotUsed}/${slotTotal}` : "n/a"}</b></span>
       <UtcClock />
     </footer>
   );

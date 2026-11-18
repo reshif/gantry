@@ -442,9 +442,8 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
       <div id="layer-pop" data-inert-exempt="">{pop ? <PopoverView state={pop} onClose={closePopover} /> : null}</div>
       <div className="toasts" id="toasts" role="status" aria-live="polite" data-inert-exempt="">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.kind} ${t.kind === "error" ? "bad" : t.kind === "warn" ? "warn" : "ok"}${t.out ? " out" : ""}`}>
-            <Icon name={t.kind === "error" ? "alert" : t.kind === "warn" ? "halt" : "check"} />
-            <span>{t.text}</span>
+          <div key={t.id} className={`toast toast-${t.kind} ${t.kind === "error" ? "bad" : t.kind === "warn" ? "warn" : t.kind === "ok" ? "ok" : ""}${t.out ? " out" : ""}`}>
+            <span className="grow" style={{ flex: 1 }}>{t.text}</span>
             {t.action ? (
               <button
                 type="button"

@@ -16,7 +16,7 @@ import { Dialog } from "../ui/Overlay";
 import { CrIcon } from "../ui/cr";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
-import { Field, LockNote, Segmented } from "../ui/primitives";
+import { Field, LockNote } from "../ui/primitives";
 import { StepUpNotice, clearStepUpDraft, draftFor, isStepUp, registerStepUpDraft } from "../ui/stepup";
 import type { CommandRefusal } from "../api/client";
 
@@ -81,13 +81,6 @@ function NotifyList({ items }: { items: PreviewItem[] }) {
   );
 }
 
-const Impact = ({ label, value }: { label: string; value: number | undefined }) => (
-  <div>
-    <dt>{label}</dt>
-    <dd>{value === undefined ? "…" : String(value)}</dd>
-  </div>
-);
-
 export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | null; onClose: () => void }) {
   const me = useMe();
   const ui = useUI();
@@ -96,11 +89,10 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   const project = me?.projects.find((p) => p.id === projectId) ?? null;
   const d = useCan(`kill.${scope}`, projectId ? { project: projectId } : {});
   const imp = useKillImpact(scope, id, d.allowed && !d.pending && (scope === "factory" || !!id));
-  const routes = useNotifyPreview("kill", scope === "factory" ? (me?.projects ?? []).map((p) => p.id) : projectId ? [projectId] : []);
   // a step-up round trip leaves what was typed in sessionStorage
   const saved = draftFor("kill", scope, id);
   const [reason, setReason] = useState(typeof saved?.reason === "string" ? saved.reason : "");
-  const [mode, setMode] = useState<"hold" | "cancel">(saved?.mode === "cancel" ? "cancel" : "hold");
+  const mode = "hold" as const; // the prototype offers no cancel mode: in-flight work is held in place and resumes on restore
   const [confirm, setConfirm] = useState(typeof saved?.confirm === "string" ? saved.confirm : "");
   const [err, setErr] = useState("");
   const [step, setStep] = useState<CommandRefusal | null>(null);
@@ -111,21 +103,23 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   };
   const [busy, setBusy] = useState(false);
   if (!me) return null;
-  const phrase = scope === "factory" ? "KILL FACTORY" : scope === "project" ? (project?.name ?? "") : null;
+  // The person types the prototype's word; the API's own confirmation (the factory phrase, the project name) is sent with it.
+  const CONFIRM_WORD = "STOP";
+  const apiPhrase = scope === "factory" ? "KILL FACTORY" : scope === "project" ? (project?.name ?? "") : null;
   const label = scope === "factory" ? "the whole factory" : scope === "project" ? (project?.name ?? id ?? "") : (id ?? "");
   const impact = imp.data;
   const submit = async () => {
     if (busy) return;
-    if (reason.trim().length < 5) {
-      setErr("Give a reason of at least 5 characters.");
+    if (reason.trim().length < 10) {
+      setErr("Give a reason of at least 10 characters.");
       return;
     }
-    if (phrase && confirm !== phrase) {
-      setErr(`Type ${phrase} exactly.`);
+    if (confirm !== CONFIRM_WORD) {
+      setErr("Type STOP in capitals.");
       return;
     }
     setBusy(true);
-    const r = await ops.kill(scope as StopScope, scope === "factory" ? null : id, { reason: reason.trim(), mode, confirmText: phrase ? confirm : null });
+    const r = await ops.kill(scope as StopScope, scope === "factory" ? null : id, { reason: reason.trim(), mode, confirmText: apiPhrase });
     setBusy(false);
     if (!r.ok) {
       if (isStepUp(r)) {
@@ -134,60 +128,40 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
       } else setErr(r.msg);
       return;
     }
-    ui.toast(r.msg, "warn");
+    ui.toast(`Emergency stop applied to ${label}`, "error");
     close();
   };
   return (
     <Dialog
       title={`Emergency stop: ${label}`}
-      kicker={`Emergency stop · ${scope}`}
-      wide
+      cls="dlg-plain"
       sub={`Stops agents immediately and blocks new work. Restoring needs ${scope === "factory" ? "two Factory Admins" : scope === "project" ? "a Project Admin" : "someone permitted to restore it"}.`}
       onClose={close}
       body={
-        <div className="form-grid">
+        <>
           <LockNote decision={d.pending ? null : d} what="This emergency stop" />
           <div className="banner bad" id="kill-banner">
             <CrIcon name="stop" />
             <div className="grow">
               {impact?.workOrders != null ? `${impact.workOrders} work order${impact.workOrders === 1 ? "" : "s"} in flight ` : "Work orders in flight "}
-              {mode === "cancel" ? "will be moved to Killed, and open PRs become drafts." : "will pause at their current station. Nothing is deleted."}
+              will pause at their current station. Nothing is deleted.
             </div>
           </div>
-          <dl className="titleblock kill-impact">
-            {scope === "factory" ? <Impact label="Projects" value={impact?.projects} /> : null}
-            <Impact label="Work orders in flight" value={impact?.workOrders} />
-            <Impact label="Running agents" value={impact?.running} />
-            <Impact label="Coding slots freed" value={impact?.slots} />
-            <Impact label="Open PRs" value={impact?.prs} />
-          </dl>
-          <Field label="Reason (required)" htmlFor="kill-reason">
-            <textarea id="kill-reason" className="input" rows={3} placeholder="What is happening? This is posted to the notification routes." value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Field label="Reason" required hint="Recorded in the audit ledger." htmlFor="kill-reason">
+            <textarea id="kill-reason" className="input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
-          {scope !== "workorder" ? (
-            <div className="field">
-              <div className="field-label">In-flight work</div>
-              <Segmented name="kill-mode" label="In-flight work" items={[{ id: "hold", label: "Hold in place (resumable)" }, { id: "cancel", label: "Cancel in-flight work" }]} value={mode} onChange={(v) => setMode(v === "cancel" ? "cancel" : "hold")} />
-              <div className="field-hint">Hold keeps work where it is and resumes on restore. Cancel moves it to Killed, converts open PRs to drafts, and needs a restore per work order.</div>
-            </div>
-          ) : (
-            <p className="muted small">The work order moves to Killed; its open PR becomes a draft. It stays killed unless someone permitted restores it.</p>
-          )}
-          <NotifyList items={routes} />
-          {phrase ? (
-            <Field label={`Type ${phrase} to confirm`} htmlFor="kill-confirm">
-              <input id="kill-confirm" className="input mono" autoComplete="off" placeholder={phrase} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-            </Field>
-          ) : null}
+          <Field label="Type STOP to confirm" required htmlFor="kill-confirm">
+            <input id="kill-confirm" className="input mono" autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          </Field>
           {step ? <StepUpNotice result={step} what="a kill" draft={{ kind: "kill", scope, id, values: { reason, mode, confirm } }} /> : null}
           <div className="form-err" role="alert">
             {err}
           </div>
-        </div>
+        </>
       }
       actions={[
         { label: "Cancel" },
-        { label: "Stop now", kind: "danger solid", icon: "st-kill", submit: true, id: "kill-ok", guard: d.pending ? null : d, onClick: () => void submit() },
+        { label: "Stop now", kind: "danger solid", submit: true, id: "kill-ok", guard: d.pending ? null : d, onClick: () => void submit() },
       ]}
     />
   );

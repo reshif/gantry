@@ -19,7 +19,9 @@ describe("Ctrl K palette", () => {
     palette();
     fireEvent.change(await screen.findByRole("combobox", { name: "Search commands" }), { target: { value: "stop" } });
     await waitFor(() => expect(labels()).toContain("Emergency stop the factory…"));
-    expect(labels().some((l) => /^Emergency stop Payments Platform…$/.test(l))).toBe(true);
+    // the prototype's palette has no per-project stop or halt, and no Sign out action
+    expect(labels().some((l) => /Payments Platform/.test(l) && /^(Halt|Emergency stop)/.test(l))).toBe(false);
+    expect(labels()).not.toContain("Sign out");
   });
 
   it("does not list kill or restore commands to people who may not", async () => {

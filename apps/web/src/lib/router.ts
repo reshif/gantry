@@ -16,6 +16,8 @@ export interface RouteLocation {
   param: string | null;
   /** The project id from `#/p/<id>/...`, null for factory routes and legacy hashes. */
   project: string | null;
+  /** The prototype's `?state=loading|empty|error|forbidden|conflict` preview, written after the route in the hash (`#home?state=empty`); null when absent. */
+  state?: string | null;
 }
 
 const dec = (v: string): string => {
@@ -27,7 +29,17 @@ const dec = (v: string): string => {
 };
 
 export function parseHash(hash: string): RouteLocation {
-  const raw = hash.replace(/^#\/?/, "");
+  const full = hash.replace(/^#\/?/, "");
+  const qi = full.indexOf("?");
+  const raw = qi < 0 ? full : full.slice(0, qi);
+  let state: string | null = null;
+  if (qi >= 0) {
+    try {
+      state = new URLSearchParams(full.slice(qi + 1)).get("state");
+    } catch {
+      state = null;
+    }
+  }
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {
@@ -35,7 +47,7 @@ export function parseHash(hash: string): RouteLocation {
     [head = "", ...rest] = rest.slice(1);
   }
   const tail = rest.join("/");
-  return { id: head, param: tail ? dec(tail) : null, project };
+  return { id: head, param: tail ? dec(tail) : null, project, ...(state ? { state } : {}) };
 }
 
 export function formatHash(id: string, param?: string | null, project?: string | null): string {

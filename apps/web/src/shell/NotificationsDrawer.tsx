@@ -52,8 +52,8 @@ export function NotificationsDrawer({ close }: { close: () => void }) {
               <div key={`a${i}`} className="li click" role="button" tabIndex={0} onClick={go(() => navigate("inbox"))} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(() => navigate("inbox"))(); } }}>
                 <Lamp tone="warn" />
                 <div className="main1">
-                  <span className="t1">{a.repo ? `Onboarding ${a.repoName ?? a.repo}` : `${a.wo ?? ""} · ${a.gateLabel ?? a.gate ?? ""} ${a.gateName ?? ""}`.trim()}</span>
-                  <span className="t2">{`Waiting for a person${a.waitMs ? ` · ${fmt.dur(a.waitMs)}` : ""}`}</span>
+                  <span className="t1">{a.repo ? `Onboarding ${a.repoName ?? a.repo}` : `${a.gateLabel ?? a.gate ?? ""} ${a.gateName ?? ""} approval for ${a.wo ?? ""}`.replace(/\s+/g, " ").trim()}</span>
+                  <span className="t2">{`Waiting for a person${a.waitMs ? ` · ${fmt.ago(Date.now() - a.waitMs, Date.now())}` : ""}`}</span>
                 </div>
               </div>
             ))}

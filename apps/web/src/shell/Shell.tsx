@@ -7,7 +7,7 @@ import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
-import { formatHash, replaceHash, useHash } from "../lib/router";
+import { formatHash, navigate, replaceHash, useHash } from "../lib/router";
 import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { useCrumbTailValue } from "../lib/crumb";
 import { Empty } from "../ui/primitives";
@@ -18,6 +18,7 @@ import { makeStopActions } from "./stopActions";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StatusBar } from "./StatusBar";
+import { NotFoundPage, StatePreview, isPreviewState } from "./StatePreview";
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
@@ -90,12 +91,21 @@ export function Shell({ me }: { me: Me }) {
   }, [ui, projectId]);
 
   useEffect(() => {
+    let chord = 0;
+    const typing = (t: EventTarget | null) => /^(input|textarea|select)$/i.test((t as HTMLElement | null)?.tagName ?? "") || !!(t as HTMLElement | null)?.isContentEditable;
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
         openPalette();
       } else if (e.key === "Escape" && navOpen) setNavOpen(false);
-      else if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey && !/^(input|textarea|select)$/i.test((e.target as HTMLElement | null)?.tagName ?? "") && !(e.target as HTMLElement | null)?.isContentEditable) ui.toast("Shortcuts: Ctrl+K palette, Esc closes", "info");
+      else if (!e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target)) {
+        if (e.key === "?") ui.toast("Shortcuts: Ctrl+K palette, g then h Home, Esc closes", "info");
+        else if (e.key === "g" && !document.querySelector("#layer-dialog > *, #layer-drawer > *")) chord = Date.now();
+        else if (e.key === "h" && chord && Date.now() - chord < 1500) {
+          chord = 0;
+          navigate("home");
+        } else chord = 0;
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -131,9 +141,7 @@ export function Shell({ me }: { me: Me }) {
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
           {notFound ? (
-            <div className="view">
-              <Empty id="route-not-found" icon="info" title="Page not found" text="There is no page at this address. It may have moved, or the link is mistyped." action={<p><a href="#home" className="btn" id="route-not-found-home">Go Home</a></p>} />
-            </div>
+            <NotFoundPage name={loc.id} />
           ) : noAccess ? (
             <div className="view">
               <Empty id="no-access" title="No access yet" text="Ask a Factory Admin or Project Admin to give you a role. Until then only your own profile is available." />
@@ -147,6 +155,8 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
             </div>
+          ) : ready && isPreviewState(loc.state) ? (
+            <StatePreview state={loc.state} eyebrow={def?.group ?? ""} title={def?.title ?? ""} />
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
           ) : null}

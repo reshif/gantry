@@ -200,6 +200,7 @@ export function richOverrides(): Record<string, Handler> {
     ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, p.id === "payments" ? reposFor(p.id) : []);
   }
   ov["activity"] = (r) => fulfillJson(r, events());
+  ov["stops/impact"] = (r) => fulfillJson(r, { projects: PROJECTS.length, workOrders: 12, running: 5, slots: 4, prs: 3 });
   ov["agents"] = (r) => fulfillJson(r, agents());
   ov["home"] = (r) =>
     fulfillJson(r, {
