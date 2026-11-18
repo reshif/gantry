@@ -240,6 +240,8 @@ d("work order commands: denied and stale for every one", () => {
     for (const k of kids) {
       const wo = await w.get(k.id);
       expect(wo.parent).toBe(id);
+      // No agent ran at Intake for an inherited brief: no invented, attributed Intake history entry.
+      expect(wo.history.filter((h: { station: string; agent: string }) => h.station === "intake" && h.agent === "ag-intake")).toEqual([]);
       await w.walk(k.id, (x) => x.state === "done", 80);
     }
     expect((await w.get(id)).state).toBe("done");

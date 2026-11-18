@@ -99,4 +99,47 @@ d("agent-led classification at Intake (G-01)", () => {
     const [row] = await w.q(`select data from work_orders where id = $1`, [id]);
     expect(row.data.history.every((h: { tokens: number; cost: number }) => h.tokens === 0 && h.cost === 0)).toBe(true);
   });
+
+  it("a claim left 'running' by a crashed API is claimed again once stale, and not before", async () => {
+    const id = (await w.submit("p-tomas", { title: "Fix the rounding bug in refunds" })).body.id as string;
+    const mark = (at: number) => w.q(`update work_orders set data = data || jsonb_build_object('classifyPending', 'running', 'classifyClaimedAt', $2::bigint) where id = $1`, [id, at]);
+    await mark(Date.now());
+    edge.respond = setClass({ cls: "security", confidence: 0.8, rationale: "Agent reads it as security." });
+    expect(await woSessionJobs.classify()).toBe(0);
+    expect(edge.calls).toHaveLength(0);
+    await mark(Date.now() - 10 * 60_000);
+    expect(await woSessionJobs.classify()).toBe(1);
+    expect((await w.get(id)).cls).toBe("security");
+  });
+
+  it("eval and onboarding work orders are never queued for a metered classification", async () => {
+    const r = await w.submit("p-tomas", { title: "Fix the rounding bug in refunds" });
+    const id = r.body.id as string;
+    await w.q(`update work_orders set source = 'eval', data = data || '{"classifyPending":"pending"}'::jsonb where id = $1`, [id]);
+    edge.respond = setClass({ cls: "security", confidence: 0.9, rationale: "Should never be asked." });
+    expect(await woSessionJobs.classify()).toBe(0);
+    expect(edge.calls).toHaveLength(0);
+    expect((await w.q(`select class, data->>'classifyPending' p from work_orders where id = $1`, [id]))[0]).toMatchObject({ class: "bug", p: "pending" });
+  });
+
+  it("an agent that finishes without calling set_class leaves the labelled rule-based class", async () => {
+    const id = (await w.submit("p-tomas", { title: "Fix the rounding bug in refunds" })).body.id as string;
+    edge.respond = () => ({ blocks: [{ type: "text" as const, text: "I looked but will not decide." }] });
+    expect(await woSessionJobs.classify()).toBe(0);
+    const wo = await w.get(id);
+    expect(wo.cls).toBe("bug");
+    expect(wo.clsRationale).toMatch(/^Rule-based keyword match: no agent set the class \(The agent returned no class\./);
+    const [row] = await w.q(`select data from work_orders where id = $1`, [id]);
+    expect(row.data.classifyPending).toBe("rule");
+  });
+
+  it("the cost of a classification is recorded even when set_class is refused", async () => {
+    const id = (await w.submit("p-tomas", { title: "Fix the rounding bug in refunds" })).body.id as string;
+    edge.respond = setClass({ cls: "made-up", confidence: 0.9, rationale: "Because it is." });
+    await woSessionJobs.classify();
+    const rows = await w.q(`select data from workorder_messages where wo_id = $1 and data->>'event' = 'agent.classified'`, [id]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].data.costMicros).not.toBeNull();
+    expect(rows[0].data.usage).toBeTruthy();
+  });
 });

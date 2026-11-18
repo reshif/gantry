@@ -17,11 +17,18 @@ import { withBriefEdits, type BriefEdits } from "./intake.js";
 export type ClassifyState = "pending" | "running" | "done" | "rule" | "failed" | "skipped";
 
 /** Claims up to `limit` work orders waiting for the agent to classify them. */
-export async function claimClassifications(pool: pg.Pool, orgId: string, limit = 3): Promise<string[]> {
+export const CLASSIFY_STALE_MS = 5 * 60_000;
+/** Sources that are not a person's request: they never trigger a metered classification (same exclusion as the Intake dialogue). */
+export const NO_CLASSIFY_SOURCES = ["eval", "onboarding"];
+
+/** Claims up to `limit` work orders waiting for the agent to classify them. A claim left 'running' longer than CLASSIFY_STALE_MS (the API restarted mid-call) is claimed again. */
+export async function claimClassifications(pool: pg.Pool, orgId: string, limit = 3, now = new Date()): Promise<string[]> {
   const { rows } = await pool.query<{ id: string }>(
-    `update work_orders set data = jsonb_set(data, '{classifyPending}', '"running"') where org_id = $1 and id in (
-       select id from work_orders where org_id = $1 and data->>'classifyPending' = 'pending' and position = 'intake' and state not in ('done','killed','declined') order by created_at limit $2 for update skip locked) returning id`,
-    [orgId, limit],
+    `update work_orders set data = jsonb_set(jsonb_set(data, '{classifyPending}', '"running"'), '{classifyClaimedAt}', to_jsonb($4::bigint)) where org_id = $1 and id in (
+       select id from work_orders where org_id = $1 and position = 'intake' and state not in ('done','killed','declined') and source <> all($5::text[])
+         and (data->>'classifyPending' = 'pending' or (data->>'classifyPending' = 'running' and coalesce((data->>'classifyClaimedAt')::bigint, 0) < $4::bigint - $3::bigint))
+       order by created_at limit $2 for update skip locked) returning id`,
+    [orgId, limit, CLASSIFY_STALE_MS, now.getTime(), NO_CLASSIFY_SOURCES],
   );
   return rows.map((r) => r.id);
 }
