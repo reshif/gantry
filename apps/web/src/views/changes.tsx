@@ -24,6 +24,22 @@ const split = (p: string): { name: string; dir: string } => {
   return { name: p.slice(i + 1), dir: i < 0 ? "" : p.slice(0, i) };
 };
 
+/** One row per file: the read lists a file once per commit that touched it, so add the commits' counts up and keep the latest status. */
+export function byFile<T extends { path: string; plus: number; minus: number }>(rows: T[]): T[] {
+  const m = new Map<string, T>();
+  for (const f of rows) {
+    const a = m.get(f.path);
+    m.set(f.path, a ? { ...a, ...f, plus: a.plus + f.plus, minus: a.minus + f.minus } : { ...f });
+  }
+  return [...m.values()];
+}
+
+/** A unified diff body as the preview lines ("+", "-", " " and "@@" headers), when the server sends the patch text. */
+export function previewOf(patch: unknown): Array<{ t: string; s: string }> | undefined {
+  if (typeof patch !== "string" || !patch) return undefined;
+  return patch.split("\n").filter((l, i, a) => !(i === a.length - 1 && l === "") && !/^(diff --git|index |--- |\+\+\+ )/.test(l)).map((l) => (l.startsWith("@@") ? { t: " ", s: l } : { t: l[0] === "+" || l[0] === "-" ? l[0] : " ", s: l.slice(1) }));
+}
+
 /** Real line numbers from the hunk headers ("@@ -40,9 +40,22 @@"): the new file's number for added and unchanged lines, the old file's for removed ones. */
 export function numbered(lines: Array<{ t: string; s: string }>): Array<{ n: number | null; hunk: boolean }> {
   let o = 0;
@@ -91,8 +107,11 @@ export default function ChangesView() {
     if (!d.rec || !d.wo) return [];
     const plan = ((d.wo.files ?? []) as RecFile[]);
     const byPath = new Map(plan.map((f) => [f.path, f]));
-    const real = ch?.files ?? d.rec.code.files;
-    const out = real.map((f) => ({ ...(byPath.get(f.path) ?? {}), ...f }) as RecFile);
+    const real = byFile(ch?.files ?? d.rec.code.files);
+    const out = real.map((f) => {
+      const patch = previewOf((f as { patch?: unknown }).patch);
+      return { ...(byPath.get(f.path) ?? {}), ...f, ...(patch && !(f as RecFile).preview?.length ? { preview: patch } : {}) } as RecFile;
+    });
     for (const f of plan) if (!out.some((x) => x.path === f.path)) out.push(f);
     return out;
   }, [ch, d.rec, d.wo]);
@@ -154,7 +173,7 @@ export default function ChangesView() {
             </div>
           </Card>
           <div className="stack" style={{ minWidth: 0 }}>
-            <Card title={<span style={{ fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{cur?.path}</span>} acts={<span className="row"><span className="dim" style={{ whiteSpace: "nowrap" }}>{cur?.preview?.length ? "Click a line number to comment" : "No preview stored"}</span></span>} flush>
+            <Card title={<span style={{ fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{cur?.path}</span>} acts={<span className="row"><span className="dim" style={{ whiteSpace: "nowrap" }}>{cur?.preview?.length ? "Click a line number to comment" : "No diff available from the server"}</span></span>} flush>
               {cur?.preview?.length ? (
                 <div className="diff" style={{ border: 0, borderRadius: 0 }}>
                   {cur.preview.map((l, i) => (
@@ -172,7 +191,7 @@ export default function ChangesView() {
                     </Fragment>
                   ))}
                 </div>
-              ) : <Empty icon="page" title="No diff preview" text="The patch is stored by content hash; open the full review below." />}
+              ) : <Empty icon="page" title="No diff preview" text="The server keeps the patch by content hash and has no read that returns it yet, so the lines are not shown. The counts on the left are the commits' totals." />}
             </Card>
             <Card title="Review summary">
               <p>{`${pr ? `Pull request #${pr.number} is ${pr.state}${pr.draft ? " (draft)" : ""}` : "No pull request yet"}: ${files.length} files, +${sum(files, "plus")} \u2212${sum(files, "minus")}. ${tests.passed + tests.failed + tests.added ? `Tests: ${tests.passed} passed, ${tests.failed} failed, ${tests.added} added.` : "Tests: not available."} ${files.some((f) => f.protected) ? `${files.filter((f) => f.protected).length} sensitive paths touched.` : "No sensitive paths touched."} ${rg ? `${rg.g.label} ${rg.g.name} has ${gi ? `${gi.have} of ${gi.need}` : "no"} approvals.` : "No gate is waiting."} The review agent's findings are not recorded by the server yet.`}</p>
