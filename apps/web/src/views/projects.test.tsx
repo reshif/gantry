@@ -401,7 +401,6 @@ describe("Project config", () => {
   });
 
   it("switching project keeps the open tab in the URL", async () => {
-    window.location.hash = "#/p/payments/project-config/risk";
     window.history.replaceState(null, "", "/?tab=members#/p/payments/project-config/risk");
     withPayments();
     mount(<ProjectConfigView />);

@@ -208,7 +208,7 @@ describe("Home: Control Room", () => {
     mount();
     expect(await screen.findByText(/Plant overview for .*\. Agents propose, people approve\./)).toBeTruthy();
     // the copy follows the switcher pill ("All projects")
-    expect(screen.getByText(/Plant overview for all projects\./)).toBeTruthy();
+    expect(screen.getByText(/Plant overview for All projects\./)).toBeTruthy();
     expect(await screen.findByText("G2 Spec approved for WO-9")).toBeTruthy();
     expect(document.querySelector("#hm-projects #hm-new-project")).toBeNull();
     expect(screen.getByText("WO-9 · Add limits · waiting 1h ago")).toBeTruthy();

@@ -44,7 +44,7 @@ function api(s: ReturnType<typeof session>, extra: Record<string, (c: Call) => {
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
 
-beforeEach(() => { resetApp(); updatePrefs({ project: "storefront" }); window.history.replaceState(null, "", "/?tab=pipeline"); window.location.hash = "#/p/storefront/onboarding/mobile-app"; });
+beforeEach(() => { resetApp(); updatePrefs({ project: "storefront" }); window.history.replaceState(null, "", "/?tab=pipeline#/p/storefront/onboarding/mobile-app"); }); // one replaceState: assigning location.hash queues a hashchange that wipes ?tab=
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.location.hash = ""; });
 
 describe("Onboarding session", () => {
@@ -142,7 +142,7 @@ describe("Onboarding session", () => {
   });
 
   it("a repo opens its session from the drawer, and from the Session tab", async () => {
-    window.location.hash = "#/p/storefront/onboarding";
+    window.history.replaceState(null, "", "/?tab=pipeline#/p/storefront/onboarding"); // not location.hash: that queues a hashchange which wipes ?tab=
     api(session());
     mount(<OnboardingView />);
     fireEvent.click(await byId("onb-detail-mobile-app"));

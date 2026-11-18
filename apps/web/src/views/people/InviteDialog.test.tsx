@@ -12,9 +12,15 @@ describe("Invite dialog dirty guard (gov1-036)", () => {
     const body = <InviteForm perm={{ allowed: true, reason: "", needs: "" } as never} teams={[]} projects={[]} roles={[{ id: "engineer", name: "Engineer", level: "project" }] as never} domains={[]} preset={{}} close={() => undefined} onDone={() => undefined} registerSubmit={() => undefined} />;
     render(<QueryClientProvider client={new QueryClient()}><OverlayProvider><Dialog title="Invite" body={body} actions={[{ label: "Cancel" }]} onClose={() => { closed++; }} /></OverlayProvider></QueryClientProvider>);
     fireEvent.change(document.querySelector("input")!, { target: { value: "Ana" } });
+    // a dirty form asks with the browser's confirm (the prototype's way): answering no keeps the dialog, yes closes it
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByText("Discard your unsaved changes?")).toBeTruthy();
+    expect(confirm).toHaveBeenCalledTimes(1);
     expect(closed).toBe(0);
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(closed).toBe(1);
+    confirm.mockRestore();
   });
 
   it("closes after a successful send even when the reply names no person (gov1-035)", async () => {

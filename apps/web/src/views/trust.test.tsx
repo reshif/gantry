@@ -81,7 +81,7 @@ const writes = (calls: Call[]) => calls.filter((c) => c.method !== "GET" && c.pa
 const reasonOf = (e: HTMLElement) => e.getAttribute("data-reason") ?? "";
 const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra } });
 
-const at = (search: string): void => window.history.replaceState(null, "", `/${search}`);
+const at = (search: string): void => window.history.replaceState(null, "", `/${search}#`);
 beforeEach(() => {
   at("");
   setCsrfToken("c");

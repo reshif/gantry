@@ -67,7 +67,8 @@ const byId = (id: string) => waitFor(() => { const e = document.getElementById(i
 const openTeams = async () => { await byId("ppl-stats"); act(() => writeUrlState({ view: "teams" })); await byId("ppl-team-new"); };
 /** The list page; with a person id, that person's own page. */
 function mount(personId?: string) {
-  if (personId) window.location.hash = `#person/${personId}`;
+  // replaceState, not `location.hash =`: assigning queues a hashchange that lands after the test wrote its ?tab= and wipes it
+  if (personId) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#person/${personId}`);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider>{personId ? <PersonView /> : <PeopleView />}</OverlayProvider></QueryClientProvider>);

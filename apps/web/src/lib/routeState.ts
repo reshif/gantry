@@ -13,8 +13,10 @@ let installed = false;
 function install(): void {
   if (installed || typeof window === "undefined") return;
   installed = true;
-  window.addEventListener("hashchange", () => {
+  window.addEventListener("hashchange", (e) => {
     try {
+      // an event whose old and new fragments are the same navigated nowhere (`location.hash = ""` on a URL with no fragment): keep the state
+      if (e.oldURL && e.newURL && new URL(e.oldURL).hash === new URL(e.newURL).hash) return;
       const u = new URL(window.location.href);
       let changed = false;
       for (const k of managed) if (u.searchParams.has(k)) { u.searchParams.delete(k); changed = true; }
