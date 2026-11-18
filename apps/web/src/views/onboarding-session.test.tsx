@@ -176,7 +176,8 @@ describe("Onboarding session", () => {
 
   it("on a wide screen the panel is sized to the room left under the header, so the composer is on screen at open", async () => {
     const w = window.innerWidth, h = window.innerHeight;
-    Object.assign(window, { innerWidth: 1440, innerHeight: 900 });
+    const setWin = (x: number, y: number) => { Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: x }); Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: y }); };
+    setWin(1440, 900);
     const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) { return { top: this.id === "osx-split" ? 278 : 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }; });
     try {
       api(session());
@@ -185,7 +186,7 @@ describe("Onboarding session", () => {
       await waitFor(() => expect(conv.style.getPropertyValue("--osx-conv-h")).toBe(`${900 - 278 - 12}px`));
     } finally {
       rect.mockRestore();
-      Object.assign(window, { innerWidth: w, innerHeight: h });
+      setWin(w, h);
     }
   });
 

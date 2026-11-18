@@ -77,7 +77,7 @@
 @media (min-width: 1100px) {
   .osx-split { grid-template-columns: minmax(0, 1fr) minmax(380px, 440px); grid-template-areas: "findings conv"; }
   .osx-findings { grid-area: findings; }
-  .osx-conv { grid-area: conv; position: sticky; top: calc(var(--topbar-h, 52px) + var(--s3, 12px)); height: var(--osx-conv-h, calc(100dvh - var(--topbar-h, 52px) - 2 * var(--s3, 12px) - 24px)); min-height: 420px; }
+  .osx-conv { grid-area: conv; position: sticky; top: calc(var(--topbar-h, 52px) + var(--s3, 12px)); --osx-conv-h: calc(100dvh - var(--topbar-h, 52px) - 2 * var(--s3, 12px) - 24px); height: var(--osx-conv-h); min-height: 420px; }
   .osx-split .osx-conv .osx-thread { flex: 1; max-height: none; }
 }
 
