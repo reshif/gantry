@@ -66,7 +66,7 @@ export function ConnectDialog({ v, close }: { v: Vendor; close: () => void }) {
           ) : null}
           <div className="form-row">
             <Field label="Monthly budget (USD)" htmlFor="vc-budget" hint={isLocal ? "Use 0 for on-prem with no per-token cost." : "Alerts at 80% and 100%."}>
-              <input id="vc-budget" className="input mono" type="number" min="0" step="100" value={budget} disabled={off} onChange={(e) => setBudget(e.target.value)} />
+              <input id="vc-budget" className="input mono" type="number" min="0" max="1000000" step="any" value={budget} disabled={off} onChange={(e) => setBudget(e.target.value)} />
             </Field>
             <Field label="Data retention" htmlFor="vc-retention" hint="Projects can allow only some retention modes."><Select id="vc-retention" disabled={off} options={RETENTION} value={retention} onChange={setRetention} /></Field>
           </div>

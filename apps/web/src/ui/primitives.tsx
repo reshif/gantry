@@ -63,6 +63,8 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
   const tone = kind === "quiet" ? "ghost" : kind;
   const className = `btn${tone ? ` ${tone} btn-${kind}` : ""}${small ? " sm btn-sm" : ""}${cls ? ` ${cls}` : ""}${locked ? " is-locked" : ""}`;
   const showWhy = locked && !!reason;
+  // allowed, but the server will ask for a fresh sign-in first (the step-up rail): say so instead of locking
+  const stepUp = !locked && guard?.allowed === true && guard.needs === "step_up" ? guard.reason || "You'll be asked to sign in again to confirm." : undefined;
   return (
     <button
       {...rest}
@@ -75,7 +77,8 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
       aria-describedby={showWhy ? "tip" : rest["aria-describedby"]}
       aria-disabled={locked ? "true" : rest["aria-disabled"]}
       data-reason={reason || undefined}
-      title={locked && reason && /read-only/i.test(reason) ? reason : rest.title}
+      title={locked && reason && /read-only/i.test(reason) ? reason : (rest.title ?? stepUp)}
+      data-step-up={stepUp ? "true" : undefined}
       onClick={(e) => {
         if (locked) {
           e.preventDefault();

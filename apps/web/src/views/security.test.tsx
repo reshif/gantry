@@ -299,7 +299,7 @@ describe("Security screen: emergency stop section", () => {
     await waitFor(() => expect(text()).toContain("Nothing is stopped right now."));
   });
 
-  it("says why a read-only role cannot save when Save settings is clicked, and marks required fields '(required)'", async () => {
+  it("says the server's reason when a role that cannot save clicks Save settings when Save settings is clicked, and marks required fields '(required)'", async () => {
     setup({}, ["security.manage"]);
     mount();
     const save = await byId("sec-save");
@@ -307,7 +307,8 @@ describe("Security screen: emergency stop section", () => {
     expect(document.querySelector("label[for=sec-sso-domain]")?.textContent).toBe("Email domain (required)");
     expect(document.querySelector("label[for=sec-sso-domain] .field-req")).toBeNull();
     fireEvent.click(save);
-    await waitFor(() => expect(document.body.textContent).toContain("Your role is read-only for this action."));
+    await waitFor(() => expect(document.querySelector(".toast, [role=status]")?.textContent ?? document.body.textContent).toContain("security.manage"));
+    expect(document.body.textContent).not.toContain("Your role is read-only for this action.");
   });
 
   it("opens the Sessions tab from the prototype deep link #/security?tab=sessions", async () => {

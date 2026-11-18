@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
 import { bindQueryClient } from "../api/keys";
-import { setCsrfToken } from "../api/client";
+import { setCsrfToken, setStepUpHandler, type StepUpOutcome } from "../api/client";
 import { reloadPrefs, updatePrefs } from "../lib/prefs";
 import { OverlayProvider } from "../ui/Overlay";
 import ProjectsView from "./projects";
@@ -42,7 +42,7 @@ const PRESETS = {
   },
 };
 
-function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
+function setup(extra: Record<string, Handler> = {}, denied: string[] = [], stepUp: string[] = []) {
   const calls: Call[] = [];
   const base: Record<string, Handler> = {
     "GET /api/v1/me": () => ({ body: ME }),
@@ -68,7 +68,7 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
       calls.push({ method, path, body, headers: hdr });
       if (path === "/api/v1/can") {
         const checks = (body as { checks: Array<{ action: string }> }).checks;
-        return new Response(JSON.stringify({ results: checks.map((c) => (denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Project Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
+        return new Response(JSON.stringify({ results: checks.map((c) => (stepUp.includes(c.action) ? { allowed: false, reason: "Fresh sign-in required", needs: "step_up", rule: { id: "STEP-UP" } } : denied.includes(c.action) ? { allowed: false, reason: `No role holds ${c.action}.`, needs: "Needs Project Admin", rule: { id: "MATRIX" } } : { allowed: true, reason: "", needs: "" })) }));
       }
       const h = base[`${method} ${path}`];
       const r = h ? h(url, init) : { status: 404, body: { ok: false, msg: `no mock ${method} ${path}` } };
@@ -203,14 +203,15 @@ describe("Projects: portfolio", () => {
     expect(btn.getAttribute("data-reason")).toMatch(/Needs Project Admin. No role holds project.create/);
   });
 
-  it("a locked New project carries the Blueprint's title and answers a click with the read-only toast", async () => {
+  it("a locked New project carries the server's reason as its title and answers a click with that toast", async () => {
     setup({}, ["project.create"]);
     mount(<ProjectsView />);
     const btn = await byId("prj-new");
     await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBe("true"));
-    expect(btn.getAttribute("title")).toBe("Your role is read-only for this action.");
+    const why = "Needs Project Admin. No role holds project.create.";
+    expect(btn.getAttribute("title")).toBe(why);
     fireEvent.click(btn);
-    expect(await screen.findByText("Your role is read-only for this action.", { selector: ".toast, .toast *, [role=status] *, [role=status]" })).toBeTruthy();
+    expect(await screen.findByText(why, { selector: ".toast, .toast *, [role=status] *, [role=status]" })).toBeTruthy();
   });
 
   it("the table's Status filter offers All, active, paused, archived (the Blueprint's)", async () => {
@@ -309,7 +310,7 @@ describe("Project config", () => {
 
   /** A tab is in the URL (`?tab=`), so a test opens one by setting it before it mounts. */
   const tab = (id: string) => window.history.replaceState(null, "", `/?tab=${id}`);
-  const withPayments = (extra: Record<string, Handler> = {}, denied: string[] = []) => setup({ "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }), ...extra }, denied);
+  const withPayments = (extra: Record<string, Handler> = {}, denied: string[] = [], stepUp: string[] = []) => setup({ "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }), ...extra }, denied, stepUp);
 
   it("shows the overview and saves the description with the project version", async () => {
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
@@ -490,6 +491,25 @@ describe("Project config", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ path: "budget.monthly", value: 5000 }, { path: "budget.alertAt", value: 0.9 }]));
     expect(calls.filter((c) => c.method === "PATCH")[1]!.headers["if-match"]).toBe("8");
     expect(await screen.findByText("Budget saved")).toBeTruthy();
+  });
+
+  it("budget tab: any amount from 0 to 10,000,000 is accepted, decimals too (the server's range)", async () => {
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
+    tab("budget");
+    mount(<ProjectConfigView />);
+    const el = (await byId("pcf-bud-monthly")) as HTMLInputElement;
+    for (const v of ["10", "0", "12.5"]) {
+      calls.length = 0;
+      fireEvent.change(el, { target: { value: v } });
+      fireEvent.click(await byId("pcf-bud-save"));
+      await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ path: "budget.monthly", value: Number(v) }]));
+      expect(screen.queryByText(/Must be at least/)).toBeNull();
+    }
+    calls.length = 0;
+    fireEvent.change(el, { target: { value: "10000001" } });
+    fireEvent.click(await byId("pcf-bud-save"));
+    expect(await screen.findByText("Cannot exceed 10,000,000.")).toBeTruthy();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   });
 
   it("is the Blueprint's seven tabs held in the URL; Members, Work classes, Notifications and History are pages reached from Overview", async () => {
@@ -731,10 +751,29 @@ describe("Project config", () => {
     mount(<ProjectConfigView />);
     const kill = await byId("pcf-kill");
     await waitFor(() => expect(kill.getAttribute("aria-disabled")).toBe("true"));
-    expect(kill.getAttribute("title")).toBe("Your role is read-only for this action.");
-    expect(document.getElementById("pcf-halt")!.getAttribute("title")).toBe("Your role is read-only for this action.");
+    // a real denial shows the server's own reason, not a generic read-only line
+    expect(kill.getAttribute("title")).toBe("Needs Project Admin. No role holds kill.project.");
+    expect(document.getElementById("pcf-halt")!.getAttribute("title")).toBe("Needs Project Admin. No role holds halt.project.");
     fireEvent.click(kill);
-    expect(await screen.findByText("Your role is read-only for this action.", { selector: "[role=status] *, [role=status], .toast, .toast *" })).toBeTruthy();
+    expect(await screen.findByText("Needs Project Admin. No role holds kill.project.", { selector: "[role=status] *, [role=status], .toast, .toast *" })).toBeTruthy();
+    expect(screen.queryByText("Your role is read-only for this action.")).toBeNull();
+  });
+
+  it("step-up only: Halt project stays enabled with the sign-in hint and clicking runs the command, which reaches the step-up handler", async () => {
+    const stepUpBody = { status: 403, body: { ok: false, msg: "Sign in again to confirm this change.", needs: "step_up", rule: { kind: "step-up", id: "STEP-UP", windowSec: 900, signedInSecAgo: 5700 } } };
+    const calls = withPayments({ "POST /api/v1/stops": () => stepUpBody }, [], ["halt.project", "project.config"]);
+    const handler = vi.fn(async (): Promise<StepUpOutcome> => ({ ok: false, error: "cancelled" }));
+    setStepUpHandler(handler);
+    tab("danger");
+    mount(<ProjectConfigView />);
+    const halt = await byId("pcf-halt");
+    await waitFor(() => expect(halt.getAttribute("title")).toMatch(/asked to sign in again/));
+    expect(halt.getAttribute("aria-disabled")).toBeNull();
+    expect(halt.getAttribute("title")).not.toMatch(/read-only/i);
+    fireEvent.click(halt);
+    await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+    expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/stops")).toBe(true);
+    setStepUpHandler(null);
   });
 
   it("Flow lists the Compliance sign-off gate (off) when the project's flow carries it", async () => {

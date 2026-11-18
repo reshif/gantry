@@ -11,6 +11,7 @@ import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { makeStopActions } from "./stopActions";
 import { useReadOnly } from "./Nav";
+import { updatePrefs, usePrefs } from "../lib/prefs";
 
 export function StopBanner({ projectId }: { projectId?: string | null }) {
   const me = useMe();
@@ -67,6 +68,24 @@ export function ReadOnlyBanner() {
     <div className="banner banner-readonly">
       <Icon name="lock" />
       Read-only viewer: mutating controls are disabled.
+    </div>
+  );
+}
+
+const VIEW_AS_LABEL: Record<string, string> = { approver: "Approver", viewer: "Read-only viewer" };
+
+/** Shown on every screen while a "View as" preview is on, so a preview (which is kept in prefs) can never pass for the person's real rights. */
+export function ViewAsBanner() {
+  const viewAs = usePrefs().viewAs;
+  if (!viewAs) return null;
+  return (
+    <div className="banner banner-readonly banner-viewas" id="viewas-banner" role="status">
+      <Icon name="user" />
+      <div>
+        <strong>{`Viewing as ${VIEW_AS_LABEL[viewAs] ?? viewAs}.`}</strong>
+        {" You are previewing fewer rights than you hold; the server still decides every command."}
+      </div>
+      <Btn label="Stop viewing as" small id="viewas-stop" onClick={() => updatePrefs({ viewAs: "" })} />
     </div>
   );
 }
