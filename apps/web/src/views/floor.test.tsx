@@ -266,13 +266,29 @@ describe("Floor: fidelity round 2", () => {
     await screen.findByRole("button", { name: /Line control/ });
   };
 
-  it("has no extra header row: the line controls sit in the tools row", async () => {
+  it("keeps the toolbar to search and the three selects; the line controls sit in the belt legend row", async () => {
     await ready();
     expect(document.getElementById("floor-extra")).toBeNull();
     expect(document.querySelector(".ph")?.textContent).not.toMatch(/Running|live/);
-    expect(document.querySelector(".fl-tools #floor-line")).toBeTruthy();
-    expect(document.querySelector(".fl-tools #floor-new-wo")).toBeTruthy();
+    expect(document.querySelector(".fl-tools #floor-line")).toBeNull();
+    expect(document.querySelector(".fl-tools #floor-new-wo")).toBeNull();
+    expect(document.querySelector(".fl-tools .fl-extra")).toBeNull();
+    expect(document.querySelectorAll(".fl-tools select").length).toBe(3);
+    expect(document.querySelector(".belt-legend #floor-line")).toBeTruthy();
+    expect(document.querySelector(".belt-legend #floor-new-wo")).toBeTruthy();
+    expect(document.querySelector(".belt-legend input[name=floor-mode]")).toBeTruthy();
     expect(document.querySelectorAll(".ph .acts .btn").length).toBe(2);
+  });
+
+  it("names each gate header by its belt label, never the raw catalogue id", async () => {
+    await ready();
+    const labels = [...document.querySelectorAll(".belt .gate .gh")].map((b) => b.getAttribute("aria-label") ?? "");
+    expect(labels.length).toBeGreaterThan(1);
+    labels.forEach((l, i) => {
+      expect(l).toMatch(new RegExp(`^Gate G${i + 1} `));
+      expect(l).not.toMatch(/G0G1|G3d|G3G3s/);
+    });
+    for (const b of document.querySelectorAll(".belt .gate .gh")) expect(b.getAttribute("title")).not.toMatch(/G0G1|G3d|G3G3s/);
   });
 
   it("numbers the belt's gates G1, G2, ... in line order, never repeating a label", async () => {
@@ -308,6 +324,26 @@ describe("Floor: fidelity round 2", () => {
     expect(await screen.findByText("Work here")).toBeTruthy();
     expect(document.querySelector(".drawer dl.kv a")?.getAttribute("href")).toMatch(/agents\//);
     expect(document.querySelector(".drawer .li.click")).toBeTruthy();
+  });
+
+  it("the station drawer shows autonomy as a level (L1 to L3), not the raw word", async () => {
+    await ready();
+    fireEvent.click(document.querySelector(".belt .stn-h") as HTMLElement);
+    await screen.findByText("Work here");
+    const dd = [...document.querySelectorAll(".drawer dl.kv dd")].map((d) => d.textContent);
+    expect(dd.some((t) => /^L[1-3]$/.test(t ?? ""))).toBe(true);
+    expect(dd).not.toContain("gate");
+  });
+
+  it("the token drawer marks stations before the current one with a check and scrolls the current one into view", async () => {
+    await ready();
+    const toks = [...document.querySelectorAll<HTMLElement>(".belt .lanes .tok")];
+    const later = toks[toks.length - 1] as HTMLElement;
+    fireEvent.click(later);
+    await waitFor(() => expect(document.querySelector(".drawer .pipe")).toBeTruthy());
+    expect(document.querySelectorAll(".drawer .pipe .st.done i").length).toBeGreaterThan(0);
+    expect([...document.querySelectorAll(".drawer .pipe .st.done i")].every((i) => i.textContent === "\u2713")).toBe(true);
+    expect(document.querySelectorAll(".drawer .pipe .st.cur").length).toBe(1);
   });
 
   it("the gate drawer is the prototype's: Mode, After station, Waiting, one list, only Configure gates in the footer", async () => {

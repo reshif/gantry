@@ -131,7 +131,7 @@ export function StationDrawer({ sid, close }: { sid: string; close: () => void }
         <dt>Agent</dt><dd>{ag ? <a href={hashFor("agents", ag.id)} onClick={() => close()}>{ag.name}</a> : st.agent}</dd>
         <dt>Model</dt><dd><span className="m">{model}</span></dd>
         <dt>Capacity</dt><dd>{`${Math.min(act, slotsN)} of ${slotsN} slots in use${act > slotsN ? `, ${act - slotsN} over` : ""}`}</dd>
-        <dt>Autonomy</dt><dd>{ag?.autonomy ?? "gate"}</dd>
+        <dt>Autonomy</dt><dd>{ag ? ({ suggest: "L1", gate: "L2", auto: "L3" } as Record<string, string>)[ag.autonomy] ?? ag.autonomy : "not available"}</dd>
         <dt>Eval score</dt><dd>{ag ? ag.evalScore.toFixed(2) : "not available"}</dd>
       </dl>
       <div className="card">

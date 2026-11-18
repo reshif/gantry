@@ -1,4 +1,5 @@
 /** The token drawer (prototype G.woDrawer): state, priority and class, the pipeline strip, where the work order is, and Review gate / Traveler / Open record. */
+import { useEffect, useRef } from "react";
 import { fmt } from "@gantry/domain";
 import { Btn, IconBtn, Who } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
@@ -30,6 +31,13 @@ export const Dr = ({ eyebrow, title, close, label, children, foot }: { eyebrow: 
 
 function Body({ woId, close }: { woId: string; close: () => void }) {
   const ctx = useFloorCtx();
+  const pipeRef = useRef<HTMLDivElement | null>(null);
+  /* the strip scrolls sideways; bring the current station into view so late stations are never out of reach */
+  useEffect(() => {
+    const cur = pipeRef.current?.querySelector<HTMLElement>(".st.cur");
+    const box = pipeRef.current;
+    if (cur && box) box.scrollLeft = Math.max(0, cur.offsetLeft - box.clientWidth / 2 + cur.offsetWidth / 2);
+  });
   const ui = useUI();
   const openTraveler = useOpenTraveler();
   const w = ctx.wos.find((x) => x.id === woId);
@@ -64,7 +72,7 @@ function Body({ woId, close }: { woId: string; close: () => void }) {
         <span className={`tag pri ${w.priority.toLowerCase()}`} title={`Priority ${w.priority}`}>{w.priority}</span>
         <span className="tag">{ctx.project.flow.classes.find((c) => c.id === w.cls)?.name ?? w.cls}</span>
       </div>
-      <div className="pipe" aria-label="Pipeline" style={{ overflowX: "auto" }}>
+      <div className="pipe" ref={pipeRef} aria-label="Pipeline" style={{ overflowX: "auto" }}>
         {order.map((si, n) => {
           const s = ctx.cat.stations[si]!;
           const done = w.state === "done" || si < cur;

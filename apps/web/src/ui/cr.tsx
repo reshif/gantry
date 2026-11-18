@@ -196,7 +196,7 @@ const Chevrons = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6l8 6-8 6M12 6l8 6-8 6" /></svg>
 );
 
-export function Conveyor({ stations, released, paused, onToken, onStation, onGate, onPile }: { stations: BeltStation[]; released: number; paused?: boolean; onToken: (id: string) => void; onStation: (id: string) => void; onGate: (id: string) => void; onPile: (id: string) => void }) {
+export function Conveyor({ stations, released, paused, onToken, onStation, onGate, onPile, legendExtra }: { legendExtra?: ReactNode; stations: BeltStation[]; released: number; paused?: boolean; onToken: (id: string) => void; onStation: (id: string) => void; onGate: (id: string) => void; onPile: (id: string) => void }) {
   return (
     <div className={`belt-card${paused ? " paused" : ""}`}>
       <div className="belt-scroll cue">
@@ -235,7 +235,7 @@ export function Conveyor({ stations, released, paused, onToken, onStation, onGat
                 </div>
                 {gw ? (
                   <div className={`gate ${gw.waiting ? "wait" : "clear"}`}>
-                    <button type="button" className="gh" onClick={() => onGate(gw.id)} aria-label={`Gate ${gw.id} ${gw.name}, ${gw.waiting ? `${gw.waiting} waiting for a person` : "clear"}`} title={`${gw.id} · ${gw.name} · ${gw.waiting ? `${gw.waiting} waiting` : "clear"}`}>
+                    <button type="button" className="gh" onClick={() => onGate(gw.id)} aria-label={`Gate ${gw.label ?? gw.id} ${gw.name}, ${gw.waiting ? `${gw.waiting} waiting for a person` : "clear"}`} title={`${gw.label ?? gw.id} · ${gw.name} · ${gw.waiting ? `${gw.waiting} waiting` : "clear"}`}>
                       <span className={`lamp ${gw.waiting ? "warn pulse" : "ok"}`} /><b>{gw.label ?? gw.id.match(/^G\d+/)?.[0] ?? gw.id}</b><span className="gname">{gw.name}</span><span className="gn">{gw.waiting || ""}</span>
                     </button>
                     <div className="gp" aria-hidden="true" />
@@ -258,6 +258,7 @@ export function Conveyor({ stations, released, paused, onToken, onStation, onGat
         <span><i className="lg bay" />Open bay</span>
         <span><i className="lg gt" />Gate: amber lamp = waiting, green = clear</span>
         <span><i className="lg jn" />No gate: passes on</span>
+        {legendExtra ? <span className="fl-legend-ctl" style={{ marginLeft: "auto", gap: 8, flexWrap: "wrap" }}>{legendExtra}</span> : null}
       </div>
     </div>
   );

@@ -100,8 +100,8 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
   const lineControl = (
     <>
       <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
-      <Btn label={p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Line control"} icon="halt" id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" />
-      <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
+      <Btn small label={p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Line control"} icon="halt" id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" />
+      <Btn small label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
     </>
   );
   const killed = factoryKilled ? me.factory.killed : p.killed;
@@ -180,9 +180,8 @@ function FloorBody({ projectId }: { projectId: string }) {
         onClear={clearFilter}
         open={filtersOpen}
         onToggle={() => setFiltersOpen((o) => !o)}
-        extra={lineControl}
       />
-      <Conveyor stations={stations} released={released} paused={paused} onToken={drawers.token} onStation={drawers.station} onGate={drawers.gate} onPile={drawers.station} />
+      <Conveyor legendExtra={lineControl} stations={stations} released={released} paused={paused} onToken={drawers.token} onStation={drawers.station} onGate={drawers.gate} onPile={drawers.station} />
       <div className="grid g2" style={{ marginTop: 16, alignItems: "start" }}>
         <Card title="Waiting at gates" flush hint="Oldest first" id="floor-gates">
           <div className="list">
