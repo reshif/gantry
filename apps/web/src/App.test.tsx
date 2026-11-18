@@ -122,7 +122,7 @@ describe("signed out", () => {
 
 describe("signed in", () => {
   it("renders the Control Room shell: top bar, rail groups, status bar and the route", async () => {
-    mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [], badges: { conversations: { n: 3, label: "3 conversations waiting for you" } } } }) });
+    mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [{ wo: "WO-1", gate: "G2", project: "payments", projectName: "Payments Platform" }, { wo: "WO-2", gate: "G4", project: "payments", projectName: "Payments Platform" }], conversations: [{ wo: "WO-3", title: "Q", project: "payments" }], badges: { floor: { n: 9 } } } }) });
     window.location.hash = "#floor";
     render(<App />);
     const nav = await screen.findByRole("navigation", { name: "Main" });
@@ -131,11 +131,15 @@ describe("signed in", () => {
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
     expect(await screen.findByText("Couldn't load the floor")).toBeTruthy(); // the shared failed state (ui/async)
     expect(within(nav).getByText("Floor").closest("a")?.getAttribute("aria-current")).toBe("page");
-    await waitFor(() => expect(within(nav).getByTitle("3 conversations waiting for you").textContent).toBe("3"));
-    expect(document.title).toBe("Floor · Payments Platform · Gantry Software Factory");
+    // one badge on the rail, as in the prototype: the Inbox counts approvals plus questions; Floor carries none
+    await waitFor(() => expect(within(nav).getByTitle("3 waiting for you").textContent).toBe("3"));
+    expect(nav.querySelectorAll(".badge")).toHaveLength(1);
+    expect(Array.from(nav.querySelectorAll(".navlink span:not(.badge)")).map((e) => e.textContent).slice(0, 7)).toEqual(["Home", "Inbox", "Floor", "Work orders", "Agents at work", "Conversations", "Console"]);
+    expect(document.title).toBe("Floor · Payments Platform · Gantry Control Room");
     expect(window.location.hash).toBe("#/p/payments/floor");
     expect(document.querySelector("#app.app > .top")).toBeTruthy();
-    expect(document.querySelector("#app.app > footer.sbar #status-cluster")).toBeTruthy();
+    expect(document.querySelector("#app.app > footer.sbar #clock")?.textContent).toMatch(/^\d\d:\d\d:\d\d UTC$/);
+    expect(document.querySelector("#app.app > footer.sbar")?.textContent).toContain("WORKERS");
     expect(FakeES.instances[0]?.url).toBe("/api/v1/stream");
   });
 
@@ -182,18 +186,15 @@ describe("signed in", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
   });
 
-  it("points project routes at Projects with a hint when no project is chosen", async () => {
+  it("opens project routes on the remembered or first project, and the switcher starts at All projects", async () => {
     sessionStorage.clear();
     homeApi();
     window.location.hash = "#home";
     render(<App />);
     const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(document.querySelector("#project-switcher")?.textContent).toContain("Choose a project");
-    const floor = within(nav).getByText("Floor").closest("a") as HTMLAnchorElement;
-    expect(floor.getAttribute("href")).toBe("#projects");
-    expect(floor.title).toBe("Choose a project");
+    expect(document.querySelector("#project-switcher")?.textContent).toContain("All projects");
+    for (const name of ["Floor", "Conversations", "Project config"]) expect((within(nav).getByText(name).closest("a") as HTMLAnchorElement).getAttribute("href")).toMatch(/^#\/p\/[a-z-]+\//);
   });
-
 
   it("hides routes the roles do not allow and says so on the page asked for", async () => {
     mockApi({ "/api/v1/me": () => ({ body: meBody({ roles: [{ role: "engineer", scope: "payments" }] }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
@@ -214,7 +215,7 @@ describe("signed in", () => {
       "/api/v1/people": () => ({ body: [person([])] }),
     });
     render(<App />);
-    expect((await screen.findByText("FACTORY KILLED")).closest(".stop-banner")?.className).toContain("is-kill");
+    expect((await screen.findByText("Factory stopped.")).closest(".stop-banner")?.className).toContain("is-kill");
     expect(document.getElementById("sysbanner")?.hasAttribute("hidden")).toBe(false);
   });
 
@@ -226,7 +227,7 @@ describe("signed in", () => {
 
 
 
-  it("switches project from the sidebar switcher and keeps the page", async () => {
+  it("the project switcher is a menu: filter, All projects, rows with a key tag and a check; picking one keeps the page and toasts", async () => {
     sessionStorage.clear();
     homeApi();
     window.location.hash = "#/p/payments/work-orders";
@@ -237,14 +238,33 @@ describe("signed in", () => {
       return el!;
     });
     fireEvent.click(sw);
-    expect((await screen.findByText("All projects (portfolio)")).getAttribute("href")).toBe("#projects");
-    const search = await screen.findByLabelText("Find a project");
+    const menu = await screen.findByRole("menu", { name: "Projects" });
+    expect(sw.getAttribute("aria-haspopup")).toBe("menu");
+    expect(within(menu).getByRole("menuitemradio", { name: /All projects/ }).getAttribute("aria-checked")).toBe("false");
+    expect(within(menu).getByRole("menuitemradio", { name: /Payments Platform/ }).getAttribute("aria-checked")).toBe("true");
+    const search = await screen.findByLabelText("Find project");
     fireEvent.change(search, { target: { value: "ris" } });
-    const link = await screen.findByRole("link", { name: "risk" });
-    expect(link.getAttribute("href")).toBe("#/p/risk/work-orders");
-    fireEvent.click(link);
-    act(() => { window.location.hash = "#/p/risk/work-orders"; });
-    await waitFor(() => expect(getPrefs().project).toBe("risk"));
+    const row = await screen.findByRole("menuitemradio", { name: /risk/i });
+    expect(row.querySelector(".tag")).toBeTruthy();
+    fireEvent.click(row);
+    await waitFor(() => expect(window.location.hash).toBe("#/p/risk/work-orders"));
+    expect(await screen.findByText(/^Showing /)).toBeTruthy();
+    expect(getPrefs().scopeAll).toBe(false);
+  });
+
+  it("All projects in the switcher sets the portfolio scope and toasts", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#home";
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Main" });
+    act(() => { updatePrefs({ scopeAll: false, project: "payments" }); });
+    expect(document.querySelector("#project-switcher")?.textContent).toContain("Payments");
+    fireEvent.click(document.querySelector("#project-switcher") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /All projects/ }));
+    expect(await screen.findByText("Showing All projects")).toBeTruthy();
+    expect(getPrefs().scopeAll).toBe(true);
+    expect(document.querySelector("#project-switcher")?.textContent).toContain("All projects");
   });
 
   it("shows a clear no-access page for a project the person cannot see", async () => {
@@ -279,7 +299,7 @@ describe("signed in", () => {
     fireEvent.change(input, { target: { value: "people" } });
     const opt = await waitFor(() => {
       const el = document.querySelector("#palette-list .pal-label");
-      expect(el?.textContent).toBe("People & teams");
+      expect(el?.textContent).toBe("People");
       return el as HTMLElement;
     });
     fireEvent.mouseDown(opt.closest("li") as HTMLElement);
@@ -296,6 +316,106 @@ describe("signed in", () => {
     fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
     fireEvent.click(await screen.findByText("Sign out"));
     await waitFor(() => expect(calls).toContain("POST /auth/logout"));
+  });
+
+  const shellApi = () =>
+    mockApi({
+      "/api/v1/me": () => ({ body: meBody() }),
+      "/api/v1/home": () => ({ body: { approvals: [{ wo: "WO-1", gate: "G2", gateLabel: "G2", gateName: "Spec", title: "Rate limit", project: "payments", projectName: "Payments Platform" }], conversations: [] } }),
+      "/api/v1/activity": () => ({ body: [{ id: 5, at: Date.now() - 60_000, type: "wo.enter", wo: "WO-9", station: "build", project: "payments" }] }),
+    });
+
+  it("the theme menu lists System, Dark, Light as radio items with a check on the chosen one", async () => {
+    shellApi();
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Theme: / }));
+    const menu = await screen.findByRole("menu", { name: "Theme" });
+    const items = within(menu).getAllByRole("menuitemradio");
+    expect(items.map((i) => i.textContent)).toEqual(["System", "Dark", "Light"]);
+    expect(items[0]!.getAttribute("aria-checked")).toBe("true");
+    expect(items[0]!.querySelector("svg:last-child")).toBeTruthy();
+    fireEvent.click(items[1]!);
+    expect(getPrefs().theme).toBe("dark");
+  });
+
+  it("the user menu heads with the title and role names and carries Account and Sign out, not theme rows", async () => {
+    shellApi();
+    render(<App />);
+    fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
+    const menu = await screen.findByRole("menu", { name: "Account menu" });
+    expect(menu.querySelector(".mh")?.textContent).toBe("Asha RamanHead · Factory Admin");
+    expect(within(menu).getByText("Account")).toBeTruthy();
+    expect(within(menu).getByText("Sign out")).toBeTruthy();
+    expect(within(menu).queryByText(/Theme/)).toBeNull();
+  });
+
+  it("the bell opens a Notifications drawer (Recent activity, waiting items then events, settings and Close) and the dot clears", async () => {
+    shellApi();
+    render(<App />);
+    const bell = await screen.findByRole("button", { name: "Notifications" });
+    await waitFor(() => expect(bell.querySelector(".dot")).toBeTruthy());
+    fireEvent.click(bell);
+    const drawer = await screen.findByRole("dialog", { name: "Details" });
+    expect(within(drawer).getByText("Recent activity")).toBeTruthy();
+    expect(within(drawer).getByText("Notifications").className).toContain("label");
+    await waitFor(() => expect(drawer.querySelectorAll(".li")).toHaveLength(2));
+    expect(drawer.querySelector(".li .t1")?.textContent).toContain("WO-1");
+    expect(within(drawer).getByRole("link", { name: "Notification settings" }).getAttribute("href")).toBe("#notifications");
+    expect(drawer.querySelector(".drawer-f .btn:last-child")?.textContent).toBe("Close");
+    fireEvent.click(drawer.querySelector(".drawer-f .btn:last-child") as HTMLElement);
+    await waitFor(() => expect(document.querySelector(".drawer")).toBeNull());
+    expect(document.querySelector("#inbox-btn .dot")).toBeNull();
+  });
+
+  it("the hamburger is labelled Open navigation and reports its state (the rail is a drawer up to 1100px)", async () => {
+    shellApi();
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+    render(<App />);
+    const btn = await screen.findByRole("button", { name: "Open navigation" });
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn.getAttribute("aria-expanded")).toBe("true"));
+  });
+
+  it("the palette groups results (Go to, Actions, Projects, ...) and says No results", async () => {
+    shellApi();
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Main" });
+    act(() => { fireEvent.keyDown(document, { key: "k", ctrlKey: true }); });
+    const input = await screen.findByRole("combobox", { name: "Search commands" });
+    expect(input.getAttribute("placeholder")).toBe("Jump to a screen, work order, agent, person…");
+    await waitFor(() => expect(Array.from(document.querySelectorAll("#palette-list .pal-grp")).map((e) => e.textContent)).toEqual(expect.arrayContaining(["Go to", "Actions", "Projects"])));
+    const labels = Array.from(document.querySelectorAll("#palette-list .pal-label")).map((e) => e.textContent);
+    expect(labels).toEqual(expect.arrayContaining(["Conversations", "Console", "Toggle theme (dark / light)", "Emergency stop the factory…", "Mark all notifications read", "Submit a work order"].filter((l) => l !== "Submit a work order")));
+    fireEvent.change(input, { target: { value: "zzzzqq" } });
+    expect(await screen.findByText("No results")).toBeTruthy();
+  });
+
+  it("an address that names no page shows Page not found with a Go Home link", async () => {
+    shellApi();
+    window.location.hash = "#/nowhere-at-all";
+    render(<App />);
+    expect(await screen.findByText("Page not found")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Go Home" }).getAttribute("href")).toBe("#home");
+  });
+
+  it("? outside a field toasts the shortcuts", async () => {
+    shellApi();
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Main" });
+    act(() => { fireEvent.keyDown(document.body, { key: "?" }); });
+    expect(await screen.findByText(/Shortcuts: Ctrl\+K/)).toBeTruthy();
+  });
+
+  it("the status bar shows throughput, workers and a UTC clock", async () => {
+    shellApi();
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Main" });
+    const bar = document.querySelector("#statusbar") as HTMLElement;
+    await waitFor(() => expect(bar.querySelector("#sb-throughput")?.textContent).toBe("THROUGHPUT 0.2/h"));
+    expect(bar.querySelector("#sb-workers")?.textContent).toContain("WORKERS");
+    expect(bar.querySelector("#clock")?.textContent).toMatch(/UTC$/);
+    expect(bar.textContent).not.toContain("SHIPPED TODAY");
   });
 
   it("stores local prefs defensively when storage throws", () => {

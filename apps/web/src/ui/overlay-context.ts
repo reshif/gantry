@@ -46,6 +46,15 @@ export interface MenuItem {
   onClick?: () => void;
 }
 
+/** Layout of an anchored popover: width, side of the anchor it aligns to, an extra class, and the ARIA role/label (menus use role "menu"). */
+export interface PopoverOpts {
+  width?: number;
+  align?: "left" | "right";
+  cls?: string;
+  role?: "dialog" | "menu";
+  label?: string;
+}
+
 export interface UIApi {
   /** A short notice. An action (e.g. Undo) keeps it up longer and runs once when pressed. */
   toast(text: string, kind?: ToastKind, action?: ToastAction): void;
@@ -61,7 +70,7 @@ export interface UIApi {
     isOpen(key?: string): boolean;
   };
   /** Popover anchored under a button. Returns its close function. */
-  popover(anchor: HTMLElement, render: (close: () => void) => ReactNode, onClose?: () => void): () => void;
+  popover(anchor: HTMLElement, render: (close: () => void) => ReactNode, onClose?: () => void, opts?: PopoverOpts): () => void;
   menu(anchor: HTMLElement, title: string | null, items: MenuItem[]): () => void;
   closePopover(): void;
   /** Resolves true when the person confirms. */

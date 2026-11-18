@@ -1,70 +1,74 @@
-/** The one project switcher: top bar, right after the logo. Popover: portfolio, search, pinned, recent, all. */
+/** The one project switcher, right after the brand (prototype: a menu with a filter field, an "All projects" scope row, then one row per project with lamp, key tag and check). */
 import { useRef, useState } from "react";
 import type { Me } from "../api/types";
 import { isProjectRoute } from "../lib/routes";
-import { hashFor } from "../lib/router";
-import { togglePinnedProject, usePrefs } from "../lib/prefs";
-import { Icon } from "../ui/Icon";
-import { CrIcon } from "../ui/cr";
+import { navigate } from "../lib/router";
+import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
+import { CrIcon, Lamp } from "../ui/cr";
 import { useUI } from "../ui/overlay-context";
+import { CrMenu, MenuRow } from "./CrMenu";
 
 type ProjectLite = Me["projects"][number];
 
-/** The one project selector, pinned at the top of the sidebar on every page. */
+/** Pages that keep their meaning in another project; the rest land on that project's Floor. */
+const keepRoute = (r: string): string => ((r === "record" || r === "changes") ? "work-orders" : r);
+
 export function ProjectSwitcher({ me, project, current }: { me: Me; project: ProjectLite | null; current: string }) {
   const ui = useUI();
+  const prefs = usePrefs();
   const ref = useRef<HTMLButtonElement>(null);
+  const onProjectRoute = isProjectRoute(current);
+  const all = !onProjectRoute && prefs.scopeAll;
+  const name = all || !project ? "All projects" : project.name;
   const open = () => {
-    if (ref.current) ui.popover(ref.current, (close) => <SwitcherList me={me} currentId={project?.id ?? null} route={current} close={close} />);
+    if (ref.current) ui.popover(ref.current, (close) => <SwitcherList me={me} currentId={all ? null : (project?.id ?? null)} route={current} close={close} />, undefined, { cls: "pop-cr", role: "menu", label: "Projects", width: 220, align: "left" });
   };
-  const status = project ? (project.killed ? "killed" : project.halted ? "halted" : project.status) : null;
-  const name = project ? project.name : "Choose a project";
+  const status = !all && project ? (project.killed ? "killed" : project.halted ? "halted" : null) : null;
   return (
-    <button ref={ref} type="button" className="pill-btn proj-sw" id="project-switcher" aria-haspopup="dialog" aria-label={project ? `Project ${project.name}. Switch project` : "Choose a project"} title={name.length > 28 ? name : undefined} onClick={open}>
+    <button ref={ref} type="button" className="pill-btn proj-sw" id="project-switcher" aria-haspopup="menu" aria-expanded="false" aria-label={`Project: ${name}. Switch project`} title={name.length > 28 ? name : undefined} onClick={open}>
       <CrIcon name="projects" />
       <span className="ell">{name}</span>
-      {status === "killed" || status === "halted" ? <span className={`lamp ${status === "killed" ? "bad" : "warn"}`} role="img" aria-label={status} title={status} /> : null}
+      {status ? <span className={`lamp ${status === "killed" ? "bad" : "warn"}`} role="img" aria-label={status} title={status} /> : null}
       <CrIcon name="chevd" />
     </button>
   );
 }
 
-/** Pages that keep their meaning in another project; the rest land on that project's Floor. */
-const keepRoute = (r: string): string => ((r === "record" || r === "changes") ? "work-orders" : r === "conversations" ? "conversations" : r);
-
 function SwitcherList({ me, currentId, route, close }: { me: Me; currentId: string | null; route: string; close: () => void }) {
-  const prefs = usePrefs();
+  const ui = useUI();
   const [q, setQ] = useState("");
   const needle = q.trim().toLowerCase();
-  const byId = new Map(me.projects.map((p) => [p.id, p] as const));
-  const pick = (ids: string[]) => ids.map((i) => byId.get(i)).filter((p): p is ProjectLite => !!p);
-  const pinned = pick(prefs.pinnedProjects);
-  const recent = pick(prefs.recentProjects).filter((p) => !prefs.pinnedProjects.includes(p.id) && p.id !== currentId).slice(0, 5);
-  const match = (p: ProjectLite) => !needle || `${p.name} ${p.key}`.toLowerCase().includes(needle);
-  const rest = me.projects.filter((p) => match(p));
-  const LIMIT = 40;
-  const row = (p: ProjectLite) => (
-    <li key={p.id} className="sw-row">
-      <a href={hashFor(isProjectRoute(route) ? keepRoute(route) : "floor", null, p.id)} className={`sw-link${p.id === currentId ? " is-active" : ""}`} aria-current={p.id === currentId ? "true" : undefined} onClick={close}>
-        <span>{p.name}</span>
-        {p.killed ? <span className="muted small">killed</span> : p.halted ? <span className="muted small">halted</span> : p.status !== "active" ? <span className="muted small">{p.status}</span> : null}
-      </a>
-      <button type="button" className="icon-btn icon-btn-sm" aria-label={`${prefs.pinnedProjects.includes(p.id) ? "Unpin" : "Pin"} ${p.name}`} aria-pressed={prefs.pinnedProjects.includes(p.id)} onClick={() => togglePinnedProject(p.id)}>
-        <Icon name="pin" />
-      </button>
-    </li>
-  );
-  const sec = (label: string, list: ProjectLite[]) => (list.length ? <><div className="sw-sec">{label}</div><ul className="plain-list">{list.map(row)}</ul></> : null);
+  const onProjectRoute = isProjectRoute(route);
+  const match = (label: string, key?: string) => !needle || `${label} ${key ?? ""}`.toLowerCase().includes(needle);
+  const projects = me.projects.filter((p) => match(p.name, p.key));
+  const showAll = match("All projects");
+
+  const pickAll = () => {
+    close();
+    updatePrefs({ scopeAll: true });
+    // a project page needs a project: the portfolio is its "all projects" view
+    if (onProjectRoute) navigate("projects");
+    ui.toast("Showing All projects", "info");
+  };
+  const pick = (p: ProjectLite) => {
+    close();
+    setProject(p.id);
+    updatePrefs({ scopeAll: false });
+    if (onProjectRoute) navigate(keepRoute(route), null, p.id);
+    ui.toast(`Showing ${p.name}`, "info");
+  };
   return (
-    <div className="sw-pop" id="project-switcher-list">
-      <a href="#projects" className="sw-all" id="sw-portfolio" onClick={close}>All projects (portfolio)</a>
-      <input className="input sw-search" type="search" placeholder="Find a project…" aria-label="Find a project" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
-      {!needle ? sec("Pinned", pinned) : null}
-      {!needle ? sec("Recent", recent) : null}
-      {sec(needle ? "Matches" : "All projects", rest.slice(0, LIMIT))}
-      {rest.length > LIMIT ? <p className="muted small">{`${rest.length - LIMIT} more. Type to narrow.`}</p> : null}
-      {!rest.length ? <p className="muted small">No project matches.</p> : null}
-    </div>
+    <CrMenu onKey={(e) => { if (e.key === "ArrowDown" && (e.target as HTMLElement).tagName === "INPUT") { e.preventDefault(); (e.currentTarget.querySelector(".mi") as HTMLElement | null)?.focus(); e.stopPropagation(); } }}>
+      <div className="menu-hd">
+        <input className="in" id="project-switcher-q" placeholder="Find project" aria-label="Find project" style={{ marginBottom: 4 }} value={q} onChange={(e) => setQ(e.target.value)} autoComplete="off" />
+      </div>
+      <div id="project-switcher-list">
+        {showAll ? <MenuRow radio icon="projects" label="All projects" checked={currentId === null} onClick={pickAll} /> : null}
+        {projects.map((p) => (
+          <MenuRow key={p.id} radio lead={<Lamp tone={p.killed ? "bad" : p.halted ? "warn" : "ok"} />} label={p.name} tag={p.key} checked={p.id === currentId} onClick={() => pick(p)} />
+        ))}
+        {!showAll && !projects.length ? <div className="mh dim">No match</div> : null}
+      </div>
+    </CrMenu>
   );
 }
-

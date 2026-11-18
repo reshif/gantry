@@ -1,42 +1,49 @@
-/** Command palette (legacy openPalette): views, projects, work orders, repos, agents and actions; pins and recents. */
+/** Command palette (prototype): one search box over Go to, Actions, Projects, Work orders, Agents and People, grouped, with an icon per row and a right-aligned tag. */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useAgents, useMe, useRepos, useWorkOrders } from "../api/queries";
+import { useAgents, useMe, usePeople, useWorkOrders } from "../api/queries";
 import { useCanMany } from "../api/can";
 import { ops } from "../api/ops";
 import { canSeeRoute, ROUTES } from "../lib/routes";
 import { hasCommand, runCommand } from "../lib/commands";
-import { navigate, navigateProject, openRecordRoute } from "../lib/router";
-import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
+import { navigate, navigateProject } from "../lib/router";
+import { applyTheme, setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { Dialog } from "../ui/Overlay";
-import { Icon } from "../ui/Icon";
+import { CrIcon } from "../ui/cr";
 import type { Decision } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
-import { useRouteCtx } from "./Nav";
+import { NAV_ICON, NAV_LAYOUT, useRouteCtx } from "./Nav";
 import { makeStopActions } from "./stopActions";
+import { useNotifications } from "./NotificationsDrawer";
+import { markNotificationsRead } from "./notifRead";
 import { useOpenTraveler } from "./useTraveler";
+
+const GROUPS = ["Go to", "Actions", "Projects", "Work orders", "Agents", "People"] as const;
+type Group = (typeof GROUPS)[number];
 
 interface Item {
   key?: string;
-  kind: string;
+  group: Group;
+  icon: string;
   label: string;
-  hint: string;
+  /** Extra words the search matches (not shown). */
+  keys?: string;
+  /** Right-aligned small tag. */
+  tag?: string;
   guard?: Decision | undefined;
   run: () => void;
-}
-interface Row {
-  it: Item;
-  sec: string | null;
 }
 
 export function usePaletteItems(projectId: string | null): Item[] {
   const me = useMe();
   const ui = useUI();
+  const prefs = usePrefs();
   const ctx = useRouteCtx();
   const openTraveler = useOpenTraveler();
+  const notif = useNotifications();
   const wos = useWorkOrders(projectId, { limit: 50 }).data;
-  const repos = useRepos(projectId).data;
   const canAgents = canSeeRoute("agents", me, ctx);
   const agents = useAgents().data;
+  const people = usePeople().data;
   const cp = me?.projects.find((p) => p.id === projectId) ?? null;
   const factoryKilled = !!me?.factory.killed;
   const checks = useCanMany([
@@ -51,129 +58,89 @@ export function usePaletteItems(projectId: string | null): Item[] {
     const stop = makeStopActions(ui, me);
     const guard = (i: number): Decision | undefined => (checks[i]?.pending ? undefined : checks[i]);
     const allowedNow = (i: number): boolean => !checks[i]?.pending && !!checks[i]?.allowed;
-    for (const r of ROUTES) if (r.nav !== false && canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, kind: "View", label: r.title, hint: r.project ? (cp?.name ?? "project") : "factory", run: () => r.project && cp ? navigateProject(cp.id, r.id) : navigate(r.id) });
-    for (const p of me.projects) items.push({ key: `project:${p.id}`, kind: "Project", label: p.name, hint: `enter ${p.key}`, run: () => { setProject(p.id); navigateProject(p.id); } });
-    const woList = Array.isArray(wos) ? wos : (wos?.items ?? []);
-    for (const w of woList) {
-      items.push({ key: `wo:${w.id}`, kind: "Work order", label: `${w.id} ${w.title}`, hint: `${w.repo} · ${w.state}`, run: () => openTraveler(w.id) });
-      items.push({ key: `record:${w.id}`, kind: "Record", label: `${w.id} full record`, hint: w.title, run: () => { setProject(w.project); openRecordRoute(w.id); } });
-    }
-    for (const r of repos ?? []) items.push({ key: `repo:${r.id}`, kind: "Repo", label: r.name, hint: `${cp?.name ?? ""} · ${r.onboarding.stage}`, run: () => { if (cp) setProject(cp.id); navigate("onboarding"); } });
-    if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, kind: "Agent", label: a.name, hint: a.model, run: () => { navigate("agents", a.id); } });
-    if (hasCommand("newWorkOrder")) items.push({ kind: "Action", label: "Submit a work order", hint: "Intake", guard: guard(3), run: () => void runCommand("newWorkOrder") });
+    // project pages need a project: the one in view, else the remembered one, else the first the person can see
+    const target = cp ?? me.projects.find((p) => p.id === prefs.project) ?? me.projects[0] ?? null;
+    // in the rail's order, with the rail's icons
+    for (const r of NAV_LAYOUT.flatMap((g) => g.ids).map((id) => ROUTES.find((x) => x.id === id)).filter((x): x is (typeof ROUTES)[number] => !!x)) if (canSeeRoute(r.id, me, ctx)) items.push({ key: r.id, group: "Go to", icon: NAV_ICON[r.id] ?? r.icon, label: r.title, keys: r.id, run: () => (r.project ? (target ? navigateProject(target.id, r.id) : navigate("projects")) : navigate(r.id)) });
+    if (hasCommand("newWorkOrder")) items.push({ group: "Actions", icon: "plus", label: "Submit a work order", keys: "new submit create", guard: guard(3), run: () => void runCommand("newWorkOrder") });
+    items.push({ group: "Actions", icon: "sun", label: "Toggle theme (dark / light)", keys: "theme dark light", run: () => {
+      const dark = document.documentElement.getAttribute("data-theme") === "dark" || (prefs.theme === "system" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
+      const next = dark ? "light" : "dark";
+      updatePrefs({ theme: next });
+      applyTheme(next);
+    } });
+    // The emergency stop is offered only to people who hold the right (the server decides); the dialogs ask for the reason and step-up.
+    if (allowedNow(2)) items.push({ group: "Actions", icon: "stop", label: factoryKilled ? "Restore the factory…" : "Emergency stop the factory…", keys: "kill halt stop restore", guard: guard(2), run: () => (factoryKilled ? stop.restore("factory", null) : stop.kill("factory", null)) });
+    items.push({ group: "Actions", icon: "bell", label: "Mark all notifications read", keys: "read", run: () => { markNotificationsRead(notif.signature); ui.toast("Marked read", "ok"); } });
     if (cp) {
-      items.push({ kind: "Action", label: `${cp.halted ? "Resume " : "Halt "}${cp.name}`, hint: "andon", guard: guard(0), run: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) });
-      // Kill and restore are offered only to people who hold the right (resolved by the server); the dialogs ask for the reason and step-up.
-      if (allowedNow(1)) items.push({ kind: "Action", label: `${cp.killed ? "Restore" : "Kill"} ${cp.name}…`, hint: "kill switch", guard: guard(1), run: () => (cp.killed ? stop.restore("project", cp.id) : stop.kill("project", cp.id)) });
+      items.push({ group: "Actions", icon: "halt", label: `${cp.halted ? "Resume " : "Halt "}${cp.name}`, keys: "andon pause", guard: guard(0), run: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) });
+      if (allowedNow(1)) items.push({ group: "Actions", icon: "stop", label: `${cp.killed ? "Restore" : "Emergency stop"} ${cp.name}…`, keys: "kill switch", guard: guard(1), run: () => (cp.killed ? stop.restore("project", cp.id) : stop.kill("project", cp.id)) });
     }
-    if (allowedNow(2)) items.push({ kind: "Action", label: factoryKilled ? "Restore factory…" : "Kill factory…", hint: "kill switch", guard: guard(2), run: () => (factoryKilled ? stop.restore("factory", null) : stop.kill("factory", null)) });
-    items.push({ kind: "Action", label: "Sign out", hint: me.person.name, run: () => void ops.signOut() });
+    items.push({ group: "Actions", icon: "lock", label: "Sign out", keys: me.person.name, run: () => void ops.signOut() });
+    for (const p of me.projects) items.push({ key: `project:${p.id}`, group: "Projects", icon: "projects", label: p.name, keys: `${p.key} ${p.id}`, tag: p.key, run: () => { setProject(p.id); navigateProject(p.id, "project-config"); } });
+    const woList = Array.isArray(wos) ? wos : (wos?.items ?? []);
+    for (const w of woList) items.push({ key: `wo:${w.id}`, group: "Work orders", icon: "wo", label: `${w.id} · ${w.title}`, keys: `${w.repo} ${w.state}`, tag: w.id, run: () => openTraveler(w.id) });
+    if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, group: "Agents", icon: "agent", label: a.name, keys: `${a.id} ${a.model}`, run: () => { navigate("agents", a.id); } });
+    if (canSeeRoute("people", me, ctx)) for (const p of Array.isArray(people) ? people : []) items.push({ key: `person:${p.id}`, group: "People", icon: "people", label: p.name, keys: `${p.email} ${p.title}`, run: () => navigate("person", p.id) });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me, wos, repos, agents, canAgents, cp, factoryKilled, ctx.canAudit, checks.map((c) => c.pending + ":" + c.allowed).join("|")]);
+  }, [me, wos, agents, people, canAgents, cp, factoryKilled, prefs.project, prefs.theme, notif.signature, ctx.canAudit, checks.map((c) => c.pending + ":" + c.allowed).join("|")]);
 }
 
 export function PaletteDialog({ projectId, onClose }: { projectId: string | null; onClose: () => void }) {
   const ui = useUI();
-  const prefs = usePrefs();
   const all = usePaletteItems(projectId);
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
-  const byKey = useMemo(() => {
-    const m: Record<string, Item> = {};
-    for (const it of all) if (it.key) m[it.key] = it;
-    return m;
-  }, [all]);
 
-  const shown: Row[] = useMemo(() => {
+  const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) {
-      const pinned = prefs.palettePinned.map((k) => byKey[k]).filter((x): x is Item => !!x);
-      const recent = prefs.paletteRecent.filter((k) => !prefs.palettePinned.includes(k)).map((k) => byKey[k]).filter((x): x is Item => !!x).slice(0, 5);
-      const rest = all.filter((it) => (it.kind === "View" || it.kind === "Action") && !pinned.includes(it) && !recent.includes(it));
-      return [...pinned.map((it) => ({ it, sec: "Pinned" })), ...recent.map((it) => ({ it, sec: "Recent" })), ...rest.map((it) => ({ it, sec: "All" }))].slice(0, 48);
-    }
-    return all
-      .filter((it) => {
-        const hay = `${it.kind} ${it.label} ${it.hint}`.toLowerCase();
-        return needle.split(/\s+/).every((w) => hay.includes(w));
-      })
-      .slice(0, 40)
-      .map((it) => ({ it, sec: null }));
-  }, [q, all, byKey, prefs.palettePinned, prefs.paletteRecent]);
+    const hit = all.filter((it) => !needle || needle.split(/\s+/).every((w) => `${it.label} ${it.keys ?? ""}`.toLowerCase().includes(w)));
+    // grouped in the prototype's order, 40 at most
+    return GROUPS.flatMap((g) => hit.filter((it) => it.group === g)).slice(0, needle ? 40 : 60);
+  }, [q, all]);
 
   const cur = Math.min(active, Math.max(0, shown.length - 1));
   useEffect(() => {
     listRef.current?.querySelector(`#pal-opt-${cur}`)?.scrollIntoView?.({ block: "nearest" });
   }, [cur]);
 
-  const togglePin = (key: string) =>
-    updatePrefs((p) => {
-      const l = p.palettePinned.slice();
-      const i = l.indexOf(key);
-      if (i >= 0) l.splice(i, 1);
-      else l.unshift(key);
-      return { palettePinned: l.slice(0, 8) };
-    });
-
   const runAt = (i: number) => {
-    const row = shown[i];
-    if (!row) return;
-    const it = row.it;
+    const it = shown[i];
+    if (!it) return;
     if (it.guard && !it.guard.allowed) {
       ui.toast((it.guard.needs ? `${it.guard.needs}. ` : "") + it.guard.reason, "error");
       return;
     }
-    const key = it.key;
-    if (key) updatePrefs((p) => ({ paletteRecent: [key, ...p.paletteRecent.filter((k) => k !== key)].slice(0, 8) }));
     onClose();
     setTimeout(it.run, 0);
   };
 
   const rows: ReactNode[] = [];
-  if (!shown.length) rows.push(<li key="empty" className="palette-empty" role="presentation">No match. Try a WO id like WO-2417 or a repo name.</li>);
-  let lastSec: string | null = null;
-  shown.forEach((row, i) => {
-    const it = row.it;
-    if (row.sec && row.sec !== lastSec && !(row.sec === "All" && lastSec === null)) rows.push(<li key={`sec-${row.sec}-${i}`} className="palette-sec" role="presentation">{row.sec}</li>);
-    lastSec = row.sec;
+  if (!shown.length) rows.push(<li key="empty" className="palette-empty empty" role="presentation" style={{ padding: 24 }}>No results</li>);
+  let last: string | null = null;
+  shown.forEach((it, i) => {
+    if (it.group !== last) rows.push(<li key={`g-${it.group}`} className="pal-grp label" role="presentation">{it.group}</li>);
+    last = it.group;
     const locked = !!it.guard && !it.guard.allowed;
-    const isPinned = !!it.key && prefs.palettePinned.includes(it.key);
     rows.push(
       <li
         key={`${it.key ?? it.label}-${i}`}
         role="option"
         id={`pal-opt-${i}`}
-        className={`palette-item${i === cur ? " is-active" : ""}${locked ? " is-locked" : ""}`}
+        className={`pal-it palette-item${i === cur ? " is-active" : ""}${locked ? " is-locked" : ""}`}
         aria-selected={i === cur ? "true" : "false"}
         aria-disabled={locked ? "true" : undefined}
         onMouseDown={(e) => {
-          if ((e.target as HTMLElement).closest(".pal-pin")) return;
           e.preventDefault();
           setActive(i);
           runAt(i);
         }}
       >
-        <span className="pal-kind">{it.kind}</span>
-        <span className="pal-label">{it.label}</span>
-        <span className="pal-hint mono">{locked && it.guard ? it.guard.needs || "Not permitted" : it.hint}</span>
-        {it.key ? (
-          <button
-            type="button"
-            className={`pal-pin${isPinned ? " is-on" : ""}`}
-            tabIndex={-1}
-            aria-label={`${isPinned ? "Unpin " : "Pin "}${it.label}`}
-            title={isPinned ? "Unpin" : "Pin to top"}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              togglePin(it.key as string);
-            }}
-          >
-            <Icon name="pin" />
-          </button>
-        ) : null}
+        <CrIcon name={it.icon} />
+        <span className="ell pal-label">{it.label}</span>
+        {locked && it.guard ? <small>{it.guard.needs || "Not permitted"}</small> : it.tag ? <small>{it.tag}</small> : null}
       </li>,
     );
   });
@@ -188,25 +155,20 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
     } else if (e.key === "Enter") {
       e.preventDefault();
       runAt(cur);
-    } else if (e.altKey && (e.key === "p" || e.key === "P" || e.key === "π")) {
-      e.preventDefault();
-      const k = shown[cur]?.it.key;
-      if (k) togglePin(k);
     }
   };
 
   return (
     <Dialog
       title="Command palette"
-      kicker="Ctrl/Cmd K · Alt+P pins the highlighted item"
-      cls="dlg-palette"
+      cls="dlg-palette pal-cr"
       onClose={onClose}
       body={
-        <div className="palette">
+        <div className="palette pal-in">
           <input
             id="palette-input"
             className="palette-input"
-            placeholder="Type a view, project, WO id, repo, agent or action"
+            placeholder="Jump to a screen, work order, agent, person…"
             autoComplete="off"
             aria-controls="palette-list"
             aria-label="Search commands"
@@ -220,12 +182,13 @@ export function PaletteDialog({ projectId, onClose }: { projectId: string | null
             }}
             onKeyDown={onKey}
           />
-          <ul id="palette-list" className="palette-list" role="listbox" aria-label="Results" ref={listRef}>
+          <ul id="palette-list" className="palette-list pal-res" role="listbox" aria-label="Results" ref={listRef}>
             {rows}
           </ul>
+          <div className="dlg-f pal-foot"><span className="dim mono">↑↓ move · Enter open · Esc close</span></div>
         </div>
       }
-      actions={[{ label: "Close" }]}
+      actions={[]}
     />
   );
 }

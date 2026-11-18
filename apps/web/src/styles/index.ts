@@ -46,3 +46,4 @@ import "./cr/tokens.css";
 import "./cr/app.css";
 import "./cr/screens.css";
 import "./cr/compat.css";
+import "./cr/shell.css";

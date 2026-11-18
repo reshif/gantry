@@ -44,6 +44,8 @@ export function Shell({ me }: { me: Me }) {
   const resolved = resolveRoute(wanted, me, ctx);
   const permDenied = resolved.denied === null && wanted !== "home" && routeDef(wanted) && access.denied(wanted) ? routeDef(wanted)! : null;
   const routeId = permDenied ? "home" : resolved.id;
+  // a hash that names no page is a 404 of its own, not a silent Home
+  const notFound = loc.id !== "" && !routeDef(wanted);
   const denied = permDenied ?? resolved.denied;
   const def = routeDef(routeId);
   const scoped = isProjectRoute(routeId);
@@ -80,8 +82,8 @@ export function Shell({ me }: { me: Me }) {
   }, [routeId, loc.param]);
 
   useEffect(() => {
-    document.title = `${denied?.title ?? def?.title ?? "Home"}${scoped && project ? ` · ${project.name}` : ""} · Gantry Software Factory`;
-  }, [def, denied, scoped, project]);
+    document.title = `${notFound ? "Page not found" : (denied?.title ?? def?.title ?? "Home")}${scoped && project ? ` · ${project.name}` : ""} · Gantry Control Room`;
+  }, [def, denied, scoped, project, notFound]);
 
   const openPalette = useCallback(() => {
     ui.open((close) => <PaletteDialog projectId={projectId} onClose={close} />);
@@ -93,14 +95,15 @@ export function Shell({ me }: { me: Me }) {
         e.preventDefault();
         openPalette();
       } else if (e.key === "Escape" && navOpen) setNavOpen(false);
+      else if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey && !/^(input|textarea|select)$/i.test((e.target as HTMLElement | null)?.tagName ?? "") && !(e.target as HTMLElement | null)?.isContentEditable) ui.toast("Shortcuts: Ctrl+K palette, Esc closes", "info");
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [openPalette, navOpen]);
+  }, [openPalette, navOpen, ui]);
 
   const toggleNav = () => {
     let wide = true;
-    try { wide = window.matchMedia("(min-width: 861px)").matches; } catch { /* assume desktop */ }
+    try { wide = window.matchMedia("(min-width: 1101px)").matches; } catch { /* assume desktop */ }
     if (wide) updatePrefs({ navRail: !prefs.navRail });
     else setNavOpen((o) => !o);
   };
@@ -117,7 +120,7 @@ export function Shell({ me }: { me: Me }) {
   return (
     <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
       <AppErrorBoundary level="chrome">
-        <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
+        <TopBar me={me} crumb={crumb} project={switcherProject} current={routeId} navOpen={navOpen} onOpenNav={toggleNav} onOpenPalette={openPalette} />
       </AppErrorBoundary>
       <AppErrorBoundary level="chrome">
         <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} onNavigate={() => setNavOpen(false)} />
@@ -127,7 +130,11 @@ export function Shell({ me }: { me: Me }) {
         {killed ? <div className="sysbanner" id="sysbanner"><StopBanner projectId={null} /></div> : null}
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
-          {noAccess ? (
+          {notFound ? (
+            <div className="view">
+              <Empty id="route-not-found" icon="info" title="Page not found" text="There is no page at this address. It may have moved, or the link is mistyped." action={<p><a href="#home" className="btn" id="route-not-found-home">Go Home</a></p>} />
+            </div>
+          ) : noAccess ? (
             <div className="view">
               <Empty id="no-access" title="No access yet" text="Ask a Factory Admin or Project Admin to give you a role. Until then only your own profile is available." />
             </div>

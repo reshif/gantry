@@ -1,6 +1,6 @@
 /** Left nav (legacy renderNav): groups filtered by role, collapsible groups, icon rail, badges. */
 import { useEffect, useRef, useState } from "react";
-import { useNavBadges } from "../api/queries";
+import { useHome } from "../api/queries";
 import { useCan, useCanMany } from "../api/can";
 import type { Me } from "../api/types";
 import { ROUTES, ROUTE_PERMS, canSeeRoute } from "../lib/routes";
@@ -28,28 +28,30 @@ export function useRouteAccess(me: Me): { visible: (id: string) => boolean; deni
 }
 
 /** The Control Room sidebar: six groups, in the prototype's order. Items are the real routes; the route table still decides who sees what. */
-const NAV_LAYOUT: ReadonlyArray<{ name: string; ids: readonly string[] }> = [
-  { name: "Operate", ids: ["home", "inbox", "floor", "work-orders", "workspace"] },
+export const NAV_LAYOUT: ReadonlyArray<{ name: string; ids: readonly string[] }> = [
+  { name: "Operate", ids: ["home", "inbox", "floor", "work-orders", "workspace", "conversations", "console"] },
   { name: "Portfolio", ids: ["projects", "onboarding", "project-config"] },
   { name: "Workforce", ids: ["agents", "skills", "models", "evals", "trust", "learning"] },
   { name: "Connect", ids: ["integrations", "mcp", "api", "notifications"] },
   { name: "Govern", ids: ["people", "workload", "access", "security", "audit", "system"] },
   { name: "Reference", ids: ["design-system"] },
 ];
-const NAV_ICON: Record<string, string> = {
+export const NAV_ICON: Record<string, string> = {
   home: "home", inbox: "inbox", floor: "floor", "work-orders": "wo", workspace: "agent", projects: "projects", onboarding: "git", "project-config": "system",
   agents: "agent", skills: "skill", models: "model", evals: "eval", trust: "trust", learning: "learn", integrations: "plug", mcp: "mcp", api: "key",
-  notifications: "bell", people: "people", workload: "work", access: "access", security: "security", audit: "audit", system: "system", "design-system": "palette",
+  notifications: "bell", people: "people", workload: "work", access: "access", security: "security", audit: "audit", system: "system", "design-system": "ds", conversations: "chat", console: "console",
 };
 
 export function Nav({ me, current, project, onNavigate }: { me: Me; current: string; project: ProjectLite | null; onNavigate: () => void }) {
   const prefs = usePrefs();
-  const badges = useNavBadges();
+  // The prototype's rail carries one badge: the Inbox, counting what waits for this person (approvals and questions).
+  const home = useHome().data;
+  const waiting = (home?.approvals?.length ?? 0) + (home?.conversations?.length ?? 0);
   const access = useRouteAccess(me);
   const ref = useRef<HTMLElement>(null);
   const [more, setMore] = useState(false);
   // On factory pages the project routes are a shortcut to the last project, never a selector implying scope.
-  const shown = project ?? (me.projects.find((p) => p.id === prefs.project) ?? null);
+  const shown = project ?? (me.projects.find((p) => p.id === prefs.project) ?? me.projects[0] ?? null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -70,8 +72,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
           <div key={g.name} role="group" aria-label={g.name}>
             <div className="navgrp">{g.name}</div>
             {items.map((it) => {
-              const bd = badges[it.id];
-              const active = current === it.id || (it.id === "work-orders" && (current === "record" || current === "changes")) || (it.id === "people" && current === "person");
+              const active = current === it.id || (it.id === "work-orders" && (current === "record" || current === "changes" || current === "traveler" || current === "dossier")) || (it.id === "people" && current === "person");
               const off = !!it.project && !shown;
               return (
                 <a
@@ -84,7 +85,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
                 >
                   <CrIcon name={NAV_ICON[it.id] ?? "info"} />
                   <span>{it.title}</span>
-                  {bd && (bd.text || bd.n) ? <span className={`badge${bd.kind === "wait" || bd.kind === "block" || !bd.kind ? " hot" : ""}`} title={bd.label}>{bd.text ?? String(bd.n ?? 0)}</span> : null}
+                  {it.id === "inbox" && waiting ? <span className="badge hot" title={`${waiting} waiting for you`}>{waiting}</span> : null}
                 </a>
               );
             })}

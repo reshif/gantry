@@ -13,6 +13,7 @@ import { ops, type StopScope } from "../api/ops";
 import { useKillImpact, useMe, useWorkOrder } from "../api/queries";
 import { useProjectRepos } from "../views/floor/kit";
 import { Dialog } from "../ui/Overlay";
+import { CrIcon } from "../ui/cr";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { Field, LockNote, Segmented } from "../ui/primitives";
@@ -138,14 +139,21 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   };
   return (
     <Dialog
-      title={`Kill ${label}`}
-      kicker={`Kill switch · ${scope}`}
+      title={`Emergency stop: ${label}`}
+      kicker={`Emergency stop · ${scope}`}
       wide
-      sub={`A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused${scope === "workorder" ? " for this work order." : " until someone restores it."}`}
+      sub={`Stops agents immediately and blocks new work. Restoring needs ${scope === "factory" ? "two Factory Admins" : scope === "project" ? "a Project Admin" : "someone permitted to restore it"}.`}
       onClose={close}
       body={
         <div className="form-grid">
-          <LockNote decision={d.pending ? null : d} what="This kill switch" />
+          <LockNote decision={d.pending ? null : d} what="This emergency stop" />
+          <div className="banner bad" id="kill-banner">
+            <CrIcon name="stop" />
+            <div className="grow">
+              {impact?.workOrders != null ? `${impact.workOrders} work order${impact.workOrders === 1 ? "" : "s"} in flight ` : "Work orders in flight "}
+              {mode === "cancel" ? "will be moved to Killed, and open PRs become drafts." : "will pause at their current station. Nothing is deleted."}
+            </div>
+          </div>
           <dl className="titleblock kill-impact">
             {scope === "factory" ? <Impact label="Projects" value={impact?.projects} /> : null}
             <Impact label="Work orders in flight" value={impact?.workOrders} />
@@ -179,7 +187,7 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
       }
       actions={[
         { label: "Cancel" },
-        { label: `Kill ${scope === "workorder" ? (id ?? "") : scope === "project" ? "project" : "factory"}`, kind: "danger", icon: "st-kill", submit: true, id: "kill-ok", guard: d.pending ? null : d, onClick: () => void submit() },
+        { label: "Stop now", kind: "danger solid", icon: "st-kill", submit: true, id: "kill-ok", guard: d.pending ? null : d, onClick: () => void submit() },
       ]}
     />
   );
