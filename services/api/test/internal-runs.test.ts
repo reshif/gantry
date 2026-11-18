@@ -191,6 +191,12 @@ d("internal runs API", () => {
       const um = (await q(`select * from usage_meter where run_id = $1`, [r.runId]))[0];
       expect(um).toMatchObject({ station: "build", cost_micros: "6525", vendor_id: "w3-anthropic", cache_write_tokens: "100" });
     });
+    it("a run's model calls carry the run's prompt manifest hash, so the prompt record can say what the agent was given", async () => {
+      const h = "c".repeat(64);
+      const r = await makeRun({ runData: { promptHash: h, promptManifest: { v: 1, kind: "run", hash: h, parts: [{ kind: "repo_context", name: "AGENTS.md", sha256: "d".repeat(64) }] } } });
+      expect((await usage(r, { requestId: "pm-1", traceRef: `sha256/${"b".repeat(64)}` })).statusCode).toBe(200);
+      expect((await q(`select prompt_hash from usage_meter where run_id = $1`, [r.runId]))[0]).toMatchObject({ prompt_hash: h });
+    });
     it("the run shows the model that actually answered, not the one pinned when it was prepared", async () => {
       const r = await makeRun();
       await q(`update runs set model_id = 'claude-sonnet-5-5' where id = $1`, [r.runId]);
