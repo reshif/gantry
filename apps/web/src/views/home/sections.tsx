@@ -261,7 +261,7 @@ export function TaskSuccess() {
       <Async query={q} what="task success" id="hm-trend-state" isEmpty={() => !data} empty={<Empty id="hm-trend-empty" title="Not available" text="No agent has a weekly success series yet." />}>
         {() => data ? (
           <TrendChart
-            series={[{ name: "Success", v: data.success }, ...(data.first !== null ? [{ name: "First pass (current)", v: data.success.map(() => data.first as number) }] : [])]}
+            series={[{ name: "Success", v: data.success }, ...(data.first !== null ? [{ name: "First pass", v: data.success.map(() => data.first as number), note: "current mean; the server keeps no weekly first-pass series" }] : [])]}
             labels={data.success.map((_, i) => `W${i + 1}`)} min={0.6} max={1} fmt={(v) => `${Math.round(v * 100)}%`} label="Task success trend"
           />
         ) : null}

@@ -35,6 +35,14 @@ describe("Work orders table", () => {
     expect(document.querySelectorAll("#wo-tab-all .tab-count, #wo-tab-shipped .tab-count")).toHaveLength(0);
   });
 
+  it("opens filtered to the station named in the address (Home's Line at a glance rows)", async () => {
+    window.history.replaceState(null, "", "/?station=build#work-orders");
+    const calls = mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: page([]) }) });
+    mount(<WorkOrdersView />);
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/projects/payments/work-orders" && c.query.get("where") === "build")).toBe(true));
+    window.history.replaceState(null, "", "/");
+  });
+
   it("asks the server for the sorted, filtered page and pages with the cursor", async () => {
     const first = WOS.slice(0, 3);
     const calls = mockApi({
@@ -143,7 +151,7 @@ describe("New work order", () => {
   it("submits once with an Idempotency-Key even when the button is clicked twice, then shows the classification and route", async () => {
     const calls = await open({ "POST /api/v1/projects/payments/work-orders": submitOk });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
-    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Refund crashes on a zero amount. Steps to reproduce: post zero." } });
+    fireEvent.change(screen.getByLabelText("What should change and why"), { target: { value: "Refund crashes on a zero amount. Steps to reproduce: post zero." } });
     expect(await screen.findByText("Classifier preview:")).toBeTruthy();
     const submit = document.getElementById("nwo-submit") as HTMLElement;
     fireEvent.click(submit);
@@ -208,5 +216,13 @@ describe("New work order", () => {
     await waitFor(() => expect(document.getElementById("nwo-submit")?.getAttribute("aria-disabled")).toBe("true"));
     expect(document.getElementById("nwo-submit")?.getAttribute("data-reason")).toMatch(/No role holds it/);
     void PAYMENTS;
+  });
+
+  it("opens as the prototype's Submit a work order dialog: Title, What should change and why, Project, Class, Priority", async () => {
+    await open();
+    for (const id of ["nwo-title", "nwo-desc", "nwo-project", "nwo-cls", "nwo-prio"]) expect(document.getElementById(id)).toBeTruthy();
+    expect(screen.getByLabelText("What should change and why")).toBeTruthy();
+    expect(screen.queryByLabelText("Description")).toBeNull();
+    expect(document.getElementById("nwo-source")).toBeNull();
   });
 });

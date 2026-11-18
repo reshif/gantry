@@ -103,7 +103,7 @@ function DecisionDialog({ title, intro, field, submit, danger, onSubmit, onClose
       body={
         <div className="dlg-body">
           <p style={{ marginBottom: 12 }}>{intro}</p>
-          <Field label={field.label} htmlFor="gd-text" {...(field.hint ? { hint: field.hint } : {})} error={err || undefined}>
+          <Field label={field.min ? `${field.label} (required)` : field.label} htmlFor="gd-text" {...(field.hint ? { hint: field.hint } : {})} error={err || undefined}>
             {field.area
               ? <TextArea id="gd-text" rows={4} value={text} onChange={(e) => { setText(e.target.value); setErr(""); }} />
               : <TextInput id="gd-text" autoComplete="off" value={text} onChange={(e) => { setText(e.target.value); setErr(""); }} />}

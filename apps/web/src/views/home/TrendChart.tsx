@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 /** The prototype's line chart: dotted gridlines with mono ticks, one polyline per series (the second dashed), a dot per point with a tooltip, and a legend of squares below. */
 const COLORS = ["var(--accent)", "var(--warn)", "var(--ok)", "var(--bad)"];
 
-export function TrendChart({ series, labels, min, max, fmt, label }: { series: Array<{ name: string; v: number[] }>; labels: string[]; min: number; max: number; fmt: (v: number) => string; label: string }) {
+export function TrendChart({ series, labels, min, max, fmt, label }: { series: Array<{ name: string; v: number[]; note?: string }>; labels: string[]; min: number; max: number; fmt: (v: number) => string; label: string }) {
   // fluid like the prototype: drawn at the width of its box, so the text keeps its size on a phone
   const box = useRef<HTMLDivElement>(null);
   const [W, setW] = useState(560);
@@ -37,13 +37,13 @@ export function TrendChart({ series, labels, min, max, fmt, label }: { series: A
         {series.map((s, k) => (
           <g key={s.name}>
             <polyline points={s.v.map((v, i) => `${X(i)},${Y(v)}`).join(" ")} fill="none" stroke={COLORS[k]} strokeWidth={2} {...(k ? { strokeDasharray: "5 3" } : {})} />
-            {s.v.map((v, i) => <circle key={i} cx={X(i)} cy={Y(v)} r={3} fill={COLORS[k]}><title>{`${s.name} ${labels[i]}: ${fmt(v)}`}</title></circle>)}
+            {s.v.map((v, i) => <circle key={i} cx={X(i)} cy={Y(v)} r={3} fill={COLORS[k]}><title>{`${s.name} ${labels[i]}: ${fmt(v)}${s.note ? ` (${s.note})` : ""}`}</title></circle>)}
           </g>
         ))}
       </svg>
       {series.length > 1 ? (
         <div className="legend" style={{ marginTop: 6 }}>
-          {series.map((s, k) => <span key={s.name}><i style={{ background: COLORS[k] }} />{s.name}</span>)}
+          {series.map((s, k) => <span key={s.name} {...(s.note ? { title: s.note } : {})}><i style={{ background: COLORS[k] }} />{s.name}</span>)}
         </div>
       ) : null}
     </div>

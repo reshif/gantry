@@ -47,7 +47,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
   const questionOf = (w: Seed) => ({ wo: w.id, title: w.title, project: w.project, question: (w.conv?.questions?.[w.conv?.qi ?? 0]?.text as string | undefined) ?? null, from: w.conv?.messages?.[w.conv.messages.length - 1]?.from ?? null });
   const conversations = [
     ...wos.filter((w) => w.state === "blocked" || w.state === "failed").map(stuckOf),
-    ...wos.filter((w) => w.conv?.awaiting && w.state !== "done" && w.state !== "killed" && w.state !== "blocked" && w.state !== "failed" && !(w.state === "waiting" && gateInfo(w)?.id === "G0G1")).map(questionOf),
+    ...wos.filter((w) => w.conv?.awaiting && w.state !== "done").map(questionOf), // the prototype's list: every conversation awaiting an answer on a work order not done
   ];
   // --- end ops1
   const live = wos.filter((w) => w.state !== "done");

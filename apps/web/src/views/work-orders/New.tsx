@@ -67,7 +67,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const [att, setAtt] = useState("");
   const [cls, setCls] = useState("");
   const [prio, setPrio] = useState("auto");
-  const [source, setSource] = useState(preset.source ?? "web");
+  const source = preset.source ?? "web";
   const [err, setErr] = useState("");
   // The refusal is shown inline (setErr), so the command toasts nothing itself.
   const send = useCommand(ops.submitWO, { ok: false, toastFail: false });
@@ -81,7 +81,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
     key.current = globalThis.crypto.randomUUID();
     // The inline error describes the form as it was submitted: once a field changes it no longer applies (a title typed after "Give the work order a title" must clear it).
     setErr("");
-  }, [projectId, repo, title, desc, att, cls, prio, source]);
+  }, [projectId, repo, title, desc, att, cls, prio]);
   if (!me || !cat || !project) return null;
   const decision = can[projects.indexOf(project)];
   const block = decision && !decision.allowed && !decision.pending ? { reason: decision.reason, needs: decision.needs, onboarding: false } : (() => { const b = submitBlock(me, project, repos, repo); return b ? { reason: b.reason, needs: "", onboarding: b.onboarding } : null; })();
@@ -120,17 +120,23 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   };
   return (
     <Dialog
-      title="New work order"
+      title="Submit a work order"
       kicker="Intake · S0"
       wide
       onClose={onClose}
       sub="It starts at S0 Intake. The Intake agent classifies it, proposes a route and opens a conversation to complete the brief."
       body={
         <div className="form-grid">
-          <div className="form-row">
-            <Field label="Project" htmlFor="nwo-project">
-              <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
-            </Field>
+          <Field label="Title" htmlFor="nwo-title" hint="A short, specific request.">
+            <input id="nwo-title" className="input" value={title} autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
+          </Field>
+          <Field label="What should change and why" htmlFor="nwo-desc" hint="Acceptance criteria help the Spec agent.">
+            <textarea id="nwo-desc" className="input" rows={4} value={desc} onChange={(e) => setDesc(e.target.value)} />
+          </Field>
+          <Field label="Project" htmlFor="nwo-project">
+            <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
+          </Field>
+          {repos.length > 1 || !repos.length ? (
             <div className="nwo-repo">
               <Field label="Repo" htmlFor="nwo-repo" hint="Only Ready repos accept work orders.">
                 {repos.length ? (
@@ -140,7 +146,18 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
                 )}
               </Field>
             </div>
+          ) : null}
+          <div className="form-row">
+            <Field label="Class" htmlFor="nwo-cls" hint="The classifier may disagree; overrides are audited.">
+              <Select id="nwo-cls" options={[{ value: "", label: "Let the Intake agent decide" }, ...classes.map((c) => ({ value: c.id, label: c.name }))]} value={cls} onChange={setCls} />
+            </Field>
+            <Field label="Priority" htmlFor="nwo-prio">
+              <Select id="nwo-prio" options={[{ value: "auto", label: "From class" }, { value: "P0", label: "P0" }, { value: "P1", label: "P1" }, { value: "P2", label: "P2" }, { value: "P3", label: "P3" }]} value={prio} onChange={setPrio} />
+            </Field>
           </div>
+          <Field label="Attachment names" htmlFor="nwo-att" hint="Names only; files are not uploaded here.">
+            <input id="nwo-att" className="input" placeholder="trace.log, screenshot.png" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
+          </Field>
           <div>
             {block ? (
               <div className="callout callout-warn" role="note">
@@ -153,26 +170,6 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
                 </span>
               </div>
             ) : null}
-          </div>
-          <Field label="Title" htmlFor="nwo-title">
-            <input id="nwo-title" className="input" value={title} placeholder="Add idempotency keys to refund endpoint" autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
-          </Field>
-          <Field label="Description" htmlFor="nwo-desc" hint="Acceptance criteria help the Spec agent.">
-            <textarea id="nwo-desc" className="input" rows={4} placeholder="What should change, and how will we know it is done?" value={desc} onChange={(e) => setDesc(e.target.value)} />
-          </Field>
-          <Field label="Attachment names" htmlFor="nwo-att" hint="Names only; files are not uploaded here.">
-            <input id="nwo-att" className="input" placeholder="trace.log, screenshot.png" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
-          </Field>
-          <div className="form-row">
-            <Field label="Requested class" htmlFor="nwo-cls" hint="The classifier may disagree; overrides are audited.">
-              <Select id="nwo-cls" options={[{ value: "", label: "Let the Intake agent decide" }, ...classes.map((c) => ({ value: c.id, label: c.name }))]} value={cls} onChange={setCls} />
-            </Field>
-            <Field label="Priority" htmlFor="nwo-prio">
-              <Select id="nwo-prio" options={[{ value: "auto", label: "From class" }, { value: "P1", label: "P1 · urgent" }, { value: "P2", label: "P2 · normal" }, { value: "P3", label: "P3 · when free" }]} value={prio} onChange={setPrio} />
-            </Field>
-            <Field label="Source" htmlFor="nwo-source">
-              <Select id="nwo-source" options={[{ value: "web", label: "Web" }, { value: "console", label: "Console" }, { value: "slack", label: "Slack message" }, { value: "github", label: "GitHub issue" }]} value={source} onChange={setSource} />
-            </Field>
           </div>
           <div className="nwo-preview" aria-live="polite">
             {preview ? (

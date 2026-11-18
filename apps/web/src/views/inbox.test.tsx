@@ -168,4 +168,37 @@ describe("Inbox", () => {
     mount(<InboxView />);
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
   });
+
+  it("Questions and Blocked lists have no search or project filter (the prototype filters Approvals only)", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [CONV, { ...CONV, wo: "WO-2417", stuck: { state: "blocked", station: "build", reason: "x", actions: [] } }] }, attention: [] }) }) });
+    mount(<InboxView />);
+    await screen.findByText("Spec approved");
+    expect(document.getElementById("inbox-search")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
+    await screen.findByText("Awaiting answer");
+    expect(document.getElementById("inbox-search")).toBeNull();
+    expect(document.getElementById("inb-proj")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /Blocked/ }));
+    await screen.findByText("WO-2417");
+    expect(document.getElementById("inbox-search")).toBeNull();
+  });
+
+  it("the filtered-empty approvals state says to loosen the search and offers Clear filters", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] }, attention: [] }) }) });
+    mount(<InboxView />);
+    await screen.findByText("Spec approved");
+    fireEvent.change(document.getElementById("inbox-search") as HTMLInputElement, { target: { value: "zzzz" } });
+    expect(await screen.findByText("Loosen the search or clear the filters.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("Spec approved")).toBeTruthy();
+  });
+
+  it("Open Trust goes to Trust with ?tab=proposals", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [] }, attention: [] }) }), "GET /api/v1/trust/cells": () => ({ body: { cells: [], proposals: [{ id: "tp1", cell: "ag-spec|feature|payments", from: 1, to: 2, status: "pending", evidence: { note: "ok" } }], policy: {} } }) });
+    mount(<InboxView />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Proposals/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Trust" }));
+    expect(window.location.search).toContain("tab=proposals");
+    expect(window.location.hash).toContain("trust");
+  });
 });

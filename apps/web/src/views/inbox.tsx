@@ -233,7 +233,8 @@ export default function InboxView() {
   const needle = search.trim().toLowerCase();
   const textOf = (i: Item): string => (i.kind === "gate" || i.kind === "onboarding" ? `${i.a.wo ?? ""} ${i.a.title ?? ""} ${i.a.repoName ?? ""} ${i.projectName} ${i.project}` : i.kind === "other" ? `${i.x.title} ${i.x.sub}` : `${i.c.wo} ${i.c.title} ${i.c.question ?? ""}`).toLowerCase();
   const all = inTab(tab);
-  const shown = all.filter((i) => (project === "all" || i.project === project) && (!needle || textOf(i).includes(needle)));
+  // The prototype filters the Approvals table only; the other lists show everything.
+  const shown = tab.id !== "gates" ? all : all.filter((i) => (project === "all" || i.project === project) && (!needle || textOf(i).includes(needle)));
   const gates = shown.filter((i): i is GateIt => i.kind === "gate");
   const onb = shown.filter((i) => i.kind === "onboarding");
   const filtered = project !== "all" || !!needle;
@@ -250,16 +251,18 @@ export default function InboxView() {
             <Panel title={tab.title} flush id={`inbox-${tab.id}`}>
               {all.length ? (
                 <>
-                  <FilterBar count={`${shown.length} ${tab.id === "gates" ? "approvals" : "items"}${filtered ? ` of ${all.length}` : ""}`}>
-                    <SearchBox id="inbox-search" value={search} onChange={(v) => setSearch(v)} placeholder="Search…" label={tab.id === "gates" ? "Search approval" : "Search the inbox"} />
-                    <label htmlFor="inb-proj">
-                      <span>Project</span>
-                      <Select id="inb-proj" options={[{ value: "all", label: "All" }, ...(projList ?? []).map((p) => ({ value: p.id, label: p.name }))]} value={project} onChange={(v) => setProj(v)} />
-                    </label>
-                    {filtered ? <Btn label="Clear" small kind="ghost" id="inbox-reset" onClick={() => { setSearch(""); setProj("all"); }} /> : null}
-                  </FilterBar>
+                  {tab.id === "gates" ? (
+                    <FilterBar count={`${shown.length} approvals${filtered ? ` of ${all.length}` : ""}`}>
+                      <SearchBox id="inbox-search" value={search} onChange={(v) => setSearch(v)} placeholder="Search…" label="Search approval" />
+                      <label htmlFor="inb-proj">
+                        <span>Project</span>
+                        <Select id="inb-proj" options={[{ value: "all", label: "All" }, ...(projList ?? []).map((p) => ({ value: p.id, label: p.name }))]} value={project} onChange={(v) => setProj(v)} />
+                      </label>
+                      {filtered ? <Btn label="Clear" small kind="ghost" id="inbox-reset" onClick={() => { setSearch(""); setProj("all"); }} /> : null}
+                    </FilterBar>
+                  ) : null}
                   {!shown.length ? (
-                    <Empty icon="filter" title="Nothing matches these filters" text="Choose another project or search." />
+                    <Empty id="inbox-filtered-empty" icon="filter" title="Nothing matches these filters" text="Loosen the search or clear the filters." action={<Btn label="Clear filters" id="inbox-clear-filters" onClick={() => { setSearch(""); setProj("all"); }} />} />
                   ) : tab.id === "gates" ? (
                     <>
                       {gates.length ? <GateTable rows={gates} /> : null}
