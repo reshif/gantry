@@ -4,7 +4,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { plural } from "../lib/plural";
-import { Btn, Field, FilterBar, SearchBox, Select } from "../ui/primitives";
+import { Btn, FilterBar, SearchBox, Select } from "../ui/primitives";
 import { DataTable, type Col } from "../ui/DataTable";
 
 export interface DataFilter<R> {
@@ -49,16 +49,28 @@ export function DataView<R>({ id, noun, rows, text, filters = [], columns, rowKe
         <FilterBar label={`Filter ${noun}s`} count={count} actions={active ? <Btn label="Clear" small kind="ghost" id={`${id}-clear`} onClick={clear} /> : undefined}>
           {search ? <SearchBox id={`${id}-q`} value={st.q} onChange={(v) => put({ ...st, q: v })} placeholder="Search…" label={`Search ${noun}s`} /> : null}
           {filters.map((f) => (
-            <Field key={f.k} label={f.label} htmlFor={`${id}-f-${f.k}`}>
+            <label key={f.k} htmlFor={`${id}-f-${f.k}`}>
+              <span>{f.label}</span>
               <Select id={`${id}-f-${f.k}`} value={st.f[f.k] ?? ""} options={[{ value: "", label: "All" }, ...f.opts.map(([value, label]) => ({ value, label }))]} onChange={(v) => put({ ...st, f: { ...st.f, [f.k]: v } })} />
-            </Field>
+            </label>
           ))}
         </FilterBar>
       ) : null}
-      <DataTable id={`${id}-table`} caption={caption ?? noun} columns={columns} rows={list} rowKey={rowKey} {...(rowId ? { rowId } : {})} {...(onRow ? { onRow } : {})} {...(pageSize ? { pageSize } : {})}
+      <DataTable sortHint noSortSelect id={`${id}-table`} caption={caption ?? noun} columns={columns} rows={list} rowKey={rowKey} {...(rowId ? { rowId } : {})} {...(onRow ? { onRow } : {})} {...(pageSize ? { pageSize } : {})}
         empty={rows.length && active
           ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id={`${id}-clear-empty`} onClick={clear} /> }
           : (empty ?? { title: "Nothing here yet", text: "Items will appear here when they exist." })} />
+      {list.length && (!pageSize || list.length <= pageSize) ? <div className="tfoot"><span>{`1–${list.length} of ${list.length}`}</span></div> : null}
     </div>
   );
+}
+
+/** The prototype's compact "2d ago": one unit, rounded. */
+export function agoP(t: number | null | undefined, now = Date.now()): string {
+  if (!t) return "—";
+  let d = (now - t) / 1000;
+  const fut = d < 0;
+  d = Math.abs(d);
+  const [n, u] = d < 3600 ? [Math.max(1, Math.round(d / 60)), "m"] : d < 86400 ? [Math.round(d / 3600), "h"] : [Math.round(d / 86400), "d"];
+  return fut ? `in ${n}${u}` : `${n}${u} ago`;
 }

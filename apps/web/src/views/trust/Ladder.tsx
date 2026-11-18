@@ -14,6 +14,7 @@ import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
 import { ClassChip } from "../projects/kit";
+import { OutcomeDialog } from "./Tabs";
 import { KV, LevelTag, Rate, Rungs, code, gateForAgent, ladderRows, lv, pct, rerender, trustCellId, trustUi, useTrustUi, type CellOut, type LadderRow, MIN_RUNS } from "./kit";
 
 export interface LadderProps { cat: Catalog; project: Project; projects: Project[]; cells: CellOut[]; proposals: TrustProposal[]; switchOn: boolean; criteria: Record<string, { cleanRuns: number; evalMin: number; reworkMax: number; incidentsMax: number; windowD: number }>; sampleRate: number; coverage: { total: number; auto: number }; agentName: (id: string) => string; clsName: (id: string) => string }
@@ -165,6 +166,7 @@ function Detail({ p, rows }: { p: LadderProps; rows: LadderRow[] }) {
   const sel = trustUi.sel;
   const wosQ = useWorkOrders(p.project.id, { cls: sel?.cls ?? "", limit: 100 });
   const perm = useCan("trust.grant", { project: p.project.id });
+  const outPerm = useCan("outcome.record", { project: p.project.id });
   if (!sel) return <section className="panel tr-detail" id="tr-detail"><Empty title="Select a cell" text="Pick an agent and class in the ladder to see its evidence, history and what it needs for the next level." /></section>;
   if (!sel.agent) {
     const first = rows[0];
@@ -202,7 +204,7 @@ function Detail({ p, rows }: { p: LadderProps; rows: LadderRow[] }) {
           <div className="tr-dmeta small">{"Judged at "}<strong>{g ? `${g.label} ${g.name}` : "no gate"}</strong>{" · "}{cell.virtual ? "no cell yet, default L1" : `since ${fmt.istDate(cell.since)}`}</div>
         </div>
         <div className="tr-dlevel"><LevelTag level={cell.level} extra="is-big" />{eff < cell.level ? <div className="small warn-text"><Icon name="lock" />{` Runs at ${code(eff)}: ${reasonWhy}`}</div> : null}</div>
-        <div className="tr-dact"><Btn label={cell.virtual ? "Set level" : "Change level"} icon="trust" id="tr-change" guard={perm} onClick={openLevel} /></div>
+        <div className="tr-dact"><Btn label={cell.virtual ? "Set level" : "Change level"} icon="trust" id="tr-change" guard={perm} onClick={openLevel} /><Btn label="Record a post-release outcome" icon="alert" id="tr-rec-outcome" guard={outPerm} onClick={() => ui_.dialog({ title: "Record a post-release outcome", kicker: "Trust · outcomes", sub: "Recorded on the shipped work order with your name and what it is attributed to. An attributed revert or incident lowers the agent's cells for that class and project to L1 at once. Audited.", wide: true, body: (close) => <OutcomeDialog cells={p.cells} projects={p.projects} onDone={close} />, actions: [{ label: "Close" }] })} /></div>
       </div>
       <LockNote decision={perm} what={`Trust levels on ${p.project.name}`} />
       <div className="tr-dgrid">
@@ -375,7 +377,7 @@ export function LadderTab({ cells, projects, switchOn, agentName, clsName }: { c
       <div style={{ padding: "14px 14px 0" }}>
         <div className="callout tr-levels"><b>How levels work</b>{`L0 proposes only, L1 needs every gate, L2 skips routine gates, L3 acts alone on routine work with sampling, L4 needs no review. Ceilings cap a level regardless of record.${switchOn ? "" : " Levels above L1 are switched off."}`}</div>
       </div>
-      <DataView id="tr-cells" noun="cell" rows={cells} rowKey={(c) => c.id} rowId={(c) => `tr-row-${c.id.replace(/\W/g, "-")}`} pageSize={12} text={(c) => `${c.id} ${agentName(c.agent)} ${clsName(c.cls)} ${projName(c.project)}`}
+      <DataView id="tr-cells" noun="cell" rows={cells} rowKey={(c) => c.id} rowId={(c) => `tr-row-${c.id.replace(/\W/g, "-")}`} onRow={open} pageSize={12} text={(c) => `${c.id} ${agentName(c.agent)} ${clsName(c.cls)} ${projName(c.project)}`}
         filters={[
           { k: "level", label: "Level", opts: [0, 1, 2, 3, 4].map((n) => [String(n), `L${n}`]), fn: (c, v) => String(c.level) === v },
           { k: "project", label: "Project", opts: projects.map((x) => [x.id, x.name]), fn: (c, v) => c.project === v },
@@ -389,12 +391,7 @@ export function LadderTab({ cells, projects, switchOn, agentName, clsName }: { c
           { key: "l", label: "Level", sort: (c) => c.level, render: (c) => <LevelChip level={c.level} /> },
           { key: "r", label: "Clean runs", align: "end", sort: (c) => c.evidence?.cleanRuns ?? c.cleanRuns, render: (c) => <span className="num">{c.evidence?.cleanRuns ?? c.cleanRuns}</span> },
           { key: "s", label: "Since", render: (c) => dmy(c.since) },
-          { key: "x", label: "", align: "end", render: (c) => (
-            <span className="row">
-              <Btn label="Details" small kind="ghost" id={`tr-open-${c.id.replace(/\W/g, "-")}`} aria={`Open the cell of ${agentName(c.agent)}, ${clsName(c.cls)}`} onClick={() => open(c)} />
-              {c.level > 0 ? <DemoteBtn cell={c} name={agentName(c.agent)} cls={clsName(c.cls)} /> : null}
-            </span>
-          ) },
+          { key: "x", label: "", align: "end", render: (c) => (c.level > 0 ? <DemoteBtn cell={c} name={agentName(c.agent)} cls={clsName(c.cls)} /> : null) },
         ]} />
     </Panel>
   );

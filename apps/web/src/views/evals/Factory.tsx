@@ -1,6 +1,7 @@
 /** Factory-wide tab (legacy factoryTab): agents x metrics, agents x projects, per-class performance, onboarding, intake confusion, per-skill coverage, gate rejections, human override. */
 import { fmt, type EvalExtra } from "@gantry/domain";
-import { AreaChart, BarChart, BarList } from "../../ui/charts";
+import { BarChart } from "../../ui/charts";
+import { BarChart as ProtoBars, LineChart } from "./protoCharts";
 import { Empty, Panel } from "../../ui/primitives";
 import { ClassChip, useCatalog } from "../projects/kit";
 import { METRICS, fmtMetric } from "./Scorecards";
@@ -189,9 +190,9 @@ export function FactoryTab({ d }: { d: EvalsData }) {
     <div className="ev-factory stack">
       <div className="cols">
         <Panel title="Task success, 8 weeks">
-          {weeks.length >= 2 ? <AreaChart values={avg} labels={labels} fmt={(v) => `${Math.round(v * 100)}%`} min={0.8} max={1} title="Task success, 8 weeks" /> : <Empty title="Insufficient data" text="The chart needs at least two weeks with finished attempts on real work." />}
+          {weeks.length >= 2 ? <LineChart values={avg} labels={labels} fmt={(v) => `${Math.round(v * 100)}%`} min={0.8} max={1} label="Task success, 8 weeks" /> : <Empty title="Insufficient data" text="The chart needs at least two weeks with finished attempts on real work." />}
         </Panel>
-        <Panel title="Gate rejection reasons">{gr.length ? <BarList items={gr} label="Gate rejection reasons" labelWidth={170} /> : <Empty title="No rejections" text="Nothing was rejected at a gate in the last 30 days." />}</Panel>
+        <Panel title="Gate rejection reasons">{gr.length ? <ProtoBars items={gr.map((g) => ({ l: g.label, v: g.value, tone: "warn" }))} label="Gate rejection reasons" lw={170} /> : <Empty title="No rejections" text="Nothing was rejected at a gate in the last 30 days." />}</Panel>
       </div>
       <Panel title="Agent × project heat map"><Heat d={d} /></Panel>
       <Panel title="Classifier confusion"><Confusion ex={ex} /></Panel>

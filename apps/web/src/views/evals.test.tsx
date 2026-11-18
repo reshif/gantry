@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -86,13 +86,16 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
   return calls;
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
+let QC: QueryClient;
 function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
+  QC = qc;
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><EvalsView /></OverlayProvider></QueryClientProvider>);
 }
 const writes = (calls: Call[], method: string) => calls.filter((c) => c.method === method && c.path !== "/api/v1/can");
-const openCard = async (agent: string) => fireEvent.click(await byId(`ev-sc-open-${agent}`));
+const openCard = async (agent: string) => { await byId("ev-scorecards"); window.location.hash = `evals?tab=cards&agent=${agent}`; await new Promise((r) => setTimeout(r, 60)); await byId("ev-scorecard"); };
+const rowBtn = async (rowId: string) => fireEvent.click((await byId(rowId)).querySelector("button.row-link")!);
 const reasonOf = (e: HTMLElement) => e.getAttribute("data-reason") ?? "";
 
 beforeEach(() => {
@@ -202,8 +205,48 @@ describe("Evals screen: regressions", () => {
   });
 });
 
+describe("Evals screen: prototype tables", () => {
+  it("shows the sort hint on sortable headers, and a bare chevron row with no Scorecard button", async () => {
+    setup();
+    mount();
+    const t = await byId("ev-scorecards-table");
+    const heads = Array.from(t.querySelectorAll("th")).map((th) => th.textContent);
+    expect(heads.filter((h) => h?.includes("↕")).length).toBe(5);
+    expect(t.textContent).not.toContain("Scorecard");
+    expect(t.querySelector("td button:not(.row-link)")).toBeNull();
+    fireEvent.click(await byId("ev-tab-suites"));
+    const su = await byId("ev-suites-table");
+    expect(su.textContent).not.toContain("Details");
+    expect(su.querySelector(".strong")).toBeNull();
+    expect(Array.from(su.querySelectorAll("th")).filter((th) => th.textContent?.includes("↕")).map((th) => th.textContent)).toEqual(["Suite↕", "Last score↕"]);
+  });
+  it("opens #/evals?tab=suites on the Suites tab", async () => {
+    setup();
+    window.location.hash = "#/evals?tab=suites";
+    mount();
+    expect((await byId("ev-tab-suites")).getAttribute("aria-selected")).toBe("true");
+  });
+  it("tells the score when a run started from the page finishes, and lists it first in Recent runs", async () => {
+    const runs = [...RUNS_BUILD];
+    setup({
+      "GET /api/v1/evals/runs": () => ({ body: runs }),
+      "POST /api/v1/suites/SUITE-BUILD/runs": () => { runs.push(run("RUN-3", "SUITE-BUILD", "ag-build", "2.7.0-rc1", "claude-opus-5-5", 0.9, ["BLD-01", "BLD-02"].map((c) => res(c, true)), { status: "queued", at: NOW + 1000 })); return { body: { ok: true, msg: "RUN-3 started.", run: "RUN-3", total: 2 } }; },
+    });
+    mount();
+    fireEvent.click(await byId("ev-tab-suites"));
+    fireEvent.click(await byId("ev-run-SUITE-BUILD"));
+    await waitFor(() => expect(runs.some((r) => r.id === "RUN-3")).toBe(true));
+    runs[runs.length - 1] = { ...runs[runs.length - 1]!, status: "completed" } as never;
+    await byId("ev-run-SUITE-BUILD");
+    await act(async () => { await QC.invalidateQueries(); });
+    await waitFor(() => expect(document.body.textContent).toContain("Builder golden set scored 90%"));
+    const first = document.querySelector("#ev-runs-table tbody tr")!;
+    expect(first.textContent).toContain("RUN-3");
+  });
+});
+
 describe("Evals screen: suites and runs", () => {
-  const openSuites = async () => { fireEvent.click(await byId("ev-tab-suites")); fireEvent.click(await byId("ev-su-open-SUITE-BUILD")); await byId("ev-run-btn"); };
+  const openSuites = async () => { fireEvent.click(await byId("ev-tab-suites")); await rowBtn("ev-su-SUITE-BUILD"); await byId("ev-run-btn"); };
   it("lists suites with the last score and its task count, and shows the run's task count and range", async () => {
     setup();
     mount();
@@ -212,7 +255,7 @@ describe("Evals screen: suites and runs", () => {
     expect(row.textContent).toContain("Builder golden set");
     expect(row.textContent).toContain("6 cases · threshold 85%");
     expect(row.textContent).toContain("50%");
-    fireEvent.click(await byId("ev-su-open-SUITE-BUILD"));
+    await rowBtn("ev-su-SUITE-BUILD");
     fireEvent.click(await byId("ev-run-RUN-1"));
     expect((await byId("ev-range")).textContent).toContain("5 of 6 tasks passed");
     expect(document.getElementById("ev-range")!.textContent).toContain("95% range 53% to 93%");

@@ -13,6 +13,9 @@ const meWith = (roles: Array<{ role: string; scope: string }>, projects = ["paym
 describe("hash parsing", () => {
   it("parses ids and params like legacy hashes", () => {
     expect(parseHash("#home")).toEqual({ id: "home", param: null, project: null });
+    expect(parseHash("#/evals?tab=suites")).toEqual({ id: "evals", param: "suites", project: null });
+    expect(parseHash("#/trust?tab=rules&x=1")).toEqual({ id: "trust", param: "rules", project: null });
+    expect(parseHash("#evals/factory")).toEqual({ id: "evals", param: "factory", project: null });
     expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042", project: null });
     expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null });
     expect(parseHash("")).toEqual({ id: "", param: null, project: null });

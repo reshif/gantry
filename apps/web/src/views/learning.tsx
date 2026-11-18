@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import { useCan } from "../api/can";
 import { ops } from "../api/ops";
-import { useLearningFindings, useLearningProposals, useLearningSettings, useLearningSignals } from "../api/queries";
+import { useLearningFindings, useLearningProposals, useLearningSettings } from "../api/queries";
 import { Btn, LockNote, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { useTabParam } from "./tabparam";
 import { Async, qState } from "../ui/async";
@@ -26,10 +26,8 @@ export default function LearningView() {
   const ui = useUI();
   const fq = useLearningFindings();
   const pq = useLearningProposals();
-  const sq = useLearningSignals(30);
   const findings = fq.data ?? [];
   const proposals = pq.data ?? [];
-  const signals = sq.data ?? [];
   const settings = useLearningSettings().data;
   const perm = dec(useCan("learning.apply"));
   const [tab, setTabUrl] = useTabParam("learning", ["proposals", "findings", "signals"] as const);
@@ -67,7 +65,7 @@ export default function LearningView() {
 
   const body = tab === "findings"
     ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
-    : tab === "signals" ? <Async query={sq} what="learning signals" id="ln-signals">{() => <SignalsTab signals={signals} findings={findings} />}</Async>
+    : tab === "signals" ? <Async query={fq} what="learning signals" id="ln-signals">{() => <SignalsTab findings={findings} />}</Async>
     : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} hi={hi} onFocusFinding={focusFinding} />}</Async>;
   return (
     <div className="view view-learning">

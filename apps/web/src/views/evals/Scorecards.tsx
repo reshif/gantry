@@ -1,5 +1,5 @@
 /** Scorecards tab (legacy agentsTab): per-agent live scorecard, trend charts, suite history, promotion eligibility, trust and learning links, candidates across the factory. */
-import type { ReactElement } from "react";
+import { useEffect, type ReactElement } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
@@ -164,6 +164,11 @@ export function ScorecardDrawer({ agentId, label, close }: { agentId: string; la
 /** The prototype's Scorecards: one flat table of the agents, the agent a link to its page, the eight-week trend a plain line with an end dot. */
 export function ScorecardsTab({ d, label }: { d: EvalsData; label: (c: { agent: string; cls: string; project: string; repo: string | null }) => string }) {
   const ui = useUI();
+  // the full scorecard is a drawer in the URL: `#/evals?tab=cards&agent=ag-build` (the row itself opens the agent page, as in the prototype)
+  const wanted = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("agent");
+  useEffect(() => {
+    if (wanted) ui.drawer.open(`ev-sc:${wanted}`, (close) => <ScorecardDrawer agentId={wanted} label={label} close={close} />);
+  }, [wanted]); // eslint-disable-line react-hooks/exhaustive-deps
   const val = (a: AgentRow, k: "taskSuccess" | "firstPass" | "rework"): number => (metricHas(d.scorecards[a.id], k) ? d.scorecards[a.id]![k] : k === "taskSuccess" ? a.evalScore : -1);
   const cell = (a: AgentRow, k: "taskSuccess" | "firstPass" | "rework") => <span className="num">{val(a, k) >= 0 ? fmt.pct(val(a, k)) : "–"}</span>;
   const open = (a: AgentRow): void => navigate("agents", a.id);
@@ -178,7 +183,7 @@ export function ScorecardsTab({ d, label }: { d: EvalsData; label: (c: { agent: 
           { key: "rw", label: "Rework", align: "end", sort: (x) => val(x, "rework"), render: (x) => cell(x, "rework") },
           { key: "cost", label: "Cost / WO", align: "end", sort: (x) => d.scorecards[x.id]?.costPerWO ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "costPerWO") ? fmt.money(d.scorecards[x.id]!.costPerWO) : "–"}</span> },
           { key: "trend", label: "8-week trend", hideSmall: true, render: (x) => { const k = d.scorecards[x.id]; const w = k ? weeksOf(k, []) : null; return w && w.idx.length >= 2 ? <Spark values={w.success} w={90} h={24} plain label={`Trend ${w.success.map((v) => +v.toFixed(2)).join(", ")}`} /> : <span className="muted">–</span>; } },
-          { key: "detail", label: "", align: "end", render: (x) => <Btn label="Scorecard" small kind="ghost" id={`ev-sc-open-${x.id}`} aria={`Open the full scorecard of ${x.name}`} onClick={() => { evalsUi.agent = x.id; ui.drawer.open(`ev-sc:${x.id}`, (close) => <ScorecardDrawer agentId={x.id} label={label} close={close} />); }} /> },
+          { key: "go", label: "", align: "end", render: () => null },
         ]} />
     </Panel>
   );

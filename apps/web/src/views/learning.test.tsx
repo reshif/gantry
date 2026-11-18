@@ -86,6 +86,7 @@ function setup(extra: Record<string, Handler> = {}, o: { denied?: string[]; as?:
 }
 
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
+const openFinding = async (id: string) => fireEvent.click((await byId(`ln-f-${id}`)).querySelector("button.row-link")!);
 function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
@@ -116,8 +117,10 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     expect(head).toContain("Adopted3");
     expect(head).toContain("Signals6events seen");
     expect(document.getElementById("ln-st-open")).toBeNull();
-    expect(card.querySelector(".chip")?.textContent).toBe("Skill edit");
-    expect(card.querySelector(".ln-pipe")?.getAttribute("aria-label")).toBe("Status: Proposed");
+    expect(card.querySelector(".chip")?.textContent).toBe("skill");
+    expect(card.querySelector(".ln-pipe")).toBeNull();
+    expect(card.querySelector("a, button.linkish")).toBeNull();
+    expect(card.querySelector(".btn .ic")).toBeNull();
     expect(card.querySelector(".diff .a")?.textContent).toContain("Always add a Rollback section.");
     expect(card.querySelector(".diff .d")?.textContent).toContain("List the files to change.");
     expect(card.textContent).toContain("Omar Haddad");
@@ -160,7 +163,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     mount();
     fireEvent.click(await byId("ln-accept-LP-1"));
     const ok = await byId("ln-acc-ok");
-    expect(document.querySelector(".dlg")?.textContent).toContain("Applies the change now through the normal operation");
+    expect(document.querySelector(".dlg")?.textContent).toContain("as a new version through its own command");
     type(await byId("ln-acc-note"), "Looks right");
     fireEvent.click(ok);
     await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/changed since this was drafted/));
@@ -232,7 +235,9 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     expect((await byId("ln-accept-LP-1")).getAttribute("data-reason")).toMatch(/Learning proposals are switched off/);
     expect((await byId("ln-decline-LP-1")).getAttribute("data-reason")).toMatch(/switched off/);
     fireEvent.click(await byId("ln-tab-findings"));
+    await openFinding("F-1");
     expect((await byId("ln-draft-F-1")).getAttribute("data-reason")).toMatch(/switched off/);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     fireEvent.click(await byId("ln-tab-proposals"));
     fireEvent.click(await byId("ln-switch"));
     const ta = await waitFor(() => { const e = document.querySelector<HTMLTextAreaElement>("#rsn-text"); if (!e) throw new Error("no field"); return e; });
@@ -252,10 +257,14 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     expect(f1.textContent).toContain("Payments Platform");
     expect(f1.textContent).toContain("3");
     expect(f1.textContent).toContain("open");
-    expect(f1.textContent).toContain("LP-1 (proposed)");
+    expect(f1.textContent).toContain("rejection");
+    expect(Array.from(f1.querySelectorAll(".chip")).map((c) => c.textContent)).toContain("rejection");
+    expect(f1.querySelector("a.pri.mono")!.textContent).toMatch(/^WO-/);
+    expect(document.getElementById("ln-refresh")).toBeNull();
+    expect(document.getElementById("ln-draft-F-1")).toBeNull();
     const f3 = await byId("ln-f-F-3");
     expect(f3.textContent).toContain("addressed");
-    expect(f3.querySelector(".entity-chip.is-plain")?.textContent).toBe("RUN-9");
+    expect(f3.querySelector(".mono")?.textContent).toBe("RUN-9");
     expect(document.getElementById("ln-find")!.textContent).toContain("3 findings");
     expect(document.getElementById("ln-find")!.textContent).toContain("Signal");
     fireEvent.change(document.getElementById("ln-find-f-status")!, { target: { value: "open" } });
@@ -263,6 +272,8 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     expect(document.getElementById("ln-find")!.textContent).toContain("2 findings of 3");
     fireEvent.click(document.getElementById("ln-find-clear")!);
     await byId("ln-f-F-3");
+    await openFinding("F-1");
+    expect((await byId("ln-f-p-LP-1")).textContent).toContain("LP-1 (proposed)");
     fireEvent.click(await byId("ln-refresh"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/learning/findings/refresh" });
@@ -275,6 +286,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     const calls = setup({ "POST /api/v1/learning/proposals": () => ({ body: { ok: true, msg: "LP-7 drafted.", proposal: prop({ id: "LP-7", owner: "p-asha" }) } }) });
     mount();
     fireEvent.click(await byId("ln-tab-findings"));
+    await openFinding("F-1");
     fireEvent.click(await byId("ln-draft-F-1"));
     await byId("ln-draft-form");
     expect((document.getElementById("ln-d-kind") as HTMLSelectElement).value).toBe("skill");
@@ -306,6 +318,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     const calls = setup({ "POST /api/v1/learning/proposals": () => ({ body: { ok: true, msg: "LP-8 drafted.", proposal: prop({ id: "LP-8" }) } }) });
     mount();
     fireEvent.click(await byId("ln-tab-findings"));
+    await openFinding("F-2");
     fireEvent.click(await byId("ln-draft-F-2"));
     await byId("ln-draft-form");
     expect((document.getElementById("ln-d-kind") as HTMLSelectElement).value).toBe("guardrail");
@@ -320,6 +333,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     setup();
     mount();
     fireEvent.click(await byId("ln-tab-findings"));
+    await openFinding("F-1");
     fireEvent.click(await byId("ln-draft-F-1"));
     await byId("ln-draft-form");
     type(await byId("ln-d-kind"), "route");
@@ -330,29 +344,15 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     for (const bad of ["intake", "spec", "design", "plan", "verify", "review", "close"]) expect(options).not.toContain(bad);
   });
 
-  it("shows every signal, filtered by type, with the run of a regression", async () => {
+  it("draws two charts side by side with raw signal words and the value at the end of each bar, and no events panel", async () => {
     setup();
     mount();
     fireEvent.click(await byId("ln-tab-signals"));
-    const table = await byId("ln-sig-table");
-    expect(document.body.textContent).toContain("Signals by count");
+    await waitFor(() => expect(document.body.textContent).toContain("Signals by count"));
     expect(document.body.textContent).toContain("Gate rejection reasons");
-    expect(table.querySelectorAll("tbody tr")).toHaveLength(4);
-    expect(document.body.textContent).toContain("All 4");
-    expect(document.body.textContent).toContain("Eval regression 1");
-    expect(document.body.textContent).toContain("3 in the last 7 days");
-    const reg = table.querySelector("tr[data-key^='RUN-9']")!;
-    expect(reg.textContent).toContain("Spec suite fell from 90% to 80%");
-    expect(reg.textContent).toContain("All projects");
-    fireEvent.click(document.getElementById("ln-sig-sendback")!);
-    await waitFor(() => expect(document.querySelectorAll("#ln-sig-table tbody tr")).toHaveLength(1));
-    expect(within(document.getElementById("ln-sig-table")!).getByText("Unclear scope")).toBeTruthy();
-    fireEvent.click(document.getElementById("ln-sig-regression")!);
-    await waitFor(() => expect(document.querySelectorAll("#ln-sig-table tbody tr")).toHaveLength(1));
-    // sorting by a column
-    fireEvent.click(document.getElementById("ln-sig-all")!);
-    fireEvent.click(await byId("ln-sig-table-sort-signal"));
-    expect(document.querySelector("#ln-sig-table th[aria-sort]")?.getAttribute("aria-sort")).toBe("ascending");
+    expect(document.getElementById("ln-sig-table")).toBeNull();
+    expect(document.body.textContent).not.toContain("Signal events");
+    expect(document.body.textContent).not.toContain("Gate rejection reasons Gate rejection");
   });
 });
 

@@ -12,7 +12,7 @@ import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 import { dec } from "../mcp/kit";
 import { AcceptDialog, VerifyDialog } from "./Dialogs";
-import { ChangeView, KINDS, Pipeline, STATUS } from "./kit";
+import { ChangeView, KINDS, PlainDiff, STATUS } from "./kit";
 
 const scopeOf = (lp: LearningProposal): { project: string } | undefined => {
   const p = (lp.change as { project?: unknown } | undefined)?.project;
@@ -57,8 +57,8 @@ function useProposalActions(lp: LearningProposal): React.ReactNode[] {
   const early = lp.status === "accepted" && due && Date.now() < due ? `The window runs until ${fmt.istDate(due)}. It can be verified then.` : null;
   const act = [] as React.ReactNode[];
   if (lp.status === "proposed") {
-    act.push(<Btn key="a" label="Adopt" small kind="primary" icon="check" id={`ln-accept-${lp.id}`} guard={perm} disabledReason={off ?? mine} onClick={() => ui.open((close) => <AcceptDialog lp={lp} close={close} />)} />);
-    act.push(<Btn key="d" label="Decline" small icon="x" id={`ln-decline-${lp.id}`} guard={perm} disabledReason={off} onClick={() => ui.reasonDialog({
+    act.push(<Btn key="a" label="Adopt" small kind="primary" id={`ln-accept-${lp.id}`} guard={perm} disabledReason={off ?? mine} onClick={() => ui.open((close) => <AcceptDialog lp={lp} close={close} />)} />);
+    act.push(<Btn key="d" label="Decline" small id={`ln-decline-${lp.id}`} guard={perm} disabledReason={off} onClick={() => ui.reasonDialog({
       title: `Decline: ${lp.title}`, kicker: `Learning · ${KINDS[lp.kind]?.name ?? lp.kind}`, sub: "Nothing changes; the finding stays open.", label: "Why decline? (required)", ok: "Decline", kind: "danger", min: 6, guard: perm,
       onOk: async (t) => { const r = await ops.declineLearning(lp.id, t); if (r.ok) ui.toast(r.msg, "ok"); return r; },
     })} />);
@@ -76,19 +76,16 @@ function useProposalActions(lp: LearningProposal): React.ReactNode[] {
   return act;
 }
 
-function ProposalPanel({ lp, hi, onFocusFinding }: { lp: LearningProposal; hi: boolean; onFocusFinding: (id: string) => void }) {
+function ProposalPanel({ lp, hi }: { lp: LearningProposal; hi: boolean; onFocusFinding: (id: string) => void }) {
   const actor = useActors();
   const act = useProposalActions(lp);
-  const kind = KINDS[lp.kind] ?? { name: lp.kind, icon: "dots" };
-  const c = (lp.change ?? {}) as { before?: string; after?: string };
   return (
-    <Panel title={lp.title} id={`ln-prop-${lp.id}`} cls={`ln-card is-${lp.status}${hi ? " is-hi" : ""}`}>
+    <Panel title={lp.title} id={`ln-prop-${lp.id}`} cls={hi ? "is-hi" : ""}>
       <div className="stack">
-        <div className="row"><Chip text={kind.name} cls="info" /><span className="small muted">{`from `}<button type="button" className="linkish" id={`ln-goto-f-${lp.id}`} onClick={() => onFocusFinding(lp.finding)}>{lp.finding}</button>{` · owner ${actor(lp.owner).name}`}</span></div>
-        <Pipeline lp={lp} />
+        <div className="row"><Chip text={lp.kind} cls="info" /><span className="small muted">{`from ${lp.finding} · owner ${actor(lp.owner).name}`}</span></div>
         <p>{lp.expected || "–"}</p>
-        {lp.kind === "skill" && c.before != null ? <div className="diff pre"><div className="d">{`− ${c.before}`}</div><div className="a">{`+ ${c.after ?? ""}`}</div></div> : <ChangeView lp={lp} />}
-        <div className="row ln-acts">{act}</div>
+        {lp.kind === "skill" && (lp.change as { before?: string }).before != null ? <PlainDiff lp={lp} /> : <ChangeView lp={lp} />}
+        <div className="row">{act}</div>
       </div>
     </Panel>
   );
@@ -100,7 +97,7 @@ function DecidedRow({ lp, hi, onFocusFinding }: { lp: LearningProposal; hi: bool
   const last = lp.history[lp.history.length - 1];
   const tone = lp.status === "accepted" || lp.status === "verified" ? "ok" : "plain";
   return (
-    <li id={`ln-prop-${lp.id}`} className={`ln-card is-${lp.status}${hi ? " is-hi" : ""}`}>
+    <li id={`ln-prop-${lp.id}`} className={hi ? "is-hi" : undefined}>
       <div className="grow">
         <div className="row"><b>{lp.title}</b><button type="button" className="linkish small" id={`ln-goto-f-${lp.id}`} onClick={() => onFocusFinding(lp.finding)}>{lp.finding}</button></div>
         <div className="small muted">{last ? `${fmt.stamp(last.at)} · ${actor(last.by).name}: ${last.text}` : ""}{lp.reason ? ` · ${lp.reason}` : ""}</div>

@@ -27,14 +27,17 @@ const dec = (v: string): string => {
 };
 
 export function parseHash(hash: string): RouteLocation {
-  const raw = hash.replace(/^#\/?/, "");
+  // `#/evals?tab=suites` (the prototype's form) is the same route as `#evals/suites`: a `tab` query is the param when no segment gives one
+  const [path = "", query = ""] = hash.replace(/^#\/?/, "").split("?");
+  const raw = path;
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {
     project = dec(rest[0]);
     [head = "", ...rest] = rest.slice(1);
   }
-  const tail = rest.join("/");
+  let tail = rest.join("/");
+  if (!tail) { try { tail = new URLSearchParams(query).get("tab") ?? ""; } catch { /* no tab */ } }
   return { id: head, param: tail ? dec(tail) : null, project };
 }
 
