@@ -27,6 +27,8 @@ export interface Approval {
   have?: number;
   need?: number;
   waitMs?: number;
+  /** The work order's priority (P0 to P3) when the API supplies it; the Inbox column shows a dash otherwise. */
+  priority?: string;
   repo?: string;
   repoName?: string;
   pr?: number;
@@ -38,6 +40,8 @@ export interface Conversation {
   title: string;
   project: string;
   question: string | null;
+  /** Who spoke last in the thread (the avatar on the Inbox question row); absent when the server does not say. */
+  from?: string | null;
   /** Set when the work order is at the brief gate: the item is a gate decision, not a question. */
   gate?: { id: string; label: string; name: string };
   /** A failed, blocked or parked work order that needs a person: the reason is `question`; `actions` are what this person may do (retry, assign). */

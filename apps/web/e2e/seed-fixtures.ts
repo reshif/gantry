@@ -39,9 +39,16 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
   const stationId = (w: Seed) => (cat.stations as Seed[])[w.station]?.id ?? "intake";
   const approvals = waiting.map((w) => {
     const g = gateInfo(w)!;
-    return { wo: w.id, title: w.title, gate: g.id, gateLabel: g.id, gateName: gateName(g.id), instance: `${w.id}:${g.id}:1`, project: w.project, projectName: projName(w.project), have: 0, need: 1, waitMs: NOW - g.since, pr: w.pr?.number };
+    return { wo: w.id, title: w.title, gate: g.id, gateLabel: g.id, gateName: gateName(g.id), instance: `${w.id}:${g.id}:1`, project: w.project, projectName: projName(w.project), have: 0, need: 1, waitMs: NOW - g.since, pr: w.pr?.number, priority: w.priority /* ops1 */ };
   });
-  const conversations = wos.filter((w) => w.state === "blocked").map((w) => ({ wo: w.id, title: w.title, project: w.project, question: w.blockReason, stuck: { state: "blocked", station: stationId(w), reason: w.blockReason ?? "", actions: ["retry"] } }));
+  // --- ops1 (Home, Inbox, Agents at work): blocked and failed work orders are "stuck"; work orders whose conversation awaits an answer are questions.
+  const stuckOf = (w: Seed) => ({ wo: w.id, title: w.title, project: w.project, question: w.blockReason ?? w.failReason ?? null, stuck: { state: w.state as string, station: stationId(w), reason: (w.blockReason ?? w.failReason ?? "") as string, actions: ["retry"] } });
+  const questionOf = (w: Seed) => ({ wo: w.id, title: w.title, project: w.project, question: (w.conv?.questions?.[w.conv?.qi ?? 0]?.text as string | undefined) ?? null, from: w.conv?.messages?.[w.conv.messages.length - 1]?.from ?? null });
+  const conversations = [
+    ...wos.filter((w) => w.state === "blocked" || w.state === "failed").map(stuckOf),
+    ...wos.filter((w) => w.conv?.awaiting && w.state !== "done" && w.state !== "killed" && w.state !== "blocked" && w.state !== "failed" && !(w.state === "waiting" && gateInfo(w)?.id === "G0G1")).map(questionOf),
+  ];
+  // --- end ops1
   const live = wos.filter((w) => w.state !== "done");
   const projectMetrics = (pid: string) => {
     const mine = live.filter((w) => w.project === pid && w.state !== "killed");

@@ -90,9 +90,9 @@ export default function WorkspaceView() {
   // No conversation open: the prototype's "Agents at work" page. Conversations keep their own pane under #workspace/inbox.
   if (!key) {
     return (
-      <AtWork needs={needs} actions={<>
-        <Btn kind="primary" icon="plus" label="New chat" id="ws-home-new" onClick={newChat} />
+      <AtWork tools={<>
         <Btn icon="chat" label={needs ? `Conversations · ${needs}` : "Conversations"} id="ws-home-inbox" onClick={() => open("inbox")} />
+        <Btn icon="plus" label="New chat" id="ws-home-new" onClick={newChat} />
         {operator ? <Btn label="Operator view" id="ws-home-op" onClick={() => open("operator")} /> : null}
       </>} />
     );

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InboxView from "./inbox";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 
-beforeEach(() => resetApp());
+beforeEach(() => { window.history.replaceState(null, "", "/"); resetApp(); });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -30,13 +30,16 @@ describe("Inbox", () => {
   it("lists what waits for the person once, grouped by kind, longest wait first", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, ONB], conversations: [CONV] }, attention: [] }) }) });
     mount(<InboxView />);
-    expect(await screen.findByText("Approve spec · G2")).toBeTruthy();
+    expect(await screen.findByText("Spec approved")).toBeTruthy();
     expect(document.getElementById("inbox-count")?.textContent).toBe("3");
     expect(screen.getByText("Merge onboarding pull request search-service#3")).toBeTruthy();
     // a tab shows one kind
     fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
-    await waitFor(() => expect(screen.queryByText("Approve spec · G2")).toBeNull());
-    expect(await screen.findByText("Which currency?")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Spec approved")).toBeNull());
+    // a question row: the work order links to its record, an Awaiting answer chip, Answer opens the thread
+    expect(await screen.findByText("Awaiting answer")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Answer" })).toBeTruthy();
+    expect(screen.getByText("WO-2407").getAttribute("href")).toContain("record/WO-2407");
   });
 
   it("lists the brief gate under Gate approvals with a pending title, not under Questions with the classifier line", async () => {
@@ -46,11 +49,11 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-1005": () => ({ body: { id: "WO-1005", project: "payments", version: 1, allowed: { approve: { gate: "G0G1", allowed: true, reason: "", needs: "" } } } }),
     });
     mount(<InboxView />);
-    expect(await screen.findByText("Confirm brief · G0+G1")).toBeTruthy();
+    expect(await screen.findByText("Brief confirmed")).toBeTruthy();
     expect(screen.queryByText(/Classified as Docs/)).toBeNull();
     expect(document.getElementById("inb-gate-WO-1005-G0G1")?.textContent).toContain("WO-1005");
     fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
-    await waitFor(() => expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("Question"));
+    await waitFor(() => expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("Awaiting answer"));
     expect(document.getElementById("inb-q-WO-1007")).toBeNull();
   });
 
@@ -64,7 +67,7 @@ describe("Inbox", () => {
     mount(<InboxView />);
     fireEvent.click(await screen.findByRole("tab", { name: /Blocked/ }));
     expect(await screen.findByText(/workspace seeding failed/)).toBeTruthy();
-    expect(document.getElementById("inb-stuck-WO-1005")?.textContent).toContain("Needs a person");
+    expect(document.getElementById("inb-stuck-WO-1005")?.textContent).toContain("WO-1005");
     const retry = await screen.findByRole("button", { name: "Retry" });
     await waitFor(() => expect(retry.getAttribute("aria-disabled")).not.toBe("true"));
     fireEvent.click(retry);
@@ -79,7 +82,7 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-2398/gates/G2/approvers": () => ({ body: approvers }),
     });
     mount(<InboxView />);
-    fireEvent.click(await screen.findByRole("button", { name: "Show details" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Who can approve WO-2398" }));
     expect(await screen.findByText(/Two approvers from Reviewer or Approver/)).toBeTruthy();
     expect(screen.getByText(/Can decide: Grace Liu/)).toBeTruthy();
   });
@@ -91,9 +94,13 @@ describe("Inbox", () => {
       "POST /api/v1/gate-instances/WO-2398%3AG2%3A3/approve": () => ({ body: { ok: true, msg: "Approved." } }),
     });
     mount(<InboxView />);
-    const ok = await screen.findByRole("button", { name: "Approve" });
+    const ok = await screen.findByRole("button", { name: /^Approve WO-2398/ });
     await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
     fireEvent.click(ok);
+    // the prototype's dialog first; the decision is sent when it is confirmed
+    expect(await screen.findByText("Approve G2 for WO-2398")).toBeTruthy();
+    expect(cs.some((c) => c.method === "POST")).toBe(false);
+    fireEvent.click(within(document.querySelector<HTMLElement>(".dlg")!).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(cs.some((c) => c.method === "POST" && c.path.startsWith("/api/v1/gate-instances/"))).toBe(true));
     cleanup();
     vi.unstubAllGlobals();
@@ -103,7 +110,7 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(false) }),
     });
     mount(<InboxView />);
-    const locked = await screen.findByRole("button", { name: "Approve" });
+    const locked = await screen.findByRole("button", { name: /^Approve WO-2398/ });
     await waitFor(() => expect(locked.getAttribute("aria-disabled")).toBe("true"));
     expect(locked.getAttribute("data-reason")).toMatch(/someone else must approve/);
   });
@@ -118,17 +125,18 @@ describe("Inbox", () => {
       "POST /api/v1/work-orders/WO-2400/decline": () => ({ body: { ok: true, msg: "Declined." } }),
     });
     mount(<InboxView />);
-    const ok = await screen.findByRole("button", { name: "Confirm brief" });
+    const ok = await screen.findByRole("button", { name: /^Approve WO-2400/ });
     await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
     fireEvent.click(ok);
+    fireEvent.click(within(await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; })).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2400/confirm-brief")).toBe(true));
     expect(cs.find((c) => c.path.endsWith("/confirm-brief"))!.headers["if-match"]).toBe("7");
-    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reject WO-2400/ }));
     const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
-    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Out of scope" } });
-    fireEvent.click(within(dlg).getByRole("button", { name: "Decline" }));
+    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Out of scope for this quarter" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Reject" }));
     await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2400/decline")).toBe(true));
-    expect(cs.find((c) => c.path.endsWith("/decline"))!.body).toMatchObject({ reason: "Out of scope" });
+    expect(cs.find((c) => c.path.endsWith("/decline"))!.body).toMatchObject({ reason: "Out of scope for this quarter" });
     expect(cs.some((c) => c.path.startsWith("/api/v1/gate-instances/"))).toBe(false);
   });
 
@@ -138,7 +146,7 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
     });
     mount(<InboxView />);
-    const ok = await screen.findByRole("button", { name: "Approve" });
+    const ok = await screen.findByRole("button", { name: /^Approve WO-2398/ });
     expect(ok.getAttribute("aria-disabled")).toBe("true");
     expect(ok.getAttribute("data-reason")).toMatch(/Checking/);
     await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
@@ -161,7 +169,7 @@ describe("Inbox", () => {
   it("says nothing is waiting, and does not say it on a refused read", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [] }, attention: [] }) }) });
     mount(<InboxView />);
-    expect(await screen.findByText("Nothing is waiting on you")).toBeTruthy();
+    expect(await screen.findByText("No approvals waiting")).toBeTruthy();
     cleanup();
     vi.unstubAllGlobals();
     mockApi({ "GET /api/v1/home": () => ({ status: 403, body: { ok: false, msg: "Needs a role." } }) });

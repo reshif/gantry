@@ -1,5 +1,5 @@
 /** Typed reads for this slice of /api/v1. Keys come from ../keys (`qk`). */
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, get, getText } from "../client";
 import { qk } from "../keys";
 import type { Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
@@ -35,6 +35,19 @@ export const useWorkOrders = (projectId: string | null | undefined, q: { cursor?
     queryKey: qk.workOrders(projectId ?? "", q),
     queryFn: () => get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), q),
     enabled: !!projectId,
+  });
+/** The work orders of several projects at once (the factory-wide scope), under the same keys as `useWorkOrders` so the two share the cache. */
+export const useWorkOrdersOf = (projectIds: string[]) =>
+  useQueries({
+    queries: projectIds.map((id) => ({
+      queryKey: qk.workOrders(id, {}),
+      queryFn: () => get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(id)}/work-orders`), {}),
+    })),
+    combine: (rs) => ({
+      data: rs.flatMap((r) => (Array.isArray(r.data) ? r.data : (r.data?.items ?? []))),
+      pending: rs.some((r) => r.isPending),
+      failed: rs.find((r) => r.isError)?.error ?? null,
+    }),
   });
 export const useWorkOrder = (id: string | null | undefined) =>
   useQuery({ queryKey: qk.workOrder(id ?? ""), queryFn: () => get<WorkOrder>(api(`work-orders/${encodeURIComponent(id ?? "")}`)), enabled: !!id });

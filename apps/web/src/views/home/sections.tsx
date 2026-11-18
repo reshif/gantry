@@ -1,20 +1,26 @@
 /** The sections of Home. Each renders only what the API put in `home.sections` (built by the caller's rights); none checks a role. */
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";
-import { ops } from "../../api/ops";
-import { useMe } from "../../api/queries";
+import { useActivity, useMe, useScorecards } from "../../api/queries";
 import { plural } from "../../lib/plural";
 import { hasCommand, runCommand } from "../../lib/commands";
 import { navigate } from "../../lib/router";
-import { setProject, updatePrefs } from "../../lib/prefs";
-import { Btn, Chip, Empty, Meter, Panel, Status } from "../../ui/primitives";
+import { gotoWithQuery } from "../../lib/urlState";
+import { getPrefs, setProject } from "../../lib/prefs";
+import { Avatar, Btn, Chip, Empty, Meter, Panel } from "../../ui/primitives";
+import { Async } from "../../ui/async";
+import { AreaChart } from "../../ui/charts";
+import { hashFor } from "../../lib/router";
+import { GateActions } from "../work/gate";
+import { agoMs } from "../work/format";
+import type { Item } from "../work/items";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { makeStopActions } from "../../shell/stopActions";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { HealthChip, MiniBelt, goProject, metricsOf, useCatalog, type PView } from "../projects/kit";
-import { goAttention, STAGE_NAME, type Approval, type AttentionItem, type Conversation, type HomeSections, type SetupStep } from "./data";
+import { goAttention, STAGE_NAME, type Approval, type AttentionItem, type HomeSections, type SetupStep } from "./data";
 
 /** From Home to the New project wizard on the Projects screen, once that screen has mounted and registered it. */
 export function openNewProject(): void {
@@ -95,64 +101,52 @@ export function AttentionStrip({ items }: { items: AttentionItem[] }) {
 
 /* ------------------------------------------------------- waiting on you */
 
-function ApprovalRow({ a }: { a: Approval }) {
-  const ui = useUI();
-  const open = useOpenTraveler();
-  if (a.repo) {
-    return (
-      <li>
-        <div className="grow">
-          <div className="row"><span className="mono small">{a.note ? "Onboarding" : "PR"}</span><Chip text={a.repoName ?? a.repo} cls="info" /></div>
-          <div className="trunc">{a.note ? `Onboarding update: ${a.repoName}` : `Merge onboarding PR ${a.repoName}#${a.pr}`}</div>
-          <div className="small muted">{a.note ? `${a.projectName} · ${a.note}` : `${a.projectName} · checks green`}</div>
-        </div>
-        <Btn label={a.note ? "Open session" : "Open onboarding"} small id={`hm-my-onb-${a.repo}`} aria={`${a.note ? "Open session" : "Open onboarding"} for ${a.repoName}`} onClick={() => { if (a.project) setProject(a.project); navigate("onboarding", a.repo); }} />
-      </li>
-    );
-  }
+/** The prototype's row: work order link and gate chip, the title, "Project · waiting <ago>", Approve and Reject on the right. */
+function GateRow({ a }: { a: Approval }) {
   const wo = a.wo ?? "";
-  const gate = a.gate ?? "";
-  const approve = async () => {
-    const r = await ops.approveGate(wo, gate, a.instance);
-    ui.toast(r.msg, r.ok ? "ok" : "error");
-  };
-  const verb = gate === "G6" ? "Confirm release" : "Approve";
   return (
-    <li>
+    <li className="hm-need">
       <div className="grow">
-        <div className="row"><span className="mono small">{wo}</span><Chip text={a.gateLabel ?? gate} cls="warn" /><span className="small muted">{a.gateName}</span></div>
-        <div className="trunc">{a.title}</div>
-        <div className="small muted">{`${a.projectName}${a.need !== undefined ? ` · ${a.have ?? 0} of ${plural(a.need, "approval")}` : ""}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`}</div>
+        <div className="row"><a className="pri mono" href={hashFor("record", wo, a.project)} id={`hm-my-wo-${wo}`}>{wo}</a><Chip text={a.gateLabel ?? a.gate ?? ""} cls="warn" /></div>
+        <div className="trunc hm-need-t">{a.title}</div>
+        <div className="small muted">{`${a.projectName} · waiting ${agoMs(a.waitMs ?? 0)}`}</div>
       </div>
-      <div className="row">
-        <Btn label="Review" small kind="ghost" id={`hm-my-open-${wo}-${gate}`} aria={`Review ${wo} at ${a.gateLabel}`} onClick={() => open(wo)} />
-        {gate === "G0G1" ? null : <Btn label={verb} small kind="primary" id={`hm-my-ok-${wo}-${gate}`} aria={`${verb} ${wo} at ${a.gateLabel}`} onClick={() => void approve()} />}
-      </div>
+      <div className="row hm-need-acts"><GateActions a={a} idPrefix="hm-my" /></div>
     </li>
   );
 }
 
-export function WaitingOnYou({ approvals, conversations }: { approvals: Approval[]; conversations: Conversation[] }) {
-  const total = approvals.length + conversations.length;
-  const sorted = approvals.slice().sort((a, b) => (b.waitMs ?? 0) - (a.waitMs ?? 0));
+/** Onboarding merges still wait on a person (kept from the working app); they follow the gate rows. */
+function OnboardingRow({ a }: { a: Approval }) {
   return (
-    <Section id="hm-waiting" title="Needs you" count={total} flush tools={total ? <Btn label="Open Inbox" small id="hm-open-inbox" onClick={() => navigate("inbox")} /> : undefined}>
-      {total ? (
+    <li>
+      <div className="grow">
+        <div className="row"><span className="mono small">{a.note ? "Onboarding" : "PR"}</span><Chip text={a.repoName ?? a.repo ?? ""} cls="info" /></div>
+        <div className="trunc">{a.note ? `Onboarding update: ${a.repoName}` : `Merge onboarding PR ${a.repoName}#${a.pr}`}</div>
+        <div className="small muted">{a.note ? `${a.projectName} · ${a.note}` : `${a.projectName} · checks green`}</div>
+      </div>
+      <Btn label={a.note ? "Open session" : "Open onboarding"} small id={`hm-my-onb-${a.repo}`} aria={`${a.note ? "Open session" : "Open onboarding"} for ${a.repoName}`} onClick={() => { if (a.project) setProject(a.project); navigate("onboarding", a.repo); }} />
+    </li>
+  );
+}
+
+const NEEDS = 6;
+
+/** §1 Needs you: at most six pending gates, the longest wait first. */
+export function WaitingOnYou({ items }: { items: Item[] }) {
+  const gates = items.filter((i): i is Extract<Item, { kind: "gate" }> => i.kind === "gate").sort((x, y) => y.waitMs - x.waitMs);
+  const onb = items.filter((i): i is Extract<Item, { kind: "onboarding" }> => i.kind === "onboarding");
+  const shown = gates.slice(0, NEEDS);
+  const rest = onb.slice(0, Math.max(0, NEEDS - shown.length));
+  return (
+    <Section id="hm-waiting" title="Needs you" flush tools={<Btn label="Open inbox" small id="hm-open-inbox" onClick={() => navigate("inbox")} />}>
+      {shown.length || rest.length ? (
         <ul className="list">
-          {sorted.slice(0, 8).map((a) => <ApprovalRow key={`${a.wo ?? a.repo}-${a.gate ?? ""}-${a.note ? "n" : ""}`} a={a} />)}
-          {conversations.slice(0, Math.max(0, 8 - sorted.length)).map((w) => (
-            <li key={w.wo}>
-              <div className="grow">
-                <div className="row"><span className="mono small">{w.wo}</span><Chip text={w.stuck ? "Needs a person" : "Question"} cls="info" /></div>
-                <div className="trunc">{w.title}</div>
-                <div className="small muted">{w.question || "Confirm the brief or answer the open question."}</div>
-              </div>
-              <Btn label={w.stuck ? "Open" : "Answer"} small kind="primary" id={`hm-my-conv-${w.wo}`} aria={`${w.stuck ? "Open" : "Answer the question on"} ${w.wo}`} onClick={() => { setProject(w.project); updatePrefs({ openConversation: w.wo }); navigate("conversations"); }} />
-            </li>
-          ))}
+          {shown.map((i) => <GateRow key={i.key} a={i.a} />)}
+          {rest.map((i) => <OnboardingRow key={i.key} a={i.a} />)}
         </ul>
       ) : (
-        <Empty id="hm-quiet" title="You are all caught up" text="Nothing is waiting on you." />
+        <Empty id="hm-quiet" title="You are all caught up" text="Nothing needs a decision right now." />
       )}
     </Section>
   );
@@ -212,51 +206,106 @@ export function SetupChecklist({ setup }: { setup: NonNullable<HomeSections["set
 
 /* --------------------------------------------------------- in motion */
 
-export function InMotion({ motion, projects }: { motion: NonNullable<HomeSections["motion"]>; projects: PView[] }) {
+export function InMotion({ motion, projects, scope }: { motion: NonNullable<HomeSections["motion"]>; projects: PView[]; scope: string | null }) {
   const cat = useCatalog();
   const m = motion;
+  const inScope = scope ? projects.filter((p) => p.id === scope) : projects;
   // The line is the sum of the visible projects' stations: derived from the numbers the Projects list already carries.
-  const counts: Record<string, { n: number; blocked: number }> = {};
-  for (const p of projects) for (const [k, v] of Object.entries(metricsOf(p).byPosition)) {
-    const c = (counts[k] ??= { n: 0, blocked: 0 });
+  const counts: Record<string, { n: number; blocked: number; lim: number; over: number; known: boolean }> = {};
+  for (const p of inScope) for (const [k, v] of Object.entries(metricsOf(p).byPosition)) {
+    const c = (counts[k] ??= { n: 0, blocked: 0, lim: 0, over: 0, known: false });
     c.n += v.n;
     c.blocked += v.blocked;
+    if (v.n > 0 || scope) {
+      const w = p.flow?.stations?.[k]?.wip || 5;
+      c.lim += w;
+      c.known = true;
+      c.over = Math.max(c.over, v.n - w);
+    }
   }
-  for (const [k, n] of Object.entries(m.byStation ?? {})) if (!counts[k]?.n) counts[k] = { n, blocked: counts[k]?.blocked ?? 0 };
+  if (!scope) for (const [k, n] of Object.entries(m.byStation ?? {})) if (!counts[k]?.n) counts[k] = { n, blocked: counts[k]?.blocked ?? 0, lim: 0, over: 0, known: false };
   const stations = cat?.stations ?? [];
   const mx = Math.max(1, ...stations.map((s) => counts[s.id]?.n ?? 0));
-  const delta = m.shippedWeek - m.shippedPrevWeek;
+  const flight = scope ? inScope.reduce((n, p) => n + metricsOf(p).wip, 0) : m.inFlight;
   return (
     <Section id="hm-motion" cls="hm-motion" title="Line at a glance">
-      {m.inFlight ? <p className="small muted hm-motion-line">{`${plural(m.inFlight, "work order")} in flight · ${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`}</p> : null}
-      {m.inFlight && cat ? (
+      {flight && cat ? (
         <div className="hbars">
           <div className="hb-list" aria-label="Work by station">
             {stations.map((s) => {
-              const c = counts[s.id] ?? { n: 0, blocked: 0 };
+              const c = counts[s.id] ?? { n: 0, blocked: 0, lim: 0, over: 0, known: false };
+              const lim = c.known ? Math.max(5, c.lim) : null;
+              const over = c.over > 0 || (lim !== null && c.n > lim);
+              const route = scope ?? getPrefs().project;
               return (
-                <a key={s.id} className="hb" href="#work-orders" title={`${s.name}: ${c.n}`}>
+                <a key={s.id} className={`hb${over ? " over" : ""}`} href={`?station=${encodeURIComponent(s.id)}${hashFor("work-orders", null, route)}`} title={`${s.name}: ${c.n} of limit ${lim ?? "—"}`}
+                  onClick={(e) => { e.preventDefault(); gotoWithQuery("work-orders", { station: s.id }, route); }}>
                   <span className="hb-n"><span className="mono">{s.no}</span>{" " + s.name}</span>
                   <span className="hb-bar">
                     <i style={{ width: `${c.n ? Math.max(3, (c.n / mx) * 100) : 0}%` }} />
                     {c.blocked ? <i className="bad" style={{ width: `${(c.blocked / mx) * 100}%` }} /> : null}
                   </span>
-                  <span className="hb-v num">{String(c.n)}</span>
+                  <span className="hb-v num">{String(c.n)}<small>{`/${lim ?? "—"}`}</small></span>
                 </a>
               );
             })}
           </div>
           <div className="row" style={{ marginTop: 12 }}>
             <a href="#floor" className="btn" id="hm-open-floor"><Icon name="belt" />Open the Floor</a>
-            <span className="small muted">Bar = work orders at the station; red = stuck.</span>
+            <span className="small muted">Bar = work orders at the station, limit after the slash; red = stuck.</span>
           </div>
         </div>
-      ) : m.inFlight ? null : (
+      ) : (
         <p className="muted hm-quiet">Nothing is moving yet. Work orders appear here once a repo is Ready and work is submitted.</p>
       )}
-      {m.shippedWeek || m.shippedToday ? (
-        <p className="hm-shipped small"><b>Shipped</b>{" "}<span>{`${m.shippedToday} today, ${m.shippedWeek} this week`}</span>{m.shippedPrevWeek ? <Status tone={delta >= 0 ? "done" : "wait"}>{`${delta >= 0 ? "+" : "-"}${Math.abs(delta)} vs previous week`}</Status> : null}</p>
-      ) : null}
+    </Section>
+  );
+}
+
+/** §3 Task success, 8 weeks: the mean of the agents' weekly scorecard series. The first-pass series has no weekly figure on the server, so it is not drawn. */
+export function TaskSuccess() {
+  const q = useScorecards();
+  const series = useMemo(() => {
+    const cards = Object.values(q.data ?? {}).filter((c) => c.trend?.success?.length);
+    if (!cards.length) return null;
+    const weeks = Math.max(...cards.map((c) => c.trend.success.length));
+    return Array.from({ length: weeks }, (_, i) => {
+      const v = cards.map((c) => c.trend.success[i]).filter((x): x is number => typeof x === "number");
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+    });
+  }, [q.data]);
+  return (
+    <Section id="hm-trend" title="Task success, 8 weeks">
+      <Async query={q} what="task success" id="hm-trend-state" isEmpty={() => !series} empty={<Empty id="hm-trend-empty" title="Not available" text="No agent has a weekly success series yet." />}>
+        {() => series ? <AreaChart values={series} labels={series.map((_, i) => `W${i + 1}`)} min={0.6} max={1} fmt={(v) => `${Math.round(v * 100)}%`} title="Task success trend" /> : null}
+      </Async>
+    </Section>
+  );
+}
+
+/** §4 Recent activity: the seven newest events, an avatar (square for agents, round for people), the text, "type · WO · ago". */
+export function RecentActivity() {
+  const q = useActivity();
+  return (
+    <Section id="hm-activity" title="Recent activity" flush>
+      <Async query={q} what="recent activity" id="hm-activity-state" isEmpty={(d) => (Array.isArray(d) ? d : d.items).length === 0} empty={<Empty id="hm-activity-empty" title="No activity yet" text="Events appear here as work moves." />}>
+        {(d) => {
+          const rows = (Array.isArray(d) ? d : d.items).slice(0, 7);
+          return (
+            <ul className="list">
+              {rows.map((e) => (
+                <li key={e.id}>
+                  <Avatar id={e.by} />
+                  <div className="grow">
+                    <div className="trunc">{e.text || e.type}</div>
+                    <div className="small muted">{`${e.type} · ${e.wo ? e.wo + " · " : ""}${agoMs(Date.now() - e.at)}`}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          );
+        }}
+      </Async>
     </Section>
   );
 }
