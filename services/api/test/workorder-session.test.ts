@@ -311,7 +311,7 @@ d("the work-order session", () => {
   });
 
   describe("who may approve a gate", () => {
-    it("explains the rule, the progress and the eligible people, warns when the gate cannot pass, and a rule that fewer people can satisfy than it requires saves with a warning", async () => {
+    it("explains the rule, the progress and the eligible people, warns when the gate cannot pass, and Factory Admins count toward a rule the role holders alone could not satisfy", async () => {
       const id = await submit();
       await w.answerAll(id);
       expect((await w.confirm(id)).status).toBe(200);
@@ -323,8 +323,9 @@ d("the work-order session", () => {
       expect(r.body.progress).toMatchObject({ have: 0 });
       expect(r.body.eligible.length).toBeGreaterThan(0);
       expect(r.body.eligible.every((e: any) => typeof e.why === "string" && e.name)).toBe(true);
-      expect(r.body.overrides.map((o: any) => o.id)).toContain(asha);
-      expect(r.body.viewerCanOverride).toBe(true);
+      expect(r.body.eligible.map((e: any) => e.id)).toContain(asha); // a Factory Admin is a normal approver (owner decision 2026-11-19)
+      expect(r.body.overrides.map((o: any) => o.id)).not.toContain(asha);
+      expect(r.body.viewerCanOverride).toBe(false);
       expect(r.body.can.editRule).toBe(true);
       expect((await call(lena, "GET", `/api/v1/work-orders/${id}/gates/${gate}/approvers`)).status).toBe(404);
       // A rule the people holding its roles cannot satisfy once the author is excluded: saves (non-blocking), and says so.
@@ -332,10 +333,10 @@ d("the work-order session", () => {
       const rule = { ...proj.approvers[gate], roles: ["engineer"], people: [], required: 1, sod: true, conditions: [] };
       const put = await w.call(asha, "PUT", `/api/v1/projects/payments/approvers/${gate}`, { value: rule });
       expect(put.status, JSON.stringify(put.body)).toBe(200);
-      expect(put.body.warning).toMatch(/separation of duties on, and exactly 1 person/);
+      expect(put.body.warning ?? null).toBeNull(); // Factory Admins count, so the gate is reachable even with one Engineer
       const after = await call(asha, "GET", `/api/v1/work-orders/${id}/gates/${gate}/approvers`);
-      expect(after.body.satisfiable).toBe(false);
-      expect(after.body.warning).toMatch(/can't pass as configured/);
+      expect(after.body.satisfiable).toBe(true);
+      expect(after.body.warning ?? null).toBeNull();
       expect(after.body.rule.text).toMatch(/Needs 1 approval from Engineer · the author can.t approve/);
     });
   });

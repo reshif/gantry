@@ -471,11 +471,11 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
   if (st.approvals.some((a) => a.by === personId)) return deny("You already approved " + g.label + " on " + wo.id + ".", "Another approver", "APR-" + gateId);
   const roles = rolesIn(person, project.id);
   const aprRule: DecisionRule = { kind: "approver", id: "APR-" + gateId, name: g.label + " approvers" };
-  // Factory Admin may decide any gate, including their own work order (user decision 2026-11-14): when the ordinary rule would not let
-  // the vote pass the gate (separation of duties, N of M, I4), the API turns it into a break-glass override that needs a reason and is audited.
+  // Factory Admin is universal (owner decision 2026-11-19): a normal approver on every gate. Only the author under separation of duties (or the
+  // author alone, I4) is outside the ordinary rule: the API turns that vote into a break-glass override that needs a reason and is audited.
   if (roles.includes("factory_admin")) {
     const own = wo.requestedBy === personId;
-    return { allowed: true, reason: "Factory Admin may approve any gate" + (own && rule.sod ? ", including their own work order" : "") + " (break-glass override when the rule would not pass it; needs a reason and is flagged in audit).", rule: aprRule, needs: "" };
+    return { allowed: true, reason: "Factory Admin may approve any gate" + (own && rule.sod ? ", including their own work order" : "") + (own && rule.sod ? " (break-glass override: needs a reason and is flagged in audit)." : "."), rule: aprRule, needs: "" };
   }
   if (rule.sod && wo.requestedBy === personId) return deny("Separation of duties on " + g.label + ": the author of " + wo.id + " cannot approve it.", "Someone other than the author", "APR-" + gateId);
   const byRole = rule.roles.some((r) => roles.includes(r));
