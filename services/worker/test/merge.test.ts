@@ -126,4 +126,35 @@ d("merge.request (F4)", () => {
     expect(w.broker.merges).toEqual([{ number: 7, sha: HEAD }]);
     expect((await wo("WO-9209")).data.merging).toBeUndefined();
   });
+
+  // Item 12: a merge deferred by a stop of any scope is requested again for the approved head when the stop is lifted.
+  const SCOPES = [
+    { scope: "wo", col: "wo_id", val: "WO-9220" },
+    { scope: "project", col: "project_id", val: "payments" },
+    { scope: "repo", col: "repo_id", val: "payments-api" },
+    { scope: "factory", col: null, val: null },
+  ] as const;
+  for (const sc of SCOPES) {
+    for (const mode of ["halt", "kill"] as const) {
+      it(`item 12: a ${mode} at ${sc.scope} scope, then ${mode === "halt" ? "resume" : "restore"}, still merges the approved head once`, async () => {
+        await waitingOnMerge("WO-9220");
+        const id = `${sc.scope}:${sc.val ?? ""}:1`;
+        const cols = ["org_id", "id", "scope_type", ...(sc.col ? [sc.col] : []), "mode", "reason", "set_by", "in_flight"];
+        const vals = [w.orgId, id, sc.scope, ...(sc.val ? [sc.val] : []), mode, "test", "p-asha", mode === "kill" ? "cancel" : null];
+        await w.q(`insert into stops (${cols.join(",")}) values (${vals.map((_, i) => `$${i + 1}`).join(",")})`, vals);
+        // The stop is committed before the merge job gets to run: the job skips (or the stop handler cancels it).
+        await w.enqueue("stop.enforce", { stopId: id, scope: sc.scope, targetId: sc.val, mode }, { dedupeKey: `stop.enforce:${id}` });
+        await w.drain();
+        expect(w.broker.merges).toHaveLength(0);
+        expect((await wo("WO-9220")).data.merging).toBeDefined();
+        await w.q(`update stops set lifted_at = now(), lifted_by = 'p-asha', version = version + 1 where id = $1`, [id]);
+        await w.enqueue("stop.enforce", { stopId: id, scope: sc.scope, targetId: sc.val, mode }, { dedupeKey: `stop.enforce:${id}:lift` });
+        await w.drain();
+        expect(w.broker.merges, "the approved merge was never requested again").toEqual([{ number: 7, sha: HEAD }]);
+        const r = await wo("WO-9220");
+        expect(r.data.merging).toBeUndefined();
+        expect(r.state).not.toBe("killed");
+      });
+    }
+  }
 });
