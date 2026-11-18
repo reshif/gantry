@@ -59,9 +59,9 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
         const x = await ops.connectRepo(project.id, w.repo.trim(), project.teams[0] ?? "platform", src && src.type === "github" ? src.id : undefined);
         set({ busy: false });
         if (!x.ok) return ui.toast(x.msg, "error");
-        const repo = (x as typeof x & { repo: RepoV }).repo;
+        const repo = (x as typeof x & { repo?: RepoV }).repo;
         ui.toast(`${w.repo.trim()} connected. Gantry is assessing it.`, "ok");
-        return set({ repoId: repo.id, step: 2 });
+        return set({ repoId: repo?.id ?? null, step: 2 });
       }
       return set({ repoId: connected.id, step: 2 });
     }
@@ -102,7 +102,7 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
               {available.map((a, i) => (
                 <label key={a.repo} className="li click" htmlFor={`onb-w-av-${i}`}>
                   <Input type="radio" name="repo" id={`onb-w-av-${i}`} checked={w.repo === a.repo} onChange={() => set({ repo: a.repo })} />
-                  <span className="main1"><span className="t1 mono">{a.repo}</span><span className="t2">{`${a.lang} · default branch main · contributors not available`}</span></span>
+                  <span className="main1"><span className="t1 mono">{a.repo}</span><span className="t2">{`${a.lang} · contributors not available`}</span></span>
                   <span className="tag">{a.lang}</span>
                 </label>
               ))}
@@ -113,11 +113,13 @@ export function OnbWizard({ project, repos, w, set, onDone }: { project: Project
         ) : (
           <p className="muted small">{avail.isLoading ? "Asking GitHub which repos the App can see…" : `${avail.data?.unavailable ?? "GitHub could not be asked for its repos."} Type the repo instead.`}</p>
         )}
-        <div style={{ marginTop: 12 }}>
-          <Field label="Or type a repo" htmlFor="onb-w-name" hint="As org/name. The GitHub App must be installed on it.">
-            <Input id="onb-w-name" mono value={w.repo} autoComplete="off" placeholder="org/repo-name" onChange={(e) => set({ repo: e.target.value })} />
-          </Field>
-        </div>
+        {available ? null : (
+          <div style={{ marginTop: 12 }}>
+            <Field label="Type a repo" htmlFor="onb-w-name" hint="As org/name. The GitHub App must be installed on it.">
+              <Input id="onb-w-name" mono value={w.repo} autoComplete="off" placeholder="org/repo-name" onChange={(e) => set({ repo: e.target.value })} />
+            </Field>
+          </div>
+        )}
       </Card>
     );
   } else if (w.step === 2) {

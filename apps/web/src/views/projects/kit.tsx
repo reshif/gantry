@@ -355,3 +355,20 @@ export function useRepoCounts(projectIds: string[]): Record<string, number | nul
   projectIds.forEach((id, i) => { out[id] = results[i]?.data ? results[i]!.data!.length : null; });
   return out;
 }
+
+/** Every repo of the given projects, as one Async-shaped read (the API lists repos per project; the pipeline shows them all). */
+export function useAllRepos(projectIds: string[]) {
+  const results = useQueries({
+    queries: projectIds.map((id) => ({ queryKey: qk.repos(id), queryFn: () => get<import("@gantry/domain").Repo[]>(api(`projects/${encodeURIComponent(id)}/repos`)) })),
+  });
+  const failed = results.find((r) => r.isError && r.data === undefined);
+  const pending = !failed && results.some((r) => r.data === undefined);
+  const data: import("@gantry/domain").Repo[] | undefined = failed || pending ? undefined : results.flatMap((r) => (r.data ? r.data : []));
+  return {
+    data,
+    error: failed?.error ?? null,
+    isPending: pending,
+    isError: !!failed,
+    refetch: () => void results.forEach((r) => void r.refetch()),
+  };
+}

@@ -24,7 +24,7 @@ const stateOf = (p: PView): "halted" | "running" | "archived" => (p.status === "
 
 function StateChip({ p }: { p: PView }) {
   const s = stateOf(p);
-  return <Chip text={s === "halted" ? "Halted" : s === "archived" ? "Archived" : "Running"} cls={s === "halted" ? "warn" : s === "archived" ? "idle" : "ok"} />;
+  return <Chip text={s === "halted" ? "Halted" : s === "archived" ? "Archived" : "Running"} cls={s === "halted" ? "warn" : s === "archived" ? "idle" : "info"} />;
 }
 
 export default function ProjectsView() {
@@ -92,6 +92,7 @@ export default function ProjectsView() {
       rowId={(p) => `prj-row-${p.id}`}
       pageSize={10}
       pager
+      sortGlyphs
       sort={{ key: sortKey, dir: dir === "desc" ? -1 : 1 }}
       onSort={(s) => setParams({ sort: s.key === "name" ? null : s.key, dir: s.dir === -1 ? "desc" : null })}
       empty={{ title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: filtered ? <Btn small id="prj-clear-empty" label="Clear filters" onClick={clear} /> : undefined }}
@@ -103,7 +104,7 @@ export default function ProjectsView() {
         { key: "wip", label: "On belt", align: "end", sort: belt, render: (p) => <span className="mono">{belt(p)}</span> },
         { key: "bad", label: "Blocked", align: "end", sort: (p) => metricsOf(p).bad, render: (p) => <span className="mono" style={{ color: metricsOf(p).bad ? "var(--bad)" : "var(--text-3)" }}>{metricsOf(p).bad}</span> },
         { key: "status", label: "Status", sort: (p) => stateOf(p), render: (p) => <StateChip p={p} /> },
-        { key: "reg", label: "Regulated", sort: (p) => (p.regulated ? 1 : 0), render: (p) => (p.regulated ? <Chip text="Regulated" cls="agent" /> : <span className="dim">—</span>) },
+        { key: "reg", label: "Regulated", sort: (p) => (p.regulated ? 1 : 0), render: (p) => (p.regulated ? <Chip text="Regulated" cls="agent plain" /> : <span className="dim">—</span>) },
       ]}
     />
   );
@@ -122,7 +123,7 @@ export default function ProjectsView() {
               <span className="mono" style={{ color: metricsOf(p).bad ? "var(--bad)" : "var(--text-3)" }}>{metricsOf(p).bad} blocked</span>
               <span className="mono dim">{repoCounts[p.id] == null ? "repos not available" : `${repoCounts[p.id]} repos`}</span>
             </div>
-            <Meter value={Math.min(100, (belt(p) / beltAll) * 400)} max={100} label={`${p.name} share of work on the belt`} />
+            <Meter value={Math.min(100, (belt(p) / beltAll) * 400)} max={100} label={`${p.name} share of work on the belt`} warnAt={2} />
             <div className="row"><Who id={p.owner} /></div>
           </div>
         </a>

@@ -5,7 +5,7 @@
  * table from an "Edit" button, so nothing was dropped: they live in flow.tsx, classes.tsx, approvers.tsx and overview.tsx.
  */
 import { useState, type ReactNode } from "react";
-import { fmt, flowOf, gateModeLock, type ApproverRule, type GateKind, type Repo } from "@gantry/domain";
+import { flowOf, gateModeLock, type ApproverRule, type GateKind, type Repo } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useFreezes, useMe, useRepos } from "../../api/queries";
@@ -16,14 +16,10 @@ import { Card, Stats } from "../../ui/cr";
 import { DataTable } from "../../ui/DataTable";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
-import { useActors } from "../../ui/actors";
 import { makeStopActions } from "../../shell/stopActions";
-import { NumInput, metricsOf, projectRoles, roleName, useRes } from "../projects/kit";
-import { useSaveFromProject } from "../projects/templates";
+import { metricsOf, projectRoles, roleName, useRes } from "../projects/kit";
 import { ifMatchOf } from "../govern/data";
 import { membersOf, type PcProps } from "./ctx";
-import { KINDS } from "./flow";
-import { stageName } from "../onboarding/kit";
 
 export interface TabProps extends PcProps {
   /** The `edit` URL parameter: which advanced editor is open under the table ("" when none). */
@@ -35,25 +31,25 @@ export interface TabProps extends PcProps {
   advanced: ReactNode;
 }
 
-const Editor = ({ open, label, onToggle, children }: { open: boolean; label: string; onToggle: () => void; children: ReactNode }) => (
-  <>
-    <div className="row" style={{ justifyContent: "flex-end" }}><Btn small kind="ghost" icon="tool" id="pcf-edit-toggle" label={open ? "Close editor" : label} onClick={onToggle} /></div>
-    {open ? <section aria-label={label} className="stack">{children}</section> : null}
-  </>
-);
+/** The advanced editors the prototype does not draw open from the header's "Project tools" menu (`?edit=`); they show under the table while open. */
+const Editor = ({ open, label, onClose, children }: { open: boolean; label: string; onClose: () => void; children: ReactNode }) =>
+  open ? (
+    <section aria-label={label} className="stack" id="pcf-editor">
+      <div className="row spread"><b>{label}</b><Btn small kind="ghost" icon="x" id="pcf-edit-close" label="Close editor" onClick={onClose} /></div>
+      {children}
+    </section>
+  ) : null;
 
 /* ------------------------------------------------------------------ General ---- */
 
-export function GeneralTab({ p, s, set, goTab, people }: TabProps) {
+export function GeneralTab({ p, s, set, people }: TabProps) {
   const ui = useUI();
   const d = useCan("project.config", { project: p.id });
-  const td = useCan("template.edit");
-  const saveAs = useSaveFromProject();
   const repos = useRepos(p.id).data;
   const m = metricsOf(p);
   const res = useRes();
   const desc = s.text.desc ?? p.desc ?? "";
-  const overlay = s.text.overlay ?? p.overlay ?? "";
+  const name = s.text.name ?? p.name;
   const owners = people.filter((x) => x.status === "active");
   const clear = (k: string) => { const t = { ...s.text }; delete t[k]; set({ text: t }); };
   const saveDesc = async () => {
@@ -62,14 +58,17 @@ export function GeneralTab({ p, s, set, goTab, people }: TabProps) {
     res(r, "Saved description");
     clear("desc");
   };
-  const repoChip = (r: Repo) => (r.freeze ? <Chip text="Frozen" cls="warn" /> : r.onboarding.stage === "ready" ? <Chip text="Ready" cls="ok" /> : <Chip text={stageName(r.onboarding.stage)} cls="info" />);
+  // The API has no rename and no regulated switch: the field and the switch look as in the prototype and say so when they are used.
+  const notStored = (what: string) => ui.toast(`Not available yet: the API cannot change a project's ${what}.`, "info");
+  const repoChip = (r: Repo) => (r.freeze ? <Chip text="Frozen" cls="warn" /> : r.onboarding.stage === "ready" ? <Chip text="Ready" cls="ok" /> : <Chip text="Onboarding" cls="info" />);
+  const short = (r: Repo) => r.name.split("/").pop() ?? r.name;
   return (
     <div className="grid g-main2">
       <div className="stack">
         <Card title="General" acts={<span className="hint">Changes save when you leave a field</span>}>
           <div className="stack">
-            <Field label="Name" htmlFor="pcf-name" hint="Renaming is not available: the API has no rename for a project.">
-              <Input id="pcf-name" value={p.name} readOnly />
+            <Field label="Name" htmlFor="pcf-name">
+              <Input id="pcf-name" value={name} disabled={!d.allowed} onChange={(e) => set({ text: { ...s.text, name: e.target.value } })} onBlur={() => { if (name.trim() !== p.name) notStored("name"); clear("name"); }} />
             </Field>
             <Field label="Description" htmlFor="pcf-desc">
               <TextArea id="pcf-desc" rows={2} disabled={!d.allowed} value={desc} onChange={(e) => set({ text: { ...s.text, desc: e.target.value } })} onBlur={() => void saveDesc()} />
@@ -78,44 +77,55 @@ export function GeneralTab({ p, s, set, goTab, people }: TabProps) {
               <Select id="pcf-owner" disabled={!d.allowed} options={owners.map((x) => ({ value: x.id, label: x.name }))} value={p.owner} onChange={async (v) => { if (v !== p.owner) res(await ops.setProject(p.id, "owner", v, { ifMatch: p.version }), "Saved owner"); }} />
             </Field>
             <div className="row">
-              <Toggle id="pcf-regulated" checked={!!p.regulated} decision={{ allowed: false, reason: "Not available: the API cannot change whether a project is regulated yet.", needs: "" }} label="Regulated project" />
+              <Toggle id="pcf-regulated" checked={!!p.regulated} decision={d} label="Regulated project" onChange={() => notStored("regulated status")} />
               <span>Regulated project (caps autonomy at L2, adds security gate)</span>
-            </div>
-          </div>
-        </Card>
-        <Card title="Instructions overlay" hint="Added to every agent's instructions for this project, after the factory base and before per-repo guidelines.">
-          <div className="stack">
-            <TextArea id="pcf-overlay" mono rows={5} aria-label="Instructions overlay" disabled={!d.allowed} value={overlay} onChange={(e) => set({ text: { ...s.text, overlay: e.target.value } })} />
-            <div className="row">
-              <Btn kind="primary" small id="pcf-ov-save" guard={d} label="Save overlay" onClick={async () => {
-                if (overlay === (p.overlay ?? "")) return void ui.toast("No changes to save.", "info");
-                res(await ops.setProject(p.id, "overlay", overlay.trim(), { ifMatch: p.version }), "Saved overlay");
-                clear("overlay");
-              }} />
-              {overlay !== (p.overlay ?? "") ? <Btn small kind="ghost" id="pcf-ov-discard" label="Discard" onClick={() => clear("overlay")} /> : null}
             </div>
           </div>
         </Card>
       </div>
       <div className="stack">
         <Stats items={[{ l: "On belt", v: m.wip + m.bays, tone: "info" }, { l: "Blocked", v: m.bad, tone: m.bad ? "bad" : "ok" }]} />
-        <Card title="Repositories" flush acts={<a className="btn sm ghost" id="pcf-to-onb" href={hashFor("onboarding", null, p.id)}>Onboarding</a>}>
-          {repos?.length ? <div className="list">{repos.map((r) => <div key={r.id} className="li"><span className="mono" style={{ flex: 1 }}>{r.name}</span>{repoChip(r)}</div>)}</div> : <p className="dim" style={{ padding: 16 }}>No repos yet. Connect one in Onboarding.</p>}
-        </Card>
-        <Card title="More settings" flush>
-          <div className="list">
-            {([["budget", "Budget", `$${p.budget.mtd} spent of $${p.budget.monthly} this month`], ["notifications", "Notifications", "Where this project's events go"], ["mcp", "MCP servers", "Tools its agents may use"], ["history", "History", "Every change to this project"]] as Array<[string, string, string]>).map(([id, t, sub]) => (
-              <div key={id} className="li"><span className="main1"><span className="t1">{t}</span><span className="t2">{sub}</span></span><Btn small kind="ghost" id={`pcf-more-${id}`} label="Open" onClick={() => goTab(id)} /></div>
-            ))}
-            <div className="li"><span className="main1"><span className="t1">Save as template</span><span className="t2">Reuse this line for new projects</span></span><Btn small kind="ghost" icon="copy" id="pcf-save-tpl" guard={td} label="Save" onClick={() => saveAs(p)} /></div>
-          </div>
+        <Card title="Repositories" flush>
+          {repos?.length ? <div className="list">{repos.map((r) => <div key={r.id} className="li"><span className="mono" style={{ flex: 1 }}>{short(r)}</span>{repoChip(r)}</div>)}</div> : <p className="dim" style={{ padding: 16 }}>No repos yet. Connect one in Onboarding.</p>}
         </Card>
       </div>
     </div>
   );
 }
 
+/** The instructions overlay: added to every agent's instructions for this project. Opens from the header's "Project tools" menu. */
+export function OverlayTab({ p, s, set }: TabProps) {
+  const ui = useUI();
+  const res = useRes();
+  const d = useCan("project.config", { project: p.id });
+  const overlay = s.text.overlay ?? p.overlay ?? "";
+  const clear = (k: string) => { const t = { ...s.text }; delete t[k]; set({ text: t }); };
+  return (
+    <Card title="Instructions overlay" hint="Added to every agent's instructions for this project, after the factory base and before per-repo guidelines.">
+      <div className="stack">
+        <TextArea id="pcf-overlay" mono rows={5} aria-label="Instructions overlay" disabled={!d.allowed} value={overlay} onChange={(e) => set({ text: { ...s.text, overlay: e.target.value } })} />
+        <div className="row">
+          <Btn kind="primary" small id="pcf-ov-save" guard={d} label="Save overlay" onClick={async () => {
+            if (overlay === (p.overlay ?? "")) return void ui.toast("No changes to save.", "info");
+            res(await ops.setProject(p.id, "overlay", overlay.trim(), { ifMatch: p.version }), "Saved overlay");
+            clear("overlay");
+          }} />
+          {overlay !== (p.overlay ?? "") ? <Btn small kind="ghost" id="pcf-ov-discard" label="Discard" onClick={() => clear("overlay")} /> : null}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Who is on call: opens from the header's "Project tools" menu. */
+export function OnCallTab({ p, people }: TabProps) {
+  const d = useCan("project.members", { project: p.id });
+  return <OnCallPanel p={p} people={people} canSet={d} />;
+}
+
 /* ------------------------------------------------------------------ Stations and gates ---- */
+
+const MODES = [{ value: "human", label: "human" }, { value: "mixed", label: "mixed" }, { value: "auto", label: "auto" }];
 
 export function StationsTab({ p, cat, edit, setEdit, advanced }: TabProps) {
   const res = useRes();
@@ -134,26 +144,24 @@ export function StationsTab({ p, cat, edit, setEdit, advanced }: TabProps) {
           columns={[
             { key: "name", label: "Station", render: (st) => <b>{st.name}</b> },
             { key: "agent", label: "Agent", render: (st) => <Who id={st.agent} /> },
-            { key: "slots", label: "Slots", align: "end", render: (st) => <NumInput id={`pcf-sg-wip-${st.id}`} value={p.flow.stations[st.id]!.wip} min={1} max={30} locked={!d.allowed} label={`${st.name} slots`} onCommit={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.wip`, v, { ifMatch: p.version }), `Saved ${st.name} slots`)} /> },
+            { key: "slots", label: "Slots", align: "end", render: (st) => <span className="mono">{p.flow.stations[st.id]!.wip}</span> },
             { key: "on", label: "Enabled", render: (st) => <Toggle id={`pcf-sg-on-${st.id}`} checked={p.flow.stations[st.id]!.enabled} decision={locked(st.id) ? { allowed: false, reason: `${st.name} cannot be disabled.`, needs: "" } : d} label={`${st.name} enabled`} onChange={async (v) => res(await ops.setProject(p.id, `flow.stations.${st.id}.enabled`, v, { ifMatch: p.version }), `${st.name}${v ? " enabled" : " disabled"}`)} /> },
             { key: "gate", label: "Gate after", render: (st) => { const g = gateOf(st.id); return g ? <><span className="mono">{g.label}</span> {g.name}</> : <span className="dim">—</span>; } },
-            { key: "mode", label: "Gate mode", render: (st) => { const g = gateOf(st.id); return g ? <Select id={`pcf-sg-mode-${g.id}`} aria-label={`Mode ${g.label}`} disabled={!d.allowed || g.id === "G0G1"} options={KINDS.filter((o) => o.value === g.mode || !gateModeLock(g, o.value as GateKind, p))} value={g.mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), "Saved")} /> : null; } },
+            { key: "mode", label: "Gate mode", render: (st) => { const g = gateOf(st.id); return g ? <Select id={`pcf-sg-mode-${g.id}`} aria-label={`Mode ${g.label}`} disabled={!d.allowed || g.id === "G0G1"} options={MODES.filter((o) => o.value === g.mode || !gateModeLock(g, o.value as GateKind, p))} value={g.mode} onChange={async (v) => res(await ops.setGateMode(p.id, g.id, v, { ifMatch: p.version }), "Saved")} /> : null; } },
           ]}
         />
       </Card>
-      <Editor open={edit === "flow"} label="Edit stations, gates and routes" onToggle={() => setEdit(edit === "flow" ? "" : "flow")}>{advanced}</Editor>
+      <Editor open={edit === "flow"} label="Edit stations, gates and routes" onClose={() => setEdit("")}>{advanced}</Editor>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ Classes ---- */
 
-export function ClassesTable({ p, cat, edit, setEdit, advanced }: TabProps) {
+export function ClassesTable({ p, edit, setEdit, advanced }: TabProps) {
   const res = useRes();
   const d = useCan("class.edit", { project: p.id });
-  const f = flowOf(cat, p);
   const [sla, setSla] = useState<Record<string, string>>({});
-  const stName = (id: string) => f.stations.find((x) => x.id === id)?.name ?? id;
   return (
     <div className="stack">
       <Card title="Work order classes" flush>
@@ -164,25 +172,25 @@ export function ClassesTable({ p, cat, edit, setEdit, advanced }: TabProps) {
           rowKey={(c) => c.id}
           columns={[
             { key: "name", label: "Class", render: (c) => <b>{c.name}</b> },
-            { key: "pri", label: "Default priority", render: (c) => <span className="tag">{c.priority}</span> },
+            { key: "pri", label: "Default priority", render: (c) => <span className={`tag pri ${c.priority.toLowerCase()}`} title={`Priority ${c.priority}`}>{c.priority}</span> },
             { key: "sla", label: "SLA (h)", align: "end", render: (c) => (
               <Input id={`pcf-sla-${c.id}`} mono style={{ width: 72, textAlign: "right" }} inputMode="numeric" disabled={!d.allowed} aria-label={`SLA hours for ${c.name}`} value={sla[c.id] ?? String(c.slaH)}
                 onChange={(e) => setSla({ ...sla, [c.id]: e.target.value })}
                 onBlur={async () => { const n = parseInt(sla[c.id] ?? "", 10); const cur = sla[c.id]; setSla((x) => { const y = { ...x }; delete y[c.id]; return y; }); if (cur === undefined || !(n > 0) || n === c.slaH) return; res(await ops.updateClass(p.id, c.id, { slaH: n }, { ifMatch: p.version }), "Saved SLA"); }} />
             ) },
-            { key: "skips", label: "Skips stations", render: (c) => (c.skips.length ? <>{c.skips.map((x) => <span key={x} className="tag">{stName(x)}</span>)}</> : <span className="dim">none</span>) },
+            { key: "skips", label: "Skips stations", render: (c) => (c.skips.length ? <>{c.skips.map((x) => <span key={x} className="tag">{x}</span>)}</> : <span className="dim">none</span>) },
             { key: "on", label: "Enabled", render: (c) => <Toggle id={`pcf-cx-en-${c.id}`} checked={c.enabled !== false} decision={d} label={`${c.name} enabled`} onChange={async (v) => res(await ops.updateClass(p.id, c.id, { enabled: v }, { ifMatch: p.version }), `${c.name}${v ? " enabled" : " disabled"}`)} /> },
           ]}
         />
       </Card>
-      <Editor open={edit === "classes"} label="Edit classes" onToggle={() => setEdit(edit === "classes" ? "" : "classes")}>{advanced}</Editor>
+      <Editor open={edit === "classes"} label="Edit classes" onClose={() => setEdit("")}>{advanced}</Editor>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ Approvers ---- */
 
-export function ApproversTable({ p, cat, people, s, edit, setEdit, advanced }: TabProps) {
+export function ApproversTable({ p, cat, people, edit, setEdit, advanced }: TabProps) {
   const res = useRes();
   const d = useCan("approvers.edit", { project: p.id });
   const f = flowOf(cat, p);
@@ -205,11 +213,10 @@ export function ApproversTable({ p, cat, people, s, edit, setEdit, advanced }: T
             { key: "who", label: "Who can approve", render: (g) => (g.mode === "auto" ? <span className="dim">no approvers (automatic)</span> : <>{who(p.approvers[g.id])}</>) },
             { key: "need", label: "Needed", align: "end", render: (g) => { const r = p.approvers[g.id]; return r && g.mode !== "auto" ? <Select id={`pcf-need-${g.id}`} style={{ width: 64 }} aria-label={`Approvers needed for ${g.label}`} disabled={!d.allowed} options={["1", "2"]} value={String(r.required)} onChange={(v) => void save(g.id, { required: Number(v) }, `Saved ${g.label}`)} /> : <span className="dim">—</span>; } },
             { key: "sod", label: "Separation of duties", render: (g) => { const r = p.approvers[g.id]; return r && g.mode !== "auto" ? <Toggle id={`pcf-sod-${g.id}`} checked={r.sod} decision={d} label={`Separation of duties at ${g.label}`} onChange={(v) => void save(g.id, { sod: v }, `Saved ${g.label}`)} /> : <span className="dim">—</span>; } },
-            { key: "edit", label: "", align: "end", render: (g) => (g.mode === "auto" ? null : <Btn small kind="ghost" id={`pcf-ax-edit-${g.id}`} label="Edit rule" onClick={() => setEdit(g.id)} />) },
           ]}
         />
       </Card>
-      <Editor open={!!edit && edit !== "closed"} label="Edit approver rules" onToggle={() => setEdit(edit ? "" : s.gate || "G5")}>{advanced}</Editor>
+      <Editor open={!!edit && edit !== "closed"} label="Edit approver rules" onClose={() => setEdit("")}>{advanced}</Editor>
     </div>
   );
 }
@@ -246,13 +253,12 @@ export function MembersTable({ p, cat, people }: TabProps) {
           columns={[
             { key: "person", label: "Person", render: (x) => <a className="rl" href={hashFor("person", x.id)}>{x.name}</a> },
             { key: "title", label: "Title", render: (x) => <span className="muted">{x.title}</span> },
-            { key: "role", label: "Role in project", render: (x) => <>{x.roles.filter((g) => g.scope === p.id).map((g) => <Chip key={g.role} text={roleName(cat, g.role)} cls="info" />)}</> },
+            { key: "role", label: "Role in project", render: (x) => <>{x.roles.filter((g) => g.scope === p.id).map((g) => <Chip key={g.role} text={roleName(cat, g.role)} cls="info plain" />)}</> },
             { key: "rm", label: "", align: "end", render: (x) => <Btn small kind="ghost" cls="danger" id={`pcf-rm-${x.id}`} label="Remove" guard={d} onClick={() => void remove(x.id, x.name)} /> },
           ]}
           empty={{ title: "No members yet", text: "Add someone to give them a role on this project." }}
         />
       </Card>
-      <OnCallPanel p={p} people={people} canSet={d} />
     </div>
   );
 }
@@ -287,10 +293,12 @@ function AddMember({ p, eligible, roles, close }: { p: PcProps["p"]; eligible: P
 
 /* ------------------------------------------------------------------ Freezes ---- */
 
+/** The prototype's G.when: `15 Jan 12:00`. */
+const when = (t: number): string => { const d = new Date(t); return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`; };
+
 export function FreezesTab({ p }: TabProps) {
   const ui = useUI();
   const res = useRes();
-  const actor = useActors();
   const perm = useCan("policy.edit");
   const q = useFreezes();
   const reposQ = useRepos(p.id).data;
@@ -299,7 +307,7 @@ export function FreezesTab({ p }: TabProps) {
   const all = Array.isArray(q.data) ? q.data : null;
   const mine = (all ?? []).filter((f) => f.repos === "all" || f.repos.some((r) => ids.has(r)));
   const now = Date.now();
-  const names = (f: (typeof mine)[number]) => (f.repos === "all" ? "all repos" : f.repos.map((r) => repos.find((x) => x.id === r)?.name ?? r).join(", "));
+  const names = (f: (typeof mine)[number]) => (f.repos === "all" ? "all repos" : f.repos.map((r) => (repos.find((x) => x.id === r)?.name ?? r).split("/").pop()).join(", "));
   const add = () => ui.open((close) => <AddFreeze repos={repos} close={close} />);
   return (
     <Card title="Freezes and release windows" flush acts={<Btn small kind="primary" icon="plus" id="pcf-add-freeze" guard={perm} label="Add freeze" onClick={add} />}>
@@ -312,7 +320,7 @@ export function FreezesTab({ p }: TabProps) {
             const past = now >= f.to;
             return (
               <div key={f.id} className="li">
-                <div className="main1"><span className="t1">{f.name}</span><span className="t2 mono">{`${fmt.stamp(f.from)} → ${fmt.stamp(f.to)} · ${names(f)} · set by ${actor(f.by).name}`}</span></div>
+                <div className="main1"><span className="t1">{f.name}</span><span className="t2 mono">{`${when(f.from)} → ${when(f.to)} · ${names(f)}`}</span></div>
                 <Chip text={past ? "Ended" : active ? "Active" : "Scheduled"} cls={active ? "warn" : "idle"} />
                 {!past ? <Btn small kind="ghost" id={`pcf-fz-end-${f.id}`} label="Lift" guard={perm} onClick={async () => res(await ops.endFreeze(f.id, ifMatchOf(f)), "Freeze lifted")} /> : null}
               </div>
@@ -372,7 +380,7 @@ export function DangerCard({ p }: TabProps) {
   const killed = !!p.killed;
   const archived = p.status === "archived";
   const rows: Array<[string, string, ReactNode]> = archived ? [["Archived", "This project is read-only and refuses new work.", <Btn key="u" kind="danger" id="pcf-unarchive" guard={ad} label="Unarchive" onClick={async () => res(await ops.unarchiveProject(p.id, { ifMatch: p.version }), "Unarchived")} />]] : [
-    ["Halt line", "Stops new work entering stations. In-flight runs finish.", <Btn key="h" kind="danger" id="pcf-halt" guard={halt} label={halted ? "Resume line" : "Halt line"} onClick={() => (halted ? void stop?.resume(p.id) : stop?.halt(p.id))} />],
+    ["Halt line", "Stops new work entering stations. In-flight runs finish.", <Btn key="h" kind="danger" id="pcf-halt" guard={halt} label={halted ? "Resume line" : "Halt line"} onClick={() => (halted ? void stop?.resume(p.id) : ui.open((close) => <HaltLine p={p} close={close} />))} />],
     ["Emergency stop", "Stops all agents on this project immediately.", <Btn key="k" kind="danger" id={killed ? "pcf-restore" : "pcf-kill"} guard={killed ? rd : kd} label={killed ? "Restore project" : "Emergency stop…"} onClick={() => (killed ? stop?.restore("project", p.id) : stop?.kill("project", p.id))} />],
     ["Archive project", "Hides the project. History is kept for audit.", <Btn key="a" kind="danger" id="pcf-archive" guard={ad} label="Archive…" onClick={() => ui.typedConfirm({
       title: `Archive ${p.name}?`, sub: "It disappears from lists. History stays for audit. You can restore it from the audit ledger.", phrase: p.key, okLabel: "Archive", kind: "danger", guard: ad,
@@ -388,6 +396,35 @@ export function DangerCard({ p }: TabProps) {
         ))}
       </div>
     </Card>
+  );
+}
+
+/** The prototype's "Halt <project>" dialog: a reason and "Halt line". Regulated projects need a longer reason (the server says how long). */
+function HaltLine({ p, close }: { p: PcProps["p"]; close: () => void }) {
+  const res = useRes();
+  const d = useCan("line.halt", { project: p.id });
+  const [reason, setReason] = useState("");
+  const [err, setErr] = useState("");
+  const min = p.regulated ? 20 : 4;
+  return (
+    <Dialog
+      title={`Halt ${p.name}`}
+      onClose={close}
+      body={
+        <div className="form-grid">
+          <Field label="Reason" htmlFor="pcf-halt-reason" error={err} required><TextArea id="pcf-halt-reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+        </div>
+      }
+      actions={[
+        { label: "Cancel" },
+        { label: "Halt line", kind: "primary", submit: true, id: "pcf-halt-ok", guard: d, onClick: async (c) => {
+          if (reason.trim().length < min) return setErr(`Give a reason of at least ${min} characters.`);
+          const r = await ops.haltProject(p.id, reason.trim());
+          res(r, "Line halted");
+          if (r.ok) c(); else setErr(r.msg);
+        } },
+      ]}
+    />
   );
 }
 

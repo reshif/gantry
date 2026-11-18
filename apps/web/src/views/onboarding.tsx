@@ -8,6 +8,7 @@ import { Page } from "../ui/cr";
 import { Async } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { RepoDrawer, rememberTab } from "./onboarding/Drawer";
+import { useAllRepos } from "./projects/kit";
 import { type RepoV } from "./onboarding/kit";
 import { Pipeline } from "./onboarding/Pipeline";
 import { SessionPage } from "./onboarding/Session";
@@ -27,10 +28,14 @@ export default function OnboardingView() {
   const repos = (reposQ.data ?? []) as RepoV[];
   const [tab, setTab] = useParam("tab", "wizard", ["wizard", "pipeline", "session", "settings"]);
   const [wiz, setWiz] = useState<Wiz>(WIZ0);
-  const openRepo = (repoId: string, dtab?: string) => {
-    if (!project) return;
+  // the Pipeline and Session tabs list every project's repos (the prototype's tables), the wizard and settings work on the current project
+  const allQ = useAllRepos(projects.map((p) => p.id));
+  const keyOf = (id: string): string => (projects.find((p) => p.id === id)?.key ?? id).toUpperCase();
+  const openRepo = (repoId: string, dtab?: string, projectId?: string) => {
+    const pid = projectId ?? project?.id;
+    if (!pid) return;
     if (dtab) rememberTab(repoId, dtab);
-    ui.drawer.open(`onb:${repoId}`, (close) => <RepoDrawer repoId={repoId} projectId={project.id} close={close} />);
+    ui.drawer.open(`onb:${repoId}`, (close) => <RepoDrawer repoId={repoId} projectId={pid} close={close} />);
   };
   if (!me) return null;
   if (!project) return <div className="view">{projectsQ.data ? <Empty title="No project" text="You do not have a project to show." /> : <Async query={projectsQ} what="your projects" id="onb-projects">{() => null}</Async>}</div>;
@@ -45,8 +50,8 @@ export default function OnboardingView() {
     >
       <Tabs idPrefix="onb-tab" items={[{ id: "wizard", label: "Wizard" }, { id: "pipeline", label: "Pipeline" }, { id: "session", label: "Session" }, { id: "settings", label: "Settings" }]} active={tab} onChange={setTab} />
       {tab === "wizard" ? <OnbWizard project={project} repos={repos} w={wiz} set={(p) => setWiz((x) => ({ ...x, ...p }))} onDone={() => setTab("pipeline")} /> : null}
-      {tab === "pipeline" ? <Async query={reposQ} what="repos" id="onb-repos">{() => <Pipeline projectKey={project.key.toUpperCase()} repos={repos} details={openRepo} />}</Async> : null}
-      {tab === "session" ? <Async query={reposQ} what="repos" id="onb-repos-s">{() => <SessionTab repos={repos} />}</Async> : null}
+      {tab === "pipeline" ? <Async query={allQ} what="repos" id="onb-repos">{(all) => <Pipeline keyOf={keyOf} repos={all as RepoV[]} details={(r) => openRepo(r.id, undefined, r.project)} />}</Async> : null}
+      {tab === "session" ? <Async query={allQ} what="repos" id="onb-repos-s">{(all) => <SessionTab repos={all as RepoV[]} />}</Async> : null}
       {tab === "settings" ? <SettingsTab project={project} /> : null}
     </Page>
   );

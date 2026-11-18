@@ -9,7 +9,7 @@ import { useMe, usePeople, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { hashFor, replaceHash, useHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
-import { Btn, Empty, Select, Tabs } from "../ui/primitives";
+import { Btn, Empty, IconBtn, Select, Tabs } from "../ui/primitives";
 import { Page, CrIcon } from "../ui/cr";
 import { Async } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
@@ -22,10 +22,11 @@ import { FlowTab } from "./project-config/flow";
 import { ClassesTab } from "./project-config/classes";
 import { ApproversTab } from "./project-config/approvers";
 import { BudgetTab, HistoryTab, McpTab, NotificationsTab } from "./project-config/misc";
-import { ApproversTable, ClassesTable, DangerCard, FreezesTab, GeneralTab, MembersTable, StationsTab } from "./project-config/tabs";
+import { ApproversTable, ClassesTable, DangerCard, FreezesTab, GeneralTab, MembersTable, OnCallTab, OverlayTab, StationsTab } from "./project-config/tabs";
+import { useSaveFromProject } from "./projects/templates";
 
 export const PCF_TABS: Array<[string, string]> = [["general", "General"], ["stations", "Stations and gates"], ["classes", "Classes"], ["approvers", "Approvers"], ["members", "Members"], ["freezes", "Freezes"], ["danger", "Danger zone"]];
-const EXTRA = ["budget", "notifications", "mcp", "history"];
+const EXTRA = ["budget", "notifications", "mcp", "history", "overlay", "oncall"];
 /** Tab names from before the rebuild (`#project-config/approvers/G2`, "Edit rule" on a gate) map to the new tabs. */
 const LEGACY: Record<string, string> = { overview: "general", flow: "stations", "work-classes": "classes" };
 
@@ -61,8 +62,10 @@ export default function ProjectConfigView() {
   }, [pid]);
   // a project in the URL that is not the current one becomes the current one (the hash decides the project)
   useEffect(() => {
-    if (idParam && hash.project !== idParam) replaceHash(hashFor("project-config", idParam, idParam));
-  }, [idParam, hash.project]);
+    if (idParam && hash.project !== idParam) replaceHash(hashFor("project-config", idParam, idParam) + (hash.query ? `?${hash.query}` : ""));
+  }, [idParam, hash.project, hash.query]);
+  const tplGuard = useCan("template.edit");
+  const saveAs = useSaveFromProject();
   const halt = useCan("line.halt", { project: pid ?? undefined });
   const goTab = (t: string) => setParams({ tab: t === "general" ? null : t, edit: null });
   const setEdit = (v: string) => setParams({ edit: v || null });
@@ -90,10 +93,24 @@ export default function ProjectConfigView() {
     members: <MembersTable {...props} advanced={null} />,
     freezes: <FreezesTab {...props} advanced={null} />,
     danger: <DangerCard {...props} advanced={null} />,
+    overlay: <OverlayTab {...props} advanced={null} />, oncall: <OnCallTab {...props} advanced={null} />,
     budget: <BudgetTab {...props} />, notifications: <NotificationsTab {...props} />, mcp: <McpTab {...props} />, history: <HistoryTab {...props} />,
   } as Record<string, React.ReactNode>)[tab];
   const stop = makeStopActions(ui, me);
   const by = p.halted ? actor(p.halted.by).name : "";
+  const tools = (anchor: HTMLElement) => ui.menu(anchor, "Project tools", [
+    { label: "Edit stations, gates and routes", icon: "tool", onClick: () => setParams({ tab: "stations", edit: "flow" }) },
+    { label: "Edit classes", icon: "tool", onClick: () => setParams({ tab: "classes", edit: "classes" }) },
+    { label: "Edit approver rules", icon: "tool", onClick: () => setParams({ tab: "approvers", edit: "G5" }) },
+    { label: "Instructions overlay", onClick: () => goTab("overlay") },
+    { label: "Budget", onClick: () => goTab("budget") },
+    { label: "Notifications", onClick: () => goTab("notifications") },
+    { label: "MCP servers", onClick: () => goTab("mcp") },
+    { label: "On call", onClick: () => goTab("oncall") },
+    { label: "History", onClick: () => goTab("history") },
+    { label: "Onboarding", icon: "branch", onClick: () => { window.location.hash = hashFor("onboarding", null, p.id); } },
+    { label: "Save as template", icon: "copy", guard: tplGuard, onClick: () => saveAs(p) },
+  ]);
   const switchTo = (id: string) => { if (id !== p.id) window.location.hash = hashFor("project-config", id, id); };
 
   return (
@@ -102,7 +119,7 @@ export default function ProjectConfigView() {
       eyebrow={`Portfolio · ${p.key}`}
       title={p.name}
       sub="Project configuration: line, people, approvals and safety."
-      acts={<Select id="pcf-switch" aria-label="Switch project" style={{ width: "auto" }} options={projects.filter((x) => x.status !== "archived" || x.id === p.id).map((x) => ({ value: x.id, label: x.name }))} value={p.id} onChange={switchTo} />}
+      acts={<><Select id="pcf-switch" aria-label="Switch project" style={{ width: "auto" }} options={projects.filter((x) => x.status !== "archived" || x.id === p.id).map((x) => ({ value: x.id, label: x.name }))} value={p.id} onChange={switchTo} /><IconBtn icon="tool" id="pcf-tools" label="Project tools" onClick={() => { const el = document.getElementById("pcf-tools"); if (el) tools(el); }} /></>}
     >
       <Tabs idPrefix="pcf-tab" items={PCF_TABS.map((t) => ({ id: t[0], label: t[1] }))} active={PCF_TABS.some((t) => t[0] === tab) ? tab : "general"} onChange={goTab} />
       {p.halted || p.killed ? (

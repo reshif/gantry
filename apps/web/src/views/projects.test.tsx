@@ -159,7 +159,7 @@ describe("Projects: prototype parity", () => {
     mount(<ProjectsView />);
     await screen.findByText("Risk and Compliance");
     expect(screen.queryByText("Payments Platform")).toBeNull();
-    expect(Array.from(document.querySelectorAll("table thead th")).map((t) => t.textContent?.replace(/[\s↑↓]+$/, ""))).toContain("Repos");
+    expect(Array.from(document.querySelectorAll("table thead th")).map((t) => t.textContent?.replace(/[\s↑↓↕]+$/, ""))).toContain("Repos");
     expect(document.querySelector(".filterbar-count")?.textContent).toBe("1 of 2");
     expect(Array.from(document.querySelectorAll("#prj-st option")).map((o) => o.textContent)).toEqual(["Status: all", "Running", "Halted"]);
     expect(screen.queryByLabelText("Templates")).toBeNull();
@@ -272,7 +272,9 @@ describe("Project config", () => {
     expect(await screen.findByText("Not visible to you")).toBeTruthy();
   });
 
-  const openFlow = async () => { fireEvent.click(await byId("pcf-tab-stations")); fireEvent.click(await byId("pcf-edit-toggle")); };
+  /** The advanced editors and the extra pages open from the header's "Project tools" menu. */
+  const tool = async (name: RegExp) => { fireEvent.click(await byId("pcf-tools")); fireEvent.click(await screen.findByRole("menuitem", { name })); };
+  const openFlow = async () => { await tool(/stations, gates/); };
   const withPayments = (extra: Record<string, Handler> = {}, denied: string[] = []) => setup({ "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }), ...extra }, denied);
 
   it("shows the overview and saves the description with the project version", async () => {
@@ -436,7 +438,7 @@ describe("Project config", () => {
     let stale = false;
     const calls = withPayments({ "PUT /api/v1/projects/payments/oncall": () => (stale ? { status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } } : ok({ oncall: ["p-meera"], version: 8 })) });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-members"));
+    await tool(/On call/);
     expect(await byId("pcf-oncall-none")).toBeTruthy();
     fireEvent.change(await byId("pcf-oncall-pick"), { target: { value: "p-meera" } });
     fireEvent.click(await byId("pcf-oncall-add"));
@@ -451,8 +453,7 @@ describe("Project config", () => {
     const people = [PEOPLE[0]!, person("p-meera", "Meera Iyer", [{ role: "line_lead", scope: "payments" }]), person("p-priya", "Priya Nair", [{ role: "reviewer", scope: "payments" }])];
     const calls = withPayments({ "GET /api/v1/people": () => ({ body: people }), "PUT /api/v1/projects/payments/approvers/G5": () => ok() });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-tab-approvers"));
-    fireEvent.click(await byId("pcf-edit-toggle"));
+    await tool(/approver rules/);
     fireEvent.click(await byId("pcf-ap-g-G5"));
     const req = (await byId("pcf-ap-required")) as HTMLInputElement;
     fireEvent.change(req, { target: { value: "5" } });
@@ -487,10 +488,107 @@ describe("Project config", () => {
   it("budget tab saves the monthly budget", async () => {
     const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
     mount(<ProjectConfigView />);
-    fireEvent.click(await byId("pcf-more-budget"));
+    await tool(/Budget/);
     const el = (await byId("pcf-bud-monthly")) as HTMLInputElement;
     fireEvent.change(el, { target: { value: "5000" } });
     fireEvent.blur(el);
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ path: "budget.monthly", value: 5000 }));
+  });
+});
+
+describe("Fidelity round 2 (projects, onboarding links, project config)", () => {
+  const withPayments = (extra: Record<string, Handler> = {}, denied: string[] = []) => setup({ "GET /api/v1/projects": () => ({ body: [PAYMENTS, RISK] }), ...extra }, denied);
+
+  it("projects table: unsorted columns show the two-way glyph, Running is the info chip and Regulated is the plain agent chip", async () => {
+    setup();
+    mount(<ProjectsView />);
+    await screen.findByText("Risk and Compliance");
+    const heads = Array.from(document.querySelectorAll("#prj-table thead th")).map((t) => t.textContent);
+    expect(heads.filter((h) => h?.includes("↕")).length).toBe(7);
+    expect(heads[0]).toMatch(/Project\s*↑/);
+    const running = Array.from(document.querySelectorAll("#prj-table .chip")).find((c) => c.textContent === "Running");
+    expect(running?.className).toMatch(/\binfo\b/);
+    const reg = Array.from(document.querySelectorAll("#prj-table .chip")).find((c) => c.textContent === "Regulated");
+    expect(reg?.className).toMatch(/\bagent\b.*\bplain\b/);
+  });
+
+  it("project config opens from #/p/<id>/project-config/<id>?tab=members (the prototype's link form) on that project and tab", async () => {
+    window.location.hash = "#/p/payments/project-config/risk?tab=members";
+    withPayments();
+    mount(<ProjectConfigView />);
+    expect(await screen.findByRole("heading", { name: "Risk and Compliance" })).toBeTruthy();
+    await byId("pcf-members");
+    expect(document.getElementById("pcf-tab-members")?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("General is the prototype's card plus Repositories (plain Ready or Frozen chips): no overlay card, no More settings, no rename note", async () => {
+    withPayments({ "GET /api/v1/projects/payments/repos": () => ({ body: [{ id: "payments-api", name: "acme/payments-api", freeze: false, onboarding: { stage: "ready" } }, { id: "payouts-worker", name: "acme/payouts-worker", freeze: true, onboarding: { stage: "ready" } }] }) });
+    mount(<ProjectConfigView />);
+    await screen.findByText("payments-api");
+    expect(Array.from(document.querySelectorAll("#pcf-tab-panel .card h2")).map((h) => h.textContent)).toEqual(["General", "Repositories"]);
+    expect(document.getElementById("pcf-overlay")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Renaming is not available/);
+    expect(Array.from(document.querySelectorAll("#pcf-tab-panel .li .chip")).map((c) => c.textContent)).toEqual(["Ready", "Frozen"]);
+    expect((document.getElementById("pcf-name") as HTMLInputElement).readOnly).toBe(false);
+  });
+
+  it("the Project tools menu reaches every editor and extra page the tabs no longer carry", async () => {
+    withPayments();
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tools"));
+    const items = (await screen.findAllByRole("menuitem")).map((m) => m.textContent?.replace(/\s+/g, " ").trim());
+    for (const want of [/stations, gates and routes/, /Edit classes/, /approver rules/, /Instructions overlay/, /Budget/, /Notifications/, /MCP servers/, /On call/, /History/, /Onboarding/, /Save as template/]) expect(items.some((t) => want.test(t ?? "")), String(want)).toBe(true);
+    fireEvent.click(screen.getByRole("menuitem", { name: /Instructions overlay/ }));
+    await byId("pcf-overlay");
+    expect(window.location.search).toContain("tab=overlay");
+  });
+
+  it("stations tab: Slots is plain text and Gate mode reads human, mixed, auto, with no inline editor link", async () => {
+    withPayments();
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-stations"));
+    await byId("pcf-stations");
+    expect(document.querySelector("#pcf-stations input[type=number], #pcf-stations input.mono")).toBeNull();
+    await byId("pcf-sg-mode-G3d");
+    const labels = Array.from(document.querySelectorAll("#pcf-stations select option")).map((o) => o.textContent);
+    expect(labels.length).toBeGreaterThan(0);
+    for (const l of labels) expect(["human", "mixed", "auto"]).toContain(l);
+    expect(document.getElementById("pcf-edit-toggle")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Edit stations, gates and routes/);
+  });
+
+  it("classes tab: the priority tag carries its priority class and skips show station ids; approvers has no Edit rule column", async () => {
+    withPayments();
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-classes"));
+    await byId("pcf-classes");
+    expect(document.querySelector("#pcf-classes .tag.pri.p1")).toBeTruthy();
+    fireEvent.click(await byId("pcf-tab-approvers"));
+    await byId("pcf-approvers");
+    expect(Array.from(document.querySelectorAll("#pcf-approvers thead th")).map((t) => t.textContent?.trim())).toEqual(["Gate", "Who can approve", "Needed", "Separation of duties"]);
+    expect(document.querySelector("[id^=pcf-ax-edit-]")).toBeNull();
+  });
+
+  it("members tab has role chips without a dot and no On call card; Danger zone's Halt line opens the prototype's Halt dialog", async () => {
+    const calls = withPayments({ "POST /api/v1/stops": () => ok() });
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-members"));
+    await byId("pcf-members");
+    expect(document.querySelector("#pcf-members .chip.info.plain")).toBeTruthy();
+    expect(document.getElementById("pcf-oncall")).toBeNull();
+    fireEvent.click(await byId("pcf-tab-danger"));
+    fireEvent.click(await byId("pcf-halt"));
+    expect((await screen.findAllByText("Halt Payments Platform")).length).toBeGreaterThan(0);
+    fireEvent.change(await byId("pcf-halt-reason"), { target: { value: "Relevance regression" } });
+    fireEvent.click(await byId("pcf-halt-ok"));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/stops")?.body).toMatchObject({ scope: "project", id: "payments", mode: "halt", reason: "Relevance regression" }));
+  });
+
+  it("freezes read '15 Jan 12:00 → 18 Jan 12:00 · repos' without who set them", async () => {
+    withPayments({ "GET /api/v1/freezes": () => ({ body: [{ id: "FRZ-7", name: "Cutover", repos: "all", from: Date.UTC(2026, 0, 15, 12), to: Date.UTC(2026, 0, 18, 12), by: "p-asha", version: 1 }] }) });
+    mount(<ProjectConfigView />);
+    fireEvent.click(await byId("pcf-tab-freezes"));
+    const t = (await screen.findByText(/→/)).textContent ?? "";
+    expect(t).toMatch(/^\d\d \w{3} \d\d:\d\d → \d\d \w{3} \d\d:\d\d · all repos$/);
   });
 });

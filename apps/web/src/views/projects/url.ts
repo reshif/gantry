@@ -8,15 +8,33 @@ import { useCallback, useSyncExternalStore } from "react";
 const EVT = "gantry:qs";
 const subscribe = (fn: () => void) => {
   window.addEventListener("popstate", fn);
+  window.addEventListener("hashchange", fn);
   window.addEventListener(EVT, fn);
   return () => {
     window.removeEventListener("popstate", fn);
+    window.removeEventListener("hashchange", fn);
     window.removeEventListener(EVT, fn);
   };
 };
+/** The query after the route inside the hash (`#/project-config/storefront?tab=members`), the prototype's link form. */
+const hashQuery = (): string => {
+  try {
+    const h = window.location.hash;
+    const i = h.indexOf("?");
+    return i < 0 ? "" : h.slice(i + 1);
+  } catch {
+    return "";
+  }
+};
+/** `location.search` and the hash's query as one string; the hash's keys win when both name one. */
 const snapshot = (): string => {
   try {
-    return window.location.search;
+    const hq = hashQuery();
+    if (!hq) return window.location.search;
+    const m = new URLSearchParams(window.location.search);
+    for (const [k, v] of new URLSearchParams(hq)) m.set(k, v);
+    const s = m.toString();
+    return s ? `?${s}` : "";
   } catch {
     return "";
   }
@@ -29,6 +47,14 @@ export function writeParams(patch: Record<string, string | null>): void {
     for (const [k, v] of Object.entries(patch)) {
       if (v === null || v === "") u.searchParams.delete(k);
       else u.searchParams.set(k, v);
+    }
+    // a query inside the hash is the same state: writing a key moves it to the search so there is one place for it
+    const hi = u.hash.indexOf("?");
+    if (hi >= 0) {
+      const hq = new URLSearchParams(u.hash.slice(hi + 1));
+      for (const k of Object.keys(patch)) hq.delete(k);
+      const rest = hq.toString();
+      u.hash = u.hash.slice(0, hi) + (rest ? `?${rest}` : "");
     }
     if (u.href !== window.location.href) window.history.replaceState(window.history.state, "", u.href);
   } catch {

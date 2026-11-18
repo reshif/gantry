@@ -73,7 +73,7 @@ describe("Onboarding: pipeline", () => {
     mount(<OnboardingView />);
     expect(await screen.findByText("Onboarding")).toBeTruthy();
     await byId("onb-row-search-indexer");
-    expect(Array.from(document.querySelectorAll("#onb-table thead th, .dtable thead th, table thead th")).map((th) => th.textContent?.trim().replace(/[\s↑↓]+$/, ""))).toEqual(["Repository", "Project", "Language", "Tests", "State"]);
+    expect(Array.from(document.querySelectorAll("#onb-table thead th, .dtable thead th, table thead th")).map((th) => th.textContent?.trim().replace(/[\s↑↓↕]+$/, ""))).toEqual(["Repository", "Project", "Language", "Tests", "State"]);
     expect(document.querySelectorAll(".dtable tbody tr")).toHaveLength(4);
     expect(document.querySelector("#onb-row-search-indexer .onb-st-person")?.textContent).toMatch(/Needs a person/);
     expect(document.querySelector("#onb-row-mobile-app .onb-st-merge")?.textContent).toMatch(/Waiting for merge/);
@@ -129,6 +129,7 @@ describe("Onboarding: pipeline", () => {
     mount(<OnboardingView />);
     await byId("onb-row-mobile-app");
     fireEvent.click(document.getElementById("onb-tab-settings")!);
+    fireEvent.click(await byId("onb-agent-open"));
     await byId("onb-agent-off");
     expect(document.getElementById("onb-tab-settings")!.getAttribute("aria-selected")).toBe("true");
     fireEvent.click(document.getElementById("onb-agent-profile")!);
@@ -391,6 +392,7 @@ describe("Onboarding: the agent and its guidelines", () => {
     const calls = api([find("web-storefront")], { "GET /api/v1/projects": () => ({ body: [{ ...STOREFRONT, ...project }] }), "GET /api/v1/agents": () => ({ body: [agent] }), ...extra }, { denied });
     mount(<OnboardingView />);
     fireEvent.click(await byId("onb-tab-settings"));
+    fireEvent.click(await byId("onb-agent-open")); // the agent and its guidelines open in a drawer from the Settings card
     await byId("onb-gl-save");
     return calls;
   };
@@ -554,6 +556,7 @@ describe("Onboarding: the agent tab says when the agent cannot run", () => {
     api([find("web-storefront")], { "GET /api/v1/agents": () => ({ body: [a] }), "GET /api/v1/vendors": () => ({ body: vendors }) });
     mount(<OnboardingView />);
     fireEvent.click(await byId("onb-tab-settings"));
+    fireEvent.click(await byId("onb-agent-open")); // the agent and its guidelines open in a drawer from the Settings card
     await byId("onb-gl-save");
   };
 
@@ -574,5 +577,57 @@ describe("Onboarding: the agent tab says when the agent cannot run", () => {
     cleanup();
     await tab([vendor(true)], { ...agent, status: "paused" });
     expect((await byId("onb-agent-off")).textContent).toContain("The Onboarding Agent is paused.");
+  });
+});
+
+describe("Onboarding: fidelity round 2", () => {
+  const PAYMENTS = { ...(SEED.projects.find((p) => p.id === "payments") as Project), version: 2 };
+  const PAY_REPOS = SEED.repos.filter((r) => r.project === "payments").slice(0, 2).map((r) => ({ ...r, version: 1 })) as Array<Repo & { version: number }>;
+
+  it("the Pipeline lists the repos of every project with each project's key and the State chips ok / info", async () => {
+    api([find("web-storefront"), repo("notifications", (r) => { r.onboarding.stage = "connected"; r.onboarding.pr = null; r.onboarding.findings = []; })], {
+      "GET /api/v1/projects": () => ({ body: [STOREFRONT, PAYMENTS] }),
+      "GET /api/v1/projects/payments/repos": () => ({ body: PAY_REPOS }),
+    });
+    mount(<OnboardingView />);
+    await byId("onb-row-web-storefront");
+    for (const r of PAY_REPOS) expect(document.getElementById(`onb-row-${r.id}`), r.id).toBeTruthy();
+    expect(document.querySelector("#onb-row-web-storefront .tag")?.textContent).toBe(STOREFRONT.key.toUpperCase());
+    expect(document.querySelector(`#onb-row-${PAY_REPOS[0]!.id} .tag`)?.textContent).toBe(PAYMENTS.key.toUpperCase());
+    expect(document.querySelector("#onb-row-notifications .chip.info")?.textContent).toBe("Assessing");
+    expect(document.querySelector("#onb-row-web-storefront .chip.ok")?.textContent).toBe("Ready");
+    expect(Array.from(document.querySelectorAll("#onb-table thead th")).filter((t) => t.textContent?.includes("↕")).length).toBe(4);
+  });
+
+  it("the wizard's first step offers only the repos GitHub lists (no free-text field) and drops the invented default branch", async () => {
+    window.history.replaceState(null, "", "/");
+    api([find("web-storefront")]);
+    mount(<OnboardingView />);
+    await byId("onb-w-av-0");
+    expect(document.getElementById("onb-w-name")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/default branch main/);
+  });
+
+  it("Settings is the four switches only, not faded; the agent and guidelines open from the card", async () => {
+    window.history.replaceState(null, "", "/?tab=settings");
+    api([find("web-storefront")]);
+    mount(<OnboardingView />);
+    await byId("onb-set-onb.pr");
+    expect(Array.from(document.querySelectorAll("#main .card h2, .card h2")).map((h) => h.textContent)).toEqual(["Onboarding settings"]);
+    expect(document.getElementById("onb-agent-off")).toBeNull();
+    expect(document.querySelector("#onb-set-onb\\.pr")?.getAttribute("aria-disabled")).toBeNull();
+    expect(document.getElementById("onb-agent-open")).toBeTruthy();
+  });
+
+  it("the Session tab names the speaker 'Onboarding Agent', has no repo subtitle, and Open conversation goes to that repo's session", async () => {
+    window.history.replaceState(null, "", "/?tab=session");
+    const r0 = repo("notifications", (r) => { r.onboarding.stage = "connected"; r.onboarding.pr = null; r.onboarding.findings = []; });
+    api([r0], { "GET /api/v1/repos/notifications/onboarding/session": () => ({ body: { repoId: "notifications", repo: r0.name, project: "storefront", stage: "connected", busy: null, prNeedsUpdate: false, prChecks: null, waiting: null, messages: [{ id: "m1", role: "assistant", author: "ag-onboard", text: "Assessment done.", at: NOW, data: {} }], agent: { mode: "rule-based", reason: "x" }, budget: { spentUsd: 0, limitUsd: 1 }, costUsd: 0, can: { talk: true, merge: false, talkWhy: "" }, steps: [], next: { actor: "agent", text: "" } } }) });
+    mount(<OnboardingView />);
+    await screen.findByText("Assessment done.");
+    expect(document.querySelector(".msg .who")?.textContent).toMatch(/^Onboarding agent$/i);
+    expect(document.querySelector(".card .hint")).toBeNull();
+    fireEvent.click(await byId("onb-open-conv"));
+    await waitFor(() => expect(window.location.hash).toBe("#/p/storefront/onboarding/notifications"));
   });
 });
