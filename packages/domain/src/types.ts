@@ -1188,7 +1188,8 @@ export interface IntegrationInstance {
   name: string;
   config: Record<string, string | boolean | undefined>;
   secretMask: string;
-  status: "healthy" | "failing" | "offline" | (string & {});
+  /** "unknown" means the connection was never tested, or its settings changed since (shown as "Not tested yet"). */
+  status: "healthy" | "failing" | "offline" | "unknown" | (string & {});
   connected: boolean;
   projects: "all" | Id[];
   lastSync: Ms;
