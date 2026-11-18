@@ -511,6 +511,19 @@ describe("Console model picker", () => {
     expect(document.getElementById("con-new-chat")).toBeTruthy();
   });
 
+  it("the header's Chats and Settings buttons open the chat list and the settings panel by clicking, no slash command", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: STATUS }) });
+    mount();
+    fireEvent.click(await byId("con-open-chats"));
+    await byId("con-chats-panel");
+    expect(document.getElementById("con-new-chat")).toBeTruthy();
+    fireEvent.click(await byId("con-open-settings"));
+    await byId("con-settings");
+    expect(document.getElementById("con-chats-panel")).toBeNull();
+    await waitFor(() => expect([...document.querySelectorAll("#con-settings .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
+    expect(document.getElementById("con-open-audit")).toBeTruthy();
+  });
+
   it("pins come from the chat, link to the record, and the status question names the pinned work order; an empty Send says so", async () => {
     setup({
       "GET /api/v1/console/threads": () => ({ body: { items: [{ id: "ct-p", title: "t", pinned: ["WO-1042"], updatedAt: 1, expiresAt: 2, retentionDays: 90 }], retentionDays: 90 } }),

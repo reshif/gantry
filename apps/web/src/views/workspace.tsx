@@ -89,7 +89,7 @@ export default function WorkspaceView() {
   if (!me) return <div className="view ws-view" />;
   // No conversation open: the prototype's "Agents at work" page. Conversations keep their own pane under #workspace/inbox.
   if (!key) {
-    return <AtWork />;
+    return <AtWork needs={needs} onInbox={() => open("inbox")} onNew={newChat} />;
   }
   const main = q ? <SearchResults q={q} onOpen={(k) => open(k)} onClose={() => setQ(null)} />
     : key === "operator" ? <OperatorPanel onOpen={(k) => open(k)} />
