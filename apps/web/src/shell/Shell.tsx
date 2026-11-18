@@ -80,7 +80,7 @@ export function Shell({ me }: { me: Me }) {
   }, [routeId, loc.param]);
 
   useEffect(() => {
-    document.title = unknown ? `Sheet not found · Gantry Blueprint` : `${denied?.title ?? def?.title ?? "Home"} · Gantry Blueprint`;
+    document.title = unknown ? `${loc.id} · Gantry Blueprint` : `${denied?.title ?? def?.title ?? "Home"} · Gantry Blueprint`;
   }, [def, denied, unknown]);
 
   // a truncated label keeps its full text one hover away
@@ -157,9 +157,9 @@ export function Shell({ me }: { me: Me }) {
           ) : denied ? (
             // a page outside the person's roles: say so where they asked for it (the URL stays, so it works once access is granted)
             <div className="view">
-              <ViewHead sheet="home" title={denied.title} />
+              <ViewHead sheet={denied.id} title={denied.title} />
               <Panel>
-                <Empty id="route-denied" icon="lock" title="No access to this sheet" text={`Your roles do not include ${denied.title}.${denied.perm ? ` Ask a factory admin for the ${denied.perm} permission.` : ""} Until then it stays hidden from your menu.`} action={<Btn label="Back to Home" id="route-denied-home" onClick={() => navigate("home")} />} />
+                <Empty id="route-denied" icon="lock" title="No access to this sheet" text={`Your role cannot open ${denied.title}.${denied.perm ? ` Ask a factory admin for the ${denied.perm} permission.` : " Ask a factory admin for access."}`} action={<Btn label="Back to Home" id="route-denied-home" onClick={() => navigate("home")} />} />
               </Panel>
             </div>
           ) : ready ? (

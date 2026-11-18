@@ -140,11 +140,11 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
         <div className="form-grid">
           <p style={{ marginBottom: 12 }}>{scope === "factory" ? "Every running agent is stopped immediately and no station will start new work. Work orders keep their place. Restoring needs two people." : `A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused${scope === "workorder" ? " for this work order." : " until someone restores it."}`}</p>
           <LockNote decision={d.pending ? null : d} what="This kill switch" />
-          <Field label="Reason" htmlFor="kill-reason" hint="Recorded in the audit ledger.">
+          <Field label="Reason (required)" htmlFor="kill-reason" hint="Recorded in the audit ledger.">
             <input id="kill-reason" className="input" autoComplete="off" value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
           {phrase ? (
-            <Field label={`Type ${phrase} to confirm`} htmlFor="kill-confirm">
+            <Field label={`Type ${phrase} to confirm (required)`} htmlFor="kill-confirm">
               <input id="kill-confirm" className="input mono" autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
             </Field>
           ) : null}

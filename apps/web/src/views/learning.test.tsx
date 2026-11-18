@@ -163,7 +163,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     mount();
     fireEvent.click(await byId("ln-accept-LP-1"));
     const ok = await byId("ln-acc-ok");
-    expect(document.querySelector(".dlg")?.textContent).toContain("as a new version through its own command");
+    expect(document.querySelector(".dlg")?.textContent).toContain("as a new version and runs the eval suite");
     type(await byId("ln-acc-note"), "Looks right");
     fireEvent.click(ok);
     await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toMatch(/changed since this was drafted/));

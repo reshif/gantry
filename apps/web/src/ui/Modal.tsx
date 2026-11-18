@@ -213,7 +213,8 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
       <div ref={panel} className={`dlg${wide ? " wide dlg-wide" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="dlg-head">
           <div>
-            {kicker ? <div className="micro">{kicker}</div> : null}
+            {/* the prototype dialogs carry no eyebrow: the kicker stays on the API (screen readers) but is not drawn */}
+            {kicker ? <div className="micro sr">{kicker}</div> : null}
             <h2 id={titleId} className="dlg-title">{title}</h2>
             {sub ? <p className="dlg-sub small muted">{sub}</p> : null}
           </div>

@@ -277,8 +277,8 @@ describe("Floor: prototype drawers and links", () => {
     expect(screen.queryByRole("button", { name: "Assign" })).toBeNull();
     expect(document.querySelectorAll(".flegend .lg")).toHaveLength(6);
     expect(document.querySelector(".flegend #floor-routes-toggle")).toBeNull();
-    expect(document.querySelector(".panel-tools #floor-routes-toggle")).toBeTruthy();
-    expect(document.querySelector(".panel-tools #floor-mode-live")).toBeTruthy();
+    expect(document.querySelector(".fl-modes #floor-routes-toggle")).toBeTruthy();
+    expect(document.querySelector(".fl-modes #floor-mode-live")).toBeTruthy();
     expect(document.querySelector(".f-valve .f-hit")).toBeTruthy();
   });
 

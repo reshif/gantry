@@ -76,7 +76,7 @@ describe("Design system sheet", () => {
     expect(container.querySelector("label.check .switch")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "Validate" })[0]!);
     expect(screen.getByText("Title is required.")).toBeTruthy();
-    expect(screen.getByText("All lines")).toBeTruthy();
+    expect(screen.getByText(/all lines/i)).toBeTruthy();
   });
 });
 

@@ -235,7 +235,7 @@ function ReasonView({ o, onClose }: { o: Parameters<UIApi["reasonDialog"]>[0]; o
           onClick: () => {
             const v = text.trim();
             if (v.length < min) {
-              setErr(`Give a reason of at least ${min} characters.`);
+              setErr(v ? `${(o.label || "Reason").replace(/\s*\((required|optional)\)\s*$/i, "")} needs at least ${min} characters.` : `${(o.label || "Reason").replace(/\s*\((required|optional)\)\s*$/i, "")} is required.`);
               return;
             }
             void run(() => o.onOk(v));

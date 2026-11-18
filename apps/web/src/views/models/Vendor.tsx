@@ -20,7 +20,7 @@ export function VendorPanel({ v }: { v: Vendor }) {
         <span className="spacer" />
         <Chip text={v.connected ? v.health : "offline"} cls={healthTone} />
       </div>
-      <div className="small muted">{[v.product || (v.custom ? "Custom vendor" : "Vendor"), (endpointVendor ? v.endpoint : v.region) || ""].filter(Boolean).join(" · ")}</div>
+      <div className="small muted">{[v.product || (v.custom ? "Custom vendor" : "Vendor"), (endpointVendor ? (v.region || "on-prem") : v.region) || ""].filter(Boolean).join(" · ")}</div>
       <dl className="kv tb-vendor md-kv">
         <dt>Latency</dt><dd>{`${v.connected ? v.latency || 0 : 0} ms`}</dd>
         <dt>Spend MTD</dt><dd>{`${usd(v.mtd || 0)} / ${usd(v.budget || 0)}`}</dd>

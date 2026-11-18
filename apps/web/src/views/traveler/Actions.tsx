@@ -120,7 +120,16 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
       id: "trv-unpark",
       guard: dU,
       group: "main",
-      onClick: () =>
+      onClick: () => {
+        const go = async (v: string) => {
+          const r = await ops.unpark(wo.id, v, undefined, ifm);
+          if (r.ok) ui.toast(page ? "Resumed" : r.msg, "ok");
+          return r;
+        };
+        if (page) {
+          void go("Resumed from the work order page.").then((r) => { if (!r.ok) ui.toast(r.msg, "error"); });
+          return;
+        }
         ui.reasonDialog({
           title: `Return ${wo.id} from ${bayLabel(cat, wo.bay)}`,
           kicker: "Bay",
@@ -128,12 +137,9 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
           min: 3,
           placeholder: "What changed?",
           sub: `It goes back to ${stName(cat, back)}.`,
-          onOk: async (v) => {
-            const r = await ops.unpark(wo.id, v, undefined, ifm);
-            if (r.ok) ui.toast(r.msg, "ok");
-            return r;
-          },
-        }),
+          onOk: go,
+        });
+      },
     });
   } else
     out.push({ key: "park", label: page ? "Park in a bay" : "Move to bay", icon: "st-park", id: "trv-park", guard: closed ? no(closedWhy) : stop ? no(stopWhy) : dec(wo, "park"), group: "move", onClick: () => void ui.open((close) => <ParkDialog woId={wo.id} onClose={close} />) });

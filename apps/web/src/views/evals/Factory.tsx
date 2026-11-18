@@ -32,8 +32,8 @@ function Heat({ d }: { d: EvalsData }) {
 function Confusion({ ex }: { ex: Extra }) {
   const cf = ex.confusion ?? {};
   const cls = Object.keys(cf);
-  let total = 0, diag = 0;
-  cls.forEach((t) => cls.forEach((p) => { const n = cf[t]![p] ?? 0; total += n; if (t === p) diag += n; }));
+  let total = 0;
+  cls.forEach((t) => cls.forEach((p) => { const n = cf[t]![p] ?? 0; total += n; }));
   if (!total) return <Empty title="No classified requests yet" text="The table fills in as requests are classified at intake and confirmed or changed by a person." />;
   return (
     <div>
@@ -47,7 +47,6 @@ function Confusion({ ex }: { ex: Extra }) {
           ])}
         </div>
       </div>
-      <p className="small muted" style={{ padding: "8px 14px" }}>{`Labelled sample of ${total} requests, last 90 days. Accuracy ${fmt.pct(diag / total)}. Overrides by submitters: ${fmt.pct(ex.overrideRate || 0)}.`}</p>
     </div>
   );
 }

@@ -233,8 +233,6 @@ function Gallery({ sc }: { sc: string }) {
           <StateTile kind="error" title="Failed to load" text="Retry or reload." />
           <StateTile kind="lock" title="No access" text="Ask an admin." />
         </div>
-        <div style={{ height: 12 }} />
-        <div className="callout warn"><b>Conflict</b>Priya changed this work order while you were editing. Reload to merge, or overwrite.</div>
       </Panel>
       <Panel title="Data display">
         <div className="cols">

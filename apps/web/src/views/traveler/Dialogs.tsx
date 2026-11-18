@@ -32,7 +32,7 @@ export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () =>
       const m = wo.allowed.moves[sid];
       return { value: sid, label: `${cat.stations.find((s) => s.id === sid)?.no ?? ""} ${stName(cat, sid)}`.trim(), disabled: !!m && !m.allowed, why: m?.reason };
     })
-    .reverse();
+
   const pick = to ?? opts.find((o) => !o.disabled)?.value ?? opts[0]?.value ?? "";
   const d: TDecision = dec(wo, "sendback");
   const submit = async () => {
@@ -157,7 +157,7 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
     const m = wo.allowed.moves[b.id]!;
     return { value: b.id, label: `${b.name}${m.allowed ? "" : " (not available)"}`, disabled: !m.allowed, why: m.reason };
   });
-  const first = opts.find((o) => !o.disabled);
+  const first = opts.find((o) => o.value === "hold" && !o.disabled) ?? opts.find((o) => !o.disabled);
   const sel = bay ?? first?.value ?? opts[0]?.value ?? "";
   const chosen = opts.find((o) => o.value === sel);
   const d: TDecision = first ? (wo.stop ? no(`${wo.stop.reason || "Stopped"}`) : dec(wo, "park")) : no(opts[0]?.why ?? "No bay is available for this work order.");
@@ -184,7 +184,7 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Moving work to a bay" />
-          <Field label="Bay" htmlFor="park-bay" hint={chosen?.disabled ? chosen.why : "Declined needs Decline rights. Queue is only for work about to build."}>
+          <Field label="Bay" htmlFor="park-bay" hint={chosen?.disabled ? chosen.why : undefined}>
             <Select id="park-bay" options={opts} value={sel} onChange={setBay} />
           </Field>
           <Field label="Reason (required)" htmlFor="park-reason">

@@ -24,7 +24,7 @@ export function AcceptDialog({ lp, close }: { lp: LearningProposal; close: () =>
   };
   return (
     <Dialog title={`Adopt: ${lp.title}`} kicker={`Learning · ${KINDS[lp.kind]?.name ?? lp.kind}`} wide onClose={close}
-      sub={`This updates ${lp.kind === "skill" ? ((lp.change as { skill?: string }).skill ?? "the skill") : "the factory"} as a new version through its own command, with its own permission check and audit entry. It can be rolled back.`}
+      sub={`This updates ${lp.kind === "skill" ? ((lp.change as { skill?: string }).skill ?? "the skill") : "the factory"} as a new version and runs the eval suite.`}
       actions={[{ label: "Cancel" }, { label: "Adopt change", kind: "primary", submit: true, id: "ln-acc-ok", guard: perm, onClick: () => void submit() }]}
       body={(
         <div className="form-grid">

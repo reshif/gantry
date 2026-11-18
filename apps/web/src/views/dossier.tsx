@@ -15,6 +15,8 @@ import { useQueryParam } from "./floor/urlState";
 import { useProjectRepos } from "./floor/kit";
 import { useProject } from "../api/queries";
 import { WoStatus } from "./dossier/stateTone";
+import { bayLabel } from "./traveler/model";
+import { useCatalog } from "./projects/kit";
 
 const useWos = (projectId: string | null) => {
   const read = useWorkOrders(projectId, { state: "all", limit: 200 });
@@ -74,7 +76,7 @@ function Index({ projectId: scopeId }: { projectId: string | null }) {
             <Select id="dos-f-project" options={(Array.isArray(projectsRead.data) ? projectsRead.data : []).map((p) => ({ value: p.id, label: p.name }))} value={projectId ?? ""} onChange={(v) => setProj(v === scopeId ? null : v)} />
           </Field>
         </FilterBar>
-        <DataTable id="dos-table" caption="Repositories" columns={cols} rows={rows} rowKey={(r) => r.id} rowHref={(r) => hashFor("dossier", r.id, projectId)} rowLabel={(r) => `Open the dossier of ${r.name}`} pageSize={15} range empty={{ title: filtered ? "Nothing matches these filters" : "No repositories", text: filtered ? "Try fewer filters." : "Onboard a repo to see it here.", action: filtered ? <Btn label="Clear filters" id="dos-clear-empty" onClick={clear} /> : undefined }} />
+        <DataTable id="dos-table" caption="Repositories" columns={cols} rows={rows} rowKey={(r) => r.id} rowHref={(r) => hashFor("dossier", r.id, projectId)} rowLabel={(r) => `Open the dossier of ${r.name}`} pageSize={15} proto range empty={{ title: filtered ? "Nothing matches these filters" : "No repositories", text: filtered ? "Loosen the search or clear the filters." : "Onboard a repo to see it here.", action: filtered ? <Btn label="Clear filters" id="dos-clear-empty" onClick={clear} /> : undefined }} />
       </Panel>
     </div>
   );
@@ -84,6 +86,7 @@ function Detail({ projectId, repoId }: { projectId: string | null; repoId: strin
   const repos = useProjectRepos(projectId);
   const project = useProject(projectId);
   const { read, items } = useWos(projectId);
+  const cat = useCatalog();
   const x = repos.find((r) => r.id === repoId);
   if (!x) return project.isLoading || read.isLoading ? <div className="view rec-view" /> : <Missing title="Dossier" />;
   const ws = items.filter((w) => w.repo === x.id);
@@ -125,7 +128,7 @@ function Detail({ projectId, repoId }: { projectId: string | null; repoId: strin
                     <li key={w.id}>
                       <a className="mono pri" href={hashFor("record", w.id, w.project)} onClick={(e) => { e.preventDefault(); navigate("record", w.id, w.project); }}>{w.id}</a>
                       <span className="grow trunc">{w.title}</span>
-                      <WoStatus state={w.state} gate={Object.entries(w.gates ?? {}).find(([, g]) => g.status === "waiting")?.[0]} />
+                      <WoStatus state={w.state} gate={Object.entries(w.gates ?? {}).find(([, g]) => g.status === "waiting")?.[0]} bay={w.bay && cat ? bayLabel(cat, w.bay) : null} />
                     </li>
                   ))}
                 </ul>

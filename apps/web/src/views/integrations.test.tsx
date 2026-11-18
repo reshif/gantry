@@ -87,7 +87,7 @@ describe("Integrations screen", () => {
     // the prototype's header has no actions: connecting is from the Catalogue tab, building from the Custom builder tab
     expect(document.getElementById("int-add")).toBeNull();
     expect(document.getElementById("int-build")).toBeNull();
-    expect(text()).toContain("All lines");
+    expect(text()).toMatch(/all lines/i);
   });
 
   it("holds the active tab in the URL and falls back to Connected for an unknown one", async () => {

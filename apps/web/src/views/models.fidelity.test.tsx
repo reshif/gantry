@@ -50,7 +50,7 @@ describe("Models screen (Blueprint layout)", () => {
     expect(tiles).toContain("Models3");
     expect(tiles).toContain("unless overridden");
     expect(document.querySelector(".stat.info")!.textContent).toContain("Models");
-    expect(document.querySelector(".ph .eyebrow")!.textContent).toContain("All lines");
+    expect(document.querySelector(".ph .eyebrow")!.textContent).toMatch(/all lines/i);
     expect([...document.querySelectorAll("[role=tab]")].map((t) => t.textContent)).toEqual(["Vendors2", "Routing", "Prices and budgets"]);
     expect(document.querySelector(".md-incident")).toBeNull();
   });

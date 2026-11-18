@@ -123,7 +123,8 @@ export default function AuditView() {
   };
 
   const known = stats && stats !== "error" ? stats : undefined;
-  const cats = [...(known?.cats ?? Object.keys(sum?.categories ?? {}))];
+  const CAT_ORDER = ["access", "config", "agents", "integrations", "auth", "onboarding", "approvals", "kill", "flow", "api"];
+  const cats = [...(known?.cats ?? Object.keys(sum?.categories ?? {}))].sort((a, b) => { const ia = CAT_ORDER.indexOf(String(a)), ib = CAT_ORDER.indexOf(String(b)); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
   if (cat !== "all" && !cats.includes(cat)) cats.push(cat);
   const actorOpts = [{ value: "all", label: "All" }, ...(known?.actors ?? sum?.facets.actors ?? []).map((a) => ({ value: a.id, label: a.name }))];
   if (actor !== "all" && !actorOpts.some((o) => o.value === actor)) actorOpts.push({ value: actor, label: name(actor) });

@@ -148,7 +148,7 @@ describe("Agents screen", () => {
     expect(head).toContain("On autopilot");
     expect(head).toContain("Need approval");
     expect(document.querySelector(".stat.info")!.textContent).toContain("Agents");
-    expect(document.querySelector(".ph .eyebrow")!.textContent).toContain("All lines");
+    expect(document.querySelector(".ph .eyebrow")!.textContent).toMatch(/all lines/i);
     // sortable: Agent, Model, Autonomy, Eval, Spend; not Status
     const sortable = [...document.querySelectorAll("#ag-roster thead th button")].map((b) => b.textContent!.replace(/[↕↑↓ ]/g, ""));
     expect(sortable).toEqual(["Agent", "Model", "Autonomy", "Eval", "Spend"]);
@@ -381,7 +381,7 @@ describe("Skills screen", () => {
     expect((await byId("sk-search")).getAttribute("aria-label")).toBe("Search skills");
     expect([...document.querySelectorAll("#sk-lib thead th")].map((t) => t.textContent!.replace(/[↕↑↓ ]/g, ""))).toEqual(["Skill", "Whentouse", "Usedby", "Owner", ""]);
     expect(document.querySelector("#sk-lib .tfoot")!.textContent).toContain("1–3 of 3");
-    expect(document.querySelector(".ph .eyebrow")!.textContent).toContain("All lines");
+    expect(document.querySelector(".ph .eyebrow")!.textContent).toMatch(/all lines/i);
     fireEvent.change(await byId("sk-search"), { target: { value: "security" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-b")).not.toBeNull();

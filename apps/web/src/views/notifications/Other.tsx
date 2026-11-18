@@ -28,7 +28,7 @@ export function OverridesTab({ p, nt }: { p: Project; nt: Nt }) {
         <ul className="list">
           {rows.map((x) => (
             <li key={`${x.repo.id}-${x.i}`}>
-              <a className="pri" href={hashFor("onboarding", x.repo.id, p.id)}>{x.repo.name}</a>
+              <a className="pri" href={hashFor("dossier", x.repo.id, p.id)}>{x.repo.name}</a>
               <div className="grow small muted">{x.o.event} → {(x.o.dest ?? []).map((dd) => `${nt.instOf(dd)?.type ?? dd.channel} ${dd.target}`).join(", ")}</div>
               <span className="chip info">{x.o.mode === "instead" ? "instead" : "also"}</span>
             </li>

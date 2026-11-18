@@ -230,7 +230,7 @@ describe("New work order", () => {
   it("opens as the prototype's Submit a work order dialog: Title, What should change and why, Project, Class, Priority", async () => {
     await open();
     for (const id of ["nwo-title", "nwo-desc", "nwo-project", "nwo-cls", "nwo-prio"]) expect(document.getElementById(id)).toBeTruthy();
-    expect(screen.getByLabelText("What should change and why")).toBeTruthy();
+    expect(screen.getByLabelText("What should change and why (required)")).toBeTruthy();
     expect(screen.queryByLabelText("Description")).toBeNull();
     expect(document.getElementById("nwo-source")).toBeNull();
   });

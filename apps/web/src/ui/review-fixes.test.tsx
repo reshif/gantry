@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DataTable } from "./DataTable";
 import { Modal } from "./Modal";
 import { OverlayProvider } from "./Overlay";
@@ -170,5 +170,23 @@ describe("DataTable paged footer (prototype pager)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(container.querySelector(".tfoot")!.textContent).toContain("13–13 of 13");
     expect(container.querySelectorAll("tbody tr").length).toBe(1);
+  });
+});
+
+describe("read-only refusal", () => {
+  it("a locked Btn names its reason in a title and raises a red toast when pressed", async () => {
+    const { Btn } = await import("./primitives");
+    const { UIContext } = await import("./overlay-context");
+    const { render, screen, fireEvent } = await import("@testing-library/react");
+    const toast = vi.fn();
+    render(
+      <UIContext.Provider value={{ toast } as never}>
+        <Btn label="Approve" guard={{ allowed: false, reason: "Your role is read-only for this action.", needs: "" }} />
+      </UIContext.Provider>,
+    );
+    const b = screen.getByRole("button", { name: "Approve" });
+    expect(b.getAttribute("title")).toBe("Your role is read-only for this action.");
+    fireEvent.click(b);
+    expect(toast).toHaveBeenCalledWith("Your role is read-only for this action.", "error");
   });
 });

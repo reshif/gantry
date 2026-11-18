@@ -82,7 +82,7 @@ describe("shell fidelity", () => {
     expect(await screen.findByText("Sheet not found")).toBeTruthy();
     expect(screen.getByText('There is no route called "nonexistent".')).toBeTruthy();
     expect(screen.getByText("Nothing drawn here")).toBeTruthy();
-    expect(document.title).toBe("Sheet not found · Gantry Blueprint");
+    expect(document.title).toBe("nonexistent · Gantry Blueprint");
     fireEvent.click(screen.getByRole("button", { name: "Go home" }));
     await waitFor(() => expect(window.location.hash).toBe("#home"));
   });

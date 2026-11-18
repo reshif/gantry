@@ -76,7 +76,15 @@ export function Belt({ onStation, onGate, onOut, onWo, replaying, onReplay }: { 
   const route = activeCls ? routeOf(ctx.cat, p, activeCls) : null;
   const detail = density === "detail";
   const tools = (
-    <>
+    <div className="seg" role="group" aria-label="Density">
+      {([["fit", "Fit", "Compact tags so the whole line fits one screen"], ["detail", "Detail", "One tag per row with title and state"]] as const).map(([v, l, t]) => (
+        <Btn key={v} label={l} title={t} aria-pressed={(detail ? "detail" : "fit") === v} onClick={() => setDensity(v === "fit" ? null : v)} />
+      ))}
+    </div>
+  );
+  // Live / Replay and the route legend stay (kept features) on their own strip under the panel header, so the header carries only the density toggle.
+  const modes = (
+    <div className="row fl-modes" style={{ justifyContent: "flex-end", gap: 8, padding: "6px 12px", borderBottom: "1px solid var(--line)" }}>
       {onReplay ? (
         <div className="seg" role="group" aria-label="Live or replay">
           <Btn label="Live" id="floor-mode-live" aria-pressed={!replaying} onClick={() => onReplay(false)} />
@@ -84,17 +92,13 @@ export function Belt({ onStation, onGate, onOut, onWo, replaying, onReplay }: { 
         </div>
       ) : null}
       <Btn label="Routes" id="floor-routes-toggle" title="Show the route of each work class" aria-pressed={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
-      <div className="seg" role="group" aria-label="Density">
-        {([["fit", "Fit", "Compact tags so the whole line fits one screen"], ["detail", "Detail", "One tag per row with title and state"]] as const).map(([v, l, t]) => (
-          <Btn key={v} label={l} title={t} aria-pressed={(detail ? "detail" : "fit") === v} onClick={() => setDensity(v === "fit" ? null : v)} />
-        ))}
-      </div>
-    </>
+    </div>
   );
   const bays = flowOf(ctx.cat, p).bays;
   return (
     <>
       <Panel title="Production line" cls={`fl-belt floor${activeCls ? " has-route" : ""}`} tools={tools} flush>
+        {modes}
         <div id="floor-belt" aria-label={`Line for ${p.name}`} data-active={prefs.activeClass ?? ""}>
           {routes || prefs.activeClass ? (
             <div className="fl-routes" id="floor-routes" role="group" aria-label="Class routes. Hover to preview, select to pin">

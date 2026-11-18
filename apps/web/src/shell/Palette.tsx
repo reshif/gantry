@@ -59,7 +59,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
     for (const p of me.projects) items.push({ key: `project:${p.id}`, group: "Projects", icon: "folder", label: p.name, hint: p.key, run: () => { setProject(p.id); if (isProjectRoute(loc.id)) navigateProject(p.id, loc.id); ui.toast(`Project: ${p.name}`); } });
     for (const w of wos) items.push({ key: `record:${w.id}`, group: "Work orders", icon: "record", label: `${w.id} · ${w.title}`, hint: w.state, run: () => { setProject(w.project); openRecordRoute(w.id); } });
     if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, group: "Agents", icon: "agent", label: a.name, hint: a.station || "agent", run: () => { navigate("agents", a.id); } });
-    for (const r of repos) items.push({ key: `repo:${r.id}`, group: "Repos", icon: "branch", label: r.name, hint: r.lang, run: () => { setProject(r.projectId); navigateProject(r.projectId, "onboarding", r.id); } });
+    for (const r of repos) items.push({ key: `repo:${r.id}`, group: "Repos", icon: "branch", label: r.name, hint: r.lang, run: () => { setProject(r.projectId); navigateProject(r.projectId, "dossier", r.id); } });
     if (hasCommand("newWorkOrder")) items.push({ group: "Actions", icon: "plus", label: "Submit a work order", hint: "", guard: guard(3), run: () => void runCommand("newWorkOrder") });
     items.push({ key: "toggle-theme", group: "Actions", icon: "moon", label: "Toggle theme", hint: "", run: () => { const dark = document.documentElement.dataset.theme === "dark" || (prefs.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches); applyTheme(dark ? "light" : "dark"); } });
     if (cp) {

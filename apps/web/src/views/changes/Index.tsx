@@ -61,8 +61,8 @@ export function ChangesIndex() {
                 rowKey={(w) => w.id}
                 rowHref={(w) => hashFor("changes", w.id, w.project)}
                 rowLabel={(w) => `Open the changes of ${w.id}`}
-                pageSize={12} range
-                empty={{ title: filtered ? "Nothing matches these filters" : "No changes yet", text: filtered ? "Try fewer filters." : "Work orders that change files appear here.", action: filtered ? <Btn label="Clear filters" id="chg-clear-empty" onClick={clear} /> : undefined }}
+                pageSize={12} proto range
+                empty={{ title: filtered ? "Nothing matches these filters" : "No changes yet", text: filtered ? "Loosen the search or clear the filters." : "Work orders that change files appear here.", action: filtered ? <Btn label="Clear filters" id="chg-clear-empty" onClick={clear} /> : undefined }}
               />
             </>
           )}

@@ -65,7 +65,7 @@ export default function LearningView() {
   };
 
   const body = tab === "findings"
-    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={scope.id ? findings.filter((f) => !f.project || f.project === scope.id) : findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
+    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
     : tab === "signals" ? <Async query={fq} what="learning signals" id="ln-signals">{() => <SignalsTab findings={findings} />}</Async>
     : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} hi={hi} onFocusFinding={focusFinding} />}</Async>;
   return (

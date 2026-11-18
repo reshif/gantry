@@ -138,6 +138,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   return (
     <Dialog
       title="Submit a work order"
+      dirty={!!(title.trim() || desc.trim())}
       onClose={onClose}
       body={
         <div className="form-grid">
@@ -152,10 +153,10 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
               </span>
             </div>
           ) : null}
-          <Field label="Title" htmlFor="nwo-title" hint="A short, specific request." error={fe.title}>
+          <Field label="Title (required)" htmlFor="nwo-title" hint="A short, specific request." error={fe.title}>
             <input id="nwo-title" className="input" value={title} autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
           </Field>
-          <Field label="What should change and why" htmlFor="nwo-desc" error={fe.desc}>
+          <Field label="What should change and why (required)" htmlFor="nwo-desc" error={fe.desc}>
             <textarea id="nwo-desc" className="input" rows={4} value={desc} onChange={(e) => setDesc(e.target.value)} />
           </Field>
           <Field label="Project" htmlFor="nwo-project">

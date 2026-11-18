@@ -45,8 +45,18 @@ export interface BtnProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 
   children?: ReactNode;
 }
 
+/** The overlay API when there is one (a control may render outside the provider, e.g. in a test). */
+function useOptionalUI(): ReturnType<typeof useUI> | null {
+  try {
+    return useUI();
+  } catch {
+    return null;
+  }
+}
+
 export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard, onClick, type = "button", children, ...rest }: BtnProps) {
   const g = guardProps(guard);
+  const uiApi = useOptionalUI();
   const reason = disabledReason || g["data-reason"];
   const locked = !!disabledReason || g.locked;
   // the prototype's modifiers (.btn.primary .danger .ghost .sm); the legacy btn-* names ride along for screens and tests not yet moved
@@ -65,11 +75,13 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
       aria-describedby={showWhy ? "tip" : rest["aria-describedby"]}
       aria-disabled={locked ? "true" : rest["aria-disabled"]}
       data-reason={reason || undefined}
+      title={locked && reason && /read-only/i.test(reason) ? reason : rest.title}
       onClick={(e) => {
         if (locked) {
           e.preventDefault();
           e.stopPropagation();
           tip.show(e.currentTarget);
+          if (reason && /read-only/i.test(reason)) uiApi?.toast(reason, "error");
           return;
         }
         onClick?.(e);
@@ -95,6 +107,7 @@ export function IconBtn({ icon, label, className = "", onClick, ...rest }: { ico
 /** Switch (checkbox with role=switch). A forbidden decision locks it and shows the reason on click. */
 export function Toggle({ id, checked, onChange, decision, label, variant, disabled }: { id: string; /** A hard-disabled control (prototype: locked checkbox, dashed grey). */ disabled?: boolean; checked: boolean; onChange?: (v: boolean) => void; decision?: Decision | null; label?: string; /** "check" draws the prototype's square matrix checkbox instead of the switch. */ variant?: "check" }) {
   const g = guardProps(decision);
+  const uiApi = useOptionalUI();
   const box = variant === "check";
   return (
     <span className={`${box ? "checkbox" : "switch"}${g.locked ? " is-locked" : ""}`}>
@@ -113,6 +126,8 @@ export function Toggle({ id, checked, onChange, decision, label, variant, disabl
           if (g.locked) {
             e.preventDefault();
             tip.show(e.currentTarget);
+            const why = g["data-reason"];
+            if (why && /read-only/i.test(why)) uiApi?.toast(why, "error");
           }
         }}
         onChange={(e) => {
@@ -403,7 +418,7 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, cru
               <span>{key ?? "ALL LINES"}</span>
             </>
           )}
-          {kicker && !crumbs && kicker !== (key ?? "ALL LINES") ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
+          {kicker && !crumbs && !(typeof kicker === "string" && kicker.toUpperCase() === (key ?? "ALL LINES").toUpperCase()) ? <><span aria-hidden="true">·</span><span>{kicker}</span></> : null}
         </Eyebrow>
         {status ? <div className="row vtitle-row"><h1 className="vtitle">{title}</h1>{status}</div> : <h1 className="vtitle">{title}</h1>}
         {sub ? <p className="sub vsub">{sub}</p> : null}

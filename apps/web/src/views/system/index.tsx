@@ -118,7 +118,7 @@ function JobsPanel({ h }: { h: SystemHealth }) {
   return (
     <Panel title="Stuck jobs" flush id="sys-jobs">
       {h.jobs.stuck.length === 0 ? (
-        <Empty id="sys-stuck-empty" title="No stuck jobs" text="Every running job is making progress." />
+        <Empty id="sys-stuck-empty" title="No stuck jobs" text="Every running work order is making progress." />
       ) : (
         <ul className="list" aria-label="Stuck jobs">
           {h.jobs.stuck.map((j: StuckJob) => (

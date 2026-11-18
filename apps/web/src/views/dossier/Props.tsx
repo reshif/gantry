@@ -1,7 +1,7 @@
 /** The Properties panel of a work order page (prototype: Station, Class, Priority, Repo, SLA due, Cost, Tokens, PR, Diff, Tests) and what waits on the viewer. */
 import type { ReactNode } from "react";
 import { fmt, type Catalog, type Project } from "@gantry/domain";
-import { Chip, Panel } from "../../ui/primitives";
+import { Panel } from "../../ui/primitives";
 import { classOf } from "../projects/kit";
 import { useRepoName } from "../traveler/repo";
 import { hashFor, navigate } from "../../lib/router";
@@ -37,7 +37,7 @@ export function Props({ wo, cat, project }: { wo: TWo; cat: Catalog; project: Pr
     <div id="dz-side">
       <Panel title="Properties">
         <dl className="kv">
-          <Row k="Station"><Chip text={where} cls="plain" /></Row>
+          <Row k="Station">{where}</Row>
           <Row k="Class">{`${classOf(cat, project, wo.cls).name} (${Math.round(wo.clsConfidence * 100)}%)`}</Row>
           <Row k="Priority">{wo.priority}</Row>
           <Row k="Repo">{wo.repo ? <a href={dossier} onClick={(e) => { e.preventDefault(); navigate("dossier", wo.repo, wo.project); }}>{repo}</a> : "—"}</Row>

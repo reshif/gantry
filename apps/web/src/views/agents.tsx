@@ -66,7 +66,7 @@ function Roster({ agents }: { agents: AgentRow[] }) {
   ];
   return (
     <Panel flush cls="ag-roster-panel">
-      <FilterBar label="Filter agents" count={`${rows.length === agents.length ? rows.length : `${rows.length} of ${agents.length}`} agent${rows.length === 1 && rows.length === agents.length ? "" : "s"}`} actions={active ? <Btn label="Clear" small kind="ghost" id="ag-clear" onClick={clear} /> : undefined}>
+      <FilterBar label="Filter agents" count={rows.length === agents.length ? `${rows.length} agent${rows.length === 1 ? "" : "s"}` : `${rows.length} agent${rows.length === 1 ? "" : "s"} of ${agents.length}`} actions={active ? <Btn label="Clear" small kind="ghost" id="ag-clear" onClick={clear} /> : undefined}>
         <SearchBox id="ag-search" value={q} onChange={(v) => setRoster({ q: v })} placeholder="Search…" label="Search agents" />
         <Field label="Station" htmlFor="ag-f-station"><Select id="ag-f-station" value={station} onChange={(v) => setRoster({ station: v })} options={[{ value: "", label: "All" }, ...st.all.map((s) => ({ value: s.id, label: s.name }))]} /></Field>
         <Field label="Autonomy" htmlFor="ag-f-autonomy"><Select id="ag-f-autonomy" value={autonomy} onChange={(v) => setRoster({ autonomy: v })} options={[{ value: "", label: "All" }, ...autonomies.map((x) => ({ value: x, label: x }))]} /></Field>

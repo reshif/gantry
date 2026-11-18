@@ -313,7 +313,7 @@ describe("Notifications", () => {
     expect((await screen.findAllByText("acme/payments-api")).length).toBeGreaterThan(0);
     expect(document.getElementById("nt-ov-add")).toBeNull();
     expect(document.getElementById("nt-ov-rm-payments-api-0")).toBeNull();
-    expect(document.querySelector("#nt-overrides a.pri")!.getAttribute("href")).toContain("onboarding/payments-api");
+    expect(document.querySelector("#nt-overrides a.pri")!.getAttribute("href")).toContain("dossier/payments-api");
   });
 
   it("card templates is exactly the three card panels: no templates table, new-template form or preview", async () => {
@@ -377,7 +377,7 @@ describe("Notifications", () => {
     fireEvent.click(await byId("nt-tab-overrides"));
     const panel = await byId("nt-overrides");
     await waitFor(() => expect(panel.textContent).toContain("gate.waiting"));
-    expect(panel.querySelector("a.pri")!.getAttribute("href")).toContain("onboarding/payments-api");
+    expect(panel.querySelector("a.pri")!.getAttribute("href")).toContain("dossier/payments-api");
     cleanup();
     window.history.replaceState(null, "", "/?tab=overrides");
     setup({ "GET /api/v1/projects/payments/repos": () => ({ body: [] }) });
