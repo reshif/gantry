@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
 import { useMe } from "../api/queries";
+import { navigate } from "../lib/router";
 import { useScope } from "../lib/scope";
 import { Btn, Empty } from "../ui/primitives";
 import { Async } from "../ui/async";
@@ -27,7 +28,8 @@ export default function ConsoleSubmitView() {
   if (!me) return null;
   if (scope.all && !projectId) {
     return (
-      <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit">
+      <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit"
+        acts={<Btn id="con-chats" icon="chat" label="Chats" onClick={() => navigate("workspace", "chats")} />}>
         <Empty
           id="con-pick-project"
           icon="projects"
@@ -54,7 +56,8 @@ export default function ConsoleSubmitView() {
     </Card>
   );
   return (
-    <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit">
+    <Page eyebrow="Operate" title="Console" sub="Submit a work order. Gantry classifies it, routes it and asks only what it needs." cls="console-submit"
+      acts={<Btn id="con-chats" icon="chat" label="Chats" onClick={() => navigate("workspace", "chats")} />}>
       <NewWorkOrderDialog key={n} variant="page" preset={{ source: "console", ...(projectId ? { project: projectId } : {}) }} onClose={() => setN((x) => x + 1)} aside={aside} />
     </Page>
   );
