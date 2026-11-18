@@ -46,6 +46,7 @@ export default function AuditView() {
   const [cp, setC] = useQueryParam("cat");
   const [op, setO] = useQueryParam("outcome");
   const [ap, setA] = useQueryParam("actor");
+  const [pp, setP] = useQueryParam("project"); // `#/audit?project=payments`: Project config links here
   const [via, setVia] = useState("all");
   useEffect(() => {
     if (asConsole && myId) {
@@ -57,8 +58,9 @@ export default function AuditView() {
   const cat = cp ?? "all";
   const outcome = op ?? "all";
   const actor = ap ?? "all";
+  const project = pp ?? "all";
   const typed = useDebounced(q, 250);
-  const filters = useMemo(() => ({ ...NO_FILTERS, q: typed, cat, outcome, actor, via }), [typed, cat, outcome, actor, via]);
+  const filters = useMemo(() => ({ ...NO_FILTERS, q: typed, cat, outcome, actor, via, project }), [typed, cat, outcome, actor, via, project]);
   const feed = useAuditFeed(filters);
   const stats = useAuditStats();
   const verify = useAuditVerify(false);
@@ -72,12 +74,13 @@ export default function AuditView() {
   const all = sum?.entries ?? total;
   const projectName = (id: string | null): string => (id ? projects.find((p) => p.id === id)?.name ?? id : "factory");
   const canVerify = !!me?.person.roles.some((g) => g.scope === "factory" && (FACTORY_READ as readonly string[]).includes(g.role));
-  const dirtyExtra = via !== "all";
+  const dirtyExtra = via !== "all" || project !== "all";
   const clear = () => {
     setQ(null);
     setC(null);
     setO(null);
     setA(null);
+    setP(null);
     setVia("all");
   };
   const hidden = !feed.data && feed.isError && failureOf(feed.error).hidden;
@@ -183,7 +186,7 @@ export default function AuditView() {
       <Panel flush id="aud-panel">
         <ListBar
           id="aud" label="Ledger filters" q={q} onQ={(v) => setQ(v || null)} shown={total} total={all} noun="entry" onClear={clear}
-          extra={dirtyExtra ? <span className="chip plain" id="aud-via-note" title="Opened from the Console">{`via ${via}`}</span> : undefined}
+          extra={project !== "all" ? <><span className="chip plain" id="aud-via-note" title="Opened from Project config">{projectName(project)}</span><Btn small kind="ghost" id="aud-project-clear" label="All projects" onClick={() => setP(null)} /></> : dirtyExtra ? <span className="chip plain" id="aud-via-note" title="Opened from the Console">{`via ${via}`}</span> : undefined}
           filters={[
             { id: "category", label: "Category", value: cat, onChange: (v) => setC(v === "all" ? null : v), options: [{ value: "all", label: "All" }, ...cats] },
             { id: "outcome", label: "Outcome", value: outcome, onChange: (v) => setO(v === "all" ? null : v), options: [{ value: "all", label: "All" }, ...outcomes] },

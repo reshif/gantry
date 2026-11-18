@@ -1,6 +1,6 @@
 /* Project config. Tokens only. Prefix pcf-. */
 .pcf-body { min-width: 0; }
-.pcf-stack { display: grid; gap: var(--s4); min-width: 0; align-content: start; }
+.pcf-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); min-width: 0; align-content: start; }
 .pcf-pad { padding: var(--s3) var(--s4); }
 .pcf-num { width: 76px; }
 .pcf-belt-row { padding-top: 4px; }
@@ -25,6 +25,7 @@
 tr.is-disabled > * { color: var(--muted); }
 tr.is-disabled th { text-decoration: line-through; text-decoration-color: var(--line-strong); }
 .pcf-slots { display: flex; align-items: center; gap: 6px; }
+.pcf-slots .pcf-num { width: 64px; }
 .pcf-rm { min-width: 760px; }
 .pcf-rm-st { text-align: center; }
 .pcf-rm-st > span { display: block; }
@@ -157,3 +158,4 @@ tr.is-custom > th, tr.is-custom > td:first-child { box-shadow: inset 3px 0 0 var
   .flw-list:not(.flw-gates) .flw-line > .flw-sub { grid-row: 2; }
   .flw-more { padding-left: 0; }
 }
+.pcf-rule .pcf-num, .pcf-nofm .pcf-num, .pcf-deleg-row .pcf-num { width: 84px; flex: none; }

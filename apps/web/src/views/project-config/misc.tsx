@@ -1,219 +1,113 @@
-/** Project config: Notifications, MCP, Budget, History and Danger zone tabs (legacy project-config.js). */
-import { useState } from "react";
+/** Project config pieces that more than one tab uses: the notification summary (Overview), spend by station (Budget) and the archive panel (Line control). */
 import { fmt, type WorkOrder } from "@gantry/domain";
-import { ops } from "../../api/ops";
+import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
-import { useDeliveries, useKillImpact, useMcpServers, useMe, useWorkOrders } from "../../api/queries";
+import { useDeliveries, useKillImpact, useMe, useWorkOrders } from "../../api/queries";
 import { canSeeRoute } from "../../lib/routes";
 import { navigate } from "../../lib/router";
-import { makeStopActions } from "../../shell/stopActions";
 import { useOpenTraveler } from "../../shell/useTraveler";
-import { Btn, Empty, Field, LockNote, Meter, Panel, Select, Toggle } from "../../ui/primitives";
+import { Btn, Empty, LockNote, Panel } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
 import { Async } from "../../ui/async";
-import { Icon } from "../../ui/Icon";
-import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
-import { NumInput, evName, flowOf, useRes } from "../projects/kit";
-import { HistoryList } from "./history";
+import { evName, flowOf, useRes } from "../projects/kit";
+import { ToggleRow } from "../projects/proto";
 import type { PcProps } from "./ctx";
 
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-export function NotificationsTab({ p }: PcProps) {
+/** Overview: how many routes this project has, a quick on/off for each, the last few deliveries, and the way to the Notifications screen. */
+export function NotificationsSummary({ p }: Pick<PcProps, "p">) {
   const res = useRes();
   const me = useMe();
   const d = useCan("notify.edit", { project: p.id });
-  const dl = useDeliveries({ project: p.id, limit: 6 }).data;
-  const deliveries = (Array.isArray(dl) ? dl : ((dl as { items?: typeof dl } | undefined)?.items ?? [])) as Array<{ id: string; at: number; event: string; channel: string; target: string; status: string }>;
+  const q = useDeliveries({ project: p.id, limit: 4 });
   const routes = p.notifications;
+  const on = routes.filter((r) => r.enabled).length;
   return (
-    <div className="pcf-stack">
-      <LockNote decision={d} what="Notification routes" />
-      <Panel title="Routes" flush tools={canSeeRoute("notifications", me) ? <Btn small kind="ghost" id="pcf-to-notify" label="Edit routes and cards" onClick={() => navigate("notifications")} /> : null}>
-        <div className="table-scroll">
-          <table className="table table-compact">
-            <thead><tr><th>Event</th><th>Destinations</th><th>Conditions</th><th>On</th></tr></thead>
-            <tbody>
-              {routes.map((rt, i) => {
-                const c = rt.cond;
-                const lockKill = (rt.event === "kill" || rt.event === "restore") && rt.enabled;
-                return (
-                  <tr key={rt.id}>
-                    <td>{evName(rt.event)}<div className="mono small muted">{rt.id}</div></td>
-                    <td className="small">{rt.dest.map((x, j) => <div key={j} className="mono">{`${x.channel} ${x.target}`}</div>)}</td>
-                    <td className="small">{[c.classes.length ? c.classes.join(", ") : "any class", c.priority.length ? c.priority.join(", ") : "any priority", c.hours === "business" ? "business hours" : "any time"].join(" · ")}</td>
-                    <td>
-                      <Toggle id={`pcf-nr-${rt.id}`} checked={rt.enabled} label={`${evName(rt.event)} route on`} decision={lockKill && d.allowed ? { allowed: false, reason: "Kill and restore notices must stay on.", needs: "" } : d}
-                        onChange={async (v) => { const arr = clone(routes); arr[i]!.enabled = v; res(await ops.setProject(p.id, "notifications", arr, { ifMatch: p.version }), `${evName(rt.event)} route ${v ? "on." : "off."}`); }} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-      <Panel title="Recent deliveries">
-        {deliveries.length ? (
-          <ul className="plain-list small">
-            {deliveries.map((x) => (
-              <li key={x.id} className="pcf-dl">
-                <span className="mono muted">{fmt.ist(x.at)}</span>
-                <span>{evName(x.event)}</span>
-                <span className="mono">{`${x.channel} ${x.target}`}</span>
-                <span className={`outcome o-${x.status === "delivered" ? "ok" : "failed"}`}>{x.status}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <Empty title="No deliveries yet" text="Deliveries for this project appear here." />
-        )}
-      </Panel>
-    </div>
-  );
-}
-
-export function McpTab({ p }: PcProps) {
-  const res = useRes();
-  const me = useMe();
-  const d = useCan("project.config", { project: p.id });
-  const serversQ = useMcpServers();
-  return (
-    <div className="pcf-stack">
-      <LockNote decision={d} what="MCP servers for this project" />
-      <Panel title={`MCP servers available to ${p.name}`} flush tools={canSeeRoute("mcp", me) ? <Btn small kind="ghost" id="pcf-to-mcp" label="Manage servers" onClick={() => navigate("mcp")} /> : null}>
-        <Async query={serversQ} what="MCP servers" id="pcf-mcp" empty={<Empty id="pcf-mcp-empty" title="No MCP servers yet" text="A Factory Admin adds MCP servers; then they can be enabled here." />}>{(servers) => (
-        <div className="table-scroll">
-          <table className="table table-compact">
-            <thead><tr><th>Server</th><th>Health</th><th>Sensitivity</th><th className="num">Tools</th><th>Factory scope</th><th>Enabled here</th></tr></thead>
-            <tbody>
-              {servers.map((s) => {
-                const on = p.mcp.includes(s.id);
-                const scopeOk = s.projects === "all" || s.projects.includes(p.id);
-                const dec = d.allowed && !scopeOk && !on ? { allowed: false, reason: `${s.name} is not scoped to ${p.name}. Change its scope in MCP servers first.`, needs: "" } : d;
-                return (
-                  <tr key={s.id}>
-                    <th scope="row">{s.name}<div className="mono small muted">{s.url}</div></th>
-                    <td><span className={`pcf-health pcf-h-${s.health}`}><Icon name={s.health === "healthy" ? "st-done" : "alert"} />{s.health}</span></td>
-                    <td className="small">{s.sensitivity}</td>
-                    <td className="num mono">{`${s.tools.length} (${s.tools.filter((t) => t.write).length} write)`}</td>
-                    <td className="small">{s.projects === "all" ? "all projects" : `${s.projects.length} projects`}</td>
-                    <td><Toggle id={`pcf-mcp-${s.id}`} checked={on} label={`${s.name} enabled for ${p.name}`} decision={dec} onChange={async (v) => res(await ops.setProject(p.id, "mcp", v ? [...p.mcp, s.id] : p.mcp.filter((x) => x !== s.id), { ifMatch: p.version }), `${s.name}${v ? " enabled for " : " disabled for "}${p.name}.`)} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        )}</Async>
-      </Panel>
-    </div>
-  );
-}
-
-export function BudgetTab({ p, cat }: PcProps) {
-  const res = useRes();
-  const d = useCan("project.config", { project: p.id });
-  const openTraveler = useOpenTraveler();
-  const raw = useWorkOrders(p.id, { limit: 200 }).data;
-  const wos = (Array.isArray(raw) ? raw : ((raw as { items?: WorkOrder[] } | undefined)?.items ?? [])) as WorkOrder[];
-  const b = p.budget;
-  const [now] = useState(() => Date.now());
-  void now;
-  const stations = flowOf(cat, p).stations;
-  const byStation = stations.map((s) => ({ s, v: wos.reduce((a, w) => a + (w.history ?? []).filter((e) => e.station === s.id).reduce((x, e) => x + (e.cost || 0), 0), 0) }));
-  const max = Math.max(1, ...byStation.map((x) => x.v));
-  const top = wos.map((w) => ({ w, cost: (w.history ?? []).reduce((a, e) => a + (e.cost || 0), 0) })).sort((a, c) => c.cost - a.cost).slice(0, 5);
-  const ratio = b.monthly ? b.mtd / b.monthly : 0;
-  return (
-    <div className="two-col">
-      <Panel title="Monthly budget">
-        <div className="form-grid">
-          <LockNote decision={d} what="Budget" />
-          <div className="pcf-bud-big"><span className="big-num">{fmt.money0(b.mtd)}</span><span className="muted">{` of ${fmt.money0(b.monthly)} this month · ${fmt.pct(ratio)}`}</span></div>
-          <Meter value={b.mtd} max={b.monthly} label="Budget used" warnAt={b.alertAt} />
-          {ratio >= b.alertAt && b.monthly ? <div className="callout callout-warn small"><Icon name="alert" /><span>Past the alert line. Project admins are emailed by the budget route.</span></div> : null}
-          <div className="form-row">
-            <Field label="Monthly budget (USD)" htmlFor="pcf-bud-monthly"><NumInput id="pcf-bud-monthly" value={b.monthly} min={100} max={100000} locked={!d.allowed} label="Monthly budget" onCommit={async (v) => res(await ops.setProject(p.id, "budget.monthly", v, { ifMatch: p.version }), `Monthly budget set to ${fmt.money0(v)}.`)} /></Field>
-            <Field label="Alert at" htmlFor="pcf-bud-alert"><Select id="pcf-bud-alert" disabled={!d.allowed} options={[0.5, 0.7, 0.8, 0.9, 1].map((x) => ({ value: String(x), label: fmt.pct(x) }))} value={String(b.alertAt)} onChange={async (v) => res(await ops.setProject(p.id, "budget.alertAt", parseFloat(v), { ifMatch: p.version }), `Budget alert at ${fmt.pct(parseFloat(v))}.`)} /></Field>
-          </div>
-        </div>
-      </Panel>
-      <div className="pcf-stack">
-        <Panel title="Agent spend by station (work orders on record)">
-          <ul className="hm-bars">
-            {byStation.map((x) => {
-              const tip = `${x.s.name}: ${fmt.money(x.v)}`;
+    <Panel title="Notifications" id="pcf-notify" tools={canSeeRoute("notifications", me) ? <Btn small kind="ghost" id="pcf-to-notify" label="Edit routes and cards" onClick={() => navigate("notifications")} /> : null}>
+      <div className="stack">
+        <LockNote decision={d} what="Notification routes" />
+        <p className="small muted" id="pcf-notify-count">{`${routes.length} route${routes.length === 1 ? "" : "s"}, ${on} on.`}</p>
+        {routes.length ? (
+          <div>
+            {routes.map((rt, i) => {
+              const lockKill = (rt.event === "kill" || rt.event === "restore") && rt.enabled;
               return (
-                <li key={x.s.id} className="hm-bar-row is-ok" tabIndex={0} data-tip={tip} aria-label={tip} id={`pcf-bud-st-${x.s.id}`}>
-                  <span className="hm-bar-l">{`${x.s.no} ${x.s.name}`}</span>
-                  <span className="hm-bar-track" aria-hidden="true"><span className="hm-bar-fill" style={{ width: `${((x.v / max) * 100).toFixed(1)}%` }} /></span>
-                  <span className="hm-bar-v mono">{fmt.money(x.v)}</span>
-                </li>
+                <ToggleRow key={rt.id} id={`pcf-nr-${rt.id}`} label={evName(rt.event)} hint={rt.dest.map((x) => `${x.channel} ${x.target}`).join(", ") || "no destination"} checked={rt.enabled}
+                  decision={lockKill && d.allowed ? { allowed: false, reason: "Kill and restore notices must stay on.", needs: "" } : d}
+                  onChange={async (v) => { const arr = clone(routes); arr[i]!.enabled = v; res(await ops.setProject(p.id, "notifications", arr, { ifMatch: p.version }), `${evName(rt.event)} route ${v ? "on." : "off."}`); }} />
               );
             })}
-          </ul>
-        </Panel>
-        <Panel title="Most expensive work orders" flush>
-          <table className="table table-compact">
-            <tbody>
-              {top.map((x) => (
-                <tr key={x.w.id}>
-                  <td><button type="button" className="linkish mono" id={`pcf-bud-wo-${x.w.id}`} onClick={() => openTraveler(x.w.id)}>{x.w.id}</button></td>
-                  <td className="small">{x.w.title}</td>
-                  <td className="num mono">{fmt.money(x.cost)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
+          </div>
+        ) : <Empty title="No routes" text="This project sends no notifications yet. Add routes on the Notifications screen." />}
+        <div className="small strong">Recent deliveries</div>
+        <Async query={q} what="deliveries" id="pcf-dl" empty={<Empty id="pcf-dl-empty" title="No deliveries yet" text="Deliveries for this project appear here." />}>
+          {(raw) => {
+            const list = (Array.isArray(raw) ? raw : (raw.items ?? [])) as Array<{ id: string; at: number; event: string; channel: string; target: string; status: string }>;
+            return (
+              <ul className="plain-list small">
+                {list.slice(0, 4).map((x) => (
+                  <li key={x.id} className="pcf-dl">
+                    <span className="mono muted">{fmt.ist(x.at)}</span>
+                    <span>{evName(x.event)}</span>
+                    <span className="mono">{`${x.channel} ${x.target}`}</span>
+                    <span className={`outcome o-${x.status === "delivered" ? "ok" : "failed"}`}>{x.status}</span>
+                  </li>
+                ))}
+              </ul>
+            );
+          }}
+        </Async>
       </div>
-    </div>
-  );
-}
-
-export function HistoryTab({ p }: PcProps) {
-  return (
-    <Panel title={`History for ${p.name}`}>
-      <HistoryList type="project" id={p.id} project={p.id} limit={80} />
     </Panel>
   );
 }
 
-export function DangerTab({ p }: PcProps) {
-  const ui = useUI();
-  const me = useMe();
-  const actor = useActors();
-  const imp = useKillImpact("project", p.id).data ?? { workOrders: 0, running: 0, slots: 0, prs: 0 };
-  const kd = useCan("kill.project", { project: p.id });
-  const rd = useCan("restore.project", { project: p.id });
-  const archived = p.status === "archived";
-  const factoryKilled = !!me?.factory.killed;
-  const stop = me ? makeStopActions(ui, me) : null;
-  const k = p.killed;
+/** Budget: agent spend by station and the most expensive work orders, from the work orders on record (the month-to-date figure above them is the metered one). */
+export function SpendBreakdown({ p, cat }: Pick<PcProps, "p" | "cat">) {
+  const openTraveler = useOpenTraveler();
+  const q = useWorkOrders(p.id, { limit: 200 });
+  const stations = flowOf(cat, p).stations;
   return (
-    <div className="pcf-stack pcf-danger">
-      <section className={`panel pcf-dz${k ? " is-killed" : ""}`} aria-label="Project kill switch">
-        <div className="panel-head"><h2 className="panel-title">{k ? "Project killed" : "Kill this project"}</h2><span className="mono small muted">kill.project · restore.project</span></div>
-        <div className="panel-body form-grid">
-          {k ? (
-            <div className="pcf-kill-state"><Icon name="st-kill" /><div><strong>KILLED</strong>{` by ${actor(k.by).name}, ${fmt.stamp(k.at)}. ${k.reason} · work ${k.mode === "cancel" ? "cancelled" : "held in place"}`}</div></div>
-          ) : (
-            <p>{`A hard stop for ${p.name}: ${imp.workOrders} work orders, ${imp.running} running agents, ${imp.slots} coding slots and ${imp.prs} open PRs. New submissions are refused until someone restores it. For a soft pause, pull the andon cord on the floor.`}</p>
-          )}
-          {factoryKilled ? <div className="callout callout-block small"><Icon name="st-kill" /><span>The whole factory is killed. Restore it from the admin home.</span></div> : null}
-          <LockNote decision={k ? rd : kd} what={k ? "Restoring this project" : "This kill switch"} />
-          <div className="form-actions">
-            {k ? (
-              <Btn kind="primary" icon="power" id="pcf-restore" guard={rd} label={`Restore ${p.name}`} onClick={() => stop?.restore("project", p.id)} />
-            ) : (
-              <Btn kind="danger" icon="st-kill" id="pcf-kill" guard={archived ? { allowed: false, reason: `${p.name} is archived.`, needs: "" } : kd} label={`Kill ${p.name}`} onClick={() => stop?.kill("project", p.id)} />
-            )}
+    <Async query={q} what="spend by station" id="pcf-spend">
+      {(raw) => {
+        const wos = (Array.isArray(raw) ? raw : ((raw as { items?: WorkOrder[] }).items ?? [])) as WorkOrder[];
+        const byStation = stations.map((s) => ({ s, v: wos.reduce((a, w) => a + (w.history ?? []).filter((e) => e.station === s.id).reduce((x, e) => x + (e.cost || 0), 0), 0) }));
+        const max = Math.max(1, ...byStation.map((x) => x.v));
+        const top = wos.map((w) => ({ w, cost: (w.history ?? []).reduce((a, e) => a + (e.cost || 0), 0) })).sort((a, c) => c.cost - a.cost).slice(0, 5);
+        return (
+          <div className="cols">
+            <Panel title="Spend by station" id="pcf-bud-stations">
+              <ul className="hm-bars">
+                {byStation.map((x) => {
+                  const tip = `${x.s.name}: ${fmt.money(x.v)}`;
+                  return (
+                    <li key={x.s.id} className="hm-bar-row is-ok" tabIndex={0} data-tip={tip} aria-label={tip} id={`pcf-bud-st-${x.s.id}`}>
+                      <span className="hm-bar-l">{`${x.s.no} ${x.s.name}`}</span>
+                      <span className="hm-bar-track" aria-hidden="true"><span className="hm-bar-fill" style={{ width: `${((x.v / max) * 100).toFixed(1)}%` }} /></span>
+                      <span className="hm-bar-v mono">{fmt.money(x.v)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="small muted">{`From the ${wos.length} most recent work orders on record.`}</p>
+            </Panel>
+            <Panel title="Most expensive work orders" id="pcf-bud-top" flush>
+              <DataTable
+                id="pcf-bud-top-table" caption="Most expensive work orders" rows={top} rowKey={(x) => x.w.id}
+                empty={{ title: "No spend yet", text: "Work orders with agent cost appear here." }}
+                columns={[
+                  { key: "id", label: "Work order", render: (x) => <Btn small kind="ghost" cls="mono" id={`pcf-bud-wo-${x.w.id}`} label={x.w.id} aria={`Open ${x.w.id}`} onClick={() => openTraveler(x.w.id)} /> },
+                  { key: "t", label: "Title", render: (x) => <span className="small">{x.w.title}</span> },
+                  { key: "c", label: "Cost", align: "end", render: (x) => <span className="mono">{fmt.money(x.cost)}</span> },
+                ]}
+              />
+            </Panel>
           </div>
-        </div>
-      </section>
-      <ArchivePanel p={p} />
-    </div>
+        );
+      }}
+    </Async>
   );
 }
 
@@ -225,7 +119,7 @@ export function ArchivePanel({ p }: { p: PcProps["p"] }) {
   const ad = useCan("project.archive", { project: p.id });
   const archived = p.status === "archived";
   return (
-      <section className="panel pcf-dz" aria-label="Archive project">
+      <section className="panel pcf-dz" id="pcf-archive-panel" aria-label="Archive project">
         <div className="panel-head"><h2 className="panel-title">{archived ? "Archived" : "Archive this project"}</h2><span className="mono small muted">project.archive</span></div>
         <div className="panel-body form-grid">
           <p>{archived ? `${p.name} is archived. It is read-only, hidden from people without a factory role, and refuses new work.` : `Archiving makes ${p.name} read-only, hides it from project members and refuses new work orders. In-flight work stops. You must type the project name to confirm.`}</p>

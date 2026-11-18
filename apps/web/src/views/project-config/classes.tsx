@@ -1,15 +1,15 @@
-/** Project config: Work classes tab and the class dialog (legacy project-config.js classesTab, classDialog). */
+/** Project config > Flow > Work classes: the table (trust ceilings, edit) and the class dialog. The On switch joins the Flow draft; everything else here saves on its own. */
 import { useState } from "react";
 import { TRUST_LEVELS, flowOf, type Catalog, type TrustCeiling, type WorkClass } from "@gantry/domain";
-import { ops } from "../../api/ops";
+import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
 import { useTrustCells } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
-import { Btn, Field, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { DataTable, type Col } from "../../ui/DataTable";
+import { Btn, Field, Input, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ClassChip, MiniBelt, focusLater, metricsOf, routeGatesOf, routeOf, useRes, type PView } from "../projects/kit";
-import type { PcProps } from "./ctx";
 
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const TOKENS: Array<[string, string]> = [["cls-feature", "Blue"], ["cls-bug", "Rust"], ["cls-hotfix", "Pink"], ["cls-epic", "Violet"], ["cls-chore", "Slate"], ["cls-refactor", "Teal"], ["cls-security", "Red"], ["cls-docs", "Green"], ["cls-spike", "Ochre"]];
@@ -66,7 +66,7 @@ function ClassDialog({ p, cat, c, close, onAdded }: { p: PView; cat: Catalog; c:
           <div className="form-grid">
             <div className="form-row">
               <Field label="Class name" htmlFor="pcf-cl-name" hint={!isNew && !dr.custom ? "Built-in classes keep their name." : undefined}>
-                <input id="pcf-cl-name" className="input" value={dr.name} placeholder="Data migration" autoComplete="off" disabled={!isNew && !dr.custom} onChange={(e) => upd({ name: e.target.value })} />
+                <Input id="pcf-cl-name" value={dr.name} placeholder="Data migration" autoComplete="off" disabled={!isNew && !dr.custom} onChange={(e) => upd({ name: e.target.value })} />
               </Field>
               <Field label="Colour" htmlFor="pcf-cl-token" hint={tokenLocked ? "Built-in classes keep their colour." : undefined}>
                 <Select id="pcf-cl-token" aria-label="Colour token" disabled={tokenLocked} options={TOKENS.map((t) => ({ value: t[0], label: t[1] }))} value={dr.token || `cls-${dr.id}`} onChange={(v) => upd({ token: v })} />
@@ -77,7 +77,7 @@ function ClassDialog({ p, cat, c, close, onAdded }: { p: PView; cat: Catalog; c:
             </div>
             <div className="form-row">
               <Field label="Priority" htmlFor="pcf-cl-prio"><Select id="pcf-cl-prio" options={["P0", "P1", "P2", "P3"]} value={dr.priority} onChange={(v) => upd({ priority: v as WorkClass["priority"] })} /></Field>
-              <Field label="SLA (hours)" htmlFor="pcf-cl-sla"><input id="pcf-cl-sla" type="number" min={1} max={720} className="input mono pcf-num" value={String(dr.slaH)} onChange={(e) => upd({ slaH: parseInt(e.target.value, 10) || 72 })} /></Field>
+              <Field label="SLA (hours)" htmlFor="pcf-cl-sla"><Input id="pcf-cl-sla" type="number" min={1} max={720} className="mono pcf-num" value={String(dr.slaH)} onChange={(e) => upd({ slaH: parseInt(e.target.value, 10) || 72 })} /></Field>
               <Field label="Typical size" htmlFor="pcf-cl-est"><Select id="pcf-cl-est" options={["S", "M", "L", "XL"]} value={dr.est || "M"} onChange={(v) => upd({ est: v as WorkClass["est"] })} /></Field>
             </div>
             <div className="field">
@@ -112,7 +112,7 @@ function ClassDialog({ p, cat, c, close, onAdded }: { p: PView; cat: Catalog; c:
               </div>
             </div>
             <Field label="Classifier hints" htmlFor="pcf-cl-hints" hint="Comma-separated words. When a request mentions one, the Intake agent proposes this class.">
-              <input id="pcf-cl-hints" className="input" value={dr.hintsText} placeholder="migrate, backfill, schema" onChange={(e) => upd({ hintsText: e.target.value })} />
+              <Input id="pcf-cl-hints" value={dr.hintsText} placeholder="migrate, backfill, schema" onChange={(e) => upd({ hintsText: e.target.value })} />
             </Field>
             <div className="pcf-pv-wrap">
               <div className="pcf-pv-head">
@@ -134,70 +134,66 @@ function ClassDialog({ p, cat, c, close, onAdded }: { p: PView; cat: Catalog; c:
   );
 }
 
-export function ClassesTab({ p, cat, set }: PcProps) {
+export function WorkClassesPanel({ p, cat, classes, changed, onEnable, onAdded }: { p: PView; cat: Catalog; /** The classes as the draft has them. */ classes: WorkClass[]; changed: ReadonlySet<string>; onEnable: (cid: string, on: boolean) => void; onAdded: (id: string) => void }) {
   const ui = useUI();
   const res = useRes();
   const d = useCan("class.edit", { project: p.id });
+  const fd = useCan("project.config", { project: p.id });
   const td = useCan("trust.criteria");
   const ceilings = useTrustCells().data?.ceilings ?? [];
   const m = metricsOf(p);
   const f = flowOf(cat, p);
-  return (
-    <div className="pcf-stack">
-      <LockNote decision={d} what="Work classes" />
-      <Panel title={`Work classes on ${p.name}`} flush tools={<Btn small icon="plus" id="pcf-add-class" guard={d} label="Add class" onClick={() => ui.open((close) => <ClassDialog p={p} cat={cat} c={null} close={close} onAdded={(id) => set({ flowCls: id })} />)} />}>
-        <div>
-          <p className="small muted pcf-pad">{`${f.classes.length} of ${p.flow.classes.length} classes on. The class decides the route, which human gates apply, the SLA and how the Intake agent recognises it. The trust cap limits how far agents may run unattended for that class here; factory-wide ceilings still apply.`}</p>
-          <div className="table-scroll">
-            <table className="table table-compact pcf-cl-table">
-              <thead><tr><th>Class</th><th>On</th><th>Route</th><th>Human gates</th><th className="num">SLA</th><th>Priority</th><th>Classifier hints</th><th>Trust cap</th><th className="num">Open</th><th></th></tr></thead>
-              <tbody>
-                {p.flow.classes.map((c) => {
-                  const route = routeOf(cat, p, c.id);
-                  const skipped = f.stations.filter((s) => !route.includes(s.id)).map((s) => s.name);
-                  const inUse = m.byClass[c.id] ?? 0;
-                  const own = projectCeiling(ceilings, p.id, c.id);
-                  const ceil = ceilingFor(ceilings, p, c.id);
-                  const others = ceil.ceilings.filter((x) => !own || x.id !== own.id);
-                  return (
-                    <tr key={c.id} className={c.enabled === false ? "is-disabled" : undefined}>
-                      <th scope="row">{chipOf(c)}{c.custom ? <span className="tag pcf-tag-custom">custom</span> : null}</th>
-                      <td>
-                        <Toggle id={`pcf-cl-en-${c.id}`} checked={c.enabled !== false} label={`${c.name} enabled`}
-                          decision={d.allowed && c.enabled !== false && inUse ? { allowed: false, reason: `${inUse} open work order${inUse > 1 ? "s use " : " uses "}${c.name}. Reclassify or finish them first.`, needs: "" } : d}
-                          onChange={async (v) => { res(await ops.updateClass(p.id, c.id, { enabled: v }, { ifMatch: p.version })); focusLater(`pcf-cl-en-${c.id}`); }} />
-                      </td>
-                      <td className="small">{skipped.length ? `skips ${skipped.join(", ")}` : "every station"}{c.endsAfter ? <div className="muted">{`ends after ${cat.stations.find((x) => x.id === c.endsAfter)?.name ?? c.endsAfter}`}</div> : null}</td>
-                      <td className="small mono pcf-nowrap">{c.gates && c.gates.length ? c.gates.map((g) => cat.gates.find((x) => x.id === g)?.label ?? g).join(", ") : "all on route"}</td>
-                      <td className="num mono">{`${c.slaH || "-"} h`}</td>
-                      <td className="mono">{c.priority || "-"}</td>
-                      <td className="small">{c.hints && c.hints.length ? c.hints.join(", ") : <span className="muted">keyword model</span>}</td>
-                      <td className="pcf-ceil">
-                        <span {...(!td.allowed ? { "aria-disabled": "true", "data-reason": `${td.needs ? `${td.needs}. ` : ""}${td.reason}` } : {})}>
-                          <Select
-                            id={`pcf-cl-ceil-${c.id}`} aria-label={`Trust ceiling for ${c.name}`} disabled={!td.allowed}
-                            options={[{ value: "", label: "No project cap" }, ...[0, 1, 2, 3, 4].map((l) => ({ value: String(l), label: `Cap at L${l} ${TRUST_LEVELS[l]?.name ?? ""}` }))]}
-                            value={own ? String(own.max) : ""}
-                            onChange={async (v) => {
-                              const r = v === "" ? (own ? await ops.removeCeiling(own.id) : { ok: true, msg: "No project cap." }) : await ops.saveCeiling({ id: own ? own.id : undefined, text: `${c.name} on ${p.name} is capped at L${v}`, when: { project: p.id, cls: c.id }, max: +v, enabled: true });
-                              res(r);
-                              focusLater(`pcf-cl-ceil-${c.id}`);
-                            }}
-                          />
-                        </span>
-                        {others.length ? <div className="muted small" data-tip={others.map((x) => `${x.id}: ${x.text}`).join("; ")} tabIndex={0}>{`Effective L${ceil.max} (${others.map((x) => x.id).join(", ")})`}</div> : <div className="muted small">{`Effective L${ceil.max}`}</div>}
-                      </td>
-                      <td className="num mono">{String(inUse)}</td>
-                      <td><Btn small kind="ghost" id={`pcf-cl-edit-${c.id}`} aria={`Edit ${c.name}`} guard={d} label="Edit" onClick={() => ui.open((close) => <ClassDialog p={p} cat={cat} c={c} close={close} onAdded={() => undefined} />)} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+  const on = classes.filter((c) => c.enabled !== false).length;
+  const cols: Array<Col<WorkClass>> = [
+    { key: "c", label: "Class", render: (c) => <span>{chipOf(c)}{c.custom ? <span className="tag pcf-tag-custom">custom</span> : null}{changed.has(c.id) ? <span className="chip chip-warn">changed</span> : null}</span> },
+    { key: "on", label: "On", render: (c) => {
+      const inUse = m.byClass[c.id] ?? 0;
+      return (
+        <Toggle id={`pcf-cl-en-${c.id}`} checked={c.enabled !== false} label={`${c.name} enabled`}
+          decision={fd.allowed && c.enabled !== false && inUse ? { allowed: false, reason: `${inUse} open work order${inUse > 1 ? "s use " : " uses "}${c.name}. Reclassify or finish them first.`, needs: "" } : fd}
+          onChange={(v) => onEnable(c.id, v)} />
+      );
+    } },
+    { key: "route", label: "Route", render: (c) => {
+      const route = routeOf(cat, { ...p, flow: { ...p.flow, classes } } as PView, c.id);
+      const skipped = f.stations.filter((s) => !route.includes(s.id)).map((s) => s.name);
+      return <span className="small">{skipped.length ? `skips ${skipped.join(", ")}` : "every station"}{c.endsAfter ? <div className="muted">{`ends after ${cat.stations.find((x) => x.id === c.endsAfter)?.name ?? c.endsAfter}`}</div> : null}</span>;
+    } },
+    { key: "g", label: "Human gates", render: (c) => <span className="small mono pcf-nowrap">{c.gates && c.gates.length ? c.gates.map((g) => cat.gates.find((x) => x.id === g)?.label ?? g).join(", ") : "all on route"}</span> },
+    { key: "sla", label: "SLA", align: "end", render: (c) => <span className="mono">{`${c.slaH || "-"} h`}</span> },
+    { key: "prio", label: "Priority", render: (c) => <span className="mono">{c.priority || "-"}</span> },
+    { key: "hints", label: "Classifier hints", render: (c) => <span className="small">{c.hints && c.hints.length ? c.hints.join(", ") : <span className="muted">keyword model</span>}</span> },
+    { key: "cap", label: "Trust cap", render: (c) => {
+      const own = projectCeiling(ceilings, p.id, c.id);
+      const ceil = ceilingFor(ceilings, p, c.id);
+      const others = ceil.ceilings.filter((x) => !own || x.id !== own.id);
+      return (
+        <div className="pcf-ceil">
+          <span {...(!td.allowed ? { "aria-disabled": "true", "data-reason": `${td.needs ? `${td.needs}. ` : ""}${td.reason}` } : {})}>
+            <Select
+              id={`pcf-cl-ceil-${c.id}`} aria-label={`Trust ceiling for ${c.name}`} disabled={!td.allowed}
+              options={[{ value: "", label: "No project cap" }, ...[0, 1, 2, 3, 4].map((l) => ({ value: String(l), label: `Cap at L${l} ${TRUST_LEVELS[l]?.name ?? ""}` }))]}
+              value={own ? String(own.max) : ""}
+              onChange={async (v) => {
+                const r = v === "" ? (own ? await ops.removeCeiling(own.id) : { ok: true, msg: "No project cap." }) : await ops.saveCeiling({ id: own ? own.id : undefined, text: `${c.name} on ${p.name} is capped at L${v}`, when: { project: p.id, cls: c.id }, max: +v, enabled: true });
+                res(r);
+                focusLater(`pcf-cl-ceil-${c.id}`);
+              }}
+            />
+          </span>
+          {others.length ? <div className="muted small" data-tip={others.map((x) => `${x.id}: ${x.text}`).join("; ")} tabIndex={0}>{`Effective L${ceil.max} (${others.map((x) => x.id).join(", ")})`}</div> : <div className="muted small">{`Effective L${ceil.max}`}</div>}
         </div>
-      </Panel>
-      {td.allowed ? null : <p className="small muted"><Icon name="lock" /> Trust caps need <span className="mono">trust.criteria</span> (Factory Admin). They are shown read-only.</p>}
-    </div>
+      );
+    } },
+    { key: "open", label: "Open", align: "end", render: (c) => <span className="mono">{String(m.byClass[c.id] ?? 0)}</span> },
+    { key: "edit", label: "", align: "end", render: (c) => <Btn small kind="ghost" id={`pcf-cl-edit-${c.id}`} aria={`Edit ${c.name}`} guard={d} label="Edit" onClick={() => ui.open((close) => <ClassDialog p={p} cat={cat} c={p.flow.classes.find((x) => x.id === c.id) ?? c} close={close} onAdded={() => undefined} />)} /> },
+  ];
+  return (
+    <Panel title={`Work classes on ${p.name}`} flush id="flw-classes" tools={<Btn small icon="plus" id="pcf-add-class" guard={d} label="Add class" onClick={() => ui.open((close) => <ClassDialog p={p} cat={cat} c={null} close={close} onAdded={onAdded} />)} />}>
+      <LockNote decision={d} what="Work classes" />
+      <p className="small muted pcf-pad">{`${on} of ${classes.length} classes on. The class decides the route, which human gates apply, the SLA and how the Intake agent recognises it. The trust cap limits how far agents may run unattended for that class here; factory-wide ceilings still apply.`}</p>
+      <DataTable id="pcf-cl-table" caption="Work classes" columns={cols} rows={classes} rowKey={(c) => c.id} />
+      {td.allowed ? null : <p className="small muted pcf-pad"><Icon name="lock" /> Trust caps need <span className="mono">trust.criteria</span> (Factory Admin). They are shown read-only.</p>}
+    </Panel>
   );
 }
