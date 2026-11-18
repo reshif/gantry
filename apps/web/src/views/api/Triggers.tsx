@@ -218,7 +218,7 @@ function Detail({ t, d, res, setRes }: { t: Trigger; d: ApiData; res: SimResult 
       <Panel title={<span className="api-th"><Icon name={TTYPES[t.type]?.icon ?? "api"} />{t.name}</span>}>
         <div className="form-grid">
           <LockNote decision={perm} what={`Triggers on ${d.pname(t.project)}`} />
-          {d.cfg && d.cfg.triggersEnabled !== true ? <div className="callout callout-warn" id="api-tr-master"><Icon name="alert" /><span>Triggers are switched off for the organisation, so no trigger fires. Turn them on under Limits.</span></div> : null}
+          {d.cfg && d.cfg.triggersEnabled !== true ? <div className="callout callout-warn" id="api-tr-master"><Icon name="alert" /><span>Triggers are switched off for the organisation, so no trigger fires. Turn them on with the switch above the list.</span></div> : null}
           <div className="toggle-row api-enabled">
             <span><strong>{t.enabled ? "Enabled" : "Disabled"}</strong>{` · ${TTYPES[t.type]?.name ?? t.type} from ${srcName(t.source, d)} · ${d.pname(t.project)}`}</span>
             <Toggle id="api-tr-enabled" checked={t.enabled} onChange={(v) => void toggle(v)} decision={perm} label="Trigger enabled" />
@@ -357,27 +357,41 @@ function TriggerDrawer({ id, close }: { id: string; close: () => void }) {
   );
 }
 
+/** The organisation's master switch for triggers (off in a new install, spec 15.3): a small switch in the panel's tools, where the prototype's panel has none to spare. */
+function MasterSwitch({ d }: { d: ApiData }) {
+  const ui = useUI();
+  const perm = dec(useCan("integration.edit"));
+  const cfg = d.cfg;
+  if (!cfg) return null;
+  return (
+    <label className="row small" htmlFor="api-tr-master-sw">
+      <span>All triggers</span>
+      <Toggle id="api-tr-master-sw" label="Triggers enabled for the organisation" checked={cfg.triggersEnabled === true} decision={perm}
+        onChange={(v) => void ops.setApiConfig({ rateLimit: cfg.rateLimit, burst: cfg.burst, idempotencyHours: cfg.idempotencyHours, webhookSigning: cfg.webhookSigning, triggersEnabled: v }, cfg.version !== undefined ? { ifMatch: cfg.version } : undefined).then((r) => ui.toast(r.ok ? (v ? "Triggers on" : "Triggers off") : r.msg, r.ok ? "ok" : "error"))} />
+    </label>
+  );
+}
+
 export function TriggersTab({ d }: { d: ApiData }) {
   const ui = useUI();
   const guard = useCanAny("triggers.edit", d.vis);
   const open = (id: string): void => ui.drawer.open(`trigger:${id}`, (close) => <TriggerDrawer id={id} close={close} />);
   const last = (t: Trigger): TriggerRun | undefined => t.runs[t.runs.length - 1];
   return (
-    <Panel title="Triggers" flush id="api-triggers-panel" tools={<Btn label="New trigger" small kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={open} />)} />}>
+    <Panel title="Triggers" flush id="api-triggers-panel" tools={<><MasterSwitch d={d} /><Btn label="New trigger" small kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={open} />)} /></>}>
       <ListView<Trigger>
-        id="trig" noun="trigger" rows={d.triggers} rowKey={(t) => t.id} rowId={(t) => `api-tr-row-${t.id}`}
+        id="trig" noun="trigger" rows={d.triggers} rowKey={(t) => t.id} rowId={(t) => `api-tr-row-${t.id}`} onRow={(t) => open(t.id)} rowLabel={(t) => `Open trigger ${t.name}`}
         text={(t) => `${t.name} ${t.type}`}
         empty={<Empty title="No triggers" text="Create a trigger to open work orders from a connected source." />}
         columns={[
           { key: "n", label: "Trigger", sort: (t) => t.name.toLowerCase(), render: (t) => (
-            <div><button type="button" className="linkish" id={`api-tr-open-${t.id}`} onClick={() => open(t.id)}><b>{t.name}</b></button><span className="sub">{d.pname(t.project)} · {t.type}{srcState(t.source, d) === "healthy" ? "" : ` · source ${srcState(t.source, d)}`}</span></div>
+            <div><b>{t.name}</b><span className="sub">{d.pname(t.project)} · {t.type}{srcState(t.source, d) === "healthy" ? "" : ` · source ${srcState(t.source, d)}`}</span></div>
           ) },
           { key: "r", label: "Runs", align: "end", sort: (t) => t.runs.length, render: (t) => t.runs.length },
           { key: "l", label: "Last run", sort: (t) => last(t)?.at ?? 0, render: (t) => { const r = last(t); return r ? <span>{ago(r.at)} <span className={`chip ${r.outcome === "created" ? "ok" : "plain"}`}>{r.outcome}</span></span> : "\u2014"; } },
           { key: "on", label: "Enabled", render: (t) => <TriggerSwitch t={t} d={d} /> },
         ]}
       />
-      <div className="tfoot">Every trigger goes through Intake and the project's gates, and starts switched off. Open one to edit it, simulate an incoming event or release held proposals.</div>
     </Panel>
   );
 }

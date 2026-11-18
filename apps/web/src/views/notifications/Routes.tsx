@@ -90,7 +90,7 @@ export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
     <div className="stack nt-routes">
       <Panel title={`Who hears about what, in ${p.name}`} flush id="nt-routes-panel" tools={<Btn label="Add route" small icon="plus" kind="primary" id="nt-add" guard={perm} onClick={() => ui.open((close) => <AddRoute p={p} nt={nt} perm={perm} close={close} />)} />}>
         <ListView<Route>
-          id="routes" noun="route" rows={list} rowKey={(r) => r.id} rowId={(r) => `nt-row-${r.id}`}
+          id="routes" noun="route" rows={list} rowKey={(r) => r.id} rowId={(r) => `nt-row-${r.id}`} onRow={(r) => select(r.id)} rowLabel={(r) => `Edit route ${r.id}`}
           text={(r) => `${r.event} ${evName(r.event)} ${r.dest.map((d) => d.target + d.channel).join(" ")}`}
           filters={[{ key: "channel", label: "Channel", options: CHANNELS, test: (r, v) => r.dest.some((d) => d.channel === v) }]}
           empty={<Empty title="No routes yet" text="Add a route to start sending notifications." />}
@@ -107,10 +107,7 @@ export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
             { key: "c", label: "Condition", render: condText },
             { key: "on", label: "On", render: (r) => <Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={locked(r)} label="Enabled" onChange={(v) => void toggleRoute(r, v)} /> },
             { key: "x", label: "", align: "end", render: (r) => (
-              <span className="row">
-                <Btn label="Edit" small kind="ghost" id={`nt-open-${r.id}`} onClick={() => select(r.id)} aria={`Edit route ${r.id}`} />
-                <Btn small kind="ghost" cls="icon" icon="trash" aria="Remove route" id={`nt-rm-${r.id}`} guard={locked(r)} onClick={() => remove(r)} />
-              </span>
+              <Btn small kind="ghost" cls="icon" icon="trash" aria="Remove route" id={`nt-rm-${r.id}`} guard={locked(r)} onClick={() => remove(r)} />
             ) },
           ]}
         />

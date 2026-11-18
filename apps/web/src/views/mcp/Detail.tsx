@@ -4,7 +4,7 @@ import { flowOf, classesOf, type Agent, type Catalog, type McpServer, type McpUs
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useMcpAccessCheck } from "../../api/queries";
-import { Btn, Empty, Field, LockNote, Panel, Select, Tabs, Toggle, ViewHead, type Decision } from "../../ui/primitives";
+import { Btn, Empty, Field, LockNote, Panel, Select, Tabs, ViewHead, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { SENS, classesFor, dec, draftOf, projectsIn, stationsFor, type ScopeDraft } from "./kit";
@@ -78,8 +78,8 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
   if (!srv || !d || !base) {
     return (
       <div className="view cx mcp-view">
-        <ViewHead title="MCP servers" kicker="All lines" />
-        <Panel><Empty title="Nothing to show" text="That server does not exist." action={<Btn label="MCP servers" id="mcp-back" onClick={() => navigate("mcp")} />} /></Panel>
+        <ViewHead title="MCP server" kicker="All lines" />
+        <Panel><Empty title="Nothing to show" text="That server does not exist." action={<Btn label="Work orders" id="mcp-back" onClick={() => navigate("work-orders")} />} /></Panel>
       </div>
     );
   }
@@ -87,8 +87,7 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
   const live = projects.filter((p) => p.status !== "archived");
   const scopeRepos = repos.filter((r) => d.projects === "all" || d.projects.includes(r.project));
   const inScope = projectsIn(projects, d.projects);
-  const strict = srv.sensitivity === "confidential" || srv.sensitivity === "restricted";
-  const enabledIn = projects.filter((p) => (p.mcp ?? []).includes(srv.id));
+    const enabledIn = projects.filter((p) => (p.mcp ?? []).includes(srv.id));
   const mine = calls.filter((u) => u.server === srv.id);
   const changed = srv.tools.filter((t) => t.changed);
   const names = (ids: "all" | string[] | null | undefined, all: string, f: (id: string) => string): string => (ids === "all" || ids == null ? all : ids.length ? ids.map(f).join(", ") : "\u2014");
@@ -172,6 +171,18 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
             </dl>
             {editing ? (
               <div className="form-grid">
+                <fieldset className="mcp-scope" id="mcp-settings">
+                  <legend className="field-label">Server settings</legend>
+                  <Field label="Sensitivity" htmlFor="mcp-sens"><Select id="mcp-sens" options={SENS} value={srv.sensitivity} disabled={ro} onChange={(x) => void ops.updateMCP(srv.id, { sensitivity: x }, v).then((r) => show(r, `${srv.name} is now ${x}.`))} /></Field>
+                  <SwitchRow id="mcp-enabled" label="Enabled" checked={srv.enabled !== false}
+                    decision={ro ? perm : srv.disabledReason && srv.enabled === false ? { allowed: false, reason: "Re-approve the changed definitions to switch it back on." } : null}
+                    onChange={(on) => void ops.updateMCP(srv.id, { enabled: on }, v).then((r) => show(r, on ? `${srv.name} enabled.` : `${srv.name} disabled.`))} />
+                  <p className="small muted">Enabled in projects: {enabledIn.length ? enabledIn.map((p) => p.key).join(", ") : "none"}. Protocol revision {srv.protocolRevision || "not yet discovered"}, last discovery {srv.discoveredAt ? ago(srv.discoveredAt) : "never"}.</p>
+                  <div className="row mcp-danger">
+                    <Btn label="Check again" icon="search" id="mcp-recheck" guard={perm} onClick={() => void ops.rediscoverMCP(srv.id, v).then((r) => show(r))} />
+                    <Btn label="Remove server" kind="danger" icon="x" id="mcp-remove" guard={perm} onClick={remove} />
+                  </div>
+                </fieldset>
                 <p className="muted small">An agent may call this server only where every scope matches. Projects must also enable it in Project config.</p>
                 <ScopeGroup k="projects" label="Projects" items={live.map((p) => ({ id: p.id, label: p.name }))} d={d} ro={ro} allowAll set={setDraft} />
                 <ScopeGroup k="repos" label="Repos" items={scopeRepos.map((r) => ({ id: r.id, label: r.name, mono: true }))} d={d} ro={ro} allowAll set={setDraft} />
@@ -244,20 +255,10 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
                 <dt>URL</dt><dd><span className="mono" title={srv.url}>{srv.url}</span></dd>
                 <dt>Transport</dt><dd>{srv.transport}</dd>
                 <dt>Auth</dt><dd>{srv.auth} <span className="mono">{srv.authMask}</span></dd>
-                <dt>Sensitivity</dt><dd><Select id="mcp-sens" aria-label="Sensitivity" options={SENS} value={srv.sensitivity} disabled={ro} onChange={(x) => void ops.updateMCP(srv.id, { sensitivity: x }, v).then((r) => show(r, `${srv.name} is now ${x}.`))} /></dd>
+                <dt>Sensitivity</dt><dd>{srv.sensitivity}</dd>
                 <dt>Health</dt><dd><span className={`chip ${healthTone(st)}`}>{st}</span>{srv.healthDetail ? <div className="neg small">{srv.healthDetail}</div> : null}</dd>
-                <dt>Write gate</dt><dd><SwitchRow id="mcp-writegate" label="Writes need approval" hint={`${strict ? "Confidential and restricted servers: " : ""}Each write call needs the station's pre-authorisation for the work order and attempt, and is never retried. It cannot be switched off.`} checked decision={WRITE_ALWAYS} /></dd>
-                <dt>Enabled</dt><dd><Toggle id="mcp-enabled" checked={srv.enabled !== false} label="Enabled"
-                  decision={ro ? perm : srv.disabledReason && srv.enabled === false ? { allowed: false, reason: "Re-approve the changed definitions to switch it back on." } : null}
-                  onChange={(on) => void ops.updateMCP(srv.id, { enabled: on }, v).then((r) => show(r, on ? `${srv.name} enabled.` : `${srv.name} disabled.`))} /></dd>
-                <dt>Enabled in projects</dt><dd>{enabledIn.length ? enabledIn.map((p) => p.key).join(", ") : "none"}</dd>
-                <dt>Protocol revision</dt><dd className="mono">{srv.protocolRevision || "not yet discovered"}</dd>
-                <dt>Last discovery</dt><dd>{srv.discoveredAt ? ago(srv.discoveredAt) : "never"}</dd>
+                <dt>Write gate</dt><dd><SwitchRow id="mcp-writegate" label="Writes need approval" checked onChange={() => ui.toast(WRITE_ALWAYS.reason, "warn")} /></dd>
               </dl>
-              <div className="row mcp-danger">
-                <Btn label="Check again" icon="search" id="mcp-recheck" guard={perm} onClick={() => void ops.rediscoverMCP(srv.id, v).then((r) => show(r))} />
-                <Btn label="Remove server" kind="danger" icon="x" id="mcp-remove" guard={perm} onClick={remove} />
-              </div>
             </div>
           </Panel>
         )}

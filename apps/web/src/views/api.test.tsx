@@ -76,7 +76,7 @@ function mount() {
   return render(<QueryClientProvider client={qc}><OverlayProvider><ApiView /></OverlayProvider></QueryClientProvider>);
 }
 const tab = async (name: string) => fireEvent.click(await byId(`api-tab-${name === "ref" ? "reference" : name === "play" ? "reference" : name}`));
-const openTrig = async (id = "TR-1") => fireEvent.click(await byId(`api-tr-open-${id}`));
+const openTrig = async (id = "TR-1") => fireEvent.click(await byId(`api-tr-row-${id}`)); // the row opens the drawer; the name is plain text
 beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -152,55 +152,17 @@ describe("API & triggers: keys", () => {
 });
 
 describe("API & triggers: reference, playground, log, limits", () => {
-  it("documents the real public API with copyable curl requests, and the real webhook signature", async () => {
+  it("reference is the Endpoints table and an Example with a full-width Copy: no per-endpoint cards, base URL callout or playground", async () => {
     setup();
     mount();
     await tab("ref");
-    expect((await screen.findAllByText("/api/v1/projects/{project}/work-orders")).length).toBeGreaterThan(1);
+    expect((await screen.findAllByText("/api/v1/projects/{project}/work-orders")).length).toBe(1);
     expect((await byId("api-ref-endpoints")).textContent).toContain("Purpose");
     expect((await byId("api-ref-example")).textContent).toContain("curl -X POST");
-    expect(screen.getAllByText("/api/v1/work-orders/{id}/messages").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("/api/v1/triggers/{id}/fire").length).toBeGreaterThan(0);
-    const curl = (await byId("api-ref-copy-0")).closest(".api-code")!.querySelector("pre")!.textContent!;
-    expect(curl).toContain("-H \"Authorization: Bearer $GANTRY_KEY\"");
-    expect(curl).toContain("Idempotency-Key");
-    expect(screen.getAllByText("60/min").length).toBeGreaterThan(0);
-    expect((await byId("api-ref-hook")).closest(".api-code")!.querySelector("pre")!.textContent).toContain("/hooks/trigger/<connection id>");
-    expect((await byId("api-ref-sig")).closest(".api-code")!.querySelector("pre")!.textContent).toContain("X-Gantry-Signature");
-  });
-
-  it("the playground sends a real request with the pasted key as an external client would, and shows the response", async () => {
-    const calls = setup({ "POST /api/v1/projects/payments/work-orders": () => ({ body: { ok: true, msg: "WO-2500 submitted to Payments Platform as Feature.", id: "WO-2500" } }) });
-    mount();
-    await tab("play");
-    const send = await byId("api-pg-send");
-    expect(send.getAttribute("aria-disabled")).toBe("true");
-    expect(send.getAttribute("data-reason")).toMatch(/Paste a key/);
-    const secret = "gk_" + "ab12cd34" + "_" + "y".repeat(32);
-    fireEvent.change(await byId("api-pg-secret"), { target: { value: secret } });
-    await waitFor(() => expect(document.getElementById("api-pg-send")!.getAttribute("aria-disabled")).toBeNull());
-    expect((await byId("api-pg-idem-gen")).tagName).toBe("BUTTON");
-    fireEvent.click(await byId("api-pg-idem-gen"));
-    fireEvent.click(await byId("api-pg-send"));
-    expect((await byId("api-pg-response")).textContent).toContain("WO-2500");
-    const c = calls.find((x) => x.method === "POST" && x.path === "/api/v1/projects/payments/work-orders")!;
-    expect(c.headers.authorization).toBe(`Bearer ${secret}`);
-    expect(c.credentials).toBe("omit"); // no cookie: a wrong key can never sign the person out
-    expect(c.headers["idempotency-key"]).toMatch(/^pg-/);
-    expect(c.body).toMatchObject({ repo: "payments-api", priority: "P2", title: "Retry failed payout webhooks with backoff" });
-    expect(document.getElementById("api-pg-open")?.textContent).toBe("Open WO-2500");
-    expect(document.querySelector(".api-pre")!.textContent).not.toContain(secret); // the preview shows the prefix only
-  });
-
-  it("a refused request shows its status and message without leaving the screen", async () => {
-    setup({ "POST /api/v1/projects/payments/work-orders": () => ({ status: 401, body: { ok: false, msg: "The API key is not valid." } }) });
-    mount();
-    await tab("play");
-    fireEvent.change(await byId("api-pg-secret"), { target: { value: "gk_" + "00000000_" + "z".repeat(30) } });
-    fireEvent.click(await byId("api-pg-send"));
-    expect(await screen.findByText("The API key is not valid.", { selector: ".api-resline span" })).toBeTruthy();
-    expect(document.querySelector(".api-resline .outcome")!.textContent).toBe("✕ 401");
-    expect(document.getElementById("api-pg-open")).toBeNull();
+    expect(document.querySelectorAll(".api-ep").length).toBe(0);
+    expect(document.getElementById("api-pg-send")).toBeNull();
+    expect(document.querySelectorAll("#api-tab-panel .panel").length).toBe(2);
+    expect(document.getElementById("api-ref-example-copy")!.parentElement!.className).toContain("stack");
   });
 
   it("the request log is a 'Last requests' panel: relative times, key id, status chips, Search and a Status filter", async () => {
@@ -223,18 +185,18 @@ describe("API & triggers: reference, playground, log, limits", () => {
     const calls = setup({ "PATCH /api/v1/api-config": () => ({ body: { ok: true, msg: "API settings saved.", version: 4 } }) });
     mount();
     await tab("limits");
-    expect((await byId("api-lim-triggers") as HTMLInputElement).checked).toBe(false);
+    expect(document.getElementById("api-lim-triggers")).toBeNull(); // no helper hints and no master-switch row in the Limits panel
+    expect((await byId("api-limits-panel")).querySelectorAll(".hint, .field-hint").length).toBe(0);
     expect((await byId("api-limits-panel")).textContent).toContain("HMAC-SHA256"); // read-only: the only scheme the delivery implements
     fireEvent.change(await byId("api-lim-rate"), { target: { value: "0" } });
     fireEvent.click(await byId("api-lim-save"));
     expect(await screen.findByText("Requests per minute must be at least 1.")).toBeTruthy();
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
     fireEvent.change(await byId("api-lim-rate"), { target: { value: "120" } });
-    fireEvent.click(await byId("api-lim-triggers"));
     fireEvent.click(await byId("api-lim-save"));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
     const p = calls.find((c) => c.method === "PATCH")!;
-    expect(p.body).toEqual({ rateLimit: 120, burst: 20, idempotencyHours: 24, webhookSigning: "HMAC-SHA256", triggersEnabled: true });
+    expect(p.body).toEqual({ rateLimit: 120, burst: 20, idempotencyHours: 24, webhookSigning: "HMAC-SHA256", triggersEnabled: false });
     expect(p.headers["if-match"]).toBe("3");
   });
 
@@ -267,6 +229,16 @@ describe("API & triggers: triggers", () => {
     const p = calls.find((c) => c.method === "PATCH")!;
     expect(p.body).toEqual({ enabled: true });
     expect(p.headers["if-match"]).toBe("2");
+  });
+
+  it("the organisation's master switch for triggers sits in the Triggers panel and saves with the version", async () => {
+    const calls = setup({ "PATCH /api/v1/api-config": () => ({ body: { ok: true, msg: "API settings saved.", version: 4 } }) });
+    mount();
+    await tab("triggers");
+    expect(document.querySelector("#api-triggers-panel .linkish")).toBeNull(); // trigger names are plain
+    fireEvent.click(await byId("api-tr-master-sw"));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && c.path === "/api/v1/api-config")).toBe(true));
+    expect(calls.find((c) => c.method === "PATCH")!.body).toMatchObject({ triggersEnabled: true });
   });
 
   it("creates a trigger switched off from a source connection", async () => {

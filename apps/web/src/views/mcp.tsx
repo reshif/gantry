@@ -50,7 +50,7 @@ export default function McpView() {
 
   const exposed = servers.reduce((n, m) => n + m.tools.filter((t) => t.allowed).length, 0);
   const total = servers.reduce((n, m) => n + m.tools.length, 0);
-  const denied = calls.filter((u) => u.outcome === "denied").length;
+  const gated = calls.filter((u) => u.outcome === "gated").length;
   const stateOf = (m: McpServer): string => (m.enabled === false ? "disabled" : m.health);
 
   const registry = (
@@ -58,7 +58,7 @@ export default function McpView() {
       {() => (
         <Panel title="MCP servers" flush id="mcp-registry">
           <ListView<McpServer>
-            id="mcp" noun="server" rows={servers} rowKey={(m) => m.id} rowId={(m) => `mcp-row-${m.id}`}
+            id="mcp" noun="server" rows={servers} rowKey={(m) => m.id} rowId={(m) => `mcp-row-${m.id}`} onRow={(m) => navigate("mcp", m.id)}
             text={(m) => `${m.name} ${m.url} ${m.transport}`}
             filters={[
               { key: "health", label: "Health", options: ["healthy", "degraded", "down", "disabled"], test: (m, v) => (v === "disabled" ? m.enabled === false : v === "down" ? down(m) : m.enabled !== false && m.health === v) },
@@ -86,10 +86,10 @@ export default function McpView() {
         actions={<Btn label="Register server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} onAdded={(id) => navigate("mcp", id)} />)} />}
       />
       <StatRow id="mcp-stats">
-        <Stat label="Servers" value={qState(serversQ, (d) => String(d.length))} />
+        <Stat label="Servers" value={qState(serversQ, (d) => String(d.length))} tone="info" />
         <Stat label="Healthy" value={qState(serversQ, () => String(servers.filter((m) => m.enabled !== false && m.health === "healthy").length))} tone="done" />
         <Stat label="Tools exposed" value={qState(serversQ, () => String(exposed))} sub={`of ${total}`} />
-        <Stat label="Calls logged" value={qState(callsQ, () => String(calls.length))} sub={`${denied} denied`} tone="wait" />
+        <Stat label="Calls logged" value={qState(callsQ, () => String(calls.length))} sub={`${gated} gated`} tone="wait" />
       </StatRow>
       <Tabs idPrefix="mcp-tab" items={[{ id: "registry", label: "Registry", count: servers.length }, { id: "usage", label: "Usage log", count: calls.length }]} active={tab} onChange={setTab} />
       <div id="mcp-tab-panel" role="tabpanel" aria-labelledby={`mcp-tab-${tab}`}>

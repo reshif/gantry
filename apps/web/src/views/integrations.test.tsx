@@ -82,7 +82,7 @@ describe("Integrations screen", () => {
     expect(table.textContent).toContain("failing");
     expect(table.textContent).toContain("disconnected");
     expect(table.textContent).toContain("Payments Platform");
-    expect(document.getElementById("int-attn-int-gh-1")?.textContent).toBe("GitHub org");
+    expect(document.getElementById("int-attn-int-gh-1")).toBeNull(); // no attention banner above the grid
     expect(text()).toContain("Catalogue3types");
     // the prototype's header has no actions: connecting is from the Catalogue tab, building from the Custom builder tab
     expect(document.getElementById("int-add")).toBeNull();
@@ -94,11 +94,11 @@ describe("Integrations screen", () => {
     setup();
     mount();
     fireEvent.click(await byId("int-tab-catalogue"));
-    await waitFor(() => expect(window.location.search).toContain("tab=catalogue"));
+    await waitFor(() => expect(window.location.hash).toContain("?tab=catalogue"));
     fireEvent.click(await byId("int-tab-builder"));
-    await waitFor(() => expect(window.location.search).toContain("tab=builder"));
+    await waitFor(() => expect(window.location.hash).toContain("?tab=builder"));
     cleanup();
-    window.history.replaceState(null, "", "/?tab=nonsense");
+    window.history.replaceState(null, "", "/#/integrations?tab=nonsense");
     mount();
     await byId("int-table");
   });

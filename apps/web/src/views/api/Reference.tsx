@@ -1,8 +1,7 @@
 /** The Endpoints tab (legacy refTab): the public API with copyable curl requests and sample responses, and how to verify outbound webhook signatures. */
 import { Btn, Panel, useCopy } from "../../ui/primitives";
 import { DataTable } from "../../ui/DataTable";
-import { PlayTab } from "./Playground";
-import { BASE, CodeBlock, type ApiData } from "./kit";
+import { BASE, type ApiData } from "./kit";
 
 interface Endpoint { m: string; p: string; d: string; scope: string; body?: unknown; res: unknown; idem?: boolean }
 
@@ -22,32 +21,19 @@ export const curl = (e: Endpoint): string => {
   let s = `curl -X ${e.m} ${url} \\\n  -H "Authorization: Bearer $GANTRY_KEY"`;
   if (e.body) s += ` \\\n  -H "Content-Type: application/json"`;
   if (e.idem) s += ` \\\n  -H "Idempotency-Key: 6f1c-refund-42"`;
-  if (e.body) s += ` \\\n  -d '${JSON.stringify(e.body, null, 2).replace(/\n/g, "\n  ")}'`;
+  if (e.body) s += ` \\\n  -d '${JSON.stringify(e.body)}'`;
   return s;
 };
 
-const SIG = `// Node.js: Gantry signs each outbound webhook delivery.
-// X-Gantry-Signature: t=<unix seconds>,v1=<hex>, where v1 = HMAC-SHA256(secret, \`\${t}.\${rawBody}\`)
-const [t, v1] = req.get("X-Gantry-Signature").split(",").map((p) => p.split("=")[1]);
-const mac = crypto.createHmac("sha256", process.env.GANTRY_WEBHOOK_SECRET).update(\`\${t}.\${rawBody}\`).digest("hex");
-const ok = mac.length === v1.length && crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(v1)) && Math.abs(Date.now() / 1000 - Number(t)) < 300;`;
+const purpose = (e: Endpoint): string => e.d.split(/(?<=\.)\s/)[0]!.replace(/\.$/, "").split(": ")[0]!.replace(/^The full work order record.*$/, "Read the full work order record");
 
-const HOOK = `# A custom connection that is a trigger source posts events here (signed like Gantry's own webhooks, five-minute window).
-BODY='{"id":"JIRA-77","kind":"issue","repo":"payments-api","title":"Settlement report is empty on Mondays","labels":["gantry"],"author":"tomas-acme"}'
-T=$(date +%s); SIG=$(printf '%s.%s' "$T" "$BODY" | openssl dgst -sha256 -hmac "$CONNECTION_SECRET" -hex | sed 's/^.* //')
-curl -X POST ${BASE}/hooks/trigger/<connection id> \\
-  -H "Content-Type: application/json" -H "X-Gantry-Signature: t=$T,v1=$SIG" -d "$BODY"`;
-
-const purpose = (e: Endpoint): string => e.d.split(/(?<=\.)\s/)[0]!.replace(/\.$/, "");
-
-export function RefTab({ d }: { d: ApiData }) {
-  const cfg = d.cfg;
+export function RefTab({ d: _d }: { d: ApiData }) {
   const copy = useCopy();
   const example = curl(ENDPOINTS[0]!);
   return (
     <div className="stack">
       <Panel title="Endpoints" flush id="api-ref-endpoints">
-        <DataTable id="api-ref-table" caption="Endpoints" rows={ENDPOINTS} rowKey={(e) => e.m + e.p} columns={[
+        <DataTable id="api-ref-table" caption="Endpoints" rows={ENDPOINTS} rowKey={(e) => e.m + e.p} sortSelect={false} columns={[
           { key: "m", label: "Method", render: (e) => <span className="mono">{e.m}</span> },
           { key: "p", label: "Path", render: (e) => <span className="mono">{e.p}</span> },
           { key: "d", label: "Purpose", render: purpose },
@@ -56,31 +42,9 @@ export function RefTab({ d }: { d: ApiData }) {
       <Panel title="Example" id="api-ref-example">
         <div className="stack">
           <pre className="pre" aria-label="Example request">{example}</pre>
-          <div><Btn label="Copy" small id="api-ref-example-copy" onClick={() => copy(example)} /></div>
+          <Btn label="Copy" small id="api-ref-example-copy" onClick={() => copy(example)} />
         </div>
       </Panel>
-      <div className="callout">
-        <b>Base URL {BASE}</b>
-        Bearer keys from the Keys tab. Rate limit <span className="mono">{(cfg?.rateLimit ?? 60) + "/min"}</span> per key with a burst of <span className="mono">{String(cfg?.burst ?? 20)}</span> (429 with Retry-After
-        over it); idempotency keys are remembered for <span className="mono">{(cfg?.idempotencyHours ?? 24) + "h"}</span>. Every request is recorded on the Request log tab.
-      </div>
-      {ENDPOINTS.map((e, i) => (
-        <section key={e.p + e.m} className="panel api-ep" aria-label={`${e.m} ${e.p}`}>
-          <div className="api-ep-head">
-            <span className={`api-m api-m-${e.m.toLowerCase()}`}>{e.m}</span>
-            <span className="mono api-path">{e.p}</span>
-            <span className="tag">{e.scope}</span>
-          </div>
-          <p className="api-ep-d">{e.d}</p>
-          <div className="api-ep-code">
-            <CodeBlock id={`api-ref-copy-${i}`} text={curl(e)} label="Request" />
-            <CodeBlock id={`api-ref-res-${i}`} text={JSON.stringify(e.res, null, 2)} label="Response (abridged)" />
-          </div>
-        </section>
-      ))}
-      <Panel title="Sending events from a custom source"><CodeBlock id="api-ref-hook" text={HOOK} label="POST /hooks/trigger/{connection}: kind is issue, comment or ci; id makes a replay harmless" /></Panel>
-      <Panel title="Verifying webhook signatures"><CodeBlock id="api-ref-sig" text={SIG} label={`Signature check (${cfg?.webhookSigning ?? "HMAC-SHA256"})`} /></Panel>
-      <PlayTab d={d} />
     </div>
   );
 }

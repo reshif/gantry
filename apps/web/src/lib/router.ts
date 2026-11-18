@@ -27,7 +27,8 @@ const dec = (v: string): string => {
 };
 
 export function parseHash(hash: string): RouteLocation {
-  const raw = hash.replace(/^#\/?/, "");
+  // a prototype-style link carries its page state after a `?` in the hash (`#/integrations?tab=catalogue`): the route is what comes before it
+  const raw = hash.replace(/^#\/?/, "").split("?")[0] ?? "";
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {

@@ -356,8 +356,8 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, cru
 }
 
 /** One stat tile: a quiet label, a big value, an optional note. Put them in <StatRow>. `value` may be the result of qState(). */
-export function Stat({ label, value, sub, tone, icon, id, action }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done"; icon?: string; id?: string; action?: ReactNode }) {
-  const t = tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : "";
+export function Stat({ label, value, sub, tone, icon, id, action }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: "wait" | "block" | "done" | "info"; icon?: string; id?: string; action?: ReactNode }) {
+  const t = tone === "wait" ? "warn" : tone === "block" ? "bad" : tone === "done" ? "ok" : tone === "info" ? "info" : "";
   return (
     <div className={`stat${t ? ` ${t}` : ""} stat-tile${tone ? ` stat-${tone}` : ""}`} id={id}>
       <div className="micro stat-lbl">

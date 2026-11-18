@@ -131,7 +131,7 @@ describe("MCP servers screen", () => {
     expect((await byId("mcp-open-mcp-docs-1a2b")).getAttribute("href")).toBe("#mcp/mcp-docs-1a2b");
     const head = document.getElementById("mcp-stats")!.textContent!;
     expect(head).toContain("Servers2");
-    expect(head).toContain("denied");
+    expect(head).toContain("gated"); // the prototype's sub: how many calls waited at a gate
     expect(head).toContain("Calls logged");
     expect(document.getElementById("mcp-add")!.textContent).toBe("Register server");
     expect(document.getElementById("mcp-tab-registry")).toBeTruthy();
@@ -147,12 +147,15 @@ describe("MCP servers screen", () => {
     expect(document.querySelector("nav.kicker")!.textContent).toContain("MCP servers");
     expect(document.body.textContent).toContain("https://mcp.example.net/mcp");
     const kv = (await byId("mcp-server")).textContent!;
-    expect(kv).toContain("2025-06-18");
+    expect(kv).not.toContain("2025-06-18"); // protocol revision and last discovery are not on the overview
     expect(kv).toContain("mcp-upstream-••••••••6789");
     const wg = document.getElementById("mcp-writegate") as HTMLInputElement;
     expect(wg.checked).toBe(true);
-    expect(wg.getAttribute("aria-disabled")).toBe("true");
-    expect(wg.getAttribute("data-reason")).toMatch(/always need a station pre-authorisation/);
+    expect(wg.getAttribute("aria-disabled")).toBeNull(); // it toggles as in the prototype; the rail stays on and the toast says why
+    fireEvent.click(wg);
+    expect(await screen.findByText(/always need a station pre-authorisation/)).toBeTruthy();
+    expect((document.getElementById("mcp-writegate") as HTMLInputElement).checked).toBe(true);
+    for (const id of ["mcp-enabled", "mcp-remove", "mcp-recheck", "mcp-sens"]) expect(document.getElementById(id), id).toBeNull();
     expect(document.body.textContent).toContain("Writes need approval");
   });
 
@@ -226,14 +229,7 @@ describe("MCP servers screen", () => {
     openSrv("mcp-docs-1a2b");
     mount();
     expect(await screen.findByText(/Read-only for you: mcp server settings/i)).toBeTruthy();
-    for (const id of ["mcp-remove", "mcp-recheck"]) {
-      const b = await byId(id);
-      expect(b.getAttribute("aria-disabled"), id).toBe("true");
-      expect(b.getAttribute("data-reason"), id).toMatch(/Needs Factory Admin/);
-    }
-    expect((document.getElementById("mcp-sens") as HTMLSelectElement).disabled).toBe(true);
-    fireEvent.click(await byId("mcp-remove"));
-    expect(document.getElementById("mcp-remove-go")).toBeNull();
+    expect(document.getElementById("mcp-remove")).toBeNull();
     fireEvent.click(await byId("mcp-dtab-tools"));
     expect((await byId("mcp-tool-0")).getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(await byId("mcp-dtab-scope"));
@@ -257,10 +253,12 @@ describe("MCP servers screen", () => {
     expect(note.textContent).toContain("Definition of search changed");
     fireEvent.click(await byId("mcp-dtab-tools"));
     expect((await byId("mcp-tools")).textContent).toContain("changed");
-    fireEvent.click(await byId("mcp-dtab-overview"));
-    const en = document.getElementById("mcp-enabled") as HTMLInputElement;
+    fireEvent.click(await byId("mcp-dtab-scope"));
+    fireEvent.click(await byId("mcp-sc-edit"));
+    const en = (await byId("mcp-enabled")) as HTMLInputElement;
     expect(en.checked).toBe(false);
     expect(en.getAttribute("data-reason")).toMatch(/Re-approve/);
+    fireEvent.click(await byId("mcp-dtab-overview"));
     fireEvent.click(await byId("mcp-approve"));
     fireEvent.click(await byId("mcp-approve-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/approve"))).toBe(true));
@@ -269,8 +267,9 @@ describe("MCP servers screen", () => {
 
   it("Check again rediscovers through the edge and reports what it found", async () => {
     const calls = setup({ "POST /api/v1/mcp/servers/mcp-docs-1a2b/discover": () => ok({ msg: "Docs wiki answered with 3 tools.", server: DOCS }) });
-    openSrv("mcp-docs-1a2b", "overview");
+    openSrv("mcp-docs-1a2b", "scope");
     mount();
+    fireEvent.click(await byId("mcp-sc-edit"));
     fireEvent.click(await byId("mcp-recheck"));
     expect(await screen.findByText("Docs wiki answered with 3 tools.")).toBeTruthy();
     expect(calls.find((c) => c.path.endsWith("/discover"))!.headers["if-match"]).toBe("4");
@@ -323,8 +322,9 @@ describe("MCP servers screen", () => {
 
   it("Remove: names the agents and projects that lose it, then DELETEs with the version", async () => {
     const calls = setup({ "DELETE /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ msg: "Docs wiki removed." }) });
-    openSrv("mcp-docs-1a2b", "overview");
+    openSrv("mcp-docs-1a2b", "scope");
     mount();
+    fireEvent.click(await byId("mcp-sc-edit"));
     fireEvent.click(await byId("mcp-remove"));
     const go = await byId("mcp-remove-go");
     const dlg = go.closest("[role=dialog], .dialog, .dlg")!;

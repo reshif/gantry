@@ -101,7 +101,7 @@ describe("Integrations", () => {
     expect(within(table).getByText("Staging Slack")).toBeTruthy();
     expect(within(table).getAllByText("All projects").length).toBe(2);
     expect(within(table).getByText("disconnected")).toBeTruthy();
-    expect((await byId("int-attn-int-off")).textContent).toBe("Staging Slack");
+    expect(document.getElementById("int-attn-int-off")).toBeNull(); // no attention banner above the grid: the stat and the chip say it
     expect(document.body.textContent).not.toMatch(/simulated/i);
     fireEvent.click(await byId("int-open-int-slack"));
     expect((await screen.findAllByText("xoxb-••••••••aaaa")).length).toBeGreaterThan(0); // a masked secret, never the value
@@ -254,7 +254,7 @@ describe("Notifications", () => {
     expect(c.body).toEqual({ enabled: false });
     expect(c.headers["if-match"]).toBe("2");
     // Edit the target in the editor, save.
-    fireEvent.click(await byId("nt-open-NR-1"));
+    fireEvent.click(await byId("nt-row-NR-1"));
     fireEvent.change(await byId("nt-dest-t-0"), { target: { value: "#pay-approvals" } });
     fireEvent.click(await byId("nt-save"));
     await waitFor(() => expect(calls.filter((x) => x.method === "PATCH").length).toBe(2));
@@ -270,7 +270,7 @@ describe("Notifications", () => {
   it("a stale version is refused by the server and shown, not swallowed", async () => {
     setup({ "PATCH /api/v1/projects/payments/routes/NR-1": () => ({ status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } }) });
     mount(<NotificationsView />);
-    fireEvent.click(await byId("nt-open-NR-1"));
+    fireEvent.click(await byId("nt-row-NR-1"));
     fireEvent.change(await byId("nt-dest-t-0"), { target: { value: "#other" } });
     fireEvent.click(await byId("nt-save"));
     expect((await screen.findAllByText(/changed since you loaded it/i)).length).toBeGreaterThan(0);
@@ -282,14 +282,14 @@ describe("Notifications", () => {
     const en = await byId("nt-en-NR-1");
     await waitFor(() => expect(en.getAttribute("data-reason")).toMatch(/No role holds notify.edit/));
     expect((await byId("nt-add")).getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(await byId("nt-open-NR-1"));
+    fireEvent.click(await byId("nt-row-NR-1"));
     expect((await byId("nt-save")).getAttribute("aria-disabled")).toBe("true");
   });
 
   it("draws the preview from the server's rendering and shows the approve note when the connection does not allow chat approval", async () => {
     setup();
     mount(<NotificationsView />);
-    fireEvent.click(await byId("nt-open-NR-1"));
+    fireEvent.click(await byId("nt-row-NR-1"));
     expect(await screen.findByText("G2 Spec approved is waiting on WO-1042")).toBeTruthy();
     expect(screen.getByText("Release Manager · 1 needed")).toBeTruthy();
     expect(await screen.findByText(/Approve from card is off for Acme Slack/)).toBeTruthy();
@@ -299,7 +299,7 @@ describe("Notifications", () => {
   it("queues a test send to one destination and says where to see the outcome", async () => {
     const calls = setup({ "POST /api/v1/projects/payments/routes/test": () => ({ body: { ok: true, msg: "Test to #pay-gates queued on Acme Slack. The delivery log shows the outcome.", delivery: { id: "DLV-10" } } }) });
     mount(<NotificationsView />);
-    fireEvent.click(await byId("nt-open-NR-1"));
+    fireEvent.click(await byId("nt-row-NR-1"));
     fireEvent.click(await byId("nt-test-0"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/projects/payments/routes/test")).toBe(true));
     expect(calls.find((c) => c.path === "/api/v1/projects/payments/routes/test")!.body).toEqual({ dest: { channel: "slack", target: "#pay-gates", integration: "int-slack" }, event: "gate.waiting" });
@@ -311,52 +311,39 @@ describe("Notifications", () => {
     mount(<NotificationsView />);
     fireEvent.click(await byId("nt-tab-log"));
     const row = await byId("nt-dl-DLV-9");
-    expect(within(row).getByText(/channel_not_found/)).toBeTruthy();
+    expect(within(row).getByText("failed").getAttribute("title")).toMatch(/channel_not_found/); // the reason is on the chip, not a second line
+    expect(row.textContent).not.toMatch(/tries/);
     expect(within(row).getByText("failed")).toBeTruthy();
     expect(document.getElementById("nt-retry-DLV-8")).toBeNull(); // a delivered one is not retried
     fireEvent.click(await byId("nt-retry-DLV-9"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/deliveries/DLV-9/retry" && c.method === "POST")).toBe(true));
   });
 
-  it("repo overrides list what the repo adds and remove one with the repo's version", async () => {
-    const calls = setup({ "PATCH /api/v1/repos/payments-api/config": () => ({ body: { ok: true, msg: "Saved." } }) });
+  it("repo overrides is one list: a link to the repo dossier, no add form and no Remove", async () => {
+    setup();
     mount(<NotificationsView />);
-    fireEvent.click(await screen.findByText("Repo overrides"));
+    fireEvent.click(await byId("nt-tab-overrides"));
     expect((await screen.findAllByText("acme/payments-api")).length).toBeGreaterThan(0);
-    fireEvent.click(await byId("nt-ov-rm-payments-api-0"));
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/repos/payments-api/config")).toBe(true));
-    const c = calls.find((x) => x.path === "/api/v1/repos/payments-api/config")!;
-    expect(c.body).toEqual({ notifyOverrides: [] });
-    expect(c.headers["if-match"]).toBe("5");
+    expect(document.getElementById("nt-ov-add")).toBeNull();
+    expect(document.getElementById("nt-ov-rm-payments-api-0")).toBeNull();
+    expect(document.querySelector("#nt-overrides a.pri")!.getAttribute("href")).toContain("dossier/payments-api");
   });
 
-  it("card templates: save a custom card, and deleting one that a route uses is refused with the reason", async () => {
-    const calls = setup({ "POST /api/v1/card-templates": () => ({ body: { ok: true, msg: "Tight gate card saved.", template: { id: "CT-1" } } }) });
+  it("card templates is exactly the three card panels: no templates table, new-template form or preview", async () => {
+    setup();
     mount(<NotificationsView />);
-    fireEvent.click(await screen.findByText("Card templates"));
-    expect(await screen.findByText("Tight gate card")).toBeTruthy();
-    fireEvent.click(await byId("nt-ct-f-repo"));
-    fireEvent.click(await byId("nt-ct-save"));
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/card-templates")).toBe(true));
-    expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/card-templates")!.body).toMatchObject({ id: "CT-1", name: "Tight gate card", kind: "gate", project: "payments", actions: ["open"], fields: ["title", "repo"] });
-  });
-
-  it("duplicating a built-in card keeps its kind and buttons, and the copy is what the editor shows next", async () => {
-    const calls = setup({ "POST /api/v1/card-templates": () => ({ body: { ok: true, msg: "Saved.", template: { id: "CT-2", name: "Gate request (copy)", kind: "gate", fields: ["title", "repo", "class", "priority", "approvers", "link", "actions"], actions: ["approve", "reject", "open"] } } }) });
-    mount(<NotificationsView />);
-    fireEvent.click(await screen.findByText("Card templates"));
-    fireEvent.click(await byId("nt-ct-dup-gate"));
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/card-templates")).toBe(true));
-    expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/card-templates")!.body).toMatchObject({ name: "Gate request (copy)", kind: "gate", actions: ["approve", "reject", "open"] });
-    await waitFor(() => expect((document.getElementById("nt-ct-kind") as HTMLSelectElement).value).toBe("gate"));
-    expect((document.getElementById("nt-ct-name") as HTMLInputElement).value).toBe("Gate request (copy)");
+    fireEvent.click(await byId("nt-tab-templates"));
+    expect(await byId("nt-card-gate")).toBeTruthy();
+    expect(document.getElementById("nt-ct-table")).toBeNull();
+    expect(document.getElementById("nt-ct-save")).toBeNull();
+    expect(document.querySelectorAll(".panel").length).toBe(3);
   });
 
   it("holds the tab in the URL; the tab strip is Routes, Card templates (3), Repo overrides, Delivery log", async () => {
     setup();
     mount(<NotificationsView />);
     fireEvent.click(await byId("nt-tab-log"));
-    await waitFor(() => expect(window.location.search).toContain("tab=log"));
+    await waitFor(() => expect(window.location.hash).toContain("?tab=log")); // the prototype form, #/notifications?tab=log
     expect(document.getElementById("nt-tab-templates")!.textContent).toContain("3");
     expect(document.getElementById("nt-tab-overrides")!.textContent).toBe("Repo overrides");
   });
@@ -402,8 +389,8 @@ describe("Notifications", () => {
     mount(<NotificationsView />);
     fireEvent.click(await byId("nt-tab-overrides"));
     const panel = await byId("nt-overrides");
-    expect(panel.textContent).toContain("gate.waiting");
-    expect(panel.querySelector("a.pri")!.getAttribute("href")).toContain("onboarding/payments-api");
+    await waitFor(() => expect(panel.textContent).toContain("gate.waiting"));
+    expect(panel.querySelector("a.pri")!.getAttribute("href")).toContain("dossier/payments-api");
     cleanup();
     window.history.replaceState(null, "", "/?tab=overrides");
     setup({ "GET /api/v1/projects/payments/repos": () => ({ body: [] }) });

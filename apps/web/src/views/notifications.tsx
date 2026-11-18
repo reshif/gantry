@@ -37,7 +37,7 @@ export default function NotificationsView() {
     <div className="view cx nt-view">
       <ViewHead title="Notifications" kicker={p.key} sub={`Routes, cards and the delivery log for ${p.name}.`} />
       <StatRow id="nt-stats">
-        <Stat label="Routes" value={String(p.notifications.length)} sub={`${p.notifications.filter((r) => r.enabled).length} on`} />
+        <Stat label="Routes" value={String(p.notifications.length)} sub={`${p.notifications.filter((r) => r.enabled).length} on`} tone="info" />
         <Stat label="Delivered" value={qState(logQ, () => String(delivered))} sub="last 24 h" tone="done" />
         <Stat label="Failed" value={qState(logQ, () => String(failed))} sub="need a retry" tone={failed ? "block" : undefined} />
         <Stat label="Channels" value={String(new Set(p.notifications.flatMap((r) => r.dest.map((d) => d.channel))).size)} />
@@ -49,7 +49,7 @@ export default function NotificationsView() {
         { id: "log", label: "Delivery log", count: logQ.data ? log.length : null },
       ]} />
       <div id="nt-tab-panel" role="tabpanel" aria-labelledby={`nt-tab-${tab}`}>
-        {tab === "overrides" ? <OverridesTab p={p} nt={nt} /> : tab === "log" ? <DeliveriesTab p={p} nt={nt} /> : tab === "templates" ? <CardsTab p={p} nt={nt} perm={perm} /> : <RoutesTab key={p.id} p={p} nt={nt} perm={perm} />}
+        {tab === "overrides" ? <OverridesTab p={p} nt={nt} /> : tab === "log" ? <DeliveriesTab p={p} nt={nt} /> : tab === "templates" ? <CardsTab p={p} /> : <RoutesTab key={p.id} p={p} nt={nt} perm={perm} />}
       </div>
     </div>
   );

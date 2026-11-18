@@ -13,9 +13,9 @@ import { Async, qState } from "../ui/async";
 import { Dialog } from "../ui/Overlay";
 import { useUI } from "../ui/overlay-context";
 import { AddIntegration } from "./integrations/AddDialog";
-import { EditIntegration, InstanceDrawer, RemoveIntegration, ToggleIntegration, TypeDrawer } from "./integrations/Instance";
+import { EditIntegration, InstanceDrawer, RemoveIntegration, ToggleIntegration } from "./integrations/Instance";
 import { CatalogueTab, ConnectedTab, CustomTab } from "./integrations/Tabs";
-import { statusOf, useIntegrationData, type TypeRow } from "./integrations/kit";
+import { statusOf, useIntegrationData } from "./integrations/kit";
 import { ops } from "../api/ops";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -57,18 +57,15 @@ export default function IntegrationsView() {
   const addDialog = (typeId: string | null): void => {
     ui.open((close) => <AddIntegration typeId={typeId} types={d.types} insts={d.insts} live={d.live} projects={d.projects} close={close} onAdded={(id) => { setTab("connected"); openInstance(id); }} />);
   };
-  const openType = (id: string): void => {
-    ui.drawer.open(`int-type:${id}`, (close) => (
-      <TypeDrawer
-        id={id} close={close} onAdd={addDialog} onOpen={openInstance}
-        onRemove={(t: TypeRow) => ui.open((c) => (
-          <Dialog title={`Remove ${t.name} from the catalogue?`} kicker="Integrations · custom type" onClose={c} actions={[{ label: "Cancel" }, { label: "Remove type", kind: "danger", id: "int-t-remove-go", guard: add, onClick: async () => {
-            const r = await ops.removeIntegrationType(t.id);
-            ui.toast(r.msg, r.ok ? "ok" : "error");
-            if (r.ok) { c(); close(); }
-          } }]} body={<p>No connection uses it. New connections of this type can no longer be added. The removal is audited.</p>} />
-        ))}
-      />
+  const removeType = (id: string): void => {
+    const t = d.types.find((x) => x.id === id);
+    if (!t) return;
+    ui.open((c) => (
+      <Dialog title={`Remove ${t.name} from the catalogue?`} kicker="Integrations · custom type" onClose={c} actions={[{ label: "Cancel" }, { label: "Remove type", kind: "danger", id: "int-t-remove-go", guard: add, onClick: async () => {
+        const r = await ops.removeIntegrationType(t.id);
+        ui.toast(r.msg, r.ok ? "ok" : "error");
+        if (r.ok) c();
+      } }]} body={<p>No connection uses it. New connections of this type can no longer be added. The removal is audited.</p>} />
     ));
   };
 
@@ -89,9 +86,9 @@ export default function IntegrationsView() {
       <Tabs idPrefix="int-tab" items={tabs} active={tab} onChange={setTab} />
       <div id="int-tab-panel" role="tabpanel" aria-labelledby={`int-tab-${tab}`}>
         {tab === "catalogue" ? (
-          <Async query={d.typesQ} what="the integration catalogue" id="int-cat">{() => <CatalogueTab openType={openType} onAdd={addDialog} goBuild={() => setTab("builder")} />}</Async>
+          <Async query={d.typesQ} what="the integration catalogue" id="int-cat">{() => <CatalogueTab onRemove={removeType} onAdd={addDialog} goBuild={() => setTab("builder")} />}</Async>
         ) : tab === "builder" ? (
-          <Async query={d.typesQ} what="custom integration types" id="int-custom">{() => <CustomTab onAddInstance={addDialog} openType={openType} />}</Async>
+          <Async query={d.typesQ} what="custom integration types" id="int-custom">{() => <CustomTab onDone={() => setTab("catalogue")} />}</Async>
         ) : (
           <Async query={d.instsQ} what="connected integrations" id="int">{() => <ConnectedTab openInstance={openInstance} onToggle={toggleInst} />}</Async>
         )}

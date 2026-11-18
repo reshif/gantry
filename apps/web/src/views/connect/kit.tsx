@@ -3,10 +3,43 @@
  * `dataView`: one filter bar per list (Search, labelled selects, count, Clear), sortable columns with the sort in the URL, 12 rows a page
  * with "a-b of N" and Prev / Next, and the shared empty states. Tabs live in the URL (`?tab=`).
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Btn, Empty, Field, FilterBar, SearchBox, Select, Toggle, type Decision } from "../../ui/primitives";
 import { DataTable, type Col, type SortState } from "../../ui/DataTable";
-import { useQueryParam } from "../floor/urlState";
+
+const subscribeHash = (fn: () => void): (() => void) => { window.addEventListener("hashchange", fn); return () => window.removeEventListener("hashchange", fn); };
+const hashNow = (): string => window.location.hash;
+
+/**
+ * A page's own state in the hash query, the prototype's form: `#/integrations?tab=catalogue`. Written with replaceState (no history entry),
+ * read again on every hashchange so a link to another tab of the same page works. An older `?tab=` in the search part still reads.
+ */
+export function useQueryParam(name: string): [string | null, (v: string | null) => void] {
+  const hash = useSyncExternalStore(subscribeHash, hashNow, () => "");
+  const at = hash.indexOf("?");
+  const fromHash = at >= 0 ? new URLSearchParams(hash.slice(at + 1)).get(name) : null;
+  let legacy: string | null = null;
+  try { legacy = new URLSearchParams(window.location.search).get(name); } catch { /* no location */ }
+  const v = fromHash ?? legacy;
+  const set = useCallback((next: string | null) => {
+    try {
+      const h = window.location.hash;
+      const i = h.indexOf("?");
+      const path = i >= 0 ? h.slice(0, i) : h;
+      const sp = new URLSearchParams(i >= 0 ? h.slice(i + 1) : "");
+      if (next) sp.set(name, next); else sp.delete(name);
+      const q = sp.toString();
+      const u = new URL(window.location.href);
+      u.hash = path + (q ? `?${q}` : "");
+      u.searchParams.delete(name);
+      if (u.href !== window.location.href) {
+        window.history.replaceState(window.history.state, "", u.href);
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      }
+    } catch { /* no history access */ }
+  }, [name]);
+  return [v, set];
+}
 
 export const PAGE = 12;
 
@@ -109,7 +142,7 @@ export function ListView<R>({ id, noun, rows, text, filters = [], columns, rowKe
         <Empty title="Nothing matches these filters" text="Loosen the search or clear the filters." action={<Btn label="Clear filters" id={`${id}-clear-empty`} onClick={clear} />} />
       ) : (
         <>
-          <DataTable id={`${id}-table`} caption={`${noun}s`} columns={columns} rows={vis} rowKey={rowKey} {...(rowId ? { rowId } : {})} {...(onRow ? { onRow } : {})} {...(rowLabel ? { rowLabel } : {})} sort={sort} onSort={(s) => setRawSort(`${id}.${s.key}.${s.dir}`)} />
+          <DataTable id={`${id}-table`} caption={`${noun}s`} columns={columns} rows={vis} rowKey={rowKey} sortHint sortSelect={false} {...(rowId ? { rowId } : {})} {...(onRow ? { onRow } : {})} {...(rowLabel ? { rowLabel } : {})} sort={sort} onSort={(s) => setRawSort(`${id}.${s.key}.${s.dir}`)} />
           <div className="tfoot">
             <span role="status">{`${at * PAGE + 1}–${at * PAGE + vis.length} of ${total}`}</span>
             {pages > 1 ? (

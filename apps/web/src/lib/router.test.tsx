@@ -13,6 +13,9 @@ const meWith = (roles: Array<{ role: string; scope: string }>, projects = ["paym
 describe("hash parsing", () => {
   it("parses ids and params like legacy hashes", () => {
     expect(parseHash("#home")).toEqual({ id: "home", param: null, project: null });
+    // the prototype's deep link carries page state after a `?`: the route is what comes before it
+    expect(parseHash("#/integrations?tab=catalogue")).toEqual({ id: "integrations", param: null, project: null });
+    expect(parseHash("#/mcp/mcp-docs?tab=tools")).toEqual({ id: "mcp", param: "mcp-docs", project: null });
     expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042", project: null });
     expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null });
     expect(parseHash("")).toEqual({ id: "", param: null, project: null });
