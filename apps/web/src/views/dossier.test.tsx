@@ -52,9 +52,51 @@ describe("Work order page", () => {
     await show({}, `#record/${W.id}`);
     fireEvent.click(document.getElementById("dz-more") as HTMLElement);
     const items = (await screen.findAllByRole("menuitem")).map((i) => (i.textContent ?? "").replace(/locked$/, "").trim());
-    expect(items.slice(0, 5)).toEqual(["Edit title and priority", "Reassign", "Park", "Send back a station", "Stop this work order\u2026"]);
-    expect(items).toContain("Reassign agent");
-    expect(items).toContain("Copy link");
+    expect(items).toEqual(["Edit title and priority", "Reassign", "Park", "Send back a station", "Stop this work order\u2026"]);
+    expect(document.querySelectorAll('[role="menu"] hr, [role="menu"] [role="separator"]').length).toBe(1);
+    expect(document.getElementById("dz-more")?.getAttribute("aria-haspopup")).toBe("menu");
+  });
+
+  it("opens the prototype's dialogs from the Actions menu: Edit, Reassign, Park (one reason), Send back and Stop", async () => {
+    await show({}, `#record/${W.id}`);
+    const open = async (item: string) => {
+      fireEvent.click(document.getElementById("dz-more") as HTMLElement);
+      fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(`^${item}`) }));
+    };
+    await open("Edit title and priority");
+    expect(await screen.findByRole("dialog", { name: `Edit ${W.id}` })).toBeTruthy();
+    for (const l of ["Title", "Priority", "Class"]) expect(screen.getAllByText(l).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open("Reassign");
+    expect(await screen.findByRole("dialog", { name: `Reassign ${W.id}` })).toBeTruthy();
+    expect(screen.getByText("New owner")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open("Park");
+    expect(await screen.findByRole("dialog", { name: `Park ${W.id}` })).toBeTruthy();
+    expect(screen.getByText("It stops moving until someone resumes it.")).toBeTruthy();
+    expect(screen.queryByText("Bay")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open("Send back a station");
+    expect(await screen.findByRole("dialog", { name: /^Send WO-.* back to / })).toBeTruthy();
+    expect(screen.getByText("The previous agent re-runs with your note.")).toBeTruthy();
+    expect(screen.queryByText("Back to station")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open("Stop this work order");
+    expect(await screen.findByRole("dialog", { name: `Stop ${W.id}?` })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop work order" })).toBeTruthy();
+  });
+
+  it("opens the Edit dialog from the Brief card's Edit button", async () => {
+    await show({}, `#record/${W.id}`);
+    expect(screen.getByText("Click the description to edit it")).toBeTruthy();
+    fireEvent.click(document.getElementById("dz-edit") as HTMLElement);
+    expect(await screen.findByRole("dialog", { name: `Edit ${W.id}` })).toBeTruthy();
+  });
+
+  it("makes the description editable in place", async () => {
+    await show({}, `#record/${W.id}`);
+    fireEvent.click(document.getElementById("dz-desc") as HTMLElement);
+    expect(await screen.findByLabelText("Edit description")).toBeTruthy();
   });
 
   it("opens the review dialog from Review and offers Request changes, Reject and Approve", async () => {
@@ -114,17 +156,10 @@ describe("Work order page", () => {
     expect(await screen.findByRole("heading", { name: "Events" })).toBeTruthy();
   });
 
-  it("says why an action is locked, once per reason, beside the buttons", async () => {
-    const t = travelerOf(W, {}, { can: { classify: deny("Class can only change at Intake.", "Project Admin"), reassign: deny("Class can only change at Intake.", "Project Admin") } });
-    await show(readsFor(W, t, recordOf(W)));
-    const lines = document.querySelectorAll(".dz-lockline");
-    expect(lines.length).toBeGreaterThan(0);
-    expect(document.querySelector(".dz-lockline")?.textContent).toMatch(/locked\./);
-  });
-
-  it("lists what waits on the viewer beside the tabs", async () => {
+  it("has no lock banners and no waiting-on-you control beside the tabs", async () => {
     await show();
-    expect(screen.getByText(/Waiting on you \(1\)/)).toBeTruthy();
+    expect(document.querySelector(".dz-lockline")).toBeNull();
+    expect(screen.queryByText(/Waiting on you/)).toBeNull();
   });
 
   it("shows a Not found page with the way back when the work order is not visible", async () => {
@@ -138,12 +173,10 @@ describe("Work order page", () => {
 });
 
 describe("Work order page: links, viewers and kills", () => {
-  it("scrolls to a section of the document from the Conversation tab and stops retrying", async () => {
-    const scrolled = vi.fn();
-    Element.prototype.scrollIntoView = scrolled;
+  it("shows the Journey as one card, without the written record below it", async () => {
     await show({}, `#record/${W.id}/journey`);
-    expect(document.getElementById("dz-doc")).toBeTruthy();
-    expect(screen.getAllByText("Completeness").length).toBeGreaterThan(0);
+    expect(document.getElementById("dz-doc")).toBeNull();
+    expect(screen.queryByText("Completeness")).toBeNull();
   });
 
   it("degrades cleanly for a viewer without access to the conversation", async () => {

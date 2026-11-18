@@ -27,7 +27,7 @@ export function woReadOverrides(wos: Loose[], projectId: string): Record<string,
     for (const b of cat.bays) moves[b.id] = { allowed: true, reason: `Moves to ${b.name}.`, kind: "park" };
     const gateProgress: Loose = {};
     for (const g of Object.keys(w.gates ?? {})) gateProgress[g] = { have: 0, need: 1, unmet: [], conds: [], onlyRequester: false, passes: false };
-    const history = [0, 1, 2, 3, 4, 5, 6].slice(0, Math.max(1, w.station + 1)).map((i) => ({ station: cat.stations[i]!.id, agent: cat.stations[i]!.agent, model: "claude-sonnet", startedAt: w.createdAt + i * 90 * MIN, endedAt: i < w.station ? w.createdAt + (i + 1) * 90 * MIN : null, tokens: 60000 + i * 9000, cost: 0.9 + i * 0.1, outcome: i < w.station ? "passed" : null, note: "", summary: i < w.station ? `${cat.stations[i]!.name} finished with no open questions.` : undefined }));
+    const history = [0, 1, 2, 3, 4, 5, 6, 7, 8].slice(0, Math.max(1, w.station + 1)).map((i) => ({ station: cat.stations[i]!.id, agent: cat.stations[i]!.agent, model: "claude-sonnet", startedAt: w.createdAt + i * 90 * MIN, endedAt: i < w.station ? w.createdAt + (i + 1) * 90 * MIN : null, tokens: 60000 + i * 9000, cost: 0.9 + i * 0.1, outcome: i < w.station ? "passed" : null, note: "", summary: i < w.station ? `${cat.stations[i]!.name} finished with no open questions.` : undefined }));
     const full = { ...w, brief: BRIEF, criteria: CRITERIA, history, version: 7, gateProgress, allowed: { approve: gate ? { allowed: true, reason: "", needs: "", gate, instance: `${w.id}:${gate}:1` } : null, moves, can }, stop: null, route: rt, pr: w.pr ?? { number: 300, state: "open", tag: null }, briefVersions: [], conv: { messages: [], qi: 0, answers: {}, misses: [], decisions: [], awaiting: "", done: true, raised: [], questions: [] } };
     const record = {
       id: w.id, version: 7, project: projectId, repo: w.repo, title: w.title, state: w.state,
@@ -39,7 +39,7 @@ export function woReadOverrides(wos: Loose[], projectId: string): Record<string,
       outcomes: [], totals: { tokens: 545000, cost: 1.16 },
       completeness: { sections: { summary: true, request: true, clarification: true, agreement: true, stations: true, changes: true, verification: true, merge: false, approvals: false, after: false, timeline: true }, done: 7, total: 11 },
       summary: { generated: `${w.title} is ${w.state}.`, written: null },
-      events: history.map((h, i) => ({ seq: i + 1, at: new Date(h.startedAt).toISOString(), type: i === 0 ? "wo.submit" : "wo.enter", by: w.requestedBy, outcome: "ok", detail: i === 0 ? { text: w.title } : { station: h.station } })),
+      events: [...history.map((h, i) => ({ seq: i + 1, at: new Date(h.startedAt).toISOString(), type: i === 0 ? "wo.submit" : "wo.enter", by: w.requestedBy, outcome: "ok", detail: i === 0 ? { text: w.title } : { station: h.station } })), ...woGateInstances(w).filter((g) => g.decision).map((g, i) => ({ seq: 100 + i, at: g.decision.at, type: "gate.decision", by: g.decision.decided_by, outcome: "ok", detail: { gate: g.gate, decision: "approved" } }))],
     };
     ov[`work-orders/${w.id}`] = (r) => fulfillJson(r, full);
     ov[`work-orders/${w.id}/record`] = (r) => fulfillJson(r, record);
@@ -52,6 +52,9 @@ export function woReadOverrides(wos: Loose[], projectId: string): Record<string,
   ov["work-order-sessions"] = (r) => fulfillJson(r, { items: [] });
   return ov;
 }
+
+/* ---- fidelity round 2, group wo: eight named checks on the merge gate ---- */
+const WO_CHECKS = ["lint", "typecheck", "unit (48)", "integration (6)", "migration dry-run", "secret scan", "licence check", "e2e smoke"].map((name) => ({ name, ok: true }));
 
 /* ---- fidelity round 1, group wo: gate instances with decisions and checks, two brief versions and a conversation for the work order screens ---- */
 const WO_DECIDERS = ["p-lead", "p-admin", "p-priya", "p-asha"];
@@ -66,7 +69,7 @@ function woGateInstances(w: Loose): Loose[] {
       return {
         id: `${w.id}:${gate}:1`, gate, station: null, status: passed ? "closed" : "waiting", closedReason: passed ? "decision" : null, headSha: null, openedAt: at, closedAt: passed ? at : null,
         pinned: { flowVersion: 3, ruleVersion: 2, policyVersion: 5 },
-        basis: { checks: [{ name: "lint", ok: true }, { name: "typecheck", ok: true }, { name: gate === "G5" ? "unit tests (48)" : "brief complete", ok: true }] },
+        basis: { checks: gate === "G5" ? WO_CHECKS : [{ name: "lint", ok: true }, { name: "typecheck", ok: true }] },
         votes: passed ? [{ by: WO_DECIDERS[i % 4]!, vote: "approve", comment: "", at, via: "web", role: null }] : [],
         decision: passed ? { decision: "approve", decided_by: WO_DECIDERS[i % 4]!, rule: null, trust_level: null, detail: { mode: "human" }, at } : null,
       };

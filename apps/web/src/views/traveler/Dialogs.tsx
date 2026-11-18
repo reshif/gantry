@@ -16,7 +16,8 @@ const Err = ({ text }: { text: string }) => (
   </div>
 );
 
-export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () => void }) {
+/** `simple`: the work order page's prototype dialog, a plain confirmation that goes back one station (the traveler drawer keeps the station picker and the note). */
+export function SendBackDialog({ woId, onClose, simple }: { woId: string; onClose: () => void; simple?: boolean }) {
   const ui = useUI();
   const cat = useCatalog();
   const wo = useTravelerWo(woId).data;
@@ -54,18 +55,18 @@ export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () =>
   return (
     <Dialog
       title={`Send ${wo.id} back${pick ? ` to ${stName(cat, pick)}` : ""}?`}
-      kicker="Rework"
+      {...(simple ? {} : { kicker: "Rework" })}
       sub="The previous agent re-runs with your note."
       onClose={onClose}
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Sending work back" />
-          <Field label="Back to station" htmlFor="sb-to" hint={`Only earlier stations on the ${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} route.`}>
+          {simple ? null : <><Field label="Back to station" htmlFor="sb-to" hint={`Only earlier stations on the ${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} route.`}>
             <Select id="sb-to" options={opts} value={pick} onChange={setTo} />
           </Field>
           <Field label="Note for the agent" htmlFor="sb-note">
             <textarea id="sb-note" className="input" rows={3} placeholder="What needs to change?" value={note} onChange={(e) => setNote(e.target.value)} />
-          </Field>
+          </Field></>}
           <Err text={err} />
         </div>
       }
@@ -144,7 +145,8 @@ export function ReassignDialog({ woId, onClose }: { woId: string; onClose: () =>
   );
 }
 
-export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => void }) {
+/** `simple`: the work order page's prototype dialog, one required reason; the bay is the first one this person may use. The traveler drawer keeps the bay picker. */
+export function ParkDialog({ woId, onClose, simple }: { woId: string; onClose: () => void; simple?: boolean }) {
   const ui = useUI();
   const cat = useCatalog();
   const wo = useTravelerWo(woId).data;
@@ -158,7 +160,7 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
     const m = wo.allowed.moves[b.id]!;
     return { value: b.id, label: `${b.name}${m.allowed ? "" : " (not available)"}`, disabled: !m.allowed, why: m.reason };
   });
-  const first = opts.find((o) => !o.disabled);
+  const first = (simple ? opts.find((o) => !o.disabled && o.value === "hold") : undefined) ?? opts.find((o) => !o.disabled);
   const sel = bay ?? first?.value ?? opts[0]?.value ?? "";
   const chosen = opts.find((o) => o.value === sel);
   const d: TDecision = first ? (wo.stop ? no(`${wo.stop.reason || "Stopped"}`) : dec(wo, "park")) : no(opts[0]?.why ?? "No bay is available for this work order.");
@@ -185,17 +187,17 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
   return (
     <Dialog
       title={`Park ${wo.id}`}
-      kicker="Off the main belt"
-      sub={`It stops moving until someone resumes it. It returns to ${stName(cat, cat.stations[wo.station]?.id)} when released.`}
+      {...(simple ? {} : { kicker: "Off the main belt" })}
+      sub={simple ? "It stops moving until someone resumes it." : `It stops moving until someone resumes it. It returns to ${stName(cat, cat.stations[wo.station]?.id)} when released.`}
       onClose={onClose}
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Moving work to a bay" />
-          <Field label="Bay" htmlFor="park-bay" hint={chosen?.disabled ? chosen.why : "Declined needs Decline rights. Queue is only for work about to build."}>
+          {simple ? null : <Field label="Bay" htmlFor="park-bay" hint={chosen?.disabled ? chosen.why : "Declined needs Decline rights. Queue is only for work about to build."}>
             <Select id="park-bay" options={opts} value={sel} onChange={setBay} />
-          </Field>
-          <Field label="Reason" htmlFor="park-reason" hint="At least 5 characters.">
-            <textarea id="park-reason" className="input" rows={3} placeholder="Why does it leave the belt?" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>}
+          <Field label="Reason" htmlFor="park-reason" {...(simple ? { required: true } : { hint: "At least 5 characters." })}>
+            <textarea id="park-reason" className="input" rows={3} {...(simple ? {} : { placeholder: "Why does it leave the belt?" })} value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
           <Err text={err} />
         </div>

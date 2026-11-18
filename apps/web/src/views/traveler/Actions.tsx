@@ -197,3 +197,7 @@ export async function decideGate(wo: TWo, gateId: string, kind: "approve" | "cha
   const reason = kind === "changes" ? `Changes requested: ${note}` : note;
   return intake ? ops.decline(wo.id, reason, undefined, ifm) : ops.rejectGate(wo.id, gateId, ap?.instance ?? "", reason, undefined, ifm);
 }
+
+/** The two writes the work order page's Edit and Stop dialogs make (kept here with the other work order commands). */
+export const reclassifyFromPage = (wo: TWo, cls: string) => ops.reclassify(wo.id, cls, "Changed from the work order page", { ifMatch: wo.version });
+export const stopFromPage = (woId: string, reason: string) => ops.kill("workorder", woId, { reason, mode: "hold", confirmText: null });

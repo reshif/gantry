@@ -257,6 +257,7 @@ export function Sections({ c }: { c: Ctx }) {
 export function Lifecycle({ woId, compact = false }: { woId: string; compact?: boolean }) {
   const d = useRecordData(woId);
   const copy = useCopyMarkdown();
+  const exportRec = useExportRecord();
   const openRecord = useOpenRecordRoute();
   if (d.loading) return <Loading label="the record" />;
   if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
@@ -288,6 +289,7 @@ export function Lifecycle({ woId, compact = false }: { woId: string; compact?: b
         </div>
         <div className="lc-btns">
           <Btn label="Copy as Markdown" small icon="copy" id={`${pre}copy-${d.wo.id}`} onClick={() => void copy(d.wo!.id)} />
+          <Btn label="Export record" small icon="dl" id={`${pre}export-${d.wo.id}`} onClick={() => void exportRec(d.wo!.id)} />
           <Btn label="Open full record" small kind="primary" icon="record" id={`${pre}open-${d.wo.id}`} onClick={() => openRecord(d.wo!.id, d.wo!.project, true)} />
         </div>
       </div>

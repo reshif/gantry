@@ -3,7 +3,7 @@
  * verdict and the evidence trail), Criteria, Brief versions, Checks and the Audit trail. Every figure comes from the record, changes and
  * audit reads; what the server does not record is shown as "not available", never invented.
  */
-import { fmt } from "@gantry/domain";
+import { type Catalog } from "@gantry/domain";
 import { useAudit } from "../../api/queries";
 import { Btn, Tabs, Who, Empty } from "../../ui/primitives";
 import { Page, Card, Stats } from "../../ui/cr";
@@ -13,9 +13,8 @@ import { useActors } from "../../ui/actors";
 import { navigate, useHash } from "../../lib/router";
 import { Picker } from "../record/Picker";
 import { briefDiff, critStatus, useRecordData, type RecordData } from "../record/data";
-import { useExportRecord } from "../record/Lifecycle";
 import type { TWo } from "../traveler/model";
-import { NotFound, splitParam, statusOf } from "./kit";
+import { NotFound, splitParam, statusOf, when } from "./kit";
 
 const TABS = [
   { id: "summary", label: "Summary" },
@@ -26,12 +25,17 @@ const TABS = [
 ] as const;
 type PackTab = (typeof TABS)[number]["id"];
 const NA = "not available";
+const VERB: Record<string, string> = { approve: "approved", reject: "rejected", changes: "changes requested", decline: "declined" };
 const CRIT_TONE: Record<string, string> = { met: "ok", failed: "bad", pending: "warn", untested: "idle" };
 
-/** Every check a gate recorded, with its gate. */
-const checksOf = (rec: RecordData) => rec.gates.flatMap((g) => (g.basis.checks ?? []).map((c) => ({ gate: g.gate, name: c.name, ok: c.ok })));
+/** The checks the gates recorded, one row per named check (its latest run) with the gate that ran it. */
+const checksOf = (rec: RecordData) => {
+  const by = new Map<string, { gate: string; name: string; ok: boolean }>();
+  for (const g of rec.gates) for (const c of g.basis.checks ?? []) by.set(c.name, { gate: g.gate, name: c.name, ok: c.ok }); // the latest run of each check
+  return [...by.values()];
+};
 
-function Summary({ wo, rec }: { wo: TWo; rec: RecordData }) {
+function Summary({ wo, rec, cat }: { wo: TWo; rec: RecordData; cat: Catalog }) {
   const actor = useActors();
   const crit = rec.criteria ?? [];
   const met = crit.filter((c) => critStatus(c).id === "met").length;
@@ -41,7 +45,8 @@ function Summary({ wo, rec }: { wo: TWo; rec: RecordData }) {
   const sens = rec.code.files.filter((f) => f.protected).length;
   const specV = rec.briefVersions.at(-1);
   const t = rec.code.tests;
-  const trail = rec.gates.filter((g) => g.decision || g.status === "waiting");
+  const trail = rec.gates.filter((g) => g.decision || g.status === "waiting").filter((g) => g.decision?.detail?.mode !== "auto");
+  const gname = (id: string) => cat.gates.find((x) => x.id === id);
   return (
     <>
       <Stats items={[
@@ -54,7 +59,7 @@ function Summary({ wo, rec }: { wo: TWo; rec: RecordData }) {
         <Card title="Verdict">
           <p>{`${wo.title} is ${wo.state === "done" ? "released" : "in flight"}. The evidence below is what each gate approver saw. Agents produced it; people decided.`}</p>
           <dl className="kv">
-            <dt>Spec</dt><dd>{specV ? `v${specV.v}, ${fmt.stamp(specV.at)}` : NA}</dd>
+            <dt>Spec</dt><dd>{specV ? `v${specV.v}, ${when(specV.at)}` : NA}</dd>
             <dt>Plan</dt><dd>{NA}</dd>
             <dt>Tests</dt><dd>{t.passed + t.failed + t.added ? `${t.passed} passed, ${t.failed} failed, ${t.added} added` : NA}</dd>
             <dt>Sensitive paths</dt><dd>{rec.code.files.length ? (sens ? `${sens} touched` : "none touched") : NA}</dd>
@@ -65,8 +70,8 @@ function Summary({ wo, rec }: { wo: TWo; rec: RecordData }) {
             <div className="tl">
               {trail.map((g) => (
                 <div key={g.id} className={g.status === "waiting" ? "warn" : g.decision?.decision === "reject" ? "bad" : "ok"}>
-                  <div>{g.status === "waiting" ? `${g.gate} waiting for a decision` : `${g.gate} ${g.decision?.decision ?? g.status}${g.decision?.decided_by ? ` by ${actor(g.decision.decided_by).name}` : ""}`}</div>
-                  <div className="when">{g.decision?.at ? fmt.stamp(Date.parse(g.decision.at)) : g.gate}</div>
+                  <div>{g.status === "waiting" ? `${gname(g.gate)?.name ?? g.gate} is waiting for a decision` : `${gname(g.gate)?.name ?? g.gate}: ${VERB[g.decision?.decision ?? ""] ?? g.decision?.decision ?? g.status}${g.decision?.decided_by ? ` by ${actor(g.decision.decided_by).name}` : ""}`}</div>
+                  <div className="when">{gname(g.gate)?.label ?? g.gate}</div>
                 </div>
               ))}
             </div>
@@ -101,7 +106,7 @@ function AuditTrail({ wo }: { wo: TWo }) {
   const q = useAudit({ project: wo.project, q: wo.id, limit: 100 });
   type Row = { id: number; at: number; actor: string; action: string };
   const cols: Col<Row>[] = [
-    { key: "at", label: "When", render: (r) => <span className="mono dim">{fmt.stamp(r.at)}</span> },
+    { key: "at", label: "When", render: (r) => <span className="mono dim">{when(r.at)}</span> },
     { key: "actor", label: "Who", render: (r) => <Who id={r.actor} /> },
     { key: "action", label: "Action", render: (r) => <span className="mono">{`${r.action} ${wo.id}`}</span> },
   ];
@@ -124,7 +129,6 @@ export default function PackView() {
   const { id, sub } = splitParam(hash.param);
   const tab: PackTab = TABS.find((t) => t.id === sub)?.id ?? "summary";
   const d = useRecordData(id || null);
-  const exportRec = useExportRecord();
   if (!id) return <Picker />;
   if (d.loading) return <div className="page"><Loading id="pack-loading" label="the dossier" /></div>;
   if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
@@ -142,13 +146,13 @@ export default function PackView() {
       acts={
         <>
           <Btn label="Back to record" id="pack-back" onClick={() => navigate("record", wo.id, wo.project)} />
-          <Btn label="Export record" icon="page" id="pack-export" onClick={() => void exportRec(wo.id)} />
+          <Btn label="Export PDF" icon="dl" id="pack-export" onClick={() => window.print()} />
         </>
       }
     >
       <Tabs idPrefix="pack-tab" items={TABS.map((t) => ({ id: t.id, label: t.label }))} active={tab} onChange={(t) => navigate("dossier", t === "summary" ? wo.id : `${wo.id}/${t}`, wo.project)} />
       <div role="tabpanel" aria-labelledby={`pack-tab-${tab}`}>
-        {tab === "summary" ? <Summary wo={wo} rec={rec} />
+        {tab === "summary" ? <Summary wo={wo} rec={rec} cat={d.cat} />
         : tab === "criteria" ? (
           <Card title="Acceptance criteria against evidence" flush>
             {(rec.criteria ?? []).length ? (
@@ -178,7 +182,7 @@ export default function PackView() {
                 {checks.map((c, i) => (
                   <div className="li" key={`${c.gate}-${c.name}-${i}`}>
                     <span className={`lamp ${c.ok ? "ok" : "warn"}`} />
-                    <div className="main1"><span className="t1">{c.name}</span><span className="t2 mono">{c.gate}</span></div>
+                    <div className="main1"><span className="t1">{c.name}</span><span className="t2 mono">{`last run at ${c.gate}`}</span></div>
                     <span className={`chip ${c.ok ? "ok" : "warn"}`}>{c.ok ? "Passed" : "Failed"}</span>
                   </div>
                 ))}

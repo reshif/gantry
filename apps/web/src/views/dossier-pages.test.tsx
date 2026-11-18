@@ -51,6 +51,7 @@ describe("Traveler, Dossier and Changes are routes of their own", () => {
     expect(screen.getByRole("heading", { name: "Evidence trail" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Audit" }));
     await waitFor(() => expect(window.location.hash).toContain("%2Faudit"));
+    expect(screen.queryByText("Export record")).toBeNull();
     expect(await screen.findByRole("heading", { name: `Audit trail for ${W.id}` })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to record" }));
     await waitFor(() => expect(window.location.hash).toContain(`record/${W.id}`));
@@ -78,7 +79,11 @@ describe("Changes page", () => {
     window.location.hash = `#changes/${W.id}`;
     mount(<ChangesView />);
     fireEvent.click(await screen.findByRole("button", { name: "Comment on line 3" }, { timeout: 4000 }));
-    expect((await screen.findAllByText(/Line comments are not available yet/)).length).toBeGreaterThan(1);
+    expect(await screen.findByRole("dialog", { name: "Comment on line" })).toBeTruthy();
+    fireEvent.change(document.getElementById("chg-note-text") as HTMLElement, { target: { value: "Check the window edge" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    expect(await screen.findByText(/Check the window edge/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Plan, commits and guardrail" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Review summary" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Review / })).toBeTruthy();
   });

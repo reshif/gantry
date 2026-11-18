@@ -4,22 +4,21 @@
  * is and who has it, and the route as a numbered strip. Banners for anything that stops the work. Locked actions say why.
  */
 import { WO_STATES, fmt, type Catalog, type Project } from "@gantry/domain";
-import { Btn, Who, reasonText, useCopy } from "../../ui/primitives";
+import { Btn, Who } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
-import { navigate, hashFor } from "../../lib/router";
+import { navigate } from "../../lib/router";
 import { classOf } from "../projects/kit";
-import { useActionSpecs, type ActionSpec } from "../traveler/Actions";
-import { bayLabel, no, stName, stNo, type TWo } from "../traveler/model";
+import { useActionSpecs } from "../traveler/Actions";
+import { bayLabel, stName, stNo, type TWo } from "../traveler/model";
 import type { WoSession } from "../conversations/session-api";
-import { useCopyMarkdown, useExportRecord } from "../record/Lifecycle";
+import { ParkDialog, SendBackDialog } from "../traveler/Dialogs";
+import { EditDialog, OwnerDialog, StopDialog } from "./WoDialogs";
 import type { RecordData } from "../record/data";
 import { ReviewDialog } from "./ReviewDialog";
 import { ProtoPipe } from "./kit";
 
-const unique = <T,>(xs: T[]): T[] => [...new Set(xs)];
-const NO_EDIT = no("The server cannot change a work order's title, priority or owner yet.");
 
 /** One line on what the work order is doing right now, from the work order read and, when there is one, its conversation. */
 export function statusLine(wo: TWo, cat: Catalog, s: WoSession | undefined): string {
@@ -40,9 +39,6 @@ export function reviewGate(wo: TWo, cat: Catalog) {
 
 export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: Catalog; project: Project; session: WoSession | undefined; rec: RecordData | undefined }) {
   const ui = useUI();
-  const copy = useCopy();
-  const copyMd = useCopyMarkdown();
-  const exportRec = useExportRecord();
   const actor = useActors();
   const specs = useActionSpecs(wo);
   const heldByKill = (wo as { heldByKill?: boolean | string }).heldByKill;
@@ -55,32 +51,24 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
   const agent = wo.history[wo.history.length - 1]?.agent ?? st?.agent;
   const special = !!(wo.killed || wo.bay || wo.state === "done");
 
-  const of = (g: ActionSpec["group"]) => (specs ?? []).filter((s) => s.group === g);
-  const item = (a: ActionSpec) => ({ label: a.menuLabel ?? a.label, icon: a.icon, ...(a.kind ? { kind: a.kind } : {}), guard: a.guard, onClick: a.onClick });
   const by = (k: string) => (specs ?? []).find((s) => s.key === k);
+  const stopSpec = by("kill");
+  const parkSpec = by("park") ?? by("unpark");
+  // the prototype's five entries and one divider; reassigning an agent, reclassifying and the line controls stay in the traveler drawer
   const menu = (anchor: HTMLElement) => {
-    const first = [
-      { label: "Edit title and priority", icon: "tag", guard: NO_EDIT, onClick: () => undefined },
-      { label: "Reassign", icon: "people", guard: NO_EDIT, onClick: () => undefined },
-      ...[by("park"), by("sendback")].filter((a): a is ActionSpec => !!a).map(item),
-    ];
-    const stop = by("kill");
-    const rest = [...of("main").filter((a) => a.key !== "park"), ...of("inline"), ...of("more").filter((a) => a.key !== "kill")].map(item);
     ui.menu(anchor, "Actions", [
-      ...first,
-      ...(stop ? [{ sep: true }, item(stop)] : []),
+      { label: "Edit title and priority", icon: "edit", onClick: () => void ui.open((close) => <EditDialog wo={wo} cat={cat} project={project} onClose={close} />) },
+      { label: "Reassign", icon: "people", onClick: () => void ui.open((close) => <OwnerDialog wo={wo} onClose={close} />) },
+      { label: "Park", icon: "pause", guard: parkSpec?.guard, onClick: () => (wo.bay ? parkSpec?.onClick() : void ui.open((close) => <ParkDialog woId={wo.id} simple onClose={close} />)) },
+      { label: "Send back a station", icon: "refresh", guard: by("sendback")?.guard, onClick: () => void ui.open((close) => <SendBackDialog woId={wo.id} simple onClose={close} />) },
       { sep: true },
-      ...rest,
-      { label: "Copy link", icon: "copy", onClick: () => copy(`${window.location.origin}${window.location.pathname}${hashFor("record", wo.id, wo.project)}`) },
-      { label: "Copy as Markdown", icon: "copy", onClick: () => void copyMd(wo.id) },
-      { label: "Export record", icon: "page", onClick: () => void exportRec(wo.id) },
+      wo.state === "killed" && stopSpec
+        ? { label: stopSpec.label, icon: stopSpec.icon, guard: stopSpec.guard, onClick: stopSpec.onClick }
+        : { label: "Stop this work order\u2026", icon: "stop", kind: "danger", guard: stopSpec?.guard, onClick: () => void ui.open((close) => <StopDialog wo={wo} onClose={close} />) },
     ]);
   };
   const approve = by("approve");
-  const retry = of("main").filter((a) => a.key === "retry" || a.key === "unpark");
-  const locked = (specs ?? []).filter((s) => s.guard && !s.guard.allowed && s.group !== "decide");
-  const reasons = unique(locked.map((s) => reasonText(s.guard!))).filter(Boolean);
-  const lines = reasons.map((r) => ({ r, items: locked.filter((s) => reasonText(s.guard!) === r).map((s) => s.label) }));
+  const retry = (specs ?? []).filter((s) => s.group === "main").filter((a) => a.key === "retry" || a.key === "unpark");
   const why = specs?.find((s) => s.why);
 
   return (
@@ -97,16 +85,10 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
           <Btn label="Changes" id="rec-changes" onClick={() => navigate("changes", wo.id, wo.project)} />
           {retry.map((a) => <Btn key={a.key} label={a.label} kind="primary" icon={a.icon} id={a.id} guard={a.guard} onClick={a.onClick} />)}
           {rg && approve ? <Btn label={rg.g.id === "G0G1" ? "Confirm brief" : `Review ${rg.g.label}`} kind="ok" id="trv-approve" guard={approve.guard} onClick={() => void ui.open((close) => <ReviewDialog wo={wo} gate={rg.g} rec={rec} onClose={close} />)} /> : null}
-          {specs ? <Btn label="Actions" id="dz-more" aria="Move, reassign, line control and other actions" onClick={(e) => menu(e.currentTarget)}><Icon name="down" /></Btn> : null}
+          {specs ? <Btn label="Actions" id="dz-more" aria-haspopup="menu" onClick={(e) => menu(e.currentTarget)}><Icon name="down" /></Btn> : null}
         </div>
       </header>
       {why?.why ? <p className="small muted trv-why" id="trv-approve-why" role="note">{why.why}</p> : null}
-      {lines.map((l) => (
-        <div key={l.r} className="dz-lockline">
-          <Icon name="lock" />
-          <span><b>{`${l.items.join(", ")} locked.`}</b>{` ${l.r}`}</span>
-        </div>
-      ))}
       <section className="card wo-strip" style={{ marginBottom: 4 }}>
         <div className="card-b row spread">
           <div className="row dz-chips">

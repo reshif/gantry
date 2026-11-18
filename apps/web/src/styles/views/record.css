@@ -307,3 +307,10 @@
 /* line-number buttons of the Changes diff: a Btn that reads as a plain number */
 .diff .ln .btn.ln-num { all: unset; cursor: pointer; color: inherit; font: inherit; }
 .diff .ln .btn.ln-num:focus-visible { outline: 2px solid var(--focus, var(--info)); }
+
+/* work order page at phone width: the header buttons share the row and Actions takes a full row of its own, as in the prototype */
+@media (max-width: 640px) {
+  .page .dz-ph .acts { flex: 1 1 100%; width: 100%; }
+  .page .dz-ph .acts .btn { flex: 1 1 auto; white-space: nowrap; }
+  .page .dz-ph .acts #dz-more { flex: 1 1 100%; }
+}
