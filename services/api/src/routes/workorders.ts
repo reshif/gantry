@@ -374,7 +374,7 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const { id } = Id.parse(req.params);
     const gi = parseGateId(id);
     const body = z.looseObject({ via: Via, reason: z.string().trim().max(1000).optional() }).parse(req.body ?? {});
-    return command(req, spec(gi.woId, await gateAction(req, gi.gateId, "approve"), await scopeOf(req, gi.woId)), async (tx, a) => approveGate(tx, a, gi.woId, gi.gateId, await requireGatePin(tx, a.orgId, gi.woId, gi.gateId, gi.n), { ...(body.via ? { via: body.via } : {}), ...(body.reason ? { reason: body.reason } : {}) }));
+    return command(req, { ...spec(gi.woId, await gateAction(req, gi.gateId, "approve"), await scopeOf(req, gi.woId)), ...(body.reason ? { overrideReason: body.reason } : {}) }, async (tx, a) => approveGate(tx, a, gi.woId, gi.gateId, await requireGatePin(tx, a.orgId, gi.woId, gi.gateId, gi.n), { ...(body.via ? { via: body.via } : {}), ...(body.reason ? { reason: body.reason } : {}) }));
   });
   app.post("/api/v1/gate-instances/:id/reject", async (req) => {
     const { id } = Id.parse(req.params);
