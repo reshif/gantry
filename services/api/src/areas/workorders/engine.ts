@@ -474,7 +474,7 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
   let evidence: GateEvidence = given ? { source: o.evidence ?? "observed" } : { source: "none" };
   if (!given && (kind === "auto" || kind === "mixed") && gateId === "G1f") {
     // Feasibility: judged from what the system holds, a research document a station wrote and no blocking question still open, not from the agent's claim.
-    const note_ = (await fx.tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and station = 'research' and doc is not null limit 1`, [fx.orgId, w.id])).rowCount;
+    const note_ = (await fx.tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and station = 'research' and doc is not null and author_kind <> 'system' limit 1`, [fx.orgId, w.id])).rowCount;
     const blocking = (await fx.tx.query(`select 1 from wo_questions where org_id = $1 and wo_id = $2 and blocking and status = 'open' limit 1`, [fx.orgId, w.id])).rowCount;
     checks = [{ name: "Research note attached", ok: !!note_ }, { name: "No blocking unknowns", ok: !blocking }];
     evidence = { source: "observed" };

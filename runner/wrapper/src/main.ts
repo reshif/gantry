@@ -133,6 +133,7 @@ export async function handOver(o: AdapterOutcome, dir: string, station: string, 
   const names = Object.keys(rec.documents);
   for (const name of names) await checkpoint({ turn, kind: "artefact", name, contentType: "text/markdown; charset=utf-8", content: rec.documents[name]! });
   if (names.length) log(`handed over ${names.length} document(s)`);
+  else if (o.status === "succeeded") log(`${station}: the agent wrote no document; the API will record its result as the station document`);
   const base = o.output && typeof o.output === "object" && !Array.isArray(o.output) ? (o.output as Record<string, unknown>) : {};
   const output: Record<string, unknown> = { ...base, documents: names, dialogue: { questions: rec.questions, assumptions: rec.assumptions, objections: rec.objections ?? [] }, ...(rec.plan ? { researchPlan: rec.plan } : {}), ...(rec.scouts?.length ? { scouts: rec.scouts } : {}) };
   if (waiting) {
