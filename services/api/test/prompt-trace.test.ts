@@ -146,6 +146,23 @@ d("prompt records of conversational calls", () => {
     expect((await get(tomas, `/api/v1/prompt-traces/${hex("4")}`)).status).toBe(404);
   });
 
+  it("a station run's trace shows the run's manifest (layer, repo context, skills) and its calls list the manifest hash", async () => {
+    const h = hex("7");
+    const manifest = { v: 1, kind: "run", hash: h, parts: [{ kind: "layer", name: "Agent", version: 2, sha256: hex("a") }, { kind: "repo_context", name: "AGENTS.md", version: null, sha256: hex("b") }, { kind: "skill", name: "Testing", version: 3, sha256: hex("c") }] };
+    const sub = await w.submit(tomas);
+    const wo = sub.body.id as string;
+    await q(`insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,'at-pm-1',$2,'build',1,'running','{}'::jsonb)`, [t.orgId, wo]);
+    await q(`insert into runs (org_id, id, attempt_id, wo_id, data) values ($1,'run-pm-1','at-pm-1',$2,$3::jsonb)`, [t.orgId, wo, JSON.stringify({ promptHash: h, promptManifest: manifest, composed: { layers: [{ name: "Agent", version: 2, hash: hex("a") }] } })]);
+    await q(`insert into usage_meter (org_id, request_id, run_id, station, project_id, model_id, input_tokens, output_tokens, cost_micros, outcome, trace_ref) values ($2, 'req-pm', 'run-pm-1', 'build', 'payments', 'claude-test-1', 1, 1, 0, 'ok', $1)`, [`sha256/${hex("8")}`, t.orgId]);
+    edge.traces.set(hex("8"), { v: 1, kind: "run-call", request: { messages: [{ role: "user", content: "go" }], messagesFrom: 3 }, manifest: {} });
+    const list = await get(tomas, `/api/v1/prompt-calls?run=run-pm-1`);
+    expect(list.body.calls[0].promptHash).toBe(h);
+    const tr = await get(tomas, `/api/v1/prompt-traces/${hex("8")}`);
+    expect(tr.status).toBe(200);
+    expect(tr.body.trace.manifest.parts.map((p: { kind: string }) => p.kind)).toEqual(["layer", "repo_context", "skill"]);
+    expect(tr.body.trace.runPrompt.promptHash).toBe(h);
+  });
+
   it("says so when the trace store cannot answer, and refuses a caller that is not a signed-in person", async () => {
     await report({ ref: hex("5"), surface: "workorder", project: "payments", woId: "WO-9", actor: tomas });
     const gone = await get(tomas, `/api/v1/prompt-traces/${hex("5")}`); // recorded, but the edge has no object

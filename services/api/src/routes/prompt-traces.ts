@@ -33,10 +33,12 @@ interface CallRow {
   trace_ref: string | null;
   outcome: string;
   at: Date;
+  run_prompt: { promptManifest?: unknown; composed?: unknown; instructionPin?: unknown } | null;
 }
 
 const SELECT = `select u.request_id, u.run_id, coalesce(u.wo_id, r.wo_id) as wo_id, u.project_id, u.surface, u.station, u.actor_id, u.turn_id, u.model_id,
-       u.input_tokens::text, u.output_tokens::text, u.cost_micros::text, u.prompt_hash, u.trace_ref, u.outcome, u.at
+       u.input_tokens::text, u.output_tokens::text, u.cost_micros::text, coalesce(u.prompt_hash, r.data->>'promptHash') as prompt_hash, u.trace_ref, u.outcome, u.at,
+       case when r.id is null then null else jsonb_build_object('promptManifest', r.data->'promptManifest', 'composed', r.data->'composed', 'instructionPin', r.data->'instructionPin') end as run_prompt
   from usage_meter u left join runs r on r.org_id = u.org_id and r.id = u.run_id`;
 
 export const promptTraceRoutes: FastifyPluginAsync = async (app) => {
@@ -83,6 +85,12 @@ export const promptTraceRoutes: FastifyPluginAsync = async (app) => {
     const t = await fetchTrace(g.config.secrets.edgeToken, `sha256/${ref}`);
     if (!t.ok) throw refuse(t.status === 404 ? "not_found" : "conflict", t.status === 404 ? "No such prompt record." : "The prompt record store is not reachable right now. Try again shortly.");
     void reply.header("cache-control", "no-store");
-    return { ok: true, trace: t.trace };
+    // A station run's edge trace holds only the messages of the call. What the agent was given (layer, repo context, skills, station tools, with versions and
+    // hashes) is the run's own manifest: it holds references (hash, size, source), never text, so there is nothing to redact in it.
+    const rp = c.run_prompt;
+    const base = t.trace && typeof t.trace === "object" ? (t.trace as Record<string, unknown>) : {};
+    const own = base.manifest && typeof base.manifest === "object" && Object.keys(base.manifest).length > 0;
+    const trace = rp?.promptManifest ? { ...base, ...(own ? {} : { manifest: rp.promptManifest }), runPrompt: { promptHash: c.prompt_hash, manifest: rp.promptManifest, composed: rp.composed ?? null, instructionPin: rp.instructionPin ?? null } } : t.trace;
+    return { ok: true, trace };
   });
 };

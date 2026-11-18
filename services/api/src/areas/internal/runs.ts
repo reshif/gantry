@@ -141,9 +141,9 @@ export const runRoutes: FastifyPluginAsync = async (app) => {
       if (ru.rowCount) await tx.query(`update runs set model_id = $3, updated_at = now() where org_id = $1 and id = $2 and model_id is distinct from $3`, [c.orgId, id, b.model]);
       if (!ru.rowCount) return { msg: "Usage already recorded.", events: [], extra: { duplicate: true, costMicros: cost, priceVersion: book.version }, changes: [] };
       await tx.query(
-        `insert into usage_meter (org_id, request_id, run_id, attempt_id, station, agent_id, agent_version, project_id, vendor_id, model_id, input_tokens, output_tokens, cached_tokens, cache_write_tokens, cost_micros, price_version, latency_ms, outcome, trace_ref)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-        [c.orgId, b.requestId ?? null, id, c.attemptId, c.station, c.agentId, c.agentVersion, c.projectId, b.vendor ?? null, b.model, b.inputTokens, b.outputTokens, b.cacheReadTokens, b.cacheWriteTokens, cost, book.version, b.latencyMs ?? null, b.outcome, b.traceRef ?? null],
+        `insert into usage_meter (org_id, request_id, run_id, attempt_id, station, agent_id, agent_version, project_id, vendor_id, model_id, input_tokens, output_tokens, cached_tokens, cache_write_tokens, cost_micros, price_version, latency_ms, outcome, trace_ref, prompt_hash)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+        [c.orgId, b.requestId ?? null, id, c.attemptId, c.station, c.agentId, c.agentVersion, c.projectId, b.vendor ?? null, b.model, b.inputTokens, b.outputTokens, b.cacheReadTokens, b.cacheWriteTokens, cost, book.version, b.latencyMs ?? null, b.outcome, b.traceRef ?? null, typeof c.runData.promptHash === "string" ? c.runData.promptHash : null],
       );
       // Spec 10.4 Budget: the in-flight call finished; the next one is refused and the work order gets a system halt with cause budget.
       const events: EventSpec[] = [];
