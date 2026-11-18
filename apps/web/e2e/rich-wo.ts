@@ -14,7 +14,10 @@ const BRIEF = {
 };
 const CRITERIA = BRIEF.ac.map((text, i) => ({ id: `AC-${i + 1}`, text, status: "met", tests: [{ name: ["limiter_429", "config_default", "window_slide"][i], result: "pass", ms: 40 + i * 12 }] }));
 
-export function woReadOverrides(wos: Loose[], projectId: string): Record<string, Handler> {
+/** ops1: what the server says about the person deciding a gate on one work order (eligibility, votes), for the approval dialog. */
+export interface Ops1Approve { allowed: boolean; reason: string; have: number; need: number; approvals?: Array<{ name: string }>; eligible?: Array<{ id: string; name: string; why: string; away: boolean; oncall: boolean }> }
+
+export function woReadOverrides(wos: Loose[], projectId: string, approveOf: Record<string, Ops1Approve> = {}): Record<string, Handler> {
   const ov: Record<string, Handler> = {};
   const cat = DEFAULT_CATALOG;
   for (const w of wos) {
@@ -28,7 +31,7 @@ export function woReadOverrides(wos: Loose[], projectId: string): Record<string,
     const gateProgress: Loose = {};
     for (const g of Object.keys(w.gates ?? {})) gateProgress[g] = { have: 0, need: 1, unmet: [], conds: [], onlyRequester: false, passes: false };
     const history = [0, 1, 2, 3, 4, 5, 6, 7, 8].slice(0, Math.max(1, w.station + 1)).map((i) => ({ station: cat.stations[i]!.id, agent: cat.stations[i]!.agent, model: "claude-sonnet", startedAt: w.createdAt + i * 90 * MIN, endedAt: i < w.station ? w.createdAt + (i + 1) * 90 * MIN : null, tokens: 60000 + i * 9000, cost: 0.9 + i * 0.1, outcome: i < w.station ? "passed" : null, note: "", summary: i < w.station ? `${cat.stations[i]!.name} finished with no open questions.` : undefined }));
-    const full = { ...w, brief: BRIEF, criteria: CRITERIA, history, version: 7, gateProgress, allowed: { approve: gate ? { allowed: true, reason: "", needs: "", gate, instance: `${w.id}:${gate}:1` } : null, moves, can }, stop: null, route: rt, pr: w.pr ?? { number: 300, state: "open", tag: null }, briefVersions: [], conv: { messages: [], qi: 0, answers: {}, misses: [], decisions: [], awaiting: "", done: true, raised: [], questions: [] } };
+    const full = { ...w, brief: BRIEF, criteria: CRITERIA, history, version: 7, gateProgress, allowed: { approve: gate ? { allowed: approveOf[w.id]?.allowed ?? true, reason: approveOf[w.id]?.reason ?? "", needs: "", gate, instance: `${w.id}:${gate}:1` } : null, moves, can }, stop: null, route: rt, pr: w.pr ?? { number: 300, state: "open", tag: null }, briefVersions: [], conv: { messages: [], qi: 0, answers: {}, misses: [], decisions: [], awaiting: "", done: true, raised: [], questions: [] } };
     const record = {
       id: w.id, version: 7, project: projectId, repo: w.repo, title: w.title, state: w.state,
       request: { text: w.description || w.title, by: w.requestedBy, via: w.source, at: w.createdAt, attachments: [] },
@@ -45,7 +48,7 @@ export function woReadOverrides(wos: Loose[], projectId: string): Record<string,
     ov[`work-orders/${w.id}/record`] = (r) => fulfillJson(r, record);
     ov[`work-orders/${w.id}/changes`] = (r) => fulfillJson(r, { pullRequests: [{ number: 300, state: "open", headSha: "a1b2c3d", branch: "gantry/" + w.id.toLowerCase(), base: "main", url: null }], commits: [], files: record.code.files, patches: [] });
     for (const g of Object.keys(w.gates ?? {})) {
-      ov[`work-orders/${w.id}/gates/${g}/approvers`] = (r) => fulfillJson(r, { gate: g, label: g, name: "Review and merge", rule: { text: "Needs 1 approval from Tech Lead or Project Admin \u00b7 the author can't approve", required: 1, sod: true, roles: [], people: [], conditions: [] }, progress: { have: 0, need: 1, approvals: [], unmet: [], onlyRequester: false }, eligible: [{ id: "p-lead", name: "Meera Iyer", why: "Tech Lead", away: false, oncall: true }], overrides: [], satisfiable: true, warning: null, viewerCanOverride: false, can: { editRule: true, editWhy: "", grantRole: true, grantWhy: "" } });
+      ov[`work-orders/${w.id}/gates/${g}/approvers`] = (r) => fulfillJson(r, { gate: g, label: g, name: "Review and merge", rule: { text: `Needs ${approveOf[w.id]?.need ?? 1} approval${(approveOf[w.id]?.need ?? 1) > 1 ? "s" : ""} from Tech Lead or Project Admin \u00b7 the author can't approve`, required: approveOf[w.id]?.need ?? 1, base: approveOf[w.id]?.need ?? 1, sod: true, roles: [], people: [], conditions: [] }, progress: { have: approveOf[w.id]?.have ?? 0, need: approveOf[w.id]?.need ?? 1, approvals: approveOf[w.id]?.approvals ?? [], unmet: [], onlyRequester: false }, eligible: approveOf[w.id]?.eligible ?? [{ id: "p-lead", name: "Meera Iyer", why: "Tech Lead", away: false, oncall: true }], overrides: [], satisfiable: true, warning: null, viewerCanOverride: false, can: { editRule: true, editWhy: "", grantRole: true, grantWhy: "" } });
     }
     ov[`work-orders/${w.id}/session`] = (r) => fulfillJson(r, woSession(w, full, gate));
   }

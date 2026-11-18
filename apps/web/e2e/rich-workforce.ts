@@ -5,6 +5,7 @@ const NOW = Date.parse("2026-01-15T10:00:00Z");
 const DAY = 86_400_000;
 const AG = ["ag-intake", "ag-research", "ag-spec", "ag-design", "ag-plan", "ag-build", "ag-test", "ag-review", "ag-close"];
 const ST = ["intake", "research", "spec", "design", "plan", "build", "verify", "review", "close"];
+const AGN: Record<string, string> = { "ag-intake": "Intake Clerk", "ag-research": "Researcher", "ag-spec": "Spec Writer", "ag-design": "Designer", "ag-plan": "Planner", "ag-build": "Builder", "ag-test": "Test Engineer", "ag-review": "Reviewer", "ag-close": "Release Captain" };
 
 const SKILLS: Array<[string, string, string, string, string[]]> = [
   ["sk-review", "Code review and PR description", "Review against the plan.", "1.0.0", ["ag-review"]],

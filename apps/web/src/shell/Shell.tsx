@@ -15,7 +15,6 @@ import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
 import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
-import { NotFoundPage, protoEyebrow, SharedStatePage, sharedStateFromUrl } from "./SharedStates";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { StatusBar } from "./StatusBar";
@@ -120,9 +119,6 @@ export function Shell({ me }: { me: Me }) {
   };
   const View = VIEWS[routeId] ?? VIEWS.home;
   const noAccess = hasNoAccess(me);
-  // `?state=loading|empty|error|forbidden|conflict` previews the shared states on any route (the design-system page links to them)
-  const sharedState = sharedStateFromUrl();
-  const unknownRoute = loc.id !== "" && !routeDef(loc.id);
   const shown = denied ?? def;
   const crumbTail = useCrumbTailValue();
   const baseCrumb = scoped ? [def?.title ?? ""] : [...(shown && !["Overview"].includes(shown.group) ? [shown.group] : []), shown?.title ?? "Home"];

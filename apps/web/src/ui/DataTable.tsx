@@ -75,9 +75,6 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   /** Controlled selection (needs `selectable`): the selected row keys. Without it the table keeps its own. */
   selected?: ReadonlySet<string>;
   onSelect?: (keys: Set<string>) => void;
-  /** Controlled pager page, zero-based (needs `pager`), so a screen can keep it in the URL. */
-  page?: number;
-  onPage?: (page: number) => void;
 }) {
   const uid = useId().replace(/:/g, "");
   const [ownPage, setOwnPage] = useState(0);

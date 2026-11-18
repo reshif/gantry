@@ -55,7 +55,7 @@ export function richGroupE(): Record<string, Handler> {
       inst("i9", "ci", "CI runner (generic)", "all", 18 * MIN),
     ]);
   const tool = (name: string, write: boolean, allowed = true) => ({ name, write, allowed, hint: write ? "write" : "read", description: name, hash: "h-" + name });
-  const mcp = (id: string, name: string, url: string, sens: string, tools: ReturnType<typeof tool>[], health = "healthy") => ({
+  const mcp = (id: string, name: string, url: string, sens: string, tools: Array<ReturnType<typeof tool> & { changed?: boolean }>, health = "healthy") => ({
     id, name, transport: "http", url, auth: "oauth", authMask: "••••", health, sensitivity: sens, writeGate: true, tools, authMode: "bearer", protocolRevision: "2025-06-18", enabled: true, version: 1, projects: "all", repos: "all", agents: "all",
   });
   const mcpAgents = (a: string[] | "all") => a;
