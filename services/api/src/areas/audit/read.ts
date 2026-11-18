@@ -21,7 +21,7 @@ export const TOPICS = [
   { id: "learning", name: "Learning", sql: `(e.type ~ '^learning\\.' or e.type = 'eval.case')` },
   {
     id: "catalogue", name: "Catalogue",
-    sql: `(e.type ~ '^(station|class|bay|vendor)\\.' or e.type ~ '^role\\.(add|edit|remove)$' or e.type in ('gate.add','flow.gate','integration.type','integration.add','integration.remove','model.add','model.remove','card.template'))`,
+    sql: `(e.type ~ '^(station|class|bay|vendor)\\.' or e.type ~ '^role\\.(add|edit|remove)$' or e.type in ('gate.add','flow.gate','flow.override','integration.type','integration.add','integration.remove','model.add','model.remove','card.template'))`,
   },
   { id: "record", name: "Records", sql: `(e.type ~ '^(record|outcome)\\.')` },
 ] as const;
@@ -86,7 +86,7 @@ interface Raw {
 export function topicFor(a: string): string | null {
   if (/^trust\./.test(a) || a === "gate.trust") return "trust";
   if (/^learning\./.test(a) || a === "eval.case") return "learning";
-  if (/^(station|class|bay|vendor)\./.test(a) || /^role\.(add|edit|remove)$/.test(a) || ["gate.add", "flow.gate", "integration.type", "integration.add", "integration.remove", "model.add", "model.remove", "card.template"].includes(a)) return "catalogue";
+  if (/^(station|class|bay|vendor)\./.test(a) || /^role\.(add|edit|remove)$/.test(a) || ["gate.add", "flow.gate", "flow.override", "integration.type", "integration.add", "integration.remove", "model.add", "model.remove", "card.template"].includes(a)) return "catalogue";
   if (/^(record|outcome)\./.test(a)) return "record";
   return null;
 }

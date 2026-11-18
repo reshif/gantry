@@ -250,12 +250,12 @@ d("projects", () => {
       for (const g of ["G2", "G3d", "G5"]) for (const m of ["auto", "mixed"]) expect((await call(admin, "PATCH", url, { gate: g, mode: m })).status, `${g} ${m}`).toBe(422);
     });
     it("refuses turning a station off while work is at it (spec 14.4)", async () => {
-      await insertWo("checkout-next", "WO-T1", "review");
-      const r = await call(admin, "PATCH", "/api/v1/projects/checkout-next/config", { path: "flow.stations.review.enabled", value: false });
+      await insertWo("checkout-next", "WO-T1", "design");
+      const r = await call(admin, "PATCH", "/api/v1/projects/checkout-next/config", { path: "flow.stations.design.enabled", value: false });
       expect(r.status).toBe(409);
       expect(r.body.msg).toMatch(/1 work order is at/);
       await t.db.admin.query(`update work_orders set state = 'done' where id = 'WO-T1'`);
-      expect((await call(admin, "PATCH", "/api/v1/projects/checkout-next/config", { path: "flow.stations.review.enabled", value: false })).status).toBe(409); // carries G5 (I1)
+      expect((await call(admin, "PATCH", "/api/v1/projects/checkout-next/config", { path: "flow.stations.review.enabled", value: false, reason: "No review wanted at all" })).status).toBe(409); // carries G5 (I1), refused even for an admin with a reason
       expect((await call(admin, "PATCH", "/api/v1/projects/checkout-next/config", { path: "flow.stations.design.enabled", value: false })).status).toBe(200);
       expect((await call(admin, "PATCH", "/api/v1/projects/checkout-next/config", { path: "flow.stations.intake.enabled", value: false })).status).toBe(409);
     });
@@ -421,11 +421,11 @@ d("projects", () => {
     it("refuses the gates that must stay on, with the reason, and changes nothing", async () => {
       const before = (await proj(id)).flow.gates;
       for (const [g, why] of [["G0G1", /confirming the brief/], ["G3G3s", /security checks/], ["G4", /required checks/], ["G5", /No agent merges on its own authority/]] as const) {
-        const r = await toggle(admin, id, g, false);
-        expect(r.status, g).toBe(409);
-        expect(r.body.ok).toBe(false);
-        expect(String(r.body.msg)).toMatch(/cannot be turned off/);
-        expect(String(r.body.msg)).toMatch(why);
+        // A Factory Admin may override with a reason (not G5), so without one is told to give it (the non-admin refusal is in gate-locks.test.ts).
+        const a = await toggle(admin, id, g, false);
+        expect(a.status, g).toBe(g === "G5" ? 409 : 403);
+        if (g !== "G5") expect(a.body.needs).toBe("override_reason");
+        else expect(String(a.body.msg)).toMatch(why);
       }
       expect((await proj(id)).flow.gates).toEqual(before);
     });
@@ -472,7 +472,8 @@ d("projects", () => {
     it("a regulated project keeps every gate on", async () => {
       await t.db.admin.query(`update projects set regulated = true where id = $1`, [id]);
       const r = await toggle(admin, id, "G2", false);
-      expect(r.status).toBe(409);
+      expect(r.status).toBe(403); // a Factory Admin may override, with a reason
+      expect(r.body.needs).toBe("override_reason");
       expect(String(r.body.msg)).toMatch(/Regulated projects keep every gate on/);
       await t.db.admin.query(`update projects set regulated = false where id = $1`, [id]);
     });

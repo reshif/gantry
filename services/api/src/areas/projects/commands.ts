@@ -6,12 +6,12 @@ import type { Actor, CommandResult, EventSpec } from "../../core/command.js";
 import { conflict, invalid, notFound, refuse } from "../../core/errors.js";
 import { readCatalog, readPeople, readRoles, readTemplates } from "../../core/read/index.js";
 import { parseConfigEdit, type ConfigEdit } from "./config.js";
-import { addBay, addClass, addGate, addStation, draftOf, moveStation, removeStation, replaceClasses, setEnabled, setGateMode, setWip, updateClass, type FlowDraft } from "./flowedit.js";
+import { addBay, addClass, type OverrideRecord, addGate, addStation, draftOf, moveStation, removeStation, replaceClasses, setEnabled, setGateMode, setWip, updateClass, type FlowDraft } from "./flowedit.js";
 import { approversPreset, flowFrom, routesPreset } from "./presets.js";
 import { checkRule, checkRuleRefs, ruleContext } from "./rules.js";
 import type { ArchiveBody, BayBody, ClassBody, ClassPatch, GateBody, MoveBody, NewProject, StationBody, TemplateCreate, TemplatePatch, ViewCreate, ViewPatch } from "./schemas.js";
 import {
-  loadDraft, lockProject, openByClass, openWorkOrders, persistDraft, publishRule, readProject, saveCatalog,
+  factoryAdminActor, loadDraft, lockProject, openByClass, openWorkOrders, persistDraft, publishRule, readProject, saveCatalog,
 } from "./store.js";
 import { applyCustom, checkTemplatePatch, customCount, customOf, templateBodyFromProject, type TemplateCustom } from "./templates.js";
 
@@ -120,7 +120,7 @@ async function replayCustom(tx: Tx, org: string, draft: FlowDraft, tpl: Template
 const jsonOf = (v: unknown) => JSON.parse(JSON.stringify(v ?? null)) as unknown;
 
 /** `PATCH /projects/{id}/config` with `{ path, value }`. Flow edits publish a new flow version; the rest update the project in place and bump its version. */
-export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: ConfigEdit, path: string): Promise<Out<{ version: number; flowVersion?: number }>> {
+export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: ConfigEdit, path: string, reason?: string): Promise<Out<{ version: number; flowVersion?: number }>> {
   const row = await lockProject(tx, a.orgId, projectId, a.ifMatch);
   const org = a.orgId;
   const subject = { type: "project", id: projectId };
@@ -130,6 +130,12 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       msg, events: [{ ...evt(type, projectId, subject, jsonOf(before), jsonOf(after), category), subject: { ...subject, path } }],
       extra: { version, ...(flowVersion !== undefined ? { flowVersion } : {}) }, changes: ["projects"], project: projectId,
     };
+  };
+
+  /** A lock overridden by a Factory Admin: one `flow.override` event with project, gate, before, after and the reason, in the project's audit. */
+  const overridden = async (o: OverrideRecord, msg: string, flowVersion: number): Promise<Out<{ version: number; flowVersion?: number }>> => {
+    const version = Number((await tx.query(`select version from projects where org_id = $1 and id = $2`, [org, projectId])).rows[0].version);
+    return { msg, events: [flowOverrideEvent(projectId, o)], extra: { version, flowVersion }, changes: ["projects", "floor"], project: projectId };
   };
 
   switch (edit.kind) {
@@ -205,21 +211,31 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
       after = edit.value;
       break;
     case "station-enabled": {
+      const adm = await factoryAdminActor(tx, a);
+      // The lock is judged first (a station carrying G5 is refused whoever asks), then whether work is at it.
+      const r = setEnabled(draft, "stations", edit.id, edit.value, { regulated: !!row.regulated, admin: !!adm, reason, by: a.id, byName: adm?.name ?? a.name, at: a.now.getTime() });
       if (!edit.value) {
         const busy = await openWorkOrders(tx, org, projectId, { position: edit.id });
         if (busy) throw conflict(`${busy} work order${busy > 1 ? "s are" : " is"} at ${draft.catalog.stations.find((s) => s.id === edit.id)?.name ?? edit.id}. Move ${busy > 1 ? "them" : "it"} first.`);
       }
-      before = setEnabled(draft, "stations", edit.id, edit.value, { regulated: !!row.regulated }).before;
+      before = r.before;
       after = edit.value;
+      if (r.override) {
+        const flowVersion = await persistDraft(tx, org, draft, a.id, `${path} (override: ${r.override.reason})`);
+        const name = draft.catalog.stations.find((s) => s.id === edit.id)?.name ?? edit.id;
+        return overridden(r.override, `${name} turned off by Factory Admin override.`, flowVersion);
+      }
       break;
     }
     case "gate-enabled": {
-      const r = setEnabled(draft, "gates", edit.id, edit.value, { regulated: !!row.regulated });
+      const adm = await factoryAdminActor(tx, a);
+      const r = setEnabled(draft, "gates", edit.id, edit.value, { regulated: !!row.regulated, admin: !!adm, reason, by: a.id, byName: adm?.name ?? a.name, at: a.now.getTime() });
       before = r.before;
       after = edit.value;
-      const flowVersion = await persistDraft(tx, org, draft, a.id, path);
+      const flowVersion = await persistDraft(tx, org, draft, a.id, r.override ? `${path} (override: ${r.override.reason})` : path);
       const gd = draft.catalog.gates.find((g) => g.id === edit.id)!;
       const inflight = edit.value ? 0 : await openWorkOrders(tx, org, projectId, {});
+      if (r.override) return overridden(r.override, `${gd.name} (${gd.label}) turned off by Factory Admin override.${inflight ? ` ${inflight} open work order${inflight > 1 ? "s keep" : " keeps"} the flow ${inflight > 1 ? "they" : "it"} started with.` : ""}`, flowVersion);
       return done("project.config", before, after, `${gd.name} (${gd.label}) turned ${edit.value ? "on" : "off"}.${edit.value ? "" : ` New work orders skip it${inflight ? `; ${inflight} open work order${inflight > 1 ? "s keep" : " keeps"} the flow ${inflight > 1 ? "they" : "it"} started with` : ""}.`}`, "config", flowVersion);
     }
     case "station-wip":
@@ -241,15 +257,23 @@ export async function setConfig(tx: Tx, a: Actor, projectId: string, edit: Confi
 
 const modeText = (m: string): string => (m === "auto" ? "automatic" : m === "mixed" ? "checks, then a person" : "a human approval");
 
-export async function changeGateMode(tx: Tx, a: Actor, projectId: string, gateId: string, mode: string): Promise<Out<{ version: number; flowVersion: number }>> {
+/** The audited event for an override of a gate lock (owner decision 2026-11-19). */
+const flowOverrideEvent = (projectId: string, o: OverrideRecord): EventSpec => ({
+  type: "flow.override", category: "config", subject: { type: o.kind === "mode" ? "gaterule" : "gate", id: `${projectId}:${o.gate}` }, projectId,
+  before: { project: projectId, gate: o.gate, ...(o.station ? { station: o.station } : {}), [o.kind === "mode" ? "mode" : "enabled"]: o.before },
+  after: { project: projectId, gate: o.gate, ...(o.station ? { station: o.station } : {}), [o.kind === "mode" ? "mode" : "enabled"]: o.after, override: true, kind: o.kind, reason: o.reason },
+});
+
+export async function changeGateMode(tx: Tx, a: Actor, projectId: string, gateId: string, mode: string, reason?: string): Promise<Out<{ version: number; flowVersion: number }>> {
   await lockProject(tx, a.orgId, projectId, a.ifMatch);
   const { draft, project } = await loadDraft(tx, a.orgId, projectId);
-  const r = setGateMode(draft, gateId, mode, { regulated: !!project.regulated });
-  const flowVersion = await persistDraft(tx, a.orgId, draft, a.id, `${r.gate.name} (${r.gate.label}) mode`);
+  const adm = await factoryAdminActor(tx, a);
+  const r = setGateMode(draft, gateId, mode, { regulated: !!project.regulated, admin: !!adm, reason, by: a.id, byName: adm?.name ?? a.name, at: a.now.getTime() });
+  const flowVersion = await persistDraft(tx, a.orgId, draft, a.id, `${r.gate.name} (${r.gate.label}) mode${r.override ? ` (override: ${r.override.reason})` : ""}`);
   const version = Number((await tx.query(`select version from projects where org_id = $1 and id = $2`, [a.orgId, projectId])).rows[0].version);
   return {
     msg: `${r.gate.name} (${r.gate.label}) is now ${modeText(mode)} on ${project.name}.`,
-    events: [evt("flow.gate", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, r.before, mode)],
+    events: [evt("flow.gate", projectId, { type: "gaterule", id: `${projectId}:${gateId}` }, r.before, mode), ...(r.override ? [flowOverrideEvent(projectId, r.override)] : [])],
     extra: { version, flowVersion }, changes: ["projects"], project: projectId,
   };
 }

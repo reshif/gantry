@@ -55,7 +55,7 @@ export const ClassSchema = z.object({
 });
 
 /** PATCH /projects/{id}/config: a path/value edit or a gate mode change. */
-export const ConfigBody = z.union([z.object({ path: str(200).min(1), value: z.unknown() }), z.object({ gate: id, mode: str(20) })]);
+export const ConfigBody = z.union([z.object({ path: str(200).min(1), value: z.unknown(), reason: str(1000).optional() }), z.object({ gate: id, mode: str(20), reason: str(1000).optional() })]);
 
 export const NewProject = z.object({
   name: str(80),
