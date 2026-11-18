@@ -107,7 +107,7 @@ export default function WorkspaceView() {
   if (key === "new" || key === "chats") return <div className="view ws-view" />;
   return (
     <div className="view ws-view">
-      <ViewHead sheet="conversations" title="Conversations" sub="The dialogue between people and the agents at each station." actions={<Btn kind="primary" icon="plus" label="New chat" id="ws-conv-new" onClick={newChat} />} />
+      <ViewHead sheet="conversations" title="Agent chats" sub="Chats between people and the agents at each station, and side chats with an agent." actions={<Btn kind="primary" icon="plus" label="New chat" id="ws-conv-new" onClick={newChat} />} />
       <div className={`ws-grid${key === "inbox" ? " ws-nosel" : ""}`}>
         <Inbox me={me.person.id} items={items} loading={filter === "archived" ? archived.isLoading : all.isLoading} current={key} filter={cur} onFilter={setFilter} onPick={(k) => open(k)} onNew={newChat} onSearch={(s) => setQ(s)}
           operator={operator ? { show: true, active: key === "operator", onOpen: () => open("operator") } : null} />

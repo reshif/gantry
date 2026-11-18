@@ -80,7 +80,7 @@ export function Inbox({ me, items, loading, current, filter, onFilter, onPick, o
   const pinned = shown.filter((i) => i.pinned);
   const rest = shown.filter((i) => !i.pinned);
   return (
-    <nav className="ws-inbox" aria-label="Conversations" id="ws-inbox">
+    <nav className="ws-inbox" aria-label="Agent chats" id="ws-inbox">
       <div className="ws-inbox-h">
         <span className="kicker">Agents at work</span>
         <Btn small kind="primary" icon="plus" label="New chat" id="ws-new" onClick={onNew} />

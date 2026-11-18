@@ -6,6 +6,9 @@
 @media (max-width: 900px) { .osx-grid { grid-template-columns: minmax(0, 1fr); } .osx-side { order: -1; } }
 .osx-main { display: flex; flex-direction: column; border: 1px solid var(--line-strong); background: var(--surface); min-width: 0; }
 .osx-thread { display: flex; flex-direction: column; gap: 12px; padding: 14px; max-height: 68vh; overflow-y: auto; }
+.osx-thread > * { flex: none; }
+/* T-D2: a bubble scrolled under the top edge fades out instead of reading as a clipped header; the first message rests below the edge */
+.osx-thread { scroll-padding-top: 12px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px); mask-image: linear-gradient(to bottom, transparent 0, #000 12px); }
 .osx-msg { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
 .osx-msg.is-user { align-self: flex-end; background: var(--sunk); padding: 8px 12px; border: 1px solid var(--line); max-width: 85%; }
 .osx-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }

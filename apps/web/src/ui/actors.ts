@@ -26,6 +26,9 @@ export function useActors(): (id: string | null | undefined) => Actor {
     const a = agents?.find((x) => x.id === key);
     if (a) return { id: key, name: `${a.name} (agent)`, initials: a.initials, kind: "agent" };
     if (key === "system") return { id: key, name: "Gantry", initials: "?", kind: "other" };
+    // A person the viewer may not list (the people list is permission-gated): show a readable name, never the raw id.
+    const bare = /^p-([a-z][a-z0-9]*)$/i.exec(key)?.[1];
+    if (bare) { const name = bare[0]!.toUpperCase() + bare.slice(1); return { id: key, name, initials: initialsOf(name), kind: "person" }; }
     return { id: key, name: key || "system", initials: "?", kind: "other" };
   };
 }

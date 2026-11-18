@@ -399,8 +399,11 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
 
   const hasModels = (st?.models?.length ?? 0) > 0;
   const noModels = !!st && st.models !== undefined && !hasModels;
-  const modeLine = status.isLoading ? "Checking whether a model is configured." : st?.configured ? `Answers come from ${st.model} (${st.vendor}) using tools over the live factory. ${actionsOn ? "It may propose the actions your console rights allow; each waits for your click." : "It is read-only for you: you hold no console rights to propose changes."}` : noModels ? (st?.canManageModels ? "No model can be called yet." : "No model can be called yet. Ask a Factory Admin to connect a model vendor in Models.") : (st?.reason ?? "The console could not check its model.");
-  const label = st?.configured ? "Model" : status.isLoading ? "Checking" : "No model";
+  // Why the console proposes nothing: name the real reason (the factory's console actions are off, or no console right is granted to this person) and who can change it.
+  const whoSwitches = st?.isFactoryAdmin ? "You can switch them on under Govern, Access (Console group)." : "A Factory Admin can switch them on under Govern, Access (Console group).";
+  const offReason = st?.canUse === false ? `You may not use the console${st.use?.reason ? `: ${st.use.reason}` : "."}` : st?.proposals?.length ? `Console actions are switched off for you: no console right to propose changes is granted. ${whoSwitches} It still answers questions.` : `Console actions are switched off for this factory, so it only answers questions. ${whoSwitches}`;
+  const modeLine = status.isLoading ? "Checking whether a model is configured." : st?.configured ? `Answers come from ${st.model} (${st.vendor}) using tools over the live factory. ${actionsOn ? "It may propose the actions your console rights allow; each waits for your click." : offReason}` : noModels ? (st?.canManageModels ? "No model can be called yet." : "No model can be called yet. Ask a Factory Admin to connect a model vendor in Models.") : (st?.reason ?? "The console could not check its model.");
+  const label = st?.configured ? (st.effectiveModel ?? st.model ?? "Model") : status.isLoading ? "Checking" : "No model";
   const cls = st?.configured ? "ready" : status.isLoading ? "checking" : "absent";
 
   const modeChip = <span className={`ask-badge ask-${cls}${streaming ? " is-busy" : ""}`} id={hasModels && st ? "con-status" : "con-mode"} role="status" title={modeLine} aria-label={`Answer mode: ${label}. ${modeLine}`}>{label}</span>;
@@ -424,7 +427,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             <ul className="caps" id="con-rights">
               {(st?.proposals ?? []).map((p) => <li key={p.kind} id={`con-right-${p.kind}`} className={p.allowed ? "ok" : "no"} tabIndex={0} data-tip={p.reason}><Icon name={p.allowed ? "check" : "lock"} /><span>{`Propose: ${p.does}`}</span><span className="small muted">{p.allowed ? "allowed" : p.needs || p.reason}</span></li>)}
             </ul>
-            {st && st.proposals && !st.proposals.some((p) => p.allowed) ? <p className="muted small" id="con-readonly">Your console is read-only: it can answer questions but not propose changes. Ask a Factory Admin for a console right.</p> : null}
+            {st && st.proposals && !st.proposals.some((p) => p.allowed) ? <p className="muted small" id="con-readonly">{offReason}</p> : null}
             <p className="muted small">Confirming a card also needs the underlying right (for example submit work orders on that project).</p>
             {st?.isFactoryAdmin ? <a href="#access" id="con-manage-perms" onClick={(e) => { e.preventDefault(); navigate("access"); }}>Manage console permissions: Govern, Access (Console group)</a> : null}
           </Panel>
@@ -450,7 +453,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     return (
       <div className="view view-console view-console-page">
         <ViewHead kicker="ALL LINES" title="Console" sub="Ask Gantry anything about your factory. Answers come from live data, and nothing changes without your approval."
-          actions={<Btn label="New work order" small icon="plus" id="con-new-wo" onClick={() => newWo({})} />} />
+          actions={<Btn label="Submit work order" small icon="plus" id="con-new-wo" onClick={() => newWo({})} />} />
         <div className={`con2${chatsOpen ? " list-open" : ""}`} id="con2">
           <ConsoleChats rows={rows} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} onChanged={refreshChats} />
           <section className="con2-main" aria-label="Chat" id="con2-main">
@@ -464,7 +467,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
               {modeChip}
               <Btn label="Settings" small icon="gear" id="con-open-settings" aria-expanded={aux === "settings"} aria-controls="con-settings" onClick={() => setAux(aux === "settings" ? null : "settings")} />
             </header>
-            {pinned.length ? <div className="chips con2-pins" id="con-pins" aria-label="Work orders in this chat"><span className="kicker">Work orders</span>{pinned.map((id) => <EntityChip key={id} e={{ type: "wo", id }} />)}</div> : null}
+            {pinned.length ? <div className="chips con2-pins" id="con-pins" aria-label="Work orders in this chat"><span className="kicker">In this chat</span>{pinned.map((id) => <EntityChip key={id} e={{ type: "wo", id }} />)}</div> : null}
             {aux === "settings" ? (
               <div className="con2-settings" id="con-settings" role="region" aria-label="Console settings">
                 <div className="con2-settings-h"><b>Console settings</b><Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} /></div>
@@ -477,14 +480,14 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
             <div className="chat con2-log" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
               {empty ? <Empty id="con-empty" title="Start a conversation" text="Ask about any project, work order, gate or spend. This chat reads all projects, or just one if you choose a scope above." /> : msgs.map((m) => (
                   <div className={`msg msg-${m.role}${byPerson(m) ? " me" : ""}`} key={m.id}>
-                    {byPerson(m) ? <Avatar id={m.by} /> : <span className="avatar bot" title="Gantry" aria-hidden="true">OA</span>}
+                    {byPerson(m) ? <Avatar id={m.by} /> : <span className="avatar bot av-agent" title="Gantry" aria-hidden="true">G</span>}
                     <div className="bub">
-                      <div className="who">{nameOf(m)}</div>
+                      <div className="who">{nameOf(m)}{m.at ? <time className="msg-at" dateTime={new Date(m.at).toISOString()}>{` · ${fmt.ist(m.at)}`}</time> : null}</div>
                       {m.streaming ? <div id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div id={`con-msg-text-${m.id}`}>{!byPerson(m) && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
-                      {!byPerson(m) && m.mode !== "pending" && m.mode !== "live" ? (
+                      {!byPerson(m) && m.mode !== "pending" && m.mode !== "live" && (m.mode !== "model" || m.stopped || m.note || (retryable && retryable.errId === m.id)) ? (
                         <div className="small muted msg-meta"><span className={`msg-mode is-${m.mode}`}>{modeOf(m)}</span>{m.note ? <span className="msg-note">{` · ${m.note}`}</span> : null}{retryable && retryable.errId === m.id ? <> <Btn label="Retry" small kind="ghost" icon="send" id="con-retry" onClick={retry} /></> : null}</div>
                       ) : m.streaming ? <div className="small muted msg-meta"><span className="msg-mode is-pending">Model · streaming</span></div> : null}
-                      {m.cited?.length ? <div className="chips msg-chips" aria-label="Used in this answer"><span className="kicker">Used</span>{m.cited.map((e) => <EntityChip key={`${e.type}:${e.id}`} e={e} />)}</div> : null}
+                      {m.cited?.length ? <div className="chips msg-chips" aria-label="Used in this answer"><span className="kicker">Based on</span>{m.cited.map((e) => <EntityChip key={`${e.type}:${e.id}`} e={e} />)}</div> : null}
                       {m.cards?.map((c, i) => c.type === "proposal" && c.proposal
                         ? <ProposalCard key={`${m.id}-${c.proposal.id}`} p={c.proposal} mid={m.id} serverId={m.serverId} />
                         : <ResultCard key={`${m.id}-${i}`} type={c.type} data={c.data} c={cardCtx(m.id)} />)}
@@ -534,7 +537,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
                     {retryable && retryable.errId === m.id ? <Btn label="Retry" small kind="ghost" icon="send" id="con-retry" onClick={retry} /> : null}
                   </div>
                 ) : m.streaming ? <div className="msg-meta"><span className="msg-mode is-pending">Model · streaming</span></div> : null}
-                {m.cited?.length ? <div className="chips msg-chips" aria-label="Used in this answer"><span className="kicker">Used</span>{m.cited.map((e) => <EntityChip key={`${e.type}:${e.id}`} e={e} />)}</div> : null}
+                {m.cited?.length ? <div className="chips msg-chips" aria-label="Used in this answer"><span className="kicker">Based on</span>{m.cited.map((e) => <EntityChip key={`${e.type}:${e.id}`} e={e} />)}</div> : null}
                 {m.cards?.map((c, i) => c.type === "proposal" && c.proposal
                   ? <ProposalCard key={`${m.id}-${c.proposal.id}`} p={c.proposal} mid={m.id} serverId={m.serverId} />
                   : <ResultCard key={`${m.id}-${i}`} type={c.type} data={c.data} c={cardCtx(m.id)} />)}
