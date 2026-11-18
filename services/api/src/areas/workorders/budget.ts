@@ -11,14 +11,23 @@ import { resolveTarget } from "../stops/targets.js";
 import { resumeStop } from "../stops/commands.js";
 import { lockWo, saveWo } from "./model.js";
 import { guardOpen } from "./ctx.js";
+import { CAP_NAME, capOfReason, overBudget, overText } from "./budget-state.js";
 
 type Cmd = CommandResult<Record<string, unknown>>;
 
 /** The most a single work order's cap can be set to, in US dollars. */
 export const MAX_WO_BUDGET_USD = 100_000;
 
-/** The reason the meter writes for a work-order cap breach (see areas/internal/runs.ts); a project or run breach reads differently and a work-order cap raise does not clear it. */
-const WO_BREACH = /^Budget reached: the work order /;
+/**
+ * Lifts a budget halt of a work order because the cap that held it was raised (the caller has already saved the new cap and checked that nothing else holds it). One resume,
+ * audited with the reason that names the cap, and the enforce job that lets the work order run again.
+ */
+export async function liftBudgetHalt(tx: Tx, a: Actor, woId: string, reason: string): Promise<{ stop: string; events: NonNullable<Cmd["events"]>; jobs: NonNullable<Cmd["jobs"]> }> {
+  const t = await resolveTarget(tx, a.orgId, "workorder", woId);
+  const r = await resumeStop(tx, a, t, { reason, budgetChecked: true });
+  const stop = String(r.extra?.stop ?? "");
+  return { stop, events: r.events, jobs: [job("stop.enforce", { stopId: stop, scope: "wo", targetId: woId, mode: "halt" }, { dedupeKey: `stop.enforce:${stop}:v${Number(r.extra?.version ?? 2)}`, priority: 100 })] };
+}
 
 const toMicros = (usd: number): number => Math.round(usd * 1_000_000);
 const fmt = (micros: number): string => `$${(micros / 1e6).toFixed(2)}`;
@@ -59,16 +68,18 @@ export async function setWoCap(tx: Tx, a: Actor, woId: string, b: { usd: number;
       `select id, reason from stops where org_id = $1 and scope_type = 'wo' and wo_id = $2 and mode = 'halt' and cause = 'budget' and lifted_at is null for update`, [a.orgId, woId],
     )
   ).rows[0];
-  if (budgetHalt && raised) {
-    if (WO_BREACH.test(budgetHalt.reason)) {
-      const t = await resolveTarget(tx, a.orgId, "workorder", woId);
-      const r = await resumeStop(tx, a, t, { reason: `Cap raised to $${b.usd}` });
-      events.push(...r.events);
-      resumed = String(r.extra?.stop ?? budgetHalt.id);
-      jobs.push(job("stop.enforce", { stopId: resumed, scope: "wo", targetId: woId, mode: "halt" }, { dedupeKey: `stop.enforce:${resumed}:v${Number(r.extra?.version ?? 2)}`, priority: 100 }));
-    } else note = " The halt came from another budget, so it stays.";
-  } else if (budgetHalt) note = " It stays halted until the cap is raised.";
-  else if ((await tx.query(`select 1 from stops where org_id = $1 and lifted_at is null and (scope_type = 'factory' or (scope_type = 'project' and project_id = $3) or (scope_type = 'wo' and wo_id = $2))`, [a.orgId, woId, w.project])).rowCount) note = " It is still halted for another reason.";
+  if (budgetHalt) {
+    const held = capOfReason(budgetHalt.reason);
+    const still = await overBudget(tx, a.orgId, woId);
+    if (held === "wo" && raised && !still.length) {
+      const l = await liftBudgetHalt(tx, a, woId, `Cap raised to $${b.usd}`);
+      events.push(...l.events);
+      jobs.push(...l.jobs);
+      resumed = l.stop;
+    } else if (held === "wo" && raised) note = ` The halt stays: ${still.map(overText).join(" and ")} still holds it. Raise that too.`;
+    else if (held === "wo") note = " It stays halted until this cap is raised above what it has spent.";
+    else note = ` The halt is held by ${held ? CAP_NAME[held] : "another budget"}, not this cap, so it stays.${held === "project" ? " Raise the project's monthly budget to lift it." : ""}`;
+  } else if ((await tx.query(`select 1 from stops where org_id = $1 and lifted_at is null and (scope_type = 'factory' or (scope_type = 'project' and project_id = $3) or (scope_type = 'wo' and wo_id = $2))`, [a.orgId, woId, w.project])).rowCount) note = " It is still halted for another reason.";
 
   events.unshift({
     type: "wo.budget", category: "config", subject: { type: "wo", id: woId }, projectId: w.project, woId, occurredAt: a.now,
