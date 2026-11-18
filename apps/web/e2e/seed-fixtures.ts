@@ -165,7 +165,23 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     summary: { generated: `${w.title}. ${w.state === "waiting" ? "It is waiting at a gate." : "It is on the line."}`, written: null },
     events: (w.log ?? []).map((l: Seed, i: number) => ({ seq: i + 1, at: new Date(l.at).toISOString(), type: "wo.log", by: l.who, outcome: "ok", detail: { text: l.text } })),
   });
+  // --- work2 (Evals, Trust, Learning) fixtures: run history in the prototype's order (newest first), and a run started from the page ---
+  const runAts = (seed.eval_runs as Seed[]).map((r: Seed) => r.at as number).sort((a: number, b: number) => b - a);
+  const evalRuns: Seed[] = (seed.eval_runs as Seed[]).map((r: Seed, i: number) => ({ ...r, at: runAts[i] }));
+  // --- end work2 ---
   return (method, path, url) => {
+    // --- work2: "Run suite" adds a finished run at the top, scored near the agent's score like the prototype ---
+    if (method === "POST" && /^suites\/[^/]+\/runs$/.test(path)) {
+      const su = (seed.suites as Seed[]).find((x: Seed) => x.id === path.split("/")[1]);
+      const ag = (seed.agents as Seed[]).find((x: Seed) => x.id === su?.agent);
+      if (!su) return undefined;
+      const score = Math.min(1, Math.max(0.4, (ag?.evalScore ?? 0.9) - 0.03));
+      const results = (su.cases as Seed[]).map((c: Seed, i: number) => ({ caseId: c.id, pass: i / (su.cases as Seed[]).length < score, reason: "", ms: 3000 }));
+      const id = `RUN-${1000 + evalRuns.length}`;
+      evalRuns.unshift({ id, suite: su.id, agent: su.agent, version: ag?.version, model: ag?.model, at: seed.NOW + 5e4, score, results, by: "p-asha", cost: 0, status: "completed", count: results.length, passed: results.filter((x: Seed) => x.pass).length });
+      return { ok: true, run: id };
+    }
+    // --- end work2 ---
     if (method !== "GET") return undefined;
     const seg = path.split("/");
     const q = (k: string) => url.searchParams.get(k);
@@ -242,7 +258,7 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "evals/factory") return seed.eval_extra;
     if (path === "skills") return seed.skills;
     if (path === "suites" || path === "agents/suites") return seed.suites;
-    if (path === "evals/runs") return seed.eval_runs;
+    if (path === "evals/runs") return evalRuns;
     if (path === "evals/scorecards") return seed.scorecards;
     if (path === "audit") {
       const ppl = new Map((seed.people as Array<{ id: string; name: string }>).map((x) => [x.id, x.name]));

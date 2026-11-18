@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto, range, linkRows, sortHint, sortSelect = true }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto, range, linkRows, sortHint, sortSelect = true, noSortSelect, paged }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -74,6 +74,10 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   proto?: boolean;
   /** Prototype footer: always show the "1–n of N" range under the table. */
   range?: boolean;
+  /** Leave out the "Sort by" menu shown on narrow screens (the prototype's card tables have none). */
+  noSortSelect?: boolean;
+  /** With pageSize: the prototype's "1–12 of 13  Prev  Page 1 / 2  Next" footer instead of "Show more". */
+  paged?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
@@ -122,7 +126,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
   if (cur && col) list.sort((a, b) => { const x = val(col, a); const y = val(col, b); return (x > y ? 1 : x < y ? -1 : 0) * cur.dir; });
-  const boolPager = pager === true;
+  const boolPager = pager === true || !!paged;
   const size = typeof pager === "object" ? pager.size : boolPager ? (pageSize || list.length) : proto && pageSize ? pageSize : 0;
   const pages = size ? Math.max(1, Math.ceil(list.length / size)) : 1;
   const pageAt = size ? Math.min(Math.max(typeof pager === "object" ? pager.page : page, 0), pages - 1) : 0;
@@ -139,10 +143,10 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const ownedKeys = new Set(own1 ? own1.split("\u0000") : []);
   const sortable = columns.filter((c) => c.sort);
   const regionProps = overflow ? { role: "region", tabIndex: 0, "aria-label": caption ?? "Table" } : {};
-  const clientMore = !proto && !pager && shown && rows.length > shown;
+  const clientMore = !proto && !pager && !paged && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
-      {sortable.length && mobileSort && sortSelect && !proto ? (
+      {sortable.length && mobileSort && sortSelect && !noSortSelect && !proto ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
           <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>
@@ -212,7 +216,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
       {range && !(clientMore || hasMore) ? (
         <div className="tfoot dtable-range"><span role="status">{`1–${visible.length} of ${total ?? rows.length}`}</span></div>
       ) : null}
-      {size ? (
+      {size && !(paged && pages <= 1) ? (
         <div className="tfoot dtable-more">
           <span className="dtable-count" role="status">{`${pageAt * size + 1}–${pageAt * size + visible.length} of ${list.length}`}</span>
           {pages > 1 ? (

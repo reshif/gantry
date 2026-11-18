@@ -120,3 +120,16 @@ export function Pipeline({ lp }: { lp: LearningProposal }) {
   );
 }
 
+
+/** The prototype's plain before/after block for a skill edit. */
+export function PlainDiff({ lp }: { lp: LearningProposal }) {
+  const c = (lp.change ?? {}) as { before?: string; after?: string };
+  return <div className="diff pre"><div className="d">{`− ${c.before ?? ""}`}</div><div className="a">{`+ ${c.after ?? ""}`}</div></div>;
+}
+
+/** The prototype's evidence link: the bare work order id in mono, a link to its record. */
+export function WoLink({ id, project }: { id: string; project?: string | null }) {
+  const open = useOpenRecordRoute();
+  if (!/^WO-/.test(id)) return <span className="mono">{id}</span>;
+  return <a className="pri mono" href="#record" onClick={(e) => { e.preventDefault(); open(id, project ?? undefined); }}>{id}</a>;
+}

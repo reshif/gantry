@@ -8,8 +8,9 @@
 import { useEffect, useState } from "react";
 import { useCan } from "../api/can";
 import { ops } from "../api/ops";
-import { useLearningFindings, useLearningProposals, useLearningSettings, useLearningSignals } from "../api/queries";
+import { useLearningFindings, useLearningProposals, useLearningSettings } from "../api/queries";
 import { Btn, LockNote, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { useScope, useTabParam } from "./tabparam";
 import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -23,32 +24,32 @@ export { learningFocus } from "./learning/focus";
 
 export default function LearningView() {
   const ui = useUI();
+  const scope = useScope();
   const fq = useLearningFindings();
   const pq = useLearningProposals();
-  const sq = useLearningSignals(30);
   const findings = fq.data ?? [];
   const proposals = pq.data ?? [];
-  const signals = sq.data ?? [];
   const settings = useLearningSettings().data;
   const perm = dec(useCan("learning.apply"));
-  const [tab, setTab] = useState("proposals");
-  const [status, setStatus] = useState("open");
+  const [tab, setTabUrl] = useTabParam("learning", ["proposals", "findings", "signals"] as const);
+  const setTab = (t: string): void => setTabUrl(t);
   const [hi, setHi] = useState<string | null>(null);
   const [hiFinding, setHiFinding] = useState<string | null>(null);
 
   useEffect(() => {
     const f = takeLearningFocus();
     if (!f) return;
-    if (f.proposal) { setTab("proposals"); setHi(f.proposal); setStatus("all"); }
+    if (f.proposal) { setTab("proposals"); setHi(f.proposal); }
     else if (f.finding) { setTab("findings"); setHiFinding(f.finding); }
     else if (f.tab) setTab(f.tab);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const on = settings?.proposalsOn ?? false;
   const open = proposals.filter((lp) => lp.status === "proposed").length;
   const openFindings = findings.filter((f) => f.status === "open").length;
-  const week = signals.filter((x) => x.at >= Date.now() - 7 * 86_400_000).length;
-  const focusProposal = (id: string): void => { setTab("proposals"); setHi(id); setStatus("all"); };
+  const adopted = proposals.filter((lp) => lp.status === "accepted" || lp.status === "verified").length;
+  const events = findings.reduce((a, f) => a + f.count, 0);
+  const focusProposal = (id: string): void => { setTab("proposals"); setHi(id); };
   const focusFinding = (id: string): void => { setTab("findings"); setHiFinding(id); };
 
   const flip = (next: boolean): void => {
@@ -64,21 +65,17 @@ export default function LearningView() {
   };
 
   const body = tab === "findings"
-    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
-    : tab === "signals" ? <Async query={sq} what="learning signals" id="ln-signals">{() => <SignalsTab signals={signals} />}</Async>
-    : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} status={status} setStatus={setStatus} hi={hi} onFocusFinding={focusFinding} />}</Async>;
+    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={scope.id ? findings.filter((f) => !f.project || f.project === scope.id) : findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
+    : tab === "signals" ? <Async query={fq} what="learning signals" id="ln-signals">{() => <SignalsTab findings={findings} />}</Async>
+    : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} hi={hi} onFocusFinding={focusFinding} />}</Async>;
   return (
     <div className="view view-learning">
-      <ViewHead
-        title="Learning"
-        sub="The factory reads its own rejections and overrides, then proposes how to improve. People decide."
-        actions={settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" icon={on ? "pause" : "play"} id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined} />
+      <ViewHead title="Learning" kicker={scope.kicker} sub="The factory reads its own rejections and overrides, then proposes how to improve. People decide." />
       <StatRow id="ln-stats">
-        <Stat label="Open findings" value={qState(fq, () => String(openFindings))} />
-        <Stat label="To review" value={qState(pq, () => String(open))} sub="proposals waiting" tone={open ? "wait" : undefined} />
-        <Stat label="Applied" value={qState(pq, () => String(proposals.filter((lp) => lp.status === "accepted").length))} sub="accepted, not yet verified" />
-        <Stat label="Verified" value={qState(pq, () => String(proposals.filter((lp) => lp.status === "verified").length))} sub="measured to work" />
-        <Stat label="Signals, 7 days" value={qState(sq, () => String(week))} />
+        <Stat label="Open findings" value={qState(fq, () => String(openFindings))} tone="wait" />
+        <Stat label="To review" value={qState(pq, () => String(open))} sub="proposals" tone="info" />
+        <Stat label="Adopted" value={qState(pq, () => String(adopted))} tone="done" />
+        <Stat label="Signals" value={qState(fq, () => String(events))} sub="events seen" />
       </StatRow>
       {perm.allowed ? null : <LockNote decision={perm} what="Applying learning proposals" />}
       {settings && !on ? (
@@ -89,6 +86,12 @@ export default function LearningView() {
       ) : null}
       <Tabs idPrefix="ln-tab" items={[{ id: "proposals", label: "Proposals", count: open }, { id: "findings", label: "Findings", count: openFindings }, { id: "signals", label: "Signals" }]} active={tab} onChange={(t) => { setTab(t); setHi(null); setHiFinding(null); }} />
       <div id="ln-tab-panel" role="tabpanel" className="ln-panel">{body}</div>
+      {settings && tab === "proposals" ? (
+        <div className="row ln-switch-row">
+          <span className="small muted">{on ? "Learning proposals are on." : "Learning proposals are off."}</span>
+          <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" small icon={on ? "pause" : "play"} id="ln-switch" guard={perm} onClick={() => flip(!on)} />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -2,16 +2,17 @@
  * Suites and runs tab (legacy suitesTab): the suites, a real "Run suite" through the production runtime (sandboxes, no write access to real repos, own concurrency cap,
  * behind work orders), the run history and per-case results with the task count and range, the golden cases with their pinned snapshot, and the head-to-head of two runs.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fmt, type Suite } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useActors } from "../../ui/actors";
-import { Btn, Chip, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
+import { IconBtn, Btn, Chip, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
-import { PassMark, ScoreN, agentOf, evalsUi, rerender, rowKeys, suiteOf, versionModel, type EvalsData, type RunRow } from "./kit";
+import { DataView } from "../dataview";
+import { PassMark, ScoreN, agentOf, evalsUi, rerender, suiteOf, useEvalsData, useEvalsUi, versionModel, type EvalsData, type RunRow } from "./kit";
 
 const asRules = (c: Suite["cases"][number]): Array<{ kind: string; [k: string]: unknown }> => c.rules ?? [];
 const short = (sha?: string | null): string => (sha ? sha.slice(0, 7) : "");
@@ -222,37 +223,95 @@ function HeadToHead({ d }: { d: EvalsData }) {
   );
 }
 
-export function SuitesTab({ d }: { d: EvalsData }) {
-  const agentSuite = agentOf(d, evalsUi.agent)?.suite;
-  if (!evalsUi.suite || !suiteOf(d, evalsUi.suite)) evalsUi.suite = (d.suites.find((s) => s.id === agentSuite) ?? d.suites[0])?.id ?? null;
-  if (!d.suites.length) return <Empty title="No suites yet" text="Create an agent: it gets a golden set to add cases to." />;
+/** The suite's own page, in a drawer: run options, cases, run history with per-case results, and the head-to-head of two runs. */
+export function SuiteDrawer({ suiteId, close }: { suiteId: string; close: () => void }) {
+  useEvalsUi();
+  const d = useEvalsData();
+  evalsUi.suite = suiteId;
+  const su = suiteOf(d, suiteId);
   return (
-    <div className="ev-suites">
-      <Panel title="Eval suites" flush cls="ev-suites-list">
-        <div className="table-scroll" data-keep-scroll="ev-suites">
-          <table className="table table-compact">
-            <thead><tr>{["Suite", "Cases", "Gate", "Last", "Runs"].map((x, i) => <th key={x} scope="col" className={i >= 1 ? "num" : ""}>{x}</th>)}</tr></thead>
-            <tbody>
-              {d.suites.map((su) => {
-                const runs = d.runsOf(su.id);
-                const done = runs.filter((r) => r.status === "completed");
-                const last = done[done.length - 1];
-                const ag = agentOf(d, su.agent);
-                return (
-                  <tr key={su.id} className={`row-link${evalsUi.suite === su.id ? " is-selected" : ""}`} tabIndex={0} id={`ev-su-${su.id}`} {...rowKeys(() => { evalsUi.suite = su.id; evalsUi.run = null; evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; rerender(); })}>
-                    <td><div className="mono strong ev-suid">{su.id}</div><div className="small muted">{ag ? ag.name : su.name}{su.builtin ? <Chip text="built-in" cls="chip-accent" /> : null}</div></td>
-                    <td className="num mono">{su.cases.length}</td>
-                    <td className="num mono">{fmt.pct(su.threshold)}</td>
-                    <td className={`num mono ${last ? (last.score >= su.threshold ? "pos" : "neg") : "muted"}`}>{last ? `${last.score >= su.threshold ? "" : "▼ "}${fmt.pct(last.score)}` : "–"}{last ? <span className="muted small">{` n=${last.count ?? 0}`}</span> : null}</td>
-                    <td className="num mono">{runs.length}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+    <div className="drawer-inner ev-suites-main" id="ev-suite-drawer">
+      <div className="drawer-head">
+        <div><div className="kicker">Suite</div><h2 className="drawer-title">{su ? `${su.id} · ${su.name}` : suiteId}</h2></div>
+        <IconBtn icon="x" label="Close" className="drawer-close" id="ev-suite-close" onClick={close} />
+      </div>
+      <div className="drawer-scroll">{su ? <><SuiteDetail d={d} /><HeadToHead d={d} /></> : <Empty title="Loading" text="Reading the suite." />}</div>
+    </div>
+  );
+}
+
+/** Defaults for a one-click run from the list: the candidate version if there is one, else the newest, on the model that version pins. */
+function runDefaults(d: EvalsData, su: Suite): { ag: NonNullable<ReturnType<typeof agentOf>>; ver: NonNullable<ReturnType<typeof agentOf>>["versions"][number]; model: string } | null {
+  const ag = agentOf(d, su.agent);
+  if (!ag || !ag.versions.length) return null;
+  const ver = ag.versions.find((v) => v.v === evalsUi.runVersion) ?? ag.versions.find((v) => v.rc) ?? ag.versions[ag.versions.length - 1]!;
+  return { ag, ver, model: versionModel(ag, ver) };
+}
+
+/** The prototype's Suites and runs: the suites with a Run suite button per row, then the recent runs. The suite's own page (options, cases, history, head-to-head) is a drawer. */
+export function SuitesTab({ d }: { d: EvalsData }) {
+  const ui = useUI();
+  const out = useOutcome();
+  const perm = useCan("eval.run");
+  const openSuite = (id: string): void => { evalsUi.suite = id; evalsUi.run = null; evalsUi.a = evalsUi.b = null; ui.drawer.open(`ev-su:${id}`, (close) => <SuiteDrawer suiteId={id} close={close} />); };
+  // Another screen (an agent's Evals button) asked for a suite: open it once.
+  useEffect(() => {
+    if (!evalsUi.detail) return;
+    evalsUi.detail = false;
+    const id = evalsUi.suite ?? d.suites[0]?.id;
+    if (id && d.suites.some((s) => s.id === id)) openSuite(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // a run started here announces its score when it finishes, like the prototype's "<suite> scored NN%"
+  const started = useRef(new Set<string>());
+  const told = useRef(new Set<string>());
+  useEffect(() => {
+    for (const r of d.runs) {
+      if (r.status === "queued" || r.status === "running") started.current.add(r.id);
+      else if (started.current.has(r.id) && !told.current.has(r.id) && (!r.status || r.status === "completed")) {
+        told.current.add(r.id);
+        const su = suiteOf(d, r.suite);
+        ui.toast(`${su?.name ?? r.suite} scored ${fmt.pct(r.score)}`, r.score >= (su?.threshold ?? 0.85) ? "ok" : "error");
+      }
+    }
+  }, [d.runs]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!d.suites.length) return <Empty title="No suites yet" text="Create an agent: it gets a golden set to add cases to." />;
+  const lastOf = (su: Suite): RunRow | undefined => { const done = d.runsOf(su.id).filter((r) => !r.status || r.status === "completed"); return done[done.length - 1]; };
+  const agName = (id: string): string => agentOf(d, id)?.name ?? id;
+  const guardOf = (su: Suite): Decision | null => {
+    const def = runDefaults(d, su);
+    const active = d.runsOf(su.id).find((r) => r.status === "queued" || r.status === "running");
+    return !perm.allowed ? perm : !def ? { allowed: false, needs: "", reason: `${su.agent || "This suite"} has no agent to run.` } : active ? { allowed: false, needs: "", reason: `A run is already in progress on ${su.id} (${active.id}).` } : !su.cases.length ? { allowed: false, needs: "", reason: "The suite has no cases yet. Add one first." } : null;
+  };
+  const run = (su: Suite): void => {
+    const def = runDefaults(d, su);
+    if (!def) return;
+    void ops.runSuite(def.ag.id, su.id, def.ver.v, def.model || undefined, evalsUi.repeats).then((r) => { out(r); if (r.ok) { const id = (r as { run?: string }).run; if (id) started.current.add(id); evalsUi.run = id ?? null; rerender(); } });
+  };
+  const runRows = d.runs.slice().reverse();
+  return (
+    <div className="stack ev-suites-stack">
+      <Panel title="Suites" flush cls="ev-suites-list">
+        <DataView id="ev-suites" noun="suite" rows={d.suites} rowKey={(s) => s.id} rowId={(s) => `ev-su-${s.id}`} text={(s) => `${s.name} ${s.id} ${agName(s.agent)}`} onRow={(s) => openSuite(s.id)} pageSize={12}
+          columns={[
+            { key: "name", label: "Suite", sort: (s) => s.name.toLowerCase(), render: (s) => <div>{s.name}<span className="sub">{`${s.cases.length} cases · threshold ${fmt.pct(s.threshold)}`}</span></div> },
+            { key: "agent", label: "Agent", render: (s) => agName(s.agent) },
+            { key: "last", label: "Last score", align: "end", sort: (s) => lastOf(s)?.score ?? 0, render: (s) => { const l = lastOf(s); return l ? <Chip text={fmt.pct(l.score)} cls={l.score >= s.threshold ? "ok" : "bad"} /> : <span className="muted">–</span>; } },
+            { key: "act", label: "", align: "end", render: (s) => (
+              <Btn label={d.runsOf(s.id).some((r) => r.status === "queued" || r.status === "running") ? "Running…" : "Run suite"} small id={`ev-run-${s.id}`} guard={guardOf(s)} onClick={() => run(s)} />
+            ) },
+          ]} />
       </Panel>
-      <div className="ev-suites-main"><SuiteDetail d={d} /><HeadToHead d={d} /></div>
+      <Panel title="Recent runs" flush cls="ev-runs-panel">
+        <DataView id="ev-runs" noun="run" rows={runRows} search={false} pageSize={8} rowKey={(r) => r.id} empty={{ title: "No runs yet", text: "Run a suite to get a first score." }}
+          columns={[
+            { key: "id", label: "Run", render: (r) => <span className="mono">{r.id}</span> },
+            { key: "suite", label: "Suite", render: (r) => r.suite },
+            { key: "ver", label: "Agent version", render: (r) => `${agName(r.agent)} v${r.version}` },
+            { key: "at", label: "When", render: (r) => fmt.ago(r.at, Date.now()) },
+            { key: "score", label: "Score", align: "end", render: (r) => !r.status || r.status === "completed" ? <Chip text={fmt.pct(r.score)} cls={r.score >= (suiteOf(d, r.suite)?.threshold ?? 0.85) ? "ok" : "bad"} /> : <span className="muted small">{r.status}</span> },
+            { key: "pass", label: "Pass", align: "end", render: (r) => `${r.passed ?? r.results.filter((x) => x.pass).length}/${r.count ?? r.results.length}` },
+          ]} />
+      </Panel>
     </div>
   );
 }
