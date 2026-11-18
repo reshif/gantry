@@ -191,6 +191,9 @@ export default function WorkOrdersView() {
   const filtered = (Object.keys(NONE) as Array<keyof Filters>).some((k) => (k === "q" ? f.q.trim() !== "" : f[k] !== "all")) || tab !== "all";
   const groupBy = (GROUPS.some((g) => g.id === u.group) ? u.group : "none") as GroupBy;
   const set = (k: keyof Filters) => (v: string) => setU({ [k]: v, page: "1" } as Partial<typeof URL_DEFAULTS>);
+  // only the tab narrows the list: an empty tab says so in its own words instead of blaming filters nobody set
+  const tabOnly = tab !== "all" && !(Object.keys(NONE) as Array<keyof Filters>).some((k) => (k === "q" ? f.q.trim() !== "" : f[k] !== "all"));
+  const emptyTab: Record<string, string> = { mine: "You have not requested any work orders in this project.", waiting: "No work orders are waiting at a gate.", intake: "No work orders are at Intake.", open: "No work orders are open.", done: "No work orders are done yet.", incidents: "No incidents.", killed: "No killed work orders." };
   const clear = () => { setApplied(""); setU({ ...NONE, tab: "all", page: "1" }); };
   const block = projectSubmitBlock(me, project, repos);
   const spans = new Set(loaded.map((w) => w.project)).size > 1;
@@ -336,18 +339,24 @@ export default function WorkOrdersView() {
               </Field>
             </FilterBar>
             {moreOpen || moreActive ? (
+              <>
               <FilterBar label="More filters, grouping, columns and saved views">
                 <Field label="Group by" htmlFor="wo-group"><Select id="wo-group" options={GROUPS.map((g) => ({ value: g.id, label: g.label }))} value={groupBy} onChange={(v) => setU({ group: v, page: "1" })} /></Field>
                 <Field label="Repo" htmlFor="wo-f-repo"><Select id="wo-f-repo" options={[{ value: "all", label: "All" }, ...repos.map((r) => ({ value: r.id, label: r.name }))]} value={f.repo} onChange={set("repo")} /></Field>
                 <Field label="Source" htmlFor="wo-f-source"><Select id="wo-f-source" options={[{ value: "all", label: "All" }, ...sources.map((x) => ({ value: x, label: x }))]} value={f.source} onChange={set("source")} /></Field>
                 <Field label="Assignee" htmlFor="wo-f-assignee"><Select id="wo-f-assignee" options={[{ value: "all", label: "Anyone" }, { value: "none", label: "Unassigned" }, ...assignees.map((a) => ({ value: a, label: actor(a).name.replace(" (agent)", "") }))]} value={f.assignee} onChange={set("assignee")} /></Field>
                 {saved.length ? <Field label="Saved views" htmlFor="wo-views"><Select id="wo-views" options={[{ value: "", label: "Choose a view" }, ...saved.map((v) => ({ value: v.id, label: v.name }))]} value={applied} onChange={applyView} /></Field> : null}
-                <div className="row wo-more-acts" role="group" aria-label="Columns and saved views">
+              </FilterBar>
+                <div className="wo-more-acts" role="group" aria-label="Columns and saved views">
+                  <span className="small muted wo-more-h" id="wo-cols-h">Columns shown</span>
+                  <div className="row wo-cols" role="group" aria-labelledby="wo-cols-h">
                   {OPTIONAL_COLS.map(([k, label]) => <label key={k} className="row small" htmlFor={`wo-col-${k}`}><Toggle id={`wo-col-${k}`} variant="check" label={`Show ${label}`} checked={!hidden.includes(k)} onChange={(on) => setHidden(on ? hidden.filter((x) => x !== k) : [...hidden, k])} />{label}</label>)}
+                  </div>
+                  <span className="small muted wo-more-note">{sort.k === "needs" ? "Sorted by what needs attention first; click a column heading to change it. " : ""}Save view keeps the tab, filters, sort and columns for you in this browser.</span>
                   <Btn label="Save view" small id="wo-view-save" onClick={saveView} />
                   {applied ? <Btn label="Delete view" small kind="ghost" id="wo-view-del" onClick={dropView} /> : null}
                 </div>
-              </FilterBar>
+              </>
             ) : null}
           </div>
           <Async query={list} what="work orders" id="wo-list">{() => rows.length ? (
@@ -363,9 +372,9 @@ export default function WorkOrdersView() {
           ) : (
             <Empty
               id="wo-empty"
-              title={filtered || total ? "Nothing matches these filters" : "Nothing here yet"}
-              text={cut ? `None of the work orders read match. ${cutNote}` : filtered || total ? "Loosen the search or clear the filters." : "Items will appear here when they exist."}
-              action={filtered ? <Btn label="Clear filters" id="wo-clear" onClick={clear} /> : undefined}
+              title={tabOnly && !cut ? (emptyTab[tab] ?? "Nothing here") : filtered || total ? "Nothing matches these filters" : "Nothing here yet"}
+              text={cut ? `None of the work orders read match. ${cutNote}` : tabOnly ? "Switch tab to see the rest of the register." : filtered || total ? "Loosen the search or clear the filters." : "Items will appear here when they exist."}
+              action={filtered ? <Btn label={tabOnly ? "Show all work orders" : "Clear filters"} id="wo-clear" onClick={clear} /> : undefined}
             />
           )}</Async>
         </Panel>

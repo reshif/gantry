@@ -90,7 +90,9 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   if (!me || !cat || !project) return null;
   const decision = can[projects.indexOf(project)];
   const block = decision && !decision.allowed && !decision.pending ? { reason: decision.reason, needs: decision.needs, onboarding: false } : (() => { const b = submitBlock(me, project, repos, repo); return b ? { reason: b.reason, needs: "", onboarding: b.onboarding } : null; })();
-  const fullProject = project as unknown as Project;
+  // /me may list projects as summaries without a flow: the preview then reads the catalogue (a missing flow must never crash the sheet)
+  const asFull = project as unknown as Project;
+  const fullProject = asFull.flow ? asFull : null;
   // the prototype's class list is the whole catalogue
   const classes = cat.classes.filter((c) => c.enabled !== false);
   const clsShown = cls || (classes.find((c) => c.id === "feature") ?? classes[0])?.id || "";
@@ -162,33 +164,34 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
           <Field label="Project" htmlFor="nwo-project">
             <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
           </Field>
-          <Field label="Class" htmlFor="nwo-cls">
+          <Field label="Class" htmlFor="nwo-cls" hint="Leave it as is and the Intake agent classifies the request.">
             <Select id="nwo-cls" options={classes.map((c) => ({ value: c.id, label: c.name }))} value={clsShown} onChange={setCls} />
           </Field>
           <Field label="Priority" htmlFor="nwo-prio">
             <Select id="nwo-prio" options={["P0", "P1", "P2", "P3"].map((v) => ({ value: v, label: v }))} value={prio || "P2"} onChange={setPrio} />
           </Field>
-          {/* kept features (attachments, the classifier's preview) sit behind a closed disclosure so the sheet reads as the prototype's */}
+          {/* the classifier preview shows as soon as there is text; attachments sit behind a closed disclosure so the sheet reads as the prototype's */}
+          <div className="nwo-preview" aria-live="polite">
+            {preview ? (
+              <>
+                <div className="nwo-cls-preview">
+                  <span className="muted small">Classifier preview:</span>
+                  <ClassChip cls={classOf(cat, fullProject, preview.cls)} />
+                  <span className="mono small">{`${Math.round(preview.confidence * 100)}%`}</span>
+                  <span className="small">{preview.rationale}</span>
+                </div>
+                <p className="small muted">{`Route: ${routeOf(cat, fullProject, preview.cls).map((s) => cat.stations.find((x) => x.id === s)?.name ?? s).join(" → ")}`}</p>
+              </>
+            ) : (
+              <p className="muted small">The Intake classifier previews the class as you type.</p>
+            )}
+          </div>
+
           <details className="nwo-more" id="nwo-more">
-            <summary className="small muted">Attachments and classifier preview</summary>
+            <summary className="small muted">Add attachments</summary>
             <Field label="Attachments" htmlFor="nwo-att" hint="File names, comma separated.">
               <input id="nwo-att" className="input" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
             </Field>
-            <div className="nwo-preview" aria-live="polite">
-              {preview ? (
-                <>
-                  <div className="nwo-cls-preview">
-                    <span className="muted small">Classifier preview:</span>
-                    <ClassChip cls={classOf(cat, fullProject, preview.cls)} />
-                    <span className="mono small">{`${Math.round(preview.confidence * 100)}%`}</span>
-                    <span className="small">{preview.rationale}</span>
-                  </div>
-                  <p className="small muted">{`Route: ${routeOf(cat, fullProject, preview.cls).map((s) => cat.stations.find((x) => x.id === s)?.name ?? s).join(" → ")}`}</p>
-                </>
-              ) : (
-                <p className="muted small">The Intake classifier previews the class as you type.</p>
-              )}
-            </div>
           </details>
           <div className="form-err" role="alert">
             {err}
