@@ -15,6 +15,7 @@ import { OverlayProvider } from "./ui/Overlay";
 import { Tip } from "./ui/Tip";
 import { Shell } from "./shell/Shell";
 import { SignIn } from "./shell/SignIn";
+import { useDropStaleSearch } from "./lib/staleSearch";
 
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
@@ -55,6 +56,7 @@ function Root() {
   // live updates only while signed in
   useEffect(() => (signedIn ? startStream() : undefined), [signedIn]);
   useEffect(() => startConnectionWatch(), []);
+  useDropStaleSearch();
 
   // Branch on data FIRST: a failed refetch of /me must never unmount a signed-in app.
   if (me && onSigninRoute) {

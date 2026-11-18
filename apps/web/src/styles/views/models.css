@@ -104,3 +104,16 @@
 .vt-name { font-family: var(--f-display); }
 .vt-needs-k { font-family: var(--f-mono); }
 .vt-local { border-top: 1px dashed var(--line); padding-top: 4px; font-family: var(--f-mono); font-size: var(--t-xs); }
+
+/* Vendor cards are links: one stretched link per card, the card is the click target. Vendor page: header actions wrap, the table scrolls inside its panel. */
+.view-models .md-vcard { position: relative; }
+.view-models .md-vcard:not(.md-vadd):hover { border-color: var(--accent); }
+.view-models .md-vcard:focus-within { border-color: var(--accent); }
+.view-models .md-vtitle { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.view-models .md-vopen { font-weight: 500; }
+.view-models .md-vopen::after { content: ""; position: absolute; inset: 0; }
+.view-models .md-vopen:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.view-models .md-vcard .md-vfoot { margin-top: auto; padding-top: 4px; }
+.view-vendor .vhead-actions { flex-wrap: wrap; }
+.view-vendor #vp-stats { margin-bottom: var(--s4); }
+.view-vendor .stat-sub { overflow-wrap: anywhere; }

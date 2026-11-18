@@ -8,7 +8,7 @@
  * Not ported, on purpose: the "Test connection" button (it only simulated an answer; health and latency now come from the metering of real calls), the simulated
  * wording of the connect dialogs, and the client-side route resolver (the preview asks GET /routing/resolve).
  */
-import { useAgents, useProjects, useRouting, useVendors } from "../api/queries";
+import { useProjects, useRouting, useVendors } from "../api/queries";
 import { useCan } from "../api/can";
 import { useUI } from "../ui/overlay-context";
 import { Btn, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
@@ -18,14 +18,21 @@ import { useCatalog } from "./projects/kit";
 import { ModelPrices, PriceVersions, ProjectBudgets, VendorBudgets } from "./models/Prices";
 import { AddVendorDialog } from "./models/Templates";
 import { RoutingPanel } from "./models/Routing";
-import { AddVendorCard, VendorCard, discoverModels } from "./models/Vendor";
-import { ModelTable } from "./models/ModelTable";
-import { setRouteQuery } from "../lib/routeQuery";
+import { AddVendorCard, VendorCard } from "./models/Vendor";
+import VendorPage from "./models/VendorPage";
 import { useHash } from "../lib/router";
-import { dec, usd } from "./models/kit";
+import { dec, usd, vendorHref, vendorOfParam } from "./models/kit";
 
 
 export default function ModelsView() {
+  const vendorId = vendorOfParam(useHash().param);
+  return vendorId ? <VendorPage id={vendorId} /> : <ModelsHome />;
+}
+
+/** After a vendor is added, its page opens: that is where its models are. */
+const openVendor = (id: string): void => { window.location.hash = vendorHref(id); };
+
+function ModelsHome() {
   const vq = useVendors();
   const rq = useRouting();
   const vendors = vq.data ?? [];
@@ -33,7 +40,6 @@ export default function ModelsView() {
   const cat = useCatalog();
   const ui = useUI();
   const perm = dec(useCan("model.edit"));
-  const agents = useAgents().data ?? [];
 
   const mtd = vendors.reduce((t, v) => t + (v.mtd || 0), 0);
   const bud = vendors.reduce((t, v) => t + (v.budget || 0), 0);
@@ -41,7 +47,6 @@ export default function ModelsView() {
   const enabledN = vendors.reduce((t, v) => t + v.models.filter((m) => m.enabled).length, 0);
   const defaultModel = vendors.flatMap((v) => v.models.map((m) => ({ m, v }))).find((x) => x.m.id === rq.data?.defaultModel);
 
-  const { q: query } = useHash();
   const [tab, setTab] = useRouteTab(["vendors", "routing", "prices"], "vendors");
 
   return (
@@ -50,7 +55,7 @@ export default function ModelsView() {
         title="Models"
         kicker="All lines"
         sub="Vendors, routing and what each station spends."
-        actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={(id) => { setTab("vendors"); setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView?.({ block: "center" }), 150); }} />)} />}
+        actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={openVendor} />)} />}
       />
       <StatRow id="md-stats">
         <Stat label="Models" value={qState(vq, () => String(allN))} sub={`${enabledN} enabled`} tone="info" />
@@ -65,10 +70,9 @@ export default function ModelsView() {
             {(r) => tab === "vendors" ? (
               <div className="stack md-stack">
               <div className="card-grid vendor-grid">
-                {vendors.map((v) => <VendorCard key={v.id} v={v} vendors={vendors} routing={r} agents={agents} selected={query.vendor === v.id} onSelect={() => setRouteQuery("vendor", query.vendor === v.id ? null : v.id)} onDiscover={(x) => void discoverModels(ui, x)} />)}
-                <AddVendorCard onAdded={(id) => { setTab("vendors"); setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView?.({ block: "center" }), 150); }} />
+                {vendors.map((v) => <VendorCard key={v.id} v={v} />)}
+                <AddVendorCard onAdded={openVendor} />
               </div>
-              <ModelTable vendors={vendors} agents={agents} routing={r} />
               </div>
             ) : tab === "routing" ? (
               <RoutingPanel routing={r} vendors={vendors} cat={cat} />

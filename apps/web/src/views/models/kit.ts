@@ -31,3 +31,8 @@ export function repoTags(r: Repo, projects: Project[]): string[] {
 
 /** Money as the Blueprint prints it: cents only when there are some ($6,383.20, $9,000). */
 export const usd = (n: number | null | undefined): string => `$${(n || 0).toLocaleString("en-US", { minimumFractionDigits: (n || 0) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+
+/** A vendor's own page: a real route in the hash router (`#models/vendors/anthropic`), so it has a link, a back button and a breadcrumb. */
+export const vendorHref = (id: string): string => `#models/vendors/${encodeURIComponent(id)}`;
+/** The vendor id of a `models` route param (`vendors/anthropic`), null for the tabbed screen. */
+export const vendorOfParam = (param: string | null): string | null => { const m = /^vendors\/(.+)$/.exec(param ?? ""); return m ? m[1]! : null; };
