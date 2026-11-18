@@ -67,9 +67,9 @@ export default function HomeView() {
   }
 
   const scopeId = pickProject(me, prefs.project);
-  const scoped = projects.filter((p) => p.id === scopeId);
+  const scoped = prefs.scopeAll ? [] : projects.filter((p) => p.id === scopeId);
   const inView = scoped.length ? scoped : projects;
-  const scopeName = prefs.scopeAll ? "all projects" : (scoped[0]?.name ?? "all projects"); // the copy follows the switcher pill; the data scope is unchanged
+  const scopeName = prefs.scopeAll ? "All projects" : (scoped[0]?.name ?? "All projects");
   const nameOf = (id: string | null | undefined) => actors(id).name.replace(" (agent)", "");
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
@@ -77,7 +77,7 @@ export default function HomeView() {
 
   /* what needs a person (prototype: the open approvals, five of them, with the count of all open): gate and onboarding approvals and the proposals and restores the server
      puts in front of this person, in the inbox's order. Health items (a blocked work order, a halted project) are not approvals: they show in the Blocked tile and the project tiles. */
-  const items = allItems.filter((i) => (i.kind === "gate" || i.kind === "onboarding" || i.kind === "other") && !(i.kind === "other" && i.x.restore?.scope === "factory"));
+  const items = allItems.filter((i) => (!scoped.length || i.project === scoped[0]?.id) && (i.kind === "gate" || i.kind === "onboarding" || i.kind === "other") && !(i.kind === "other" && i.x.restore?.scope === "factory"));
   const att = s.attention ?? [];
   const killBanner = att.find((a) => a.restore?.scope === "factory");
   const waitSub = (ms: number) => (ms ? ` · waiting ${agoShort(ms)}` : "");
@@ -99,7 +99,10 @@ export default function HomeView() {
   const statItems: StatItem[] = [];
   const blocked = inView.reduce((t, p) => t + metricsOf(p).bad, 0);
   const atGates = items.filter((i) => i.kind === "gate").length;
-  if (m) statItems.push({ l: "On the belt", v: m.inFlight, d: `${m.running} running · ${Math.max(0, m.inFlight - m.running)} queued`, tone: "info", spark: buckets });
+  // On the belt follows the scope: the work in progress of the projects in view (the server's factory-wide motion counts only when all projects are in view).
+  const onBelt = scoped.length ? inView.reduce((t, p) => t + metricsOf(p).wip, 0) : (m?.inFlight ?? 0);
+  const runningNow = scoped.length ? Math.min(m?.running ?? 0, onBelt) : (m?.running ?? 0);
+  if (m) statItems.push({ l: "On the belt", v: onBelt, d: `${runningNow} running · ${Math.max(0, onBelt - runningNow)} queued`, tone: "info", spark: buckets });
   if (s.waiting || s.attention) statItems.push({ l: "Waiting for a person", v: waitingN, d: `${atGates} at gates`, tone: waitingN ? "warn" : "ok" });
   if (m) statItems.push({ l: "Released today", v: m.shippedToday, d: "median cycle n/a", tone: "ok" });
   if (projects.length) statItems.push({ l: "Blocked", v: blocked, d: "oldest n/a", tone: "bad" });
@@ -178,10 +181,10 @@ export default function HomeView() {
           <div className="row spread dim mono" style={{ fontSize: 11, margin: "6px 0 0 24px" }}><span>-24h</span><span>-12h</span><span>now</span></div>
         </Card>
       </div>
-      {projects.length ? (
-        <Card title="Projects" flush hint={`${projects.length} in view`} id="hm-projects" >
+      {inView.length ? (
+        <Card title="Projects" flush hint={`${inView.length} in view`} id="hm-projects" >
           <div className="proj-grid">
-            {projects.map((p) => {
+            {inView.map((p) => {
               const mt = metricsOf(p);
               return (
                 <a key={p.id} className="ptile" href={hashFor("project-config", null, p.id)}>

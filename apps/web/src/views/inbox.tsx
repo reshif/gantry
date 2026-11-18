@@ -17,7 +17,7 @@ import { Card, CrEmpty, ListItem, Page } from "../ui/cr";
 import { Async, useCommand } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { navigate, hashFor } from "../lib/router";
-import { setProject } from "../lib/prefs";
+import { setProject, usePrefs } from "../lib/prefs";
 import { setRouteState, useClearRouteStateOnLeave, useRouteState } from "../lib/queryState";
 import { useDecided } from "../lib/decided";
 import { useOpenTraveler } from "../shell/useTraveler";
@@ -114,7 +114,10 @@ export default function InboxView() {
   const projList = useMemo(() => (Array.isArray(projData) ? projData : []) as PView[], [projData]);
   const names = useMemo(() => new Map(projList.map((p) => [p.id, p.name] as [string, string])), [projList]);
   const keys = useMemo(() => new Map(projList.map((p) => [p.id, p.key] as [string, string])), [projList]);
-  const items = useItems(home, names);
+  const prefs = usePrefs();
+  const allItems = useItems(home, names);
+  // The switcher's project scope (prototype: Home, Inbox and Agents at work follow it); "All projects" shows everything.
+  const items = useMemo(() => (prefs.scopeAll || !prefs.project ? allItems : allItems.filter((i) => i.project === prefs.project)), [allItems, prefs.scopeAll, prefs.project]);
   const decided = useDecided();
   const [tab, setTab] = useRouteState("tab", "approvals");
   const [search, setSearch] = useRouteState("q", "");
@@ -124,6 +127,8 @@ export default function InboxView() {
   useClearRouteStateOnLeave(KEYS);
   const override = useStateOverride();
   const approvals = items.filter((i) => i.group === "gate" || i.group === "onboarding" || i.group === "other");
+  // The meta total counts every open approval, whatever the switcher scope (prototype).
+  const allApprovals = allItems.filter((i) => i.group === "gate" || i.group === "onboarding" || i.group === "other").length;
   const questions = items.filter((i): i is Extract<Item, { kind: "question" | "stuck" }> => i.kind === "question" || i.kind === "stuck");
   const needle = search.trim().toLowerCase();
   const shown = approvals.filter((i) => {
@@ -145,7 +150,7 @@ export default function InboxView() {
           <span className="sr-only" id="inbox-count">{items.length}</span>
           {tab === "approvals" ? (
             <>
-              <FilterBar label="Filter approvals" count={`${shown.length} of ${approvals.length}`} actions={filtered || sortKey ? <Btn small kind="ghost" label="Clear" id="inbox-clear" onClick={clear} /> : undefined}>
+              <FilterBar label="Filter approvals" count={`${shown.length} of ${allApprovals}`} actions={filtered || sortKey ? <Btn small kind="ghost" label="Clear" id="inbox-clear" onClick={clear} /> : undefined}>
                 <SearchBox id="inbox-q" value={search} onChange={setSearch} placeholder="Search approvals" />
                 <Select id="inbox-type" aria-label="Type" value={type} onChange={setType} options={[{ value: "all", label: "Type: all" }, ...[...TYPES, ...extraTypes].map((v) => ({ value: v, label: TYPE_LABEL[v] ?? v }))]} />
               </FilterBar>

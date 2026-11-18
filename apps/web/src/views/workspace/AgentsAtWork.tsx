@@ -6,7 +6,7 @@
 import { useMemo } from "react";
 import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
-import { useActivity, useAgents, useMe } from "../../api/queries";
+import { useActivity, useAgents, useHome, useMe } from "../../api/queries";
 import { pickProject } from "../../lib/routes";
 import { hashFor } from "../../lib/router";
 import { eventRows, eventText } from "../../lib/eventText";
@@ -22,6 +22,7 @@ import { Page, Stats } from "../../ui/cr";
 import { StateBody, useStateOverride } from "../ops1/stateOverride";
 import { buildBelt, NO_FILTER } from "../floor/conveyor";
 import { useCatalog } from "../projects/kit";
+import { type HomeFull } from "../home/data";
 import { openEntry, useFloorRead, useFloorState, type FWo } from "../floor/kit";
 
 const short = (m: string) => m.replace(/^claude-/, "");
@@ -62,6 +63,8 @@ export function AgentsAtWork() {
     return !needle || `${c.s.agent} ${c.s.name} ${c.running.map((w) => `${w.id} ${w.title}`).join(" ")}`.toLowerCase().includes(needle);
   });
   const busy = list.filter((c) => c.running.length).length;
+  // Runs in flight is factory-wide and unfiltered in the prototype: the server's running count, else this project's.
+  const factoryRuns = (useHome().data as HomeFull | undefined)?.sections?.motion?.running;
   const runs = list.reduce((n, c) => n + c.running.length, 0);
   /* Tokens in the last hour and cost per hour, from the open runs' own totals: a run older than an hour contributes its last hour pro rata (an estimate, said so on the tile);
      the hourly cost is what the runs have spent over the time they have been running. */
@@ -91,8 +94,8 @@ export function AgentsAtWork() {
       {override ? <StateBody state={override} /> : <Async query={floorQ} what="the agents on this project" id="ws-agents" isEmpty={() => false}>{() => (
         <>
           <Stats items={[
-            { l: "Agents busy", v: `${busy} / ${list.length}`, tone: "info" },
-            { l: "Runs in flight", v: runs, tone: "agent" },
+            { l: "Agents busy", v: `${busy} / ${cards.length}`, tone: "info" },
+            { l: "Runs in flight", v: factoryRuns ?? runs, tone: "agent" },
             { l: "Tokens in flight", v: compact(tokens), d: "last hour, est." },
             { l: "Cost per hour", v: `$${perHour.toFixed(2)}` },
           ]} />
@@ -135,7 +138,7 @@ export function AgentsAtWork() {
                       <div className="row spread ws-f">
                         <span className="mono" style={{ fontSize: 12 }}><span className="muted">{Math.min(running.length, s.slots)}/{s.slots} slots</span>{over ? <> · <span style={{ color: "var(--warn)" }}>+{over} over capacity</span></> : null}</span>
                         <span className="row">
-                          <a className="btn sm" id={`ws-talk-${s.id}`} href={hashFor("conversations", w ? w.id : null, projectId)}>Talk</a>
+                          <a className="btn sm" id={`ws-talk-${s.id}`} href={`${hashFor("conversations", null, projectId)}${w ? `?c=${encodeURIComponent(w.id)}` : ""}`}>Talk</a>
                           {w ? <StopRun woId={w.id} station={s.name} /> : null}
                         </span>
                       </div>

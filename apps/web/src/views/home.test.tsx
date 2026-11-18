@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CATALOG } from "@gantry/domain";
+import { updatePrefs } from "../lib/prefs";
 import { canBatcher } from "../api/can";
 import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
@@ -174,6 +175,31 @@ describe("Home: Control Room", () => {
     expect(tile("On the belt")?.textContent).toMatch(/5 running · 7 queued/);
     expect(tile("Blocked")).toBeTruthy();
     expect(tile("Waiting for a person")?.textContent).toMatch(/at gates/);
+  });
+
+  it("a picked project scopes the project tiles and the On the belt tile", async () => {
+    updatePrefs({ scopeAll: false, project: "payments" });
+    setup(ASHA, adminHome({}, { attention: [], setup: undefined, waiting: { approvals: [], conversations: [] }, motion: { ...MOTION, inFlight: 40, running: 2 } }), { extra: { "GET /api/v1/me": () => ({ body: { ...me(ASHA), projects: [{ id: "payments", name: "Payments Platform", key: "PAY" }] } }) } });
+    mount();
+    await screen.findByText("Plant overview for Payments Platform. Agents propose, people approve.");
+    expect(document.querySelectorAll(".ptile").length).toBe(1);
+    expect(screen.getByText("On the belt").closest(".stat")?.textContent).toMatch(/3/);
+    expect(screen.getByText("On the belt").closest(".stat")?.textContent).not.toMatch(/40/);
+    updatePrefs({ scopeAll: true });
+  });
+
+  it("the sub line says All projects by default", async () => {
+    setup(ASHA, adminHome({}, { attention: [], setup: undefined, waiting: { approvals: [], conversations: [] } }));
+    mount();
+    expect(await screen.findByText("Plant overview for All projects. Agents propose, people approve.")).toBeTruthy();
+  });
+
+  it("the sub line names the picked project when the switcher scopes to one", async () => {
+    updatePrefs({ scopeAll: false, project: "payments" });
+    setup(ASHA, adminHome({}, { attention: [], setup: undefined, waiting: { approvals: [], conversations: [] } }), { extra: { "GET /api/v1/me": () => ({ body: { ...me(ASHA), projects: [{ id: "payments", name: "Payments Platform", key: "PAY" }] } }) } });
+    mount();
+    expect(await screen.findByText("Plant overview for Payments Platform. Agents propose, people approve.")).toBeTruthy();
+    updatePrefs({ scopeAll: true });
   });
 
   it("the sub line names the project and the head has only Open floor and Submit work order; Review opens the decision dialog", async () => {

@@ -138,7 +138,7 @@ export function useReviewApproval(): (it: Item) => void {
     if (it.kind !== "gate" && it.kind !== "other") return;
     const t = titleOf(it);
     ui.dialog({
-      title: t.title, kicker: it.projectName || "Factory", sub: t.sub, wide: true, actions: [],
+      title: t.title, kicker: it.projectName || "Factory", sub: t.sub, wide: true, cls: "dlg-plain", actions: [],
       body: (close) => it.kind === "gate" ? <GateBody it={it} close={close} /> : <OtherBody it={it} close={close} />,
     });
   };

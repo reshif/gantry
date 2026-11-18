@@ -51,8 +51,19 @@ describe("Agents at work (prototype workspace)", () => {
     expect(screen.queryByText("Cost so far")).toBeNull();
     expect(screen.getByText("Tokens in flight").closest(".stat")?.textContent).toMatch(/last hour/);
     expect(document.querySelector(".ws-card .tok-stream")?.children.length).toBe(3);
+    // the prototype's link shape: the conversations route with ?c=<thread>
+    expect([...document.querySelectorAll("[id^=ws-talk-]")].map((a) => a.getAttribute("href"))).toContainEqual(expect.stringMatching(/^#\/p\/payments\/conversations\?c=WO-/));
     fireEvent.click(document.querySelector("[id^=ws-talk-]")!);
-    await waitFor(() => expect(window.location.hash).toMatch(/conversations(\/WO-|$)/));
+    await waitFor(() => expect(window.location.hash).toMatch(/conversations/));
+  });
+
+  it("a search that matches nothing keeps the totals: Agents busy reads 0 / <all agents>", async () => {
+    window.history.replaceState(null, "", "/?q=zzzzzz");
+    mockApi();
+    mount(<AgentsAtWork />);
+    const tile = await screen.findByText("Agents busy");
+    await waitFor(() => expect(tile.closest(".stat")?.textContent).toMatch(/0 \/ [6-9]|0 \/ \d\d/));
+    expect(document.querySelectorAll(".ws-card").length).toBe(0);
   });
 
   it("?state=loading shows the shared loading skeleton", async () => {
