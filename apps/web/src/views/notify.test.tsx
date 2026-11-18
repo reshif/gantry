@@ -239,6 +239,14 @@ const goto = (q: string) => { window.history.replaceState(null, "", `/?${q}`); w
 const openRoutes = async () => { await byId("nt-tab-channels"); goto("tab=routes"); await byId("nt-table"); };
 
 describe("Notifications", () => {
+  it("offers only delivered, failed and retrying in the status filter, as the prototype does", async () => {
+    setup();
+    mount(<NotificationsView />);
+    fireEvent.click(await byId("nt-tab-deliveries"));
+    const sel = (await byId("nt-dl-status")) as HTMLSelectElement;
+    expect(Array.from(sel.options).map((o) => o.value)).toEqual(["all", "delivered", "failed", "retrying"]);
+  });
+
   it("says Not visible to you when the delivery log is refused, instead of no deliveries", async () => {
     setup({ "GET /api/v1/deliveries": () => ({ status: 403, body: { ok: false, msg: "Needs notify.view on this project." } }) });
     mount(<NotificationsView />);

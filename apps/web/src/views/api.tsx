@@ -47,7 +47,7 @@ export default function ApiView() {
 
   return (
     <Page eyebrow="Connect" title="API and triggers" sub="How outside systems create work: scoped API keys and event triggers." cls="api-view" acts={acts}>
-      <Tabs idPrefix="api-tab" items={[{ id: "keys", label: "API keys", count: active.length }, { id: "triggers", label: "Triggers", count: d.allTriggers.length }, { id: "docs", label: "Quick start" }]} active={tab} onChange={(t) => url.set({ tab: t, q: "", sort: "", dir: "", sec: "", edit: "" })} />
+      <Tabs idPrefix="api-tab" items={[{ id: "keys", label: "API keys", count: active.length }, { id: "triggers", label: "Triggers", count: d.allTriggers.length }, { id: "docs", label: "Quick start" }]} active={tab} onChange={(t) => url.set({ tab: t, q: "", sec: "", edit: "", page: "0" })} />
       {tab === "triggers" && url.v.edit ? <TriggerEditor id={url.v.edit} close={() => url.set({ edit: "" })} /> : null}
       <div id="api-tab-panel" role="tabpanel" aria-labelledby={`api-tab-${tab}`}>
         {tab === "triggers" ? (

@@ -13,14 +13,14 @@ const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }
 export const dlStatus = (d: Delivery): "delivered" | "failed" | "retrying" | "pending" => (d.status === "failed" ? (d.state === "failed" && d.attempts > 0 ? "retrying" : "failed") : d.status === "pending" ? "pending" : "delivered");
 const WORD = { delivered: "Delivered", failed: "Failed", retrying: "Retrying", pending: "Pending" } as const;
 const TONE = { delivered: "ok", failed: "bad", retrying: "warn", pending: "info" } as const;
-const STATUSES = ["delivered", "failed", "retrying", "pending"] as const;
+const FILTERABLE = ["delivered", "failed", "retrying"] as const;
 
 export function DeliveriesTab({ p, url }: { p: Project; url: ReturnType<typeof useUrlState<"tab" | "q" | "st" | "sort" | "dir" | "page" | "view">> }) {
   const ui = useUI();
   const perm = dec(useCan("notify.edit", { project: p.id }));
   const q = useDeliveries({ project: p.id, limit: 200 });
   const all = Array.isArray(q.data) ? q.data : q.data?.items ?? [];
-  const st = oneOf(url.v.st, ["all", ...STATUSES], "all");
+  const st = oneOf(url.v.st, ["all", ...FILTERABLE], "all");
   const needle = url.v.q.trim().toLowerCase();
   const rows = all.filter((d) => (st === "all" || dlStatus(d) === st) && (!needle || `${d.id} ${d.event} ${d.target}`.toLowerCase().includes(needle)));
   const filtered = !!(needle || st !== "all");
@@ -32,7 +32,7 @@ export function DeliveriesTab({ p, url }: { p: Project; url: ReturnType<typeof u
     <>
       <FilterBar label="Filter deliveries" count={`${qState(q, () => String(rows.length))} of ${qState(q, () => String(all.length))}`} actions={filtered ? <Btn label="Clear" small kind="ghost" id="nt-dl-clear" onClick={() => url.clear("tab")} /> : null}>
         <SearchBox id="nt-dl-q" label="Search deliveries" placeholder="Search deliveries" value={url.v.q} onChange={(v) => url.set({ q: v })} />
-        <Select id="nt-dl-status" aria-label="Status" options={[{ value: "all", label: "Status: all" }, ...STATUSES.map((s) => ({ value: s, label: s }))]} value={st} onChange={(v) => url.set({ st: v })} />
+        <Select id="nt-dl-status" aria-label="Status" options={[{ value: "all", label: "Status: all" }, ...FILTERABLE.map((s) => ({ value: s, label: s }))]} value={st} onChange={(v) => url.set({ st: v })} />
       </FilterBar>
       <Async query={q} what="the delivery log" id="nt-dl">{() => (
         <DataTable<Delivery>

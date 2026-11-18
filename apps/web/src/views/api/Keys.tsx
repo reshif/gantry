@@ -88,6 +88,7 @@ export function CreateKey({ d, close, onCreated }: { d: ApiData; close: () => vo
 
 function RevokeKey({ k, perm, close }: { k: ApiKey; perm: Decision; close: () => void }) {
   const out = useOutcome();
+  const ui = useUI();
   const [n, setN] = useState<number | null>(null);
   useEffect(() => {
     let live = true;
@@ -101,7 +102,7 @@ function RevokeKey({ k, perm, close }: { k: ApiKey; perm: Decision; close: () =>
     <Dialog
       title={`Revoke ${k.name}?`} sub="Anything using this key stops working immediately. This cannot be undone." onClose={close}
       body={n === null ? <p className="muted small">Requests with this key fail with 401.</p> : <p className="muted small">It made {n} request{n === 1 ? "" : "s"} in the last 24 hours.</p>}
-      actions={[{ label: "Cancel" }, { label: "Revoke key", kind: "danger", id: "api-key-revoke-go", guard: perm, onClick: async () => { const r = out(await ops.revokeKey(k.id)); if (r.ok) close(); } }]}
+      actions={[{ label: "Cancel" }, { label: "Revoke key", kind: "danger", id: "api-key-revoke-go", guard: perm, onClick: async () => { const r = await ops.revokeKey(k.id); if (r.ok) { ui.toast(`Revoked ${k.name}`, "warn"); close(); } else out(r); } }]}
     />
   );
 }

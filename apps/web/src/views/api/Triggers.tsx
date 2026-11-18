@@ -330,7 +330,7 @@ const pkeyOf = (id: string, d: ApiData): string => d.vis.find((p) => p.id === id
 function EnableSwitch({ t }: { t: Trigger }) {
   const out = useOutcome();
   const perm = dec(useCan("triggers.edit", { project: t.project }));
-  return <Toggle id={`api-tr-en-${t.id}`} checked={t.enabled} label={`${t.name} enabled`} decision={perm} onChange={(v) => void (async () => { out(await ops.saveTrigger(t.id, { enabled: v }, t.version !== undefined ? { ifMatch: t.version } : undefined)); })()} />;
+  return <Toggle id={`api-tr-en-${t.id}`} checked={t.enabled} label={`${t.name} enabled`} decision={perm} onChange={(v) => void (async () => { out(await ops.saveTrigger(t.id, { enabled: v }, t.version !== undefined ? { ifMatch: t.version } : undefined), `${v ? "Enabled" : "Disabled"} ${t.name} enabled`); })()} />;
 }
 
 export type TriggerUrl = { v: { q: string; sort: string; dir: string; page: string }; set: (p: { q?: string; sort?: string; dir?: string; page?: string }) => void; clear: () => void };

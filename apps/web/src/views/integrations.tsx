@@ -61,7 +61,7 @@ export default function IntegrationsView() {
   };
 
   const all = d.insts;
-  const typeIds = Array.from(new Set(all.map((i) => i.type))).sort();
+  const typeIds = Array.from(new Set(all.map((i) => i.type)));
   const type = oneOf(url.v.type, ["all", ...typeIds], "all");
   const st = oneOf(url.v.st, ["all", ...STATUSES], "all");
   const needle = url.v.q.trim().toLowerCase();

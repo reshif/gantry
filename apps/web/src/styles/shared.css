@@ -219,6 +219,8 @@ button.mseg:hover, button.mseg:focus-visible { box-shadow: inset 0 0 0 2px var(-
   .dtable td { border: 0; padding: 3px 0; display: grid; grid-template-columns: minmax(90px, 35%) minmax(0, 1fr); gap: 8px; text-align: left; }
   .dtable td::before { content: attr(data-label); font-family: var(--f-mono); font-size: var(--t-xs); text-transform: uppercase; color: var(--muted); }
   .dtable td.is-end { text-align: left; }
+  .dtable td.is-end[data-label=""], .dtable td[data-label=""] { display: flex; justify-content: flex-start; text-align: left; }
+  .dtable td[data-label=""]::before { display: none; }
   .dtable td.hide-sm { display: none; }
 }
 .ask-badge { display: inline-flex; align-items: center; gap: 5px; font-family: var(--f-mono); font-size: var(--t-xs); padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); white-space: nowrap; }

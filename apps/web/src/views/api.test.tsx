@@ -186,6 +186,17 @@ describe("API & triggers: keys", () => {
     expect(await screen.findByText(/It made 1 request in the last 24 hours/)).toBeTruthy();
     fireEvent.click(await byId("api-key-revoke-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/api-keys/key-1")).toBe(true));
+    expect(await screen.findByText("Revoked Jira bridge")).toBeTruthy(); // the prototype's warn toast, not the server's empty message
+  });
+
+  it("keeps sort and direction in the URL when the tab changes", async () => {
+    setup();
+    goto("sort=name&dir=asc");
+    mount();
+    await tab("triggers");
+    await waitFor(() => expect(window.location.search).toContain("tab=triggers"));
+    expect(window.location.search).toContain("sort=name");
+    expect(window.location.search).toContain("dir=asc");
   });
 });
 
