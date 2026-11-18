@@ -2,6 +2,7 @@
  * The Conversations page, as data: how the thread list is grouped and how a work order's messages are laid out as a chat. Pure functions over what the
  * API already returns (the sessions list, the session's messages and station questions); nothing here talks to the server.
  */
+import { gateLabelOf } from "../../lib/gate-label";
 import { fromPerson } from "../../lib/wo-message";
 import type { StationQuestion } from "../documents/api";
 import type { WoSession, WoSessionMessage, WoSessionRow } from "./session-api";
@@ -19,7 +20,7 @@ export const groupOf = (r: WoSessionRow): ThreadGroup => (r.waitingOn === "you" 
 /** Why a thread sits where it does: a gate waiting on the viewer, a question from a station, or who it waits on. */
 export function reasonOf(r: WoSessionRow): { text: string; tone: "info" | "warn" | "" } {
   if (r.closed) return { text: "Done", tone: "" };
-  if (r.waitingOn === "you") return r.gate ? { text: `Gate ${r.gate}`, tone: "warn" } : { text: `Question from ${r.stationName}`, tone: "info" };
+  if (r.waitingOn === "you") return r.gate ? { text: `Gate ${gateLabelOf(null, r.gate)}`, tone: "warn" } : { text: `Question from ${r.stationName}`, tone: "info" };
   const others: Partial<Record<WoSessionRow["waitingOn"], string>> = { approver: "With an approver", person: "Waiting on someone" };
   const other = others[r.waitingOn];
   if (other) return { text: other, tone: "" };

@@ -3,6 +3,7 @@
  * its pending gate with the approvals so far (home.waiting.approvals), the Review agent's verdict, the bay reason, a block or failure reason, or the agent
  * that holds it and since when. Nothing here is written by the client: the station and gate names come from the catalogue, the rest is the server's own text.
  */
+import { gateLabelOf } from "../../lib/gate-label";
 import { bayDef, type Catalog, type WorkOrder } from "@gantry/domain";
 import type { Approval, Conversation, HomeFull } from "../home/data";
 import { agoMs } from "./format";
@@ -35,7 +36,7 @@ export function needsOf(w: WoWithReview, cat: Catalog, waiting: WaitingData, age
   const gate = ap ?? (conv?.gate ? { gate: conv.gate.id, gateLabel: conv.gate.label, have: undefined, need: undefined } : null);
   if (gate) {
     const n = typeof gate.have === "number" && typeof gate.need === "number" ? ` (${gate.have} of ${gate.need})` : "";
-    return { kind: "gate", text: `${gate.gateLabel ?? gate.gate} approval${n}`, mine: true, gate: gate.gate ?? "" };
+    return { kind: "gate", text: `${gateLabelOf(gate.gateLabel, gate.gate)} approval${n}`, mine: true, gate: gate.gate ?? "" };
   }
   if (w.review?.verdict === "changes_requested") return { kind: "review", text: "Review requested changes", mine: false };
   if (w.bay) {

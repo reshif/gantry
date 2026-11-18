@@ -3,6 +3,7 @@
  * The decision is pinned to the gate opening the person was shown (`instance`) and to the work order version, so a
  * conflict refreshes instead of deciding on stale data. Locked, with the reason, until the server's decision is known.
  */
+import { gateLabelOf } from "../../lib/gate-label";
 import { useState } from "react";
 import { gateOps } from "../../api/queries";
 import { useCommand } from "../../ui/async";
@@ -17,7 +18,7 @@ import type { Approval } from "../home/data";
 /** What a person does at a waiting gate ("Approve spec"), from the domain wording, for the approval's gate. */
 export const pendingName = (a: Pick<Approval, "gate" | "gateName">): string => gatePendingName({ id: a.gate ?? "", name: a.gateName ?? a.gate ?? "" });
 /** "Approve spec · G2": the pending title of the approval's gate. */
-export const pendingTitle = (a: Pick<Approval, "gate" | "gateName" | "gateLabel">): string => gatePendingTitle({ id: a.gate ?? "", name: a.gateName ?? a.gate ?? "", label: a.gateLabel ?? a.gate ?? "" });
+export const pendingTitle = (a: Pick<Approval, "gate" | "gateName" | "gateLabel">): string => gatePendingTitle({ id: a.gate ?? "", name: a.gateName ?? a.gate ?? "", label: gateLabelOf(a.gateLabel, a.gate) });
 
 const CHECKING: Decision = { allowed: false, reason: "Checking what you may decide here.", needs: "" };
 
@@ -49,7 +50,7 @@ export function GateActions({ a, idPrefix, size = "sm" }: { a: Approval; idPrefi
   );
   const [busy, setBusy] = useState(false);
   const purpose = cat?.gates.find((g) => g.id === gate)?.purpose;
-  const label = a.gateLabel ?? gate;
+  const label = gateLabelOf(a.gateLabel, gate);
   const open = (kind: "approve" | "reject") =>
     ui.open((close) => (
       <DecisionDialog

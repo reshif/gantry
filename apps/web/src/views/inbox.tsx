@@ -3,6 +3,7 @@
  * GET /home: gate approvals (with the rule and who else can decide), onboarding merges, questions agents asked, and the other decisions
  * the server puts in front of this person (trust, learning, MCP and trigger proposals, a factory restore). Every decision is a command the server checks (approver rules, separation of duties).
  */
+import { gateLabelOf } from "../lib/gate-label";
 import { useMemo, useState, type ReactNode } from "react";
 import { useAgents, useHome, useLearningProposals, useMe, useProjects, useTrustCells } from "../api/queries";
 import { useCan } from "../api/can";
@@ -54,7 +55,7 @@ function GateTable({ rows }: { rows: GateIt[] }) {
   const sort: SortState = { key: k, dir: d === "desc" ? -1 : 1 };
   const cols: Col<GateIt>[] = [
     { key: "id", label: "Work order", sort: (r) => r.a.wo ?? "", render: (r) => <div><a className="pri mono" href={WO_LINK(r.a.wo ?? "", r.project)} id={`inb-wo-${r.a.wo}`}>{r.a.wo}</a><span className="sub trunc" style={{ maxWidth: 340 }}>{r.a.title}</span></div> },
-    { key: "gate", label: "Gate", render: (r) => <div><Chip text={r.a.gateLabel ?? r.a.gate ?? ""} cls="warn" /><span className="sub">{pendingName(r.a)}</span></div> },
+    { key: "gate", label: "Gate", render: (r) => <div><Chip text={gateLabelOf(r.a.gateLabel, r.a.gate)} cls="warn" /><span className="sub">{pendingName(r.a)}</span></div> },
     { key: "project", label: "Project", render: (r) => r.projectName },
     // oldest first is ascending by the time the gate opened, as the prototype sorts it
     { key: "wait", label: "Waiting", sort: (r) => -r.waitMs, render: (r) => WaitText(r.waitMs) },

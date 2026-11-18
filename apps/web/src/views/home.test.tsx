@@ -264,7 +264,7 @@ describe("Home: one page", () => {
     const one = { wo: "WO-1", title: "Rounding", gate: "G2", gateLabel: "G2", gateName: "Spec approval", project: "payments", projectName: "Payments Platform" };
     setup(ASHA, adminHome({}, { setup: undefined, attention: [], waiting: { approvals: [one], conversations: [] } }));
     mount();
-    expect(await screen.findByText(/1 work order waits on a person\./)).toBeTruthy();
+    expect(await screen.findByText(/1 approval waits on you/)).toBeTruthy();
     expect(text()).not.toMatch(/1 projects|1 work orders|1 items/);
   });
 });
