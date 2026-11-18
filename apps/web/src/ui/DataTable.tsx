@@ -20,6 +20,8 @@ export interface Col<R> {
   hideSmall?: boolean;
   /** the label a stacked small-screen card shows for this cell when it is shorter than the column heading */
   cardLabel?: string;
+  /** The label a stacked (phone) row shows when it differs from the header ("Time" under a "Duration" header). */
+  mobileLabel?: string;
   width?: string;
   render?: (r: R) => ReactNode;
 }
@@ -197,7 +199,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                     const first = i === 0 && action && !hasOwn;
                     const lid = `${uid}-${key}`.replace(/[^\w-]/g, "_");
                     return (
-                      <td key={c.key} data-label={c.cardLabel ?? c.label} data-l={c.cardLabel ?? c.label} className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.align === "center" ? { textAlign: "center" } : undefined}>
+                      <td key={c.key} data-label={c.cardLabel ?? c.mobileLabel ?? c.label} data-l={c.cardLabel ?? c.mobileLabel ?? c.label} className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.align === "center" ? { textAlign: "center" } : undefined}>
                         {i === 0 && action ? <span className="cell-content" id={first ? lid : undefined}>{content}</span> : content}
                         {first ? (
                           rowHref ? <a className="row-link" href={rowHref(r)} aria-labelledby={rowLabel ? undefined : lid} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} />

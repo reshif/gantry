@@ -5,7 +5,7 @@
  */
 import { useMemo, useState } from "react";
 import { fmt } from "@gantry/domain";
-import { useAllSuiteRuns, useScorecards, useSkills, useWorkOrders } from "../../api/queries";
+import { useAllSuiteRuns, useInstructions, useScorecards, useSkills, useWorkOrders } from "../../api/queries";
 import { usePrefs } from "../../lib/prefs";
 import { hashFor, navigate } from "../../lib/router";
 import { Btn, Chip, Field, IconBtn, Select, Toggle, type Decision } from "../../ui/primitives";
@@ -60,7 +60,7 @@ export function OverviewTab({ a, d, onTab }: TabProps & { onTab: (t: string) => 
   const cols: SortCol<Run>[] = [
     { key: "wo", label: "Work order", render: (r) => <a className="rl mono" href={hashFor("record", r.wo)}>{r.wo}</a> },
     { key: "outcome", label: "Outcome", render: (r) => outcomeChip(r.outcome) },
-    { key: "ms", label: "Duration", align: "end", render: (r) => <span className="mono">{r.ms == null ? "\u2014" : `${Math.max(1, Math.round(r.ms / 60000))}m`}</span> },
+    { key: "ms", label: "Duration", mobileLabel: "Time", align: "end", render: (r) => <span className="mono">{r.ms == null ? "\u2014" : `${Math.max(1, Math.round(r.ms / 60000))}m`}</span> },
     { key: "cost", label: "Cost", align: "end", render: (r) => <span className="mono">{fmt.money(r.cost)}</span> },
   ];
   return (
@@ -118,13 +118,18 @@ export function InstructionsCard({ a, d, ro, edit, onSaveVersion, saving }: Pick
       </div>
     ));
   };
-  const text = d.instructions ?? "";
+  // The prototype opens an agent's text as "# <Name>" over the factory base; shown, not saved, until the person edits it.
+  const base = useInstructions().data?.base;
+  const [touched, setTouched] = useState(false);
+  const own = d.instructions ?? "";
+  const text = touched || own ? own : base ? `# ${a.name}\n\n${base}` : "";
+  const cand = a.versions.filter((v) => !v.live && /-rc\d+$/.test(String(v.v))).at(-1);
   return (
     <Card title="Instructions" hint="Saving creates a new version and runs the eval suite before it goes live">
       <div className="stack">
-        <textarea id="ag-instr-main" className="in input mono" rows={16} style={{ fontSize: 12, lineHeight: "18px" }} aria-label="Instructions" disabled={ro} value={text} onChange={(e) => edit(() => { d.instructions = e.target.value; })} />
+        <textarea id="ag-instr-main" className="in input mono" rows={16} style={{ fontSize: 12, lineHeight: "18px" }} aria-label="Instructions" disabled={ro} value={text} onChange={(e) => { setTouched(true); edit(() => { d.instructions = e.target.value; }); }} />
         <div className="row spread">
-          <span className="dim mono" id="ag-instr-count">{`${text.length} characters · live version ${live?.v ?? a.version}`}</span>
+          <span className="dim mono" id="ag-instr-count">{`${text.length} characters · live version ${live?.v ?? a.version}${cand ? ` · ${cand.v} saved, awaiting its eval suite` : ""}`}</span>
           <span className="row">
             <Btn label="Show diff" id="ag-instr-diff" onClick={showDiff} />
             <Btn label="Save as new version" kind="primary" id="ag-instr-save" disabledReason={ro ? "You cannot edit this agent." : saving ? "Saving…" : null} onClick={onSaveVersion} />
@@ -164,17 +169,19 @@ export function ToolsTab({ d, perm, ro, edit }: TabProps) {
   );
 }
 
-export function ModelTab({ d, ro, edit }: TabProps) {
+/** Like the prototype, a changed Model or Budget is saved at once ("Saved model"); `onSave` writes just that key. */
+export function ModelTab({ a, d, ro, edit, onSave }: TabProps & { onSave: (key: "model" | "budget", value: string | number) => void }) {
   const m = useModels();
   const opts = m.list.map((x) => ({ value: x.id, label: x.id })).concat(m.list.some((x) => x.id === d.model) ? [] : [{ value: d.model, label: `${d.model} (not available)` }]);
+  const commitBudget = (): void => { if (d.budget !== a.budget) onSave("budget", d.budget); };
   return (
     <Card title="Model and budget">
       <div className="grid g2">
         <Field label="Model" htmlFor="ag-model">
-          <Select id="ag-model" options={opts} value={d.model} disabled={ro} onChange={(v) => edit(() => { d.model = v; d.fallbacks = d.fallbacks.filter((x) => x !== v); })} />
+          <Select id="ag-model" options={opts} value={d.model} disabled={ro} onChange={(v) => { edit(() => { d.model = v; d.fallbacks = d.fallbacks.filter((x) => x !== v); }); if (v !== a.model) onSave("model", v); }} />
         </Field>
         <Field label="Budget per run (USD)" htmlFor="ag-budget" hint="The run stops when it reaches this.">
-          <input id="ag-budget" className="input mono" type="number" min="0" step="0.1" value={String(d.budget)} disabled={ro} onChange={(e) => edit(() => { d.budget = +e.target.value || 0; })} />
+          <input id="ag-budget" className="input mono" type="number" min="0" step="0.1" value={String(d.budget)} disabled={ro} onChange={(e) => edit(() => { d.budget = +e.target.value || 0; })} onBlur={commitBudget} onKeyDown={(e) => { if (e.key === "Enter") commitBudget(); }} />
         </Field>
       </div>
     </Card>

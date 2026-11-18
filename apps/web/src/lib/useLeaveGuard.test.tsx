@@ -65,39 +65,29 @@ describe("a dirty dialog", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("asks before a scrim click, Escape or Cancel discards typed input", () => {
+  it("asks with the browser confirm before a scrim click or Escape discards typed input", () => {
     const onClose = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     open(true, onClose);
     scrimClick();
+    expect(confirm).toHaveBeenCalledWith("Discard what you typed?");
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByRole("alertdialog").textContent).toMatch(/unsaved/);
-    fireEvent.click(screen.getByText("Keep editing"));
-    expect(screen.queryByRole("alertdialog")).toBeNull();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByRole("alertdialog")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    confirm.mockReturnValue(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("moves focus to Keep editing when asked, and back to the field when kept", async () => {
-    open(true, vi.fn());
-    const field = screen.getByLabelText("name");
-    field.focus();
-    scrimClick();
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByText("Keep editing").closest("button")));
-    fireEvent.click(screen.getByText("Keep editing"));
-    await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
   it("guards a custom Cancel action through the dirty check", () => {
     const onClose = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const custom = vi.fn((c: () => void) => c());
     render(<Dialog title="Edit" body={<Form dirty />} onClose={onClose} actions={[{ label: "Back out", onClick: custom }]} />);
     fireEvent.click(screen.getByText("Back out"));
     expect(custom).toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(confirm).toHaveBeenCalledWith("Discard what you typed?");
   });
 
   it("arms beforeunload while a dialog form is dirty", () => {

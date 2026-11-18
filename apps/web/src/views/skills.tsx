@@ -81,8 +81,9 @@ function SkillDrawer({ sk, agents, stations, close }: { sk: SkillRow; agents: Ag
         <pre className="code" style={{ fontSize: 12 }}>{`---\nname: ${sk.id}\n---\n# ${sk.name}\n\n${sk.body || sk.desc}`}</pre>
       </div>
       <div className="drawer-f">
+        <Btn label="Skill page" id="sk-drawer-page" onClick={() => { close(); navigate("skills", sk.id); }} />
         <Btn label="Close" onClick={close} />
-        <Btn label="Edit draft" kind="primary" id="sk-drawer-edit" onClick={() => ui_.toast(`Opened a draft of ${sk.name}`, "info", { label: "Open skill page", id: "sk-drawer-page", onClick: () => { close(); navigate("skills", sk.id); } })} />
+        <Btn label="Edit draft" kind="primary" id="sk-drawer-edit" onClick={() => ui_.toast(`Opened a draft of ${sk.name}`, "info")} />
       </div>
     </div>
   );
@@ -125,7 +126,7 @@ function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] })
         <SearchBox id="sk-search" value={qText} onChange={setQText} placeholder="Search skills" label="Filter skills" />
         <Select id="sk-f-station" aria-label="Station" value={r.station} onChange={(v) => setR({ station: v })} options={[{ value: "", label: "Station: all" }, ...stOpts]} />
       </FilterBar>
-      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} pageSize={12} pager
+      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} pageSize={12} pager
         sort={{ key: r.sort, dir: r.dir === "desc" ? -1 : 1 }} onSort={(x) => setR({ sort: x.key, dir: x.dir === -1 ? "desc" : "asc" })}
         empty={{ title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="sk-empty-clear" onClick={clear} /> }} />
     </>

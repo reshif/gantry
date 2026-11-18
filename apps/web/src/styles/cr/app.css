@@ -255,6 +255,7 @@ hr{border:0;border-top:1px solid var(--line);margin:var(--s3) 0}
   .tw.cards td:first-child{font-size:14px;justify-content:flex-start;text-align:left;padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:4px}
   .tw.cards td:first-child::before{display:none}
   .tw.cards td .ell{white-space:normal}
+  .tw.cards .md-name{display:flex;gap:var(--s3);align-items:baseline;flex-wrap:wrap}
   .tw.cards td.nol::before{display:none}
   .tw+.pager,.tw.cards+.pager{border:0;background:none;padding:var(--s2) 0}
   .toasts{left:var(--s4);right:var(--s4);bottom:36px}

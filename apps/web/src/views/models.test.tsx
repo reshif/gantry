@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG, VENDOR_TEMPLATES } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -573,19 +573,58 @@ describe("models catalog in the prototype layout", () => {
 });
 
 describe("models screen has no tab strip (prototype)", () => {
-  it("the catalog has no buttons to vendors, routing or prices; Spend by model replaces Spend by vendor; Add vendor lives on the vendors page", async () => {
+  it("the catalog has no tab strip but keeps Vendors, Routing, Prices and Add vendor one click away; Spend by model replaces Spend by vendor", async () => {
     setup();
     window.location.hash = "#models";
     mount();
     await byId("mc-table");
     expect(document.getElementById("md-tab-models")).toBeNull();
-    expect(document.getElementById("md-add-vendor")).toBeNull();
     expect(document.getElementById("mc-vendors")).toBeNull();
+    fireEvent.click(await byId("md-add-vendor"));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    cleanup();
+    for (const [btn, sub] of [["md-go-vendors", "vendors"], ["md-go-routing", "routing"], ["md-go-prices", "prices"]] as const) {
+      window.location.hash = "#models";
+      mount();
+      fireEvent.click(await byId(btn));
+      expect(window.location.hash).toBe(`#models/${sub}`);
+      cleanup();
+    }
+    window.location.hash = "#models";
+    mount();
+    await byId("mc-table");
     expect(document.body.textContent).toContain("Spend by model");
     expect(document.body.textContent).not.toContain("Spend by vendor");
     cleanup();
     window.location.hash = "#models/vendors";
     mount();
     await byId("md-add-vendor");
+  });
+});
+
+describe("work1 residual round 2: models", () => {
+  beforeEach(() => { window.location.hash = "#models"; });
+  it("the header carries Discover models alone; Vendors, Routing, Prices and Add vendor sit in a quiet row below the tiles", async () => {
+    setup();
+    mount();
+    await byId("mc-table");
+    const head = document.querySelector(".ph")!;
+    expect([...head.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Discover models"]);
+    const manage = await byId("md-manage");
+    expect([...manage.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Vendors", "Routing", "Prices", "Add vendor"]);
+  });
+  it("lists tiers frontier, standard, fast in the filter and in the add-model dialog", async () => {
+    setup();
+    mount();
+    await byId("mc-table");
+    const opts = [...(document.getElementById("mc-tier") as HTMLSelectElement).options].map((o) => o.value).filter(Boolean);
+    expect(opts.slice(0, 3)).toEqual(["frontier", "standard", "fast"]);
+  });
+  it("Discover models toasts a sentence even when the server sends no message", async () => {
+    setup({ "POST /api/v1/vendors/anthropic/discover": () => ({ body: { ok: true } }) });
+    mount();
+    await byId("mc-table");
+    fireEvent.click(await byId("md-discover"));
+    await waitFor(() => expect(document.body.textContent).toContain("Checked Anthropic."));
   });
 });

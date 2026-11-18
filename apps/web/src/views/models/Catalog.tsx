@@ -55,7 +55,8 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
   const all: Row[] = useMemo(() => vendors.flatMap((v) => v.models.map((m) => ({ id: m.id, name: m.name, tier: m.tier ?? "standard", context: m.context || 0, inPrice: m.inPrice, outPrice: m.outPrice, enabled: m.enabled, needsPrice: !!m.needsPrice, invocable: m.invocable !== false, vendor: v }))), [vendors]);
   const term = qText.trim().toLowerCase();
   const rows = all.filter((m) => (!tier || m.tier === tier) && (!term || `${m.name} ${m.id}`.toLowerCase().includes(term)));
-  const tiers = [...new Set(all.map((m) => m.tier))];
+  const TIER_ORDER = ["frontier", "standard", "fast"];
+  const tiers = [...TIER_ORDER, ...new Set(all.map((m) => m.tier)).values()].filter((t, i, l) => l.indexOf(t) === i);
   /** Locks that stop the switch from being used at all (permission, price, vendor). */
   const lockFor = (m: Row) => !perm.allowed ? perm
     : m.needsPrice && !m.enabled ? no("Set a price first.")
@@ -65,7 +66,7 @@ export function ModelCatalog({ vendors, routing, agents }: { vendors: Vendor[]; 
   const inUse = (m: Row) => m.enabled && routing.defaultModel === m.id ? "This is the factory default model. Pick another default first."
     : m.enabled && usedBy(agents, m.id).some((a) => a.model === m.id) ? "Primary model of an agent. Change that agent first." : null;
   const cols: SortCol<Row>[] = [
-    { key: "name", label: "Model", sort: (m) => m.name.toLowerCase(), render: (m) => { const l = lockFor(m) ?? (inUse(m) ? no(inUse(m)!) : null); return <span className="stack" style={{ gap: 0 }}><b className="ell">{m.name}</b><span className="mono dim ell" style={{ fontSize: 11 }} title={l && perm.allowed ? reasonText(l) : undefined}>{m.id}</span></span>; } },
+    { key: "name", label: "Model", sort: (m) => m.name.toLowerCase(), render: (m) => { const l = lockFor(m) ?? (inUse(m) ? no(inUse(m)!) : null); return <span className="md-name"><b className="ell">{m.name}</b><span className="mono dim ell" style={{ fontSize: 11 }} title={l && perm.allowed ? reasonText(l) : undefined}>{m.id}</span></span>; } },
     { key: "tier", label: "Tier", sort: true, render: (m) => <Chip text={m.tier} cls={`${tierTone(m.tier)} plain`} /> },
     { key: "context", label: "Context", sort: true, align: "end", render: (m) => <span className="mono">{fmt.k(m.context)}</span> },
     { key: "price", label: "In / out per Mtok", sort: (m) => m.outPrice, align: "end", render: (m) => m.needsPrice ? <Btn label="Set price" small id={`mc-price-${m.id}`} guard={perm} onClick={() => ui.open((close) => <SetPriceDialog m={m} close={close} />)} /> : <span className="mono">{m.inPrice || m.outPrice ? `$${m.inPrice} / $${m.outPrice}` : "self-hosted"}</span> },

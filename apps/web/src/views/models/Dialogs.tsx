@@ -182,7 +182,7 @@ export function AddModelDialog({ v, vendors, close }: { v: Vendor; vendors: Vend
             <Field label="Input $ / Mtok" htmlFor="ma-in"><input id="ma-in" className="input mono" type="number" min="0" step="0.01" value={pin} disabled={off} onChange={(e) => setPin(e.target.value)} /></Field>
             <Field label="Output $ / Mtok" htmlFor="ma-out"><input id="ma-out" className="input mono" type="number" min="0" step="0.01" value={pout} disabled={off} onChange={(e) => setPout(e.target.value)} /></Field>
             <Field label="Context (tokens)" htmlFor="ma-ctx"><input id="ma-ctx" className="input mono" type="number" min="1000" step="1000" value={ctx} disabled={off} onChange={(e) => setCtx(e.target.value)} /></Field>
-            <Field label="Tier" htmlFor="ma-tier"><Select id="ma-tier" disabled={off} options={[{ value: "fast", label: "Fast" }, { value: "standard", label: "Standard" }, { value: "frontier", label: "Frontier" }]} value={tier} onChange={setTier} /></Field>
+            <Field label="Tier" htmlFor="ma-tier"><Select id="ma-tier" disabled={off} options={[{ value: "frontier", label: "Frontier" }, { value: "standard", label: "Standard" }, { value: "fast", label: "Fast" }]} value={tier} onChange={setTier} /></Field>
           </div>
           <Field label="Same model as (optional)" htmlFor="ma-same" hint="Marks this as the same model another vendor serves, so calls can fall back between them.">
             <Select id="ma-same" disabled={off} options={[{ value: "", label: "A different model" }, ...others.map((m) => ({ value: m.id, label: `${m.name} · ${m.vendorName}` }))]} value={same} onChange={setSame} />

@@ -28,7 +28,9 @@ const subscribe = (fn: () => void) => {
   window.addEventListener("popstate", fn);
   return () => { window.removeEventListener(EVENT, fn); window.removeEventListener("popstate", fn); };
 };
-const snapshot = (): string => { try { return window.location.search; } catch { return ""; } };
+/** The hash's own query (`#agents/ag-build?tab=tools`, the prototype's link shape), "" when none. */
+const hashSearch = (): string => { const h = window.location.hash, i = h.indexOf("?"); return i >= 0 ? h.slice(i) : ""; };
+const snapshot = (): string => { try { return window.location.search + "\u0000" + hashSearch(); } catch { return ""; } };
 
 /** Reads `defaults` keys from the query string and returns a setter that writes them back. */
 export function useRouteState<T extends Record<string, string>>(defaults: T): [T, (patch: Partial<T>) => void] {
@@ -38,10 +40,27 @@ export function useRouteState<T extends Record<string, string>>(defaults: T): [T
   for (const k of keys) managed.add(k);
   const defRef = useRef(defaults);
   defRef.current = defaults;
-  const params = new URLSearchParams(search);
+  const [qs = "", hs = ""] = search.split("\u0000");
+  const params = new URLSearchParams(qs);
+  new URLSearchParams(hs).forEach((v, k) => params.set(k, v));
   const value = Object.fromEntries(keys.map((k) => [k, params.get(k) ?? defaults[k]])) as T;
   const set = useCallback((patch: Partial<T>) => {
     try {
+      const hi = window.location.hash.indexOf("?");
+      if (hi >= 0) {
+        // A link in the hash carries its state there: keep it in the hash so the two never disagree.
+        const hp = new URLSearchParams(window.location.hash.slice(hi + 1));
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === undefined || v === "" || v === defRef.current[k]) hp.delete(k);
+          else hp.set(k, v as string);
+        }
+        const u2 = new URL(window.location.href);
+        u2.hash = window.location.hash.slice(0, hi) + (hp.toString() ? `?${hp.toString()}` : "");
+        if (u2.href === window.location.href) return;
+        window.history.replaceState(window.history.state, "", u2.href);
+        window.dispatchEvent(new Event(EVENT));
+        return;
+      }
       const u = new URL(window.location.href);
       for (const [k, v] of Object.entries(patch)) {
         if (v === undefined || v === "" || v === defRef.current[k]) u.searchParams.delete(k);

@@ -137,7 +137,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   // "Save as new version": the working copy is saved first (one audited change), then a candidate snapshots it. Promotion stays a separate step on Versions.
   const saveVersion = () => {
     if ((d.instructions ?? "").trim().length < 40) { ui_.toast("Instructions are too short.", "warn"); return; }
-    if ((d.instructions ?? "") === (a.instructions ?? "") && !dirty) { ui_.toast("No changes to save. Edit the instructions first.", "warn"); return; }
+    if ((d.instructions ?? "") === (a.instructions ?? "") && !dirty) { ui_.toast("Instructions are too short.", "warn"); return; }
     confirmNewVersion(ui_, a, () => {
       void (async () => {
         let rev = a.rev;
@@ -153,6 +153,10 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
       })();
     });
   };
+  // Model and Budget save the moment they change, as in the prototype; the draft follows once the server copy catches up.
+  const saveField = (key: "model" | "budget", value: string | number): void => {
+    void ops.saveAgent(a.id, { [key]: value }, key, { ifMatch: a.rev }).then((r) => { if (r.ok) ui_.toast(`Saved ${key}`, "ok"); else out(r); });
+  };
   const running = a.running ?? 0;
   const paused = a.status === "paused";
   const station = st.find(a.station);
@@ -163,7 +167,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const tp: TabProps = { a, d, ro, perm, projects, policies, edit };
   const body = tab === "instructions" ? <><InstructionsCard a={a} d={d} ro={ro} edit={edit} onSaveVersion={saveVersion} saving={draft.saving || draft.syncing} /><More label="Layers and versions" id="ag-more-instr"><InstructionsTab {...tp} /><VersionsTab a={a} dirty={dirty} perm={perm} /></More></>
     : tab === "tools" ? <ToolsTab {...tp} />
-    : tab === "model" ? <ModelTab {...tp} />
+    : tab === "model" ? <ModelTab {...tp} onSave={saveField} />
     : tab === "skills" ? <><SkillsListTab {...tp} /><More label="Skill pins and MCP servers" id="ag-more-skills"><SkillsTab {...tp} /></More></>
     : tab === "guardrails" ? <>
         <GuardrailsTab {...tp} />
@@ -230,6 +234,14 @@ export default function AgentsView() {
       navigate("agents", id);
     }
   }, [prefs.agent, agents]);
+
+  // A new agent the server did not name in its reply: open it as soon as the list shows it (prototype: Create agent lands on its page).
+  useEffect(() => {
+    const o = ui.opening;
+    if (!o) return;
+    const made = agents.find((a) => a.name === o.name && !o.known.includes(a.id));
+    if (made) { ui.opening = null; navigate("agents", made.id); }
+  }, [agents]);
 
   const create = <Btn label="New agent" kind="primary" icon="plus" id="agent-create" guard={perm} onClick={() => ui_.open((close) => <NewAgentDialog agents={agents} perm={perm} close={close} />)} />;
   const head = (children: React.ReactNode) => <Page eyebrow="Workforce" title="Agents" sub={SUB} acts={create} cls="view-agents">{children}</Page>;

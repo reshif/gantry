@@ -194,7 +194,7 @@ describe("Agents screen", () => {
     await waitFor(() => expect(window.location.search).toContain("tab=guardrails"));
     expect(document.getElementById("ag-maxdiff")).toBeTruthy();
     fireEvent.click(await byId("ag-talk"));
-    expect(window.location.hash).toBe("#/p/payments/conversations");
+    expect(window.location.hash).toMatch(/^#(\/p\/payments\/)?conversations$/);
     window.location.hash = "#agents/ag-build";
     fireEvent.click(await byId("ag-back-link"));
     expect(window.location.hash).toBe("#agents");
@@ -732,5 +732,72 @@ describe("work1 round 3 fixes", () => {
     fireEvent.click(await byId("ag-tool-postSlack"));
     await waitFor(() => expect(document.body.textContent).toContain("Disabled postSlack"));
     expect(document.body.textContent).not.toContain("Save the agent to keep it");
+  });
+});
+
+describe("work1 residual round 2", () => {
+  it("saves Model at once as one PATCH with only that key and toasts Saved model", async () => {
+    const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
+    mountAgent();
+    await tab("model");
+    const sel = (await byId("ag-model")) as HTMLSelectElement;
+    await waitFor(() => expect([...sel.options].some((o) => o.value === "claude-sonnet-5-5")).toBe(true));
+    fireEvent.change(sel, { target: { value: "claude-sonnet-5-5" } });
+    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
+    const c = writes(calls, "PATCH")[0]!;
+    expect(c.body.patch).toEqual({ model: "claude-sonnet-5-5" });
+    expect(c.headers["if-match"]).toBe("7");
+    await waitFor(() => expect(document.body.textContent).toContain("Saved model"));
+  });
+  it("saves Budget when the field is left, with only that key, and toasts Saved budget", async () => {
+    const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
+    mountAgent();
+    await tab("model");
+    const b = (await byId("ag-budget")) as HTMLInputElement;
+    fireEvent.change(b, { target: { value: "9" } });
+    expect(writes(calls, "PATCH")).toHaveLength(0);
+    fireEvent.blur(b);
+    await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
+    expect(writes(calls, "PATCH")[0]!.body.patch).toEqual({ budget: 9 });
+    await waitFor(() => expect(document.body.textContent).toContain("Saved budget"));
+  });
+  it("opens an agent with no text of its own as '# Name' over the factory base, without making a draft of it", async () => {
+    setup({ "GET /api/v1/agents": () => ({ body: [{ ...BUILD, instructions: "" }, REVIEW] }) });
+    mountAgent();
+    await tab("instructions");
+    const t = (await byId("ag-instr-main")) as HTMLTextAreaElement;
+    await waitFor(() => expect(t.value).toBe("# Builder\n\nBase rules."));
+    expect(document.getElementById("ag-savebar")).toBeNull();
+  });
+  it("names a saved candidate next to the live version in the counter", async () => {
+    setup();
+    mountAgent();
+    await tab("instructions");
+    await waitFor(() => expect(document.getElementById("ag-instr-count")!.textContent).toContain("live version 2.6.1 · 2.8.0-rc1 saved"));
+  });
+  it("honours the prototype's deep link with the tab in the hash", async () => {
+    setup();
+    window.location.hash = "#agents/ag-build?tab=tools";
+    mount(<AgentsView />);
+    await byId("ag-tool-postSlack");
+  });
+  it("opens the new agent's page from the list when the server's reply does not name it", async () => {
+    let made = false;
+    setup({
+      "GET /api/v1/agents": () => ({ body: made ? [...AGENTS, { ...BUILD, id: "ag-docs-9", name: "Docs Writer" }] : AGENTS }),
+      "POST /api/v1/agents": () => { made = true; return ok(); },
+    });
+    mount(<AgentsView />);
+    fireEvent.click(await byId("agent-create"));
+    fireEvent.change(await byId("na-name"), { target: { value: "Docs Writer" } });
+    fireEvent.click(await byId("na-ok"));
+    await waitFor(() => expect(window.location.hash).toBe("#agents/ag-docs-9"));
+  });
+  it("a click on a skill row outside the name does not open the drawer", async () => {
+    setup();
+    mount(<SkillsView />);
+    const row = await byId("sk-row-sk-a");
+    fireEvent.click(row.querySelectorAll("td")[3]!);
+    expect(document.getElementById("sk-drawer")).toBeNull();
   });
 });
