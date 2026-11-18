@@ -60,10 +60,10 @@ RUN if [ "$RUNNER_TOOLCHAIN" = "full" ]; then \
     fi
 # Python test toolchain (owner decision 2026-11-18): uv and a Python 3.12 so Verify can run a repository's confirmed test command ("make test" ->
 # "uv run pytest"). Package downloads at run time go only to pypi.org and files.pythonhosted.org through the edge allow-list; the interpreter itself
-# is baked in (UV_PYTHON_DOWNLOADS=never, so uv never fetches one from GitHub). The environment and caches live in /workspace and /tmp, both writable.
+# is baked in (UV_PYTHON_DOWNLOADS=never, so uv never fetches one from GitHub). The environment lives in /workspace. The wrapper sets UV_CACHE_DIR (and the pip, npm and XDG caches) to /workspace/.gantry-cache at run time, kept out of git; /tmp is only a small tmpfs.
 ARG PYTHON_VERSION=3.12
 COPY --from=uv /uv /uvx /usr/local/bin/
-ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_PYTHON_PREFERENCE=only-managed UV_PYTHON_DOWNLOADS=never UV_CACHE_DIR=/tmp/uv-cache UV_LINK_MODE=copy UV_NO_PROGRESS=1
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_PYTHON_PREFERENCE=only-managed UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_NO_PROGRESS=1
 RUN --mount=type=secret,id=cacert,required=false \
     if [ "$RUNNER_TOOLCHAIN" = "full" ]; then \
       if [ -f /run/secrets/cacert ]; then export SSL_CERT_FILE=/run/secrets/cacert; fi; \

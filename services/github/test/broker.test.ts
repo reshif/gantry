@@ -102,6 +102,14 @@ describe("seed", () => {
     const mint = env.gh.of("POST", /access_tokens$/).at(-1)!;
     expect(mint.body).toEqual({ repositories: ["payments-api"], permissions: { contents: "read", metadata: "read" } });
   });
+  it("excludes the runner's package cache dot-directory from git, so `git add -A` cannot stage it", async () => {
+    const w = await workspace();
+    expect(await readFile(join(w.dir, ".git/info/exclude"), "utf8")).toContain("/.gantry-cache/");
+    await mkdir(join(w.dir, ".gantry-cache/uv"), { recursive: true });
+    await writeFile(join(w.dir, ".gantry-cache/uv/blob"), "x");
+    run(w.dir, "add", "-A");
+    expect(run(w.dir, "status", "--porcelain")).not.toContain(".gantry-cache");
+  });
   it("returns the repository context at the commit: convention files with hash and size, AGENTS.md inlined, a file with a credential-shaped match listed but withheld", async () => {
     const r = await env.call("POST", "/v1/workspaces/seed", { repo: REPO, commit: base, volume: "ws-ctx" });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
