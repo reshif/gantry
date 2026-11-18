@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { can, checkMatrixEdit, defaultMatrix, DEFAULT_CATALOG, isFactoryAdmin, istTime } from "./index.js";
-import { seedState } from "./testkit.js";
+import { NOW, seedState } from "./testkit.js";
 
 /** Owner decision 2026-11-19: Factory Admin is universal. */
 const fri22 = istTime("2026-11-20", "22:00");
@@ -51,5 +51,35 @@ describe("E: isFactoryAdmin needs factory scope", () => {
     t.roles = [{ role: "factory_admin", scope: "payments" }];
     expect(isFactoryAdmin(S, "p-tomas")).toBe(false);
     expect(isFactoryAdmin(S, "p-asha")).toBe(true);
+  });
+});
+
+describe("C: a Factory Admin may pass a freeze or a halt with a reason", () => {
+  const frozen = () => {
+    const S = structuredClone(seedState());
+    return S;
+  };
+  const when = NOW + 86400000;
+  it("a freeze refuses the admin with needs override_reason, and allows it with the override, marked", () => {
+    const S = frozen();
+    const ctx = { project: "payments", repo: "payouts-worker", time: when };
+    const no = can(S, "p-asha", "release", ctx);
+    expect(no).toMatchObject({ allowed: false, override: true, needs: "override_reason" });
+    const yes = can(S, "p-asha", "release", { ...ctx, override: true });
+    expect(yes).toMatchObject({ allowed: true, override: true, overrideKind: "freeze" });
+    // not an admin: the freeze stands, the override flag changes nothing
+    expect(can(S, "p-kenji", "release", { ...ctx, override: true })).toMatchObject({ allowed: false });
+    expect(can(S, "p-kenji", "release", ctx).override).toBeUndefined();
+  });
+  it("a halt blocks the admin's gate approval until override, a kill still blocks, other actions stay blocked", () => {
+    const S = structuredClone(seedState());
+    S.projects.find((p) => p.id === "payments")!.halted = { by: "p-meera", at: Date.now(), reason: "flaky" } as never;
+    const ctx = { project: "payments" };
+    expect(can(S, "p-asha", "gate.approve", ctx)).toMatchObject({ allowed: false, override: true, needs: "override_reason" });
+    expect(can(S, "p-asha", "gate.approve", { ...ctx, override: true })).toMatchObject({ allowed: true, override: true, overrideKind: "halt" });
+    expect(can(S, "p-asha", "wo.move", { ...ctx, override: true }).allowed).toBe(false);
+    expect(can(S, "p-meera", "gate.approve", { ...ctx, override: true }).allowed).toBe(false);
+    S.projects.find((p) => p.id === "payments")!.killed = { by: "p-asha", at: Date.now(), reason: "x" } as never;
+    expect(can(S, "p-asha", "gate.approve", { ...ctx, override: true }).allowed).toBe(false);
   });
 });

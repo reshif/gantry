@@ -74,6 +74,7 @@ describe("can() equals legacy G.can", () => {
             const a = can(S, person.id, act, ctx);
             const b = G.can(person.id, act, ctx);
             if (b.rule.id === "POL-105" && a.allowed && a.rule.id === "MATRIX") continue; // allow policies never restrict a Factory Admin (2026-11-19)
+            if (a.override && !a.allowed) { expect(b.allowed).toBe(false); expect(a.reason).toBe(b.reason); continue; } // a Factory Admin may pass a freeze with a reason (2026-11-19)
             expect(a, `${person.id} ${act} ${repo.id}`).toEqual(b);
           }
         }

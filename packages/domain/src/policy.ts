@@ -37,6 +37,8 @@ export interface PolicyContext {
   time?: number;
   /** The work order the action targets, for work-order-level stops. */
   wo?: Pick<WorkOrder, "id" | "killed" | "state"> | null;
+  /** A Factory Admin has given a reason for a break-glass override of a freeze or an andon halt (owner decision 2026-11-19). The caller records it in the audit. */
+  override?: boolean;
 }
 
 /** A policy role of "*" means anyone (the UI calls it "Anyone"). */
@@ -238,7 +240,19 @@ function whereOk(q: Policy, projectId: string | null): boolean {
 /** Actions a Factory Admin keeps even if the matrix is damaged (I7): stopping and restoring. */
 const ADMIN_ALWAYS = new Set(["line.halt", "line.resume", "halt.factory", "resume.factory", "kill.workorder", "restore.workorder", "kill.project", "restore.project", "kill.factory", "restore.factory"]);
 
+/** Gate and release actions a Factory Admin may pass during an andon halt with a reason ("Approve anyway"). A kill still blocks them. */
+export const HALT_OVERRIDE_ACTIONS: ReadonlySet<string> = new Set(["gate.approve", "release", "brief.confirm"]);
+
+export interface OverrideMarks { kind: "freeze" | "halt" | null }
+
 export function can(state: PolicyState, personId: string | null | undefined, action: string, ctx: PolicyContext = {}): Decision {
+  const marks: OverrideMarks = { kind: null };
+  const d = canCore(state, personId, action, ctx, marks);
+  if (d.allowed && marks.kind) return { ...d, override: true, overrideKind: marks.kind, reason: d.reason + " Factory Admin override of " + (marks.kind === "freeze" ? "the freeze" : "the halt") + "." };
+  return d;
+}
+
+function canCore(state: PolicyState, personId: string | null | undefined, action: string, ctx: PolicyContext, marks: OverrideMarks): Decision {
   const person = findPerson(state, personId);
   const act = actionsOf(state).find((a) => a.id === action);
   const scope = actionScopeOf(actionsOf(state), action) ?? act?.scope;
@@ -262,8 +276,13 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   /* spec 9.7: stop state of the scope refuses work; stop controls themselves are exempt (I7) */
   const stop = effectiveStop(state, { project: projectId, repo: ctx.repo ?? null, wo: ctx.wo ?? null });
   /* an archived project is not a stop: only kill and andon halt refuse work here (archived is handled by submitGuard and moveCheck) */
+  const adminHere = granting.some((g) => g.role === "factory_admin" && g.scope === "factory");
   if (stop && stop.mode !== "archived" && granting.length && stopBlocks(state, action, stop)) {
-    return { allowed: false, reason: stop.reason, rule: { kind: "stop", id: "STOP-" + stop.level.toUpperCase(), name: "Stop state" }, needs: stop.mode === "halt" ? "Resume first" : "Restore first" };
+    /* Owner decision 2026-11-19: a Factory Admin may approve a gate or release during a halt with a reason. The halt stays for everyone else; a kill still blocks. */
+    if (adminHere && stop.mode === "halt" && HALT_OVERRIDE_ACTIONS.has(action)) {
+      if (!ctx.override) return { allowed: false, reason: stop.reason, rule: { kind: "stop", id: "STOP-" + stop.level.toUpperCase(), name: "Stop state" }, needs: "override_reason", override: true, overrideKind: "halt" };
+      marks.kind = "halt";
+    } else return { allowed: false, reason: stop.reason, rule: { kind: "stop", id: "STOP-" + stop.level.toUpperCase(), name: "Stop state" }, needs: stop.mode === "halt" ? "Resume first" : "Restore first" };
   }
 
   if (!granting.length) {
@@ -292,12 +311,15 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   }
 
   const held = granting.map((g) => g.role);
-  const adminHere = granting.some((g) => g.role === "factory_admin" && g.scope === "factory");
   const denies = state.policies.filter((p) => p.enabled && p.effect === "deny" && p.actions.includes(action));
   for (const p of denies) {
     if (p.where.freeze && repo) {
       const f = activeFreeze(state, repo.id, time);
-      if (f) {
+      if (f && adminHere) {
+        /* A release freeze stops everyone else; a Factory Admin passes it with a reason, audited (owner decision 2026-11-19). */
+        if (!ctx.override) return { allowed: false, reason: "Freeze " + f.id + " '" + f.name + "' is active on " + repo.name + " until " + fmt.stamp(f.to) + ".", rule: { kind: "policy", id: p.id, name: p.name, freeze: f.id }, needs: "override_reason", override: true, overrideKind: "freeze" };
+        marks.kind = "freeze";
+      } else if (f) {
         return { allowed: false, reason: "Freeze " + f.id + " '" + f.name + "' is active on " + repo.name + " until " + fmt.stamp(f.to) + ".", rule: { kind: "policy", id: p.id, name: p.name, freeze: f.id }, needs: "Wait for the freeze to end" };
       }
     }

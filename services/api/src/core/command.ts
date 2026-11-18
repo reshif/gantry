@@ -66,6 +66,8 @@ export interface CommandSpec {
   /** Catalog action id; checked by the decision point. `null`: the caller changes only their own data (own session, own saved view), which needs no catalogue right. */
   action: string | null;
   scope?: Scope;
+  /** A Factory Admin's reason for a break-glass override of a freeze or halt (at least 5 characters, else it is ignored). The handler records it in the audit. */
+  overrideReason?: string;
   /** Reads the entity's current version in the transaction (null = not found). With an `If-Match` header, a different value is a 409. */
   ifMatch?: (tx: Tx) => Promise<number | null>;
   /** Versioned config endpoints: a request without `If-Match` is a 409 "version required" (so a blind overwrite is impossible). Needs `ifMatch`. */
@@ -236,7 +238,7 @@ export async function command<X extends object = Record<string, never>>(
       let decision: Decision =
         spec.service && principal.kind === "service"
           ? { allowed: true, reason: `Authenticated service ${principal.id}.`, rule: { kind: "service", id: principal.id, name: `Service ${principal.id}` }, needs: "" }
-          : spec.action === null ? SELF : decideFor(st, principal, spec.action, spec.scope ?? {});
+          : spec.action === null ? SELF : decideFor(st, principal, spec.action, (spec.overrideReason?.trim().length ?? 0) >= 5 ? { ...(spec.scope ?? {}), override: true } : spec.scope ?? {});
       if (fallback) {
         decision = { ...decision, reason: `${decision.reason} (Decided from the policy snapshot of ${fallback.snapshotAt}: policy data was unreadable.)`, ...(decision.allowed ? { rule: { kind: "invariant", id: "I7-SNAPSHOT", name: "Stop path: last-known-good policy" } } : {}) };
       }
