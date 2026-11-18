@@ -8,7 +8,7 @@ const facts = RepoFacts.parse({
   files: ["README.md", "pyproject.toml", "jobs/a.py", "assets/logo.png"], contents: { "README.md": "# Nautobot jobs\nRun with nautobot-server.", "pyproject.toml": "[project]" },
   secrets: { scanned: 0, complete: true, hits: [] }, protection: null,
 });
-const ctx = (): WoSessionCtx => ({ repoFull: "acme/nautobot-jobs", inspect: async () => ({ ok: true, facts }), cards: [], used: [], drafts: {}, next: 1 } as unknown as WoSessionCtx);
+const ctx = (): WoSessionCtx => ({ orgId: "o", wo: { id: "WO-9" }, repoFull: "acme/nautobot-jobs", inspect: async () => ({ ok: true, facts }), cards: [], used: [], drafts: {}, next: 1 } as unknown as WoSessionCtx);
 const tool = (name: string) => WO_TOOLS.find((t) => t.name === name)!;
 
 describe("the Intake agent reads the repository snapshot", () => {
@@ -17,12 +17,13 @@ describe("the Intake agent reads the repository snapshot", () => {
     expect(r.error).toBeUndefined();
     expect(r.content).toContain("Run with nautobot-server");
   });
-  it("says why a listed file cannot be read, instead of a bare refusal, and still serves nothing outside the snapshot", async () => {
-    const listed = (await tool("read_file").run(ctx(), { path: "assets/logo.png" })) as { error: string };
-    expect(listed.error).toMatch(/in the repository but its text is not part of the snapshot/);
+  it("serves nothing outside the snapshot when no file reader is wired, and refuses traversal with a reason", async () => {
+    const listed = (await tool("read_file").run(ctx(), { path: "jobs/a.py" })) as { error: string; content?: string };
+    expect(listed.content).toBeUndefined();
+    expect(listed.error).toMatch(/not available here/);
     const unknown = (await tool("read_file").run(ctx(), { path: "../../etc/passwd" })) as { error: string; content?: string };
     expect(unknown.content).toBeUndefined();
-    expect(unknown.error).toMatch(/Only files the assessment reads/);
+    expect(unknown.error).toMatch(/not a path inside the repository/);
   });
   it("has no tool that writes to the repository", () => {
     expect(WO_TOOLS.map((t) => t.name).filter((n) => /write|commit|push|create_file|delete/.test(n))).toEqual([]);

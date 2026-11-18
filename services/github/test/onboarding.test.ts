@@ -84,6 +84,19 @@ describe("POST /v1/onboarding/inspect", () => {
   });
 });
 
+describe("POST /v1/onboarding/file", () => {
+  it("reads one file at the given commit with the read-only token, and refuses a path that is not in the tree", async () => {
+    const r = await env.call("POST", "/v1/onboarding/file", { repo: REPO, sha: head, path: "src/index.ts" });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ path: "src/index.ts", binary: false, content: "export const a = 1;\n" });
+    expect(env.gh.writes()).toEqual([]);
+    const miss = await env.call("POST", "/v1/onboarding/file", { repo: REPO, sha: head, path: "src/none.ts" });
+    expect(miss.status).toBe(404);
+    expect(miss.body).toMatchObject({ code: "no_such_file" });
+    expect((await env.call("POST", "/v1/onboarding/file", { repo: REPO, sha: "main", path: "a" })).status).toBeGreaterThanOrEqual(400);
+  });
+});
+
 describe("POST /v1/onboarding/pr", () => {
   const body = (over: Record<string, unknown> = {}) => ({ repo: REPO, branch: "gantry/onboarding", title: "Prepare acme/payments-api for Gantry", body: "Adds files.", files: [{ path: "AGENTS.md", content: "# AGENTS.md\n" }, { path: ".gantry/factory.yml", content: "repo: acme/payments-api\n" }], ...over });
 
