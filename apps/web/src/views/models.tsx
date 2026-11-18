@@ -8,15 +8,18 @@
  * Not ported, on purpose: the "Test connection" button (it only simulated an answer; health and latency now come from the metering of real calls), the simulated
  * wording of the connect dialogs, and the client-side route resolver (the preview asks GET /routing/resolve).
  */
-import { useProjects, useRouting, useVendors } from "../api/queries";
-import { Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { useAgents, useProjects, useRouting, useVendors } from "../api/queries";
+import { useCan } from "../api/can";
+import { useUI } from "../ui/overlay-context";
+import { Btn, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { useRouteTab } from "../lib/routeQuery";
 import { Async, qState } from "../ui/async";
 import { useCatalog } from "./projects/kit";
-import { ModelPrices, ProjectBudgets } from "./models/Prices";
+import { ModelPrices, PriceVersions, ProjectBudgets, VendorBudgets } from "./models/Prices";
+import { ManualVendorDialog } from "./models/Dialogs";
 import { RoutingPanel } from "./models/Routing";
 import { VendorPanel } from "./models/Vendor";
-import { usd } from "./models/kit";
+import { dec, usd } from "./models/kit";
 
 
 export default function ModelsView() {
@@ -25,6 +28,9 @@ export default function ModelsView() {
   const vendors = vq.data ?? [];
   const projects = useProjects().data ?? [];
   const cat = useCatalog();
+  const ui = useUI();
+  const perm = dec(useCan("model.edit"));
+  const agents = useAgents().data ?? [];
 
   const mtd = vendors.reduce((t, v) => t + (v.mtd || 0), 0);
   const bud = vendors.reduce((t, v) => t + (v.budget || 0), 0);
@@ -40,6 +46,7 @@ export default function ModelsView() {
         title="Models"
         kicker="All lines"
         sub="Vendors, routing and what each station spends."
+        actions={<Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <ManualVendorDialog close={close} onAdded={(id) => { setTab("vendors"); setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView?.({ block: "center" }), 150); }} />)} />}
       />
       <StatRow id="md-stats">
         <Stat label="Models" value={qState(vq, () => String(allN))} sub={`${enabledN} enabled`} tone="info" />
@@ -53,13 +60,15 @@ export default function ModelsView() {
           <Async query={rq} what="model routing" id="models-routing">
             {(r) => tab === "vendors" ? (
               <div className="card-grid vendor-grid">
-                {vendors.map((v) => <VendorPanel key={v.id} v={v} />)}
+                {vendors.map((v) => <VendorPanel key={v.id} v={v} vendors={vendors} routing={r} agents={agents} />)}
               </div>
             ) : tab === "routing" ? (
               <RoutingPanel routing={r} vendors={vendors} cat={cat} />
             ) : (
               <div className="stack md-stack">
                 <ModelPrices vendors={vendors} />
+                <PriceVersions />
+                <VendorBudgets vendors={vendors} />
                 <ProjectBudgets projects={projects} />
               </div>
             )}

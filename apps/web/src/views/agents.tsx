@@ -3,10 +3,11 @@
  * model, autonomy, tools, skills and MCP, per-project overrides and versions with rollback. The model, autonomy and tool controls write at once (one audited change, toasted);
  * instructions are saved as a new version. A version is a snapshot of the saved configuration and is immutable.
  */
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { fmt, type Project } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, usePolicies, useProjects } from "../api/queries";
+import { createThread, useInbox } from "./workspace/api";
 import { ops } from "../api/ops";
 import { hashFor, navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
@@ -17,6 +18,7 @@ import { Avatar, Btn, Chip, Empty, Field, FilterBar, LockNote, Panel, SearchBox,
 import { DataTable, type SortCol } from "../ui/SortTable";
 import { Spark } from "../ui/charts";
 import { useUI } from "../ui/overlay-context";
+import { Dialog } from "../ui/Overlay";
 import { useOutcome } from "./govern/data";
 import { nextVersion, ui, useAgentsUi, useStations, type AgentRow } from "./agents/kit";
 import { ConfigTab, OverridesTab, type TabProps } from "./agents/Config";
@@ -78,6 +80,36 @@ function Roster({ agents }: { agents: AgentRow[] }) {
   );
 }
 
+/** Talk: a side thread with this agent about one work order; the agent answers in its own voice and cannot change the work order. */
+function TalkDialog({ a, close }: { a: AgentRow; close: () => void }) {
+  const inbox = useInbox(false);
+  const wos = (inbox.data?.items ?? []).filter((w) => w.kind === "primary" && !w.archived);
+  const [wo, setWo] = useState("");
+  const [err, setErr] = useState("");
+  const pick = wo || wos[0]?.key || "";
+  const start = async (): Promise<void> => {
+    const item = wos.find((w) => w.key === pick);
+    if (!item?.scope.id) { setErr("Pick a work order to talk about."); return; }
+    const r = await createThread({ scope: { kind: "work_order", id: item.scope.id }, agent: a.id, visibility: "private" });
+    if (!r.ok) { setErr(r.msg); return; }
+    close();
+    navigate("workspace", r.id);
+  };
+  return (
+    <Dialog title={`Talk to ${a.name}`} kicker="Agents" onClose={close}
+      sub="A side thread about one work order. The agent reads its documents, questions and sources and answers in its own voice."
+      actions={[{ label: "Cancel" }, { label: "Start", kind: "primary", submit: true, id: "ag-talk-ok", onClick: () => void start() }]}
+      body={(
+        <div className="form-grid">
+          <Field label="About work order" htmlFor="ag-talk-wo" hint={wos.length ? undefined : "No work order has a thread yet."}>
+            <Select id="ag-talk-wo" value={pick} onChange={setWo} options={wos.map((w) => ({ value: w.key, label: `${w.scope.id} · ${w.title.slice(0, 60)}` }))} />
+          </Field>
+          <div className="form-err" role="alert">{err}</div>
+        </div>
+      )} />
+  );
+}
+
 function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const ui_ = useUI();
   const out = useOutcome();
@@ -122,7 +154,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
         crumbs={[{ label: "Agents", href: hashFor("agents"), onClick: () => navigate("agents") }, { label: a.name }]}
         title={a.name}
         sub={stn?.purpose ?? "Roaming agent"}
-        actions={<Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={write.wait("Saving…")} onClick={() => apply({ status: paused ? "active" : "paused" }, `${a.name} ${paused ? "active" : "paused"}`)} />}
+        actions={<><Btn label="Talk" icon="chat" id="ag-talk" onClick={() => ui_.open((close) => <TalkDialog a={a} close={close} />)} /><Btn label={paused ? "Resume agent" : "Pause agent"} icon={paused ? "play" : "pause"} id="ag-pause" guard={perm} disabledReason={write.wait("Saving…")} onClick={() => apply({ status: paused ? "active" : "paused" }, `${a.name} ${paused ? "active" : "paused"}`)} /></>}
       />
       <StatRow id="ag-detail-stats">
         <Stat label="Eval score" value={fmt.pct(a.evalScore)} sub={`suite ${a.suite}`} tone={a.evalScore > 0.9 ? "done" : "wait"} />

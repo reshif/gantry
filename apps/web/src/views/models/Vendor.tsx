@@ -1,12 +1,15 @@
 /** One vendor card (legacy vendorPanel): health and latency and spend from real calls, residency, models with their toggles, and the actions. */
-import { fmt, type Vendor } from "@gantry/domain";
+import { useState } from "react";
+import { fmt, type Agent, type Model, type Routing, type Vendor } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Chip, Toggle } from "../../ui/primitives";
+import { Btn, Chip, Toggle } from "../../ui/primitives";
+import { AddModelDialog, ConnectDialog, DisconnectDialog, RemoveModelDialog } from "./Dialogs";
+import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { dec, hasEndpoint, usd } from "./kit";
 
-export function VendorPanel({ v }: { v: Vendor }) {
+export function VendorPanel({ v, vendors, routing, agents }: { v: Vendor; vendors: Vendor[]; routing: Routing; agents: Agent[] }) {
   const ui = useUI();
   const perm = dec(useCan("model.edit"));
   const endpointVendor = hasEndpoint(v);
@@ -39,6 +42,22 @@ export function VendorPanel({ v }: { v: Vendor }) {
           );
         })}
       </div>
+      <div className="row md-actions" style={{ flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        <Btn small label={v.connected ? "Update key" : "Connect"} kind={v.connected ? undefined : "primary"} id={`vendor-connect-${v.id}`} guard={perm} onClick={() => ui.open((close) => <ConnectDialog v={v} close={close} />)} />
+        <Btn small label="Add model" icon="plus" id={`vendor-addmodel-${v.id}`} guard={perm} onClick={() => ui.open((close) => <AddModelDialog v={v} vendors={vendors} close={close} />)} />
+        {v.models.length ? <Btn small kind="ghost" label="Remove model" id={`vendor-rmmodel-${v.id}`} guard={perm} onClick={() => ui.open((close) => <RemoveModelPick v={v} close={close} />)} /> : null}
+        {v.connected ? <Btn small kind="ghost" label="Disconnect" id={`vendor-disc-${v.id}`} guard={perm} onClick={() => ui.open((close) => <DisconnectDialog v={v} routing={routing} agents={agents} close={close} />)} /> : null}
+      </div>
     </section>
+  );
+}
+
+/** Remove model needs a model: with one model it goes straight to the confirmation, with several a small picker comes first. */
+function RemoveModelPick({ v, close }: { v: Vendor; close: () => void }) {
+  const [picked, setPicked] = useState<Model | null>(v.models.length === 1 ? v.models[0]! : null);
+  if (picked) return <RemoveModelDialog v={v} m={picked} close={close} />;
+  return (
+    <Dialog title={`Remove a model from ${v.name}`} kicker="Models · catalogue" onClose={close} sub="Pick the model to remove from the catalogue." actions={[{ label: "Cancel" }]}
+      body={<div className="stack">{v.models.map((m) => <Btn key={m.id} label={m.name} id={`rm-pick-${m.id}`} onClick={() => setPicked(m)} />)}</div>} />
   );
 }
