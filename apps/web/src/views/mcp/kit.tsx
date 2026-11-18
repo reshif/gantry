@@ -1,6 +1,6 @@
 /** Shared pieces of the MCP screen (legacy views/mcp.js helpers): chips, scope text, and the lists the dialogs and panels draw from. */
 import { classesOf, flowOf, type Catalog, type McpServer, type Project } from "@gantry/domain";
-import { Chip, Status, type Decision, type Tone } from "../../ui/primitives";
+import { Status, type Decision, type Tone } from "../../ui/primitives";
 
 export const SENS = [{ value: "public", label: "Public" }, { value: "internal", label: "Internal" }, { value: "confidential", label: "Confidential" }, { value: "restricted", label: "Restricted" }];
 export const AUTH_MODES = [{ value: "none", label: "None" }, { value: "bearer", label: "Bearer token" }, { value: "header", label: "API key in a header" }];
@@ -19,7 +19,7 @@ export const Rw = ({ write }: { write: boolean }) => (
   </span>
 );
 
-export const SensChip = ({ s }: { s: string }) => <Chip text={s.charAt(0).toUpperCase() + s.slice(1)} cls={s === "restricted" ? "chip-block" : s === "confidential" ? "chip-warn" : ""} />;
+export const SensChip = ({ s }: { s: string }) => <span className={`chip plain ${s === "restricted" ? "bad" : s === "confidential" ? "warn" : "idle"}`}>{s}</span>;
 
 export const scopeText = (v: "all" | string[] | null | undefined, name: string): string => (v === "all" ? `all ${name}` : !v || !v.length ? `no ${name}` : `${v.length} ${name}`);
 

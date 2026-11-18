@@ -124,7 +124,7 @@
     --cls-refactor: #4dd0c1; --cls-security: #ff7a7a; --cls-docs: #9ccc65; --cls-spike: #e6b44a;
     --kill: #ff5a5a; --kill-soft: #3d0f12; --gate: #f0a63a; --gate-soft: #3a2a0c;
     --scrim: rgba(0, 0, 0, 0.6);
-    --idle: #52525b;
+    --idle: #9aa9bc;
   }
 }
 
@@ -158,5 +158,5 @@
   --cls-refactor: #4dd0c1; --cls-security: #ff7a7a; --cls-docs: #9ccc65; --cls-spike: #e6b44a;
   --kill: #ff5a5a; --kill-soft: #3d0f12; --gate: #f0a63a; --gate-soft: #3a2a0c;
   --scrim: rgba(0, 0, 0, 0.6);
-  --idle: #52525b;
+  --idle: #9aa9bc;
 }

@@ -106,3 +106,10 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
   .view-evals .filterbar .meta,.view-learning .filterbar .meta{width:100%}
   .view-evals .filterbar .meta,.view-learning .filterbar .meta{justify-content:flex-start}
 }
+
+/* fidelity connect-027: at phone width the table rows are the prototype's cards (4px cell rhythm, no fixed 44px cell height or side padding) and the filter count sits on its own row, left */
+@media (max-width:720px){
+  .dtable.t td{height:auto;padding:4px 0}
+  .dtable.t td:first-child{padding-bottom:6px}
+  .filterbar .filterbar-count{margin-left:0;flex-basis:100%;text-align:left}
+}

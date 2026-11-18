@@ -15,7 +15,7 @@ import { AUTHS, DirTags, Health, Mark, PAYLOADS, catName, control, scopeText, st
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
 /** "Disconnect <name>?": the prototype's confirm. A connection that routes or enabled triggers still use is refused, and the button says why. */
-export function RemoveIntegration({ inst, close, closeDrawer }: { inst: IntegrationInstance; close: () => void; closeDrawer: () => void }) {
+export function RemoveIntegration({ inst, close }: { inst: IntegrationInstance; close: () => void }) {
   const ui = useUI();
   const perm = dec(useCan("integration.edit"));
   const d = useIntegrationData();
@@ -27,7 +27,7 @@ export function RemoveIntegration({ inst, close, closeDrawer }: { inst: Integrat
     <Dialog title={`Disconnect ${inst.name}?`} sub="Projects using it stop receiving events. Secrets are deleted." onClose={close} actions={[{ label: "Cancel" }, { label: "Disconnect", kind: "danger", id: "int-rm-go", guard: block ?? perm, onClick: async () => {
       const r = await ops.removeIntegration(inst.id);
       ui.toast(r.ok ? "Disconnected" : r.msg, r.ok ? "warn" : "error");
-      if (r.ok) { close(); closeDrawer(); }
+      if (r.ok) close();
     } }]} body={block ? <div className="callout callout-block" id="int-rm-blocked"><Icon name="lock" /><span>{block.reason}</span></div> : null} />
   );
 }

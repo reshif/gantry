@@ -14,7 +14,7 @@ export function LogTab({ d }: { d: ApiData }) {
   return (
     <div className="form-grid">
       <div className="filters">
-        <Field label="Key" htmlFor="api-log-key"><Select id="api-log-key" options={[{ value: "all", label: "All keys" }, ...d.keys.map((k) => ({ value: k.id, label: k.name }))]} value={key} onChange={setKey} /></Field>
+        <Field label="Key" htmlFor="api-log-key"><Select id="api-log-key" options={[{ value: "all", label: "All keys" }, ...d.allKeys.map((k) => ({ value: k.id, label: k.name }))]} value={key} onChange={setKey} /></Field>
         <Field label="Status" htmlFor="api-log-status">
           <Select id="api-log-status" options={[{ value: "all", label: "All" }, { value: "2xx", label: "Success (2xx)" }, { value: "429", label: "Rate limited (429)" }, { value: "4xx", label: "Refused (4xx)" }]} value={status} onChange={setStatus} />
         </Field>
@@ -28,7 +28,7 @@ export function LogTab({ d }: { d: ApiData }) {
                 {list.map((x, i) => (
                   <tr key={`${x.at}-${i}`}>
                     <td className="mono">{`${fmt.istDate(x.at)} ${fmt.ist(x.at)}`}</td>
-                    <td>{d.keys.find((k) => k.id === x.key)?.name ?? x.key}</td>
+                    <td>{d.allKeys.find((k) => k.id === x.key)?.name ?? x.key}</td>
                     <td><span className={`api-m api-m-${x.method.toLowerCase()}`}>{x.method}</span></td>
                     <td className="mono">{x.path}</td>
                     <td><StatusChip code={x.status} /></td>

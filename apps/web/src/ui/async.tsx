@@ -7,7 +7,7 @@
  *  - `useCommand` (lib/useCommand) wraps one write; re-exported here.
  *  - `qState` gives a header stat the same honesty: "…" while loading, "–" with the reason when hidden or failed.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
 import "../lib/data.css";
@@ -44,14 +44,19 @@ export function NotVisible({ what, reason, id }: { what: string; reason?: string
 }
 
 export function LoadFailed({ what, msg, onRetry, id }: { what: string; msg: string; onRetry?: () => void; id?: string }) {
+  const eid = useMemo(() => `e-${Math.random().toString(36).slice(2, 8)}`, []);
   return (
     <Empty
       id={id}
-      icon="alert"
-      tone="block"
-      title={`Couldn't load ${what}`}
-      text={msg}
-      action={onRetry ? <Btn small icon="refresh" label="Try again" id={id ? `${id}-retry` : undefined} onClick={onRetry} /> : undefined}
+      icon="warn"
+      title="This view failed to load"
+      text={<><span className="sr">{`Couldn't load ${what}. `}</span>{`${msg} Nothing was changed. Error id: ${eid}`}</>}
+      action={(
+        <div className="row">
+          {onRetry ? <Btn small kind="primary" label="Retry" id={id ? `${id}-retry` : undefined} onClick={onRetry} /> : null}
+          <Btn small label="Reload" id={id ? `${id}-reload` : undefined} onClick={() => window.location.reload()} />
+        </div>
+      )}
     />
   );
 }

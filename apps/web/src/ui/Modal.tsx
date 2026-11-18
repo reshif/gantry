@@ -49,10 +49,12 @@ function focusables(root: HTMLElement): HTMLElement[] {
 /** Marks every sibling of `el` and of each ancestor inert, except exempt ones. Returns the undo. */
 export function inertOutside(el: HTMLElement): () => void {
   const changed: HTMLElement[] = [];
+  // a dialog opened over a drawer lives in its own layer above it: the drawer must not make that layer inert
+  const overDialogs = !el.closest("#layer-dialog");
   let node: HTMLElement | null = el;
   while (node && node !== document.body && node.parentElement) {
     for (const sib of Array.from(node.parentElement.children)) {
-      if (sib === node || !(sib instanceof HTMLElement) || sib.hasAttribute("inert") || sib.matches(EXEMPT) || sib.matches("script,style")) continue;
+      if (sib === node || !(sib instanceof HTMLElement) || sib.hasAttribute("inert") || sib.matches(EXEMPT) || sib.matches("script,style") || (overDialogs && sib.id === "layer-dialog")) continue;
       sib.setAttribute("inert", "");
       changed.push(sib);
     }

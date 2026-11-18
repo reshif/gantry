@@ -128,7 +128,7 @@ describe("signed in", () => {
     expect(Array.from(nav.querySelectorAll(".navgrp")).map((e) => e.textContent)).toEqual(["Operate", "Portfolio", "Workforce", "Connect", "Govern", "Reference"]);
     expect(within(nav).getByText("Access")).toBeTruthy();
     expect(within(nav).queryByText("Work order record")).toBeNull(); // nav:false
-    expect(await screen.findByText("Couldn't load the floor")).toBeTruthy(); // the shared failed state (ui/async)
+    expect(await screen.findByText("This view failed to load")).toBeTruthy(); // the shared failed state (ui/async)
     expect(within(nav).getByText("Floor").closest("a")?.getAttribute("aria-current")).toBe("page");
     // one badge on the rail, as in the prototype: the Inbox counts approvals plus questions; Floor carries none
     await waitFor(() => expect(within(nav).getByTitle("3 waiting for you").textContent).toBe("3"));
