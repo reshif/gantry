@@ -1,4 +1,4 @@
-import { applyStationResult, endCarrierAttempt, expireLeases, failEvalAttempt, pendingStops, revokeRunTokens, job as buildJob } from "@gantry/api/core";
+import { applyJobDead, applyStationResult, endCarrierAttempt, expireLeases, failEvalAttempt, pendingStops, revokeRunTokens, job as buildJob } from "@gantry/api/core";
 import { enqueue, withTx, type Job } from "@gantry/db";
 import type { Deps } from "../deps.js";
 import { errMsg } from "../errors.js";
@@ -10,6 +10,32 @@ export interface SweepReport {
   leasesExpired: number;
   orphansRemoved: string[];
   watchdog: string[];
+  /** Repos whose onboarding step's job died and were handed back to a person. */
+  onboardingFreed?: string[];
+}
+
+const BUSY_JOB: Record<string, string[]> = {
+  assessing: ["onboarding.assess"], opening_pr: ["onboarding.open_pr"], updating_pr: ["onboarding.open_pr"], merging: ["onboarding.merge"], verifying: ["onboarding.verify"],
+};
+
+/**
+ * A repo whose onboarding step is marked busy but whose job is dead (all attempts or the lease used up) and has nothing else queued or running would be refused every command
+ * forever. Hand it back to a person with the job's error (the API's `applyJobDead`).
+ */
+export async function onboardingSweep(deps: Deps, orgId: string): Promise<string[]> {
+  const { rows } = await deps.pool.query<{ id: string; busy: string }>(`select id, data->'onboarding'->>'busy' as busy from repos where org_id = $1 and data->'onboarding'->>'busy' is not null order by id`, [orgId]);
+  const freed: string[] = [];
+  for (const r of rows) {
+    const kinds = BUSY_JOB[r.busy] ?? [];
+    if (!kinds.length) continue;
+    const live = (await deps.pool.query(`select 1 from jobs where org_id = $1 and kind like 'onboarding.%' and payload->>'repoId' = $2 and status in ('queued','running') limit 1`, [orgId, r.id])).rowCount;
+    if (live) continue;
+    const last = (await deps.pool.query<{ status: string; last_error: string | null }>(`select status, last_error from jobs where org_id = $1 and kind = any($3) and payload->>'repoId' = $2 order by created_at desc, id desc limit 1`, [orgId, r.id, kinds])).rows[0];
+    if (!last || last.status !== "dead") continue;
+    const out = await withTx(deps.pool, (tx) => applyJobDead(tx, orgId, { repoId: r.id, now: deps.now(), error: last.last_error ?? "the job died" }));
+    if (out.applied) freed.push(r.id);
+  }
+  return freed;
 }
 
 /** Removes every launcher resource without a live attempt lease (spec 4.6). A run whose attempt is queued or running, within its lease plus a grace, is live. */
@@ -98,5 +124,6 @@ export async function reaperSweep(job: Job, ctx: HandlerCtx): Promise<SweepRepor
   report.leasesExpired += await evalSweep(deps, org);
   report.watchdog = await wallClockWatchdog(deps, org);
   report.orphansRemoved = await reapOrphans(deps, org);
+  report.onboardingFreed = await onboardingSweep(deps, org);
   return report;
 }

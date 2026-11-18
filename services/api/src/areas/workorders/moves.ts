@@ -1,10 +1,10 @@
 /** Board and traveler moves: move (one step along the route), send back, park, unpark, reassign, retry and the record summary (spec 9.4, 9.6). */
-import { bayDef, can, gateForWO, moveCheck, nextStationId, route, stationDef, type MoveCheck, type Project } from "@gantry/domain";
+import { bayDef, can, gateForWO, moveCheck, nextStationId, route, routeGates, stationDef, type MoveCheck, type Project } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
 import {
-  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, dispatchQueued, enterStation, ev, leaveBay, note, openGate, projectOf, resetGatesFrom, stationIdOf, type Fx,
+  acquireSlot, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, dispatchQueued, enterStation, ev, leaveBay, note, openGate, pinned, advance, projectOf, resetGatesFrom, stationIdOf, type Fx,
 } from "./engine.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
 import { approveInner } from "./gates.js";
@@ -138,6 +138,14 @@ async function unparkInner(fx: Fx, actor: Actor, w: Wo, reason?: string): Promis
     w.position = "build";
     w.state = "running";
     await enterStation(fx, w, "build", { project });
+  } else if (from === "sechold" && !routeGates(fx.catalog, await pinned(fx, w), w.cls).includes("G3G3s")) {
+    // Plan and security was switched off (a Factory Admin override) after the hold began: there is no gate left to reopen, so the work order goes on to the next station.
+    delete w.data.bayReason;
+    delete w.data.bayFrom;
+    delete w.data.bayAt;
+    w.position = back;
+    note(w, fx, by, "The plan and security gate is off, so the work order goes on past it.");
+    await advance(fx, w, by);
   } else if (from === "sechold" && w.data.gateChecks && (w.data.gateChecks as Record<string, unknown>).G3G3s) {
     const checks = ((w.data.gateChecks as Record<string, Array<{ name: string; ok: boolean }>>).G3G3s ?? []).map((c) => ({ ...c, ok: true }));
     delete w.data.bayReason;

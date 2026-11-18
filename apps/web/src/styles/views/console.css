@@ -26,8 +26,9 @@
 }
 
 /* round three: Claude mode, streaming, entity chips */
-.con-model { display: inline-flex; align-items: center; gap: 6px; }
-.con-model select { min-width: 200px; max-width: 280px; font-family: var(--f-mono); font-size: var(--t-xs); }
+.con-model { display: block; width: 100%; max-width: 560px; }
+.con-model select { width: 100%; text-overflow: clip; font-size: var(--t-xs); padding-inline: 8px; }
+.con2-settings .con-model { margin: 8px 0; }
 .view-console .msg-text.is-thinking { color: var(--muted); font-style: italic; }
 .msg-meta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 2px; }
 .msg-mode { border: 1px solid var(--line-strong); color: var(--muted); }

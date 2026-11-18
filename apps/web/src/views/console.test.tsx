@@ -141,7 +141,6 @@ describe("Console (legacy console.js on the real API)", () => {
       });
       mount("/settings");
       await waitFor(() => expect(document.getElementById("con-mode")!.textContent).toBe("claude-test-1"));
-      expect(document.getElementById("con-mode-reason")!.textContent).toContain("claude-test-1");
       // T-3: the reason is the factory switch and who can flip it, never a made-up "read-only for you"
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("switched off for this factory");
       expect(document.getElementById("con-mode-reason")!.textContent).toContain("A Factory Admin can switch them on");
@@ -260,7 +259,7 @@ describe("Console (legacy console.js on the real API)", () => {
     it("a halt asks for a reason, then calls the ordinary endpoint with via console and an Idempotency-Key", async () => {
       const calls = setup({ ...ON, ...tool("propose_halt", proposal()), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform halted." } }) });
       mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
+      await byId("con-access-link");
       await ask("/halt payments duplicate refunds");
       const ok = await firstOf("[id^='con-cf-ok-']");
       expect(calls.find((c) => c.path === "/api/v1/console/tools/propose_halt")!.body.input).toEqual({ scope: "project", id: "payments", reason: "duplicate refunds" });
@@ -284,7 +283,7 @@ describe("Console (legacy console.js on the real API)", () => {
     it("a kill needs the typed phrase and carries the in-flight choice", async () => {
       const calls = setup({ ...ON, ...tool("propose_kill", proposal({ kind: "kill", title: "Kill Payments Platform", phrase: "Payments Platform", danger: true, call: { method: "POST", path: "/api/v1/stops", body: { scope: "project", id: "payments", mode: "kill", reason: "bad deploy", inFlight: "hold", confirmText: "", via: "console" }, idempotent: true }, perm: { action: "kill.project", project: "payments" } })), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Killed." } }) });
       mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
+      await byId("con-access-link");
       await ask("/kill payments bad deploy");
       const card = await waitFor(() => { const c = document.querySelector<HTMLElement>(".ccard-confirm.is-danger"); if (!c) throw new Error("no card"); return c; });
       const ok = card.querySelector<HTMLElement>("[id^='con-cf-ok-']")!;
@@ -305,7 +304,7 @@ describe("Console (legacy console.js on the real API)", () => {
         "POST /api/v1/console/explain": () => ({ body: { ok: true, mode: "trace", explanation: null, note: "No model is configured, so this is the policy engine's own trace.", person: "Asha", action: "line.halt (Halt)", decision: { allowed: false, reason: "x", rule: { id: "MATRIX" }, needs: "" }, trace: ["Roles in scope: none.", "Deciding rule: MATRIX Role matrix."] } }),
       });
       mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
+      await byId("con-access-link");
       await ask("/halt payments dup");
       const perm = await waitFor(() => { const e = document.querySelector(".perm.neg"); if (!e) throw new Error("no perm"); return e; });
       expect(perm.textContent).toContain("You can't do this: Needs Line Lead. Only a Line Lead may halt this line.");
@@ -338,7 +337,7 @@ describe("Console (legacy console.js on the real API)", () => {
     it("a refusal from the endpoint ends the card as failed and says why", async () => {
       setup({ ...ON, ...tool("propose_halt", proposal()), "POST /api/v1/stops": () => ({ status: 403, body: { ok: false, msg: "Payments Platform is halted already." } }) });
       mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-rights")).toBeTruthy());
+      await byId("con-access-link");
       await ask("/halt payments dup refunds");
       fireEvent.click(await firstOf("[id^='con-cf-ok-']"));
       await waitFor(() => expect(document.querySelector(".ccard-confirm.is-failed")).toBeTruthy());
@@ -347,45 +346,10 @@ describe("Console (legacy console.js on the real API)", () => {
   });
 
   describe("context panel and settings", () => {
-    it("lists what the person can do in the current project, with reasons for what they cannot", async () => {
-      setup({}, ["kill.factory"]);
-      mount("/settings");
-      const caps = await waitFor(() => { const c = document.querySelector(".caps"); if (!c || !c.querySelector("li.no")) throw new Error("not yet"); return c; });
-      const no = caps.querySelector("li.no")!;
-      expect(no.textContent).toContain("Kill the factory");
-      expect(no.getAttribute("data-tip")).toBe("No role holds kill.factory.");
-      expect(caps.querySelectorAll("li.ok").length).toBe(9);
-      expect(document.querySelector(".mini-log")!.textContent).toContain("Payments Platform");
-    });
-
-    it("the panel lists what the console can do for you with a check or lock and the reason; no global toggle; admins get the manage link", async () => {
-      setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: true, canUse: true, isFactoryAdmin: true, proposals: rights((k) => k !== "kill") } }) });
-      const r = mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-right-halt")).toBeTruthy());
-      expect(document.getElementById("con-actions")).toBeNull();
-      expect(document.getElementById("con-right-halt")!.className).toBe("ok");
-      const kill = document.getElementById("con-right-kill")!;
-      expect(kill.className).toBe("no");
-      expect(kill.getAttribute("data-tip")).toBe("No role held includes it.");
-      expect(kill.textContent).toContain("Ask a Factory Admin to give you 'Console: propose kill'");
-      expect(document.getElementById("con-manage-perms")).toBeTruthy();
-      r.unmount();
-      cleanup();
-      canBatcher.clear();
-      // An Engineer: nothing allowed, read-only message, no admin link.
-      setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: false, canUse: true, isFactoryAdmin: false, proposals: rights(() => false) } }) });
-      mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-readonly")).toBeTruthy());
-      expect(document.getElementById("con-readonly")!.textContent).toContain("no console right to propose changes is granted");
-      expect(document.getElementById("con-readonly")!.textContent).not.toContain("read-only");
-      expect(document.querySelectorAll("#con-rights li.ok").length).toBe(0);
-      expect(document.getElementById("con-manage-perms")).toBeNull();
-    });
-
     it("a slash action the person has no console right for says which right is missing and calls nothing", async () => {
       const calls = setup({ "GET /api/v1/console/status": () => ({ body: { ...STATUS, actionsEnabled: false, canUse: true, proposals: rights(() => false) } }) });
       mount("/settings");
-      await waitFor(() => expect(document.getElementById("con-right-halt")).toBeTruthy());
+      await byId("con-access-link");
       await ask("/halt payments duplicate refunds");
       await waitFor(() => expect(text()).toContain("Console: propose halt"));
       expect(calls.some((c) => c.path.startsWith("/api/v1/console/tools/propose_"))).toBe(false);
@@ -461,13 +425,29 @@ describe("Console model picker", () => {
     mount("/settings");
     const sel = (await byId("con-model")) as HTMLSelectElement;
     expect(document.getElementById("con-mode")).toBeNull();
-    expect([...sel.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Anthropic", "Amazon Bedrock"]);
     expect(sel.value).toBe("claude-sonnet-5-5");
     const opts = [...sel.options].map((o) => o.textContent);
     expect(opts[0]).toContain("default");
     expect(opts[1]).toContain("fast");
     expect(opts[2]).toContain("frontier");
     expect(opts[2]).toContain("5/25");
+  });
+
+  it("Settings shows no permission checklist or action ids, links to Access, and names the model once", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: { ...WITH, actionsEnabled: true, canUse: true, isFactoryAdmin: true, proposals: rights(() => true) } }) });
+    mount("/settings");
+    const panel = await byId("con-settings");
+    await byId("con-model");
+    expect(panel.querySelectorAll(".caps, .cap-code, li").length).toBe(0);
+    for (const id of ["wo.submit", "gate.approve", "line.halt", "kill.factory"]) expect(panel.textContent).not.toContain(id);
+    expect(panel.textContent).toContain("The console proposes only actions your role allows; each waits for your click. Permissions are managed in Access.");
+    const link = document.getElementById("con-access-link")!;
+    expect(link.textContent).toBe("Access");
+    fireEvent.click(link);
+    expect(window.location.hash).toContain("access");
+    expect(panel.querySelectorAll("select").length).toBe(1);
+    expect(panel.querySelector("#con-mode, #con-status")).toBeNull();
+    expect(panel.textContent!.split("Claude Sonnet 5.5").length - 1).toBe(1);
   });
 
   it("saves the person's choice on the server, and choosing the default clears it", async () => {
@@ -555,15 +535,14 @@ describe("Console model picker", () => {
     spy.mockRestore();
   });
 
-  it("Settings open in place under the chat header (not below the fold), with the model, the console's rights and the audit link; Close hides them", async () => {
+  it("Settings open in place under the chat header (not below the fold), with the model and the Access link; Close hides them", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: STATUS }) });
     mount();
     fireEvent.click(await byId("con-open-settings"));
     const panel = await byId("con-settings");
     expect(document.getElementById("con2-main")!.contains(panel)).toBe(true);
     expect(document.getElementById("con-open-settings")!.getAttribute("aria-expanded")).toBe("true");
-    await waitFor(() => expect([...document.querySelectorAll("#con-settings .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
-    expect(document.getElementById("con-open-audit")).toBeTruthy();
+    await byId("con-access-link");
     fireEvent.click(document.getElementById("con-aux-close")!);
     expect(document.getElementById("con-settings")).toBeNull();
   });

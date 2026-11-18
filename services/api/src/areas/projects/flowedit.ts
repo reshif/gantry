@@ -1,5 +1,5 @@
-import { gateLock, gateModeLock, type ApproverRule, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type Station, type WorkClass } from "@gantry/domain";
-import { conflict, invalid, refuse } from "../../core/errors.js";
+import { gateLock, gateModeLock, gateOverridable, OVERRIDE_REASON_MIN, type ApproverRule, type FlowOverrideMark, type Bay, type Catalog, type Gate, type GateKind, type ProjectFlow, type Station, type WorkClass } from "@gantry/domain";
+import { conflict, invalid, refuse, type Refusal } from "../../core/errors.js";
 
 /**
  * Pure flow editing (legacy `G.catalog.*` and the checks in `ops3.js`). A `FlowDraft` is a deep copy of one project's flow, its approver
@@ -211,42 +211,93 @@ export function updateClass(d: FlowDraft, clsId: string, patch: Partial<WorkClas
 
 const MODES: readonly GateKind[] = ["auto", "human", "mixed"];
 
-export function setGateMode(d: FlowDraft, gateId: string, mode: string, o: { regulated?: boolean } = {}): { before: GateKind; after: GateKind; gate: Gate } {
+/**
+ * A Factory Admin overriding a lock (owner decision 2026-11-19): `admin` says the caller holds a factory-scope Factory Admin grant (decided by the
+ * server, never from a role name), `reason` is what they gave. Every lock but G5's can be overridden; the caller records the audited event.
+ */
+export interface OverrideIn {
+  regulated?: boolean;
+  admin?: boolean;
+  reason?: string | undefined;
+  by?: string;
+  byName?: string;
+  at?: number;
+}
+
+const reasonOf = (o: OverrideIn): string => (o.reason ?? "").trim();
+const markOf = (o: OverrideIn, from?: GateKind): FlowOverrideMark => ({ by: o.by ?? "", byName: o.byName ?? o.by ?? "", at: o.at ?? Date.now(), reason: reasonOf(o), ...(from ? { from } : {}) });
+
+/** The refusal an admin gets when they have not given a reason: names the lock and says how to proceed. */
+function needsReason(what: string, lockReason: string): Refusal {
+  return refuse("denied", `${what} ${lockReason} As Factory Admin you can override this lock. Give a reason of at least ${OVERRIDE_REASON_MIN} characters; it is recorded in the audit.`, { needs: "override_reason", overrideKind: "gate_lock", rule: { kind: "lock", id: "GATE-LOCK", name: "Gate lock" } });
+}
+
+export interface OverrideRecord { gate: string; station?: string | undefined; kind: "off" | "mode"; before: unknown; after: unknown; reason: string }
+
+export function setGateMode(d: FlowDraft, gateId: string, mode: string, o: OverrideIn = {}): { before: GateKind; after: GateKind; gate: Gate; override: OverrideRecord | null } {
   const g = gate(d, gateId);
   if (!g || !gateLive(d, gateId)) throw invalid("Unknown project or gate.");
   if (!MODES.includes(mode as GateKind)) throw invalid("Mode is auto, human or mixed.");
-  const refusal = gateModeLock(g, mode as GateKind, o);
+  let refusal = gateModeLock(g, mode as GateKind, o);
+  let override = false;
+  if (refusal && o.admin && gateOverridable(g)) {
+    // Only the permission locks can be overridden; the correctness rule and G5 stay (an admin gets a clear reason, not a way round).
+    if (gateModeLock(g, mode as GateKind, o, { override: true }) === null) {
+      if (reasonOf(o).length < OVERRIDE_REASON_MIN) throw needsReason(`${g.name} (${g.label}) cannot be set to ${mode}.`, refusal);
+      override = true;
+      refusal = null;
+    } else refusal = gateModeLock(g, mode as GateKind, o, { override: true });
+  }
   if (refusal) throw invalid(refusal);
   const cfg = d.flow.gates[gateId]!;
   const before = cfg.mode || g.kind;
   cfg.mode = mode as GateKind;
+  if (override) cfg.override = { ...(cfg.override ?? {}), mode: markOf(o, before) };
+  else if (cfg.override?.mode && mode === g.kind) delete cfg.override.mode;
+  if (cfg.override && !cfg.override.off && !cfg.override.mode) delete cfg.override;
   const r = d.approvers[gateId];
   if (mode !== "auto" && r && !r.roles.length && !r.people.length) {
     r.roles = ["line_lead", "project_admin"];
     r.required = 1;
     d.rulesChanged.add(gateId);
   }
-  return { before, after: mode as GateKind, gate: g };
+  return { before, after: mode as GateKind, gate: g, override: override ? { gate: gateId, kind: "mode", before, after: mode, reason: reasonOf(o) } : null };
 }
 
-/** A station or gate toggled on or off. Intake and G0+G1 are always on. */
-export function setEnabled(d: FlowDraft, kind: "stations" | "gates", id: string, on: boolean, o: { regulated?: boolean } = {}): { name: string; before: boolean } {
+/** A station or gate toggled on or off. Intake is always on. A locked gate (or the station that carries it) stays on, except that a Factory Admin may switch it off with a reason, G5 excepted. */
+export function setEnabled(d: FlowDraft, kind: "stations" | "gates", id: string, on: boolean, o: OverrideIn = {}): { name: string; before: boolean; override: OverrideRecord | null } {
   const cfg = d.flow[kind][id];
   const def = kind === "stations" ? station(d, id) : gate(d, id);
   if (!cfg || cfg.absent || !def) throw invalid(`This project has no ${kind === "stations" ? "station" : "gate"} ${id}.`);
   if (kind === "stations" && id === "intake" && !on) throw conflict("Intake is always on: every work order starts there.");
+  let override: OverrideRecord | null = null;
+  const mayOverride = (g: Gate): boolean => !!o.admin && gateOverridable(g);
   if (kind === "stations" && !on) {
     // A station's gate leaves the route with it: a locked gate keeps its station on.
     const lockedGate = d.catalog.gates.find((g) => g.after === id && gateLive(d, g.id) && gateLock(g, o).locked);
-    if (lockedGate) throw conflict(`${(def as Station).name} cannot be turned off: it carries ${lockedGate.name} (${lockedGate.label}). ${gateLock(lockedGate, o).reason}`);
+    if (lockedGate) {
+      const why = gateLock(lockedGate, o).reason;
+      if (!mayOverride(lockedGate)) throw conflict(`${(def as Station).name} cannot be turned off: it carries ${lockedGate.name} (${lockedGate.label}). ${why}`);
+      if (reasonOf(o).length < OVERRIDE_REASON_MIN) throw needsReason(`${(def as Station).name} carries ${lockedGate.name} (${lockedGate.label}).`, why);
+      override = { gate: lockedGate.id, station: id, kind: "off", before: true, after: false, reason: reasonOf(o) };
+    }
   }
   if (kind === "gates" && !on) {
     const lock = gateLock(def as Gate, o);
-    if (lock.locked) throw conflict(`${(def as Gate).name} (${(def as Gate).label}) cannot be turned off. ${lock.reason}`);
+    if (lock.locked) {
+      if (!mayOverride(def as Gate)) throw conflict(`${(def as Gate).name} (${(def as Gate).label}) cannot be turned off. ${lock.reason}`);
+      if (reasonOf(o).length < OVERRIDE_REASON_MIN) throw needsReason(`${(def as Gate).name} (${(def as Gate).label}) is always on.`, lock.reason);
+      override = { gate: id, kind: "off", before: true, after: false, reason: reasonOf(o) };
+    }
   }
   const before = cfg.enabled;
   cfg.enabled = on;
-  return { name: kind === "stations" ? (def as Station).name : (def as Gate).label, before };
+  if (override) cfg.override = { ...(cfg.override ?? {}), off: markOf(o) };
+  else if (on && cfg.override?.off) {
+    delete cfg.override.off;
+    if (!Object.keys(cfg.override).length) delete cfg.override;
+  }
+  return { name: kind === "stations" ? (def as Station).name : (def as Gate).label, before, override };
 }
 
 export function setWip(d: FlowDraft, stationId: string, wip: number): { name: string; before: number } {

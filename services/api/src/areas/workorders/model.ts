@@ -240,6 +240,7 @@ export async function buildWorkOrders(db: Queryable, orgId: string, catalog: Cat
         g.waitingSince = ms(last.opened_at) ?? created;
         if (Number(last.basis?.required) > 0) g.openedRequired = Number(last.basis.required);
         if (typeof last.basis?.trustNote === "string") g.trustNote = last.basis.trustNote;
+        if (last.basis?.escalated === true) g.escalated = true;
       } else if (override === "skipped") g.status = "skipped" as LegacyGate["status"];
       else if (override === "failed") g.status = "failed";
       else if (last) {

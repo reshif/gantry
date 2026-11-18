@@ -192,15 +192,28 @@ export interface Person {
 
 export type ProjectStatus = "active" | "onboarding" | "new" | "archived";
 
+/** Who turned something off or changed a locked mode against its lock, when and why (a Factory Admin override, owner decision 2026-11-19). */
+export interface FlowOverrideMark {
+  by: string;
+  byName: string;
+  at: number;
+  reason: string;
+  /** For a mode override: the mode before. */
+  from?: GateKind;
+}
 export interface StationConfig {
   enabled: boolean;
   wip: number;
   absent?: boolean;
+  /** Set while the station is off by a Factory Admin override of a lock it carries. */
+  override?: { off?: FlowOverrideMark };
 }
 export interface GateConfig {
   enabled: boolean;
   mode: GateKind;
   absent?: boolean;
+  /** Set while the gate is off, or in a locked mode, by a Factory Admin override. */
+  override?: { off?: FlowOverrideMark; mode?: FlowOverrideMark };
 }
 export interface ProjectFlow {
   stations: Record<string, StationConfig>;
@@ -298,6 +311,8 @@ export interface HaltInfo {
   by: Id;
   at: Ms;
   reason: string;
+  /** Why the halt exists: `manual` (a person), `budget` or `readiness` (Gantry raised it). Absent on older data. */
+  cause?: string;
 }
 
 export interface Project {
@@ -492,6 +507,8 @@ export interface GateInstance {
   openedRequired?: number;
   decision?: GateDecisionRecord;
   trustNote?: string | null;
+  /** The gate waited past its escalation limit: the rule's fallback approver (else the project owner) may approve it from then on. */
+  escalated?: boolean;
 }
 
 export interface HistorySkill {

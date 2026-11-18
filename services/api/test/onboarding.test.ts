@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { withTx } from "@gantry/db";
 import { RepoFacts, assess, judgeCanary, judgeOwners, judgeProtections, judgeRunner, judgeGuidelines, planPr, type AssessContext, type PlanContext, type ReadinessResult } from "@gantry/domain";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyAssessment, applyMergeRefused, applyMerged, applyPrFailed, applyPrObservation, applyPrOpened, applyVerification, READINESS_STRIKES } from "../src/areas/onboarding/apply.js";
+import { applyAssessment, applyJobDead, applyMergeRefused, applyMerged, applyPrFailed, applyPrObservation, applyPrOpened, applyVerification, READINESS_STRIKES } from "../src/areas/onboarding/apply.js";
 import { TEST_URL, startApp, type TestApp } from "./helpers.js";
 
 const d = TEST_URL ? describe : describe.skip;
@@ -498,11 +498,13 @@ d("repo onboarding", () => {
       expect((await q(`select count(*)::int as n from stops where org_id = $1 and repo_id = $2`, [t.orgId, r.id]))[0].n).toBe(0);
       expect((await verify(r, lostChecks(), "manual")).outcome).toBe("lost");
       expect((await q(`select cause from stops where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]))[0].cause).toBe("readiness");
-      // An exception accepts the gaps: it lifts the readiness halt too, and later checks skip the repo.
+      // An exception accepts the gaps: it lifts the readiness halt too, and later checks still run and report without halting or unsetting it (S-6).
       expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception`, { reason: "Owner accepts the missing ruleset" })).status).toBe(200);
       expect((await q(`select lifted_by from stops where org_id = $1 and repo_id = $2`, [t.orgId, r.id]))[0].lifted_by).toBe(lena);
-      const skip = await verify(r, lostChecks(), "schedule");
-      expect(skip.applied).toBe(false);
+      const rechecked = await verify(r, lostChecks(), "schedule");
+      expect(rechecked).toMatchObject({ applied: true, outcome: "excepted" });
+      expect((await q(`select count(*)::int as n from stops where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]))[0].n).toBe(0);
+      expect(await doc(r.id)).toMatchObject({ stage: "ready", exception: { reason: "Owner accepts the missing ruleset" }, verification: { ok: false, trigger: "schedule" } });
     });
 
     it("a repo that was already halted by a person keeps their halt: readiness loss does not add a second one", async () => {
@@ -511,6 +513,94 @@ d("repo onboarding", () => {
       expect((await verify(r, lostChecks(), "manual")).outcome).toBe("lost");
       expect((await q(`select count(*)::int as n from stops where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]))[0].n).toBe(1);
       await q(`update stops set lifted_by = 'p-lena', lifted_at = now() where org_id = $1 and repo_id = $2`, [t.orgId, r.id]);
+    });
+  });
+
+  describe("statechart gaps", () => {
+    it("S-3: a readiness halt does not block the onboarding merge that would restore readiness; any other halt still does", async () => {
+      const r = await ready();
+      expect((await verify(r, lostChecks(), "manual")).outcome).toBe("lost");
+      expect((await q(`select cause from stops where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]))[0].cause).toBe("readiness");
+      // Re-assess, open the PR, checks go green: the way back to Ready is the merge.
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`)).status).toBe(200);
+      await assessed({ id: r.id, runId: (await doc(r.id)).runId });
+      const cur = { id: r.id, runId: (await doc(r.id)).runId as string };
+      await opened(cur, 8, SHA("d"));
+      await green(cur, SHA("d"));
+      const m = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
+      expect(m.status, JSON.stringify(m.body)).toBe(200);
+      const adm = await call(admin, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
+      expect(adm.status).toBe(409); // already merging: refused for busy, not for the halt
+      expect(adm.body.msg).not.toMatch(/andon|Readiness lost/);
+      // A hand-pulled halt still refuses it.
+      await q(`update repos set data = jsonb_set(data, '{onboarding,busy}', 'null') where org_id = $1 and id = $2`, [t.orgId, r.id]);
+      await q(`update stops set lifted_by = 'system', lifted_at = now() where org_id = $1 and repo_id = $2 and lifted_at is null`, [t.orgId, r.id]);
+      await q(`insert into stops (org_id, id, scope_type, project_id, repo_id, mode, reason, set_by) values ($1,$2,'repo','identity',$3,'halt','hand halt','p-lena')`, [t.orgId, `repo:${r.id}:s3`, r.id]);
+      const blocked = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.msg).toMatch(/hand halt/);
+      await q(`update stops set lifted_by = 'p-lena', lifted_at = now() where org_id = $1 and id = $2`, [t.orgId, `repo:${r.id}:s3`]);
+    });
+
+    it("S-4: a failed or blocked assessment with a green PR open keeps the PR at its stage, mergeable, with the failure as the blocker", async () => {
+      for (const result of [{ kind: "failed", msg: "GitHub timed out" }, { kind: "blocked", code: "app", msg: "The App is not installed" }] as const) {
+        const r = await connect();
+        await assessed(r);
+        await opened(r);
+        await green(r);
+        expect((await doc(r.id)).stage).toBe("pr_checks");
+        expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`)).status).toBe(200);
+        const run = (await doc(r.id)).runId as string;
+        const out = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: run, now: new Date(), result }));
+        expect(out.applied).toBe(true);
+        expect(await doc(r.id)).toMatchObject({ stage: "pr_checks", busy: null, blocker: result.msg, pr: { state: "open" } });
+        expect((await repoDoc(r.id)).onboarding_stage).toBe("pr_checks");
+        // still synced by the scheduler (stage listed) and still mergeable
+        const m = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
+        expect(m.status, JSON.stringify(m.body)).toBe(200);
+      }
+    });
+  });
+
+  describe("ready by exception", () => {
+    it("S-6: a repo ready by exception can be re-assessed and re-verified (reported, exception kept) and the exception can be withdrawn, audited", async () => {
+      const r = await connect();
+      await assessed(r);
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception`, { reason: "Owner accepts the missing ruleset" })).status).toBe(200);
+      // verification is no longer refused
+      const v = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/verify`);
+      expect(v.status, JSON.stringify(v.body)).toBe(200);
+      expect((await verify(r, lostChecks(), "manual")).outcome).toBe("excepted");
+      expect(await doc(r.id)).toMatchObject({ stage: "ready", exception: { reason: "Owner accepts the missing ruleset" }, busy: null });
+      // so is a new assessment: it reports and the repo stays ready
+      const a = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`);
+      expect(a.status, JSON.stringify(a.body)).toBe(200);
+      const run = (await doc(r.id)).runId as string;
+      expect((await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: run, now: new Date(), result: { kind: "failed", msg: "GitHub timed out" } }))).applied).toBe(true);
+      expect(await doc(r.id)).toMatchObject({ stage: "ready", exception: { reason: "Owner accepts the missing ruleset" }, busy: null });
+      // a person with the right withdraws it, with a reason; engineers cannot
+      expect((await call(rui, "POST", `/api/v1/repos/${r.id}/onboarding/exception/withdraw`, { reason: "No longer accepted by the owner" })).status).toBe(403);
+      const w = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception/withdraw`, { reason: "No longer accepted by the owner" });
+      expect(w.status, JSON.stringify(w.body)).toBe(200);
+      expect(await doc(r.id)).toMatchObject({ stage: "person", exception: null, blocker: expect.stringMatching(/withdrawn/) });
+      expect((await repoDoc(r.id)).onboarding_stage).toBe("person");
+      expect((await events("onboarding.exception.withdrawn")).find((e) => e.subject?.id === r.id)).toMatchObject({ actor: lena, outcome: "ok", after: { reason: "No longer accepted by the owner" } });
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/exception/withdraw`, { reason: "No longer accepted by the owner" })).status).toBe(409);
+      // and it is re-assessed like any other
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`)).status).toBe(200);
+    });
+  });
+
+  describe("a dead job", () => {
+    it("S-5: after a dead job is handed back, the person can re-run the step (the repo is not busy forever)", async () => {
+      const r = await connect();
+      expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/verify`)).status).toBe(409); // busy: assessing
+      const out = await asWorker((tx) => applyJobDead(tx, t.orgId, { repoId: r.id, now: new Date(), error: "lease expired" }));
+      expect(out.applied).toBe(true);
+      expect(await doc(r.id)).toMatchObject({ stage: "person", busy: null, blocker: expect.stringMatching(/lease expired/) });
+      const again = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`);
+      expect(again.status, JSON.stringify(again.body)).toBe(200);
+      expect(await doc(r.id)).toMatchObject({ busy: "assessing" });
     });
   });
 
