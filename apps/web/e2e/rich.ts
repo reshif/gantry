@@ -8,7 +8,7 @@ import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Page } from "@playwright/test";
 import { workforceOverrides } from "./rich-workforce";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
-import { woReadOverrides } from "./rich-wo";
+import { woReadOverrides, type Ops1Approve } from "./rich-wo";
 import { richGroupE, routesE } from "./rich-e";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
@@ -79,11 +79,16 @@ const PAY: Spec[] = [
   [1076, "Reconciliation diff viewer", "feature", "P2", "research", "run"],
 ];
 
+/* ---- ops1 fixtures (Home, Inbox, Agents at work): each station agent runs the model the prototype names ---- */
+const OPS1_MODEL: Record<string, string> = { "ag-intake": "claude-haiku-5-5", "ag-research": "claude-sonnet-5-5", "ag-spec": "claude-opus-5-5", "ag-design": "claude-sonnet-5-5", "ag-plan": "claude-opus-5-5", "ag-build": "claude-sonnet-5-5", "ag-test": "claude-sonnet-5-5", "ag-review": "claude-opus-5-5", "ag-close": "claude-haiku-5-5" };
+export const ops1Model = (agent: string): string => OPS1_MODEL[agent] ?? "claude-sonnet-5-5";
+/* ---- end ops1 ---- */
+
 let _agents: unknown[] | null = null;
 function agents() {
   if (_agents) return _agents;
   const names: Record<string, string> = { "ag-intake": "Intake Clerk", "ag-research": "Researcher", "ag-spec": "Spec Writer", "ag-design": "Designer", "ag-plan": "Planner", "ag-build": "Builder", "ag-test": "Test Engineer", "ag-review": "Reviewer", "ag-close": "Release Captain" };
-  _agents = cat.stations.map((s) => ({ id: s.agent, name: names[s.agent] ?? s.agent, station: s.id, model: "claude-sonnet", fallbacks: [], version: "1.4.0", status: "active", autonomy: "gate", evalScore: 0.9, threshold: 0.85, suiteName: "Golden set", rev: 1, runs30: 120, rework: 0.06, tools: {}, skills: [], mcp: [], stations: [s.id], projects: "all", budget: 40, guardrails: { paths: [], maxDiff: 800 }, suite: "su-" + s.id, instructions: "", overrides: {}, versions: [{ v: "1.4.0", at: NOW - 5 * DAY, note: "Live version", diff: "", suiteScore: 0.9, live: true, rc: false, snapshot: null, eligibility: { ok: true, text: "Passed", score: 0.9, suite: "su-" + s.id, threshold: 0.85, needs: "" } }], spark: [0.9, 0.88, 0.91, 0.9, 0.92, 0.9, 0.91], spend7d: 12.4, initials: (names[s.agent] ?? "AG").split(" ").map((x) => x[0]).join("").slice(0, 2) }));
+  _agents = cat.stations.map((s) => ({ id: s.agent, name: names[s.agent] ?? s.agent, station: s.id, model: ops1Model(s.agent), fallbacks: [], version: "1.4.0", status: "active", autonomy: "gate", evalScore: 0.9, threshold: 0.85, suiteName: "Golden set", rev: 1, runs30: 120, rework: 0.06, tools: {}, skills: [], mcp: [], stations: [s.id], projects: "all", budget: 40, guardrails: { paths: [], maxDiff: 800 }, suite: "su-" + s.id, instructions: "", overrides: {}, versions: [{ v: "1.4.0", at: NOW - 5 * DAY, note: "Live version", diff: "", suiteScore: 0.9, live: true, rc: false, snapshot: null, eligibility: { ok: true, text: "Passed", score: 0.9, suite: "su-" + s.id, threshold: 0.85, needs: "" } }], spark: [0.9, 0.88, 0.91, 0.9, 0.92, 0.9, 0.91], spend7d: 12.4, initials: (names[s.agent] ?? "AG").split(" ").map((x) => x[0]).join("").slice(0, 2) }));
   return _agents;
 }
 
@@ -106,7 +111,7 @@ function wo(s: Spec, projectId: string) {
   return {
     id: `WO-${num}`, project: projectId, repo: ["payments-api", "payouts-worker", "ledger-core"][num % 3], title, description: title, attachments: [], cls, clsConfidence: 0.9, clsRationale: "", clsSuggested: cls, clsOverridden: null, requestedCls: null,
     priority, source: "console", requestedBy: "p-lead", createdAt: NOW - age - 6 * HOUR, station, state, bay: null, bayReason: "", bayFrom: null, progress: kind === "run" ? 30 + (num % 60) : 0, slot: null,
-    history: [{ station: sid, agent: cat.stations[station]!.agent, model: "claude-sonnet", startedAt, endedAt: kind === "queue" || kind === "gate" ? startedAt + 5 * MIN : null, tokens: 120000, cost: 1.4, outcome: null, note: "" }],
+    history: [{ station: sid, agent: cat.stations[station]!.agent, model: ops1Model(cat.stations[station]!.agent), startedAt, endedAt: kind === "queue" || kind === "gate" ? startedAt + 5 * MIN : null, tokens: 120000, cost: 1.4, outcome: null, note: "" }],
     gates: waitingGate ? { [waitingGate]: { status: "waiting", approvals: [], rejections: [], checks: [], waitingSince: startedAt } } : {},
     log: [], diff: { files: 0, add: 0, del: 0 }, tests: { total: 0, passed: 0, failed: 0 }, pr: null, blockReason: kind === "block" ? "Waiting on an upstream schema change" : null, failReason: kind === "fail" ? "2 checks failed" : null,
     doneAt: null, killed: null, parent: null, children: [], risk: "normal", paths: [], slaDue: NOW + 2 * DAY, conv: { messages: [] }, brief: {}, split: false,
@@ -204,6 +209,33 @@ export function richOverrides(): Record<string, Handler> {
     Object.assign(ov, woReadOverrides(floorFor(p.id).workOrders as never, p.id));
     ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, p.id === "payments" ? reposFor(p.id) : []);
   }
+  /* ---- ops1 fixtures: the station is called Release (the prototype's name), and the three gate approvals on Home carry what the server says about this person ---- */
+  ov["catalog"] = (r) => fulfillJson(r, { ...cat, stations: cat.stations.map((st) => (st.id === "close" ? { ...st, name: "Release" } : st)) });
+  const OPS1_APPROVE: Array<[number, string, string, string, string, string, Ops1Approve]> = [
+    [1004, "Add idempotency keys to refund endpoint", "payments", "review", "G5", "Review and merge", { allowed: true, reason: "", have: 1, need: 2, approvals: [{ name: "Meera Iyer" }] }],
+    [1013, "Add order tracking page", "storefront", "close", "G6", "Release confirmed", { allowed: false, reason: "Separation of duties: you requested this work order, so someone else must approve.", have: 0, need: 1 }],
+    [1021, "Add WebAuthn backup codes", "identity", "verify", "G4", "Checks green", { allowed: true, reason: "", have: 0, need: 2 }],
+  ];
+  for (const [num, title, proj, sid, gate, , approve] of OPS1_APPROVE) {
+    const w = { ...wo([num, title, "feature", "P2", sid, "gate"], proj), gates: { [gate]: { status: "waiting", approvals: [], rejections: [], checks: [], waitingSince: NOW - 5 * HOUR } } };
+    Object.assign(ov, woReadOverrides([w as never], proj, { [`WO-${num}`]: approve }));
+  }
+  /* a conversation for every work order on the payments line, so Talk opens a real thread */
+  for (const w of floorFor("payments").workOrders as Array<ReturnType<typeof wo>>) {
+    const st = cat.stations[w.station];
+    if (!st || w.id === "WO-1006") continue;
+    const agentName = ({ "ag-intake": "Intake Clerk", "ag-research": "Researcher", "ag-spec": "Spec Writer", "ag-design": "Designer", "ag-plan": "Planner", "ag-build": "Builder", "ag-test": "Test Engineer", "ag-review": "Reviewer", "ag-close": "Release Captain" } as Record<string, string>)[st.agent] ?? st.agent;
+    ov[`work-orders/${w.id}/session`] = (r) => fulfillJson(r, {
+      woId: w.id, project: "payments", repo: w.repo,
+      wo: { id: w.id, title: w.title, description: "", cls: w.cls, clsName: "Feature", confidence: 0.9, rationale: "", priority: w.priority, station: st.id, stationName: st.id === "close" ? "Release" : st.name, state: "running", bay: null, gate: null, requestedBy: "p-lead", closed: false },
+      messages: [{ id: "m1", role: "assistant", author: st.agent, text: `I am working on "${w.title}" at ${st.name}.`, at: NOW - 40 * MIN, data: { kind: "station", mode: "agent" } }],
+      agent: { mode: "agent", name: agentName, id: st.agent, model: ops1Model(st.agent), vendor: "anthropic", version: 3, station: st.id },
+      budget: { spentUsd: 1.2, limitUsd: 20 }, costUsd: 0.6, can: { talk: true, talkWhy: "", confirm: false, confirmWhy: "" },
+      steps: [], next: { actor: "agent", text: `${agentName} is working.` }, waiting: null,
+      dialogue: { questions: [], assumptions: [], objections: [], askedMe: false }, swarm: null, documents: [], research: { state: "none" }, sources: [], pending: [], brief: {}, briefConfirmed: true, briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false,
+    });
+  }
+  /* ---- end ops1 ---- */
   ov["activity"] = (r) => fulfillJson(r, events());
   ov["stops/impact"] = (r) => fulfillJson(r, { projects: PROJECTS.length, workOrders: 52, running: 31, slots: 4, prs: 3 });
   ov["agents"] = (r) => fulfillJson(r, agents());
@@ -214,12 +246,12 @@ export function richOverrides(): Record<string, Handler> {
         { wo: "WO-1013", title: "Add order tracking page", gate: "G6", gateLabel: "G6", gateName: "Release confirmed", project: "storefront", projectName: "Storefront", have: 0, need: 1, waitMs: 6 * HOUR },
         { wo: "WO-1021", title: "Add WebAuthn backup codes", gate: "G4", gateLabel: "G4", gateName: "Checks green", project: "identity", projectName: "Identity", have: 0, need: 1, waitMs: 2 * HOUR },
       ],
-      conversations: [{ wo: "WO-1070", title: "Batch size tuning for payout worker", project: "payments", question: "Should the batch size be per region?" }],
-      badges: { inbox: { n: 4, label: "4 waiting for you" }, floor: { n: 6, label: "6 gates waiting", kind: "wait" } },
+      conversations: [{ wo: "WO-1070", title: "Batch size tuning for payout worker", project: "payments", question: "Should the batch size be per region?", agent: "ag-intake", at: NOW - 95 * MIN, options: ["Per region", "One global size"] }],
+      badges: { inbox: { n: 4, label: "4 waiting for you" } },
       factory: { killed: null },
       sections: {
         attention: [
-          { id: "hm-att-1", sev: 0, icon: "st-block", title: "WO-1006 is blocked at Close", where: "Payments Platform", sub: "Waiting on an upstream schema change · 7h", act: { label: "Open", route: "traveler", wo: "WO-1006" } },
+          { id: "hm-att-1", sev: 0, icon: "st-block", title: "WO-1006 is blocked at Release", where: "Payments Platform", sub: "Waiting on an upstream schema change · 7h", act: { label: "Open", route: "traveler", wo: "WO-1006" } },
           { id: "hm-att-2", sev: 1, icon: "st-wait", title: "Search is halted", where: "Search", sub: "Relevance regression under investigation", act: { label: "Open floor", route: "floor", project: "search" } },
         ],
         waiting: {
@@ -228,7 +260,7 @@ export function richOverrides(): Record<string, Handler> {
             { wo: "WO-1013", title: "Add order tracking page", gate: "G6", gateLabel: "G6", gateName: "Release confirmed", project: "storefront", projectName: "Storefront", have: 0, need: 1, waitMs: 6 * HOUR },
             { wo: "WO-1021", title: "Add WebAuthn backup codes", gate: "G4", gateLabel: "G4", gateName: "Checks green", project: "identity", projectName: "Identity", have: 0, need: 1, waitMs: 2 * HOUR },
           ],
-          conversations: [{ wo: "WO-1070", title: "Batch size tuning for payout worker", project: "payments", question: "Should the batch size be per region?" }],
+          conversations: [{ wo: "WO-1070", title: "Batch size tuning for payout worker", project: "payments", question: "Should the batch size be per region?", agent: "ag-intake", at: NOW - 95 * MIN, options: ["Per region", "One global size"] }],
         },
         motion: { inFlight: 52, running: 31, inBays: 3, byStation: {}, shippedToday: 7, shippedWeek: 34, shippedPrevWeek: 29, recentDone: [], mine: [] },
         health: { spend: { spent: 186.4, budget: 240, projects: [] }, evals: null, audit: true },

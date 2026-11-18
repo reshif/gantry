@@ -1,9 +1,10 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InboxView from "./inbox";
+import { clearDecided } from "../lib/decided";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 
-beforeEach(() => resetApp());
+beforeEach(() => { resetApp(); clearDecided(); window.history.replaceState(null, "", "/"); });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -33,12 +34,12 @@ describe("Inbox", () => {
   it("lists approvals in one table and questions on their own tab", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, ONB], conversations: [CONV] }, attention: [] }) }) });
     mount(<InboxView />);
-    expect(await screen.findByText("Approve spec · G2 on WO-2398")).toBeTruthy();
+    expect(await screen.findByText("Approve spec · G2 for WO-2398")).toBeTruthy();
     expect(document.getElementById("inbox-count")?.textContent).toBe("3");
     expect(screen.getByText("Merge onboarding pull request search-service#3")).toBeTruthy();
     expect(screen.queryByText("Which currency?")).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
-    expect(screen.queryByText("Approve spec · G2 on WO-2398")).toBeNull();
+    expect(screen.queryByText("Approve spec · G2 for WO-2398")).toBeNull();
     expect(screen.getByText("Which currency?")).toBeTruthy();
   });
 
@@ -49,11 +50,11 @@ describe("Inbox", () => {
       "GET /api/v1/work-orders/WO-1005": () => ({ body: { id: "WO-1005", project: "payments", version: 1, allowed: { approve: { gate: "G0G1", allowed: true, reason: "", needs: "" } } } }),
     });
     mount(<InboxView />);
-    expect(await screen.findByText("Confirm brief · G0+G1 on WO-1005")).toBeTruthy();
+    expect(await screen.findByText("Confirm brief · G0+G1 for WO-1005")).toBeTruthy();
     expect(screen.queryByText(/Classified as Docs/)).toBeNull();
     expect(document.getElementById("inb-gate-WO-1005-G0G1")?.textContent).toContain("Gate");
     fireEvent.click(screen.getByRole("tab", { name: /Questions/ }));
-    expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("Question");
+    expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("Which currency?");
   });
 
   it("lists a stopped work order with its reason and a Retry the server's decision allows", async () => {
@@ -83,7 +84,39 @@ describe("Inbox", () => {
     mount(<InboxView />);
     await review();
     expect(await screen.findByText(/Two approvers from Reviewer or Approver/)).toBeTruthy();
-    expect(screen.getByText(/Can decide: Grace Liu/)).toBeTruthy();
+    expect(screen.getByText("Eligible")).toBeTruthy();
+    expect(screen.getByText(/Grace Liu/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Request changes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+    expect(screen.getByLabelText("Comment")).toBeTruthy();
+  });
+
+  it("opens the Review dialog without crashing when the rule read has no progress yet", async () => {
+    mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),
+      "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
+      "GET /api/v1/work-orders/WO-2398/gates/G2/approvers": () => ({ body: {} }),
+    });
+    mount(<InboxView />);
+    await review();
+    expect(await screen.findByRole("button", { name: "Request changes" })).toBeTruthy();
+    expect(screen.queryByText("Gantry hit a problem")).toBeNull();
+  });
+
+  it("sorts on the Waiting column (key at) and shows the prototype's neutral arrow on the other sortable headers", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }) });
+    mount(<InboxView />);
+    await screen.findByText("Add idempotency keys", { exact: false });
+    expect(document.getElementById("t-inbox-sort-at")).toBeTruthy();
+    expect(document.getElementById("t-inbox-sort-title")?.textContent).toContain("\u2195");
+  });
+
+  it("?state=error shows the shared error state under the Inbox header", async () => {
+    window.history.replaceState(null, "", "/?state=error");
+    mockApi({ "GET /api/v1/home": () => ({ body: home({}) }) });
+    mount(<InboxView />);
+    expect(await screen.findByText("This view failed to load")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
   });
 
   it("approves from the row, and locks Approve with the server's reason when this person may not", async () => {
@@ -107,7 +140,7 @@ describe("Inbox", () => {
     });
     mount(<InboxView />);
     await review();
-    const locked = await screen.findByRole("button", { name: "Approve" });
+    const locked = await screen.findByRole("button", { name: /^Approve/ });
     await waitFor(() => expect(locked.getAttribute("aria-disabled")).toBe("true"));
     expect(locked.getAttribute("data-reason")).toMatch(/someone else must approve/);
   });
@@ -129,12 +162,13 @@ describe("Inbox", () => {
     await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2400/confirm-brief")).toBe(true));
     expect(cs.find((c) => c.path.endsWith("/confirm-brief"))!.headers["if-match"]).toBe("7");
     await review();
-    fireEvent.click(await screen.findByRole("button", { name: "Decline" }));
     const dlg = await waitFor(() => { const e = Array.from(document.querySelectorAll<HTMLElement>(".dlg")).pop(); if (!e) throw new Error("no dialog"); return e; });
-    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Out of scope" } });
-    fireEvent.click(within(dlg).getByRole("button", { name: "Decline" }));
+    fireEvent.change(within(dlg).getByLabelText("Comment"), { target: { value: "Out of scope for now" } });
+    const rej = within(dlg).getByRole("button", { name: "Reject" });
+    await waitFor(() => expect(rej.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(rej);
     await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2400/decline")).toBe(true));
-    expect(cs.find((c) => c.path.endsWith("/decline"))!.body).toMatchObject({ reason: "Out of scope" });
+    expect(cs.find((c) => c.path.endsWith("/decline"))!.body).toMatchObject({ reason: "Rejected: Out of scope for now" });
     expect(cs.some((c) => c.path.startsWith("/api/v1/gate-instances/"))).toBe(false);
   });
 
@@ -151,18 +185,91 @@ describe("Inbox", () => {
     await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
   });
 
-  it("names a question's project, and lists one project under one label", async () => {
+  it("lists project keys, typed chips, votes, and keeps the tab, search and type in the URL with a Clear", async () => {
     mockApi({
-      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, { ...GATE, wo: "WO-1", project: "ops", projectName: "Ops" }], conversations: [CONV] } }) }),
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, ONB], conversations: [CONV] }, attention: [{ id: "t1", sev: 1, icon: "x", title: "Raise trust on Spec", where: "Payments", sub: "proposal", act: { label: "Open Trust", route: "trust" } }] }) }),
       "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
     });
     mount(<InboxView />);
-    await screen.findByText("Approve spec · G2 on WO-2398");
-    const opts = Array.from(document.querySelectorAll<HTMLOptionElement>("#inb-proj option")).map((o) => o.textContent);
+    await screen.findByText("Approve spec · G2 for WO-2398");
+    const row = document.getElementById("inb-gate-WO-2398-G2")!;
+    expect(row.textContent).toContain("1/2");
+    expect(row.textContent).toContain("3h ago");
+    expect(document.getElementById("inb-t1")?.textContent).toContain("Trust");
+    const opts = Array.from(document.querySelectorAll<HTMLOptionElement>("#inbox-type option")).map((o) => o.textContent);
+    expect(opts).toEqual(["Type: all", "Gate", "Trust", "Learning", "MCP", "Trigger", "Onboarding"]);
+    expect(document.getElementById("inb-proj")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+    fireEvent.change(document.getElementById("inbox-type")!, { target: { value: "trust" } });
+    await waitFor(() => expect(window.location.search).toContain("type=trust"));
+    expect(screen.queryByText("Approve spec · G2 for WO-2398")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await screen.findByText("Approve spec · G2 for WO-2398");
+    expect(window.location.search).not.toContain("type=");
+    fireEvent.click(screen.getByRole("tab", { name: /Decided/ }));
+    await waitFor(() => expect(window.location.search).toContain("tab=decided"));
+    expect(await screen.findByText("No decisions yet this session")).toBeTruthy();
+  });
 
-    expect(opts).not.toContain("payments");
-    expect(opts.filter((o) => o === "Payments Platform")).toHaveLength(1);
-    expect(screen.queryByText(/listed once/)).toBeNull();
+  it("lists an approval under Decided after it is approved here", async () => {
+    mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),
+      "GET /api/v1/work-orders/WO-2398": () => ({ body: traveler(true) }),
+      "POST /api/v1/gate-instances/WO-2398%3AG2%3A3/approve": () => ({ body: { ok: true, msg: "Approved." } }),
+    });
+    mount(<InboxView />);
+    await review();
+    const ok = await screen.findByRole("button", { name: "Approve" });
+    await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(ok);
+    fireEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+    expect(await screen.findByText("Approve spec · G2 for WO-2398")).toBeTruthy();
+    expect(screen.getAllByText(/Approved/).length).toBeGreaterThan(0);
+  });
+
+  it("answers a question in place with Write an answer", async () => {
+    const cs = mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [CONV] }, attention: [] }) }),
+      "POST /api/v1/work-orders/WO-2407/messages": () => ({ body: { ok: true, msg: "Sent." } }),
+    });
+    mount(<InboxView />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Questions/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Write an answer…" }));
+    const dlg = await waitFor(() => { const e = Array.from(document.querySelectorAll<HTMLElement>(".dlg")).pop(); if (!e) throw new Error("no dialog"); return e; });
+    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Use EUR" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Send answer" }));
+    await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2407/messages")).toBe(true));
+  });
+
+  it("shows one button per answer option beside Write an answer, with no Question chip or Open conversation, and sends the option", async () => {
+    const asked = { ...CONV, options: ["EUR", "USD"], agent: "ag-spec" };
+    const cs = mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [], conversations: [asked] }, attention: [] }) }),
+      "POST /api/v1/work-orders/WO-2407/messages": () => ({ body: { ok: true, msg: "Sent." } }),
+    });
+    mount(<InboxView />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Questions/ }));
+    expect(screen.queryByRole("button", { name: "Open conversation" })).toBeNull();
+    expect(document.getElementById("inb-q-WO-2407")?.textContent).toContain("asked about");
+    fireEvent.click(await screen.findByRole("button", { name: "EUR" }));
+    await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/work-orders/WO-2407/messages")).toBe(true));
+  });
+
+  it("names the wait with one unit, like the prototype (6h ago, not 6h 00m ago)", async () => {
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [{ ...GATE, waitMs: 6 * 3_600_000 }], conversations: [] }, attention: [] }) }) });
+    mount(<InboxView />);
+    expect(await screen.findByText("6h ago")).toBeTruthy();
+  });
+
+  it("?state=forbidden names the role and the permission; ?state=error carries an error id", async () => {
+    window.history.replaceState(null, "", "/?state=forbidden");
+    mockApi({ "GET /api/v1/home": () => ({ body: home({}) }) });
+    mount(<InboxView />);
+    expect(await screen.findByText(/people\.manage/)).toBeTruthy();
+    cleanup();
+    window.history.replaceState(null, "", "/?state=error");
+    mount(<InboxView />);
+    expect(await screen.findByText(/Error id: e-/)).toBeTruthy();
   });
 
   it("says nothing is waiting, and does not say it on a refused read", async () => {

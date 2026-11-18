@@ -38,6 +38,10 @@ export interface Conversation {
   title: string;
   project: string;
   question: string | null;
+  /** Who asked, when, and the answer choices the agent offered (the server adds these when it has them; none is invented here). */
+  agent?: string | null;
+  at?: number | null;
+  options?: string[];
   /** Set when the work order is at the brief gate: the item is a gate decision, not a question. */
   gate?: { id: string; label: string; name: string };
   /** A failed, blocked or parked work order that needs a person: the reason is `question`; `actions` are what this person may do (retry, assign). */

@@ -10,14 +10,17 @@ import { useActivity, useHome, useMe, useProjects } from "../api/queries";
 import { hasCommand, runCommand } from "../lib/commands";
 import { eventRows, eventText, hourly, eventTone } from "../lib/eventText";
 import { hashFor, navigate } from "../lib/router";
-import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
-import { useOpenTraveler } from "../shell/useTraveler";
+import { setProject, usePrefs } from "../lib/prefs";
+import { pickProject } from "../lib/routes";
 import { Btn, Chip, Empty } from "../ui/primitives";
 import { useActors } from "../ui/actors";
 import { Async } from "../ui/async";
 import { Bars, Card, CrEmpty, CrIcon, Lamp, ListItem, MiniBeltCr, Page, Stats, type MiniStation, type StatItem } from "../ui/cr";
-import { type HomeFull, goAttention } from "./home/data";
+import { type HomeFull } from "./home/data";
+import { useReviewApproval } from "./inbox/ApprovalDialog";
+import { agoShort, titleOf, useItems } from "./inbox/kit";
 import { RestoreAction, SetupChecklist, openNewProject } from "./home/sections";
+import { StateBody, useStateOverride } from "./ops1/stateOverride";
 import { metricsOf, useCatalog, type PView } from "./projects/kit";
 
 export { openNewProject };
@@ -27,18 +30,27 @@ export default function HomeView() {
   const me = useMe();
   const q = useHome();
   const projectsData: unknown = useProjects().data;
-  const projects = (Array.isArray(projectsData) ? projectsData : []) as PView[];
+  const projects = useMemo(() => (Array.isArray(projectsData) ? projectsData : []) as PView[], [projectsData]);
   const cat = useCatalog();
   const prefs = usePrefs();
   const activity = useActivity();
   const actors = useActors();
-  const openTraveler = useOpenTraveler();
-  const create = useCan("project.create");
+  const review = useReviewApproval();
   const submit = useCan("wo.submit");
   const home = q.data as HomeFull | undefined;
   const events = useMemo(() => eventRows(activity.data), [activity.data]);
+  const names = useMemo(() => new Map(projects.map((p) => [p.id, p.name] as [string, string])), [projects]);
+  const allItems = useItems(home, names);
+  const override = useStateOverride();
 
   if (!me) return null;
+  if (override) {
+    return (
+      <Page eyebrow="Operate" title="Home" cls="hm">
+        <StateBody state={override} />
+      </Page>
+    );
+  }
   if (!home) {
     return (
       <Page eyebrow="Operate" title="Home">
@@ -55,102 +67,78 @@ export default function HomeView() {
     );
   }
 
+  const scopeId = pickProject(me, prefs.project);
+  const scoped = projects.filter((p) => p.id === scopeId);
+  const inView = scoped.length ? scoped : projects;
+  const scopeName = scoped[0]?.name ?? "all projects";
   const nameOf = (id: string | null | undefined) => actors(id).name.replace(" (agent)", "");
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
   const away = me.person.away && me.person.away.to > Date.now() ? ` Away until ${fmt.istDate(me.person.away.to)}.` : "";
 
-  /* what needs a person: attention items first, then gate and onboarding approvals, then questions; nothing twice */
-  const attIds = new Set((s.attention ?? []).map((a) => a.id));
-  const waiting = s.waiting
-    ? {
-        approvals: s.waiting.approvals.filter((a) => !(a.repo && !a.note && attIds.has(`hm-att-onb-${a.repo}`)) && !(a.wo && attIds.has(`hm-att-sla-${a.wo}-${a.gate}`))),
-        conversations: s.waiting.conversations,
-      }
-    : null;
+  /* what needs a person (prototype: the open approvals, five of them, with the count of all open): gate and onboarding approvals and the proposals and restores the server
+     puts in front of this person, in the inbox's order. Health items (a blocked work order, a halted project) are not approvals: they show in the Blocked tile and the project tiles. */
+  const items = allItems.filter((i) => (i.kind === "gate" || i.kind === "onboarding" || i.kind === "other") && !(i.kind === "other" && i.x.restore?.scope === "factory"));
   const att = s.attention ?? [];
-  const crit = att.filter((a) => a.sev === 0).length;
-  const waitingN = waiting ? waiting.approvals.length + waiting.conversations.length : 0;
-  const rows = [
-    ...att.map((a) => ({
-      key: a.id,
-      tone: (a.sev === 0 ? "bad" : "warn") as "bad" | "warn",
-      title: a.title,
-      sub: `${a.where}${a.sub ? ` · ${a.sub}` : ""}`,
-      action: a.restore ? <RestoreAction item={a} /> : <Btn label={a.act.label} small kind="primary" onClick={() => goAttention(a.act, openTraveler)} />,
-    })),
-    ...(waiting?.approvals ?? []).map((a, i) => ({
-      key: `ap-${a.wo ?? a.repo}-${i}`,
-      tone: "warn" as const,
-      title: a.repo ? (a.note ? `Onboarding ${a.repoName ?? a.repo}` : `Merge onboarding PR ${a.repoName ?? a.repo}#${a.pr ?? ""}`) : `${a.wo} · ${a.gateLabel ?? a.gate ?? ""} ${a.gateName ?? ""}`.trim(),
-      sub: `${a.title ?? a.note ?? "Checks green"} · ${a.projectName}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`,
-      action: (
-        <Btn
-          label="Review" small kind="primary"
-          onClick={() => {
-            if (a.repo) {
-              if (a.project) setProject(a.project);
-              navigate("onboarding", a.repo);
-            } else if (a.wo) openTraveler(a.wo);
-          }}
-        />
-      ),
-    })),
-    ...(waiting?.conversations ?? []).map((c) => ({
-      key: `cv-${c.wo}`,
-      tone: "warn" as const,
-      title: `${c.wo} · ${c.gate ? `${c.gate.label} ${c.gate.name}` : "questions for you"}`,
-      sub: c.title,
-      action: (
-        <Btn
-          label="Open" small kind="primary"
-          onClick={() => {
-            updatePrefs({ project: c.project, openConversation: c.wo });
-            navigate("conversations");
-          }}
-        />
-      ),
-    })),
-  ];
+  const killBanner = att.find((a) => a.restore?.scope === "factory");
+  const waitSub = (ms: number) => (ms ? ` · waiting ${agoShort(ms)}` : "");
+  const rows = items.map((i) => {
+    const t = titleOf(i);
+    const gate = i.kind === "gate" ? i.a : null;
+    return {
+      key: i.key,
+      title: gate ? `${gate.gateLabel ?? gate.gate} ${gate.gateName ?? "gate"} for ${gate.wo}` : String(t.title),
+      sub: `${i.kind === "other" ? i.x.sub || i.x.where : String(t.sub)}${waitSub(i.waitMs)}`,
+      it: i,
+    };
+  });
+  const waitingN = rows.length;
 
   /* stats */
   const m = s.motion;
   const buckets = hourly(events);
   const statItems: StatItem[] = [];
-  if (m) statItems.push({ l: "On the belt", v: m.inFlight, d: `${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`, tone: "info", spark: buckets });
-  if (waiting || s.attention) statItems.push({ l: "Waiting for a person", v: waitingN, d: waitingN ? "approvals and questions" : "nothing waiting", tone: waitingN ? "warn" : "ok" });
-  if (m) statItems.push({ l: "Released today", v: m.shippedToday, d: `${m.shippedWeek} this week`, tone: "ok" });
-  if (s.attention) statItems.push({ l: "Needs attention", v: att.length, d: crit ? `${crit} critical` : "none critical", tone: crit ? "bad" : att.length ? "warn" : "ok" });
-  if (s.health) statItems.push({ l: "Spend this month", v: `$${s.health.spend.spent.toFixed(2)}`, d: `budget $${s.health.spend.budget.toFixed(2)}`, tone: "agent" });
+  const blocked = inView.reduce((t, p) => t + metricsOf(p).bad, 0);
+  const atGates = items.filter((i) => i.kind === "gate").length;
+  if (m) statItems.push({ l: "On the belt", v: m.inFlight, d: `${m.running} running · ${Math.max(0, m.inFlight - m.running)} queued`, tone: "info", spark: buckets });
+  if (s.waiting || s.attention) statItems.push({ l: "Waiting for a person", v: waitingN, d: `${atGates} at gates`, tone: waitingN ? "warn" : "ok" });
+  if (m) statItems.push({ l: "Released today", v: m.shippedToday, d: "median cycle n/a", tone: "ok" });
+  if (projects.length) statItems.push({ l: "Blocked", v: blocked, d: "oldest n/a", tone: "bad" });
+  if (s.health) statItems.push({ l: "Spend today", v: "n/a", d: `month $${s.health.spend.spent.toFixed(2)} of $${s.health.spend.budget.toFixed(2)}`, tone: "agent" });
 
   /* belt at a glance: stations across, work in progress per station summed over the projects in view */
   const stations: MiniStation[] = (cat?.stations ?? []).map((st) => {
-    const n = projects.reduce((t, p) => t + (metricsOf(p).byPosition[st.id]?.n ?? 0), 0);
+    const n = inView.reduce((t, p) => t + (metricsOf(p).byPosition[st.id]?.n ?? 0), 0);
     const gate = cat?.gates.find((g) => g.after === st.id);
-    const gateWaiting = gate ? projects.reduce((t, p) => t + (metricsOf(p).byGate[gate.id] ?? 0), 0) > 0 : false;
+    const gateWaiting = gate ? inView.reduce((t, p) => t + (metricsOf(p).byGate[gate.id] ?? 0), 0) > 0 : false;
     // Capacity is each project's configured WIP for the station (coding slots for Build), summed over the projects in view.
-    const slots = Math.max(1, projects.reduce((t, p) => t + (st.id === "build" ? p.flow.slots : (p.flow.stations[st.id]?.wip ?? 0)), 0));
-    return { id: st.id, name: st.name, n, slots, gate: gateWaiting, href: hashFor("floor", null, prefs.project) };
+    const slots = Math.max(1, inView.reduce((t, p) => t + (st.id === "build" ? p.flow.slots : (p.flow.stations[st.id]?.wip ?? 0)), 0));
+    return { id: st.id, name: st.name, n, slots, gate: gateWaiting, href: hashFor("floor", null, scopeId) };
   });
 
-  const canCreate = !create.pending && create.allowed && !s.setup;
-  const canSubmit = !submit.pending && submit.allowed && !s.setup && hasCommand("newWorkOrder");
+  const canSubmit = !submit.pending && submit.allowed && !s.setup;
   const feed = events.slice(0, 7);
 
   return (
     <Page
       eyebrow="Operate"
       title={`${greet}, ${me.person.name.split(" ")[0]}`}
-      sub={`Plant overview for ${prefs.scopeAll ? "All projects" : (me.projects.find((p) => p.id === prefs.project)?.name ?? "All projects")}. Agents propose, people approve.${away}`}
+      sub={`Plant overview for ${scopeName}. Agents propose, people approve.${away}`}
       cls="hm"
       acts={
         <>
-          <a className="btn" href={hashFor("floor", null, prefs.project)}><CrIcon name="floor" />Open floor</a>
-          {canCreate ? <Btn label="New project" icon="plus" id="hm-new-project" onClick={openNewProject} /> : null}
-          {canSubmit ? <Btn label="Submit work order" kind="primary" icon="plus" id="hm-my-new" onClick={() => void runCommand("newWorkOrder")} /> : null}
+          <a className="btn" href={hashFor("floor", null, scopeId)}><CrIcon name="floor" />Open floor</a>
+          {canSubmit ? <a className="btn primary" id="hm-my-new" href={hashFor("console")}><CrIcon name="plus" />Submit work order</a> : null}
         </>
       }
     >
+      {killBanner ? (
+        <div className="banner bad" role="alert" style={{ marginBottom: 16 }}>
+          <CrIcon name="stop" />
+          <div className="grow"><b>Factory stopped.</b> {killBanner.sub} Restore needs two Factory Admins.</div>
+          <RestoreAction item={killBanner} startLabel="Start restore" small={false} />
+        </div>
+      ) : null}
       {s.setup ? <div style={{ marginBottom: 16 }}><SetupChecklist setup={s.setup} /></div> : null}
       {statItems.length ? <Stats items={statItems} id="hm-stats" /> : null}
       <div className="grid g-main rows" style={{ marginBottom: 16 }}>
@@ -158,7 +146,9 @@ export default function HomeView() {
           {rows.length ? (
             <div>
               {rows.slice(0, 5).map((r) => (
-                <ListItem key={r.key} tone={r.tone} title={r.title} sub={r.sub}>{r.action}</ListItem>
+                <ListItem key={r.key} tone="warn" title={r.title} sub={r.sub}>
+                  <Btn label="Review" small kind="primary" id={`hm-review-${r.key}`} onClick={() => { if (r.it.kind === "onboarding") { if (r.it.a.project) setProject(r.it.a.project); navigate("onboarding", r.it.a.repo); } else review(r.it); }} />
+                </ListItem>
               ))}
             </div>
           ) : (
@@ -170,7 +160,7 @@ export default function HomeView() {
             <div className="tl">
               {feed.map((e) => (
                 <div key={e.id} className={eventTone(e)}>
-                  <div>{eventText(e, cat, nameOf)}</div>
+                  <div>{e.type === "wo.enter" ? `${e.wo ?? ""} moved to ${cat?.stations.find((x) => x.id === e.station)?.name ?? e.station ?? "a station"}`.trim() : eventText(e, cat, nameOf)}</div>
                   <div className="when">{fmt.ago(e.at, Date.now())}</div>
                 </div>
               ))}
@@ -181,16 +171,16 @@ export default function HomeView() {
         </Card>
       </div>
       <div className="grid g-main rows" style={{ marginBottom: 16 }}>
-        <Card title="Belt at a glance" hint="Work orders per station. Dashed line = capacity; amber bar = over it; amber dot = gate waiting" acts={<a className="btn sm" href={hashFor("floor", null, prefs.project)}>Floor</a>} id="hm-belt">
+        <Card title="Belt at a glance" hint="Work orders per station. Dashed line = capacity; amber bar = over it; amber dot = gate waiting" acts={<a className="btn sm" href={hashFor("floor", null, scopeId)}>Floor</a>} id="hm-belt">
           <div style={{ padding: "4px 0" }}>{stations.length ? <MiniBeltCr stations={stations} /> : <CrEmpty title="No stations" text="The line has not loaded." icon="floor" />}</div>
         </Card>
-        <Card title="Throughput, last 24 hours" hint="Station entries per hour" id="hm-throughput">
+        <Card title="Throughput, last 24 hours" hint="Work orders completing a station per hour" id="hm-throughput">
           <Bars data={buckets} w={240} h={96} label="Station entries per hour" />
           <div className="row spread dim mono" style={{ fontSize: 11, margin: "6px 0 0 24px" }}><span>-24h</span><span>-12h</span><span>now</span></div>
         </Card>
       </div>
       {projects.length ? (
-        <Card title="Projects" flush hint={`${projects.length} in view`} id="hm-projects">
+        <Card title="Projects" flush hint={`${projects.length} in view`} id="hm-projects" >
           <div className="proj-grid">
             {projects.map((p) => {
               const mt = metricsOf(p);
