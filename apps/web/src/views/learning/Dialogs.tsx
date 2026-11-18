@@ -23,9 +23,9 @@ export function AcceptDialog({ lp, close }: { lp: LearningProposal; close: () =>
     close();
   };
   return (
-    <Dialog title={`Accept ${lp.id}`} kicker={`Learning · ${KINDS[lp.kind]?.name ?? lp.kind}`} wide onClose={close}
+    <Dialog title={`Adopt: ${lp.title}`} kicker={`Learning · ${KINDS[lp.kind]?.name ?? lp.kind}`} wide onClose={close}
       sub="Applies the change now through the normal operation, with its own permission check and audit entry, then marks the finding addressed. It can be rolled back."
-      actions={[{ label: "Cancel" }, { label: "Accept and apply", kind: "primary", submit: true, id: "ln-acc-ok", guard: perm, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: "Adopt change", kind: "primary", submit: true, id: "ln-acc-ok", guard: perm, onClick: () => void submit() }]}
       body={(
         <div className="form-grid">
           <LockNote decision={perm} what="Applying learning proposals" />

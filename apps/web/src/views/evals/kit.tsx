@@ -7,9 +7,11 @@ import { DAY, fmt, type Agent, type EvalRun, type Suite } from "@gantry/domain";
 import { useAgents, useAllSuiteRuns, useEvalsFactory, useScorecards, useSkills, useSuites, useVendors } from "../../api/queries";
 import type { AgentRow, AgentVersionRow } from "../agents/kit";
 import { Icon } from "../../ui/Icon";
+import { navigate } from "../../lib/router";
 
-export type EvalsTab = "agents" | "suites" | "factory";
-export const evalsUi = { tab: "agents" as EvalsTab, agent: null as string | null, suite: null as string | null, run: null as string | null, a: null as string | null, b: null as string | null, runVersion: null as string | null, runModel: null as string | null, repeats: 1 };
+export type EvalsTab = "cards" | "suites" | "factory";
+/** `tab` is what another screen asked for (focus); the screen turns it into the URL (`#evals/suites`) once. `detail` opens the suite drawer on arrival. */
+export const evalsUi = { tab: "cards" as EvalsTab, detail: false, agent: null as string | null, suite: null as string | null, run: null as string | null, a: null as string | null, b: null as string | null, runVersion: null as string | null, runModel: null as string | null, repeats: 1 };
 let tick = 0;
 const listeners = new Set<() => void>();
 export const rerender = (): void => {
@@ -21,6 +23,7 @@ export const useEvalsUi = (): number => useSyncExternalStore((l) => (listeners.a
 /** Other screens (agents) open a suite here. */
 export function evalsFocus(o: { agent?: string; suite?: string; version?: string }): void {
   evalsUi.tab = "suites";
+  evalsUi.detail = true;
   if (o.agent) evalsUi.agent = o.agent;
   if (o.suite) {
     evalsUi.suite = o.suite;
@@ -30,6 +33,11 @@ export function evalsFocus(o: { agent?: string; suite?: string; version?: string
   }
   evalsUi.runVersion = o.version ?? null;
   rerender();
+}
+/** Open a suite (and its agent) on the Suites tab. */
+export function evalsGoSuite(suite: string | null | undefined, agent?: string): void {
+  evalsFocus({ ...(agent ? { agent } : {}), ...(suite ? { suite } : {}) });
+  navigate("evals", "suites");
 }
 
 export type RunRow = EvalRun;

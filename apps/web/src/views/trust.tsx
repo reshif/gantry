@@ -1,73 +1,59 @@
 /**
- * Trust ladder (spec 8.7, 13.3). Port of legacy/js/views/trust.js against /api/v1/trust: earned autonomy per agent x work class x project (optionally repo), the ladder matrix with level,
- * evidence count and ceiling marker per cell, cell detail with evidence, history and the criteria for the next level, promotion proposals, demotions with cause, ceilings, versioned
- * promotion criteria, the L2 spot-check rate, and the runtime switch for levels above L1 (off in a new install). L4 is not grantable. A rate is shown with its count and "insufficient
- * data" when small (spec 13.3). Not ported, on purpose: the legacy "Simulate an incoming outcome" button. Outcomes are recorded for real, on shipped work, with an attribution.
+ * Trust ladder (spec 8.7, 13.3). Port of legacy/js/views/trust.js against /api/v1/trust: earned autonomy per agent x work class x project (optionally repo), as the prototype's flat Ladder with
+ * Level, Project and Agent filters; cell detail (evidence, history, the criteria for the next level, Change level, the matrix) in a drawer; promotion proposals, demotions with cause, and the Rules tab
+ * (criteria per level, ceilings, the runtime switch for levels above L1 and the L2 spot-check rate). L4 is not grantable. A rate is shown with its count and "insufficient data" when small (spec 13.3).
+ * Not ported, on purpose: the legacy "Simulate an incoming outcome" button. Outcomes are recorded for real, on shipped work, with an attribution.
+ * The tab is in the URL (#trust/proposals); the screen is factory-wide and does not follow the project switcher.
  */
-import { useEffect, useMemo } from "react";
-import { useAgents, useProjects, useTrustCells } from "../api/queries";
+import { useEffect } from "react";
+import { useTrustCells } from "../api/queries";
+import { useUI } from "../ui/overlay-context";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { DemotionsTab, PolicyTab, ProposalsTab } from "./trust/Tabs";
-import { LadderTab, type LadderProps } from "./trust/Ladder";
-import { rerender, trustFocus, trustUi, useTrustUi, type CellOut, type TrustTab } from "./trust/kit";
-import { useCatalog } from "./projects/kit";
-import type { Project } from "@gantry/domain";
+import { CellDrawer, LadderTab, useLadderProps } from "./trust/Ladder";
+import { trustFocus, trustUi, useTrustUi, type CellOut } from "./trust/kit";
+import { useTabParam } from "./tabparam";
 
-const DAY = 86_400_000;
+const TABS = ["ladder", "proposals", "demotions", "rules"] as const;
 
 export default function TrustView() {
   useTrustUi();
+  const ui = useUI();
   const prefs = usePrefs();
-  const cat = useCatalog();
-  const pq = useProjects();
-  const projects = ((pq.data ?? []) as Project[]).filter((p) => p.status !== "archived");
-  const agentsData = useAgents().data;
+  const [tab, setTab] = useTabParam("trust", TABS);
   const all = useTrustCells();
-  const project = (trustUi.project && projects.some((p) => p.id === trustUi.project) ? trustUi.project : null) ?? (prefs.project && projects.some((p) => p.id === prefs.project) ? prefs.project : null) ?? projects[0]?.id ?? null;
-  if (project !== trustUi.project) trustUi.project = project;
-  const lad = useTrustCells(trustUi.tab === "ladder" ? project : null);
+  const base = useLadderProps(null);
   const tr = all.data;
   const cells = (tr?.cells ?? []) as CellOut[];
   const proposals = tr?.proposals ?? [];
   const focus = (prefs as unknown as { trustFocus?: Parameters<typeof trustFocus>[0] | null }).trustFocus;
   useEffect(() => {
     if (!focus || !tr) return;
+    const target = focus.cell ? cells.find((c) => c.id === focus.cell) : null;
     trustFocus(focus, cells, proposals);
+    if (target) ui.drawer.open(`tr-cell:${target.id}`, (close) => <CellDrawer projectId={target.project} close={close} />);
     updatePrefs({ trustFocus: null } as never);
   }, [focus, tr]); // eslint-disable-line react-hooks/exhaustive-deps
-  const agentName = useMemo(() => (id: string) => (agentsData ?? []).find((a) => a.id === id)?.name ?? id, [agentsData]);
-  const clsName = useMemo(() => (id: string) => cat?.classes.find((c) => c.id === id)?.name ?? id, [cat]);
-  if (pq.data === undefined) return <div className="view view-trust"><ViewHead title="Trust" /><Async query={pq} what="projects" id="trust-projects">{() => null}</Async></div>;
-  if (!projects.length) return <div className="view view-trust"><ViewHead title="Trust" /><Empty title="No projects to show" text="You have no role on an active project." /></div>;
-  if (!tr || !cat) return <div className="view view-trust"><ViewHead title="Trust" /><Async query={all} what="trust levels" id="trust">{() => null}</Async></div>;
-  const proj = projects.find((p) => p.id === project)!;
+  if (!tr) return <div className="view view-trust"><ViewHead title="Trust" kicker="All lines" /><Async query={all} what="trust levels" id="trust">{() => null}</Async></div>;
+  if (!base) return <div className="view view-trust"><ViewHead title="Trust" kicker="All lines" /><Empty title="No projects to show" text="You have no role on an active project." /></div>;
   const pending = proposals.filter((x) => x.status === "pending");
-  const dem7 = cells.reduce((n, c) => n + (c.history || []).filter((e) => (e.kind === "demote" || (e.kind === "grant" && e.from != null && e.to < e.from)) && e.at >= Date.now() - 7 * DAY).length, 0);
-  const cov = Object.values(tr.coverage ?? {}).reduce((a, c) => ({ total: a.total + c.total, auto: a.auto + c.auto }), { total: 0, auto: 0 });
   const unattended = cells.filter((c) => c.level >= 3).length;
-  const ladderCells = (lad.data?.cells ?? cells.filter((c) => c.project === project)) as CellOut[];
-  const base: LadderProps = {
-    cat, project: proj, projects, cells: ladderCells.filter((c) => c.project === project), proposals, switchOn: tr.levelsAboveL1 === true, criteria: tr.criteria, sampleRate: tr.sampleRate,
-    coverage: tr.coverage?.[proj.id] ?? { total: 0, auto: 0 }, agentName, clsName,
-  };
-  const tab = trustUi.tab as TrustTab;
-  const tabs = [{ id: "ladder", label: "Ladder" }, { id: "proposals", label: "Proposals", count: pending.length }, { id: "demotions", label: "Demotions", count: dem7 }, { id: "policy", label: "Ceilings and criteria" }];
   const body = tab === "proposals" ? <ProposalsTab p={base} cells={cells} proposals={proposals} />
-    : tab === "demotions" ? <DemotionsTab cells={cells} projects={projects} p={{ ...base, cells }} />
-    : tab === "policy" ? <PolicyTab p={{ ...base, cells, ...({ ceilings: tr.ceilings, criteriaVersion: tr.criteriaVersion ?? 0 } as object) } as LadderProps & { criteriaVersion: number }} cells={cells} projects={projects} />
-    : <LadderTab p={base} />;
+    : tab === "demotions" ? <DemotionsTab cells={cells} projects={base.projects} p={{ ...base, cells }} />
+    : tab === "rules" ? <PolicyTab p={{ ...base, cells, ...({ ceilings: tr.ceilings, criteriaVersion: tr.criteriaVersion ?? 0 } as object) } as typeof base & { criteriaVersion: number }} cells={cells} projects={base.projects} />
+    : <LadderTab cells={cells} projects={base.projects} switchOn={base.switchOn} agentName={base.agentName} clsName={base.clsName} />;
   return (
     <div className="view view-trust">
-      <ViewHead title="Trust" sub="How much autonomy each agent has earned, per class of work and project." />
+      <ViewHead title="Trust" kicker="All lines" sub="How much autonomy each agent has earned, per class of work and project." />
       <StatRow id="tr-stats">
-        <Stat label="Cells" value={String(cells.length)} sub="agent, class and project" />
-        <Stat label="L3 and up" value={String(unattended)} sub="decided by checks" />
-        <Stat label="Proposals" value={String(pending.length)} sub="awaiting you" tone={pending.length ? "wait" : undefined} />
-        <Stat label="Sample rate" value={cov.total >= 10 ? `${Math.round((cov.auto / cov.total) * 100)}%` : `n=${cov.total}`} sub="gate decisions under trust, 7 days" />
+        <Stat label="Cells" value={String(cells.length)} sub="agent × class × project" tone="info" />
+        <Stat label="At L3 or above" value={String(unattended)} tone="done" />
+        <Stat label="Proposals" value={String(pending.length)} sub="awaiting you" {...(pending.length ? { tone: "wait" as const } : {})} />
+        <Stat label="Sample rate" value={`${tr.sampleRate}%`} sub="of autonomous work reviewed" />
       </StatRow>
-      <Tabs idPrefix="tr-tab" items={tabs} active={tab} onChange={(t) => { trustUi.tab = t as TrustTab; trustUi.hiProposal = null; rerender(); }} />
+      <Tabs idPrefix="tr-tab" items={[{ id: "ladder", label: "Ladder", count: cells.length }, { id: "proposals", label: "Proposals", count: pending.length }, { id: "demotions", label: "Demotions" }, { id: "rules", label: "Rules" }]} active={tab} onChange={(t) => { trustUi.hiProposal = null; setTab(t); }} />
       <div id="tr-tab-panel" role="tabpanel" className="tr-panel">{body}</div>
     </div>
   );

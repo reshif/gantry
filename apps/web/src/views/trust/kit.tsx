@@ -8,7 +8,7 @@ import { updatePrefs } from "../../lib/prefs";
 import { navigate } from "../../lib/router";
 
 export const MIN_RUNS = 5;
-export type TrustTab = "ladder" | "proposals" | "demotions" | "policy";
+export type TrustTab = "ladder" | "proposals" | "demotions" | "rules";
 export const trustUi = { tab: "ladder" as TrustTab, project: null as string | null, repo: "", sel: null as { agent: string | null; cls: string } | null, propFilter: "pending", demoFilter: "all", hiProposal: null as string | null, view: "list" as "list" | "matrix" };
 let tick = 0;
 const listeners = new Set<() => void>();
@@ -47,8 +47,9 @@ export function trustFocus(o: { cell?: string | null; proposal?: string | null; 
     trustUi.tab = "proposals";
     trustUi.propFilter = prop.status === "pending" ? "pending" : "all";
     trustUi.hiProposal = prop.id;
-  } else trustUi.tab = (o.tab as TrustTab) || "ladder";
+  } else trustUi.tab = (o.tab === "policy" ? "rules" : (o.tab as TrustTab)) || "ladder";
   rerender();
+  navigate("trust", trustUi.tab);
 }
 /** Asks the Trust screen to open at a cell, from another screen. */
 export function goTrustCell(cellId: string): void {

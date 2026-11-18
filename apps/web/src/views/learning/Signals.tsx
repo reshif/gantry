@@ -1,14 +1,34 @@
 /** Signals tab: every signal the loop reads, from the work order records and eval runs. */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Segmented } from "../../ui/primitives";
+import { Empty, Panel, Segmented } from "../../ui/primitives";
+import { BarList } from "../../ui/charts";
+import { useEvalsFactory } from "../../api/queries";
 import { Icon } from "../../ui/Icon";
 import { SortTable } from "../../ui/SortTable";
 import { useCatalog } from "../projects/kit";
 import type { LearningSignalRow } from "../../api/types";
+import type { LearningFinding } from "@gantry/domain";
 import { SIGNALS, WoChip, useLn } from "./kit";
 
-export function SignalsTab({ signals }: { signals: LearningSignalRow[] }) {
+/** The prototype's Signals: two charts side by side (signals by count, gate rejection reasons); the individual signal events are the real feed underneath. */
+export function SignalsTab({ signals, findings }: { signals: LearningSignalRow[]; findings: LearningFinding[] }) {
+  const by: Record<string, number> = {};
+  findings.forEach((f) => { by[f.signal] = (by[f.signal] ?? 0) + f.count; });
+  const gr = (useEvalsFactory().data?.gateRejections ?? []).map((r) => ({ label: r[0], value: r[1], tone: "warn" as const }));
+  const bars = Object.entries(by).map(([k, v]) => ({ label: SIGNALS[k]?.[0] ?? k, value: v }));
+  return (
+    <div className="stack">
+      <div className="cols">
+        <Panel title="Signals by count">{bars.length ? <BarList items={bars} label="Signals by count" labelWidth={110} /> : <Empty title="No signals yet" text="Signals appear as work orders are rejected, sent back or overridden." />}</Panel>
+        <Panel title="Gate rejection reasons">{gr.length ? <BarList items={gr} label="Gate rejection reasons" labelWidth={170} /> : <Empty title="No rejections" text="Nothing was rejected at a gate in the last 30 days." />}</Panel>
+      </div>
+      <Panel title="Signal events"><EventTable signals={signals} /></Panel>
+    </div>
+  );
+}
+
+function EventTable({ signals }: { signals: LearningSignalRow[] }) {
   const { projName, agName } = useLn();
   const cat = useCatalog();
   const [type, setType] = useState("all");

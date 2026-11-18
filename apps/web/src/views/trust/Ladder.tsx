@@ -1,18 +1,20 @@
 /** Ladder tab (legacy ladderTab): agent x class x project matrix with level, evidence count and ceiling marker, cell detail with evidence, criteria and history, and the projection. */
 import { useState } from "react";
+import { useAgents, useProjects, useTrustCells } from "../../api/queries";
 import { fmt, flowOf, type Catalog, type Project, type TrustProposal, type WorkOrder } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useWorkOrders } from "../../api/queries";
+import { useCatalog } from "../projects/kit";
+import { DataView } from "../dataview";
 import { openRecordRoute } from "../../lib/router";
-import { Avatar, Btn, Empty, Field, LockNote, Panel, Segmented, Select, type Decision } from "../../ui/primitives";
-import { DataTable, type Col } from "../../ui/DataTable";
+import { IconBtn, Avatar, Btn, Chip, Empty, Field, LockNote, Panel, Select, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
 import { ClassChip } from "../projects/kit";
-import { KV, LevelTag, Rate, Rungs, code, gateForAgent, ladderRows, lv, pct, rerender, trustCellId, trustUi, type CellOut, type LadderRow, MIN_RUNS } from "./kit";
+import { KV, LevelTag, Rate, Rungs, code, gateForAgent, ladderRows, lv, pct, rerender, trustCellId, trustUi, useTrustUi, type CellOut, type LadderRow, MIN_RUNS } from "./kit";
 
 export interface LadderProps { cat: Catalog; project: Project; projects: Project[]; cells: CellOut[]; proposals: TrustProposal[]; switchOn: boolean; criteria: Record<string, { cleanRuns: number; evalMin: number; reworkMax: number; incidentsMax: number; windowD: number }>; sampleRate: number; coverage: { total: number; auto: number }; agentName: (id: string) => string; clsName: (id: string) => string }
 
@@ -55,25 +57,6 @@ function Matrix({ p, rows }: { p: LadderProps; rows: LadderRow[] }) {
   );
 }
 
-interface ListRow { id: string; agent: string; cls: string; cell: CellOut }
-
-/** The prototype's Ladder: one flat row per agent and class with its level, clean runs and since; Demote opens the cell. */
-function LadderList({ p, rows }: { p: LadderProps; rows: LadderRow[] }) {
-  const classes = flowOf(p.cat, p.project).classes;
-  const list: ListRow[] = [];
-  for (const cl of classes) for (const r of rows) { const { cell } = cellFor(p, r.agent, cl.id); if (!cell.virtual) list.push({ id: `${r.agent}-${cl.id}`, agent: r.agent, cls: cl.id, cell }); }
-  const cols: Array<Col<ListRow>> = [
-    { key: "agent", label: "Agent", sort: (r) => p.agentName(r.agent), render: (r) => p.agentName(r.agent) },
-    { key: "cls", label: "Class", sort: (r) => p.clsName(r.cls), render: (r) => p.clsName(r.cls) },
-    { key: "project", label: "Project", render: () => p.project.name },
-    { key: "level", label: "Level", sort: (r) => r.cell.effective, render: (r) => <LevelTag level={r.cell.effective} /> },
-    { key: "clean", label: "Clean runs", align: "end", sort: (r) => r.cell.evidence.cleanRuns, render: (r) => String(r.cell.evidence.cleanRuns) },
-    { key: "since", label: "Since", sort: (r) => r.cell.since, render: (r) => (r.cell.since ? fmt.istDate(r.cell.since) : "—") },
-    { key: "act", label: "", align: "end", render: (r) => <Btn small label="Change level" id={`tr-row-${r.agent}-${r.cls}`} aria={`Change level of ${p.agentName(r.agent)}, ${p.clsName(r.cls)}`} onClick={() => { trustUi.sel = { agent: r.agent, cls: r.cls }; rerender(); setTimeout(() => document.getElementById("tr-detail")?.scrollIntoView?.({ block: "start", behavior: "smooth" }), 30); }} /> },
-  ];
-  return <DataTable id="tr-list" caption={`Trust cells of ${p.project.name}`} columns={cols} rows={list} rowKey={(r) => r.id} pageSize={12} empty={{ title: "No cells yet", text: "A person sets the first level, or the system proposes one when the criteria are met." }} />;
-}
-
 function CellButton({ p, r, cls }: { p: LadderProps; r: LadderRow; cls: { id: string; name: string } }) {
   const { cell, inherited } = cellFor(p, r.agent, cls.id);
   const virtual = !!cell.virtual;
@@ -111,18 +94,19 @@ export function ProposalButtons({ prop, cell, p }: { prop: TrustProposal; cell: 
   const ui_ = useUI();
   const out = useOutcome();
   const perm = useCan("trust.grant", { project: cell.project });
+  const name = p.agentName(cell.agent);
   const accGuard: Decision | null = !perm.allowed ? perm
     : prop.to > 3 ? { allowed: false, needs: "", reason: "L4 cannot be granted in this version. Decline it." }
     : prop.to > 1 && !p.switchOn ? { allowed: false, needs: "Turn on trust levels above L1", reason: "Trust levels above L1 are switched off." }
     : prop.to > cell.ceiling.max ? { allowed: false, needs: "", reason: `Capped at ${code(cell.ceiling.max)} by ${cell.ceiling.ids.join(", ")}. Decline it or change the ceiling.` } : null;
   return (
     <>
-      <Btn label={`Approve ${code(prop.to)}`} small kind="primary" icon="check" id={`tr-prop-ok-${prop.id}`} guard={accGuard}
-        onClick={() => ui_.reasonDialog({ title: `Approve ${prop.id}`, kicker: "Trust · promotion", sub: `${label(cell, p)} moves from ${code(prop.from)} to ${code(prop.to)}. About ${prop.savedPerWeek || 0} approvals a week stop needing a person.`, label: "Reason (required)", placeholder: "e.g. Clean streak reviewed, no open incidents", ok: "Approve", min: 4, guard: accGuard,
-          onOk: async (t) => out(await ops.decideTrustProposal(prop.id, true, t)) }) } />
-      <Btn label="Decline" small icon="x" id={`tr-prop-no-${prop.id}`} guard={perm}
-        onClick={() => ui_.reasonDialog({ title: `Decline ${prop.id}`, kicker: "Trust · promotion", sub: `${label(cell, p)} stays at ${code(prop.from)}. The system will not propose this cell again for 3 days.`, label: "Reason (required)", ok: "Decline", kind: "danger", min: 4, guard: perm,
+      <Btn label="Decline" small id={`tr-prop-no-${prop.id}`} guard={perm}
+        onClick={() => ui_.reasonDialog({ title: `Decline ${name}`, kicker: "Trust · promotion", sub: `${label(cell, p)} stays at ${code(prop.from)}. The system will not propose this cell again for 3 days.`, label: "Reason (required)", ok: "Decline", kind: "danger", min: 6, guard: perm,
           onOk: async (t) => out(await ops.decideTrustProposal(prop.id, false, t)) })} />
+      <Btn label="Promote" small kind="primary" id={`tr-prop-ok-${prop.id}`} guard={accGuard}
+        onClick={() => ui_.reasonDialog({ title: `Promote ${name}`, kicker: "Trust · promotion", sub: `${prop.evidence.note || label(cell, p)} About ${prop.savedPerWeek || 0} approvals a week stop needing a person.`, label: "Reason (optional)", placeholder: "Recorded with the decision", ok: `Promote to L${prop.to}`, min: 0, guard: accGuard,
+          onOk: async (t) => out(await ops.decideTrustProposal(prop.id, true, t.trim() || prop.evidence.note || "Meets the criteria for the next level.")) })} />
     </>
   );
 }
@@ -319,23 +303,99 @@ function Projection({ p, rows }: { p: LadderProps; rows: LadderRow[] }) {
   );
 }
 
-export function LadderTab({ p }: { p: LadderProps }) {
-  const { repos } = useAllRepos();
-  const rs = repos.filter((r) => r.project === p.project.id);
-  if (trustUi.repo && !rs.some((r) => r.id === trustUi.repo)) trustUi.repo = "";
-  const rows = ladderRows(p.cat, p.project, p.cells);
+export const dmy = (t: number): string => (t ? new Date(t).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "—");
+/** The prototype's level chip: plain L<n>, L2 blue, L3 and up green. */
+export const LevelChip = ({ level }: { level: number }) => <Chip text={`L${level}`} cls={level >= 3 ? "ok" : level === 2 ? "info" : "plain"} />;
+
+/** What the ladder, its detail and the policy tabs read: the catalog, projects, trust data, one project's cells. Null until loaded. */
+export function useLadderProps(projectId: string | null): LadderProps | null {
+  const cat = useCatalog();
+  const projects = ((useProjects().data ?? []) as Project[]).filter((x) => x.status !== "archived");
+  const agentsData = useAgents().data;
+  const all = useTrustCells();
+  const lad = useTrustCells(projectId);
+  const tr = all.data;
+  const proj = projects.find((x) => x.id === projectId) ?? projects[0];
+  if (!tr || !cat || !proj) return null;
+  const cells = (tr.cells ?? []) as CellOut[];
+  const scoped = ((projectId ? lad.data?.cells : null) ?? cells.filter((c) => c.project === proj.id)) as CellOut[];
+  return {
+    cat, project: proj, projects, cells: scoped.filter((c) => c.project === proj.id), proposals: tr.proposals ?? [], switchOn: tr.levelsAboveL1 === true, criteria: tr.criteria, sampleRate: tr.sampleRate,
+    coverage: tr.coverage?.[proj.id] ?? { total: 0, auto: 0 }, agentName: (id) => (agentsData ?? []).find((a) => a.id === id)?.name ?? id, clsName: (id) => cat.classes.find((c) => c.id === id)?.name ?? id,
+  };
+}
+
+function DemoteBtn({ cell, name, cls }: { cell: CellOut; name: string; cls: string }) {
+  const ui_ = useUI();
+  const out = useOutcome();
+  const perm = useCan("trust.grant", { project: cell.project });
   return (
-    <div className="tr-ladder">
-      <Panel title={trustUi.view === "list" ? "Where each agent stands" : `Ladder · ${p.project.name}`} flush cls="tr-matrix-panel" tools={<Segmented name="tr-view" label="Ladder layout" items={[{ id: "list", label: "List" }, { id: "matrix", label: "Matrix" }]} value={trustUi.view} onChange={(v) => { trustUi.view = v as "list" | "matrix"; rerender(); }} />}>
-      <div className="callout info tr-levels tr-in-panel" role="note"><span><strong>How levels work</strong>{" "}{[0, 1, 2, 3].map((n) => `${code(n)} ${lv(n).desc}`).join(". ")}. Ceilings cap a level regardless of record.{p.switchOn ? "" : " Levels above L1 are switched off."}</span></div>
-      <div className="toolbar tr-toolbar">
-        <Field label="Project" htmlFor="tr-project"><Select id="tr-project" value={p.project.id} options={p.projects.map((x) => ({ value: x.id, label: x.name + (x.regulated ? " (regulated)" : "") }))} onChange={(v) => { trustUi.project = v; trustUi.repo = ""; trustUi.sel = null; rerender(); }} /></Field>
-        <Field label="Repo" htmlFor="tr-repo"><Select id="tr-repo" value={trustUi.repo} options={[{ value: "", label: "All repos (project cells)" }, ...rs.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => { trustUi.repo = v; rerender(); }} /></Field>
-        <p className="small muted tr-toolbar-note">{trustUi.repo ? "Showing repo cells where they exist; other cells fall back to the project cell (marked proj)." : "Cells are agent × class on this project. A repo cell overrides the project cell."}</p>
+    <Btn label="Demote" small id={`tr-demote-${cell.id.replace(/\W/g, "-")}`} aria={`Demote ${name}, ${cls}`} guard={perm}
+      onClick={() => ui_.reasonDialog({ title: `Demote ${name} · ${cls}`, kicker: "Trust · demotion", label: "Reason (required)", ok: `Demote to L${Math.max(0, cell.level - 1)}`, kind: "danger", min: 8, guard: perm,
+        onOk: async (t) => out(await ops.grantTrust(cell.id, Math.max(0, cell.level - 1), t, { ifMatch: cell.rev })) })} />
+  );
+}
+
+/** One cell's page, in a drawer: the project's matrix, the cell's evidence, history, next-level criteria and Change level, and the projection. */
+export function CellDrawer({ projectId, close }: { projectId: string; close: () => void }) {
+  useTrustUi();
+  const p = useLadderProps(projectId);
+  const rs = useAllRepos().repos.filter((r) => r.project === projectId);
+  if (trustUi.repo && !rs.some((r) => r.id === trustUi.repo)) trustUi.repo = "";
+  return (
+    <div className="drawer-inner tr-celldrawer" id="tr-cell-drawer">
+      <div className="drawer-head">
+        <div><div className="kicker">Trust cell</div><h2 className="drawer-title">{p ? p.project.name : "Cell"}</h2></div>
+        <IconBtn icon="x" label="Close" className="drawer-close" id="tr-cell-close" onClick={close} />
       </div>
-        <div>{trustUi.view === "list" ? <LadderList p={p} rows={rows} /> : <><Matrix p={p} rows={rows} /><Legend /></>}</div>
-      </Panel>
-      <div className="tr-ladder-grid"><Detail p={p} rows={rows} /><Projection p={p} rows={rows} /></div>
+      <div className="drawer-scroll">
+        {p ? (
+          <>
+            <div className="toolbar tr-toolbar">
+              <Field label="Repo" htmlFor="tr-repo"><Select id="tr-repo" value={trustUi.repo} options={[{ value: "", label: "All repos (project cells)" }, ...rs.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => { trustUi.repo = v; rerender(); }} /></Field>
+              <p className="small muted tr-toolbar-note">{trustUi.repo ? "Showing repo cells where they exist; other cells fall back to the project cell (marked proj)." : "Cells are agent × class on this project. A repo cell overrides the project cell."}</p>
+            </div>
+            <Panel title={`Ladder · ${p.project.name}`} flush cls="tr-matrix-panel"><Matrix p={p} rows={ladderRows(p.cat, p.project, p.cells)} /><Legend /></Panel>
+            <div className="tr-ladder-grid"><Detail p={p} rows={ladderRows(p.cat, p.project, p.cells)} /><Projection p={p} rows={ladderRows(p.cat, p.project, p.cells)} /></div>
+          </>
+        ) : <Empty title="Loading" text="Reading the cell." />}
+      </div>
     </div>
+  );
+}
+
+/** The prototype's Ladder: every cell across the projects (agent, class, project, level, clean runs, since) with search, Level, Project and Agent filters; Demote opens a reason dialog. */
+export function LadderTab({ cells, projects, switchOn, agentName, clsName }: { cells: CellOut[]; projects: Project[]; switchOn: boolean; agentName: (id: string) => string; clsName: (id: string) => string }) {
+  const ui_ = useUI();
+  const projName = (id: string): string => projects.find((x) => x.id === id)?.name ?? id;
+  const agentIds = [...new Set(cells.map((c) => c.agent))];
+  const open = (c: CellOut): void => { trustUi.project = c.project; trustUi.sel = { agent: c.agent, cls: c.cls }; trustUi.repo = c.repo || ""; ui_.drawer.open(`tr-cell:${c.id}`, (close) => <CellDrawer projectId={c.project} close={close} />); };
+  return (
+    <Panel title="Where each agent stands" flush cls="tr-matrix-panel">
+      <div style={{ padding: "14px 14px 0" }}>
+        <div className="callout tr-levels"><b>How levels work</b>{`L0 proposes only, L1 needs every gate, L2 skips routine gates, L3 acts alone on routine work with sampling, L4 needs no review. Ceilings cap a level regardless of record.${switchOn ? "" : " Levels above L1 are switched off."}`}</div>
+      </div>
+      <DataView id="tr-cells" noun="cell" rows={cells} rowKey={(c) => c.id} rowId={(c) => `tr-row-${c.id.replace(/\W/g, "-")}`} pageSize={12} text={(c) => `${c.id} ${agentName(c.agent)} ${clsName(c.cls)} ${projName(c.project)}`}
+        filters={[
+          { k: "level", label: "Level", opts: [0, 1, 2, 3, 4].map((n) => [String(n), `L${n}`]), fn: (c, v) => String(c.level) === v },
+          { k: "project", label: "Project", opts: projects.map((x) => [x.id, x.name]), fn: (c, v) => c.project === v },
+          { k: "agent", label: "Agent", opts: agentIds.map((a) => [a, agentName(a)]), fn: (c, v) => c.agent === v },
+        ]}
+        empty={{ title: "No cells yet", text: "A person sets the first level, or the system proposes one when the criteria are met." }}
+        columns={[
+          { key: "a", label: "Agent", sort: (c) => agentName(c.agent), render: (c) => agentName(c.agent) },
+          { key: "c", label: "Class", sort: (c) => clsName(c.cls), render: (c) => clsName(c.cls) },
+          { key: "p", label: "Project", sort: (c) => projName(c.project), render: (c) => projName(c.project) },
+          { key: "l", label: "Level", sort: (c) => c.level, render: (c) => <LevelChip level={c.level} /> },
+          { key: "r", label: "Clean runs", align: "end", sort: (c) => c.evidence?.cleanRuns ?? c.cleanRuns, render: (c) => <span className="num">{c.evidence?.cleanRuns ?? c.cleanRuns}</span> },
+          { key: "s", label: "Since", render: (c) => dmy(c.since) },
+          { key: "x", label: "", align: "end", render: (c) => (
+            <span className="row">
+              <Btn label="Details" small kind="ghost" id={`tr-open-${c.id.replace(/\W/g, "-")}`} aria={`Open the cell of ${agentName(c.agent)}, ${clsName(c.cls)}`} onClick={() => open(c)} />
+              {c.level > 0 ? <DemoteBtn cell={c} name={agentName(c.agent)} cls={clsName(c.cls)} /> : null}
+            </span>
+          ) },
+        ]} />
+    </Panel>
   );
 }

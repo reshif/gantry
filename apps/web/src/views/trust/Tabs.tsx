@@ -1,63 +1,67 @@
 /** Proposals, demotions and policy tabs (legacy proposalsTab, demotionsTab, policyTab). */
 import { useState } from "react";
-import { fmt, type Catalog, type Project, type TrustCeiling, type TrustProposal, type WorkOrder } from "@gantry/domain";
+import { fmt, type Project, type TrustCeiling, type TrustProposal, type WorkOrder } from "@gantry/domain";
 import { useCan, useCanMany } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useWorkOrders } from "../../api/queries";
-import { openRecordRoute } from "../../lib/router";
-import { Btn, Empty, Field, LockNote, Panel, Segmented, Select, Toggle, type Decision } from "../../ui/primitives";
+import { Btn, Chip, Empty, Field, LockNote, Panel, Segmented, Select, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome } from "../govern/data";
-import { DataTable } from "../projects/kit";
-import { ProposalButtons, cellLabel, type LadderProps } from "./Ladder";
-import { KV, LevelTag, MIN_RUNS, code, gateForAgent, lv, pct, rerender, trustFocus, trustUi, type CellOut } from "./kit";
+import { LevelChip, ProposalButtons, cellLabel, type LadderProps } from "./Ladder";
+import { code, lv, pct, rerender, trustFocus, trustUi, type CellOut } from "./kit";
 
 /* ---------------- proposals ---------------- */
 
-export function ProposalsTab({ p, cells, proposals }: { p: LadderProps; cells: CellOut[]; proposals: TrustProposal[] }) {
-  const vis = new Set(cells.map((c) => c.id));
-  const all = proposals.filter((x) => vis.has(x.cell)).slice().reverse();
-  const pending = all.filter((x) => x.status === "pending");
-  const list = trustUi.propFilter === "pending" ? pending : all;
-  return (
-    <div className="tr-props">
-      <div className="toolbar">
-        <Segmented name="tr-propf" items={[{ id: "pending", label: `Pending (${pending.length})` }, { id: "all", label: `All (${all.length})` }]} value={trustUi.propFilter} onChange={(v) => { trustUi.propFilter = v; rerender(); }} label="Show proposals" />
-        <span className="small muted">The system proposes a promotion when a cell meets the criteria for its next level, and only while levels above L1 are on. A permitted person approves or declines; both need a reason.</span>
-      </div>
-      {list.length ? <ul className="tr-prop-list">{list.map((x) => <PropCard key={x.id} prop={x} cell={cells.find((c) => c.id === x.cell)!} p={p} cells={cells} proposals={proposals} />)}</ul>
-        : <div className="empty empty-state" id="tr-props-empty"><div className="empty-icon" aria-hidden="true"><Icon name="trust" /></div><div className="empty-title">{trustUi.propFilter === "pending" ? "No promotions waiting" : "No proposals yet"}</div><p>Proposals appear when a cell's clean streak, eval score and incident record meet the next level's criteria.</p></div>}
-    </div>
-  );
-}
+const STATUS_CHIP: Record<string, string> = { accepted: "ok", approved: "ok", declined: "plain", withdrawn: "plain" };
 
-function PropCard({ prop, cell, p, cells, proposals }: { prop: TrustProposal; cell: CellOut; p: LadderProps; cells: CellOut[]; proposals: TrustProposal[] }) {
+export function ProposalsTab({ p, cells, proposals }: { p: LadderProps; cells: CellOut[]; proposals: TrustProposal[] }) {
   const who = useActors();
-  if (!cell) return null;
-  const m = cell.meets;
-  const ev = cell.evidence;
-  const st = ({ pending: "Pending", accepted: "Approved", declined: "Declined", withdrawn: "Withdrawn" } as Record<string, string>)[prop.status] ?? prop.status;
+  const byId = new Map(cells.map((c) => [c.id, c]));
+  const all = proposals.filter((x) => byId.has(x.cell)).slice().reverse();
+  const pending = all.filter((x) => x.status === "pending");
+  const decided = all.filter((x) => x.status !== "pending");
+  const projName = (id: string): string => p.projects.find((x) => x.id === id)?.name ?? id;
   return (
-    <li className={`panel tr-prop is-${prop.status}${trustUi.hiProposal === prop.id ? " is-hi" : ""}`} id={`tr-prop-${prop.id}`}>
-      <div className="tr-prop-top">
-        <span className="mono strong">{prop.id}</span><span className={`chip tr-pst tr-pst-${prop.status}`}>{st}</span>
-        <button type="button" className="linkish strong" id={`tr-prop-cell-${prop.id}`} onClick={() => trustFocus({ cell: cell.id }, cells, proposals)}>{cellLabel(cell, p)}</button>
-        <span className="tr-prop-move"><LevelTag level={prop.from} /><span aria-hidden="true"> → </span><span className="sr-only"> to </span><LevelTag level={prop.to} /></span>
-        <span className="small muted">{`proposed ${fmt.ago(prop.at, Date.now())}`}</span>
-      </div>
-      <dl className="tr-kv tr-prop-kv">
-        <KV k="Clean streak" v={<span className="mono">{prop.evidence.cleanRuns}</span>} />
-        <KV k="Finished on record" v={<span className="mono">{ev.runs}</span>} extra={ev.runs < MIN_RUNS ? <span className="small muted"> small sample</span> : null} />
-        <KV k="Eval score" v={<span className="mono">{pct(prop.evidence.evalScore)}</span>} />
-        <KV k="Saves" v={<span className="mono">{`${prop.savedPerWeek || 0} approvals / week`}</span>} />
-        <KV k="Ceiling" v={<span className={`mono${prop.to > cell.ceiling.max ? " neg" : ""}`}>{`≤ ${code(cell.ceiling.max)}`}</span>} extra={prop.to > cell.ceiling.max ? <span className="small neg"> blocks this promotion</span> : null} />
-      </dl>
-      <p className="small">{prop.evidence.note || ""}{prop.status === "pending" && !m.ok && m.next === prop.to ? <span className="warn-text">{` Since proposed: ${m.missing.join(", ")}.`}</span> : null}</p>
-      {prop.status === "pending" ? <div className="tr-prop-acts"><ProposalButtons prop={prop} cell={cell} p={p} /></div>
-        : <p className="small muted">{`${st}${prop.by ? ` by ${who(prop.by).name}` : ""}${prop.decidedAt ? ` ${fmt.ago(prop.decidedAt, Date.now())}` : ""}${prop.reason ? `: ${prop.reason}` : ""}`}</p>}
-    </li>
+    <div className="tr-props stack">
+      <Panel title="Promotion proposals" flush>
+        {pending.length ? (
+          <ul className="list tr-prop-list">
+            {pending.map((x) => {
+              const cell = byId.get(x.cell)!;
+              return (
+                <li key={x.id} id={`tr-prop-${x.id}`} className={trustUi.hiProposal === x.id ? "is-hi" : undefined}>
+                  <div className="grow">
+                    <div className="row"><b>{p.agentName(cell.agent)}</b><LevelChip level={x.from} /><Icon name="right" /><LevelChip level={x.to} /><span className="small muted">{`${p.clsName(cell.cls)} · ${projName(cell.project)}`}</span></div>
+                    <div className="small">{x.evidence.note || ""}</div>
+                    <div className="small muted">{`${x.evidence.cleanRuns} clean runs · eval ${pct(x.evidence.evalScore)} · saves ~${x.savedPerWeek || 0} approvals a week`}</div>
+                    {!cell.meets.ok && cell.meets.next === x.to && cell.meets.missing.length ? <div className="small warn-text">{`Since proposed: ${cell.meets.missing.join(", ")}.`}</div> : null}
+                  </div>
+                  <ProposalButtons prop={x} cell={cell} p={p} />
+                </li>
+              );
+            })}
+          </ul>
+        ) : <Empty id="tr-props-empty" title="No proposals pending" text="An agent is proposed when it meets the criteria for the next level." />}
+      </Panel>
+      {decided.length ? (
+        <Panel title="Decided" flush>
+          <ul className="list">
+            {decided.map((x) => {
+              const cell = byId.get(x.cell)!;
+              return (
+                <li key={x.id} id={`tr-prop-${x.id}`}>
+                  <div className="grow">{`${p.agentName(cell.agent)} L${x.from} → L${x.to}`}</div>
+                  <Chip text={x.status} cls={STATUS_CHIP[x.status] ?? "plain"} />
+                  <span className="small muted">{`${x.by ? who(x.by).name : ""}${x.decidedAt ? ` · ${fmt.ago(x.decidedAt, Date.now())}` : ""}${x.reason ? ` · ${x.reason}` : ""}`}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </Panel>
+      ) : null}
+    </div>
   );
 }
 
@@ -106,7 +110,6 @@ function OutcomeDialog({ cells, projects, onDone }: { cells: CellOut[]; projects
 
 export function DemotionsTab({ cells, projects, p }: { cells: CellOut[]; projects: Project[]; p: LadderProps }) {
   const ui_ = useUI();
-  const who = useActors();
   const list: Array<{ cell: CellOut; e: CellOut["history"][number] }> = [];
   for (const c of cells) for (const e of c.history || []) if (e.kind === "demote" || (e.kind === "grant" && e.from != null && e.to < e.from)) list.push({ cell: c, e });
   list.sort((a, b) => b.e.at - a.e.at);
@@ -119,34 +122,31 @@ export function DemotionsTab({ cells, projects, p }: { cells: CellOut[]; project
   const dec: Decision | null = anyOutcome ? null : perms[0] ?? null;
   return (
     <div className="tr-demos">
-      <div className="toolbar">
-        <Segmented name="tr-demof" items={Object.keys(types).map((k) => ({ id: k, label: types[k]! }))} value={trustUi.demoFilter} onChange={(v) => { trustUi.demoFilter = v; rerender(); }} label="Filter demotions by cause" />
-        <Btn label="Record a post-release outcome" icon="alert" id="tr-rec-outcome" guard={dec} onClick={() => ui_.dialog({ title: "Record a post-release outcome", kicker: "Trust · outcomes", sub: "Recorded on the shipped work order with your name and what it is attributed to. An attributed revert or incident lowers the agent's cells for that class and project to L1 at once. Audited.", wide: true, body: (close) => <OutcomeDialog cells={cells} projects={projects} onDone={close} />, actions: [{ label: "Close" }] })} />
-      </div>
-      <p className="small muted">Automatic rules: a revert or incident attributed to the agent drops its cells for that class and project to L1; a guardrail breach or security finding does the same; two failures in the last ten reviewed runs drop a cell one level. Nothing outside these rules lowers a cell except a person.</p>
-      <DataTable id="tr-demo-table" caption="Trust demotions" rows={shown} rowKey={(d) => `${d.cell.id}@${d.e.at}`} empty={{ title: "No demotions", text: "Cells drop a level automatically after an attributed revert or incident, a guardrail breach or a security finding." }}
-        columns={[
-          { key: "at", label: "When", render: (d) => <span className="mono small">{fmt.stamp(d.e.at)}</span> },
-          { key: "cell", label: "Cell", render: (d) => <button type="button" className="linkish" id={`tr-demo-${d.cell.id.replace(/\W/g, "-")}-${d.e.at}`} onClick={() => trustFocus({ cell: d.cell.id }, cells, [])}>{cellLabel(d.cell, p)}</button> },
-          { key: "move", label: "Change", render: (d) => <span className="mono">{`${code(d.e.from ?? 0)} ▼ ${code(d.e.to)}`}</span> },
-          { key: "cause", label: "Cause", render: (d) => { const t = typeOf(d); return <span className={`tr-cause tr-cause-${t}`}><Icon name={t === "guardrail" || t === "security" ? "shield" : t === "manual" ? "human" : "alert"} />{types[t] ?? t}{d.e.cause && d.e.cause.wo ? <span>{" "}<button type="button" className="chip entity-chip" onClick={() => openRecordRoute(d.e.cause!.wo!)}>{d.e.cause.wo}</button></span> : null}</span>; } },
-          { key: "reason", label: "Reason", render: (d) => <span className="small">{d.e.reason}</span> },
-          { key: "by", label: "By", hideSmall: true, render: (d) => <span className="small">{who(d.e.by).name}</span> },
-        ]} />
+      <Panel title="Demotions" flush tools={<Btn label="Record a post-release outcome" small icon="alert" id="tr-rec-outcome" guard={dec} onClick={() => ui_.dialog({ title: "Record a post-release outcome", kicker: "Trust · outcomes", sub: "Recorded on the shipped work order with your name and what it is attributed to. An attributed revert or incident lowers the agent's cells for that class and project to L1 at once. Audited.", wide: true, body: (close) => <OutcomeDialog cells={cells} projects={projects} onDone={close} />, actions: [{ label: "Close" }] })} />}>
+        <div style={{ padding: "10px 14px 0" }}>
+          <Segmented name="tr-demof" items={Object.keys(types).map((k) => ({ id: k, label: types[k]! }))} value={trustUi.demoFilter} onChange={(v) => { trustUi.demoFilter = v; rerender(); }} label="Filter demotions by cause" />
+          <p className="small muted">Automatic rules: a revert or incident attributed to the agent drops its cells for that class and project to L1; a guardrail breach or security finding does the same; two failures in the last ten reviewed runs drop a cell one level. Nothing outside these rules lowers a cell except a person.</p>
+        </div>
+        {shown.length ? (
+          <ul className="list" id="tr-demo-table">
+            {shown.map((d) => (
+              <li key={`${d.cell.id}@${d.e.at}`}>
+                <div className="grow">
+                  <button type="button" className="linkish strong" id={`tr-demo-${d.cell.id.replace(/\W/g, "-")}-${d.e.at}`} title={cellLabel(d.cell, p)} onClick={() => trustFocus({ cell: d.cell.id }, cells, [])}>{d.cell.id}</button>
+                  <div className="small muted">{d.e.reason}</div>
+                </div>
+                <Chip text={`L${d.e.from ?? 0} → L${d.e.to}`} cls="bad" />
+                <span className="small muted">{fmt.ago(d.e.at, Date.now())}</span>
+              </li>
+            ))}
+          </ul>
+        ) : <Empty title="No demotions" text="Cells are demoted by people or by an incident." />}
+      </Panel>
     </div>
   );
 }
 
 /* ---------------- policy: switch, ceilings, criteria, sampling ---------------- */
-
-const whenText = (w: TrustCeiling["when"], p: LadderProps, cat: Catalog): string => {
-  const parts: string[] = [];
-  if (w.regulated) parts.push("regulated projects");
-  if (w.cls) parts.push(p.clsName(w.cls));
-  if (w.project) parts.push(p.projects.find((x) => x.id === w.project)?.name ?? w.project);
-  if (w.gate) parts.push(`gate ${cat.gates.find((g) => g.id === w.gate)?.label ?? w.gate}`);
-  return parts.join(" · ") || "everywhere";
-};
 
 function CeilingDialog({ c, p, projects, onDone }: { c: (TrustCeiling & { version?: number }) | null; p: LadderProps; projects: Project[]; onDone: () => void }) {
   const out = useOutcome();
@@ -198,8 +198,8 @@ function CriteriaRow({ level, p }: { level: number; p: LadderProps & { criteriaV
   );
   return (
     <tr>
-      <th scope="row"><LevelTag level={level} /></th>
-      <td>{inp("cleanRuns")}</td><td>{inp("evalMin", true)}</td><td>{inp("reworkMax", true)}</td><td>{inp("incidentsMax")}</td><td>{inp("windowD")}</td>
+      <th scope="row"><LevelChip level={level} /></th>
+      <td>{inp("cleanRuns")}</td><td>{inp("evalMin", true)}</td><td>{inp("reworkMax", true)}</td><td>{inp("windowD")}</td><td>{inp("incidentsMax")}</td>
       <td><Btn label={`Save ${code(level)}`} small id={`tr-crit-save-${level}`} guard={perm} onClick={() => {
         if (!Object.keys(d).length) { out({ ok: true, msg: "Nothing changed.", status: 200 } as never, "Nothing changed."); return; }
         void ops.setTrustCriteria(level, d, { ifMatch: p.criteriaVersion }).then((r) => { out(r); if (r.ok) setD({}); });
@@ -208,20 +208,12 @@ function CriteriaRow({ level, p }: { level: number; p: LadderProps & { criteriaV
   );
 }
 
-export function PolicyTab({ p, cells, projects }: { p: LadderProps & { criteriaVersion: number }; cells: CellOut[]; projects: Project[] }) {
+export function PolicyTab({ p, projects }: { p: LadderProps & { criteriaVersion: number }; cells: CellOut[]; projects: Project[] }) {
   const ui_ = useUI();
   const out = useOutcome();
   const perm = useCan("trust.criteria");
   const [sr, setSr] = useState<string | null>(null);
-  const ceilings = (p as unknown as { ceilings: Array<TrustCeiling & { version?: number }> }).ceilings;
-  const reach = (c: TrustCeiling): number => cells.filter((x) => {
-    const pr = projects.find((y) => y.id === x.project);
-    if (c.when.regulated && !(pr && pr.regulated)) return false;
-    if (c.when.cls && c.when.cls !== x.cls) return false;
-    if (c.when.project && c.when.project !== x.project) return false;
-    if (c.when.gate) { const g = gateForAgent(p.cat, x.agent); if (!g || g.id !== c.when.gate) return false; }
-    return true;
-  }).length;
+  const ceilings = ((p as unknown as { ceilings?: Array<TrustCeiling & { version?: number }> }).ceilings ?? []);
   const openCeiling = (c: (TrustCeiling & { version?: number }) | null) => ui_.dialog({ title: c ? `Edit ${c.id}` : "Add ceiling", kicker: "Trust · policy", sub: "Cells that match every condition you set are capped at the maximum. Saved and audited.", body: (close) => <CeilingDialog c={c} p={p} projects={projects} onDone={close} />, actions: [{ label: "Close" }] });
   const toggleSwitch = () => {
     if (p.switchOn) {
@@ -230,50 +222,43 @@ export function PolicyTab({ p, cells, projects }: { p: LadderProps & { criteriaV
       ui_.reasonDialog({ title: "Turn trust levels above L1 on", kicker: "Trust · policy", sub: "Cells at L2 and L3 will pass gates without a person (L2 reviews a sample; L3 still reviews a random sample of at least 1 in 10). Risk-tagged changes, work with text from outside the organisation, the merge and release always need a person. Audited.", label: "Reason (required)", ok: "Turn on", min: 4, guard: perm, onOk: async (t) => out(await ops.setTrustSwitch(true, t)) });
     }
   };
+  const levels = Object.keys(p.criteria).map(Number).sort((a, b) => a - b);
   return (
-    <div className="tr-policy">
+    <div className="tr-policy stack">
       <LockNote decision={perm} what="Trust policy" />
-      <Panel title="Levels above L1">
-        <div className="tr-switch">
-          <Toggle id="tr-switch" checked={p.switchOn} decision={perm} label="Trust levels above L1" onChange={toggleSwitch} />
-          <div>
-            <strong>{p.switchOn ? "On" : "Off (the default in a new install)"}</strong>
-            <p className="small muted">L0 and L1 are always enforced: a person decides every gate. L2 and L3 are built but stay switched off until there is enough evidence. While off, a cell's recorded level above L1 does nothing, no promotion is proposed and a level above L1 cannot be granted. L4 cannot be granted in this version.</p>
-          </div>
-        </div>
-      </Panel>
-      <Panel title="Ceilings" tools={<Btn label="Add ceiling" small icon="plus" id="tr-ceil-add" guard={perm} onClick={() => openCeiling(null)} />}>
-        <div>
-          <p className="small muted">A ceiling caps the level a cell can run at, whatever was granted. The lowest matching ceiling wins.</p>
-          <div className="table-scroll">
-            <table className="table table-compact tr-ceil">
-              <thead><tr>{["Id", "Rule", "Applies when", "Maximum", "Reach", "On", ""].map((x, i) => <th key={i} scope="col">{x}</th>)}</tr></thead>
-              <tbody>
-                {ceilings.map((c) => (
-                  <tr key={c.id} className={c.enabled === false ? "is-off" : ""}>
-                    <td className="mono">{c.id}</td><td>{c.text}</td><td className="small">{whenText(c.when, p, p.cat)}</td><td><LevelTag level={c.max} /></td><td className="small">{`${reach(c)} cells`}</td>
-                    <td><Toggle id={`tr-ceil-on-${c.id}`} checked={c.enabled !== false} decision={perm} label={`Enforce ${c.id}`} onChange={(v) => { void ops.saveCeiling({ ...c, enabled: v }, { ifMatch: c.version ?? 0 }).then((r) => out(r)); }} /></td>
-                    <td className="tr-acts">
-                      <Btn label="Edit" small id={`tr-ceil-edit-${c.id}`} guard={perm} onClick={() => openCeiling(c)} />
-                      <Btn label="Remove" small kind="ghost" id={`tr-ceil-rm-${c.id}`} guard={perm} onClick={() => ui_.reasonDialog({ title: `Remove ${c.id}`, sub: `${c.text}. Cells it capped may run at their granted level again.`, label: "Reason", ok: "Remove", kind: "danger", min: 4, guard: perm, onOk: async () => out(await ops.removeCeiling(c.id, { ifMatch: c.version ?? 0 })) })} />
-                    </td>
-                  </tr>
-                ))}
-                {!ceilings.length ? <tr><td colSpan={7} className="muted small">No ceilings. Every cell can run at the level it was granted.</td></tr> : null}
-              </tbody>
+      <div className="cols">
+        <Panel title="Criteria for each level" flush>
+          <p className="small muted" style={{ padding: "10px 14px 0" }}>{`What a cell must show before the system proposes the level. Eval min and rework max are percentages. A change publishes version ${p.criteriaVersion + 1}; earlier versions stay on record.`}</p>
+          <div className="tw">
+            <table className="tbl tr-crit-t">
+              <thead><tr>{["Level", "Clean runs", "Eval min", "Rework max", "Window (d)", "Incidents max", ""].map((x, i) => <th key={i} scope="col">{x}</th>)}</tr></thead>
+              <tbody>{levels.map((L) => <CriteriaRow key={`${L}-${p.criteriaVersion}`} level={L} p={p} />)}</tbody>
             </table>
           </div>
-        </div>
-      </Panel>
-      <div className="two-col">
-        <Panel title="Promotion criteria">
-          <div>
-            <p className="small muted">{`What a cell must show before the system proposes the level. Eval minimum and rework maximum are percentages. Counted from reviewed runs since the cell's last change. A change publishes version ${p.criteriaVersion + 1}; earlier versions stay on record.`}</p>
-            <div className="table-scroll">
-              <table className="table table-compact tr-crit-t">
-                <thead><tr>{["Level", "Clean runs", "Eval min %", "Rework max %", "Incidents max", "Window (days)", ""].map((x, i) => <th key={i} scope="col">{x}</th>)}</tr></thead>
-                <tbody>{[2, 3, 4].map((L) => <CriteriaRow key={`${L}-${p.criteriaVersion}`} level={L} p={p} />)}</tbody>
-              </table>
+        </Panel>
+        <Panel title="Ceilings" tools={<Btn label="Add ceiling" small icon="plus" id="tr-ceil-add" guard={perm} onClick={() => openCeiling(null)} />}>
+          <div id="tr-ceilings">
+            {ceilings.map((c) => (
+              <div key={c.id} className={`row tr-ceil-row${c.enabled === false ? " is-off" : ""}`} style={{ justifyContent: "space-between", padding: "6px 0", borderBottom: "1px dotted var(--line)" }}>
+                <span><span>{c.text}</span><span className="sub muted small" style={{ display: "block" }}>{`Max level L${c.max}`}</span></span>
+                <span className="row">
+                  <Btn label="Edit" small kind="ghost" id={`tr-ceil-edit-${c.id}`} aria={`Edit ${c.id}`} guard={perm} onClick={() => openCeiling(c)} />
+                  <Btn label="Remove" small kind="ghost" id={`tr-ceil-rm-${c.id}`} aria={`Remove ${c.id}`} guard={perm} onClick={() => ui_.reasonDialog({ title: `Remove ${c.id}`, sub: `${c.text}. Cells it capped may run at their granted level again.`, label: "Reason", ok: "Remove", kind: "danger", min: 4, guard: perm, onOk: async () => out(await ops.removeCeiling(c.id, { ifMatch: c.version ?? 0 })) })} />
+                  <Toggle id={`tr-ceil-on-${c.id}`} checked={c.enabled !== false} decision={perm} label={`Enforce ${c.id}`} onChange={(v) => { void ops.saveCeiling({ ...c, enabled: v }, { ifMatch: c.version ?? 0 }).then((r) => out(r)); }} />
+                </span>
+              </div>
+            ))}
+            {!ceilings.length ? <p className="small muted">No ceilings. Every cell can run at the level it was granted.</p> : null}
+          </div>
+        </Panel>
+      </div>
+      <div className="cols">
+        <Panel title="Levels above L1">
+          <div className="tr-switch">
+            <Toggle id="tr-switch" checked={p.switchOn} decision={perm} label="Trust levels above L1" onChange={toggleSwitch} />
+            <div>
+              <strong>{p.switchOn ? "On" : "Off (the default in a new install)"}</strong>
+              <p className="small muted">L0 and L1 are always enforced: a person decides every gate. L2 and L3 are built but stay switched off until there is enough evidence. While off, a cell's recorded level above L1 does nothing, no promotion is proposed and a level above L1 cannot be granted. L4 cannot be granted in this version.</p>
             </div>
           </div>
         </Panel>

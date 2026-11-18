@@ -4,16 +4,16 @@ import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useLearningFindings, useTrustCells } from "../../api/queries";
-import { navigate } from "../../lib/router";
+import { hashFor, navigate } from "../../lib/router";
 import { updatePrefs } from "../../lib/prefs";
-import { Btn, Chip, Empty, LockNote, Panel, type Decision } from "../../ui/primitives";
-import { DataTable } from "../../ui/DataTable";
+import { IconBtn, Btn, Chip, Empty, LockNote, Panel, type Decision } from "../../ui/primitives";
+import { DataView } from "../dataview";
 import { Icon } from "../../ui/Icon";
 import { AreaChart, Spark } from "../../ui/charts";
 import { useUI } from "../../ui/overlay-context";
 import type { AgentRow, AgentVersionRow } from "../agents/kit";
 import { useOutcome } from "../govern/data";
-import { MIN_N, agentOf, evalsUi, metricHas, rerender, suiteOf, weekLabels, weeksOf, type EvalsData } from "./kit";
+import { MIN_N, agentOf, evalsGoSuite, evalsUi, metricHas, suiteOf, useEvalsData, useEvalsUi, weekLabels, weeksOf, type EvalsData } from "./kit";
 
 const METRICS: Array<[keyof import("@gantry/domain").Scorecard, string, "pct" | "money" | "min" | "n", boolean]> = [
   ["taskSuccess", "Task success", "pct", true], ["firstPass", "First-pass approval", "pct", true], ["testPass", "Test pass", "pct", true], ["rework", "Rework", "pct", false],
@@ -101,11 +101,13 @@ function PromoteRow({ a, v, perm }: { a: AgentRow; v: AgentVersionRow; perm: Dec
   );
 }
 
-export function ScorecardsTab({ d, label }: { d: EvalsData; label: (c: { agent: string; cls: string; project: string; repo: string | null }) => string }) {
-  useUI();
+/** The agent's full scorecard (live metrics, weekly charts, suite history, promotion eligibility, trust and learning links, candidates), in a drawer opened from the list row. */
+export function ScorecardDrawer({ agentId, label, close }: { agentId: string; label: (c: { agent: string; cls: string; project: string; repo: string | null }) => string; close: () => void }) {
+  useEvalsUi();
+  const d = useEvalsData();
   const perm = useCan("agent.edit");
-  const a = agentOf(d, evalsUi.agent) ?? d.agents.find((x) => (d.scorecards[x.id]?.counts?.attempts ?? 0) > 0) ?? d.agents[0];
-  if (!a) return <Empty title="No agents" text="Create an agent to see its scorecard." />;
+  const a = agentOf(d, agentId);
+  if (!a) return <div className="drawer-inner"><div className="drawer-head"><h2 className="drawer-title">Scorecard</h2><IconBtn icon="x" label="Close" className="drawer-close" onClick={close} /></div><Empty title="Loading" text="Reading the scorecard." /></div>;
   evalsUi.agent = a.id;
   const c = d.scorecards[a.id];
   const su = suiteOf(d, a.suite);
@@ -115,58 +117,69 @@ export function ScorecardsTab({ d, label }: { d: EvalsData; label: (c: { agent: 
   const candidates: Array<[AgentRow, AgentVersionRow]> = [];
   for (const x of d.agents) for (const v of x.versions) if (v.rc) candidates.push([x, v]);
   return (
-    <div className="ev-agents">
-      <Panel title="Agent scorecards" flush cls="ev-aglist-panel">
-        <DataTable id="ev-scorecards" caption="Agent scorecards" rows={d.agents} rowKey={(x) => x.id} rowId={(x) => `ev-ag-${x.id}`} onRow={(x) => { evalsUi.agent = x.id; rerender(); }}
-          columns={[
-            { key: "name", label: "Agent", sort: (x) => x.name.toLowerCase(), render: (x) => { const su2 = d.suites.find((u) => u.id === x.suite); const below = !!su2 && x.evalScore < su2.threshold; return <span><span className={`pri${evalsUi.agent === x.id ? " is-on" : ""}`}>{evalsUi.agent === x.id ? "▸ " : ""}{x.name}</span><span className={`sub mono${below ? " neg" : ""}`}>{`Suite ${below ? "▼ " : ""}${fmt.pct(x.evalScore)}`}</span></span>; } },
-            { key: "ts", label: "Task success", align: "end", sort: (x) => d.scorecards[x.id]?.taskSuccess ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "taskSuccess") ? fmt.pct(d.scorecards[x.id]!.taskSuccess) : fmt.pct(x.evalScore)}</span> },
-            { key: "fp", label: "First pass", align: "end", sort: (x) => d.scorecards[x.id]?.firstPass ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "firstPass") ? fmt.pct(d.scorecards[x.id]!.firstPass) : "–"}</span> },
-            { key: "rw", label: "Rework", align: "end", sort: (x) => d.scorecards[x.id]?.rework ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "rework") ? fmt.pct(d.scorecards[x.id]!.rework) : "–"}</span> },
-            { key: "cost", label: "Cost / WO", align: "end", sort: (x) => d.scorecards[x.id]?.costPerWO ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "costPerWO") ? fmt.money(d.scorecards[x.id]!.costPerWO) : "–"}</span> },
-            { key: "trend", label: "8-week trend", hideSmall: true, render: (x) => { const k = d.scorecards[x.id]; return k && weeksOf(k, []).idx.length >= 2 ? <Spark values={weeksOf(k, []).success} w={90} h={24} label={`${x.name} success trend`} /> : <span className="muted">–</span>; } },
-          ]} />
-      </Panel>
-      <div className="ev-agmain">
-        <Panel title={`${a.name} scorecard`} tools={<Btn label="Open suite" small icon="eval" id="ev-open-suite" onClick={() => { evalsUi.tab = "suites"; evalsUi.suite = a.suite; evalsUi.run = null; evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; rerender(); }} />}>
-          <div>
-            <p className="small muted ev-p">{`Live work over the last 7 days, version ${a.version} on ${a.model}. Suite ${su ? `${su.id}, gate ${fmt.pct(su.threshold)}` : "none"}.`}</p>
-            <dl className="ev-tiles">
-              {METRICS.map(([k, name, kind, higher]) => (
-                <div className="ev-tile" key={k}>
-                  <dt>{name}</dt>
-                  <dd className="ev-big">{metricHas(c, k) ? fmtMetric(kind, c![k] as number) : "–"}</dd>
-                  <dd className="ev-dir small muted">{higher ? "higher is better" : "lower is better"}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="small muted ev-n" id="ev-n">
-              {n < MIN_N ? `Insufficient data: ${n} finished attempt${n === 1 ? "" : "s"} in 7 days, ${c?.counts?.decisions ?? 0} gate decision${c?.counts?.decisions === 1 ? "" : "s"}.` : `Based on ${n} finished attempts on ${c?.counts?.workOrders ?? 0} work orders and ${c?.counts?.decisions ?? 0} gate decisions in 7 days.`}
-            </p>
-          </div>
-        </Panel>
+    <div className="drawer-inner ev-agmain" id="ev-scorecard">
+      <div className="drawer-head">
+        <div><div className="kicker">Scorecard</div><h2 className="drawer-title">{`${a.name} scorecard`}</h2></div>
+        <IconBtn icon="x" label="Close" className="drawer-close" id="ev-sc-close" onClick={close} />
+      </div>
+      <div className="drawer-scroll">
+        <p className="small muted ev-p">{`Live work over the last 7 days, version ${a.version} on ${a.model}. Suite ${su ? `${su.id}, gate ${fmt.pct(su.threshold)}` : "none"}.`}</p>
+        <div className="row"><a className="btn sm" href={hashFor("agents", a.id)} id="ev-open-agent" onClick={close}>Open agent</a><Btn label="Open suite" small icon="eval" id="ev-open-suite" onClick={() => { close(); evalsGoSuite(a.suite, a.id); }} /></div>
+        <dl className="ev-tiles">
+          {METRICS.map(([k, name, kind, higher]) => (
+            <div className="ev-tile" key={k}>
+              <dt>{name}</dt>
+              <dd className="ev-big">{metricHas(c, k) ? fmtMetric(kind, c![k] as number) : "–"}</dd>
+              <dd className="ev-dir small muted">{higher ? "higher is better" : "lower is better"}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="small muted ev-n" id="ev-n">
+          {n < MIN_N ? `Insufficient data: ${n} finished attempt${n === 1 ? "" : "s"} in 7 days, ${c?.counts?.decisions ?? 0} gate decision${c?.counts?.decisions === 1 ? "" : "s"}.` : `Based on ${n} finished attempts on ${c?.counts?.workOrders ?? 0} work orders and ${c?.counts?.decisions ?? 0} gate decisions in 7 days.`}
+        </p>
         {wk.idx.length >= 2 ? (
           <div className="chart-pair">
             <AreaChart title={`${a.name}: task success by week`} values={wk.success} labels={wk.labels} fmt={(v) => fmt.pct(v)} yLabel="success rate" min={0.5} max={1} {...(su ? { threshold: su.threshold, threshLabel: `gate ${fmt.pct(su.threshold)}` } : {})} />
             <AreaChart title={`${a.name}: cost per work order by week`} values={wk.cost} labels={wk.labels} fmt={(v) => `$${v.toFixed(2)}`} yLabel="USD per work order" />
           </div>
         ) : <Panel title="Weekly trend"><Empty title="Insufficient data" text={`Charts need at least two weeks with finished attempts. ${a.name} has ${wk.idx.length}.`} /></Panel>}
-        <div className="two-col">
-          {runs.length > 1 ? (
-            <Panel title="Suite history">
-              <AreaChart title={`${su ? su.id : "Suite"} score by run`} values={runs.map((r) => r.score)} labels={runs.map((r) => r.version)} fmt={(v) => fmt.pct(v)} yLabel="suite score" min={0.4} max={1} {...(su ? { threshold: su.threshold } : {})} threshLabel="gate" />
-            </Panel>
-          ) : <Panel title="Suite history"><Empty title="Not enough runs" text="Run the suite twice to see a trend." /></Panel>}
-          <Panel title="Promotion eligibility">
-            <LockNote decision={perm} what="Promoting agent versions" />
-            <ul className="ev-promos">{a.versions.slice().reverse().map((v) => <PromoteRow key={v.v} a={a} v={v} perm={perm} />)}</ul>
+        {runs.length > 1 ? (
+          <Panel title="Suite history">
+            <AreaChart title={`${su ? su.id : "Suite"} score by run`} values={runs.map((r) => r.score)} labels={runs.map((r) => r.version)} fmt={(v) => fmt.pct(v)} yLabel="suite score" min={0.4} max={1} {...(su ? { threshold: su.threshold } : {})} threshLabel="gate" />
           </Panel>
-        </div>
+        ) : <Panel title="Suite history"><Empty title="Not enough runs" text="Run the suite twice to see a trend." /></Panel>}
+        <Panel title="Promotion eligibility">
+          <LockNote decision={perm} what="Promoting agent versions" />
+          <ul className="ev-promos">{a.versions.slice().reverse().map((v) => <PromoteRow key={v.v} a={a} v={v} perm={perm} />)}</ul>
+        </Panel>
         <OutcomesPanel a={a} label={label} />
         <Panel title="Candidates across the factory">
           {candidates.length ? <ul className="ev-promos">{candidates.map(([x, v]) => <PromoteRow key={`${x.id}-${v.v}`} a={x} v={v} perm={perm} />)}</ul> : <Empty title="No candidates" text="Create a candidate version on an agent to see it here." />}
         </Panel>
       </div>
     </div>
+  );
+}
+
+/** The prototype's Scorecards: one flat table of the agents, the agent a link to its page, the eight-week trend a plain line with an end dot. */
+export function ScorecardsTab({ d, label }: { d: EvalsData; label: (c: { agent: string; cls: string; project: string; repo: string | null }) => string }) {
+  const ui = useUI();
+  const val = (a: AgentRow, k: "taskSuccess" | "firstPass" | "rework"): number => (metricHas(d.scorecards[a.id], k) ? d.scorecards[a.id]![k] : k === "taskSuccess" ? a.evalScore : -1);
+  const cell = (a: AgentRow, k: "taskSuccess" | "firstPass" | "rework") => <span className="num">{val(a, k) >= 0 ? fmt.pct(val(a, k)) : "–"}</span>;
+  const open = (a: AgentRow): void => navigate("agents", a.id);
+  if (!d.agents.length) return <Empty title="No agents" text="Create an agent to see its scorecard." />;
+  return (
+    <Panel title="Agent scorecards" flush cls="ev-aglist-panel">
+      <DataView id="ev-scorecards" noun="agent" rows={d.agents} rowKey={(x) => x.id} rowId={(x) => `ev-ag-${x.id}`} text={(x) => x.name} onRow={open} pageSize={12} empty={{ title: "No agents", text: "Create an agent to see its scorecard." }}
+        columns={[
+          { key: "name", label: "Agent", sort: (x) => x.name.toLowerCase(), render: (x) => <a className="pri" href={hashFor("agents", x.id)} onClick={(e) => { e.preventDefault(); open(x); }}>{x.name}</a> },
+          { key: "ts", label: "Task success", align: "end", sort: (x) => val(x, "taskSuccess"), render: (x) => cell(x, "taskSuccess") },
+          { key: "fp", label: "First pass", align: "end", sort: (x) => val(x, "firstPass"), render: (x) => cell(x, "firstPass") },
+          { key: "rw", label: "Rework", align: "end", sort: (x) => val(x, "rework"), render: (x) => cell(x, "rework") },
+          { key: "cost", label: "Cost / WO", align: "end", sort: (x) => d.scorecards[x.id]?.costPerWO ?? -1, render: (x) => <span className="num">{metricHas(d.scorecards[x.id], "costPerWO") ? fmt.money(d.scorecards[x.id]!.costPerWO) : "–"}</span> },
+          { key: "trend", label: "8-week trend", hideSmall: true, render: (x) => { const k = d.scorecards[x.id]; const w = k ? weeksOf(k, []) : null; return w && w.idx.length >= 2 ? <Spark values={w.success} w={90} h={24} plain label={`Trend ${w.success.map((v) => +v.toFixed(2)).join(", ")}`} /> : <span className="muted">–</span>; } },
+          { key: "detail", label: "", align: "end", render: (x) => <Btn label="Scorecard" small kind="ghost" id={`ev-sc-open-${x.id}`} aria={`Open the full scorecard of ${x.name}`} onClick={() => { evalsUi.agent = x.id; ui.drawer.open(`ev-sc:${x.id}`, (close) => <ScorecardDrawer agentId={x.id} label={label} close={close} />); }} /> },
+        ]} />
+    </Panel>
   );
 }
