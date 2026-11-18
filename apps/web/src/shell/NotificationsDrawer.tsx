@@ -1,9 +1,13 @@
 /** The bell's right-hand drawer (prototype notesDrawer): gate requests with Review, recent events, and the two footer actions. */
+import { gateLabelOf } from "../lib/gate-label";
 import { useSyncExternalStore } from "react";
 import { useActivity, useHome } from "../api/queries";
 import { navigate } from "../lib/router";
 import { setProject } from "../lib/prefs";
 import { Avatar, Btn } from "../ui/primitives";
+import { useActors } from "../ui/actors";
+import { eventSentence } from "../lib/eventText";
+import { useCatalog } from "../views/projects/kit";
 import { useUI } from "../ui/overlay-context";
 import { Async } from "../ui/async";
 
@@ -32,6 +36,9 @@ export function NotificationsBody({ close }: { close: () => void }) {
   const home = useHome();
   const act = useActivity();
   const ui = useUI();
+  const actor = useActors();
+  const cat = useCatalog();
+  const name = (id: string | null | undefined) => actor(id).name.replace(" (agent)", "");
   const gates = (home.data?.approvals ?? []).filter((a) => a.wo).slice(0, 4);
   const waiting = (home.data?.approvals.length ?? 0) + (home.data?.conversations.length ?? 0);
   const events = (Array.isArray(act.data) ? act.data : (act.data?.items ?? [])).slice(0, 14);
@@ -51,7 +58,7 @@ export function NotificationsBody({ close }: { close: () => void }) {
               {gates.map((a) => (
                 <div key={`${a.wo}-${a.gate}`} className="callout warn" style={{ marginBottom: 8 }}>
                   <b>{`${a.wo} needs your approval`}</b>
-                  {`${a.title ?? ""} · ${a.gateLabel ?? a.gate ?? ""}`}
+                  {`${a.title ?? ""} · ${gateLabelOf(a.gateLabel, a.gate)}`}
                   <div style={{ marginTop: 6 }}>
                     <Btn label="Review" small kind="primary" onClick={() => { close(); if (a.project) setProject(a.project); if (a.wo) navigate("record", a.wo); }} />
                   </div>
@@ -63,8 +70,8 @@ export function NotificationsBody({ close }: { close: () => void }) {
                     <li key={e.id}>
                       <Avatar id={e.by} size="sm" />
                       <div className="grow">
-                        <div className="trunc">{(e as { text?: string }).text ?? e.type}</div>
-                        <div className="small muted">{`${e.type} · ${e.wo ?? ""} · ${ago(e.at)}`}</div>
+                        <div>{eventSentence(e, { cat, name })}</div>
+                        <div className="small muted">{ago(e.at)}</div>
                       </div>
                     </li>
                   ))}

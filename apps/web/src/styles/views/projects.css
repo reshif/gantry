@@ -49,3 +49,6 @@
 .prj-wz .radio-card .rc-t { font-weight: 600; }
 .prj-wz .radio-card .rc-d { color: var(--muted); font-size: var(--t-md); }
 .prj-wz .radio-card .rc-d:last-child { color: var(--faint); font-size: var(--t-sm); }
+
+/* Project cards: the numbers, the meter and the buttons sit at the bottom of every card, so a row of cards lines up whatever the description's length. */
+.prj-card-foot { display: grid; gap: var(--s2); margin-top: auto; }

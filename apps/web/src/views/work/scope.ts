@@ -5,7 +5,8 @@ import { usePrefs } from "../../lib/prefs";
 export function useScope(): { project: string | null; kicker: string } {
   const prefs = usePrefs();
   const list = useProjects().data;
-  const project = prefs.project;
+  // "All lines" wins: the switcher shows the whole factory whenever scopeAll is set, whatever project was chosen last
+  const project = prefs.scopeAll ? null : prefs.project;
   const p = project ? (list ?? []).find((x) => x.id === project) : null;
   return { project: p ? p.id : null, kicker: p ? p.key : "All lines" };
 }

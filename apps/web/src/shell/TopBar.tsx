@@ -67,7 +67,7 @@ export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me:
       // the Account page (profile, access, sessions, preferences, linked accounts); its Profile tab links on to the person page
       { label: "My account", icon: "user", onClick: () => navigate("account") },
       { sep: true },
-      { head: "View as" },
+      { head: "View as (preview only)" },
       ...viewAs,
       { sep: true },
       { label: "Sign out", icon: "logout", onClick: () => void signOut() },

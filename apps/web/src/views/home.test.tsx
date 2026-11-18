@@ -8,6 +8,7 @@ import { setCsrfToken } from "../api/client";
 import { flowFrom } from "./projects/templates-kit";
 import { OverlayProvider } from "../ui/Overlay";
 import HomeView from "./home";
+import { updatePrefs } from "../lib/prefs";
 
 /**
  * Home is one page for everyone: the API puts the sections a person may see in `home.sections`, and the page renders what is present.
@@ -181,8 +182,19 @@ describe("Home: one page", () => {
     mount();
     await screen.findByText("WO-1");
     expect(Array.from(document.querySelectorAll(".hm-need a.pri")).map((a) => a.textContent)).toEqual(["WO-1", "WO-2"]);
-    const li = document.querySelector(".hm-need") as HTMLElement;
-    expect(Array.from(li.children).filter((c) => c.tagName === "BUTTON").map((b) => b.textContent)).toEqual(["Approve", "Request changes", "Reject"]);
+    // one action bar: the decisions, then Conversation and Record, in a single wrapping row (no staggered rows)
+    const bar = document.querySelector(".hm-need .act-bar") as HTMLElement;
+    expect(Array.from(bar.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Approve", "Request changes", "Reject", "Conversation", "Record"]);
+  });
+
+  it("the eyebrow names the scope the switcher holds: All lines, never a project key left over from an earlier choice", async () => {
+    updatePrefs({ project: "payments", scopeAll: true });
+    setup(ASHA, adminHome({}, { setup: undefined }));
+    mount();
+    await screen.findByRole("heading", { level: 2, name: /Needs you/ });
+    const eyebrow = document.querySelector(".eyebrow") as HTMLElement;
+    expect(eyebrow.textContent).toMatch(/ALL LINES/);
+    expect(eyebrow.textContent).not.toContain("PAY");
   });
 
   it("Needs you asks for changes at the gate with a reason, pinned to the shown instance", async () => {
@@ -252,7 +264,7 @@ describe("Home: one page", () => {
     const one = { wo: "WO-1", title: "Rounding", gate: "G2", gateLabel: "G2", gateName: "Spec approval", project: "payments", projectName: "Payments Platform" };
     setup(ASHA, adminHome({}, { setup: undefined, attention: [], waiting: { approvals: [one], conversations: [] } }));
     mount();
-    expect(await screen.findByText(/1 work order waits on a person\./)).toBeTruthy();
+    expect(await screen.findByText(/1 approval waits on you/)).toBeTruthy();
     expect(text()).not.toMatch(/1 projects|1 work orders|1 items/);
   });
 });

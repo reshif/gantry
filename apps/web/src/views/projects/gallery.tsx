@@ -30,15 +30,17 @@ function Card({ p, owner }: { p: PView; owner: string }) {
       <div className="row">
         <span className="mono small" style={{ border: "1px solid var(--accent)", color: "var(--accent)", padding: "0 6px" }}>{p.key}</span>
         <h3 className="grow">{p.name}</h3>
+        {p.regulated ? <Chip text="regulated" cls="warn" /> : null}
       </div>
-      {p.regulated ? <div className="row"><Chip text="regulated" cls="warn" /></div> : null}
       <div className="small muted">{p.desc}</div>
+      <div className="prj-card-foot">
       <div className="row small"><span className="num">{String(m.wip)}</span> in flight · <span className="num">{String(m.gates)}</span> at gates · <Done id={p.id} /></div>
       <Meter value={p.budget.mtd} max={p.budget.monthly} label={`${p.name} spend`} warnAt={p.budget.alertAt} />
       <div className="small muted">{`${fmt.money0(p.budget.mtd)} of ${fmt.money0(p.budget.monthly)} · owner ${owner}`}</div>
       <div className="row">
         <Btn small kind="primary" id={`prj-floor-${p.id}`} aria={`Open the floor for ${p.name}`} label="Open Floor" onClick={() => goProject(p.id, "floor")} />
         <Btn small id={`prj-cfg-${p.id}`} aria={`Configure ${p.name}`} label="Config" onClick={() => goProject(p.id, "project-config")} />
+      </div>
       </div>
     </div>
   );

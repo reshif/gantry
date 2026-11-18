@@ -1,6 +1,7 @@
 /** Home (#home): one page for everyone. The API decides which sections a person gets (`home.sections`); this renders what is present, in a fixed order: attention, waiting on you, set up, in motion, projects, health. */
 import { useCan } from "../api/can";
 import { useMemo } from "react";
+import { useNavBadges } from "../api/queries/nav";
 import { useHome, useMe, useProjects, useScorecards } from "../api/queries";
 import { plural } from "../lib/plural";
 import { runCommand } from "../lib/commands";
@@ -23,6 +24,7 @@ export default function HomeView() {
   const submit = useCan("wo.submit");
   const home = q.data as unknown as HomeFull | undefined;
   const scope = useScope();
+  const badges = useNavBadges();
   const names = useMemo(() => new Map(projects.map((p) => [p.id, p.name] as [string, string])), [projects]);
   const allItems = useItems(home, names);
   const cards = useScorecards().data;
@@ -54,6 +56,8 @@ export default function HomeView() {
       !(i.kind === "gate" && attIds.has(`hm-att-sla-${i.a.wo}-${i.a.gate}`)),
   );
   const pending = items.filter((i) => i.kind === "gate").length;
+  // The left nav's Inbox count is the one number for everything waiting on this person; this page says which part of it it counts.
+  const inboxTotal = badges.inbox?.n ?? 0;
   const away = me.person.away && me.person.away.to > Date.now() ? `Away until ${fmt.istDate(me.person.away.to)}.` : "";
   const showWaiting = !!s.waiting;
   const m = s.motion;
@@ -66,7 +70,7 @@ export default function HomeView() {
   const success = scores.length ? { v: scores.reduce((a, b) => a + b, 0) / scores.length, sub: "agents, last 7 days" } : hl?.evals && hl.evals.scored ? { v: hl.evals.passing / hl.evals.scored, sub: "agent versions passing evals" } : null;
   const budgetPct = hl && hl.spend.budget ? hl.spend.spent / hl.spend.budget : 0;
   const first = me.person.name.split(" ")[0];
-  const sub = away || (showWaiting ? `${greetingAt(new Date().getHours())}, ${first}. ${plural(pending, "work order")} ${pending === 1 ? "waits" : "wait"} on a person.` : "What needs you, what is moving, and how the factory is doing.");
+  const sub = away || (showWaiting ? `${greetingAt(new Date().getHours())}, ${first}. ${plural(pending, "approval")} ${pending === 1 ? "waits" : "wait"} on you${inboxTotal > pending ? ` (${inboxTotal} things in your Inbox)` : ""}.` : "What needs you, what is moving, and how the factory is doing.");
   const hasStats = showWaiting || !!m || !!hl;
   // The one primary action. Locked with the reason (never hidden) when this person may not submit, or no repo can take work yet.
   const submitBlock = s.setup ? "Finish setting up the factory first: no repo is Ready for work yet." : null;
@@ -80,7 +84,7 @@ export default function HomeView() {
       />
       {hasStats ? (
         <StatRow id="hm-stats">
-          {showWaiting ? <Stat id="hm-stat-waiting" label="Waiting on you" value={String(pending)} sub="gates to approve" href="#inbox" tone={pending ? "wait" : "done"} /> : null}
+          {showWaiting ? <Stat id="hm-stat-waiting" label="Waiting on you" value={String(pending)} sub={inboxTotal > pending ? `gates to approve · ${inboxTotal} in Inbox` : "gates to approve"} href="#inbox" tone={pending ? "wait" : "done"} /> : null}
           {m ? <Stat id="hm-stat-flight" label="In flight" value={String(inFlight)} sub="across the line" href="#floor" tone="info" /> : null}
           {m ? <Stat id="hm-stat-shipped" label="Released" value={String(m.shippedWeek)} sub="work orders closed" tone="done" /> : null}
           {success ? <Stat id="hm-stat-evals" label="Task success" value={fmt.pct(success.v)} sub={success.sub} href="#evals" tone="done" /> : null}

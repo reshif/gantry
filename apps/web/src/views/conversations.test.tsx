@@ -68,7 +68,7 @@ describe("Conversations list", () => {
 
   it("lists the threads (WO-id, full title, last message, a reason chip) linking to conversations/<id>, with the picked one in a second panel and Open record", async () => {
     showList([row(), row({ id: "WO-9", title: "Other", waitingOn: "agent", unread: false, latest: null, started: false })]);
-    expect(await screen.findByText("Gate G0G1")).toBeTruthy();
+    expect(await screen.findByText("Gate G0+G1")).toBeTruthy();
     expect(screen.getByText(/Which endpoint is this for\?/)).toBeTruthy();
     const link = screen.getByRole("link", { name: new RegExp(`${W.id}.*${W.title.slice(0, 12)}`) });
     expect(link.getAttribute("href")).toBe(`#/p/payments/conversations/${W.id}`);

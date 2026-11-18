@@ -93,12 +93,12 @@ describe("Work orders list: Project and Needs columns, row actions", () => {
     wos([mk("WO-7001"), mk("WO-7002")], home({ approvals: [], conversations: [{ wo: "WO-7001", title: "t", project: "payments", question: "Which one?" }] }));
     mount(<WorkOrdersView />);
     await screen.findByText("WO-7001");
-    for (const id of ["WO-7001", "WO-7002"]) {
-      expect(document.getElementById(`wo-conv-${id}`)).toBeTruthy();
-      expect(document.getElementById(`wo-rec-${id}`)).toBeTruthy();
-    }
+    for (const id of ["WO-7001", "WO-7002"]) expect(document.getElementById(`wo-rec-${id}`)).toBeTruthy();
+    expect(document.getElementById("wo-conv-WO-7002")).toBeTruthy();
     expect(await waitFor(() => { const e = document.getElementById("wo-primary-WO-7001"); if (!e) throw new Error("no answer"); return e; })).toBeTruthy();
     expect(document.getElementById("wo-primary-WO-7002")).toBeNull();
+    // Answer opens the conversation, so the row with Answer has no second Conversation button
+    expect(document.getElementById("wo-conv-WO-7001")).toBeNull();
     fireEvent.click(document.getElementById("wo-conv-WO-7002") as HTMLElement);
     await waitFor(() => expect(window.location.hash).toBe("#/p/payments/conversations/WO-7002"));
     fireEvent.click(document.getElementById("wo-rec-WO-7002") as HTMLElement);
@@ -115,14 +115,14 @@ describe("Work orders list: Project and Needs columns, row actions", () => {
 });
 
 describe("The same work order actions in every place", () => {
-  it("Inbox rows: a question offers Answer, Conversation, Record; Conversation navigates", async () => {
+  it("Inbox rows: a question offers Answer and Record (Answer opens the conversation); no duplicate Conversation", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ conversations: [{ wo: "WO-8", title: "Asked", project: "payments", question: "Which?" }], approvals: [] }) }) });
     window.history.replaceState(null, "", "/?tab=questions");
     mount(<InboxView />);
     await screen.findByText("Awaiting answer");
     const labels = within(screen.getByText("WO-8").closest("li") as HTMLElement).getAllByRole("button").map((b) => b.textContent);
-    expect(labels).toEqual(["Answer", "Conversation", "Record"]);
-    fireEvent.click(screen.getByRole("button", { name: "Conversation for WO-8" }));
+    expect(labels).toEqual(["Answer", "Record"]);
+    fireEvent.click(screen.getByRole("button", { name: "Answer for WO-8" }));
     await waitFor(() => expect(window.location.hash).toBe("#/p/payments/conversations/WO-8"));
   });
 
@@ -142,5 +142,12 @@ describe("The same work order actions in every place", () => {
     const groups = container.querySelectorAll(".wo-acts");
     expect(Array.from(groups[0]!.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Conversation", "Record"]);
     expect(Array.from(groups[1]!.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Conversation"]);
+  });
+
+  it("an open question shows Answer and Record, not a second Conversation button that does the same thing", async () => {
+    mockApi();
+    const { container } = mount(<WoActions wo="WO-1" project="payments" needs={{ kind: "question", text: "", mine: true }} />);
+    await waitFor(() => expect(Array.from(container.querySelectorAll(".wo-acts button")).map((b) => b.textContent)).toContain("Answer"));
+    expect(Array.from(container.querySelectorAll(".wo-acts button")).map((b) => b.textContent)).toEqual(["Answer", "Record"]);
   });
 });

@@ -17,11 +17,13 @@ export function WoActions({ wo, project, repo, needs, idPrefix = "woa", omit = [
   const q = needs?.kind === "question";
   const g = needs?.kind === "gate";
   const primary = q ? { label: WO_ACTION_LABELS.answer, d: answer, go: () => navigate("conversations", wo, project) } : g ? { label: WO_ACTION_LABELS.approve, d: approve, go: () => navigate("record", wo, project) } : null;
+  const showPrimary = !!primary && !primary.d.pending && primary.d.allowed;
+  // Answer opens the conversation, so beside it a second Conversation button would be the same control twice
   const has = (a: WoAction): boolean => !omit.includes(a);
   return (
     <div className="row wo-acts" role="group" aria-label={`Actions for ${wo}`}>
-      {primary && has("primary") && !primary.d.pending && primary.d.allowed ? <Btn label={primary.label} small={small} kind="primary" id={`${idPrefix}-primary-${wo}`} aria={`${primary.label} for ${wo}`} onClick={primary.go} /> : null}
-      {has("conversation") ? <Btn label={WO_ACTION_LABELS.conversation} small={small} {...(kind ? { kind } : {})} id={`${idPrefix}-conv-${wo}`} aria={`${WO_ACTION_LABELS.conversation} for ${wo}`} onClick={() => navigate("conversations", wo, project)} /> : null}
+      {primary && has("primary") && showPrimary ? <Btn label={primary.label} small={small} kind="primary" id={`${idPrefix}-primary-${wo}`} aria={`${primary.label} for ${wo}`} onClick={primary.go} /> : null}
+      {has("conversation") && !(q && has("primary") && showPrimary) ? <Btn label={WO_ACTION_LABELS.conversation} small={small} {...(kind ? { kind } : {})} id={`${idPrefix}-conv-${wo}`} aria={`${WO_ACTION_LABELS.conversation} for ${wo}`} onClick={() => navigate("conversations", wo, project)} /> : null}
       {has("record") ? <Btn label={WO_ACTION_LABELS.record} small={small} {...(kind ? { kind } : {})} id={`${idPrefix}-rec-${wo}`} aria={`${WO_ACTION_LABELS.record} for ${wo}`} onClick={() => navigate("record", wo, project)} /> : null}
     </div>
   );
