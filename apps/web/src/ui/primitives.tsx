@@ -215,9 +215,18 @@ export interface TabItem {
   count?: number | string | null;
 }
 
-export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: TabItem[]; active: string; onChange: (id: string) => void; idPrefix?: string }) {
+export function Tabs({ items, active, onChange, idPrefix = "tab", revealActive }: { items: TabItem[]; active: string; onChange: (id: string) => void; idPrefix?: string; /** scroll the active tab to the middle of a strip that overflows (the Blueprint does, so a deep link at phone width opens on its tab) */ revealActive?: boolean }) {
   const bar = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState("");
+  useEffect(() => {
+    if (!revealActive) return;
+    const t = setTimeout(() => {
+      const el = bar.current;
+      const on = el?.querySelector<HTMLElement>(".tab.is-active");
+      if (el && on && el.scrollWidth > el.clientWidth) el.scrollTo({ left: on.offsetLeft - (el.clientWidth - on.offsetWidth) / 2 });
+    }, 30);
+    return () => clearTimeout(t);
+  }, [active, revealActive]);
   useEffect(() => {
     const el = bar.current;
     if (!el) return;
@@ -262,8 +271,22 @@ export function Tabs({ items, active, onChange, idPrefix = "tab" }: { items: Tab
   );
 }
 
+/** A text-like input in the standard control style (the `input` class). Put it inside a Field. */
+export function Input({ className = "", ...rest }: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...rest} className={`input${className ? ` ${className}` : ""}`} />;
+}
+
 /** Radio group styled as buttons. */
-export function Segmented({ name, items, value, onChange, label }: { name: string; items: Array<{ id: string; label: string; icon?: string }>; value: string; onChange: (id: string) => void; label?: string }) {
+export function Segmented({ name, items, value, onChange, label, pressed }: { name: string; items: Array<{ id: string; label: string; icon?: string }>; value: string; onChange: (id: string) => void; label?: string; /** Prototype `.seg` of toggle buttons (aria-pressed) instead of radios: a view switch such as Cards / Table. */ pressed?: boolean }) {
+  if (pressed) {
+    return (
+      <div className="seg" role="group" aria-label={label || name}>
+        {items.map((it) => (
+          <button key={it.id} type="button" id={`${name}-${it.id}`} aria-pressed={it.id === value ? "true" : "false"} onClick={() => onChange(it.id)}>{it.label}</button>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="seg" role="radiogroup" aria-label={label || name}>
       {items.map((it) => {

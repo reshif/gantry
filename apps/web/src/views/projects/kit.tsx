@@ -224,7 +224,7 @@ export const focusLater = (id: string): void => {
 };
 
 /** Number input that commits on change (legacy numInput). */
-export function NumInput({ id, value, min, max, onCommit, locked, label }: { id: string; value: number; min: number; max: number; onCommit: (v: number) => void; locked?: boolean; label?: string }) {
+export function NumInput({ id, value, min, max, limit, minMsg, onCommit, locked, label }: { id: string; value: number; min: number; max: number; /** the largest value accepted (the input's max attribute may be tighter) */ limit?: number; /** the toast for a value below min */ minMsg?: string; onCommit: (v: number) => void; locked?: boolean; label?: string }) {
   const ui = useUI();
   const [draft, setDraft] = useState<string | null>(null);
   return (
@@ -242,8 +242,8 @@ export function NumInput({ id, value, min, max, onCommit, locked, label }: { id:
         if (draft === null) return;
         const v = parseInt(draft, 10);
         setDraft(null);
-        if (Number.isNaN(v) || v < min || v > max) {
-          ui.toast(`Enter a number from ${min} to ${max}.`, "error");
+        if (Number.isNaN(v) || v < min || v > (limit ?? max)) {
+          ui.toast(minMsg && (Number.isNaN(v) || v < min) ? minMsg : `Enter a number from ${min} to ${limit ?? max}.`, "error");
           return;
         }
         if (v !== value) onCommit(v);

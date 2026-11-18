@@ -358,7 +358,7 @@ export function FlowTab({ p, cat, s, set }: PcProps) {
                           }} />
                         )}
                       </td>
-                      <td>{mode === "auto" ? <span className="muted small">no approvers</span> : <Btn small kind="ghost" id={`pcf-gate-ap-${g.id}`} label="Approvers" onClick={() => set({ tab: "approvers", gate: g.id })} />}</td>
+                      <td>{mode === "auto" ? <span className="muted small">no approvers</span> : <Btn small kind="ghost" id={`pcf-gate-ap-${g.id}`} label="Approvers" onClick={() => set({ tab: "rules", gate: g.id })} />}</td>
                     </tr>
                   );
                 })}

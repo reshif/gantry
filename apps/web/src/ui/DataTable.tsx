@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto, range }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto, range, linkRows, sortHint, sortSelect = true }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -44,7 +44,13 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   rowHref?: (r: R) => string;
   /** Accessible name of the first-cell control when the cell's text is not enough ("Open work order WO-12"). */
   rowLabel?: (r: R) => string;
+  /** Prototype list: a click on the row (outside its own controls) follows the row's primary link `a.pri`. Adds no control of its own. */
+  linkRows?: boolean;
   sort?: SortState | undefined;
+  /** Show the faint up-down mark on sortable headers that are not the sort column (the Blueprint's `sorthint`). */
+  sortHint?: boolean;
+  /** The "Sort by" select shown above the cards on a phone; the Blueprint has none. Default true. */
+  sortSelect?: boolean;
   onSort?: (s: SortState) => void;
   /** Client paging: show this many, then "Show more". */
   pageSize?: number;
@@ -131,7 +137,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const clientMore = !proto && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
-      {sortable.length && mobileSort && !proto ? (
+      {sortable.length && mobileSort && sortSelect && !proto ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
           <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>
@@ -172,9 +178,10 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
               return (
                 <tr
                   key={key}
-                  className={action ? "rowtr" : undefined}
+                  className={action || linkRows ? "rowtr" : undefined}
                   data-key={key}
                   {...(rowId ? { id: rowId(r) } : {})}
+                  {...(linkRows && !action ? { onClick: (e: React.MouseEvent<HTMLTableRowElement>) => { if ((e.target as HTMLElement).closest(INTERACTIVE)) return; e.currentTarget.querySelector<HTMLAnchorElement>("a.pri[href]")?.click(); } } : {})}
                   {...(action ? { onClick: (e: React.MouseEvent) => { if ((e.target as HTMLElement).closest(INTERACTIVE)) return; if (onRow) onRow(r); else if (rowHref) window.location.assign(rowHref(r)); } } : {})}
                 >
                   {columns.map((c, i) => {

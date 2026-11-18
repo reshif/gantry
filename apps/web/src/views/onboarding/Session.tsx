@@ -4,17 +4,25 @@
  * timeline. Side panel: where the repo is in the lifecycle, who acts next, what it cost, what is proposed.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { assessorLabel, fmt, type OnboardFinding, type SessionCard } from "@gantry/domain";
-import { useRepos } from "../../api/queries";
-import { Btn, Chip, Empty, Who } from "../../ui/primitives";
+import { fmt, type SessionCard } from "@gantry/domain";
+import { useCan } from "../../api/can";
+import { commands } from "../../api/commands";
+import { useProjects, useRepos } from "../../api/queries";
+import { hashFor, navigate } from "../../lib/router";
+import { ActBtn, Kv } from "../projects/proto";
+import { useTab } from "../projects/proto";
+import { Avatar, Btn, Chip, Empty, Panel, Tabs, ViewHead, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { decide, markSeen, sendTurn, useSession, type Session, type SessionMessage } from "./session-api";
-import { StatusChip, type RepoV } from "./kit";
+import { busyText, useAvailableRepos, type RepoV } from "./kit";
+import { PSTAGES, protoStage } from "./proto";
 import { QuestionCard, useThreadEnd } from "../session/kit";
 
 type Proposal = Extract<SessionCard, { kind: "proposal" }>;
+/** Message roles drawn on the right (the person's own words). */
+const ME: Record<string, true> = { user: true };
 const ACTORS: Record<string, string> = { system: "Gantry", "ag-onboard": "Onboarding Agent", ci: "CI" };
 const nameOf = (who: string): React.ReactNode => ACTORS[who] ?? (who.startsWith("github:") ? who : <Who id={who} />);
 
@@ -22,36 +30,6 @@ const nameOf = (who: string): React.ReactNode => ACTORS[who] ?? (who.startsWith(
 
 function Source({ source }: { source: "observed" | "agent" }) {
   return source === "agent" ? <span className="chip chip-accent onb-src" title="Drafted by the Onboarding Agent">Agent</span> : <span className="chip onb-src" title="Read or written by Gantry from the repository's own files">Observed</span>;
-}
-
-function FindingsCard({ r }: { r: RepoV }) {
-  const o = r.onboarding;
-  if (!o.findings.length) return null;
-  const list: OnboardFinding[] = o.findings.slice().sort((a, b) => Number(a.ok) - Number(b.ok));
-  const gaps = list.filter((f) => !f.ok).length;
-  return (
-    <article className="osx-card" id="osx-findings" aria-label="Assessment findings">
-      <header className="osx-card-h">
-        <strong>{`Assessment · ${gaps} gap${gaps === 1 ? "" : "s"} of ${list.length}`}</strong>
-        <span className="muted small">{assessorLabel(o.assessor)}</span>
-      </header>
-      {o.assessor?.mode === "rule-based" ? <p className="small muted">{o.assessor.reason ? `Rule-based (no agent): ${o.assessor.reason}` : "Rule-based (no agent): every finding was read from the repository by fixed rules."}</p> : null}
-      {o.assessor?.risk ? <p className="small">{`Agent's risk judgement: ${o.assessor.risk.level}. ${o.assessor.risk.reason}`}</p> : null}
-      <ul className="osx-findings">
-        {list.map((f) => (
-          <li key={f.id} className={f.ok ? "is-ok" : "is-gap"}>
-            <span className="osx-f-ic"><Icon name={f.ok ? "check" : f.manual ? "human" : "alert"} /></span>
-            <div>
-              <strong>{f.check}</strong>
-              {f.ok ? <span className="muted small"> passes</span> : <span className="small"> · {f.sev}{f.required === false ? " · advisory" : ""}</span>}
-              <div className="small"><Source source="observed" />{` ${f.detail ?? (f.ok ? "Met." : f.fix)}`}</div>
-              {f.note ? <div className="small"><Source source="agent" />{` ${f.note}`}</div> : null}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </article>
-  );
 }
 
 function ProposalCard({ m, c, s, send }: { m: SessionMessage; c: Proposal; s: Session; send: (b: { kind: "continue" }) => void }) {
@@ -141,10 +119,52 @@ function Cards({ m, s, send, last }: { m: SessionMessage; s: Session; send: (b: 
 
 /* ------------------------------------------------------------------ the page ---- */
 
+const STEPS = (st: number) => (
+  <div className="stepper" id="osx-steps">
+    {PSTAGES.map((n, i) => <div key={n} className={i < st ? "done" : i === st ? "on" : ""} aria-current={i === st ? "step" : undefined}>{`${i + 1}. ${n}`}</div>)}
+  </div>
+);
+
+/** A repository the sources can see that has not been started: the same page with nothing assessed yet (the Blueprint's stage 0). */
+function NotStarted({ projectId, projectName, name, lang }: { projectId: string; projectName: string; name: string; lang: string }) {
+  const [tab, setTab] = useTab(["findings", "pr", "settings"], "findings");
+  const none = "Start the assessment from the Onboarding list first.";
+  return (
+    <div className="osx" id="osx">
+      <ViewHead crumbs={[{ label: "Onboarding", href: hashFor("onboarding", null, projectId) }, { label: name }]} title={name} sub="Onboarding session" />
+      {STEPS(0)}
+      <Tabs revealActive idPrefix="osx-tab" items={[{ id: "findings", label: "Findings" }, { id: "pr", label: "Pull request" }, { id: "settings", label: "Settings" }]} active={tab} onChange={setTab} />
+      <div className="stack">
+        {tab === "findings" ? (
+          <>
+            <Panel title="Assessment against guidelines" flush><ul className="list" /></Panel>
+            <Panel title="Conversation with the Onboarding agent"><div className="chat" /></Panel>
+          </>
+        ) : tab === "pr" ? (
+          <Panel title="Onboarding pull request">
+            <Empty title="No pull request yet" text="Open one and the agent writes AGENTS.md, CODEOWNERS and the factory config." action={<>
+              <Btn kind="primary" id="osx-openpr" label="Open pull request" disabled disabledReason={none} />
+              <Btn id="osx-openanyway" label="Open anyway" disabled disabledReason={none} />
+            </>} />
+          </Panel>
+        ) : (
+          <Panel title="Settings"><Kv rows={[["Repository", name], ["Language", lang], ["Project", projectName], ["Default branch", "—"]]} /></Panel>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function SessionPage({ projectId, repoId, back, details }: { projectId: string; repoId: string; back: () => void; details: () => void }) {
-  const repos = (useRepos(projectId).data ?? []) as RepoV[];
+  const reposQ = useRepos(projectId);
+  const repos = (reposQ.data ?? []) as RepoV[];
   const r = repos.find((x) => x.id === repoId);
-  const q = useSession(repoId);
+  const projectName = useProjects().data?.find((p) => p.id === projectId)?.name ?? projectId;
+  const manage = useCan("onboarding.manage", { project: projectId, repo: repoId });
+  const merge = useCan("onboarding.merge", { project: projectId, repo: repoId });
+  const [tab, setTab] = useTab(["findings", "pr", "settings"], "findings");
+  const availQ = useAvailableRepos(projectId, true);
+  const q = useSession(repoId, !!r);
   const s = q.data;
   const ui = useUI();
   const [live, setLive] = useState<{ text: string; tools: string[]; cards: SessionCard[] } | null>(null);
@@ -186,92 +206,131 @@ export function SessionPage({ projectId, repoId, back, details }: { projectId: s
     return [...msgs, ...tl].sort((a, b) => a.at - b.at);
   }, [s, r]);
 
-  if (!r) return <Empty title="No such repo" text="This repo is not in the project." action={<Btn label="Back to the pipeline" onClick={back} />} />;
-  if (!s) return <div className="osx"><Async query={q} what="this onboarding session" id="onb-session">{() => null}</Async><Btn label="Back to the pipeline" small kind="ghost" icon="back" onClick={back} /></div>;
+  const waiting = !r ? availQ.data?.available?.find((a) => a.repo === repoId || a.repo.replace("/", "--") === repoId) : undefined;
+  if (!r && waiting) return <NotStarted projectId={projectId} projectName={projectName} name={waiting.repo} lang={waiting.lang} />;
+  if (!r) return reposQ.data && (availQ.isSuccess || availQ.isError) ? <div><ViewHead title="Onboarding" /><Panel><Empty title="Nothing to show" text="That repo does not exist." action={<Btn label="Work orders" onClick={() => navigate("work-orders")} />} /></Panel></div> : <Async query={reposQ} what="this repo" id="onb-session-repo">{() => null}</Async>;
+  if (!s) return <div className="osx"><Async query={q} what="this onboarding session" id="onb-session">{() => null}</Async><Btn label="Onboarding" small kind="ghost" icon="back" onClick={back} /></div>;
 
   const o = r.onboarding;
+  const st = protoStage(r);
   const lastMsg = s.messages.at(-1)?.id;
-  const pending = s.messages.flatMap((m) => (m.data.cards ?? []).filter((c): c is Proposal => c.kind === "proposal" && c.status === "pending").map((c) => ({ m, c })));
   const ruleBased = s.agent.mode === "rule-based";
-  const composerNote = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not change onboarding for this repo."}` : ruleBased ? "Connect a model vendor to talk to the Onboarding Agent" : "Answer a question, give a fact (for example: tests run with make check), or ask why.";
+  const composerNote = !s.can.talk ? `Read-only: ${s.can.talkWhy || "you may not change onboarding for this repo."}` : ruleBased ? "Connect a model vendor to talk to the Onboarding Agent" : "Answer a question, give a fact (for example: tests run with make check), or ask for a change";
   const submit = () => { const t = draft.trim(); if (!t) return; setDraft(""); void send({ kind: "message", text: t }); };
+  const list = o.findings;
+  // the person answers in words only when the agent has asked something that is still open
+  const asked = s.messages.some((m) => (m.data.cards ?? []).some((c) => c.kind === "question" && !c.answered)) || !!live;
+  const recheck = async () => { const x = await commands.rerunAssessment(r.id); ui.toast(x.ok ? "Checking the repository again" : x.msg, x.ok ? "ok" : "error"); };
+  // Gantry reads check results from GitHub: this refreshes them and says what they are
+  const checks = async () => {
+    const fresh = ((await reposQ.refetch()).data as RepoV[] | undefined)?.find((x) => x.id === r.id);
+    const green = fresh?.onboarding.pr?.checks === "green";
+    ui.toast(green ? "Checks passing" : "Checks are not passing yet", green ? "ok" : "error");
+  };
+  const nGaps = o.findings.filter((f) => !f.ok).length;
+  const prOpen = !!o.pr && o.pr.state === "open";
+  const busyNote = o.busy ? busyText(r) ?? "Working" : null;
+  const requiredGap = o.findings.some((f) => !f.ok && f.required !== false);
+  const openPr = () => run(() => commands.openOnboardingPR(r.id), "Pull request opened");
+  const run = async (fn: () => Promise<{ ok: boolean; msg: string }>, ok?: string) => { const x = await fn(); ui.toast(x.ok && ok ? ok : x.msg, x.ok ? "ok" : "error"); };
+  const mergeAsk = async () => {
+    if (!o.pr) return;
+    const yes = await ui.confirm({ title: `Merge #${o.pr.number}?`, body: `${r.name} becomes Ready and agents may start work.`, ok: "Merge" });
+    if (yes) await run(() => commands.mergeOnboardingPR(r.id), `${r.name} is Ready`);
+  };
+  const mergeReason = merge.allowed ? (!prOpen ? "The PR is already merged" : busyNote ?? (o.pr?.checks !== "green" || o.stage !== "pr_checks" ? "Checks are not green yet" : null)) : null;
+  const tabs = [{ id: "findings", label: "Findings", count: nGaps }, { id: "pr", label: "Pull request" }, { id: "settings", label: "Settings" }];
 
   return (
     <div className="osx" id="osx">
-      <header className="osx-top">
-        <div className="osx-top-main">
-          <Btn small kind="ghost" icon="back" id="osx-back" label="Pipeline" onClick={back} />
-          <div className="small muted">Repo onboarding</div>
-          <h1 className="vtitle osx-title mono">{r.name}</h1>
-          <div className="osx-top-tags">
-            <StatusChip r={r} />
-            <Chip text={ruleBased ? "Rule-based (no agent)" : `Onboarding Agent v${s.agent.mode === "agent" ? s.agent.version : ""}`} cls={ruleBased ? "" : "chip-accent"} />
-          </div>
-        </div>
-        <div className="vhead-actions"><Btn small id="osx-details" label="Details and settings" onClick={details} /></div>
-      </header>
-      <div className="osx-grid">
-        <section className="osx-main" aria-label="Conversation">
-          <div className="osx-thread" role="log" aria-live="polite" ref={thread}>
-            <FindingsCard r={r} />
-            {items.map((it) =>
-              it.kind === "t" ? (
-                <p key={`t${it.at}${it.t.text.slice(0, 12)}`} className="osx-event small"><span className="muted">{fmt.stamp(it.t.at)}</span> {nameOf(it.t.who)}: {it.t.text}</p>
-              ) : (
-                <div key={it.m.id} className={`osx-msg is-${it.m.role}${it.m.data.kind === "update" ? " is-update" : ""}`}>
-                  {it.m.role === "user" ? <div className="osx-who small"><Who id={it.m.author} /></div> : <div className="osx-who small strong">{it.m.author === "ag-onboard" ? "Onboarding Agent" : "Gantry"}{it.m.data.mode === "rule-based" || it.m.author === "system" ? <span className="muted"> · rule-based</span> : null}</div>}
-                  {it.m.text ? <p className="osx-text">{it.m.text}</p> : null}
-                  <Cards m={it.m} s={s} send={(b) => void send(b)} last={it.m.id === lastMsg} />
+      <ViewHead crumbs={[{ label: "Onboarding", href: hashFor("onboarding", null, projectId) }, { label: r.name }]} title={r.name} sub="Onboarding session" />
+      {STEPS(st)}
+      <Tabs revealActive idPrefix="osx-tab" items={tabs} active={tab} onChange={setTab} />
+      <div className="stack">
+        {tab === "findings" ? (
+          <>
+            <Panel title="Assessment against guidelines" flush>
+              {list.length ? (
+                <ul className="list">
+                  {list.map((f) => (
+                    <li key={f.id}>
+                      <Chip text={f.ok ? "met" : "gap"} cls={f.ok ? "ok" : f.required !== false ? "bad" : "warn"} />
+                      <div className="grow">{f.check}<div className="small muted">{f.required !== false ? "Required" : "Advisory"}</div></div>
+                      {!f.ok && st < 3 ? <ActBtn small id={`osx-fixed-${f.id}`} label="Mark fixed" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => void recheck()} /> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : <ul className="list" />}
+            </Panel>
+            <Panel title="Conversation with the Onboarding agent">
+              <div className="osx-main">
+                <div className="chat osx-thread" role="log" aria-live="polite" ref={thread}>
+                  {items.map((it) =>
+                    it.kind === "t" ? (
+                      <div key={`t${it.at}${it.t.text.slice(0, 12)}`} className="msg">
+                        <Avatar id={it.t.who in ACTORS ? "ag-onboard" : it.t.who} />
+                        <div className="bub"><div className="who">{nameOf(it.t.who)}</div>{it.t.text}</div>
+                      </div>
+                    ) : (
+                      <div key={it.m.id} className={`msg${it.m.role in ME ? " me" : ""}${it.m.data.kind === "update" ? " is-update" : ""}`}>
+                        <Avatar id={it.m.author in ACTORS ? "ag-onboard" : it.m.author} />
+                        <div className="bub">
+                          <div className="who">{nameOf(it.m.author)}{it.m.data.mode === "rule-based" ? " · rule-based" : ""}</div>
+                          {it.m.text ? <p className="osx-text">{it.m.text}</p> : null}
+                          <Cards m={it.m} s={s} send={(b) => void send(b)} last={it.m.id === lastMsg} />
+                        </div>
+                      </div>
+                    ))}
+                  {live ? (
+                    <div className="msg is-live" aria-busy="true">
+                      <Avatar id="ag-onboard" />
+                      <div className="bub">
+                        <div className="who">Onboarding Agent</div>
+                        {live.tools.length ? <p className="osx-progress small muted">{`Working: ${live.tools.map((t) => t.replace(/_/g, " ")).join(", ")}`}</p> : null}
+                        <p className="osx-text">{live.text || "Reading the repository..."}</p>
+                        {live.cards.map((c, i) => (c.kind === "progress" ? <p key={i} className="osx-progress small"><Icon name="check" /> {c.text}</p> : null))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {s.waiting ? <p className="osx-waiting small" id="osx-waiting" role="status"><Icon name="clock" /> {`${s.waiting.text}${s.waiting.since ? ` since ${fmt.ago(s.waiting.since, Date.now())}` : ""}${s.waiting.checkedAt ? ` · checked ${fmt.ago(s.waiting.checkedAt, Date.now())}` : ""} · we'll post here and notify you`}</p> : null}
+                  {s.busy ? <p className="osx-event small muted">{`Gantry is working: ${s.next.text}.`}</p> : null}
+                  {error ? <p className="callout callout-warn small" role="alert">{error}</p> : null}
                 </div>
-              ))}
-            {live ? (
-              <div className="osx-msg is-assistant is-live" aria-busy="true">
-                <div className="osx-who small strong">Onboarding Agent</div>
-                {live.tools.length ? <p className="osx-progress small muted">{`Working: ${live.tools.map((t) => t.replace(/_/g, " ")).join(", ")}`}</p> : null}
-                <p className="osx-text">{live.text || "Reading the repository..."}</p>
-                {live.cards.map((c, i) => (c.kind === "progress" ? <p key={i} className="osx-progress small"><Icon name="check" /> {c.text}</p> : null))}
+                {asked ? (
+                  <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+                    <textarea id="osx-input" className="input" rows={2} aria-label="Message to the Onboarding Agent" value={draft} placeholder={composerNote} disabled={!s.can.talk || ruleBased || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
+                    <Btn kind="primary" type="submit" id="osx-send" label="Send" disabled={!s.can.talk || ruleBased || !!live || !draft.trim()} />
+                    {ruleBased ? <p className="small muted osx-reason" id="osx-mode-note">{`Connect a model vendor to talk to the Onboarding Agent. ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
+                  </form>
+                ) : null}
               </div>
-            ) : null}
-            {s.waiting ? <p className="osx-waiting small" id="osx-waiting" role="status"><Icon name="clock" /> {`${s.waiting.text}${s.waiting.since ? ` since ${fmt.ago(s.waiting.since, Date.now())}` : ""}${s.waiting.checkedAt ? ` · checked ${fmt.ago(s.waiting.checkedAt, Date.now())}` : ""} · we'll post here and notify you`}</p> : null}
-            {s.busy ? <p className="osx-event small muted">{`Gantry is working: ${s.next.text}.`}</p> : null}
-            {error ? <p className="callout callout-warn small" role="alert">{error}</p> : null}
-          </div>
-          <form className="osx-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-            <textarea id="osx-input" className="input" rows={2} aria-label="Message to the Onboarding Agent" value={draft} placeholder={composerNote} disabled={!s.can.talk || ruleBased || !!live} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }} />
-            <Btn kind="primary" type="submit" id="osx-send" label="Send" disabled={!s.can.talk || ruleBased || !!live || !draft.trim()} />
-            {ruleBased ? <p className="small muted osx-reason" id="osx-mode-note">{`Connect a model vendor to talk to the Onboarding Agent. ${s.agent.mode === "rule-based" ? s.agent.reason : ""}`}</p> : null}
-          </form>
-        </section>
-        <aside className="osx-side" aria-label="Lifecycle"><h2 className="osx-side-h">Lifecycle</h2>
-          <ol className="osx-steps" id="osx-steps">
-            {s.steps.map((st) => (
-              <li key={st.name} className={`is-${st.state}`} aria-current={st.state === "current" ? "step" : undefined}>
-                <span className="osx-dot" aria-hidden="true">{st.state === "done" ? <Icon name="check" /> : null}</span>
-                <span>{st.name}</span>
-              </li>
-            ))}
-          </ol>
-          <div className="osx-next" id="osx-next">
-            <span className="small muted">Next</span>
-            <p><strong>{{ agent: "Onboarding Agent", you: "You", gantry: "Gantry", github: "GitHub", reviewer: "A reviewer", nobody: "" }[s.next.actor]}</strong>{s.next.actor === "nobody" ? "" : " — "}{s.next.text}</p>
-          </div>
-          <dl className="osx-facts small">
-            <dt>Mode</dt><dd>{s.agent.mode === "agent" ? `Onboarding Agent v${s.agent.version} · ${s.agent.model}` : "Rule-based (no agent)"}</dd>
-            <dt>Cost so far</dt><dd className="mono" id="osx-cost">{`${fmt.money(s.costUsd)}${s.agent.mode === "agent" || s.budget.spentUsd ? ` of ${fmt.money(s.budget.limitUsd)} budget` : ""}`}</dd>
-            {o.pr ? <><dt>Pull request</dt><dd>{o.pr.url ? <a href={o.pr.url} target="_blank" rel="noreferrer">{`#${o.pr.number}`}</a> : `#${o.pr.number}`}{` · ${o.pr.state === "merged" ? "merged" : `checks ${o.pr.checks}`}`}{s.prNeedsUpdate ? " · needs an update" : ""}</dd></> : null}
-          </dl>
-          <h2 className="osx-side-h">Proposed changes</h2>
-          {pending.length ? (
-            <ul className="osx-pending" id="osx-pending">
-              {pending.map(({ m, c }) => (
-                <li key={`${m.id}${c.id}`}>
-                  <button type="button" className="linkish" onClick={() => document.getElementById(`osx-prop-${c.id}`)?.scrollIntoView?.({ block: "center" })}>{c.title}</button>
-                  <span className="muted small">{` · ${c.files.length} file${c.files.length === 1 ? "" : "s"}`}</span>
-                </li>
-              ))}
-            </ul>
-          ) : <p className="muted small">None waiting.</p>}
-        </aside>
+            </Panel>
+          </>
+        ) : tab === "pr" ? (
+          <Panel title="Onboarding pull request">
+            {o.pr ? (
+              <div className="stack">
+                <Kv rows={[
+                  ["PR", `#${o.pr.number}`],
+                  ["Status", <Chip key="s" text={o.pr.state === "merged" ? "merged" : o.pr.checks === "green" ? "checks passing" : o.pr.state} cls={st >= 3 ? "ok" : "info"} />],
+                  ["Files", <div key="f" className="pre">{o.pr.files.map((f) => f.path).join("\n")}</div>],
+                ]} />
+                {s.prNeedsUpdate ? <p className="small muted">A later assessment found this pull request out of date. Approve the update in the conversation.</p> : null}
+                {st === 2 ? <ActBtn id="osx-checks" label="Mark checks passing" guard={manage} onClick={() => void checks()} /> : null}
+                {o.pr.state !== "merged" && st >= 3 ? <ActBtn kind="primary" id="osx-merge" label="Merge and go live" guard={merge} disabledReason={mergeReason} onClick={() => void mergeAsk()} /> : null}
+              </div>
+            ) : (
+              <Empty title="No pull request yet" text="Open one and the agent writes AGENTS.md, CODEOWNERS and the factory config." action={<>
+                <ActBtn kind="primary" id="osx-openpr" label="Open pull request" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => { if (requiredGap) { ui.toast("Fix the required gaps first, or open the PR so the agent can fix them.", "error"); return; } void openPr(); }} />
+                <ActBtn id="osx-openanyway" label="Open anyway" guard={manage} disabledReason={manage.allowed ? busyNote : null} onClick={() => void openPr()} />
+              </>} />
+            )}
+          </Panel>
+        ) : (
+          <Panel title="Settings">
+            <Kv rows={[["Repository", <a key="d" className="pri" id="osx-details" href={hashFor("onboarding", r.id, projectId)} onClick={(e) => { e.preventDefault(); details(); }}>{r.name}</a>], ["Language", r.lang], ["Project", projectName], ["Default branch", r.config.defaultBranch]]} />
+          </Panel>
+        )}
       </div>
     </div>
   );

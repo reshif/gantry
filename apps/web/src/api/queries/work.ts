@@ -87,6 +87,9 @@ export const useReposAcross = (projectIds: string[]): Array<Repo & { projectId: 
     queries: projectIds.map((id) => ({ queryKey: qk.repos(id), queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(id)}/repos`)) })),
     combine: (rs) => rs.flatMap((r, i) => (Array.isArray(r.data) ? r.data : []).map((x) => ({ ...x, projectId: projectIds[i] ?? "" }))),
   });
+/** The repositories of several projects (the portfolio count of live repos); one query per project, sharing the per-project key. */
+export const useReposOf = (projectIds: string[]) =>
+  useQueries({ queries: projectIds.map((id) => ({ queryKey: qk.repos(id), queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(id)}/repos`)) })) });
 export const useGuidelines = () => useQuery({ queryKey: qk.guidelines(), queryFn: () => get<OrgGuidelines>(api("guidelines")) });
 
 /** The four writes a gate decision can make (approve, confirm the brief, reject, decline it), for the Approve and Reject dialogs; views run them through useCommand. */

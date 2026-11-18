@@ -7,6 +7,8 @@
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Me } from "../src/api/types";
 import type { Persona } from "./fixtures";
+import { DEFAULT_CATALOG } from "@gantry/domain";
+import { projOnboarding } from "./proj-fixtures";
 
 type Seed = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -168,6 +170,8 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     const seg = path.split("/");
     const q = (k: string) => url.searchParams.get(k);
     if (path === "home") return home;
+    // PROJ GROUP: the catalogue the prototype draws (its extra Compliance sign-off gate and role) on top of the real one
+    if (path === "catalog") return { ...DEFAULT_CATALOG, gates: [...DEFAULT_CATALOG.gates, ...(seed.catalog.gates as Seed[]).filter((g) => !DEFAULT_CATALOG.gates.some((x) => x.id === g.id))], roles: [...DEFAULT_CATALOG.roles, ...(seed.catalog.roles as Seed[]).filter((r) => !DEFAULT_CATALOG.roles.some((x) => x.id === r.id))] };
     if (path === "projects") return seed.projects.map((p: Seed) => ({ ...p, metrics: projectMetrics(p.id) }));
     if (seg[0] === "projects" && seg[1]) {
       const p = seed.projects.find((x: Seed) => x.id === seg[1]);
@@ -180,9 +184,11 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
         return { project: p, workOrders: mine.map(slim), flowVersion: 1, slots: { used: holders.filter((h) => h.wo).length, total: p.flow.slots, holders }, gates, queue: mine.filter((w) => w.bay === "queue").map((w) => w.id), stop: null, stops: [], at: null };
       }
       if (seg[2] === "work-orders") return page(mine.map(slim));
-      if (seg[2] === "repos") return seed.repos.filter((r: Seed) => r.project === p.id);
+      if (seg[2] === "repos" && seg[3] === "available") return { available: projOnboarding(seed, p.id).waiting }; // PROJ GROUP
+      if (seg[2] === "repos") return [...seed.repos.filter((r: Seed) => r.project === p.id), ...(p.id === "payments" ? projOnboarding(seed, p.id).repos : [])]; // PROJ GROUP
       if (seg[2] === "events") return seed.events.filter((e: Seed) => !e.project || e.project === p.id);
     }
+    if (seg[0] === "repos" && seg[2] === "onboarding" && seg[3] === "session") return projOnboarding(seed, "payments").session(seg[1]!); // PROJ GROUP
     if (seg[0] === "work-orders" && seg[1]) {
       const w = byId.get(seg[1]);
       if (!w) return { __status: 404, body: { ok: false, msg: "Work order not found" } };

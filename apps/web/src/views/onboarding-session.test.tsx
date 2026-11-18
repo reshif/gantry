@@ -56,13 +56,13 @@ describe("Onboarding session", () => {
     expect(screen.getByText(/Read the repository: 40 files/)).toBeTruthy();
     expect(screen.getAllByText("Proposed onboarding PR").length).toBeGreaterThan(0);
     expect(screen.getByText("Drafted by the Onboarding Agent")).toBeTruthy();
-    const steps = Array.from(document.querySelectorAll("#osx-steps li")).map((li) => [li.textContent, li.className]);
-    expect(steps[0]).toEqual(["Connected", "is-done"]);
-    expect(steps[1]).toEqual(["Assessed", "is-current"]);
-    expect(document.querySelector("#osx-next")?.textContent).toMatch(/You — review the proposed changes/);
-    expect(document.getElementById("osx-cost")?.textContent).toMatch(/\$0\.12.*\$1\.00 budget/);
-    expect(document.querySelector("#osx-pending")?.textContent).toMatch(/Proposed onboarding PR · 2 files/);
-    expect(document.getElementById("osx-findings")?.textContent).toMatch(/Observed/);
+    // the Blueprint's five-stage stepper, the Assess stage current; Findings / Pull request / Settings tabs
+    const steps = Array.from(document.querySelectorAll("#osx-steps > div")).map((d) => [d.textContent, d.className]);
+    expect(steps).toEqual([["1. Connect", "done"], ["2. Assess", "on"], ["3. Pull request", ""], ["4. Merge", ""], ["5. Ready", ""]]);
+    expect(Array.from(document.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Findings", "Pull request", "Settings"]);
+    expect(document.querySelector("#osx-next")).toBeNull(); // the Blueprint has no "Next:" line or chat header chip above the thread
+    expect(document.querySelector(".osx-event .muted")).toBeNull(); // no timestamp lines: events are bubbles
+    expect(document.querySelector(".crumbs, .eyebrow")?.textContent).toMatch(/Onboarding\/acme\/mobile-app/i);
     fireEvent.click(screen.getByText("AGENTS.md").closest("button")!);
     expect(screen.getByLabelText("Added lines of AGENTS.md").textContent).toContain("+ Run vitest run");
   });
@@ -114,10 +114,9 @@ describe("Onboarding session", () => {
     const rule = { ...PROPOSAL, mode: "rule-based" };
     api(session({ agent: { mode: "rule-based", reason: "No model is configured." }, messages: [{ id: "om-1", role: "system", author: "system", text: "Gantry assessed acme/mobile-app (rule-based, no agent): 4 checks, 2 gaps.", at: NOW - 3000, data: { mode: "rule-based", cards: [rule] } }], next: { actor: "you", text: "review the proposed changes and approve, ask for changes or discard" } }));
     mount(<OnboardingView />);
-    expect((await screen.findAllByText(/Rule-based \(no agent\)/)).length).toBeGreaterThan(1);
-    expect((await byId("osx-input")).getAttribute("placeholder")).toBe("Connect a model vendor to talk to the Onboarding Agent");
-    expect(document.getElementById("osx-mode-note")?.textContent).toMatch(/Connect a model vendor to talk to the Onboarding Agent/);
-    expect((document.getElementById("osx-input") as HTMLTextAreaElement).disabled).toBe(true);
+    expect((await screen.findAllByText(/Rule-based \(no agent\)/)).length).toBeGreaterThan(0);
+    expect(document.getElementById("osx-input")).toBeNull(); // no composer unless the agent asked something that is still open
+    expect(document.getElementById("osx-send")).toBeNull();
     expect((await byId("osx-approve-P-1")).hasAttribute("disabled")).toBe(false);
   });
 
@@ -145,7 +144,7 @@ describe("Onboarding session", () => {
     window.location.hash = "#/p/storefront/onboarding";
     api(session());
     mount(<OnboardingView />);
-    fireEvent.click(await byId("onb-row-mobile-app"));
+    fireEvent.click(await byId("onb-open-mobile-app"));
     await waitFor(() => expect(window.location.hash).toMatch(/onboarding\/mobile-app$/));
     expect(await screen.findByText(/Gantry observed two gaps/)).toBeTruthy();
   });
