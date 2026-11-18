@@ -5,7 +5,7 @@
  */
 import { useState } from "react";
 import { fmt } from "@gantry/domain";
-import { Btn, Chip, Who } from "../../ui/primitives";
+import { Btn, Chip, Who, TextArea } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { answerQuestion, askOfText, decideAssumption, type Assumption, type StationQuestion } from "./api";
 
@@ -41,7 +41,7 @@ export function StationQuestionCard({ woId, q, mine, canAnswer, why }: { woId: s
         <div className="osx-ask">
           {q.options.length ? <div className="osx-options">{q.options.map((o) => <Btn key={o} small label={o} disabled={busy} onClick={() => void send("answer", o)} />)}</div> : null}
           <label className="small" htmlFor={`${fid}-text`}>{mine ? "Your answer" : "Answer"}</label>
-          <textarea id={`${fid}-text`} className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
+          <TextArea id={`${fid}-text`} className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
           <div className="osx-actions">
             <Btn kind="primary" small id={`${fid}-send`} label="Send answer" disabled={busy || !text.trim()} onClick={() => void send("answer", text.trim())} />
             <Btn small id={`${fid}-dk`} label="I don't know" disabled={busy} onClick={() => void send("dont_know", text.trim() || undefined)} />
@@ -78,7 +78,7 @@ function AssumptionRow({ woId, a, canDecide }: { woId: string; a: Assumption; ca
           fixing ? (
             <div className="osx-ask">
               <label className="small" htmlFor={`${fid}-note`}>What is true instead?</label>
-              <textarea id={`${fid}-note`} className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+              <TextArea id={`${fid}-note`} className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
               <div className="osx-actions">
                 <Btn kind="primary" small id={`${fid}-save`} label="Save correction" disabled={busy || note.trim().length < 3} onClick={() => void run("corrected")} />
                 <Btn small label="Cancel" onClick={() => setFixing(false)} />

@@ -8,7 +8,7 @@ test("signed out: the sign-in screen is shown (401 from /me)", async ({ page }) 
   await mockApi(page, { persona: null });
   await open(page, "/");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await expect(page.locator("#auth")).toBeVisible();
+  await expect(page.locator("#auth-sso")).toBeVisible();
 });
 
 test("/me 500 on first load: an alert with a retry, not a blank page", async ({ page }) => {
@@ -67,17 +67,15 @@ test("contrast: the same read answered 200 with an empty list is an empty state,
 });
 
 // A write refused by the server (409 conflict, 422 validation) is a value the wizard shows inline in a role=alert, and the app
-// stays up. Drives the real New project wizard to its last step on fixtures, then refuses the POST.
+// stays up. Fills the real New project dialog on fixtures, then refuses the POST.
 async function createProjectRefused(page: import("@playwright/test").Page, status: number, msg: string) {
   let posted = 0;
   await mockApi(page, { overrides: { "POST projects": (r) => { posted++; return fulfillJson(r, { ok: false, msg, code: status === 409 ? "conflict" : "invalid" }, status); } } });
   await open(page, "/#projects");
   await page.locator("#prj-new").click();
-  await page.locator("#prj-wz-next").click();
-  await page.locator("#prj-wz-name").fill("Checkout Platform");
-  await page.locator("#prj-wz-team-add").selectOption({ index: 1 });
-  for (const _ of [1, 2, 3, 4]) await page.locator("#prj-wz-next").click();
-  await page.locator("#prj-wz-create").click();
+  await page.getByRole("textbox", { name: /^Name/ }).fill("Checkout Platform");
+  await page.getByRole("textbox", { name: /^Key/ }).fill("CHK");
+  await page.getByRole("button", { name: "Create project" }).click();
   await expect.poll(() => posted).toBe(1);
   return page.getByRole("alert").filter({ hasText: msg });
 }
@@ -86,8 +84,8 @@ for (const [status, msg] of [[409, "Version changed since you opened it"], [422,
   test(`a write refused with ${status} shows the reason inline and the app stays up`, async ({ page }) => {
     const alert = await createProjectRefused(page, status, msg);
     await expect(alert).toBeVisible();
-    await expect(page.locator("#prj-wz-create")).toBeEnabled();
-    await expect(page.getByRole("navigation").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create project" })).toBeEnabled();
+    await expect(page.locator("#root > *")).not.toHaveCount(0); // the dialog is modal, so the shell is inert but mounted
   });
 }
 
@@ -100,8 +98,8 @@ test("offline: going offline mid-session keeps the shell", async ({ page, contex
   await expect(page.locator("#root > *")).not.toHaveCount(0);
 });
 
-// Stale chunk after a deploy: a lazy view's script 404s. There is no boundary yet (P0 item 2).
-test.fail("a missing lazy chunk shows a recoverable error, not a blank route", async ({ page }) => {
+// Stale chunk after a deploy: a lazy view's script 404s. lazyRetry reloads once, then the route error boundary offers Retry.
+test("a missing lazy chunk shows a recoverable error, not a blank route", async ({ page }) => {
   await mockApi(page);
   await open(page, "/#home");
   await page.route("**/assets/agents-*.js", (r) => r.fulfill({ status: 404, body: "not found" }));

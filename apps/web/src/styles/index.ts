@@ -44,3 +44,4 @@ import "./system.css";
 import "./views/dossier.css";
 import "./views/home-projects.css";
 import "./views/design-system.css";
+import "./precision.css";

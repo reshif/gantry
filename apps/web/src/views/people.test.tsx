@@ -348,14 +348,60 @@ describe("People & teams: one page per person", () => {
     expect(await screen.findByText("Roles of the team")).toBeTruthy();
   });
 
-  it("the person's Details row has no Edit teams link and the On call switch is live", async () => {
+  it("the person's Details row has a Change teams control and the On call switch is live", async () => {
     const calls = setup({ "PUT /api/v1/projects/payments/oncall": () => ({ body: { ok: true, msg: "Saved.", oncall: ["p-tomas"], version: 3 } }) });
     mount("p-tomas");
     const sw = (await screen.findByRole("switch", { name: "On call rotation" })) as HTMLInputElement;
-    expect(document.getElementById("ppl-teams")).toBeNull();
+    expect(document.getElementById("ppl-teams")).not.toBeNull();
     expect(sw.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(sw);
     await waitFor(() => expect(writes(calls).some((c) => c.method === "PUT" && c.path.endsWith("/projects/payments/oncall"))).toBe(true));
     expect(writes(calls).find((c) => c.path.endsWith("/projects/payments/oncall"))?.body).toEqual({ people: ["p-tomas"] });
+  });
+});
+
+describe("Person page: team membership", () => {
+  const withDefault = () => {
+    const teams = [...TEAMS, { id: "default", name: "Default", desc: "Everyone.", roles: [] }];
+    const lone = person("p-lone", "Lone Person", [], []);
+    return { "GET /api/v1/teams": () => ({ body: teams }), "GET /api/v1/people": () => ({ body: [...PEOPLE, lone] }), "GET /api/v1/people/p-lone/effective-permissions": () => ({ body: EFF }), "PUT /api/v1/people/p-lone/teams": () => ({ body: { ok: true, msg: "Saved." } }) };
+  };
+  it("shows No team with a Change control; picking Default and saving sends the teams", async () => {
+    const calls = setup(withDefault());
+    mount("p-lone");
+    const change = await byId("ppl-teams");
+    expect(change.closest("dl")?.textContent).toContain("No team");
+    fireEvent.click(change);
+    fireEvent.click(await byId("ppl-tm-default"));
+    fireEvent.click(await byId("ppl-tm-save"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/people/p-lone/teams", body: { teams: ["default"] } });
+  });
+  it("refuses an empty selection", async () => {
+    const calls = setup(withDefault());
+    mount("p-lone");
+    fireEvent.click(await byId("ppl-teams"));
+    await byId("ppl-tm-default");
+    fireEvent.click(await byId("ppl-tm-save"));
+    await waitFor(() => expect(document.body.textContent).toContain("Keep at least one team."));
+    expect(writes(calls)).toHaveLength(0);
+  });
+  it("is locked without people.manage", async () => {
+    const calls = setup(withDefault(), ["people.manage"]);
+    mount("p-lone");
+    const change = await byId("ppl-teams");
+    await waitFor(() => expect(change.getAttribute("aria-disabled")).toBe("true"));
+    fireEvent.click(change);
+    expect(writes(calls)).toHaveLength(0);
+  });
+  it("adds a member from a team's menu with the person's teams plus that team", async () => {
+    const calls = setup({ ...withDefault(), "PUT /api/v1/people/p-tomas/teams": () => ({ body: { ok: true, msg: "Saved." } }) });
+    mount();
+    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.contextMenu(await byId("ppl-team-platform"));
+    fireEvent.click(await screen.findByText("Add member"));
+    fireEvent.click(await byId("ppl-am-platform-p-tomas"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/people/p-tomas/teams", body: { teams: ["payments", "platform"] } });
   });
 });

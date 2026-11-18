@@ -5,19 +5,17 @@
 .wo-filters .input { min-width: 0; }
 .wo-panel > .panel-body { padding: 0; }
 .wo-panel .tabs { padding: 0 var(--s4); }
-.wo-bar { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+.wo-bar { border-bottom: 1px solid var(--line); }
 .wo-main { display: grid; gap: 2px; min-width: 200px; }
 .wo-live { margin-top: var(--s3); color: var(--faint); font-size: var(--t-sm); }
 .wo-board { margin-top: var(--s2); }
 .wo-table .dtable-wrap { border: 0; border-radius: 0; box-shadow: none; }
-.callout-info { border-color: var(--accent-line); background: var(--accent-soft); display: flex; gap: var(--s3); align-items: flex-start; }
-.callout-info > .ic { flex: none; margin-top: 2px; color: var(--accent); }
 .wo-table td { white-space: normal; vertical-align: top; overflow-wrap: anywhere; }
 .wo-table td .wo-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; max-width: 34ch; line-height: 1.35; }
 .wo-table .wo-needs { display: grid; gap: 1px; max-width: 26ch; min-width: 0; }
 .wo-table .wo-needs.is-mine .wo-need-t { font-weight: 600; color: var(--ink); }
 .wo-table .wo-needs .sub { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.wo-acts { gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
+.wo-acts { flex-wrap: wrap; justify-content: flex-start; }
 .wo-table td:last-child { width: 1%; }
 .wo-table td:last-child .wo-acts { flex-direction: column; align-items: stretch; }
 .wo-table td:last-child .wo-acts .btn { width: 100%; justify-content: center; }
@@ -50,8 +48,6 @@
 .int-conf { display: inline-flex; align-items: center; gap: 6px; }
 .int-conf-bar { width: 72px; height: 8px; border: 1px solid var(--line-strong); background: var(--sunk); display: inline-block; }
 .int-conf-bar > span { display: block; height: 100%; background: var(--done); }
-.int-conf-mid .int-conf-bar > span { background: var(--wait); }
-.int-conf-lo .int-conf-bar > span { background: var(--block); background-image: repeating-linear-gradient(-45deg, transparent 0 3px, var(--surface) 3px 5px); }
 
 /* classification card */
 .int-cls { display: grid; gap: var(--s2); }
@@ -61,7 +57,6 @@
 .int-alts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .int-rc-cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .int-rc-prev { border: 1px dashed var(--line-strong); padding: 8px 10px; background: var(--panel); }
-.int-guess { min-height: 20px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; color: var(--ink-2); }
 
 @media (max-width: 560px) {
   .wo-bar .wo-filters .field { flex: 1 1 calc(50% - var(--s2)); width: auto; }
@@ -79,7 +74,6 @@
 .wo-cls { display: inline-flex; align-items: center; white-space: nowrap; }
 .wo-acts { display: inline-flex; gap: 2px; }
 .int-rs.is-custom { border-style: dashed; border-color: var(--accent-line); }
-@media (max-width: 640px) { .wo-table .wo-title { min-width: 0; } }
 .wo-table .dtable td { white-space: normal; }
 .wo-table .dtable td .mono, .wo-table .dtable td .chip, .wo-table .dtable td .state { white-space: nowrap; }
 .wo-by { display: inline-block; min-width: 90px; }
@@ -123,7 +117,6 @@
 .wo-cols > summary::-webkit-details-marker { display: none; }
 .wo-cols-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: grid; gap: var(--s2); padding: var(--s3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r2); box-shadow: var(--shadow-2); }
 .wo-cols-opt { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); }
-.wo-bar .filterbar-end { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: flex-end; }
 
 /* Blueprint: the register is stats, one panel, one filter row */
 .wo-more{padding:6px 14px;border-bottom:1px solid var(--line);background:var(--surface2)}

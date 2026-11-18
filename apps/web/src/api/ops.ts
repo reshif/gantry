@@ -192,8 +192,8 @@ export const ops = {
   setAway: (personId: string, away: Obj | null, projectId?: string) => run(["people", "me"], put(api(`people/${enc(personId)}/away`), { away, project: projectId ?? null })),
 
   /* ===== onboarding ===== */
-  connectRepo: (projectId: string, repoName: string, team: string, sourceId?: string) =>
-    run(["repos", "projects"], post(api(`projects/${enc(projectId)}/repos`), { name: repoName, team, source: sourceId ?? null }, create)),
+  connectRepo: (projectId: string, repoName: string, team: string | null, sourceId?: string) =>
+    run(["repos", "projects"], post(api(`projects/${enc(projectId)}/repos`), { name: repoName, team: team || null, source: sourceId ?? null }, create)),
   configureRepo: (repoId: string, patchBody: Obj, v?: Versioned) => run(["repos"], patch(api(`repos/${enc(repoId)}/config`), patchBody, opts(v))),
   rerunAssessment: (repoId: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/assess`))),
   openOnboardingPR: (repoId: string) => run(["repos"], post(api(`repos/${enc(repoId)}/onboarding/open-pr`))),
@@ -279,7 +279,7 @@ export const ops = {
   /** The Add dialog's connection test: settings that are not saved yet. Nothing is stored; the result's `test` has the lines. */
   testIntegrationDraft: (type: string, body: Obj) => post(api(`integration-types/${enc(type)}/test`), body),
   /** The recorded link step (spec 12.3): a one-time code the person sends from the chat app. */
-  requestChatLink: (channel = "slack", integration?: string) => run(["chatLinks"], post(api("chat-links"), { channel, ...(integration ? { integration } : {}) }, create)),
+  requestChatLink: (channel = "slack", integration?: string) => run<{ command: string }>(["chatLinks"], post(api("chat-links"), { channel, ...(integration ? { integration } : {}) }, create)),
   removeChatLink: (id: string) => run(["chatLinks"], del(api(`chat-links/${enc(id)}`))),
   /** Channel-level connection settings (slack, email, ...). */
   setIntegration: (channel: string, patchBody: Obj) => run(["integrations", "integrationInstances"], patch(api(`integrations/${enc(channel)}`), patchBody)),

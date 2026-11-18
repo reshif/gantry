@@ -253,6 +253,7 @@ describe("Floor: prototype drawers and links", () => {
     expect(screen.getByRole("button", { name: "Conversation for WO-2398" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Journey" })).toBeNull();
     // the Traveler button opens the traveler drawer, which holds Journey, Documents and Run
+    await import("./traveler"); // the drawer is a lazy chunk: load it before the click so the open is immediate
     fireEvent.click(document.getElementById("floor-wo-traveler") as HTMLElement);
     expect(await screen.findByRole("tab", { name: "Journey" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Documents" })).toBeTruthy();

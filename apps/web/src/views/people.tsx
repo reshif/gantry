@@ -17,6 +17,7 @@ import { useAllRepos, useTeams } from "./govern/data";
 import { CountClear, PAGE_SIZE, Pager, parseSort, setQS, sortParam, useQS } from "./govern/kit";
 import { useInviteDialog } from "./people/InviteDialog";
 import { useTeamDialogs } from "./people/TeamDialog";
+import { useAddMember } from "./people/PersonTeams";
 import { TeamRoles } from "./people/TeamRoles";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -84,6 +85,7 @@ function TeamGrid({ people, teams, projects, repos, roles, perm, invite, teamDlg
   people: Person[]; teams: Team[]; projects: Project[]; repos: Array<{ team: string }>; roles: Role[];
   perm: Decision; invite: (p: { team?: string }) => void; teamDlg: ReturnType<typeof useTeamDialogs>; ui: Ui;
 }) {
+  const addMember = useAddMember({ people, guard: perm });
   if (!teams.length) return <Empty id="ppl-none" icon="search" title="No teams yet" text="Create a team to group people and own projects." />;
   return (
     <div className="card-grid" id="ppl-teams">
@@ -93,6 +95,7 @@ function TeamGrid({ people, teams, projects, repos, roles, perm, invite, teamDlg
         const owns = repos.filter((r) => r.team === t.id);
         const menu = (el: HTMLElement) => ui.menu(el, t.name, [
           { label: `Invite to ${t.name}`, icon: "plus", guard: perm, onClick: () => invite({ team: t.id }) },
+          { label: "Add member", icon: "user", guard: perm, onClick: () => addMember(t) },
           { label: "Edit team", icon: "tag", guard: perm, onClick: () => teamDlg.edit(t) },
           { label: "Roles of the team", icon: "key", onClick: () => ui.dialog({ title: `Roles of ${t.name}`, kicker: "People & teams", body: <TeamRoles team={t} roles={roles} projects={projects} perm={perm} members={members.length} />, actions: [{ label: "Close", kind: "primary" }] }) },
           { sep: true },
