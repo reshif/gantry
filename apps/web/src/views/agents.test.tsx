@@ -253,7 +253,7 @@ describe("Agents screen", () => {
     setup();
     mountAgent();
     await tab("instructions");
-    expect([...document.querySelectorAll("#agent-detail .panel-title")].map((t) => t.textContent)).toEqual(["Instructions"]);
+    expect([...document.querySelectorAll("#agent-detail .panel-title")].map((t) => t.textContent)).toEqual(["Instructions", "Draft against live"]);
     expect(document.getElementById("ag-instr-save")!.textContent).toBe("Save as new version");
     expect(document.getElementById("ag-instr-revert")!.textContent).toBe("Revert");
     await tab("skills");
@@ -401,7 +401,7 @@ describe("Skills screen", () => {
     expect(drw.querySelector("pre.pre")!.textContent).toBe("Test design body");
     expect(drw.querySelector("dl.kv")!.textContent).toContain("Builder");
     expect(drw.textContent).toContain("SKILL");
-    expect(drw.querySelector("footer")!.textContent).toBe("Edit");
+    expect(drw.querySelector("footer")!.textContent).toBe("Open pageEdit");
     fireEvent.click(drw.querySelector(".drawer-close")!);
     await waitFor(() => expect(window.location.hash).toBe("#skills"));
     await waitFor(() => expect(document.querySelector("aside.drw")).toBeNull());
@@ -489,3 +489,46 @@ describe("Skills drawer", () => {
   });
 });
 
+
+describe("Reachability: agent Talk, draft against live, skill page", () => {
+  it("the agent page header has Talk: pick a work order and a side thread with this agent opens", async () => {
+    const item = { key: "wo:WO-1", kind: "primary", scope: { kind: "work_order", id: "WO-1", label: "WO-1" }, project: "payments", title: "Add refunds", agent: null, archived: false };
+    const calls = setup({
+      "GET /api/v1/workspace/inbox": () => ({ body: { items: [item] } }),
+      "POST /api/v1/workspace/threads": () => ok({ id: "ct-9", key: "ct-9", title: "t", visibility: "private" }),
+    });
+    mountAgent();
+    fireEvent.click(await byId("ag-talk"));
+    await waitFor(() => expect((document.getElementById("ag-talk-wo") as HTMLSelectElement | null)?.value).toBe("wo:WO-1"));
+    fireEvent.click(await byId("ag-talk-ok"));
+    await waitFor(() => expect(writes(calls, "POST").find((c) => c.path.endsWith("/workspace/threads"))?.body).toMatchObject({ scope: { kind: "work_order", id: "WO-1" }, agent: "ag-build" }));
+    await waitFor(() => expect(window.location.hash).toContain("workspace/ct-9"));
+  });
+
+  it("Instructions shows the draft against the live version's text as a line diff", async () => {
+    const live = { ...BUILD, instructions: "Line one.\nLine two edited by a person.", versions: BUILD.versions.map((v) => (v.live ? { ...v, snapshot: JSON.stringify({ instructions: "Line one.\nLine two." }) } : v)) };
+    setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }) });
+    mountAgent();
+    await tab("instructions");
+    const d = await byId("ag-instr-diff");
+    expect(d.textContent).toContain("1 line added, 1 removed");
+    expect(d.querySelectorAll(".is-add")).toHaveLength(1);
+    expect(d.querySelectorAll(".is-del")).toHaveLength(1);
+  });
+
+  it("a skill drawer opens the skill page with Definition, Agents, Projects and Versions", async () => {
+    setup();
+    window.location.hash = "#skills/sk-a";
+    mount(<SkillsView />);
+    fireEvent.click(await byId("sk-drawer-page"));
+    await byId("sk-detail");
+    expect(window.location.hash).toContain("page=1");
+    for (const t of ["def", "agents", "projects", "versions"]) expect(document.getElementById(`sk-tab-${t}`)).not.toBeNull();
+    fireEvent.click(await byId("sk-tab-agents"));
+    expect((await byId("sk-att-ag-build")).getAttribute("aria-checked") ?? (document.getElementById("sk-att-ag-build") as HTMLInputElement).checked.toString()).toMatch(/true/);
+    fireEvent.click(await byId("sk-tab-projects"));
+    await byId("sk-proj-all");
+    fireEvent.click(await byId("sk-tab-versions"));
+    await byId("sk-vers");
+  });
+});

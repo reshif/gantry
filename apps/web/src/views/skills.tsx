@@ -14,8 +14,10 @@ import { Dialog } from "../ui/Overlay";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { hashFor, navigate, replaceHash, useHash } from "../lib/router";
+import { withQuery } from "../lib/routeQuery";
 import { invalidateSlices } from "../api/keys";
 import { type AgentRow } from "./agents/kit";
+import { SkillPage } from "./skills/Page";
 
 type SkillRow = Skill & { rev: number };
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
@@ -137,7 +139,7 @@ function SkillDrawer({ sk, agents, close, onEdit }: { sk: SkillRow; agents: Agen
           <pre className="pre">{sk.body}</pre>
         </div>
       </div>
-      <footer><Btn label="Edit" id="sk-drawer-edit" guard={perm} onClick={onEdit} /></footer>
+      <footer><Btn label="Open page" id="sk-drawer-page" onClick={() => { close(); window.location.hash = withQuery(hashFor("skills", sk.id), "page", "1"); }} /><Btn label="Edit" id="sk-drawer-edit" guard={perm} onClick={onEdit} /></footer>
     </>
   );
 }
@@ -152,22 +154,24 @@ export default function SkillsView() {
   const agents = useMemo(() => (agentData ?? []) as unknown as AgentRow[], [agentData]);
   const perm = dec(useCan("skill.edit"));
   const wanted = route.id === "skills" ? route.param : null;
+  const page = route.q.page === "1";
   const sel = wanted ? skills.find((s) => s.id === wanted) ?? null : null;
   const edit = (sk: SkillRow | null) => ui_.open((close) => <SkillDialog sk={sk} close={close} />);
 
   // `#skills/<id>` is the open drawer: closing it (X, Esc, scrim) puts the URL back to `#skills`.
   useEffect(() => {
-    if (!sel) return;
+    if (!sel || page) return;
     // a tick later: the route change that brought us here also closes any open drawer
     const t = setTimeout(() => ui_.drawer.open(`skill:${sel.id}`, (close) => <SkillDrawer sk={sel} agents={agents} close={close} onEdit={() => { close(); edit(sel); }} />, () => replaceHash(hashFor("skills"))), 0);
     return () => clearTimeout(t);
     // reopen when the skill or the agents it is used by change
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel?.id, sel?.rev, agents]);
+  }, [sel?.id, sel?.rev, agents, page]);
 
   const sub = "Reusable know-how that agents load when a task calls for it.";
   const newBtn = <Btn label="New skill" kind="primary" icon="plus" id="sk-new" guard={perm} onClick={() => edit(null)} />;
   if (q.data === undefined) return <div className="view view-skills"><ViewHead title="Skills" kicker="All lines" sub={sub} actions={newBtn} /><Async query={q} what="skills" id="skills">{() => null}</Async></div>;
+  if (sel && page) return <div className="view view-skills"><SkillPage sk={sel} agents={agents} onEdit={() => edit(sel)} /></div>;
   return (
     <div className="view view-skills">
       <ViewHead title="Skills" kicker="All lines" sub={sub} actions={newBtn} />

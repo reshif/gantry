@@ -7,12 +7,13 @@ import { Fragment } from "react";
 import { fmt, type Catalog, type Routing, type Vendor } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { useRoutingVersions } from "../../api/queries";
+import { useProjects, useRoutingVersions } from "../../api/queries";
 import { useActors } from "../../ui/actors";
 import { Chip, LockNote, Panel, Select } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/SortTable";
 import { useUI } from "../../ui/overlay-context";
 import { dec, enabledModels } from "./kit";
+import { ProjectPolicy } from "./Policy";
 
 type RoutingRead = Routing & { version?: number };
 
@@ -33,6 +34,7 @@ export function RoutingPanel({ routing, vendors, cat }: { routing: RoutingRead; 
     return res;
   };
 
+  const projects = useProjects().data ?? [];
   const stations = cat?.stations ?? [];
   const withCurrent = (cur: string) => (cur && !enabled.some((m) => m.value === cur) ? [...enabled, { value: cur, label: `${cur} (unavailable)` }] : enabled);
 
@@ -88,6 +90,9 @@ export function RoutingPanel({ routing, vendors, cat }: { routing: RoutingRead; 
       </div>
       <Panel title="Routing rules" flush>
         {rules}
+      </Panel>
+      <Panel title="Project policy">
+        <ProjectPolicy routing={r} vendors={vendors} projects={projects} enabled={enabled} change={change} />
       </Panel>
       <RoutingVersions current={r.version} />
     </div>

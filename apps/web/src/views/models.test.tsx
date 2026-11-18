@@ -117,7 +117,6 @@ describe("routing policy", () => {
     mount();
     await byId("rt-default");
     expect(document.getElementById("rt-cross")).toBeNull();
-    expect(document.getElementById("rt-proj")).toBeNull();
     expect(document.body.textContent).not.toContain("Where would this request go");
     expect(document.body.textContent).not.toContain("Per-project policy");
     const titles = [...document.querySelectorAll(".panel h2, .panel h3, .panel-head")].map((t) => t.textContent ?? "").join("|");
@@ -155,5 +154,69 @@ describe("Models screen: a read the person may not make", () => {
     mount();
     await waitFor(() => expect(document.getElementById("models-hidden")?.textContent).toContain("Not visible to you"));
     expect(document.getElementById("models-hidden")?.textContent).toContain("model.view");
+  });
+});
+
+describe("Reachability: every dialog and panel is a click away", () => {
+  it("Add vendor in the header opens the add-vendor dialog and posts", async () => {
+    const calls = setup({ "POST /api/v1/vendors": () => ok({ vendor: { id: "acme-llm" } }) });
+    mount();
+    fireEvent.click(await byId("md-add-vendor"));
+    type(await byId("va-name"), "Acme LLM");
+    fireEvent.click(await byId("va-ok"));
+    await waitFor(() => expect(writes(calls).find((c) => c.method === "POST" && c.path === "/api/v1/vendors")?.body).toMatchObject({ name: "Acme LLM" }));
+  });
+
+  it("vendor card actions: Connect, Add model, Remove model and Disconnect each open their dialog", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("vendor-connect-local"));
+    await byId("vc-submit");
+    fireEvent.click(document.querySelector<HTMLElement>("[role=dialog] button")!);
+    fireEvent.click(await byId("vendor-addmodel-anthropic"));
+    await byId("ma-ok");
+    cleanup();
+    setup();
+    mount();
+    fireEvent.click(await byId("vendor-disc-bedrock"));
+    await byId("vd-submit");
+    cleanup();
+    setup();
+    mount();
+    fireEvent.click(await byId("vendor-rmmodel-bedrock"));
+    await byId("md-rm-ok");
+  });
+
+  it("Remove model with several models asks which one first", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("vendor-rmmodel-anthropic"));
+    fireEvent.click(await byId("rm-pick-claude-haiku-5-5"));
+    await byId("md-rm-ok");
+  });
+
+  it("Prices: Publish prices publishes several models as one version; versions and the vendor roll-up are listed", async () => {
+    const calls = setup({ "POST /api/v1/prices": () => ok({ version: 3 }) });
+    window.location.hash = "#models?tab=prices";
+    mount();
+    await waitFor(() => expect(document.getElementById("pv-table")?.textContent).toContain("Price cut"));
+    expect(document.querySelector("[aria-label='Anthropic budget used']")).not.toBeNull();
+    fireEvent.click(await byId("md-publish-prices"));
+    type(await byId("pv-in-claude-opus-5-5"), "6");
+    type(await byId("pv-out-claude-opus-5-5"), "30");
+    type(await byId("pv-in-claude-sonnet-5-5"), "4");
+    type(await byId("pv-out-claude-sonnet-5-5"), "16");
+    fireEvent.click(await byId("pv-add"));
+    await waitFor(() => expect(writes(calls).find((c) => c.path === "/api/v1/prices")?.body.prices).toMatchObject({ "claude-opus-5-5": { in: 6, out: 30 }, "claude-sonnet-5-5": { in: 4, out: 16 } }));
+  });
+
+  it("Routing: the project policy panel is mounted and saves a project's allowed vendors", async () => {
+    const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
+    window.location.hash = "#models?tab=routing";
+    mount();
+    await byId("rt-policy");
+    fireEvent.click(await byId("rt-proj-v-bedrock"));
+    fireEvent.click(await byId("rt-proj-save"));
+    await waitFor(() => expect(writes(calls).find((c) => c.path === "/api/v1/routing")?.body.routing.projects.payments.allowedVendors).toEqual(["bedrock"]));
   });
 });

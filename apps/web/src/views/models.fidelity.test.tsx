@@ -88,17 +88,17 @@ describe("Models screen (Blueprint layout)", () => {
     expect(document.body.textContent).toContain("3 models");
     expect(document.querySelector("#md-prices .tfoot")!.textContent).toContain("1–3 of 3");
     const titles = [...document.querySelectorAll(".md-stack .panel-title")].map((t) => t.textContent);
-    expect(titles.slice(0, 2)).toEqual(["Model prices", "Project budgets, this month"]);
+    expect(titles.filter((t) => t === "Model prices" || t === "Project budgets, this month")).toEqual(["Model prices", "Project budgets, this month"]);
     const link = [...document.querySelectorAll(".md-stack a")].find((a) => a.textContent === "Payments Platform")!;
     expect(link.getAttribute("href")).toBe("#/p/payments/project-config");
     expect(document.body.textContent).toContain("$4,500 / $5,000");
     expect(document.querySelector(".md-stack .meter.warn")).not.toBeNull();
   });
 
-  it("matches the prototype's header and vendor cards: no Add vendor, static 'all connected', no Manage rows, no dashed Local card, any model switch is usable", async () => {
+  it("matches the prototype's header and vendor cards: Add vendor in the header, static 'all connected', no Manage rows, no dashed Local card, any model switch is usable", async () => {
     mount("#models");
     const card = await byId("vendor-anthropic");
-    expect(document.getElementById("md-add-vendor")).toBeNull();
+    expect(document.getElementById("md-add-vendor")).not.toBeNull();
     expect(document.getElementById("md-stats")!.textContent).toContain("all connected");
     expect(document.body.textContent).not.toContain("not connected");
     expect(document.querySelector(".md-manage")).toBeNull();
@@ -118,11 +118,11 @@ describe("Models screen (Blueprint layout)", () => {
     expect((document.querySelector("select[aria-label='Default model']") as HTMLSelectElement).id).toBe("rt-default");
   });
 
-  it("prices tab: only Model prices and Project budgets (all projects, archived too); no Publish prices; local models have blank prices", async () => {
+  it("prices tab: Model prices, Price versions, Vendor budgets and Project budgets (all projects, archived too); Publish prices; local models have blank prices", async () => {
     mount("#models?tab=prices");
     await byId("md-prices");
-    expect([...document.querySelectorAll(".md-stack .panel-title")].map((t) => t.textContent)).toEqual(["Model prices", "Project budgets, this month"]);
-    expect(document.getElementById("pv-open")).toBeNull();
+    expect([...document.querySelectorAll(".md-stack .panel-title")].map((t) => t.textContent)).toEqual(["Model prices", "Price versions", "Vendor budgets", "Project budgets, this month"]);
+    expect(document.getElementById("md-publish-prices")).not.toBeNull();
     const local = [...document.querySelectorAll("#md-prices tbody tr")].find((r) => r.textContent!.includes("coder-34b"))!;
     expect([...local.querySelectorAll("td .num")].map((n) => n.textContent)).toEqual(["", ""]);
   });

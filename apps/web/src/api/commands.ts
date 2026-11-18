@@ -15,4 +15,6 @@ export const commands = {
   setGateMode: ops.setGateMode,
   kill: ops.kill,
   haltProject: ops.haltProject,
+  attachSkill: ops.attachSkill,
+  setSkillProjects: ops.setSkillProjects,
 };
