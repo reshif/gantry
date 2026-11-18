@@ -206,7 +206,7 @@ export function MembersTab({ p, cat, people, s, set }: PcProps) {
  * Who is on call for this project (owner decision 7). Factory Admins always are; the project's admins choose who else is.
  * Nobody can put themselves on call; the person on call can hand over to someone with a role here.
  */
-function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["people"]; canSet: ReturnType<typeof useCan> }) {
+export function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["people"]; canSet: ReturnType<typeof useCan> }) {
   const res = useRes();
   const me = useMe();
   const list = Array.isArray(p.oncall) ? p.oncall : [];
