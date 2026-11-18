@@ -39,6 +39,8 @@ export interface PolicyContext {
   wo?: Pick<WorkOrder, "id" | "killed" | "state"> | null;
 }
 
+/** A policy role of "*" means anyone (the UI calls it "Anyone"). */
+export const ANYONE = "*";
 const MATRIX_RULE: DecisionRule = { kind: "matrix", id: "MATRIX", name: "Role matrix" };
 
 export function rolesOf(state: PolicyState): readonly Role[] {
@@ -49,7 +51,8 @@ export function actionsOf(state: PolicyState): readonly Action[] {
 }
 /** Does the matrix let this role do the action? A factory-scope right held by a project-level role is ignored, whatever the stored matrix says. */
 export function roleHolds(state: Pick<PolicyState, "matrix" | "catalog">, role: string, action: string): boolean {
-  return !!state.matrix[role]?.[action] && roleMayHold(state.catalog?.roles ?? DEFAULT_CATALOG.roles, state.catalog?.actions ?? DEFAULT_CATALOG.actions, role, action);
+  /* Factory Admin is universal (owner decision 2026-11-19): every cell of its column is on, whatever the stored matrix says. */
+  return (role === "factory_admin" || !!state.matrix[role]?.[action]) && roleMayHold(state.catalog?.roles ?? DEFAULT_CATALOG.roles, state.catalog?.actions ?? DEFAULT_CATALOG.actions, role, action);
 }
 
 /* ------------------------------------------------------------------ lookups ------------- */
@@ -105,7 +108,7 @@ export function permissionSources(state: Pick<PolicyState, "matrix" | "catalog">
 }
 export function isFactoryAdmin(state: PolicyState, personId: string): boolean {
   const p = findPerson(state, personId);
-  return !!p && p.roles.some((g) => g.role === "factory_admin");
+  return !!p && p.roles.some((g) => g.role === "factory_admin" && g.scope === "factory");
 }
 export function visibleProjects(state: PolicyState, personId: string) {
   const p = findPerson(state, personId);
@@ -265,7 +268,7 @@ export function can(state: PolicyState, personId: string | null | undefined, act
 
   if (!granting.length) {
     const ext = state.policies.filter((p) => p.enabled && p.extend && p.effect === "allow" && p.actions.includes(action));
-    const hit = ext.find((q) => q.roles.some((r) => heldRoles.includes(r)) && whereOk(q, projectId) && whenOk(q, t) && (!q.oncallOnly || onCall));
+    const hit = ext.find((q) => q.roles.some((r) => r === ANYONE || heldRoles.includes(r)) && whereOk(q, projectId) && whenOk(q, t) && (!q.oncallOnly || onCall));
     if (hit) return { allowed: true, reason: "Allowed by " + hit.id + " '" + hit.name + "'.", rule: { kind: "policy", id: hit.id, name: hit.name }, needs: "" };
     /* I7: a Factory Admin can always halt, kill and restore, even if the matrix is damaged */
     if (ADMIN_ALWAYS.has(action) && person.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")) {
@@ -289,6 +292,7 @@ export function can(state: PolicyState, personId: string | null | undefined, act
   }
 
   const held = granting.map((g) => g.role);
+  const adminHere = granting.some((g) => g.role === "factory_admin" && g.scope === "factory");
   const denies = state.policies.filter((p) => p.enabled && p.effect === "deny" && p.actions.includes(action));
   for (const p of denies) {
     if (p.where.freeze && repo) {
@@ -299,8 +303,9 @@ export function can(state: PolicyState, personId: string | null | undefined, act
     }
   }
   const allows = state.policies.filter((p) => p.enabled && p.effect === "allow" && !p.extend && p.actions.includes(action));
-  if (allows.length) {
-    const applicable = allows.filter((q) => q.roles.some((r) => held.includes(r)) && whereOk(q, projectId));
+  /* Owner decision 2026-11-19: allow policies (windows, on-call) never restrict a Factory Admin, whether or not they name the role. */
+  if (allows.length && !adminHere) {
+    const applicable = allows.filter((q) => q.roles.some((r) => r === ANYONE || held.includes(r)) && whereOk(q, projectId));
     if (!applicable.length) {
       return {
         allowed: false,

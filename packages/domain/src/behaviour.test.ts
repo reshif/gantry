@@ -33,7 +33,7 @@ describe("can(): cases as the legacy views ask them", () => {
     ["Nikhil (project admin) edits approvers in Risk", "p-nikhil", "approvers.edit", { project: "risk" }, true, "MATRIX"],
     ["Grace may approve gates in Risk", "p-grace", "gate.approve", { project: "risk" }, true, "MATRIX"],
     ["Asha as factory admin sees any project", "p-asha", "project.view", { project: "identity" }, true, "MATRIX"],
-    ["Asha releases Identity under break-glass POL-105 (not on call, so POL-103 does not apply)", "p-asha", "release", { project: "identity", time: wed11 }, true, "POL-105"],
+    ["Asha releases Identity: allow policies never restrict a Factory Admin (the matrix decides)", "p-asha", "release", { project: "identity", time: wed11 }, true, "MATRIX"],
     ["Omar edits policy", "p-omar", "policy.edit", {}, true, "MATRIX"],
     ["Priya halts a line as reviewer", "p-priya", "line.halt", { project: "payments" }, true, "MATRIX"],
     ["Chloe confirms briefs in Storefront (line lead)", "p-chloe", "brief.confirm", { project: "storefront" }, true, "MATRIX"],
@@ -156,7 +156,7 @@ describe("invariants (spec 5.1 and 14.4)", () => {
 
   it("a Factory Admin keeps stop commands even if the matrix is damaged (I7)", () => {
     const s = mutate(S, (x) => { x.matrix = defaultMatrix(); x.matrix.factory_admin!["kill.factory"] = false; });
-    expect(can(s, "p-asha", "kill.factory", {})).toMatchObject({ allowed: true, rule: { id: "I7" } });
+    expect(can(s, "p-asha", "kill.factory", {})).toMatchObject({ allowed: true });
     expect(can(s, "p-meera", "kill.factory", {}).allowed).toBe(false);
   });
 
