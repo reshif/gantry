@@ -13,7 +13,6 @@ import { Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { useRouteTab } from "../lib/routeQuery";
 import { Async, qState } from "../ui/async";
 import { useCatalog } from "./projects/kit";
-import { useAllRepos } from "./govern/data";
 import { ModelPrices, ProjectBudgets } from "./models/Prices";
 import { RoutingPanel } from "./models/Routing";
 import { VendorPanel } from "./models/Vendor";
@@ -26,7 +25,6 @@ export default function ModelsView() {
   const vendors = vq.data ?? [];
   const projects = useProjects().data ?? [];
   const cat = useCatalog();
-  const { repos } = useAllRepos();
 
   const mtd = vendors.reduce((t, v) => t + (v.mtd || 0), 0);
   const bud = vendors.reduce((t, v) => t + (v.budget || 0), 0);
@@ -58,7 +56,7 @@ export default function ModelsView() {
                 {vendors.map((v) => <VendorPanel key={v.id} v={v} />)}
               </div>
             ) : tab === "routing" ? (
-              <RoutingPanel routing={r} vendors={vendors} repos={repos} projects={projects} cat={cat} />
+              <RoutingPanel routing={r} vendors={vendors} cat={cat} />
             ) : (
               <div className="stack md-stack">
                 <ModelPrices vendors={vendors} />

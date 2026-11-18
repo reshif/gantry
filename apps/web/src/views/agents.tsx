@@ -107,7 +107,7 @@ function Detail({ a, projects }: { a: AgentRow; projects: Project[] }) {
   const [tab, setTab] = useRouteTab(["config", "instr", "skills", "proj", "versions"], "config");
   const tabs = [
     { id: "config", label: "Configuration" }, { id: "instr", label: "Instructions" }, { id: "skills", label: "Skills and MCP", count: a.skills.length + a.mcp.length },
-    { id: "proj", label: "Per-project", count: Object.keys(a.overrides ?? {}).length }, { id: "versions", label: "Versions", count: a.versions.length },
+    { id: "proj", label: "Per-project", count: Object.keys(a.overrides ?? {}).length || undefined }, { id: "versions", label: "Versions", count: a.versions.length },
   ];
   const tp: TabProps = { a, ro, perm, projects, policies, apply, saveAsVersion };
   const body = tab === "instr" ? <InstructionsTab key={`${a.id}-${a.rev}`} {...tp} />

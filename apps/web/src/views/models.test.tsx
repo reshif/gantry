@@ -99,9 +99,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Models screen (legacy models.js on the real API)", () => {
-});
-
 describe("routing policy", () => {
   beforeEach(() => { window.location.hash = "#models?tab=routing"; });
   it("changes the default model with If-Match from the loaded version", async () => {
@@ -115,45 +112,16 @@ describe("routing policy", () => {
     expect(w.headers["if-match"]).toBe("4");
   });
 
-  it("the cross-model switch is off by default and saves the factory switch", async () => {
-    const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
+  it("Routing carries the prototype's panels only: default and per-station, fallback chain (read-only), routing rules, then the kept routing versions", async () => {
+    setup();
     mount();
-    const sw = (await byId("rt-cross")) as HTMLInputElement;
-    expect(sw.checked).toBe(false);
-    fireEvent.click(sw);
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body.routing.crossModelFallback).toBe(true);
-  });
-
-  it("saves a per-project policy: allowed vendors, regions, retention and the cross-model opt-in (locked until the factory switch is on)", async () => {
-    const calls = setup({ "PUT /api/v1/routing": () => ok({ version: 5 }) });
-    mount();
-    type(await byId("rt-proj"), "risk");
-    fireEvent.click(await byId("rt-proj-v-bedrock"));
-    type(await byId("rt-proj-regions"), "eu-central-1, on-prem");
-    fireEvent.click(await byId("rt-proj-r-zero"));
-    expect((await byId("rt-proj-cross")).getAttribute("data-reason")).toMatch(/switched off for the factory/);
-    fireEvent.click(await byId("rt-proj-save"));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body.routing.projects).toEqual({ risk: { allowedVendors: ["bedrock"], allowedRegions: ["eu-central-1", "on-prem"], allowedRetention: ["zero"] } });
-  });
-
-  it("previews the route from the API's resolver and follows the repo and station", async () => {
-    const calls = setup();
-    mount();
-    await waitFor(() => expect(document.querySelector(".md-result")?.textContent).toContain("bedrock-claude-sonnet-5-5"));
-    expect(calls.filter((c) => c.path === "/api/v1/routing/resolve").at(-1)!.query.get("repo")).toBe("risk-engine");
-    expect(document.querySelector(".md-steps")?.textContent).toContain("RR-1");
-    type(await byId("rt-prev-repo"), "payments-api");
-    await waitFor(() => expect(document.querySelector(".md-result")?.textContent).toContain("claude-opus-5-5"));
-    type(await byId("rt-prev-station"), "review");
-    await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/routing/resolve").at(-1)!.query.get("station")).toBe("review"));
-  });
-
-  it("shows a blocked route", async () => {
-    setup({ "GET /api/v1/routing/resolve": () => ({ body: { model: null, vendor: null, wanted: "claude-opus-5-5", layer: "default", steps: ["RR-1: no allowed vendor serves claude-opus-5-5."], blocked: "x", crossModel: false, sameModelFallback: false, rule: null } }) });
-    mount();
-    await waitFor(() => expect(document.querySelector(".md-result.is-block")?.textContent).toContain("Blocked: no allowed model"));
+    await byId("rt-default");
+    expect(document.getElementById("rt-cross")).toBeNull();
+    expect(document.getElementById("rt-proj")).toBeNull();
+    expect(document.body.textContent).not.toContain("Where would this request go");
+    expect(document.body.textContent).not.toContain("Per-project policy");
+    const titles = [...document.querySelectorAll(".panel h2, .panel h3, .panel-head")].map((t) => t.textContent ?? "").join("|");
+    for (const t of ["Default and per-station", "Fallback chain", "Routing rules", "Routing versions"]) expect(titles).toContain(t);
   });
 });
 

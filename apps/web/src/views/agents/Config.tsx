@@ -23,7 +23,7 @@ export function ConfigTab({ a, ro, perm, projects, policies, apply }: TabProps) 
   const st = useStations();
   const station = st.find(a.station);
   const check = (autonomy: string) => autonomyCheck(policies, projects, { station: a.station, projects: a.projects }, autonomy);
-  const modelOpts = m.list.map((x) => ({ value: x.id, label: x.name })).concat(m.list.some((x) => x.id === a.model) ? [] : [{ value: a.model, label: `${m.name(a.model)} (not available)` }]);
+  const modelOpts = m.all.map((x) => ({ value: x.id, label: x.name })).concat(m.all.some((x) => x.id === a.model) ? [] : [{ value: a.model, label: `${m.name(a.model)} (not available)` }]);
   const autoValues = [...new Set([...AUTONOMY.map((o) => o[0]), a.autonomy])];
   const paths = a.guardrails.paths;
   const tools: Record<string, boolean> = { ...a.tools };
@@ -68,7 +68,7 @@ export function ConfigTab({ a, ro, perm, projects, policies, apply }: TabProps) 
 
 export function OverridesTab({ a, projects }: TabProps) {
   const heat = useEvalsFactory().data?.heat?.[a.id];
-  const rows = projects.filter((p) => p.status !== "archived");
+  const rows = projects;
   const cols: SortCol<Project>[] = [
     { key: "p", label: "Project", render: (p) => p.name },
     { key: "o", label: "Override", render: (p) => (a.overrides[p.id] ? <Chip text="custom" cls="info" /> : <span className="muted">Uses default</span>) },

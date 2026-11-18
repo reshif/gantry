@@ -8,7 +8,7 @@ export function InstructionsTab({ a, ro, perm, saveAsVersion }: TabProps) {
   return (
     <Panel title="Instructions">
       <div>
-        <textarea id="ag-instr" className="input" rows={8} aria-label="Instructions" disabled={ro} value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea id="ag-instr" className="input" rows={8} style={{ lineHeight: 1.6, padding: "8px 10px" }} aria-label="Instructions" disabled={ro} value={text} onChange={(e) => setText(e.target.value)} />
         <div className="row" style={{ marginTop: 10 }}>
           <Btn label="Save as new version" kind="primary" id="ag-instr-save" guard={ro ? perm : null} onClick={() => saveAsVersion(text)} />
           <Btn label="Revert" id="ag-instr-revert" onClick={() => setText(a.instructions ?? "")} />

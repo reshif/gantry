@@ -234,6 +234,8 @@ describe("Agents screen", () => {
     expect(document.getElementById("ag-savebar")).toBeNull();
     expect(document.getElementById("ag-paths-edit")).toBeNull();
     await waitFor(() => expect(Array.from(model.options).some((o) => o.value === "claude-sonnet-5-5")).toBe(true));
+    // every model of every vendor is offered, not only the enabled ones
+    expect(Array.from(model.options).some((o) => o.value === "off-model")).toBe(true);
     fireEvent.change(model, { target: { value: "claude-sonnet-5-5" } });
     await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
     expect(writes(calls, "PATCH")[0]).toMatchObject({ body: { patch: { model: "claude-sonnet-5-5" } }, headers: { "if-match": "7" } });
@@ -300,37 +302,20 @@ describe("Agents screen", () => {
     expect(writes(calls, "PATCH")[0]).toMatchObject({ body: { patch: { status: "paused" }, note: "status" }, headers: { "if-match": "7" } });
   });
 
-  it("locks promotion with the eval gate's reason, and promotes an eligible candidate", async () => {
-    const calls = setup({ "POST /api/v1/agents/ag-build/versions/2.8.0-rc1/promote": () => ok() });
+  it("Versions: only live or retired chips, Roll back on every non-live row (candidate included), a dash on the live row, no Promote", async () => {
+    setup();
     mountAgent();
     await tab("versions");
-    const blocked = await byId("ag-promote-270rc1");
-    expect(blocked.getAttribute("aria-disabled")).toBe("true");
-    expect(blocked.textContent).toBe("Promote");
-    expect(blocked.getAttribute("data-reason")).toBe("A passing run of its suite. No run of SUITE-BUILD yet.");
-    fireEvent.click(blocked);
-    expect(writes(calls, "POST")).toHaveLength(0);
-    const eligible = await byId("ag-promote-280rc1");
-    expect(eligible.getAttribute("aria-disabled")).toBeNull();
-    expect(eligible.className).toContain("btn-primary");
-    fireEvent.click(eligible);
-    await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
-    expect(writes(calls, "POST")[0]!.headers["if-match"]).toBe("7");
-    // the live version and a retired one: no promote on live, rollback only on a retired one
-    expect(document.getElementById("ag-promote-261")).toBeNull();
-    expect(document.getElementById("ag-rollback-250")).not.toBeNull();
+    await byId("ag-rollback-250");
+    expect(document.getElementById("ag-rollback-270rc1")).not.toBeNull();
+    expect(document.getElementById("ag-rollback-280rc1")).not.toBeNull();
+    expect(document.querySelector("[id^=ag-promote-]")).toBeNull();
     expect(document.getElementById("ag-rollback-261")).toBeNull();
+    const chips = [...document.querySelectorAll("#ag-vers tbody .chip")].map((c) => c.textContent?.toLowerCase());
+    expect(chips.every((c) => c === "live" || c === "retired")).toBe(true);
+    expect(document.querySelector("#ag-vers")!.textContent).toContain("—");
     const cols = [...document.querySelectorAll("#ag-vers thead th")].map((t) => t.textContent);
     expect(cols).toEqual(["Version", "Date", "Change", "Suite", "State", ""]);
-    expect(document.querySelector("#ag-vers .tfoot")!.textContent).toContain("1–4 of 4");
-  });
-
-  it("shows a promotion refusal from the server as an error toast", async () => {
-    setup({ "POST /api/v1/agents/ag-build/versions/2.8.0-rc1/promote": () => ({ status: 403, body: { ok: false, msg: "Blocked: Blocked: 70% vs 85% on SUITE-BUILD.", needs: "Needs SUITE-BUILD at 85% or better" } }) });
-    mountAgent();
-    await tab("versions");
-    fireEvent.click(await byId("ag-promote-280rc1"));
-    await screen.findByText(/Blocked: Blocked: 70% vs 85%/);
   });
 
   it("rolls back through a confirmation that names both versions", async () => {

@@ -1,4 +1,4 @@
-/** Versions tab in the Blueprint layout: one "Version history" panel; a retired version has Roll back, a candidate (when one exists) has Promote. */
+/** Versions tab in the Blueprint layout: one "Version history" panel; every non-live version has Roll back. */
 import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { Btn, Chip, Panel, type Decision } from "../../ui/primitives";
@@ -25,21 +25,16 @@ export function RollbackDialog({ a, ver, perm, close }: { a: AgentRow; ver: Agen
 
 export function VersionsTab({ a, perm }: { a: AgentRow; perm: Decision }) {
   const ui_ = useUI();
-  const out = useOutcome();
   const rows = a.versions.slice().reverse();
   const cols: SortCol<AgentVersionRow>[] = [
     { key: "v", label: "Version", render: (v) => <span className="mono">v{v.v}</span> },
     { key: "at", label: "Date", render: (v) => new Date(v.at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) },
     { key: "n", label: "Change", render: (v) => <div>{v.note}<span className="sub mono">{v.diff}</span></div> },
     { key: "s", label: "Suite", align: "end", render: (v) => (v.suiteScore == null ? "—" : fmt.pct(v.suiteScore)) },
-    { key: "l", label: "State", render: (v) => (v.live ? <Chip text="live" cls="ok" /> : v.rc ? <Chip text="candidate" cls="warn" /> : <Chip text="retired" cls="plain" />) },
+    { key: "l", label: "State", render: (v) => (v.live ? <Chip text="live" cls="ok" /> : <Chip text="retired" cls="plain" />) },
     { key: "a", label: "", align: "end", render: (v) => {
-      if (v.live) return null;
+      if (v.live) return <span className="muted">—</span>;
       const vid = v.v.replace(/\W/g, "");
-      if (v.rc) {
-        const g: Decision | null = !perm.allowed ? perm : !v.eligibility.ok ? { allowed: false, needs: "A passing run of its suite", reason: `${v.eligibility.text}.` } : null;
-        return <Btn label="Promote" small kind="primary" id={`ag-promote-${vid}`} aria={`Promote ${v.v}`} guard={g} onClick={() => { void ops.promoteAgent(a.id, v.v, { ifMatch: a.rev }).then((r) => out(r)); }} />;
-      }
       return <Btn label="Roll back" small id={`ag-rollback-${vid}`} aria={`Roll back to ${v.v}`} guard={perm} onClick={() => ui_.open((close) => <RollbackDialog a={a} ver={v} perm={perm} close={close} />)} />;
     } },
   ];
