@@ -4,6 +4,7 @@ import type { Actor } from "../../core/command.js";
 import { invalid, refuse } from "../../core/errors.js";
 import { closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
 import { appendMessage, closeConversation } from "./conversation.js";
+import { recordBriefDocument } from "./station-docs.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
 import { saveWo, type Wo } from "./model.js";
 import { declineInner } from "./intake.js";
@@ -152,6 +153,7 @@ async function confirmBrief(fx: Fx, w: Wo, by: string): Promise<void> {
   await fx.tx.query(`insert into brief_versions (org_id, wo_id, version, body, class, route, confirmed_by, confirmed_at) values ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8)`, [fx.orgId, w.id, v, JSON.stringify(brief), w.cls, JSON.stringify(r), by, fx.now]);
   const names = r.map((s) => stationDef(fx.catalog, s)?.name ?? s).join(" → ");
   const who = (await fx.tx.query<{ name: string }>(`select name from people where org_id = $1 and id = $2`, [fx.orgId, by])).rows[0]?.name ?? by;
+  await recordBriefDocument(fx.tx, { orgId: fx.orgId, woId: w.id, version: v, brief: brief as Record<string, unknown>, cls: w.cls, route: r.map((s) => stationDef(fx.catalog, s)?.name ?? s), by, byName: who });
   await appendMessage(fx, w.id, "ag-intake", `Brief confirmed by ${who}. Starting the route: ${names}.`);
   await closeConversation(fx, w.id);
   closeEntry(w, fx, "passed");

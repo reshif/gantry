@@ -73,7 +73,7 @@ d("document collaboration", () => {
     expect(secret.body.error?.message ?? JSON.stringify(secret.body)).toContain("API key");
     // The next station run is handed the person's version and told a person wrote it.
     const { latestDocuments } = await import("../src/areas/workorders/documents.js");
-    expect(await latestDocuments(t.db.app, t.orgId, id)).toMatchObject([{ name: "research.md", version: 2, markdown: edited, editedByPerson: true }]);
+    expect((await latestDocuments(t.db.app, t.orgId, id)).filter((x) => x.name === "research.md")).toMatchObject([{ name: "research.md", version: 2, markdown: edited, editedByPerson: true }]);
     // The gate decision later records which documents a person edited.
     const { editedByPeople } = await import("../src/areas/workorders/documents.js");
     expect(await editedByPeople(t.db.app, t.orgId, id)).toEqual([{ doc: "research.md", version: 2, by: "p-meera" }]);

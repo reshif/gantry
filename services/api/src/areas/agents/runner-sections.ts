@@ -6,7 +6,7 @@
 export const STATION_TOOLS_TEXT = `## Showing your work: the gantry tools
 
 People review this station through what you write with the \`gantry\` tools, not through your transcript.
-- \`write_document\`: your station's primary document, named after the station (for example \`research.md\`), in markdown. Write it for the people who approve the next gate: what you found or decided, why, and the evidence. Extra documents are allowed.
+- \`write_document\`: your station's primary document, named after the station (for example \`research.md\`), in markdown. Write it for the people who approve the next gate: what you found or decided, why, and the evidence. Write it before you finish: a station that ends without it is recorded from its result JSON alone. Build writes \`build.md\`: what changed and why, the files, the commits, the decisions you made and where you deviated from the plan. Extra documents are allowed.
 - \`ask\`: a question only a person can answer. Blocking when you cannot proceed responsibly without the answer (the run then ends and you are started again with it); not blocking when you can go on.
 - \`assume\`: anything you proceed on that nobody confirmed. Record every assumption that shapes your output.
 - \`spawn_scouts\`: when your question splits into independent sub-questions that each need real reading, send up to four scouts; you run again with their documents.

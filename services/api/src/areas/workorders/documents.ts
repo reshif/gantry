@@ -62,7 +62,7 @@ export interface AssumptionRow {
 /** A station run's document: the next version of its name on this work order. */
 export async function recordDocument(
   tx: Tx,
-  d: { orgId: string; id: string; woId: string; attemptId: string | null; station: string | null; name: string; hash: string; mediaType: string; size: number; body: string; author: string | null; authorKind?: "agent" | "person" },
+  d: { orgId: string; id: string; woId: string; attemptId: string | null; station: string | null; name: string; hash: string; mediaType: string; size: number; body: string; author: string | null; authorKind?: "agent" | "person" | "system" },
 ): Promise<{ id: string; version: number }> {
   // One writer at a time per document name: the advisory lock makes "max + 1" safe without a sequence per document.
   await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`doc:${d.orgId}:${d.woId}:${d.name}`]);

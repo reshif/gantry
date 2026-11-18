@@ -12,6 +12,7 @@ import { schedule, type Tx } from "@gantry/db";
 import { flushFx, attemptIsCurrent, arriveAtGate, bayOf, cancelAttempts, closeEntry, closeOpenInstances, advance, coveringStop, enterBay, enterStation, ev, loadOne, note, openGate, openInstanceOf, releaseSlot, startAttempt, stationIdOf, dispatchQueued, type Fx } from "./engine.js";
 import { readCatalog, readOrg } from "../../core/read/index.js";
 import { lockWo, saveWo, type Wo } from "./model.js";
+import { ensureStationDocument } from "./station-docs.js";
 import { recordDialogue, type QuestionRow } from "./documents.js";
 import type { ResearchPlan } from "./research.js";
 import { applyScoutResult, scoutRequest, startSwarm } from "./swarm.js";
@@ -180,6 +181,7 @@ export async function applyStationResult(tx: Tx, attemptId: string, fencing: num
     const { checks, headSha } = absorbOutput(w, sid, result);
     await recordGuardrail(tx, orgId, w, fx.actor);
     const dl = await recordDialogue(tx, { orgId, woId: w.id, station: sid, attemptId, agent: fx.actor, dialogue: asObj(result.output).dialogue, now });
+    await ensureStationDocument(tx, { orgId, woId: w.id, attemptId, station: sid, stationName: stationDef(fx.catalog, sid)?.name ?? sid, result });
     await postStationMessage(fx, w, sid, attemptId, result.summary ? `${stationDef(fx.catalog, sid)?.name ?? sid} finished: ${clip(result.summary)}` : `${stationDef(fx.catalog, sid)?.name ?? sid} finished.`, dl.questions, dl.assumptions);
     closeEntry(w, fx, "passed", result.summary ?? "");
     w.data.progress = 100;
