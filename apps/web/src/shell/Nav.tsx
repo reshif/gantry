@@ -133,7 +133,7 @@ export function Nav({ me, current, project, open, onNavigate }: { me: Me; curren
       <div className="nav" id="nav">
         {NAV_GROUPS.map((gname) => {
           const noProj = gname === "Project" && !shown;
-          const items = ROUTES.filter((r) => r.group === gname && r.nav !== false && (noProj || access.visible(r.id) || r.id === "design-system"));
+          const items = ROUTES.filter((r) => r.group === gname && r.nav !== false && (noProj || access.visible(r.id)));
           if (!items.length) return null;
           const label = GROUP_LABEL[gname] ?? gname;
           const isActive = (it: (typeof items)[number]) => current === it.id || (it.id === "work-orders" && (current === "record" || current === "changes" || current === "traveler")) || (it.id === "people" && current === "person");
