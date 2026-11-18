@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CATALOG } from "@gantry/domain";
@@ -106,7 +106,9 @@ describe("Home: one page", () => {
     setup(ASHA, adminHome({}, { attention: [killed], setup: undefined }));
     mount();
     expect(await screen.findByText("Factory killed")).toBeTruthy();
-    expect(screen.getByText(/restore approvals 1 of 2/)).toBeTruthy();
+    expect(screen.getAllByText(/restore approvals 1 of 2/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("alert").textContent).toMatch(/Factory stopped\./);
+    expect(screen.getByRole("alert").textContent).toMatch(/Restore needs two Factory Admins/);
     expect(await screen.findByRole("button", { name: /Approve restore \(2 of 2\)/ })).toBeTruthy();
     cleanup();
     vi.unstubAllGlobals();
@@ -155,7 +157,21 @@ describe("Home: Control Room", () => {
     const tile = (l: string) => screen.getByText(l).closest(".stat");
     expect(tile("On the belt")?.querySelector(".v")?.textContent).toBe("12");
     expect(tile("Released today")?.querySelector(".v")?.textContent).toBe("3");
-    expect(tile("Needs attention")?.querySelector(".v")?.textContent).toBe("1");
+    expect(tile("On the belt")?.textContent).toMatch(/5 running · 7 queued/);
+    expect(tile("Blocked")).toBeTruthy();
+    expect(tile("Waiting for a person")?.textContent).toMatch(/at gates/);
+  });
+
+  it("the sub line names the project and the head has only Open floor and Submit work order; Review opens the decision dialog", async () => {
+    const gate = { wo: "WO-9", title: "Add limits", gate: "G2", gateLabel: "G2", gateName: "Spec approved", project: "payments", projectName: "Payments Platform", waitMs: 3_600_000 };
+    setup(ASHA, adminHome({}, { attention: [], setup: undefined, waiting: { approvals: [gate], conversations: [] } }), { extra: { "GET /api/v1/work-orders/WO-9": () => ({ body: { id: "WO-9", project: "payments", version: 1, allowed: { approve: { gate: "G2", instance: "WO-9:G2:1", allowed: true, reason: "", needs: "" } } } }), "GET /api/v1/work-orders/WO-9/gates/G2/approvers": () => ({ body: { label: "Spec", rule: { text: "One approver.", conditions: [] }, progress: { have: 0, need: 1, approvals: [], unmet: [] }, satisfiable: true, warning: "", eligible: [], overrides: [], viewerCanOverride: false, can: { editRule: false, editWhy: "", grantRole: false, grantWhy: "" } } }) } });
+    mount();
+    expect(await screen.findByText(/Plant overview for .*\. Agents propose, people approve\./)).toBeTruthy();
+    await waitFor(() => expect(document.querySelector("#hm-projects #hm-new-project")).toBeTruthy());
+    expect(screen.getByText("WO-9 · Add limits · waiting 1h 00m ago")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    expect(await screen.findByRole("button", { name: "Request changes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
   });
 
   it("an item in Attention is not repeated among the waiting rows", async () => {

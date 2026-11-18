@@ -46,7 +46,7 @@ const SEV = [{ id: "crit", label: "Critical" }, { id: "high", label: "High" }, {
 const SHOWN = 5;
 
 /** Restore for a killed scope, only for people who may (no locked copy for anyone else). */
-export function RestoreAction({ item }: { item: AttentionItem }) {
+export function RestoreAction({ item, startLabel, small = true }: { item: AttentionItem; startLabel?: string; small?: boolean }) {
   const ui = useUI();
   const me = useMe();
   const r = item.restore!;
@@ -54,10 +54,10 @@ export function RestoreAction({ item }: { item: AttentionItem }) {
   if (!me || d.pending || !d.allowed) return null;
   const done = r.approvals?.length ?? 0;
   const already = !!r.approvals?.some((a) => a.by === me.person.id);
-  const label = r.scope === "factory" ? (done ? `Approve restore (${done + 1} of ${r.needs ?? 2})` : "Restore factory") : "Restore project";
+  const label = r.scope === "factory" ? (done ? `Approve restore (${done + 1} of ${r.needs ?? 2})` : (startLabel ?? "Restore factory")) : (startLabel ?? "Restore project");
   return (
     <Btn
-      label={label} small kind="primary" id={`hm-restore-${r.scope}${r.id ? `-${r.id}` : ""}`} aria={`${label}: ${item.title}`}
+      label={label} small={small} kind={small ? "primary" : undefined} id={`hm-restore-${r.scope}${r.id ? `-${r.id}` : ""}`} aria={`${label}: ${item.title}`}
       disabledReason={already ? "You approved this restore already. A second Factory Admin must approve." : null}
       onClick={() => makeStopActions(ui, me).restore(r.scope, r.id)}
     />

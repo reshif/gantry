@@ -11,12 +11,15 @@ import { hasCommand, runCommand } from "../lib/commands";
 import { eventRows, eventText, eventTone } from "../lib/eventText";
 import { hashFor, navigate } from "../lib/router";
 import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
+import { pickProject } from "../lib/routes";
 import { useOpenTraveler } from "../shell/useTraveler";
 import { Btn, Chip, Empty } from "../ui/primitives";
 import { useActors } from "../ui/actors";
 import { Async } from "../ui/async";
 import { Bars, Card, CrEmpty, CrIcon, Lamp, ListItem, MiniBeltCr, Page, Stats, type MiniStation, type StatItem } from "../ui/cr";
 import { type HomeFull, goAttention } from "./home/data";
+import { useReviewApproval } from "./inbox/ApprovalDialog";
+import { gateItem, titleOf } from "./inbox/kit";
 import { RestoreAction, SetupChecklist, openNewProject } from "./home/sections";
 import { metricsOf, useCatalog, type PView } from "./projects/kit";
 
@@ -34,6 +37,7 @@ export default function HomeView() {
   const activity = useActivity();
   const actors = useActors();
   const openTraveler = useOpenTraveler();
+  const review = useReviewApproval();
   const create = useCan("project.create");
   const submit = useCan("wo.submit");
   const home = q.data as HomeFull | undefined;
@@ -56,6 +60,10 @@ export default function HomeView() {
     );
   }
 
+  const scopeId = pickProject(me, prefs.project);
+  const scoped = projects.filter((p) => p.id === scopeId);
+  const inView = scoped.length ? scoped : projects;
+  const scopeName = scoped[0]?.name ?? "all projects";
   const nameOf = (id: string | null | undefined) => actors(id).name.replace(" (agent)", "");
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
@@ -70,7 +78,7 @@ export default function HomeView() {
       }
     : null;
   const att = s.attention ?? [];
-  const crit = att.filter((a) => a.sev === 0).length;
+  const killBanner = att.find((a) => a.restore?.scope === "factory");
   const waitingN = waiting ? waiting.approvals.length + waiting.conversations.length : 0;
   const rows = [
     ...att.map((a) => ({
@@ -78,13 +86,17 @@ export default function HomeView() {
       tone: (a.sev === 0 ? "bad" : "warn") as "bad" | "warn",
       title: a.title,
       sub: `${a.where}${a.sub ? ` · ${a.sub}` : ""}`,
-      action: a.restore ? <RestoreAction item={a} /> : <Btn label={a.act.label} small kind="primary" onClick={() => goAttention(a.act, openTraveler)} />,
+      action: a.restore ? (a === killBanner ? <Btn label={a.act.label} small onClick={() => goAttention(a.act, openTraveler)} /> : <RestoreAction item={a} />) : <Btn label={a.act.label} small kind="primary" onClick={() => goAttention(a.act, openTraveler)} />,
     })),
     ...(waiting?.approvals ?? []).map((a, i) => ({
       key: `ap-${a.wo ?? a.repo}-${i}`,
       tone: "warn" as const,
-      title: a.repo ? (a.note ? `Onboarding ${a.repoName ?? a.repo}` : `Merge onboarding PR ${a.repoName ?? a.repo}#${a.pr ?? ""}`) : `${a.wo} · ${a.gateLabel ?? a.gate ?? ""} ${a.gateName ?? ""}`.trim(),
-      sub: `${a.title ?? a.note ?? "Checks green"} · ${a.projectName}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)}` : ""}`,
+      title: a.repo
+        ? (a.note ? `Onboarding ${a.repoName ?? a.repo}` : `Merge onboarding PR ${a.repoName ?? a.repo}#${a.pr ?? ""}`)
+        : String(titleOf(gateItem(a)).title),
+      sub: a.repo
+        ? `${a.note ?? "Checks green"} · ${a.projectName}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)} ago` : ""}`
+        : `${a.wo} · ${a.title ?? ""}${a.waitMs ? ` · waiting ${fmt.dur(a.waitMs)} ago` : ""}`,
       action: (
         <Btn
           label="Review" small kind="primary"
@@ -92,7 +104,7 @@ export default function HomeView() {
             if (a.repo) {
               if (a.project) setProject(a.project);
               navigate("onboarding", a.repo);
-            } else if (a.wo) openTraveler(a.wo);
+            } else if (a.wo) review(gateItem(a));
           }}
         />
       ),
@@ -118,20 +130,22 @@ export default function HomeView() {
   const m = s.motion;
   const buckets = hourly(events);
   const statItems: StatItem[] = [];
-  if (m) statItems.push({ l: "On the belt", v: m.inFlight, d: `${m.running} running${m.inBays ? ` · ${m.inBays} in bays` : ""}`, tone: "info", spark: buckets });
-  if (waiting || s.attention) statItems.push({ l: "Waiting for a person", v: waitingN, d: waitingN ? "approvals and questions" : "nothing waiting", tone: waitingN ? "warn" : "ok" });
-  if (m) statItems.push({ l: "Released today", v: m.shippedToday, d: `${m.shippedWeek} this week`, tone: "ok" });
-  if (s.attention) statItems.push({ l: "Needs attention", v: att.length, d: crit ? `${crit} critical` : "none critical", tone: crit ? "bad" : att.length ? "warn" : "ok" });
+  const blocked = inView.reduce((t, p) => t + metricsOf(p).bad, 0);
+  const atGates = (waiting?.approvals ?? []).filter((a) => a.gate).length;
+  if (m) statItems.push({ l: "On the belt", v: m.inFlight, d: `${m.running} running · ${Math.max(0, m.inFlight - m.running)} queued`, tone: "info", spark: buckets });
+  if (waiting || s.attention) statItems.push({ l: "Waiting for a person", v: waitingN, d: `${atGates} at gates`, tone: waitingN ? "warn" : "ok" });
+  if (m) statItems.push({ l: "Released today", v: m.shippedToday, d: `${m.shippedWeek} this week · median cycle not available`, tone: "ok" });
+  if (projects.length) statItems.push({ l: "Blocked", v: blocked, d: "oldest: not available", tone: "bad" });
   if (s.health) statItems.push({ l: "Spend this month", v: `$${s.health.spend.spent.toFixed(2)}`, d: `budget $${s.health.spend.budget.toFixed(2)}`, tone: "agent" });
 
   /* belt at a glance: stations across, work in progress per station summed over the projects in view */
   const stations: MiniStation[] = (cat?.stations ?? []).map((st) => {
-    const n = projects.reduce((t, p) => t + (metricsOf(p).byPosition[st.id]?.n ?? 0), 0);
+    const n = inView.reduce((t, p) => t + (metricsOf(p).byPosition[st.id]?.n ?? 0), 0);
     const gate = cat?.gates.find((g) => g.after === st.id);
-    const gateWaiting = gate ? projects.reduce((t, p) => t + (metricsOf(p).byGate[gate.id] ?? 0), 0) > 0 : false;
+    const gateWaiting = gate ? inView.reduce((t, p) => t + (metricsOf(p).byGate[gate.id] ?? 0), 0) > 0 : false;
     // Capacity is each project's configured WIP for the station (coding slots for Build), summed over the projects in view.
-    const slots = Math.max(1, projects.reduce((t, p) => t + (st.id === "build" ? p.flow.slots : (p.flow.stations[st.id]?.wip ?? 0)), 0));
-    return { id: st.id, name: st.name, n, slots, gate: gateWaiting, href: hashFor("floor", null, prefs.project) };
+    const slots = Math.max(1, inView.reduce((t, p) => t + (st.id === "build" ? p.flow.slots : (p.flow.stations[st.id]?.wip ?? 0)), 0));
+    return { id: st.id, name: st.name, n, slots, gate: gateWaiting, href: hashFor("floor", null, scopeId) };
   });
 
   const canCreate = !create.pending && create.allowed && !s.setup;
@@ -142,16 +156,22 @@ export default function HomeView() {
     <Page
       eyebrow="Operate"
       title={`${greet}, ${me.person.name.split(" ")[0]}`}
-      sub={`Plant overview. Agents propose, people approve.${away}`}
+      sub={`Plant overview for ${scopeName}. Agents propose, people approve.${away}`}
       cls="hm"
       acts={
         <>
-          <a className="btn" href={hashFor("floor", null, prefs.project)}><CrIcon name="floor" />Open floor</a>
-          {canCreate ? <Btn label="New project" icon="plus" id="hm-new-project" onClick={openNewProject} /> : null}
+          <a className="btn" href={hashFor("floor", null, scopeId)}><CrIcon name="floor" />Open floor</a>
           {canSubmit ? <Btn label="Submit work order" kind="primary" icon="plus" id="hm-my-new" onClick={() => void runCommand("newWorkOrder")} /> : null}
         </>
       }
     >
+      {killBanner ? (
+        <div className="banner bad" role="alert" style={{ marginBottom: 16 }}>
+          <CrIcon name="stop" />
+          <div className="grow"><b>Factory stopped.</b> {killBanner.sub} Restore needs two Factory Admins.</div>
+          <RestoreAction item={killBanner} startLabel="Start restore" small={false} />
+        </div>
+      ) : null}
       {s.setup ? <div style={{ marginBottom: 16 }}><SetupChecklist setup={s.setup} /></div> : null}
       {statItems.length ? <Stats items={statItems} id="hm-stats" /> : null}
       <div className="grid g-main rows" style={{ marginBottom: 16 }}>
@@ -171,7 +191,7 @@ export default function HomeView() {
             <div className="tl">
               {feed.map((e) => (
                 <div key={e.id} className={eventTone(e)}>
-                  <div>{eventText(e, cat, nameOf)}</div>
+                  <div>{e.type === "wo.enter" ? `${e.wo ?? ""} moved to ${cat?.stations.find((x) => x.id === e.station)?.name ?? e.station ?? "a station"}`.trim() : eventText(e, cat, nameOf)}</div>
                   <div className="when">{fmt.ago(e.at, Date.now())}</div>
                 </div>
               ))}
@@ -182,16 +202,16 @@ export default function HomeView() {
         </Card>
       </div>
       <div className="grid g-main rows" style={{ marginBottom: 16 }}>
-        <Card title="Belt at a glance" hint="Work orders per station. Dashed line = capacity; amber bar = over it; amber dot = gate waiting" acts={<a className="btn sm" href={hashFor("floor", null, prefs.project)}>Floor</a>} id="hm-belt">
+        <Card title="Belt at a glance" hint="Work orders per station. Dashed line = capacity; amber bar = over it; amber dot = gate waiting" acts={<a className="btn sm" href={hashFor("floor", null, scopeId)}>Floor</a>} id="hm-belt">
           <div style={{ padding: "4px 0" }}>{stations.length ? <MiniBeltCr stations={stations} /> : <CrEmpty title="No stations" text="The line has not loaded." icon="floor" />}</div>
         </Card>
-        <Card title="Throughput, last 24 hours" hint="Station entries per hour" id="hm-throughput">
+        <Card title="Throughput, last 24 hours" hint="Work orders completing a station per hour" id="hm-throughput">
           <Bars data={buckets} w={240} h={96} label="Station entries per hour" />
           <div className="row spread dim mono" style={{ fontSize: 11, margin: "6px 0 0 24px" }}><span>-24h</span><span>-12h</span><span>now</span></div>
         </Card>
       </div>
       {projects.length ? (
-        <Card title="Projects" flush hint={`${projects.length} in view`} id="hm-projects">
+        <Card title="Projects" flush hint={`${projects.length} in view`} id="hm-projects" acts={canCreate ? <Btn small label="New project" icon="plus" id="hm-new-project" onClick={openNewProject} /> : undefined}>
           <div className="proj-grid">
             {projects.map((p) => {
               const mt = metricsOf(p);

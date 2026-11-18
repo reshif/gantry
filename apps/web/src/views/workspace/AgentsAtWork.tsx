@@ -3,18 +3,23 @@
  * its time at the station, tokens and cost so far), its slot use, and where to talk to it. Read from the floor read of the chosen project
  * (stations, work orders and their open history entry); nothing here is invented. The conversations hub lives at `#workspace/chats`.
  */
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { fmt } from "@gantry/domain";
-import { useMe } from "../../api/queries";
+import { ops } from "../../api/ops";
+import { useAgents, useHome, useMe } from "../../api/queries";
 import { pickProject } from "../../lib/routes";
-import { navigate } from "../../lib/router";
+import { hashFor, navigate } from "../../lib/router";
+import { setRouteState, useClearRouteStateOnLeave, useRouteState } from "../../lib/queryState";
 import { usePrefs } from "../../lib/prefs";
 import { useOpenTraveler } from "../../shell/useTraveler";
-import { Async } from "../../ui/async";
+import { Async, useCommand } from "../../ui/async";
+import { useUI } from "../../ui/overlay-context";
+import { useTravelerWo } from "../traveler/model";
 import { useActors } from "../../ui/actors";
 import { Avatar, Btn, Chip, FilterBar, SearchBox, Select } from "../../ui/primitives";
 import { CrEmpty, Page, Stats } from "../../ui/cr";
 import { buildBelt, NO_FILTER } from "../floor/conveyor";
+import { useCatalog } from "../projects/kit";
 import { openEntry, useFloorRead, useFloorState, type FWo } from "../floor/kit";
 
 const short = (m: string) => m.replace(/^claude-/, "");
@@ -28,8 +33,12 @@ export function AgentsAtWork() {
   const { value: ctx } = useFloorState(projectId, null);
   const actors = useActors();
   const open = useOpenTraveler();
-  const [q, setQ] = useState("");
-  const [act, setAct] = useState("all");
+  const [q, setQ] = useRouteState("q", "");
+  const [act, setAct] = useRouteState("st", "all");
+  useClearRouteStateOnLeave(["q", "st"]);
+  const agents = useAgents().data;
+  const modelOf = (id: string): string | null => agents?.find((a) => a.id === id)?.model ?? null;
+  const home = useHome().data as { sections?: { motion?: { running: number } } } | undefined;
 
   const cards = useMemo(() => {
     if (!ctx) return [];
@@ -56,18 +65,18 @@ export function AgentsAtWork() {
   return (
     <Page
       eyebrow="Operate" title="Agents at work" cls="ws-agents"
-      sub="What each station's agent is doing right now. You can open a conversation or the work order."
+      sub="What each station's agent is doing right now. You can open a conversation or stop a run."
       acts={<Btn label="Conversations" icon="chat" id="ws-open-chats" onClick={() => navigate("workspace", "chats")} />}
     >
       <Async query={floorQ} what="the agents on this project" id="ws-agents" isEmpty={() => false}>{() => (
         <>
           <Stats items={[
             { l: "Agents busy", v: `${busy} / ${cards.length}`, tone: "info" },
-            { l: "Runs in flight", v: runs, tone: "agent" },
+            { l: "Runs in flight", v: home?.sections?.motion?.running ?? runs, tone: "agent" },
             { l: "Tokens in flight", v: compact(tokens), d: "open runs" },
             { l: "Cost so far", v: `$${cost.toFixed(2)}`, d: "open runs" },
           ]} />
-          <FilterBar label="Filter agents" count={`${list.length} of ${cards.length}`}>
+          <FilterBar label="Filter agents" count={`${list.length} of ${cards.length}`} actions={needle || act !== "all" ? <Btn small kind="ghost" label="Clear" id="ws-clear" onClick={() => setRouteState({ q: null, st: null })} /> : undefined}>
             <SearchBox id="ws-q" value={q} onChange={setQ} placeholder="Search agents or work orders" />
             <Select id="ws-act" aria-label="Activity" value={act} onChange={setAct} options={[{ value: "all", label: "Activity: all" }, { value: "busy", label: "Busy" }, { value: "idle", label: "Idle" }]} />
           </FilterBar>
@@ -81,33 +90,33 @@ export function AgentsAtWork() {
                     <div className="card-h">
                       <div className="row nowrap" style={{ minWidth: 0 }}>
                         <Avatar id={agentId} />
-                        <div style={{ minWidth: 0 }}><h3 className="ell">{s.agent}</h3><div className="hint ell">{s.name}{e?.model ? ` · ${short(e.model)}` : ""}</div></div>
+                        <div style={{ minWidth: 0 }}><h3 className="ell">{s.agent}</h3><div className="hint ell">{s.name}{(modelOf(agentId) ?? e?.model) ? ` · ${short(modelOf(agentId) ?? e?.model ?? "")}` : ""}</div></div>
                       </div>
                       <Chip text={running.length ? "Working" : "Idle"} cls={running.length ? "info" : "idle"} />
                     </div>
                     <div className="card-b ws-b">
                       {w ? (
                         <>
-                          <div className="row spread nowrap"><a className="mono" id={`ws-wo-${s.id}`} href={`#workspace/wo:${w.id}`} onClick={(e) => { e.preventDefault(); open(w.id); }}>{w.id}</a><span className="mono dim">{fmt.dur(Math.max(0, (ctx?.now ?? Date.now()) - (e?.startedAt ?? w.createdAt)))}</span></div>
+                          <div className="row spread nowrap"><a className="mono" id={`ws-wo-${s.id}`} href={hashFor("record", w.id)} onClick={(e) => { e.preventDefault(); open(w.id); }}>{w.id}</a><span className="mono dim">{fmt.dur(Math.max(0, (ctx?.now ?? Date.now()) - (e?.startedAt ?? w.createdAt)))}</span></div>
                           <div className="ell" title={w.title} style={{ fontWeight: 600 }}>{w.title}</div>
                           <div className="tok-stream">
-                            <div>{`✓ ${(e?.tokens ?? 0).toLocaleString()} tokens used`}</div>
-                            <div>{`✓ $${(e?.cost ?? 0).toFixed(2)} spent at this station`}</div>
-                            <div>{`▸ ${w.progress ?? 0}% through ${s.name}`}<span className="caret">▍</span></div>
+                            <div style={{ opacity: 0.5 }}>{`✓ ${(e?.tokens ?? 0).toLocaleString()} tokens used`}</div>
+                            <div style={{ opacity: 0.75 }}>{`✓ $${(e?.cost ?? 0).toFixed(2)} spent at this station`}</div>
+                            <div style={{ opacity: 1 }}>{`▸ ${w.progress ?? 0}% through ${s.name}`}<span className="caret">▍</span></div>
                           </div>
                         </>
                       ) : (
                         <div className="ws-idle">
                           <div className="label">Idle</div>
                           <p className="muted">Nothing running at this station.</p>
-                          {next ? (<><div className="mono" style={{ fontSize: 12 }}><span className="dim">Next up </span>{next.id}</div><div className="ell dim" style={{ fontSize: 12 }}>{next.title}</div></>) : <div className="dim" style={{ fontSize: 12 }}>Queue is empty.</div>}
+                          {next ? (<><div className="mono" style={{ fontSize: 12 }}><span className="dim">Next up </span><a href={hashFor("record", next.id)} onClick={(e) => { e.preventDefault(); open(next.id); }}>{next.id}</a></div><div className="ell dim" style={{ fontSize: 12 }}>{next.title}</div></>) : <div className="dim" style={{ fontSize: 12 }}>Queue is empty.</div>}
                         </div>
                       )}
                       <div className="row spread ws-f">
                         <span className="mono" style={{ fontSize: 12 }}><span className="muted">{Math.min(running.length, s.slots)}/{s.slots} slots</span>{over ? <> · <span style={{ color: "var(--warn)" }}>+{over} over capacity</span></> : null}</span>
                         <span className="row">
-                          <Btn small label="Talk" id={`ws-talk-${s.id}`} disabledReason={w ? null : "Nothing is running here to talk about."} onClick={() => w && navigate("workspace", `wo:${w.id}`)} />
-                          {w ? <Btn small label="Open" id={`ws-open-${s.id}`} onClick={() => open(w.id)} /> : null}
+                          <Btn small label="Talk" id={`ws-talk-${s.id}`} onClick={() => (w ? navigate("workspace", `wo:${w.id}`) : navigate("workspace", "chats"))} />
+                          {w ? <StopRun woId={w.id} station={s.name} /> : null}
                         </span>
                       </div>
                     </div>
@@ -122,4 +131,19 @@ export function AgentsAtWork() {
       )}</Async>
     </Page>
   );
+}
+
+/** "Stop run": parks the work order in the needs-a-person bay (the server's own stop for one work order) after a confirm. Guarded by the move the server allows this person. */
+function StopRun({ woId, station }: { woId: string; station: string }) {
+  const ui = useUI();
+  const cat = useCatalog();
+  const t = useTravelerWo(woId).data;
+  const bay = cat?.bays.find((b) => b.id === "person" && t?.allowed.moves[b.id]?.allowed) ?? cat?.bays.find((b) => t?.allowed.moves[b.id]?.allowed);
+  const park = useCommand(() => ops.park(woId, bay?.id ?? "", `Run stopped at ${station}`, undefined, t ? { ifMatch: t.version } : undefined), {});
+  const why = !t ? "Checking what you may do here." : !bay ? (t.allowed.moves.person?.reason || "You may not stop this run.") : null;
+  const go = async () => {
+    const ok = await ui.confirm({ title: `Stop the run on ${woId}?`, body: "The agent stops after its current tool call. The work order is parked at this station and a person is asked what to do.", ok: "Stop run", kind: "danger" });
+    if (ok) void park.run().then((r) => { if (r?.ok) ui.toast(`Run stopped on ${woId}`, "warn"); });
+  };
+  return <Btn small kind="danger" label="Stop run" id={`ws-stop-${woId}`} disabledReason={why} onClick={() => void go()} />;
 }
