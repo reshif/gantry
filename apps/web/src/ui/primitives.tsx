@@ -9,6 +9,7 @@ import { Icon } from "./Icon";
 import { tip } from "./Tip";
 import { useActors } from "./actors";
 import { useUI } from "./overlay-context";
+import { usePrefs } from "../lib/prefs";
 import { useHash } from "../lib/router";
 import { isProjectRoute } from "../lib/routes";
 import { useMe } from "../api/queries";
@@ -337,8 +338,9 @@ export function ViewHead({ kicker, title, status, sub, meta, actions, sheet, cru
   const hashId = loc.id || "home";
   const route = sheet ?? hashId;
   const me = useMe();
-  // the scope key follows the page: a project page shows that project, a factory page shows every line
-  const key = isProjectRoute(route) ? me?.projects.find((p) => p.id === loc.project)?.key : undefined;
+  // the scope key follows the page: a project page shows that project, a factory page shows the chosen scope
+  const prefs = usePrefs();
+  const key = isProjectRoute(route) ? me?.projects.find((p) => p.id === loc.project)?.key : (prefs.scopeAll ? undefined : me?.projects.find((p) => p.id === prefs.project)?.key);
   return (
     <header className="ph vhead">
       <div className="title vhead-main">

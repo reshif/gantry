@@ -148,10 +148,11 @@ describe("shell fidelity", () => {
     const items = screen.getAllByRole("menuitem");
     expect(items.map((m) => m.textContent)).toEqual(["My account", "Factory admin", "Approver", "Read-only viewer", "Sign out"]);
     expect(items[1]?.getAttribute("aria-current")).toBe("true");
-    // another role is another sign-in: it is never faked on the client
+    // a preview of a lower sheet only removes rights: the heading follows it, and the admin entry brings the own sheet back
     fireEvent.click(items[2] as HTMLElement);
-    expect(await screen.findByText(/holds one role/)).toBeTruthy();
+    expect(await screen.findByText("Viewing as Approver")).toBeTruthy();
     fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
+    expect(screen.getByText(/viewing as Approver/, { selector: ".micro" })).toBeTruthy();
     const items2 = screen.getAllByRole("menuitem");
     fireEvent.click(items2[0] as HTMLElement);
     await waitFor(() => expect(window.location.hash).toBe("#person/p-x"));
@@ -201,5 +202,32 @@ describe("shell fidelity", () => {
     render(<App />);
     const brand = (await nav()).getByText("Gantry").closest("a") as HTMLElement;
     expect(brand.textContent).toContain("PLANT 1 · BENGALURU");
+  });
+
+  it("choosing a project on a factory page scopes it: the project button, the eyebrow and the Inbox pill follow", async () => {
+    api({ approvals: [{ wo: "WO-1", gate: "G3", title: "A", project: "payments" }, { wo: "WO-2", gate: "G3", title: "B", project: "risk" }], conversations: [] });
+    window.location.hash = "#/home";
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /All projects/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Payments Platform/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Project Payments Platform/ })).toBeTruthy());
+    expect(window.location.hash).toBe("#/home");
+    expect(document.querySelector(".eyebrow")?.textContent).toContain("PAY");
+    expect((await nav()).getByText("Inbox").closest("a")?.querySelector(".cnt")?.textContent).toBe("1");
+  });
+
+  it("View as Read-only viewer previews the read-only sheet: brand line and no write rights", async () => {
+    api();
+    render(<App />);
+    fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
+    fireEvent.click((await screen.findAllByRole("menuitem")).find((m) => m.textContent === "Read-only viewer") as HTMLElement);
+    expect(await screen.findByText("READ-ONLY SHEET")).toBeTruthy();
+  });
+
+  it("the Emergency stop entry is plain, like the prototype's", async () => {
+    api();
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Line control/ }));
+    expect((await screen.findByRole("menuitem", { name: /Emergency stop/ })).className).not.toMatch(/danger/);
   });
 });

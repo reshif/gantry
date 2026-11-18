@@ -56,7 +56,7 @@ export function StatusCluster() {
       cp
         ? { label: cp.halted ? "Resume line" : "Halt line", icon: cp.halted ? "right" : "pause", guard: guardOf(0), onClick: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) }
         : { label: "Halt line", icon: "pause", guard: { allowed: false, reason: "No project to halt.", needs: "" } },
-      { label: killed ? "Restore factory" : "Emergency stop", icon: "stop", kind: killed ? undefined : "andon", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
+      { label: killed ? "Restore factory" : "Emergency stop", icon: "stop", guard: guardOf(1), onClick: () => (killed ? stop.restore("factory", null) : stop.kill("factory", null)) },
     ]);
   };
   return (

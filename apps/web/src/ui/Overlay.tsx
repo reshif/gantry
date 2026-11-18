@@ -3,7 +3,7 @@
  * G.toast, G.dialog, G.drawer, G.popover, G.menu), as React. Same DOM and classes, same focus
  * rules: dialogs trap focus, Escape closes the top layer, focus returns to the opener.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
 import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
@@ -51,7 +51,7 @@ export function Dialog({ title, kicker, sub, wide, cls, dirty, body, actions, on
   const dirtyIds = useRef(new Set<symbol>());
   const [marked, setMarked] = useState(false);
   const scope = useMemo<DirtyScopeApi>(() => ({ mark: (id, d) => { if (d) dirtyIds.current.add(id); else dirtyIds.current.delete(id); setMarked(dirtyIds.current.size > 0); } }), []);
-  const list: DialogAction[] = actions ?? [{ label: "Close", kind: "ghost" }];
+  const list: DialogAction[] = actions ?? [{ label: "Close" }];
   const submitAction = list.find((a) => a.submit);
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -63,7 +63,7 @@ export function Dialog({ title, kicker, sub, wide, cls, dirty, body, actions, on
   return (
     <Modal title={title} kicker={kicker} sub={sub} wide={wide} cls={cls} dirty={dirty || marked} onClose={onClose} onSubmit={onSubmit}
       footer={(ask) => list.map((a, i) => (
-        <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(ask) : ask())} />
+        <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(ask) : ask())} />
       ))}
     >
       <DirtyScope.Provider value={scope}>{content}</DirtyScope.Provider>
@@ -94,12 +94,21 @@ interface PopState {
   render: (close: () => void) => ReactNode;
   onClose?: (() => void) | undefined;
   rect: DOMRect;
+  /** A menu is as wide as its longest entry, right-aligned to an anchor on the right half of the screen (prototype openMenu). */
+  menu?: boolean;
 }
 
 function PopoverView({ state, onClose }: { state: PopState; onClose: () => void }) {
   const pop = useRef<HTMLDivElement>(null);
   const { anchor, rect } = state;
   const w = Math.min(380, window.innerWidth - 16);
+  useLayoutEffect(() => {
+    const el = pop.current;
+    if (!state.menu || !el) return;
+    const mw = el.offsetWidth;
+    const right = rect.left + rect.width / 2 > window.innerWidth / 2;
+    el.style.left = `${Math.max(8, Math.min(right ? rect.right - mw : rect.left, window.innerWidth - mw - 8))}px`;
+  }, [state.menu, rect]);
   useEffect(() => {
     anchor.setAttribute("aria-expanded", "true");
     const t = setTimeout(() => pop.current?.querySelector<HTMLElement>("button,select,input,a")?.focus(), 10);
@@ -108,7 +117,7 @@ function PopoverView({ state, onClose }: { state: PopState; onClose: () => void 
   return (
     <>
       <div className="pop-shield" onClick={onClose} />
-      <div ref={pop} className="pop" role="dialog" aria-label={anchor.getAttribute("aria-label") || "Menu"} style={{ width: w, top: rect.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - w - 8, rect.right - w)) }} onKeyDown={trapKeys(() => pop.current, onClose)}>
+      <div ref={pop} className="pop" role="dialog" aria-label={anchor.getAttribute("aria-label") || "Menu"} style={{ ...(state.menu ? { width: "max-content", minWidth: Math.min(220, w), maxWidth: w } : { width: w }), top: rect.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - w - 8, rect.right - w)) }} onKeyDown={trapKeys(() => pop.current, onClose)}>
         {state.render(onClose)}
       </div>
     </>
@@ -376,7 +385,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
         return closePopover;
       },
       menu: (anchor, title, items) => {
-        setPop({ anchor, render: (close) => <MenuList title={title} items={items} close={close} />, rect: anchor.getBoundingClientRect() });
+        setPop({ anchor, render: (close) => <MenuList title={title} items={items} close={close} />, rect: anchor.getBoundingClientRect(), menu: true });
         return closePopover;
       },
       closePopover,

@@ -6,12 +6,17 @@ import { useHome } from "./work";
 /** Nav badges for the left nav, from GET /home. Empty until home loads. */
 export function useNavBadges(): Record<string, NavBadge> {
   const home = useHome();
-  const project = usePrefs().project;
+  const prefs = usePrefs();
+  const project = prefs.project;
   // Floor, work-order and onboarding badges follow the selected project; the API gives them per project.
   const byProject = (home.data?.projectBadges ?? {}) as Record<string, Record<string, NavBadge>>;
   const b: Record<string, NavBadge> = { ...(home.data?.badges ?? {}), ...(project ? byProject[project] ?? {} : {}) };
   // The Inbox counts what waits for this person: gate and onboarding approvals, and questions addressed to them.
-  const waiting = (home.data?.approvals?.length ?? 0) + (home.data?.conversations?.length ?? 0);
+  // on a scoped sheet only that project's items count (like the prototype's Inbox pill)
+  const scope = prefs.scopeAll ? null : prefs.project;
+  const inScope = (x: { project?: string }) => !scope || x.project === scope;
+  const waiting = (home.data?.approvals?.filter(inScope).length ?? 0) + (home.data?.conversations?.filter(inScope).length ?? 0);
+  if (scope) delete b.inbox;
   if (waiting && !b.inbox) b.inbox = { n: waiting, label: `${waiting} waiting for you` };
   return b;
 }

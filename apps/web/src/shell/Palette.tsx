@@ -1,6 +1,6 @@
 /** Command palette (legacy openPalette): views, projects, work orders, repos, agents and actions; pins and recents. */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useAgents, useMe, useRepos, useWorkOrdersAcross } from "../api/queries";
+import { useAgents, useMe, useReposAcross, useWorkOrdersAcross } from "../api/queries";
 import { useCanMany } from "../api/can";
 import { ops } from "../api/ops";
 import { canSeeRoute, isProjectRoute, ROUTES } from "../lib/routes";
@@ -37,7 +37,8 @@ export function usePaletteItems(projectId: string | null): Item[] {
   const loc = useHash();
   // the prototype lists work orders of every project, not only the scoped one
   const wos = useWorkOrdersAcross((me?.projects ?? []).map((p) => p.id), { limit: 50 });
-  const repos = useRepos(projectId).data;
+  // like the prototype: the repos of every project, each opening on its own project's onboarding
+  const repos = useReposAcross((me?.projects ?? []).map((p) => p.id));
   const canAgents = canSeeRoute("agents", me, ctx);
   const agents = useAgents().data;
   const cp = me?.projects.find((p) => p.id === projectId) ?? null;
@@ -58,7 +59,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
     for (const p of me.projects) items.push({ key: `project:${p.id}`, group: "Projects", icon: "folder", label: p.name, hint: p.key, run: () => { setProject(p.id); if (isProjectRoute(loc.id)) navigateProject(p.id, loc.id); ui.toast(`Project: ${p.name}`); } });
     for (const w of wos) items.push({ key: `record:${w.id}`, group: "Work orders", icon: "record", label: `${w.id} · ${w.title}`, hint: w.state, run: () => { setProject(w.project); openRecordRoute(w.id); } });
     if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, group: "Agents", icon: "agent", label: a.name, hint: a.station || "agent", run: () => { navigate("agents", a.id); } });
-    for (const r of repos ?? []) items.push({ key: `repo:${r.id}`, group: "Repos", icon: "branch", label: r.name, hint: r.lang, run: () => { if (cp) setProject(cp.id); navigate("onboarding", r.id); } });
+    for (const r of repos) items.push({ key: `repo:${r.id}`, group: "Repos", icon: "branch", label: r.name, hint: r.lang, run: () => { setProject(r.projectId); navigateProject(r.projectId, "onboarding", r.id); } });
     if (hasCommand("newWorkOrder")) items.push({ group: "Actions", icon: "plus", label: "Submit a work order", hint: "", guard: guard(3), run: () => void runCommand("newWorkOrder") });
     items.push({ key: "toggle-theme", group: "Actions", icon: "moon", label: "Toggle theme", hint: "", run: () => { const dark = document.documentElement.dataset.theme === "dark" || (prefs.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches); applyTheme(dark ? "light" : "dark"); } });
     if (cp) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CanBatcher } from "./can";
+import { CanBatcher, previewDecision } from "./can";
 import type { CanCheck, CanResult } from "./types";
 
 const allow: CanResult = { allowed: true, reason: "ok", needs: "" };
@@ -91,5 +91,20 @@ describe("CanBatcher", () => {
     b.peek({ action: "a" });
     await tick();
     expect(b.get({ action: "a" })?.allowed).toBe(false);
+  });
+});
+
+describe("view as preview", () => {
+  const ok = { allowed: true, reason: "", needs: "" };
+  it("a viewer keeps reads except policy and audit, and loses every write", () => {
+    expect(previewDecision("wo.submit", ok, "viewer").allowed).toBe(false);
+    expect(previewDecision("agents.view", ok, "viewer").allowed).toBe(true);
+    expect(previewDecision("audit.view", ok, "viewer").allowed).toBe(false);
+  });
+  it("an approver loses the admin writes only, and a preview never grants", () => {
+    expect(previewDecision("kill.factory", ok, "approver").allowed).toBe(false);
+    expect(previewDecision("gate.approve", ok, "approver").allowed).toBe(true);
+    expect(previewDecision("kill.factory", { allowed: false, reason: "no", needs: "" }, "").allowed).toBe(false);
+    expect(previewDecision("wo.submit", ok, "").allowed).toBe(true);
   });
 });

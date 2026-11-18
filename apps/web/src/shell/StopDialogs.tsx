@@ -80,13 +80,6 @@ function NotifyList({ items }: { items: PreviewItem[] }) {
   );
 }
 
-const Impact = ({ label, value }: { label: string; value: number | undefined }) => (
-  <div>
-    <dt>{label}</dt>
-    <dd>{value === undefined ? "…" : String(value)}</dd>
-  </div>
-);
-
 export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | null; onClose: () => void }) {
   const me = useMe();
   const ui = useUI();
@@ -110,7 +103,9 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   };
   const [busy, setBusy] = useState(false);
   if (!me) return null;
-  const phrase = scope === "factory" ? "KILL FACTORY" : scope === "project" ? (project?.name ?? "") : null;
+  // The factory dialog asks for the prototype's short word; the server's own phrase for the factory goes with the request.
+  const phrase = scope === "factory" ? "STOP" : scope === "project" ? (project?.name ?? "") : null;
+  const sentPhrase = scope === "factory" ? "KILL FACTORY" : phrase;
   const label = scope === "factory" ? "the whole factory" : scope === "project" ? (project?.name ?? id ?? "") : (id ?? "");
   const impact = imp.data;
   const submit = async () => {
@@ -124,7 +119,7 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
       return;
     }
     setBusy(true);
-    const r = await ops.kill(scope as StopScope, scope === "factory" ? null : id, { reason: reason.trim(), mode, confirmText: phrase ? confirm : null });
+    const r = await ops.kill(scope as StopScope, scope === "factory" ? null : id, { reason: reason.trim(), mode, confirmText: phrase ? sentPhrase : null });
     setBusy(false);
     if (!r.ok) {
       if (isStepUp(r)) {
@@ -139,38 +134,35 @@ export function KillDialog({ scope, id, onClose }: { scope: Scope; id: string | 
   return (
     <Dialog
       title={scope === "factory" ? "Emergency stop the factory" : `Kill ${label}`}
-      kicker={`Kill switch · ${scope}`}
-      wide
-      sub={scope === "factory" ? "Every running agent is stopped immediately and no station will start new work. Work orders keep their place. Restoring needs two people." : `A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused${scope === "workorder" ? " for this work order." : " until someone restores it."}`}
       onClose={close}
       body={
         <div className="form-grid">
+          <p style={{ marginBottom: 12 }}>{scope === "factory" ? "Every running agent is stopped immediately and no station will start new work. Work orders keep their place. Restoring needs two people." : `A kill is a hard stop. Agents stop, coding slots are freed, and new submissions are refused${scope === "workorder" ? " for this work order." : " until someone restores it."}`}</p>
           <LockNote decision={d.pending ? null : d} what="This kill switch" />
-          <dl className="titleblock kill-impact">
-            {scope === "factory" ? <Impact label="Projects" value={impact?.projects} /> : null}
-            <Impact label="Work orders in flight" value={impact?.workOrders} />
-            <Impact label="Running agents" value={impact?.running} />
-            <Impact label="Coding slots freed" value={impact?.slots} />
-            <Impact label="Open PRs" value={impact?.prs} />
-          </dl>
-          <Field label="Reason (required)" htmlFor="kill-reason">
-            <textarea id="kill-reason" className="input" rows={3} placeholder="What is happening? This is posted to the notification routes." value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Field label="Reason" htmlFor="kill-reason" hint="Recorded in the audit ledger.">
+            <input id="kill-reason" className="input" autoComplete="off" value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
-          {scope !== "workorder" ? (
-            <div className="field">
-              <div className="field-label">In-flight work</div>
-              <Segmented name="kill-mode" label="In-flight work" items={[{ id: "hold", label: "Hold in place (resumable)" }, { id: "cancel", label: "Cancel in-flight work" }]} value={mode} onChange={(v) => setMode(v === "cancel" ? "cancel" : "hold")} />
-              <div className="field-hint">Hold keeps work where it is and resumes on restore. Cancel moves it to Killed, converts open PRs to drafts, and needs a restore per work order.</div>
-            </div>
-          ) : (
-            <p className="muted small">The work order moves to Killed; its open PR becomes a draft. It stays killed unless someone permitted restores it.</p>
-          )}
-          <NotifyList items={routes} />
           {phrase ? (
             <Field label={`Type ${phrase} to confirm`} htmlFor="kill-confirm">
-              <input id="kill-confirm" className="input mono" autoComplete="off" placeholder={phrase} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+              <input id="kill-confirm" className="input mono" autoComplete="off" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
             </Field>
           ) : null}
+          <details className="kill-more" id="kill-more">
+            <summary className="small muted">What it reaches, in-flight work and who is told</summary>
+            <p className="small" id="kill-impact">
+              {`${scope === "factory" ? `${impact?.projects ?? "…"} projects, ` : ""}${impact?.workOrders ?? "…"} work orders in flight, ${impact?.running ?? "…"} running agents, ${impact?.slots ?? "…"} coding slots freed, ${impact?.prs ?? "…"} open PRs.`}
+            </p>
+            {scope !== "workorder" ? (
+              <div className="field">
+                <div className="field-label">In-flight work</div>
+                <Segmented name="kill-mode" label="In-flight work" items={[{ id: "hold", label: "Hold in place (resumable)" }, { id: "cancel", label: "Cancel in-flight work" }]} value={mode} onChange={(v) => setMode(v === "cancel" ? "cancel" : "hold")} />
+                <div className="field-hint">Hold keeps work where it is and resumes on restore. Cancel moves it to Killed, converts open PRs to drafts, and needs a restore per work order.</div>
+              </div>
+            ) : (
+              <p className="muted small">The work order moves to Killed; its open PR becomes a draft. It stays killed unless someone permitted restores it.</p>
+            )}
+            <NotifyList items={routes} />
+          </details>
           {step ? <StepUpNotice result={step} what="a kill" draft={{ kind: "kill", scope, id, values: { reason, mode, confirm } }} /> : null}
           <div className="form-err" role="alert">
             {err}
@@ -229,11 +221,10 @@ export function RestoreDialog({ scope, id, onClose }: { scope: Scope; id: string
   return (
     <Dialog
       title={scope === "factory" ? "Restore the factory" : `Restore ${label}`}
-      kicker="Kill switch · restore"
-      sub={`${k ? `Killed by ${actor(k.by).name} at ${fmt.stamp(k.at)}: ${k.reason}. ` : ""}Agents start picking up work again in station order.${scope === "factory" ? " Restoring the factory needs two Factory Admins." : ""}`}
       onClose={close}
       body={
         <div className="form-grid">
+          <p style={{ marginBottom: 12 }}>{`${k ? `Killed by ${actor(k.by).name} at ${fmt.stamp(k.at)}: ${k.reason}. ` : ""}Agents start picking up work again in station order.${scope === "factory" ? " Restoring the factory needs two Factory Admins." : ""}`}</p>
           <LockNote decision={d.pending ? null : d} what="Restoring" />
           <Field label="Reason" htmlFor="rsn-text">
             <textarea id="rsn-text" className="input" rows={3} placeholder="Why is it safe to restore?" value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -282,11 +273,10 @@ export function HaltDialog({ scope, id, projectId, onClose }: { scope: "project"
   return (
     <Dialog
       title={scope === "project" ? "Halt the line" : `Halt ${name}`}
-      kicker={scope === "project" ? undefined : "Andon · repo"}
-      sub={scope === "project" ? "Running agents finish their current step; nothing new starts until the line is resumed." : `A soft, resumable pause. Agents on this repo stop at their current step until someone resumes it.`}
       onClose={onClose}
       body={
         <div className="form-grid">
+          <p style={{ marginBottom: 12 }}>{scope === "project" ? "Running agents finish their current step; nothing new starts until the line is resumed." : "A soft, resumable pause. Agents on this repo stop at their current step until someone resumes it."}</p>
           <LockNote decision={d.pending ? null : d} what="The andon cord" />
           <Field label={<>Reason<span className="muted"> (required)</span></>} htmlFor="rsn-text" hint="Recorded in the audit ledger.">
             <input id="rsn-text" className="input" autoComplete="off" value={reason} onChange={(e) => setReason(e.target.value)} />

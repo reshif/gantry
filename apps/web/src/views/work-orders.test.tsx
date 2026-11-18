@@ -166,12 +166,16 @@ describe("New work order", () => {
     expect((document.getElementById("nwo-cls") as HTMLSelectElement).selectedOptions[0]?.textContent).toMatch(/Feature/);
     expect((document.getElementById("nwo-prio") as HTMLSelectElement).value).toBe("P2");
     expect(document.getElementById("nwo-source")).toBeNull();
+    // the prototype's sheet: no repo picker, all ten classes
+    expect(document.getElementById("nwo-repo")).toBeNull();
+    expect((document.getElementById("nwo-cls") as HTMLSelectElement).options.length).toBe(9);
     expect(screen.queryByLabelText("Requested class")).toBeNull();
   });
 
   it("shows the server's refusal inline and keeps the dialog open", async () => {
     await open({ "POST /api/v1/projects/payments/work-orders": () => ({ status: 409, body: { ok: false, msg: "Payments Platform is halted (andon): duplicate refunds." } }) });
     fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: "Fix refund crash" } });
+    fireEvent.change(screen.getByLabelText(/What should change and why/), { target: { value: "Refunds crash when the amount is zero." } });
     fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
     expect(await screen.findByText(/is halted \(andon\)/)).toBeTruthy();
     expect(screen.getByLabelText(/^Title/)).toBeTruthy();
@@ -180,9 +184,11 @@ describe("New work order", () => {
   it("clears the inline title error as soon as a title is typed", async () => {
     await open();
     fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
-    expect(await screen.findByText("Give the work order a title.")).toBeTruthy();
+    expect(await screen.findByText("Title is required.")).toBeTruthy();
+    expect(screen.getByText("What should change and why is required.")).toBeTruthy();
+    expect(document.activeElement?.id).toBe("nwo-title");
     fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: "Fix refund crash" } });
-    await waitFor(() => expect(screen.queryByText("Give the work order a title.")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Title is required.")).toBeNull());
   });
 
   it("locks the submit button with the reason while the factory is killed, and sends nothing", async () => {

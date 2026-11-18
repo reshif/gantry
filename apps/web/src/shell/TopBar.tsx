@@ -12,7 +12,6 @@ import { StatusCluster } from "./StatusCluster";
 import { openNotifications, useUnread } from "./NotificationsDrawer";
 import { navigate } from "../lib/router";
 import { useCan, useCanMany } from "../api/can";
-import { useReadOnly } from "./Nav";
 
 const PERSONAS: Record<string, string> = { admin: "Factory admin", approver: "Approver", viewer: "Read-only viewer" };
 const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform || "");
@@ -25,11 +24,14 @@ export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me:
   const waiting = (home?.approvals.length ?? 0) + (home?.conversations.length ?? 0);
   const unread = useUnread(waiting);
   const v = me.person;
-  const readOnly = useReadOnly();
   const people = useCan("people.view");
   // Which sheet the server gives this session: the same three the prototype lists under "View as".
-  const admin = useCanMany([{ action: "kill.factory" }])[0];
-  const persona = readOnly ? "viewer" : admin?.allowed ? "admin" : "approver";
+  // the session's own decisions (not the preview): they decide which sheets it may preview
+  const ownChecks = useCanMany([{ action: "kill.factory" }, { action: "wo.submit" }, { action: "line.halt" }], { raw: true });
+  const admin = ownChecks[0];
+  const ownReadOnly = ownChecks.every((c) => !c.pending && !c.allowed);
+  const own = ownReadOnly ? "viewer" : admin?.allowed ? "admin" : "approver";
+  const persona = prefs.viewAs || own;
   const signOut = async (what?: string) => {
     ui.closeAllDialogs();
     ui.drawer.close();
@@ -44,19 +46,25 @@ export function TopBar({ me, project, current, onOpenNav, onOpenPalette }: { me:
 
   const openUserMenu = () => {
     if (!userRef.current) return;
-    // "View as": the session's real role is marked; another one needs another sign-in (demo stacks list their accounts), never a client-side pretence.
+    // "View as": a preview of a less privileged sheet. It only removes rights from what the server decided (never grants one), so a session can look
+    // at what an approver or a read-only viewer would see; a role above the session's own needs another sign-in.
+    const rank: Record<string, number> = { admin: 2, approver: 1, viewer: 0 };
     const viewAs = (Object.entries(PERSONAS) as Array<[string, string]>).map(([k, label]) => ({
       label,
       icon: "user",
       sel: persona === k,
       onClick: () => {
-        if (persona === k) return ui.toast(`Viewing as ${label}`);
-        if (me.config.demoAccounts) void signOut(`Signed out. Sign in as ${label} to view as that role.`);
-        else ui.toast("Your session holds one role. Sign in with an account that has this role to view as it.", "warn");
+        if ((rank[k] ?? 0) > (rank[own] ?? 0)) {
+          if (me.config.demoAccounts) void signOut(`Signed out. Sign in as ${label} to view as that role.`);
+          else ui.toast("Your session holds a lower role. Sign in with an account that has this role to view as it.", "warn");
+          return;
+        }
+        updatePrefs({ viewAs: k === own ? "" : (k as "approver" | "viewer") });
+        ui.toast(`Viewing as ${label}`);
       },
     }));
     ui.menu(userRef.current, null, [
-      { head: `${v.name} · ${v.email}` },
+      { head: prefs.viewAs ? `${v.name} · viewing as ${PERSONAS[prefs.viewAs]}` : `${v.name} · ${v.email}` },
       // own person page (the prototype's target); a session without the people read right keeps the Account page
       { label: "My account", icon: "user", onClick: () => (people.allowed ? navigate("person", v.id) : navigate("account")) },
       { sep: true },

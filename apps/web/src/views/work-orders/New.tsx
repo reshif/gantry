@@ -4,7 +4,7 @@
  * work order (the request carries an Idempotency-Key that is kept for retries of the same dialog).
  */
 import { useEffect, useRef, useState } from "react";
-import { ONBOARD_STAGES, classify, classesOf, route as routeOf, type Project, type Repo } from "@gantry/domain";
+import { ONBOARD_STAGES, classify, route as routeOf, type Project, type Repo } from "@gantry/domain";
 import { useCanMany } from "../../api/can";
 import { ops } from "../../api/ops";
 import type { Me } from "../../api/types";
@@ -58,7 +58,8 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const me = useMe();
   const cat = useCatalog();
   const prefs = usePrefs();
-  const projects = (me?.projects ?? []).filter((p) => p.status !== "archived");
+  // every project is listed (an archived or stopped one is refused with its reason, like the server does)
+  const projects = me?.projects ?? [];
   const [projectId, setProjectId] = useState<string>(preset.project && projects.some((p) => p.id === preset.project) ? preset.project : (projects.find((p) => p.id === prefs.project)?.id ?? projects[0]?.id ?? ""));
   const repos = useProjectRepos(projectId);
   const [repoId, setRepoId] = useState<string | null>(preset.repo ?? null);
@@ -70,6 +71,7 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
   const [prio, setPrio] = useState("");
   const [source] = useState(preset.source ?? "web");
   const [err, setErr] = useState("");
+  const [fe, setFe] = useState<{ title?: string; desc?: string }>({});
   // The refusal is shown inline (setErr), so the command toasts nothing itself.
   const send = useCommand(ops.submitWO, { ok: false, toastFail: false });
   const busy = send.busy;
@@ -83,26 +85,37 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
     // The inline error describes the form as it was submitted: once a field changes it no longer applies (a title typed after "Give the work order a title" must clear it).
     setErr("");
   }, [projectId, repo, title, desc, att, cls, prio, source]);
+  useEffect(() => { if (title.trim().length >= 6) setFe((f) => (f.title ? { ...f, title: undefined } : f)); }, [title]);
+  useEffect(() => { if (desc.trim().length >= 15) setFe((f) => (f.desc ? { ...f, desc: undefined } : f)); }, [desc]);
   if (!me || !cat || !project) return null;
   const decision = can[projects.indexOf(project)];
   const block = decision && !decision.allowed && !decision.pending ? { reason: decision.reason, needs: decision.needs, onboarding: false } : (() => { const b = submitBlock(me, project, repos, repo); return b ? { reason: b.reason, needs: "", onboarding: b.onboarding } : null; })();
   const fullProject = project as unknown as Project;
-  const classes = classesOf(cat, fullProject);
+  // the prototype's class list is the whole catalogue
+  const classes = cat.classes.filter((c) => c.enabled !== false);
   const clsShown = cls || (classes.find((c) => c.id === "feature") ?? classes[0])?.id || "";
   const text = `${title} ${desc}`.trim();
   const preview = text.length >= 6 ? classify(cat, text, cls || null, fullProject) : null;
   const submit = async () => {
     if (busy) return;
+    // field messages first, in the prototype's words, and focus goes to the first invalid field
+    const f: { title?: string; desc?: string } = {};
+    if (!title.trim()) f.title = "Title is required.";
+    else if (title.trim().length < 6) f.title = "Title needs at least 6 characters.";
+    if (!desc.trim()) f.desc = "What should change and why is required.";
+    else if (desc.trim().length < 15) f.desc = "What should change and why needs at least 15 characters.";
+    setFe(f);
+    if (f.title || f.desc) {
+      setErr("");
+      document.getElementById(f.title ? "nwo-title" : "nwo-desc")?.focus();
+      return;
+    }
     if (block) {
       setErr(block.reason);
       return;
     }
     if (!repo) {
       setErr(`Pick a repo in ${project.name}.`);
-      return;
-    }
-    if (title.trim().length < 3) {
-      setErr("Give the work order a title.");
       return;
     }
     const r = await send.run(
@@ -139,45 +152,43 @@ function NewWorkOrderDialog({ preset, onClose }: { preset: NewWoPreset; onClose:
               </span>
             </div>
           ) : null}
-          <Field label={<>Title<span className="muted"> (required)</span></>} htmlFor="nwo-title" hint="A short, specific request.">
+          <Field label="Title" htmlFor="nwo-title" hint="A short, specific request." error={fe.title}>
             <input id="nwo-title" className="input" value={title} autoComplete="off" onChange={(e) => setTitle(e.target.value)} />
           </Field>
-          <Field label={<>What should change and why<span className="muted"> (required)</span></>} htmlFor="nwo-desc">
+          <Field label="What should change and why" htmlFor="nwo-desc" error={fe.desc}>
             <textarea id="nwo-desc" className="input" rows={4} value={desc} onChange={(e) => setDesc(e.target.value)} />
           </Field>
           <Field label="Project" htmlFor="nwo-project">
             <Select id="nwo-project" options={projects.map((p, i) => ({ value: p.id, label: p.name + (can[i]?.allowed === false && !can[i]?.pending ? " (not permitted)" : "") }))} value={projectId} onChange={(v) => { setProjectId(v); setRepoId(null); }} />
           </Field>
-          {repos.length > 1 ? (
-            // the server needs a repo; the picker only appears when the project has a real choice
-            <Field label="Repo" htmlFor="nwo-repo">
-              <Select id="nwo-repo" options={repos.map((r) => ({ value: r.id, label: r.name + (ready(r) ? "" : ` (not ready: ${STAGE_NAMES[r.onboarding.stage] ?? r.onboarding.stage})`) }))} value={repo} onChange={setRepoId} />
-            </Field>
-          ) : null}
           <Field label="Class" htmlFor="nwo-cls">
             <Select id="nwo-cls" options={classes.map((c) => ({ value: c.id, label: c.name }))} value={clsShown} onChange={setCls} />
           </Field>
           <Field label="Priority" htmlFor="nwo-prio">
             <Select id="nwo-prio" options={["P0", "P1", "P2", "P3"].map((v) => ({ value: v, label: v }))} value={prio || "P2"} onChange={setPrio} />
           </Field>
-          <Field label="Attachments" htmlFor="nwo-att" hint="File names, comma separated.">
-            <input id="nwo-att" className="input" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
-          </Field>
-          <div className="nwo-preview" aria-live="polite">
-            {preview ? (
-              <>
-                <div className="nwo-cls-preview">
-                  <span className="muted small">Classifier preview:</span>
-                  <ClassChip cls={classOf(cat, fullProject, preview.cls)} />
-                  <span className="mono small">{`${Math.round(preview.confidence * 100)}%`}</span>
-                  <span className="small">{preview.rationale}</span>
-                </div>
-                <p className="small muted">{`Route: ${routeOf(cat, fullProject, preview.cls).map((s) => cat.stations.find((x) => x.id === s)?.name ?? s).join(" → ")}`}</p>
-              </>
-            ) : (
-              <p className="muted small">The Intake classifier previews the class as you type.</p>
-            )}
-          </div>
+          {/* kept features (attachments, the classifier's preview) sit behind a closed disclosure so the sheet reads as the prototype's */}
+          <details className="nwo-more" id="nwo-more">
+            <summary className="small muted">Attachments and classifier preview</summary>
+            <Field label="Attachments" htmlFor="nwo-att" hint="File names, comma separated.">
+              <input id="nwo-att" className="input" autoComplete="off" value={att} onChange={(e) => setAtt(e.target.value)} />
+            </Field>
+            <div className="nwo-preview" aria-live="polite">
+              {preview ? (
+                <>
+                  <div className="nwo-cls-preview">
+                    <span className="muted small">Classifier preview:</span>
+                    <ClassChip cls={classOf(cat, fullProject, preview.cls)} />
+                    <span className="mono small">{`${Math.round(preview.confidence * 100)}%`}</span>
+                    <span className="small">{preview.rationale}</span>
+                  </div>
+                  <p className="small muted">{`Route: ${routeOf(cat, fullProject, preview.cls).map((s) => cat.stations.find((x) => x.id === s)?.name ?? s).join(" → ")}`}</p>
+                </>
+              ) : (
+                <p className="muted small">The Intake classifier previews the class as you type.</p>
+              )}
+            </div>
+          </details>
           <div className="form-err" role="alert">
             {err}
           </div>

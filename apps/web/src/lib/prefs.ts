@@ -13,6 +13,10 @@ export type Theme = "system" | "light" | "dark";
 export interface Prefs {
   theme: Theme;
   project: string | null;
+  /** Scope of the factory pages: every project (true) or the remembered one. A project page is always scoped to its project. */
+  scopeAll: boolean;
+  /** Preview of a less privileged sheet (never grants anything): "" is the session's own. */
+  viewAs: "" | "approver" | "viewer";
   /** Projects the person starred in the switcher, and the last few entered (most recent first). */
   pinnedProjects: string[];
   recentProjects: string[];
@@ -33,12 +37,14 @@ export interface Prefs {
   activeClass: string | null;
 }
 
-const PERSISTED = ["theme", "project", "pinnedProjects", "recentProjects", "floorView", "boardSwim", "navCollapsed", "navRail", "palettePinned", "paletteRecent", "portfolio"] as const;
+const PERSISTED = ["theme", "project", "scopeAll", "viewAs", "pinnedProjects", "recentProjects", "floorView", "boardSwim", "navCollapsed", "navRail", "palettePinned", "paletteRecent", "portfolio"] as const;
 
 export function defaultPrefs(): Prefs {
   return {
     theme: "system",
     project: null,
+    scopeAll: true,
+    viewAs: "",
     pinnedProjects: [],
     recentProjects: [],
     floorView: "belt",
@@ -75,6 +81,8 @@ export function parsePrefs(raw: string | null): Prefs {
   if (!v || typeof v !== "object") return out;
   const s = v as Record<string, unknown>;
   if (isTheme(s.theme)) out.theme = s.theme;
+  if (typeof s.scopeAll === "boolean") out.scopeAll = s.scopeAll;
+  if (s.viewAs === "approver" || s.viewAs === "viewer") out.viewAs = s.viewAs;
   if (typeof s.project === "string" && s.project) out.project = s.project;
   if (isStrArray(s.pinnedProjects)) out.pinnedProjects = s.pinnedProjects;
   if (isStrArray(s.recentProjects)) out.recentProjects = s.recentProjects;
@@ -141,7 +149,7 @@ export const usePrefs = (): Prefs => useSyncExternalStore(subscribe, getPrefs);
 /* view state helpers (legacy ops.openRecord / ops.setReplay) */
 export const openRecord = (woId: string | null): void => updatePrefs({ record: woId });
 export const setReplay = (o: Prefs["replay"]): void => updatePrefs((p) => ({ replay: o ? { ...(p.replay ?? {}), ...o } : null }));
-export const setProject = (id: string): void => updatePrefs((p) => ({ project: id, recentProjects: [id, ...p.recentProjects.filter((x) => x !== id)].slice(0, 6) }));
+export const setProject = (id: string): void => updatePrefs((p) => ({ project: id, scopeAll: false, recentProjects: [id, ...p.recentProjects.filter((x) => x !== id)].slice(0, 6) }));
 export const togglePinnedProject = (id: string): void =>
   updatePrefs((p) => ({ pinnedProjects: p.pinnedProjects.includes(id) ? p.pinnedProjects.filter((x) => x !== id) : [id, ...p.pinnedProjects].slice(0, 12) }));
 
@@ -158,3 +166,6 @@ export function reducedMotion(): boolean {
     return false;
   }
 }
+
+/** Factory-page scope: every project. The remembered project stays, so the Project group keeps its shortcut. */
+export const setScopeAll = (): void => updatePrefs({ scopeAll: true });

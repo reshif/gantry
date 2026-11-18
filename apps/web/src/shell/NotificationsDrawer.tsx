@@ -1,13 +1,19 @@
 /** The bell's right-hand drawer (prototype notesDrawer): gate requests with Review, recent events, and the two footer actions. */
 import { useSyncExternalStore } from "react";
-import { fmt } from "@gantry/domain";
 import { useActivity, useHome } from "../api/queries";
 import { navigate } from "../lib/router";
 import { setProject } from "../lib/prefs";
 import { Avatar, Btn } from "../ui/primitives";
-import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { Async } from "../ui/async";
+
+/** One unit, like the prototype: 5m ago, 3h ago, 7d ago, in 2h. */
+function ago(at: number, now = Date.now()): string {
+  if (!at) return "—";
+  const d = Math.abs(now - at) / 1000;
+  const [n, u] = d < 3600 ? [Math.max(1, Math.round(d / 60)), "m"] : d < 86400 ? [Math.round(d / 3600), "h"] : [Math.round(d / 86400), "d"];
+  return now - at < 0 ? `in ${n}${u}` : `${n}${u} ago`;
+}
 
 /** Local read marker: how many waiting items the person has already seen. Cleared by opening the drawer; never sent anywhere. */
 let seen = 0;
@@ -25,7 +31,6 @@ export function useUnread(waiting: number): number {
 export function NotificationsBody({ close }: { close: () => void }) {
   const home = useHome();
   const act = useActivity();
-  const actor = useActors();
   const ui = useUI();
   const gates = (home.data?.approvals ?? []).filter((a) => a.wo).slice(0, 4);
   const waiting = (home.data?.approvals.length ?? 0) + (home.data?.conversations.length ?? 0);
@@ -59,7 +64,7 @@ export function NotificationsBody({ close }: { close: () => void }) {
                       <Avatar id={e.by} size="sm" />
                       <div className="grow">
                         <div className="trunc">{(e as { text?: string }).text ?? e.type}</div>
-                        <div className="small muted">{`${e.type} · ${e.wo ?? ""} · ${fmt.ago(e.at, Date.now())} · ${e.by ? actor(e.by).name : "system"}`}</div>
+                        <div className="small muted">{`${e.type} · ${e.wo ?? ""} · ${ago(e.at)}`}</div>
                       </div>
                     </li>
                   ))}

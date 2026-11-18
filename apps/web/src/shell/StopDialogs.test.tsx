@@ -34,8 +34,8 @@ describe("Kill dialog", () => {
     });
     act(() => actions?.kill("project", "payments"));
     expect(await screen.findByText("Kill Payments Platform")).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("Running agents").nextElementSibling?.textContent).toBe("2"));
-    expect(screen.getByText("Open PRs").nextElementSibling?.textContent).toBe("3");
+    await waitFor(() => expect(document.getElementById("kill-impact")?.textContent).toMatch(/2 running agents/));
+    expect(document.getElementById("kill-impact")?.textContent).toMatch(/3 open PRs/);
     expect(calls.find((c) => c.path === "/api/v1/stops/impact")?.query.get("scope")).toBe("project");
     // nothing is sent until reason and phrase are right
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
@@ -56,12 +56,12 @@ describe("Kill dialog", () => {
     const calls = await start({ "GET /api/v1/stops/impact": () => ({ body: { projects: 10, workOrders: 6, running: 2, slots: 2, prs: 0 } }), "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Factory killed." } }) });
     act(() => actions?.kill("factory", null));
     await screen.findByText("Emergency stop the factory");
-    await waitFor(() => expect(screen.getByText("Projects").nextElementSibling?.textContent).toBe("10"));
+    await waitFor(() => expect(document.getElementById("kill-impact")?.textContent).toMatch(/^10 projects/));
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Credential leak suspected" } });
     fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "kill factory" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
-    expect(await screen.findByText("Type KILL FACTORY exactly.")).toBeTruthy();
-    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "KILL FACTORY" } });
+    expect(await screen.findByText("Type STOP exactly.")).toBeTruthy();
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "STOP" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     await waitFor(() => expect(posts(calls, "/api/v1/stops")[0]?.body).toMatchObject({ scope: "factory", mode: "kill", confirmText: "KILL FACTORY" }));
   });
@@ -100,14 +100,14 @@ describe("Step-up and the notify list", () => {
     await screen.findByText("Emergency stop the factory");
     fireEvent.change(document.getElementById("kill-reason") as HTMLElement, { target: { value: "Credential leak suspected" } });
     fireEvent.click(screen.getByLabelText("Cancel in-flight work"));
-    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "KILL FACTORY" } });
+    fireEvent.change(document.getElementById("kill-confirm") as HTMLElement, { target: { value: "STOP" } });
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     const note = await screen.findByText(/For safety, a kill needs a sign-in within the last 5 min\. You signed in 42 min ago\./);
     expect(note).toBeTruthy();
     expect(screen.queryByText("Sign in again to confirm this change.")).toBeNull();
     fireEvent.click(document.getElementById("stepup-go") as HTMLElement);
     const saved = JSON.parse(window.sessionStorage.getItem("gantry.stepup.draft") ?? "null");
-    expect(saved).toMatchObject({ kind: "kill", scope: "factory", values: { reason: "Credential leak suspected", mode: "cancel", confirm: "KILL FACTORY" } });
+    expect(saved).toMatchObject({ kind: "kill", scope: "factory", values: { reason: "Credential leak suspected", mode: "cancel", confirm: "STOP" } });
     expect(posts(calls, "/api/v1/stops")).toHaveLength(1);
     // back from the sign-in: the same dialog, same typed values, nothing sent until the final click
     cleanup();
@@ -115,7 +115,7 @@ describe("Step-up and the notify list", () => {
     act(() => actions?.kill("factory", null));
     await screen.findByText("Emergency stop the factory");
     expect((document.getElementById("kill-reason") as HTMLTextAreaElement).value).toBe("Credential leak suspected");
-    expect((document.getElementById("kill-confirm") as HTMLInputElement).value).toBe("KILL FACTORY");
+    expect((document.getElementById("kill-confirm") as HTMLInputElement).value).toBe("STOP");
     expect((screen.getByLabelText("Cancel in-flight work") as HTMLInputElement).checked).toBe(true);
     fireEvent.click(document.getElementById("kill-ok") as HTMLElement);
     expect(await screen.findByText("Done: kill. Factory killed.")).toBeTruthy();
@@ -164,7 +164,7 @@ describe("Restore dialog", () => {
     const calls = await start({ "POST /api/v1/stops/factory%3A/restore": () => ({ body: { ok: true, msg: "Restore recorded (1 of 2). A second Factory Admin must approve.", pending: true } }) }, { me: { factory: { killed } } });
     act(() => actions?.restore("factory", null));
     await screen.findByText("Restore the factory");
-    expect(document.querySelector(".dlg-sub")?.textContent).toMatch(/Killed by Asha Raman.*Runaway agent spend.*two Factory Admins/);
+    expect(document.querySelector(".dlg p")?.textContent).toMatch(/Killed by Asha Raman.*Runaway agent spend.*two Factory Admins/);
     fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
     expect(await screen.findByText(/at least 5 characters/)).toBeTruthy();
     fireEvent.change(document.getElementById("rsn-text") as HTMLElement, { target: { value: "Credentials rotated" } });

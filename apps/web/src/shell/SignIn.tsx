@@ -2,11 +2,12 @@
  * Sign-in screen (legacy auth.js). Sign-in is delegated to the identity provider: the buttons leave
  * the SPA for /auth/login. Demo accounts appear only when the API config says demoAccounts is on.
  */
+import { useState } from "react";
 import type { PublicConfig } from "../api/types";
 import { loginUrlWithReturn as loginUrl } from "../lib/session/returnTo";
 import { DEMO_ACCOUNTS } from "../lib/demo";
 import { Icon } from "../ui/Icon";
-import { Btn } from "../ui/primitives";
+import { Btn, Field } from "../ui/primitives";
 import { applyTheme, usePrefs } from "../lib/prefs";
 import { BrandMark } from "./Nav";
 
@@ -34,6 +35,7 @@ function MfaSetup() {
 }
 
 export function SignIn({ config, error, needs }: { config: PublicConfig | null; error?: string | null; needs?: string | null }) {
+  const [email, setEmail] = useState("");
   const demo = !!config?.demoAccounts;
   const prefs = usePrefs();
   const accounts = config?.demoAccountList?.length ? config.demoAccountList : DEMO_ACCOUNTS;
@@ -57,14 +59,26 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
                 <span>{error}</span>
               </div>
             ) : null}
-            <Btn label="Continue with SSO" kind="primary" id="auth-sso-go" icon="key" cls="block" onClick={() => go("sso")} />
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                // the identity provider asks for the password: the work email travels as its login hint
+                window.location.assign(loginUrl("sso", email.trim() || undefined));
+              }}
+            >
+              <Field label="Work email" htmlFor="auth-email">
+                <input id="auth-email" className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </Field>
+              <Btn label="Sign in" kind="primary" id="auth-sso-go" type="submit" cls="block" />
+            </form>
             <div className="row auth-or" style={{ margin: "12px 0" }}>
               <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
               <span className="small muted">or</span>
               <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
             </div>
-            <Btn label="Continue with GitHub" id="auth-gh" icon="github" cls="block" disabledReason={config?.githubLogin === false ? "GitHub sign-in is turned off in Security settings." : null} onClick={() => go("github")} />
-            <p className="small muted" style={{ marginTop: 12 }}>MFA is required for admins. Sign-in is handled by your organisation's identity provider.</p>
+            <Btn label="Continue with SSO" id="auth-sso" cls="block" onClick={() => go("sso")} />
+            {config?.githubLogin === false ? null : <Btn label="Continue with GitHub" kind="ghost" id="auth-gh" icon="github" cls="block" onClick={() => go("github")} />}
+            <p className="small muted" style={{ marginTop: 12 }}>MFA is required for admins.</p>
             {demo ? (
               <div className="auth-demo">
                 <h2 className="auth-demo-h micro">Demo accounts · one click, development only</h2>

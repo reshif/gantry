@@ -67,4 +67,10 @@ export const useKillImpact = (scope: string, id: string | null, enabled = true) 
 
 export const useRepos = (projectId: string | null | undefined) =>
   useQuery({ queryKey: qk.repos(projectId ?? ""), queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(projectId ?? "")}/repos`)), enabled: !!projectId });
+/** Repos of several projects in one list (the command palette), each tagged with its project; each project is its own cached read. */
+export const useReposAcross = (projectIds: string[]): Array<Repo & { projectId: string }> =>
+  useQueries({
+    queries: projectIds.map((id) => ({ queryKey: qk.repos(id), queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(id)}/repos`)) })),
+    combine: (rs) => rs.flatMap((r, i) => (Array.isArray(r.data) ? r.data : []).map((x) => ({ ...x, projectId: projectIds[i] ?? "" }))),
+  });
 export const useGuidelines = () => useQuery({ queryKey: qk.guidelines(), queryFn: () => get<OrgGuidelines>(api("guidelines")) });

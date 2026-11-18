@@ -3,7 +3,7 @@ import { useRef } from "react";
 import type { Me } from "../api/types";
 import { isProjectRoute } from "../lib/routes";
 import { navigate, navigateProject } from "../lib/router";
-import { setProject, usePrefs } from "../lib/prefs";
+import { setProject, setScopeAll, usePrefs } from "../lib/prefs";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 
@@ -12,10 +12,11 @@ type ProjectLite = Me["projects"][number];
 /** Pages that keep their meaning in another project; the rest land on that project's Floor. */
 const keepRoute = (r: string): string => ((r === "record" || r === "changes" || r === "traveler") ? "work-orders" : r);
 
-/** `project` is the project of the page being shown; null on factory pages, where the button reads "All projects". */
-export function ProjectSwitcher({ me, project, current }: { me: Me; project: ProjectLite | null; current: string }) {
+/** `pageProject` is the project of the page being shown; on factory pages the button shows the chosen scope (All projects, or one project). */
+export function ProjectSwitcher({ me, project: pageProject, current }: { me: Me; project: ProjectLite | null; current: string }) {
   const ui = useUI();
   const prefs = usePrefs();
+  const project = pageProject ?? (prefs.scopeAll ? null : (me.projects.find((p) => p.id === prefs.project) ?? null));
   const ref = useRef<HTMLButtonElement>(null);
   const open = () => {
     if (!ref.current) return;
@@ -25,7 +26,7 @@ export function ProjectSwitcher({ me, project, current }: { me: Me; project: Pro
     ui.menu(ref.current, null, [
       { head: "Project line" },
       // like the prototype: the scope changes and the person stays on the sheet they are reading (a project sheet has no "all" form, so it goes to the list)
-      { label: "All projects", icon: "grid", sel: !project, onClick: () => { if (isProjectRoute(current)) navigate("projects"); ui.toast("Showing all projects"); } },
+      { label: "All projects", icon: "grid", sel: !project, onClick: () => { setScopeAll(); if (isProjectRoute(current)) navigate("projects"); ui.toast("Showing all projects"); } },
       { sep: true },
       ...ordered.map((p) => ({
         label: `${p.name}  ·  ${p.key}`,
