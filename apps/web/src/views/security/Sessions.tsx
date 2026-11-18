@@ -60,7 +60,7 @@ export function SessionsTab({ perm, sessions, currentId, viewerId }: { perm: Dec
             actions: [{ label: "Cancel" }, { label: `Revoke ${others.length}`, kind: "danger", id: "sec-ses-all-ok", onClick: (close) => void (async () => { let n = 0; for (const x of others) if ((await revokeSession(x.id)).ok) n++; close(); ui.toast(`${n} sessions revoked.`, "ok"); })() }],
           })} />}
       />
-      <DataTable id="sec-ses-table" caption="Active sessions" columns={cols} rows={rows} rowKey={(s) => s.id} pageSize={12} pager
+      <DataTable sortHint id="sec-ses-table" caption="Active sessions" columns={cols} rows={rows} rowKey={(s) => s.id} pageSize={12} pager
         empty={sessions.length ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="sec-ses-empty-clear" onClick={() => setQ(null)} /> } : { title: "Nothing here yet", text: "Items will appear here when they exist." }} />
     </Panel>
   );

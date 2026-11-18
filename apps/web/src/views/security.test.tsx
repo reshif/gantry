@@ -149,7 +149,7 @@ describe("Security screen", () => {
     mount();
     fireEvent.click(await byId("sec-tab-sessions"));
     await byId("sec-ses-rv-s2");
-    expect(Array.from(document.querySelectorAll("#sec-ses-table th")).map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["Person", "Device", "Method", "Started", "Last seen", ""]);
+    expect(Array.from(document.querySelectorAll("#sec-ses-table th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["Person", "Device", "Method", "Started", "Last seen", ""]);
     expect(document.querySelector("#sec-ses-table .chip.bad")?.textContent).toBe("revoked");
     expect(text()).toContain("3 sessions");
     fireEvent.change(document.querySelector("#sec-ses-q") as HTMLElement, { target: { value: "zzz" } });
@@ -169,7 +169,7 @@ describe("Security screen", () => {
     mount();
     fireEvent.click(await byId("sec-tab-signins"));
     await waitFor(() => expect(text()).toContain("mallory@evil.test"));
-    expect(Array.from(document.querySelectorAll("#sec-hist-table th")).map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["When", "Account", "Method", "Device", "Outcome", "Reason"]);
+    expect(Array.from(document.querySelectorAll("#sec-hist-table th")).map((t) => t.textContent?.replace(/[↑↓↕]/g, ""))).toEqual(["When", "Account", "Method", "Device", "Outcome", "Reason"]);
     expect(text()).toContain("Domain not allowed");
     fireEvent.change(await byId("sec-hist-f-outcome"), { target: { value: "success" } });
     await waitFor(() => expect(text()).not.toContain("mallory@evil.test"));

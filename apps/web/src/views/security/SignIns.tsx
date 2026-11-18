@@ -34,7 +34,7 @@ export function SignInsTab({ signins }: { signins: SignIn[] }) {
           { id: "method", label: "Method", value: method, onChange: (v) => setM(v === "all" ? null : v), options: [{ value: "all", label: "All" }, ...methods] },
         ]}
       />
-      <DataTable id="sec-hist-table" caption="Recent sign-ins" columns={cols} rows={rows} rowKey={(s) => `${s.at}-${s.email}-${s.ip}-${s.outcome}-${s.reason}`} pageSize={12} pager
+      <DataTable sortHint id="sec-hist-table" caption="Recent sign-ins" columns={cols} rows={rows} rowKey={(s) => `${s.at}-${s.email}-${s.ip}-${s.outcome}-${s.reason}`} pageSize={12} pager
         empty={signins.length ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id="sec-hist-empty-clear" onClick={clear} /> } : { title: "Nothing here yet", text: "Items will appear here when they exist." }} />
     </Panel>
   );

@@ -198,7 +198,7 @@ export default function AuditView() {
           empty={<Empty id="aud-empty" icon="ledger" title={q || cat !== "all" || outcome !== "all" || actor !== "all" || dirtyExtra ? "Nothing matches these filters" : "Nothing here yet"} text={q || cat !== "all" || outcome !== "all" || actor !== "all" || dirtyExtra ? "Loosen the search or clear the filters." : "Every change, denial and sign-in is written here as it happens."} action={q || cat !== "all" || outcome !== "all" || actor !== "all" || dirtyExtra ? <Btn label="Clear filters" id="aud-empty-clear" onClick={clear} /> : undefined} />}
         >{() => (
           <>
-            <DataTable id="aud-table" caption="Audit ledger" columns={cols} rows={rows} rowKey={(e) => String(e.seq)} sort={{ key: "at", dir: -1 }} pageSize={15} pager />
+            <DataTable sortHint id="aud-table" caption="Audit ledger" columns={cols} rows={rows} rowKey={(e) => String(e.seq)} sort={{ key: "at", dir: -1 }} pageSize={15} pager />
             {feed.hasNextPage ? <div className="tfoot"><span className="muted small">{`${rows.length} of ${total} loaded`}</span><Btn label="Load older entries" small id="aud-more" onClick={() => void feed.fetchNextPage()} /></div> : null}
           </>
         )}</Async>
