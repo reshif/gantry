@@ -6,8 +6,8 @@
 import { DEFAULT_CATALOG, ONBOARD_STAGES, RISK_TAG_RULES } from "./catalog.js";
 import { gateModeLock, requiredFor } from "./gates.js";
 import { HOUR } from "./format.js";
-import { actorName, can, effectiveStop, findPerson, findProject, findRepo, isOnCall, rolesIn } from "./policy.js";
-import type { PolicyState } from "./policy.js";
+import { actorName, can, effectiveStop, findPerson, findProject, findRepo, isFactoryAdmin, isOnCall, rolesIn } from "./policy.js";
+import type { OverrideMarks, PolicyState } from "./policy.js";
 import type {
   ApproverCondition, ApproverNeeds, ApproverRule, Bay, Brief, Catalog, Conversation, ConvMiss, ConvQuestion, Decision, DecisionRule, Gate, GateKind, GateInstance,
   Person, Priority, Project, Repo, Station, WorkClass, WorkOrder,
@@ -437,7 +437,10 @@ export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk
     const pp = people.find((x) => x.id === a.by);
     return !!pp && satisfies(pp, project, cd.needs);
   }));
-  const need = requiredFor(rule, wo.cls);
+  // The count the server enforces: never below what this opening was opened with (tightening applies at once, loosening never approves waiting work, spec 9.3),
+  // except where the rule lists this class: that override is the owner's setting and applies live.
+  const classSet = !!rule.classRequired && Object.prototype.hasOwnProperty.call(rule.classRequired, wo.cls);
+  const need = classSet ? requiredFor(rule, wo.cls) : Math.max(requiredFor(rule, wo.cls), Number((st as { openedRequired?: number }).openedRequired) || 0);
   const onlyRequester = gateId !== "G0G1" && counted.length > 0 && counted.every((a) => a.by === wo.requestedBy);
   return { have: counted.length, need, unmet, conds, onlyRequester, passes: counted.length >= need && !unmet.length && !onlyRequester, authorExcluded };
 }
@@ -448,7 +451,14 @@ function deny(reason: string, needs?: string, rule?: string): Decision {
 }
 
 /** May this person approve this gate on this work order right now? Adds approver rules on top of can(). */
-export function gateDecision(state: FlowState, personId: string | null | undefined, wo: WorkOrder, gateId: string, now: number): Decision {
+export function gateDecision(state: FlowState, personId: string | null | undefined, wo: WorkOrder, gateId: string, now: number, opts: { override?: boolean } = {}): Decision {
+  const marks: OverrideMarks = { kind: null };
+  const d = gateDecisionCore(state, personId, wo, gateId, now, opts, marks);
+  if (d.allowed && marks.kind) return { ...d, override: true, overrideKind: marks.kind };
+  return d;
+}
+
+function gateDecisionCore(state: FlowState, personId: string | null | undefined, wo: WorkOrder, gateId: string, now: number, opts: { override?: boolean }, marks: OverrideMarks): Decision {
   const c = cat(state);
   const person = findPerson(state, personId);
   const project = state.projects.find((p) => p.id === wo.project) as Project;
@@ -459,11 +469,18 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
   const st = wo.gates[gateId];
   if (!st || st.status !== "waiting") return deny(wo.id + " is not waiting at " + g.label + ".", "", "STATE");
   const stop = effectiveStop(state, { project: project.id, repo: wo.repo, wo });
-  if (stop) return deny(stop.reason, stop.mode === "halt" ? "Resume first" : "Restore first", stop.mode === "halt" ? "HALT" : "KILL");
+  if (stop) {
+    // Owner decision 2026-11-19: a Factory Admin may approve a gate during a halt with a reason ("Approve anyway"); a kill, and everyone else, stay blocked.
+    if (stop.mode === "halt" && isFactoryAdmin(state, personId as string)) {
+      if (!opts.override) return { ...deny(stop.reason, "override_reason", "HALT"), override: true, overrideKind: "halt" as const };
+      marks.kind = "halt";
+    } else return deny(stop.reason, stop.mode === "halt" ? "Resume first" : "Restore first", stop.mode === "halt" ? "HALT" : "KILL");
+  }
 
   if (gateId === "G0G1") {
-    const d0 = can(state, personId, "brief.confirm", { project: project.id, time: now });
+    const d0 = can(state, personId, "brief.confirm", { project: project.id, time: now, ...(opts.override ? { override: true } : {}) });
     if (!d0.allowed) return d0;
+    if (d0.overrideKind) marks.kind = d0.overrideKind;
     const roles0 = rolesIn(person, project.id);
     const senior = roles0.some((r) => ["line_lead", "project_admin", "factory_admin"].includes(r));
     if (!senior && wo.requestedBy !== personId) return deny("Engineers may confirm only briefs they submitted. " + actorName(state, wo.requestedBy) + " submitted this one.", "Submitter, Line Lead or Project Admin", "APR-G0G1");
@@ -471,8 +488,9 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
     return { allowed: true, reason: wo.requestedBy === personId ? "You submitted this work order." : "Line Leads and Project Admins may confirm any brief.", rule: { kind: "approver", id: "APR-G0G1", name: "Brief confirmation" }, needs: "" };
   }
 
-  const base = can(state, personId, g.action || "gate.approve", { project: project.id, repo: wo.repo, time: now });
+  const base = can(state, personId, g.action || "gate.approve", { project: project.id, repo: wo.repo, time: now, ...(opts.override ? { override: true } : {}) });
   if (!base.allowed) return base;
+  if (base.overrideKind) marks.kind = base.overrideKind;
   const rule = project.approvers[gateId] ?? { ...NO_RULE };
   if (st.approvals.some((a) => a.by === personId)) return deny("You already approved " + g.label + " on " + wo.id + ".", "Another approver", "APR-" + gateId);
   const roles = rolesIn(person, project.id);

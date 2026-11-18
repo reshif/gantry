@@ -6,7 +6,8 @@
 import type { Tx } from "@gantry/db";
 import type { Actor, CommandResult } from "../../core/command.js";
 import { Refusal, conflict, invalid } from "../../core/errors.js";
-import { readSecurity } from "../../core/read/index.js";
+import { factoryAdmins } from "@gantry/domain";
+import { readPeople, readSecurity } from "../../core/read/index.js";
 import { apiStopId, scopeToApi, stopAction, type ScopeType, type StopTarget } from "./targets.js";
 
 type Cmd = CommandResult<Record<string, unknown>>;
@@ -130,6 +131,19 @@ export async function restoreStop(tx: Tx, a: Actor, t: StopTarget, reason: strin
       needsTwo = (await readSecurity(tx, a.orgId)).value.restoreFactoryNeedsTwo;
     } catch {
       // Unreadable settings must not weaken the control: keep the strict default.
+    }
+    // Owner decision 2026-11-19: with only ONE active Factory Admin, nobody can be the second approver, so that admin restores alone with a reason, audited as an override.
+    // With two or more, the two-person approval stays exactly as it is.
+    const soleAdmin = needsTwo && (await readPeople(tx, a.orgId).then((ps) => { const fa = factoryAdmins(ps); return fa.length === 1 && fa[0]!.id === a.personId; }).catch(() => false));
+    if (soleAdmin) {
+      await lift(tx, a, kill);
+      return {
+        msg: "The factory was restored by its only Factory Admin (override, recorded with your reason).",
+        events: [{ type: "restore", category: "kill", subject, outcome: "ok", occurredAt: a.now, before: { stop: kill.id }, after: payload(t, { text: reason.trim(), stop: kill.id, apiId: apiStopId(t.scope, t.target), override: true, soleAdmin: true }) }],
+        extra: { stop: kill.id, apiId: apiStopId(t.scope, t.target), pending: false, override: true, version: kill.version + 1 },
+        changes: ["stops", "factory", "projects", "repos", "workOrders", "floor", "home"],
+        project: t.project,
+      };
     }
     if (needsTwo) {
       const prior = await tx.query<{ approver: string }>(`select approver from restore_approvals where org_id = $1 and stop_id = $2`, [a.orgId, kill.id]);

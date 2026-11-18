@@ -69,13 +69,13 @@ export async function computeWorkload(db: Queryable, orgId: string, viewer: stri
     projects: visible.map((p) => ({ id: p.id, name: p.name })),
     factoryWide: !!viewerPerson && viewerPerson.roles.some((g) => g.scope === "factory"),
     totals: {
-      gatesWaiting: m.gates.length, soleGates: m.gates.filter((g) => g.eligible.length === 1).length, noneGates: m.gates.filter((g) => !g.eligible.length).length,
+      gatesWaiting: m.gates.length, soleGates: m.gates.filter((g) => g.named.length === 1).length, noneGates: m.gates.filter((g) => !g.eligible.length).length,
       timedN: timed.length, medianWaitMin: median(timed), acts: m.acts.length, afterHours, minutes,
     },
     rows: m.rows.map((r) => ({
       person: r.person, name: r.name, team: r.team, waiting: r.waiting, glass: r.glass, approvals: r.approvals, perDay: r.perDay, answered: r.answered, waitN: r.waitN, medianResponseMin: r.medianResponseMin,
       afterHours: r.afterHours, n: r.n, sole: r.sole, minutes: r.minutes, away: r.away, oncall: r.oncall,
-      waitingGates: r.waitingGates.map((g) => ({ wo: ref(g.wo), gate: g.gate, since: g.since, eligible: g.eligible.length })),
+      waitingGates: r.waitingGates.map((g) => ({ wo: ref(g.wo), gate: g.gate, since: g.since, eligible: g.named.length })),
       recent: r.acts.slice().sort((a, b) => b.at - a.at).slice(0, 14).map((a) => ({ kind: a.kind, at: a.at, wo: a.wo, ...(a.gate ? { gate: a.gate } : {}), waitMin: a.waitMin ?? null })),
     })),
     teams: m.teams.map((x) => ({ team: x.team, name: x.name, people: x.people, waiting: x.waiting, approvals: x.approvals, answered: x.answered, minutes: x.minutes, waitN: x.waitN, medianResponseMin: x.medianResponseMin, afterHours: x.afterHours, n: x.n, sole: x.sole })),

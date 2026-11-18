@@ -2,7 +2,7 @@
 import { gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
 import type { Actor } from "../../core/command.js";
 import { invalid, refuse } from "../../core/errors.js";
-import { closeEntry, closeInstance, advance, bayOf, pinned, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
+import { coveringStop, closeEntry, closeInstance, advance, bayOf, pinned, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
 import { appendMessage, closeConversation } from "./conversation.js";
 import { recordBriefDocument } from "./station-docs.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
@@ -76,7 +76,9 @@ function markLastEntry(w: Wo, outcome: string, text = ""): void {
  * under the rule in force now, and never below the number the instance was opened with (tightening applies at once, loosening never approves waiting work, spec 9.3).
  */
 export async function approveGate(tx: import("@gantry/db").Tx, actor: Actor, woId: string, gateId: string, n: number | null, o: { via?: string; reason?: string } = {}): Promise<CmdResult> {
-  const { fx, w } = await begin(tx, actor, woId, "gate.approve");
+  // "Approve anyway": a Factory Admin who gives a reason is not stopped by the halt guard here; approveInner decides, records and audits it. A kill is never skipped.
+  const adminWithReason = !!o.reason && o.reason.trim().length >= 5 && !!actor.personId && (await tx.query(`select 1 from effective_role_assignments where org_id = $1 and person_id = $2 and role_id = 'factory_admin' and project_id is null and revoked_at is null and (expires_at is null or expires_at > now()) limit 1`, [actor.orgId, actor.personId])).rows.length > 0;
+  const { fx, w } = await begin(tx, actor, woId, "gate.approve", { haltOverride: adminWithReason });
   return approveInner(fx, actor, w, gateId, n, o.via, o.reason);
 }
 
@@ -88,7 +90,19 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   const by = person(actor, "Gate decisions are");
   const { st, wo } = await flowFor(fx, w);
   if (gateId === "G0G1" && !wo.conv.done) throw invalid("Answer the open intake questions first; the brief is not complete.");
-  const d = gateDecision(st, by, wo, gateId, fx.now.getTime());
+  let d = gateDecision(st, by, wo, gateId, fx.now.getTime());
+  // Owner decision 2026-11-19: a Factory Admin may approve during a freeze or a halt with a reason (a kill still blocks). Never silent: the reason is audited below.
+  const reason5 = overrideReason && overrideReason.trim().length >= 5 ? overrideReason.trim() : "";
+  const covering = await coveringStop(fx.tx, fx.orgId, w);
+  const adminNow = st.people.some((p) => p.id === by && p.roles.some((r) => r.role === "factory_admin" && r.scope === "factory"));
+  let stopKind: "freeze" | "halt" | null = null;
+  if (adminNow && covering?.mode === "halt") stopKind = "halt";
+  if (!d.allowed && d.override) {
+    stopKind = d.overrideKind ?? (d.rule.kind === "stop" ? "halt" : "freeze");
+    if (!reason5) throw refuse("denied", `${d.reason} As Factory Admin you can approve anyway. Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: d.rule });
+    d = gateDecision(st, by, wo, gateId, fx.now.getTime(), { override: true });
+  } else if (d.allowed && d.override) stopKind = d.overrideKind ?? stopKind;
+  if (stopKind && !reason5) throw refuse("denied", `${covering ? covering.reason : "A stop is in force"} As Factory Admin you can approve anyway. Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "stop", id: "STOP-" + (covering?.scope ?? "project").toUpperCase(), name: "Stop state" } });
   if (!d.allowed) throw refuse("denied", d.reason, { rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) });
   if (gateId === "G5") await requireMergeablePr(fx, w);
   await insertVote(fx, w, inst.id, by, "approve", "", via ?? actor.channel);
@@ -105,16 +119,24 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   const isAdmin = (after.st.people.find((p) => p.id === by)?.roles ?? []).some((r) => r.role === "factory_admin" && r.scope === "factory");
   // Bypassing separation of duties is always an override, even when the count would be met with the author's vote.
   const sodBypass = isAdmin && gateId !== "G0G1" && !!project.approvers[gateId]?.sod && wo.requestedBy === by;
-  const override = isAdmin && ((!ruled && (prog.onlyRequester || prog.unmet.length > 0)) || sodBypass);
+  // N of M that cannot be reached (fewer eligible people than the gate needs) is a break-glass case too: the admin passes it with a reason.
+  const eligible = new Set(after.wo.gates[gateId]?.approvals.map((a) => a.by) ?? []);
+  if (isAdmin && !ruled && gateId !== "G0G1") for (const pp of after.st.people) if (pp.status === "active" && !eligible.has(pp.id) && gateDecision(after.st, pp.id, after.wo, gateId, fx.now.getTime()).allowed) eligible.add(pp.id);
+  const unreachable = isAdmin && !ruled && gateId !== "G0G1" && eligible.size < need;
+  const override = isAdmin && ((!ruled && (prog.onlyRequester || prog.unmet.length > 0 || unreachable)) || sodBypass);
   if (override && (!overrideReason || overrideReason.trim().length < 5)) {
-    throw refuse("denied", `As Factory Admin you can override ${g.label} (it needs ${need} approval${need === 1 ? "" : "s"}${prog.onlyRequester || wo.requestedBy === by ? ", and you are the author" : ""}). Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "approver", id: "APR-" + gateId, name: "Factory Admin override" } });
+    throw refuse("denied", `As Factory Admin you can override ${g.label} (it needs ${need} approval${need === 1 ? "" : "s"}${prog.onlyRequester || wo.requestedBy === by ? ", and you are the author" : ""}${unreachable ? `; only ${eligible.size} ${eligible.size === 1 ? "person" : "people"} can approve it, so it cannot be reached` : ""}). Give a reason of at least 5 characters; it is recorded in the audit.`, { needs: "override_reason", rule: { kind: "approver", id: "APR-" + gateId, name: "Factory Admin override" } });
   }
   const passes = (ruled && !sodBypass) || override;
   const voter = { personId: by, via: via ?? actor.channel, channel: actor.channel };
   if (override) {
     const why = overrideReason!.trim();
     note(w, fx, by, `${g.label} passed by Factory Admin override (${prog.have} of ${need} approvals): ${why}`);
-    ev(fx, w, "gate.override", { gate: gateId, by, text: why, have: prog.have, need, author: wo.requestedBy === by, instance: inst.id }, { category: "approvals" });
+    ev(fx, w, "gate.override", { gate: gateId, by, text: why, have: prog.have, need, author: wo.requestedBy === by, instance: inst.id, ...(unreachable ? { unreachable: true, eligible: eligible.size } : {}) }, { category: "approvals" });
+  }
+  if (stopKind) {
+    note(w, fx, by, `${g.label} approved by Factory Admin override during ${stopKind === "freeze" ? "a release freeze" : "a halt"}: ${reason5}`);
+    ev(fx, w, "gate.override", { gate: gateId, by, text: reason5, kind: stopKind, have: prog.have, need, author: wo.requestedBy === by, instance: inst.id }, { category: "approvals" });
   }
   if (!passes) {
     const unmet = prog.unmet.length ? `; still needs: ${prog.unmet.map((c) => c.text).join("; ")}` : prog.onlyRequester ? "; the requester cannot be the only approver" : "";
@@ -124,7 +146,7 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
     await saveWo(fx.tx, fx.orgId, w);
     return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${excl}${unmet}).`, w.project, { passed: false, have: prog.have, need, authorExcluded: prog.authorExcluded, instance: inst.id, version: w.version });
   }
-  await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, override, ...(override ? { reason: overrideReason!.trim() } : {}) });
+  await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, override: override || !!stopKind, ...(override || stopKind ? { reason: (overrideReason ?? reason5).trim() } : {}) });
   await closeInstance(fx, inst.id, "decision");
   note(w, fx, by, `${g.label} ${g.name} approved${via && via !== "web" ? ` via ${via}` : ""}.`);
   // Phase 3: what the approver had in front of them, recorded with the decision (not a block): assumptions nobody confirmed, objections nobody decided.

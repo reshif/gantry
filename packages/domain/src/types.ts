@@ -494,6 +494,8 @@ export interface GateInstance {
   rejections: Rejection[];
   checks: GateCheck[];
   waitingSince?: Ms;
+  /** The approvals this opening was opened with. A later loosening of the rule never lowers what a waiting gate needs (spec 9.3), so progress and the satisfiable warning use it too. */
+  openedRequired?: number;
   decision?: GateDecisionRecord;
   trustNote?: string | null;
 }
@@ -1706,4 +1708,11 @@ export interface Decision {
   reason: string;
   rule: DecisionRule;
   needs: string;
+  /**
+   * A Factory Admin break-glass (owner decision 2026-11-19). On a denial: only an override with a reason would allow it (`needs` is "override_reason").
+   * On an allow: the override was used, so the caller must record the reason in the audit.
+   */
+  override?: boolean;
+  /** Which stop the override passes: a release freeze or an andon halt. */
+  overrideKind?: "freeze" | "halt";
 }

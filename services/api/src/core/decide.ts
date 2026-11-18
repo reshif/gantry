@@ -13,6 +13,8 @@ export interface Scope {
   wo?: string | null;
   /** Epoch ms of the question; defaults to now. */
   time?: number;
+  /** A Factory Admin has given a reason for a break-glass override of a freeze or an andon halt (owner decision 2026-11-19). */
+  override?: boolean;
 }
 
 /** Policy state for this request, loaded once (spec 14.3: cached per request). Inside a transaction pass `tx` to read the transaction's view (uncached). */
@@ -51,6 +53,7 @@ export function decideFor(st: PolicyStateLoaded, principal: Principal | null, ac
     project: scope.project ?? null,
     repo: scope.repo ?? null,
     time,
+    ...(scope.override ? { override: true } : {}),
     ...(scope.wo ? { wo: { id: scope.wo, state: killed ? "killed" : "running", ...(killed ? { killed } : {}) } as never } : {}),
   });
 }

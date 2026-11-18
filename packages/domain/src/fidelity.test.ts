@@ -40,6 +40,8 @@ describe("can() equals legacy G.can", () => {
             const ctx = { project, time };
             const a = can(S, person.id, act.id, ctx);
             const b = G.can(person.id, act.id, ctx);
+            // Intentional divergence (owner decision 2026-11-19): allow policies never restrict a Factory Admin, so POL-105 is no longer needed.
+            if (b.rule.id === "POL-105" && a.allowed && a.rule.id === "MATRIX") { diverged++; continue; }
             // Intentional divergence from the legacy engine: a factory-scoped action needs a factory-level grant (a project role never
             // reaches beyond its project). The legacy allowed audit.view / eval.run to Project Admins and Line Leads factory-wide.
             const projectOnly = act.scope === "factory" && !person.roles.some((g) => g.scope === "factory");
@@ -69,7 +71,11 @@ describe("can() equals legacy G.can", () => {
         for (const act of ["release", "gate.approve", "kill.project"]) {
           for (const time of times) {
             const ctx = { repo: repo.id, time };
-            expect(can(S, person.id, act, ctx), `${person.id} ${act} ${repo.id}`).toEqual(G.can(person.id, act, ctx));
+            const a = can(S, person.id, act, ctx);
+            const b = G.can(person.id, act, ctx);
+            if (b.rule.id === "POL-105" && a.allowed && a.rule.id === "MATRIX") continue; // allow policies never restrict a Factory Admin (2026-11-19)
+            if (a.override && !a.allowed) { expect(b.allowed).toBe(false); expect(a.reason).toBe(b.reason); continue; } // a Factory Admin may pass a freeze with a reason (2026-11-19)
+            expect(a, `${person.id} ${act} ${repo.id}`).toEqual(b);
           }
         }
       }
