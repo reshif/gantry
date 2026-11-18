@@ -297,10 +297,12 @@ describe("Workload: Control room prototype layout (gov1)", () => {
     expect(document.body.textContent).not.toContain("n=");
     expect(document.getElementById("wl-view-link")).toBeNull(); // the header sub is plain text, as in the prototype
     expect(document.querySelector(".ph")?.textContent).not.toContain("Suggestions, teams and minutes");
-    cleanup();
-    mount(true); // the detail view is still reachable by its address (?wview=detail)
+    fireEvent.click(document.getElementById("wl-view-detail")!); // the Overview / detail switch
     await byId("wl-sugg-card");
+    expect(document.getElementById("wl-tab-panel")).not.toBeNull();
     expect(document.getElementById("wl-matrix")).toBeNull();
     expect(document.getElementById("wl-project")).not.toBeNull();
+    fireEvent.click(document.getElementById("wl-view-overview")!);
+    await byId("wl-matrix");
   });
 });

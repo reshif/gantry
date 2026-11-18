@@ -12,7 +12,7 @@ import { pickProject } from "../lib/routes";
 import { usePrefs } from "../lib/prefs";
 import { useCatalog } from "./projects/kit";
 import type { Workload, WorkloadSuggestion } from "../api/types";
-import { Btn, Chip, Empty, FilterBar, SearchBox, Select, Tabs } from "../ui/primitives";
+import { Btn, Chip, Empty, FilterBar, SearchBox, Segmented, Select, Tabs } from "../ui/primitives";
 import { Card, Page, Stats } from "../ui/cr";
 import { hashFor } from "../lib/router";
 import { usePeopleLoad } from "./govern/load";
@@ -77,7 +77,7 @@ function useAgentUtilisation(agents: Array<{ id: string; station: string | null 
 export default function WorkloadView() {
   const ui = useUI();
   const me = useMe();
-  const [view] = useUrlState("wview", "overview"); // overview (the prototype screen) | detail (suggestions, teams, waits, minutes)
+  const [view, setView] = useUrlState("wview", "overview"); // overview (the prototype screen) | detail (suggestions, teams, waits, minutes)
   const [tab, setTab] = useUrlState("wtab", "people");
   const [win, setWin] = useUrlState("win", "7");
   const days = win === "1" ? 1 : 7;
@@ -126,7 +126,7 @@ export default function WorkloadView() {
   const clear = (): void => writeUrlState({ q: null, team: null, scope: null, win: null });
 
   return (
-    <Page cls="view-workload" eyebrow="Govern" title="Workload" sub={sub}>
+    <Page cls="view-workload" eyebrow="Govern" title="Workload" sub={sub} acts={<Segmented name="wl-view" label="Workload view" value={detail ? "detail" : "overview"} onChange={(v) => setView(v === "detail" ? "detail" : "overview")} items={[{ id: "overview", label: "Overview" }, { id: "detail", label: "Suggestions and detail" }]} />}>
       <Stats id="wl-stats" items={[
         { l: "Approvals waiting", v: String(t.gatesWaiting), tone: "warn" },
         { l: "Median wait at gates", v: t.timedN >= MIN_N ? mins(t.medianWaitMin) : "–", tone: "info" },

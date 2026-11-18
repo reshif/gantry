@@ -143,7 +143,7 @@ export default function AccessView() {
         idPrefix="acc-tab"
         active={tab}
         onChange={setTab}
-        items={[{ id: "matrix", label: "Matrix" }, { id: "policies", label: "Policies" }, { id: "check", label: "Check access" }]}
+        items={[{ id: "matrix", label: "Matrix" }, { id: "policies", label: "Policies" }, { id: "freezes", label: "Freezes" }, { id: "roles", label: "Roles" }, { id: "check", label: "Check access" }]}
       />
       <div className="acc-body" id="acc-tab-panel" role="tabpanel">
         {tab === "check" ? (
@@ -161,7 +161,7 @@ export default function AccessView() {
         : tab === "freezes" ? <Card title="Freezes" flush id="acc-freezes-card" acts={<>{<Btn label="Policies" small kind="ghost" id="acc-back-policies" onClick={() => setTab("policies")} />}{toolsFor("freezes")}</>}><FreezeList freezes={freezes} repos={repos} hlFreeze={evaluated && (evaluated.result.decision.rule as { freeze?: string }).freeze ? (evaluated.result.decision.rule as { freeze?: string }).freeze! : null} /></Card>
         : tab === "roles" ? <Card title="Roles" flush id="acc-roles-card" acts={<><Btn label="Matrix" small kind="ghost" id="acc-back-matrix" onClick={() => setTab("matrix")} />{toolsFor("roles")}</>}><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /></Card>
         : (
-          <Card title="Policies" flush id="acc-policies-card">
+          <Card title="Policies" flush id="acc-policies-card" acts={toolsFor("policies")}>
           <PolicyCards
             policies={policies} hl={hl} roles={roles} onEdit={openPolicy} freezes={freezes}
           />
