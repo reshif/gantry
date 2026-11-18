@@ -342,3 +342,9 @@ a.step:hover, button.step:hover { background: var(--panel); }
   .toasts { right: 8px; left: 8px; bottom: 8px; width: auto; }
 }
 .stat-act { margin-top: 2px; }
+
+/* tablet widths: the project switcher gives way so the topbar never pushes the page wider than the window */
+@media (max-width: 900px) {
+  .top .proj-sw { flex: 0 1 auto; min-width: 0; }
+  .top .proj-sw > span { min-width: 0; }
+}

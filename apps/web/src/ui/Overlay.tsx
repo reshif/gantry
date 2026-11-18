@@ -46,7 +46,7 @@ export interface DialogProps extends Omit<DialogOpts, "onClose"> {
 }
 
 /** A modal dialog (see ui/Modal for the layer rules). Render it while open; call onClose to dismiss. Also used by ui.dialog(). */
-export function Dialog({ title, kicker, sub, wide, cls, dirty, body, actions, onClose }: DialogProps) {
+export function Dialog({ title, kicker, sub, wide, cls, dirty, bare, body, actions, onClose }: DialogProps) {
   // Forms inside mark themselves with useLeaveGuard(dirty); the dialog is dirty while any of them is, so every dismissal asks first.
   const dirtyIds = useRef(new Set<symbol>());
   const [marked, setMarked] = useState(false);
@@ -61,7 +61,7 @@ export function Dialog({ title, kicker, sub, wide, cls, dirty, body, actions, on
   };
   const content = typeof body === "function" ? body(onClose) : body;
   return (
-    <Modal title={title} kicker={kicker} sub={sub} wide={wide} cls={cls} dirty={dirty || marked} onClose={onClose} onSubmit={onSubmit}
+    <Modal title={title} kicker={kicker} sub={sub} wide={wide} cls={cls} bare={bare} dirty={dirty || marked} onClose={onClose} onSubmit={onSubmit}
       footer={list.length ? (ask) => list.map((a, i) => (
         <Btn key={a.id ?? `${a.label}-${i}`} label={a.label} kind={a.kind ?? "ghost"} type={a.submit ? "submit" : "button"} guard={a.guard} icon={a.icon} id={a.id} onClick={a.submit ? undefined : () => (a.onClick ? a.onClick(ask) : ask())} />
       )) : undefined}
@@ -392,13 +392,15 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
             <Dialog
               title={o.title}
               kicker={o.kicker}
+              sub={o.sub}
+              bare={o.bare}
               body={o.body ?? null}
               onClose={() => {
                 close();
                 finish(false);
               }}
               actions={[
-                { label: "Cancel", onClick: (c) => c() },
+                { label: "Cancel", kind: o.cancelKind, onClick: (c) => c() },
                 {
                   label: o.ok ?? "Confirm",
                   kind: o.kind ?? "primary",

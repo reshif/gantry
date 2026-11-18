@@ -40,7 +40,7 @@ export const ROUTE_MAP = {
 };
 const realHash = (route) => {
   const [rr, qs] = route.split("?");
-  if (qs) return "/?" + qs + realHash(rr).slice(1);
+  if (qs) return realHash(rr) + "?" + qs;
   const [name, param] = rr.split("/");
   const base = ROUTE_MAP[name];
   if (base === undefined) throw new Error(`no mapping for route "${name}" (see ROUTE_MAP)`);

@@ -243,7 +243,7 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
   const run = useCallback((on: Parameters<typeof sendWoTurn>[2], signal: AbortSignal) => sendWoTurn(woId, turn.current, on, signal), [woId]);
   const { live, error, start } = useLiveTurn<WoCard>(run, (m) => ui.toast(m, "error"));
   const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text);
-  const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => { turn.current = body; void start(); };
+  const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => { turn.current = body; if (body.kind === "message") void markWoSeen(woId); void start(); };
   const agents = useWsAgents(woId).data?.items ?? [];
   const mentions = useMentions(woId, draft, setDraft, !!s?.can.talk && !live);
 
@@ -256,8 +256,6 @@ export function WoSessionPage({ woId, back, embedded, bare, proto }: { woId: str
     send({ kind: "open" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s?.woId, started, ruleBased, s?.busy, s?.can.talk, s?.briefOpen]);
-  const seenKey = s ? `${s.messages.length}:${s.messages.at(-1)?.id ?? ""}` : "";
-  useEffect(() => { if (seenKey) void markWoSeen(woId); }, [seenKey, woId]);
   useEffect(() => { if (s) setProject(s.project); }, [s?.project]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lastId = s?.messages.at(-1)?.id;

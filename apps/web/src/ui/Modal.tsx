@@ -152,6 +152,8 @@ export interface ModalProps {
   cls?: string;
   /** True while the body holds unsaved input: Escape, the scrim and the close button then ask before discarding. */
   dirty?: boolean;
+  /** No corner close button. */
+  bare?: boolean;
   onClose: () => void;
   /** Wrap body and footer in a form with this submit handler. */
   onSubmit?: (e: React.FormEvent) => void;
@@ -160,7 +162,7 @@ export interface ModalProps {
   footer?: ReactNode | ((requestClose: () => void) => ReactNode);
 }
 
-export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit, children, footer }: ModalProps) {
+export function Modal({ title, kicker, sub, wide, cls, dirty, bare, onClose, onSubmit, children, footer }: ModalProps) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = `dlg-title-${useId().replace(/:/g, "")}`;
   const [asking, setAsking] = useState(false);
@@ -217,9 +219,11 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit,
             <h2 id={titleId} className="dlg-title">{title}</h2>
             {sub ? <p className="dlg-sub">{sub}</p> : null}
           </div>
-          <button type="button" className="icon-btn" aria-label="Close dialog" onClick={requestClose}>
-            <Icon name="x" />
-          </button>
+          {bare ? null : (
+            <button type="button" className="icon-btn" aria-label="Close dialog" onClick={requestClose}>
+              <Icon name="x" />
+            </button>
+          )}
         </div>
         {onSubmit ? <form className="dlg-form" noValidate onSubmit={onSubmit}>{inner}</form> : <div className="dlg-form">{inner}</div>}
       </div>

@@ -131,6 +131,14 @@ describe("Work-order session", () => {
     expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)[1]!.body).toMatchObject({ text: "gimme a brief" });
   });
 
+  it("opening a thread leaves it unread; sending a message marks it seen", async () => {
+    const calls = await showSession(session(), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
+    await screen.findByText("Intake Clerk is waiting for you");
+    expect(posts(calls, `/api/v1/work-orders/${W.id}/session/seen`)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "POST /refunds" }));
+    await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/seen`)).toHaveLength(1));
+  });
+
   it("@ offers people by name, says who cannot open the project, and sends only the people still named; a mention that gave no access is noted under the message", async () => {
     const calls = await showSession(
       session({ messages: [...session().messages, { id: "wm-9", role: "user", author: "p-tomas", text: "@Lena Okafor please look", at: Date.now(), data: { mentions: [{ id: "p-lena", name: "Lena Okafor", access: false }] } }] }),
