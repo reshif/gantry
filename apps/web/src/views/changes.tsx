@@ -46,6 +46,7 @@ export default function ChangesView() {
   const sel = files.find((f) => f.path === fileQ) ?? files[0];
   const commits = ch?.commits ?? (rec.code?.commits ?? []).map((x) => ({ sha: x.sha, message: x.message, author: x.author }));
   const pr = rec.code?.pullRequests?.[0] ?? null;
+  const waitingGate = Object.entries(wo.gates ?? {}).find(([, g]) => g.status === "waiting")?.[0];
   return (
     <div className="view rec-view dz">
       <ViewHead
@@ -53,6 +54,7 @@ export default function ChangesView() {
         kicker={<span style={{ display: "inline-flex", gap: 8 }}><a href={hashFor("changes", null, wo.project)} onClick={(e) => { e.preventDefault(); navigate("changes", null, wo.project); }}>Changes</a><span aria-hidden="true">/</span><a href={hashFor("record", wo.id, wo.project)} onClick={(e) => { e.preventDefault(); navigate("record", wo.id, wo.project); }}>{wo.id}</a></span>}
         title={`Changes · ${wo.id}`}
         sub={wo.title}
+        actions={<Btn label={waitingGate ? `Review ${d.cat.gates.find((g) => g.id === waitingGate)?.label ?? waitingGate}` : "Review gates"} icon="branch" id="chg-review" onClick={() => { window.location.hash = `${hashFor("record", wo.id, wo.project)}?tab=gates`; }} />}
       />
       <StatRow id="chg-stats">
         <Stat label="Files" value={String(files.length)} />

@@ -224,4 +224,12 @@ describe("Operator view", () => {
     expect([...table.querySelectorAll("th")].map((th) => th.className)).toEqual(["", "num", "num"]);
     expect([...table.querySelectorAll("tbody td")].map((td) => td.className)).toEqual(["", "num mono", "num mono"]);
   });
+
+  it("shows the failed state with a retry when the read is not the operator shape (an unknown GET returns [])", async () => {
+    window.location.hash = "#workspace/operator";
+    mockApi({ ...readsFor(intakeWo), "GET /api/v1/workspace/inbox": () => ({ body: { items: ITEMS } }), "GET /api/v1/workspace/operator": () => ({ body: [] }) });
+    mount(<WorkspaceView />);
+    expect(await screen.findByText(/Couldn't load the operator view/, {}, { timeout: 4000 })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Try again|Retry/ })).toBeTruthy();
+  });
 });

@@ -330,3 +330,23 @@ describe("Floor: prototype drawers and links", () => {
   });
 });
 
+
+describe("Request changes at a gate (floor drawer)", () => {
+  it("opens the gate drawer, asks for changes and sends the pinned gate instance", async () => {
+    const calls = mockApi({
+      "GET /api/v1/work-orders/WO-2408": () => ({ body: { ...WOS.find((w) => w.id === "WO-2408"), version: 3, allowed: { approve: { allowed: true, reason: "", needs: "", gate: "G3d", instance: "WO-2408:G3d:1" }, moves: {}, can: {} } } }),
+      "POST /api/v1/gate-instances/WO-2408%3AG3d%3A1/reject": () => ({ body: { ok: true, msg: "Sent back." } }),
+    });
+    mount(<FloorView />);
+    await screen.findAllByText("PAY");
+    fireEvent.click(document.getElementById("floor-gate-G3d") as HTMLElement);
+    const btn = await screen.findByRole("button", { name: /^Request changes on WO-2408/ });
+    await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBeNull());
+    fireEvent.click(btn);
+    const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
+    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Name the migration rollback" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Request changes" }));
+    await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/reject")).toHaveLength(1));
+    expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/reject")[0]?.body).toMatchObject({ reason: "Name the migration rollback" });
+  });
+});

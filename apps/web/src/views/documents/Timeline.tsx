@@ -6,7 +6,7 @@ import { useState } from "react";
 import { fmt } from "@gantry/domain";
 import { Empty } from "../../ui/primitives";
 import { Async } from "../../ui/async";
-import { useWoTimeline, type RunTimeline, type TimelineEntry } from "./api";
+import { runsOf, useWoTimeline, type RunTimeline, type TimelineEntry } from "./api";
 
 const station = (s: string) => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
 const TOOL: Record<string, string> = { Read: "Read", Grep: "Searched", Glob: "Listed", Bash: "Ran", Edit: "Edited", Write: "Wrote", "gantry:write_document": "Wrote document", "gantry:ask": "Asked", "gantry:assume": "Assumed", "gantry:web_fetch": "Read page", "gantry:propose_research_plan": "Proposed a plan" };
@@ -27,7 +27,8 @@ function Line({ e }: { e: TimelineEntry }) {
 
 function Run({ r, compact }: { r: RunTimeline; compact?: boolean }) {
   const live = r.state === "running" || r.state === "starting";
-  const entries = compact ? r.entries.slice(-6) : r.entries;
+  const all = Array.isArray(r.entries) ? r.entries : [];
+  const entries = compact ? all.slice(-6) : all;
   return (
     <section className={`tl-run${live ? " is-live" : ""}`} aria-label={`${station(r.station)} run`}>
       <header className="tl-run-h">
@@ -35,8 +36,8 @@ function Run({ r, compact }: { r: RunTimeline; compact?: boolean }) {
         <span className={`tl-state is-${r.state}`}>{live ? `Working${r.turn ? ` · turn ${r.turn}` : ""}` : r.state}</span>
         <span className="small muted tl-meter">{`${r.calls} model call${r.calls === 1 ? "" : "s"} · ${fmt.num(r.tokens)} tokens · ${fmt.money(r.costUsd)}`}</span>
       </header>
-      {compact && r.entries.length > entries.length ? <p className="small muted tl-more">{`${r.entries.length - entries.length} earlier steps`}</p> : null}
-      <ol className="tl-list">{entries.map((e, i) => <Line key={i} e={e} />)}</ol>
+      {compact && all.length > entries.length ? <p className="small muted tl-more">{`${all.length - entries.length} earlier steps`}</p> : null}
+      {entries.length ? <ol className="tl-list">{entries.map((e, i) => <Line key={i} e={e} />)}</ol> : null}
     </section>
   );
 }
@@ -46,7 +47,8 @@ export function RunTimelineView({ woId }: { woId: string }) {
   const q = useWoTimeline(woId);
   const [all, setAll] = useState(false);
   if (!q.data) return <Async query={q} what="the run timeline" id="tl">{() => null}</Async>;
-  const runs = q.data.runs;
+  const runs = runsOf(q.data);
+  if (!runs) return <Empty icon="clock" title="The run timeline could not be shown" text="The server answered with something that is not a run timeline. Close this and open it again." />;
   if (!runs.length) return <Empty icon="clock" title="No runs yet" text="Each station's run shows here as it works: the files it reads, the pages it fetches, what it writes and what it costs." />;
   const shown = all ? runs : runs.slice(0, 3);
   return (
@@ -59,7 +61,7 @@ export function RunTimelineView({ woId }: { woId: string }) {
 
 /** The live run in a side panel: the last few steps of the run that is working now, if any. */
 export function LiveRun({ woId, onOpen }: { woId: string; onOpen: () => void }) {
-  const runs = useWoTimeline(woId).data?.runs ?? [];
+  const runs = runsOf(useWoTimeline(woId).data) ?? [];
   const r = runs.find((x) => x.state === "running" || x.state === "starting");
   if (!r) return null;
   return (

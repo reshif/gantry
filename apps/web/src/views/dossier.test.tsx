@@ -193,6 +193,15 @@ describe("Changes page", () => {
     expect(document.getElementById("chg-full")).toBeNull();
   });
 
+  it("links to the review of the waiting gate, which opens the record's Gates tab", async () => {
+    mockApi({ ...readsFor(W) });
+    window.location.hash = `#changes/${W.id}`;
+    mount(<ChangesView />);
+    const link = await screen.findByRole("button", { name: /^Review G\w+/ }, { timeout: 4000 });
+    fireEvent.click(link);
+    await waitFor(() => expect(window.location.hash).toMatch(new RegExp(`record/${W.id}\\?tab=gates$`)));
+  });
+
   it("does not crash on a commit that lists no files (record with a PR)", async () => {
     mockApi({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/changes`]: () => ({ body: { pullRequests: [], commits: [{ sha: "abc1234", message: "m", author: null, at: null }], files: [], patches: [] } }) });
     window.location.hash = `#record/${W.id}?full=1`;

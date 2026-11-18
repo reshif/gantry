@@ -73,8 +73,42 @@ export function GateActions({ a, idPrefix, size = "sm" }: { a: Approval; idPrefi
   return (
     <>
       <Btn label="Approve" aria={`Approve ${wo} at ${label}`} kind="primary" {...cls} id={`${idPrefix}-ok-${wo}-${gate}`} guard={base} disabledReason={busy ? "Deciding…" : null} onClick={() => open("approve")} />
+      {brief ? null : <RequestChangesBtn wo={wo} gate={gate} label={label} instance={instance} guard={base} {...(ifm ? { ifMatch: ifm.ifMatch } : {})} id={`${idPrefix}-chg-${wo}-${gate}`} small={size === "sm"} />}
       <Btn label="Reject" aria={`Reject ${wo} at ${label}`} kind="danger" {...cls} id={`${idPrefix}-back-${wo}-${gate}`} guard={decideBack} onClick={() => open("reject")} />
     </>
+  );
+}
+
+/**
+ * "Request changes" at a waiting gate: the same pinned gate-instance command as Reject (the server's only verb that sends work back with a
+ * reason), worded as a request. A stale or unpinned instance refreshes and says nothing was decided, as for Approve and Reject.
+ */
+export function RequestChangesBtn({ wo, gate, label, instance, guard, ifMatch, id, small }: { wo: string; gate: string; label: string; instance: string | undefined; guard: Decision | null; ifMatch?: number; id: string; small?: boolean }) {
+  const ui = useUI();
+  const send = useCommand(
+    (text: string) => gateOps.rejectGate(wo, gate, instance, text, undefined, ifMatch ? { ifMatch } : undefined),
+    { ok: false, toastFail: false },
+  );
+  return (
+    <Btn
+      label="Request changes" aria={`Request changes on ${wo} at ${label}`} small={!!small} id={id} guard={guard}
+      onClick={() =>
+        ui.open((close) => (
+          <DecisionDialog
+            title={`Request changes at ${label} for ${wo}`}
+            danger={false}
+            intro="The work order goes back to the agent with what you ask for and waits in Needs a person. Nothing is approved. The request is recorded."
+            field={{ label: "What should change", min: 8, area: true, hint: "Say what must change before this gate can pass." }}
+            submit="Request changes"
+            onClose={close}
+            onSubmit={async (text) => {
+              const r = await send.run(text);
+              if (r?.ok) ui.toast(`Changes requested on ${wo} at ${label}`, "ok");
+              return r ?? undefined;
+            }}
+          />
+        ))}
+    />
   );
 }
 

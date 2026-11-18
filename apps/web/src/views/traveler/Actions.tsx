@@ -104,6 +104,30 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
       },
     });
   }
+  if (waiting && ap && g && g.id !== "G0G1") {
+    out.push({
+      key: "changes",
+      label: page ? "Request changes" : `Request changes at ${g.label}`,
+      icon: page ? "" : "undo",
+      id: "trv-changes",
+      guard: ap,
+      group: "decide",
+      onClick: () =>
+        ui.reasonDialog({
+          title: `Request changes at ${g.label} on ${wo.id}`,
+          kicker: `${g.label} ${g.name}`,
+          ok: "Request changes",
+          min: 8,
+          sub: `The station's agent reworks ${stName(cat, stationId)} with what you ask for. Nothing is approved.`,
+          placeholder: "What must change before this passes?",
+          onOk: async (v) => {
+            const r = await ops.rejectGate(wo.id, g.id, ap.instance, v, undefined, ifm);
+            if (r.ok) ui.toast(r.msg, "ok");
+            return r;
+          },
+        }),
+    });
+  }
   void approveGate;
   // A station that failed repeatedly is parked in the Needs a person bay: retrying it is what that person is there for.
   if (wo.state === "failed" || wo.state === "blocked" || (wo.bay === "person" && wo.bayCause === "failed"))

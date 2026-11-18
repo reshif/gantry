@@ -175,14 +175,31 @@ describe("Home: one page", () => {
     for (const here of ["Needs you", "Line at a glance", "Task success, 8 weeks", "Recent activity"]) expect(titles.some((t) => t.includes(here))).toBe(true);
   });
 
-  it("Needs you keeps the server's order and its Approve and Reject buttons sit directly in the row (so the phone layout can wrap them)", async () => {
+  it("Needs you keeps the server's order and its Approve, Request changes and Reject buttons sit directly in the row (so the phone layout can wrap them)", async () => {
     const A = (wo: string, waitMs: number) => ({ wo, title: `T ${wo}`, gate: "G2", gateLabel: "G2", gateName: "Spec", instance: `${wo}:G2:1`, project: "payments", projectName: "Payments", have: 0, need: 1, waitMs });
     setup(ASHA, adminHome({}, { setup: undefined, attention: [], waiting: { approvals: [A("WO-1", 1000), A("WO-2", 9_000_000)], conversations: [] } }));
     mount();
     await screen.findByText("WO-1");
     expect(Array.from(document.querySelectorAll(".hm-need a.pri")).map((a) => a.textContent)).toEqual(["WO-1", "WO-2"]);
     const li = document.querySelector(".hm-need") as HTMLElement;
-    expect(Array.from(li.children).filter((c) => c.tagName === "BUTTON").map((b) => b.textContent)).toEqual(["Approve", "Reject"]);
+    expect(Array.from(li.children).filter((c) => c.tagName === "BUTTON").map((b) => b.textContent)).toEqual(["Approve", "Request changes", "Reject"]);
+  });
+
+  it("Needs you asks for changes at the gate with a reason, pinned to the shown instance", async () => {
+    const A = { wo: "WO-1", title: "T WO-1", gate: "G2", gateLabel: "G2", gateName: "Spec", instance: "WO-1:G2:4", project: "payments", projectName: "Payments", have: 0, need: 1, waitMs: 1000 };
+    const calls = setup(ASHA, adminHome({}, { setup: undefined, attention: [], waiting: { approvals: [A], conversations: [] } }), { extra: {
+      "GET /api/v1/work-orders/WO-1": () => ({ body: { id: "WO-1", project: "payments", version: 2, allowed: { approve: { gate: "G2", instance: "WO-1:G2:4", allowed: true, reason: "", needs: "" } } } }),
+      "POST /api/v1/gate-instances/WO-1%3AG2%3A4/reject": () => ({ body: { ok: true, msg: "Sent back." } }),
+    } });
+    mount();
+    const btn = await screen.findByRole("button", { name: /^Request changes on WO-1/ });
+    await waitFor(() => expect(btn.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(btn);
+    const dlg = await screen.findByRole("dialog");
+    fireEvent.change(dlg.querySelector("textarea") as HTMLTextAreaElement, { target: { value: "Spell out the refund limits" } });
+    fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((x) => x.textContent === "Request changes") as HTMLElement);
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/gate-instances/WO-1%3AG2%3A4/reject")).toBe(true));
+    expect(calls.find((c) => c.path.endsWith("/reject"))!.body).toMatchObject({ reason: "Spell out the refund limits" });
   });
 
   it("Task success is the prototype's line chart: gridlines, a dot per week, a dashed second series and a legend", async () => {

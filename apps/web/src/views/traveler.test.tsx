@@ -173,3 +173,27 @@ describe("Traveler drawer", () => {
   });
 });
 void allow;
+
+describe("Run tab of the Traveler drawer", () => {
+  const body = (b: unknown) => ({ [`GET /api/v1/work-orders/${W.id}/timeline`]: () => ({ body: b }) });
+  const toRun = async (b: unknown) => {
+    await show(body(b));
+    fireEvent.click(screen.getByRole("tab", { name: "Run" }));
+  };
+  afterEach(() => setTravelerTab("journey"));
+  it("says the timeline could not be shown when the read is [] or {}", async () => {
+    await toRun([]);
+    expect(await screen.findByText("The run timeline could not be shown")).toBeTruthy();
+    cleanup();
+    await toRun({});
+    expect(await screen.findByText("The run timeline could not be shown")).toBeTruthy();
+  });
+  it("says No runs yet for an empty list and renders a run without entries as its header only", async () => {
+    await toRun({ runs: [] });
+    expect(await screen.findByText("No runs yet")).toBeTruthy();
+    cleanup();
+    await toRun({ runs: [{ runId: "r1", station: "spec", state: "running", turn: 2, calls: 1, tokens: 10, costUsd: 0.1 }] });
+    expect(await screen.findByText("Spec")).toBeTruthy();
+    expect(document.querySelector(".tl-list")).toBeNull();
+  });
+});

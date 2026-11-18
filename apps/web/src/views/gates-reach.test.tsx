@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
 import TravelerPage from "./traveler/Page";
@@ -44,6 +44,23 @@ describe("Gates tab", () => {
     expect(await screen.findByText("Needs 1 approval from Line Lead")).toBeTruthy();
     expect(await screen.findByText("The ledger already stores minor units")).toBeTruthy();
     expect(screen.getByText("The spec skips refunds")).toBeTruthy();
+  });
+});
+
+describe("Request changes on the Gates tab", () => {
+  it("asks for changes on the waiting gate from the Gates tab, pinned to the gate instance", async () => {
+    const t = travelerOf(W);
+    const calls = await show({ [`POST /api/v1/gate-instances/${encodeURIComponent(`${W.id}:${gate}:1`)}/reject`]: () => ({ body: { ok: true, msg: "Sent back." } }) });
+    void t;
+    fireEvent.click(screen.getByRole("tab", { name: /^Gates/ }));
+    const row = await screen.findByRole("table", { name: /Gate decisions/ });
+    const btn = await waitFor(() => { const b = Array.from(row.querySelectorAll("button")).find((x) => x.textContent === "Request changes"); if (!b) throw new Error("no button"); return b; });
+    fireEvent.click(btn);
+    const dlg = await screen.findByRole("dialog");
+    fireEvent.change(dlg.querySelector("textarea") as HTMLTextAreaElement, { target: { value: "Cover the retry path too" } });
+    fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((x) => x.textContent === "Request changes") as HTMLElement);
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/reject"))).toBe(true));
+    expect(calls.find((c) => c.path.endsWith("/reject"))!.body).toMatchObject({ reason: "Cover the retry path too" });
   });
 });
 

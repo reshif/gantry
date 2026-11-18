@@ -116,10 +116,12 @@ export interface RunTimeline {
   runId: string; attemptId: string; station: string; state: string; startedAt: number; endedAt: number | null; turn: number | null;
   model: string | null; calls: number; tokens: number; costUsd: number; entries: TimelineEntry[];
 }
-const live = (runs: RunTimeline[] | undefined) => !!runs?.some((r) => r.state === "running" || r.state === "starting");
+const live = (runs: RunTimeline[] | undefined) => Array.isArray(runs) && runs.some((r) => r.state === "running" || r.state === "starting");
 /** Polls while a run is live (every 4 s), not otherwise. */
+/** The runs of a timeline read, or null when the body is not `{runs: [...]}` (an unknown read can answer [] or {}). */
+export const runsOf = (d: unknown): RunTimeline[] | null => { const r = (d as { runs?: unknown } | null | undefined)?.runs; return Array.isArray(r) ? (r as RunTimeline[]) : null; };
 export const useWoTimeline = (woId: string | null | undefined) =>
-  useQuery({ queryKey: qk.woTimeline(woId ?? ""), queryFn: () => get<{ runs: RunTimeline[] }>(api(`work-orders/${enc(woId ?? "")}/timeline`)), enabled: !!woId, refetchInterval: (q) => (live(q.state.data?.runs) ? 4000 : false) });
+  useQuery({ queryKey: qk.woTimeline(woId ?? ""), queryFn: () => get<{ runs: RunTimeline[] }>(api(`work-orders/${enc(woId ?? "")}/timeline`)), enabled: !!woId, refetchInterval: (q) => (live(runsOf(q.state.data) ?? undefined) ? 4000 : false) });
 
 export interface Objection {
   id: string; station: string; attemptId: string | null; raisedBy: string; targetDoc: string; targetStation: string | null; section: string; claim: string; reason: string;

@@ -1,4 +1,5 @@
 /** Station and gate detail drawers of the floor (legacy floor.js openStation / openGate). They always show the live floor. */
+import { RequestChangesBtn } from "../work/gate";
 import { GateDetail } from "../work/GateDetail";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { useState, type ReactNode } from "react";
@@ -86,6 +87,15 @@ function ApproveBtn({ w, gid, label, primary, id, after }: { w: WorkOrder; gid: 
   );
 }
 
+/** Request changes at the gate: the pinned reject command, asked for with a reason. */
+function ChangesBtn({ w, gid }: { w: WorkOrder; gid: string }) {
+  const t = useWorkOrder(w.id).data as Traveler | undefined;
+  const ctx = useFloorCtx();
+  const a = t?.allowed?.approve;
+  const dec: Decision | null = ctx.replay ? { allowed: false, reason: "Replay is showing the past. Go back to live to act.", needs: "" } : !t ? { allowed: false, reason: "Checking what you may decide here.", needs: "" } : a && a.gate === gid ? { allowed: a.allowed, reason: a.reason, needs: a.needs } : null;
+  return <RequestChangesBtn wo={w.id} gate={gid} label={gid} instance={a?.instance} guard={dec} id={`floor-gchg-${w.id}`} small />;
+}
+
 /** One work order waiting at a gate: its approvals so far ("1 of 1 approvals"), Approve, and the approver rule with what is still open. */
 function WaitingRow({ w, gid, project, close }: { w: WorkOrder; gid: string; project: string; close: () => void }) {
   const [more, setMore] = useState(false);
@@ -97,6 +107,7 @@ function WaitingRow({ w, gid, project, close }: { w: WorkOrder; gid: string; pro
       {prog ? <span className="small muted num" id={`floor-gcount-${w.id}`}>{`${prog.have} of ${prog.need} approvals`}</span> : null}
       <Btn label={more ? "Hide rule" : "Who may approve"} small id={`floor-grule-${w.id}`} aria-expanded={more} onClick={() => setMore((x) => !x)} />
       <ApproveBtn w={w} gid={gid} label="Approve" id={`floor-gapp-${w.id}`} after={close} />
+      {gid === "G0G1" ? null : <ChangesBtn w={w} gid={gid} />}
       {more ? <div className="fl-waiting-more" style={{ flexBasis: "100%" }}><GateDetail woId={w.id} gate={gid} project={project} onNavigate={close} /></div> : null}
     </li>
   );

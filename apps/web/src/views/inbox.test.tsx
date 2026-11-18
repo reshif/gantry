@@ -191,3 +191,25 @@ describe("Inbox", () => {
     expect(window.location.hash).toContain("trust");
   });
 });
+
+describe("Request changes at a gate (Inbox)", () => {
+  it("asks for changes with a reason, pinned to the gate instance and the work order version", async () => {
+    const cs = mockApi({
+      "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE], conversations: [] } }) }),
+      "GET /api/v1/work-orders/WO-2398": () => ({ body: { ...traveler(true), version: 5 } }),
+      "POST /api/v1/gate-instances/WO-2398%3AG2%3A3/reject": () => ({ body: { ok: true, msg: "Sent back." } }),
+    });
+    mount(<InboxView />);
+    const btn = await screen.findByRole("button", { name: /^Request changes on WO-2398/ });
+    await waitFor(() => expect(btn.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(btn);
+    const dlg = await waitFor(() => { const e = document.querySelector<HTMLElement>(".dlg"); if (!e) throw new Error("no dialog"); return e; });
+    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Cover the retry path too" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Request changes" }));
+    await waitFor(() => expect(cs.some((c) => c.path === "/api/v1/gate-instances/WO-2398%3AG2%3A3/reject")).toBe(true));
+    const call = cs.find((c) => c.path.endsWith("/reject"))!;
+    expect(call.body).toMatchObject({ reason: "Cover the retry path too" });
+    expect(call.headers["if-match"]).toBe("5");
+    expect(await screen.findByText("Changes requested on WO-2398 at G2")).toBeTruthy();
+  });
+});
