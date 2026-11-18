@@ -22,10 +22,10 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = join(HERE, "..");
 const PROTO = "/home/reshif/Downloads/gantry-designs/design-1-control-room";
-const OUT = join(PROTO, "fidelity");
+const OUT = process.env.FID_OUT || join(PROTO, "fidelity"); // FID_OUT: per-engineer output folder
 const PW = "/home/reshif/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
-const PROTO_PORT = 9401;
-const REAL_PORT = 9510;
+const PROTO_PORT = Number(process.env.FID_PROTO_PORT || 9401); // unique per parallel run
+const REAL_PORT = Number(process.env.FID_REAL_PORT || 9510);
 const NOW = Date.parse("2026-01-15T10:00:00Z");
 
 /** prototype route -> real hash (the same table, in prose, is apps/web/fidelity/MAP.md) */
@@ -39,7 +39,9 @@ export const ROUTE_MAP = {
   people: "/#people", workload: "/#workload", access: "/#access", security: "/#security", audit: "/#audit", system: "/#system", signin: "/", "design-system": "/#design-system",
 };
 const realHash = (route) => {
-  const [name, param] = route.split("/");
+  const [rr, qs] = route.split("?");
+  if (qs) return "/?" + qs + realHash(rr).slice(1);
+  const [name, param] = rr.split("/");
   const base = ROUTE_MAP[name];
   if (base === undefined) throw new Error(`no mapping for route "${name}" (see ROUTE_MAP)`);
   if (base === null) return null;
