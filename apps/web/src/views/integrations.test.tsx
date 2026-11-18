@@ -79,15 +79,6 @@ const goView = async (view: string) => {
 };
 
 describe("Integrations screen", () => {
-  it("the Add dialog links to the connector catalogue", async () => {
-    setup();
-    mount();
-    fireEvent.click(await byId("int-add"));
-    fireEvent.click(await byId("int-add-browse"));
-    await waitFor(() => expect(window.location.search).toContain("view=catalogue"));
-    await waitFor(() => expect(text()).toContain("Linear"));
-  });
-
   it("lists the connections with their status, scope and the header counts", async () => {
     setup();
     mount();

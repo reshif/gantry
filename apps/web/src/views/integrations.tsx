@@ -5,7 +5,7 @@
  * The connector catalogue and the custom-type builder stay available behind the Catalogue and Custom types buttons (`?view=`).
  * Tab, search, filters, sort, page and the open drawer live in the URL (F-15).
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { IntegrationInstance } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { ops } from "../api/ops";
@@ -16,10 +16,10 @@ import { Page, Stats } from "../ui/cr";
 import { Dialog } from "../ui/Overlay";
 import { useUI } from "../ui/overlay-context";
 import { AddIntegration } from "./integrations/AddDialog";
-import { EditIntegration, InstanceDrawer, RemoveIntegration, ToggleIntegration, TypeDrawer } from "./integrations/Instance";
+import { InstanceDrawer, RemoveIntegration, TypeDrawer } from "./integrations/Instance";
 import { CatalogueTab, CustomTab } from "./integrations/Tabs";
 import { Health, statusOf, useIntegrationData, type TypeRow } from "./integrations/kit";
-import { ClearOnClose, NothingMatches, agoShort, oneOf, sortFrom, useUrlState } from "./connect/kit";
+import { NothingMatches, agoShort, oneOf, sortFrom, useUrlState } from "./connect/kit";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 const STATUSES = ["healthy", "degraded", "failing", "offline", "disabled"] as const;
@@ -31,33 +31,19 @@ export default function IntegrationsView() {
   const ui = useUI();
   const d = useIntegrationData();
   const add = dec(useCan("integration.add"));
-  const url = useUrlState({ view: "connected", q: "", type: "all", st: "all", sort: "", dir: "", page: "0", open: "" });
+  const url = useUrlState({ view: "connected", q: "", type: "all", st: "all", sort: "", dir: "", page: "0" });
   const view = oneOf(url.v.view, VIEWS, "connected");
   const [cq, setCq] = useState("");
   const [ccat, setCcat] = useState("all");
   const [cst, setCst] = useState("all");
 
   const openInstance = (id: string): void => {
-    url.set({ open: id }); // the drawer id is part of the URL: a reload or a pasted link opens the same drawer
     ui.drawer.open(`int:${id}`, (close) => (
-      <ClearOnClose param="open" id={id}>
-        <InstanceDrawer
-          id={id} close={close}
-          onEdit={(i: IntegrationInstance) => ui.open((c) => <EditIntegration inst={i} close={c} />)}
-          onToggle={(i: IntegrationInstance) => {
-            if (!i.connected) {
-              void ops.updateIntegration(i.id, { connected: true }, i.version !== undefined ? { ifMatch: i.version } : undefined).then((r) => ui.toast(r.ok ? `${i.name} enabled.` : r.msg, r.ok ? "ok" : "error"));
-              return;
-            }
-            ui.open((c) => <ToggleIntegration inst={i} close={c} />);
-          }}
-          onRemove={(i: IntegrationInstance) => ui.open((c) => <RemoveIntegration inst={i} close={c} closeDrawer={close} />)}
-        />
-      </ClearOnClose>
+      <InstanceDrawer id={id} close={close} onRemove={(i: IntegrationInstance) => ui.open((c) => <RemoveIntegration inst={i} close={c} closeDrawer={close} />)} />
     ));
   };
-  const addDialog = (typeId: string | null): void => {
-    ui.open((close) => <AddIntegration typeId={typeId} onBrowse={() => url.set({ view: "catalogue" })} types={d.types} insts={d.insts} live={d.live} projects={d.projects} close={close} onAdded={(id) => { url.set({ view: "connected" }); openInstance(id); }} />);
+  const addDialog = (_typeId: string | null): void => {
+    ui.open((close) => <AddIntegration types={d.types} close={close} />);
   };
   const openType = (id: string): void => {
     ui.drawer.open(`int-type:${id}`, (close) => (
@@ -74,15 +60,6 @@ export default function IntegrationsView() {
     ));
   };
 
-  // a link with ?open=<id> opens its drawer once the connections have loaded
-  const [opened, setOpened] = useState("");
-  useEffect(() => {
-    if (url.v.open && url.v.open !== opened && d.insts.some((i) => i.id === url.v.open)) {
-      setOpened(url.v.open);
-      if (!ui.drawer.isOpen(`int:${url.v.open}`)) openInstance(url.v.open);
-    }
-  }); // eslint-disable-line react-hooks/exhaustive-deps
-
   const all = d.insts;
   const typeIds = Array.from(new Set(all.map((i) => i.type))).sort();
   const type = oneOf(url.v.type, ["all", ...typeIds], "all");
@@ -97,7 +74,7 @@ export default function IntegrationsView() {
     <>
       <FilterBar label="Filter integrations" count={`${rows.length} of ${all.length}`} actions={(
         <>
-          {filtered ? <Btn label="Clear" small kind="ghost" id="int-clear" onClick={() => url.clear("view", "open")} /> : null}
+          {filtered ? <Btn label="Clear" small kind="ghost" id="int-clear" onClick={() => url.clear("view")} /> : null}
         </>
       )}>
         <SearchBox id="int-q" label="Search integrations" placeholder="Search integrations" value={url.v.q} onChange={(q) => url.set({ q })} />
@@ -126,7 +103,7 @@ export default function IntegrationsView() {
           { key: "status", label: "Status", sort: (i) => statusOf(i), render: (i) => <Health st={statusOf(i)} /> },
         ]}
       />
-      {all.length && filtered && !rows.length ? <div className="card"><NothingMatches onClear={() => url.clear("view", "open")} /></div> : null}
+      {all.length && filtered && !rows.length ? <div className="card"><NothingMatches onClear={() => url.clear("view")} /></div> : null}
     </>
   );
 

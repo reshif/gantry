@@ -1,11 +1,11 @@
 /** The Keys tab (legacy keysTab, createKeyDialog, secretDialog and the revoke dialog): service accounts scoped to one project and a set of actions, shown once at creation. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DAY, fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { api, get } from "../../api/client";
 import { DataTable } from "../../ui/DataTable";
-import { Btn, Field, FilterBar, LockNote, SearchBox, Select, type Decision } from "../../ui/primitives";
+import { Btn, Field, FilterBar, LockNote, SearchBox, Select, focusFirstInvalid, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { CrIcon } from "../../ui/cr";
 import { useCopy } from "../../ui/primitives";
@@ -14,10 +14,11 @@ import { useActors } from "../../ui/actors";
 import { usePrefs } from "../../lib/prefs";
 import { useOutcome } from "../govern/data";
 import { agoShort } from "../connect/kit";
-import { KEY_ACTIONS, dec, type ApiData } from "./kit";
+import { dec, type ApiData } from "./kit";
 import type { ApiKey } from "@gantry/domain";
 
-const EXPIRY = [{ value: "30", label: "30 days" }, { value: "90", label: "90 days (default)" }, { value: "180", label: "180 days" }, { value: "365", label: "1 year" }];
+/** Keys stop working on their own; the prototype form has no Expires field, so every key gets the 90-day default. */
+const DEFAULT_EXPIRY_DAYS = 90;
 
 export function SecretDialog({ k, secret, project, close }: { k: ApiKey; secret: string; project: string; close: () => void }) {
   const copy = useCopy();
@@ -47,15 +48,16 @@ export function CreateKey({ d, close, onCreated }: { d: ApiData; close: () => vo
   const [name, setName] = useState("");
   const [project, setProject] = useState(() => (prefs.project && d.visIds.includes(prefs.project) ? prefs.project : d.vis[0]?.id ?? ""));
   const [preset, setPreset] = useState("rw");
-  const [extra, setExtra] = useState<string[]>([]);
-  const actions = [...(preset === "rw" ? ["wo.submit", "wo.read"] : ["wo.read"]), ...extra];
-  const [days, setDays] = useState("90");
+  const actions = preset === "rw" ? ["wo.submit", "wo.read"] : ["wo.read"];
   const [err, setErr] = useState("");
+  const [nameErr, setNameErr] = useState("");
+  const root = useRef<HTMLDivElement>(null);
   const perm = dec(useCan("api.keys", { project }));
   const submit = async () => {
-    if (name.trim().length < 3) { setErr("Name must be at least 3 characters."); return; }
-    if (!actions.length) { setErr("Pick at least one scope."); return; }
-    const r = await ops.createKey({ name: name.trim(), project, actions, expiresInDays: Number(days) });
+    if (!name.trim()) { setNameErr("Name is required."); setTimeout(() => { if (root.current) focusFirstInvalid(root.current); }, 0); return; }
+    if (name.trim().length < 3) { setNameErr("Name needs at least 3 characters."); setTimeout(() => { if (root.current) focusFirstInvalid(root.current); }, 0); return; }
+    setNameErr("");
+    const r = await ops.createKey({ name: name.trim(), project, actions, expiresInDays: DEFAULT_EXPIRY_DAYS });
     if (!r.ok) { setErr(r.msg); out(r); return; }
     close();
     const key = (r as unknown as { key: ApiKey; secret: string }).key;
@@ -67,32 +69,15 @@ export function CreateKey({ d, close, onCreated }: { d: ApiData; close: () => vo
     <Dialog
       title="Create API key" onClose={close} dirty={!!name}
             body={(
-        <div className="form-grid">
+        <div className="form-grid" ref={root}>
           <LockNote decision={perm} what={`API keys on ${d.pname(project)}`} />
-          <Field label="Name" htmlFor="api-key-name">
+          <Field label="Name" htmlFor="api-key-name" error={nameErr}>
             <input id="api-key-name" className="input" placeholder="e.g. Release dashboard" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="Project" htmlFor="api-key-project" >
             <Select id="api-key-project" options={d.vis.map((p) => ({ value: p.id, label: p.name }))} value={project} onChange={setProject} />
           </Field>
           <Field label="Actions" htmlFor="api-key-actions"><Select id="api-key-actions" options={[{ value: "rw", label: "Submit and read work orders" }, { value: "r", label: "Read only" }]} value={preset} onChange={setPreset} /></Field>
-          <details className="int-more">
-            <summary>More scopes</summary>
-            <div className="check-grid">
-              {KEY_ACTIONS.filter(([id]) => id !== "wo.submit" && id !== "wo.read").map(([id, label]) => {
-                const cid = `api-key-act-${id.replace(".", "-")}`;
-                return (
-                  <label key={id} className="check" htmlFor={cid}>
-                    <input type="checkbox" id={cid} checked={extra.includes(id)} onChange={(e) => setExtra((a) => (e.target.checked ? [...a.filter((x) => x !== id), id] : a.filter((x) => x !== id)))} />
-                    <span>{label} <span className="mono small muted">{id}</span></span>
-                  </label>
-                );
-              })}
-            </div>
-          </details>
-          <Field label="Expires" htmlFor="api-key-expires" hint="Keys stop working on their own. Rotate before then.">
-            <Select id="api-key-expires" options={EXPIRY} value={days} onChange={setDays} />
-          </Field>
           <div className="form-err" role="alert">{err}</div>
         </div>
       )}

@@ -5,13 +5,13 @@
  * Changed from legacy: "Simulate incoming" evaluates the real rules and creates nothing unless asked; "Anyone with repo access" is "Everyone held for a person";
  * rate and budget limits are editable; held proposals have Release and Decline.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { classesOf, fmt, type Trigger, type TriggerProposal, type TriggerRun } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
 import { useProjects, useRepos, useTriggerProposals } from "../../api/queries";
 import { DataTable } from "../../ui/DataTable";
-import { Btn, Empty, Field, FilterBar, SearchBox, LockNote, Panel, Select, Toggle } from "../../ui/primitives";
+import { Btn, Empty, Field, FilterBar, SearchBox, LockNote, Panel, Select, Toggle, focusFirstInvalid } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
@@ -20,7 +20,7 @@ import { usePrefs } from "../../lib/prefs";
 import { useCatalog } from "../projects/kit";
 import { useOutcome } from "../govern/data";
 import { CrDrawer, Kv, agoShort } from "../connect/kit";
-import { useApiData as useApiDataLive, TTYPES, dec, hookUrl, kindsFor, srcName, srcOptions, srcState, whoOptions, type ApiData } from "./kit";
+import { useApiData as useApiDataLive, TTYPES, TRIG_SOURCES, dec, hookUrl, kindsFor, sourceInsts, srcName, srcOptions, srcState, trigTag, whoOptions, type ApiData } from "./kit";
 
 interface SimResult { outcome: string; msg: string; wo: string; created: boolean; notes: string[]; at: number }
 const outcomeClass = (o: string): string => (o === "created" ? "ok" : o === "refused" ? "denied" : "warn");
@@ -37,55 +37,53 @@ function usePrefsProject(id: string) {
 
 /* ---------- new trigger ---------- */
 
-export function NewTrigger({ d, close, onCreated }: { d: ApiData; close: () => void; onCreated: (id: string) => void }) {
+export function NewTrigger({ d, close }: { d: ApiData; close: () => void }) {
   const ui = useUI();
   const prefs = usePrefs();
+  const root = useRef<HTMLDivElement>(null);
   const [project, setProject] = useState(() => (prefs.project && d.visIds.includes(prefs.project) ? prefs.project : d.vis[0]?.id ?? ""));
-  const [type, setType] = useState("issue");
+  const [tag, setTag] = useState<string>("issue");
   const [name, setName] = useState("");
-  const [source, setSource] = useState("");
-  const [err, setErr] = useState("");
+  const [errs, setErrs] = useState<{ name?: string; form?: string }>({});
   const perm = dec(useCan("triggers.edit", { project }));
   const classes = useClassOptions(project).map((c) => c.value);
-  const opts = srcOptions(project, null, null, d);
-  const src = opts.some((o) => o.value === source) ? source : opts[0]?.value ?? "";
-  const kinds = kindsFor(src, d);
-  const ty = kinds.includes(type) ? type : kinds[0]!;
-  const inst = d.insts.find((i) => i.id === src);
   const go = async () => {
-    if (name.trim().length < 3) { setErr("Name must be at least 3 characters."); return; }
-    if (!src) { setErr("Pick a source. Connect one in Integrations first."); return; }
-    const base: Record<string, unknown> = { project, type: ty, name: name.trim(), source: src };
-    if (ty === "schedule") Object.assign(base, { cls: classes.includes("chore") ? "chore" : classes[0] });
-    if (ty === "ci") Object.assign(base, { cls: classes.includes("hotfix") ? "hotfix" : classes[0] });
+    const e: typeof errs = {};
+    if (!name.trim()) e.name = "Name is required.";
+    else if (name.trim().length < 3) e.name = "Name needs at least 3 characters.";
+    // the prototype's five sources stand for a trigger kind plus a connection the project can use
+    const type = tag === "pr-comment" ? "comment" : tag === "jira" ? "issue" : tag;
+    const src = tag === "schedule" ? "schedule" : sourceInsts(project, d).filter((i) => (tag === "jira" ? d.typeOf(i.type)?.id === "jira" : d.typeOf(i.type)?.id !== "jira") && kindsFor(i.id, d).includes(type))[0]?.id ?? "";
+    if (!e.name && !src) e.form = `No ${tag === "schedule" ? "schedule" : tag} connection is open to ${d.pname(project)}. Connect one in Integrations first.`;
+    if (Object.keys(e).length) {
+      setErrs(e);
+      setTimeout(() => { if (root.current) focusFirstInvalid(root.current); }, 0);
+      return;
+    }
+    const base: Record<string, unknown> = { project, type, name: name.trim(), source: src };
+    if (type === "schedule") Object.assign(base, { cls: classes.includes("chore") ? "chore" : classes[0] });
+    if (type === "ci") Object.assign(base, { cls: classes.includes("hotfix") ? "hotfix" : classes[0] });
     const r = await ops.saveTrigger(null, base);
-    if (!r.ok) { setErr(r.msg); return; }
-    ui.toast("Trigger created. It starts disabled; review it, then turn it on.", "ok");
-    onCreated((r as unknown as { trigger: { id: string } }).trigger.id);
+    if (!r.ok) { setErrs({ form: r.msg }); return; }
+    ui.toast("Trigger created", "ok");
     close();
   };
   return (
     <Dialog
       title="New trigger" onClose={close} dirty={!!name}
       body={(
-        <div className="form-grid">
+        <div className="form-grid" ref={root}>
           <LockNote decision={perm} what={`Triggers on ${d.pname(project)}`} />
-          <Field label="Name" htmlFor="api-tr-new-name"><input id="api-tr-new-name" className="input" value={name} placeholder="Issues labelled factory" onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label="Project" htmlFor="api-tr-new-project"><Select id="api-tr-new-project" options={d.vis.map((p) => ({ value: p.id, label: p.name }))} value={project} onChange={(v) => { setProject(v); setSource(""); }} /></Field>
-          <Field label="Connection" htmlFor="api-tr-new-source" hint="Connected source-control, issue-tracker, CI and custom source connections open to this project. Add more in Integrations.">
-            <Select id="api-tr-new-source" options={opts} value={src} onChange={setSource} />
-          </Field>
-          <Field label="Source" htmlFor="api-tr-new-type"><Select id="api-tr-new-type" options={kinds.map((k) => ({ value: k, label: TTYPES[k]?.name ?? k }))} value={ty} onChange={setType} /></Field>
-          {inst && srcState(inst.id, d) !== "healthy" ? <div className="callout callout-warn"><Icon name="alert" /><span>{`${inst.name} is ${srcState(inst.id, d)}. The trigger saves, but events from it will not arrive until it is healthy.`}</span></div> : null}
-          <div className="form-err" role="alert">{err}</div>
+          <Field label="Name" htmlFor="api-tr-new-name" error={errs.name}><input id="api-tr-new-name" className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="Source" htmlFor="api-tr-new-type"><Select id="api-tr-new-type" options={[...TRIG_SOURCES]} value={tag} onChange={setTag} /></Field>
+          <Field label="Project" htmlFor="api-tr-new-project"><Select id="api-tr-new-project" options={d.vis.map((p) => ({ value: p.id, label: p.name }))} value={project} onChange={setProject} /></Field>
+          <div className="form-err" role="alert">{errs.form ?? ""}</div>
         </div>
       )}
-      actions={[{ label: "Cancel" }, { label: "Create trigger", kind: "primary", submit: true, id: "api-tr-new-go", guard: perm, onClick: () => void go() }]}
+      actions={[{ label: "Cancel" }, { label: "Create", kind: "primary", submit: true, id: "api-tr-new-go", guard: perm, onClick: () => void go() }]}
     />
   );
 }
-
-/* ---------- simulate incoming ---------- */
 
 function Simulate({ t, d, close, onResult }: { t: Trigger; d: ApiData; close: () => void; onResult: (r: SimResult) => void }) {
   const ui = useUI();
@@ -362,7 +360,7 @@ export function TriggersTab({ d, url, openTrigger }: { d: ApiData; url: TriggerU
         columns={[
           { key: "id", label: "ID", sort: (x) => x.id, render: (x) => <span className="mono">{x.id}</span> },
           { key: "name", label: "Trigger", sort: (x) => x.name.toLowerCase(), render: (x) => <a className="rl ell" id={`api-tr-open-${x.id}`} href="#api" onClick={(e) => { e.preventDefault(); openTrigger(x.id); }}>{x.name}</a> },
-          { key: "type", label: "Source", sort: (x) => x.type, hideSmall: true, render: (x) => <span className="tag">{x.type}</span> },
+          { key: "type", label: "Source", sort: (x) => x.type, hideSmall: true, render: (x) => <span className="tag">{trigTag(x, d)}</span> },
           { key: "project", label: "Project", sort: (x) => pkeyOf(x.project, d), render: (x) => <span className="tag">{pkeyOf(x.project, d)}</span> },
           { key: "runs", label: "Runs", align: "end", sort: (x) => x.runs.length, render: (x) => <span className="mono">{x.runs.length}</span> },
           { key: "last", label: "Last fired", sort: (x) => x.runs[x.runs.length - 1]?.at ?? 0, render: (x) => <span className="mono dim">{agoShort(x.runs[x.runs.length - 1]?.at)}</span> },
@@ -373,29 +371,27 @@ export function TriggersTab({ d, url, openTrigger }: { d: ApiData; url: TriggerU
   );
 }
 
-/** The rule editor, held proposals and Simulate for one trigger, with its own simulation state (it lives in a dialog opened from the drawer foot). */
-function DetailHost({ id }: { id: string }) {
+/** The rule editor, held proposals and Simulate of one trigger, with its own simulation state. Not linked from the prototype screens; it opens from `?tab=triggers&edit=<id>`. */
+export function TriggerEditor({ id, close }: { id: string; close: () => void }) {
   const d = useApiDataLive();
   const t = d.triggers.find((x) => x.id === id);
   const [sim, setSim] = useState<SimResult | undefined>(undefined);
-  return t ? <Detail t={t} d={d} res={sim} setRes={setSim} /> : null;
+  return t ? <Dialog title={t.name} kicker={`Trigger ${t.id}`} wide onClose={close} actions={[{ label: "Close" }]} body={<Detail t={t} d={d} res={sim} setRes={setSim} />} /> : null;
 }
 
-/** The trigger drawer (prototype anatomy: Source, Project, Who may fire, Reply, Dedupe, Recent runs). The full rule editor, held proposals and Simulate open from its foot. */
+/** The trigger drawer (prototype anatomy: Source, Project, Who may fire, Reply, Dedupe, Recent runs). */
 export function TriggerDrawer({ id, close }: { id: string; close: () => void }) {
   const d = useApiDataLive();
   const t = d.triggers.find((x) => x.id === id);
-  const ui = useUI();
   if (!t) return null;
   const runs = [...t.runs].reverse().slice(0, 3);
   const who = t.who === "org" ? "Members of the org" : t.who === "system" ? "System creates the work order" : "Held for a person";
   return (
     <CrDrawer
       eyebrow={`Trigger ${t.id}`} title={t.name} close={close}
-      foot={<Btn label="Edit rule, simulate and held proposals…" id="api-tr-more" onClick={() => ui.open((c) => <Dialog title={t.name} kicker={`Trigger ${t.id}`} wide onClose={c} actions={[{ label: "Close" }]} body={<DetailHost id={t.id} />} />)} />}
     >
       <Kv rows={[
-        ["Source", <span key="s" className="tag">{t.type}</span>],
+        ["Source", <span key="s" className="tag">{trigTag(t, d)}</span>],
         ["Project", d.pname(t.project)],
         ["Who may fire", who],
         ["Reply", t.reply || "none"],

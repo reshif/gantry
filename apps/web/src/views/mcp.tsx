@@ -1,10 +1,9 @@
 /**
  * MCP servers (spec 8.8, 12.4), the Control Room screen: head with Register server, a banner when a server changed a tool definition
  * (Review change opens the re-approval), a search with its count, and one card per server (auth, sensitivity, tools and write tools, tool tags,
- * Agents, Manage tools). Manage tools opens the server drawer (URL `?open=`). The usage log of every call stays behind the Usage log button (`?view=usage`).
+ * Agents, Manage tools). Manage tools opens the server drawer (not in the URL, like the prototype). The usage log of every call stays behind the Usage log button (`?view=usage`).
  * Real data: /mcp/servers and /mcp/usage; discovery, scope and the access check are the registry's own.
  */
-import { useEffect, useState } from "react";
 import type { McpServer } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useMcpCalls, useMcpServers, useProjects } from "../api/queries";
@@ -15,10 +14,11 @@ import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { AddMcp } from "./mcp/AddDialog";
 import { ServerDrawer } from "./mcp/Drawer";
+import { ScopeDialog } from "./mcp/Scope";
 import { ReapproveDialog } from "./mcp/Reapprove";
 import { Health, authLabel, dec } from "./mcp/kit";
 import { UsageTab } from "./mcp/Usage";
-import { ClearOnClose, NothingMatches, oneOf, useUrlState } from "./connect/kit";
+import { NothingMatches, oneOf, useUrlState } from "./connect/kit";
 
 export default function McpView() {
   const ui = useUI();
@@ -30,20 +30,12 @@ export default function McpView() {
   const projects = useProjects().data ?? [];
   const agents = useAgents().data ?? [];
   const actor = useActors();
-  const url = useUrlState({ view: "registry", q: "", open: "" });
-  const view = oneOf(url.v.view, ["registry", "usage"] as const, "registry");
+  const url = useUrlState({ view: "registry", q: "", server: "" });
+  const view = oneOf(url.v.view, ["registry", "usage", "scope"] as const, "registry");
 
   const openServer = (id: string): void => {
-    url.set({ open: id });
-    ui.drawer.open(`mcp:${id}`, (close) => <ClearOnClose param="open" id={id}><ServerDrawer id={id} close={close} onUsage={() => url.set({ view: "usage" })} /></ClearOnClose>);
+    ui.drawer.open(`mcp:${id}`, (close) => <ServerDrawer id={id} close={close} />);
   };
-  const [opened, setOpened] = useState("");
-  useEffect(() => {
-    if (url.v.open && url.v.open !== opened && servers.some((m) => m.id === url.v.open)) {
-      setOpened(url.v.open);
-      if (!ui.drawer.isOpen(`mcp:${url.v.open}`)) openServer(url.v.open);
-    }
-  }); // eslint-disable-line react-hooks/exhaustive-deps
 
   const needle = url.v.q.trim().toLowerCase();
   const shown = servers.filter((m) => !needle || `${m.name} ${m.url}`.toLowerCase().includes(needle));
@@ -65,7 +57,7 @@ export default function McpView() {
           ))}
           <FilterBar label="Filter servers" count={`${shown.length} of ${servers.length}`} actions={(
             <>
-              {url.v.q ? <Btn label="Clear" small kind="ghost" id="mcp-clear" onClick={() => url.clear("view", "open")} /> : null}
+              {url.v.q ? <Btn label="Clear" small kind="ghost" id="mcp-clear" onClick={() => url.clear("view", "server")} /> : null}
             </>
           )}>
             <SearchBox id="mcp-q" label="Search servers" placeholder="Search servers" value={url.v.q} onChange={(q) => url.set({ q })} />
@@ -101,7 +93,7 @@ export default function McpView() {
                 );
               })}
             </div>
-          ) : <div className="card"><NothingMatches onClear={() => url.clear("view", "open")} /></div>}
+          ) : <div className="card"><NothingMatches onClear={() => url.clear("view", "server")} /></div>}
         </>
       )}
     </Async>
@@ -110,8 +102,9 @@ export default function McpView() {
   return (
     <Page
       eyebrow="Connect" title="MCP servers" sub="Tool servers agents can call. Write tools need a gate; changed definitions need re-approval." cls="mcp-view"
-      acts={<Btn label="Register server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} onAdded={openServer} />)} />}
+      acts={<Btn label="Register server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} />)} />}
     >
+      {view === "scope" && url.v.server ? <ScopeDialog id={url.v.server} close={() => url.set({ view: "registry", server: "" })} /> : null}
       {view === "usage" ? (
         <>
           <div className="row" style={{ marginBottom: 12 }}><Btn label="Back to servers" small kind="ghost" icon="arrow-left" id="mcp-view-back" onClick={() => url.set({ view: "registry" })} /><span className="dim">Usage log: {calls.length} calls</span></div>

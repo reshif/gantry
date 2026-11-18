@@ -1,7 +1,7 @@
 /**
  * The Matrix tab: "Who hears about what", event by channel switches (prototype). The real model is routes (event, destinations); a cell is on
  * when an enabled route for the event has a destination on that channel. A switch adds or removes that destination on the event's route,
- * or creates the route with the first open connection of that channel. In-app is not a routable channel in the backend, so its column is shown off and locked.
+ * or creates the route with the first open connection of that channel. In-app is not a routable channel in the backend: its switches stay on and say why when pressed.
  */
 import { type Project } from "@gantry/domain";
 import { ops } from "../../api/ops";
@@ -73,16 +73,21 @@ export function MatrixTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
                 {MATRIX_CHANNELS.map((ch) => {
                   const on = ch.id === "inapp" ? true : isOn(e.route, ch);
                   const mandatory = e.route === "kill" && on;
-                  const d: Decision | null = ch.id === "inapp" ? { allowed: false, reason: "In-app is always on: the notification bell lists every event." }
-                    : !e.route ? { allowed: false, reason: "Gantry has no notification event for this yet." }
-                    : !perm.allowed ? perm : mandatory ? { allowed: false, reason: "Kill and restore notifications cannot be switched off." } : null;
-                  return <td key={ch.id}><span className="perm-cell"><Toggle id={`nt-mx-${e.id}-${ch.id}`} checked={on && !!e.route || ch.id === "inapp"} decision={d} label={`${e.label} via ${ch.label}`} onChange={(v) => void flip({ id: e.route, name: e.label }, ch, v)} /></span></td>;
+                  // In-app and the emergency stop cannot be changed, but they are not drawn dimmed: the switch answers with the reason
+                  const d: Decision | null = !e.route && ch.id !== "inapp" ? { allowed: false, reason: "Gantry has no notification event for this yet." } : !perm.allowed ? perm : null;
+                  const refuse = (v: boolean): void => {
+                    if (ch.id === "inapp") ui.toast("In-app notifications are always on: the notification bell lists every event.", "info");
+                    else if (mandatory && !v) ui.toast("Kill and restore notifications cannot be switched off.", "info");
+                    else void flip({ id: e.route, name: e.label }, ch, v);
+                  };
+                  return <td key={ch.id}><span className="perm-cell"><Toggle id={`nt-mx-${e.id}-${ch.id}`} checked={(on && !!e.route) || ch.id === "inapp"} decision={d} label={`${e.label} via ${ch.label}`} onChange={refuse} /></span></td>;
                 })}
               </tr>
             ))}
           </tbody>
         </Table>
       </div>
+      <div className="swipe">Swipe sideways for more →</div>
     </Card>
   );
 }

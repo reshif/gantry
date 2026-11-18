@@ -75,15 +75,17 @@ function mount() {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><ApiView /></OverlayProvider></QueryClientProvider>);
 }
-const openTr = async (id: string) => { fireEvent.click(await byId(`api-tr-open-${id}`)); fireEvent.click(await byId("api-tr-more")); await byId("api-tr-sim"); };
+/** Deep links the screen keeps for what the prototype does not draw: the rule editor and the sections behind Quick start. */
+const goto = (q: string) => { window.history.replaceState(null, "", `/?${q}`); window.dispatchEvent(new Event("gantry:urlstate")); };
+const openTr = async (id: string) => { await byId(`api-tr-open-${id}`); goto(`tab=triggers&edit=${id}`); await byId("api-tr-sim"); };
 /** Quick start, then one of the sections linked under the curl (ref, play, log, limits). */
-const docs = async (sec: string) => { await tab("docs"); fireEvent.click(await byId(`api-sec-${sec}`)); };
+const docs = async (sec: string) => { await tab("docs"); goto(`tab=docs&sec=${sec}`); };
 const tab = async (name: string) => fireEvent.click(await byId(`api-tab-${name}`));
 beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("API & triggers: quick start", () => {
-  it("shows the prototype card (one curl, no copy bar, no disclosures) with the reference, playground, log and limits linked under it", async () => {
+  it("shows the prototype card (one curl, no copy bar, no disclosures) and no links to the reference, playground, log or limits", async () => {
     setup();
     mount();
     await tab("docs");
@@ -91,20 +93,22 @@ describe("API & triggers: quick start", () => {
     expect(pre.textContent).toContain('-H "Idempotency-Key: $(uuidgen)"');
     expect(document.getElementById("api-quickstart-copy")).toBeNull();
     expect(document.querySelector("details")).toBeNull();
-    for (const s of ["ref", "play", "log", "limits"]) expect(document.getElementById(`api-sec-${s}`)).toBeTruthy();
-    fireEvent.click(await byId("api-sec-ref"));
-    expect(window.location.search).toContain("sec=ref");
+    for (const s of ["ref", "play", "log", "limits"]) expect(document.getElementById(`api-sec-${s}`)).toBeNull();
+    expect(document.querySelector(".card a")).toBeNull();
+    goto("tab=docs&sec=ref");
     expect(await screen.findByText("/api/v1/work-orders/{id}/messages")).toBeTruthy();
   });
 
-  it("the trigger drawer is the prototype's (no disclosure); the rule editor opens from its foot", async () => {
+  it("the trigger drawer is the prototype's (no disclosure); its foot has no extra buttons (the rule editor is a deep link)", async () => {
     setup();
     mount();
     await tab("triggers");
     fireEvent.click(await byId("api-tr-open-TR-1"));
-    await byId("api-tr-more");
+    await byId("api-tr-open-TR-1");
     expect(document.querySelector("details")).toBeNull();
-    expect(document.querySelector(".drawer-f")!.textContent).toContain("Edit rule");
+    expect(document.querySelector(".drawer-f")).toBeNull();
+    expect(document.getElementById("api-tr-more")).toBeNull();
+    expect(window.location.search).not.toContain("open=");
   });
 });
 
@@ -141,15 +145,15 @@ describe("API & triggers: keys", () => {
     mount();
     fireEvent.click(await byId("api-key-new"));
     fireEvent.click(await byId("api-key-go"));
-    expect((await screen.findByText("Name must be at least 3 characters.")).getAttribute("role")).toBe("alert");
+    expect((await screen.findByText("Name is required.")).getAttribute("role")).toBe("alert");
     fireEvent.change(await byId("api-key-name"), { target: { value: "ServiceNow bridge" } });
-    fireEvent.click(await byId("api-key-act-triggers-run"));
-    fireEvent.change(await byId("api-key-expires"), { target: { value: "30" } });
+    expect(document.getElementById("api-key-expires")).toBeNull();
+    expect(document.querySelector(".dlg details")).toBeNull();
     fireEvent.click(await byId("api-key-go"));
     const input = (await byId("api-secret-value")) as HTMLInputElement;
     expect(input.value).toBe(SECRET);
     const post = calls.find((c) => c.method === "POST" && c.path === "/api/v1/api-keys")!;
-    expect(post.body).toEqual({ name: "ServiceNow bridge", project: "payments", actions: ["wo.submit", "wo.read", "triggers.run"], expiresInDays: 30 });
+    expect(post.body).toEqual({ name: "ServiceNow bridge", project: "payments", actions: ["wo.submit", "wo.read"], expiresInDays: 90 });
     expect(post.headers["idempotency-key"]).toBeTruthy();
     expect(document.querySelector(".dlg h2, [role=dialog] h2")!.textContent).toContain("Copy your key now");
     fireEvent.click(await byId("api-secret-done"));
@@ -276,7 +280,7 @@ describe("API & triggers: triggers", () => {
     expect(item.textContent).toContain("Issues labelled factory");
     await openTr("TR-1");
     for (const w of ["Acme GitHub", "Issue with label", "Payments Platform"]) expect(document.body.textContent).toContain(w);
-    expect(document.querySelector(".drawer-h")!.textContent).toContain("TR-1");
+    expect(document.querySelector(".dlg")!.textContent).toContain("TR-1");
     expect((await byId("api-tr-master")).textContent).toMatch(/switched off for the organisation/);
     expect(screen.getByText("✓ created")).toBeTruthy();
     expect(screen.getByText("◆ held")).toBeTruthy();
@@ -294,8 +298,8 @@ describe("API & triggers: triggers", () => {
     await tab("triggers");
     fireEvent.click(await byId("api-tr-new"));
     fireEvent.click(await byId("api-tr-new-go"));
-    expect((await screen.findByText("Name must be at least 3 characters.")).getAttribute("role")).toBe("alert");
-    fireEvent.change(await byId("api-tr-new-type"), { target: { value: "comment" } });
+    expect((await screen.findByText("Name is required.")).getAttribute("role")).toBe("alert");
+    fireEvent.change(await byId("api-tr-new-type"), { target: { value: "pr-comment" } });
     fireEvent.change(await byId("api-tr-new-name"), { target: { value: "Fix PRs" } });
     fireEvent.click(await byId("api-tr-new-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/triggers")).toBe(true));
@@ -413,10 +417,9 @@ describe("API & triggers: triggers", () => {
     expect(screen.getByText(/Next run/)).toBeTruthy();
     expect(document.getElementById("api-tr-label")).toBeNull();
     fireEvent.click(within(document.querySelector<HTMLElement>(".dlg")!).getByRole("button", { name: "Close" }));
-    fireEvent.click(document.querySelector<HTMLElement>(".drawer-h [aria-label=Close]")!);
     await waitFor(() => expect(document.getElementById("api-tr-schedule")).toBeNull());
-    fireEvent.click(await byId("api-tr-open-TR-4"));
-    fireEvent.click(await byId("api-tr-more"));
+    await byId("api-tr-open-TR-4");
+    goto("tab=triggers&edit=TR-4");
     await waitFor(() => expect((document.getElementById("api-tr-cls") as HTMLSelectElement | null)?.value).toBe("hotfix"));
     expect((await byId("api-tr-cls") as HTMLSelectElement).value).toBe("hotfix");
     expect(screen.getByText(/opens a proposal and asks a person to confirm/i)).toBeTruthy();

@@ -51,7 +51,7 @@ export default function NotificationsView() {
       )}
       <div id="nt-tab-panel" role="tabpanel" aria-labelledby={`nt-tab-${tab}`}>
         {tab === "deliveries" ? <DeliveriesTab p={p} url={url} />
-          : tab === "channels" ? <ChannelsTab p={p} nt={nt} perm={perm} onMore={(m) => url.set({ tab: m })} />
+          : tab === "channels" ? <ChannelsTab p={p} nt={nt} perm={perm} />
           : tab === "routes" ? <RoutesTab key={p.id} p={p} nt={nt} perm={perm} />
           : tab === "templates" ? <TemplatesTab p={p} nt={nt} perm={perm} />
           : tab === "overrides" ? <OverridesTab p={p} nt={nt} />

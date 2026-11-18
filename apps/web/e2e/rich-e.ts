@@ -46,7 +46,7 @@ export function richGroupE(): Record<string, Handler> {
     fulfillJson(r, [
       inst("i1", "github", "GitHub (acme)", "all", 60 * MIN),
       inst("i2", "github", "GitHub Enterprise (internal)", ["internal-tools", "partner-api"], 62 * MIN),
-      { ...inst("i3", "slack", "Slack", "all", 13 * MIN), config: { defaultChannel: "#factory-gates" } },
+      { ...inst("i3", "slack", "Slack", "all", 13 * MIN), config: { defaultChannel: "#factory-gates", workspace: "acme" } },
       inst("i4", "teams", "Microsoft Teams", ["risk"], 11 * MIN, "degraded"),
       inst("i5", "email", "Email (SMTP)", "all", 5 * MIN),
       inst("i6", "paging", "On-call paging", "all", 32 * MIN),
@@ -76,9 +76,10 @@ export function richGroupE(): Record<string, Handler> {
       key("k4", "Support console", "internal-tools", ["wo.submit"], 88 * DAY, 2 * DAY, true),
     ]);
   ov["api-config"] = (r) => fulfillJson(r, { rateLimit: 600, burst: 60, idempotencyHours: 24, webhookSigning: "hmac-sha256", triggersEnabled: true });
-  const trig = (id: string, name: string, project: string, type: string, enabled: boolean, n: number) => ({
-    id, project, type, name, enabled, who: "org", reply: "Thanks. Gantry opened {wo} and will ask any questions here.", dedupe: true, repos: "all",
-    runs: Array.from({ length: n }, (_, i) => ({ at: NOW - (i + 1) * 6 * HOUR, outcome: "created", wo: `WO-10${10 + i}`, source: `acme/${project}#${800 + i * 37}` })),
+  // runs ascend in time (the drawer shows the newest first): the newest is 1d ago and its source is the prototype's acme/payments-api#837
+  const trig = (id: string, name: string, project: string, type: string, enabled: boolean, n: number, source?: string) => ({
+    id, project, type, name, enabled, who: "org", reply: "Thanks. Gantry opened {wo} and will ask any questions here.", dedupe: true, repos: "all", ...(source ? { source } : {}),
+    runs: Array.from({ length: n }, (_, j) => { const k = n - j; return { at: NOW - k * DAY, outcome: "created", wo: `WO-10${10 + k * 4}`, source: `acme/${project === "payments" ? "payments-api" : project}#${800 + k * 37}` }; }),
   });
   ov["triggers"] = (r) =>
     fulfillJson(r, [
@@ -87,13 +88,18 @@ export function richGroupE(): Record<string, Handler> {
       trig("TR-3", "Weekly dependency chores", "payments", "schedule", true, 9),
       trig("TR-4", "Failing CI on main", "storefront", "ci", true, 4),
       trig("TR-5", "Compliance issues", "risk", "issue", false, 0),
-      trig("TR-6", "Jira issues labelled gantry", "internal-tools", "issue", true, 5),
+      trig("TR-6", "Jira issues labelled gantry", "internal-tools", "issue", true, 5, "i8"),
     ]);
   const ev = ["submitted", "question", "gate.waiting", "gate.decided", "stuck", "done", "kill", "trust", "mcp"];
   const ch = ["slack", "email", "teams", "pager"];
   const tg = ["#factory-gates", "#payments-line", "ops@acme.dev", "oncall"];
+  // group connect: per-connection deliveries and test results, the way the prototype drawers read them
+  ov["POST integrations/i7/test"] = (r) => fulfillJson(r, { ok: false, test: { ok: false, ms: 0, error: "HTTP 503" }, msg: "HTTP 503" });
+  for (const id of ["i1", "i2", "i3", "i4", "i5", "i6", "i8", "i9"]) ov[`POST integrations/${id}/test`] = (r) => fulfillJson(r, { ok: true, test: { ok: true, ms: 84 }, msg: "ok" });
   ov["deliveries"] = (r) =>
-    fulfillJson(r, Array.from({ length: 30 }, (_, i) => {
+    new URL(r.request().url()).searchParams.get("integration") === "i7"
+      ? fulfillJson(r, Array.from({ length: 5 }, (_, i) => ({ id: `DLV-i7-${i}`, at: NOW - (i + 1) * 9 * MIN, project: "data-platform", event: "gate.waiting", channel: "webhook", target: "audit-lake", status: "failed", attempts: 3, error: "HTTP 503 from the target", state: "dead" })))
+      : fulfillJson(r, Array.from({ length: 30 }, (_, i) => {
       const dead = i === 4 || i === 11;
       const retrying = i === 7;
       return { id: `DLV-${5112 - i}`, at: NOW - i * 17 * MIN, project: "payments", event: ev[(i * 4) % 9], channel: ch[i % 4], target: tg[(i * 3) % 4], status: dead || retrying ? "failed" : "delivered", attempts: dead ? 3 : 1, error: dead ? "HTTP 503" : "", state: dead ? "dead" : retrying ? "failed" : "sent" };

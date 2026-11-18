@@ -75,7 +75,10 @@ function mount() {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><McpView /></OverlayProvider></QueryClientProvider>);
 }
-const openDocs = async () => { fireEvent.click(await byId("mcp-open-mcp-docs-1a2b")); fireEvent.click(await byId("mcp-d-more")); await waitFor(() => { if (!document.querySelector(".dlg")) throw new Error("no dialog"); }); };
+/** The deep links the screen keeps for what the prototype does not draw (scope and access, usage log). */
+const goto = (q: string) => { window.history.replaceState(null, "", `/?${q}`); window.dispatchEvent(new Event("gantry:urlstate")); };
+const openScope = (id: string) => goto(`view=scope&server=${id}`);
+const openDocs = async () => { await byId("mcp-open-mcp-docs-1a2b"); openScope("mcp-docs-1a2b"); await waitFor(() => { if (!document.querySelector(".dlg")) throw new Error("no dialog"); }); };
 const ok = (extra: object = {}) => ({ body: { ok: true, msg: "Done.", ...extra } });
 const patches = (calls: Call[]) => calls.filter((c) => c.method === "PATCH");
 
@@ -136,7 +139,7 @@ describe("MCP servers screen", () => {
     await waitFor(() => expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeTruthy());
   });
 
-  it("the registry has no extra Usage log button, shows the sensitivity as a plain lower-case chip, and the drawer offers Scope and access and the usage log", async () => {
+  it("the registry has no extra Usage log button, shows the sensitivity as a plain lower-case chip, and the drawer has only the prototype's foot (Refresh definitions, Done)", async () => {
     setup();
     mount();
     const row = await byId("mcp-row-mcp-docs-1a2b");
@@ -145,9 +148,10 @@ describe("MCP servers screen", () => {
     expect(chip.className).toContain("plain");
     fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
     await byId("mcp-d-refresh");
-    expect(document.getElementById("mcp-d-more")!.textContent).toBe("Scope and access…");
+    expect(document.getElementById("mcp-d-more")).toBeNull();
+    expect(document.getElementById("mcp-d-usage")).toBeNull();
     expect(document.querySelector("details")).toBeNull();
-    expect(document.getElementById("mcp-d-usage")).toBeTruthy();
+    expect(document.querySelector(".drawer-f")!.textContent).toBe("Refresh definitionsDone");
   });
 
   it("Manage tools opens a drawer: eyebrow MCP SERVER, URL/Auth/Health, a Tools card with switches and Refresh definitions in the foot", async () => {
@@ -162,7 +166,7 @@ describe("MCP servers screen", () => {
     expect(kv).toContain("Health");
     expect(document.querySelector(".drawer-f")!.textContent).toContain("Refresh definitions");
     expect(document.getElementById("mcp-dtool-1")).toBeTruthy();
-    expect(window.location.search).toContain("open=mcp-docs-1a2b");
+    expect(window.location.search).not.toContain("open=");
   });
 
   it("lists the first server's detail in the drawer: transport, revision, masked credential, tools, write-gate on and locked", async () => {
@@ -254,8 +258,8 @@ describe("MCP servers screen", () => {
   it("a server disabled by a changed definition says so, marks the tool, cannot just be switched on, and re-approval posts /approve with the version", async () => {
     const calls = setup({ "POST /api/v1/mcp/servers/mcp-chg-0001/approve": () => ok({ server: { ...CHANGED, enabled: true } }) });
     mount();
-    fireEvent.click(await byId("mcp-open-mcp-chg-0001"));
-    fireEvent.click(await byId("mcp-d-more"));
+    await byId("mcp-open-mcp-chg-0001");
+    openScope("mcp-chg-0001");
     const note = await byId("mcp-disabled-note");
     expect(note.textContent).toContain("Definition of search changed");
     expect(document.querySelector(".mcp-tools tbody")!.textContent).toContain("changed");
@@ -277,6 +281,38 @@ describe("MCP servers screen", () => {
     expect(calls.find((c) => c.path.endsWith("/discover"))!.headers["if-match"]).toBe("4");
   });
 
+  it("Review change opens the prototype's approval dialog: sub with the server id, evidence, diff, Rule/Eligible/Waiting, a comment, and Cancel, Request changes, Reject, Approve", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("mcp-review-mcp-chg-0001"));
+    await byId("mcp-approve-go");
+    const dlg = document.querySelector(".dlg")!;
+    expect(dlg.textContent).toContain("Re-approve changed definitions of Issue tracker");
+    expect(dlg.textContent).toContain("MCP server mcp-chg-0001");
+    expect(dlg.textContent).toContain("Tool search changed its definition. 1 tool unchanged.");
+    expect(dlg.querySelector("pre.diff")!.textContent).toBe("~ search");
+    for (const w of ["Rule", "1 approver (0 of 1 so far)", "Eligible", "Waiting", "Comment"]) expect(dlg.textContent).toContain(w);
+    expect(Array.from(dlg.querySelectorAll(".dlg-f button, footer button")).map((b) => b.textContent)).toEqual(["Cancel", "Request changes", "Reject", "Approve"]);
+  });
+
+  it("a tool switch in the drawer toasts 'Enabled <tool> allowed' or 'Disabled <tool> allowed'", async () => {
+    setup({ "PATCH /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ server: DOCS }) });
+    mount();
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
+    fireEvent.click(await byId("mcp-dtool-0"));
+    expect(await screen.findByText(/^(Enabled|Disabled) .* allowed$/)).toBeTruthy();
+  });
+
+  it("Register has Name, URL and Auth only: no token, no disclosure, no egress hint", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("mcp-add"));
+    await byId("mcp-add-name");
+    expect(document.getElementById("mcp-add-secret")).toBeNull();
+    expect(document.querySelector(".dlg details")).toBeNull();
+    expect(document.querySelector(".dlg")!.textContent).not.toContain("egress");
+  });
+
   it("Register: validates the name and the https URL inline, then discovers for real and posts the server with an idempotency key", async () => {
     let disc: any = null;
     const calls = setup({
@@ -292,10 +328,9 @@ describe("MCP servers screen", () => {
     expect(calls.filter((c) => c.method === "POST" && c.path !== "/api/v1/can")).toHaveLength(0);
     fireEvent.change(await byId("mcp-add-name"), { target: { value: "Tracker" } });
     fireEvent.change(await byId("mcp-add-url"), { target: { value: "https://tracker.example.net/mcp" } });
-    fireEvent.change(await byId("mcp-add-secret"), { target: { value: "tok-123456" } });
     fireEvent.click(await byId("mcp-add-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/mcp/servers")).toBe(true));
-    expect(disc).toMatchObject({ name: "Tracker", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456" });
+    expect(disc).toMatchObject({ name: "Tracker", url: "https://tracker.example.net/mcp", authMode: "bearer" });
     const add = calls.find((c) => c.method === "POST" && c.path === "/api/v1/mcp/servers")!;
     expect(add.body.tools).toEqual([{ name: "get_issue", write: false, allowed: true }, { name: "create_issue", write: true, allowed: false }]);
     expect(add.headers["idempotency-key"]).toBeTruthy();
@@ -308,7 +343,6 @@ describe("MCP servers screen", () => {
     fireEvent.click(await byId("mcp-add"));
     fireEvent.change(await byId("mcp-add-name"), { target: { value: "Tracker" } });
     fireEvent.change(await byId("mcp-add-url"), { target: { value: "https://tracker.example.net/mcp" } });
-    fireEvent.change(await byId("mcp-add-secret"), { target: { value: "tok-123456" } });
     fireEvent.click(await byId("mcp-add-go"));
     expect(await screen.findByText(/ECONNREFUSED/)).toBeTruthy();
     expect(calls.some((c) => c.path === "/api/v1/mcp/servers" && c.method === "POST")).toBe(false);
@@ -331,8 +365,8 @@ describe("MCP servers screen", () => {
   it("Usage log: filters by server, agent, project and outcome, charts calls per server, labels removed servers and real outcomes", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
-    fireEvent.click(await byId("mcp-d-usage"));
+    await byId("mcp-open-mcp-docs-1a2b");
+    goto("view=usage");
     const rows = () => document.querySelectorAll(".mcp-usage tbody tr");
     await waitFor(() => expect(rows()).toHaveLength(3));
     expect(document.querySelector(".mcp-usage")!.textContent).toContain("mcp-gone (removed)");

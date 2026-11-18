@@ -125,3 +125,13 @@ export function hookUrl(src: string | undefined, d: ApiData): string | null {
   const i = d.insts.find((x) => x.id === src);
   return i && d.typeOf(i.type)?.custom ? `${BASE}/hooks/trigger/${i.id}` : null;
 }
+
+/** The prototype's source tag of a trigger: issue, pr-comment, schedule, ci or jira (an issue trigger whose connection is Jira). */
+export function trigTag(t: { type: string; source?: string | undefined }, d: ApiData): string {
+  if (t.type === "comment") return "pr-comment";
+  const inst = t.source ? d.insts.find((i) => i.id === t.source) : undefined;
+  if (t.type === "issue" && inst?.type === "jira") return "jira";
+  return t.type;
+}
+/** The prototype's source choices, and the real trigger kind (and connection type) each one stands for. */
+export const TRIG_SOURCES = ["issue", "pr-comment", "schedule", "ci", "jira"] as const;
