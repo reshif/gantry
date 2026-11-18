@@ -130,9 +130,14 @@ function done(num: number, projectId: string, hoursAgo: number) {
 export function floorFor(projectId: string) {
   const p = project(PROJECTS.find((x) => x.id === projectId) ?? PROJECTS[0], PROJECTS.findIndex((x) => x.id === projectId));
   const specs = projectId === "payments" ? PAY : PAY.filter((s) => s[5] !== "block" && s[5] !== "fail").slice(0, 8).map((s, i) => [s[0] + 100 * (i + 1), s[1], s[2], s[3], s[4], s[5]] as Spec);
-  const wos = [...specs.map((s) => wo(s, projectId)), done(990, projectId, 2), done(991, projectId, 5), done(992, projectId, 9), done(993, projectId, 30)];
+  /* floor group: 24 shipped in the last six hours (4.0 an hour, as the prototype) for payments, and no gate after Research or Verify so the belt shows joints there */
+  const shipped = projectId === "payments" ? Array.from({ length: 22 }, (_, i) => done(900 + i, projectId, 0.2 + (i * 5.6) / 22)) : [];
+  /* floor group: a deep queue at Spec so the belt shows "+N more" and the pile opens the station drawer */
+  const deepQueue = projectId === "payments" ? [1201, 1202, 1203, 1204, 1205, 1206].map((n, i) => wo([n, "Queued spec request " + (i + 1), "feature", i % 3 === 0 ? "P1" : "P2", "spec", "queue"], projectId)) : [];
+  const wos = [...specs.map((s) => wo(s, projectId)), ...deepQueue, ...shipped, done(990, projectId, 2), done(991, projectId, 5), done(992, projectId, 9), done(993, projectId, 30)].map((w) => ({ ...w, requestedBy: "p-fatima" }));
+  const pf = { ...p, flow: { ...p.flow, gates: { ...p.flow.gates, G1f: { ...p.flow.gates.G1f, absent: true }, G4: { ...p.flow.gates.G4, absent: true } } } };
   const gates = wos.filter((w) => Object.keys(w.gates).length).map((w) => ({ instance: `${w.id}:${Object.keys(w.gates)[0]}:1`, wo: w.id, gate: Object.keys(w.gates)[0], since: w.createdAt, have: 0, need: 1 }));
-  return { project: p, workOrders: wos, flowVersion: 3, slots: { used: 4, total: 4, holders: [] }, gates, queue: wos.filter((w) => w.station === 5 && w.state === "waiting").map((w) => w.id), stop: null, stops: [], at: null };
+  return { project: pf, workOrders: wos, flowVersion: 3, slots: { used: 4, total: 4, holders: [] }, gates, queue: wos.filter((w) => w.station === 5 && w.state === "waiting").map((w) => w.id), stop: null, stops: [], at: null };
 }
 
 function events(projectId?: string) {
