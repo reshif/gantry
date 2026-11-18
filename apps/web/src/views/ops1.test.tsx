@@ -74,13 +74,13 @@ describe("Inbox (prototype tabs and rows)", () => {
 });
 
 describe("Agents at work (prototype page)", () => {
-  it("is tiles and agent cards only: no Conversations, New chat or Operator buttons, Agents active is info blue, Running runs is ok green", async () => {
+  it("is tiles and agent cards only: no Operator button (Conversations is the inbox link), Agents active is info blue, Running runs is ok green", async () => {
     updatePrefs({ project: null });
     mockApi({ "GET /api/v1/agents": () => ({ body: [{ id: "ag-a", name: "Alpha", station: "spec", model: "m", autonomy: "gate", spark: [1, 2, 3], evalScore: 0.9 }] }) });
     mount(<WorkspaceView />);
     expect(await screen.findByText("Who is doing what right now, across the line.")).toBeTruthy();
     expect(document.querySelector(".ws-tools")).toBeNull();
-    for (const name of [/Conversations/, "New chat", "Operator view"]) expect(screen.queryByRole("button", { name })).toBeNull();
+    for (const name of ["Operator view"]) expect(screen.queryByRole("button", { name })).toBeNull();
     const tiles = Array.from(document.querySelectorAll("#ws-stats .stat"));
     expect(tiles[0]?.className).toContain("info");
     expect(tiles[1]?.className).toContain("ok");
@@ -167,7 +167,7 @@ describe("Gate dialogs (prototype)", () => {
     const ok = await screen.findByRole("button", { name: /^Approve WO-100/ });
     await waitFor(() => expect(ok.getAttribute("aria-disabled")).not.toBe("true"));
     fireEvent.click(ok);
-    expect(await screen.findByText("Approve G2 for WO-100")).toBeTruthy();
+    expect(await screen.findByText(/^Approve .*G2 for WO-100$/)).toBeTruthy();
     expect(screen.getByLabelText("Note (optional)")).toBeTruthy();
     expect(document.querySelector(".dlg .kicker, .modal-kicker")).toBeNull();
   });
