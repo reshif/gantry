@@ -3,7 +3,7 @@
  * or by last change. It is hidden until the Floor header's "Parts list" button opens it (URL `parts=open`, sort `psort`), so the line drawing
  * normally has the full width. A row opens the same work-order drawer a balloon does.
  */
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Btn, IconBtn, Panel } from "../../ui/primitives";
 import { classOf } from "../projects/kit";
 import { bayName, gateHaveNeed, useFloorCtx } from "./kit";
@@ -97,6 +97,16 @@ function Row({ b, h, max }: { b: Bal; h: LineHandlers; max: number }) {
 }
 
 export function PartsList({ model, sort, onSort, onClose, h }: { model: FloorModel; sort: PartsSort; onSort: (s: PartsSort) => void; onClose: () => void; h: LineHandlers }) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeRef.current();
+    };
+    document.getElementById("floor-parts-close")?.focus();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const groups = useMemo(() => (sort === "group" ? groupsOf(model) : []), [model, sort]);
   const flat = useMemo(() => {
     if (sort === "group") return [];

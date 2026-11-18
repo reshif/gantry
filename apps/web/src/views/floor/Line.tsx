@@ -31,7 +31,7 @@ const keyOn = (fn: () => void) => (e: React.KeyboardEvent) => {
 const trunc = (t: string, n: number): string => (t.length > n ? `${t.slice(0, Math.max(1, n - 1))}…` : t);
 
 /* ---------- sheet geometry ---------- */
-const W = 1008;
+const W = 1180;
 const ROW = 46;
 const GAP = 40;
 const X0 = 40;
@@ -52,7 +52,7 @@ function layout(model: FloorModel, order: { top: string[]; bottom: string[] }) {
   const row1 = order.top.map((id) => byId.get(id)).filter((s): s is StationModel => !!s);
   const row2 = order.bottom.map((id) => byId.get(id)).filter((s): s is StationModel => !!s);
   const n = Math.max(row1.length, row2.length + 1, 1);
-  const sw = Math.max(104, Math.min(170, Math.floor((W - X0 - 78 - (n - 1) * GAP) / n)));
+  const sw = Math.max(104, Math.min(200, Math.floor((W - X0 - 78 - (n - 1) * GAP) / n)));
   const trays = (st: StationModel): number => st.bays.reduce((sum, b) => sum + trayH(b.items.length, sw) + 10, 0);
   const place = (row: StationModel[], y: number): { placed: Placed[]; h: number; rowH: number } => {
     const bh = Math.max(140, ...row.map((st) => hBusy(st.items.length, sw)));
@@ -164,7 +164,7 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
         <text className="fp-t b" x={box.x + 31} y={box.y + 17} fontSize={11} letterSpacing=".03em">{trunc(st.s.name.toUpperCase(), Math.floor((box.w - 36) / 6.6))}</text>
         {tone !== "idle" ? <path className={`fp-scan ${tone}`} d={`M${box.x + 2} ${box.y + 25.6}H${box.x + box.w - 2}`} /> : null}
         <circle className={`fp-dot ${tone}`} cx={box.x + 13} cy={box.y + 40} r={3} />
-        <text className="fp-t b" x={box.x + 21} y={box.y + 43.5} fontSize={10.5}>{trunc(st.agent, Math.floor((box.w - 90) / 6.2))}</text>
+        <text className="fp-t b" x={box.x + 21} y={box.y + 43.5} fontSize={10.5}>{trunc(st.agent, Math.floor((box.w - 80) / 6))}</text>
         <text className={`fp-t b st ${tone}`} x={box.x + box.w - 10} y={box.y + 43.5} fontSize={10} textAnchor="end">{st.state.t}</text>
         <text className={tone === "idle" ? "fp-sn" : "fp-t m"} x={box.x + 10} y={box.y + 58} fontSize={10.5}>{cap1}</text>
         <text className="fp-t m" x={box.x + 10} y={box.y + 77} fontSize={10} letterSpacing=".1em">WIP</text>

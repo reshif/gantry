@@ -14,8 +14,8 @@
   --fp-hair: var(--line);
   --fp-bomw: 404px;
 }
-.floorpg .fp-ticker { display: flex; border: 1px solid var(--fp-out); border-radius: 3px; background: var(--surface); min-width: 0; width: max-content; max-width: 100%; margin: 0 0 var(--s3); }
-.fp-ticker .tk { padding: 6px 15px; border-left: 1px solid var(--fp-out); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.floorpg .fp-ticker { display: flex; border: 1px solid var(--fp-out); border-radius: 3px; background: var(--surface); min-width: 0; width: max-content; max-width: 100%; margin: 0 0 var(--s2); }
+.fp-ticker .tk { padding: 5px 15px; border-left: 1px solid var(--fp-out); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .fp-ticker .tk:first-child { border-left: 0; }
 .fp-ticker .k { font: 600 10px/1 var(--mono); letter-spacing: .12em; color: var(--ink2); }
 .fp-ticker .v { font: 650 18px/1 var(--mono); letter-spacing: -.02em; display: flex; align-items: baseline; gap: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -26,7 +26,7 @@
 .floorpg .seg .btn { border: 0; border-radius: 0; box-shadow: none; }
 .floorpg .seg .btn + .btn { border-left: 1px solid var(--fp-out); }
 .floorpg .btn[aria-pressed="true"] { background: var(--fp-warns); border-color: var(--fp-warns); color: var(--fp-onwarn); }
-.floorpg .seg .btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.floorpg #floor-parts-toggle[aria-pressed="true"], .floorpg .seg .btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 
 /* needs-you bar */
 .fp-need { display: grid; grid-template-columns: auto repeat(3, minmax(0, 1fr)) auto; border: 1px solid var(--fp-out); border-radius: 3px; background: var(--surface); overflow: hidden; margin: 0 0 var(--s3); min-width: 0; }
@@ -49,11 +49,9 @@
 /* main: the drawing, and the parts list only when it is opened */
 .fp-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s3); align-items: start; min-width: 0; }
 .fp-left { min-width: 0; display: grid; gap: var(--s3); }
-@media (min-width: 1181px) {
-  .fp-main.has-parts { grid-template-columns: minmax(0, 1fr) var(--fp-bomw); }
-  .fp-main.has-parts .fp-parts { position: sticky; top: var(--s3); max-height: calc(100vh - 120px); display: flex; flex-direction: column; }
-  .fp-main.has-parts .fp-parts > .panel-body { overflow: auto; min-height: 0; }
-}
+/* The parts list is a drawer over the drawing at every width, so the drawing keeps its size and the list is never pushed off screen. */
+.fp-main.has-parts .fp-parts { position: fixed; top: var(--topbar-h, 52px); right: 0; bottom: 0; width: min(var(--fp-bomw), 100vw); z-index: 40; display: flex; flex-direction: column; border-radius: 0; box-shadow: -12px 0 32px rgba(0, 0, 0, .35); }
+.fp-main.has-parts .fp-parts > .panel-body { overflow: auto; min-height: 0; flex: 1; }
 .fp-sheetp { overflow: hidden; }
 .fp-sheetp .panel-title .fp-meta, .fp-parts .panel-title .fp-meta { font: 500 10.5px var(--mono); color: var(--ink2); margin-left: 9px; }
 .fp-hint { font: 500 10.5px var(--mono); color: var(--ink2); }
@@ -234,3 +232,6 @@
   .fp-wb { width: 60px; }
 }
 @media (prefers-reduced-motion: reduce) { .fp-dw * { animation: none !important; transition: none !important; } .fp-bal.hl .sel { transition: none; } }
+
+/* compact the top of the page so the sheet starts higher */
+.floorpg #floor-head .ph { margin-bottom: var(--s2); padding-bottom: var(--s2); }

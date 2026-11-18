@@ -424,6 +424,17 @@ describe("Floor: precision sheet", () => {
     window.history.replaceState(null, "", "/");
   });
 
+  it("closes the Parts list with Escape and puts focus on its close button when it opens", async () => {
+    mockApi();
+    window.history.replaceState(null, "", "/?parts=open");
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    expect(document.activeElement?.id).toBe("floor-parts-close");
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.getElementById("floor-parts")).toBeNull());
+    window.history.replaceState(null, "", "/");
+  });
+
   it("marks the bottleneck: the station over its limit is flagged on the drawing and named in the ticker", async () => {
     const tight = { ...PAYMENTS, version: 1, flow: { ...PAYMENTS.flow, stations: { ...PAYMENTS.flow.stations, build: { ...PAYMENTS.flow.stations.build, wip: 1 } } } };
     mockApi({ "GET /api/v1/projects": () => ({ body: [tight] }), "GET /api/v1/projects/payments": () => ({ body: tight }), "GET /api/v1/projects/payments/floor": () => ({ body: { ...floorRead(), project: tight } }) });
