@@ -98,72 +98,14 @@ beforeEach(() => {
   at("");
   setCsrfToken("c");
   canBatcher.clear();
-  Object.assign(evalsUi, { tab: "agents", agent: null, suite: null, run: null, a: null, b: null, runVersion: null, runModel: null, repeats: 1 });
+  Object.assign(evalsUi, { tab: "suites", agent: null, suite: null, run: null, a: null, b: null, runVersion: null, runModel: null, repeats: 1 });
 });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
-describe("Evals screen: scorecards", () => {
-  beforeEach(() => at("?tab=agents"));
-  it("lists agents with their eval score, marks one below its gate, and shows the live scorecard with its count", async () => {
-    setup();
-    mount();
-    const row = await byId("ev-ag-ag-review");
-    expect(row.textContent).toContain("▼ 70%");
-    expect((await byId("ev-ag-ag-build")).textContent).toContain("90%");
-    expect(document.querySelector(".ev-tiles")!.textContent).toContain("Task success90%");
-    expect((await byId("ev-n")).textContent).toContain("Based on 12 finished attempts on 12 work orders and 12 gate decisions");
-    fireEvent.click(row);
-    await waitFor(() => expect(document.getElementById("ev-n")!.textContent).toContain("Insufficient data: 2 finished attempts"));
-    expect(document.querySelector(".ev-tiles")!.textContent).toContain("Task success90%");
-  });
-  it("shows the headline numbers: suites, runs, regressions, eligible candidates", async () => {
-    setup();
-    mount();
-    await byId("ev-ag-ag-build");
-    const head = document.getElementById("ev-stats")!.textContent!;
-    expect(head).toContain("Suites2");
-    expect(head).toContain("Below threshold");
-    expect(head).toContain("Passing");
-  });
-  it("blocks promotion with the reason until the suite passed, and promotes an eligible candidate with the agent's version", async () => {
-    const calls = setup({ "POST /api/v1/agents/ag-build/versions/2.8.0-rc1/promote": () => ({ body: { ok: true, msg: "Builder 2.8.0-rc1 is on the floor." } }) });
-    mount();
-    const blocked = await byId("ev-promote-ag-build-270rc1");
-    expect(blocked.getAttribute("aria-disabled")).toBe("true");
-    expect(reasonOf(blocked)).toContain("Blocked: 60% vs 85%");
-    fireEvent.click(blocked);
-    expect(writes(calls, "POST")).toHaveLength(0);
-    const go = (await waitFor(() => { const e = document.querySelectorAll("[id='ev-promote-ag-build-280rc1']")[0]; if (!e) throw new Error("none"); return e; })) as HTMLElement;
-    fireEvent.click(go);
-    await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
-    expect(writes(calls, "POST")[0]!.headers["if-match"]).toBe("7");
-  });
-  it("lists trust demotions and learning findings for the agent, with links to Trust and Learning", async () => {
-    setup();
-    mount();
-    expect((await byId("ev-tl-dem-0")).textContent).toContain("Builder · bug · Payments");
-    expect(document.body.textContent).toContain("Post-release incident on WO-1");
-    fireEvent.click(document.getElementById("ev-tl-dem-0")!);
-    expect(window.location.hash).toBe("#trust");
-    expect((await byId("ev-tl-f-F-1")).textContent).toContain("F-1 Builder misses tests");
-  });
-});
-
 describe("Evals screen: regressions", () => {
-  it("finds a run that scored well under the floor version's and calls it out, linking to the comparison", async () => {
-    setup();
-    mount();
-    const btn = await byId("ev-reg-0");
-    expect(btn.textContent).toContain("SUITE-BUILD: Builder 2.7.0-rc1 on claude-opus-5-5 scored 50% vs 83% for the floor version");
-    expect(document.querySelector(".ev-regs")!.textContent).toContain("1 regression");
-    fireEvent.click(btn);
-    await byId("ev-run-btn");
-    expect((document.getElementById("h2h-a") as HTMLSelectElement).value).toBe("RUN-2");
-    expect((document.getElementById("h2h-b") as HTMLSelectElement).value).toBe("RUN-1");
-  });
   it("does not count a model override or an old run as a regression", () => {
     const d = { suites: SUITES, agents: AGENTS, runsOf: (id: string) => RUNS_BUILD.filter((r) => r.suite === id).map((r) => ({ ...r, override: true })) } as never;
     expect(regressionsOf(d)).toHaveLength(0);
@@ -271,11 +213,12 @@ describe("Evals screen: suites and runs", () => {
 });
 
 describe("Evals screen: prototype structure", () => {
-  it("has the Suites, Runs, Scorecards and Factory-wide tabs in that order and a Run all suites action", async () => {
+  it("has exactly the Suites and Runs tabs, a Run all suites action and no regression banner", async () => {
     setup();
     mount();
     await byId("ev-tab-suites");
-    expect([...document.querySelectorAll("[role=tab][id^='ev-tab-']")].map((e) => e.textContent)).toEqual(["Suites", "Runs", "Scorecards", "Factory-wide"]);
+    expect([...document.querySelectorAll("[role=tab][id^='ev-tab-']")].map((e) => e.textContent)).toEqual(["Suites", "Runs"]);
+    expect(document.querySelector(".ev-regs")).toBeNull();
     expect(document.getElementById("ev-run-all")!.textContent).toContain("Run all suites");
   });
   it("keeps the tab and search in the URL, and the Runs tab lists every run with suite, agent, version and score", async () => {
@@ -293,28 +236,6 @@ describe("Evals screen: prototype structure", () => {
     fireEvent.click(await byId("ev-run-all"));
     await waitFor(() => expect(writes(calls, "POST")).toHaveLength(2));
     expect(writes(calls, "POST").map((c) => c.path).sort()).toEqual(["/api/v1/suites/SUITE-BUILD/runs", "/api/v1/suites/SUITE-REVIEW/runs"]);
-  });
-});
-
-describe("Evals screen: factory-wide", () => {
-  it("shows the matrix, the project heat grid, per-class figures with counts, onboarding with counts and the skill coverage", async () => {
-    setup();
-    mount();
-    fireEvent.click(await byId("ev-tab-factory"));
-    const mx = await byId("ev-mx-ag-build");
-    expect(mx.textContent).toContain("90%");
-    expect(document.getElementById("ev-mx-ag-review")!.textContent).toContain("n=2");
-    const heat = document.querySelector(".ev-heat")!;
-    expect(heat.textContent).toContain("▼ 60%");
-    expect(heat.querySelector(".is-none")).not.toBeNull();
-    expect(document.querySelector(".ev-pc")!.textContent).toContain("n=8");
-    expect(document.querySelector(".ev-pc")!.textContent).toContain("insufficient data");
-    expect(document.querySelector(".ev-onb")!.textContent).toContain("2 of 3 repos reached Ready");
-    expect(document.querySelector(".ev-onb")!.textContent).toContain("No CI");
-    expect(document.getElementById("ev-sk-sk-a")!.closest("tr")!.textContent).toContain("75%");
-    expect(document.body.textContent).toContain("No classified requests yet");
-    fireEvent.click(mx);
-    await byId("ev-n");
   });
 });
 

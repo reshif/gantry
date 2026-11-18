@@ -9,7 +9,7 @@ import type { AgentRow, AgentVersionRow } from "../agents/kit";
 import { Icon } from "../../ui/Icon";
 import { setUrlParams } from "../urlState";
 
-export type EvalsTab = "agents" | "suites" | "runs" | "factory";
+export type EvalsTab = "suites" | "runs";
 export const evalsUi = { tab: "suites" as EvalsTab, agent: null as string | null, suite: null as string | null, run: null as string | null, a: null as string | null, b: null as string | null, runVersion: null as string | null, runModel: null as string | null, repeats: 1 };
 let tick = 0;
 const listeners = new Set<() => void>();

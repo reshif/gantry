@@ -8,14 +8,12 @@ import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useActors } from "../../ui/actors";
 import { Avatar, Btn, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, type Decision } from "../../ui/primitives";
-import { CrIcon } from "../../ui/cr";
 import { DataTable, type SortCol } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
 import { setUrlParams } from "../urlState";
 import { PassMark, ScoreMeter, ScoreN, agentOf, evalsUi, rerender, suiteOf, versionModel, type EvalsData, type RunRow } from "./kit";
-import { LinkedOutcomes } from "./Scorecards";
 
 const asRules = (c: Suite["cases"][number]): Array<{ kind: string; [k: string]: unknown }> => c.rules ?? [];
 const short = (sha?: string | null): string => (sha ? sha.slice(0, 7) : "");
@@ -257,7 +255,7 @@ type SuiteTableRow = { su: Suite; agentName: string; agentId: string; cases: num
 type Url = { tab: string; q: string; sort: string; dir: string; suite: string; run: string };
 type SetUrl = (p: Partial<Url>) => void;
 
-export function SuitesTab({ d, regs, url, setUrl, runner }: { d: EvalsData; regs: Array<{ suite: Suite; run: RunRow; base: RunRow; delta: number; agentId: string; agentName: string }>; url: Url; setUrl: SetUrl; runner: ReturnType<typeof useRunSuites> }) {
+export function SuitesTab({ d, url, setUrl, runner }: { d: EvalsData; url: Url; setUrl: SetUrl; runner: ReturnType<typeof useRunSuites> }) {
   if (evalsUi.suite && !suiteOf(d, evalsUi.suite)) evalsUi.suite = null;
   if (!d.suites.length) return <Empty title="No suites yet" text="Create an agent: it gets a golden set to add cases to." />;
   const all: SuiteTableRow[] = d.suites.map((su) => {
@@ -285,24 +283,6 @@ export function SuitesTab({ d, regs, url, setUrl, runner }: { d: EvalsData; regs
   const sort = { key: sortKey, dir: (url.dir === "desc" ? -1 : 1) as 1 | -1 };
   return (
     <div className="ev-suites">
-      {regs.length ? (
-        <div className="banner bad ev-regs" role="note">
-          <CrIcon name="warn" />
-          <div className="grow">
-            <b>{`${regs.length} regression${regs.length > 1 ? "s" : ""} in the last 14 days. `}</b>
-            <ul className="plain-list">
-              {regs.map((r, i) => (
-                <li key={`${r.run.id}`}>
-                  <a href="#evals" className="linkish" id={`ev-reg-${i}`} onClick={(e) => { e.preventDefault(); evalsUi.a = r.run.id; evalsUi.b = r.base.id; setUrl({ suite: r.suite.id, run: r.run.id }); }}>
-                    {`${r.suite.id}: ${r.agentName} ${r.run.version} on ${r.run.model || "stub"} scored ${fmt.pct(r.run.score)} vs ${fmt.pct(r.base.score)} for the floor version (${r.delta >= 0 ? "+" : ""}${fmt.pct(r.delta)}). Compare`}
-                  </a>
-                  <LinkedOutcomes agentId={r.agentId} idp={`ev-reg-${i}`} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : null}
       <FilterBar label="Filter suites" count={`${rows.length} of ${all.length}`} actions={url.q ? <Btn label="Clear" small kind="ghost" id="ev-clear" onClick={() => setUrl({ q: "" })} /> : undefined}>
         <SearchBox id="ev-search" value={url.q} onChange={(v) => setUrl({ q: v })} placeholder="Search suites" />
       </FilterBar>

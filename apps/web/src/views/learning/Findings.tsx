@@ -1,5 +1,5 @@
 /** Findings tab (prototype): search, a Signal select, and a flat table. The proposals drafted from a finding are reached from the Proposals tab and the row action. */
-import { type LearningFinding, type LearningProposal } from "@gantry/domain";
+import { type LearningFinding } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { Avatar, Btn, Chip, FilterBar, SearchBox, Select } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/DataTable";
@@ -10,9 +10,8 @@ import { ChipList, SIGNALS, useLn } from "./kit";
 
 export interface LnUrl { tab: string; q: string; sig: string; sort: string; dir: string; st: string }
 
-export function FindingsTab({ findings, proposals, hi, onDrafted, proposalsOn, url, setUrl }: {
+export function FindingsTab({ findings, hi, onDrafted, proposalsOn, url, setUrl }: {
   findings: LearningFinding[];
-  proposals: LearningProposal[];
   hi: string | null;
   onFocusProposal?: (id: string) => void;
   onDrafted: (id: string) => void;
@@ -28,15 +27,12 @@ export function FindingsTab({ findings, proposals, hi, onDrafted, proposalsOn, u
   const clear = (): void => setUrl({ q: "", sig: "" });
   const cols: SortCol<LearningFinding>[] = [
     { key: "id", label: "ID", sort: (f) => f.id, render: (f) => <span className="mono nowrap" id={hi === f.id ? `ln-f-hi-${f.id}` : undefined}>{f.id}</span> },
-    { key: "title", label: "Finding", sort: (f) => f.title.toLowerCase(), render: (f) => <span className="ell" style={{ maxWidth: 340 }} title={f.title}>{f.title}</span> },
-    { key: "signal", label: "Signal", sort: (f) => f.signal, render: (f) => <Chip text={(SIGNALS[f.signal] ?? [f.signal])[0]} cls="agent" /> },
+    { key: "title", label: "Finding", sort: (f) => f.title.toLowerCase(), render: (f) => <a href="#learning" className="ell" id={`ln-open-${f.id}`} style={{ maxWidth: 340, color: "inherit" }} title={`${f.title}. Draft a proposal from this finding.`} aria-label={`Draft a proposal from ${f.id}: ${f.title}`}
+      onClick={(e) => { e.preventDefault(); if (!proposalsOn) { ui.toast("Learning proposals are switched off. Turn them on first.", "warn"); return; } if (!perm.allowed) { ui.toast(perm.reason || "You may not apply learning proposals.", "warn"); return; } ui.open((close) => <DraftDialog f={f} close={close} onDrafted={onDrafted} />); }}>{f.title}</a> },
+    { key: "signal", label: "Signal", sort: (f) => f.signal, render: (f) => <Chip text={f.signal} cls="agent plain" /> },
     { key: "agent", label: "Agent", sort: (f) => f.agent ?? "", render: (f) => f.agent ? <span className="who"><Avatar id={f.agent} size="sm" /><span>{agName(f.agent)}</span></span> : <span className="dim">{"\u2013"}</span> },
     { key: "ev", label: "Evidence", render: (f) => <ChipList ids={f.evidence} max={3} project={f.project} /> },
     { key: "st", label: "Status", sort: (f) => f.status, render: (f) => <Chip text={f.status === "open" ? "Open" : "Addressed"} cls={f.status === "open" ? "warn" : "ok"} /> },
-    { key: "act", label: "", align: "end", render: (f) => {
-      const has = proposals.some((lp) => lp.finding === f.id);
-      return <Btn label={has ? "Draft another" : "Draft"} small id={`ln-draft-${f.id}`} aria={`Draft a proposal from ${f.id}`} guard={perm} disabledReason={proposalsOn ? null : "Learning proposals are switched off. Turn them on first."} onClick={() => ui.open((close) => <DraftDialog f={f} close={close} onDrafted={onDrafted} />)} />;
-    } },
   ];
   const sort = { key: url.sort || "id", dir: (url.dir === "desc" ? -1 : 1) as 1 | -1 };
   return (

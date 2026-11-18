@@ -90,7 +90,7 @@ function useProposeDialog() {
   };
 }
 
-export function MatrixTab({ cells, projects, agents, switchOn }: { cells: CellOut[]; projects: Project[]; agents: Array<{ id: string; name: string }>; switchOn: boolean }) {
+export function MatrixTab({ cells, projects, agents, switchOn, demotions = 0 }: { cells: CellOut[]; projects: Project[]; agents: Array<{ id: string; name: string }>; switchOn: boolean; demotions?: number }) {
   const open = useProposeDialog();
   const grant = useCan("trust.grant");
   const withCells = projects.filter((p) => cells.some((c) => c.project === p.id));
@@ -122,7 +122,9 @@ export function MatrixTab({ cells, projects, agents, switchOn }: { cells: CellOu
       </div>
       <style>{".mx-swipe{display:none;font:500 11px var(--mono);color:var(--text-3);padding:6px 2px 0}@media (max-width:760px){.mx-swipe{display:block}}"}</style>
       <div className="mx-swipe">Swipe sideways for more {"\u2192"}</div>
-      <div className="row dim mono" style={{ marginTop: 12, fontSize: 11 }}><span>L0 every output reviewed</span><span>{"·"}</span><span>L2 sample reviewed</span><span>{"·"}</span><span>L3 decided by checks</span></div>
+      <div className="row dim mono" style={{ marginTop: 12, fontSize: 11 }}><span>L0 every output reviewed</span><span>{"·"}</span><span>L2 sample reviewed</span><span>{"·"}</span><span>L4 runs unattended, audited</span>
+        {demotions ? <><span>{"·"}</span><a href="#trust" id="tr-demos-link" onClick={(e) => { e.preventDefault(); setUrlParams({ tab: "demotions" }); }}>{`${demotions} demotion${demotions === 1 ? "" : "s"} in 7 days`}</a></> : null}
+      </div>
     </Card>
   );
 }

@@ -4,15 +4,12 @@
  * the task count and a range, head-to-head of two runs task by task, regressions, promotion eligibility, and factory-wide views.
  * Not ported, on purpose: the legacy "Runs are simulated locally" timer and its random pass/fail. A model-graded check is advisory only; deterministic checks decide.
  */
-import { useEffect, useMemo } from "react";
-import { useProjects } from "../api/queries";
+import { useEffect } from "react";
 import { usePrefs } from "../lib/prefs";
 import { Btn, Empty, Tabs } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Page, Stats } from "../ui/cr";
 import { setUrlParams, useUrlState } from "./urlState";
-import { FactoryTab } from "./evals/Factory";
-import { ScorecardsTab } from "./evals/Scorecards";
 import { SuitesTab, useRunSuites } from "./evals/Suites";
 import { agentOf, evalsUi, suiteOf, useEvalsData, useEvalsUi, type EvalsData, type EvalsTab, type RunRow } from "./evals/kit";
 import { RunsTab } from "./evals/Runs";
@@ -43,7 +40,7 @@ export function regressionsOf(d: EvalsData, now = Date.now()): Regression[] {
   return out;
 }
 
-const TABS: EvalsTab[] = ["suites", "runs", "agents", "factory"];
+const TABS: EvalsTab[] = ["suites", "runs"];
 const SUB = "Golden-set suites that decide whether an agent change may go live.";
 
 export default function EvalsView() {
@@ -52,12 +49,6 @@ export default function EvalsView() {
   usePrefs();
   const [url, setUrl] = useUrlState({ tab: "suites", q: "", sort: "", dir: "", suite: "", run: "" });
   const runner = useRunSuites(d);
-  const projectsData = useProjects().data;
-  const label = useMemo(() => (c: { agent: string; cls: string; project: string; repo: string | null }): string => {
-    const a = d.agents.find((x) => x.id === c.agent)?.name ?? c.agent;
-    const p = (projectsData ?? []).find((x) => x.id === c.project)?.name ?? c.project;
-    return `${a} \u00b7 ${c.cls} \u00b7 ${p}${c.repo ? ` \u00b7 ${c.repo}` : ""}`;
-  }, [d.agents, projectsData]);
   // another screen (Agents) asked for a suite: its request becomes URL state once, so a reload keeps it
   useEffect(() => {
     if (evalsUi.suite && !url.suite) setUrlParams({ suite: evalsUi.suite, ...(evalsUi.tab !== "suites" ? { tab: evalsUi.tab } : {}) });
@@ -69,14 +60,11 @@ export default function EvalsView() {
   const head = <Page eyebrow="Workforce" title="Evals" sub={SUB} />;
   if (d.q.data === undefined) return <div className="view view-evals">{head}<Async query={d.q as never} what="evals" id="evals">{() => null}</Async></div>;
   if (!d.agents.length) return <div className="view view-evals">{head}<Empty title="No agents" text="Create an agent to see how it does its job." /></div>;
-  const regs = regressionsOf(d);
   const lastOf = (id: string): RunRow | undefined => { const done = d.runsOf(id).filter((r) => r.status === "completed"); return done[done.length - 1]; };
   const passing = d.suites.filter((su) => { const last = lastOf(su.id); return !!last && last.score >= su.threshold; }).length;
   const below = d.suites.filter((su) => { const last = lastOf(su.id); return !!last && last.score < su.threshold; }).length;
   const setTab = (t: string): void => { evalsUi.run = null; setUrl({ tab: t, q: "", sort: "", dir: "", suite: t === "suites" ? url.suite : "", run: "" }); };
-  const body = tab === "suites" ? <SuitesTab d={d} regs={regs} url={url} setUrl={setUrl} runner={runner} />
-    : tab === "runs" ? <RunsTab d={d} url={url} setUrl={setUrl} />
-    : tab === "factory" ? <FactoryTab d={d} /> : <ScorecardsTab d={d} label={label} />;
+  const body = tab === "suites" ? <SuitesTab d={d} url={url} setUrl={setUrl} runner={runner} /> : <RunsTab d={d} url={url} setUrl={setUrl} />;
   const all = d.suites.map((s) => s.id);
   return (
     <div className="view view-evals">
@@ -90,7 +78,7 @@ export default function EvalsView() {
             { l: "Runs, 7 days", v: String(d.runs.filter((r) => r.at > Date.now() - 7 * DAY).length), tone: "agent" },
           ]} />
         </div>
-        <Tabs idPrefix="ev-tab" items={[{ id: "suites", label: "Suites" }, { id: "runs", label: "Runs" }, { id: "agents", label: "Scorecards" }, { id: "factory", label: "Factory-wide" }]} active={tab} onChange={setTab} />
+        <Tabs idPrefix="ev-tab" items={[{ id: "suites", label: "Suites" }, { id: "runs", label: "Runs" }]} active={tab} onChange={setTab} />
         {body}
       </Page>
     </div>

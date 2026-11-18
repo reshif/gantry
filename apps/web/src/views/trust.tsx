@@ -7,7 +7,7 @@
 import { useEffect, useMemo } from "react";
 import { useAgents, useProjects, useTrustCells } from "../api/queries";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Empty, Tabs } from "../ui/primitives";
+import { Btn, Empty, Tabs } from "../ui/primitives";
 import { Page, Stats } from "../ui/cr";
 import { Async } from "../ui/async";
 import { CeilingsTab, CriteriaTab, DemotionsTab, ProposalsTab } from "./trust/Tabs";
@@ -20,6 +20,7 @@ import type { Project } from "@gantry/domain";
 
 const DAY = 86_400_000;
 
+/** The four prototype tabs. "ladder" and "demotions" stay reachable by URL (the matrix dialog and the legend link open them) as drill-downs, not tabs. */
 const TABS: TrustTab[] = ["matrix", "proposals", "ceilings", "criteria", "ladder", "demotions"];
 const SUB = "How much each agent may do without a person, earned by evidence and capped by policy.";
 
@@ -62,8 +63,8 @@ export default function TrustView() {
     coverage: tr.coverage?.[proj.id] ?? { total: 0, auto: 0 }, agentName, clsName,
   };
   const policy = { ...base, cells, ...({ ceilings: tr.ceilings, criteriaVersion: tr.criteriaVersion ?? 0 } as object) } as LadderProps & { criteriaVersion: number };
-  const tabs = [{ id: "matrix", label: "Matrix" }, { id: "proposals", label: "Proposals", count: pending.length }, { id: "ceilings", label: "Ceilings" }, { id: "criteria", label: "Criteria" }, { id: "ladder", label: "Ladder" }, { id: "demotions", label: "Demotions", count: dem7 }];
-  const body = tab === "matrix" ? <MatrixTab cells={cells} projects={projects} agents={(agentsData ?? []).map((a) => ({ id: a.id, name: a.name }))} switchOn={tr.levelsAboveL1 === true} />
+  const tabs = [{ id: "matrix", label: "Matrix" }, { id: "proposals", label: "Proposals", count: pending.length }, { id: "ceilings", label: "Ceilings" }, { id: "criteria", label: "Criteria" }];
+  const body = tab === "matrix" ? <MatrixTab cells={cells} projects={projects} agents={(agentsData ?? []).map((a) => ({ id: a.id, name: a.name }))} switchOn={tr.levelsAboveL1 === true} demotions={dem7} />
     : tab === "proposals" ? <ProposalsTab p={base} cells={cells} proposals={proposals} />
     : tab === "demotions" ? <DemotionsTab cells={cells} projects={projects} p={{ ...base, cells }} />
     : tab === "ceilings" ? <CeilingsTab p={policy} cells={cells} projects={projects} />
@@ -80,7 +81,8 @@ export default function TrustView() {
             { l: "Review sample rate", v: `${Math.round(100 / Math.max(1, tr.sampleRate))}%` },
           ]} />
         </div>
-        <div style={{ minWidth: 0, maxWidth: "100%", contain: "inline-size" }}><Tabs idPrefix="tr-tab" items={tabs} active={tab} onChange={(t) => { trustUi.hiProposal = null; setUrl({ tab: t }); }} /></div>
+        <div style={{ minWidth: 0, maxWidth: "100%", contain: "inline-size" }}><Tabs idPrefix="tr-tab" items={tabs} active={tab === "ladder" || tab === "demotions" ? "matrix" : tab} onChange={(t) => { trustUi.hiProposal = null; setUrl({ tab: t }); }} /></div>
+        {tab === "ladder" || tab === "demotions" ? <div className="row" style={{ marginBottom: 8 }}><Btn label="Back to the matrix" small kind="ghost" icon="back" id="tr-back" onClick={() => setUrl({ tab: "matrix" })} /></div> : null}
         <div id="tr-tab-panel" role="tabpanel" className="tr-panel" style={{ minWidth: 0, maxWidth: "100%", contain: "inline-size" }}>{body}</div>
       </Page>
     </div>

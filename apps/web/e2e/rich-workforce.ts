@@ -45,9 +45,15 @@ const evalsFactory = () => ({
   gateRejections: [["G5", 6], ["G4", 3], ["G2", 2]], humanOverride: { "ag-build": 3, "ag-review": 2 }, onboardingStages: { discovered: 3, assessed: 4, ready: 11 }, counts: { workOrders: 103, classified: 99, decisions: 212, attempts: 540 },
 });
 const trust = () => ({
-  sampleRate: 0.2, seededAt: NOW - 60 * DAY, nextProposal: 3, levelsAboveL1: true, minRuns: 5, soakDays: 7, maxGrantable: 3, criteriaVersion: 1,
+  sampleRate: 20, seededAt: NOW - 60 * DAY, nextProposal: 3, levelsAboveL1: true, minRuns: 5, soakDays: 7, maxGrantable: 3, criteriaVersion: 1,
   criteria: { "1": { cleanRuns: 5, evalMin: 0.8, reworkMax: 0.2, incidentsMax: 1, windowD: 14 }, "2": { cleanRuns: 15, evalMin: 0.88, reworkMax: 0.12, incidentsMax: 0, windowD: 30 }, "3": { cleanRuns: 40, evalMin: 0.93, reworkMax: 0.06, incidentsMax: 0, windowD: 60 } },
-  ceilings: [{ id: "ce1", text: "Regulated projects are capped at L2", when: { regulated: true }, max: 2, enabled: true, version: 1 }],
+  ceilings: [{ id: "ce1", text: "Regulated projects are capped at L2", when: { regulated: true }, max: 2, enabled: true, version: 1 },
+    // --- work2 (Trust fidelity): the prototype's four ceilings ---
+    { id: "ce2", text: "Security fixes never run above L1", when: { cls: "security" }, max: 1, enabled: true, version: 1 },
+    { id: "ce3", text: "Hotfixes are capped at L2", when: { cls: "hotfix" }, max: 2, enabled: true, version: 1 },
+    { id: "ce4", text: "Release confirmation (G6) is capped at L3 on Payments Platform", when: { project: "payments", gate: "G6" }, max: 3, enabled: true, version: 1 },
+    // --- end work2 ---
+  ],
   cells: AG.flatMap((agent, i) => ["payments", "storefront", "risk"].flatMap((project, k) => ["feature", "bug"].map((cls, j) => ({ id: `tc-${agent}-${cls}-${project}`, agent, cls, project, repo: null, level: (i + j + k) % 4, since: NOW - (10 + i) * DAY, cleanRuns: 6 + i * 4 + j * 3, history: [{ at: NOW - (10 + i) * DAY, from: 0, to: 1, by: "p-lead", note: "Initial grant" }], rev: 1, gate: "G5", effective: (i + j + k) % 4, evidence: { runs: 12 + i * 3, cleanRuns: 6 + i * 4, evalScore: 0.9, rework: 0.06, incidents: 0, incidentWos: [] }, meets: { ok: (i + j) % 2 === 0, next: 2, missing: (i + j) % 2 ? ["More clean runs"] : [] }, ceiling: { max: 3, ids: [] }, projection: 2, pending: null })))),
   proposals: [],
 });

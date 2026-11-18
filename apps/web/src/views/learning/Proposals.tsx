@@ -5,7 +5,7 @@ import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useLearningFindings, useLearningSettings, useSkills } from "../../api/queries";
 import { useMe } from "../../api/queries";
-import { Avatar, Btn, Chip, Segmented } from "../../ui/primitives";
+import { Avatar, Btn, Chip } from "../../ui/primitives";
 import { Card } from "../../ui/cr";
 import { useLn } from "./kit";
 import { Icon } from "../../ui/Icon";
@@ -14,7 +14,7 @@ import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
 import { dec } from "../mcp/kit";
 import { AcceptDialog, VerifyDialog } from "./Dialogs";
-import { ChangeView, ChipList, KINDS, STATUS, sigName } from "./kit";
+import { KINDS, STATUS, useChangeLines } from "./kit";
 
 const scopeOf = (lp: LearningProposal): { project: string } | undefined => {
   const p = (lp.change as { project?: unknown } | undefined)?.project;
@@ -22,40 +22,23 @@ const scopeOf = (lp: LearningProposal): { project: string } | undefined => {
 };
 const verifyDue = (lp: LearningProposal): number | null => (lp.appliedAt && lp.windowDays ? lp.appliedAt + lp.windowDays * 86_400_000 : null);
 
-export function ProposalsTab({ proposals, status, setStatus, hi, onFocusFinding, control }: {
-  proposals: LearningProposal[];
-  status: string;
-  setStatus: (s: string) => void;
-  hi: string | null;
-  onFocusFinding: (id: string) => void;
-  control?: React.ReactNode;
-}) {
-  const all = proposals.slice().reverse();
-  const counts: Record<string, number> = { open: 0, accepted: 0, verified: 0, declined: 0 };
-  for (const lp of all) {
-    const k = lp.status === "proposed" ? "open" : lp.status;
-    if (k in counts) counts[k]!++;
-  }
-  const shown = all.filter((lp) => status === "all" || (status === "open" ? lp.status === "proposed" : lp.status === status));
-  const items = [{ id: "all", label: `All (${all.length})` }, { id: "open", label: `Proposed (${counts.open})` }, { id: "accepted", label: `Accepted (${counts.accepted})` }, { id: "verified", label: `Verified (${counts.verified})` }, { id: "declined", label: `Declined (${counts.declined})` }];
+export function ProposalsTab({ proposals, hi }: { proposals: LearningProposal[]; hi: string | null }) {
   return (
     <div className="ln-props stack">
-      {control}
-      <Segmented name="ln-st" items={items} value={status} onChange={setStatus} label="Show proposals" />
-      {shown.length ? (
-        <div className="stack ln-list">{shown.map((lp) => <ProposalCard key={lp.id} lp={lp} hi={hi === lp.id} onFocusFinding={onFocusFinding} />)}</div>
+      {proposals.length ? (
+        <div className="stack ln-list">{proposals.map((lp) => <ProposalCard key={lp.id} lp={lp} hi={hi === lp.id} />)}</div>
       ) : (
         <div className="empty empty-state" id="ln-props-empty">
           <div className="empty-icon" aria-hidden="true"><Icon name="learn" /></div>
-          <div className="empty-title">Nothing here</div>
-          <p>{status === "open" ? "No proposals are waiting. Draft one from a finding." : "No proposals with this status."}</p>
+          <div className="empty-title">No proposals yet</div>
+          <p>Agents propose instruction changes from findings. They appear here for a person to accept or decline.</p>
         </div>
       )}
     </div>
   );
 }
 
-function ProposalCard({ lp, hi, onFocusFinding }: { lp: LearningProposal; hi: boolean; onFocusFinding: (id: string) => void }) {
+function ProposalCard({ lp, hi }: { lp: LearningProposal; hi: boolean }) {
   const ui = useUI();
   const actor = useActors();
   const me = useMe();
@@ -88,8 +71,7 @@ function ProposalCard({ lp, hi, onFocusFinding }: { lp: LearningProposal; hi: bo
   if (lp.kind === "skill" && lp.status !== "proposed" && lp.status !== "declined" && sk) {
     act.push(<a key="s" href="#skills" className="btn btn-sm btn-ghost" id={`ln-open-skill-${lp.id}`} onClick={(e) => { e.preventDefault(); navigate("skills"); }}><Icon name="skill" /><span>{`Open ${sk.name} v${sk.version}`}</span></a>);
   }
-  const m = lp.metric;
-  const lift = lp.verification ? <Chip text={`signals ${lp.verification.baseline ?? "?"} \u2192 ${lp.verification.measured}`} cls="plain ok" /> : <Chip text="eval lift not available" cls="plain idle" />;
+  const lines = useChangeLines(lp);
   return (
     <div id={`ln-prop-${lp.id}`} className={hi ? "is-hi" : ""}>
       <Card title={`${lp.id} \u00b7 ${lp.title}`} hint={`From finding ${lp.finding}`} cls={`ln-card is-${lp.status}`}>
@@ -97,21 +79,9 @@ function ProposalCard({ lp, hi, onFocusFinding }: { lp: LearningProposal; hi: bo
           <div className="row">
             {f?.agent ? <AgentWho id={f.agent} /> : null}
             <Chip text={STATUS[lp.status] ?? lp.status} cls={lp.status === "proposed" ? "warn" : lp.status === "declined" || lp.status === "rolled_back" ? "idle" : "ok"} />
-            <Chip text={(KINDS[lp.kind] ?? { name: lp.kind }).name} cls="plain agent" />
-            {lift}
+            <Chip text="eval lift not available" cls="plain idle" />
           </div>
-          <div className="ln-change"><ChangeView lp={lp} /></div>
-          <dl className="ln-kv">
-            <div><dt>Expected effect</dt><dd>{lp.expected || "\u2013"}</dd></div>
-            {m && lp.windowDays ? <div><dt>Verified when</dt><dd>{`At most ${m.target} ${sigName(m.signal)} signal${m.target === 1 ? "" : "s"} in the ${lp.windowDays} days after it is applied${lp.baseline ? ` (before: ${lp.baseline.count} in ${lp.windowDays} days)` : ""}`}</dd></div> : null}
-            {lp.verification ? <div><dt>Measured</dt><dd>{`${lp.verification.measured} signal${lp.verification.measured === 1 ? "" : "s"}, target at most ${lp.verification.target}`}</dd></div> : null}
-            <div><dt>Owner</dt><dd>{actor(lp.owner).name}</dd></div>
-            <div><dt>From finding</dt><dd>{f ? <button type="button" className="linkish" id={`ln-goto-f-${lp.id}`} onClick={() => onFocusFinding(f.id)}>{`${f.id} ${f.title}`}</button> : lp.finding}</dd></div>
-            {f ? <div><dt>{`Evidence (${f.evidence.length})`}</dt><dd><ChipList ids={f.evidence} max={6} project={f.project} /></dd></div> : null}
-            {lp.status === "accepted" || lp.status === "verified" ? <div><dt>Rollback</dt><dd>{lp.rollback?.summary ?? "\u2013"}</dd></div> : null}
-            {lp.status === "declined" && lp.reason ? <div><dt>Declined because</dt><dd>{lp.reason}</dd></div> : null}
-            {lp.status === "rolled_back" && lp.reason ? <div><dt>Rolled back because</dt><dd>{lp.reason}</dd></div> : null}
-          </dl>
+          <pre className="code diff" style={{ padding: 8 }}>{lines.map((l, i) => <div key={i} className={l[0] === "+" ? "add" : "del"}>{l}</div>)}</pre>
           {act.length || last ? (
             <div className="row">
               {act}
