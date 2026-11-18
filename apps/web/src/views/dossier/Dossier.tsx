@@ -108,7 +108,7 @@ export function Dossier({ id, tab: pathTab }: { id: string; tab: DossierTab }) {
             <div className="cols w21">
               <div className="stack">
                 <BriefPanel wo={wo} />
-                <CriteriaPanel wo={wo} />
+                <CriteriaPanel wo={wo} criteria={rec.criteria} tests={rec.code?.tests} />
                 <PlanPanel wo={wo} />
               </div>
               <Props wo={wo} cat={cat} project={project} />

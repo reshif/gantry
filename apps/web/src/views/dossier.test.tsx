@@ -41,17 +41,19 @@ describe("Work order page", () => {
     expect(document.getElementById("rec-all")).toBeNull();
   });
 
-  it("lists the prototype's Actions menu: Edit title, Change priority, Send back, Park, then a divider and Kill", async () => {
+  it("lists the prototype's Actions menu: Edit title, Change priority, Send back, Redo, Park, then a divider and Kill", async () => {
     await show();
     fireEvent.click(document.getElementById("dz-actions") as HTMLElement);
     const items = (await screen.findAllByRole("menuitem")).map((i) => i.textContent ?? "");
     expect(items[0]).toMatch(/Edit title/);
     expect(items[1]).toMatch(/Change priority/);
     expect(items[2]).toMatch(/Send back/);
-    expect(items[3]).toMatch(/Reassign agent/);
-    expect(items[4]).toMatch(/Park in a bay|Resume/);
+    // Redo is the one addition: a person can re-run the station the work order is at
+    expect(items[3]).toMatch(/^Redo /);
+    expect(items[4]).toMatch(/Reassign agent/);
+    expect(items[5]).toMatch(/Park in a bay|Resume/);
     expect(items[items.length - 1]).toMatch(/Kill work order/);
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(7);
     expect(items.some((t) => /Open conversation|Copy link|Halt repo/.test(t))).toBe(false);
   });
 

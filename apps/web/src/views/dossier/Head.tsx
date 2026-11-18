@@ -36,6 +36,7 @@ function useBar(wo: TWo) {
         { label: "Edit title", icon: "edit", guard: wo.allowed?.can?.["edit"], onClick: () => void ui.open((close) => <EditTitleDialog wo={wo} onClose={close} />) },
         { label: "Change priority", icon: "filter", guard: wo.allowed?.can?.["edit"], onClick: () => void ui.open((close) => <PriorityDialog wo={wo} onClose={close} />) },
         ...item(by("sendback"), "Send back to a station"),
+        ...item(by("redo")),
         ...item(by("reassign")),
         ...item(by("unpark") ?? by("park")),
         { sep: true },

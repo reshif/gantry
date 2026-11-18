@@ -1,5 +1,5 @@
 /** The Document tab's first panels and the Gates and Runs tabs of a work order page (Blueprint prototype: Brief, Acceptance criteria, Plan; Gate decisions; Station runs). */
-import { fmt, type Catalog } from "@gantry/domain";
+import { fmt, type Catalog, type Criterion } from "@gantry/domain";
 import { Btn, Chip, Empty, Panel } from "../../ui/primitives";
 import { useActionSpecs } from "../traveler/Actions";
 import { DataTable, type Col } from "../../ui/SortTable";
@@ -7,6 +7,7 @@ import { useActors } from "../../ui/actors";
 import type { TWo } from "../traveler/model";
 import { ago, minutes, plainName } from "./time";
 import { PromptsPanel } from "./Prompts";
+import { EditBriefBtn } from "./BriefEdit";
 import { useUI } from "../../ui/overlay-context";
 import { Dialog } from "../../ui/Overlay";
 import { RunTimelineView } from "../documents/Timeline";
@@ -20,7 +21,7 @@ export function BriefPanel({ wo }: { wo: TWo }) {
   const b: Record<string, unknown> | undefined = { ...wo.brief };
   const entries = Object.entries(b ?? {}).filter(([k, v]) => k !== "route" && v && (!Array.isArray(v) || v.length));
   return (
-    <Panel title="Brief">
+    <Panel title="Brief" tools={<EditBriefBtn wo={wo} />}>
       {entries.length ? (
         <div className="stack" id="dz-brief">
           {entries.map(([k, v]) => (
@@ -37,20 +38,42 @@ export function BriefPanel({ wo }: { wo: TWo }) {
   );
 }
 
-export function CriteriaPanel({ wo }: { wo: TWo }) {
-  const list = wo.criteria ?? [];
+/** What Verify recorded for a criterion, in the words a person reads: the server says "met", "not met" or "not tested". */
+export const CRITERION: Record<string, { label: string; cls: string }> = {
+  met: { label: "Passed", cls: "ok" }, passing: { label: "Passed", cls: "ok" },
+  "not met": { label: "Failed", cls: "bad" }, failing: { label: "Failed", cls: "bad" },
+  "not tested": { label: "Not tested", cls: "plain" },
+};
+
+/** Acceptance criteria with Verify's verdict for each and the test counts of the record (`criteria` and `tests` come from GET .../record, which carries Verify's report). */
+export function CriteriaPanel({ wo, criteria, tests }: { wo: TWo; criteria?: Criterion[]; tests?: { passed: number; failed: number; added: number } }) {
+  const list = criteria ?? wo.criteria ?? [];
+  const ran = (tests?.passed ?? 0) + (tests?.failed ?? 0);
   return (
     <Panel title="Acceptance criteria" flush>
       {list.length ? (
-        <ul className="list">
-          {list.map((c) => (
-            <li key={c.id}>
-              <span className="mono small">{c.id}</span>
-              <span className="grow">{c.text}</span>
-              <Chip text={c.status} cls={c.status === "passing" || c.status === "met" ? "ok" : c.status === "failing" ? "bad" : "plain"} />
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="list" id="dz-criteria">
+            {list.map((c) => {
+              const st = CRITERION[c.status] ?? { label: c.status, cls: "plain" };
+              return (
+                <li key={c.id}>
+                  <span className="mono small">{c.id}</span>
+                  <div className="grow">
+                    <div>{c.text}</div>
+                    {c.tests?.length ? <div className="small muted mono">{c.tests.map((t) => `${t.name} ${t.result === "pass" ? "passed" : "failed"}`).join(" · ")}</div> : null}
+                  </div>
+                  <Chip text={st.label} cls={st.cls} />
+                </li>
+              );
+            })}
+          </ul>
+          {tests ? (
+            <p className="small muted" id="dz-test-counts" style={{ padding: "8px 12px", margin: 0 }}>
+              {ran ? `${tests.passed} test${tests.passed === 1 ? "" : "s"} passed, ${tests.failed} failed${tests.added ? `, ${tests.added} added` : ""}.` : `No tests were run${tests.added ? ` (${tests.added} added)` : ""}, so criteria that were not tested stay unconfirmed.`}
+            </p>
+          ) : null}
+        </>
       ) : <div className="empty">None recorded yet.</div>}
     </Panel>
   );

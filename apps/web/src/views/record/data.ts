@@ -17,9 +17,21 @@ export interface RecGate {
   openedAt: string | null;
   closedAt: string | null;
   pinned: { flowVersion: number; ruleVersion: number | null; policyVersion: number | null };
-  basis: { checks?: Array<{ name: string; ok: boolean }>; required?: number; riskTags?: string[]; forcedHuman?: boolean };
+  basis: { checks?: Array<{ name: string; ok: boolean }>; required?: number; riskTags?: string[]; forcedHuman?: boolean; review?: ReviewVerdict | null };
   votes: Array<{ by: string; vote: string; comment: string; at: string | null; via: string; role: string | null }>;
   decision: { decision: string; decided_by: string | null; rule: string | null; trust_level: string | null; detail: { mode?: string; reason?: string; via?: string; reasonCode?: string; samplingReason?: string } | null; at: string } | null;
+}
+/** What the Review agent recorded (data.review on the work order): its verdict, the per-criterion result and its findings. Gantry only relays it. */
+export interface ReviewVerdict {
+  verdict: "approve" | "changes_requested" | "none";
+  reported?: string;
+  criteria: Array<{ criterion: string; result: "pass" | "fail" | "untested"; evidence: string }>;
+  findings: Array<{ severity: string; file: string; line: number | null; issue: string; fix: string }>;
+  notes?: string;
+  sendBackTo?: string | null;
+  description?: { title: string | null; body: string } | null;
+  headSha?: string | null;
+  at?: number;
 }
 export interface RecPr {
   number: number;
@@ -65,6 +77,8 @@ export interface RecordData {
   criteria: Criterion[];
   journey: HistoryEntry[];
   gates: RecGate[];
+  /** The Review agent's verdict, or null before Review has run. */
+  review?: ReviewVerdict | null;
   sendbacks: Sendback[];
   bayStays: Array<{ bay: string; reason: string; by: string | null; from: string | null; to: string | null }>;
   attempts: Array<{ id: string; station: string; visit: number; fencing: number; state: string; outcome: string | null; startedAt: string | null; endedAt: string | null; agent: string | null }>;

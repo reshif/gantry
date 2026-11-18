@@ -10,7 +10,7 @@ import { useCatalog } from "../projects/kit";
 import { useProjectRepos } from "../floor/kit";
 import { ReclassifyDialog } from "../work-orders/intake";
 import { ApproveGateDialog, RejectGateDialog } from "../record/GateDialogs";
-import { ParkDialog, ReassignDialog, SendBackDialog } from "./Dialogs";
+import { ParkDialog, ReassignDialog, RedoDialog, SendBackDialog } from "./Dialogs";
 import { bayLabel, dec, isClosed, no, ok, stName, type TDecision, type TWo } from "./model";
 
 /** One action the viewer may take on a work order. `group` says where the dossier toolbar puts it; the drawer lists them in two rows. */
@@ -177,6 +177,15 @@ export function useActionSpecs(wo: TWo, page = false): ActionSpec[] | null {
       guard: closed ? no(closedWhy) : stop ? no(stopWhy) : wo.bay ? no(`Return it from ${bayLabel(cat, wo.bay)} first.`) : first ? no("Already at the first station on its route.") : dec(wo, "sendback"),
       group: "move",
       onClick: () => void ui.open((close) => <SendBackDialog woId={wo.id} onClose={close} />),
+    },
+    {
+      key: "redo",
+      label: `Redo ${stName(cat, stationId)}`,
+      icon: "refresh",
+      id: "trv-redo",
+      guard: closed ? no(closedWhy) : stop ? no(stopWhy) : wo.bay ? no(`Return it from ${bayLabel(cat, wo.bay)} first.`) : dec(wo, "sendback"),
+      group: "move",
+      onClick: () => void ui.open((close) => <RedoDialog woId={wo.id} onClose={close} />),
     },
     { key: "reassign", label: "Reassign agent", icon: "swap", id: "trv-reassign", guard: closed ? no(closedWhy) : wo.bay ? no("Nobody staffs work in a bay.") : dec(wo, "reassign"), group: "inline", onClick: () => void ui.open((close) => <ReassignDialog woId={wo.id} onClose={close} />) },
     {

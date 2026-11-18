@@ -17,4 +17,6 @@ export const commands = {
   haltProject: ops.haltProject,
   attachSkill: ops.attachSkill,
   setSkillProjects: ops.setSkillProjects,
+  editBrief: ops.editBrief,
+  sendBack: ops.sendBack,
 };

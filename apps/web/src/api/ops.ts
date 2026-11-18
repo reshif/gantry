@@ -111,6 +111,9 @@ export const ops = {
     run(["workOrders", "conversations"], post(api(`work-orders/${enc(woId)}/messages`), { ...q, kind: "followup" })),
   reclassify: (woId: string, cls: string, reason: string, v?: Versioned) =>
     run(["workOrders"], post(api(`work-orders/${enc(woId)}/reclassify`), { cls, reason }, opts(v))),
+  /** A person edits the brief before confirming it (PATCH .../brief). `v.ifMatch` is the work order's version from the last read; a different version is a 409. */
+  editBrief: (woId: string, b: { scopeIn?: string[]; scopeOut?: string[]; children?: string[]; reason?: string }, v?: Versioned) =>
+    run(["workOrders"], patch(api(`work-orders/${enc(woId)}/brief`), b, opts(v))),
   confirmBrief: (woId: string, via?: Via, v?: Versioned) => run(["workOrders"], post(api(`work-orders/${enc(woId)}/confirm-brief`), { via }, opts(v))),
   decline: (woId: string, reason: string, via?: Via, v?: Versioned) =>
     run(["workOrders"], post(api(`work-orders/${enc(woId)}/decline`), { reason, via }, opts(v))),

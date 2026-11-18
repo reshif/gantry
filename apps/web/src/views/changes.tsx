@@ -10,6 +10,8 @@ import { useActors } from "../ui/actors";
 import { splitQuery, useHashQuery } from "./dossier/hashQuery";
 import { Loading } from "../ui/async";
 import { ChangesIndex } from "./changes/Index";
+import { FileDiff, whyNoDiff } from "./changes/Diff";
+import { useWoDiff, type DiffFile } from "../api/queries";
 import { useChangesRead, useRecordData, sum, type RecFile } from "./record/data";
 
 export default function ChangesView() {
@@ -19,15 +21,22 @@ export default function ChangesView() {
   const ch = useChangesRead(id || null).data;
   const [fileQ, setFile] = useHashQuery("file");
   const actor = useActors();
-  const files: RecFile[] = useMemo(() => {
+  const diffQ = useWoDiff(id || null);
+  const diff = diffQ.data;
+  /** One row per file. The diff read has one entry per path across all commits (the record lists a path once per commit); files only the plan or the record knows are kept, with the reason they have no lines. */
+  const files: Array<RecFile & { df?: DiffFile }> = useMemo(() => {
     if (!d.wo || !d.rec) return [];
     const planFiles = (d.wo.files ?? []) as RecFile[];
-    const real = ch?.files ?? d.rec.code?.files ?? [];
     const byPath = new Map(planFiles.map((f) => [f.path, f]));
-    const out: RecFile[] = real.map((f) => ({ ...(byPath.get(f.path) ?? {}), ...f }) as RecFile);
-    for (const f of planFiles) if (!out.some((x) => x.path === f.path)) out.push(f);
+    const out: Array<RecFile & { df?: DiffFile }> = [];
+    const put = (f: RecFile, df?: DiffFile) => { if (!out.some((x) => x.path === f.path)) out.push({ ...(byPath.get(f.path) ?? {}), ...f, ...(df ? { df } : {}) }); };
+    for (const f of diff?.files ?? []) put({ path: f.path, status: f.status, plus: f.plus, minus: f.minus }, f);
+    const recorded = ch?.files ?? d.rec.code?.files ?? [];
+    // the record lists a path once per commit; fold repeats so a file is one row
+    for (const f of recorded) { if (!out.some((x) => x.path === f.path)) put(recorded.filter((x) => x.path === f.path).reduce((a, x) => ({ ...a, plus: a.plus + x.plus, minus: a.minus + x.minus }), { ...f, plus: 0, minus: 0 })); }
+    for (const f of planFiles) put(f);
     return out;
-  }, [ch, d.wo, d.rec]);
+  }, [ch, diff, d.wo, d.rec]);
   if (!id) return <ChangesIndex />;
   if (d.loading) return <div className="view rec-view"><Loading id="chg-loading" label="the changes" /></div>;
   if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
@@ -58,8 +67,8 @@ export default function ChangesView() {
       />
       <StatRow id="chg-stats">
         <Stat label="Files" value={String(files.length)} />
-        <Stat label="Added" value={`+${sum(files, "plus")}`} tone="done" />
-        <Stat label="Removed" value={`−${sum(files, "minus")}`} tone="block" />
+        <Stat label="Added" value={`+${sum(files, "plus")}`} tone="done" sub={files.some((f) => f.df?.approximate) ? "approximate" : undefined} />
+        <Stat label="Removed" value={`−${sum(files, "minus")}`} tone="block" sub={files.some((f) => f.df?.approximate) ? "approximate" : undefined} />
         <Stat label="Tests passed" value={String(rec.code.tests.passed)} sub={`${rec.code.tests.added} added`} tone="info" />
         <Stat label="PR" value={pr ? `#${pr.number}` : "—"} sub={pr ? `${pr.state} · ${wo.pr ? wo.pr.checks : "no checks"}` : "none"} />
       </StatRow>
@@ -71,7 +80,8 @@ export default function ChangesView() {
                 <li key={f.path} style={f.path === sel?.path ? { background: "var(--accent-soft)" } : undefined}>
                   <a className="pri trunc grow mono small" href={`${hashFor("changes", wo.id, wo.project)}?file=${encodeURIComponent(f.path)}`} aria-current={f.path === sel?.path ? "true" : undefined} title={f.path} onClick={(e) => { e.preventDefault(); setFile(f.path); }}>{f.path}</a>
                   <Chip text={f.status} cls={f.status === "added" ? "ok" : "plain"} />
-                  <span className="num small">{`+${f.plus}/−${f.minus}`}</span>
+                  {f.df?.approximate ? <Chip text="approx." cls="warn" /> : null}
+                  <span className="num small">{`${f.df?.approximate ? "≈ " : ""}+${f.plus}/−${f.minus}`}</span>
                 </li>
               ))}
             </ul>
@@ -79,11 +89,15 @@ export default function ChangesView() {
         </Panel>
         <div className="stack">
           <Panel title={sel ? sel.path : "Diff"} flush tools={sel ? <><Chip text={sel.protected ? "protected path" : "normal path"} cls={sel.protected ? "warn" : "plain"} />{sel.step ? <Chip text={sel.step} cls="plain" /> : null}</> : undefined}>
-            {sel?.preview?.length ? (
+            {sel?.df && diff ? (
+              <FileDiff file={sel.df} diff={diff} commitMessage={(sha) => commits.find((c) => c.sha === sha)?.message ?? ""} />
+            ) : sel?.preview?.length ? (
               <div className="diff pre" id="chg-diff" style={{ padding: 0 }}>
                 {sel.preview.map((l, i) => <div key={i} className={l.t === "+" ? "a" : l.t === "-" ? "d" : undefined}>{`${l.t} ${l.s}`}</div>)}
               </div>
-            ) : <div className="empty">{sel ? "No preview for this file." : "Select a file."}</div>}
+            ) : sel ? (
+              <div className="empty" id="chg-nodiff">{diffQ.isPending ? "Loading the diff…" : whyNoDiff(diff, diffQ.isError)}</div>
+            ) : <div className="empty">Select a file.</div>}
           </Panel>
           <Panel title="Commits and checks" flush>
             <div className="stack">

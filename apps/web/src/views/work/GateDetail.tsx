@@ -6,6 +6,43 @@ import { Chip } from "../../ui/primitives";
 import { Async } from "../../ui/async";
 import { useWoDialogue } from "../documents/api";
 import { ApproversPanel } from "../traveler/Approvers";
+import { useRecordRead, type ReviewVerdict } from "../record/data";
+
+const VERDICT: Record<ReviewVerdict["verdict"], { label: string; cls: string }> = {
+  approve: { label: "Review approves", cls: "ok" },
+  changes_requested: { label: "Review asked for changes", cls: "bad" },
+  none: { label: "Review gave no verdict", cls: "warn" },
+};
+const RESULT: Record<string, { label: string; cls: string }> = { pass: { label: "Met", cls: "ok" }, fail: { label: "Not met", cls: "bad" }, untested: { label: "Not tested", cls: "plain" } };
+const SEV = (s: string): string => (s === "critical" || s === "major" || s === "high" ? "bad" : s === "minor" || s === "low" ? "plain" : "warn");
+
+/** The Review agent's verdict on the waiting gate: what it concluded, each acceptance criterion's result with its evidence, and the findings with file and line. Shown on the gate Review feeds (G5) and on any gate whose opening carries it. */
+function ReviewCard({ woId, gate }: { woId: string; gate: string }) {
+  const rec = useRecordRead(woId);
+  if (rec.isError) return <p className="small muted" id="gd-review-err" role="alert">Couldn't load the Review verdict, so it is not shown here.</p>;
+  const r = rec.data;
+  if (!r) return null;
+  const open = [...(r.gates ?? [])].reverse().find((g) => g.gate === gate && g.status === "open");
+  const v = open?.basis?.review ?? (gate === "G5" ? r.review : null) ?? null;
+  if (!v) return null;
+  const t = VERDICT[v.verdict] ?? VERDICT.none;
+  return (
+    <section className="gd-notes" id={`gd-review-${woId}`} aria-label="Review verdict">
+      <h3 className="sub-h">Review agent's verdict</h3>
+      <p><Chip text={t.label} cls={t.cls} />{v.notes ? <span className="small muted">{` ${v.notes}`}</span> : null}</p>
+      {v.criteria?.length ? (
+        <ul className="list" id="gd-review-criteria" aria-label="Criteria as Review judged them">
+          {v.criteria.map((c, i) => <li key={i}><Chip text={(RESULT[c.result] ?? RESULT.untested!).label} cls={(RESULT[c.result] ?? RESULT.untested!).cls} /><span className="grow">{c.criterion}{c.evidence ? <span className="small muted">{` ${c.evidence}`}</span> : null}</span></li>)}
+        </ul>
+      ) : <p className="small muted">Review did not judge the criteria one by one.</p>}
+      {v.findings?.length ? (
+        <ul className="list" id="gd-review-findings" aria-label="Review findings">
+          {v.findings.map((f, i) => <li key={i}><Chip text={f.severity} cls={SEV(f.severity)} /><span className="grow">{f.issue}<span className="small muted mono">{f.file ? ` ${f.file}${f.line ? `:${f.line}` : ""}` : ""}</span>{f.fix ? <span className="small muted">{` Fix: ${f.fix}`}</span> : null}</span></li>)}
+        </ul>
+      ) : <p className="small muted" id="gd-review-nofindings">No findings.</p>}
+    </section>
+  );
+}
 
 function OpenNotes({ woId }: { woId: string }) {
   const q = useWoDialogue(woId);
@@ -39,6 +76,7 @@ export function GateDetail({ woId, gate, project, onNavigate }: { woId: string; 
   return (
     <div className="stack gd" id={`gd-${woId}-${gate}`}>
       <ApproversPanel woId={woId} gate={gate} project={project} {...(onNavigate ? { onNavigate } : {})} />
+      <ReviewCard woId={woId} gate={gate} />
       <OpenNotes woId={woId} />
     </div>
   );

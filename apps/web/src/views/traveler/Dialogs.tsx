@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ops } from "../../api/ops";
 import { useAgents } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
-import { Field, LockNote, Select } from "../../ui/primitives";
+import { Field, LockNote, Select, TextArea } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { useCatalog } from "../projects/kit";
 import { navigate } from "../../lib/router";
@@ -69,6 +69,53 @@ export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () =>
         </div>
       }
       actions={[{ label: "Cancel" }, { label: "Save", kind: "primary", submit: true, id: "sb-submit", guard: d, onClick: () => void submit() }]}
+    />
+  );
+}
+
+/** Redo the station the work order is at: the same send-back route with the current station as the target. The station runs again from a clean attempt and its agent reads the note. */
+export function RedoDialog({ woId, onClose }: { woId: string; onClose: () => void }) {
+  const ui = useUI();
+  const cat = useCatalog();
+  const wo = useTravelerWo(woId).data;
+  const [note, setNote] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!wo || !cat) return null;
+  const sid = cat.stations[wo.station]?.id ?? "";
+  const name = stName(cat, sid);
+  const d: TDecision = dec(wo, "sendback");
+  const submit = async () => {
+    if (busy) return;
+    if (note.trim().length < 3) {
+      setErr("Say what the station should do differently (at least 3 characters).");
+      return;
+    }
+    setBusy(true);
+    const r = await ops.sendBack(wo.id, sid, note.trim(), undefined, { ifMatch: wo.version });
+    setBusy(false);
+    if (!r.ok) {
+      setErr(r.msg);
+      return;
+    }
+    ui.toast(r.msg, "ok");
+    onClose();
+  };
+  return (
+    <Dialog
+      title={`Redo ${name}`}
+      sub={`${name} runs again from a clean attempt. Its agent reads your note; what it wrote before stays on record.`}
+      onClose={onClose}
+      body={
+        <div className="form-grid">
+          <LockNote decision={d} what="Redoing a station" />
+          <Field label="What should it do differently? (required)" htmlFor="redo-note">
+            <TextArea id="redo-note" rows={3} placeholder="What needs to change?" value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+          <Err text={err} />
+        </div>
+      }
+      actions={[{ label: "Cancel" }, { label: `Redo ${name}`, kind: "primary", submit: true, id: "redo-submit", guard: d, onClick: () => void submit() }]}
     />
   );
 }
