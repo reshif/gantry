@@ -321,6 +321,39 @@ describe("intake: classification, conversation and brief", () => {
     expect(wo.conv.messages.at(-1)!.text).toMatch(/brief is ready/);
   });
 
+  it("keeps the class a person chose, even when the keyword guess is confident and different (G-01)", () => {
+    const payments = S.projects.find((p) => p.id === "payments")!;
+    const mk = (title: string, requestedCls: string | null) => buildWorkOrder(S.catalog, payments, { id: "WO-9100", project: "payments", repo: "payments-api", title, requestedCls, requestedBy: "p-tomas", createdAt: NOW });
+    expect(classify(S.catalog, "Fix the rounding bug", null).cls).toBe("bug");
+    const chosen = mk("Fix the rounding bug", "chore");
+    expect(chosen.cls).toBe("chore");
+    expect(chosen.clsSuggested).toBe("bug");
+    expect(chosen.clsConfidence).toBe(1);
+    expect(chosen.clsRationale).toMatch(/Chosen by the submitter/);
+    expect(chosen.clsRationale).toMatch(/rule-based keyword match/i);
+    // No choice: the keyword match is only a labelled first guess.
+    const guess = mk("Fix the rounding bug", null);
+    expect(guess.cls).toBe("bug");
+    expect(guess.clsRationale).toMatch(/^Rule-based keyword match \(no agent read the request\)/);
+  });
+
+  it("writes no agent voice and no invented epic split: scripted notes are Gantry's, children come from an agent or a person", () => {
+    const payments = S.projects.find((p) => p.id === "payments")!;
+    let wo = buildWorkOrder(S.catalog, payments, { id: "WO-9101", project: "payments", repo: "payments-api", title: "Three report jobs for the billing team", requestedCls: "epic", requestedBy: "p-tomas", createdAt: NOW });
+    expect(wo.cls).toBe("epic");
+    expect(wo.conv.questions.some((q) => q.id === "children" || /data model|child work orders/i.test(q.text))).toBe(false);
+    expect(wo.conv.messages.every((m) => m.from === "system" && m.scripted === true)).toBe(true);
+    expect(wo.conv.messages.some((m) => /Intake Clerk|I read this/.test(m.text))).toBe(false);
+    expect(wo.conv.awaiting).toBe("submitter");
+    let t = NOW;
+    while (!wo.conv.done) {
+      const r = answerConversation(S.catalog, payments, wo, wo.conv.questions[wo.conv.qi]!.chips[0]!, "p-tomas", (t += 60000));
+      wo = { ...wo, conv: r.conv, brief: r.brief };
+      expect(wo.brief.children).toEqual([]);
+    }
+    expect(wo.conv.awaiting).toBe("approver");
+  });
+
   it("classifies a regulated project's work as high risk and honours requested class below 0.8 confidence", () => {
     const risk = S.projects.find((p) => p.id === "risk")!;
     const wo = buildWorkOrder(S.catalog, risk, { id: "WO-9003", project: "risk", repo: "risk-models", title: "something vague", requestedCls: "docs", requestedBy: "p-priya", createdAt: NOW });

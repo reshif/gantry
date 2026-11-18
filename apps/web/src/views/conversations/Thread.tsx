@@ -146,7 +146,7 @@ export function ConversationThread({ woId, idPrefix = "conv", head, noActions, n
     ui.toast(r.msg, r.ok ? "ok" : "error");
   };
   const ovr = wo.clsOverridden;
-  const awaitNote = conv.awaiting && conv.awaiting !== "submitter" && intake;
+  const awaitNote = (conv.awaiting === "slack" || conv.awaiting === "api") && !conv.done && intake;
   return (
     <div className="conv-thread">
       {head ? (
@@ -215,16 +215,18 @@ export function ConversationThread({ woId, idPrefix = "conv", head, noActions, n
       <ol className="conv-msgs" id={`${pre}msgs-${wo.id}`} aria-label="Messages" tabIndex={0} ref={list}>
         {conv.messages.map((m, i) => {
           const a = actor(m.from);
-          const isAgent = a.kind === "agent" || m.from.startsWith("ag-");
-          const sys = m.from === "ag-classifier";
+          const scripted = m.scripted === true || m.from === "system";
+          const isAgent = !scripted && (a.kind === "agent" || m.from.startsWith("ag-"));
+          const sys = scripted || m.from === "ag-classifier";
           const cur = showChips && i === lastQ && m.qid === curQ?.id;
           return (
             <li key={`${m.at}-${i}`} className={`conv-msg${isAgent ? " is-agent" : " is-person"}${m.from === mine ? " is-mine" : ""}${sys ? " is-sys" : ""}${cur ? " is-current" : ""}`}>
               <div className="conv-msg-av"><Avatar id={m.from} size="sm" /></div>
               <div className="conv-bubble">
                 <div className="conv-meta">
-                  <strong>{m.from === mine ? "You" : a.name.replace(" (agent)", "")}</strong>
+                  <strong>{m.from === mine ? "You" : scripted ? "Gantry" : a.name.replace(" (agent)", "")}</strong>
                   {isAgent ? <span className="conv-tag mono">agent</span> : null}
+                  {scripted ? <span className="conv-tag mono">rule-based</span> : null}
                   <span className="mono muted">{`${fmt.ist(m.at)} IST`}</span>
                 </div>
                 <div className="conv-text">{m.text}</div>

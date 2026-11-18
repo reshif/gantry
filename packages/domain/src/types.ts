@@ -563,6 +563,8 @@ export interface ConvMessage {
   text: string;
   qid?: string;
   chips?: string[];
+  /** Written by Gantry's scripted questionnaire, not by an agent. */
+  scripted?: boolean;
 }
 export interface ConvQuestion {
   id: string;

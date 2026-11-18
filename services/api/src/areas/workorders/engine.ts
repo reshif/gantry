@@ -9,7 +9,7 @@
  * supersedes every older attempt inside its scope without the stop path having to touch attempts.
  */
 import {
-  gateAfter, gateDef, gateKind, gateProgress, requiredFor, nextStationId, riskTagsOf, route, routeGates, stationDef,
+  checkMatches, gateAfter, gateDef, gateKind, gateProgress, requiredFor, nextStationId, riskTagsOf, route, routeGates, stationDef,
   type Catalog, type Person, type Project, type WorkOrder,
 } from "@gantry/domain";
 import { appendEvent, cancel, enqueue, schedule, type EventCategory, type EventChannel, type Tx } from "@gantry/db";
@@ -362,8 +362,11 @@ async function splitEpic(fx: Fx, w: Wo, project: Project, by: string): Promise<v
   const { newWoId, createWorkOrder } = await import("./create.js");
   for (const name of names) {
     const id = await newWoId(fx.tx);
+    // The Plan agent writes each child as "Title: one-line goal"; the title and the goal are its words, not Gantry's.
+    const [t, ...g] = name.split(":");
+    const goal = g.join(":").trim();
     await createWorkOrder(fx, {
-      id, project: project.id, repo: w.repo ?? "", title: `${w.title}: ${name}`, description: `Child of ${w.id}. ${name} part of the epic.`, forceCls: "feature", requestedBy: w.submitter ?? by, source: "epic", parent: w.id, childOf: { by, parent: w.id },
+      id, project: project.id, repo: w.repo ?? "", title: `${w.title}: ${(g.length ? t! : name).trim()}`, description: `Child of ${w.id} (${w.title}).${goal ? ` ${goal}` : g.length ? "" : ` ${name}`}`, forceCls: "feature", requestedBy: w.submitter ?? by, source: "epic", parent: w.id, childOf: { by, parent: w.id },
     });
     ids.push(id);
   }
@@ -384,6 +387,12 @@ export async function advance(fx: Fx, w: Wo, by: string, project?: Project): Pro
   const sid = stationIdOf(fx.catalog, w);
   const idx = fx.catalog.stations.findIndex((s) => s.id === sid);
   if (w.cls === "epic" && sid === "plan" && Array.isArray(w.data.brief?.children) && w.data.brief.children.length && !w.data.split) return splitEpic(fx, w, p, by);
+  // An epic with no split is never silently built as one work order: Gantry asks a person (who may add children to the brief or send it back to the Plan agent).
+  if (w.cls === "epic" && sid === "plan" && !w.data.split && !(Array.isArray(w.data.brief?.children) && w.data.brief.children.length)) {
+    const { parkInto } = await import("./intake.js");
+    note(w, fx, "system", "The plan did not split this epic into child work orders.");
+    return parkInto(fx, w, "person", "This epic has no split into child work orders. Add children to the brief, or return it to Plan so the Plan agent proposes one.");
+  }
   const next = nextStationId(fx.catalog, p, { cls: w.cls, station: idx });
   if (!next) {
     const g6 = routeGates(fx.catalog, p, w.cls).includes("G6");
@@ -422,7 +431,7 @@ async function ciEvidence(fx: Fx, w: Wo, headSha: string | null): Promise<{ chec
   const ids: Array<number | string> = [];
   let unsettled = false;
   for (const name of names) {
-    const r = rows.find((x) => x.name === name);
+    const r = rows.find((x) => x.name === name) ?? rows.find((x) => checkMatches(name, x.name));
     if (!r || r.status !== "completed") {
       unsettled = true;
       continue;
@@ -465,7 +474,7 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
   let evidence: GateEvidence = given ? { source: o.evidence ?? "observed" } : { source: "none" };
   if (!given && (kind === "auto" || kind === "mixed") && gateId === "G1f") {
     // Feasibility: judged from what the system holds, a research document a station wrote and no blocking question still open, not from the agent's claim.
-    const note_ = (await fx.tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and station = 'research' and doc is not null limit 1`, [fx.orgId, w.id])).rowCount;
+    const note_ = (await fx.tx.query(`select 1 from artefacts where org_id = $1 and wo_id = $2 and station = 'research' and doc is not null and author_kind <> 'system' limit 1`, [fx.orgId, w.id])).rowCount;
     const blocking = (await fx.tx.query(`select 1 from wo_questions where org_id = $1 and wo_id = $2 and blocking and status = 'open' limit 1`, [fx.orgId, w.id])).rowCount;
     checks = [{ name: "Research note attached", ok: !!note_ }, { name: "No blocking unknowns", ok: !blocking }];
     evidence = { source: "observed" };

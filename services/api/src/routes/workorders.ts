@@ -18,7 +18,7 @@ import { z } from "zod";
 import { command, decide, policyState, refuse, type CommandSpec } from "../core/index.js";
 import { loadFlow, stateWithPinned } from "../areas/workorders/model.js";
 import { actionForGate, approveGate, parseGateId, rejectGate, requireGatePin } from "../areas/workorders/gates.js";
-import { addFollowup, decline, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
+import { addFollowup, decline, editBrief, postMessage, reclassify, submitWO } from "../areas/workorders/intake.js";
 import { dryRunMove, moveWO, park, reassign, retry, sendBack, setRecordSummary, unpark } from "../areas/workorders/moves.js";
 import { setWoCap } from "../areas/workorders/budget.js";
 import { keyCreator } from "../areas/apikeys/store.js";
@@ -66,6 +66,12 @@ const SubmitBody = z.looseObject({
   via: Via,
 });
 const MessageBody = z.looseObject({ text: z.string().min(1).max(8000), kind: z.enum(["answer", "question", "followup"]).default("answer"), chips: z.array(z.string().max(200)).max(3).optional(), mode: z.string().max(40).optional(), via: Via });
+const BriefEditBody = z.looseObject({
+  children: z.array(z.string().trim().min(1).max(300)).max(12).optional(),
+  scopeIn: z.array(z.string().trim().min(1).max(300)).max(12).optional(),
+  scopeOut: z.array(z.string().trim().min(1).max(300)).max(12).optional(),
+  reason: z.string().trim().max(500).optional(),
+});
 const ReclassifyBody = z.looseObject({ cls: z.string().min(1).max(60), reason: Reason });
 const ReasonBody = z.looseObject({ reason: Reason.default(""), via: Via });
 const MoveBody = z.looseObject({ target: z.string().min(1).max(100), reason: Reason.optional(), dry_run: z.boolean().optional(), via: Via });
@@ -314,6 +320,15 @@ export const workOrderRoutes: FastifyPluginAsync = async (app) => {
     const own = b.kind !== "question" && req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
     const action = b.kind === "question" ? "wo.park" : own ? null : "wo.answer";
     return command(req, spec(id, action, s), (tx, a) => (b.kind === "followup" ? addFollowup(tx, a, id, { text: b.text, ...(b.chips ? { chips: b.chips } : {}), ...(b.mode ? { mode: b.mode } : {}) }) : postMessage(tx, a, id, { text: b.text, kind: b.kind })));
+  });
+
+  /** A person edits the brief's scope and an epic's child work orders before confirming it. If-Match is the work order's version; the edit is audited with before and after. */
+  app.patch("/api/v1/work-orders/:id/brief", async (req) => {
+    const { id } = Id.parse(req.params);
+    const b = BriefEditBody.parse(req.body ?? {});
+    const s = await scopeOf(req, id);
+    const own = req.gx.principal?.kind === "person" && s.requestedBy === req.gx.principal.id;
+    return command(req, spec(id, own ? null : "wo.answer", s), (tx, a) => editBrief(tx, a, id, { ...(b.children ? { children: b.children } : {}), ...(b.scopeIn ? { scopeIn: b.scopeIn } : {}), ...(b.scopeOut ? { scopeOut: b.scopeOut } : {}), ...(b.reason ? { reason: b.reason } : {}) }));
   });
 
   app.post("/api/v1/work-orders/:id/reclassify", async (req) => {

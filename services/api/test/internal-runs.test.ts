@@ -28,7 +28,7 @@ d("internal runs API", () => {
 
   interface Made { runId: string; attemptId: string; woId: string; token: string; fencing: string; project: string }
   /** A work order with a running attempt and a starting run, and its token. */
-  async function makeRun(o: { project?: string; model?: string | null; woData?: object; runData?: object; attemptData?: object; attemptState?: string } = {}): Promise<Made> {
+  async function makeRun(o: { project?: string; model?: string | null; woData?: object; runData?: object; attemptData?: object; attemptState?: string; station?: string } = {}): Promise<Made> {
     const i = ++n;
     const project = o.project ?? "payments";
     const woId = `WO-w3-${i}`;
@@ -36,7 +36,7 @@ d("internal runs API", () => {
     const runId = `run-w3-${i}`;
     const org = t.orgId;
     await q(`insert into work_orders (org_id, id, project_id, title, class, position, state, flow_version, data) values ($1,$2,$3,'Test','feature','build','running',1,$4::jsonb)`, [org, woId, project, JSON.stringify(o.woData ?? {})]);
-    const a = await q(`insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,'build',1,$4,$5::jsonb) returning fencing::text as fencing`, [org, attemptId, woId, o.attemptState ?? "running", JSON.stringify(o.attemptData ?? {})]);
+    const a = await q(`insert into attempts (org_id, id, wo_id, station, visit, state, data) values ($1,$2,$3,$6,1,$4,$5::jsonb) returning fencing::text as fencing`, [org, attemptId, woId, o.attemptState ?? "running", JSON.stringify(o.attemptData ?? {}), o.station ?? "build"]);
     await q(`insert into runs (org_id, id, attempt_id, wo_id, model_id, data) values ($1,$2,$3,$4,$5,$6::jsonb)`, [org, runId, attemptId, woId, o.model === undefined ? "claude-test-1" : o.model, JSON.stringify(o.runData ?? {})]);
     const fencing = a[0].fencing as string;
     const tk = await withTx(t.db.app, (tx) => issueRunToken(tx, runId, attemptId, fencing));
@@ -190,6 +190,12 @@ d("internal runs API", () => {
       expect(ru).toMatchObject({ project_id: "payments", wo_id: r.woId, cached_tokens: "500", cache_write_tokens: "100", latency_ms: 420, price_version: 90, trace_ref: `sha256/${"a".repeat(64)}` });
       const um = (await q(`select * from usage_meter where run_id = $1`, [r.runId]))[0];
       expect(um).toMatchObject({ station: "build", cost_micros: "6525", vendor_id: "w3-anthropic", cache_write_tokens: "100" });
+    });
+    it("a run's model calls carry the run's prompt manifest hash, so the prompt record can say what the agent was given", async () => {
+      const h = "c".repeat(64);
+      const r = await makeRun({ runData: { promptHash: h, promptManifest: { v: 1, kind: "run", hash: h, parts: [{ kind: "repo_context", name: "AGENTS.md", sha256: "d".repeat(64) }] } } });
+      expect((await usage(r, { requestId: "pm-1", traceRef: `sha256/${"b".repeat(64)}` })).statusCode).toBe(200);
+      expect((await q(`select prompt_hash from usage_meter where run_id = $1`, [r.runId]))[0]).toMatchObject({ prompt_hash: h });
     });
     it("the run shows the model that actually answered, not the one pinned when it was prepared", async () => {
       const r = await makeRun();
@@ -570,6 +576,26 @@ d("internal runs API", () => {
       expect((await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: "grt.xx.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })).statusCode).toBe(403);
       await setStop("wo", r.woId, "kill");
       expect((await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: r.token })).statusCode).toBe(409);
+    });
+
+    it("the Python package index is allowed only for stations that may run tests (owner decision 2026-11-18): Verify and Build yes, every other station no", async () => {
+      const hostsFor = async (station: string): Promise<string[]> => {
+        const r = await makeRun({ station });
+        return (await call("POST", `/internal/v1/runs/${r.runId}/egress`, { token: r.token })).json().hosts;
+      };
+      for (const st of ["verify", "build"]) {
+        const h = await hostsFor(st);
+        expect(h, st).toContain("pypi.org");
+        expect(h, st).toContain("files.pythonhosted.org");
+      }
+      for (const st of ["spec", "review", "research", "deploy"]) {
+        const h = await hostsFor(st);
+        expect(h, st).not.toContain("pypi.org");
+        expect(h, st).not.toContain("files.pythonhosted.org");
+        expect(h, st).toContain("github.com");
+      }
+      const v = await hostsFor("verify");
+      for (const x of ["python.org", "astral.sh", "pythonhosted.org", "test.pypi.org"]) expect(v, x).not.toContain(x);
     });
     it("system hosts include integration endpoints", async () => {
       await q(`insert into integration_types (org_id, id, name) values ($1,'w3-hook','Hook') on conflict do nothing`, [t.orgId]);

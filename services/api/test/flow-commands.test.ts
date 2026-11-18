@@ -244,4 +244,25 @@ d("work order commands: denied and stale for every one", () => {
     }
     expect((await w.get(id)).state).toBe("done");
   });
+
+  it("epics: a plan with no split never builds as one work order; it waits for a person, whose children split it with 'Title: goal' parsed into child title and description", async () => {
+    const id = (await w.submit("p-tomas", { title: "Epic: report jobs" })).body.id as string;
+    await t.db.admin.query(`update work_orders set class = 'epic' where id = $1`, [id]);
+    await w.answerAll(id);
+    expect((await w.confirm(id)).status).toBe(200);
+    const order = ((await w.call("p-asha", "GET", "/api/v1/catalog")).body.stations as Array<{ id: string }>).map((s) => s.id);
+    await w.walk(id, (x) => order[x.station] === "plan" && x.state === "running");
+    expect((await w.apply((await w.liveAttempt(id))!, { status: "succeeded", summary: "Planned", output: { children: [] } })).applied).toBe(true);
+    const held = await w.walk(id, (x) => x.state === "parked");
+    expect(held.children.length).toBe(0);
+    expect((await w.q(`select position from work_orders where id = $1`, [id]))[0].position).toBe("person");
+    const wo = await w.get(id);
+    const r = await w.call("p-tomas", "PATCH", `/api/v1/work-orders/${id}/brief`, { children: ["Interfaces report: list interfaces by location"] }, w.ifm(wo.version));
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const split = await w.walk(id, (x) => x.children.length === 1);
+    expect(split.state).toBe("waiting");
+    const kid = (await w.q(`select title, data from work_orders where parent_id = $1`, [id]))[0];
+    expect(kid.title).toBe("Epic: report jobs: Interfaces report");
+    expect(String(kid.data.description)).toContain("list interfaces by location");
+  });
 });

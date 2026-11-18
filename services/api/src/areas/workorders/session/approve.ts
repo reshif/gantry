@@ -25,7 +25,7 @@ export async function confirmAgentBrief(tx: Tx, actor: Actor, woId: string, draf
   w.data.brief = applyBriefDraft(wo.brief, v.draft);
   w.data.briefAuthoredBy = { agent: by.agent, version: by.version, proposal: by.proposal, approvedBy: actor.personId, at: fx.now.getTime() };
   // The agent has asked what it needed: the scripted questionnaire no longer gates the brief.
-  await fx.tx.query(`update conversations set status = 'answered', data = jsonb_set(data, '{done}', 'true'::jsonb), updated_at = now() where org_id = $1 and id = $2`, [fx.orgId, convIdOf(w.id)]);
+  await fx.tx.query(`update conversations set status = 'answered', data = jsonb_set(jsonb_set(data, '{done}', 'true'::jsonb), '{awaiting}', '"approver"'::jsonb), updated_at = now() where org_id = $1 and id = $2`, [fx.orgId, convIdOf(w.id)]);
   note(w, fx, actor.personId ?? actor.id, `Brief drafted by ${by.agent} and approved.`);
   await saveWo(fx.tx, fx.orgId, w);
   return approveInner(fx, actor, w, "G0G1", null, undefined);

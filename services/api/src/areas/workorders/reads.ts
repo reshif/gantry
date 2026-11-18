@@ -1,7 +1,7 @@
 /** Work-order reads (spec 8.4): the list, the traveler, conversations, the floor with replay, the record and its export, and the changes. All rows are mapped to the legacy shapes the web already reads. */
 import { createHash } from "node:crypto";
 import {
-  can, completeness, criteriaFor, effectiveStop, gateDecision, gateProgress, moveCheck, route, routeGates, stateAt, summaryText, woTotals,
+  can, completeness, criteriaFor, type Verification, effectiveStop, gateDecision, gateProgress, moveCheck, route, routeGates, stateAt, summaryText, woTotals,
   type Decision, type EventEntry, type FlowState, type MoveCheck, type Project, type WorkOrder,
 } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
@@ -203,7 +203,7 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
   const totals = woTotals(wo);
   const full = {
     ...wo,
-    criteria: criteriaFor(wo),
+    criteria: criteriaFor(wo, (wo as { verification?: Verification }).verification ?? null),
   } as WorkOrder;
   const summary = { generated: summaryText({ ...st, integrationTypes: [], integrationInstances: [] }, full), written: (row.data.recordSummary as { text: string; by: string; at: number } | undefined) ?? null };
   const record = {

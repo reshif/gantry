@@ -35,14 +35,15 @@ d("station documents and dialogue", () => {
     expect(a2.station).toBe("research");
     // The new run's handoff carries the earlier document and the answered question.
     const { latestDocuments, dialogueHandoff } = await import("../src/areas/workorders/documents.js");
-    expect(await latestDocuments(t.db.app, t.orgId, id, { exceptAttempt: a2.id })).toMatchObject([{ name: "research.md", version: 1, markdown: "# Research\n\nFirst pass." }]);
+    expect(await latestDocuments(t.db.app, t.orgId, id, { exceptAttempt: a2.id })).toMatchObject([{ name: "brief.md", version: 1 }, { name: "research.md", version: 1, markdown: "# Research\n\nFirst pass." }]);
     expect((await dialogueHandoff(t.db.app, t.orgId, id)).questions).toMatchObject([{ question: "Who owns the sync job?", status: "answered", answer: "The platform team owns it.", answeredBy: "p-tomas" }]);
     expect(await doc(id, a2.id, "research", "research.md", "# Research\n\nWith the owner.")).toMatchObject({ version: 2 });
-    const list = (await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/documents`)).body.items as Array<{ id: string; version: number; supersedes: string | null; body?: string }>;
-    expect(list.map((x) => x.version)).toEqual([1, 2]);
-    expect(list[1]!.supersedes).toBe(list[0]!.id);
-    expect(list[0]!.body).toBeUndefined();
-    const one = await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/documents/${list[1]!.id}`);
+    const list = (await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/documents`)).body.items as Array<{ doc: string; id: string; version: number; supersedes: string | null; body?: string }>;
+    const rd = list.filter((x: any) => x.doc === "research.md");
+    expect(rd.map((x) => x.version)).toEqual([1, 2]);
+    expect(rd[1]!.supersedes).toBe(rd[0]!.id);
+    expect(rd[0]!.body).toBeUndefined();
+    const one = await w.call("p-tomas", "GET", `/api/v1/work-orders/${id}/documents/${rd[1]!.id}`);
     expect(one.body).toMatchObject({ doc: "research.md", version: 2, body: "# Research\n\nWith the owner.", authorKind: "agent", authorId: "ag-research" });
     // Someone who cannot see the project gets the same 404 as for the work order itself.
     expect((await w.call("p-fatima", "GET", `/api/v1/work-orders/${id}/documents`)).status).toBe(404);
