@@ -7,8 +7,9 @@ import { DAY, fmt, type Agent, type EvalRun, type Suite } from "@gantry/domain";
 import { useAgents, useAllSuiteRuns, useEvalsFactory, useScorecards, useSkills, useSuites, useVendors } from "../../api/queries";
 import type { AgentRow, AgentVersionRow } from "../agents/kit";
 import { Icon } from "../../ui/Icon";
+import { setUrlParams } from "../urlState";
 
-export type EvalsTab = "agents" | "suites" | "factory";
+export type EvalsTab = "agents" | "suites" | "runs" | "factory";
 export const evalsUi = { tab: "suites" as EvalsTab, agent: null as string | null, suite: null as string | null, run: null as string | null, a: null as string | null, b: null as string | null, runVersion: null as string | null, runModel: null as string | null, repeats: 1 };
 let tick = 0;
 const listeners = new Set<() => void>();
@@ -27,6 +28,7 @@ export function evalsFocus(o: { agent?: string; suite?: string; version?: string
     evalsUi.run = null;
     evalsUi.a = evalsUi.b = null;
     evalsUi.runModel = null;
+    setUrlParams({ tab: null, suite: o.suite, run: null });
   }
   evalsUi.runVersion = o.version ?? null;
   rerender();
@@ -157,4 +159,15 @@ function combine(qs: QLike[]): EvalsData["q"] {
     isError: !!failed,
     refetch: () => Promise.all(qs.filter((x) => x.isError).map((x) => x.refetch())),
   };
+}
+
+/** The prototype's score cell: the score in mono and a green or red bar, green from the given gate up. */
+export function ScoreMeter({ score, gate, label }: { score: number; gate: number; label?: string }) {
+  const p = Math.max(0, Math.min(100, score * 100));
+  return (
+    <span className="row nowrap">
+      <span className="mono">{score.toFixed(2)}</span>
+      <div className={`meter ${score >= gate ? "ok" : "bad"}`} role="meter" aria-label={label ?? "Score"} aria-valuenow={Math.round(p)} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${p}%` }} /></div>
+    </span>
+  );
 }

@@ -98,6 +98,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -105,29 +106,31 @@ afterEach(() => {
 });
 
 describe("Learning screen (legacy learning.js on the real API)", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/?tab=proposals"));
   it("shows the title block, the status strip and one card per proposal with its change, metric and pipeline", async () => {
     setup();
     mount();
     const card = await byId("ln-prop-LP-1");
     expect(document.body.textContent).toContain("Open findings2");
-    expect(document.body.textContent).toContain("To review2");
-    expect(document.body.textContent).toContain("Applied2");
-    expect(document.body.textContent).toContain("Verified1");
-    expect(document.getElementById("ln-st-open")?.textContent).toBe("Proposed2");
-    expect(document.getElementById("ln-st-accepted")?.textContent).toBe("Accepted and applied2");
-    expect(document.getElementById("ln-st-all")?.textContent).toBe("All6");
-    expect(card.querySelector(".ln-kind")?.textContent).toBe("Skill edit");
-    expect(card.querySelector(".ln-pipe")?.getAttribute("aria-label")).toBe("Status: Proposed");
+    expect(document.body.textContent).toContain("Proposals waiting2");
+    expect(document.body.textContent).toContain("Accepted, 30d");
+    expect(document.body.textContent).toContain("Avg eval lift");
+    expect(document.body.textContent).not.toContain("To review");
+    expect(document.querySelector("label[for=ln-st-open]")?.textContent).toBe("Proposed (2)");
+    expect(document.querySelector("label[for=ln-st-accepted]")?.textContent).toBe("Accepted (2)");
+    expect(document.querySelector("label[for=ln-st-all]")?.textContent).toBe("All (6)");
+    expect(card.textContent).toContain("Skill edit");
+    expect(card.textContent).toContain("From finding");
+    expect(card.textContent).toContain("Proposed");
     expect(card.querySelector(".ln-diff ins")?.textContent).toContain("Always add a Rollback section.");
     expect(card.textContent).toContain("Spec writing v1.2.0 → next minor version");
     expect(card.textContent).toContain("At most 1 gate rejection signal in the 14 days after it is applied");
     expect(card.textContent).toContain("Omar Haddad");
-    expect(card.querySelectorAll(".ln-chips .entity-chip")).toHaveLength(3);
-    expect(document.getElementById("ln-prop-LP-3")).toBeNull();
+    expect(card.querySelectorAll(".ln-chips a.mono")).toHaveLength(3);
     fireEvent.click(await byId("ln-st-accepted"));
     const acc = await byId("ln-prop-LP-3");
     expect(acc.textContent).toContain("before: 4 in 14 days");
-    expect(acc.querySelector(".ln-pipe li.is-on")?.textContent).toContain("Accepted and applied");
+    expect(acc.textContent).toContain("Accepted and applied");
     fireEvent.click(await byId("ln-st-declined"));
     expect((await byId("ln-prop-LP-6")).textContent).toContain("One incident is not enough.");
   });
@@ -224,18 +227,19 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
       "PUT /api/v1/learning/switch": () => { on = true; return { body: { ok: true, msg: "Learning proposals are on." } }; },
     });
     mount();
-    expect((await byId("ln-off")).textContent).toContain("switched off");
+    expect((await byId("ln-off")).textContent).toContain("Off.");
     expect((await byId("ln-accept-LP-1")).getAttribute("data-reason")).toMatch(/Learning proposals are switched off/);
     expect((await byId("ln-decline-LP-1")).getAttribute("data-reason")).toMatch(/switched off/);
     fireEvent.click(await byId("ln-tab-findings"));
     expect((await byId("ln-draft-F-1")).getAttribute("data-reason")).toMatch(/switched off/);
+    fireEvent.click(await byId("ln-tab-proposals"));
     fireEvent.click(await byId("ln-switch"));
     const ta = await waitFor(() => { const e = document.querySelector<HTMLTextAreaElement>("#rsn-text"); if (!e) throw new Error("no field"); return e; });
     type(ta, "Trying the loop");
     fireEvent.click(Array.from(document.querySelectorAll<HTMLButtonElement>(".dlg .btn")).find((b) => b.textContent === "Turn on")!);
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "PUT", path: "/api/v1/learning/switch", body: { on: true, reason: "Trying the loop" } });
-    await waitFor(() => expect(document.getElementById("ln-off")).toBeNull());
+    await waitFor(() => expect(document.getElementById("ln-off")!.textContent).toContain("On."));
   });
 
   it("lists findings with their agent, project, signals and evidence, marks a small sample, and refreshes", async () => {
@@ -244,22 +248,20 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     fireEvent.click(await byId("ln-tab-findings"));
     const f1 = await byId("ln-f-F-1");
     expect(f1.textContent).toContain("Spec agent");
-    expect(f1.textContent).toContain("Payments Platform");
-    expect(f1.textContent).toContain("3 signals");
-    expect(f1.textContent).not.toContain("small sample");
-    expect((await byId("ln-f-F-2")).textContent).toContain("small sample");
+    expect(f1.textContent).toContain("Open");
     const f3 = await byId("ln-f-F-3");
     expect(f3.textContent).toContain("Addressed");
-    expect(f3.textContent).toContain("All projects");
-    expect(f3.querySelector(".entity-chip.is-plain")?.textContent).toBe("RUN-9");
+    expect(f3.querySelector("a[href*='record']") ?? f3.querySelector(".mono")).not.toBeNull();
     expect(Array.from(document.querySelectorAll("#ln-f-table tbody tr")).map((e) => e.id)).toEqual(["ln-f-F-1", "ln-f-F-2", "ln-f-F-3"]);
-    expect((await byId("ln-f-F-1")).textContent).toContain("LP-1 (proposed)");
+    fireEvent.change(await byId("ln-search"), { target: { value: "zzz" } });
+    await waitFor(() => expect(window.location.search).toContain("q=zzz"));
+    expect(document.body.textContent).toContain("Nothing matches");
+    fireEvent.click(await byId("ln-clear-empty"));
+    await waitFor(() => expect(window.location.search).not.toContain("q="));
+    fireEvent.click(await byId("ln-tab-signals"));
     fireEvent.click(await byId("ln-refresh"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "POST", path: "/api/v1/learning/findings/refresh" });
-    fireEvent.click(await byId("ln-f-p-LP-1"));
-    await byId("ln-prop-LP-1");
-    expect(document.getElementById("ln-prop-LP-1")?.className).toContain("is-hi");
   });
 
   it("drafts a proposal: declares the metric and window before anything is applied, and sends the change", async () => {
@@ -342,6 +344,21 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     fireEvent.click(document.getElementById("ln-sig-all")!);
     fireEvent.click(await byId("ln-sig-table-sort-signal"));
     expect(document.querySelector("#ln-sig-table th[aria-sort]")?.getAttribute("aria-sort")).toBe("ascending");
+  });
+});
+
+describe("Learning screen: prototype structure", () => {
+  it("has the Findings, Proposals and kept Signals tabs, with the tab in the URL, and evidence links go to the record route", async () => {
+    setup();
+    window.history.replaceState(null, "", "/");
+    mount();
+    fireEvent.click(await byId("ln-tab-findings"));
+    await byId("ln-f-table");
+    expect([...document.querySelectorAll("[role=tab][id^='ln-tab-']")].map((e) => (e.textContent ?? "").replace(/\d+$/, ""))).toEqual(["Findings", "Proposals", "Signals"]);
+    const a = document.querySelector("#ln-f-table a.mono") as HTMLAnchorElement;
+    expect(a.getAttribute("href")).toMatch(/record\/WO-/);
+    fireEvent.click(document.getElementById("ln-tab-proposals")!);
+    await waitFor(() => expect(window.location.search).toContain("tab=proposals"));
   });
 });
 

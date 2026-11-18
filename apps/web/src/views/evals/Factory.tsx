@@ -5,7 +5,8 @@ import { AreaChart, BarChart } from "../../ui/charts";
 import { Empty, Panel } from "../../ui/primitives";
 import { ClassChip, useCatalog } from "../projects/kit";
 import { METRICS, fmtMetric } from "./Scorecards";
-import { MIN_N, agentOf, evalsUi, metricHas, rerender, rowKeys, suiteOf, weekLabels, type EvalsData } from "./kit";
+import { MIN_N, agentOf, evalsUi, metricHas, rowKeys, suiteOf, weekLabels, type EvalsData } from "./kit";
+import { setUrlParams } from "../urlState";
 
 type Extra = EvalExtra & { counts?: { workOrders: number; classified: number; decisions: number; attempts: number } };
 
@@ -24,7 +25,7 @@ function Matrix({ d }: { d: EvalsData }) {
             const c = d.scorecards[a.id];
             const has = !!c && (c.counts?.attempts ?? 0) > 0;
             return (
-              <tr key={a.id} className="row-link" tabIndex={0} id={`ev-mx-${a.id}`} {...rowKeys(() => { evalsUi.tab = "agents"; evalsUi.agent = a.id; rerender(); })}>
+              <tr key={a.id} className="row-link" tabIndex={0} id={`ev-mx-${a.id}`} {...rowKeys(() => { evalsUi.agent = a.id; setUrlParams({ tab: "agents", q: "", sort: "", dir: "", suite: "", run: "" }); })}>
                 <th scope="row">{a.name}{has && (c!.counts?.attempts ?? 0) < MIN_N ? <span className="muted small">{` n=${c!.counts!.attempts}`}</span> : null}</th>
                 {METRICS.map(([k, name, kind, higher], i) => {
                   if (!has || !metricHas(c, k)) return <td key={k} className="num muted">–</td>;

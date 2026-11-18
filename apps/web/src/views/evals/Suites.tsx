@@ -7,12 +7,15 @@ import { fmt, type Suite } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
 import { useActors } from "../../ui/actors";
-import { Avatar, Btn, Chip, Empty, Field, FilterBar, LockNote, Meter, Panel, SearchBox, Select, type Decision } from "../../ui/primitives";
+import { Avatar, Btn, Empty, Field, FilterBar, LockNote, Panel, SearchBox, Select, type Decision } from "../../ui/primitives";
+import { CrIcon } from "../../ui/cr";
 import { DataTable, type SortCol } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useOutcome, useAllRepos } from "../govern/data";
-import { PassMark, ScoreN, agentOf, evalsUi, rerender, suiteOf, versionModel, type EvalsData, type RunRow } from "./kit";
+import { setUrlParams } from "../urlState";
+import { PassMark, ScoreMeter, ScoreN, agentOf, evalsUi, rerender, suiteOf, versionModel, type EvalsData, type RunRow } from "./kit";
+import { LinkedOutcomes } from "./Scorecards";
 
 const asRules = (c: Suite["cases"][number]): Array<{ kind: string; [k: string]: unknown }> => c.rules ?? [];
 const short = (sha?: string | null): string => (sha ? sha.slice(0, 7) : "");
@@ -133,7 +136,7 @@ function SuiteDetail({ d }: { d: EvalsData }) {
           <Field label="Model" htmlFor="ev-run-model"><Select id="ev-run-model" disabled={!perm.allowed} value={evalsUi.runModel} options={modelOpts.length ? modelOpts : [{ value: "", label: "Stub adapter (no model)" }]} onChange={(v) => { evalsUi.runModel = v; rerender(); }} /></Field>
           <Field label="Each task" htmlFor="ev-run-repeats"><Select id="ev-run-repeats" disabled={!perm.allowed} value={String(evalsUi.repeats)} options={[1, 2, 3, 5].map((n) => ({ value: String(n), label: n === 1 ? "once (smoke set)" : `${n} times` }))} onChange={(v) => { evalsUi.repeats = Number(v); rerender(); }} /></Field>
           <Btn label={active ? "Running…" : "Run suite"} kind="primary" icon="play" id="ev-run-btn" guard={runGuard}
-            onClick={() => { void ops.runSuite(ag.id, su.id, ver.v, evalsUi.runModel ?? undefined, evalsUi.repeats).then((r) => { out(r); if (r.ok) { evalsUi.run = (r as { run?: string }).run ?? null; rerender(); } }); }} />
+            onClick={() => { void ops.runSuite(ag.id, su.id, ver.v, evalsUi.runModel ?? undefined, evalsUi.repeats).then((r) => { out(r); if (r.ok) setUrlParams({ run: (r as { run?: string }).run ?? null }); }); }} />
           {active ? (
             <div className="run-progress" role="status">
               <div className="meter"><span className="meter-fill" style={{ width: `${active.total ? Math.round(((active.done ?? 0) / active.total) * 100) : 0}%` }} /></div>
@@ -151,7 +154,7 @@ function SuiteDetail({ d }: { d: EvalsData }) {
               <ul className="run-list" data-keep-scroll="ev-runs">
                 {runs.map((r) => (
                   <li key={r.id}>
-                    <button type="button" className={`run-item${evalsUi.run === r.id || (!evalsUi.run && r === sel) ? " is-on" : ""}`} id={`ev-run-${r.id}`} onClick={() => { evalsUi.run = r.id; rerender(); }}>
+                    <button type="button" className={`run-item${evalsUi.run === r.id || (!evalsUi.run && r === sel) ? " is-on" : ""}`} id={`ev-run-${r.id}`} onClick={() => setUrlParams({ run: r.id })}>
                       <span className="mono strong">{r.id}</span><span className="mono">{r.version}</span><span className="mono muted small ev-run-model">{r.model || "stub"}</span>
                       {r.status === "completed" ? <span className={`mono ${r.score >= su.threshold ? "pos" : "neg"}`}>{`${r.score >= su.threshold ? "✓ " : "▼ "}${fmt.pct(r.score)}`}<span className="muted small">{` n=${r.count ?? 0}`}</span></span> : <span className="mono muted">{r.status}</span>}
                       <span className="muted small">{fmt.istDate(r.at)}</span>
@@ -223,41 +226,96 @@ function HeadToHead({ d }: { d: EvalsData }) {
   );
 }
 
-type SuiteTableRow = { su: Suite; agentName: string; agentId: string; cases: number; last: number | null; n: number | null; runs: number };
+/** The version and model a suite runs with by default: the candidate if there is one, else the newest version, on the model it pins (same default as the suite detail). */
+export function defaultRun(d: EvalsData, suiteId: string): { agent: string; version: string; model: string } | null {
+  const su = suiteOf(d, suiteId);
+  const ag = su ? agentOf(d, su.agent) : undefined;
+  if (!su || !ag || !ag.versions.length) return null;
+  const ver = ag.versions.find((v) => v.rc) ?? ag.versions[ag.versions.length - 1]!;
+  return { agent: ag.id, version: ver.v, model: versionModel(ag, ver) };
+}
 
-export function SuitesTab({ d }: { d: EvalsData }) {
-  const agentSuite = agentOf(d, evalsUi.agent)?.suite;
-  const [q, setQ] = useState("");
+/** Starts a real run for each given suite through the existing run command and says what happened. Nothing is simulated: scores arrive as the runs finish. */
+export function useRunSuites(d: EvalsData): { start: (ids: string[]) => void; guard: ReturnType<typeof useCan> } {
+  const ui = useUI();
+  const perm = useCan("eval.run");
+  const start = (ids: string[]): void => {
+    const jobs = ids.map((id) => ({ id, r: defaultRun(d, id) })).filter((j) => j.r && !d.runsOf(j.id).some((x) => x.status === "queued" || x.status === "running") && (suiteOf(d, j.id)?.cases.length ?? 0) > 0);
+    if (!jobs.length) { ui.toast("Nothing to run: every suite is already running or has no cases.", "warn"); return; }
+    ui.toast(`Running ${jobs.length} suite${jobs.length > 1 ? "s" : ""}\u2026`, "info");
+    void Promise.all(jobs.map((j) => ops.runSuite(j.r!.agent, j.id, j.r!.version, j.r!.model || undefined, evalsUi.repeats))).then((rs) => {
+      const ok = rs.filter((r) => r.ok).length;
+      const bad = rs.find((r) => !r.ok);
+      if (ok) ui.toast(`Started ${ok} run${ok > 1 ? "s" : ""}. Scores appear as they finish.`, "ok");
+      if (bad && !bad.ok) ui.toast(bad.msg, "error");
+    });
+  };
+  return { start, guard: perm };
+}
+
+type SuiteTableRow = { su: Suite; agentName: string; agentId: string; cases: number; last: number | null; active: boolean };
+type Url = { tab: string; q: string; sort: string; dir: string; suite: string; run: string };
+type SetUrl = (p: Partial<Url>) => void;
+
+export function SuitesTab({ d, regs, url, setUrl, runner }: { d: EvalsData; regs: Array<{ suite: Suite; run: RunRow; base: RunRow; delta: number; agentId: string; agentName: string }>; url: Url; setUrl: SetUrl; runner: ReturnType<typeof useRunSuites> }) {
   if (evalsUi.suite && !suiteOf(d, evalsUi.suite)) evalsUi.suite = null;
-  if (!evalsUi.suite && agentSuite && suiteOf(d, agentSuite)) evalsUi.suite = agentSuite;
   if (!d.suites.length) return <Empty title="No suites yet" text="Create an agent: it gets a golden set to add cases to." />;
   const all: SuiteTableRow[] = d.suites.map((su) => {
     const runs = d.runsOf(su.id);
     const done = runs.filter((r) => r.status === "completed");
     const last = done[done.length - 1];
     const ag = agentOf(d, su.agent);
-    return { su, agentName: ag ? ag.name : su.name, agentId: ag?.id ?? su.agent, cases: su.cases.length, last: last ? last.score : null, n: last ? last.count ?? 0 : null, runs: runs.length };
+    return { su, agentName: ag ? ag.name : su.name, agentId: ag?.id ?? su.agent, cases: su.cases.length, last: last ? last.score : null, active: runs.some((r) => r.status === "queued" || r.status === "running") };
   });
-  const term = q.trim().toLowerCase();
+  const term = url.q.trim().toLowerCase();
   const rows = all.filter((r) => !term || `${r.su.name} ${r.su.id} ${r.agentName}`.toLowerCase().includes(term));
-  const pick = (r: SuiteTableRow): void => { evalsUi.suite = r.su.id; evalsUi.run = null; evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; rerender(); };
+  const open = (r: SuiteTableRow): void => { evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; setUrl({ suite: r.su.id, run: "" }); };
   const cols: SortCol<SuiteTableRow>[] = [
-    { key: "suite", label: "Suite", sort: (r) => r.su.name.toLowerCase(), render: (r) => <span className="stack" style={{ gap: 0 }}><b className="ell">{r.su.name}</b><span className="mono dim ell" style={{ fontSize: 11 }}>{r.su.id}</span></span> },
-    { key: "agent", label: "Agent", sort: (r) => r.agentName.toLowerCase(), render: (r) => <span className="row nowrap"><Avatar id={r.agentId} size="sm" />{r.agentName}{r.su.builtin ? <Chip text="built-in" cls="agent" /> : null}</span> },
+    { key: "suite", label: "Suite", sort: (r) => r.su.name.toLowerCase(), render: (r) => <><b className="ell"><a href="#evals" id={`ev-su-open-${r.su.id}`} aria-label={`Open details of ${r.su.name}`} style={{ color: "inherit" }} onClick={(e) => { e.preventDefault(); open(r); }}>{r.su.name}</a></b><span className="mono dim" style={{ fontSize: 11 }}>{r.su.id}</span></> },
+    { key: "agent", label: "Agent", sort: (r) => r.agentName.toLowerCase(), render: (r) => <span className="who"><Avatar id={r.agentId} size="sm" /><span>{r.agentName}</span></span> },
     { key: "cases", label: "Cases", sort: (r) => r.cases, align: "end", render: (r) => <span className="mono">{r.cases}</span> },
-    { key: "last", label: "Last score", sort: (r) => r.last ?? -1, render: (r) => r.last === null ? <span className="dim">{"\u2013"}</span> : <span className="row nowrap"><span className="mono">{r.last.toFixed(2)}</span><span style={{ width: 100 }}><Meter value={r.last} max={1} label={`${r.su.id} last score`} warnAt={2} /></span><span className="dim mono" style={{ fontSize: 11 }}>{r.last >= r.su.threshold ? "" : "below gate"}</span>{r.n ? <span className="dim mono" style={{ fontSize: 11 }}>{`n=${r.n}`}</span> : null}</span> },
-    { key: "gate", label: "Threshold", sort: (r) => r.su.threshold, align: "end", render: (r) => <span className="mono">{r.su.threshold.toFixed(2)}</span> },
-    { key: "runs", label: "Runs", sort: (r) => r.runs, align: "end", render: (r) => <span className="mono">{r.runs}</span> },
+    { key: "last", label: "Last score", sort: (r) => r.last ?? -1, render: (r) => r.last === null ? <span className="dim">{"\u2013"}</span> : <ScoreMeter score={r.last} gate={r.su.threshold} label={`${r.su.id} last score`} /> },
+    { key: "gate", label: "Threshold", sort: (r) => r.su.threshold, align: "end", render: (r) => <span className="mono">{r.su.threshold}</span> },
+    { key: "run", label: "", align: "end", render: (r) => {
+      const why: Decision | null = !runner.guard.allowed ? runner.guard : r.active ? { allowed: false, needs: "", reason: `A run is already in progress on ${r.su.id}.` } : !r.cases ? { allowed: false, needs: "", reason: "The suite has no cases yet. Add one first." } : null;
+      return <Btn label="Run" small id={`ev-run-${r.su.id}-row`} aria={`Run ${r.su.name}`} guard={why} onClick={() => runner.start([r.su.id])} />;
+    } },
   ];
+  const sortKey = url.sort || "suite";
+  const sort = { key: sortKey, dir: (url.dir === "desc" ? -1 : 1) as 1 | -1 };
   return (
     <div className="ev-suites">
-      <div className="ev-suites-list" data-keep-scroll="ev-suites">
-        <FilterBar label="Filter suites" count={`${rows.length} of ${all.length}`}>
-          <SearchBox id="ev-search" value={q} onChange={setQ} placeholder="Search suites" />
-        </FilterBar>
-        <DataTable id="ev-su-table" caption="Eval suites" columns={cols} rows={rows} rowKey={(r) => r.su.id} rowId={(r) => `ev-su-${r.su.id}`} onRow={pick} pageSize={12} pager empty={{ title: "No suites match", text: "Clear the search to see every suite." }} />
-      </div>
-      {evalsUi.suite ? <div className="ev-suites-main"><SuiteDetail d={d} /><HeadToHead d={d} /></div> : null}
+      {regs.length ? (
+        <div className="banner bad ev-regs" role="note">
+          <CrIcon name="warn" />
+          <div className="grow">
+            <b>{`${regs.length} regression${regs.length > 1 ? "s" : ""} in the last 14 days. `}</b>
+            <ul className="plain-list">
+              {regs.map((r, i) => (
+                <li key={`${r.run.id}`}>
+                  <a href="#evals" className="linkish" id={`ev-reg-${i}`} onClick={(e) => { e.preventDefault(); evalsUi.a = r.run.id; evalsUi.b = r.base.id; setUrl({ suite: r.suite.id, run: r.run.id }); }}>
+                    {`${r.suite.id}: ${r.agentName} ${r.run.version} on ${r.run.model || "stub"} scored ${fmt.pct(r.run.score)} vs ${fmt.pct(r.base.score)} for the floor version (${r.delta >= 0 ? "+" : ""}${fmt.pct(r.delta)}). Compare`}
+                  </a>
+                  <LinkedOutcomes agentId={r.agentId} idp={`ev-reg-${i}`} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
+      <FilterBar label="Filter suites" count={`${rows.length} of ${all.length}`} actions={url.q ? <Btn label="Clear" small kind="ghost" id="ev-clear" onClick={() => setUrl({ q: "" })} /> : undefined}>
+        <SearchBox id="ev-search" value={url.q} onChange={(v) => setUrl({ q: v })} placeholder="Search suites" />
+      </FilterBar>
+      {rows.length ? (
+        <DataTable id="ev-su-table" caption="Eval suites" columns={cols} rows={rows} rowKey={(r) => r.su.id} rowId={(r) => `ev-su-${r.su.id}`} pageSize={12} pager sort={sort}
+          onSort={(s) => setUrl({ sort: s.key, dir: s.dir === -1 ? "desc" : "asc" })} />
+      ) : <Empty icon="search" title="Nothing matches" text="Try clearing a filter or searching for something else." action={<Btn label="Clear filters" id="ev-clear-empty" onClick={() => setUrl({ q: "" })} />} />}
+      {evalsUi.suite ? (
+        <div className="ev-suites-main">
+          <div className="row" style={{ justifyContent: "flex-end", marginBottom: 8 }}><Btn label="Close details" small kind="ghost" icon="x" id="ev-detail-close" onClick={() => setUrl({ suite: "", run: "" })} /></div>
+          <SuiteDetail d={d} /><HeadToHead d={d} />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 /** Scorecards tab (legacy agentsTab): per-agent live scorecard, trend charts, suite history, promotion eligibility, trust and learning links, candidates across the factory. */
 import type { ReactElement } from "react";
+import { setUrlParams } from "../urlState";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
@@ -133,7 +134,7 @@ export function ScorecardsTab({ d, label }: { d: EvalsData; label: (c: { agent: 
         </ul>
       </Panel>
       <div className="ev-agmain">
-        <Panel title={`${a.name} scorecard`} tools={<Btn label="Open suite" small icon="eval" id="ev-open-suite" onClick={() => { evalsUi.tab = "suites"; evalsUi.suite = a.suite; evalsUi.run = null; evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; rerender(); }} />}>
+        <Panel title={`${a.name} scorecard`} tools={<Btn label="Open suite" small icon="eval" id="ev-open-suite" onClick={() => { evalsUi.a = evalsUi.b = null; evalsUi.runVersion = null; evalsUi.runModel = null; setUrlParams({ tab: "", suite: a.suite, run: "" }); }} />}>
           <div>
             <p className="small muted ev-p">{`Live work over the last 7 days, version ${a.version} on ${a.model}. Suite ${su ? `${su.id}, gate ${fmt.pct(su.threshold)}` : "none"}.`}</p>
             <dl className="ev-tiles">

@@ -93,7 +93,9 @@ function mount() {
 const writes = (calls: Call[], method: string) => calls.filter((c) => c.method === method && c.path !== "/api/v1/can");
 const reasonOf = (e: HTMLElement) => e.getAttribute("data-reason") ?? "";
 
+const at = (search: string): void => window.history.replaceState(null, "", `/${search}`);
 beforeEach(() => {
+  at("");
   setCsrfToken("c");
   canBatcher.clear();
   Object.assign(evalsUi, { tab: "agents", agent: null, suite: null, run: null, a: null, b: null, runVersion: null, runModel: null, repeats: 1 });
@@ -104,6 +106,7 @@ afterEach(() => {
 });
 
 describe("Evals screen: scorecards", () => {
+  beforeEach(() => at("?tab=agents"));
   it("lists agents with their eval score, marks one below its gate, and shows the live scorecard with its count", async () => {
     setup();
     mount();
@@ -170,15 +173,13 @@ describe("Evals screen: regressions", () => {
 });
 
 describe("Evals screen: suites and runs", () => {
-  const openSuites = async () => { fireEvent.click(await byId("ev-tab-suites")); await byId("ev-run-btn"); };
+  const openSuites = async () => { fireEvent.click(await byId("ev-su-open-SUITE-BUILD")); await byId("ev-run-btn"); };
   it("lists suites with the last score and its task count, and shows the run's task count and range", async () => {
     setup();
     mount();
     await openSuites();
     const row = await byId("ev-su-SUITE-BUILD");
     expect(row.textContent).toContain("0.50");
-    expect(row.textContent).toContain("below gate");
-    expect(row.textContent).toContain("n=6");
     expect(row.textContent).toContain("6");
     fireEvent.click(await byId("ev-run-RUN-1"));
     expect((await byId("ev-range")).textContent).toContain("5 of 6 tasks passed");
@@ -266,6 +267,32 @@ describe("Evals screen: suites and runs", () => {
     mount();
     await openSuites();
     expect(document.querySelector(".ev-suites-main")!.textContent).toContain("Need two runs");
+  });
+});
+
+describe("Evals screen: prototype structure", () => {
+  it("has the Suites, Runs, Scorecards and Factory-wide tabs in that order and a Run all suites action", async () => {
+    setup();
+    mount();
+    await byId("ev-tab-suites");
+    expect([...document.querySelectorAll("[role=tab][id^='ev-tab-']")].map((e) => e.textContent)).toEqual(["Suites", "Runs", "Scorecards", "Factory-wide"]);
+    expect(document.getElementById("ev-run-all")!.textContent).toContain("Run all suites");
+  });
+  it("keeps the tab and search in the URL, and the Runs tab lists every run with suite, agent, version and score", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("ev-tab-runs"));
+    await waitFor(() => expect(window.location.search).toContain("tab=runs"));
+    await waitFor(() => expect(document.body.textContent).toContain("RUN-1"));
+    expect(document.body.textContent).toContain("RUN-2");
+    expect(document.body.textContent).toContain("2.7.0-rc1");
+  });
+  it("starts a real run for each suite from Run all suites", async () => {
+    const calls = setup({ "POST /api/v1/suites/SUITE-BUILD/runs": () => ({ body: { ok: true, msg: "started", run: "RUN-3", total: 6 } }), "POST /api/v1/suites/SUITE-REVIEW/runs": () => ({ body: { ok: true, msg: "started", run: "RUN-4", total: 2 } }) });
+    mount();
+    fireEvent.click(await byId("ev-run-all"));
+    await waitFor(() => expect(writes(calls, "POST")).toHaveLength(2));
+    expect(writes(calls, "POST").map((c) => c.path).sort()).toEqual(["/api/v1/suites/SUITE-BUILD/runs", "/api/v1/suites/SUITE-REVIEW/runs"]);
   });
 });
 

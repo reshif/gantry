@@ -1,7 +1,7 @@
 /** Shared pieces of the Learning screen (legacy js/views/learning.js): kinds, signals, statuses, the word diff, what a change does, the status pipeline and evidence chips. */
 import { fmt, type LearningProposal } from "@gantry/domain";
 import { useAgents, useProjects, useSkills, useSuites } from "../../api/queries";
-import { Icon } from "../../ui/Icon";
+import { hashFor } from "../../lib/router";
 import { useOpenRecordRoute } from "../record/nav";
 import { useCatalog } from "../projects/kit";
 
@@ -25,14 +25,12 @@ export function useLn() {
   };
 }
 
-/** Evidence chip for a work order record; other evidence (an eval run) is shown as plain text. */
+/** Evidence for a work order record: a mono link to the record route (prototype); other evidence (an eval run) is plain mono text. */
 export function WoChip({ id, project }: { id: string; project?: string | null }) {
   const open = useOpenRecordRoute();
-  if (!/^WO-/.test(id)) return <span className="chip entity-chip is-plain" data-entity={`run:${id}`}><Icon name="eval" /><span className="mono">{id}</span></span>;
+  if (!/^WO-/.test(id)) return <span className="mono" data-entity={`run:${id}`}>{id}</span>;
   return (
-    <a className="chip entity-chip entity-wo" href="#record" data-entity={`wo:${id}`} onClick={(e) => { e.preventDefault(); open(id, project ?? undefined); }}>
-      <Icon name="page" /><span>{id}</span>
-    </a>
+    <a className="mono" href={hashFor("record", id, project ?? null)} data-entity={`wo:${id}`} onClick={(e) => { e.preventDefault(); open(id, project ?? undefined); }}>{id}</a>
   );
 }
 
@@ -40,7 +38,7 @@ export function ChipList({ ids, max = 8, project }: { ids: string[]; max?: numbe
   return (
     <span className="ln-chips">
       {ids.slice(0, max).map((id) => <WoChip key={id} id={id} project={project} />)}
-      {ids.length > max ? <span className="small muted">{`+${ids.length - max} more`}</span> : null}
+      {ids.length > max ? <span className="small muted">{`+${ids.length - max}`}</span> : null}
     </span>
   );
 }

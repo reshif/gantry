@@ -9,9 +9,10 @@ import { useEffect, useState } from "react";
 import { useCan } from "../api/can";
 import { ops } from "../api/ops";
 import { useLearningFindings, useLearningProposals, useLearningSettings, useLearningSignals } from "../api/queries";
-import { Btn, LockNote, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
+import { Btn, LockNote, Tabs } from "../ui/primitives";
+import { Card, Page, Stats } from "../ui/cr";
+import { useUrlState } from "./urlState";
 import { Async, qState } from "../ui/async";
-import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { dec } from "./mcp/kit";
 import { FindingsTab } from "./learning/Findings";
@@ -20,6 +21,9 @@ import { SignalsTab } from "./learning/Signals";
 import { takeLearningFocus } from "./learning/focus";
 
 export { learningFocus } from "./learning/focus";
+
+const TABS = ["findings", "proposals", "signals"];
+const DAY = 86_400_000;
 
 export default function LearningView() {
   const ui = useUI();
@@ -31,24 +35,28 @@ export default function LearningView() {
   const signals = sq.data ?? [];
   const settings = useLearningSettings().data;
   const perm = dec(useCan("learning.apply"));
-  const [tab, setTab] = useState("findings");
-  const [status, setStatus] = useState("open");
+  const [url, setUrl] = useUrlState({ tab: "findings", q: "", sig: "", sort: "", dir: "", st: "all" });
+  const tab = TABS.includes(url.tab) ? url.tab : "findings";
+  const status = url.st;
   const [hi, setHi] = useState<string | null>(null);
   const [hiFinding, setHiFinding] = useState<string | null>(null);
+  const setTab = (t: string): void => setUrl({ tab: t, q: "", sig: "", sort: "", dir: "" });
+  const setStatus = (s: string): void => setUrl({ st: s });
 
   useEffect(() => {
     const f = takeLearningFocus();
     if (!f) return;
-    if (f.proposal) { setTab("proposals"); setHi(f.proposal); setStatus("all"); }
-    else if (f.finding) { setTab("findings"); setHiFinding(f.finding); }
-    else if (f.tab) setTab(f.tab);
-  }, []);
+    if (f.proposal) { setUrl({ tab: "proposals", st: "all" }); setHi(f.proposal); }
+    else if (f.finding) { setUrl({ tab: "findings" }); setHiFinding(f.finding); }
+    else if (f.tab) setUrl({ tab: f.tab });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const on = settings?.proposalsOn ?? false;
   const open = proposals.filter((lp) => lp.status === "proposed").length;
   const openFindings = findings.filter((f) => f.status === "open").length;
-  const focusProposal = (id: string): void => { setTab("proposals"); setHi(id); setStatus("all"); };
-  const focusFinding = (id: string): void => { setTab("findings"); setHiFinding(id); };
+  const accepted30 = proposals.filter((lp) => (lp.status === "accepted" || lp.status === "verified") && (lp.appliedAt ?? lp.at) >= Date.now() - 30 * DAY).length;
+  const focusProposal = (id: string): void => { setUrl({ tab: "proposals", st: "all" }); setHi(id); };
+  const focusFinding = (id: string): void => { setUrl({ tab: "findings" }); setHiFinding(id); };
 
   const flip = (next: boolean): void => {
     if (!next) {
@@ -61,33 +69,33 @@ export default function LearningView() {
       onOk: async (t) => { const r = await ops.setLearningSwitch(true, t); ui.toast(r.msg, r.ok ? "ok" : "error"); return r; },
     });
   };
+  const refresh = async (): Promise<void> => { const r = await ops.refreshFindings(); ui.toast(r.msg, r.ok ? "ok" : "error"); };
+
+  const control = settings ? (
+    <Card title="Learning proposals" hint={on ? "On. A person can draft proposals from findings; a second person accepts them." : "Off. Findings and signals keep being recorded from every work order; nothing can be drafted, accepted or verified until a person turns proposals on."} id="ln-off"
+      acts={<Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" small id="ln-switch" guard={perm} onClick={() => flip(!on)} />}>
+      {perm.allowed ? <span className="dim">Every change is applied through its ordinary command and can be rolled back.</span> : <LockNote decision={perm} what="Applying learning proposals" />}
+    </Card>
+  ) : undefined;
 
   const body = tab === "findings"
-    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
-    : tab === "signals" ? <Async query={sq} what="learning signals" id="ln-signals">{() => <SignalsTab signals={signals} />}</Async>
-    : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} status={status} setStatus={setStatus} hi={hi} onFocusFinding={focusFinding} />}</Async>;
+    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} url={url} setUrl={setUrl} />}</Async>
+    : tab === "signals" ? <Async query={sq} what="learning signals" id="ln-signals">{() => <div className="stack"><div className="row"><Btn label="Refresh findings" small kind="ghost" icon="refresh" id="ln-refresh" guard={perm} onClick={() => void refresh()} /></div><SignalsTab signals={signals} /></div>}</Async>
+    : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} status={status} setStatus={setStatus} hi={hi} onFocusFinding={focusFinding} control={control} />}</Async>;
   return (
     <div className="view view-learning">
-      <ViewHead
-        kicker="Workforce"
-        title="Learning"
-        sub="Rejected, sent-back and reverted work is counted as signals. Repeated signals become findings. A finding can become a proposal that a person reviews."
-        actions={settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" icon={on ? "pause" : "play"} id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined} />
-      <StatRow id="ln-stats">
-        <Stat label="Open findings" value={qState(fq, () => String(openFindings))} />
-        <Stat label="To review" value={qState(pq, () => String(open))} sub="proposals waiting" tone={open ? "wait" : undefined} />
-        <Stat label="Applied" value={qState(pq, () => String(proposals.filter((lp) => lp.status === "accepted").length))} sub="accepted, not yet verified" />
-        <Stat label="Verified" value={qState(pq, () => String(proposals.filter((lp) => lp.status === "verified").length))} sub="measured to work" />
-      </StatRow>
-      {perm.allowed ? null : <LockNote decision={perm} what="Applying learning proposals" />}
-      {settings && !on ? (
-        <div className="callout callout-warn" role="note" id="ln-off">
-          <Icon name="alert" />
-          <span>Learning proposals are switched off. Findings and signals keep being recorded from every work order; nothing can be drafted, accepted or verified until a person turns proposals on.</span>
+      <Page eyebrow="Workforce" title="Learning" sub="Agents notice patterns in rejections and overrides, then propose instruction changes. A person accepts or declines.">
+        <div id="ln-stats">
+          <Stats items={[
+            { l: "Open findings", v: qState(fq, () => String(openFindings)), tone: "warn" },
+            { l: "Proposals waiting", v: qState(pq, () => String(open)), tone: "agent" },
+            { l: "Accepted, 30d", v: qState(pq, () => String(accepted30)), tone: "ok" },
+            { l: "Avg eval lift", v: "n/a", d: "not recorded by the backend", tone: "info" },
+          ]} />
         </div>
-      ) : null}
-      <Tabs idPrefix="ln-tab" items={[{ id: "findings", label: "Findings", count: openFindings }, { id: "proposals", label: "Proposals", count: open }, { id: "signals", label: "Signals" }]} active={tab} onChange={(t) => { setTab(t); setHi(null); setHiFinding(null); }} />
-      <div id="ln-tab-panel" role="tabpanel" className="ln-panel">{body}</div>
+        <Tabs idPrefix="ln-tab" items={[{ id: "findings", label: "Findings" }, { id: "proposals", label: "Proposals", count: open }, { id: "signals", label: "Signals" }]} active={tab} onChange={(t) => { setTab(t); setHi(null); setHiFinding(null); }} />
+        <div id="ln-tab-panel" role="tabpanel" className="ln-panel">{body}</div>
+      </Page>
     </div>
   );
 }
