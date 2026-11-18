@@ -125,35 +125,44 @@ afterEach(() => {
 });
 
 describe("Agents screen", () => {
-  it("lists the roster with status, station, model chain, candidates, eval below threshold, spend, and the header meta", async () => {
+  it("lists the roster in the prototype's columns (agent, station, model, autonomy, version, eval, runs, status) and its four tiles", async () => {
     setup();
     mount(<AgentsView />);
     const row = await byId("ag-row-ag-build");
+    const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim());
+    expect(heads).toEqual(["Agent", "Station", "Model", "Autonomy", "Version", "Eval", "Runs 7d", "Status"]);
     expect(row.textContent).toContain("Builder");
-    expect(row.textContent).toContain("Active");
+    expect(row.textContent).toContain("Build");
     expect(row.textContent).toContain("opus-5-5");
-    expect(row.textContent).toContain("+1");
+    expect(row.textContent).toContain("L2");
     expect(row.textContent).toContain("2.6.1");
-    expect(row.textContent).toContain("2 candidate");
-    expect(row.querySelector(".ag-below")).not.toBeNull();
     expect(row.textContent).toContain("0.80");
-    expect(row.textContent).toContain("$612");
+    expect(row.textContent).toContain("Busy");
     expect((await byId("ag-row-ag-review")).textContent).toContain("Paused");
     const head = document.getElementById("ag-stats")!.textContent!;
     expect(head).toContain("Agents2");
-    expect(head).toContain("Active1 / 2");
-    expect(head).toContain("Candidates2");
-    expect(head).toContain("Below threshold1");
+    expect(head).toContain("Avg eval score0.88");
+    expect(head).toContain("Runs, 7 days");
+    expect(head).toContain("Avg rework");
+    expect(document.querySelector(".ph .sub")!.textContent).toBe("One agent per station. Each has instructions, tools, a model, a budget and an autonomy level people granted.");
+    expect(document.getElementById("agent-create")!.textContent).toContain("New agent");
   });
 
-  it("filters the roster by view tab, station and search, and opens an agent's own page from a row", async () => {
+  it("filters the roster by station, autonomy and search in the URL, clears them, and opens an agent from a row", async () => {
     setup();
     mount(<AgentsView />);
     await byId("ag-row-ag-build");
-    fireEvent.change(document.getElementById("ag-view")!, { target: { value: "paused" } });
+    fireEvent.change(document.getElementById("ag-f-station")!, { target: { value: "review" } });
     await waitFor(() => expect(document.getElementById("ag-row-ag-build")).toBeNull());
     expect(document.getElementById("ag-row-ag-review")).not.toBeNull();
-    fireEvent.change(document.getElementById("ag-view")!, { target: { value: "all" } });
+    expect(window.location.search).toContain("station=review");
+    fireEvent.click(await byId("ag-clear"));
+    await waitFor(() => expect(document.getElementById("ag-row-ag-build")).not.toBeNull());
+    expect(window.location.search).toBe("");
+    fireEvent.change(document.getElementById("ag-f-lv")!, { target: { value: "0" } });
+    await waitFor(() => expect(document.getElementById("ag-row-ag-build")).toBeNull());
+    expect(window.location.search).toContain("lv=0");
+    fireEvent.click(await byId("ag-empty-clear"));
     fireEvent.change(document.getElementById("ag-search")!, { target: { value: "build" } });
     await waitFor(() => expect(document.getElementById("ag-row-ag-review")).toBeNull());
     fireEvent.click(await byId("ag-row-ag-build"));
@@ -164,31 +173,50 @@ describe("Agents screen", () => {
     setup();
     mountAgent();
     await byId("agent-detail");
-    expect(document.querySelector(".ad-meta")!.textContent).toBe("2.6.1 · claude-opus-5-5 · 2 work orders now · SUITE-BUILD 80% · next after this station: Verify");
-    expect(document.querySelector(".ad-meta")!.textContent).not.toMatch(/ · $/);
+    expect(document.querySelector(".ph .eyebrow")!.textContent).toBe("Workforce \u00b7 Agent");
+    expect(document.querySelector(".ph .sub")!.textContent).toContain("Build station \u00b7 claude-opus-5-5");
+    expect([...document.querySelectorAll(".tabs [role=tab], .tabs button")].slice(0, 7).map((t) => t.textContent!.replace(/\d+$/, ""))).toEqual(["Overview", "Instructions", "Tools", "Model and budget", "Skills", "Guardrails", "Evals"]);
+    expect(document.getElementById("ag-talk")).toBeTruthy();
     expect(document.getElementById("ag-back-link")).toBeTruthy();
     expect(document.getElementById("ag-row-ag-build")).toBeNull();
     cleanup();
     mountAgent("ag-nope");
-    expect(await screen.findByText("No agent with that id")).toBeTruthy();
+    expect(await screen.findByText("Page not found")).toBeTruthy();
+    expect(document.body.textContent).toContain("There is no \u201cagent\u201d page");
+  });
+
+  it("sends the header buttons and the Overview card to the prototype's destinations, with the tab in the URL", async () => {
+    setup();
+    mountAgent();
+    fireEvent.click(await byId("ag-open-guardrails"));
+    await waitFor(() => expect(window.location.search).toContain("tab=guardrails"));
+    expect(document.getElementById("ag-maxdiff")).toBeTruthy();
+    fireEvent.click(await byId("ag-talk"));
+    expect(window.location.hash).toBe("#conversations");
+    window.location.hash = "#agents/ag-build";
+    fireEvent.click(await byId("ag-back-link"));
+    expect(window.location.hash).toBe("#agents");
   });
 
   it("labels every roster cell with its column so the phone layout can stack them", async () => {
     setup();
     mount(<AgentsView />);
     const row = await byId("ag-row-ag-build");
-    const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent);
+    const heads = [...document.querySelectorAll("#ag-roster thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim());
     expect([...row.querySelectorAll("td")].map((c) => c.getAttribute("data-label"))).toEqual(heads);
   });
 
   it("edits the configuration in a draft and saves one audited PATCH with the agent's version and only the changed keys", async () => {
     const calls = setup({ "PATCH /api/v1/agents/ag-build": () => ok() });
     mountAgent();
+    await tab("model");
     const budget = (await byId("ag-budget")) as HTMLInputElement;
     expect(document.getElementById("ag-savebar")!.className).not.toContain("is-dirty");
     expect(document.getElementById("ag-save")!.getAttribute("data-reason")).toBe("No changes to save.");
     fireEvent.change(budget, { target: { value: "15" } });
+    await tab("guardrails");
     fireEvent.change(await byId("ag-maxdiff"), { target: { value: "600" } });
+    await tab("tools");
     fireEvent.click(await byId("ag-tool-merge"));
     await waitFor(() => expect(document.getElementById("ag-savebar")!.className).toContain("is-dirty"));
     fireEvent.click(document.getElementById("ag-save")!);
@@ -206,9 +234,11 @@ describe("Agents screen", () => {
     let live = { ...BUILD };
     const calls = setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }), "PATCH /api/v1/agents/ag-build": () => ok() });
     mountAgent();
+    await tab("guardrails");
     fireEvent.change(await byId("ag-maxdiff"), { target: { value: "600" } });
     live = { ...BUILD, rev: 8, budget: 20 };
     invalidateSlices(["agents"]);
+    await tab("model");
     await waitFor(() => expect(((document.getElementById("ag-budget")) as HTMLInputElement).value).toBe("20"));
     expect(document.getElementById("ag-conflict")).toBeNull();
     fireEvent.click(await byId("ag-save"));
@@ -222,6 +252,7 @@ describe("Agents screen", () => {
     let live = { ...BUILD };
     const calls = setup({ "GET /api/v1/agents": () => ({ body: [live, REVIEW] }), "PATCH /api/v1/agents/ag-build": () => ok() });
     mountAgent();
+    await tab("model");
     fireEvent.change(await byId("ag-budget"), { target: { value: "15" } });
     live = { ...BUILD, rev: 8, budget: 20 };
     invalidateSlices(["agents"]);
@@ -240,9 +271,10 @@ describe("Agents screen", () => {
   it("keeps the draft across tabs and discards it on request", async () => {
     setup();
     mountAgent();
+    await tab("model");
     fireEvent.change(await byId("ag-budget"), { target: { value: "33" } });
     await tab("overrides");
-    await tab("config");
+    await tab("model");
     expect(((await byId("ag-budget")) as HTMLInputElement).value).toBe("33");
     fireEvent.click(await byId("ag-discard"));
     await waitFor(() => expect(((document.getElementById("ag-budget")) as HTMLInputElement).value).toBe("12"));
@@ -251,6 +283,7 @@ describe("Agents screen", () => {
   it("blocks autonomy on a regulated project with POL-112, naming the project", async () => {
     setup();
     mountAgent();
+    await tab("settings");
     const auto = (await byId("ag-aut-auto")) as HTMLInputElement;
     expect(auto.disabled).toBe(true);
     expect(auto.closest("label")!.getAttribute("data-reason")).toMatch(/POL-112: no autonomous agents from Plan onward on regulated projects \(Risk and Compliance\)/);
@@ -265,6 +298,7 @@ describe("Agents screen", () => {
   it("a person without the right sees every control locked with the reason, and the create button too", async () => {
     setup({}, ["agent.edit"]);
     mountAgent();
+    await tab("settings");
     await waitFor(() => expect(document.querySelector(".lock-note")).not.toBeNull());
     expect(document.querySelector(".lock-note")!.textContent).toContain("Read-only for you: agent configuration");
     expect(((await byId("ag-name")) as HTMLInputElement).disabled).toBe(true);
@@ -292,9 +326,9 @@ describe("Agents screen", () => {
     expect((await byId("ag-sk-up-sk-a")).getAttribute("data-reason")).toBe("Already first.");
     fireEvent.click(await byId("ag-sk-up-sk-b"));
     await waitFor(() => expect(document.querySelector(".ag-skill-chain li")!.textContent).toContain("Security review"));
-    fireEvent.change(await byId("ag-sk-add"), { target: { value: "sk-c" } });
+    fireEvent.click(await byId("ag-sk-sk-c"));
     await waitFor(() => expect(document.querySelectorAll(".ag-skill-chain li")).toHaveLength(3));
-    fireEvent.click(await byId("ag-sk-rm-sk-a"));
+    fireEvent.click(await byId("ag-sk-sk-a"));
     fireEvent.click(await byId("ag-save"));
     await waitFor(() => expect(writes(calls, "PATCH")).toHaveLength(1));
     expect(writes(calls, "PATCH")[0]!.body.patch).toEqual({ skills: ["sk-b", "sk-c"] });
@@ -389,7 +423,7 @@ describe("Agents screen", () => {
     await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
     expect(writes(calls, "POST")[0]).toMatchObject({ path: "/api/v1/agents/ag-build/versions", body: { label: "2.7.0-rc2", note: "Sonnet trial" }, headers: { "if-match": "7" } });
     // with unsaved edits the button says why it is locked
-    await tab("config");
+    await tab("model");
     fireEvent.change(await byId("ag-budget"), { target: { value: "40" } });
     await tab("versions");
     expect((await byId("ag-newver-go")).getAttribute("data-reason")).toMatch(/Save or discard your changes first/);
@@ -468,39 +502,34 @@ describe("Agents screen", () => {
     expect(window.location.hash).toBe("#trust");
   });
 
-  it("walks the create-agent flow and posts the new agent once with an Idempotency-Key", async () => {
-    const calls = setup({ "POST /api/v1/agents": () => ok({ agent: { ...BUILD, id: "ag-docs-1a2b", name: "Docs Writer 1" } }) });
+  it("creates an agent from the New agent dialog (name, station, model) at the lowest autonomy, once, and opens it", async () => {
+    const calls = setup({ "POST /api/v1/agents": () => ok({ agent: { ...BUILD, id: "ag-docs-1a2b", name: "Docs Writer" } }) });
     mount(<AgentsView />);
     fireEvent.click(await byId("agent-create"));
-    expect((await byId("ca-back")).getAttribute("data-reason")).toBe("This is the first step.");
-    fireEvent.click(await byId("ca-tpl-docs"));
-    expect(((await byId("ca-name")) as HTMLInputElement).value).toBe("Docs Writer 1");
-    fireEvent.click(await byId("ca-next"));
-    await byId("ca-model");
-    fireEvent.click(await byId("ca-next"));
-    fireEvent.click(await byId("ca-tool-sendEmail"));
-    fireEvent.click(await byId("ca-next"));
-    await byId("ca-projects");
-    fireEvent.click(await byId("ca-next"));
     const dlg = await screen.findByRole("dialog");
-    expect(dlg.textContent).toContain("The agent starts paused at 0.1.0 with its own eval suite.");
-    expect(dlg.textContent).toContain("Docs Writer 1");
-    fireEvent.click(await byId("ca-next"));
+    expect(dlg.textContent).toContain("New agent");
+    expect(dlg.textContent).toContain("Agents start at autonomy L0: every output goes to a person.");
+    expect(dlg.textContent).toContain("Name (required)");
+    fireEvent.change(await byId("na-name"), { target: { value: "Docs Writer" } });
+    fireEvent.change(await byId("na-station"), { target: { value: "close" } });
+    fireEvent.click(await byId("na-ok"));
     await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
     const c = writes(calls, "POST")[0]!;
     expect(c.path).toBe("/api/v1/agents");
     expect(c.headers["idempotency-key"]).toBeTruthy();
-    expect(c.body).toMatchObject({ name: "Docs Writer 1", station: "close", autonomy: "gate", projects: "all", skills: ["sk-relnotes"], model: "claude-sonnet-5-5", stations: ["close"] });
-    expect(c.body.tools).toMatchObject({ writeBranch: true, openPR: true, sendEmail: true, merge: false });
+    expect(c.body).toMatchObject({ name: "Docs Writer", station: "close", autonomy: "suggest", projects: "all", stations: ["close"] });
+    await waitFor(() => expect(window.location.hash).toBe("#agents/ag-docs-1a2b"));
   });
 
-  it("refuses the create flow's first step without a name", async () => {
+  it("refuses the New agent dialog without a name or with a short one, and sends nothing", async () => {
     const calls = setup();
     mount(<AgentsView />);
     fireEvent.click(await byId("agent-create"));
-    fireEvent.click(await byId("ca-tpl-blank"));
-    fireEvent.click(await byId("ca-next"));
-    await waitFor(() => expect(document.querySelector(".ag-create .form-err")!.textContent).toBe("Give the agent a name."));
+    fireEvent.click(await byId("na-ok"));
+    expect((await screen.findByRole("dialog")).textContent).toContain("Name is required.");
+    fireEvent.change(await byId("na-name"), { target: { value: "ab" } });
+    fireEvent.click(await byId("na-ok"));
+    await waitFor(() => expect(document.body.textContent).toContain("Name needs at least 3 characters."));
     expect(writes(calls, "POST")).toHaveLength(0);
   });
 });
@@ -510,34 +539,44 @@ describe("Skills screen", () => {
   const mountSkill = (id: string) => { window.location.hash = `#skills/${id}`; return mount(<SkillsView />); };
   const sTab = async (id: string) => fireEvent.click(await byId(`sk-tab-${id}`));
 
-  it("lists the library with versions, usage and eval coverage, and filters it", async () => {
-    setup();
+  it("lists the library in the prototype's columns, filters by station and search, and opens the drawer from the name", async () => {
+    const calls = setup({ "PUT /api/v1/skills/sk-a/projects": () => ok() });
     mount(<SkillsView />);
     const row = await byId("sk-row-sk-a");
+    const heads = [...document.querySelectorAll("#sk-lib thead th")].map((h) => h.textContent!.replace(/[\u2191\u2193]/g, "").trim());
+    expect(heads).toEqual(["Skill", "Station", "Used by", "Version", "Uses", "Enabled"]);
     expect(row.textContent).toContain("Test design");
-    expect(row.textContent).toContain("v1.2.0");
-    expect(row.querySelector(".sk-cov")!.className).toContain("sk-cov-good");
-    expect(row.querySelector(".sk-cov")!.textContent).toBe("9/10");
-    expect((await byId("sk-row-sk-b")).textContent).toContain("1 project");
-    expect((await byId("sk-row-sk-b")).querySelector(".sk-cov")!.className).toContain("sk-cov-none");
-    expect((await byId("sk-row-sk-c")).querySelector(".sk-cov")!.className).toContain("sk-cov-low");
-    fireEvent.change(await byId("sk-view"), { target: { value: "unused" } });
+    expect(row.textContent).toContain("Build");
+    expect(row.textContent).toContain("Builder");
+    expect(row.textContent).toContain("1.2.0");
+    expect(document.querySelector(".ph .sub")!.textContent).toBe("Reusable know-how that agents load. Versioned, reviewed, and measured by evals.");
+    fireEvent.change(await byId("sk-f-station"), { target: { value: "review" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
-    expect(document.getElementById("sk-row-sk-c")).not.toBeNull();
-    fireEvent.change(await byId("sk-view"), { target: { value: "all" } });
+    expect(window.location.search).toContain("station=review");
+    fireEvent.click(await byId("sk-clear"));
     fireEvent.change(await byId("sk-search"), { target: { value: "security" } });
     await waitFor(() => expect(document.getElementById("sk-row-sk-a")).toBeNull());
     expect(document.getElementById("sk-row-sk-b")).not.toBeNull();
+    fireEvent.click(await byId("sk-clear"));
+    fireEvent.click((await byId("sk-row-sk-a")).querySelector("a.sk-name")!);
+    const drawer = await byId("sk-drawer");
+    expect(drawer.textContent).toContain("Skill \u00b7 v1.2.0");
+    expect(drawer.textContent).toContain("Skill file");
+    fireEvent.click(await byId("sk-drawer-edit"));
+    expect(window.location.hash).toBe("#skills/sk-a");
+    cleanup();
+    window.location.hash = "#skills";
+    mount(<SkillsView />);
+    fireEvent.click(await byId("sk-en-sk-a"));
+    await waitFor(() => expect(writes(calls, "PUT")).toHaveLength(1));
+    expect(writes(calls, "PUT")[0]!.body).toEqual({ projects: [] });
   });
 
-  it("opens a skill's own page from a row, and says so when the skill is gone", async () => {
+  it("shows the prototype 404 page for a skill that is gone", async () => {
     setup();
-    mount(<SkillsView />);
-    fireEvent.click(await byId("sk-row-sk-b"));
-    expect(window.location.hash).toBe("#skills/sk-b");
-    cleanup();
     mountSkill("sk-nope");
-    expect(await screen.findByText("No skill with that id")).toBeTruthy();
+    expect(await screen.findByText("Page not found")).toBeTruthy();
+    expect(document.body.textContent).toContain("There is no \u201cskill\u201d page");
   });
 
   it("saves an edit as a new version with the change note, the changed fields only and the skill's version", async () => {
@@ -602,24 +641,27 @@ describe("Skills screen", () => {
     await screen.findByText("LP-1 Tighten test design");
   });
 
-  it("creates a skill with an Idempotency-Key and attaches it to an agent", async () => {
+  it("creates a draft skill from the prototype dialog (name, station, what it teaches), attaches it, and stays on the list", async () => {
     const calls = setup({ "POST /api/v1/skills": () => ok({ msg: "Skill API review created.", skill: { ...SKILLS[0], id: "sk-new-1a2b", name: "API review" } }), "PUT /api/v1/agents/ag-review/skills/sk-new-1a2b": () => ok() });
     mount(<SkillsView />);
     fireEvent.click(await byId("sk-new"));
     fireEvent.click(await byId("sk-new-ok"));
-    await waitFor(() => expect(document.querySelector(".form-err")!.textContent).toBe("Name the skill."));
+    await waitFor(() => expect(document.body.textContent).toContain("Name is required."));
     fireEvent.change(await byId("sk-new-name"), { target: { value: "API review" } });
-    fireEvent.change(await byId("sk-new-body"), { target: { value: "Diff the spec." } });
-    fireEvent.change(await byId("sk-new-res"), { target: { value: "x.md\n\n" } });
+    fireEvent.change(await byId("sk-new-desc"), { target: { value: "short" } });
+    fireEvent.click(await byId("sk-new-ok"));
+    await waitFor(() => expect(document.body.textContent).toContain("at least 10 characters"));
+    fireEvent.change(await byId("sk-new-desc"), { target: { value: "Diff the spec against the code." } });
+    fireEvent.change(await byId("sk-new-station"), { target: { value: "review" } });
     fireEvent.change(await byId("sk-new-attach"), { target: { value: "ag-review" } });
     fireEvent.click(await byId("sk-new-ok"));
     await waitFor(() => expect(writes(calls, "POST")).toHaveLength(1));
     expect(writes(calls, "POST")[0]!.headers["idempotency-key"]).toBeTruthy();
-    expect(writes(calls, "POST")[0]!.body).toMatchObject({ name: "API review", body: "Diff the spec.", resources: ["x.md"] });
+    expect(writes(calls, "POST")[0]!.body).toMatchObject({ name: "API review", desc: "Diff the spec against the code." });
     await waitFor(() => expect(writes(calls, "PUT")).toHaveLength(1));
+    expect(window.location.hash).toBe("");
   });
 });
-
 
 describe("Agents screen: a read the person may not make", () => {
   it("says Not visible to you, not an empty list, when the primary read is refused", async () => {

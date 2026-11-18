@@ -64,7 +64,7 @@ export function TextDialog({ o, close }: { o: TextOpts; close: () => void }) {
 
 /** The status of the repo's own convention files, from the manifest of the last run seeded from it (not from the guidelines text above). */
 function conventionsLine(rc: AgentEffective["repoContext"] | undefined): string {
-  if (!rc) return "Repo conventions: not read yet. Agents are shown AGENTS.md and CLAUDE.md from the repository when a run starts.";
+  if (!rc || !Array.isArray(rc.files)) return "Repo conventions: not read yet. Agents are shown AGENTS.md and CLAUDE.md from the repository when a run starts.";
   const f = (path: string) => rc.files.find((x) => x.path === path);
   const one = (path: string): string => {
     const x = f(path);

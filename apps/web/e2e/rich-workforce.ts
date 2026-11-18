@@ -19,6 +19,8 @@ const SKILLS: Array<[string, string, string, string, string[]]> = [
   ["sk-security", "Security review", "Threat check on sensitive paths.", "1.0.0", ["ag-design"]],
   ["sk-spec", "Spec writing", "Acceptance criteria, scope, rollback note.", "1.3.0", ["ag-spec"]],
 ];
+/** work1 block: the skills each agent carries (the agents list in rich.ts reads it, so Skills shows Station and Used by). */
+export const agentSkills = (agent: string): string[] => SKILLS.filter((x) => x[4].includes(agent)).map((x) => x[0]);
 export const skills = () => SKILLS.map(([id, name, desc, version], i) => ({
   id, name, desc, when: desc, owner: "p-lead", body: `# ${name}\n\n${desc}\n\n1. Read the structured result from the previous station.\n2. Apply the steps for this skill.\n`, resources: [], version, projects: "all",
   versions: [{ v: version, at: NOW - (i + 3) * DAY, by: "p-lead", note: "Reviewed edit" }], coverage: { suite: "su-" + ST[i % 9], cases: 6 + (i % 4) * 3, pass: 5 + (i % 4) * 3 }, builtin: i < 6,
@@ -26,7 +28,7 @@ export const skills = () => SKILLS.map(([id, name, desc, version], i) => ({
 
 const model = (vendor: string, id: string, name: string, inPrice: number, outPrice: number, enabled = true) => ({ id, name, enabled, context: 200000, inPrice, outPrice, vendor, tier: "standard", canonical: id.replace(/^.*?:/, ""), invocable: true });
 const vendors = () => [
-  { id: "anthropic", name: "Anthropic", product: "Claude API", connected: true, health: "healthy", latency: 640, mtd: 1480, budget: 4000, keyMask: "sk-ant-…a41f", region: "us", endpoint: "https://api.anthropic.com", residency: "US", retention: "30d", version: 2, models: [model("anthropic", "claude-sonnet", "Claude Sonnet", 3, 15), model("anthropic", "claude-opus", "Claude Opus", 15, 75), model("anthropic", "claude-haiku", "Claude Haiku", 0.8, 4)] },
+  { id: "anthropic", name: "Anthropic", product: "Claude API", connected: true, health: "healthy", latency: 640, mtd: 1480, budget: 4000, keyMask: "sk-ant-…a41f", region: "us", endpoint: "https://api.anthropic.com", residency: "US", retention: "30d", version: 2, models: [model("anthropic", "claude-sonnet", "Claude Sonnet", 3, 15), { ...model("anthropic", "claude-opus", "Claude Opus", 15, 75), tier: "frontier" }, { ...model("anthropic", "claude-haiku", "Claude Haiku", 0.8, 4), tier: "fast" }, { ...model("anthropic", "claude-fable", "Claude Fable", 0, 0, false), tier: "frontier", needsPrice: true }] },
   { id: "bedrock", name: "Amazon Bedrock", product: "Bedrock runtime", connected: true, health: "degraded", latency: 1320, mtd: 410, budget: 1500, keyMask: "AKIA…7Q2", region: "eu", endpoint: "bedrock-runtime.eu-west-1", residency: "EU", retention: "zero", version: 1, models: [model("bedrock", "bedrock:claude-sonnet", "Claude Sonnet (Bedrock)", 3, 15)] },
   { id: "vertex", name: "Google Vertex", product: "Vertex AI", connected: false, health: "offline", latency: 0, mtd: 0, budget: 1000, keyMask: "", region: "us", endpoint: "", residency: "US", retention: "standard", version: 1, models: [model("vertex", "vertex:claude-sonnet", "Claude Sonnet (Vertex)", 3, 15, false)] },
 ];
@@ -61,9 +63,22 @@ const proposals = () => [
   { id: "lp-2", finding: "lf-3", kind: "skill", title: "Add a breaking-change check to Release notes", owner: "ag-close", status: "verified", at: NOW - 8 * DAY, expected: "No missed breaking flags", change: {}, history: [], rev: 2, appliedAt: NOW - 6 * DAY, appliedBy: "p-lead", verification: { measured: 0, target: 1, baseline: 2, at: NOW - DAY, by: "p-lead" } },
 ];
 
+/** work1 block: the composed instructions the Instructions tab shows for an agent (layers, sections, hand-off), so the tab renders in the fidelity run. */
+const effective = (agent: string) => {
+  const layers = [
+    { key: "base", name: "Factory base", version: 4, hash: "a", text: "You are one station on a software factory line." },
+    { key: "project", name: "Project overlay", version: 1, hash: "b", text: "Payments Platform overlay." },
+    { key: "agent", name: "Agent", version: 2, hash: "c", text: `Instructions of ${AGN[agent] ?? agent}.` },
+  ];
+  return { agent, version: "1.4.0", live: true, draft: false, project: { id: "payments", name: "Payments Platform" }, repo: null, text: "x", hash: "e".repeat(64), promptHash: "f".repeat(64), layers, skills: [], handoff: { first: "Station: the station the agent works", json: ["workOrder (id, title, class)"] }, words: 120, tokens: 200,
+    sections: layers.map((l) => ({ key: l.key, title: l.name, source: "layer", text: l.text, words: 8 })) };
+};
+
 export function workforceOverrides(): Record<string, Handler> {
   const j = (f: () => unknown): Handler => (r) => fulfillJson(r, f());
+  const eff = Object.fromEntries(AG.map((a) => [`agents/${a}/effective`, j(() => effective(a))]));
   return {
+    ...eff,
     skills: j(skills), vendors: j(vendors), routing: j(routing), prices: j(prices), budgets: j(budgets), "routing/versions": j(() => [{ version: 4, publishedAt: new Date(NOW - 5 * DAY).toISOString(), publishedBy: "p-admin", note: "Opus on plan" }]),
     "evals/scorecards": j(scorecards), suites: j(suites), "evals/runs": j(runs), "evals/factory": j(evalsFactory),
     "trust/cells": j(trust), "learning/findings": j(findings), "learning/proposals": j(proposals), "learning/signals": j(() => []),

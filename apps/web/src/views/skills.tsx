@@ -9,10 +9,12 @@ import { useCan } from "../api/can";
 import { useAgents, useLearningProposals, useProjects, useSkills } from "../api/queries";
 import { ops } from "../api/ops";
 import { Async, useCommand } from "../ui/async";
-import { Btn, Chip, Empty, Field, FilterBar, LockNote, SearchBox, Select, Stat, StatRow, Tabs, Toggle, ViewHead, Who, type Decision } from "../ui/primitives";
-import { DataTable, type SortCol } from "../ui/SortTable";
+import { Btn, Chip, Field, IconBtn, FilterBar, LockNote, SearchBox, Select, Tabs, Toggle, Who, type Decision } from "../ui/primitives";
+import { CrEmpty, Page, Stats } from "../ui/cr";
+import { useRouteState, useDebouncedParam } from "../lib/routeState";
+import { NotFoundPage } from "./NotFound";
+import { DataTable, type SortCol } from "../ui/DataTable";
 import { Dialog } from "../ui/Overlay";
-import { Icon } from "../ui/Icon";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
 import { hashFor, navigate, useHash } from "../lib/router";
@@ -26,6 +28,7 @@ import { invalidateSlices } from "../api/keys";
 import { agentsSelect, EntityHistory, useStations, type AgentRow } from "./agents/kit";
 
 type SkillRow = Skill & { rev: number };
+const NA = "not available";
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 
 /* screen state, kept across tabs and screens like legacy `ui` */
@@ -52,40 +55,78 @@ function CovCell({ sk }: { sk: SkillRow }) {
   );
 }
 
-type SkillView = "all" | "unused" | "lowcov";
+const cap = (x: string): string => x.charAt(0).toUpperCase() + x.slice(1);
+const enabledOf = (sk: SkillRow): boolean => sk.projects === "all" || sk.projects.length > 0;
 
-/** The library: view tabs with counts, a filter bar and one table. A row opens the skill's own page. */
+/** The skill drawer (prototype `skopen`): description, key facts, the skill file; the full page (definition, agents, projects, versions) is one button away. */
+function SkillDrawer({ sk, agents, stations, close }: { sk: SkillRow; agents: AgentRow[]; stations: string; close: () => void }) {
+  const users = agents.filter((a) => a.skills.includes(sk.id) || (a.liveSkills ?? []).some((l) => l.id === sk.id));
+  const updated = sk.versions[sk.versions.length - 1]?.at;
+  return (
+    <div className="drawer-inner" id="sk-drawer">
+      <div className="drawer-h">
+        <div><div className="eyebrow">{`Skill \u00b7 v${sk.version}`}</div><h2>{sk.name}</h2></div>
+        <IconBtn icon="x" label="Close" className="drawer-close" onClick={close} />
+      </div>
+      <div className="drawer-b">
+        <p>{sk.desc}</p>
+        <dl className="kv">
+          <dt>Station</dt><dd>{stations || "\u2014"}</dd>
+          <dt>Uses</dt><dd className="mono dim">{NA}</dd>
+          <dt>Updated</dt><dd>{updated ? fmt.ago(updated, Date.now()) : "\u2014"}</dd>
+          <dt>Agents</dt><dd>{users.length ? <span className="row">{users.map((a) => <span key={a.id} className="tag">{a.name}</span>)}</span> : "\u2014"}</dd>
+        </dl>
+        <div className="label">Skill file</div>
+        <pre className="code" style={{ fontSize: 12 }}>{`---\nname: ${sk.id}\n---\n# ${sk.name}\n\n${sk.body || sk.desc}`}</pre>
+      </div>
+      <div className="drawer-f">
+        <Btn label="Close" onClick={close} />
+        <Btn label="Edit draft" kind="primary" id="sk-drawer-edit" onClick={() => { close(); navigate("skills", sk.id); }} />
+      </div>
+    </div>
+  );
+}
+
+/** The library (prototype `skills`): search, Station select and the table; state in the URL (?q ?station ?sort ?dir). */
 function Library({ skills, agents }: { skills: SkillRow[]; agents: AgentRow[] }) {
-  const actor = useActors();
+  const ui_ = useUI();
+  const st = useStations();
+  const perm = dec(useCan("skill.edit"));
+  const toggle = useCommand((sk: SkillRow, on: boolean) => ops.setSkillProjects(sk.id, on ? "all" : []), { ok: false });
+  const [r, setR] = useRouteState({ q: "", station: "", sort: "name", dir: "asc" });
+  const [qText, setQText] = useDebouncedParam(r.q, (v) => setR({ q: v }));
   const usedBy = (id: string) => agents.filter((a) => a.skills.includes(id) || (a.liveSkills ?? []).some((l) => l.id === id));
-  const q = ui.q.trim().toLowerCase();
-  const views: Array<{ id: SkillView; label: string; test: (sk: SkillRow) => boolean }> = [
-    { id: "all", label: "All", test: () => true },
-    { id: "unused", label: "Unused", test: (sk) => !usedBy(sk.id).length },
-    { id: "lowcov", label: "Low coverage", test: (sk) => !(covPct(sk) >= 0.85 && sk.coverage.cases) },
-  ];
-  const inView = views.find((v) => v.id === ui.filter)?.test ?? views[0]!.test;
-  const list = skills.filter((sk) => inView(sk) && (!q || `${sk.name} ${sk.desc} ${sk.when}`.toLowerCase().indexOf(q) >= 0));
-  const open = (sk: SkillRow) => navigate("skills", sk.id);
+  /** The backend has no station on a skill: it is the station of the agents that use it. */
+  const stationsOf = (id: string): string[] => [...new Set(usedBy(id).map((a) => a.station).filter((x): x is string => !!x))];
+  const stationName = (id: string): string => st.find(id)?.name ?? (id === "onboarding" ? "Onboarding" : cap(id));
+  const term = qText.trim().toLowerCase();
+  const list = skills.filter((sk) => (!r.station || stationsOf(sk.id).includes(r.station)) && (!term || `${sk.name} ${sk.desc} ${sk.id}`.toLowerCase().includes(term)));
+  const open = (sk: SkillRow): void => ui_.drawer.open(`skill:${sk.id}`, (close) => <SkillDrawer sk={sk} agents={agents} stations={stationsOf(sk.id).map(stationName).join(", ")} close={close} />);
+  const any = !!(r.q || r.station);
+  const clear = (): void => { setQText(""); setR({ q: "", station: "" }); };
   const cols: SortCol<SkillRow>[] = [
     { key: "name", label: "Skill", sort: (sk) => sk.name.toLowerCase(), render: (sk) => (
-      <div className="sk-cell">
-        <div className="row"><a className="rl ell sk-name" href={hashFor("skills", sk.id)} onClick={(e) => { e.preventDefault(); open(sk); }}>{sk.name}</a><DraftDot scope="skill" id={sk.id} />{sk.builtin ? <Chip text="built-in" /> : null}</div>
-        <span className="dim ell" style={{ fontSize: 12 }} title={`Owner: ${actor(sk.owner).name.replace(" (agent)", "")}`}>{sk.desc}</span>
-      </div>
+      <span className="stack" style={{ gap: 0 }}>
+        <span className="row"><a className="rl ell sk-name" href={hashFor("skills", sk.id)} onClick={(e) => { e.preventDefault(); open(sk); }}>{sk.name}</a><DraftDot scope="skill" id={sk.id} /></span>
+        <span className="dim ell" style={{ fontSize: 12 }}>{sk.desc}</span>
+      </span>
     ) },
-    { key: "projects", label: "Projects", render: (sk) => sk.projects === "all" ? "all projects" : sk.projects.length ? `${sk.projects.length} project${sk.projects.length > 1 ? "s" : ""}` : <span className="warn-text">no projects</span> },
-    { key: "version", label: "Version", render: (sk) => <span className="mono">{`v${sk.version}`}</span> },
-    { key: "used", label: "Used by", sort: (sk) => usedBy(sk.id).length, render: (sk) => { const u = usedBy(sk.id); return u.length ? <span className="row nowrap">{u.map((a) => <span key={a.id} className="tag">{a.name}</span>)}</span> : <span className="dim">{"\u2014"}</span>; } },
-    { key: "cov", label: "Eval coverage", sort: (sk) => covPct(sk), render: (sk) => <CovCell sk={sk} /> },
+    { key: "station", label: "Station", sort: (sk) => stationsOf(sk.id)[0] ?? "~", render: (sk) => { const s = stationsOf(sk.id); return s.length ? <span>{s.map(stationName).join(", ")}</span> : <span className="dim">{"\u2014"}</span>; } },
+    { key: "agents", label: "Used by", render: (sk) => { const u = usedBy(sk.id); return u.length ? <span className="row nowrap">{u.map((a) => <span key={a.id} className="tag">{a.name}</span>)}</span> : <span className="dim">{"\u2014"}</span>; } },
+    { key: "version", label: "Version", sort: (sk) => sk.version, render: (sk) => <span className="mono">{sk.version}</span> },
+    { key: "uses", label: "Uses", align: "end", sort: () => 0, render: () => <span className="mono dim">{NA}</span> },
+    { key: "en", label: "Enabled", render: (sk) => <Toggle id={`sk-en-${sk.id}`} checked={enabledOf(sk)} label={`${sk.name} enabled`} decision={perm} onChange={(on) => { void toggle.run(sk, on).then((x) => { if (x?.ok) ui_.toast(`${on ? "Enabled" : "Disabled"} ${sk.name}`, "ok"); }); }} /> },
   ];
+  const stOpts = [...st.all.map((s) => ({ value: s.id, label: s.name })), { value: "onboarding", label: "Onboarding" }];
   return (
     <>
-      <FilterBar label="Filter skills" count={`${list.length} of ${skills.length}`}>
-        <SearchBox id="sk-search" value={ui.q} onChange={(v) => { ui.q = v; rerender(); }} placeholder="Search skills" label="Filter skills" />
-        <Select id="sk-view" aria-label="View" value={ui.filter} onChange={(t) => { ui.filter = t as SkillView; rerender(); }} options={views.map((v) => ({ value: v.id, label: `View: ${v.label} (${skills.filter(v.test).length})` }))} />
+      <FilterBar label="Filter skills" count={`${list.length} of ${skills.length}`} actions={any ? <Btn label="Clear" small kind="ghost" id="sk-clear" onClick={clear} /> : undefined}>
+        <SearchBox id="sk-search" value={qText} onChange={setQText} placeholder="Search skills" label="Filter skills" />
+        <Select id="sk-f-station" aria-label="Station" value={r.station} onChange={(v) => setR({ station: v })} options={[{ value: "", label: "Station: all" }, ...stOpts]} />
       </FilterBar>
-      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} pageSize={12} pager empty={{ title: "No skills match", text: "Clear the filter to see the whole library." }} />
+      <DataTable id="sk-lib" caption="Skills" columns={cols} rows={list} rowKey={(sk) => sk.id} rowId={(sk) => `sk-row-${sk.id}`} onRow={open} pageSize={12} pager
+        sort={{ key: r.sort, dir: r.dir === "desc" ? -1 : 1 }} onSort={(x) => setR({ sort: x.key, dir: x.dir === -1 ? "desc" : "asc" })}
+        empty={{ title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: <Btn label="Clear filters" id="sk-empty-clear" onClick={clear} /> }} />
     </>
   );
 }
@@ -244,65 +285,72 @@ function VersionsTab({ sk }: { sk: SkillRow }) {
 function Detail({ sk, agents }: { sk: SkillRow; agents: AgentRow[] }) {
   const actor = useActors();
   const perm = dec(useCan("skill.edit"));
+  const [route, setRoute] = useRouteState({ tab: "def" });
   const users = agents.filter((a) => a.skills.includes(sk.id));
   const suites = [...new Set(users.map((a) => a.suite).filter(Boolean))];
   const tabs = [{ id: "def", label: "Definition" }, { id: "agents", label: "Agents", count: users.length }, { id: "projects", label: "Projects" }, { id: "versions", label: "Versions", count: sk.versions.length }];
-  const body = ui.tab === "agents" ? <AgentsTab sk={sk} agents={agents} /> : ui.tab === "projects" ? <ProjectsTab sk={sk} agents={agents} /> : ui.tab === "versions" ? <VersionsTab sk={sk} /> : <DefTab sk={sk} perm={perm} />;
+  const tab = tabs.some((t) => t.id === route.tab) ? route.tab : "def";
+  const body = tab === "agents" ? <AgentsTab sk={sk} agents={agents} /> : tab === "projects" ? <ProjectsTab sk={sk} agents={agents} /> : tab === "versions" ? <VersionsTab sk={sk} /> : <DefTab sk={sk} perm={perm} />;
   return (
-    <section className="sk-detail" id="sk-detail" aria-label={sk.name}>
-      <a className="back-link" id="sk-back-link" href={hashFor("skills")} onClick={(e) => { e.preventDefault(); navigate("skills"); }}><Icon name="back" />All skills</a>
-      <ViewHead kicker={`Skill · ${sk.id}${sk.builtin ? " · built-in" : ""}`} title={sk.name} sub={sk.desc} />
-      <StatRow id="sk-stats">
-        <Stat label="Version" value={<span className="mono">{`v${sk.version}`}</span>} />
-        <Stat label="Owner" value={actor(sk.owner).name.replace(" (agent)", "")} />
-        <Stat label="Used by" value={`${users.length} agent${users.length === 1 ? "" : "s"}`} />
-        <Stat label="Coverage" value={<CovCell sk={sk} />} />
-        <Stat label="Suites" value={<span className="mono small">{suites.join(", ") || "none"}</span>} />
-      </StatRow>
+    <Page id="sk-detail" eyebrow={`Workforce \u00b7 Skill${sk.builtin ? " \u00b7 built-in" : ""}`} title={sk.name} sub={sk.desc} cls="sk-detail"
+      acts={<Btn label="All skills" id="sk-back-link" onClick={() => navigate("skills")} />}>
+      <Stats id="sk-stats" items={[
+        { l: "Version", v: <span className="mono">{sk.version}</span> },
+        { l: "Owner", v: actor(sk.owner).name.replace(" (agent)", "") },
+        { l: "Used by", v: `${users.length} agent${users.length === 1 ? "" : "s"}`, tone: "agent" },
+        { l: "Coverage", v: <CovCell sk={sk} />, tone: "ok" },
+        { l: "Suites", v: <span className="mono small">{suites.join(", ") || "none"}</span> },
+      ]} />
       <LockNote decision={perm} what="Skill text" />
-      <div className="panel sk-panel">
-        <Tabs idPrefix="sk-tab" items={tabs} active={ui.tab} onChange={(t) => { ui.tab = t; rerender(); }} />
-        <div className="sk-body">{body}</div>
-      </div>
-    </section>
+      <Tabs idPrefix="sk-tab" items={tabs} active={tab} onChange={(t) => setRoute({ tab: t })} />
+      <div className="sk-body">{body}</div>
+    </Page>
   );
 }
 
 function NewSkill({ agents, close }: { agents: AgentRow[]; close: () => void }) {
   const ui_ = useUI();
+  const st = useStations();
   const perm = dec(useCan("skill.edit"));
   const attachGuard = dec(useCan("agent.edit"));
-  const [f, setF] = useState({ name: "", desc: "", when: "", body: "", res: "", attach: "" });
-  const [err, setErr] = useState("");
+  const [f, setF] = useState({ name: "", station: "", desc: "", attach: "" });
+  const [err, setErr] = useState<{ name?: string; desc?: string; form?: string }>({});
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const station = f.station || st.all[0]?.id || "";
+  const offered = agents.filter((a) => a.station === station);
   return (
-    <Dialog title="New skill" kicker="Build · skills" wide onClose={close} sub="Skills start at v1.0.0, enabled on all projects. Add eval cases in the agent's suite to cover them."
+    <Dialog title="New skill" onClose={close} dirty={!!(f.name || f.desc)}
       body={(
         <div className="form-grid">
           <LockNote decision={perm} what="Creating skills" />
-          <Field label="Name" htmlFor="sk-new-name"><input id="sk-new-name" className="input" placeholder="e.g. API contract review" value={f.name} onChange={set("name")} /></Field>
-          <Field label="Description" htmlFor="sk-new-desc"><input id="sk-new-desc" className="input" value={f.desc} onChange={set("desc")} /></Field>
-          <Field label="When to use" htmlFor="sk-new-when"><input id="sk-new-when" className="input" placeholder="e.g. At Design when an endpoint changes" value={f.when} onChange={set("when")} /></Field>
-          <Field label="Body" htmlFor="sk-new-body"><textarea id="sk-new-body" className="input mono" rows={5} value={f.body} onChange={set("body")} /></Field>
-          <Field label="Resources" htmlFor="sk-new-res"><textarea id="sk-new-res" className="input mono" rows={2} placeholder="one file per line" value={f.res} onChange={set("res")} /></Field>
-          <Field label="Attach" htmlFor="sk-new-attach" hint={attachGuard.allowed ? undefined : `Attaching needs Configure agents: ${attachGuard.reason}`}>
-            <Select id="sk-new-attach" disabled={!attachGuard.allowed} value={f.attach} options={[{ value: "", label: "Do not attach yet" }, ...agents.map((a) => ({ value: a.id, label: `Attach to ${a.name}` }))]} onChange={(v) => setF((x) => ({ ...x, attach: v }))} />
+          <Field label="Name (required)" htmlFor="sk-new-name" error={err.name}><input id="sk-new-name" className="input" value={f.name} onChange={set("name")} aria-invalid={err.name ? true : undefined} /></Field>
+          <Field label="Station" htmlFor="sk-new-station" hint="Skills carry no station of their own: it is the station of the agents that use them. It lists the agents you may attach it to.">
+            <Select id="sk-new-station" value={station} options={[...st.all.map((s) => ({ value: s.id, label: s.name })), { value: "onboarding", label: "Onboarding" }]} onChange={(v) => setF((x) => ({ ...x, station: v, attach: "" }))} />
           </Field>
-          <div className="form-err" role="alert">{err}</div>
+          <Field label="What it teaches (required)" htmlFor="sk-new-desc" error={err.desc}><textarea id="sk-new-desc" className="input" rows={4} value={f.desc} onChange={set("desc")} aria-invalid={err.desc ? true : undefined} /></Field>
+          <Field label="Attach (optional)" htmlFor="sk-new-attach" hint={attachGuard.allowed ? undefined : `Attaching needs Configure agents: ${attachGuard.reason}`}>
+            <Select id="sk-new-attach" disabled={!attachGuard.allowed} value={f.attach} options={[{ value: "", label: "Do not attach yet" }, ...offered.map((a) => ({ value: a.id, label: `Attach to ${a.name}` }))]} onChange={(v) => setF((x) => ({ ...x, attach: v }))} />
+          </Field>
+          <div className="form-err" role="alert">{err.form ?? ""}</div>
         </div>
       )}
       actions={[
         { label: "Cancel" },
         {
-          label: "Create skill", kind: "primary", submit: true, id: "sk-new-ok", guard: perm,
+          label: "Create draft", kind: "primary", submit: true, id: "sk-new-ok", guard: perm,
           onClick: (done) => {
-            if (!f.name.trim()) { setErr("Name the skill."); return; }
-            void ops.saveSkill(null, { name: f.name, desc: f.desc.trim(), when: f.when.trim(), body: f.body, resources: f.res.split("\n").map((x) => x.trim()).filter(Boolean) }).then(async (r) => {
-              if (!r.ok) { setErr(r.msg); return; }
+            const name = f.name.trim();
+            const desc = f.desc.trim();
+            const e: typeof err = {};
+            if (!name) e.name = "Name is required."; else if (name.length < 3) e.name = "Name needs at least 3 characters.";
+            if (!desc) e.desc = "Describe what it teaches."; else if (desc.length < 10) e.desc = "Say a little more: at least 10 characters.";
+            setErr(e);
+            if (e.name || e.desc) { document.getElementById(e.name ? "sk-new-name" : "sk-new-desc")?.focus(); return; }
+            void ops.saveSkill(null, { name, desc, when: "", body: desc, resources: [] }).then(async (r) => {
+              if (!r.ok) { setErr({ form: r.msg }); return; }
               const created = (r as unknown as { skill?: SkillRow }).skill;
               if (created && f.attach) { const r2 = await ops.attachSkill(f.attach, created.id, true); if (!r2.ok) ui_.toast(r2.msg, "error"); }
-              if (created) { ui.sel = created.id; ui.tab = "def"; rerender(); navigate("skills", created.id); }
-              ui_.toast(r.msg, "ok");
+              ui_.toast("Draft created", "ok");
               done();
             });
           },
@@ -321,27 +369,16 @@ export default function SkillsView() {
   const perm = dec(useCan("skill.edit"));
   const wanted = route.id === "skills" ? route.param : null;
   useCrumbTail(wanted ? skills.find((s) => s.id === wanted)?.name : null);
-  const sub = "Reusable know-how attached to agents. A skill is text plus a version, so a change to it is a reviewed edit, not a code change.";
+  const sub = "Reusable know-how that agents load. Versioned, reviewed, and measured by evals.";
   const newBtn = <Btn label="New skill" kind="primary" icon="plus" id="sk-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill agents={agents} close={close} />)} />;
-  if (q.data === undefined) return <div className="view view-skills"><ViewHead kicker="Workforce" title="Skills" sub={sub} actions={newBtn} /><Async query={q} what="skills" id="skills">{() => null}</Async></div>;
-  if (!skills.length) return <div className="view view-skills"><ViewHead kicker="Workforce" title="Skills" sub={sub} actions={newBtn} /><Empty title="No skills yet" text="Create the first skill." /></div>;
+  const head = (children: React.ReactNode) => <Page eyebrow="Workforce" title="Skills" sub={sub} acts={newBtn} cls="view-skills">{children}</Page>;
+  if (q.data === undefined) return head(<Async query={q} what="skills" id="skills">{() => null}</Async>);
   if (wanted) {
     const current = skills.find((s) => s.id === wanted);
-    if (!current) {
-      return (
-        <div className="view view-skills">
-          <ViewHead title="Skill not found" sub="This skill does not exist, or it was removed." />
-          <Empty title="No skill with that id" text="Pick one from the library." action={<Btn label="Back to skills" icon="back" id="sk-back" onClick={() => navigate("skills")} />} />
-        </div>
-      );
-    }
+    if (!current) return <NotFoundPage what="skill" />;
     ui.sel = current.id;
-    return <div className="view view-skills"><Detail sk={current} agents={agents} /></div>;
+    return <Detail sk={current} agents={agents} />;
   }
-  return (
-    <div className="view view-skills">
-      <ViewHead kicker="Workforce" title="Skills" sub={sub} actions={newBtn} />
-      <Library skills={skills} agents={agents} />
-    </div>
-  );
+  if (!skills.length) return head(<div className="card"><CrEmpty title="Nothing here yet" text="Create the first skill." action={<Btn label="New skill" kind="primary" icon="plus" id="skills-empty-new" guard={perm} onClick={() => ui_.open((close) => <NewSkill agents={agents} close={close} />)} />} /></div>);
+  return head(<Library skills={skills} agents={agents} />);
 }

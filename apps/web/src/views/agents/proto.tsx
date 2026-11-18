@@ -8,12 +8,11 @@ import { fmt } from "@gantry/domain";
 import { useAllSuiteRuns, useScorecards, useSkills, useWorkOrders } from "../../api/queries";
 import { usePrefs } from "../../lib/prefs";
 import { hashFor, navigate } from "../../lib/router";
-import { Btn, Chip, Field, Select, Toggle, type Decision } from "../../ui/primitives";
-import { Bars, Card, Stats } from "../../ui/cr";
+import { Btn, Chip, Field, IconBtn, Select, Toggle, type Decision } from "../../ui/primitives";
+import { Bars, Card, CrIcon, Stats } from "../../ui/cr";
 import { DataTable, type SortCol } from "../../ui/DataTable";
 import { useUI } from "../../ui/overlay-context";
 import { lineDiff } from "../../ui/linediff";
-import { Icon } from "../../ui/Icon";
 import { TOOLS, liveVersion, nextVersion, useModels, useStations, type AgentRow } from "./kit";
 import type { TabProps } from "./Config";
 
@@ -107,7 +106,7 @@ export function InstructionsCard({ a, d, ro, edit, onSaveVersion, saving }: Pick
       <div className="drawer-inner">
         <div className="drawer-h">
           <div><div className="eyebrow">Diff</div><h2>{`${a.name} instructions`}</h2></div>
-          <button type="button" className="icon-btn drawer-close" aria-label="Close" onClick={close}><Icon name="x" /></button>
+          <IconBtn icon="x" label="Close" className="drawer-close" onClick={close} />
         </div>
         <div className="drawer-b">
           {lines.length ? (
@@ -143,10 +142,8 @@ export function confirmNewVersion(ui: ReturnType<typeof useUI>, a: AgentRow, run
   });
 }
 
-export function ToolsTab({ a, d, perm, ro, edit }: TabProps) {
+export function ToolsTab({ d, perm, ro, edit }: TabProps) {
   const ui = useUI();
-  const st = useStations();
-  const station = st.find(a.station);
   return (
     <Card title="Tools" flush>
       <div className="list">
@@ -155,7 +152,7 @@ export function ToolsTab({ a, d, perm, ro, edit }: TabProps) {
           const on = !!d.tools[id];
           return (
             <div key={id} className="setrow">
-              <div className="tx"><b className="mono">{id}</b><span>{danger ? "Sensitive: needs a Factory Admin" : `Allowed for ${station ? `the ${station.name} station` : "this agent"}`}</span></div>
+              <div className="tx"><b className="mono">{id}</b><span>{danger ? "Sensitive: needs a Factory Admin" : "Allowed for this station"}</span></div>
               <Toggle id={`ag-tool-${id}`} checked={on} label={`${label}`} decision={ro ? perm : danger && !perm.allowed ? perm : null} onChange={(v) => { edit(() => { d.tools[id] = v; }); ui.toast(`${v ? "Enabled" : "Disabled"} ${id}. Save the agent to keep it.`, "ok"); }} />
             </div>
           );
@@ -261,15 +258,18 @@ export function GuardrailsTab({ d, ro, edit }: TabProps) {
   return (
     <Card title="Guardrails">
       <div className="stack">
-        <div className="banner"><Icon name="info" /><div className="grow">Guardrails are enforced by the platform, not by the agent. Changing them is recorded in the audit ledger.</div></div>
-        <KvList rows={[["On violation", "Stop and ask a person"]]} />
+        <KvList rows={[
+          ["Max diff", <span key="md" className="mono">{d.guardrails.maxDiff ? `${d.guardrails.maxDiff} lines` : "no limit"}</span>],
+          ["Forbidden paths", d.guardrails.paths.length ? <span key="fp" className="row">{d.guardrails.paths.map((p) => <code key={p}>{p}</code>)}</span> : "none"],
+          ["On violation", "Stop and ask a person"],
+        ]} />
+        <div className="banner"><CrIcon name="info" /><div className="grow">Guardrails are enforced by the platform, not by the agent. Changing them is recorded in the audit ledger.</div></div>
         <Field label="Max diff size (lines)" htmlFor="ag-maxdiff" hint="0 means no limit.">
           <input id="ag-maxdiff" className="input mono" type="number" min="0" step="50" value={String(d.guardrails.maxDiff)} disabled={ro} onChange={(e) => edit(() => { d.guardrails.maxDiff = +e.target.value || 0; })} />
         </Field>
         <Field label="Forbidden paths" htmlFor="ag-paths" hint="One glob per line.">
           <textarea id="ag-paths" className="input mono" rows={3} disabled={ro} placeholder="infra/prod/**" value={paths} onChange={(e) => { setPaths(e.target.value); edit(() => { d.guardrails.paths = e.target.value.split("\n").map((x) => x.trim()).filter(Boolean); }); }} />
         </Field>
-        {d.guardrails.paths.length ? <div className="row">{d.guardrails.paths.map((p) => <code key={p}>{p}</code>)}</div> : null}
       </div>
     </Card>
   );
