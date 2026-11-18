@@ -426,11 +426,12 @@ describe("Access", () => {
 });
 
 describe("Security", () => {
-  it("says Not visible to you when the settings read is refused, instead of a blank page", async () => {
+  it("shows the locked sheet with a way home when the settings read is refused, instead of a blank page", async () => {
     setup({ "GET /api/v1/security": () => ({ status: 403, body: { ok: false, msg: "Needs security.manage." } }) });
     mount(<SecurityView />);
-    expect(await screen.findByText("Not visible to you")).toBeTruthy();
+    expect(await screen.findByText("No access to this sheet")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Security" })).toBeTruthy();
+    expect(screen.getByText("Back to Home")).toBeTruthy();
   });
 
   it("toggles a setting with PATCH {path, value} and the settings version", async () => {
@@ -443,43 +444,45 @@ describe("Security", () => {
     expect(c.headers["if-match"]).toBe("7");
   });
 
-  it("keeps the last allowed domain and the one you signed in with", async () => {
-    setup();
+  it("keeps the one you signed in with, and refuses an allow list that would lock you out", async () => {
+    const calls = setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Network/ }));
     const rm = await byId("sec-dom-rm-acme_dev");
     expect(rm.getAttribute("aria-disabled")).toBe("true");
     expect(rm.getAttribute("data-reason")).toContain("lock you out");
     // this browser (10.4.0.12) is covered only by 10.0.0.0/8
-    const ip = await byId("sec-ip-rm-10_0_0_0_8");
-    expect(ip.getAttribute("data-reason")).toContain("only range covering your address 10.4.0.12");
+    fireEvent.change(await byId("sec-ip"), { target: { value: "192.0.2.0/24" } });
+    fireEvent.click(await byId("sec-save"));
+    expect(await screen.findByText(/would lock you out: your address 10.4.0.12/)).toBeTruthy();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   });
 
   it("validates a CIDR before sending", async () => {
     const calls = setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Network/ }));
-    fireEvent.change(await screen.findByLabelText("Address range to allow"), { target: { value: "nope" } });
-    fireEvent.click(screen.getByText("Add range"));
-    expect(await screen.findByText(/Enter an IPv4 address or CIDR range/)).toBeTruthy();
+    fireEvent.change(await byId("sec-ip"), { target: { value: "nope" } });
+    fireEvent.click(await byId("sec-save"));
+    expect(await screen.findByText("Each line must be a CIDR such as 10.0.0.0/8.")).toBeTruthy();
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   });
 
-  it("lists sessions and revokes another one; read-only users cannot revoke others", async () => {
+  it("lists sessions and revokes another one after a confirmation", async () => {
     const calls = setup({ "DELETE /api/v1/sessions/s2": () => ({ body: { ok: true, msg: "Session revoked." } }) });
     mount(<SecurityView />);
     fireEvent.click(await screen.findByRole("tab", { name: /Sessions/ }));
     fireEvent.click(await byId("sec-ses-rv-s2"));
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    fireEvent.click(await byId("sec-ses-ok"));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/sessions/s2")).toBe(true));
   });
 
-  it("shows the sign-in history with failures", async () => {
+  it("shows the sign-in log with failures and filters by outcome", async () => {
     setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /History/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Sign-in log/ }));
     expect(await screen.findByText("domain not allowed")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Succeeded"));
-    expect(screen.queryByText("domain not allowed")).toBeNull();
+    fireEvent.change(await byId("sec-hist-f-outcome"), { target: { value: "success" } });
+    await waitFor(() => expect(screen.queryByText("domain not allowed")).toBeNull());
     expect(within(document.querySelector("tbody")!).getAllByRole("row")).toHaveLength(1);
   });
 

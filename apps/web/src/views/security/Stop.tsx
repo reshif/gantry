@@ -2,37 +2,34 @@
  * Security, Emergency stop: the factory-wide kill and restore (the same dialogs as the status menu), who may do it,
  * and every stop in force right now. Lifted stops stay in the Audit ledger.
  */
-import { qk } from "../../api/keys";
-import { useQuery } from "@tanstack/react-query";
 import type { SecuritySettings } from "@gantry/domain";
-import { api, get } from "../../api/client";
 import { useCan } from "../../api/can";
-import { useMe, usePeople } from "../../api/queries";
+import { useFactoryStops, useMe, usePeople } from "../../api/queries";
 import { fmt } from "@gantry/domain";
 import { makeStopActions } from "../../shell/stopActions";
 import { Btn, Panel, Status, Who, type Decision } from "../../ui/primitives";
 import { Async } from "../../ui/async";
+import { DataTable } from "../../ui/DataTable";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
-import { lockd } from "../govern/data";
-
-interface StopRow { id: string; scope: string; mode: string; reason: string; inFlight: string | null; by: string; at: number }
+import { isAdminLike, lockd } from "../govern/data";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
 const SCOPE: Record<string, string> = { factory: "Whole factory", project: "Project", repo: "Repo", workorder: "Work order" };
 
-export function StopTab({ sec, onSignIn }: { sec: SecuritySettings; onSignIn: () => void }) {
+export function StopTab({ sec }: { sec: SecuritySettings }) {
   const me = useMe();
   const ui = useUI();
-  const people = usePeople().data ?? [];
+  const peopleQ = usePeople();
+  const people = peopleQ.data ? peopleQ.data : [];
   const kill = dec(useCan("kill.factory"));
   const restore = dec(useCan("restore.factory"));
-  const stops = useQuery({ queryKey: qk.factoryStops(), queryFn: async () => (await get<{ items: StopRow[] }>(api("stops"))).items });
+  const stops = useFactoryStops();
   if (!me) return null;
   const killed = me.factory.killed;
   const act = makeStopActions(ui, me);
-  const admins = people.filter((p) => p.status === "active" && p.roles.some((g) => g.role === "factory_admin" && g.scope === "factory")).length;
+  const admins = people.filter((p) => p.status === "active" && isAdminLike(p.roles.filter((g) => g.scope === "factory"))).length;
   const noSecond = sec.restoreFactoryNeedsTwo && admins < 2;
   const restoreGuard: Decision = restore.allowed && killed && noSecond ? lockd(`Only ${admins} Factory Admin: a restore needs two different Factory Admins.`, "Add a second Factory Admin") : restore;
   return (
@@ -56,30 +53,22 @@ export function StopTab({ sec, onSignIn }: { sec: SecuritySettings; onSignIn: ()
         <dl className="sec-kv">
           <div><dt>Restore</dt><dd>{sec.restoreFactoryNeedsTwo ? "Needs two different Factory Admins and a fresh sign-in." : "One Factory Admin with a fresh sign-in."}</dd></div>
           <div><dt>Kill</dt><dd>{sec.killNeedsStepUp !== false ? "Needs a fresh sign-in." : "No fresh sign-in needed."}</dd></div>
-          <div><dt>Change this</dt><dd><button type="button" className="linkbtn" onClick={onSignIn}>Sign-in tab, Session lifetime</button></dd></div>
+          <div><dt>Change this</dt><dd><Btn label="Sign-in policy above" small kind="ghost" id="sec-stop-policy" onClick={() => document.getElementById("sec-policy")?.scrollIntoView({ block: "start" })} /></dd></div>
         </dl>
       </Panel>
       <Panel title="Stops in force" flush>
         <Async query={stops} what="stops" id="sec-stops">{(rows) => rows.length ? (
-          <div className="table-scroll">
-            <table className="table table-compact sec-table" id="sec-stops-table">
-              <thead><tr>{["Scope", "Target", "Mode", "Reason", "Set by", "Set (IST)"].map((x) => <th key={x} scope="col">{x}</th>)}</tr></thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id}>
-                    <td>{SCOPE[r.scope] ?? r.scope}</td>
-                    <td className="mono">{r.id.includes(":") ? r.id.split(":")[1] || "factory" : r.id}</td>
-                    <td><Status tone={r.mode === "kill" ? "block" : "wait"}>{r.mode === "kill" ? "Killed" : "Halted"}</Status></td>
-                    <td className="small">{r.reason || "No reason recorded"}</td>
-                    <td><Who id={r.by} /></td>
-                    <td className="mono nowrap">{`${fmt.istDate(r.at)} ${fmt.ist(r.at)}`}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable id="sec-stops-table" caption="Stops in force" rows={rows} rowKey={(r) => r.id}
+            columns={[
+              { key: "scope", label: "Scope", render: (r) => SCOPE[r.scope] ?? r.scope },
+              { key: "target", label: "Target", render: (r) => <span className="mono">{r.id.includes(":") ? r.id.split(":")[1] || "factory" : r.id}</span> },
+              { key: "mode", label: "Mode", render: (r) => <Status tone={r.mode === "kill" ? "block" : "wait"}>{r.mode === "kill" ? "Killed" : "Halted"}</Status> },
+              { key: "reason", label: "Reason", render: (r) => <span className="small">{r.reason || "No reason recorded"}</span> },
+              { key: "by", label: "Set by", render: (r) => <Who id={r.by} /> },
+              { key: "at", label: "Set (IST)", render: (r) => <span className="mono nowrap">{`${fmt.istDate(r.at)} ${fmt.ist(r.at)}`}</span> },
+            ]} />
         ) : <p className="muted small sec-stop-none">Nothing is stopped right now.</p>}</Async>
-        <p className="muted small sec-stop-foot">Stops that were lifted stay in the <button type="button" className="linkbtn" onClick={() => navigate("audit")}>Audit ledger</button> under Kill.</p>
+        <p className="muted small sec-stop-foot">Stops that were lifted stay in the <Btn label="Audit ledger" small kind="ghost" id="sec-stop-audit" onClick={() => navigate("audit")} /> under Kill.</p>
       </Panel>
     </div>
   );

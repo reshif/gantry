@@ -22,6 +22,8 @@ describe("hash parsing", () => {
     expect(parseHash("#evals/factory")).toEqual({ id: "evals", param: "factory", project: null, q: {} });
     expect(parseHash("#/integrations?tab=catalogue")).toEqual({ id: "integrations", param: "catalogue", project: null, q: { tab: "catalogue" } });
     expect(parseHash("#/mcp/mcp-docs?tab=tools")).toEqual({ id: "mcp", param: "mcp-docs", project: null, q: { tab: "tools" } });
+    expect(parseHash("#/security?tab=sessions")).toEqual({ id: "security", param: "sessions", project: null, q: { tab: "sessions" } });
+    expect(ROUTES.find((r) => r.id === "audit")?.title).toBe("Audit ledger");
   });
   it("ignores a query on the hash: #/p/x/floor?view=board is the floor route", () => {
     expect(parseHash("#/p/payments/floor?view=board")).toEqual({ id: "floor", param: null, project: "payments", q: { view: "board" } });

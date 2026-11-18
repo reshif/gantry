@@ -274,7 +274,20 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
       const items = (seed.audit as Seed[]).slice().sort((x: Seed, y: Seed) => y.at - x.at).map((e: Seed, i: number, all: Seed[]): Seed => ({ ...e, seq: e.id, actorKind: String(e.actor).startsWith("p-") ? "human" : "system", actorName: ppl.get(e.actor) ?? e.actor, channel: e.via ?? "web", digest: `d${String(e.id).padStart(8, "0")}ffff`, prev: `d${String(all[i + 1]?.id ?? 0).padStart(8, "0")}ffff` }));
       const count = (k: string) => items.reduce<Record<string, number>>((m: Record<string, number>, e: Seed) => ({ ...m, [e[k]]: (m[e[k]] ?? 0) + 1 }), {});
       const cats = count("category");
-      return { items, next: null, total: items.length, summary: { entries: items.length, denied: items.filter((e) => e.outcome === "denied").length, changes: items.filter((e) => e.category === "config").length, head: items[0]?.digest ?? "", categories: cats, topics: {}, facets: { outcomes: Object.keys(count("outcome")), channels: ["web", "api"], actors: Object.keys(count("actor")).map((id) => ({ id, name: ppl.get(id) ?? id })) } } };
+      // gov2 fixtures: the ledger honours the same filters as the server (outcome, category, actor, q), so counts by outcome are real
+      const qp = url.searchParams;
+      const needle = (qp.get("q") ?? "").toLowerCase();
+      const shown = items.filter((e) => (!qp.get("outcome") || e.outcome === qp.get("outcome")) && (!qp.get("category") || e.category === qp.get("category")) && (!qp.get("actor") || e.actor === qp.get("actor")) && (!needle || [e.action, e.target, e.actorName].join(" ").toLowerCase().includes(needle)));
+      const limit = Number(qp.get("limit") ?? 0) || shown.length;
+      return { items: shown.slice(0, limit), next: null, total: shown.length, summary: { entries: items.length, denied: items.filter((e) => e.outcome === "denied").length, changes: items.filter((e) => e.category === "config").length, head: items[0]?.digest ?? "", categories: cats, topics: {}, facets: { outcomes: Object.keys(count("outcome")), channels: ["web", "api"], actors: Object.keys(count("actor")).map((id) => ({ id, name: ppl.get(id) ?? id })) } } };
+    }
+    // gov2 fixtures: one ledger entry, in the server's detail shape (before/after as JSON text, the chain digests, the entity)
+    const auditOne = /^audit\/(\d+)$/.exec(path);
+    if (auditOne) {
+      const e = (seed.audit as Seed[]).find((x) => String(x.id) === auditOne[1]);
+      if (!e) return undefined;
+      const ppl = new Map((seed.people as Array<{ id: string; name: string }>).map((x) => [x.id, x.name]));
+      return { ...e, seq: e.id, actorKind: String(e.actor).startsWith("p-") ? "human" : "system", actorName: ppl.get(e.actor) ?? e.actor, channel: e.via ?? "web", digest: `d${String(e.id).padStart(8, "0")}ffff`, prev: `d${String(Number(e.id) - 1).padStart(8, "0")}ffff`, rule: null, onBehalfOf: null, topic: null, workOrder: null, session: null, request: { id: null, command: null, idempotencyKey: null }, sourceIp: null, diff: null, history: [], before: e.before == null ? null : JSON.stringify(e.before), after: e.after == null ? null : JSON.stringify(e.after) };
     }
     if (path === "signins") return seed.signins;
     if (path === "sessions") return seed.sessions;
@@ -301,15 +314,25 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
     if (path === "trust/cells") return { levelsAboveL1: true, minRuns: 5, soakDays: 7, maxGrantable: 3, ...seed.trust, cells: (seed.trust?.cells ?? []).map((c: Seed) => ({ rev: 1, gate: null, pending: null, effective: c.level, projection: 2, meets: { ok: false, next: Math.min(4, c.level + 1), missing: [] }, ceiling: { max: 4, ids: [] }, evidence: { runs: c.cleanRuns + 1, cleanRuns: c.cleanRuns, evalScore: 0.9, rework: 0.08, incidents: 0, incidentWos: [] }, ...c })), proposals: (seed.trust?.proposals ?? []).map((p: Seed) => ({ ...p, status: p.status === "approved" ? "accepted" : p.status })) };
     if (path === "access/matrix") return { matrix: seed.role_matrix, roles: seed.catalog.roles, actions: seed.catalog.actions, version: 1 };
     if (path === "system/health") {
+      // gov2 fixtures: the services, dead letters and stuck work of the prototype's System health sheet, in the server's shapes
       const at = new Date(seed.NOW).toISOString();
-      const svc = (id: string, name: string, status: "ok" | "degraded", detail: string) => ({ id, name, status, detail, latencyMs: 40 });
+      const svc = (id: string, name: string, status: "ok" | "degraded" | "down", detail: string, extra: Seed = {}) => ({ id, name, status, detail, latencyMs: null, ...extra });
+      const vstat = (h: string): "ok" | "degraded" | "down" => (h === "healthy" ? "ok" : h === "degraded" ? "degraded" : "down");
+      const stuckWos = (seed.work_orders as Seed[]).filter((w) => w.state === "blocked" || (w.state === "running" && w.progress < 20 && w.history?.at(-1) && seed.NOW - w.history.at(-1).startedAt > 3 * 3600e3));
       return {
         at,
-        services: [svc("api", "API gateway", "ok", "p95 212 ms"), svc("worker", "Worker pool", "ok", "6 of 6 workers"), svc("db", "Postgres", "ok", "replica lag 0.4 s"), svc("queue", "Job queue", "degraded", "2 dead letters")],
-        backup: { status: "ok", at, ageHours: 6, set: "nightly-0412", detail: "verified" },
-        drill: { status: "ok", at, ageHours: 40, set: "nightly-0410", seconds: 840, failedChecks: 0, detail: "restore drill passed" },
-        outbox: { counts: { pending: 1, sending: 0, delivered: 220, dead: 2 }, oldestPendingSeconds: 30, dead: [{ id: "dl-1", destination: "slack #gates", scope: "project", attempts: 5, maxAttempts: 5, lastError: "channel_not_found", createdAt: at, failedAt: at }] },
-        jobs: { counts: { queued: 2, running: 3, done: 480, dead: 0 }, stuck: [], runningLongMinutes: 180, dead: [], deadWindowHours: 24 },
+        services: [
+          svc("api", "API gateway", "ok", "p95 212 ms"), svc("worker", "Worker pool", "ok", "6 of 6 workers", { heartbeatAgeSeconds: 12 }), svc("db", "Postgres", "ok", "replica lag 0.4 s"), svc("queue", "Job queue", "degraded", "2 dead letters"),
+          ...(seed.vendors as Seed[]).map((v) => svc(`vendor-${v.id}`, `${v.name} API`, vstat(v.health), `${v.latency} ms`)),
+          ...(seed.integration_instances as Seed[]).slice(0, 3).map((i) => svc(`int-${i.id}`, i.name, vstat(i.status === "connected" ? "healthy" : i.status), `synced ${Math.round((seed.NOW - i.lastSync) / 3600e3)}h ago`)),
+        ],
+        backup: { status: "ok", at, ageHours: 6, set: "bk-0412", detail: "verified" },
+        drill: { status: "ok", at, ageHours: 9 * 24, set: "bk-0410", seconds: 840, failedChecks: 0, detail: "restore drill passed" },
+        outbox: { counts: { pending: 1, sending: 0, delivered: 220, dead: 2 }, oldestPendingSeconds: 30, dead: [
+          { id: "ob-81", destination: "slack.card", workOrder: "WO-2404", scope: "project", attempts: 5, maxAttempts: 5, lastError: "503 from slack.com", createdAt: at, failedAt: at },
+          { id: "ob-77", destination: "webhook.release", workOrder: "WO-2405", scope: "project", attempts: 5, maxAttempts: 5, lastError: "timeout after 10 s", createdAt: at, failedAt: at },
+        ] },
+        jobs: { counts: { queued: 2, running: 3, done: 480, dead: 0 }, stuck: stuckWos.map((w) => ({ id: `j-${w.id}`, queue: w.id, kind: "flow.advance", attempts: 1, maxAttempts: 5, owner: null, startedAt: null, leaseUntil: null, reason: w.state === "blocked" ? "lease_expired" : "running_long", lastError: null, workOrder: { id: w.id, title: w.title, project: w.project, reason: w.blockReason ?? null } })), runningLongMinutes: 180, dead: [], deadWindowHours: 24 },
         runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
       };
     }

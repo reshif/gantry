@@ -27,3 +27,7 @@ export const useAuditEntry = (seq: number | string | null | undefined) =>
 export const useAuditVerify = (enabled = false) =>
   useQuery({ queryKey: qk.auditVerify(), queryFn: () => get<{ ok: boolean; checked: number; [k: string]: unknown }>(api("audit/verify")), enabled, staleTime: 0 });
 export const useWorkload = (scope?: string, days?: number) => useQuery({ queryKey: qk.workload(scope, days), queryFn: () => get<Workload>(api("workload"), { scope, days }), placeholderData: (prev) => prev });
+
+export interface FactoryStop { id: string; scope: string; mode: string; reason: string; inFlight: string | null; by: string; at: number }
+/** Every stop in force (GET /api/v1/stops), for the Security screen's Emergency stop section. */
+export const useFactoryStops = () => useQuery({ queryKey: qk.factoryStops(), queryFn: async () => (await get<{ items: FactoryStop[] }>(api("stops"))).items });

@@ -63,7 +63,7 @@ export function Btn({ label, kind, small, cls, icon, aria, disabledReason, guard
       aria-description={locked && reason ? reason : undefined}
       // the shared tooltip node (ui/Tip) carries this control's reason while it has focus
       aria-describedby={showWhy ? "tip" : rest["aria-describedby"]}
-      aria-disabled={locked ? "true" : undefined}
+      aria-disabled={locked ? "true" : rest["aria-disabled"]}
       data-reason={reason || undefined}
       onClick={(e) => {
         if (locked) {
