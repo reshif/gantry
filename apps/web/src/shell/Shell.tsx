@@ -10,6 +10,7 @@ import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, rou
 import { formatHash, replaceHash, useHash } from "../lib/router";
 import { setProject, usePrefs } from "../lib/prefs";
 import { Empty } from "../ui/primitives";
+import { NoAccessSheet, ReadOnlyBanner, SheetNotFound, useReadOnlyViewer } from "./SheetStates";
 import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
 import { useInstallOverrideReason } from "../ui/override";
@@ -102,10 +103,13 @@ export function Shell({ me }: { me: Me }) {
   const switcherProject = scoped ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
   const ready = !scoped || (!!project && synced === project.id);
   const killed = !!me.factory.killed;
+  const readOnly = useReadOnlyViewer(me, projectId);
+  const unknownRoute = loc.id !== "" && !routeDef(wanted);
+  const roleNames = me.person.roles.map((g) => g.role).filter((r, i, a) => a.indexOf(r) === i).join(", ") || "none";
   return (
     <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
       <AppErrorBoundary level="chrome">
-        <Nav me={me} current={denied ? denied.id : routeId} project={scoped ? project : null} open={navOpen} onNavigate={() => setNavOpen(false)} />
+        <Nav me={me} readOnly={readOnly} current={denied ? denied.id : routeId} project={scoped ? project : null} open={navOpen} onNavigate={() => setNavOpen(false)} />
       </AppErrorBoundary>
       {navOpen ? <div className="scrim nav" id="nav-scrim" onClick={() => setNavOpen(false)} /> : null}
       <div className="main">
@@ -113,6 +117,7 @@ export function Shell({ me }: { me: Me }) {
         <TopBar me={me} project={switcherProject} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
       </AppErrorBoundary>
       {killed ? <StopBanner projectId={null} /> : null}
+      {readOnly ? <ReadOnlyBanner /> : null}
       <main className="content" id="main" tabIndex={-1} ref={main}>
         {def?.project && !killed ? <StopBanner projectId={projectId} /> : null}
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
@@ -124,11 +129,11 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="no-project-access" title="You do not have access to this project" text="It may not exist, or you hold no role on it. Projects you cannot see are hidden from you." action={<p><a href="#projects" className="linkish">Back to all projects</a></p>} />
             </div>
+          ) : unknownRoute ? (
+            <SheetNotFound name={loc.id} />
           ) : denied ? (
             // a page outside the person's roles: say so where they asked for it (the URL stays, so it works once access is granted)
-            <div className="view">
-              <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
-            </div>
+            <NoAccessSheet title={denied.title} roles={roleNames} />
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>
           ) : null}

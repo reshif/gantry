@@ -67,6 +67,27 @@ function Fallback({ level, error, id, onRetry }: { level: BoundaryLevel; error: 
     </div>
   );
   if (level === "root") return <div className="boot">{body}</div>;
-  if (level === "route") return <div className="view">{body}</div>;
+  if (level === "route") {
+    // prototype crash sheet: "Something went wrong" header, one panel, Retry and Home
+    return (
+      <div className="view error-route" id="error-route">
+        <header className="ph vhead"><div className="title vhead-main"><h1 className="vtitle" tabIndex={-1} ref={head}>Something went wrong</h1></div></header>
+        <section className="panel">
+          <div className="state" role="alert">
+            <svg className="art" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18h.01" /></svg>
+            <h3 className="empty-title">{chunk ? "A newer version of Gantry is available" : "This sheet failed to draw"}</h3>
+            <p>{chunk ? "Reload to get the latest version." : "Nothing you entered elsewhere was lost."}</p>
+            {import.meta.env.DEV ? <pre className="error-detail">{error.message}</pre> : null}
+            {id ? <p className="error-id">Error id <code>{id}</code></p> : null}
+            <div className="row">
+              {/* React.lazy caches the rejected import, so re-rendering would throw the same error: a missing chunk offers Reload only */}
+              {chunk ? <button type="button" className="btn primary" onClick={() => window.location.reload()}>Reload</button> : <button type="button" className="btn primary" onClick={onRetry}>Retry</button>}
+              <a className="btn" href="#home">Home</a>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
   return body;
 }

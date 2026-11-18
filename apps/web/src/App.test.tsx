@@ -16,7 +16,7 @@ const meBody = (o: { roles?: Array<{ role: string; scope: string }>; projects?: 
   config: { demoAccounts: !!o.demo },
 });
 
-function mockApi(routes: Record<string, (url: string, init?: RequestInit) => { status?: number; body: Json }>) {
+function mockApi(routes: Record<string, (url: string, init?: RequestInit) => { status?: number; body: Json }>, canAll = true) {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -25,7 +25,7 @@ function mockApi(routes: Record<string, (url: string, init?: RequestInit) => { s
       const path = url.split("?")[0] ?? url;
       if (path === "/api/v1/can") {
         const checks = (JSON.parse(String(init?.body)) as { checks: unknown[] }).checks;
-        return new Response(JSON.stringify({ results: checks.map(() => ({ allowed: true, reason: "", needs: "" })) }));
+        return new Response(JSON.stringify({ results: checks.map(() => ({ allowed: canAll, reason: canAll ? "" : "Your role cannot do this.", needs: "" })) }));
       }
       const h = routes[path];
       const r = h ? h(url, init) : { status: 404, body: { ok: false, msg: "none" } };
@@ -63,9 +63,11 @@ describe("signed out", () => {
   it("shows the sign-in screen with SSO and GitHub, and no demo accounts by default", async () => {
     mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "Sign in.", config: { demoAccounts: false } } }) });
     render(<App />);
-    await screen.findByText("Continue with SSO");
-    expect(screen.getByText("Continue with GitHub")).toBeTruthy();
+    await screen.findByText("Continue with Okta SSO");
+    expect(screen.queryByText("Continue with GitHub")).toBeNull(); // only when Security settings turn it on
     expect(screen.queryByText(/Demo accounts/)).toBeNull();
+    expect((screen.getByLabelText("Password") as HTMLInputElement).disabled).toBe(false);
+    expect(document.querySelector("svg.brand-mark circle")).toBeTruthy();
     expect(screen.getByLabelText("Work email")).toBeTruthy();
   });
 
@@ -110,7 +112,7 @@ describe("signed out", () => {
   });
 
   it("SSO and GitHub buttons go to /auth/login with the method", async () => {
-    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "x" } }) });
+    mockApi({ "/api/v1/me": () => ({ status: 401, body: { ok: false, msg: "x", config: { demoAccounts: false, githubLogin: true } } }) });
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign, hash: "", search: "" });
     render(<App />);
@@ -153,7 +155,9 @@ describe("signed in", () => {
     const nav = await screen.findByRole("navigation", { name: "Main" });
     expect(within(nav).queryByText("Security")).toBeNull();
     expect(within(nav).queryByText("Agents")).toBeNull();
-    expect(await screen.findByText("Security isn't available to your roles")).toBeTruthy();
+    expect(await screen.findByText("No access to this sheet")).toBeTruthy();
+    expect(screen.getByText(/cannot open Security/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to Home" }).getAttribute("href")).toBe("#home");
     expect(window.location.hash).toBe("#security");
     expect(within(nav).getByText("Home").closest("a")?.getAttribute("aria-current")).toBeNull();
   });
@@ -165,7 +169,24 @@ describe("signed in", () => {
       "/api/v1/people": () => ({ body: [person([])] }),
     });
     render(<App />);
-    expect((await screen.findByText("FACTORY KILLED")).closest(".banner")?.className).toContain("is-kill");
+    expect((await screen.findByText("Factory emergency stop is active.")).closest(".banner")?.className).toContain("is-kill");
+  });
+
+  it("an address that is no route draws Sheet not found with Go home", async () => {
+    mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });
+    window.location.hash = "#nonsense-sheet";
+    render(<App />);
+    expect(await screen.findByText("Sheet not found")).toBeTruthy();
+    expect(screen.getByText("Nothing drawn here")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Go home" }).getAttribute("href")).toBe("#home");
+  });
+
+  it("a person every permission check refuses sees the read-only banner and the READ-ONLY SHEET brand line", async () => {
+    mockApi({ "/api/v1/me": () => ({ body: meBody({ roles: [{ role: "viewer", scope: "payments" }] }) }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) }, false);
+    window.location.hash = "#home";
+    render(<App />);
+    expect(await screen.findByText("Read-only viewer: mutating controls are disabled.")).toBeTruthy();
+    expect(screen.getByText("READ-ONLY SHEET")).toBeTruthy();
   });
 
   const homeApi = () => mockApi({ "/api/v1/me": () => ({ body: meBody() }), "/api/v1/home": () => ({ body: { approvals: [], conversations: [] } }) });

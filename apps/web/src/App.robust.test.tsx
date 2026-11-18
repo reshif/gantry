@@ -85,7 +85,7 @@ describe("session robustness", () => {
     meMode = "401";
     // only the /me refetch sees the 401 here (nothing calls the API client's handler): still an expiry
     act(() => invalidateSlices(["session"]));
-    await screen.findByText("Continue with SSO");
+    await screen.findByText("Continue with Okta SSO");
     expect(localStorage.getItem("gantry.accessSim")).toBeNull();
     expect(localStorage.getItem("gantry.navClosed")).toBe("x");
     expect(sessionStorage.getItem("gantry.stepup.draft")).toBe("{}");

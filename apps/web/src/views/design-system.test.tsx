@@ -25,7 +25,15 @@ describe("Sign-in card", () => {
     expect(screen.getByLabelText("Work email")).toBeTruthy();
     expect((screen.getByLabelText("Password") as HTMLInputElement).type).toBe("password");
     expect((screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement).type).toBe("submit");
-    expect(screen.getByRole("button", { name: "Continue with SSO" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Continue with Okta SSO" })).toBeTruthy();
+  });
+  it("prefills the demo account email when development sign-in is on, and shows the MFA step in the same card", () => {
+    const { unmount } = render(<SignIn config={{ demoAccounts: true }} />);
+    expect((screen.getByLabelText("Work email") as HTMLInputElement).value).toBe("asha@acme.dev");
+    unmount();
+    const { container } = render(<SignIn config={null} needs="mfa_setup" />);
+    expect(container.querySelector("main.signin > form.panel svg.brand-mark")).toBeTruthy();
+    expect(screen.getByText("Set up two-step sign-in")).toBeTruthy();
   });
   it("shows a sign-in failure as a bad callout", () => {
     render(<SignIn config={null} error="denied" />);
@@ -69,5 +77,17 @@ describe("Design system sheet", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Validate" })[0]!);
     expect(screen.getByText("Title is required.")).toBeTruthy();
     expect(screen.getByText("All lines")).toBeTruthy();
+  });
+});
+
+describe("Design system gallery", () => {
+  it("the tab strip is a static sample: clicking a tab does not select it; the sparkline is a plain line; loading shows three bars", () => {
+    mockApi();
+    const { container } = mount(<DesignSystem />);
+    const tab = screen.getAllByRole("tab", { name: /Configuration/ })[0]!;
+    fireEvent.click(tab);
+    expect(tab.getAttribute("aria-selected")).toBe("false");
+    expect(container.querySelectorAll(".spark-area")).toHaveLength(0);
+    expect(container.querySelector('[aria-label="Loading"]')?.querySelectorAll(".skel")).toHaveLength(3);
   });
 });

@@ -43,7 +43,7 @@ const GROUP_LABEL: Record<string, string> = { Project: "Project line" };
  * Sidebar (prototype .side): brand, then the groups as a mono heading and a list of links. The groups, routes, badges and
  * permission filtering are the app's; only the markup is the prototype's. Under 1024px it slides over the page (`open`).
  */
-export function Nav({ me, current, project, open, onNavigate }: { me: Me; current: string; project: ProjectLite | null; open: boolean; onNavigate: () => void }) {
+export function Nav({ me, current, project, open, onNavigate, readOnly }: { readOnly?: boolean; me: Me; current: string; project: ProjectLite | null; open: boolean; onNavigate: () => void }) {
   const prefs = usePrefs();
   const badges = useNavBadges();
   const access = useRouteAccess(me);
@@ -56,7 +56,7 @@ export function Nav({ me, current, project, open, onNavigate }: { me: Me; curren
         <BrandMark />
         <div>
           <b>Gantry</b>
-          <small>{(me.org?.plant ?? me.config.orgName ?? "Software factory").toUpperCase()}</small>
+          <small>{readOnly ? "READ-ONLY SHEET" : (me.org?.plant ?? me.config.orgName ?? "Software factory").toUpperCase()}</small>
         </div>
       </a>
       <div className="nav" id="nav">

@@ -9,13 +9,24 @@ import type { PublicConfig } from "../api/types";
 import { loginUrlWithReturn as loginUrl } from "../lib/session/returnTo";
 import { DEMO_ACCOUNTS } from "../lib/demo";
 import { applyTheme, updatePrefs, usePrefs } from "../lib/prefs";
-import { Icon, Logo } from "../ui/Icon";
+import { Icon } from "../ui/Icon";
 import { Btn, Field, TextInput } from "../ui/primitives";
+
+/** The prototype's brand mark: a framed grid square with the accent dot (brandMark() in js/shell.js). */
+function BrandMark() {
+  return (
+    <svg className="brand-mark" viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="var(--accent)" strokeWidth="1.8" aria-hidden="true">
+      <rect x="3" y="3" width="26" height="26" />
+      <path d="M3 12h26M3 20h26M12 3v26M20 3v26" strokeWidth=".8" opacity=".6" />
+      <circle cx="16" cy="16" r="5" fill="var(--accent)" />
+    </svg>
+  );
+}
 
 function Brand({ sub }: { sub: string }) {
   return (
     <div className="row" style={{ marginBottom: 16 }}>
-      <span className="brand-mark" style={{ width: 30, height: 30, display: "inline-grid", placeItems: "center" }}><Logo /></span>
+      <BrandMark />
       <div>
         <h1 style={{ fontSize: 22 }} id="auth-h">Gantry</h1>
         <div className="micro">{sub}</div>
@@ -56,7 +67,8 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
   const demo = !!config?.demoAccounts;
   const accounts = config?.demoAccountList?.length ? config.demoAccountList : DEMO_ACCOUNTS;
   const [pending, setPending] = useState<"sso" | "github" | null>(null);
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => (config?.demoAccounts ? (config.demoAccountList?.[0]?.email ?? DEMO_ACCOUNTS[0]?.email ?? "") : ""));
+  const [password, setPassword] = useState("");
   const go = (method: "sso" | "github") => { setPending(method); window.location.assign(loginUrl(method)); };
   return (
     <>
@@ -76,8 +88,8 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
                 <Field label="Work email">
                   <TextInput id="auth-email" type="email" value={email} onChange={setEmail} autoComplete="username" placeholder="you@company.com" />
                 </Field>
-                <Field label="Password" hint="Your identity provider asks for the password on its own page.">
-                  <TextInput id="auth-pw" type="password" value="" disabled autoComplete="current-password" placeholder="Asked by your identity provider" />
+                <Field label="Password">
+                  <TextInput id="auth-pw" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
                 </Field>
                 <Btn label={pending === "sso" ? "Opening your identity provider..." : "Sign in"} kind="primary" type="submit" id="auth-sso-go" cls="block" disabledReason={pending ? "Signing in" : null} />
                 <div className="row" style={{ margin: "12px 0" }}>
@@ -85,8 +97,8 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
                   <span className="small muted">or</span>
                   <hr style={{ flex: 1, border: 0, borderTop: "1px solid var(--line)" }} />
                 </div>
-                <Btn label="Continue with SSO" id="auth-sso" cls="block" disabledReason={pending ? "Signing in" : null} onClick={() => go("sso")} />
-                <Btn label="Continue with GitHub" id="auth-gh" cls="block" disabledReason={config?.githubLogin === false ? "GitHub sign-in is turned off in Security settings." : pending ? "Signing in" : null} onClick={() => go("github")} />
+                <Btn label="Continue with Okta SSO" id="auth-sso" cls="block" disabledReason={pending ? "Signing in" : null} onClick={() => go("sso")} />
+                {config?.githubLogin === true ? <Btn label="Continue with GitHub" id="auth-gh" cls="block" disabledReason={pending ? "Signing in" : null} onClick={() => go("github")} /> : null}
                 {demo ? (
                   <div className="auth-demo" style={{ marginTop: 12 }}>
                     <h2 className="micro auth-demo-h">Demo accounts · development only</h2>
@@ -109,7 +121,7 @@ export function SignIn({ config, error, needs }: { config: PublicConfig | null; 
                   </div>
                 ) : null}
                 <p className="small muted" style={{ marginTop: 12 }}>
-                  {demo ? "MFA is required for admins. Development sign-in is on: use it only on a local stack." : "MFA is required for admins. Your organisation's identity provider checks the password and the second factor."}
+                  MFA is required for admins.{demo ? " Development sign-in is on." : ""}
                 </p>
                 <div className="row" style={{ marginTop: 8 }}><ThemeBtn /></div>
               </>

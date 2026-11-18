@@ -18,6 +18,8 @@ const AGENTS = [
   { id: "ag-spec", name: "Spec Writer", model: "claude-opus-5-5", autonomy: "gate", eval: 1 },
   { id: "ag-design", name: "Designer", model: "claude-opus-5-5", autonomy: "gate", eval: 0.9 },
 ];
+/** The prototype strip is a static sample: choosing a tab changes nothing. */
+const noop = (): void => undefined;
 const SPARK = [0.92, 0.89, 0.94, 0.87, 0.94, 0.9, 0.84];
 const TABS = ["Overview", "Configuration", "Instructions", "Skills and MCP", "Per-project", "Versions", "Evaluations", "History"];
 const TAB_COUNTS: Record<string, number> = { Overview: 2, "Skills and MCP": 5, Evaluations: 8 };
@@ -40,7 +42,7 @@ function LoadingTile() {
   return (
     <div style={{ border: "1px dashed var(--line2)" }}>
       <div className="state" aria-busy="true" aria-label="Loading">
-        {[90, 78, 66, 54].map((w) => <div key={w} className="skel" style={{ width: `${w}%`, marginLeft: "auto", marginRight: "auto" }} />)}
+        {[90, 78, 66].map((w) => <div key={w} className="skel" style={{ width: `${w}%`, marginLeft: "auto", marginRight: "auto" }} />)}
       </div>
     </div>
   );
@@ -105,7 +107,6 @@ function openExample(ui: UIApi) {
 
 function Gallery({ sc }: { sc: string }) {
   const ui = useUI();
-  const [tab, setTab] = useState("Overview");
   const [q, setQ] = useState("");
   const [auto, setAuto] = useState("");
   const [on, setOn] = useState(false);
@@ -163,7 +164,7 @@ function Gallery({ sc }: { sc: string }) {
         </StatRow>
       </Panel>
       <Panel title="Tab strip with overflow cue">
-        <Tabs idPrefix={`ds-${sc}`} items={TABS.map((l) => ({ id: l, label: l, count: TAB_COUNTS[l] ?? null }))} active={tab} onChange={setTab} />
+        <Tabs idPrefix={`ds-${sc}`} items={TABS.map((l) => ({ id: l, label: l, count: TAB_COUNTS[l] ?? null }))} active="Overview" onChange={noop} />
       </Panel>
       <Panel title="Filter bar and table" flush>
         <FilterBar count={q || auto ? `${rows.length} agents of ${AGENTS.length}` : `${rows.length} agents`} actions={q || auto ? <Btn small kind="ghost" label="Clear" onClick={() => { setQ(""); setAuto(""); }} /> : null}>
@@ -245,7 +246,7 @@ function Gallery({ sc }: { sc: string }) {
             </ol>
           </div>
           <div className="stack">
-            <div className="row"><Spark values={SPARK} w={100} h={28} label="Sample trend" />sparkline</div>
+            <div className="row"><Spark plain values={SPARK} w={100} h={28} label="Sample trend" />sparkline</div>
             <BarList label="Sample bars" labelWidth={70} items={[{ label: "Specs", value: 14 }, { label: "Plans", value: 9, tone: "warn" }, { label: "Builds", value: 4 }]} />
             <div className="heat" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
               {[0.62, 0.7, 0.8, 0.9, 0.97].map((v) => <div key={v} style={{ background: `color-mix(in srgb, var(--accent) ${Math.round(v * 70)}%, var(--surface))` }}>{Math.round(v * 100)}</div>)}
