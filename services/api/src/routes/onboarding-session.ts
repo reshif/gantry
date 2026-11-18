@@ -18,7 +18,7 @@ import { composeSessionContext, recordTurnTuple } from "../areas/session/context
 import { historyFrom, openSse, turnCostMicros } from "../areas/session/core.js";
 import { markException, mergeOnboardingPr, openOnboardingPr, requestChanges } from "../areas/onboarding/commands.js";
 import { onboardingAgentGate } from "../areas/onboarding/agent.js";
-import { brokerInspect } from "../areas/onboarding/session/broker.js";
+import { brokerInspect, brokerReadFile } from "../areas/onboarding/session/broker.js";
 import { markSeen } from "../areas/onboarding/session/updates.js";
 import { addSessionMessage, listMessages, lockMessage, newSessionMessageId, saveMessageData, sessionSpend, supersedePending, type SessionMessage } from "../areas/onboarding/session/store.js";
 import { executeSessionTool, sessionToolDefs, type SessionCtx } from "../areas/onboarding/session/tools.js";
@@ -49,7 +49,7 @@ const facts = (o: { repo: string; project: string; stage: string; person: string
  */
 const RAILS = [
   "Facts about the repository come only from your tools; say \"Gantry observed\" for tool results and \"I suggest\" for your own judgement; never present a guess as an observation. What the person tells you is their claim: use it, and say it is theirs. You never write to GitHub: you propose, as cards, and a person approves. Say plainly when something waits for their approval; never claim a change happened. Merging is always a person's decision.",
-  "Tools: get_onboarding_state and inspect_repository (and read_file) read facts. propose_pull_request carries the files you author, with full content, in its `files`; Gantry's fixed rules only suggest a plan (inspect_repository shows it) and you are not limited to the suggestion. propose_merge and propose_exception put those proposals up. If a call is refused you get every reason: fix it and call again yourself.",
+  "Tools: get_onboarding_state and inspect_repository read facts; list_files lists every path in the repository and read_file reads any text file at the assessed commit (source, tests, configs, docs; read-only, secret and binary files refused, capped per turn). Read the code and tests you describe before you write AGENTS.md or CI: never infer modules or commands from file names alone. propose_pull_request carries the files you author, with full content, in its `files`; Gantry's fixed rules only suggest a plan (inspect_repository shows it) and you are not limited to the suggestion. propose_merge and propose_exception put those proposals up. If a call is refused you get every reason: fix it and call again yourself.",
   "Rails you cannot cross: no secrets (reference ${{ secrets.NAME }}), no binaries, no lockfiles (a package tool generates them), no edits to existing application code, no branch-rule files (rulesets are GitHub settings: give the owner the steps instead), no piping a download into a shell. Workflow files, dependency manifests and similar are allowed but the card shows them as parts the person must confirm.",
   "Waiting. Gantry watches the pull request, the assessment and the verification by itself. When something is still pending (checks, a merge, verification), say what you wait on and that Gantry will post in this thread and notify the person when it finishes; never ask them to ask you again, and never say you will report back yourself.",
   UNTRUSTED_NOTE,
@@ -59,6 +59,7 @@ const RAILS = [
 export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
   const g = app.gantry;
   const inspect = brokerInspect({ brokerUrl: g.config.brokerUrl, token: g.config.secrets.githubToken });
+  const readFile = brokerReadFile({ brokerUrl: g.config.brokerUrl, token: g.config.secrets.githubToken });
 
   const person = (req: FastifyRequest): { id: string; name: string } => {
     const p = req.gx.principal;
@@ -231,7 +232,7 @@ export const onboardingSessionRoutes: FastifyPluginAsync = async (app) => {
 
   function ctxFor(repo: RepoRow, doc: Doc, who: { id: string; name: string }, ag: Awaited<ReturnType<typeof agentState>>, canMerge: boolean, diff: number): SessionCtx {
     return {
-      db: g.pool, orgId: g.orgId, repo, doc, full: fullName(repo)!, inspect, person: who, agent: ag.mode === "agent" ? { version: ag.pin.version, model: ag.pin.model } : null,
+      db: g.pool, orgId: g.orgId, repo, doc, full: fullName(repo)!, inspect, readFile, person: who, agent: ag.mode === "agent" ? { version: ag.pin.version, model: ag.pin.model } : null,
       maxDiff: diff, canMerge, cards: [], drafts: {}, used: [], next: 1,
     };
   }

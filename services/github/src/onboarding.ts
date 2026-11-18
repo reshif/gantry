@@ -153,6 +153,33 @@ export async function inspectRepo(d: OpDeps, repo: string, o: { scan?: boolean; 
   } catch (e) { throw gh(e); }
 }
 
+/* ------------------------------------------------------------------ read one file ---- */
+
+/** One read-only file read at a commit the session is already bound to. The repository comes from the session, never from the model. */
+export const FileBody = z.object({ repo: repoName, sha: z.string().regex(/^[0-9a-f]{40}$/), path: z.string().min(1).max(300) }).strict();
+
+/** Reads one blob at `sha` through the same installation token and `onboard_read` purpose the inspect uses. Binary or oversized files come back flagged, without content. */
+export async function readRepoFile(d: OpDeps, b: z.infer<typeof FileBody>, limits: InspectLimits = DEFAULT_LIMITS): Promise<Record<string, unknown>> {
+  const { owner, name } = splitRepo(b.repo);
+  try {
+    return await d.app.withRepo(b.repo, "onboard_read", async (c) => {
+      const req = rq(c.octokit);
+      const commit = (await req("GET /repos/{owner}/{repo}/git/commits/{commit_sha}", { owner, repo: name, commit_sha: b.sha })).data;
+      const tree = (await req("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", { owner, repo: name, tree_sha: commit.tree.sha, recursive: "1" })).data;
+      const hit = (tree.tree as { path: string; type: string; sha: string; size?: number }[]).find((t) => t.type === "blob" && t.path === b.path);
+      if (!hit) throw new BrokerError(404, "no_such_file", `${b.path} is not a file in ${b.repo} at ${b.sha.slice(0, 7)}.`);
+      if ((hit.size ?? 0) > limits.maxFileBytes) return { ok: true, path: b.path, size: hit.size ?? 0, tooLarge: true, binary: false, content: null };
+      const r = (await req("GET /repos/{owner}/{repo}/git/blobs/{file_sha}", { owner, repo: name, file_sha: hit.sha })).data;
+      const buf = Buffer.from(r.content as string, (r.encoding as BufferEncoding) ?? "base64");
+      if (buf.includes(0)) return { ok: true, path: b.path, size: buf.length, tooLarge: false, binary: true, content: null };
+      return { ok: true, path: b.path, size: buf.length, tooLarge: false, binary: false, content: buf.toString("utf8") };
+    });
+  } catch (e) {
+    if (e instanceof BrokerError) throw e;
+    throw gh(e);
+  }
+}
+
 /* ------------------------------------------------------------------ the onboarding pull request ---- */
 
 export const PrBody = z.object({
