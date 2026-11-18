@@ -96,6 +96,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -114,10 +115,8 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     setup();
     mount();
     const t = await byId("wl-people");
-    expect(document.body.textContent).toContain("Gates waiting3");
-    expect(document.body.textContent).toContain("Median wait1h 35m");
-    expect(document.body.textContent).toContain("After hours33%");
-    expect(document.body.textContent).toContain("Human minutes61");
+    expect(document.body.textContent).toContain("Approvals waiting3");
+    expect(document.body.textContent).toContain("Median wait at gates1h 35m");
     expect(document.querySelector(".wl-bus")?.textContent).toContain("2 of 3 waiting gates have exactly one eligible approver; 1 have nobody eligible except break-glass. That person is the bus factor for that work.");
     const priya = t.querySelector("tr[data-key='p-priya']")!;
     await waitFor(() => expect(priya.textContent).toContain("Priya Nair"));
@@ -146,11 +145,8 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     expect(reads(calls)[0]!.query.get("days")).toBe("7");
     type(await byId("wl-project"), "risk");
     await waitFor(() => expect(reads(calls).some((c) => c.query.get("scope") === "risk")).toBe(true));
-    fireEvent.click(document.getElementById("wl-days-1")!);
+    type(await byId("wl-days"), "1");
     await waitFor(() => expect(reads(calls).some((c) => c.query.get("days") === "1" && c.query.get("scope") === "risk")).toBe(true));
-    const before = reads(calls).length;
-    fireEvent.click(await byId("wl-refresh"));
-    await waitFor(() => expect(reads(calls).length).toBe(before + 1));
   });
 
   it("lists suggestions with the top five, and a link to show them all", async () => {
@@ -264,5 +260,18 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
     fireEvent.click(await byId("wl-tab-teams"));
     fireEvent.click(await byId("wl-tab-people"));
     expect(Array.from(document.querySelectorAll("#wl-people tbody tr")).map((r) => r.getAttribute("data-key"))).toEqual(["p-meera", "p-priya"]);
+  });
+});
+
+describe("Workload: Control room prototype layout (gov1)", () => {
+  it("has the matrix and agent utilisation, person names link to the person page, no header actions", async () => {
+    setup();
+    mount();
+    await byId("wl-matrix");
+    expect(document.getElementById("wl-agents-card")).not.toBeNull();
+    await waitFor(() => expect(document.querySelector("#wl-matrix a")?.getAttribute("href")).toBe("#person/p-asha"));
+    expect(document.body.textContent).toContain("Approvals waiting");
+    expect(document.body.textContent).toContain("Agent utilisation");
+    expect(document.getElementById("wl-q")).not.toBeNull();
   });
 });

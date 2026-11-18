@@ -8,11 +8,15 @@ import { useQuery } from "@tanstack/react-query";
 import { fmt, type Person, type Project, type Role } from "@gantry/domain";
 import { api, get } from "../api/client";
 import { ops } from "../api/ops";
-import { useAccessMatrix, useMe, usePeople, useProjects } from "../api/queries";
+import { useAccessMatrix, useApiKeys, useMe, usePeople, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate, useHash } from "../lib/router";
 import { ExplainDenial } from "./console/ExplainDenial";
-import { Avatar, Btn, Empty, LockNote, Panel, Select, Tabs, Toggle, ViewHead, type Decision } from "../ui/primitives";
+import { Avatar, Btn, Empty, Field, LockNote, Panel, Select, Tabs, Toggle, type Decision } from "../ui/primitives";
+import { Card, CrEmpty, Page } from "../ui/cr";
+import { DataTable } from "../ui/DataTable";
+import { useUrlState } from "./govern/urlState";
+import { usePeopleLoad } from "./govern/load";
 import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -37,21 +41,20 @@ export default function PersonView() {
   const people = peopleQ.data ?? [];
   const p = people.find((x) => x.id === loc.param);
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
-  const back = <a className="linkbtn person-back" href="#people" id="person-back">‹ People &amp; teams</a>;
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
-  if (!view.allowed) return <div className="view view-person">{back}<Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
+  if (!view.allowed) return <Page cls="view view-person" eyebrow="Govern · Person" title="Person"><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></Page>;
   if (!p) {
     return (
-      <div className="view view-person">
-        {back}
-        <Async query={peopleQ} what="people" id="person">{() => <Empty id="person-missing" icon="user" title="No such person" text="Nobody has that id. They may have been removed." action={<Btn label="Back to people" kind="primary" onClick={() => navigate("people")} />} />}</Async>
-      </div>
+      <Async query={peopleQ} what="people" id="person">{() => (
+        <Page cls="view view-person" id="person-missing" eyebrow="404" title="Page not found">
+          <div className="card"><CrEmpty icon="search" title="There is no “person” page" text="The link may be old, or the page was renamed." action={<Btn label="Go Home" kind="primary" onClick={() => navigate("home")} />} /></div>
+        </Page>
+      )}</Async>
     );
   }
   const admins = people.filter((x) => x.status === "active" && x.roles.some((g) => g.role === "factory_admin"));
   return (
     <div className="view view-person">
-      {back}
       <LockNote decision={perm} what="Roles, teams and access" />
       <MemberDetail key={p.id} p={p} teams={teamsQ.data ?? []} projects={projects} roles={roles} perm={perm} admins={admins} viewerId={me.person.id} roleName={roleName} />
     </div>
@@ -87,6 +90,20 @@ function TeamsForm({ p, teams, perm, onSave }: { p: Person; teams: Array<{ id: s
   );
 }
 
+/** The Change role dialog body: the role this grant becomes (same level as the grant: a factory role stays a factory role). */
+function ChangeRoleForm({ roles, current, level, roleName, onSave }: { roles: Role[]; current: string; level: "factory" | "project"; roleName: (id: string) => string; onSave: (fn: () => string) => void }) {
+  const [v, setV] = useState(current);
+  onSave(() => v);
+  const pool = roles.filter((r) => (level === "factory" ? r.level === "factory" : r.level !== "factory"));
+  return (
+    <div className="form-grid">
+      <Field label="Role" htmlFor="ppl-chrole">
+        <Select id="ppl-chrole" value={v} onChange={setV} options={[...(level === "factory" ? [{ value: "", label: "None (project roles only)" }] : []), ...pool.map((r) => ({ value: r.id, label: roleName(r.id) }))]} />
+      </Field>
+    </div>
+  );
+}
+
 function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleName }: {
   p: Person; teams: Array<{ id: string; name: string }>; projects: Project[]; roles: Role[]; perm: Decision; admins: Person[]; viewerId: string; roleName: (id: string) => string;
 }) {
@@ -94,17 +111,16 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const outcome = useOutcome();
   const actors = useActors();
   const [effProject, setEffProject] = useState("all");
-  const [tab, setTab] = useState("profile");
+  const [tab, setTab] = useUrlState("tab", "profile");
   const [cell, setCell] = useState<{ action: string; project: string } | null>(null);
   const eff = useQuery({ queryKey: qk.effectivePermissions(p.id), queryFn: () => get<EffectivePermissions>(api(`people/${encodeURIComponent(p.id)}/effective-permissions`)) });
+  const keysQ = useApiKeys();
   const away = p.away && p.away.to > Date.now() ? p.away : null;
   const visible = projects.filter((x) => x.status !== "archived");
+  const load = usePeopleLoad(visible);
   const frRole = p.roles.find((g) => g.scope === "factory" && !g.via)?.role ?? "";
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
-  const direct = p.roles.filter((g) => !g.via);
-  const inherited = p.roles.filter((g) => g.via);
-  const scopeName = (s: string) => (s === "factory" ? "Factory" : projects.find((x) => x.id === s)?.name ?? s);
-  const factoryRoles = roles.filter((r) => r.level === "factory");
+  const scopeName = (s: string) => (s === "factory" ? "Whole factory" : projects.find((x) => x.id === s)?.name ?? s);
   const projectRoles = roles.filter((r) => r.level !== "factory");
 
   let factGuard: Decision = perm;
@@ -145,6 +161,27 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
     });
   };
 
+  /** Change role for one grant row: a factory grant goes through the reason dialog, a project grant swaps the role in that project. */
+  const changeRole = (g: { role: string; scope: string }) => {
+    let pick: () => string = () => g.role;
+    const factory = g.scope === "factory";
+    ui.dialog({
+      title: `Change role for ${p.name}`, kicker: "People",
+      body: <ChangeRoleForm roles={roles} current={g.role} level={factory ? "factory" : "project"} roleName={roleName} onSave={(fn) => (pick = fn)} />,
+      actions: [{ label: "Cancel" }, { label: "Save", kind: "primary", submit: true, id: "ppl-chrole-save", guard: factory ? factGuard : perm, onClick: (close) => {
+        const v = pick();
+        close();
+        if (v === g.role) return;
+        if (factory) { changeFactoryRole(v); return; }
+        void (async () => {
+          const rm = await ops.setMemberRole(p.id, g.scope, g.role, false);
+          if (!rm.ok) return void outcome(rm);
+          outcome(await ops.setMemberRole(p.id, g.scope, v, true), "Role changed");
+        })();
+      } }],
+    });
+  };
+
   const openTeams = () => {
     let save: () => Promise<boolean> = async () => false;
     ui.dialog({
@@ -161,77 +198,80 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   else if (perm.allowed && p.status === "active" && p.roles.some((g) => g.role === "factory_admin" && !g.via) && admins.length < 2) offGuard = lockd(`${p.name} is the only Factory Admin. Make someone else a Factory Admin first.`);
 
   const selDecision = useSelectedCell(p.id, cell);
-  const stateWord = p.status === "invited" ? "Invite pending" : p.status === "deactivated" ? "Deactivated" : away ? "Away" : "Active";
+  const stateWord = p.status === "invited" ? "Invited" : p.status === "deactivated" ? "Deactivated" : "Active";
   const teamNames = (p.teams ?? []).map(teamName).join(", ") || "No team";
+  const primary = p.roles.find((g) => g.scope === "factory" && !g.via)?.role ?? p.roles.find((g) => !g.via)?.role ?? p.roles[0]?.role;
+  const ownedBy = projects.filter((x) => x.owner === p.id).map((x) => x.name);
+  const keys = keysQ.data ? keysQ.data.filter((k) => k.by === p.id && !k.revoked && !k.expired).length : null;
+  const requested = visible.reduce((n, pr) => n + load.requested(p.id, pr.id), 0);
+  const NA = <span className="dim" title="Not available to you, or the server did not answer">not available</span>;
+  const grants = p.roles.map((g, i) => ({ ...g, key: `${g.role}-${g.scope}-${g.via ?? ""}-${i}` }));
 
   return (
-    <div className="person-stack" aria-label={p.name}>
-      <ViewHead
-        kicker="Govern · Person"
-        title={p.name}
-        sub={`${p.title || "No title yet"} · ${teamNames}`}
-        actions={(
-          <>
-            {p.status === "invited" ? <Btn label="Mark invite accepted" icon="check" id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
-            <Btn label="Edit teams" icon="teams" id="ppl-teams" guard={perm} onClick={openTeams} />
-            <Btn label="History" icon="ledger" id="ppl-history-jump" onClick={() => setTab("activity")} />
-            {off
-              ? <Btn label="Reactivate" icon="check" id="ppl-reactivate" guard={perm} onClick={() => offboard.reactivate(p)} />
-              : <Btn label="Deactivate" kind="danger" icon="lock" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
-          </>
-        )}
-      />
+    <Page
+      cls="person-stack"
+      eyebrow="Govern · Person"
+      title={p.name}
+      sub={p.title || "No title yet"}
+      acts={(
+        <>
+          <Btn label="All people" id="ppl-all" onClick={() => navigate("people")} />
+          {off
+            ? <Btn label="Reactivate" id="ppl-reactivate" guard={perm} onClick={() => offboard.reactivate(p)} />
+            : <Btn label="Deactivate…" kind="danger" id="ppl-deactivate" guard={offGuard} onClick={() => offboard.deactivate(p, offGuard)} />}
+        </>
+      )}
+    >
       <div className="row ppl-badges" style={{ marginBottom: 16 }}>
         <Avatar id={p.id} size="lg" />
         <span className={`chip ${p.status === "active" ? "ok" : p.status === "invited" ? "info" : "idle"}`}>{stateWord}</span>
-        {direct.slice(0, 2).map((g) => <span key={`${g.role}-${g.scope}`} className="chip info plain">{roleName(g.role)}</span>)}
-        <span className={`chip ${p.mfa ? "ok" : "warn"}`}>{p.mfa ? "MFA enrolled" : "No MFA"}</span>
+        {primary ? <span className="chip info plain">{roleName(primary)}</span> : null}
         {p.oncall ? <span className="chip agent" data-tip="On call for at least one project, or a Factory Admin (always on call). Project admins set who is on call in Project config." tabIndex={0}>on call</span> : null}
         {away ? <span className="chip warn">{`Away until ${fmt.istDate(away.to)}, delegate ${actors(away.delegate).name}`}</span> : null}
       </div>
       <Tabs idPrefix="person-tab" items={[{ id: "profile", label: "Profile" }, { id: "access", label: "Access" }, { id: "activity", label: "Activity" }]} active={tab} onChange={setTab} />
       {tab === "profile" ? (
-      <div className="gv-two gv-top">
-        <Panel title="Profile">
-          <dl className="kv" id="ppl-profile">
+      <div className="grid g2">
+        <Card title="Profile" id="ppl-profile-card" acts={<>
+          {p.status === "invited" ? <Btn label="Mark invite accepted" small id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
+          <Btn label="Edit teams" small id="ppl-teams" guard={perm} onClick={openTeams} />
+        </>}>
+          <dl className="kv" id="ppl-profile" style={{ margin: 0 }}>
             <dt>Email</dt><dd className="mono">{p.email}</dd>
             <dt>Title</dt><dd>{p.title || "No title yet"}</dd>
             <dt>Team</dt><dd>{teamNames}</dd>
-            <dt>MFA</dt><dd>{p.mfa ? "On" : "Off"}</dd>
-            <dt>GitHub</dt><dd className="mono">{p.github || "not linked"}</dd>
+            <dt>MFA</dt><dd>{p.mfa === undefined ? "–" : p.mfa ? "On" : "Off"}</dd>
+            {/* The API does not report a last sign-in time: say so instead of inventing one. */}
+            <dt>Last seen</dt><dd>{NA}</dd>
           </dl>
-        </Panel>
-        <Panel title="Roles held">
-          <div className="ppl-held" id="ppl-held">
-            <div>
-              <span className="kicker">Direct</span>
-              {direct.length ? <ul className="ppl-held-list">{direct.map((g) => <li key={`${g.role}-${g.scope}`} className="chip">{`${roleName(g.role)} · ${scopeName(g.scope)}`}</li>)}</ul> : <span className="muted small">None granted to {p.name} personally.</span>}
-            </div>
-            <div>
-              <span className="kicker">Inherited from teams</span>
-              {inherited.length ? (
-                <ul className="ppl-held-list">{inherited.map((g) => <li key={`${g.role}-${g.scope}-${g.via}`} className="chip chip-accent">{`${roleName(g.role)} · ${scopeName(g.scope)} · via ${teamName(g.via!)}`}</li>)}</ul>
-              ) : <span className="muted small">None. Roles held by {p.name}'s teams would show here; change them on the team.</span>}
-            </div>
-          </div>
-        </Panel>
-        <Panel title="Factory role">
-          <p className="muted small ppl-hint">Reaches every project. Factory Admin can do everything; Auditor reads everything and changes nothing.</p>
-          <div className="ppl-frole-row">
-            <Select
-              id="ppl-frole"
-              value={frRole}
-              aria-label={`Factory role for ${p.name}`}
-              disabled={!factGuard.allowed}
-              onChange={(v) => changeFactoryRole(v)}
-              options={[{ value: "", label: "None (project roles only)" }, ...factoryRoles.map((r) => ({ value: r.id, label: roleName(r.id) + (r.id === "factory_admin" ? ": everything, every project" : r.id === "auditor" ? ": read everything, change nothing" : r.id === "factory_manager" ? ": read everything, run every project; no access admin" : r.id === "security_reviewer" ? ": read everything, sign off or stop risky work" : r.custom ? ` (custom): ${r.desc || "custom factory role"}` : "") }))]}
-            />
-            {!factGuard.allowed ? <span className="ppl-why"><Icon name="lock" />{(factGuard.needs ? `${factGuard.needs}. ` : "") + factGuard.reason}</span> : null}
-          </div>
-        </Panel>
+        </Card>
+        <Card title="Holds right now" id="ppl-holds-card">
+          <dl className="kv" id="ppl-holds" style={{ margin: 0 }}>
+            <dt>Open work orders</dt><dd>{load.loading ? "…" : load.partial && !requested ? NA : requested}</dd>
+            <dt>Eligible to approve</dt><dd>{load.loading ? "…" : load.partial ? NA : `${load.eligible(p.id)} pending`}</dd>
+            <dt>API keys</dt><dd>{keys === null ? NA : keys}</dd>
+            <dt>Projects owned</dt><dd>{ownedBy.join(", ") || "none"}</dd>
+          </dl>
+        </Card>
       </div>
       ) : null}
       {tab === "access" ? (<>
+      <Card title="Roles" id="ppl-roles-card" flush>
+        <DataTable
+          id="ppl-roles"
+          caption={`Roles of ${p.name}`}
+          rows={grants}
+          rowKey={(g) => g.key}
+          empty={{ title: "No roles yet", text: `${p.name} holds no role. Grant one on a project below, or a factory role from the invite.` }}
+          columns={[
+            { key: "role", label: "Role", render: (g) => <span className="chip info plain">{roleName(g.role)}</span> },
+            { key: "scope", label: "Scope", render: (g) => (g.scope === "factory" ? "Whole factory" : <span className="tag">{(projects.find((x) => x.id === g.scope) as (Project & { key?: string }) | undefined)?.key ?? scopeName(g.scope)}</span>) },
+            { key: "via", label: "", align: "end", render: (g) => (g.via
+              ? <span className="dim small">{`via ${teamName(g.via)}: change it on the team`}</span>
+              : <Btn label="Change role" small id={`ppl-chrole-${g.scope}`} guard={g.scope === "factory" ? factGuard : perm} onClick={() => changeRole(g)} />) },
+          ]}
+        />
+      </Card>
       <Panel title="Roles per project" flush>
         <p className="muted small ppl-hint ppl-hint-pad">One person can hold different roles in each project. A role granted by a team shows as "via team" and is changed on the team. A switch is locked where you cannot manage that project's members.</p>
         <div className="table-scroll" data-keep-scroll="ppl-proles">
@@ -293,12 +333,12 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
       </>) : null}
 
       {tab === "activity" ? (
-      <Panel title="History" cls="person-history">
+      <Card title="Recent activity" id="ppl-activity-card">
         <span id="ppl-history" className="person-anchor" />
-        <HistoryList id={p.id} limit={8} />
-      </Panel>
+        <HistoryList id={p.id} limit={6} />
+      </Card>
       ) : null}
-    </div>
+    </Page>
   );
 }
 

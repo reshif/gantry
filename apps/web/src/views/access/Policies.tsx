@@ -2,7 +2,8 @@ import { useState } from "react";
 import { DAYS, type Action, type Person, type Policy, type Project, type Role } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Btn, Chip, Empty, Field, LockNote, Segmented, Toggle, type Decision } from "../../ui/primitives";
+import { DataTable } from "../../ui/DataTable";
+import { Btn, Empty, Field, LockNote, Segmented, Toggle, type Decision } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { ifMatchOf, lockd, useOutcome, usePolicyWording, versionOf } from "../govern/data";
@@ -153,6 +154,7 @@ export function usePolicyDialog(args: { perm: Decision; roles: Role[]; actions: 
   };
 }
 
+/** The Policies card body: Policy (name + id), Roles, Scope, When, Effect and an On switch; Edit / Simulate / Delete stay as row actions. */
 export function PolicyCards({ policies, hl, people, onEdit, onSimulate }: { policies: Policy[]; hl: string | null; people: Person[]; onEdit: (p: Policy) => void; onSimulate: (p: Policy, who: Person | undefined) => void }) {
   const outcome = useOutcome();
   const perm = useCan("policy.edit");
@@ -160,39 +162,32 @@ export function PolicyCards({ policies, hl, people, onEdit, onSimulate }: { poli
   const list = [...policies].sort((a, b) => (a.id < b.id ? -1 : 1));
   if (!list.length) return <Empty id="acc-policies-empty" title="No policies yet" text="Roles alone decide who can do what. Add a policy to narrow a right to certain hours or projects, or to extend it, for example while on call." />;
   return (
-    <ul className="policy-cards">
-      {list.map((p) => {
-        const kind = p.effect === "deny" ? "Deny" : p.extend ? "Extend" : "Narrow";
-        const isHl = hl === p.id;
-        const proj = p.where.projects?.[0] ?? "";
-        const who = people.find((x) => x.status === "active" && x.roles.some((g) => p.roles.includes(g.role) && (g.scope === "factory" || g.scope === proj || !p.where.projects?.length)));
-        const custom = (p as Policy & { custom?: boolean }).custom;
-        return (
-          <li key={p.id} className={`policy-card eff-${p.effect}${p.extend ? " is-extend" : ""}${p.enabled ? "" : " is-off"}${isHl ? " is-hl" : ""}`} id={`acc-pol-${p.id}`}>
-            <div className="pc-top">
-              <span className="mono strong">{p.id}</span>
-              <span className="pc-effect"><Icon name={p.effect === "deny" ? "halt" : p.extend ? "plus" : "clock"} />{kind}</span>
-              {isHl ? <Chip text="deciding rule" cls="chip-accent" /> : null}
-              <span className="pc-toggle">
-                <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label={`Enable ${p.id}`} onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v, ifMatchOf(p)))} />
-              </span>
-            </div>
-            <h3 className="pc-name">{p.name}</h3>
-            <p className="pc-sentence">{wording.sentence(p)}</p>
-            <dl className="pc-grid">
-              <div><dt>Who</dt><dd>{wording.roles(p)}</dd></div>
-              <div><dt>What</dt><dd className="mono small">{p.actions.join(", ")}</dd></div>
-              <div><dt>Where</dt><dd>{wording.where(p)}</dd></div>
-              <div><dt>When</dt><dd>{p.effect === "deny" ? (p.where.freeze ? "while a freeze is active" : "always") : wording.when(p.when) + (p.oncallOnly ? ", on call" : "")}</dd></div>
-            </dl>
-            <div className="pc-actions">
-              <Btn label="Edit" small kind="ghost" icon="page" id={`acc-pol-edit-${p.id}`} guard={!perm.allowed ? perm : SPECIAL[p.id] ? lockd(SPECIAL[p.id]!) : null} onClick={() => onEdit(p)} />
-              <Btn label="Simulate" small kind="ghost" icon="play" id={`acc-pol-sim-${p.id}`} onClick={() => onSimulate(p, who)} />
-              {custom ? <Btn label="Delete" small kind="ghost" icon="x" id={`acc-pol-del-${p.id}`} guard={perm} onClick={async () => void outcome(await ops.deletePolicy(p.id, ifMatchOf(p)))} /> : null}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+    <DataTable
+      id="acc-policies"
+      caption="Policies"
+      rows={list}
+      rowKey={(p) => p.id}
+      rowId={(p) => `acc-pol-${p.id}`}
+      columns={[
+        { key: "policy", label: "Policy", render: (p) => <><b>{p.name}</b>{hl === p.id ? <span className="chip accent plain"> deciding rule</span> : null}<span className="mono dim" style={{ display: "block", fontSize: 11 }}>{p.id}</span></> },
+        { key: "roles", label: "Roles", render: (p) => wording.roles(p) },
+        { key: "scope", label: "Scope", render: (p) => wording.where(p) },
+        { key: "when", label: "When", render: (p) => <span className="mono">{p.effect === "deny" ? (p.where.freeze ? "while a freeze is active" : "always") : wording.when(p.when) + (p.oncallOnly ? ", on call" : "")}</span> },
+        { key: "effect", label: "Effect", render: (p) => <span className={`chip ${p.effect === "deny" ? "bad" : "ok"}`}>{p.effect}</span> },
+        { key: "on", label: "On", render: (p) => <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label={p.name} onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v, ifMatchOf(p)), `${v ? "Enabled" : "Disabled"} ${p.name}`)} /> },
+        { key: "acts", label: "", align: "end", render: (p) => {
+          const proj = p.where.projects?.[0] ?? "";
+          const who = people.find((x) => x.status === "active" && x.roles.some((g) => p.roles.includes(g.role) && (g.scope === "factory" || g.scope === proj || !p.where.projects?.length)));
+          const custom = (p as Policy & { custom?: boolean }).custom;
+          return (
+            <span className="row nowrap">
+              <Btn label="Edit" small kind="ghost" id={`acc-pol-edit-${p.id}`} guard={!perm.allowed ? perm : SPECIAL[p.id] ? lockd(SPECIAL[p.id]!) : null} onClick={() => onEdit(p)} />
+              <Btn label="Simulate" small kind="ghost" id={`acc-pol-sim-${p.id}`} onClick={() => onSimulate(p, who)} />
+              {custom ? <Btn label="Delete" small kind="ghost" id={`acc-pol-del-${p.id}`} guard={perm} onClick={async () => void outcome(await ops.deletePolicy(p.id, ifMatchOf(p)))} /> : null}
+            </span>
+          );
+        } },
+      ]}
+    />
   );
 }

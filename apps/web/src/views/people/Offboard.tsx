@@ -121,6 +121,7 @@ export function DeactivateForm({ p, projects, roleName, perm, onDone, registerSu
   return (
     <div className="form-grid" id="ppl-off">
       <LockNote decision={perm} what="Deactivating people" />
+      <div className="banner warn"><Icon name="alert" /><div className="grow">{`History stays attributed to ${p.name} in the audit ledger.`}</div></div>
       <Section title="Roles" count={p.roles.length} empty="No roles. Nothing to lose.">
         <ul className="ppl-off-list">
           {p.roles.map((g) => (
@@ -183,7 +184,7 @@ export function useOffboard(args: { perm: Decision; projects: Project[]; roleNam
       let submit: () => void = () => undefined;
       ui.dialog({
         title: `Deactivate ${p.name}?`, kicker: "People", wide: true,
-        sub: "They lose access now. History stays on the audit log, and you can reactivate them later.",
+        sub: "They are signed out everywhere and cannot sign in.",
         body: (close) => <DeactivateForm p={p} projects={args.projects} roleName={args.roleName} perm={guard} registerSubmit={(fn) => (submit = fn)} onDone={(r) => {
           close();
           ui.dialog({
@@ -203,7 +204,7 @@ export function useOffboard(args: { perm: Decision; projects: Project[]; roleNam
         onOk: async (reason) => {
           const r = await ops.reactivatePerson(p.id, reason, p.version !== undefined ? { ifMatch: p.version } : undefined);
           if (!r.ok) return r;
-          ui.toast(`${p.name} is active again.`, "ok");
+          ui.toast(`${p.name} reactivated`, "ok");
           return { ok: true };
         },
       });

@@ -59,3 +59,12 @@ describe("Access screen: load failure", () => {
     await waitFor(() => expect(hits.matrix).toBeGreaterThan(before));
   });
 });
+
+describe("Access: Control room prototype layout (gov1)", () => {
+  it("has the Matrix, Policies and Check access tabs without counts", async () => {
+    setup(() => new Response(JSON.stringify({ matrix: {}, roles: [], actions: [], version: 1 }), { status: 200 }));
+    mount();
+    await byId("acc-tab-check");
+    expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(["Matrix", "Policies", "Check access"]);
+  });
+});

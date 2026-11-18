@@ -1,7 +1,7 @@
 import { useAudit } from "../../api/queries";
 import { fmt } from "@gantry/domain";
 import type { AuditEntry } from "@gantry/domain";
-import { Empty, Who } from "../../ui/primitives";
+import { Empty } from "../../ui/primitives";
 
 /** A before/after value as one short line: role lists by name, with the reason when the change carried one. */
 const show = (v: unknown): string => {
@@ -21,13 +21,13 @@ export function HistoryList({ id, limit = 8 }: { id: string; limit?: number }) {
   const items: AuditEntry[] = (Array.isArray(raw) ? raw : raw?.items ?? []).slice(0, limit);
   if (!items.length) return <Empty title="No history yet" text="Changes to this person appear here." />;
   return (
-    <ul className="history">
+    <div className="tl" id="ppl-history-list">
       {items.map((e) => (
-        <li key={e.id}>
-          <span className="mono small">{fmt.stamp(e.at)}</span> <Who id={e.actor} /> <span className="strong">{e.action}</span>{" "}
-          <span className="muted small">{e.before != null || e.after != null ? `${show(e.before)} → ${show(e.after)}` : e.target}</span>
-        </li>
+        <div key={e.id} className="info">
+          <div className="mono">{`${e.action} ${e.target}`}</div>
+          <div className="when">{fmt.stamp(e.at)}{e.before != null || e.after != null ? <span className="small"> · {show(e.before)} → {show(e.after)}</span> : null}</div>
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }

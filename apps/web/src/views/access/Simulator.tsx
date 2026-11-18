@@ -1,5 +1,6 @@
 import { DAYS, fmt, istTime, istToday, type Person, type Project, type Repo, type SimulationResult, type Action } from "@gantry/domain";
-import { Btn, Field, Panel, Select } from "../../ui/primitives";
+import { Btn, Field, Select } from "../../ui/primitives";
+import { Card } from "../../ui/cr";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { ExplainDenial } from "../console/ExplainDenial";
@@ -108,64 +109,64 @@ export function Simulator({ people, projects, repos, actions, sim, setSim, evalu
   const rr = r?.sim.repo ? repos.find((x) => x.id === r.sim.repo) : undefined;
   const rule = rd?.rule as { freeze?: string } | undefined;
   return (
-    <Panel title="Policy simulator" cls="panel-sim">
-      <p className="muted small acc-sim-hint">Could this person do this, there, then? The answer is asked again whenever the matrix, a policy, a freeze or the people change.</p>
-      <div className="acc-sim">
-        <div>
-          <form
-            className="sim-form acc-sim-form"
-            id="acc-sim-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              onEvaluate(sim);
-            }}
-          >
-            <Field label="Person" htmlFor="acc-sim-person"><Select id="acc-sim-person" value={sim.person} onChange={set("person")} options={people.map((p) => ({ value: p.id, label: p.name + (p.status === "invited" ? " (invited)" : "") }))} /></Field>
-            <Field label="Action" htmlFor="acc-sim-action"><Select id="acc-sim-action" value={sim.action} onChange={set("action")} options={actions.map((a) => ({ value: a.id, label: `${a.group}: ${a.name}` }))} /></Field>
+    <Card title="Check access" id="acc-check-card" hint="Could this person do this, there, then? The answer is asked again whenever the matrix, a policy, a freeze or the people change.">
+      <form
+        className="grid g3 sim-form acc-sim-form"
+        id="acc-sim-form"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          onEvaluate(sim);
+        }}
+      >
+        <Field label="Person" htmlFor="acc-sim-person"><Select id="acc-sim-person" value={sim.person} onChange={set("person")} options={people.map((p) => ({ value: p.id, label: p.name + (p.status === "invited" ? " (invited)" : "") }))} /></Field>
+        <Field label="Permission" htmlFor="acc-sim-action"><Select id="acc-sim-action" value={sim.action} onChange={set("action")} options={actions.map((a) => ({ value: a.id, label: a.name }))} /></Field>
+        <div className="field"><span className="lbl">&nbsp;</span><Btn label="Check" kind="primary" type="submit" id="acc-sim-run" /></div>
+        <details className="acc-adv" style={{ gridColumn: "1 / -1" }}>
+          <summary>Advanced: project, repo and time</summary>
+          <div className="grid g3" style={{ marginTop: 12 }}>
             <Field label="Project" htmlFor="acc-sim-project"><Select id="acc-sim-project" value={sim.project} onChange={set("project")} disabled={!scoped} title={scoped ? undefined : "Factory actions apply everywhere"} options={projects.map((p) => ({ value: p.id, label: p.name }))} /></Field>
             <Field label="Repo" htmlFor="acc-sim-repo"><Select id="acc-sim-repo" value={sim.repo} onChange={set("repo")} disabled={!scoped} options={[{ value: "", label: "Any repo" }, ...repos.filter((x) => x.project === sim.project).map((x) => ({ value: x.id, label: x.name }))]} /></Field>
+            <div className="field"><span className="lbl">&nbsp;</span><Btn label="Use now" id="acc-sim-now" onClick={() => setSim({ ...sim, ...nowIst() })} /></div>
             <Field label="Date (IST)" htmlFor="acc-sim-date"><input id="acc-sim-date" className="input mono" type="date" value={sim.date} onChange={(e) => setSim({ ...sim, date: e.target.value })} /></Field>
             <Field label="Time (IST)" htmlFor="acc-sim-time"><input id="acc-sim-time" className="input mono" type="time" value={sim.time} onChange={(e) => setSim({ ...sim, time: e.target.value })} /></Field>
-            <div className="sim-go">
-              <Btn label="Evaluate" kind="primary" type="submit" icon="play" id="acc-sim-run" />
-              <Btn label="Use now" id="acc-sim-now" onClick={() => setSim({ ...sim, ...nowIst() })} />
-            </div>
-          </form>
+          </div>
           {presetsList.length ? (
-            <div className="chips acc-presets">
+            <div className="chips acc-presets" style={{ marginTop: 12 }}>
               <span className="kicker">Try</span>
               {presetsList.map((pr, i) => (
                 <button key={pr.label} type="button" className="sugg" id={`acc-preset-${i}`} onClick={() => { const s = pr.s(); setSim(s); onEvaluate(s); }}>{pr.label}</button>
               ))}
             </div>
           ) : null}
-        </div>
+        </details>
+      </form>
+      <div id="acc-sim-out" style={{ marginTop: 16 }} role="status">
         {r && rd && ract ? (
           <div className="acc-out">
-            <div className={`decision ${rd.allowed ? "is-allowed" : "is-denied"}`} aria-live="polite" id="acc-sim-result">
-              <div className="decision-v"><Icon name={rd.allowed ? "check" : "halt"} />{rd.allowed ? "Allowed" : "Denied"}</div>
-              <div><strong>{actors(r.sim.person).name}</strong>{` · ${ract.name.toLowerCase()}${ract.scope === "project" ? ` · ${rp?.name ?? r.sim.project}${rr ? ` / ${rr.name}` : ""}` : " · factory-wide"} · ${fmt.stamp(r.t)}`}</div>
-              <div className="decision-rule">
-                <span className="kicker">Deciding rule</span>
-                <span className="mono strong">{rule?.freeze ? `${rd.rule.id} + ${rule.freeze}` : rd.rule.id}</span>
-                <span>{rd.rule.name}</span>
-                <button type="button" className="linkish" id="acc-sim-show" onClick={() => onShowRule(rule?.freeze ? "freezes" : rd.rule.kind === "policy" ? "policies" : "matrix")}>Show rule</button>
+            <div className={`banner ${rd.allowed ? "ok" : "bad"}`} id="acc-sim-result">
+              <Icon name={rd.allowed ? "check" : "lock"} />
+              <div className="grow">
+                <b>{rd.allowed ? "Allowed." : "Denied."}</b>{` ${actors(r.sim.person).name} · ${ract.name.toLowerCase()}${ract.scope === "project" ? ` · ${rp?.name ?? r.sim.project}${rr ? ` / ${rr.name}` : ""}` : " · factory-wide"} · ${fmt.stamp(r.t)}. ${rd.reason}`}
+                {rd.needs && !rd.allowed ? <span>{` To allow it: ${rd.needs}.`}</span> : null}
               </div>
-              <p>{rd.reason}</p>
-              {rd.needs && !rd.allowed ? <p className="small"><strong>To allow it: </strong>{`${rd.needs}.`}</p> : null}
+            </div>
+            <div className="decision-rule" style={{ marginTop: 10 }}>
+              <span className="kicker">Deciding rule </span>
+              <span className="mono strong">{rule?.freeze ? `${rd.rule.id} + ${rule.freeze}` : rd.rule.id}</span>{" "}
+              <span>{rd.rule.name}</span>{" "}
+              <button type="button" className="linkish" id="acc-sim-show" onClick={() => onShowRule(rule?.freeze ? "freezes" : rd.rule.kind === "policy" ? "policies" : "matrix")}>Show rule</button>
               {!rd.allowed ? <ExplainDenial id="acc-sim-explain" person={r.sim.person} action={r.sim.action} project={ract.scope === "project" ? r.sim.project : null} repo={ract.scope === "project" ? r.sim.repo || null : null} time={r.t} /> : null}
             </div>
-            <details className="acc-why" open>
+            <details className="acc-why" open style={{ marginTop: 10 }}>
               <summary>How the engine got there</summary>
               <Trace lines={r.result.trace} />
             </details>
             <div className="acc-wk-h"><span className="sub-h">Same question, every hour of the next 7 days</span></div>
             <WeekStrip r={r} />
           </div>
-        ) : (
-          <div className="acc-out"><p className="muted small acc-sim-empty">Pick a person, action, project or repo and an IST time, then evaluate. The deciding rule is highlighted in the tabs below, and the week strip shows when the answer changes.</p></div>
-        )}
+        ) : null}
       </div>
-    </Panel>
+    </Card>
   );
 }

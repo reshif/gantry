@@ -3,13 +3,15 @@
  * A member opens their own page (views/person.tsx) with the roles they hold and what they may do.
  */
 import { useEffect, useState } from "react";
+import { useUrlState, writeUrlState } from "./govern/urlState";
 import type { Person, Project, Role, Team } from "@gantry/domain";
 import { useAccessMatrix, useMe, usePeople, useProjects, useSecurity } from "../api/queries";
 import { useCan } from "../api/can";
-import { hashFor, navigate, replaceHash, useHash } from "../lib/router";
+import { hashFor, replaceHash, useHash } from "../lib/router";
 import { DataTable } from "../ui/DataTable";
-import { Avatar, Btn, Chip, Empty, FilterBar, LockNote, Panel, SearchBox, Select, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
-import { Async, qState } from "../ui/async";
+import { Avatar, Btn, Chip, Empty, FilterBar, LockNote, Panel, SearchBox, Select, type Decision } from "../ui/primitives";
+import { Page, Stats } from "../ui/cr";
+import { Async } from "../ui/async";
 import { Icon, Logo } from "../ui/Icon";
 import { useAllRepos, useTeams } from "./govern/data";
 import { useInviteDialog } from "./people/InviteDialog";
@@ -31,11 +33,10 @@ export default function PeopleView() {
   const roles = matrix?.roles ?? [];
   const perm = dec(useCan("people.manage"));
   const view = dec(useCan("people.view"));
+  const [mode, setMode] = useUrlState("view", "people"); // "teams" is the team-card surface (create, edit, roles per team)
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("people");
   const sec = useSecurity(); // the allowed invite domains, when this person may read the security settings (the server checks them anyway)
-  const goPerson = (id: string) => navigate("person", id);
-  const invite = useInviteDialog({ perm, teams, projects: projects as Project[], roles, domains: sec.data?.domains ?? [], onDone: goPerson });
+  const invite = useInviteDialog({ perm, teams, projects: projects as Project[], roles, domains: sec.data?.domains ?? [], onDone: () => undefined });
   const teamDlg = useTeamDialogs(perm);
   // Older links (#people/<id>) land on the person's own page.
   useEffect(() => {
@@ -44,29 +45,33 @@ export default function PeopleView() {
 
   if (!me) return null;
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
-  if (!view.allowed) return <div className="view view-people"><ViewHead title="People & teams" sub="" /><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></div>;
-  const admins = people.filter((p) => p.status === "active" && p.roles.some((g) => g.role === "factory_admin"));
-  const invited = people.filter((p) => p.status === "invited").length;
+  if (!view.allowed) return <Page cls="view view-people" eyebrow="Govern" title="People"><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></Page>;
+  const admins = people.filter((p) => p.roles.some((g) => g.role === "factory_admin" && !g.via));
   const noMfa = people.filter((p) => p.status === "active" && p.mfa === false).length;
   const org = me.org;
+  const asTeams = mode === "teams";
 
+  const ph = (n: () => number): string => (peopleQ.data ? String(n()) : peopleQ.isError ? "–" : "…");
   return (
-    <div className="view view-people">
-      <ViewHead
-        kicker="Govern"
-        title="People"
-        sub={<span id="ppl-defaults"><strong>Default for new people: no access until granted.</strong> Roles are granted per project or for the whole factory; a person also holds the grants of their teams.</span>}
-        actions={<><Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} /><Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /></>}
-      />
-      <StatRow id="ppl-stats">
-        <Stat label="People" value={qState(peopleQ, () => String(people.length))} />
-        <Stat label="Active" value={qState(peopleQ, () => String(people.filter((p) => p.status === "active").length))} tone="done" />
-        <Stat label="No MFA" value={qState(peopleQ, () => String(noMfa))} sub={`${teams.length} teams, ${invited} invites pending`} tone={noMfa ? "wait" : undefined} />
-        <Stat label="Factory Admins" value={qState(peopleQ, () => String(admins.length))} sub="active" />
-      </StatRow>
+    <Page
+      cls="view view-people"
+      eyebrow="Govern"
+      title={asTeams ? "Teams" : "People"}
+      sub={asTeams ? <span id="ppl-defaults"><strong>Default for new people: no access until granted.</strong> Teams group people and own repos; a person also holds the grants of their teams.</span> : "Who can do what. Roles are granted per project or for the whole factory."}
+      acts={asTeams
+        ? <><Btn label="All people" id="ppl-back" onClick={() => setMode("people")} /><Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /></>
+        : <Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} />}
+    >
+      {asTeams ? null : (
+        <Stats id="ppl-stats" items={[
+          { l: "People", v: ph(() => people.length), tone: "info" },
+          { l: "Active", v: ph(() => people.filter((p) => p.status === "active").length), tone: "ok" },
+          { l: "No MFA", v: ph(() => noMfa), tone: "warn" },
+          { l: "Factory admins", v: ph(() => admins.length), tone: "agent" },
+        ]} />
+      )}
       <LockNote decision={perm} what="Invites, teams and roles" />
-      <Tabs idPrefix="ppl-tab" items={[{ id: "people", label: "People", count: people.length }, { id: "teams", label: "Teams", count: teams.length }]} active={tab} onChange={setTab} />
-      <Async query={peopleQ} what="people" id="ppl">{() => (tab === "teams" ? (
+      <Async query={peopleQ} what="people" id="ppl">{() => (asTeams ? (
         <>
           <section className="panel ppl-org" aria-label="Organisation">
             <div className="ppl-org-head">
@@ -80,8 +85,8 @@ export default function PeopleView() {
           </section>
           <OrgTree people={people} teams={teams} projects={projects as Project[]} repos={repos} roles={roles} q={q} perm={perm} invite={invite} teamDlg={teamDlg} />
         </>
-      ) : <PeopleTable people={people} teams={teams} roles={roles} onOpen={goPerson} />)}</Async>
-    </div>
+      ) : <PeopleTable people={people} teams={teams} roles={roles} invite={() => invite()} perm={perm} onTeams={() => setMode("teams")} />)}</Async>
+    </Page>
   );
 }
 
@@ -172,24 +177,33 @@ function OrgTree({ people, teams, projects, repos, roles, q, perm, invite, teamD
 
 /* ---------- the directory as a table (the Control Room People screen) ---------- */
 
-function PeopleTable({ people, teams, roles, onOpen }: { people: Person[]; teams: Team[]; roles: Role[]; onOpen: (id: string) => void }) {
-  const [q, setQ] = useState("");
-  const [role, setRole] = useState("all");
-  const [team, setTeam] = useState("all");
-  const [st, setSt] = useState("all");
+/** The role a person is shown with: the factory role when they hold one, otherwise the first role they hold. */
+export const primaryRole = (p: Person): string | undefined => (p.roles.find((g) => g.scope === "factory" && !g.via) ?? p.roles.find((g) => !g.via) ?? p.roles[0])?.role;
+
+function PeopleTable({ people, teams, roles, invite, perm, onTeams }: { people: Person[]; teams: Team[]; roles: Role[]; invite: () => void; perm: Decision; onTeams: () => void }) {
+  const [q, setQ] = useUrlState("q", "");
+  const [role, setRole] = useUrlState("role", "all");
+  const [team, setTeam] = useUrlState("team", "all");
+  const [st, setSt] = useUrlState("st", "all");
+  const [sortKey, setSortKey] = useUrlState("sort", "name");
+  const [dir, setDir] = useUrlState("dir", "asc");
+  const [page, setPage] = useUrlState("page", "1");
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? id;
   const needle = q.trim().toLowerCase();
   const rows = people.filter((p) => (role === "all" || p.roles.some((g) => g.role === role)) && (team === "all" || (p.teams ?? []).includes(team)) && (st === "all" || p.status === st) && (!needle || `${p.name} ${p.email} ${p.title}`.toLowerCase().includes(needle)));
-  const roleIds = [...new Set(people.flatMap((p) => p.roles.map((g) => g.role)))];
   const tone = (s: string): string => (s === "active" ? "ok" : s === "invited" ? "info" : "idle");
+  const dirty = !!needle || role !== "all" || team !== "all" || st !== "all";
+  const clear = (): void => writeUrlState({ q: null, role: null, team: null, st: null, page: null });
+  const clearBtn = <Btn label="Clear filters" id="ppl-clear" onClick={clear} />;
+  if (!people.length) return <Empty id="ppl-empty" icon="people" title="Nothing here yet" text="Invite the first person to give them access." action={<Btn label="Invite person" kind="primary" icon="plus" guard={perm} onClick={invite} />} />;
   return (
     <div className="form-grid">
-      <FilterBar label="Filter people" count={`${rows.length} of ${people.length}`}>
-        <SearchBox id="ppl-q" value={q} onChange={setQ} placeholder="Search name, email, title" label="Find a person" />
-        <Select id="ppl-f-role" aria-label="Role" options={[{ value: "all", label: "Role: all" }, ...roleIds.map((r) => ({ value: r, label: roleName(r) }))]} value={role} onChange={setRole} />
-        <Select id="ppl-f-team" aria-label="Team" options={[{ value: "all", label: "Team: all" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} value={team} onChange={setTeam} />
-        <Select id="ppl-f-status" aria-label="Status" options={[{ value: "all", label: "Status: all" }, { value: "active", label: "Active" }, { value: "invited", label: "Invited" }, { value: "deactivated", label: "Deactivated" }]} value={st} onChange={setSt} />
+      <FilterBar label="Filter people" count={`${rows.length} of ${people.length}`} actions={<>{dirty ? <Btn label="Clear" kind="ghost" small id="ppl-clear-small" onClick={clear} /> : null}<Btn label="Teams" kind="ghost" small icon="teams" id="ppl-teams-link" onClick={onTeams} /></>}>
+        <SearchBox id="ppl-q" value={q} onChange={(v) => { setQ(v); setPage("1"); }} placeholder="Search name, email, title" label="Find a person" />
+        <Select id="ppl-f-role" aria-label="Role" options={[{ value: "all", label: "Role: all" }, ...roles.map((r) => ({ value: r.id, label: r.name }))]} value={role} onChange={(v) => { setRole(v); setPage("1"); }} />
+        <Select id="ppl-f-team" aria-label="Team" options={[{ value: "all", label: "Team: all" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} value={team} onChange={(v) => { setTeam(v); setPage("1"); }} />
+        <Select id="ppl-f-status" aria-label="Status" options={[{ value: "all", label: "Status: all" }, { value: "active", label: "Active" }, { value: "invited", label: "Invited" }, { value: "deactivated", label: "Deactivated" }]} value={st} onChange={(v) => { setSt(v); setPage("1"); }} />
       </FilterBar>
       <DataTable
         id="ppl-table"
@@ -199,17 +213,20 @@ function PeopleTable({ people, teams, roles, onOpen }: { people: Person[]; teams
         rowId={(p) => `ppl-row-${p.id}`}
         pageSize={12}
         pager
-        sort={{ key: "name", dir: 1 }}
-        onRow={(p) => onOpen(p.id)}
-        rowLabel={(p) => `${p.name}: open`}
-        empty={{ title: needle ? `Nobody matches "${q.trim()}"` : "Nobody matches", text: "Change the search or filters." }}
+        page={Math.max(0, (Number(page) || 1) - 1)}
+        onPage={(n) => setPage(String(n + 1))}
+        sort={{ key: sortKey, dir: dir === "desc" ? -1 : 1 }}
+        onSort={(s) => { setSortKey(s.key); setDir(s.dir === -1 ? "desc" : "asc"); }}
+        empty={{ title: "Nothing matches", text: "Try clearing a filter or searching for something else.", action: clearBtn }}
         columns={[
           { key: "name", label: "Person", sort: (p) => p.name.toLowerCase(), render: (p) => (
-            <span className="row nowrap"><Avatar id={p.id} size="sm" /><span style={{ minWidth: 0 }}><b className="ell">{p.name}</b><span className="dim ell small" style={{ display: "block" }}>{p.title}</span></span></span>
+            <span className="row nowrap"><Avatar id={p.id} size="sm" /><span style={{ minWidth: 0 }}><a className="rl ell" href={hashFor("person", p.id)} aria-label={`${p.name}: open`}>{p.name}</a><span className="dim ell small" style={{ display: "block" }}>{p.title}</span></span></span>
           ) },
-          { key: "role", label: "Role", sort: (p) => p.roles[0]?.role ?? "", render: (p) => (p.roles.length ? <span className="chip info plain">{p.roles.map((g) => roleName(g.role)).filter((x, i, a) => a.indexOf(x) === i).slice(0, 2).join(", ")}{p.roles.length > 2 ? ` +${p.roles.length - 2}` : ""}</span> : <span className="dim">No roles yet</span>) },
-          { key: "team", label: "Team", hideSmall: true, sort: (p) => (p.teams ?? []).map(teamName).join(", "), render: (p) => ((p.teams ?? []).map(teamName).join(", ") || <span className="dim">none</span>) },
+          { key: "role", label: "Role", sort: (p) => primaryRole(p) ?? "", render: (p) => { const r = primaryRole(p); return r ? <span className="chip info plain">{roleName(r)}</span> : <span className="dim">No roles yet</span>; } },
+          { key: "team", label: "Team", sort: (p) => (p.teams ?? []).map(teamName).join(", "), render: (p) => ((p.teams ?? []).map(teamName).join(", ") || <span className="dim">none</span>) },
           { key: "mfa", label: "MFA", sort: (p) => (p.mfa ? 1 : 0), render: (p) => (p.mfa === undefined ? <span className="dim">–</span> : p.mfa ? <span className="chip ok">On</span> : <span className="chip warn">Off</span>) },
+          // The API does not report when a person last signed in: say so instead of inventing a time.
+          { key: "seen", label: "Last seen", render: () => <span className="mono dim" title="The server does not report last sign-in yet">not available</span> },
           { key: "status", label: "Status", sort: (p) => p.status, render: (p) => <><span className={`chip ${tone(p.status)}`}>{p.status.charAt(0).toUpperCase() + p.status.slice(1)}</span>{p.oncall ? <span className="chip agent">on call</span> : null}</> },
         ]}
       />

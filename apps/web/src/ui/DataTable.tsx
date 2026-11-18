@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, page: pageProp, onPage, selectable, empty, hasMore, onLoadMore, loadingMore, total }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -50,6 +50,9 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   pageSize?: number;
   /** Prototype pager: "1-12 of 66", Prev, "1 / 6", Next (instead of "Show more"). Needs pageSize. */
   pager?: boolean;
+  /** Optional controlled page (0-based) so a view can keep the page in the URL. With onPage. */
+  page?: number;
+  onPage?: (page: number) => void;
   /** A leading checkbox column with select-all (selection is local to the table). */
   selectable?: boolean;
   empty?: { title: string; text?: string; action?: ReactNode };
@@ -61,7 +64,9 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   total?: number;
 }) {
   const uid = useId().replace(/:/g, "");
-  const [page, setPage] = useState(0);
+  const [pageOwn, setPageOwn] = useState(0);
+  const page = pageProp ?? pageOwn;
+  const setPage = (n: number): void => { setPageOwn(n); onPage?.(n); };
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
   const [shown, setShown] = useState(pageSize ?? 0);
   // a new page size or a different row count (a filter changed) starts the list over at the first page
@@ -69,7 +74,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   if (seen !== `${pageSize ?? 0}:${rows.length}`) {
     setSeen(`${pageSize ?? 0}:${rows.length}`);
     setShown(pageSize ?? 0);
-    setPage(0);
+    setPageOwn(0);
+    if (onPage && pageProp) queueMicrotask(() => onPage(0));
   }
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [own1, setOwn1] = useState<string>("");

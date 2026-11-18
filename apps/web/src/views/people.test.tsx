@@ -75,6 +75,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -92,7 +93,7 @@ describe("People & teams: roles for teams", () => {
   it("states the default for new people and lists each team's roles", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.click(await byId("ppl-teams-link"));
     expect((await byId("ppl-defaults")).textContent).toContain("Default for new people: no access until granted.");
     const t = await byId("ppl-tr-payments");
     expect(t.textContent).toContain("Reviewer · Payments Platform");
@@ -102,7 +103,7 @@ describe("People & teams: roles for teams", () => {
   it("adds a project role to a team through the real endpoint, without Factory Admin on offer", async () => {
     const calls = setup({ "POST /api/v1/teams/platform/roles": () => ({ body: { ok: true, msg: "Platform now has Engineer on Storefront." } }) });
     mount();
-    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.click(await byId("ppl-teams-link"));
     fireEvent.click(await byId("ppl-tr-add-platform"));
     const role = (await byId("ppl-tr-role")) as HTMLSelectElement;
     expect(Array.from(role.options).map((o) => o.value)).not.toContain("factory_admin");
@@ -116,7 +117,7 @@ describe("People & teams: roles for teams", () => {
   it("shows the server's message when a grant is refused, and keeps the dialog open", async () => {
     setup({ "POST /api/v1/teams/platform/roles": () => ({ status: 403, body: { ok: false, msg: "Sign in again to continue.", needs: "step_up" } }) });
     mount();
-    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.click(await byId("ppl-teams-link"));
     fireEvent.click(await byId("ppl-tr-add-platform"));
     fireEvent.click(await byId("ppl-tr-submit"));
     await waitFor(() => expect(document.querySelector(".form-err")?.textContent).toContain("Sign in again"));
@@ -125,7 +126,7 @@ describe("People & teams: roles for teams", () => {
   it("removes a team role after confirming, with the grant id", async () => {
     const calls = setup({ "DELETE /api/v1/teams/payments/roles/tra-1": () => ({ body: { ok: true, msg: "Removed Reviewer from Payments." } }) });
     mount();
-    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.click(await byId("ppl-teams-link"));
     fireEvent.click(await byId("ppl-tr-rm-payments-tra-1"));
     fireEvent.click(await waitFor(() => within(document.body).getByText("Remove role")));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
@@ -135,7 +136,7 @@ describe("People & teams: roles for teams", () => {
   it("locks add and remove with the server's reason when the viewer cannot manage people", async () => {
     const calls = setup({}, ["people.manage"]);
     mount();
-    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.click(await byId("ppl-teams-link"));
     const add = (await byId("ppl-tr-add-platform")) as HTMLButtonElement;
     await waitFor(() => expect(add.getAttribute("aria-disabled") === "true" || add.disabled).toBe(true));
     fireEvent.click(await byId("ppl-tr-rm-payments-tra-1"));
@@ -146,13 +147,13 @@ describe("People & teams: roles for teams", () => {
 describe("People & teams: a member's roles and where permissions come from", () => {
   it("separates direct roles from roles inherited via a team", async () => {
     setup();
+    window.history.replaceState(null, "", "/?tab=access");
     mount("p-tomas");
-    const held = await byId("ppl-held");
-    await waitFor(() => expect(document.getElementById("ppl-held")?.textContent).toContain("Reviewer · Payments Platform · via Payments"));
-    const [direct, inherited] = Array.from(held.querySelectorAll(":scope > div"));
-    expect(direct!.textContent).toContain("Engineer · Payments Platform");
-    expect(direct!.textContent).not.toContain("Reviewer");
-    expect(inherited!.textContent).toContain("via Payments");
+    const held = await byId("ppl-roles");
+    await waitFor(() => expect(document.getElementById("ppl-roles")?.textContent).toContain("via Payments"));
+    expect(held.textContent).toContain("Engineer");
+    expect(held.textContent).toContain("Reviewer");
+    expect(held.textContent).toContain("via Payments: change it on the team");
   });
 
   it("marks effective-permission cells with their source", async () => {
@@ -281,7 +282,7 @@ describe("People & teams: deactivate", () => {
     const off = { ...person("p-ines", "Inés Alvarez", ["payments"], []), status: "deactivated", version: 5 };
     const calls = setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0], off, PEOPLE[1]] }), "POST /api/v1/people/p-ines/reactivate": () => ({ body: { ok: true, msg: "Active again." } }) });
     mount();
-    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.click(await byId("ppl-teams-link"));
     const ines = await byId("ppl-mem-payments-p-ines");
     const tomas = await byId("ppl-mem-payments-p-tomas");
     expect(ines.textContent).toContain("deactivated");
@@ -332,10 +333,35 @@ describe("People & teams: one page per person", () => {
   it("opens a person from a team card, and says so when the id is unknown", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("ppl-tab-teams"));
+    fireEvent.click(await byId("ppl-teams-link"));
     expect((await byId("ppl-mem-payments-p-tomas")).getAttribute("href")).toBe("#person/p-tomas");
     cleanup();
     mount("p-nobody");
-    expect((await byId("person-missing")).textContent).toContain("No such person");
+    expect((await byId("person-missing")).textContent).toContain("Page not found");
+  });
+});
+
+describe("People: Control room prototype layout (gov1)", () => {
+  it("shows one primary header action, a Last seen column, name links to the person page and filters in the URL", async () => {
+    setup();
+    mount();
+    await byId("ppl-table");
+    expect(document.getElementById("ppl-invite")).not.toBeNull();
+    expect(document.getElementById("ppl-team-new")).toBeNull();
+    expect(document.getElementById("ppl-tab-teams")).toBeNull();
+    expect(document.getElementById("ppl-table")?.textContent).toContain("Last seen");
+    await waitFor(() => expect(document.querySelector("#ppl-table a.rl")?.getAttribute("href")).toMatch(/^#person\//));
+    fireEvent.change(await byId("ppl-f-status"), { target: { value: "invited" } });
+    await waitFor(() => expect(window.location.search).toContain("st=invited"));
+    expect(document.getElementById("ppl-clear-small")).not.toBeNull();
+  });
+
+  it("the person page has All people, Deactivate… and Profile / Access / Activity tabs", async () => {
+    setup();
+    mount("p-tomas");
+    await byId("person-tab-access");
+    expect(document.body.textContent).toContain("All people");
+    expect(document.body.textContent).toContain("Holds right now");
+    expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(expect.arrayContaining(["Profile", "Access", "Activity"]));
   });
 });
