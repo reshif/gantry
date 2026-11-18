@@ -9,7 +9,7 @@ import { useAccessMatrix, useMe, usePeople, useProjects, useSecurity } from "../
 import { useCan } from "../api/can";
 import { hashFor, navigate, replaceHash, useHash } from "../lib/router";
 import { DataTable } from "../ui/DataTable";
-import { Avatar, Btn, Chip, Empty, FilterBar, LockNote, Panel, SearchBox, Select, type Decision } from "../ui/primitives";
+import { Avatar, Btn, Chip, Empty, FilterBar, LockNote, Panel, SearchBox, Segmented, Select, type Decision } from "../ui/primitives";
 import { Page, Stats } from "../ui/cr";
 import { Async } from "../ui/async";
 import { Icon, Logo } from "../ui/Icon";
@@ -58,9 +58,12 @@ export default function PeopleView() {
       eyebrow="Govern"
       title={asTeams ? "Teams" : "People"}
       sub={asTeams ? <span id="ppl-defaults"><strong>Default for new people: no access until granted.</strong> Teams group people and own repos; a person also holds the grants of their teams.</span> : <>Who can do what. Roles are granted per project or for the whole factory.</>}
-      acts={asTeams
-        ? <><Btn label="All people" id="ppl-back" onClick={() => setMode("people")} /><Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /></>
-        : <Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} />}
+      acts={<>
+        <Segmented name="ppl-mode" label="People or teams" value={asTeams ? "teams" : "people"} onChange={(v) => setMode(v)} items={[{ id: "people", label: "People" }, { id: "teams", label: "Teams" }]} />
+        {asTeams
+          ? <Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} />
+          : <Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} />}
+      </>}
     >
       {asTeams ? null : (
         <Stats id="ppl-stats" items={[

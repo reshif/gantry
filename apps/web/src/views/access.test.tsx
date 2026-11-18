@@ -61,11 +61,11 @@ describe("Access screen: load failure", () => {
 });
 
 describe("Access: Control room prototype layout (gov1)", () => {
-  it("has the Matrix, Policies and Check access tabs without counts", async () => {
+  it("has the Matrix, Policies, Freezes, Roles and Check access tabs without counts", async () => {
     setup(() => new Response(JSON.stringify({ matrix: {}, roles: [], actions: [], version: 1 }), { status: 200 }));
     mount();
     await byId("acc-tab-check");
-    expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(["Matrix", "Policies", "Check access"]);
+    expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(["Matrix", "Policies", "Freezes", "Roles", "Check access"]);
   });
 });
 
@@ -108,13 +108,21 @@ describe("Access: round 3 fixes (gov1)", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  it("the Policies card has no Freezes link and no Add policy button", async () => {
+  it("the Policies card has no Freezes link; Add policy is rendered; Freezes and Roles are reached by clicking their tabs", async () => {
     setup(() => new Response(JSON.stringify(MX3), { status: 200 }));
-    window.history.replaceState(null, "", "/?tab=policies");
+    window.history.replaceState(null, "", "/");
     mount();
+    await byId("acc-tab-policies");
+    fireEvent.click(document.getElementById("acc-tab-policies")!);
     await byId("acc-policies-card");
     expect(document.getElementById("acc-open-freezes")).toBeNull();
-    expect(document.getElementById("acc-add-policy")).toBeNull();
+    await waitFor(() => expect((document.getElementById("acc-add-policy") as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(document.getElementById("acc-tab-freezes")!);
+    await byId("acc-freezes-card");
+    expect(document.getElementById("acc-add-freeze")).not.toBeNull();
+    fireEvent.click(document.getElementById("acc-tab-roles")!);
+    await byId("acc-roles-card");
+    expect(document.getElementById("acc-add-role")).not.toBeNull();
     window.history.replaceState(null, "", "/");
   });
 });

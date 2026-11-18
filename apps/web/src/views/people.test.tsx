@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG, defaultMatrix } from "@gantry/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,6 @@ import { bindQueryClient } from "../api/keys";
 import { setCsrfToken, setStepUpHandler } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import PeopleView from "./people";
-import { writeUrlState } from "./govern/urlState";
 import PersonView from "./person";
 
 type Handler = (url: string, init?: RequestInit) => { status?: number; body: unknown };
@@ -63,8 +62,8 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
   return calls;
 }
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-/** The team cards are reached by ?view=teams (the prototype People screen has no link to them). */
-const openTeams = async () => { await byId("ppl-stats"); act(() => writeUrlState({ view: "teams" })); await byId("ppl-team-new"); };
+/** The team cards are reached by clicking Teams in the People / Teams switch. */
+const openTeams = async () => { await byId("ppl-stats"); fireEvent.click(await byId("ppl-mode-teams")); await byId("ppl-team-new"); };
 /** The list page; with a person id, that person's own page. */
 function mount(personId?: string) {
   // replaceState, not `location.hash =`: assigning queues a hashchange that lands after the test wrote its ?tab= and wipes it
@@ -395,6 +394,18 @@ describe("People: round 3 fixes (gov1)", () => {
     const mfa = document.querySelector("#ppl-row-p-asha td:nth-child(4)")!;
     fireEvent.click(mfa);
     expect(window.location.hash).toBe("#person/p-asha");
+  });
+
+  it("the People / Teams switch reaches the team cards and back by clicking", async () => {
+    setup();
+    mount();
+    await byId("ppl-table");
+    expect(document.getElementById("ppl-team-new")).toBeNull();
+    await openTeams();
+    expect(document.getElementById("ppl-table")).toBeNull();
+    fireEvent.click(document.getElementById("ppl-mode-people")!);
+    await byId("ppl-table");
+    expect(document.getElementById("ppl-invite")).not.toBeNull();
   });
 
   it("the invite dialog has Name, Email, Role and Team only, and Cancel closes it", async () => {
