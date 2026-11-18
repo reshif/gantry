@@ -184,7 +184,7 @@ describe("intake, slots and records equal legacy", () => {
     ];
     const strip = (w: Record<string, unknown>) => {
       const x = JSON.parse(JSON.stringify(w));
-      for (const k of ["conv", "brief", "clsRationale", "clsConfidence"]) delete x[k];
+      for (const k of ["conv", "brief", "clsRationale", "clsConfidence", "history"]) delete x[k];
       return x;
     };
     inputs.forEach((i, n) => {
@@ -198,7 +198,7 @@ describe("intake, slots and records equal legacy", () => {
       let wo = a;
       let t = NOW + 5000;
       for (let k = 0; k < 4 && !wo.conv.done; k++) {
-        const text = wo.conv.questions[wo.conv.qi]!.chips[0]!;
+        const text = "Typed answer " + k;
         const r = answerConversation(S.catalog, project, wo, text, i.requestedBy, t);
         G.answerConversation(lw, text, i.requestedBy, t);
         wo = { ...wo, conv: r.conv, brief: r.brief };

@@ -194,43 +194,25 @@ export function classify(c: Catalog, text: string, requested: string | null | un
 
 type WoText = Pick<WorkOrder, "title" | "description" | "cls">;
 
-/** What the brief is missing for its class (legacy `misses`). */
-export function intakeMisses(wo: WoText): ConvMiss[] {
-  const d = (wo.title + " " + wo.description).toLowerCase();
-  const out: ConvMiss[] = [];
-  if (["hotfix", "feature", "refactor", "epic", "security"].includes(wo.cls) && !/rollback|revert|flag/.test(d)) out.push({ id: "rollback", text: "No rollback plan", resolved: false });
-  if (["feature", "epic"].includes(wo.cls) && !/v\d|version|release/.test(d)) out.push({ id: "version", text: "Unclear target version", resolved: false });
-  if (!["spike", "docs"].includes(wo.cls) && !/test/.test(d)) out.push({ id: "testdata", text: "Missing test data or test strategy", resolved: false });
-  if (wo.cls === "bug" && !/repro|steps/.test(d)) out.push({ id: "repro", text: "No reproduction steps", resolved: false });
-  return out;
+/**
+ * No-model fallback only. Which gaps a brief has is the Intake agent's judgement (it reads the request, the repository and AGENTS.md), never a keyword check, so the
+ * fallback finds none and says nothing about them.
+ */
+export function intakeMisses(_wo: WoText): ConvMiss[] {
+  return [];
 }
 
-const AC: Record<string, string[]> = {
-  feature: ["New behaviour covered by tests", "Metric and alert added", "Both of those"],
-  bug: ["Regression test fails before and passes after", "Error rate back to baseline", "Both of those"],
-  hotfix: ["Error rate back to baseline within 30 min", "Regression test added", "Both of those"],
-  security: ["Vulnerability no longer reproducible", "Scanner shows clean", "Both of those"],
-  epic: ["Each child has its own acceptance criteria", "Feature flag controls rollout"],
-  chore: ["Build and tests green on the new version", "No API changes"],
-  refactor: ["Behaviour identical, all tests green", "Benchmark within 5%"],
-  docs: ["Reviewed by the owning team", "Linked from the README"],
-  spike: ["A one-page report answers the question", "Report includes a recommendation"],
-};
-
+/**
+ * The no-model fallback form: three plain fields, no agent voice and no canned answers (no chips). It is shown only when no Intake agent can talk (see `scripted` messages,
+ * labelled "Rule-based (no agent)" by the page). With an agent, the agent decides what is missing and asks it in its own words.
+ */
 export function convQuestions(wo: Pick<WorkOrder, "cls" | "title" | "repo"> & { conv: Pick<Conversation, "misses"> }): ConvQuestion[] {
-  const repo = wo.repo;
-  const qs: ConvQuestion[] = [];
-  if (wo.cls === "spike") qs.push({ id: "question", field: "scope", text: "What question should the report answer?", chips: ["Is it feasible on our stack?", "What would it cost to run?", "Which option should we pick?"] });
-  else qs.push({ id: "scope", field: "scope", text: "What is in scope for \"" + wo.title + "\"?", chips: ["Only " + repo, repo + " and its direct clients", "Suggest a scope for me"] });
-  qs.push({ id: "ac", field: "ac", text: "How will we know it is done?", chips: AC[wo.cls] ?? (AC.feature as string[]) });
-  for (const m of wo.conv.misses) {
-    if (m.id === "rollback") qs.push({ id: "rollback", field: "rollback", text: "No rollback plan was found in the request. How do we undo this if it goes wrong?", chips: ["Revert the PR", "Turn the feature flag off", "Needs a migration rollback"] });
-    if (m.id === "version") qs.push({ id: "version", field: "version", text: "Which release should this land in?", chips: ["Next patch release", "Next minor release", "Internal only, no release"] });
-    if (m.id === "testdata") qs.push({ id: "testdata", field: "testdata", text: "What test data can the agents use?", chips: ["Fixtures already in the repo", "Generate synthetic data", "I will attach a sample"] });
-    if (m.id === "repro") qs.push({ id: "repro", field: "repro", text: "How do we reproduce it?", chips: ["Steps are in the linked issue", "Happens on every request with JPY", "I will describe them"] });
-  }
-  qs.push({ id: "extra", field: "extra", text: "Anything else the factory should know?", chips: ["No, that is everything"] });
-  return qs;
+  void wo;
+  return [
+    { id: "scope", field: "scope", text: "Scope (form field, no agent is reading this request): what is in scope?", chips: [] },
+    { id: "ac", field: "ac", text: "Acceptance (form field): how will we know it is done?", chips: [] },
+    { id: "extra", field: "extra", text: "Note (form field): anything else to add? Leave it empty or write \"no\" if not.", chips: [] },
+  ];
 }
 
 const FIELD_LABEL: Record<string, string> = { scope: "Scope", ac: "Acceptance", rollback: "Rollback", version: "Target release", testdata: "Test data", repro: "Reproduction", children: "Split", extra: "Note" };
@@ -273,10 +255,10 @@ export function startConversation(
   const cls = c.classes.find((x) => x.id === wo.cls);
   const conv: Conversation = { messages: [], qi: 0, answers: {}, misses, decisions: [], awaiting: awaiting || "submitter", done: false, raised: [], questions: [] };
   // Scripted notes are Gantry's, not an agent's: they are authored by "system" and marked scripted so the page can label them (and hide them when an agent talks).
-  conv.messages.push({ from: "system", at: wo.createdAt, text: "Rule-based first guess: " + (cls ? cls.name : wo.cls) + " (confidence " + Math.round(wo.clsConfidence * 100) + "%). " + wo.clsRationale, scripted: true });
+  conv.messages.push({ from: "system", at: wo.createdAt, text: "Class: " + (cls ? cls.name : wo.cls) + ". " + wo.clsRationale, scripted: true });
   const qs = convQuestions({ cls: wo.cls, title: wo.title, repo: wo.repo, conv: { misses } });
   conv.questions = qs;
-  conv.messages.push({ from: "system", at: wo.createdAt + 1000, text: "Scripted intake questions (no agent is reading this request)." + (misses.length ? " Gaps found by keyword checks: " + misses.map((m) => m.text.toLowerCase()).join("; ") + "." : ""), scripted: true });
+  conv.messages.push({ from: "system", at: wo.createdAt + 1000, text: "Fallback intake form (no agent is reading this request).", scripted: true });
   const q0 = qs[0] as ConvQuestion;
   conv.messages.push({ from: "system", at: wo.createdAt + 2000, text: q0.text, qid: q0.id, chips: q0.chips, scripted: true });
   return { conv, brief: buildBrief(c, project, { cls: wo.cls, title: wo.title, conv }) };
@@ -348,6 +330,9 @@ export interface NewWorkOrderInput {
   risk?: string;
 }
 
+/** The label on a class guessed by keywords before the Intake agent has read the request. */
+export const PROVISIONAL_CLS_PREFIX = "Provisional rule-based keyword match (no agent has read the request yet; the Intake agent classifies it next, and this stands only if no model is usable). ";
+
 /** Build a work order at Intake with its classification, gates and conversation (legacy G.buildWO, with the clock and id supplied). */
 export function buildWorkOrder(c: Catalog, project: Project, o: NewWorkOrderInput): WorkOrder {
   const cl = classify(c, o.title + " " + (o.description || ""), o.requestedCls, project);
@@ -364,7 +349,7 @@ export function buildWorkOrder(c: Catalog, project: Project, o: NewWorkOrderInpu
   const clsConfidence = chosen ? 1 : cl.confidence;
   const clsRationale = chosen
     ? "Chosen by the submitter: " + clsName(cls) + "." + (cl.cls !== cls ? " A rule-based keyword match (no agent read the request) would have said " + clsName(cl.cls) + "; the choice stands unless a person changes it." : "")
-    : "Rule-based keyword match (no agent read the request). " + cl.rationale;
+    : PROVISIONAL_CLS_PREFIX + cl.rationale;
   const base = {
     cls, title: o.title, description: o.description || "", repo: o.repo, createdAt: created, clsConfidence, clsRationale,
   };
@@ -374,7 +359,7 @@ export function buildWorkOrder(c: Catalog, project: Project, o: NewWorkOrderInpu
     cls, clsConfidence, clsRationale, clsSuggested: cl.cls, clsOverridden: null, requestedCls: o.requestedCls || null,
     priority: o.priority || classDef.priority, source: o.source || "console", requestedBy: o.requestedBy, createdAt: created,
     station: 0, state: "waiting", bay: null, bayReason: "", bayFrom: null, progress: 100, slot: null,
-    history: [{ station: "intake", agent: "ag-intake", model: "claude-haiku-5-5", startedAt: created, endedAt: null, tokens: 4200, cost: 0.02, outcome: null, note: "" }],
+    history: [{ station: "intake", agent: "ag-intake", model: "", startedAt: created, endedAt: null, tokens: 0, cost: 0, outcome: null, note: "" }],
     gates, log: [{ at: created, who: o.requestedBy, text: "Submitted from " + (o.source || "console") + "." }],
     diff: { plus: 0, minus: 0, files: 0 }, tests: { passed: 0, failed: 0, added: 0 }, pr: null,
     blockReason: null, failReason: null, doneAt: null, killed: null, parent: o.parent || null, children: [], risk: o.risk || (project.regulated ? "high" : "normal"),

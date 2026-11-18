@@ -59,12 +59,12 @@ d("learning loop (spec 8.7, 13.4)", () => {
       expect(r0.body).toMatchObject({ ok: true, created: 0 }); // one signal does not repeat
       const b = await record([now - 4 * DAY, now - 3 * DAY]);
       const r1 = await refresh();
-      // the seeded intake conversations carry misses of their own: they group too (a second finding)
-      expect(r1.body).toMatchObject({ created: 2, updated: 0, open: 2 });
+      // Intake no longer asks a fixed questionnaire, so it carries no canned-question misses of its own: only the send-backs group.
+      expect(r1.body).toMatchObject({ created: 1, updated: 0, open: 1 });
       const f = (await get("/api/v1/learning/findings")).find((x: any) => x.signal === "sendback");
       fid = f.id;
       expect(f).toMatchObject({ signal: "sendback", agent: "ag-build", project: "payments", status: "open", count: 2 });
-      expect((await get("/api/v1/learning/findings")).find((x: any) => x.signal === "miss")).toMatchObject({ agent: "ag-intake", project: "payments" });
+      expect((await get("/api/v1/learning/findings")).find((x: any) => x.signal === "miss")).toBeUndefined();
       expect(f.title).toContain("Missing a rollback note");
       expect([...f.evidence].sort()).toEqual([a, b].sort());
       const again = await refresh();
