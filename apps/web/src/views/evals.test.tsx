@@ -229,6 +229,9 @@ describe("Evals screen: prototype structure", () => {
     await waitFor(() => expect(document.body.textContent).toContain("RUN-1"));
     expect(document.body.textContent).toContain("RUN-2");
     expect(document.body.textContent).toContain("2.7.0-rc1");
+    // prototype: run rows are plain, no link and no drawer
+    expect(document.querySelector("#ev-runs-table a")).toBeNull();
+    expect(document.querySelector("#ev-runs-table [id^='ev-runs-open-']")!.tagName).toBe("SPAN");
   });
   it("starts a real run for each suite from Run all suites", async () => {
     const calls = setup({ "POST /api/v1/suites/SUITE-BUILD/runs": () => ({ body: { ok: true, msg: "started", run: "RUN-3", total: 6 } }), "POST /api/v1/suites/SUITE-REVIEW/runs": () => ({ body: { ok: true, msg: "started", run: "RUN-4", total: 2 } }) });

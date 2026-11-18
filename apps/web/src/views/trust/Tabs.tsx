@@ -128,7 +128,7 @@ export function DemotionsTab({ cells, projects, p }: { cells: CellOut[]; project
 
 type PolicyProps = { p: LadderProps & { criteriaVersion: number }; cells: CellOut[]; projects: Project[] };
 
-/** Ceilings tab (prototype): one setrow per ceiling, the rule as the title, its maximum below and a switch at the right. The runtime switch for levels above L1 is the last row of the same list. */
+/** Ceilings tab (prototype): one setrow per ceiling, the rule as the title, its maximum below and a switch at the right. The runtime switch for levels above L1 is the last row of the same card. */
 export function CeilingsTab({ p }: PolicyProps) {
   const ui_ = useUI();
   const out = useOutcome();
@@ -142,7 +142,6 @@ export function CeilingsTab({ p }: PolicyProps) {
     }
   };
   return (
-    <>
     <Card title="Ceilings" flush>
       <div className="list tr-ceil">
         {ceilings.map((c) => (
@@ -151,13 +150,12 @@ export function CeilingsTab({ p }: PolicyProps) {
             <Toggle id={`tr-ceil-on-${c.id}`} checked={c.enabled !== false} decision={perm} label={c.text} onChange={(v) => { void ops.saveCeiling({ ...c, enabled: v }, { ifMatch: c.version ?? 0 }).then((r) => out(r, `${v ? "Enabled" : "Disabled"} ${c.text}`)); }} />
           </div>
         ))}
+        <div className="setrow tr-switch" id="tr-switch-row">
+          <div className="tx"><b>Levels above L1</b><span>{p.switchOn ? "On. A cell's level above L1 is enforced, within the ceilings." : "Off. A level above L1 does nothing and cannot be granted until a person turns this on."}</span></div>
+          <Toggle id="tr-switch" checked={p.switchOn} decision={perm} label="Trust levels above L1" onChange={toggleSwitch} />
+        </div>
       </div>
     </Card>
-    <div className="setrow tr-switch" id="tr-switch-row" style={{ marginTop: 12 }}>
-          <div className="tx"><b>Levels above L1</b><span>{p.switchOn ? "On. A cell's level above L1 is enforced, within the ceilings." : "Off. A level above L1 does nothing and cannot be granted until a person turns this on."}</span></div>
-      <Toggle id="tr-switch" checked={p.switchOn} decision={perm} label="Trust levels above L1" onChange={toggleSwitch} />
-    </div>
-    </>
   );
 }
 

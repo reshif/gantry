@@ -1,8 +1,8 @@
-/** Runs tab (prototype): every suite run in one table, newest first, searchable. A run id opens that run in its suite's detail. */
+/** Runs tab (prototype): every suite run in one table, newest first, searchable. Plain rows: a run is read in its suite's detail (open the suite from the Suites tab). */
 import { fmt } from "@gantry/domain";
 import { Avatar, Btn, Empty, FilterBar, SearchBox } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/DataTable";
-import { agentOf, evalsUi, ScoreMeter, type EvalsData, type RunRow } from "./kit";
+import { agentOf, ScoreMeter, type EvalsData, type RunRow } from "./kit";
 
 type Url = { tab: string; q: string; sort: string; dir: string; suite: string; run: string };
 
@@ -11,7 +11,7 @@ export function RunsTab({ d, url, setUrl }: { d: EvalsData; url: Url; setUrl: (p
   const nameOf = (r: RunRow): string => agentOf(d, r.agent)?.name ?? r.agent;
   const rows = d.runs.filter((r) => !term || `${r.id} ${r.suite} ${nameOf(r)} ${r.agent}`.toLowerCase().includes(term));
   const cols: SortCol<RunRow>[] = [
-    { key: "id", label: "Run", sort: (r) => r.id, render: (r) => <a className="mono rl" href="#evals" id={`ev-runs-open-${r.id}`} aria-label={`Open run ${r.id} in suite ${r.suite}`} onClick={(e) => { e.preventDefault(); evalsUi.a = evalsUi.b = null; setUrl({ tab: "suites", q: "", sort: "", dir: "", suite: r.suite, run: r.id }); }}>{r.id}</a> },
+    { key: "id", label: "Run", sort: (r) => r.id, render: (r) => <span className="mono rl" id={`ev-runs-open-${r.id}`}>{r.id}</span> },
     { key: "suite", label: "Suite", sort: (r) => r.suite, render: (r) => <span className="mono">{r.suite}</span> },
     { key: "agent", label: "Agent", sort: (r) => nameOf(r).toLowerCase(), render: (r) => <span className="who"><Avatar id={r.agent} size="sm" /><span>{nameOf(r)}</span></span> },
     { key: "version", label: "Version", sort: (r) => r.version, render: (r) => <span className="mono">{r.version}</span> },

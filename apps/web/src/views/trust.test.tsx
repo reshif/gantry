@@ -95,6 +95,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Trust screen: prototype matrix", () => {
+  it("has a text-only legend, no link anywhere in the matrix card, and no row of dashes for an agent without cells", async () => {
+    setup();
+    at("");
+    mount();
+    const m = await byId("tr-agent-matrix");
+    const card = m.parentElement!;
+    expect(card.querySelector("#tr-demos-link")).toBeNull();
+    expect(card.textContent).toContain("L4 runs unattended, audited");
+    for (const tr of m.querySelectorAll("tbody tr")) expect(tr.querySelector("a.lvl")).not.toBeNull();
+  });
+});
+
 describe("Trust screen: ladder", () => {
   beforeEach(() => at("?tab=ladder"));
   it("shows the header numbers, including that levels above L1 are off", async () => {
@@ -379,7 +392,9 @@ describe("Trust screen: matrix", () => {
     mount();
     fireEvent.click(await byId("tr-tab-ceilings"));
     await byId("tr-switch");
-    expect(document.querySelectorAll(".tr-ceil .setrow")).toHaveLength(document.querySelectorAll(".tr-ceil [id^='tr-ceil-on-']").length);
-    expect(document.querySelector(".tr-ceil #tr-switch")).toBeNull();
+    // the runtime switch is the last row of the same card: exactly the ceilings plus that one row, none outside it
+    expect(document.querySelectorAll(".tr-ceil .setrow")).toHaveLength(document.querySelectorAll(".tr-ceil [id^='tr-ceil-on-']").length + 1);
+    expect(document.querySelector(".tr-ceil #tr-switch")).not.toBeNull();
+    expect(document.querySelectorAll(".setrow")).toHaveLength(document.querySelectorAll(".tr-ceil .setrow").length);
   });
 });

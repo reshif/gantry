@@ -18,7 +18,6 @@ import { trustFocus, trustUi, useTrustUi, type CellOut, type TrustTab } from "./
 import { useCatalog } from "./projects/kit";
 import type { Project } from "@gantry/domain";
 
-const DAY = 86_400_000;
 
 /** The four prototype tabs. "ladder" and "demotions" stay reachable by URL (the matrix dialog and the legend link open them) as drill-downs, not tabs. */
 const TABS: TrustTab[] = ["matrix", "proposals", "ceilings", "criteria", "ladder", "demotions"];
@@ -55,8 +54,8 @@ export default function TrustView() {
   if (!tr || !cat) return <div className="view-trust">{head}<Async query={all} what="trust levels" id="trust">{() => null}</Async></div>;
   const proj = projects.find((p) => p.id === project)!;
   const pending = proposals.filter((x) => x.status === "pending");
-  const dem7 = cells.reduce((n, c) => n + (c.history || []).filter((e) => (e.kind === "demote" || (e.kind === "grant" && e.from != null && e.to < e.from)) && e.at >= Date.now() - 7 * DAY).length, 0);
-  const atL3 = new Set(cells.filter((c) => (c.effective ?? c.level) >= 3).map((c) => c.agent)).size;
+  // the prototype counts matrix cells (an agent on a project) at L3 or above, one per agent and project
+  const atL3 = new Set(cells.filter((c) => (c.effective ?? c.level) >= 3).map((c) => `${c.agent}|${c.project}`)).size;
   const ladderCells = (lad.data?.cells ?? cells.filter((c) => c.project === project)) as CellOut[];
   const base: LadderProps = {
     cat, project: proj, projects, cells: ladderCells.filter((c) => c.project === project), proposals, switchOn: tr.levelsAboveL1 === true, criteria: tr.criteria, sampleRate: tr.sampleRate,
@@ -64,7 +63,7 @@ export default function TrustView() {
   };
   const policy = { ...base, cells, ...({ ceilings: tr.ceilings, criteriaVersion: tr.criteriaVersion ?? 0 } as object) } as LadderProps & { criteriaVersion: number };
   const tabs = [{ id: "matrix", label: "Matrix" }, { id: "proposals", label: "Proposals", count: pending.length }, { id: "ceilings", label: "Ceilings" }, { id: "criteria", label: "Criteria" }];
-  const body = tab === "matrix" ? <MatrixTab cells={cells} projects={projects} agents={(agentsData ?? []).map((a) => ({ id: a.id, name: a.name }))} switchOn={tr.levelsAboveL1 === true} demotions={dem7} />
+  const body = tab === "matrix" ? <MatrixTab cells={cells} projects={projects} agents={(agentsData ?? []).map((a) => ({ id: a.id, name: a.name }))} switchOn={tr.levelsAboveL1 === true} />
     : tab === "proposals" ? <ProposalsTab p={base} cells={cells} proposals={proposals} />
     : tab === "demotions" ? <DemotionsTab cells={cells} projects={projects} p={{ ...base, cells }} />
     : tab === "ceilings" ? <CeilingsTab p={policy} cells={cells} projects={projects} />

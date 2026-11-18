@@ -68,7 +68,8 @@ export default function LearningView() {
     : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} hi={hi} />}</Async>;
   return (
     <div className="view-learning">
-      <Page eyebrow="Workforce" title="Learning" sub="Agents notice patterns in rejections and overrides, then propose instruction changes. A person accepts or declines.">
+      <Page eyebrow="Workforce" title="Learning" sub="Agents notice patterns in rejections and overrides, then propose instruction changes. A person accepts or declines."
+        acts={tab === "proposals" && settings ? <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" id="ln-switch" guard={perm} onClick={() => flip(!on)} /> : undefined}>
         <div id="ln-stats">
           <Stats items={[
             { l: "Open findings", v: qState(fq, () => String(openFindings)), tone: "warn" },
@@ -79,12 +80,6 @@ export default function LearningView() {
         </div>
         <Tabs idPrefix="ln-tab" items={[{ id: "findings", label: "Findings" }, { id: "proposals", label: "Proposals", count: open }]} active={tab} onChange={(t) => { setTab(t); setHi(null); setHiFinding(null); }} />
         <div id="ln-tab-panel" role="tabpanel" className="ln-panel">{body}</div>
-        {tab === "proposals" && settings ? (
-          <div className={`banner${on ? "" : " warn"}`} id="ln-switch-row">
-            <div className="grow">{on ? "Learning proposals are on. A person can draft them from findings and a second person accepts." : "Learning proposals are off. Turn them on to let a person draft proposals from findings."}</div>
-            <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" small id="ln-switch" guard={perm} onClick={() => flip(!on)} />
-          </div>
-        ) : null}
       </Page>
     </div>
   );
