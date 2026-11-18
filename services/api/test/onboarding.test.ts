@@ -539,6 +539,25 @@ d("repo onboarding", () => {
       expect(blocked.body.msg).toMatch(/hand halt/);
       await q(`update stops set lifted_by = 'p-lena', lifted_at = now() where org_id = $1 and id = $2`, [t.orgId, `repo:${r.id}:s3`]);
     });
+
+    it("S-4: a failed or blocked assessment with a green PR open keeps the PR at its stage, mergeable, with the failure as the blocker", async () => {
+      for (const result of [{ kind: "failed", msg: "GitHub timed out" }, { kind: "blocked", code: "app", msg: "The App is not installed" }] as const) {
+        const r = await connect();
+        await assessed(r);
+        await opened(r);
+        await green(r);
+        expect((await doc(r.id)).stage).toBe("pr_checks");
+        expect((await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/assess`)).status).toBe(200);
+        const run = (await doc(r.id)).runId as string;
+        const out = await asWorker((tx) => applyAssessment(tx, t.orgId, { repoId: r.id, runId: run, now: new Date(), result }));
+        expect(out.applied).toBe(true);
+        expect(await doc(r.id)).toMatchObject({ stage: "pr_checks", busy: null, blocker: result.msg, pr: { state: "open" } });
+        expect((await repoDoc(r.id)).onboarding_stage).toBe("pr_checks");
+        // still synced by the scheduler (stage listed) and still mergeable
+        const m = await call(lena, "POST", `/api/v1/repos/${r.id}/onboarding/merge`);
+        expect(m.status, JSON.stringify(m.body)).toBe(200);
+      }
+    });
   });
 
   describe("Ready gates work orders", () => {

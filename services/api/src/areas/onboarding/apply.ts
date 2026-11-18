@@ -102,14 +102,16 @@ export async function applyAssessment(tx: Tx, orgId: string, o: { repoId: string
     await publishChange(tx, { org: orgId, keys: ["repos", "projects", "audit", "home"], project: repo.project_id });
     return { applied: true };
   }
+  // With an open onboarding PR the repo stays where the PR is (as a successful assessment does): the PR keeps syncing and stays mergeable, and the failure is shown as the blocker.
+  const keepPr = doc.pr?.state === "open" && (doc.stage === "pr_opened" || doc.stage === "pr_checks");
   if (r.kind === "blocked") {
-    doc.stage = "person";
+    if (!keepPr) doc.stage = "person";
     doc.blocker = r.msg;
     stamp(doc, SYSTEM, `Needs a person: ${r.msg}`, o.now);
     await finishRun(tx, orgId, o.runId, "needs_person", { blocker: r.msg, data: { code: r.code, adapter } });
     await sysEvent(tx, orgId, repo, "onboarding.assess", { outcome: "failed", after: { run: o.runId, blocked: r.code, msg: r.msg }, occurredAt: o.now });
   } else {
-    doc.stage = "failed";
+    if (!keepPr) doc.stage = "failed";
     doc.blocker = r.msg;
     stamp(doc, SYSTEM, `The assessment failed: ${r.msg}`, o.now);
     await finishRun(tx, orgId, o.runId, "failed", { blocker: r.msg, data: { adapter } });
