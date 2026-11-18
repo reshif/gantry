@@ -5,8 +5,8 @@
  */
 import { useRef, useState } from "react";
 import { fmt } from "@gantry/domain";
-import { useMe, usePeople } from "../../api/queries";
-import { Btn, Chip, Field, Panel, Select, Who } from "../../ui/primitives";
+import { useMe } from "../../api/queries";
+import { Btn, Chip, Field, Panel, Who } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
@@ -14,6 +14,7 @@ import { navigate, formatHash, replaceHash } from "../../lib/router";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import ConsoleView from "../console";
 import { useThread } from "../console/api";
+import { InviteForm } from "./InviteForm";
 import { exportUrl, invite, patchThread, removeMember, type InboxItem } from "./api";
 import { takeAsk } from "./mention";
 
@@ -22,24 +23,6 @@ function RenameForm({ initial, registerSubmit, onSave }: { initial: string; regi
   const [err, setErr] = useState("");
   registerSubmit(() => { const t = v.trim(); if (!t) return setErr("Give the conversation a name."); void onSave(t).then((e) => setErr(e ?? "")); });
   return <div className="form-grid"><Field label="Name" htmlFor="ws-chat-name"><input id="ws-chat-name" className="input" value={v} maxLength={120} autoFocus onChange={(e) => setV(e.target.value)} /></Field><div className="form-err" role="alert">{err}</div></div>;
-}
-
-function InviteForm({ exclude, registerSubmit, onSave }: { exclude: string[]; registerSubmit: (fn: () => void) => void; onSave: (p: string) => Promise<string | null> }) {
-  const people = usePeople();
-  const opts = (people.data ?? []).filter((p) => !exclude.includes(p.id)).map((p) => ({ value: p.id, label: p.name }));
-  const [v, setV] = useState("");
-  const [err, setErr] = useState("");
-  registerSubmit(() => { const id = v.trim(); if (!id) return setErr("Choose a person."); void onSave(id).then((e) => setErr(e ?? "")); });
-  return (
-    <div className="form-grid">
-      {people.data ? (
-        <Field label="Person" htmlFor="ws-invite-who" hint="They can read and post here. Someone who cannot see the project cannot be invited."><Select id="ws-invite-who" value={v} onChange={setV} options={[{ value: "", label: "Choose…" }, ...opts]} /></Field>
-      ) : (
-        <Field label="Person id" htmlFor="ws-invite-who" hint="For example p-meera. They can read and post here."><input id="ws-invite-who" className="input" value={v} onChange={(e) => setV(e.target.value)} /></Field>
-      )}
-      <div className="form-err" role="alert">{err}</div>
-    </div>
-  );
 }
 
 export function ChatPane({ id, item, onThread, page }: { id: string | null; item: InboxItem | null; onThread: (id: string) => void; page?: boolean }) {

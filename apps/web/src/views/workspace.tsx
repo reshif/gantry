@@ -2,12 +2,12 @@
  * Agents at work (#workspace): one place for every conversation with agents (agent workspace, Phase 4). The inbox on the left lists the work
  * orders' threads, side threads with a chosen agent, repositories' onboarding threads and factory chats; the centre shows the one picked, with its
  * own context pane. `#workspace/<key>`: `wo:<id>`, `repo:<id>`, a chat id, `new` (a new factory chat) or `operator`.
- * The older Conversations (#conversations/<WO>) and Console (#console) links land here.
+ * The older Conversations (#conversations/<WO>) links land here; #workspace/new and #workspace/chats go to the Console page (#console/new, #console).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMe } from "../api/queries";
 import { anyRole, BUILD_READ } from "../lib/routes";
-import { navigate, useHash } from "../lib/router";
+import { formatHash, navigate, replaceHash, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Btn, Empty, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
@@ -32,7 +32,7 @@ export default function WorkspaceView() {
   // Older links: #conversations/<WO> and #console[/<chat>] open here.
   useEffect(() => {
     if (hash.id === "conversations") { openFirstOnce = !hash.param; toWorkspace(hash.param ? `wo:${hash.param}` : "inbox"); }
-    else if (hash.id === "console") toWorkspace(hash.param ?? "new");
+    else if (hash.id === "workspace" && (hash.param === "new" || hash.param === "chats")) replaceHash(formatHash("console", hash.param === "new" ? "new" : null));
   }, [hash.id, hash.param]);
   const pending = prefs.openConversation;
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function WorkspaceView() {
       title: "New chat", kicker: "Agents at work",
       body: <NewChatForm wos={all.data?.items ?? []} initialWo={key?.startsWith("wo:") ? key.slice(3) : null} registerSubmit={(fn) => (submit = fn)} onSave={async (c) => {
         // A factory chat with the Console starts with its first message (no empty chats are saved).
-        if (c.scope.kind === "factory") { d.close(); open("new"); return null; }
+        if (c.scope.kind === "factory") { d.close(); navigate("console", "new"); return null; }
         const r = await createThread({ scope: c.scope, agent: c.agent, visibility: c.visibility });
         if (!r.ok) return r.msg;
         d.close();
@@ -103,18 +103,8 @@ export default function WorkspaceView() {
           action={<div className="ws-home-actions"><Btn kind="primary" icon="plus" label="New chat" id="ws-home-new" onClick={newChat} />{operator ? <Btn label="Operator view" id="ws-home-op" onClick={() => open("operator")} /> : null}</div>} />
       </div>
     );
-  // A factory chat (the Console): the prototype's Console page, the conversation beside what the person can do. The chat list is one click away.
-  if (key === "new") {
-    return (
-      <div className="view view-console-page">
-        <ViewHead sheet="console" title="Console" sub="Ask the factory a question in plain language. Answers are read from live work-order state." actions={<>
-          <Btn icon="chat" label={needs ? `Conversations · ${needs}` : "Conversations"} id="ws-console-inbox" onClick={() => open("inbox")} />
-          <Btn kind="primary" icon="plus" label="New chat" id="ws-console-new" onClick={newChat} />
-        </>} />
-        <ChatPane id={null} item={null} page onThread={(id) => navigate("workspace", id)} />
-      </div>
-    );
-  }
+  // A new factory chat lives on the Console page now (#console/new); this key only redirects.
+  if (key === "new" || key === "chats") return <div className="view ws-view" />;
   return (
     <div className="view ws-view">
       <ViewHead sheet="conversations" title="Conversations" sub="The dialogue between people and the agents at each station." actions={<Btn kind="primary" icon="plus" label="New chat" id="ws-conv-new" onClick={newChat} />} />

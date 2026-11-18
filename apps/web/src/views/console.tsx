@@ -11,21 +11,24 @@ import { fmt } from "@gantry/domain";
 import { useCanMany } from "../api/can";
 import { useAudit, useHome, useMe, useProjects, useWorkOrders } from "../api/queries";
 import { setProject, usePrefs } from "../lib/prefs";
-import { hashFor, navigate } from "../lib/router";
+import { formatHash, navigate, replaceHash, useHash } from "../lib/router";
 import { Icon } from "../ui/Icon";
-import { Avatar, Btn, Chip, Empty, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
+import { Avatar, Btn, Empty, Field, Panel, Select, StateChip, ViewHead } from "../ui/primitives";
+import { useOpenTraveler } from "../shell/useTraveler";
 import { useActors } from "../ui/actors";
 import { useUI } from "../ui/overlay-context";
-import { useOpenTraveler } from "../shell/useTraveler";
 import { callTool, ck, clearThread, renameThread, savePinned, sendMessage, useConsoleStatus, useThread, useThreads, type StreamEvent } from "./console/api";
 import { ChatList } from "./console/ChatList";
+import { ConsoleChats, type ChatRow } from "./console/ConsoleChats";
+import { useInbox, wk } from "./workspace/api";
+import { useNewWorkOrder } from "./work-orders/New";
 import { ResultCard, unmark, type CardCtx } from "./console/Cards";
 import { EntityChip } from "./console/Chips";
 import { ProposalCard } from "./console/Confirm";
 import { Markdown } from "./console/Markdown";
 import { ModelPicker } from "./console/ModelPicker";
 import { plan as planSlash, SLASH } from "./console/slash";
-import { helpText, isInFlight, liveAnswer, type LiveCtx, type LiveWo } from "./console/live";
+import { helpText, liveAnswer, type LiveCtx, type LiveWo } from "./console/live";
 import { useCatalog } from "./projects/kit";
 import type { Card, Cited, Msg, Proposal, ThreadMessage } from "./console/types";
 
@@ -85,15 +88,25 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const threads = useThreads();
   const projects = useProjects().data ?? [];
   const openTraveler = useOpenTraveler();
+  const hash = useHash();
+  const newWo = useNewWorkOrder();
+  const inbox = useInbox(false);
+  // The Console page (not the workspace's embedded chat) keeps its chat in the URL: #console/<chatId>, #console/new for a new chat.
+  const page = !embed;
+  const hp = page && hash.id === "console" ? hash.param : null;
   const actorOf = useActors();
 
   const meId = me?.person.id ?? "";
-  const [threadId, setThreadIdState] = useState<string | null>(embed?.threadId ?? null);
+  const [threadId, setThreadIdState] = useState<string | null>(embed?.threadId ?? (hp && hp !== "new" ? hp : null));
   const setThreadId = useCallback((id: string | null) => {
     setThreadIdState(id);
     if (id && embed && id !== embed.threadId) embed.onThread(id);
+    if (id && !embed) replaceHash(formatHash("console", id));
   }, [embed]);
-  const [fresh, setFresh] = useState(false);
+  const [fresh, setFresh] = useState(hp === "new");
+  /** The project this chat is about (page): "" is All projects. A saved chat shows its own. */
+  const [scope, setScope] = useState("");
+  const [chatsOpen, setChatsOpen] = useState(false);
   const thread = useThread(threadId);
   const [local, setLocalState] = useState<Msg[]>(() => localCache.get(meId) ?? []);
   const [tail, setTail] = useState<Msg[]>([]);
@@ -101,7 +114,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   /** Questions asked again with Retry: their earlier saved copy and error are hidden so the question shows once. */
   const [redo, setRedo] = useState<Array<{ text: string; cut: number }>>([]);
   /** A panel the person asked for with /chats or /settings (the prototype page has neither). */
-  const [aux, setAux] = useState<"chats" | "settings" | null>(null);
+  const [aux, setAux] = useState<"settings" | null>(null);
   const [draft, setDraft] = useState("");
   const [slashIdx, setSlashIdx] = useState(0);
   const ac = useRef<AbortController | null>(null);
@@ -112,13 +125,14 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
 
   // Continue the latest saved conversation, unless the person cleared it. In the workspace the inbox decides.
   useEffect(() => {
-    if (embed || threadId || fresh || !threads.data) return;
+    if (embed || threadId || fresh || hp === "new" || !threads.data) return;
     const latest = threads.data.items[0];
     if (latest) setThreadId(latest.id);
-  }, [embed, threads.data, threadId, fresh, setThreadId]);
+  }, [embed, threads.data, threadId, fresh, hp, setThreadId]);
 
   const visible = projects.filter((p) => p.status !== "archived");
-  const cur = visible.find((p) => p.id === prefs.project) ?? visible[0] ?? null;
+  const scoped = page && scope ? visible.find((p) => p.id === scope) ?? null : null;
+  const cur = scoped ?? visible.find((p) => p.id === prefs.project) ?? visible[0] ?? null;
   const st = status.data;
   const actionsOn = !!st?.actionsEnabled;
   const proposalFor = (tool: string) => st?.proposals?.find((x) => x.tool === tool);
@@ -130,10 +144,6 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const stuck = wos.find((w) => w.state === "waiting" || w.state === "blocked" || w.bay)?.id ?? wos.find((w) => !["done", "killed"].includes(w.state))?.id ?? null;
   const doneWo = wos.filter((w) => w.state === "done").slice(-1)[0]?.id ?? null;
   const suggestions = [...new Set(suggestionsFor(roles, cur?.name ?? "my projects", cur?.id ?? null, stuck, doneWo))];
-  // The Console page (not the workspace's embedded chat): the prototype's four questions, answered at once from live state.
-  const page = !embed;
-  const statusWo = thread.data?.pinned?.[0] ?? wos.find((w) => w.state === "blocked")?.id ?? stuck ?? wos.find(isInFlight)?.id ?? null;
-  const liveChips = ["What is blocked?", "What waits on a person?", ...(statusWo ? [`Status of ${statusWo}`] : []), "Spend this month"];
   const liveCtx: LiveCtx = {
     wos: wos.map((w): LiveWo => ({ ...w, ...(typeof w.station === "number" && cat?.stations[w.station] ? { stationName: cat.stations[w.station]!.name } : {}) })),
     waiting: (home?.approvals ?? []).filter((a) => a.wo).map((a) => ({ wo: a.wo!, ...(a.gate ? { gate: a.gate } : {}) })),
@@ -176,10 +186,11 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   const prevMsg = msgs[msgs.length - 2];
   const retryable = !streaming && lastMsg?.role === "factory" && lastMsg.mode === "error" && prevMsg?.role === "user" && !prevMsg.text.startsWith("/") && !localIds(local).has(prevMsg.id) ? { text: prevMsg.text, errId: lastMsg.id } : null;
 
+  // The conversation opens at the newest message and follows new ones.
   useEffect(() => {
     const el = log.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [msgs.length, tail]);
+  }, [msgs.length, tail, threadId, thread.data?.id]);
 
   const focusComposer = (): void => { setTimeout(() => { const c = input.current; if (c) { c.focus(); c.setSelectionRange(c.value.length, c.value.length); } }, 30); };
   const toDraft = (t: string): void => { setDraft(t); setSlashIdx(0); focusComposer(); };
@@ -199,7 +210,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
   /* ---------- slash commands: tools, directly ---------- */
   const runSlash = async (text: string): Promise<void> => {
     // The chat list and the model and rights panel are not on the page (the prototype has neither): /chats and /settings open them.
-    if (page && /^\/(chats|settings)\s*$/i.test(text)) { setAux(/chats/i.test(text) ? "chats" : "settings"); return; }
+    if (page && /^\/(chats|settings)\s*$/i.test(text)) { if (/chats/i.test(text)) setChatsOpen(true); else setAux("settings"); return; }
     addLocal({ role: "user", text, mode: "pending", by: meId });
     const p = planSlash(text, visible, cur ? { id: cur.id, name: cur.name, key: cur.key } : null, Date.now());
     if (p.kind === "help") { addLocal({ role: "factory", mode: "slash", text: "Slash commands and plain sentences both work. Anything that changes state shows a confirm card first.", cards: [{ type: "help" }] }); return; }
@@ -240,7 +251,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
       else if (e.event === "unavailable" || e.event === "error") patchLive((m) => (page ? { ...m, text: helpText(liveCtx), mode: "live", streaming: false } : { ...m, text: e.data.msg, mode: e.event === "error" ? "error" : "none", streaming: false }));
       else if (e.event === "done") patchLive((m) => ({ ...m, text: e.data.text || m.text, mode: e.data.mode === "none" ? "none" : "model", streaming: false, cited: e.data.cited, stopped: !!e.data.stopped, serverId: e.data.messageId }));
     };
-    const r = await sendMessage({ text, ...(threadId ? { threadId } : {}), ...(cur ? { project: cur.id } : {}) }, onEvent, ctl.signal);
+    const r = await sendMessage({ text, ...(threadId ? { threadId } : {}), ...(page ? (scoped ? { project: scoped.id } : {}) : cur ? { project: cur.id } : {}) }, onEvent, ctl.signal);
     ac.current = null;
     try {
       if (!r.ok && !ctl.signal.aborted) {
@@ -278,7 +289,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     // On the Console page the four suggested questions (and, with no model configured, any question about a work order, what waits, what is blocked
     // or spend) are answered at once from live state. Other questions go to the model; with no model the page says what can be asked.
     if (page) {
-      const isChip = liveChips.some((c) => c.toLowerCase() === text.toLowerCase()) || /^status of wo-?\d+\??$/i.test(text);
+      const isChip = /^status of wo-?\d+\??$/i.test(text);
       const modelOff = !!st && !st.configured;
       const answer = isChip || modelOff ? liveAnswer(text, liveCtx) ?? (modelOff ? helpText(liveCtx) : null) : null;
       if (answer !== null) {
@@ -306,6 +317,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     setTail([]);
     setThreadId(null);
     setFresh(true);
+    if (page) replaceHash(formatHash("console", "new"));
     await qc.invalidateQueries({ queryKey: ck.threads() });
   };
 
@@ -318,18 +330,38 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     setRedo([]);
   };
   const pickChat = (id: string): void => {
+    setChatsOpen(false);
     if (id === threadId) return;
+    if (page) { navigate("console", id); focusComposer(); return; }
     leave();
     setFresh(false);
     setThreadId(id);
     focusComposer();
   };
   const newChat = (): void => {
+    setChatsOpen(false);
+    if (page) { navigate("console", "new"); focusComposer(); return; }
     leave();
     setThreadId(null);
     setFresh(true);
     focusComposer();
   };
+  // The page follows its URL: a chat link opens that chat, #console/new an empty one (a chat this view just created is already current).
+  useEffect(() => {
+    if (!page || hash.id !== "console") return;
+    if (hp === "new") {
+      if (threadId !== null || !fresh) { leave(); setThreadIdState(null); setFresh(true); setScope(""); }
+      return;
+    }
+    if (hp && hp !== threadId) { leave(); setFresh(false); setThreadIdState(hp); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hp]);
+  // A saved chat shows the project it is about.
+  const savedScope = thread.data?.projectId;
+  useEffect(() => {
+    if (page && threadId && thread.data?.id === threadId) setScope(savedScope ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, threadId, thread.data?.id, savedScope]);
   // In the workspace the inbox picks the chat: follow it (a chat this view just created is already current).
   const ext = embed ? embed.threadId : undefined;
   const extSeen = useRef(ext);
@@ -390,7 +422,7 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
     <>
           <Panel title={`What ${me.person.name.split(" ")[0]} can do${cur ? ` in ${cur.name}` : ""}`}>
             <div className="con-ctx">
-              <Field label="Current project" htmlFor="con-ctx-project"><Select id="con-ctx-project" aria-label="Current project" value={cur?.id ?? ""} onChange={setProject} options={visible.map((x) => ({ value: x.id, label: x.name }))} /></Field>
+              {page ? null : <Field label="Current project" htmlFor="con-ctx-project"><Select id="con-ctx-project" aria-label="Current project" value={cur?.id ?? ""} onChange={setProject} options={visible.map((x) => ({ value: x.id, label: x.name }))} /></Field>}
               {cur ? <div><StateChip state={cur.killed ? "killed" : cur.halted ? "blocked" : "running"} /></div> : null}
             </div>
             <ul className="caps">{CAPS.map(([action, text], i) => { const d = caps[i]!; return <li key={action} className={d.allowed ? "ok" : "no"} tabIndex={0} data-tip={d.reason}><Icon name={d.allowed ? "check" : "lock"} /><span>{text}</span><code className="cap-code mono" title="The permission that governs this action. Admins find it under Govern, Access.">{action}</code></li>; })}</ul>
@@ -409,23 +441,54 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
           </Panel>
     </>
   );
-  /* ---------- the Console page (prototype `console`): §1 Conversation, §2 Pinned work orders ---------- */
+  /* ---------- the Console page: a general chat with Gantry. Left: the chat list. Right: the chat (header, messages that scroll, composer pinned) ---------- */
   if (page) {
     const empty = msgs.length === 1 && msgs[0]!.id === "m0" && !streaming;
-    const woById = new Map(wos.map((w) => [w.id, w]));
     const modeOf = (m: Msg): string => (m.mode === "model" ? `${st?.model ?? "Model"}${m.stopped ? " · stopped" : ""}` : m.mode === "live" ? "Live work-order state" : m.mode === "slash" ? "Slash command · live data" : m.mode === "none" ? "No model configured" : "Model did not answer");
+    const inboxBy = new Map((inbox.data?.items ?? []).map((i) => [i.key, i]));
+    const projName = (id: string | null | undefined): string | undefined => (id ? projects.find((x) => x.id === id)?.name ?? id : undefined);
+    const rows: ChatRow[] = (threads.data?.items ?? []).map((t) => {
+      const it = inboxBy.get(t.id);
+      return { id: t.id, title: t.title, updatedAt: t.updatedAt, count: t.count, mine: true, scope: it ? (projName(it.project) ?? "All projects") : undefined, visibility: it?.visibility ?? null, canShare: !!it && !!it.project };
+    });
+    for (const it of inbox.data?.items ?? []) {
+      if (it.kind !== "chat" || it.mine || !it.shared || rows.some((r) => r.id === it.key)) continue;
+      rows.push({ id: it.key, title: it.title, updatedAt: it.updatedAt, mine: false, scope: projName(it.project) ?? "All projects", visibility: it.visibility, canShare: false });
+    }
+    rows.sort((x, y) => y.updatedAt - x.updatedAt);
+    const refreshChats = (): void => { void qc.invalidateQueries({ queryKey: ck.threads() }); void qc.invalidateQueries({ queryKey: wk.all() }); };
+    const readOnly = !!thread.data && !!thread.data.can && !thread.data.can.post;
     return (
       <div className="view view-console view-console-page">
-        <ViewHead kicker="ALL LINES" title="Console" sub="Ask the factory a question in plain language. Answers are read from live work-order state." actions={<><Btn label="Chats" small icon="list" id="con-open-chats" aria-pressed={aux === "chats"} onClick={() => setAux(aux === "chats" ? null : "chats")} /><Btn label="Settings" small icon="gear" id="con-open-settings" aria-pressed={aux === "settings"} onClick={() => setAux(aux === "settings" ? null : "settings")} /></>} />
-        <div className="cols w21">
-          <Panel title="Conversation">
-            <div className="conv" id="con-conv">
-              <div className="chat" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
-                {empty ? <Empty id="con-empty" title="Ask anything about the line" text="Try one of the suggestions below." /> : msgs.map((m) => (
+        <ViewHead kicker="ALL LINES" title="Console" sub="Ask Gantry anything about your factory. Answers come from live data, and nothing changes without your approval."
+          actions={<Btn label="New work order" small icon="plus" id="con-new-wo" onClick={() => newWo({})} />} />
+        <div className={`con2${chatsOpen ? " list-open" : ""}`} id="con2">
+          <ConsoleChats rows={rows} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} onChanged={refreshChats} />
+          <section className="con2-main" aria-label="Chat" id="con2-main">
+            <header className="con2-head" id="con-head">
+              <Btn label="Chats" small icon="list" id="con-open-chats" cls="con2-chats-btn" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)} />
+              <h2 className="con2-title" id="con-title">{chatTitle}</h2>
+              <span className="con2-spacer" />
+              <Select id="con-scope" aria-label="Project this chat is about" value={scope} onChange={setScope} options={[{ value: "", label: "All projects" }, ...visible.map((x) => ({ value: x.id, label: x.name }))]} />
+              {modeChip}
+              <Btn label="Settings" small icon="gear" id="con-open-settings" aria-expanded={aux === "settings"} aria-controls="con-settings" onClick={() => setAux(aux === "settings" ? null : "settings")} />
+            </header>
+            {pinned.length ? <div className="chips con2-pins" id="con-pins" aria-label="Work orders in this chat"><span className="kicker">Work orders</span>{pinned.map((id) => <EntityChip key={id} e={{ type: "wo", id }} />)}</div> : null}
+            {aux === "settings" ? (
+              <div className="con2-settings" id="con-settings" role="region" aria-label="Console settings">
+                <div className="con2-settings-h"><b>Console settings</b><Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} /></div>
+                <div className="row">{modeChip}{modePicker}</div>
+                <p className="con-mode-line small muted" id="con-mode-reason"><span>{modeLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p>
+                {ctxPanels}
+                <p className="footnote small muted">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
+              </div>
+            ) : null}
+            <div className="chat con2-log" id="con-thread" ref={log} role="log" aria-live="polite" aria-label="Console conversation" data-keep-scroll="con-thread">
+              {empty ? <Empty id="con-empty" title="Start a conversation" text="Ask about any project, work order, gate or spend. This chat reads all projects, or just one if you choose a scope above." /> : msgs.map((m) => (
                   <div className={`msg msg-${m.role}${m.role === "user" ? " me" : ""}`} key={m.id}>
-                    {m.role === "user" ? <Avatar id={m.by} /> : <span className="avatar bot" title="Factory" aria-hidden="true">OA</span>}
+                    {m.role === "user" ? <Avatar id={m.by} /> : <span className="avatar bot" title="Gantry" aria-hidden="true">OA</span>}
                     <div className="bub">
-                      <div className="who">{m.role === "user" ? (m.by && m.by !== meId ? actorOf(m.by).name : me.person.name) : "Factory"}</div>
+                      <div className="who">{m.role === "user" ? (m.by && m.by !== meId ? actorOf(m.by).name : me.person.name) : "Gantry"}</div>
                       {m.streaming ? <div id={`con-msg-text-${m.id}`}>{m.text ? <Markdown text={m.text} /> : "Thinking…"}</div> : m.text ? <div id={`con-msg-text-${m.id}`}>{m.role === "factory" && (m.mode === "model" || m.mode === "pending") ? <Markdown text={m.text} /> : m.text}</div> : null}
                       {m.role === "factory" && m.mode !== "pending" && m.mode !== "live" ? (
                         <div className="small muted msg-meta"><span className={`msg-mode is-${m.mode}`}>{modeOf(m)}</span>{m.note ? <span className="msg-note">{` · ${m.note}`}</span> : null}{retryable && retryable.errId === m.id ? <> <Btn label="Retry" small kind="ghost" icon="send" id="con-retry" onClick={retry} /></> : null}</div>
@@ -437,47 +500,20 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
                     </div>
                   </div>
                 ))}
-              </div>
-              <div className="chips" id="con-chips">{liveChips.map((sg, i) => <button type="button" key={sg} className="chipbtn" id={`con-foot-sug-${i}`} onClick={() => void send(sg)}>{sg}</button>)}</div>
-              <form className="row nowrap" id="con-form" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { ui.toast("Type a question first", "error"); return; } void send(draft); }}>
+            </div>
+            {readOnly ? <p className="con2-composer small muted" id="con-readonly-thread" role="note"><Icon name="lock" /> You can read this chat but not post in it.</p> : (
+              <form className="con2-composer" id="con-form" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { ui.toast("Type a question first", "error"); return; } void send(draft); }}>
                 {slash.length ? (
                   <ul className="slash-menu" id="con-slash" role="listbox" aria-label="Commands">
                     {slash.map((x, i) => <li key={x.cmd} role="option" id={`con-slash-${i}`} className={i === idx ? "is-active" : ""} aria-selected={i === idx} onMouseDown={(e) => { e.preventDefault(); toDraft(x.cmd); }}><span className="mono">{x.cmd.trim()}</span><span className="muted">{x.hint}</span></li>)}
                   </ul>
                 ) : null}
-                <input id="con-input" ref={input} className="input" type="text" autoFocus placeholder={'Ask the factory: "what is blocked?", "status of WO-2417"…'} aria-label="Console message" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
+                <input id="con-input" ref={input} className="input" type="text" autoFocus placeholder="Message Gantry" aria-label="Message Gantry" aria-autocomplete="list" aria-controls="con-slash" value={draft} onChange={(e) => { setDraft(e.target.value); setSlashIdx(0); }} onKeyDown={onKey} />
                 {streaming ? <Btn label="Stop" kind="danger" icon="x" id="con-stop" onClick={() => ac.current?.abort()} /> : null}
                 <Btn label="Send" kind="primary" type="submit" id="con-send" disabledReason={streaming ? "Wait for the answer or stop it." : null} />
               </form>
-            </div>
-          </Panel>
-          <>
-            <Panel title="Pinned work orders" flush id="con-pins">
-              {pinned.length ? (
-                <ul className="list">{pinned.map((id) => { const w = woById.get(id); return (
-                  <li key={id}>
-                    <a className="pri mono" id={`con-pin-${id}`} href={hashFor("record", id, cur?.id ?? null)}>{id}</a>
-                    {w ? <span className="grow wrap2" title={w.title}>{w.title}</span> : <span className="grow" />}
-                    {w ? <Chip text={w.state} cls={PIN_TONE[w.state] ?? "plain"} /> : null}
-                  </li>
-                ); })}</ul>
-              ) : <div className="empty" title="Pin a work order from a why card.">Nothing pinned.</div>}
-            </Panel>
-            {aux === "chats" ? (
-              <Panel title="Chats" flush id="con-chats-panel" tools={<Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} />}>
-                <ChatList items={threads.data?.items ?? []} current={threadId} busy={streaming} onPick={pickChat} onNew={newChat} onRename={renameChat} onDelete={deleteChat} />
-                <div className="row" style={{ padding: 8 }}><Btn label="Clear conversation" small kind="ghost" icon="x" id="con-clear" disabledReason={threadId || local.length ? null : "There is nothing to clear."} onClick={() => void clear()} /></div>
-              </Panel>
-            ) : null}
-            {aux === "settings" ? (
-              <Panel title="Console settings" id="con-settings" tools={<Btn label="Close" small kind="ghost" id="con-aux-close" onClick={() => setAux(null)} />}>
-                <div className="row">{modeChip}{modePicker}</div>
-                <p className="con-mode-line small muted" id="con-mode-reason"><span>{modeLine}</span>{noModels && st?.canManageModels ? <> <a href="#models" id="con-connect-vendor" onClick={(e) => { e.preventDefault(); navigate("models"); }}>Connect a model vendor</a></> : null}</p>
-                {ctxPanels}
-                <p className="footnote small muted">{`Questions go to ${st?.configured ? st.model : "the configured model"} through the Gantry edge, with tools that read only what you may see. Conversations are kept for ${st?.retentionDays ?? 90} days. Proposed actions run only after you confirm them here, under your own permissions, and are audited with via console.`}</p>
-              </Panel>
-            ) : null}
-          </>
+            )}
+          </section>
         </div>
       </div>
     );
@@ -560,7 +596,6 @@ export default function ConsoleView({ embed }: { embed?: ConsoleEmbed } = {}) {
 }
 
 /** Recent work orders of a project, for the suggested questions only (a stuck one, a finished one). */
-const PIN_TONE: Record<string, string> = { running: "info", waiting: "warn", blocked: "bad", failed: "bad", killed: "bad", done: "ok" };
 
 function useWorkOrdersLite(projectId: string | null, q: { limit: number }): Array<LiveWo & { bay: string | null }> {
   const r = useWorkOrders(projectId, q);

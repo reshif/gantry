@@ -392,8 +392,10 @@ describe("Console (legacy console.js on the real API)", () => {
       });
       mount("/chats");
       await waitFor(() => expect(text()).toContain("earlier answer"));
-      expect(document.getElementById("con-pin-WO-1042")).toBeTruthy();
-      fireEvent.click(await byId("con-clear"));
+      await firstOf('#con-pins [data-entity="wo:WO-1042"]');
+      fireEvent.click(await byId("con-chat-more-ct-9"));
+      fireEvent.click(await waitFor(() => { const m = [...document.querySelectorAll("[role=menuitem]")].find((e) => /Delete/.test(e.textContent ?? "")); if (!m) throw new Error("no menu"); return m as HTMLElement; }));
+      fireEvent.click(await waitFor(() => { const b = [...document.querySelectorAll("button")].find((e) => e.textContent === "Delete chat"); if (!b) throw new Error("no confirm"); return b; }));
       await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/console/threads/ct-9")).toBe(true));
       await waitFor(() => expect(text()).not.toContain("earlier answer"));
     });
@@ -494,47 +496,67 @@ describe("Console model picker", () => {
     expect(document.getElementById("con-connect-vendor")).toBeNull();
   });
 
-  it("the page itself carries no model chip, toolbar, chat list or disclosure; /settings and /chats open them on request", async () => {
+  it("the Console is a general chat: a plain line says what it is, the chat list and the chat are side by side, nothing is pinned to a side panel", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
     mount();
     await byId("con-form");
-    expect(document.querySelector(".vhead .ask-badge")).toBeNull();
-    for (const id of ["con-bar", "con-new", "con-clear", "con-chats-panel", "con-more", "con-settings"]) expect(document.getElementById(id)).toBeNull();
-    expect(document.querySelectorAll(".panel-title").length).toBe(2);
-    await ask("/settings");
-    await byId("con-settings");
-    expect(document.querySelector("#con-settings .ask-badge")).toBeTruthy();
-    await waitFor(() => expect([...document.querySelectorAll("#con-settings .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
-    expect(document.getElementById("con-open-audit")).toBeTruthy();
-    await ask("/chats");
-    await byId("con-chats-panel");
+    expect(document.querySelector(".vhead")!.textContent).toContain("Ask Gantry anything about your factory. Answers come from live data, and nothing changes without your approval.");
+    expect(document.getElementById("con-chats")).toBeTruthy();
     expect(document.getElementById("con-new-chat")).toBeTruthy();
+    expect(document.getElementById("con-new-wo")).toBeTruthy();
+    expect(document.getElementById("con-scope")).toBeTruthy();
+    for (const id of ["con-bar", "con-more", "con-settings"]) expect(document.getElementById(id)).toBeNull();
+    expect([...document.querySelectorAll(".panel-title")].map((h) => h.textContent)).not.toContain("Pinned work orders");
+    expect(document.body.textContent).not.toContain("Pinned work orders");
   });
 
-  it("the header's Chats and Settings buttons open the chat list and the settings panel by clicking, no slash command", async () => {
+  it("Settings open in place under the chat header (not below the fold), with the model, the console's rights and the audit link; Close hides them", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: STATUS }) });
     mount();
-    fireEvent.click(await byId("con-open-chats"));
-    await byId("con-chats-panel");
-    expect(document.getElementById("con-new-chat")).toBeTruthy();
     fireEvent.click(await byId("con-open-settings"));
-    await byId("con-settings");
-    expect(document.getElementById("con-chats-panel")).toBeNull();
+    const panel = await byId("con-settings");
+    expect(document.getElementById("con2-main")!.contains(panel)).toBe(true);
+    expect(document.getElementById("con-open-settings")!.getAttribute("aria-expanded")).toBe("true");
     await waitFor(() => expect([...document.querySelectorAll("#con-settings .caps .cap-code")].map((c) => c.textContent)).toContain("gate.approve"));
     expect(document.getElementById("con-open-audit")).toBeTruthy();
+    fireEvent.click(document.getElementById("con-aux-close")!);
+    expect(document.getElementById("con-settings")).toBeNull();
   });
 
-  it("pins come from the chat, link to the record, and the status question names the pinned work order; an empty Send says so", async () => {
+  it("the page carries no hard-coded suggestion chips: the console API supplies none", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
+    mount();
+    await byId("con-form");
+    expect(document.getElementById("con-chips")).toBeNull();
+    expect(document.querySelector(".chipbtn, .sugg")).toBeNull();
+    for (const t of ["What is blocked?", "What waits on a person?", "Spend this month"]) expect(text()).not.toContain(t);
+  });
+
+  it("the work orders a chat mentions show as chips in that chat, linking to the record; there is no side panel", async () => {
     setup({
       "GET /api/v1/console/threads": () => ({ body: { items: [{ id: "ct-p", title: "t", pinned: ["WO-1042"], updatedAt: 1, expiresAt: 2, retentionDays: 90 }], retentionDays: 90 } }),
       "GET /api/v1/console/threads/ct-p": () => ({ body: { id: "ct-p", title: "t", pinned: ["WO-1042"], createdAt: 0, updatedAt: 0, expiresAt: 0, retentionDays: 90, messages: [] } }),
     });
     mount();
-    const pin = await byId("con-pin-WO-1042");
-    expect(pin.getAttribute("href")).toContain("record/WO-1042");
-    await waitFor(() => expect(text()).toContain("Status of WO-1042"));
+    const pin = await firstOf('#con-pins [data-entity="wo:WO-1042"]');
+    expect(document.getElementById("con-pins")!.contains(pin)).toBe(true);
+    expect(document.getElementById("con-thread")!.contains(pin)).toBe(false);
     fireEvent.submit(document.getElementById("con-form")!);
     await waitFor(() => expect(text()).toContain("Type a question first"));
+  });
+
+  it("the composer is pinned under the messages, which scroll on their own and open at the newest", async () => {
+    setup({ "GET /api/v1/console/status": () => ({ body: STATUS }) });
+    mount();
+    const log = await byId("con-thread");
+    const form = document.getElementById("con-form")!;
+    expect(log.parentElement).toBe(form.parentElement);
+    expect(log.nextElementSibling).toBe(form);
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 900 });
+    await ask("hello");
+    await waitFor(() => expect(log.scrollTop).toBe(900));
+    const css = readFileSync(resolve(__dirname, "../styles/views/console.css"), "utf8");
+    expect(/\.con2-log \{[^}]*overflow-y: auto/.test(css)).toBe(true);
   });
 
   it("the status line sits below the header rule: no negative margin pulls it into the heading", () => {
@@ -665,22 +687,100 @@ describe("Console chats", () => {
   });
 });
 
-describe("Console page layout (prototype)", () => {
-  it("has the four suggested questions, a one-line Console message input, and Conversation and Pinned work orders panels in 2fr / 1fr", async () => {
+describe("Console page layout", () => {
+  it("has a one-line message input in a left chat list and chat layout, and the agent answers as Gantry on the left, the person on the right", async () => {
     setup({ "GET /api/v1/console/status": () => ({ body: NO_MODEL }) });
     mount();
     const input = (await byId("con-input")) as HTMLInputElement;
     expect(input.tagName).toBe("INPUT");
-    expect(input.getAttribute("aria-label")).toBe("Console message");
-    const chips = [...document.querySelectorAll("#con-chips .chipbtn")].map((c) => c.textContent);
-    expect(chips).toContain("What is blocked?");
-    expect(chips).toContain("What waits on a person?");
-    expect(chips).toContain("Spend this month");
-    expect(document.querySelector(".cols.w21")).toBeTruthy();
-    expect([...document.querySelectorAll(".panel-title")].map((h) => h.textContent)).toEqual(expect.arrayContaining(["Conversation", "Pinned work orders"]));
-    expect(document.getElementById("con-pins")?.textContent).toContain("Nothing pinned.");
-    fireEvent.click(document.querySelector("#con-chips .chipbtn") as HTMLElement);
+    expect(input.getAttribute("aria-label")).toBe("Message Gantry");
+    expect(document.querySelector(".con2 > .con2-list")).toBeTruthy();
+    expect(document.querySelector(".con2 > .con2-main")).toBeTruthy();
+    await ask("status of WO-1042");
     await waitFor(() => expect(document.querySelector(".msg.me .bub .who")).toBeTruthy());
-    expect(document.querySelector(".msg:not(.me) .who")?.textContent).toBe("Factory");
+    expect(document.querySelector(".msg:not(.me) .who")?.textContent).toBe("Gantry");
+  });
+});
+
+describe("Console chats in the URL and the chat list", () => {
+  const th = (id: string, title: string) => ({ id, title, pinned: [], createdAt: 1, updatedAt: Date.now() - 1000, expiresAt: Date.now() + 1e9, retentionDays: 90, messages: [{ id: `${id}-m`, threadId: id, role: "user", text: `hello from ${title}`, at: 1, data: {} }] });
+  const A = th("ct-a", "Payments gates"), B = th("ct-b", "Release notes");
+  const chats = (extra: Record<string, Handler> = {}) => setup({
+    "GET /api/v1/console/threads": () => ({ body: { items: [A, B].map(({ messages: _m, ...t }) => t), retentionDays: 90 } }),
+    "GET /api/v1/console/threads/ct-a": () => ({ body: A }),
+    "GET /api/v1/console/threads/ct-b": () => ({ body: B }),
+    ...extra,
+  });
+
+  it("opens the chat in the URL, picking a chat puts it in the URL, and New chat goes to #console/new with an empty chat", async () => {
+    chats();
+    window.location.hash = "#console/ct-b";
+    mount();
+    await waitFor(() => expect(text()).toContain("hello from Release notes"));
+    expect(document.getElementById("con-chat-ct-b")!.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(await byId("con-chat-ct-a"));
+    await waitFor(() => expect(text()).toContain("hello from Payments gates"));
+    expect(window.location.hash).toBe("#console/ct-a");
+    fireEvent.click(await byId("con-new-chat"));
+    await waitFor(() => expect(text()).not.toContain("hello from Payments gates"));
+    expect(window.location.hash).toBe("#console/new");
+    expect(document.getElementById("con-title")!.textContent).toBe("New conversation");
+    expect(document.querySelector(".con2-chat[aria-current]")).toBeNull();
+  });
+
+  it("a first message in a new chat starts it with All projects as its scope and moves the URL to the new chat", async () => {
+    const calls = chats({
+      "POST /api/v1/console/messages": () => ({ sse: sse(["thread", { threadId: "ct-a", messageId: "cm-1", created: true }], ["text", { delta: "ok" }], ["done", { messageId: "cm-2", text: "ok", mode: "model", model: "claude-test-1", cited: [], proposals: [] }]) }),
+    });
+    window.location.hash = "#console/new";
+    mount();
+    expect((await byId("con-scope") as HTMLSelectElement).value).toBe("");
+    await ask("what is going on?");
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/console/messages")).toBe(true));
+    expect(calls.find((c) => c.path === "/api/v1/console/messages")!.body.project).toBeUndefined();
+    await waitFor(() => expect(window.location.hash).toBe("#console/ct-a"));
+  });
+
+  it("choosing a project scope for the chat sends it with the message", async () => {
+    const calls = chats({ "POST /api/v1/console/messages": () => ({ sse: sse(["done", { messageId: "cm-2", text: "ok", mode: "model", cited: [], proposals: [] }]) }) });
+    window.location.hash = "#console/new";
+    mount();
+    type(await byId("con-scope"), "payments");
+    await ask("anything?");
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/v1/console/messages")?.body.project).toBe("payments"));
+  });
+
+  it("lists Recent and Shared with me groups, with the scope and last activity on each row", async () => {
+    chats({
+      "GET /api/v1/workspace/inbox": () => ({ body: { items: [
+        { key: "ct-a", kind: "chat", scope: { kind: "project", id: "payments", label: "Payments Platform" }, project: "payments", title: "Payments gates", mine: true, shared: false, visibility: "private", updatedAt: Date.now() },
+        { key: "ct-z", kind: "chat", scope: { kind: "factory", id: null, label: "Factory" }, project: null, title: "Shared by Meera", mine: false, shared: true, visibility: "project", updatedAt: Date.now() },
+      ] } }),
+    });
+    mount();
+    await waitFor(() => expect(document.getElementById("con-chat-ct-z")).toBeTruthy());
+    const heads = [...document.querySelectorAll(".con2-group")].map((h) => h.textContent);
+    expect(heads).toEqual(["Recent", "Shared with me"]);
+    expect(document.getElementById("con-chat-ct-a")!.textContent).toContain("Payments Platform");
+    expect(document.getElementById("con-chat-ct-z")!.textContent).toContain("All projects");
+  });
+
+  it("the old workspace routes go to the Console", async () => {
+    const { default: WorkspaceView } = await import("./workspace");
+    chats({ "GET /api/v1/workspace/inbox": () => ({ body: { items: [] } }) });
+    window.location.hash = "#workspace/new";
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    bindQueryClient(qc);
+    render(<QueryClientProvider client={qc}><OverlayProvider><WorkspaceView /></OverlayProvider></QueryClientProvider>);
+    await waitFor(() => expect(window.location.hash).toBe("#console/new"));
+    window.location.hash = "#workspace/chats";
+    await waitFor(() => expect(window.location.hash).toBe("#console"));
+  });
+
+  it("New work order is one click from the Console header", async () => {
+    chats();
+    mount();
+    const b = await byId("con-new-wo");
+    expect(document.querySelector(".vhead")!.contains(b)).toBe(true);
   });
 });
