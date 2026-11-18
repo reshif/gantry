@@ -164,8 +164,8 @@ export function BudgetProto({ p }: PcProps) {
   const ratio = b.monthly ? b.mtd / b.monthly : 0;
   const save = async () => {
     const e: Record<string, string> = {};
-    if (!monthly.trim()) e.monthly = "Monthly budget ($) is required."; else if (Number(monthly) < 100) e.monthly = "Must be at least 100.";
-    if (!alert.trim()) e.alert = "Alert at (% used) is required."; else if (Number(alert) > 100) e.alert = "Cannot exceed 100."; else if (Number(alert) < 10) e.alert = "Must be at least 10.";
+    if (!monthly.trim()) e.monthly = "Monthly budget ($) is required."; else if (!Number.isFinite(Number(monthly)) || Number(monthly) < 0) e.monthly = "Must be 0 or more."; else if (Number(monthly) > 10_000_000) e.monthly = "Cannot exceed 10,000,000.";
+    if (!alert.trim()) e.alert = "Alert at (% used) is required."; else if (Number(alert) > 100) e.alert = "Cannot exceed 100."; else if (Number(alert) < 5) e.alert = "Must be at least 5.";
     setErrs(e);
     if (Object.keys(e).length) { setTimeout(() => document.querySelector<HTMLElement>("#pcf-budget [aria-invalid=true]")?.focus(), 30); return; }
     let ver = b && p.version;
@@ -188,8 +188,8 @@ export function BudgetProto({ p }: PcProps) {
           <form id="pcf-budget" noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
             <div>
               <LockNote decision={d} what="Budget" />
-              <Field label={<>Monthly budget ($) <span className="muted">(required)</span></>} error={errs.monthly}><Input id="pcf-bud-monthly" type="number" min={100} value={monthly} disabled={!d.allowed} onChange={(e) => setMonthly(e.target.value)} /></Field>
-              <Field label={<>Alert at (% used) <span className="muted">(required)</span></>} error={errs.alert}><Input id="pcf-bud-alert" type="number" min={10} value={alert} disabled={!d.allowed} onChange={(e) => setAlert(e.target.value)} /></Field>
+              <Field label={<>Monthly budget ($) <span className="muted">(required)</span></>} error={errs.monthly}><Input id="pcf-bud-monthly" type="number" min={0} max={10000000} step="any" value={monthly} disabled={!d.allowed} onChange={(e) => setMonthly(e.target.value)} /></Field>
+              <Field label={<>Alert at (% used) <span className="muted">(required)</span></>} error={errs.alert}><Input id="pcf-bud-alert" type="number" min={5} step="any" value={alert} disabled={!d.allowed} onChange={(e) => setAlert(e.target.value)} /></Field>
               <div><ActBtn kind="primary" type="submit" id="pcf-bud-save" label="Save budget" guard={d} /></div>
             </div>
           </form>

@@ -7,7 +7,7 @@ import { useRef, useState, type FormEvent } from "react";
 import type { SecuritySettings } from "@gantry/domain";
 import { useUI } from "../../ui/overlay-context";
 import { setSecurity } from "./commands";
-import { Btn, Field, Panel, Select, Toggle, focusFirstInvalid, type Decision } from "../../ui/primitives";
+import { Btn, Field, Panel, Select, Toggle, focusFirstInvalid, reasonText, type Decision } from "../../ui/primitives";
 import { nextVersion, useOutcome, versionOf } from "../govern/data";
 import { inCidr, parseCidr } from "./cidr";
 import { useSet } from "./More";
@@ -58,7 +58,7 @@ export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: Secur
     }
     // the prototype validates first, then says why a read-only role cannot save
     if (!perm.allowed) {
-      ui.toast("Your role is read-only for this action.", "error");
+      ui.toast(reasonText(perm) || "You do not have permission to change this.", "error");
       return;
     }
     setBusy(true);
@@ -108,7 +108,7 @@ export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: Secur
           </div>
           <Field label="IP allow list" htmlFor="sec-ip" hint="One CIDR per line. Empty means anywhere." error={err.ip}><textarea id="sec-ip" className="input mono" rows={3} value={cur.ip} disabled={!perm.allowed} onChange={(e) => upd({ ip: e.target.value })} /></Field>
           <div className="row">
-            <Btn label="Save settings" kind="primary" type="submit" id="sec-save" aria-disabled={!perm.allowed ? "true" : undefined} title={!perm.allowed ? "Your role is read-only for this action." : undefined} disabledReason={busy ? "Saving…" : undefined} />
+            <Btn label="Save settings" kind="primary" type="submit" id="sec-save" aria-disabled={!perm.allowed ? "true" : undefined} title={!perm.allowed ? reasonText(perm) : undefined} disabledReason={busy ? "Saving…" : undefined} />
             {dirty ? <Btn label="Discard" kind="ghost" id="sec-discard" onClick={() => { setD(null); setErr({}); }} /> : null}
           </div>
         </form>

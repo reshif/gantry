@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CanBatcher, previewDecision } from "./can";
+import { CanBatcher, STEP_UP_HINT, previewDecision } from "./can";
 import type { CanCheck, CanResult } from "./types";
 
 const allow: CanResult = { allowed: true, reason: "ok", needs: "" };
@@ -106,5 +106,21 @@ describe("view as preview", () => {
     expect(previewDecision("gate.approve", ok, "approver").allowed).toBe(true);
     expect(previewDecision("kill.factory", { allowed: false, reason: "no", needs: "" }, "").allowed).toBe(false);
     expect(previewDecision("wo.submit", ok, "").allowed).toBe(true);
+  });
+});
+
+describe("step-up decisions", () => {
+  it("a decision whose only blocker is step_up is allowed (with the sign-in hint), so the control is not locked", async () => {
+    const { b } = setup(() => ({ allowed: false, reason: "Fresh sign-in required", needs: "step_up" }));
+    b.peek({ action: "halt.project", project: "p1" });
+    await tick();
+    expect(b.peek({ action: "halt.project", project: "p1" })).toEqual({ allowed: true, reason: STEP_UP_HINT, needs: "step_up" });
+  });
+
+  it("any other denial keeps the server's own reason", async () => {
+    const { b } = setup(() => ({ allowed: false, reason: "No role holds halt.project.", needs: "Project Admin" }));
+    b.peek({ action: "halt.project" });
+    await tick();
+    expect(b.peek({ action: "halt.project" })).toEqual({ allowed: false, reason: "No role holds halt.project.", needs: "Project Admin" });
   });
 });

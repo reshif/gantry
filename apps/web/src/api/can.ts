@@ -16,6 +16,17 @@ export interface CanContext {
   time?: number | undefined;
 }
 
+/** Shown on a control whose only blocker is the step-up rail: it stays usable and the command asks for a fresh sign-in. */
+export const STEP_UP_HINT = "You'll be asked to sign in again to confirm.";
+
+/**
+ * A decision whose only blocker is `needs: "step_up"` is not a denial: the person may do it after a fresh sign-in, and api/client routes the
+ * refused command to ui/stepup, which prompts and retries. So the control stays enabled (the server still decides every command).
+ */
+export function softenStepUp(r: CanResult): CanResult {
+  return !r.allowed && r.needs === "step_up" ? { allowed: true, reason: STEP_UP_HINT, needs: "step_up" } : r;
+}
+
 /** Before the server answers a control stays usable-looking but unresolved. */
 export const PENDING: CanResult = { allowed: true, reason: "", needs: "" };
 
@@ -127,7 +138,7 @@ export class CanBatcher {
     if (results && results.length === entries.length) {
       entries.forEach(([k], i) => {
         const r = results[i];
-        if (r) this.cache.set(k, r);
+        if (r) this.cache.set(k, softenStepUp(r));
       });
     } else {
       // The server did not answer: show locked rather than guess "allowed" for a control.

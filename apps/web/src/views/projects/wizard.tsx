@@ -139,7 +139,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
       if (e) return upd({ err: e, step: i });
     }
     setBusy(true);
-    const r = await ops.createProject({ name: wz.name.trim(), key: wz.key || null, templateId: wz.tpl, owner: wz.owner, teams: wz.teams, desc: wz.desc.trim() || null, budget: wz.budget || 1000, approvers: approvers(), notifications: routes() });
+    const r = await ops.createProject({ name: wz.name.trim(), key: wz.key || null, templateId: wz.tpl, owner: wz.owner, teams: wz.teams, desc: wz.desc.trim() || null, budget: wz.budget, approvers: approvers(), notifications: routes() });
     if (!r.ok) {
       setBusy(false);
       return upd({ err: r.msg });
@@ -193,7 +193,7 @@ export function NewProjectWizard({ tplId, projects, close }: { tplId?: string | 
         <Field label="Description" htmlFor="prj-wz-desc"><input id="prj-wz-desc" className="input" value={wz.desc} placeholder="What this project builds" onChange={(e) => upd({ desc: e.target.value })} /></Field>
         <div className="form-row">
           <Field label="Owner" htmlFor="prj-wz-owner" hint="Becomes Project Admin unless they hold a factory role."><Select id="prj-wz-owner" options={active.map((x) => ({ value: x.id, label: `${x.name} · ${x.title}` }))} value={wz.owner} onChange={(v) => upd({ owner: v })} /></Field>
-          <Field label="Monthly budget (USD)" htmlFor="prj-wz-budget"><input id="prj-wz-budget" type="number" min={100} className="input mono" value={String(wz.budget)} onChange={(e) => upd({ budget: parseInt(e.target.value, 10) || 0 })} /></Field>
+          <Field label="Monthly budget (USD)" htmlFor="prj-wz-budget"><input id="prj-wz-budget" type="number" min={0} max={10000000} step="any" className="input mono" value={String(wz.budget)} onChange={(e) => upd({ budget: Math.min(10_000_000, Math.max(0, parseFloat(e.target.value) || 0)) })} /></Field>
         </div>
         <Field label="Owning teams" htmlFor="prj-wz-team-add" hint="A project can have more than one owning team.">
           <Select id="prj-wz-team-add" options={[{ value: "", label: "Add an owning team" }, ...teams.filter((t) => !wz.teams.includes(t.id)).map((t) => ({ value: t.id, label: t.name }))]} value="" onChange={(v) => { if (v) { upd({ teams: [...wz.teams, v] }); focus("prj-wz-team-add"); } }} />

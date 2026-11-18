@@ -1,6 +1,6 @@
 /** Small Blueprint building blocks shared by Onboarding and Project config: key/value list, switch row, URL-held tab. */
 import { Children, Fragment, type ReactNode } from "react";
-import { Btn, Toggle, type BtnProps, type Decision } from "../../ui/primitives";
+import { Btn, Toggle, reasonText, type BtnProps, type Decision } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { useQueryParam } from "./urlState";
 
@@ -41,11 +41,13 @@ export const LOCK = "Your role is read-only for this action.";
 export function ActBtn({ guard, onClickCapture, ...rest }: BtnProps) {
   const ui = useUI();
   const locked = !!guard && !guard.allowed;
+  // the server's own reason, never a generic "read-only" (a step-up is not a lock at all: see api/can softenStepUp)
+  const why = guard ? reasonText(guard) || LOCK : LOCK;
   return (
     <Btn
       {...rest}
       guard={guard}
-      {...(locked ? { title: LOCK, onClickCapture: () => ui.toast(LOCK, "error") } : { onClickCapture })}
+      {...(locked ? { title: why, onClickCapture: () => ui.toast(why, "error") } : { onClickCapture })}
     />
   );
 }

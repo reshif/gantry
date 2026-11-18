@@ -17,7 +17,7 @@ import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
-import { ReadOnlyBanner, StopBanner } from "./StopBanner";
+import { ReadOnlyBanner, StopBanner, ViewAsBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
 
@@ -142,6 +142,7 @@ export function Shell({ me }: { me: Me }) {
         <TopBar me={me} project={scoped ? project : null} current={routeId} onOpenNav={toggleNav} onOpenPalette={openPalette} />
       </AppErrorBoundary>
       <StopBanner projectId={scoped ? projectId : null} />
+      <ViewAsBanner />
       <ReadOnlyBanner />
       <main className="content" id="main" tabIndex={-1} ref={main}>
         <AppErrorBoundary level="route" resetKey={`${routeId}/${loc.param ?? ""}`}>
