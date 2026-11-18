@@ -128,3 +128,6 @@
 .wo-views .seg { display: inline-flex; flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
 .wo-views .seg .seg-label { white-space: nowrap; flex: none; }
 @media (max-width: 720px) { .wo-view td[data-l="Open"] { display: none !important; } .wo-view .ph .acts { width: 100%; } .wo-view .ph .acts .btn { flex: 1 1 auto; justify-content: center; } .wo-opts > summary { width: 100%; justify-content: center; } }
+
+/* Work orders (prototype): the search icon is centred on the field, whatever the field's height */
+.wo-view .fb .searchbox.search > .ic { top: 50%; transform: translateY(-50%); }

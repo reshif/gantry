@@ -9,6 +9,7 @@ import type { WoSession, WoSessionRow } from "./conversations/session-api";
 
 beforeEach(() => {
   resetApp();
+  window.history.replaceState(null, "", "/");
   updatePrefs({ project: "payments" });
 });
 afterEach(() => {
@@ -48,11 +49,13 @@ function showList(rows: WoSessionRow[]) {
   mount(<ConversationsView />);
   return calls;
 }
-async function showSession(s: WoSession, extra: Parameters<typeof mockApi>[0] = {}) {
+async function showSession(s: WoSession, extra: Parameters<typeof mockApi>[0] = {}, open = true) {
   window.location.hash = `#/p/payments/conversations/${W.id}`;
   const calls = mockApi({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ body: s }), [`POST /api/v1/work-orders/${W.id}/session/seen`]: () => ({ body: { ok: true, msg: "Seen." } }), ...extra });
   mount(<ConversationsView />);
   await screen.findByRole("region", { name: `Conversation ${W.id}` }, { timeout: 4000 });
+  // the brief, gate and proposals panel is folded under the Details button; most tests read it
+  if (open) fireEvent.click(document.getElementById("wos-details")!);
   return calls;
 }
 
@@ -66,11 +69,23 @@ describe("Conversations list", () => {
 
   it("lists work-order sessions with who waits on whom and the latest message; a row opens that work order's session beside the list", async () => {
     showList([row(), row({ id: "WO-9", title: "Other", waitingOn: "agent", unread: false, latest: null, started: false })]);
-    expect(await screen.findByText("Waiting on you")).toBeTruthy();
-    expect(screen.getByRole("img", { name: "Unread" })).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "Unread" })).toBeTruthy();
+    // the prototype row has two lines: no third "Waiting on you" line, no Waiting / Open / Closed tabs, no New work order button
+    expect(screen.queryByText("Waiting on you")).toBeNull();
+    expect(screen.queryByRole("tab", { name: /Waiting on me/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New work order" })).toBeNull();
     expect(document.querySelector(".conv .conv-list")).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: new RegExp(W.id) }));
-    await waitFor(() => expect(window.location.hash).toBe(`#/p/payments/conversations/${W.id}`));
+    // the row names the conversation in ?c= (the prototype's URL), as the prototype's rows do
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("c")).toBe(W.id));
+  });
+
+  it("the thread has no status bar while the agent just works, and keeps brief, gate and proposals behind a Details button in the header", async () => {
+    await showSession(session({ next: { actor: "agent", text: "Spec Writer is working." } }), {}, false);
+    expect(document.getElementById("wos-status")).toBeNull();
+    expect(document.getElementById("wos-more")).toBeNull();
+    fireEvent.click(document.getElementById("wos-details")!);
+    expect(document.getElementById("wos-more")).toBeTruthy();
   });
 
   it("an older deep link (the openConversation preference) lands on the session", async () => {
@@ -80,18 +95,36 @@ describe("Conversations list", () => {
   });
 });
 
+describe("Conversations URL state (prototype ?c= and ?q=)", () => {
+  it("opens the conversation named by ?c= and keeps the search in ?q=", async () => {
+    window.history.replaceState(null, "", `/?c=${W.id}`);
+    const calls = mockApi({ ...readsFor(W), "GET /api/v1/work-order-sessions": () => ({ body: { items: [row(), row({ id: "WO-9", title: "Other thing", started: false, latest: null })] } }), [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ body: session() }), [`POST /api/v1/work-orders/${W.id}/session/seen`]: () => ({ body: { ok: true, msg: "Seen." } }) });
+    mount(<ConversationsView />);
+    expect(await screen.findByRole("region", { name: `Conversation ${W.id}` }, { timeout: 4000 })).toBeTruthy();
+    expect(calls.some((c) => c.path === `/api/v1/work-orders/${W.id}/session`)).toBe(true);
+    fireEvent.change(screen.getByLabelText("Search conversations"), { target: { value: "other" } });
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("q")).toBe("other"));
+    expect(screen.queryByText(row().title)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Search conversations"), { target: { value: "zzz" } });
+    expect(await screen.findByText("No conversations")).toBeTruthy();
+    expect(document.querySelector(".conv-list .empty p")?.textContent ?? "").toBe("");
+  });
+});
+
 describe("Work-order session", () => {
   it("makes it obvious the dialogue is open: the agent waits for you, the composer is always there, a suggested answer is one click", async () => {
     const calls = await showSession(session(), { [`POST /api/v1/work-orders/${W.id}/session/messages`]: () => ({ body: { ok: true, msg: "Saved." } }) });
     expect(await screen.findByText("Intake Clerk is waiting for you")).toBeTruthy();
-    expect(screen.getByLabelText("Message to Intake Clerk")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Traveler" })).toBeTruthy();
+    expect(screen.getByLabelText("Message")).toBeTruthy();
+    // the prototype thread header: the work order id links to the record, Back is for narrow screens
+    expect((document.getElementById("wos-record") as HTMLAnchorElement).getAttribute("href")).toMatch(/\/record\/WO-2398$/);
+    expect(document.getElementById("wos-back")).toBeTruthy();
     expect(screen.getByRole("list", { name: "The belt" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "POST /refunds" }));
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
     expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)[0]!.body).toMatchObject({ kind: "message", text: "POST /refunds" });
     // Free text on Enter.
-    const box = screen.getByLabelText("Message to Intake Clerk");
+    const box = screen.getByLabelText("Message");
     fireEvent.change(box, { target: { value: "gimme a brief" } });
     fireEvent.keyDown(box, { key: "Enter" });
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(2));
@@ -107,12 +140,12 @@ describe("Work-order session", () => {
       },
     );
     expect(await screen.findByText(/Lena Okafor cannot open this project yet\. Mentioning them did not give them access/)).toBeTruthy();
-    const box = screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement;
+    const box = screen.getByLabelText("Message") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "hey @Len", selectionStart: 8 } });
     const list = await screen.findByRole("listbox", { name: "People to mention" });
     expect(list.textContent).toMatch(/cannot open this project yet/);
     fireEvent.keyDown(box, { key: "Enter" });
-    await waitFor(() => expect((screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement).value).toBe("hey @Lena Okafor "));
+    await waitFor(() => expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("hey @Lena Okafor "));
     expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(0);
     fireEvent.change(box, { target: { value: "hey @Lena Okafor can you check?" } });
     fireEvent.keyDown(box, { key: "Enter" });
@@ -152,7 +185,7 @@ describe("Work-order session", () => {
     expect(screen.getByText("What is in scope?")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Only the API" }));
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
-    expect((screen.getByLabelText("Message to Intake Clerk") as HTMLTextAreaElement).disabled).toBe(false);
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).disabled).toBe(false);
   });
 
   it("the agent starts the dialogue by itself when the session has none yet", async () => {

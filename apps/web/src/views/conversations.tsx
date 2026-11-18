@@ -3,25 +3,19 @@
  * in the route (`#/p/<project>/conversations/<WO>`), that work order's agent conversation (views/conversations/Session.tsx). The list has no forms: every row opens a session.
  * Older links that ask for a conversation through the `openConversation` preference land on the session too.
  */
-import { useEffect, useMemo, useState } from "react";
-import { fmt } from "@gantry/domain";
-import { useCan } from "../api/can";
+import { useEffect, useMemo } from "react";
+import { agoShort } from "./conversations/ago";
 import { useMe, useProject } from "../api/queries";
 import { pickProject } from "../lib/routes";
 import { navigate, useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
-import { Avatar, Btn, SearchBox, Tabs } from "../ui/primitives";
+import { Avatar, SearchBox } from "../ui/primitives";
 import { CrEmpty, Page } from "../ui/cr";
 import { Async } from "../ui/async";
 import { EmptyState, useCatalog } from "./projects/kit";
 import { WoSessionPage } from "./conversations/Session";
-import { useWoSessions, type WoSessionRow } from "./conversations/session-api";
-import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
-import { useProjectRepos } from "./floor/kit";
-
-type Tab = "waiting" | "open" | "closed";
-
-const WAIT: Record<WoSessionRow["waitingOn"], string> = { you: "Waiting on you", approver: "Waiting on an approver", person: "Waiting on someone else", agent: "Agent working", nobody: "Closed" };
+import { useWoSessions } from "./conversations/session-api";
+import { useUrlState } from "./work-orders/url-state";
 
 export default function ConversationsView() {
   const hash = useHash();
@@ -31,12 +25,8 @@ export default function ConversationsView() {
   const projectId = me ? pickProject(me, prefs.project) : null;
   const projectQ = useProject(projectId);
   const project = projectQ.data ?? null;
-  const submit = useCan("wo.submit", projectId ? { project: projectId } : {});
-  const repos = useProjectRepos(projectId);
-  const newWoDialog = useNewWorkOrder();
   const q = useWoSessions(projectId ?? undefined);
-  const [tab, setTab] = useState<Tab | null>(null);
-  const [search, setSearch] = useState("");
+  const [url, setUrl] = useUrlState(["q", "c"] as const);
   // A deep link from an older screen (the work orders table, the bell, the record) asks for one conversation: land on its session.
   const pending = prefs.openConversation;
   useEffect(() => {
@@ -44,62 +34,45 @@ export default function ConversationsView() {
     updatePrefs({ openConversation: null });
     navigate("conversations", pending);
   }, [pending]);
-  const items = useMemo(() => q.data?.items ?? [], [q.data]);
-  const groups = useMemo(() => {
-    const byLatest = (a: WoSessionRow, b: WoSessionRow) => (b.latest?.at ?? b.createdAt) - (a.latest?.at ?? a.createdAt);
-    return {
-      waiting: items.filter((w) => !w.closed && w.waitingOn === "you").sort(byLatest),
-      open: items.filter((w) => !w.closed).sort(byLatest),
-      closed: items.filter((w) => w.closed).sort(byLatest),
-    };
-  }, [items]);
+  const items = useMemo(() => [...(q.data?.items ?? [])].sort((a, b) => (b.latest?.at ?? b.createdAt) - (a.latest?.at ?? a.createdAt)), [q.data]);
   if (!me || !cat) return <div className="view conv-view" />;
   if (!projectId) return <div className="view"><EmptyState title="No project" text="You do not have a project to show." /></div>;
   if (!project) return <div className="view"><Async query={projectQ} what="this project" id="conv-project">{() => null}</Async></div>;
-  const cur: Tab = tab ?? "open";
-  const list = groups[cur];
-  const block = projectSubmitBlock(me, project, repos);
-  const needle = search.trim().toLowerCase();
-  const shown = list.filter((w) => !needle || `${w.title} ${w.id} ${w.agentName ?? ""}`.toLowerCase().includes(needle));
+  const needle = url.q.trim().toLowerCase();
+  const shown = items.filter((w) => !needle || `${w.title} ${w.id} ${w.agentName ?? ""}`.toLowerCase().includes(needle));
   // As in the prototype, the first conversation is open on a wide screen until one is picked.
   const wide = typeof window !== "undefined" && window.innerWidth > 720;
-  const cur2 = hash.param ?? (wide ? (shown[0]?.id ?? null) : null);
+  // `?c=` is the prototype's way to name a conversation (here a work order); the path form `/conversations/<WO>` still works.
+  const asked = hash.param ?? (url.c && items.some((w) => w.id === url.c) ? url.c : null);
+  const cur2 = asked ?? (wide ? (shown[0]?.id ?? null) : null);
   return (
-    <Page
-      eyebrow="Operate" title="Conversations" cls="conv-view"
-      sub="Talk to the agent on a work order. Answers are recorded on the record."
-      acts={<Btn label="New work order" kind="primary" icon="plus" id="conv-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWoDialog({ project: project.id })} />}
-    >
+    <Page eyebrow="Operate" title="Conversations" cls="conv-view" sub="Talk to the agent on a work order. Answers are recorded on the record.">
       <div className={`conv${cur2 ? " has" : ""}`}>
         <div className="card conv-list" hidden={false}>
           <div className="card-b" style={{ padding: 8 }}>
-            <SearchBox id="conv-q" value={search} onChange={setSearch} placeholder="Search conversations" />
-            <div style={{ marginTop: 8 }}>
-              <Tabs idPrefix="conv-tab" items={[{ id: "waiting", label: "Waiting on me", count: groups.waiting.length }, { id: "open", label: "Open", count: groups.open.length }, { id: "closed", label: "Closed", count: groups.closed.length }]} active={cur} onChange={(t) => setTab(t as Tab)} />
-            </div>
+            <SearchBox id="conv-q" value={url.q} onChange={(v) => setUrl({ q: v })} placeholder="Search conversations" label="Search conversations" />
           </div>
           <div className="card-b flush" data-keep-scroll="conv-list">
             <Async query={q} what="conversations" id="conv-list">{() => shown.length ? (
               <>
                 {shown.map((w) => (
-                  <a key={w.id} className="li click" id={`conv-item-${w.id}`} href={`#/p/${project.id}/conversations/${w.id}`} aria-label={`${w.id} ${w.title}`} style={{ color: "inherit", textDecoration: "none", ...(cur2 === w.id ? { background: "var(--surface-2)" } : {}) }}>
+                  <a key={w.id} className="li click" id={`conv-item-${w.id}`} href={`#/p/${project.id}/conversations/${w.id}`} aria-label={`${w.id} ${w.title}`} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); if (hash.param) navigate("conversations", null); setUrl({ c: w.id }); }} style={{ color: "inherit", textDecoration: "none", ...(cur2 === w.id ? { background: "var(--surface-2)" } : {}) }}>
                     <Avatar id={w.agent} />
                     <div className="main1">
                       <span className="t1">{w.title}</span>
-                      <span className="t2">{`${w.agentName ?? "Agent"} · ${w.id} · ${fmt.ago(w.latest?.at ?? w.createdAt, Date.now())}`}</span>
-                      <span className="t2">{w.waitingOn === "agent" && w.agentName ? `${w.agentName} working` : WAIT[w.waitingOn]}</span>
+                      <span className="t2">{`${w.agentName ?? "Agent"} · ${w.id} · ${agoShort(w.latest?.at ?? w.createdAt)}`}</span>
                     </div>
                     {w.unread ? <span className="badge hot" role="img" aria-label="Unread">1</span> : null}
                   </a>
                 ))}
               </>
             ) : (
-              <EmptyState id="conv-empty" icon="chat" title={cur === "waiting" ? "Nothing waits on you" : cur === "open" ? "No open conversations" : "Nothing closed yet"} text={cur === "waiting" ? "When an agent asks you something or proposes a brief, the conversation shows here." : "Submit a work order to start a conversation with its Intake agent."} />
+              <CrEmpty icon="chat" title="No conversations" />
             )}</Async>
           </div>
         </div>
         {cur2 ? (
-          <div className="card conv-thread"><div className="card-b"><WoSessionPage key={cur2} woId={cur2} back={() => navigate("conversations", null)} embedded /></div></div>
+          <WoSessionPage key={cur2} woId={cur2} proto back={() => { setUrl({ c: "" }); navigate("conversations", null); }} embedded />
         ) : (
           <div className="card"><CrEmpty icon="chat" title="Pick a conversation" text="Choose one on the left to read or reply." /></div>
         )}

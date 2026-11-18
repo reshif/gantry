@@ -29,9 +29,11 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, neutralArrow }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, selectable, empty, hasMore, onLoadMore, loadingMore, total, selected, onSelect, page: pageProp, onPage, sortHints, neutralArrow }: {
   /** Show the prototype's dim up/down arrow on sortable headers that are not the active sort. */
   neutralArrow?: boolean;
+  /** Additive: show a faint two-way arrow on every sortable column that is not the current sort (Control Room prototype). */
+  sortHints?: boolean;
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -61,9 +63,17 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   loadingMore?: boolean;
   /** Total on the server, for the "Showing x of y" line. */
   total?: number;
+  /** Controlled selection (needs `selectable`): the selected row keys. Without it the table keeps its own. */
+  selected?: ReadonlySet<string>;
+  onSelect?: (keys: Set<string>) => void;
+  /** Controlled pager page, zero-based (needs `pager`), so a screen can keep it in the URL. */
+  page?: number;
+  onPage?: (page: number) => void;
 }) {
   const uid = useId().replace(/:/g, "");
-  const [page, setPage] = useState(0);
+  const [ownPage, setOwnPage] = useState(0);
+  const page = pageProp ?? ownPage;
+  const setPage = (n: number): void => { setOwnPage(n); onPage?.(n); };
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
   const [shown, setShown] = useState(pageSize ?? 0);
   // a new page size or a different row count (a filter changed) starts the list over at the first page
@@ -71,9 +81,11 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   if (seen !== `${pageSize ?? 0}:${rows.length}`) {
     setSeen(`${pageSize ?? 0}:${rows.length}`);
     setShown(pageSize ?? 0);
-    setPage(0);
+    setOwnPage(0);
   }
-  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [ownPicked, setOwnPicked] = useState<Set<string>>(new Set());
+  const picked: ReadonlySet<string> = selected ?? ownPicked;
+  const setPicked = (f: (s0: ReadonlySet<string>) => Set<string>): void => { const n = f(picked); setOwnPicked(n); onSelect?.(n); };
   const [own1, setOwn1] = useState<string>("");
   const [overflow, setOverflow] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -150,7 +162,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : neutralArrow ? <span style={{ opacity: 0.4 }}>↕</span> : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : (neutralArrow || sortHints) ? <span className="th-arrow-idle">↕</span> : ""}</span>
                       </button>
                     ) : c.label}
                   </th>

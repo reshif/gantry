@@ -100,6 +100,10 @@ function project(p: (typeof PROJECTS)[number], i: number) {
   };
 }
 
+// --- ops2 fixtures: a few work orders are requested by the signed-in admin, so "Requested by me" has rows (prototype: 4). ---
+const OPS2_MINE = new Set([1038, 1060, 1065, 1076]);
+// --- end ops2 ---
+
 function wo(s: Spec, projectId: string) {
   const [num, title, cls, priority, sid, kind] = s;
   const station = STATION_IDS.indexOf(sid);
@@ -110,7 +114,7 @@ function wo(s: Spec, projectId: string) {
   const state = kind === "run" ? "running" : kind === "gate" ? "waiting" : kind === "queue" ? "waiting" : kind === "block" ? "blocked" : kind === "fail" ? "failed" : "waiting";
   return {
     id: `WO-${num}`, project: projectId, repo: ["payments-api", "payouts-worker", "ledger-core"][num % 3], title, description: title, attachments: [], cls, clsConfidence: 0.9, clsRationale: "", clsSuggested: cls, clsOverridden: null, requestedCls: null,
-    priority, source: "console", requestedBy: "p-lead", createdAt: NOW - age - 6 * HOUR, station, state, bay: null, bayReason: "", bayFrom: null, progress: kind === "run" ? 30 + (num % 60) : 0, slot: null,
+    priority, source: "console", requestedBy: OPS2_MINE.has(num) ? "p-admin" : "p-lead", createdAt: NOW - age - 6 * HOUR, station, state, bay: null, bayReason: "", bayFrom: null, progress: kind === "run" ? 30 + (num % 60) : 0, slot: null,
     history: [{ station: sid, agent: cat.stations[station]!.agent, model: ops1Model(cat.stations[station]!.agent), startedAt, endedAt: kind === "queue" || kind === "gate" ? startedAt + 5 * MIN : null, tokens: 120000, cost: 1.4, outcome: null, note: "" }],
     gates: waitingGate ? { [waitingGate]: { status: "waiting", approvals: [], rejections: [], checks: [], waitingSince: startedAt } } : {},
     log: [], diff: { files: 0, add: 0, del: 0 }, tests: { total: 0, passed: 0, failed: 0 }, pr: null, blockReason: kind === "block" ? "Waiting on an upstream schema change" : null, failReason: kind === "fail" ? "2 checks failed" : null,
@@ -182,6 +186,14 @@ function reposFor(project: string) {
   ];
 }
 
+// ---- ops2 group: the other projects' repos (the prototype's REPOS table), so the Console's Repository list follows the project ----
+const OTHER_REPOS: Record<string, string[]> = { storefront: ["storefront-web", "checkout-ui"], risk: ["risk-rules", "kyc-service"], identity: ["identity-gateway", "session-store"], mobile: ["ios-app", "android-app"], "data-platform": ["pipelines", "metrics-lake"], search: ["search-service", "relevance-lab"], "internal-tools": ["support-console", "ops-portal"] };
+function otherRepos(project: string) {
+  const mk = reposFor(project)[0]!;
+  return (OTHER_REPOS[project] ?? []).map((n) => ({ ...mk, id: n, name: `acme/${n}`, lang: "TypeScript", tags: [] }));
+}
+// ---- end ops2 group ----
+
 export function richOverrides(): Record<string, Handler> {
   const ov: Record<string, Handler> = {};
   const me = { ...PERSONAS.admin.me, projects: PROJECTS.map((p, i) => ({ id: p.id, name: p.name, key: p.key, status: "active", halted: "halted" in p && p.halted ? { by: "p-admin", at: NOW - 3 * HOUR, reason: "x" } : null, killed: null, order: i })) };
@@ -207,7 +219,7 @@ export function richOverrides(): Record<string, Handler> {
       return fulfillJson(r, { items: items.slice(0, lim), total: items.length, next: null });
     };
     Object.assign(ov, woReadOverrides(floorFor(p.id).workOrders as never, p.id));
-    ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, p.id === "payments" ? reposFor(p.id) : []);
+    ov[`projects/${p.id}/repos`] = (r) => fulfillJson(r, p.id === "payments" ? reposFor(p.id) : otherRepos(p.id));
   }
   /* ---- ops1 fixtures: the station is called Release (the prototype's name), and the three gate approvals on Home carry what the server says about this person ---- */
   ov["catalog"] = (r) => fulfillJson(r, { ...cat, stations: cat.stations.map((st) => (st.id === "close" ? { ...st, name: "Release" } : st)) });
@@ -268,24 +280,32 @@ export function richOverrides(): Record<string, Handler> {
       },
     });
   const sess = (id: string, title: string, agent: string, agentName: string, station: string, stationName: string, waitingOn: string, agoMin: number, text: string, unread: boolean) => ({ id, project: "payments", title, cls: "feature", station, stationName, state: "running", bay: null, gate: null, agent, agentName, waitingOn, latest: { text, at: NOW - agoMin * MIN, by: agent, role: "assistant" }, unread, closed: false, started: true, requestedBy: "p-lead", createdAt: NOW - 6 * HOUR });
-  ov["work-order-sessions"] = (r) => fulfillJson(r, { items: [
-    sess("WO-1006", "Retry limit scope", "ag-spec", "Spec Writer", "spec", "Spec", "you", 40, "Before I commit to a criterion: should the limit apply per merchant or per account?", true),
-    sess("WO-1004", "Review findings on the payout limiter", "ag-review", "Reviewer", "review", "Review and merge", "approver", 120, "Findings are ready for the G5 approver.", false),
-    sess("WO-1025", "New request: bulk refund screen", "ag-intake", "Intake Clerk", "intake", "Intake", "agent", 300, "Classifying: feature, confidence 0.91", false),
-  ] });
-  ov["work-orders/WO-1006/session"] = (r) => fulfillJson(r, {
-    woId: "WO-1006", project: "payments", repo: "payments-api",
-    wo: { id: "WO-1006", title: "Retry limit scope", description: "", cls: "feature", clsName: "Feature", confidence: 0.9, rationale: "", priority: "P2", station: "spec", stationName: "Spec", state: "running", bay: null, gate: null, requestedBy: "p-lead", closed: false },
-    messages: [
-      { id: "m1", role: "assistant", author: "ag-spec", text: "I am writing the spec for the payout rate limit. Before I commit to a criterion: should the limit apply per merchant or per account?", at: NOW - 52 * MIN, data: { kind: "station", mode: "agent" } },
-      { id: "m2", role: "user", author: "p-lead", text: "Per merchant. Accounts are internal.", at: NOW - 47 * MIN, data: {} },
-      { id: "m3", role: "assistant", author: "ag-spec", text: "Thanks. I will state it per merchant with a default of 60 requests a minute and note that it is configurable.", at: NOW - 46 * MIN, data: { kind: "station", mode: "agent" } },
-    ],
-    agent: { mode: "agent", name: "Spec Writer", id: "ag-spec", model: "claude-opus", vendor: "anthropic", version: 3, station: "spec" },
-    budget: { spentUsd: 4.2, limitUsd: 20 }, costUsd: 1.4, can: { talk: true, talkWhy: "", confirm: false, confirmWhy: "" },
-    steps: [], next: { actor: "agent", text: "Spec Writer is working." }, waiting: null,
-    dialogue: { questions: [], assumptions: [], objections: [], askedMe: false }, swarm: null, documents: [], research: { state: "none" }, sources: [], pending: [], brief: {}, briefConfirmed: true, briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false,
-  });
+  // ---- ops2 group (Conversations): the prototype's four conversations (cv-1 .. cv-4), each openable ----
+  const convRows = [
+    sess("WO-1006", "Retry limit scope", "ag-spec", "Spec Writer", "spec", "Spec", "you", 40, "Thanks. I will state it per merchant with a default of 60 requests a minute and note that it is configurable.", true),
+    sess("WO-1004", "Review findings on the payout limiter", "ag-review", "Reviewer", "review", "Review and merge", "approver", 100, "Fixed window is fine for v1. Please add a note in the PR.", false),
+    sess("WO-1042", "New request: bulk refund screen", "ag-intake", "Intake Clerk", "intake", "Intake", "agent", 300, "Opened WO-1042 as a feature, P2, classification confidence 91%. It needs a brief confirm at G1.", false),
+    sess("WO-1090", "Onboarding relevance-lab", "ag-onboard", "Onboarding Agent", "intake", "Intake", "you", 90, "Assessment done for relevance-lab: tests run in 4m, coverage 71%, one flaky suite. I propose a guideline pack v2 and an onboarding PR.", true),
+  ];
+  ov["work-order-sessions"] = (r) => fulfillJson(r, { items: convRows });
+  const convMsgs: Record<string, Array<[string, string, number]>> = {
+    "WO-1006": [["ag-spec", "I am writing the spec for the payout rate limit. Before I commit to a criterion: should the limit apply per merchant or per account?", 52], ["p-meera", "Per merchant. Accounts are internal.", 47], ["ag-spec", "Thanks. I will state it per merchant with a default of 60 requests a minute and note that it is configurable. Spec v3 will be ready for G2 in about 10 minutes.", 46]],
+    "WO-1004": [["ag-review", "The limiter uses a fixed window. A burst at the window edge allows double the stated rate. I recommend a sliding window; the plan allowed either. Flagged as a nit, not blocking.", 110], ["p-priya", "Fixed window is fine for v1. Please add a note in the PR.", 100]],
+    "WO-1042": [["p-ines", "Support wants a bulk refund screen with a CSV upload. Can you open a work order?", 300], ["ag-intake", "Opened WO-1042 as a feature on internal-tools, P2, classification confidence 91%. It needs a brief confirm at G1.", 299]],
+    "WO-1090": [["ag-onboard", "Assessment done for relevance-lab: tests run in 4m, coverage 71%, one flaky suite. I propose a guideline pack v2 and an onboarding PR.", 95]],
+  };
+  for (const row of convRows) {
+    ov[`work-orders/${row.id}/session`] = (r) => fulfillJson(r, {
+      woId: row.id, project: "payments", repo: "payments-api",
+      wo: { id: row.id, title: row.title, description: "", cls: "feature", clsName: "Feature", confidence: 0.9, rationale: "", priority: "P2", station: row.station, stationName: row.stationName, state: "running", bay: null, gate: null, requestedBy: "p-lead", closed: false },
+      messages: (convMsgs[row.id] ?? []).map(([who, text, ago], i) => ({ id: `m${i}`, role: who.startsWith("ag-") ? "assistant" : "user", author: who, text, at: NOW - ago * MIN, data: who.startsWith("ag-") ? { kind: "station", mode: "agent" } : {} })),
+      agent: { mode: "agent", name: row.agentName, id: row.agent, model: "claude-opus", vendor: "anthropic", version: 3, station: row.station },
+      budget: { spentUsd: 4.2, limitUsd: 20 }, costUsd: 1.4, can: { talk: true, talkWhy: "", confirm: false, confirmWhy: "" },
+      steps: [], next: { actor: "agent", text: `${row.agentName} is working.` }, waiting: null,
+      dialogue: { questions: [], assumptions: [], objections: [], askedMe: false }, swarm: null, documents: [], research: { state: "none" }, sources: [], pending: [], brief: {}, briefConfirmed: true, briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false,
+    });
+  }
+  // ---- end ops2 group ----
   ov["people"] = (r) => fulfillJson(r, [person("p-admin", "Asha Raman", "Engineering Director", "factory_admin"), person("p-lead", "Meera Iyer", "Tech Lead", "tech_lead"), person("p-reader", "Rae Reader", "Auditor", "auditor")]);
   Object.assign(ov, workforceOverrides());
   Object.assign(ov, richGroupE());

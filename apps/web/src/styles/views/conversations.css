@@ -117,3 +117,14 @@
 .conv-fu-card { border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--r1); padding: var(--s2) var(--s3); display: grid; gap: var(--s2); }
 .conv-fu-card .input { background: var(--surface); }
 .conv-fu-act { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: flex-end; }
+
+/* Conversations screen (Control Room prototype): Back shows when the thread replaces the list on a phone */
+.conv-thread .wos-more > summary { cursor: pointer; }
+@media (max-width: 720px) {
+  .conv-thread .nodesk-back { display: inline-flex; }
+  .conv.has .conv-list { display: none; }
+}
+
+/* Conversations (prototype): agent avatars are tinted, thread header details button, message author is plain text */
+.conv .av.av-agent { background: color-mix(in srgb, var(--agent) 22%, var(--surface-2)); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+.conv-thread .card-h .conv-details { margin-left: auto; }

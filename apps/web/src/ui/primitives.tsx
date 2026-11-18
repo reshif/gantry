@@ -3,7 +3,7 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, forwardRef, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
@@ -175,6 +175,11 @@ export function Field({ label, htmlFor, hint, description, error, required, chil
     </div>
   );
 }
+
+/** The one text input (prototype `.in`). Additive primitive: views use it inside a Field instead of a raw <input>. */
+export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function TextInput({ className = "", ...rest }, ref) {
+  return <input {...rest} ref={ref} className={`input in${className ? ` ${className}` : ""}`} />;
+});
 
 /** Moves focus to the first control inside `root` marked aria-invalid (call after a failed submit). Returns whether one was found. */
 export function focusFirstInvalid(root: ParentNode): boolean {

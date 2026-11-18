@@ -33,7 +33,8 @@ export const useMentionCandidates = (woId: string, query: string | null) =>
 
 /** State and key handling for the composer: spread `props` on the textarea, render `<MentionList>` beside it. */
 export function useMentions(woId: string, draft: string, setDraft: (v: string) => void, enabled: boolean) {
-  const [caret, setCaret] = useState(0);
+  const [caret, setCaret0] = useState(0);
+  const setCaret = (n: number | null) => setCaret0(n ?? 0);
   const [picked, setPicked] = useState<Picked[]>([]);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<number | null>(null);
@@ -50,7 +51,7 @@ export function useMentions(woId: string, draft: string, setDraft: (v: string) =
     setPicked((p) => [...p.filter((x) => x.id !== c.id), { id: c.id, name: c.name }]);
     setCaret(at.start + c.name.length + 2);
   };
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>): boolean => {
     if (!list.length) return false;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setActive((i) => (i + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length); return true; }
     if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pick(list[active] ?? list[0]!); return true; }
