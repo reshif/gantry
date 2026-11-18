@@ -323,17 +323,38 @@ describe("Access", () => {
     expect(edit110.getAttribute("data-reason") ?? edit110.textContent).toContain("Freeze rules come from the freeze list");
   });
 
-  it("checks through the server simulator and answers Allowed or Denied with the deciding rule", async () => {
-    const calls = setup({ "POST /api/v1/access/simulate": () => ({ body: { ok: true, decision: { allowed: false, reason: "Outside window.", needs: "", rule: { id: "POL-101", name: "Release window", kind: "policy" } }, trace: ["Roles in scope: Engineer.", "Role matrix grants release: no."], week: [{ day0: Date.now(), dow: 1, label: "Mon", cells: Array.from({ length: 24 }, (_, hour) => ({ hour, allowed: hour > 9, rule: "MATRIX", selected: hour === 3 })) }] } }) });
+  it("checks locally from the role matrix and always answers with a callout in the prototype's words", async () => {
+    const calls = setup();
     mount(<AccessView />);
     fireEvent.click(await byId("acc-tab-check"));
     await waitFor(() => expect((document.getElementById("acc-sim-person") as HTMLSelectElement).value).toBe("p-asha"));
     fireEvent.click(screen.getByText("Check"));
-    expect(await screen.findByText(/Outside window\./)).toBeTruthy();
-    const sim = calls.find((c) => c.path === "/api/v1/access/simulate")!;
-    expect(sim.body).toMatchObject({ person: "p-asha", action: "wo.submit", project: "payments" });
-    expect(document.querySelectorAll(".wk-c.is-yes").length).toBeGreaterThan(5);
-    expect(screen.getByText("Denied")).toBeTruthy();
+    const res = await byId("acc-sim-result");
+    expect(res.className).toContain("bad");
+    expect(res.textContent).toBe("DeniedNone of Asha Raman's roles grant wo.submit in Payments Platform.");
+    fireEvent.change(document.getElementById("acc-sim-action") as HTMLSelectElement, { target: { value: "release" } });
+    fireEvent.click(screen.getByText("Check"));
+    await waitFor(() => expect(document.getElementById("acc-sim-result")?.textContent).toBe("AllowedAsha Raman holds a role that grants release."));
+    expect(calls.some((c) => c.path === "/api/v1/access/simulate")).toBe(false);
+  });
+
+  it("shows inline field errors and focuses the first invalid field in the invite and team dialogs", async () => {
+    setup();
+    mount(<PeopleView />);
+    fireEvent.click(await screen.findByText("Invite person"));
+    fireEvent.click(await screen.findByText("Send invite"));
+    expect(await screen.findByText("Full name is required.")).toBeTruthy();
+    expect(screen.getByText("Work email is required.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement?.id).toBe("ppl-inv-name"));
+  });
+
+  it("the person sheet ends at Open work orders (no History section)", async () => {
+    setup();
+    window.location.hash = "#person/p-asha";
+    mount(<PersonView />);
+    expect(await screen.findByText("Open work orders")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "History" })).toBeNull();
+    expect(document.getElementById("ppl-history-panel")).toBeNull();
   });
 
   it("edits a matrix cell with the matrix version as If-Match", async () => {

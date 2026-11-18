@@ -86,7 +86,7 @@ export default function AccessView() {
       />
       <div className="acc-body" id="acc-tab-panel" role="tabpanel">
         <Async query={(tab === "freezes" ? freezesQ : tab === "policies" ? policiesQ : mQ) as UseQueryResult<unknown>} what={tab === "freezes" ? "freezes" : tab === "policies" ? "policies" : "the access matrix"} id="acc">{() => (
-          tab === "check" ? <Simulator people={people} projects={projects} repos={repos} actions={actions} defaults={simDefaults()} />
+          tab === "check" ? <Simulator people={people} projects={projects} actions={actions} matrix={matrix} defaults={simDefaults()} />
           : tab === "matrix" ? <Panel title="What each role may do" flush><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} newRole={newRole} /></Panel>
           : tab === "roles" ? <Panel title="Roles" flush><><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /><Pager id="acc-roles-pager" page={0} total={roles.length} onPage={() => undefined} /></></Panel>
           : tab === "freezes" ? <Panel title="Change freezes" flush tools={<Btn label="New freeze" small kind="primary" icon="plus" id="acc-add-freeze" guard={perm} onClick={openFreeze} />}><FreezeList freezes={freezes} repos={repos} /></Panel>
@@ -94,7 +94,7 @@ export default function AccessView() {
             <Panel title="Conditional policies" flush>
               <PolicyTable
                 policies={policies} people={people} onEdit={openPolicy}
-                onSimulate={(p, who) => setQS({ "acc.tab": "check", "acc.when": "1", "acc.person": who?.id ?? me.person.id, "acc.action": p.actions[0] ?? "", "acc.project": p.where.projects?.[0] ?? projects[0]?.id ?? "" })}
+                onSimulate={(p, who) => setQS({ "acc.tab": "check", "acc.person": who?.id ?? me.person.id, "acc.action": p.actions[0] ?? "", "acc.project": p.where.projects?.[0] ?? projects[0]?.id ?? "" })}
               />
             </Panel>
           )

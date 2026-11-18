@@ -4,6 +4,7 @@ import { ops } from "../../api/ops";
 import { getPrefs } from "../../lib/prefs";
 import { useUI } from "../../ui/overlay-context";
 import { Field, LockNote, Select, type Decision } from "../../ui/primitives";
+import { minLen, required, useFieldErrors } from "../govern/validate";
 
 /** The invite form (legacy G.inviteDialog). Sends POST /invites; the email goes out through the outbox. */
 export function InviteForm({ perm, teams, projects, roles, domains, preset, close, onDone, registerSubmit }: {
@@ -22,19 +23,21 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   const [email, setEmail] = useState("");
   const [title, setTitle] = useState("");
   const [role, setRole] = useState(roles.find((r) => r.id === "engineer")?.id ?? roles[0]?.id ?? "");
-  const [team, setTeam] = useState(preset.team ?? teams[0]?.id ?? "");
+  const [team, setTeam] = useState(preset.team ?? teams.find((t) => t.name.toLowerCase() === "platform")?.id ?? teams[0]?.id ?? "");
   // The prototype asks only for a role and a team. A project role needs a project: the one open in the top bar (or the first live one).
   const live = projects.filter((p) => p.status !== "archived");
   const proj = preset.project ?? live.find((p) => p.id === getPrefs().project)?.id ?? live[0]?.id ?? "";
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
+  const fe = useFieldErrors();
   const isFactory = roles.find((r) => r.id === role)?.level === "factory";
 
   registerSubmit(() => {
     void (async () => {
       const e = email.trim().toLowerCase();
-      if (name.trim().length < 3) return setErr("Full name needs at least 3 characters.");
-      if (!/^\S+@\S+\.\S+$/.test(e)) return setErr("Enter a work email.");
+      setErr("");
+      const emailMsg = required("Work email", e) || (/^\S+@\S+\.\S+$/.test(e) ? "" : "Enter a valid email address.");
+      if (!fe.run([["ppl-inv-name", required("Full name", name) || minLen("Full name", name, 3)], ["ppl-inv-email", emailMsg]])) return;
       const dom = e.split("@")[1];
       if (dom && domains.length && !domains.includes(dom)) return setErr(`${dom} is not an allowed domain. Add it in Security first.`);
       if (isFactory && reason.trim().length < 10) return setErr("Give a reason of at least 10 characters for the factory role.");
@@ -56,11 +59,11 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   return (
     <div className="form-grid">
       <LockNote decision={perm} what="Inviting people" />
-      <Field label="Full name (required)" htmlFor="ppl-inv-name">
-        <input id="ppl-inv-name" className="input" aria-required="true" autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} />
+      <Field label="Full name (required)" htmlFor="ppl-inv-name" error={fe.errors["ppl-inv-name"]}>
+        <input id="ppl-inv-name" className="input" aria-required="true" autoComplete="off" value={name} onChange={(e) => { setName(e.target.value); fe.clear("ppl-inv-name"); }} />
       </Field>
-      <Field label="Work email (required)" htmlFor="ppl-inv-email">
-        <input id="ppl-inv-email" className="input" type="email" aria-required="true" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <Field label="Work email (required)" htmlFor="ppl-inv-email" error={fe.errors["ppl-inv-email"]}>
+        <input id="ppl-inv-email" className="input" type="email" aria-required="true" autoComplete="off" value={email} onChange={(e) => { setEmail(e.target.value); fe.clear("ppl-inv-email"); }} />
       </Field>
       <Field label="Title" htmlFor="ppl-inv-title">
         <input id="ppl-inv-title" className="input" autoComplete="off" value={title} onChange={(e) => setTitle(e.target.value)} />

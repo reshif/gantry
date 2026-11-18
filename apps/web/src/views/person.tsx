@@ -11,7 +11,6 @@ import { Btn, Empty, LockNote, Panel, Stat, StatRow, Toggle, ViewHead, type Deci
 import { Async } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { fmtDay, ifMatchOf, lockd, useOutcome, useTeams } from "./govern/data";
-import { HistoryList } from "./people/History";
 import { useOffboard } from "./people/Offboard";
 import { useGrantRole } from "./people/GrantRole";
 
@@ -182,9 +181,6 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
             ))}
           </ul>
         ) : <div className="empty">{wos.pending ? "Loading." : wos.failed ? "Some projects could not be read." : "Nothing open."}</div>}
-      </Panel>
-      <Panel title="History" id="ppl-history-panel">
-        <HistoryList id={p.id} limit={8} />
       </Panel>
     </div>
   );

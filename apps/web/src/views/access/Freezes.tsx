@@ -6,6 +6,7 @@ import { Btn, Chip, Empty, Field, LockNote, type Decision } from "../../ui/primi
 import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
 import { fmtDay, ifMatchOf, useOutcome } from "../govern/data";
+import { minLen, required, useFieldErrors } from "../govern/validate";
 
 export function FreezeForm({ perm, registerSubmit, close }: { perm: Decision; registerSubmit: (fn: () => void) => void; close: () => void }) {
   const outcome = useOutcome();
@@ -15,12 +16,17 @@ export function FreezeForm({ perm, registerSubmit, close }: { perm: Decision; re
   const [fromD, setFromD] = useState(`${y}-12-20`);
   const [toD, setToD] = useState(`${y + 1}-01-03`);
   const [err, setErr] = useState("");
+  const fe = useFieldErrors();
   registerSubmit(() => {
     void (async () => {
-      if (name.trim().length < 3) return setErr("Name needs at least 3 characters.");
-      const a = istTime(fromD, "00:00");
-      const b = istTime(toD, "23:59");
-      if (!(b > a)) return setErr("End must be after start.");
+      setErr("");
+      const a = fromD ? istTime(fromD, "00:00") : 0;
+      const b = toD ? istTime(toD, "23:59") : 0;
+      if (!fe.run([
+        ["acc-fz-name", required("Name", name) || minLen("Name", name, 3)],
+        ["acc-fz-from", required("From", fromD)],
+        ["acc-fz-to", required("To", toD) || (fromD && !(b > a) ? "End must be after start." : "")],
+      ])) return;
       const r = outcome(await ops.saveFreeze({ name: name.trim(), repos: "all", from: a, to: b }));
       if (!r.ok) return setErr(r.msg);
       close();
@@ -29,9 +35,9 @@ export function FreezeForm({ perm, registerSubmit, close }: { perm: Decision; re
   return (
     <div className="form-grid">
       <LockNote decision={perm} what="Freezes" />
-      <Field label="Name (required)" htmlFor="acc-fz-name"><input id="acc-fz-name" className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      <Field label="From (required)" htmlFor="acc-fz-from"><input id="acc-fz-from" className="input mono" type="date" value={fromD} onChange={(e) => setFromD(e.target.value)} /></Field>
-      <Field label="To (required)" htmlFor="acc-fz-to"><input id="acc-fz-to" className="input mono" type="date" value={toD} onChange={(e) => setToD(e.target.value)} /></Field>
+      <Field label="Name (required)" htmlFor="acc-fz-name" error={fe.errors["acc-fz-name"]}><input id="acc-fz-name" className="input" value={name} onChange={(e) => { setName(e.target.value); fe.clear("acc-fz-name"); }} /></Field>
+      <Field label="From (required)" htmlFor="acc-fz-from" error={fe.errors["acc-fz-from"]}><input id="acc-fz-from" className="input mono" type="date" value={fromD} onChange={(e) => setFromD(e.target.value)} /></Field>
+      <Field label="To (required)" htmlFor="acc-fz-to" error={fe.errors["acc-fz-to"]}><input id="acc-fz-to" className="input mono" type="date" value={toD} onChange={(e) => setToD(e.target.value)} /></Field>
       <div className="form-err" role="alert">{err}</div>
     </div>
   );
