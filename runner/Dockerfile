@@ -70,6 +70,8 @@ RUN --mount=type=secret,id=cacert,required=false \
       UV_PYTHON_DOWNLOADS=automatic uv python install "$PYTHON_VERSION" \
       && chmod -R a+rX /opt/uv-python \
       && ln -s "$(uv python find "$PYTHON_VERSION")" /usr/local/bin/python3.12; \
+    else \
+      rm -f /usr/local/bin/uv /usr/local/bin/uvx; \
     fi
 COPY --from=harness /opt/harness /opt/harness
 RUN ln -s /opt/harness/node_modules/.bin/claude /usr/local/bin/claude && claude --version

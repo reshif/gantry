@@ -4,6 +4,8 @@ import { world } from "./flow-helpers.js";
 import { openGate } from "../src/areas/workorders/engine.js";
 import { lockWo } from "../src/areas/workorders/model.js";
 import { applyStationResult } from "../src/areas/workorders/station.js";
+import { readRecord } from "../src/areas/workorders/reads.js";
+import { ciFact } from "../src/areas/internal/spec.js";
 
 const d = TEST_URL ? describe : describe.skip;
 
@@ -86,6 +88,29 @@ d("automatic gates need real evidence", () => {
     const row = await w.get(id);
     expect((row as any).tests).toMatchObject({ passed: 2, failed: 1, added: 0 });
     expect((row as any).verification.criteria[0]).toMatchObject({ result: "pass" });
+  });
+
+  it("the record page shows Verify's per-criterion verdicts and test counts (the read path, not only the stored row), and a failing observed run overrides a claimed pass", async () => {
+    const id = await w.atStation("verify", "Verify shows on the record");
+    await w.q(`update work_orders set data = data || $3::jsonb where org_id = $1 and id = $2`, [t.orgId, id, JSON.stringify({ brief: { goal: "g", scopeIn: [], scopeOut: [], ac: ["Lists devices", "Handles empty"], risks: [], open: [], decisions: [], estimate: "M", route: [], children: [] } })]);
+    const att = await w.liveAttempt(id);
+    await w.tx((tx) => applyStationResult(tx, att!.id, Number(att!.fencing), { status: "succeeded", summary: "ran", output: { testsRun: [{ name: "test_lists", command: "make test", result: "pass", ms: 12 }, { name: "test_empty", command: "make test", result: "fail" }], criteria: [{ criterion: "Lists devices", result: "pass", evidence: "test_lists passed" }, { criterion: "Handles empty", result: "pass", evidence: "test_empty passed" }] } } as never));
+    const rec = await w.tx((tx) => readRecord(tx, t.orgId, id));
+    expect(rec!.code.tests).toMatchObject({ passed: 1, failed: 1, added: 0 });
+    expect(rec!.criteria.slice(0, 2).map((c) => c.status)).toEqual(["met", "not met"]);
+    expect(rec!.criteria[0]!.tests).toEqual([{ name: "test_lists", result: "pass", ms: 12 }]);
+  });
+
+  it("a station is handed GitHub's own check results for the PR head, and a note instead of a failure when there are none", async () => {
+    await w.insertWo("WO-9211", { position: "verify", state: "running" });
+    await pr("WO-9211", 9211, "sha9211", ["ci/test"], [["test", "completed", "success"]]);
+    const f = await w.tx((tx) => ciFact(tx, { orgId: t.orgId, woId: "WO-9211" } as never));
+    expect(f).toMatchObject({ observedBy: "github", pullRequest: 9211, headSha: "sha9211", requiredChecks: ["ci/test"], checkRuns: [{ name: "test", status: "completed", conclusion: "success", required: true }] });
+    await w.insertWo("WO-9212", { position: "verify", state: "running" });
+    await pr("WO-9212", 9212, "sha9212", ["ci/test"], []);
+    expect(await w.tx((tx) => ciFact(tx, { orgId: t.orgId, woId: "WO-9212" } as never))).toMatchObject({ checkRuns: [], note: expect.stringContaining("not a failure") });
+    await w.insertWo("WO-9213", { position: "verify", state: "running" });
+    expect(await w.tx((tx) => ciFact(tx, { orgId: t.orgId, woId: "WO-9213" } as never))).toBeNull();
   });
 
   it("an empty observed checks list is not evidence", async () => {

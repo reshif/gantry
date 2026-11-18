@@ -1,5 +1,5 @@
 import type { Queryable } from "@gantry/db";
-import { REPO_CONTEXT_LAYER_NAME, RepoContext, renderRepoContext } from "@gantry/domain";
+import { REPO_CONTEXT_LAYER_NAME, RepoContext, checkMatches, renderRepoContext } from "@gantry/domain";
 import { compactPrevious, type StationResultRow } from "./previous.js";
 import { agentConfig } from "./metering.js";
 import { testCommandRules } from "../onboarding/testcmd.js";
@@ -206,6 +206,23 @@ export async function changeFact(db: Queryable, c: RunCtx, prior: StationResultR
   };
 }
 
+/**
+ * The GitHub check runs the platform has stored for the work order's open pull request head, as a fact for the stations after Build. A station's own
+ * list of checks (an agent's `output.checks`) is that agent's report, not GitHub's: this is what GitHub said. Nothing is judged here; the agent decides what
+ * a missing or running check means. A check run reports only its job name ("test"), a required context may read "ci/test": both are shown.
+ */
+export async function ciFact(db: Queryable, c: RunCtx): Promise<Record<string, unknown> | null> {
+  const pr = (await db.query<{ repo_id: string; number: number; head_sha: string | null }>(`select repo_id, number, head_sha from pull_requests where org_id = $1 and wo_id = $2 and state = 'open' order by number desc limit 1`, [c.orgId, c.woId])).rows[0];
+  if (!pr || !pr.head_sha) return null;
+  const rows = (await db.query<{ name: string; status: string; conclusion: string | null; github_id: string | null }>(`select name, status, conclusion, github_id::text from checks where org_id = $1 and repo_id = $2 and head_sha = $3 order by name`, [c.orgId, pr.repo_id, pr.head_sha])).rows;
+  const required = (await db.query<{ required_checks: string[] | null }>(`select required_checks from repo_config where org_id = $1 and repo_id = $2`, [c.orgId, pr.repo_id])).rows[0]?.required_checks ?? [];
+  return {
+    observedBy: "github", pullRequest: pr.number, headSha: pr.head_sha, requiredChecks: required,
+    checkRuns: rows.map((r) => ({ name: r.name, status: r.status, conclusion: r.conclusion, required: required.some((n) => checkMatches(n, r.name)), ...(r.github_id ? { githubCheckId: r.github_id } : {}) })),
+    note: rows.length ? "These are GitHub's own check results for the pull request head. A check list in an earlier station's output is that station's report, not GitHub's." : "GitHub has reported no check run for this head yet. That is not a failure: say it is not known, and do not mark a check failed because you could not see its log.",
+  };
+}
+
 /** Station handoff (spec 10.2): the latest confirmed brief and the previous stations' structured results, not a transcript. */
 async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   const brief = (await db.query(`select body from brief_versions where org_id = $1 and wo_id = $2 order by version desc limit 1`, [c.orgId, c.woId])).rows[0]?.body;
@@ -232,8 +249,9 @@ async function handoff(db: Queryable, c: RunCtx): Promise<unknown> {
   const sw = swarmOf(c.woData);
   const scouts = !sc && sw?.endedAt && sw.station === c.station ? sw.scouts.map((x) => ({ id: x.id, question: x.question, focus: x.focus, state: x.state, summary: x.summary ?? "" })) : undefined;
   const change = await changeFact(db, c, prior as StationResultRow[]);
+  const ci = c.station === "build" ? null : await ciFact(db, c);
   return {
-    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, ...(change ? { change } : {}), previous: compactPrevious(prior as StationResultRow[], c.woId), documents, dialogue, sources, research,
+    workOrder: { id: c.woId, title, class: c.woClass }, brief: brief ?? null, ...(change ? { change } : {}), ...(ci ? { ci } : {}), previous: compactPrevious(prior as StationResultRow[], c.woId), documents, dialogue, sources, research,
     ...(sc ? { scout: { id: sc.id, question: sc.question, focus: sc.focus, note: `You are scout ${sc.id}. Answer only this question, write your findings to research/scout-${sc.id.toLowerCase()}.md with write_document, cite web sources, and end. You cannot send scouts or propose a plan.` } } : {}),
     ...(scouts ? { scouts } : {}),
   };

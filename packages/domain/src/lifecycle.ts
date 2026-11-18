@@ -35,7 +35,9 @@ export function checkMatches(required: string, checkName: string): boolean {
 /** What Verify reported for each criterion (agent-reported, recorded by the station), and the test runs it listed. */
 export interface Verification {
   criteria?: Array<{ criterion: string; result: string; evidence?: string }>;
-  testsRun?: Array<{ name: string; command?: string; result: string }>;
+  testsRun?: Array<{ name: string; command?: string; result: string; ms?: number }>;
+  /** The failed-test count the platform itself observed (not the agent's), when it observed one. */
+  observedFailed?: number;
 }
 
 const VERDICT: Record<string, string> = { pass: "met", passed: "met", met: "met", fail: "not met", failed: "not met", "not met": "not met" };
@@ -59,8 +61,13 @@ export function criteriaFor(wo: Pick<WorkOrder, "brief" | "cls">, verification?:
   const runs = Array.isArray(verification?.testsRun) ? verification!.testsRun! : [];
   return list.map((text, i) => {
     const v = reported.find((r) => typeof r?.criterion === "string" && norm(r.criterion) === norm(text)) ?? (i < Math.max(fromBrief, 1) ? reported[i] : undefined);
-    const status = v ? (VERDICT[String(v.result).toLowerCase()] ?? "not tested") : "not tested";
-    const tests = v && typeof v.evidence === "string" ? runs.filter((r) => typeof r?.name === "string" && r.name && v.evidence!.includes(r.name)).map((r) => ({ name: r.name, result: r.result === "pass" ? "pass" : "fail", ms: 0 })) : [];
+    const named = v && typeof v.evidence === "string" ? runs.filter((r) => typeof r?.name === "string" && r.name && v.evidence!.includes(r.name)) : [];
+    let status = v ? (VERDICT[String(v.result).toLowerCase()] ?? "not tested") : "not tested";
+    // The verdict is the agent's; the runs are evidence. A "met" is not kept when a run its own evidence names failed, nor when the platform observed
+    // failing tests and no run named for the criterion passed: it drops to "not met" in the first case and "not tested" (unconfirmed) in the second.
+    if (status === "met" && named.some((r) => r.result !== "pass")) status = "not met";
+    else if (status === "met" && (verification?.observedFailed ?? 0) > 0 && !named.some((r) => r.result === "pass")) status = "not tested";
+    const tests = named.map((r) => ({ name: r.name, result: r.result === "pass" ? "pass" : "fail", ms: Number.isFinite(r.ms) ? Math.max(0, Math.round(r.ms as number)) : 0 }));
     return { id: "AC-" + (i + 1), text, status, tests };
   });
 }

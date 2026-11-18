@@ -10,10 +10,13 @@ import { ANTHROPIC_BASE_URL } from "./route.js";
  */
 export const PYTHON_TEST_HOSTS = ["pypi.org", "files.pythonhosted.org"] as const;
 
-/** The GitHub host and the common package registries (spec 5.3 Outbound allow-list). Admins add more per org and per project. */
+/** The stations whose runs may run the repository's tests, so the only ones that get the package index. Every other station's run is refused those hosts. */
+export const TEST_STATIONS: readonly string[] = ["build", "verify"];
+
+/** The GitHub host and the common package registries, without the Python package index (that is per station, see TEST_STATIONS) (spec 5.3 Outbound allow-list). Admins add more per org and per project. */
 export const DEFAULT_RUN_HOSTS = [
   "github.com", "api.github.com", "codeload.github.com", "objects.githubusercontent.com",
-  "registry.npmjs.org", "registry.yarnpkg.com", ...PYTHON_TEST_HOSTS,
+  "registry.npmjs.org", "registry.yarnpkg.com",
   "proxy.golang.org", "sum.golang.org", "crates.io", "index.crates.io", "static.crates.io",
   "repo.maven.apache.org", "repo1.maven.org", "rubygems.org",
 ];
@@ -54,6 +57,7 @@ const jsonUrlHosts = (v: unknown, out: Set<string>): void => {
  */
 export async function runEgressHosts(db: Queryable, c: RunCtx): Promise<string[]> {
   const out = new Set<string>(DEFAULT_RUN_HOSTS);
+  if (TEST_STATIONS.includes(c.station)) for (const h of PYTHON_TEST_HOSTS) out.add(h);
   const org = await orgEgress(db, c.orgId);
   for (const h of org.hosts) out.add(h);
   const extra = (c.projectConfig.extra ?? {}) as { allowedHosts?: unknown };
