@@ -34,11 +34,11 @@ d("every station leaves a document", () => {
   afterAll(() => t.close());
   const w = world(() => t);
 
-  it("confirming the brief stores brief.md, versioned, authored by the person who confirmed", async () => {
+  it("confirming the brief stores brief.md, versioned, recorded by Gantry from the confirmed brief", async () => {
     const id = await w.atStation("research", "Brief document");
     const rows = await w.q<{ doc: string; version: number; station: string; author_kind: string; author_id: string; body: string }>(`select doc, version, station, author_kind, author_id, body from artefacts where wo_id = $1 and doc = 'brief.md' order by version`, [id]);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ version: 1, station: "intake", author_kind: "person" });
+    expect(rows[0]).toMatchObject({ version: 1, station: "intake", author_kind: "system" });
     expect(rows[0]!.body).toContain("# Brief (version 1)");
   });
 

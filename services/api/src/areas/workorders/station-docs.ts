@@ -87,5 +87,5 @@ export function briefMarkdown(brief: BriefLike, o: { version: number; cls: strin
 
 export async function recordBriefDocument(tx: Tx, d: { orgId: string; woId: string; version: number; brief: BriefLike; cls: string; route: string[]; by: string; byName: string }): Promise<void> {
   const body = briefMarkdown(d.brief, { version: d.version, cls: d.cls, route: d.route, by: d.byName });
-  await recordDocument(tx, { orgId: d.orgId, id: `art-brief-${d.woId}-v${d.version}`, woId: d.woId, attemptId: null, station: "intake", name: "brief.md", hash: await hash(body), mediaType: "text/markdown; charset=utf-8", size: body.length, body, author: d.by, authorKind: "person" });
+  await recordDocument(tx, { orgId: d.orgId, id: `art-brief-${d.woId}-v${d.version}`, woId: d.woId, attemptId: null, station: "intake", name: "brief.md", hash: await hash(body), mediaType: "text/markdown; charset=utf-8", size: body.length, body, author: null, authorKind: "system" });
 }
