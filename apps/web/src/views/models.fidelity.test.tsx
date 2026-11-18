@@ -55,15 +55,18 @@ describe("Models screen (Blueprint layout)", () => {
     expect(document.querySelector(".md-incident")).toBeNull();
   });
 
-  it("vendor cards: health chip (offline for a disconnected vendor), spend with cents, models enabled, last check, and a switch per model row with the context", async () => {
+  it("vendor cards: health chip (offline for a disconnected vendor), spend with cents, models enabled, last check, and a link to the vendor page whose table shows the context", async () => {
     mount("#models");
     const card = await byId("vendor-anthropic");
     expect(card.querySelector(".vendor-head .chip")!.textContent).toBe("healthy");
     expect([...card.querySelectorAll("dl.kv dt")].map((t) => t.textContent)).toEqual(["Spend this month", "Models", "Last check"]);
-    expect(card.textContent).toContain("$4,182.40 of $9,000");
+    expect(card.textContent).toContain("$4,182.40 / $9,000");
     expect(card.textContent).toContain("2 of 2 enabled");
-    expect(document.getElementById("md-table-anthropic")!.textContent).toContain("500k");
     expect((await byId("vendor-local")).querySelector(".vendor-head .chip")!.textContent).toBe("offline");
+    expect(document.getElementById("vp-table")).toBeNull();
+    cleanup();
+    mount("#models/vendors/anthropic");
+    expect((await byId("vp-table")).textContent).toContain("500k");
   });
 
   it("keeps the tab in the URL: ?tab=routing opens Routing in the prototype's layout, a click writes ?tab=prices", async () => {
@@ -104,7 +107,9 @@ describe("Models screen (Blueprint layout)", () => {
     expect(document.body.textContent).not.toContain("not connected");
     expect(document.querySelector(".md-manage")).toBeNull();
     expect((await byId("vendor-local")).className).not.toContain("is-off");
-    const sw = document.getElementById("mt-claude-opus-5-5")!;
+    cleanup();
+    mount("#models/vendors/anthropic");
+    const sw = await byId("mt-claude-opus-5-5");
     expect(sw.getAttribute("aria-disabled")).not.toBe("true");
   });
 

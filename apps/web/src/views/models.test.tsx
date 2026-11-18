@@ -80,7 +80,8 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
 }
 
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-function mount() {
+function mount(hash?: string) {
+  if (hash !== undefined) window.location.hash = hash;
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><ModelsView /></OverlayProvider></QueryClientProvider>);
@@ -196,44 +197,43 @@ describe("Reachability: every dialog and panel is a click away", () => {
     await waitFor(() => expect(writes(calls).find((c) => c.method === "POST" && c.path === "/api/v1/vendors")?.body).toMatchObject({ name: "Acme LLM" }));
   });
 
-  it("vendor card actions: Connect, Add model, Remove model and Disconnect each are reachable from the card", async () => {
+  it("vendor page actions: Connect, Add model, Remove model and Disconnect each are reachable from the vendor's page", async () => {
     setup();
-    mount();
-    fireEvent.click(await byId("vendor-connect-local"));
+    mount("#models/vendors/local");
+    fireEvent.click(await byId("vp-connect"));
     await byId("vc-submit");
-    fireEvent.click(document.querySelector<HTMLElement>("[role=dialog] button")!);
-    fireEvent.click(await byId("vendor-menu-anthropic"));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Add model/ }));
+    cleanup();
+    setup();
+    mount("#models/vendors/anthropic");
+    fireEvent.click(await byId("vp-add-model"));
     await byId("ma-ok");
     cleanup();
     setup();
-    mount();
-    fireEvent.click(await byId("vendor-menu-bedrock"));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Disconnect/ }));
+    mount("#models/vendors/bedrock");
+    fireEvent.click(await byId("vp-disconnect"));
     await byId("vd-submit");
     cleanup();
-    setup();
-    mount();
-    fireEvent.click(await byId("vendor-menu-bedrock"));
+    const calls = setup();
+    mount("#models/vendors/bedrock");
+    fireEvent.click(await waitFor(() => { const b = document.querySelector<HTMLElement>("[id^=mt-menu-]"); if (!b) throw new Error("no row menu"); return b; }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Remove model/ }));
-    await byId("md-rm-ok");
+    fireEvent.click(await byId("md-rm-ok"));
+    await waitFor(() => expect(writes(calls).find((c) => c.method === "DELETE" && c.path.startsWith("/api/v1/models/"))).toBeTruthy());
   });
 
   it("Discover models posts to the vendor's discover endpoint", async () => {
     const calls = setup({ "POST /api/v1/vendors/bedrock/discover": () => ok({ msg: "Listed." }) });
-    mount();
-    fireEvent.click(await byId("vendor-menu-bedrock"));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Discover models/ }));
+    mount("#models/vendors/bedrock");
+    fireEvent.click(await byId("vp-discover"));
     await waitFor(() => expect(writes(calls).find((c) => c.path === "/api/v1/vendors/bedrock/discover")).toBeTruthy());
   });
 
-  it("Remove model with several models asks which one first", async () => {
+  it("Remove model asks for confirmation for the very model whose menu was opened", async () => {
     setup();
-    mount();
-    fireEvent.click(await byId("vendor-menu-anthropic"));
+    mount("#models/vendors/anthropic");
+    fireEvent.click(await byId("mt-menu-claude-haiku-5-5"));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Remove model/ }));
-    fireEvent.click(await byId("rm-pick-claude-haiku-5-5"));
-    await byId("md-rm-ok");
+    expect((await byId("md-rm-ok")).closest("[role=dialog]")!.textContent).toContain("claude-haiku-5-5");
   });
 
   it("Prices: Publish prices publishes several models as one version; versions and the vendor roll-up are listed", async () => {

@@ -10,7 +10,7 @@ import { useUI } from "../../ui/overlay-context";
 import { hashFor, navigate } from "../../lib/router";
 import { Btn, Chip, Field, FilterBar, LockNote, Panel, SearchBox } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/SortTable";
-import { allModels, dec, usd } from "./kit";
+import { allModels, dec, usd, vendorHref } from "./kit";
 
 /** Model prices (Blueprint §1): a read table; publishing a new price version is the extra action. */
 export function ModelPrices({ vendors }: { vendors: Vendor[] }) {
@@ -164,7 +164,7 @@ export function PriceVersions() {
   );
 }
 
-/** What each vendor has spent this month against its budget. Read-only: a vendor's budget is set on its card in Vendors. */
+/** What each vendor has spent this month against its budget. Read-only: a vendor's budget is set from its page (Update key). */
 export function VendorBudgets({ vendors }: { vendors: Vendor[] }) {
   return (
     <Panel title="Vendor budgets">
@@ -174,7 +174,7 @@ export function VendorBudgets({ vendors }: { vendors: Vendor[] }) {
           return (
             <div key={v.id}>
               <div className="row">
-                <span>{v.name}</span>
+                <a href={vendorHref(v.id)}>{v.name}</a>
                 <span className="spacer" />
                 <span className="num small">{v.budget ? `${usd(v.mtd || 0)} / ${usd(v.budget)}` : `${usd(v.mtd || 0)} · no budget set`}</span>
               </div>
