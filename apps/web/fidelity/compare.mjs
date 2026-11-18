@@ -23,10 +23,10 @@ import vm from "node:vm";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = resolve(HERE, "..");
 const PROTO_DIR = "/home/reshif/Downloads/gantry-designs/design-3-blueprint";
-const OUT_DIR = join(PROTO_DIR, "fidelity");
+const OUT_DIR = process.env.FID_OUT || join(PROTO_DIR, "fidelity"); // FID_OUT: per-engineer output folder
 const PW = "/home/reshif/.npm/_npx/e41f203b7505f1fb/node_modules/playwright/index.mjs";
-const PROTO_PORT = 9423;
-const REAL_PORT = 9532;
+const PROTO_PORT = Number(process.env.FID_PROTO_PORT || 9423); // unique per parallel run
+const REAL_PORT = Number(process.env.FID_REAL_PORT || 9532);
 const FONTS = join(WEB, "src/assets/fonts");
 
 const argv = process.argv.slice(2);
