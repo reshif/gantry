@@ -390,7 +390,7 @@ export function DangerCard({ p }: TabProps) {
     ["Archive project", "Hides the project. History is kept for audit.", <Btn key="a" kind="danger" id="pcf-archive" guard={ad} label="Archive…" onClick={() => ui.typedConfirm({
       title: `Archive ${p.name}?`, sub: "It disappears from lists. History stays for audit. You can restore it from the audit ledger.", phrase: p.key, okLabel: "Archive", kind: "danger", guard: ad,
       body: <p className="small muted">Type the project key ({p.key}) to confirm.</p>,
-      onOk: async (text) => { const r = await ops.archiveProject(p.id, p.name, { ifMatch: p.version }); res(r, "Archived"); if (r.ok) navigate("projects"); return r.ok ? undefined : { ok: false, msg: r.msg }; },
+      onOk: async () => { const r = await ops.archiveProject(p.id, p.name, { ifMatch: p.version }); res(r, "Archived"); if (r.ok) navigate("projects"); return r.ok ? undefined : { ok: false, msg: r.msg }; },
     })} />],
   ];
   return (
