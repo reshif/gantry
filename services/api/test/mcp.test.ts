@@ -299,6 +299,23 @@ d("MCP registry (spec 8.8, 12.4)", () => {
     expect((await g(ADMIN, {})).status).toBe(409);
   });
 
+  it("S-22: a Factory Admin who requested the work order pre-authorises with a reason (audited override); no reason is refused with needs override_reason", async () => {
+    await w.insertWo("WO-mcp-2", { project: "payments", repo: "payments-api", state: "running", position: "build", requestedBy: ADMIN });
+    await w.q(`insert into attempts (org_id, id, wo_id, station, visit, state) values ($1,'at-mcp-2','WO-mcp-2','build',1,'running')`, [t.orgId]);
+    const g = (o: Record<string, unknown>) => w.call(ADMIN, "POST", "/api/v1/mcp/grants", { wo: "WO-mcp-2", tools: [`${id}/update_page`], ...o }, { "idempotency-key": "g-" + randomBytes(4).toString("hex") });
+    const bare = await g({});
+    expect(bare.status).toBe(403);
+    expect(bare.body.needs).toBe("override_reason");
+    expect((await g({ reason: "no" })).body.needs).toBe("override_reason");
+    expect((await w.q(`select data from attempts where id = 'at-mcp-2'`))[0].data.writeGrants ?? null).toBeNull();
+    const ok = await g({ reason: "Lone admin; reviewed the tool" });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect((await w.q(`select data from attempts where id = 'at-mcp-2'`))[0].data.writeGrants).toEqual([`${id}/update_page`]);
+    expect((await evs("mcp.grant")).at(-1)!.after).toMatchObject({ override: true, reason: "Lone admin; reviewed the tool", requester: true });
+    // a non-admin is unchanged: still refused, a reason does not help
+    expect((await w.call("p-daniel", "POST", "/api/v1/mcp/grants", { wo: "WO-mcp-2", tools: [`${id}/update_page`], reason: "please please" }, { "idempotency-key": "g-nd" })).status).toBe(403);
+  });
+
   it("a killed factory refuses every registry change, with the stop's reason", async () => {
     await w.q(`insert into stops (org_id, id, scope_type, mode, reason, set_by) values ($1,'factory:kill-mcp','factory','kill','drill','p-asha')`, [t.orgId]);
     const r = await w.call(ADMIN, "PATCH", `/api/v1/mcp/servers/${id}`, { sensitivity: "public" });
