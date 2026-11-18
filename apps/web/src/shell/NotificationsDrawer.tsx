@@ -4,6 +4,9 @@ import { useActivity, useHome } from "../api/queries";
 import { navigate } from "../lib/router";
 import { setProject } from "../lib/prefs";
 import { Avatar, Btn } from "../ui/primitives";
+import { useActors } from "../ui/actors";
+import { eventSentence } from "../lib/eventText";
+import { useCatalog } from "../views/projects/kit";
 import { useUI } from "../ui/overlay-context";
 import { Async } from "../ui/async";
 
@@ -32,6 +35,9 @@ export function NotificationsBody({ close }: { close: () => void }) {
   const home = useHome();
   const act = useActivity();
   const ui = useUI();
+  const actor = useActors();
+  const cat = useCatalog();
+  const name = (id: string | null | undefined) => actor(id).name.replace(" (agent)", "");
   const gates = (home.data?.approvals ?? []).filter((a) => a.wo).slice(0, 4);
   const waiting = (home.data?.approvals.length ?? 0) + (home.data?.conversations.length ?? 0);
   const events = (Array.isArray(act.data) ? act.data : (act.data?.items ?? [])).slice(0, 14);
@@ -63,8 +69,8 @@ export function NotificationsBody({ close }: { close: () => void }) {
                     <li key={e.id}>
                       <Avatar id={e.by} size="sm" />
                       <div className="grow">
-                        <div className="trunc">{(e as { text?: string }).text ?? e.type}</div>
-                        <div className="small muted">{`${e.type} · ${e.wo ?? ""} · ${ago(e.at)}`}</div>
+                        <div>{eventSentence(e, { cat, name })}</div>
+                        <div className="small muted">{ago(e.at)}</div>
                       </div>
                     </li>
                   ))}

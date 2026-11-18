@@ -165,7 +165,7 @@ describe("shell fidelity", () => {
     api();
     render(<App />);
     fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
-    expect(await screen.findByText("View as", { selector: ".micro" })).toBeTruthy();
+    expect(await screen.findByText("View as (preview only)", { selector: ".micro" })).toBeTruthy();
     const items = screen.getAllByRole("menuitem");
     expect(items.map((m) => m.textContent)).toEqual(["My account", "Factory admin", "Approver", "Read-only viewer", "Sign out"]);
     expect(items[1]?.getAttribute("aria-current")).toBe("true");

@@ -59,7 +59,7 @@ function GateTable({ rows }: { rows: GateIt[] }) {
     // oldest first is ascending by the time the gate opened, as the prototype sorts it
     { key: "wait", label: "Waiting", sort: (r) => -r.waitMs, render: (r) => WaitText(r.waitMs) },
     { key: "p", label: "Priority", render: (r) => (r.a.priority ? <Chip text={r.a.priority} cls={r.a.priority === "P0" || r.a.priority === "P1" ? "bad" : "info"} /> : <span className="muted" title="The server did not send a priority">—</span>) },
-    { key: "a", label: "", align: "end", render: (r) => <div className="row" style={{ justifyContent: "flex-end" }}><GateActions a={r.a} idPrefix="inb" />{r.a.wo ? <WoActions wo={r.a.wo} project={r.project} idPrefix="inb-g" omit={["primary"]} /> : null}</div> },
+    { key: "a", label: "", align: "end", render: (r) => <div className="act-stack"><div className="act-decide"><GateActions a={r.a} idPrefix="inb" /></div>{r.a.wo ? <WoActions wo={r.a.wo} project={r.project} idPrefix="inb-g" omit={["primary"]} /> : null}</div> },
   ];
   return <DataTable proto id="inbox-g" caption="Approvals waiting for a decision" columns={cols} rows={rows} rowKey={(r) => r.key} rowId={(r) => `inb-${r.key}`} rowHref={(r) => WO_LINK(r.a.wo ?? "", r.project)} rowLabel={(r) => `Open ${r.a.wo}`} sort={sort} onSort={(n) => setSortQ(`${n.key}:${n.dir === 1 ? "asc" : "desc"}`)} pageSize={12} />;
 }
@@ -86,7 +86,8 @@ function QuestionItem({ it }: { it: Extract<Item, { kind: "question" }> }) {
       <Avatar id={c.from ?? null} />
       <div className="grow">
         <div className="row"><a className="pri mono" href={WO_LINK(c.wo, c.project)}>{c.wo}</a><Chip text="Awaiting answer" cls="info" /></div>
-        <div className="small muted trunc">{c.title}</div>
+        <div className="pri-cell-title">{c.title}</div>
+        {c.question ? <div className="small muted">{c.question}</div> : null}
       </div>
       <WoActions wo={c.wo} project={c.project} needs={{ kind: "question", text: "", mine: true }} idPrefix="inb" />
     </li>
@@ -101,7 +102,7 @@ function StuckItem({ it }: { it: Extract<Item, { kind: "stuck" }> }) {
     <li id={`inb-${it.key}`} className="inb-row">
       <a className="pri mono" href={WO_LINK(c.wo, c.project)}>{c.wo}</a>
       <div className="grow">
-        <div className="trunc">{c.title}</div>
+        <div>{c.title}</div>
         <div className="small" style={{ color: "var(--bad)" }}>{s.reason || c.question || "This work order stopped and needs a person."}</div>
       </div>
       <WoActions wo={c.wo} project={c.project} idPrefix="inb" />

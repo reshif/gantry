@@ -8,6 +8,7 @@ import { Icon } from "./Icon";
 import { Btn, Field, guardProps } from "./primitives";
 import { UIContext, type DialogAction, type DialogOpts, type MenuItem, type ToastAction, type ToastKind, type UIApi } from "./overlay-context";
 import { tip } from "./Tip";
+import { parseHash } from "../lib/router";
 import { DirtyScope, useLeaveGuard, type DirtyScopeApi } from "../lib/useLeaveGuard";
 import "../lib/data.css";
 import { Modal, useModalLayer, useScrimClose } from "./Modal";
@@ -428,11 +429,16 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     };
   }, [toast, closePopover]);
 
-  // legacy: a route change closes the drawer and any popover
+  // A route change closes the drawer, any popover and every open dialog, so nothing stays open over a screen it does not belong to.
+  // Only a change of screen counts (the view and its project): opening or closing a drawer or editing the query of the same screen leaves a dialog open.
+  const pathOf = () => { const l = parseHash(window.location.hash); return `${l.project ?? ""}|${l.id}`; };
+  const lastPath = useRef(pathOf());
   useEffect(() => {
     const onHash = () => {
       setDrawer(null);
       closePopover();
+      const path = pathOf();
+      if (path !== lastPath.current) { lastPath.current = path; setStack([]); }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);

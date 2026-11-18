@@ -30,3 +30,14 @@
   .inb-filters, .inb-filters .seg { max-width: 100%; }
   .inb-filters .seg { overflow-x: auto; }
 }
+
+/* One tidy action bar: decisions and links in one wrapping row (Home), or two fixed rows right-aligned in a table cell (Inbox). */
+.act-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.act-bar .wo-acts { display: contents; }
+.act-stack { display: grid; justify-items: end; gap: var(--s2); }
+.act-stack .wo-acts { display: flex; flex-wrap: nowrap; gap: var(--s2); justify-content: flex-end; }
+.act-decide { display: grid; grid-template-columns: repeat(3, max-content); justify-content: end; gap: var(--s2); }
+.act-decide > :first-child { grid-column: 1; }
+.act-decide > :last-child { grid-column: 3; }
+.act-stack .btn, .act-bar .btn { white-space: nowrap; }
+@media (max-width: 560px) { .act-decide { grid-template-columns: repeat(3, max-content); } }

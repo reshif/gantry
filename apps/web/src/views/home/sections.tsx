@@ -108,11 +108,13 @@ function GateRow({ a }: { a: Approval }) {
     <li className="hm-need">
       <div className="grow">
         <div className="row"><a className="pri mono" href={hashFor("record", wo, a.project)} id={`hm-my-wo-${wo}`}>{wo}</a><Chip text={pendingTitle(a)} cls="warn" /></div>
-        <div className="trunc hm-need-t">{a.title}</div>
+        <div className="hm-need-t">{a.title}</div>
         <div className="small muted">{`${a.projectName} · waiting ${agoMs(a.waitMs ?? 0)}`}</div>
-        {wo ? <div style={{ marginTop: 6 }}><WoActions wo={wo} project={a.project ?? ""} idPrefix="hm-my" omit={["primary"]} /></div> : null}
+        <div className="act-bar" style={{ marginTop: 8 }}>
+          <GateActions a={a} idPrefix="hm-my" />
+          {wo ? <WoActions wo={wo} project={a.project ?? ""} idPrefix="hm-my" omit={["primary"]} /> : null}
+        </div>
       </div>
-      <GateActions a={a} idPrefix="hm-my" />
     </li>
   );
 }
