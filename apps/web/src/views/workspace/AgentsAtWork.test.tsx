@@ -55,6 +55,15 @@ describe("Agents at work (prototype workspace)", () => {
     await waitFor(() => expect(window.location.hash).toMatch(/conversations(\/WO-|$)/));
   });
 
+  it("a search that matches nothing keeps the totals: Agents busy reads 0 / <all agents>", async () => {
+    window.history.replaceState(null, "", "/?q=zzzzzz");
+    mockApi();
+    mount(<AgentsAtWork />);
+    const tile = await screen.findByText("Agents busy");
+    await waitFor(() => expect(tile.closest(".stat")?.textContent).toMatch(/0 \/ [6-9]|0 \/ \d\d/));
+    expect(document.querySelectorAll(".ws-card").length).toBe(0);
+  });
+
   it("?state=loading shows the shared loading skeleton", async () => {
     window.history.replaceState(null, "", "/?state=loading");
     mockApi();

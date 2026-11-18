@@ -67,9 +67,9 @@ export default function HomeView() {
   }
 
   const scopeId = pickProject(me, prefs.project);
-  const scoped = projects.filter((p) => p.id === scopeId);
+  const scoped = prefs.scopeAll ? [] : projects.filter((p) => p.id === scopeId);
   const inView = scoped.length ? scoped : projects;
-  const scopeName = scoped[0]?.name ?? "all projects";
+  const scopeName = scoped[0]?.name ?? "All projects";
   const nameOf = (id: string | null | undefined) => actors(id).name.replace(" (agent)", "");
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
@@ -77,7 +77,7 @@ export default function HomeView() {
 
   /* what needs a person (prototype: the open approvals, five of them, with the count of all open): gate and onboarding approvals and the proposals and restores the server
      puts in front of this person, in the inbox's order. Health items (a blocked work order, a halted project) are not approvals: they show in the Blocked tile and the project tiles. */
-  const items = allItems.filter((i) => (i.kind === "gate" || i.kind === "onboarding" || i.kind === "other") && !(i.kind === "other" && i.x.restore?.scope === "factory"));
+  const items = allItems.filter((i) => (!scoped.length || i.project === scoped[0]?.id) && (i.kind === "gate" || i.kind === "onboarding" || i.kind === "other") && !(i.kind === "other" && i.x.restore?.scope === "factory"));
   const att = s.attention ?? [];
   const killBanner = att.find((a) => a.restore?.scope === "factory");
   const waitSub = (ms: number) => (ms ? ` · waiting ${agoShort(ms)}` : "");

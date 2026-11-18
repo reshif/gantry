@@ -91,7 +91,7 @@ export function AgentsAtWork() {
       {override ? <StateBody state={override} /> : <Async query={floorQ} what="the agents on this project" id="ws-agents" isEmpty={() => false}>{() => (
         <>
           <Stats items={[
-            { l: "Agents busy", v: `${busy} / ${list.length}`, tone: "info" },
+            { l: "Agents busy", v: `${busy} / ${cards.length}`, tone: "info" },
             { l: "Runs in flight", v: runs, tone: "agent" },
             { l: "Tokens in flight", v: compact(tokens), d: "last hour, est." },
             { l: "Cost per hour", v: `$${perHour.toFixed(2)}` },

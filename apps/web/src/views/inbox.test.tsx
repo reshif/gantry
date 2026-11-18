@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InboxView from "./inbox";
+import { updatePrefs } from "../lib/prefs";
 import { clearDecided } from "../lib/decided";
 import { mockApi, mount, resetApp } from "./floor/testkit";
 
@@ -31,6 +32,19 @@ const traveler = (allowed: boolean) => ({ id: "WO-2398", project: "payments", al
 const review = async (nth = 0) => { const b = await screen.findAllByRole("button", { name: "Review" }); fireEvent.click(b[nth]!); };
 
 describe("Inbox", () => {
+  it("follows the switcher's project scope: a project hides the other projects' approvals, All projects shows them", async () => {
+    const OTHER = { ...GATE, wo: "WO-7", project: "storefront", projectName: "Storefront" };
+    mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, OTHER], conversations: [] }, attention: [] }) }) });
+    updatePrefs({ scopeAll: false, project: "payments" });
+    mount(<InboxView />);
+    expect(await screen.findByText("Approve spec · G2 for WO-2398")).toBeTruthy();
+    expect(screen.queryByText("Approve spec · G2 for WO-7")).toBeNull();
+    cleanup();
+    updatePrefs({ scopeAll: true });
+    mount(<InboxView />);
+    expect(await screen.findByText("Approve spec · G2 for WO-7")).toBeTruthy();
+  });
+
   it("lists approvals in one table and questions on their own tab", async () => {
     mockApi({ "GET /api/v1/home": () => ({ body: home({ waiting: { approvals: [GATE, ONB], conversations: [CONV] }, attention: [] }) }) });
     mount(<InboxView />);
