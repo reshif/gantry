@@ -157,4 +157,29 @@ d("attempt.dispatch and run.result", () => {
     await w.drain();
     expect((await w.q(`select data from runs where id = $1`, [runId]))[0].data).toMatchObject({ adapter: "stub", dispatch: { phase: "started" } });
   });
+
+  // ---- Lifecycle gap 6 (statechart model: AnAgentThatIsOffNeverRuns): the station's agent must be on for its run to start.
+  it("gap 6: an agent that was turned off after the attempt was queued does not run; the order goes to Needs a person with the way forward", async () => {
+    await w.q(`update agents set status = 'paused' where org_id = $1 and id = 'ag-build'`, [w.orgId]);
+    const { attemptId, runId } = await w.workOrderAt("WO-9040", { agent: "ag-build" });
+    await w.drain();
+    expect(w.launcher.calls.filter((c) => c.op === "start")).toHaveLength(0);
+    expect(w.launcher.runs.has(runId)).toBe(false);
+    expect((await w.q(`select count(*)::int as n from runs where id = $1`, [runId]))[0].n).toBe(0);
+    expect((await w.q(`select state from attempts where id = $1`, [attemptId]))[0].state).toBe("cancelled");
+    const wo = (await w.q(`select state, position, data from work_orders where id = 'WO-9040'`))[0];
+    expect(wo).toMatchObject({ state: "parked", position: "person" });
+    expect(wo.data.bayReason).toMatch(/agent is turned off; turn it on or reassign the station\./);
+    expect(wo.data.bayReason).toContain("Build");
+  });
+
+  it("gap 6: a live version that was never promoted does not run either", async () => {
+    await w.q(`update agents set data = data || '{"promoted": []}'::jsonb where org_id = $1 and id = 'ag-build'`, [w.orgId]);
+    await w.workOrderAt("WO-9041", { agent: "ag-build" });
+    await w.drain();
+    expect(w.launcher.calls.filter((c) => c.op === "start")).toHaveLength(0);
+    const wo = (await w.q(`select state, position, data from work_orders where id = 'WO-9041'`))[0];
+    expect(wo).toMatchObject({ state: "parked", position: "person" });
+    expect(wo.data.bayReason).toMatch(/eval suite/);
+  });
 });

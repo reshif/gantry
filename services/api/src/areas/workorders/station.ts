@@ -262,6 +262,29 @@ async function interruptions(tx: Tx, orgId: string, woId: string, station: strin
   return Number((await tx.query(`select count(*)::int as n from attempts where org_id = $1 and wo_id = $2 and station = $3 and outcome in ('interrupted','lease_expired')`, [orgId, woId, station])).rows[0].n);
 }
 
+/**
+ * The station's agent is turned off (or its live version never passed its eval suite), so its run is not started: the attempt is cancelled and the work order goes to
+ * Needs a person with the reason, where Retry (after turning the agent on) or assigning another agent moves it. Nothing about the work is lost or failed.
+ * Safe to call twice and for a superseded attempt (nothing happens).
+ */
+export async function refuseStationRun(tx: Tx, attemptId: string, fencing: number, reason: string, o: { now?: Date } = {}): Promise<{ applied: boolean }> {
+  const found = (await tx.query<{ org_id: string; wo_id: string }>(`select org_id, wo_id from attempts where id = $1 and fencing = $2`, [attemptId, fencing])).rows[0];
+  if (!found) return { applied: false };
+  const w = await lockWo(tx, found.org_id, found.wo_id);
+  if (w.source === "eval" || w.source === "onboarding") return { applied: false };
+  if (!(await attemptIsCurrent(tx, found.org_id, attemptId, fencing)).current || w.state === "done" || w.state === "killed") return { applied: false };
+  const fx = await fxFor(tx, found.org_id, "system", o.now ?? new Date());
+  if (bayOf(fx.catalog, w)) return { applied: false };
+  closeEntry(w, fx, "not started", reason);
+  await cancelAttempts(fx, w, "agent_off");
+  await needsPerson(fx, w, reason, "failed");
+  await saveWo(tx, found.org_id, w);
+  await flushFx(fx);
+  await dispatchQueued(fx, w.project);
+  await flushFx(fx);
+  return { applied: true };
+}
+
 /** F9: a run whose lease lapsed is retried as a fresh attempt, up to a bound, then the work order goes to "Needs a person". Returns the attempts handled. */
 export async function expireLeases(tx: Tx, o: { now?: Date; limit?: number } = {}): Promise<string[]> {
   const now = o.now ?? new Date();
