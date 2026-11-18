@@ -66,11 +66,11 @@ describe("Conversations list", () => {
     expect(screen.queryByText("Nothing waits on you")).toBeNull();
   });
 
-  it("lists the threads (WO-id · title, last message, an asks chip) linking to conversations/<id>, with the picked one in a second panel and Open record", async () => {
+  it("lists the threads (WO-id, full title, last message, a reason chip) linking to conversations/<id>, with the picked one in a second panel and Open record", async () => {
     showList([row(), row({ id: "WO-9", title: "Other", waitingOn: "agent", unread: false, latest: null, started: false })]);
-    expect(await screen.findByText("asks")).toBeTruthy();
+    expect(await screen.findByText("Gate G0G1")).toBeTruthy();
     expect(screen.getByText(/Which endpoint is this for\?/)).toBeTruthy();
-    const link = screen.getByRole("link", { name: new RegExp(`${W.id} · `) });
+    const link = screen.getByRole("link", { name: new RegExp(`${W.id}.*${W.title.slice(0, 12)}`) });
     expect(link.getAttribute("href")).toBe(`#/p/payments/conversations/${W.id}`);
     expect(screen.queryByRole("link", { name: /WO-9/ })).toBeNull();
     expect(await screen.findByRole("button", { name: "Open record" })).toBeTruthy();
@@ -167,7 +167,7 @@ describe("Work-order session", () => {
     expect(screen.queryByRole("button", { name: "Traveler" })).toBeNull();
     expect(screen.queryByRole("list", { name: "The belt" })).toBeNull();
     expect(document.querySelector(".wos-side-inline")).toBeNull();
-    expect(document.querySelector("#wos .who")?.textContent).toMatch(/ · \d{2} [A-Z][a-z]{2} \d{2}:\d{2}$/);
+    expect(document.querySelector("#wos .cv-who")?.textContent).toMatch(/ · \d{2} [A-Z][a-z]{2} \d{2}:\d{2}$/);
     fireEvent.click(screen.getByRole("button", { name: "Only the API" }));
     await waitFor(() => expect(posts(calls, `/api/v1/work-orders/${W.id}/session/messages`)).toHaveLength(1));
   });

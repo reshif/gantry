@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMe } from "../../api/queries";
 import type { WoCard } from "@gantry/domain";
-import { fmt, isBriefScaffold } from "@gantry/domain";
+import { fmt } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { Avatar, Btn, Chip, Empty, Who } from "../../ui/primitives";
 import { Async } from "../../ui/async";
@@ -19,163 +19,22 @@ import { useOpenTraveler } from "../../shell/useTraveler";
 import { useOpenRecordRoute } from "../record/nav";
 import { Markdown } from "../console/Markdown";
 import { ApproversPanel } from "../traveler/Approvers";
-import { ProgressLine, QuestionCard, useLiveTurn, useThreadEnd } from "../session/kit";
+import { ProgressLine, useLiveTurn, useThreadEnd } from "../session/kit";
 import { MentionList, useMentions } from "./Mentions";
-import { decideWo, markWoSeen, sendWoTurn, useWoSession, type WoSession, type WoSessionMessage } from "./session-api";
-import { DocViewer } from "../documents/DocViewer";
-import { AssumptionList, StationQuestionCard } from "../documents/Dialogue";
-import { ResearchPlanCard } from "../documents/Research";
+import { markWoSeen, sendWoTurn, useWoSession, type WoSession, type WoSessionMessage } from "./session-api";
 import { LiveRun, RunTimelineView } from "../documents/Timeline";
-import { GateNotes, ObjectionCard, SwarmBoard } from "../documents/Swarm";
+import { GateNotes } from "../documents/Swarm";
 import { navigate } from "../../lib/router";
 import { fmtDate, plainName } from "../dossier/time";
 import { createThread, useWsAgents } from "../workspace/api";
 import { mentionChoices, mentionOf, queueAsk } from "../workspace/mention";
 
-type Proposal = Extract<WoCard, { kind: "proposal" }>;
+import { AnswerText, BriefBlock, Cards, useOpenDocument } from "./Cards";
+import { Transcript, panelDate } from "./Transcript";
+import { buildTranscript } from "./chat";
+import { useStickyScroll } from "./scroll";
+export { useOpenDocument, panelDate };
 
-/* ------------------------------------------------------------------ cards ---- */
-
-function BriefBlock({ b }: { b: NonNullable<Proposal["brief"]> }) {
-  const sec = (label: string, xs: string[]) => (xs.length ? <div><strong className="small">{label}</strong><ul className="small wos-list">{xs.map((x) => <li key={x}>{x}</li>)}</ul></div> : null);
-  return (
-    <div className="wos-brief">
-      <p className="wos-goal">{b.goal}</p>
-      {sec("In scope", b.scopeIn)}{sec("Out of scope", b.scopeOut)}{sec("Acceptance criteria", b.ac)}{sec("Risks", b.risks)}{sec("Open questions", b.open)}{sec("Decisions", b.decisions)}
-      {b.estimate ? <p className="small muted">{`Estimate: ${b.estimate}`}</p> : null}
-    </div>
-  );
-}
-
-function ProposalCard({ m, c, s, agent, send }: { m: WoSessionMessage; c: Proposal; s: WoSession; agent: string; send: (b: { kind: "continue" }) => void }) {
-  const ui = useUI();
-  const [asking, setAsking] = useState(false);
-  const [full, setFull] = useState(false);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const pending = c.status === "pending";
-  const mayApprove = c.what === "brief" ? s.can.confirm : s.can.talk;
-  const why = c.what === "brief" ? s.can.confirmWhy || "Only someone who may confirm briefs can approve this." : s.can.talkWhy;
-  const run = async (d: "approve" | "changes" | "discard") => {
-    setBusy(true);
-    const r = await decideWo(s.woId, m.id, c.id, d, d === "changes" ? text : undefined);
-    setBusy(false);
-    ui.toast(r.msg, r.ok ? "ok" : "error");
-    if (r.ok && d === "changes") { setAsking(false); setText(""); send({ kind: "continue" }); }
-  };
-  const label: Record<Proposal["status"], string> = { pending: "Waiting for you", approved: "Approved", changes: "Changes requested", discarded: "Discarded", superseded: "Replaced by a newer proposal", failed: "Failed" };
-  const approveLabel = c.what === "brief" ? "Approve and confirm the brief" : c.what === "reclassify" ? `Approve: reclassify as ${c.cls?.name ?? ""}` : "Approve the decline";
-  return (
-    <article className={`osx-card osx-proposal is-${c.status}`} id={`wos-prop-${c.id}`} aria-label={c.title}>
-      <header className="osx-card-h">
-        <strong>{c.title}</strong>
-        <Chip text={c.mode === "agent" ? `Drafted by ${agent}` : "Rule-based (no agent)"} cls={c.mode === "agent" ? "chip-accent" : ""} />
-        <span className={`osx-status st-${c.status}`}>{label[c.status]}{c.decidedBy && c.status !== "superseded" ? <> · <Who id={c.decidedBy} /></> : null}</span>
-      </header>
-      <p className="small">{c.summary}</p>
-      {c.what === "brief" && c.cls ? <p className="small muted">{`Class: ${c.cls.name}${c.cls.confidence !== undefined ? ` · ${Math.round(c.cls.confidence * 100)}%` : ""}${c.cls.rationale ? ` · ${c.cls.rationale}` : ""}`}</p> : null}
-      {c.what === "brief" && c.changes ? (
-        c.changes.length ? (
-          <ul className="wos-diff" aria-label="What changes against the current brief">
-            {c.changes.map((ch) => {
-              // read from before/after so proposals stored before the rule changed show the same way: seeded placeholders are not
-              // a person's words, and an open question that goes away was answered
-              const gone = ch.before.filter((x) => !ch.after.includes(x));
-              const removed = ch.field === "open" ? [] : gone.filter((x) => !isBriefScaffold(x));
-              const resolved = ch.field === "open" ? gone : [];
-              if (!removed.length && !ch.added.length && !resolved.length) return null;
-              return (
-                <li key={ch.field}>
-                  <strong className="small">{ch.label}</strong>
-                  {removed.map((x) => <div key={`r${x}`} className="small wos-minus">{`- ${x}`}</div>)}
-                  {ch.added.map((x) => <div key={`a${x}`} className="small wos-plus">{`+ ${x}`}</div>)}
-                  {resolved.map((x) => <div key={`q${x}`} className="small wos-resolved">{`Answered: ${x}`}</div>)}
-                </li>
-              );
-            })}
-          </ul>
-        ) : <p className="small muted">No change against the brief as it stands.</p>
-      ) : null}
-      {c.what === "brief" && c.brief ? <><button type="button" className="linkish small" aria-expanded={full} onClick={() => setFull(!full)}>{full ? "Hide the full brief" : "Show the full brief"}</button>{full ? <BriefBlock b={c.brief} /> : null}</> : null}
-      {c.route?.length ? <p className="small muted">{`Route: ${c.route.join(" → ")}`}</p> : null}
-      {c.what !== "brief" && c.reason ? <p className="small">{`Reason (audited): ${c.reason}`}</p> : null}
-      {c.what === "brief" ? <p className="muted small">Nothing is confirmed until a person approves. Approving confirms the brief at G0+G1 and starts the route.</p> : null}
-      {pending ? (
-        <div className="osx-actions">
-          <Btn kind="primary" id={`wos-approve-${c.id}`} label={approveLabel} disabled={busy || !mayApprove} disabledReason={!mayApprove ? why : undefined} onClick={() => void run("approve")} />
-          {c.what === "brief" ? <Btn id={`wos-changes-${c.id}`} label="Ask for changes" disabled={busy || !s.can.talk} onClick={() => setAsking(!asking)} /> : null}
-          <Btn id={`wos-discard-${c.id}`} label="Discard" disabled={busy || !s.can.talk} onClick={() => void run("discard")} />
-        </div>
-      ) : null}
-      {pending && asking ? (
-        <div className="osx-ask">
-          <label className="small" htmlFor={`wos-changes-text-${c.id}`}>What should change?</label>
-          <textarea id={`wos-changes-text-${c.id}`} className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: also cover the retry path, and leave the admin API out." />
-          <Btn id={`wos-changes-send-${c.id}`} kind="primary" small label="Send" disabled={busy || text.trim().length < 3} onClick={() => void run("changes")} />
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-/** Opens a station document in the viewer, in a wide dialog over the conversation. */
-export function useOpenDocument() {
-  const ui = useUI();
-  return (woId: string, id?: string, project?: string) => ui.dialog({ title: "Station documents", kicker: woId, wide: true, body: <DocViewer woId={woId} initial={id} project={project} />, actions: [{ label: "Close" }] });
-}
-
-function DocLine({ s, c }: { s: WoSession; c: Extract<WoCard, { kind: "document" }> }) {
-  const open = useOpenDocument();
-  return (
-    <button type="button" className="osx-file wos-doc" id={`wos-doc-${c.id}`} onClick={() => open(s.woId, c.id, s.project)}>
-      <Icon name="page" />
-      <span className="mono">{c.name}</span>
-      <span className="muted small">{`version ${c.version}`}</span>
-      <span className="wos-doc-open small">Read</span>
-    </button>
-  );
-}
-
-function Cards({ m, s, agent, send, last }: { m: WoSessionMessage; s: WoSession; agent: string; send: (b: { kind: "message" | "continue"; text?: string }) => void; last: boolean }) {
-  return (
-    <>
-      {(m.data.cards ?? []).map((c, i) => {
-        if (c.kind === "progress") return <ProgressLine key={i} text={c.text} detail={c.detail} />;
-        if (c.kind === "question") return <QuestionCard key={i} question={c.question} options={c.options} answered={c.answered} last={last} answer={(t) => send({ kind: "message", text: t })} />;
-        if (c.kind === "document") return <DocLine key={i} s={s} c={c} />;
-        if (c.kind === "swarm") return s.swarm ? <SwarmBoard key={i} woId={s.woId} sw={s.swarm} canStop={!!s.can.park} stopWhy={s.can.parkWhy} /> : null;
-        if (c.kind === "objection") {
-          const o = s.dialogue.objections.find((x) => x.id === c.id);
-          return !o || m.role === "user" ? null : <ObjectionCard key={i} woId={s.woId} o={o} canDecide={s.research.canDecide} />;
-        }
-        if (c.kind === "research_plan") return m.role === "user" ? null : <ResearchPlanCard key={i} woId={s.woId} r={s.research} />;
-        if (c.kind === "station_question") {
-          const q = s.dialogue.questions.find((x) => x.id === c.id);
-          // A person's answer quotes the question it answers; the card itself lives on the agent's message.
-          if (!q || m.role === "user") return null;
-          return <StationQuestionCard key={i} woId={s.woId} q={q} mine={q.mine} canAnswer={s.can.talk} why={s.can.talkWhy} />;
-        }
-        if (c.kind === "assumptions") {
-          const items = s.dialogue.assumptions.filter((a) => a.station === c.station && (!c.attempt || a.attemptId === c.attempt));
-          return <AssumptionList key={i} woId={s.woId} items={items} canDecide={s.can.talk} />;
-        }
-        return <ProposalCard key={i} m={m} c={c} s={s} agent={agent} send={send} />;
-      })}
-    </>
-  );
-}
-
-/** A person's answer to a station question, quoting the question so the thread reads on its own. */
-function AnswerText({ m, s }: { m: WoSessionMessage; s: WoSession }) {
-  const qid = (m.data.cards ?? []).find((c) => c.kind === "station_question")?.id;
-  const q = s.dialogue.questions.find((x) => x.id === qid);
-  return (
-    <div className="osx-text wos-answer">
-      {q ? <p className="small muted wos-answer-q">{`Answer to ${q.station.charAt(0).toUpperCase()}${q.station.slice(1)}: “${q.question}”`}</p> : null}
-      <p className="wos-answer-a">{m.text}</p>
-    </div>
-  );
-}
 
 /** Side panel: what the stations wait on, the assumptions nobody confirmed yet, and the documents. */
 function SideDialogue({ s }: { s: WoSession }) {
@@ -227,10 +86,8 @@ function SideDialogue({ s }: { s: WoSession }) {
 
 /* ------------------------------------------------------------------ the page ---- */
 
-/** The prototype's message time: "13 Nov 15:43" (IST, as everywhere in the app). */
-export const panelDate = (t: number): string => new Date(t).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata", hour12: false }).replace(",", "");
 
-export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: string; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean; /** The Conversations page: the prototype's chat bubbles and composer inside the page's own panel. */ panel?: boolean }) {
+export function WoSessionPage({ woId, back, embedded, bare, panel, events }: { woId: string; /** The Conversations page: false leaves the line events out of the chat. */ events?: boolean; back: () => void; /** In the workspace, whose inbox is the way back. */ embedded?: boolean; /** On the work order page: no title bar of its own, the page header carries it. */ bare?: boolean; /** The Conversations page: the prototype's chat bubbles and composer inside the page's own panel. */ panel?: boolean }) {
   const q = useWoSession(woId);
   const me = useMe();
   const s = q.data;
@@ -247,6 +104,7 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
   const thread = useThreadEnd<HTMLDivElement>(s?.messages.length, live?.text);
   /** The person's own words show at once; they give way to the saved copy as soon as the thread has grown. */
   const [sent, setSent] = useState<{ text: string; base: number; at: number } | null>(null);
+  const scroll = useStickyScroll(woId, s?.messages.length, live?.text, events, sent?.at);
   const send = (body: { kind: "message" | "open" | "continue"; text?: string; mentions?: string[] }) => {
     turn.current = body;
     if (body.kind === "message" && body.text) setSent({ text: body.text, base: s?.messages.length ?? 0, at: Date.now() });
@@ -337,53 +195,43 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
   const panelName = (m: WoSessionMessage): string => (m.role === "user" || (m.author && m.author.startsWith("ag-")) ? actorOf(m.author).name.replace(" (agent)", "") : m.author === "system" ? "Gantry" : m.data.agent ?? agentName);
   const lastFrom = s.messages.length ? panelName(s.messages[s.messages.length - 1]!) : agentName;
   if (panel) {
+    const blocks = buildTranscript(s, events !== false);
+    const pending = sent && s.messages.length <= sent.base;
     return (
-      <div className="wos wos-panel stack" id="wos" data-wo={s.woId} role="region" aria-label={`Conversation ${s.woId}`}>
-        <div className="chat" id="wos-thread" role="log" aria-live="polite" ref={thread}>
-          {!s.messages.length && !live && !quick ? <Empty title="No conversation yet" text="Agents talk here when they need you." /> : null}
-          {s.messages.map((m) => (
-            <div key={m.id} className="wos-turn">
-              {m.data.kind === "update" ? (
-                <p className="osx-event small muted"><span>{fmt.stamp(m.at)}</span> {m.text}</p>
-              ) : (
-                <div className={`msg${m.role === "user" ? " me" : ""}`}>
-                  <Avatar id={m.author} />
-                  <div className="bub">
-                    <div className="who">{panelName(m)}{` · ${panelDate(m.at)}`}</div>
-                    {m.data.kind === "answer" ? <AnswerText m={m} s={s} /> : m.text ? (m.role === "assistant" && m.data.mode === "agent" ? <div className="osx-text"><Markdown text={m.text} /></div> : <p className="osx-text">{m.text}</p>) : null}
-                    {(m.data.mentions ?? []).filter((x) => !x.access).map((x) => <p key={x.id} className="small muted wos-mention-note">{`${x.name} cannot open this project yet. Mentioning them did not give them access: a project admin was asked.`}</p>)}
-                    <Cards m={m} s={s} agent={agentName} send={(b) => send(b)} last={m.id === lastId} />
+      <div className="wos wos-panel cv-body" id="wos" data-wo={s.woId} role="region" aria-label={`Conversation ${s.woId}`}>
+        <div className="cv-scroll" id="wos-thread" role="log" aria-live="polite" tabIndex={0} aria-label="Messages" ref={scroll.ref} onScroll={scroll.onScroll}>
+          <div className="chat cv-inner" ref={scroll.inner}>
+            {!s.messages.length && !live && !quick ? <Empty title="No conversation yet" text="Agents talk here when they need you." /> : null}
+            <Transcript s={s} blocks={blocks} agent={agentName} nameOf={panelName} mine={me?.person.id} send={(b) => send(b)} lastId={lastId} />
+            {pending ? (
+              <div className="cv-turn is-person is-you" id="wos-sent">
+                <div className="cv-col"><div className="cv-who">You<span className="muted">{` · ${panelDate(sent.at)}`}</span></div><div className="cv-msg"><p className="cv-text">{sent.text}</p></div></div>
+              </div>
+            ) : null}
+            {quick && !s.wo.closed && !pending ? (
+              <div className="callout" id="wos-asks-callout">
+                <b>{`${lastFrom} asks`}</b>{quick.text}
+                {quick.chips.length ? <div className="chips" style={{ marginTop: 8 }}>{quick.chips.map((o) => <button key={o} type="button" className="chipbtn" disabled={!s.can.talk} onClick={() => send({ kind: "message", text: o })}>{o}</button>)}</div> : null}
+              </div>
+            ) : null}
+            {live ? (
+              <div className="cv-turn is-agent" aria-busy="true">
+                <Avatar id={s.agent.id} />
+                <div className="cv-col">
+                  <div className="cv-who">{agentName}</div>
+                  <div className="cv-msg">
+                    {live.tools.length ? <p className="osx-progress small muted">{`Working: ${live.tools.map((t) => t.replace(/_/g, " ")).join(", ")}`}</p> : null}
+                    <div className="cv-text">{live.text ? <Markdown text={live.text} /> : "Reading the request…"}</div>
+                    {live.cards.map((c, i) => (c.kind === "progress" ? <ProgressLine key={i} text={c.text} /> : null))}
                   </div>
                 </div>
-              )}
-            </div>
-          ))}
-          {sent && s.messages.length <= sent.base ? (
-            <div className="msg me" id="wos-sent">
-              <Avatar id={me?.person.id} />
-              <div className="bub"><div className="who">{`${actorOf(me?.person.id).name} · ${panelDate(sent.at)}`}</div><p className="osx-text">{sent.text}</p></div>
-            </div>
-          ) : null}
-          {quick && !s.wo.closed && !(sent && s.messages.length <= sent.base) ? (
-            <div className="callout" id="wos-asks-callout">
-              <b>{`${lastFrom} asks`}</b>{quick.text}
-              {quick.chips.length ? <div className="chips" style={{ marginTop: 8 }}>{quick.chips.map((o) => <button key={o} type="button" className="chipbtn" disabled={!s.can.talk} onClick={() => send({ kind: "message", text: o })}>{o}</button>)}</div> : null}
-            </div>
-          ) : null}
-          {live ? (
-            <div className="msg" aria-busy="true">
-              <Avatar id={s.agent.id} />
-              <div className="bub">
-                <div className="who">{agentName}</div>
-                {live.tools.length ? <p className="osx-progress small muted">{`Working: ${live.tools.map((t) => t.replace(/_/g, " ")).join(", ")}`}</p> : null}
-                <div className="osx-text">{live.text ? <Markdown text={live.text} /> : "Reading the request…"}</div>
-                {live.cards.map((c, i) => (c.kind === "progress" ? <ProgressLine key={i} text={c.text} /> : null))}
               </div>
-            </div>
-          ) : null}
-          {error ? <p className="callout warn small" role="alert">{error}</p> : null}
+            ) : null}
+            {error ? <p className="callout warn small" role="alert">{error}</p> : null}
+          </div>
         </div>
-        <form className="wos-reply" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { writeFirst(); return; } submit(); }}>
+        {scroll.away ? <Btn small kind="primary" icon="down" cls="cv-jump" id="wos-jump" label="New messages" onClick={scroll.toEnd} /> : null}
+        <form className="wos-reply cv-composer" onSubmit={(e) => { e.preventDefault(); if (!draft.trim()) { writeFirst(); return; } scroll.stick(); submit(); }}>
           {choices.length ? (
             <ul className="slash-menu wos-mention-menu" id="wos-mentions" role="listbox" aria-label="Ask an agent in a side thread">
               {choices.map((a) => <li key={a.id} role="option" aria-selected="false" id={`wos-mention-${a.id}`} onMouseDown={(e) => { e.preventDefault(); setDraft(`@${a.name} `); }}><span className="strong">{`@${a.name}`}</span><span className="muted">{`${a.stationName} · answers in a side thread`}</span></li>)}
@@ -391,12 +239,10 @@ export function WoSessionPage({ woId, back, embedded, bare, panel }: { woId: str
           ) : null}
           <div className="wos-compose">
             <MentionList id={mentions.listId} list={mentions.list} active={mentions.active} pick={mentions.pick} />
-            <textarea id="wos-input" className="input" rows={2} placeholder="Reply to the agent…" aria-label="Reply" value={draft} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!draft.trim()) writeFirst(); else submit(); } }} />
+            <textarea id="wos-input" className="input" rows={2} placeholder="Reply to the agent…" aria-label="Reply" value={draft} disabled={!!live} {...(mentions.open ? { role: "combobox", "aria-expanded": true, "aria-controls": mentions.listId, "aria-autocomplete": "list" as const } : {})} onChange={(e) => { setDraft(e.target.value); mentions.setCaret(e.target.selectionStart); }} onKeyUp={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onClick={(e) => mentions.setCaret(e.currentTarget.selectionStart)} onKeyDown={(e) => { if (mentions.onKeyDown(e)) return; if (e.key === "Tab" && choices.length) { e.preventDefault(); setDraft(`@${choices[0]!.name} `); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!draft.trim()) writeFirst(); else { scroll.stick(); submit(); } } }} />
+            <Btn kind="primary" type="submit" id="wos-send" icon="send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || (!mention && !s.can.talk)} />
           </div>
           {mention ? <span className="small muted wos-mention-note" id="wos-mention-note">{`Asks ${mention.agent.name} in a side thread`}</span> : null}
-          <div className="row" style={{ marginTop: 8, justifyContent: "flex-end" }}>
-            <Btn kind="primary" type="submit" id="wos-send" label={mention ? `Ask ${mention.agent.name}` : "Send"} disabled={!!live || (!mention && !s.can.talk)} />
-          </div>
         </form>
       </div>
     );
