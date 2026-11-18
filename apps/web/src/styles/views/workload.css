@@ -1,5 +1,4 @@
 /* Workload view styles (#workload). Tokens only. */
-.view-workload { display: grid; gap: var(--s3); min-width: 0; }
 .wl-tools { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: flex-end; justify-content: space-between; }
 .wl-tools .filters { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: flex-end; }
 .wl-tools .field { min-width: 0; }

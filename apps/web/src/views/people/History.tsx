@@ -1,16 +1,9 @@
 import { useAudit } from "../../api/queries";
-import { fmt } from "@gantry/domain";
 import type { AuditEntry } from "@gantry/domain";
 import { Empty } from "../../ui/primitives";
 
-/** A before/after value as one short line: role lists by name, with the reason when the change carried one. */
-const show = (v: unknown): string => {
-  if (v == null) return "";
-  if (typeof v !== "object") return String(v);
-  const o = v as { roles?: unknown; role?: unknown; scope?: unknown; reason?: unknown };
-  const what = o.roles != null ? String(o.roles) : o.role != null ? `${String(o.role)}${o.scope ? ` @ ${String(o.scope)}` : ""}` : "";
-  return [what, o.reason ? `"${String(o.reason)}"` : ""].filter(Boolean).join(" ") || JSON.stringify(v);
-};
+/** The prototype's time stamp: "17 Nov 21:54" (day, short month, 24-hour time). */
+const when = (t: number): string => { const d = new Date(t); return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`; };
 
 /** The newest audit entries that mention an entity (legacy G.historyList). */
 export function HistoryList({ id, limit = 8 }: { id: string; limit?: number }) {
@@ -25,7 +18,7 @@ export function HistoryList({ id, limit = 8 }: { id: string; limit?: number }) {
       {items.map((e) => (
         <div key={e.id} className="info">
           <div className="mono">{`${e.action} ${e.target}`}</div>
-          <div className="when">{fmt.stamp(e.at)}{e.before != null || e.after != null ? <span className="small"> · {show(e.before)} → {show(e.after)}</span> : null}</div>
+          <div className="when">{when(e.at)}</div>
         </div>
       ))}
     </div>

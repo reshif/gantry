@@ -77,7 +77,7 @@ function useAgentUtilisation(agents: Array<{ id: string; station: string | null 
 export default function WorkloadView() {
   const ui = useUI();
   const me = useMe();
-  const [view, setView] = useUrlState("wview", "overview"); // overview (the prototype screen) | detail (suggestions, teams, waits, minutes)
+  const [view] = useUrlState("wview", "overview"); // overview (the prototype screen) | detail (suggestions, teams, waits, minutes)
   const [tab, setTab] = useUrlState("wtab", "people");
   const [win, setWin] = useUrlState("win", "7");
   const days = win === "1" ? 1 : 7;
@@ -105,9 +105,9 @@ export default function WorkloadView() {
   const busiest = people.filter((p) => p.status === "active").map((p) => ({ p, n: totalOf(p.id) })).sort((x, y) => y.n - x.n)[0];
 
   if (!me) return null;
-  const sub = <>Where work and approvals pile up, for people and for agents. <a className="rl" id="wl-view-link" href={`${window.location.pathname}${window.location.search}${window.location.hash}`} onClick={(e) => { e.preventDefault(); setView(detail ? "overview" : "detail"); }}>{detail ? "Back to the overview" : "Suggestions, teams and minutes"}</a></>;
+  const sub = "Where work and approvals pile up, for people and for agents."; // the detail view (suggestions, teams, minutes) stays reachable at ?wview=detail
   // until the snapshot arrives the page is its header and the shared loading, not-visible or failed state
-  if (!m) return <Page cls="view view-workload" eyebrow="Govern" title="Workload" sub={sub}><Async query={wq} what="workload" id="wl">{() => null}</Async></Page>;
+  if (!m) return <Page cls="view-workload" eyebrow="Govern" title="Workload" sub={sub}><Async query={wq} what="workload" id="wl">{() => null}</Async></Page>;
 
   const setSort = (id: string, s: SortState): void => setSorts((x) => ({ ...x, [id]: s }));
   const openPerson = (pid: string): void => ui.drawer.open(`workload:${pid}`, (close) => <PersonDrawer pid={pid} m={m} close={close} />);
@@ -125,7 +125,7 @@ export default function WorkloadView() {
   const clear = (): void => writeUrlState({ q: null, team: null, scope: null, win: null });
 
   return (
-    <Page cls="view view-workload" eyebrow="Govern" title="Workload" sub={sub}>
+    <Page cls="view-workload" eyebrow="Govern" title="Workload" sub={sub}>
       <Stats id="wl-stats" items={[
         { l: "Approvals waiting", v: String(t.gatesWaiting), tone: "warn" },
         { l: "Median wait at gates", v: t.timedN >= MIN_N ? mins(t.medianWaitMin) : "–", tone: "info" },

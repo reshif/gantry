@@ -71,13 +71,14 @@ describe("Access: Control room prototype layout (gov1)", () => {
 
 describe("Access: round 2 fixes (gov1)", () => {
   const MX = { matrix: { factory_admin: { "project.view": true }, viewer: { "project.view": true } }, roles: [{ id: "factory_admin", name: "Factory Admin", level: "factory" }, { id: "viewer", name: "Viewer", level: "project" }], actions: [{ id: "project.view", name: "View project", group: "Work", scope: "project" }, { id: "release", name: "Release", group: "Gates", scope: "project" }], version: 1 };
-  it("the matrix card has no header buttons; roles are managed from a text link in its hint", async () => {
+  it("the matrix card has no header buttons; its hint is plain text (no Manage roles link)", async () => {
     setup(() => new Response(JSON.stringify(MX), { status: 200 }));
     window.history.replaceState(null, "", "/");
     mount();
     await byId("acc-matrix-card");
     expect(document.querySelector("#acc-matrix-card .card-h button")).toBeNull();
-    expect(document.getElementById("acc-open-roles")).not.toBeNull();
+    expect(document.getElementById("acc-open-roles")).toBeNull();
+    expect(document.querySelector("#acc-matrix-card .hint")?.textContent).toBe("Built-in roles are fixed. Custom roles are not enabled.");
     expect(document.getElementById("acc-add-role")).toBeNull();
   });
 
@@ -93,3 +94,27 @@ describe("Access: round 2 fixes (gov1)", () => {
   });
 });
 
+
+describe("Access: round 3 fixes (gov1)", () => {
+  const MX3 = { matrix: {}, roles: [], actions: [{ id: "project.view", name: "View project", group: "Work", scope: "project" }], version: 1 };
+  it("Check access is Person, Permission and Check only: no Advanced disclosure", async () => {
+    setup(() => new Response(JSON.stringify(MX3), { status: 200 }));
+    window.history.replaceState(null, "", "/?tab=check");
+    mount();
+    await byId("acc-sim-form");
+    expect(document.querySelector("details, .acc-adv")).toBeNull();
+    expect(document.body.textContent).not.toContain("Advanced");
+    expect(document.getElementById("acc-sim-project")).toBeNull();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("the Policies card has no Freezes link and no Add policy button", async () => {
+    setup(() => new Response(JSON.stringify(MX3), { status: 200 }));
+    window.history.replaceState(null, "", "/?tab=policies");
+    mount();
+    await byId("acc-policies-card");
+    expect(document.getElementById("acc-open-freezes")).toBeNull();
+    expect(document.getElementById("acc-add-policy")).toBeNull();
+    window.history.replaceState(null, "", "/");
+  });
+});

@@ -7,7 +7,7 @@ import { useUrlState, writeUrlState } from "./govern/urlState";
 import { type Person, type Project, type Role, type Team } from "@gantry/domain";
 import { useAccessMatrix, useMe, usePeople, useProjects, useSecurity } from "../api/queries";
 import { useCan } from "../api/can";
-import { hashFor, replaceHash, useHash } from "../lib/router";
+import { hashFor, navigate, replaceHash, useHash } from "../lib/router";
 import { DataTable } from "../ui/DataTable";
 import { Avatar, Btn, Chip, Empty, FilterBar, LockNote, Panel, SearchBox, Select, type Decision } from "../ui/primitives";
 import { Page, Stats } from "../ui/cr";
@@ -45,7 +45,7 @@ export default function PeopleView() {
 
   if (!me) return null;
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
-  if (!view.allowed) return <Page cls="view view-people" eyebrow="Govern" title="People"><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></Page>;
+  if (!view.allowed) return <Page cls="view-people" eyebrow="Govern" title="People"><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></Page>;
   const admins = people.filter((p) => p.roles.some((g) => g.role === "factory_admin" && !g.via));
   const noMfa = people.filter((p) => p.status === "active" && p.mfa === false).length;
   const org = me.org;
@@ -54,10 +54,10 @@ export default function PeopleView() {
   const ph = (n: () => number): string => (peopleQ.data ? String(n()) : peopleQ.isError ? "–" : "…");
   return (
     <Page
-      cls="view view-people"
+      cls="view-people"
       eyebrow="Govern"
       title={asTeams ? "Teams" : "People"}
-      sub={asTeams ? <span id="ppl-defaults"><strong>Default for new people: no access until granted.</strong> Teams group people and own repos; a person also holds the grants of their teams.</span> : <>Who can do what. Roles are granted per project or for the whole factory. <a className="rl" id="ppl-teams-link" href={`${window.location.pathname}${window.location.search}${window.location.search ? "&" : "?"}view=teams${window.location.hash}`} onClick={(e) => { e.preventDefault(); setMode("teams"); }}>Manage teams</a></>}
+      sub={asTeams ? <span id="ppl-defaults"><strong>Default for new people: no access until granted.</strong> Teams group people and own repos; a person also holds the grants of their teams.</span> : <>Who can do what. Roles are granted per project or for the whole factory.</>}
       acts={asTeams
         ? <><Btn label="All people" id="ppl-back" onClick={() => setMode("people")} /><Btn label="New team" icon="teams" id="ppl-team-new" guard={perm} onClick={teamDlg.create} /></>
         : <Btn label="Invite person" kind="primary" icon="plus" id="ppl-invite" guard={perm} onClick={() => invite()} />}
@@ -203,7 +203,7 @@ function PeopleTable({ people, teams, roles, invite, perm }: { people: Person[];
   const clearBtn = <Btn label="Clear filters" id="ppl-clear" onClick={clear} />;
   if (!people.length) return <Empty id="ppl-empty" icon="people" title="Nothing here yet" text="Invite the first person to give them access." action={<Btn label="Invite person" kind="primary" icon="plus" guard={perm} onClick={invite} />} />;
   return (
-    <div className="form-grid">
+    <div>
       <FilterBar label="Filter people" count={`${rows.length} of ${people.length}`} actions={dirty ? <Btn label="Clear" kind="ghost" small id="ppl-clear-small" onClick={clear} /> : undefined}>
         <SearchBox id="ppl-q" value={q} onChange={(v) => { setQ(v); setPage("1"); }} placeholder="Search name, email, title" label="Find a person" />
         <Select id="ppl-f-role" aria-label="Role" options={[{ value: "all", label: "Role: all" }, ...roles.map((r) => ({ value: r.id, label: r.name }))]} value={role} onChange={(v) => { setRole(v); setPage("1"); }} />
@@ -216,6 +216,8 @@ function PeopleTable({ people, teams, roles, invite, perm }: { people: Person[];
         rows={rows}
         rowKey={(p) => p.id}
         rowId={(p) => `ppl-row-${p.id}`}
+        onRow={(p) => navigate("person", p.id)}
+        rowLabel={(p) => `${p.name}: open`}
         pageSize={12}
         pager
         sortHint

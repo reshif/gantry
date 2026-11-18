@@ -29,7 +29,7 @@ const SEEN_MIN = [180, 720, 1860, 2760, 2340, 600, 1080, 1500, 180, 2880, 2760, 
 const PROJECT_IDS = ["payments", "storefront", "risk", "identity", "mobile", "data-platform", "search", "internal-tools"];
 const OWNER: Record<string, string> = { payments: "p-meera", storefront: "p-chloe", mobile: "p-hana", "internal-tools": "p-ines", "data-platform": "p-nikhil" };
 
-const TEAMS = [["payments", "Payments"], ["platform", "Platform"], ["growth", "Growth"], ["data", "Data"], ["security", "Security"], ["mobile", "Mobile"], ["partners", "Partners"], ["internal", "Internal Tools"]]
+const TEAMS = [["payments", "Payments"], ["platform", "Platform"], ["growth", "Growth"], ["data", "Data"], ["security", "Security"], ["mobile", "Mobile"], ["partners", "Partners"], ["internal", "Internal"]]
   .map(([id, name]) => ({ id, name, desc: `${name} team.`, members: P.filter((p) => p[4] === id).length, roles: [] as unknown[] }));
 
 const ROLES = [

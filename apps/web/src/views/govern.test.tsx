@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
@@ -6,6 +6,7 @@ import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
 import { OverlayProvider } from "../ui/Overlay";
 import PeopleView from "./people";
+import { writeUrlState } from "./govern/urlState";
 import PersonView from "./person";
 import AccessView from "./access";
 import SecurityView from "./security";
@@ -87,22 +88,33 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
+/** The person page's Access tab: Change role, pick Factory Admin, Save (the reason dialog follows). */
+async function pickFactoryRole() {
+  fireEvent.click(await byId("person-tab-access"));
+  fireEvent.click(await byId("ppl-chrole-btn"));
+  fireEvent.change(await byId("ppl-chrole"), { target: { value: "factory_admin" } });
+  fireEvent.click(await byId("ppl-chrole-save"));
+}
+
 describe("People", () => {
   it("lists teams and members, and decides effective permissions from the server's cells", async () => {
     setup();
     mount(<PeopleView />);
-    fireEvent.click(await byId("ppl-tab-teams"));
+    await byId("ppl-stats");
+    act(() => writeUrlState({ view: "teams" })); // the team cards are at ?view=teams
     expect(await screen.findByText("Asha Raman")).toBeTruthy();
     expect(screen.getByText("Tomas Eriksen")).toBeTruthy();
     expect(screen.getByText("invited")).toBeTruthy();
     cleanup();
     window.location.hash = "#person/p-asha";
+    window.history.replaceState(null, "", "/?view=detail#person/p-asha"); // the permissions grid is the secondary view
     mount(<PersonView />);
     fireEvent.click(await byId("person-tab-access"));
     expect(await screen.findByRole("heading", { name: "Asha Raman" })).toBeTruthy();
@@ -115,6 +127,7 @@ describe("People", () => {
   it("shows the reason for a cell from the simulator", async () => {
     setup({ "POST /api/v1/access/simulate": () => ({ body: { ok: true, decision: { allowed: false, reason: "Outside the release window.", needs: "Wait for Monday", rule: { id: "POL-101", name: "Release window", kind: "policy" } }, trace: [], week: [] } }) });
     window.location.hash = "#person/p-asha";
+    window.history.replaceState(null, "", "/?view=detail#person/p-asha");
     mount(<PersonView />);
     fireEvent.click(await byId("person-tab-access"));
     const cell = await waitFor(() => {
@@ -131,10 +144,9 @@ describe("People", () => {
     const calls = setup({ "POST /api/v1/invites": () => ({ body: { ok: true, msg: "Invite sent to n@acme.dev.", person: { id: "p-n", name: "Nina" } } }) });
     mount(<PeopleView />);
     fireEvent.click(await screen.findByText("Invite person"));
-    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Nina Park" } });
-    fireEvent.change(screen.getByLabelText("Work email"), { target: { value: "N@acme.dev" } });
-    fireEvent.click(screen.getByLabelText("Platform"));
-    fireEvent.change(screen.getByLabelText("First project"), { target: { value: "payments" } });
+    fireEvent.change(await screen.findByLabelText(/Full name/), { target: { value: "Nina Park" } });
+    fireEvent.change(screen.getByLabelText(/Work email/), { target: { value: "N@acme.dev" } });
+    fireEvent.change(document.getElementById("ppl-inv-team")!, { target: { value: "platform" } }); // Name, Email, Role and Team only: the project role lands on the current project
     fireEvent.click(screen.getByText("Send invite"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/invites")).toBe(true));
     const c = calls.find((x) => x.path === "/api/v1/invites")!;
@@ -146,14 +158,14 @@ describe("People", () => {
     const calls = setup({ "POST /api/v1/invites": () => ({ body: { ok: true, msg: "Invite sent to n@acme.dev.", person: { id: "p-n", name: "Nina" } } }) });
     mount(<PeopleView />);
     fireEvent.click(await screen.findByText("Invite person"));
-    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Nina Park" } });
-    fireEvent.change(screen.getByLabelText("Work email"), { target: { value: "n@acme.dev" } });
-    expect(screen.queryByLabelText("Reason for the factory role")).toBeNull();
-    fireEvent.change(screen.getByLabelText("Factory role"), { target: { value: "factory_admin" } });
+    fireEvent.change(await screen.findByLabelText(/Full name/), { target: { value: "Nina Park" } });
+    fireEvent.change(screen.getByLabelText(/Work email/), { target: { value: "n@acme.dev" } });
+    expect(screen.queryByLabelText(/Reason for the factory role/)).toBeNull();
+    fireEvent.change(document.getElementById("ppl-inv-prole")!, { target: { value: "factory_admin" } });
     fireEvent.click(screen.getByText("Send invite"));
     expect(await screen.findByText(/at least 10 characters/)).toBeTruthy();
     expect(calls.some((c) => c.path === "/api/v1/invites")).toBe(false);
-    fireEvent.change(screen.getByLabelText("Reason for the factory role"), { target: { value: "Quarterly audit support" } });
+    fireEvent.change(screen.getByLabelText(/Reason for the factory role/), { target: { value: "Quarterly audit support" } });
     fireEvent.click(screen.getByText("Send invite"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/invites")).toBe(true));
     expect(calls.find((x) => x.path === "/api/v1/invites")!.body).toMatchObject({ roles: [{ role: "factory_admin", scope: "factory" }], reason: "Quarterly audit support" });
@@ -164,10 +176,10 @@ describe("People", () => {
     mount(<PeopleView />);
     fireEvent.click(await screen.findByText("Invite person"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/security")).toBe(true));
-    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Nina Park" } });
-    fireEvent.change(screen.getByLabelText("Work email"), { target: { value: "n@evil.io" } });
+    fireEvent.change(await screen.findByLabelText(/Full name/), { target: { value: "Nina Park" } });
+    fireEvent.change(screen.getByLabelText(/Work email/), { target: { value: "n@evil.io" } });
     fireEvent.click(screen.getByText("Send invite"));
-    expect(await screen.findByText(/evil.io is not an allowed domain/)).toBeTruthy();
+    expect(await screen.findByText(/allowed domain/)).toBeTruthy();
     expect(calls.some((c) => c.path === "/api/v1/invites")).toBe(false);
   });
 
@@ -194,8 +206,7 @@ describe("People", () => {
     setup({ "PUT /api/v1/people/p-tomas/factory-roles/factory_admin": () => ({ status: 403, body: { ok: false, msg: "Sign in again to confirm this change.", needs: "step_up" } }) });
     window.location.hash = "#person/p-tomas";
     mount(<PersonView />);
-    const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
-    fireEvent.change(sel, { target: { value: "factory_admin" } });
+    await pickFactoryRole(); // Change role (Access tab) to Factory Admin
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Covering for Asha" } });
     fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
     expect(await screen.findByText(/Sign in again to confirm this change/)).toBeTruthy();
@@ -208,8 +219,7 @@ describe("People", () => {
     });
     window.location.hash = "#person/p-tomas";
     mount(<PersonView />);
-    const sel = (await screen.findByLabelText("Factory role for Tomas Eriksen")) as HTMLSelectElement;
-    fireEvent.change(sel, { target: { value: "factory_admin" } });
+    await pickFactoryRole(); // Change role (Access tab) to Factory Admin
     expect(await screen.findByText(/A factory role applies on every project/)).toBeTruthy();
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Quarterly review" } });
     fireEvent.click(document.getElementById("rsn-ok") as HTMLElement);
@@ -217,7 +227,7 @@ describe("People", () => {
     expect(calls.find((c) => c.method === "PUT" && c.path.endsWith("/factory-roles/factory_admin"))?.body).toEqual({ reason: "Quarterly review" });
     fireEvent.click(await byId("ppl-frole-undo"));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path.endsWith("/factory-roles/factory_admin"))).toBe(true));
-    expect(calls.find((c) => c.method === "DELETE")?.body).toEqual({ reason: "Undo: Quarterly review" });
+    expect(calls.find((c) => c.method === "DELETE" && c.path.endsWith("/factory-roles/factory_admin"))?.body).toEqual({ reason: "Undo: Quarterly review" });
   });
 });
 
@@ -236,9 +246,9 @@ describe("Access", () => {
     fireEvent.click(await byId("acc-tab-policies"));
     expect(await screen.findByText("Release window")).toBeTruthy();
     expect(screen.getByText("Freeze rule")).toBeTruthy();
-    const edit110 = document.getElementById("acc-pol-edit-POL-110")!;
-    expect(edit110.getAttribute("aria-disabled")).toBe("true");
-    expect(edit110.getAttribute("data-reason")).toContain("Freeze rules come from the freeze list");
+    fireEvent.click(document.getElementById("acc-pol-edit-POL-110")!); // an engine-owned policy opens no editor, it says why
+    expect(await screen.findByText(/Freeze rules come from the freeze list/)).toBeTruthy();
+    expect(document.querySelector("[role=dialog]")).toBeNull();
   });
 
   it("evaluates through the server simulator and highlights the deciding rule", async () => {
@@ -246,49 +256,20 @@ describe("Access", () => {
     mount(<AccessView />);
     fireEvent.click(await byId("acc-tab-check"));
     await waitFor(() => expect((document.getElementById("acc-sim-person") as HTMLSelectElement).value).toBe("p-asha"));
-    fireEvent.click(screen.getByText("Evaluate"));
-    expect(await screen.findByText("Outside window.")).toBeTruthy();
+    fireEvent.click(screen.getByText("Check"));
+    expect((await byId("acc-sim-result")).textContent).toContain("Denied.");
     const sim = calls.find((c) => c.path === "/api/v1/access/simulate")!;
-    expect(sim.body).toMatchObject({ person: "p-asha", action: "release", project: "payments" });
+    expect(sim.body).toMatchObject({ person: "p-asha", project: "payments" }) // the first permission, as in the prototype;
     expect(document.querySelectorAll(".wk-c.is-yes").length).toBeGreaterThan(5);
     fireEvent.click(await byId("acc-tab-policies"));
-    expect(document.getElementById("acc-pol-POL-101")?.className).toContain("is-hl");
+    expect(document.getElementById("acc-pol-POL-101")?.textContent).toContain("deciding rule");
   });
 
-  it("edits a matrix cell with the matrix version as If-Match", async () => {
-    const calls = setup({ "PUT /api/v1/access/matrix/engineer/release": () => ({ body: { ok: true, msg: "Engineer can now release.", version: 5 } }) });
+  it("the role matrix is read-only: no switches, roles are edited at ?tab=roles", async () => {
+    setup();
     mount(<AccessView />);
-    await byId("acc-tab-matrix");
-    const sw = await screen.findByLabelText("Engineer: Release");
-    fireEvent.click(sw);
-    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path === "/api/v1/access/matrix/engineer/release")).toBe(true));
-    const c = calls.find((x) => x.method === "PUT")!;
-    expect(c.body).toEqual({ on: true });
-    expect(c.headers["if-match"]).toBe("4");
-    // rights a role must keep so nobody is locked out stay locked in the UI
-    expect(screen.getByLabelText("Factory Admin: Edit policy").getAttribute("aria-disabled")).toBe("true");
-  });
-
-  it("shows a stale matrix refusal", async () => {
-    setup({ "PUT /api/v1/access/matrix/engineer/release": () => ({ status: 409, body: { ok: false, msg: "This changed since you loaded it. Reload and try again." } }) });
-    mount(<AccessView />);
-    await byId("acc-tab-matrix");
-    fireEvent.click(await screen.findByLabelText("Engineer: Release"));
-    expect(await screen.findByText(/changed since you loaded it/)).toBeTruthy();
-  });
-
-  it("adds a policy through the dialog with a preview and the policy body", async () => {
-    const calls = setup({ "POST /api/v1/policies": () => ({ body: { ok: true, msg: "POL-111 added.", id: "POL-111", version: 1 } }) });
-    mount(<AccessView />);
-    fireEvent.click(await byId("acc-tab-policies"));
-    fireEvent.click(await byId("acc-add-policy"));
-    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Weekend hotfix" } });
-    expect(document.querySelector(".acc-preview")?.textContent).toContain("may release");
-    fireEvent.click(await byId("acc-pd-save"));
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/policies")).toBe(true));
-    const c = calls.find((x) => x.path === "/api/v1/policies" && x.method === "POST")!;
-    expect(c.body).toMatchObject({ name: "Weekend hotfix", effect: "allow", roles: ["release_manager"], actions: ["release"], oncallOnly: false });
-    expect(c.headers["idempotency-key"]).toBeTruthy();
+    await byId("acc-matrix-table");
+    expect(document.querySelectorAll("#acc-matrix-table input, #acc-matrix-table [role=switch]")).toHaveLength(0);
   });
 
   it("toggles a policy and ends a freeze", async () => {
@@ -298,11 +279,11 @@ describe("Access", () => {
     });
     mount(<AccessView />);
     fireEvent.click(await byId("acc-tab-policies"));
-    fireEvent.click(await screen.findByLabelText("Enable POL-101"));
+    fireEvent.click(await screen.findByLabelText("Release window"));
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ enabled: false }));
     // versioned config endpoints refuse a request without If-Match (409 "version required"), so every toggle sends the version it loaded
     expect(calls.find((c) => c.method === "PATCH")?.headers["if-match"]).toMatch(/^\d+$/);
-    fireEvent.click(await screen.findByRole("tab", { name: /Freezes/ }));
+    act(() => writeUrlState({ tab: "freezes" })); // freezes are reached at ?tab=freezes
     fireEvent.click(await screen.findByText("End freeze now"));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/freezes/FRZ-01/end")).toBe(true));
     expect(calls.find((c) => c.path === "/api/v1/freezes/FRZ-01/end")?.headers["if-match"]).toBe("2");
@@ -312,9 +293,7 @@ describe("Access", () => {
     setup({}, ["policy.edit", "role.edit"]);
     mount(<AccessView />);
     fireEvent.click(await byId("acc-tab-policies"));
-    const add = await byId("acc-add-policy");
-    await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
-    expect(screen.getByLabelText("Enable POL-101").getAttribute("aria-disabled")).toBe("true");
+    await waitFor(() => expect(screen.getByLabelText("Release window").getAttribute("aria-disabled")).toBe("true"));
     expect(screen.getAllByText(/Read-only for you/).length).toBeGreaterThan(0);
   });
 });

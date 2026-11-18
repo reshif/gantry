@@ -276,7 +276,7 @@ describe("Workload: Control room prototype layout (gov1)", () => {
     expect(document.getElementById("wl-q")).not.toBeNull();
   });
 
-  it("the overview has no Project or Window filter, no suggestions and no detail tabs; one link opens the detail view and back", async () => {
+  it("the overview has no Project or Window filter, no suggestions, no detail tabs and no link to the detail view", async () => {
     setup();
     mount(false);
     await byId("wl-matrix");
@@ -285,11 +285,12 @@ describe("Workload: Control room prototype layout (gov1)", () => {
     expect(document.getElementById("wl-sugg-card")).toBeNull();
     expect(document.getElementById("wl-tab-panel")).toBeNull();
     expect(document.body.textContent).not.toContain("n=");
-    fireEvent.click(await byId("wl-view-link"));
+    expect(document.getElementById("wl-view-link")).toBeNull(); // the header sub is plain text, as in the prototype
+    expect(document.querySelector(".ph")?.textContent).not.toContain("Suggestions, teams and minutes");
+    cleanup();
+    mount(true); // the detail view is still reachable by its address (?wview=detail)
     await byId("wl-sugg-card");
     expect(document.getElementById("wl-matrix")).toBeNull();
     expect(document.getElementById("wl-project")).not.toBeNull();
-    fireEvent.click(await byId("wl-view-link"));
-    await byId("wl-matrix");
   });
 });

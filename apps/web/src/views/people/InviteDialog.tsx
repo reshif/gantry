@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Project, Role, Team } from "@gantry/domain";
 import { ops } from "../../api/ops";
+import { getPrefs } from "../../lib/prefs";
 import { useUI } from "../../ui/overlay-context";
 import { Field, LockNote, Select, type Decision } from "../../ui/primitives";
 
@@ -19,9 +20,10 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   const ui = useUI();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [team, setTeam] = useState(preset.team ?? "");
+  const [team, setTeam] = useState(preset.team ?? teams[0]?.id ?? "");
   const [role, setRole] = useState(roles.some((r) => r.id === "engineer") ? "engineer" : roles[0]?.id ?? "");
-  const [proj, setProj] = useState(preset.project ?? projects.find((p) => p.status !== "archived")?.id ?? "");
+  // The prototype form has no project field: a project role applies to the project you are working in (or the one the invite was opened from).
+  const proj = preset.project ?? (projects.find((p) => p.id === getPrefs().project && p.status !== "archived") ?? projects.find((p) => p.status !== "archived"))?.id ?? "";
   const [reason, setReason] = useState("");
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [err, setErr] = useState("");
@@ -66,17 +68,13 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
         <Select id="ppl-inv-prole" value={role} onChange={setRole} options={roles.map((r) => ({ value: r.id, label: r.name + (r.custom ? " (custom)" : "") }))} />
       </Field>
       <Field label="Team" htmlFor="ppl-inv-team">
-        <Select id="ppl-inv-team" value={team} onChange={setTeam} options={[{ value: "", label: "No team" }, ...teams.map((t) => ({ value: t.id, label: t.name }))]} />
+        <Select id="ppl-inv-team" value={team} onChange={setTeam} options={[...teams.map((t) => ({ value: t.id, label: t.name }))]} />
       </Field>
-      {!factoryLevel ? (
-        <Field label="Project" htmlFor="ppl-inv-proj" hint="A project role applies inside one project.">
-          <Select id="ppl-inv-proj" value={proj} onChange={setProj} options={[{ value: "", label: "No project yet" }, ...projects.filter((p) => p.status !== "archived").map((p) => ({ value: p.id, label: p.name }))]} />
-        </Field>
-      ) : (
+      {factoryLevel ? (
         <Field label="Reason for the factory role" htmlFor="ppl-inv-reason" required error={errs.reason} hint="Recorded in the audit trail. Factory roles need a fresh sign-in.">
           <input id="ppl-inv-reason" className="input" autoComplete="off" placeholder="Why this person needs it" value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
-      )}
+      ) : null}
       <div className="form-err" role="alert">{err}</div>
     </div>
   );
@@ -87,8 +85,7 @@ export function useInviteDialog(args: { perm: Decision; teams: Team[]; projects:
   return (preset: { team?: string; project?: string } = {}) => {
     let submit: () => void = () => undefined;
     ui.dialog({
-      title: "Invite a person", kicker: "People",
-      sub: "They get an email with a sign-in link. Until they accept, the policy engine grants them nothing.",
+      title: "Invite a person",
       body: (close) => <InviteForm {...args} preset={preset} close={close} registerSubmit={(fn) => (submit = fn)} />,
       actions: [{ label: "Cancel" }, { label: "Send invite", kind: "primary", icon: "send", submit: true, id: "ppl-inv-submit", guard: args.perm, onClick: () => submit() }],
     });

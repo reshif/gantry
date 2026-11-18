@@ -11,6 +11,7 @@ import { ops } from "../api/ops";
 import { useAccessMatrix, useApiKeys, useMe, usePeople, useProjects } from "../api/queries";
 import { useCan } from "../api/can";
 import { navigate, useHash } from "../lib/router";
+import { getPrefs } from "../lib/prefs";
 import { ExplainDenial } from "./console/ExplainDenial";
 import { Avatar, Btn, Empty, Field, LockNote, Panel, Select, Tabs, Toggle, type Decision } from "../ui/primitives";
 import { Card, CrEmpty, Page } from "../ui/cr";
@@ -42,11 +43,11 @@ export default function PersonView() {
   const p = people.find((x) => x.id === loc.param);
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
   // Default deny: the directory is itself a right. The server refuses the reads too; this shows why instead of an empty screen.
-  if (!view.allowed) return <Page cls="view view-person" eyebrow="Govern · Person" title="Person"><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></Page>;
+  if (!view.allowed) return <Page cls="view-person" eyebrow="Govern · Person" title="Person"><Empty id="people-no-access" icon="lock" title="No access to people and teams" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin or Project Admin to give you a role that can see people.`} /></Page>;
   if (!p) {
     return (
       <Async query={peopleQ} what="people" id="person">{() => (
-        <Page cls="view view-person" id="person-missing" eyebrow="404" title="Page not found">
+        <Page cls="view-person" id="person-missing" eyebrow="404" title="Page not found">
           <div className="card"><CrEmpty icon="search" title="There is no “person” page" text="The link may be old, or the page was renamed." action={<Btn label="Go Home" kind="primary" onClick={() => navigate("home")} />} /></div>
         </Page>
       )}</Async>
@@ -87,19 +88,20 @@ function TeamsForm({ p, teams, perm, onSave }: { p: Person; teams: Array<{ id: s
   );
 }
 
-/** The Change role dialog body: the role this grant becomes (same level as the grant: a factory role stays a factory role). */
-function ChangeRoleForm({ roles, current, level, roleName, onSave }: { roles: Role[]; current: string; level: "factory" | "project"; roleName: (id: string) => string; onSave: (fn: () => string) => void }) {
+/** The Change role dialog body: every role, as in the prototype. */
+function ChangeRoleForm({ roles, current, roleName, onSave }: { roles: Role[]; current: string; roleName: (id: string) => string; onSave: (fn: () => string) => void }) {
   const [v, setV] = useState(current);
   onSave(() => v);
-  const pool = roles.filter((r) => (level === "factory" ? r.level === "factory" : r.level !== "factory"));
   return (
     <div className="form-grid">
       <Field label="Role" htmlFor="ppl-chrole">
-        <Select id="ppl-chrole" value={v} onChange={setV} options={[...(level === "factory" ? [{ value: "", label: "None (project roles only)" }] : []), ...pool.map((r) => ({ value: r.id, label: roleName(r.id) }))]} />
+        <Select id="ppl-chrole" value={v} onChange={setV} options={roles.map((r) => ({ value: r.id, label: roleName(r.id) }))} />
       </Field>
     </div>
   );
 }
+
+interface RoleRow { key: string; role: string; scopes: string[]; allScopes: string[]; via: string[] }
 
 function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleName }: {
   p: Person; teams: Array<{ id: string; name: string }>; projects: Project[]; roles: Role[]; perm: Decision; admins: Person[]; viewerId: string; roleName: (id: string) => string;
@@ -109,6 +111,8 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const actors = useActors();
   const [effProject, setEffProject] = useState("all");
   const [tab, setTab] = useUrlState("tab", "profile");
+  const [pview] = useUrlState("view", "prototype"); // ?view=detail keeps the per-project role grid, effective permissions and team editing
+  const detail = pview === "detail";
   const [cell, setCell] = useState<{ action: string; project: string } | null>(null);
   const eff = useQuery({ queryKey: qk.effectivePermissions(p.id), queryFn: () => get<EffectivePermissions>(api(`people/${encodeURIComponent(p.id)}/effective-permissions`)) });
   const keysQ = useApiKeys();
@@ -135,7 +139,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   };
 
   // A factory role reaches every project (Wave 3, F7): ask why (it goes on the ledger), and offer to undo straight after.
-  const changeFactoryRole = (v: string) => {
+  const changeFactoryRole = (v: string, after?: () => Promise<unknown>) => {
     const prev = frRole;
     if (v === prev) return;
     ui.reasonDialog({
@@ -150,6 +154,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
       onOk: async (reason) => {
         const r = await swapFactoryRole(prev, v, reason);
         if (!r.ok) return r;
+        if (after) await after();
         const undo = () =>
           void swapFactoryRole(v, prev, `Undo: ${reason}`).then((u) => ui.toast(u.ok ? (prev ? `${p.name} is ${roleName(prev)} again.` : `${p.name} has no factory role again.`) : u.msg, u.ok ? "ok" : "error"));
         ui.toast(v ? `${p.name} is now ${roleName(v)} across the factory.` : `${p.name} has no factory role now.`, "ok", { label: "Undo", id: "ppl-frole-undo", onClick: undo });
@@ -158,23 +163,37 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
     });
   };
 
-  /** Change role for one grant row: a factory grant goes through the reason dialog, a project grant swaps the role in that project. */
-  const changeRole = (g: { role: string; scope: string }) => {
+  /** Change role for one row of the Roles table (one role, all the scopes it is held in): the factory role goes through the reason dialog, project roles are swapped in each project. */
+  const changeRole = (g: RoleRow) => {
     let pick: () => string = () => g.role;
-    const factory = g.scope === "factory";
+    const levelOf = (id: string) => roles.find((r) => r.id === id)?.level ?? "project";
+    const oldFactory = g.scopes.includes("factory");
     ui.dialog({
-      title: `Change role for ${p.name}`, kicker: "People",
-      body: <ChangeRoleForm roles={roles} current={g.role} level={factory ? "factory" : "project"} roleName={roleName} onSave={(fn) => (pick = fn)} />,
-      actions: [{ label: "Cancel" }, { label: "Save", kind: "primary", submit: true, id: "ppl-chrole-save", guard: factory ? factGuard : perm, onClick: (close) => {
+      title: `Change role for ${p.name}`,
+      body: <ChangeRoleForm roles={roles} current={g.role} roleName={roleName} onSave={(fn) => (pick = fn)} />,
+      actions: [{ label: "Cancel" }, { label: "Save", kind: "primary", submit: true, id: "ppl-chrole-save", guard: oldFactory || levelOf(pick()) === "factory" ? factGuard : perm, onClick: (close) => {
         const v = pick();
         close();
         if (v === g.role) return;
-        if (factory) { changeFactoryRole(v); return; }
-        void (async () => {
-          const rm = await ops.setMemberRole(p.id, g.scope, g.role, false);
-          if (!rm.ok) return void outcome(rm);
-          outcome(await ops.setMemberRole(p.id, g.scope, v, true), "Role changed");
-        })();
+        const newFactory = levelOf(v) === "factory";
+        const projectScopes = g.scopes.filter((x) => x !== "factory");
+        const swap = async (scopes: string[]): Promise<void> => {
+          for (const sc of scopes) {
+            const rm = await ops.setMemberRole(p.id, sc, g.role, false);
+            if (!rm.ok) return void outcome(rm);
+            const add = await ops.setMemberRole(p.id, sc, v, true);
+            if (!add.ok) return void outcome(add);
+          }
+          outcome({ ok: true, msg: "" } as never, "Role changed");
+        };
+        if (oldFactory && newFactory) return changeFactoryRole(v);
+        if (!oldFactory && !newFactory) return void swap(projectScopes);
+        if (newFactory) return changeFactoryRole(v, async () => { for (const sc of projectScopes) await ops.setMemberRole(p.id, sc, g.role, false); });
+        // factory role to a project role: the project role lands on the projects they already work in, else the project open now
+        const targets = [...new Set(p.roles.filter((x) => x.scope !== "factory" && !x.via).map((x) => x.scope))];
+        const fallback = visible.find((x) => x.id === getPrefs().project)?.id ?? visible[0]?.id;
+        const into = targets.length ? targets : fallback ? [fallback] : [];
+        changeFactoryRole("", async () => { for (const sc of into) await ops.setMemberRole(p.id, sc, v, true); });
       } }],
     });
   };
@@ -202,11 +221,18 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
   const keys = keysQ.data ? keysQ.data.filter((k) => k.by === p.id && !k.revoked && !k.expired).length : null;
   const requested = visible.reduce((n, pr) => n + load.requested(p.id, pr.id), 0);
   const NA = <span className="dim" title="Not available to you, or the server did not answer">not available</span>;
-  const grants = p.roles.map((g, i) => ({ ...g, key: `${g.role}-${g.scope}-${g.via ?? ""}-${i}` }));
+  const rows: RoleRow[] = [];
+  for (const g of p.roles) {
+    const row = rows.find((x) => x.role === g.role) ?? (rows[rows.push({ key: g.role, role: g.role, scopes: [], allScopes: [], via: [] }) - 1]!);
+    if (g.via) { if (!row.via.includes(g.via)) row.via.push(g.via); } else row.scopes.push(g.scope);
+    if (g.via && !row.allScopes.includes(g.scope)) row.allScopes.push(g.scope);
+    if (!g.via && !row.allScopes.includes(g.scope)) row.allScopes.push(g.scope);
+  }
+  const keyOf = (sc: string): string => (projects.find((x) => x.id === sc) as (Project & { key?: string }) | undefined)?.key ?? scopeName(sc);
 
   return (
     <Page
-      cls="view view-person"
+      cls="view-person"
       eyebrow="Govern · Person"
       title={p.name}
       sub={p.title || "No title yet"}
@@ -220,7 +246,6 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
       )}
     >
       <LockNote decision={perm} what="Roles, teams and access" />
-      <div className="person-stack">
       <div className="row ppl-badges" style={{ marginBottom: 16 }}>
         <Avatar id={p.id} size="sm" />
         <span className={`chip ${p.status === "active" ? "ok" : p.status === "invited" ? "info" : "idle"}`}>{stateWord}</span>
@@ -237,7 +262,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
           <dl className="kv" id="ppl-profile" style={{ margin: 0 }}>
             <dt>Email</dt><dd className="mono">{p.email}</dd>
             <dt>Title</dt><dd>{p.title || "No title yet"}</dd>
-            <dt>Team</dt><dd>{teamNames}{" "}<Btn label="Change" small kind="ghost" id="ppl-teams" guard={perm} onClick={openTeams} /></dd>
+            <dt>Team</dt><dd>{teamNames}{detail ? <>{" "}<Btn label="Change" small kind="ghost" id="ppl-teams" guard={perm} onClick={openTeams} /></> : null}</dd>
             <dt>MFA</dt><dd>{p.mfa === undefined ? "–" : p.mfa ? "On" : "Off"}</dd>
             {/* The API does not report a last sign-in time: say so instead of inventing one. */}
             <dt>Last seen</dt><dd>{lastSeenOf(p) ? agoShort(lastSeenOf(p)!) : NA}</dd>
@@ -258,18 +283,19 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         <DataTable
           id="ppl-roles"
           caption={`Roles of ${p.name}`}
-          rows={grants}
+          rows={rows}
           rowKey={(g) => g.key}
-          empty={{ title: "No roles yet", text: `${p.name} holds no role. Grant one on a project below, or a factory role from the invite.` }}
+          empty={{ title: "No roles yet", text: `${p.name} holds no role.` }}
           columns={[
             { key: "role", label: "Role", render: (g) => <span className="chip info plain">{roleName(g.role)}</span> },
-            { key: "scope", label: "Scope", render: (g) => (g.scope === "factory" ? "Whole factory" : <span className="tag">{(projects.find((x) => x.id === g.scope) as (Project & { key?: string }) | undefined)?.key ?? scopeName(g.scope)}</span>) },
-            { key: "via", label: "", align: "end", render: (g) => (g.via
-              ? <span className="dim small">{`via ${teamName(g.via)}: change it on the team`}</span>
-              : <Btn label="Change role" small id={`ppl-chrole-${g.scope}`} guard={g.scope === "factory" ? factGuard : perm} onClick={() => changeRole(g)} />) },
+            { key: "scope", label: "Scope", render: (g) => (g.allScopes.includes("factory") ? "Whole factory" : <>{g.allScopes.map((sc, i) => <span key={sc}>{i ? " " : ""}<span className="tag">{keyOf(sc)}</span></span>)}</>) },
+            { key: "via", label: "", align: "end", render: (g) => (g.scopes.length
+              ? <Btn label="Change role" small id="ppl-chrole-btn" guard={g.scopes.includes("factory") ? factGuard : perm} onClick={() => changeRole(g)} />
+              : <span className="dim small">{`via ${g.via.map(teamName).join(", ")}: change it on the team`}</span>) },
           ]}
         />
       </Card>
+      {detail ? <>
       <Panel title="Roles per project" flush>
         <p className="muted small ppl-hint ppl-hint-pad">One person can hold different roles in each project. A role granted by a team shows as "via team" and is changed on the team. A switch is locked where you cannot manage that project's members.</p>
         <div className="table-scroll" data-keep-scroll="ppl-proles">
@@ -327,7 +353,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
           </ul>
         )}</Async>
       </Panel>
-
+      </> : null}
       </>) : null}
 
       {tab === "activity" ? (
@@ -336,7 +362,6 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         <HistoryList id={p.id} limit={6} />
       </Card>
       ) : null}
-      </div>
     </Page>
   );
 }

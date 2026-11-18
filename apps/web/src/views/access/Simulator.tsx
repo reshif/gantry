@@ -94,13 +94,11 @@ function WeekStrip({ r }: { r: Evaluated }) {
   );
 }
 
-export function Simulator({ roles, people, projects, repos, actions, sim, setSim, evaluated, onEvaluate, onShowRule, presetsList }: {
+export function Simulator({ roles, people, actions, sim, setSim, evaluated, onEvaluate, onShowRule }: {
   roles: Role[]; people: Person[]; projects: Project[]; repos: Repo[]; actions: Action[]; sim: Sim; setSim: (s: Sim) => void; evaluated: Evaluated | null;
   onEvaluate: (s: Sim) => void; onShowRule: (tab: string) => void; presetsList: Array<{ label: string; s: () => Sim }>;
 }) {
   const actors = useActors();
-  const act = actions.find((a) => a.id === sim.action);
-  const scoped = !act || act.scope === "project";
   const set = (k: keyof Sim) => (v: string) => setSim({ ...sim, [k]: v, ...(k === "project" ? { repo: "" } : {}) });
   const r = evaluated;
   const rd = r?.result.decision;
@@ -120,24 +118,6 @@ export function Simulator({ roles, people, projects, repos, actions, sim, setSim
         <Field label="Person" htmlFor="acc-sim-person"><Select id="acc-sim-person" value={sim.person} onChange={set("person")} options={people.map((p) => ({ value: p.id, label: p.name + (p.status === "invited" ? " (invited)" : "") }))} /></Field>
         <Field label="Permission" htmlFor="acc-sim-action"><Select id="acc-sim-action" value={sim.action} onChange={set("action")} options={actions.map((a) => ({ value: a.id, label: a.name }))} /></Field>
         <div className="field"><span className="lbl">&nbsp;</span><Btn label="Check" kind="primary" type="submit" id="acc-sim-run" /></div>
-        <details className="acc-adv" style={{ gridColumn: "1 / -1" }}>
-          <summary>Advanced: project, repo and time</summary>
-          <div className="grid g3" style={{ marginTop: 12 }}>
-            <Field label="Project" htmlFor="acc-sim-project"><Select id="acc-sim-project" value={sim.project} onChange={set("project")} disabled={!scoped} title={scoped ? undefined : "Factory actions apply everywhere"} options={projects.map((p) => ({ value: p.id, label: p.name }))} /></Field>
-            <Field label="Repo" htmlFor="acc-sim-repo"><Select id="acc-sim-repo" value={sim.repo} onChange={set("repo")} disabled={!scoped} options={[{ value: "", label: "Any repo" }, ...repos.filter((x) => x.project === sim.project).map((x) => ({ value: x.id, label: x.name }))]} /></Field>
-            <div className="field"><span className="lbl">&nbsp;</span><Btn label="Use now" id="acc-sim-now" onClick={() => setSim({ ...sim, ...nowIst() })} /></div>
-            <Field label="Date (IST)" htmlFor="acc-sim-date"><input id="acc-sim-date" className="input mono" type="date" value={sim.date} onChange={(e) => setSim({ ...sim, date: e.target.value })} /></Field>
-            <Field label="Time (IST)" htmlFor="acc-sim-time"><input id="acc-sim-time" className="input mono" type="time" value={sim.time} onChange={(e) => setSim({ ...sim, time: e.target.value })} /></Field>
-          </div>
-          {presetsList.length ? (
-            <div className="chips acc-presets" style={{ marginTop: 12 }}>
-              <span className="kicker">Try</span>
-              {presetsList.map((pr, i) => (
-                <button key={pr.label} type="button" className="sugg" id={`acc-preset-${i}`} onClick={() => { const s = pr.s(); setSim(s); onEvaluate(s); }}>{pr.label}</button>
-              ))}
-            </div>
-          ) : null}
-        </details>
       </form>
       <div id="acc-sim-out" style={{ marginTop: 16 }} role="status">
         {r && rd && ract ? (

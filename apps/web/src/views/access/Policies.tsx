@@ -154,12 +154,29 @@ export function usePolicyDialog(args: { perm: Decision; roles: Role[]; actions: 
   };
 }
 
+const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** "Tue–Thu 10:00–16:00": days as a range when they run on, the hours as given, "always" for no window (as the prototype words it). */
+function whenText(p: Policy): string {
+  if (p.effect === "deny" && p.where.freeze) return "while a freeze is active";
+  const w = p.when;
+  let text = "always";
+  if (w) {
+    const d = [...w.days].sort((a, b) => a - b);
+    const run = d.length > 1 && d.every((x, i) => i === 0 || x === d[i - 1]! + 1);
+    const days = d.length === 7 ? "" : run ? `${DAY[d[0]!]}–${DAY[d[d.length - 1]!]}` : d.map((x) => DAY[x]).join(", ");
+    const hours = w.from === "00:00" && w.to === "24:00" ? "" : `${w.from}–${w.to}`;
+    text = [days, hours].filter(Boolean).join(" ") || "always";
+  }
+  return p.oncallOnly ? `${text}, on call` : text;
+}
+/** The projects a policy covers, by id, or "all". */
+const scopeText = (p: Policy): string => (p.where.freeze || !p.where.projects?.length ? "all" : p.where.projects.join(", "));
+
 /** The Policies card body: Policy (name + id), Roles, Scope, When, Effect and an On switch, as in the prototype. The policy name opens the editor. */
 export function PolicyCards({ policies, hl, roles, onEdit }: { policies: Policy[]; hl: string | null; roles: Role[]; onEdit: (p: Policy) => void }) {
   const ui = useUI();
   const outcome = useOutcome();
   const perm = useCan("policy.edit");
-  const wording = usePolicyWording();
   const list = [...policies].sort((a, b) => (a.id < b.id ? -1 : 1));
   if (!list.length) return <Empty id="acc-policies-empty" title="No policies yet" text="Roles alone decide who can do what. Add a policy to narrow a right to certain hours or projects, or to extend it, for example while on call." />;
   const roleText = (p: Policy): string => (p.roles[0] === "*" || (roles.length > 1 && roles.every((r) => p.roles.includes(r.id))) ? "all" : p.roles[0] === "agents" ? "Agents" : p.roles.map((id) => roles.find((r) => r.id === id)?.name ?? id).join(", "));
@@ -174,8 +191,8 @@ export function PolicyCards({ policies, hl, roles, onEdit }: { policies: Policy[
       columns={[
         { key: "policy", label: "Policy", render: (p) => <><a className="rl" href="#edit" id={`acc-pol-edit-${p.id}`} onClick={(e) => { e.preventDefault(); if (SPECIAL[p.id]) ui.toast(SPECIAL[p.id]!, "info"); else onEdit(p); }}><b>{p.name}</b></a>{hl === p.id ? <span className="chip accent plain"> deciding rule</span> : null}<span className="mono dim" style={{ display: "block", fontSize: 11 }}>{p.id}</span></> },
         { key: "roles", label: "Roles", render: (p) => roleText(p) },
-        { key: "scope", label: "Scope", render: (p) => wording.where(p) },
-        { key: "when", label: "When", render: (p) => <span className="mono">{p.effect === "deny" ? (p.where.freeze ? "while a freeze is active" : "always") : wording.when(p.when) + (p.oncallOnly ? ", on call" : "")}</span> },
+        { key: "scope", label: "Scope", render: (p) => scopeText(p) },
+        { key: "when", label: "When", render: (p) => <span className="mono">{whenText(p)}</span> },
         { key: "effect", label: "Effect", render: (p) => <span className={`chip ${p.effect === "deny" ? "bad" : "ok"}`}>{p.effect}</span> },
         { key: "on", label: "On", render: (p) => <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label={p.name} onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v, ifMatchOf(p)), `${v ? "Enabled" : "Disabled"} ${p.name}`)} /> },
         ...(anyCustom ? [{ key: "acts", label: "", align: "end" as const, render: (p: Policy) => ((p as Policy & { custom?: boolean }).custom ? <Btn label="Delete" small kind="ghost" id={`acc-pol-del-${p.id}`} guard={perm} onClick={async () => void outcome(await ops.deletePolicy(p.id, ifMatchOf(p)))} /> : null) }] : []),
