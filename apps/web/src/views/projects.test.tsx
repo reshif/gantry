@@ -739,6 +739,8 @@ describe("Project config", () => {
     mount(<ProjectConfigView />);
     expect(Array.from((await waitFor(() => { const t = document.querySelectorAll("#pcf-appr thead th"); if (!t.length) throw new Error("no table"); return t; }))).map((t) => t.textContent?.replace(/[↑↓↕]/, "").trim())).toEqual(["Gate", "Roles", "Needed", "Separation", "Escalate", ""]);
     expect((await byId("pcf-rule")).getAttribute("aria-label")).toMatch(/G2/); // the Traveler's Edit rule link opens that gate
+    expect(window.location.hash).toBe("#/p/payments/project-config"); // the gate lives in ?rule=, not a stale hash segment
+    expect(window.location.search).toMatch(/tab=approvers/);
     fireEvent.click(await byId("pcf-ap-edit-G5"));
     await waitFor(() => expect(document.getElementById("pcf-rule")!.getAttribute("aria-label")).toMatch(/G5/));
     for (const id of ["pcf-ap-required", "pcf-ap-sod", "pcf-ap-add", "pcf-ap-esc", "pcf-ap-fallback", "pcf-sc-cls"]) expect(document.getElementById(id), id).toBeTruthy();
@@ -839,6 +841,8 @@ describe("Project config", () => {
     tab("spend");
     mount(<ProjectConfigView />);
     expect((await byId("pcf-bud-st-build")).textContent).toMatch(/\$13/);
+    expect((await byId("pcf-bud-st-other")).textContent).toMatch(/\$237/); // metered month to date ($250) less the $13 on stations, so the figures reconcile
+    expect(document.getElementById("pcf-bud-note")!.textContent).toMatch(/\$250/);
     expect(Array.from(document.querySelectorAll("#pcf-bud-top-table tbody tr")).map((r) => r.querySelector("button")?.textContent)).toEqual(["WO-2", "WO-1"]);
     expect(document.getElementById("pcf-bud-monthly")!.getAttribute("min")).toBe("0");
     expect(document.getElementById("pcf-bud-monthly")!.getAttribute("max")).toBe("10000000");

@@ -130,7 +130,7 @@ tr.is-custom > th, tr.is-custom > td:first-child { box-shadow: inset 3px 0 0 var
 .flw-line { display: grid; align-items: center; gap: 6px; padding: 7px 0; min-width: 0; grid-template-columns: 30px minmax(72px, 1fr) minmax(0, 0.8fr) 136px 72px 26px; }
 .flw-gates .flw-line { grid-template-columns: 46px minmax(84px, 1fr) 56px 158px minmax(0, 0.8fr) 58px 26px; }
 .flw-code { color: var(--accent); }
-.flw-name, .flw-sub, .flw-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.flw-name, .flw-sub, .flw-hint { min-width: 0; overflow-wrap: anywhere; }
 .flw-ctl { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .flw-on { justify-content: flex-end; }
 .flw-step { display: inline-flex; align-items: center; gap: 2px; }
@@ -159,3 +159,9 @@ tr.is-custom > th, tr.is-custom > td:first-child { box-shadow: inset 3px 0 0 var
   .flw-more { padding-left: 0; }
 }
 .pcf-rule .pcf-num, .pcf-nofm .pcf-num, .pcf-deleg-row .pcf-num { width: 84px; flex: none; }
+
+#pcf-bud-stations .hm-bar-l { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.pcf-top { align-items: start; }
+.pcf .check-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.pcf .check { flex-wrap: wrap; row-gap: 2px; }
+.pcf .check .pcf-tag-custom { margin-left: 0; flex: none; }

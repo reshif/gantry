@@ -9,7 +9,7 @@ import { pickProject } from "../lib/routes";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Btn, Empty, Panel, Select, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
-import { useCatalog, type PView } from "./projects/kit";
+import { flowOf, useCatalog, type PView } from "./projects/kit";
 import { useQueryParam } from "./projects/urlState";
 import { LEGACY_TABS, TABS, type CfgState } from "./project-config/ctx";
 import { MembersTab, OverviewProto } from "./project-config/overview";
@@ -47,14 +47,31 @@ export default function ProjectConfigView() {
   const tab = legacy ? legacy.tab : TABS.some((t) => t[0] === raw) ? raw : "overview";
   // an old bookmark is rewritten once, then the tab renders: its section and editor are in the URL before the tab mounts
   useEffect(() => {
-    if (!legacy) return;
+    if (!legacy || !cat || !p) return;
     if (legacy.sec) setSecQ(legacy.sec);
-    if (legacy.rule && !ruleQ) setRuleQ("G5");
+    const gates = flowOf(cat, p).gates;
+    const first = (gates.find((g) => g.id === "G5") ?? gates[0])?.id; // G5 (the release gate) when this flow has it, else the first gate
+    if (legacy.rule && !ruleQ && first) setRuleQ(first);
     setTabQ(legacy.tab === "overview" ? null : legacy.tab);
     setS((x) => ({ ...x, tab: legacy.tab }));
-  }, [legacy]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [legacy, !!cat, !!p]); // eslint-disable-line react-hooks/exhaustive-deps
   // the Traveler's "Edit rule" link names the gate
-  useEffect(() => { const l = linked(); if (l?.gate) setRuleQ(l.gate); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // the segment moves into the query (?tab=approvers&rule=G2) so the address and the screen agree after a tab switch
+  useEffect(() => {
+    const l = linked();
+    if (!l?.gate) return;
+    setRuleQ(l.gate);
+    setTabQ(l.tab);
+    try {
+      const h = window.location.hash;
+      const i = h.indexOf("project-config");
+      if (i >= 0) {
+        const qi = h.indexOf("?");
+        const next = h.slice(0, i + "project-config".length) + (qi < 0 ? "" : h.slice(qi));
+        window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${next}`);
+      }
+    } catch { /* no history access */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (patch: Partial<CfgState>) => {
     const { tab: t, ...rest } = patch;
     if (t) setTabQ(t === "overview" ? null : t);

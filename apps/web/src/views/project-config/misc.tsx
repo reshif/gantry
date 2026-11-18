@@ -74,7 +74,9 @@ export function SpendBreakdown({ p, cat }: Pick<PcProps, "p" | "cat">) {
       {(raw) => {
         const wos = (Array.isArray(raw) ? raw : ((raw as { items?: WorkOrder[] }).items ?? [])) as WorkOrder[];
         const byStation = stations.map((s) => ({ s, v: wos.reduce((a, w) => a + (w.history ?? []).filter((e) => e.station === s.id).reduce((x, e) => x + (e.cost || 0), 0), 0) }));
-        const max = Math.max(1, ...byStation.map((x) => x.v));
+        const onStations = byStation.reduce((a, x) => a + x.v, 0);
+        const other = Math.max(0, p.budget.mtd - onStations);
+        const max = Math.max(1, other, ...byStation.map((x) => x.v));
         const top = wos.map((w) => ({ w, cost: (w.history ?? []).reduce((a, e) => a + (e.cost || 0), 0) })).sort((a, c) => c.cost - a.cost).slice(0, 5);
         return (
           <div className="cols">
@@ -90,8 +92,13 @@ export function SpendBreakdown({ p, cat }: Pick<PcProps, "p" | "cat">) {
                     </li>
                   );
                 })}
+                <li className="hm-bar-row is-ok" id="pcf-bud-st-other">
+                  <span className="hm-bar-l">Not tied to a station</span>
+                  <span className="hm-bar-track" aria-hidden="true"><span className="hm-bar-fill" style={{ width: `${((other / max) * 100).toFixed(1)}%` }} /></span>
+                  <span className="hm-bar-v mono">{fmt.money(other)}</span>
+                </li>
               </ul>
-              <p className="small muted">{`From the ${wos.length} most recent work orders on record.`}</p>
+              <p className="small muted" id="pcf-bud-note">{`Stations add up the cost recorded on the ${wos.length} most recent work orders. The rest of the month-to-date figure (${fmt.money(p.budget.mtd)}, metered) is chat, side threads and older work orders, shown as Not tied to a station.`}</p>
             </Panel>
             <Panel title="Most expensive work orders" id="pcf-bud-top" flush>
               <DataTable

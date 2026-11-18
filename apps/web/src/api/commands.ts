@@ -6,6 +6,7 @@ import { ops } from "./ops";
 
 export const commands = {
   createProject: ops.createProject,
+  setTeams: ops.setTeams,
   connectRepo: ops.connectRepo,
   rerunAssessment: ops.rerunAssessment,
   openOnboardingPR: ops.openOnboardingPR,

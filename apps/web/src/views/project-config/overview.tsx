@@ -1,6 +1,6 @@
 /** Project config > Overview and Members: details (with the instructions overlay), summary, template, recent changes, notifications; members, roles, factory-wide roles and on call. */
 import { useState } from "react";
-import { isOnCall } from "@gantry/domain";
+import { isFactoryAdmin, isOnCall, type PolicyState } from "@gantry/domain";
 import { commands as ops } from "../../api/commands";
 import { useCan } from "../../api/can";
 import { useMe, useRepos, useTemplates } from "../../api/queries";
@@ -61,7 +61,7 @@ export function OverviewProto({ p, cat, people }: PcProps) {
   const gates = cat.gates.filter((g) => p.flow.gates[g.id] && !p.flow.gates[g.id]!.absent).length;
   return (
     <div className="stack">
-      <div className="cols">
+      <div className="cols pcf-top">
         <Panel title="Details">
           <form noValidate onSubmit={(e) => { e.preventDefault(); void save(); }}>
             <div>
@@ -186,7 +186,7 @@ function OnCallPanel({ p, people, canSet }: { p: PcProps["p"]; people: PcProps["
   const me = useMe();
   const list = Array.isArray(p.oncall) ? p.oncall : [];
   const v = (p as { version?: number }).version;
-  const isFA = (x: (typeof people)[number]) => x.roles.some((g) => g.role === "factory_admin" && g.scope === "factory");
+  const isFA = (x: (typeof people)[number]) => isFactoryAdmin({ people } as PolicyState, x.id);
   const pool = people.filter((x) => x.status === "active" && !isFA(x) && x.roles.some((g) => g.scope === p.id || g.scope === "factory"));
   const addable = pool.filter((x) => !list.includes(x.id));
   const [pick, setPick] = useState("");

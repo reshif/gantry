@@ -39,7 +39,7 @@
       "views/integrations": 5,
       "views/learning": 12,
       "views/mcp": 3,
-      "views/models": 5,
+      "views/models": 4,
       "views/notifications": 5,
       "views/onboarding": 6,
       "views/people": 4,
@@ -76,7 +76,6 @@
       "views/notifications": 1,
       "views/project-config": 3
     },
-    "jsx-a11y/no-redundant-roles": {},
     "jsx-a11y/no-static-element-interactions": {
       "shell": 1,
       "ui": 1,
@@ -160,7 +159,7 @@
       "views/govern": 2,
       "views/learning": 6,
       "views/people": 1,
-      "views/project-config": 7,
+      "views/project-config": 5,
       "views/traveler": 1,
       "views/workspace": 1
     },
