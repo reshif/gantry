@@ -287,7 +287,7 @@ describe("Floor: prototype drawers and links", () => {
     expect(convWaiting({ ...base, bay: null } as never, DEFAULT_CATALOG)).toBeNull();
   });
 
-  it("keeps the header to Belt/Board, Line control and Submit, and reads ?view=board from the hash", async () => {
+  it("shows the same header in Board as in Belt (Parts list, Focus, Live/Replay, view, Line control, Submit) and reads ?view=board from the hash", async () => {
     mockApi();
     window.location.hash = "#/p/payments/floor?view=board";
     mount(<FloorView />);
@@ -295,8 +295,16 @@ describe("Floor: prototype drawers and links", () => {
     expect(document.getElementById("floor-board")).toBeTruthy();
     expect(document.getElementById("floor-view-board")?.getAttribute("aria-pressed")).toBe("true");
     expect(document.getElementById("floor-line")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Replay" })).toBeNull();
-    expect(document.getElementById("floor-parts-toggle")).toBeNull();
+    expect(screen.getByRole("button", { name: "Replay" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Live" })).toBeTruthy();
+    expect(document.getElementById("floor-parts-toggle")).toBeTruthy();
+    expect(document.getElementById("floor-focus")).toBeTruthy();
+    expect(document.getElementById("floor-line-control")).toBeTruthy();
+    expect(document.getElementById("floor-new-wo")).toBeTruthy();
+    fireEvent.click(document.getElementById("floor-focus") as HTMLElement);
+    expect(document.getElementById("floor-board")?.className).toMatch(/is-focus/);
+    fireEvent.click(document.getElementById("floor-parts-toggle") as HTMLElement);
+    expect(document.getElementById("floor-parts")).toBeTruthy();
     window.location.hash = "";
   });
 
@@ -305,6 +313,8 @@ describe("Floor: prototype drawers and links", () => {
     mount(<FloorView />);
     fireEvent.click(await screen.findByRole("button", { name: /Line control/ }));
     expect(await screen.findByRole("menuitem", { name: /Halt line/ })).toBeTruthy();
+    expect(await screen.findByText("Pause one repo")).toBeTruthy();
+    expect(screen.getAllByRole("menuitem", { name: /^Pause / }).length).toBeGreaterThan(0);
     fireEvent.click(await screen.findByRole("menuitem", { name: /Emergency stop/ }));
     expect(await screen.findByText("Emergency stop the factory")).toBeTruthy();
   });
@@ -511,5 +521,15 @@ describe("Floor: precision sheet", () => {
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: was });
     }
+  });
+});
+
+describe("wrapText (captions are shown whole, never cut with an ellipsis)", () => {
+  it("wraps on words and splits an over-long word", async () => {
+    const { wrapText } = await import("./floor/Line");
+    expect(wrapText("holding 1 for G0+G1 · oldest 13h 08m", 20)).toEqual(["holding 1 for G0+G1", "· oldest 13h 08m"]);
+    expect(wrapText("abcdefghij", 4)).toEqual(["abcd", "efgh", "ij"]);
+    expect(wrapText("", 10)).toEqual([""]);
+    expect(wrapText("WO-2407 · Support partial refunds on Amex", 20).join(" ")).not.toMatch(/…/);
   });
 });

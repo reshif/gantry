@@ -29,6 +29,30 @@ const keyOn = (fn: () => void) => (e: React.KeyboardEvent) => {
   }
 };
 const trunc = (t: string, n: number): string => (t.length > n ? `${t.slice(0, Math.max(1, n - 1))}…` : t);
+/** Wrap text on words to lines of at most n characters (a longer word is split), so a caption is shown whole instead of cut. */
+export const wrapText = (t: string, n: number): string[] => {
+  const out: string[] = [];
+  let line = "";
+  for (let word of t.split(/\s+/).filter(Boolean)) {
+    while (word.length > n) {
+      if (line) { out.push(line); line = ""; }
+      out.push(word.slice(0, n));
+      word = word.slice(n);
+    }
+    if (!line) line = word;
+    else if (line.length + 1 + word.length <= n) line += ` ${word}`;
+    else { out.push(line); line = word; }
+  }
+  if (line) out.push(line);
+  return out.length ? out : [""];
+};
+const LH = 12; // extra height of each wrapped text line
+const MAXLINES = 4;
+const capChars = (w: number): number => Math.max(8, Math.floor((w - 20) / 6.4));
+const capLines = (t: string, w: number): string[] => {
+  const all = wrapText(t, capChars(w));
+  return all.length <= MAXLINES ? all : [...all.slice(0, MAXLINES - 1), trunc(all.slice(MAXLINES - 1).join(" "), capChars(w))];
+};
 
 /* ---------- sheet geometry ---------- */
 const W = 1180;
@@ -37,15 +61,15 @@ const GAP = 40;
 const X0 = 40;
 const colsFor = (w: number): number => Math.max(1, Math.floor((w - 24) / 30));
 const MAXROWS = 4;
-const hBusy = (n: number, w: number): number => (n ? 176 + (Math.min(MAXROWS, Math.ceil(n / colsFor(w))) - 1) * ROW : 140);
-const trayH = (n: number, w: number): number => 88 + (Math.min(MAXROWS, Math.ceil(n / colsFor(w))) - 1) * ROW;
+const hBusy = (n: number, w: number, sh: number): number => (n ? 176 + (Math.min(MAXROWS, Math.ceil(n / colsFor(w))) - 1) * ROW : 140) + sh;
+const trayH = (n: number, w: number, dl: number): number => 88 + (Math.min(MAXROWS, Math.ceil(n / colsFor(w))) - 1) * ROW + (dl - 1) * LH;
 const slot = (x: number, w: number, i: number, cols: number, top: number): { x: number; y: number } => {
   const pitch = Math.min(32, (w - 24) / cols);
   return { x: x + 12 + pitch / 2 + (i % cols) * pitch, y: top + 14 + Math.floor(i / cols) * ROW };
 };
 
 interface Box { x: number; y: number; w: number; h: number }
-interface Placed { st: StationModel; box: Box; trays: Array<{ bay: StationModel["bays"][number]; box: Box }> }
+interface Placed { st: StationModel; box: Box; sh: number; trays: Array<{ bay: StationModel["bays"][number]; box: Box }> }
 
 function layout(model: FloorModel, order: { top: string[]; bottom: string[] }) {
   const byId = new Map(model.stations.map((s) => [s.s.id, s]));
@@ -53,14 +77,16 @@ function layout(model: FloorModel, order: { top: string[]; bottom: string[] }) {
   const row2 = order.bottom.map((id) => byId.get(id)).filter((s): s is StationModel => !!s);
   const n = Math.max(row1.length, row2.length + 1, 1);
   const sw = Math.max(104, Math.min(200, Math.floor((W - X0 - 78 - (n - 1) * GAP) / n)));
-  const trays = (st: StationModel): number => st.bays.reduce((sum, b) => sum + trayH(b.items.length, sw) + 10, 0);
+  const dl = (b: StationModel["bays"][number]): number => capLines(b.bay.desc, sw).length;
+  const trays = (st: StationModel): number => st.bays.reduce((sum, b) => sum + trayH(b.items.length, sw, dl(b)) + 10, 0);
+  const sh = (Math.max(1, ...[...row1, ...row2].map((st) => capLines(st.caption, sw).length)) - 1) * LH;
   const place = (row: StationModel[], y: number): { placed: Placed[]; h: number; rowH: number } => {
-    const bh = Math.max(140, ...row.map((st) => hBusy(st.items.length, sw)));
+    const bh = Math.max(140, ...row.map((st) => hBusy(st.items.length, sw, sh)));
     const th = Math.max(0, ...row.map(trays));
     const placed = row.map((st, i): Placed => {
       const x = X0 + i * (sw + GAP);
       let ty = y + bh + 14;
-      return { st, box: { x, y, w: sw, h: bh }, trays: st.bays.map((bay) => { const h = trayH(bay.items.length, sw); const b = { bay, box: { x, y: ty, w: sw, h } }; ty += h + 10; return b; }) };
+      return { st, sh, box: { x, y, w: sw, h: bh }, trays: st.bays.map((bay) => { const h = trayH(bay.items.length, sw, dl(bay)); const b = { bay, box: { x, y: ty, w: sw, h } }; ty += h + 10; return b; }) };
     });
     return { placed, h: bh, rowH: bh + (th ? th + 4 : 0) };
   };
@@ -132,7 +158,7 @@ function Gauge({ x, y, w, count, limit, labels }: { x: number; y: number; w: num
 }
 
 function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bottleneck: boolean; revIds: Set<string> }) {
-  const { st, box } = p;
+  const { st, box, sh } = p;
   const count = st.items.length;
   const hot = st.items.some((b) => b.kind === "gate");
   const calm = !count && !st.bays.length;
@@ -141,12 +167,11 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
   const shown = count > cap ? st.items.slice(0, cap - 1) : st.items;
   const extra = count - shown.length;
   const open = () => h.onStation(st.s.id);
-  const maxc = Math.floor((box.w - 20) / 5.5);
   const tone = st.state.tone;
   const oldest = st.oldestWait;
   const lt = oldest !== null ? `OLDEST WAIT ${dur(oldest)}` : "NO WAIT";
   const dimY = box.y + box.h - 14;
-  const cap1 = trunc(st.caption, maxc);
+  const capL = capLines(st.caption, box.w);
   return (
     <g data-station={st.s.id} className={`fp-st${h.route && !h.route.includes(st.s.id) ? " bypass" : ""}${st.over ? " over" : ""}${hot && !st.over ? " hot" : ""}${calm ? " calm" : ""}`}>
       <g
@@ -166,15 +191,15 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
         <circle className={`fp-dot ${tone}`} cx={box.x + 13} cy={box.y + 40} r={3} />
         <text className="fp-t b" x={box.x + 21} y={box.y + 43.5} fontSize={10.5}>{trunc(st.agent, Math.floor((box.w - 80) / 6))}</text>
         <text className={`fp-t b st ${tone}`} x={box.x + box.w - 10} y={box.y + 43.5} fontSize={10} textAnchor="end">{st.state.t}</text>
-        <text className={tone === "idle" ? "fp-sn" : "fp-t m"} x={box.x + 10} y={box.y + 58} fontSize={10.5}>{cap1}</text>
-        <text className="fp-t m" x={box.x + 10} y={box.y + 77} fontSize={10} letterSpacing=".1em">WIP</text>
-        <text className={`fp-t b${st.over ? " bad" : ""}`} x={box.x + 36} y={box.y + 77} fontSize={13}>{`${count} / ${st.lim}`}</text>
+        <text className={tone === "idle" ? "fp-sn" : "fp-t m"} x={box.x + 10} y={box.y + 58} fontSize={10.5}>{capL.map((l, i) => <tspan key={i} x={box.x + 10} dy={i ? LH : 0}>{l}</tspan>)}</text>
+        <text className="fp-t m" x={box.x + 10} y={box.y + 77 + sh} fontSize={10} letterSpacing=".1em">WIP</text>
+        <text className={`fp-t b${st.over ? " bad" : ""}`} x={box.x + 36} y={box.y + 77 + sh} fontSize={13}>{`${count} / ${st.lim}`}</text>
         {st.over ? (
-          <text className="fp-t bad b" x={box.x + box.w - 10} y={box.y + 77} fontSize={10} textAnchor="end">{`+${st.over} OVER`}</text>
+          <text className="fp-t bad b" x={box.x + box.w - 10} y={box.y + 77 + sh} fontSize={10} textAnchor="end">{`+${st.over} OVER`}</text>
         ) : count ? (
-          <text className="fp-t m" x={box.x + box.w - 10} y={box.y + 77} fontSize={10} textAnchor="end">{`${Math.round(st.ratio * 100)}% FULL`}</text>
+          <text className="fp-t m" x={box.x + box.w - 10} y={box.y + 77 + sh} fontSize={10} textAnchor="end">{`${Math.round(st.ratio * 100)}% FULL`}</text>
         ) : null}
-        <Gauge x={box.x + 12} y={box.y + 84} w={box.w - 24} count={count} limit={st.lim} labels />
+        <Gauge x={box.x + 12} y={box.y + 84 + sh} w={box.w - 24} count={count} limit={st.lim} labels />
         <line className="fp-dim" x1={box.x + 10} y1={dimY - 4} x2={box.x + 10} y2={dimY + 4} />
         <line className="fp-dim" x1={box.x + box.w - 10} y1={dimY - 4} x2={box.x + box.w - 10} y2={dimY + 4} />
         <line className="fp-dim" x1={box.x + 10} y1={dimY} x2={box.x + box.w - 10} y2={dimY} />
@@ -194,12 +219,12 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
         </g>
       ) : null}
       {shown.map((b, k) => {
-        const q = slot(box.x, box.w, k, cols, box.y + 114);
+        const q = slot(box.x, box.w, k, cols, box.y + 114 + sh);
         return <Balloon key={b.w.id} b={b} x={q.x} y={q.y} rev={revIds.has(b.w.id)} h={h} />;
       })}
       {extra > 0
         ? (() => {
-            const q = slot(box.x, box.w, shown.length, cols, box.y + 114);
+            const q = slot(box.x, box.w, shown.length, cols, box.y + 114 + sh);
             return (
               <g className="fp-more" tabIndex={0} role="button" transform={`translate(${q.x} ${q.y})`} aria-label={`${extra} more at ${st.s.name}`} onClick={open} onKeyDown={keyOn(open)}>
                 <title>{`${extra} more work orders at ${st.s.name}`}</title>
@@ -214,6 +239,7 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
         const tshown = bay.items.length > tcols * MAXROWS ? bay.items.slice(0, tcols * MAXROWS - 1) : bay.items;
         const textra = bay.items.length - tshown.length;
         const openBay = () => h.onBay(st.s.id, bay.bay.id);
+        const descL = capLines(bay.bay.desc, tb.w);
         return (
           <g key={bay.bay.id} data-bay={bay.bay.id} className={`fp-tray${bay.needsYou ? " need" : ""}`}>
             <g
@@ -231,7 +257,7 @@ function Station({ p, h, bottleneck, revIds }: { p: Placed; h: LineHandlers; bot
               <rect className="tb" x={tb.x} y={tb.y} width={tb.w} height={tb.h} rx={2} />
               <text className="fp-t b tray-h" x={tb.x + 10} y={tb.y + 17.5} fontSize={10} letterSpacing=".08em">{trunc(bay.bay.name.toUpperCase(), Math.floor((tb.w - 20) / 7))}</text>
               <text className="fp-t m fp-bay-c" x={tb.x + tb.w - 10} y={tb.y + 17.5} fontSize={10} textAnchor="end">{bay.items.length}</text>
-              <text className="fp-t m" x={tb.x + 10} y={tb.y + tb.h - 7} fontSize={10}>{trunc(bay.bay.desc, Math.floor((tb.w - 20) / 5.6))}</text>
+              <text className="fp-t m" x={tb.x + 10} y={tb.y + tb.h - 7 - (descL.length - 1) * LH} fontSize={10}>{descL.map((l, i) => <tspan key={i} x={tb.x + 10} dy={i ? LH : 0}>{l}</tspan>)}</text>
             </g>
             {tshown.map((b, k) => {
               const q = slot(tb.x, tb.w, k, tcols, tb.y + 14);
