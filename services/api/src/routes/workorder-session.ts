@@ -252,7 +252,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
   async function agentTurn(o: { row: NonNullable<Awaited<ReturnType<typeof readWoRow>>>; who: { id: string; name: string }; canConfirm: boolean; ag: Mode & { agentId: string; agentName: string; station: string }; question: string; kind: "message" | "open" | "continue" | "followup"; send: (e: string, d: unknown) => void; signal: AbortSignal }): Promise<string> {
     const f = await flowOf(o.row);
     const ctx = ctxFor(o.row, await repoFullOf(o.row.repo), f, o.who, o.ag);
-    const prior = [...(await legacyMessages(g.pool, g.orgId, o.row.id)), ...(await listWoMessages(g.pool, g.orgId, o.row.id, 30))];
+    const prior = [...(await legacyMessages(g.pool, g.orgId, o.row.id, { withScripted: false })), ...(await listWoMessages(g.pool, g.orgId, o.row.id, 30))];
     const { hist, question } = historyFrom(prior.map((m) => ({ role: m.role, text: m.text })), o.kind, o.question, { take: 16 });
     const atIntake = ctx.briefOpen;
     const defs = woToolDefs().filter((t) => atIntake || !/^(propose_|ask_user)/.test(t.name));
@@ -362,8 +362,10 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const planWaiting = planOf(row.data)?.status === "proposed" ? planOf(row.data) : null;
     const canDecidePlan = planWaiting ? (await decide(req, "gate.approve", scopeOf(row))).allowed : false;
     // The scripted questionnaire is history: shown until the session starts, never mixed into it afterwards.
-    const messages = mine.length ? mine : legacy;
-    const history = mine.length ? legacy.filter((m) => m.at < (mine[0]?.at ?? 0)) : [];
+    // With an agent talking, Gantry's scripted questions and notes are not shown at all (they were never an agent's words); in rule-based mode they are the conversation, labelled as such.
+    const legacyShown = ag.mode === "agent" ? legacy.filter((m) => !m.data.scripted) : legacy;
+    const messages = mine.length ? mine : legacyShown;
+    const history = mine.length ? legacyShown.filter((m) => m.at < (mine[0]?.at ?? 0)) : [];
     const cards = mine.flatMap((m) => (m.data.cards ?? []).map((cd) => ({ m, cd })));
     const pending = cards.filter((x): x is { m: WoMessage; cd: Extract<WoCard, { kind: "proposal" }> } => x.cd.kind === "proposal" && x.cd.status === "pending").map((x) => ({ mid: x.m.id, id: x.cd.id, what: x.cd.what, title: x.cd.title }));
     const lastM = mine.at(-1);

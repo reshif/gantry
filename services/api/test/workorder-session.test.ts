@@ -49,6 +49,30 @@ d("the work-order session", () => {
   };
 
   describe("with the Intake Clerk", () => {
+    it("never shows or feeds the model Gantry's scripted questions; an epic's children are the agent's proposal, applied on approval, and nobody is awaited after the confirm (G-01)", async () => {
+      const r = await w.submit(tomas, { title: "Three Nautobot report jobs for the network team", requestedCls: "epic" });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      const id = r.body.id as string;
+      let s = (await call(tomas, "GET", url(id))).body;
+      expect(s.agent.mode).toBe("agent");
+      expect(s.messages.some((m: any) => m.data?.scripted || /Intake Clerk|What is in scope/.test(m.text))).toBe(false);
+      edge.script = [{ blocks: [{ type: "tool_use", id: "t1", name: "propose_brief", input: { ...BRIEF, children: ["Interfaces report: interfaces by location", "Cables report: cable inventory"] } }] }, { blocks: [{ type: "text", text: "I drafted the brief with a proposed split; it waits for your approval." }] }];
+      expect((await call(tomas, "POST", url(id, "/messages"), { text: "Please draft the brief." })).status).toBe(200);
+      const sent = JSON.stringify(edge.calls[0]!.body.messages);
+      expect(sent).not.toMatch(/What is in scope|Scripted intake/);
+      expect(sent).toContain("Please draft the brief.");
+      s = (await call(tomas, "GET", url(id))).body;
+      const msg = s.messages.at(-1);
+      const card = msg.data.cards.find((c: any) => c.kind === "proposal");
+      expect(card.changes.find((c: any) => c.field === "children").added).toEqual(["Interfaces report: interfaces by location", "Cables report: cable inventory"]);
+      expect((await w.get(id)).brief.children).toEqual([]);
+      const ok = await call(tomas, "POST", url(id, `/proposals/${msg.id}/${card.id}`), { decision: "approve" });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      const wo = await w.get(id);
+      expect(wo.brief.children).toEqual(["Interfaces report: interfaces by location", "Cables report: cable inventory"]);
+      expect(wo.conv.awaiting).toBe("nobody");
+    });
+
     it("reads the work order and the repo, asks in natural language with suggestions, drafts the brief as a proposal with its diff; Approve confirms the brief through the ordinary command and passes G0+G1", async () => {
       const id = await submit();
       edge.script = [

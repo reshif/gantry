@@ -175,20 +175,25 @@ describe("flow definition equals legacy", () => {
 });
 
 describe("intake, slots and records equal legacy", () => {
-  it("buildWorkOrder and answerConversation equal legacy buildWO and answerConversation", () => {
+  it("buildWorkOrder equals legacy buildWO except where Gantry no longer writes what an agent authors (G-01)", () => {
     const inputs = [
       { project: "payments", repo: "payments-api", title: "Fix rounding on JPY partial captures", description: "see steps", requestedBy: "p-tomas" },
-      { project: "payments", repo: "ledger-service", title: "Notification preferences centre redesign", requestedBy: "p-meera", requestedCls: "feature" },
+      { project: "payments", repo: "ledger-service", title: "Notification preferences centre redesign", requestedBy: "p-meera" },
       { project: "risk", repo: "risk-models", title: "Retrain model and tune drift threshold", requestedBy: "p-priya" },
       { project: "storefront", repo: "web-storefront", title: "Evaluate edge rendering", requestedBy: "p-arjun" },
     ];
+    const strip = (w: Record<string, unknown>) => {
+      const x = JSON.parse(JSON.stringify(w));
+      for (const k of ["conv", "brief", "clsRationale", "clsConfidence"]) delete x[k];
+      return x;
+    };
     inputs.forEach((i, n) => {
       const o = { ...i, id: "WO-9" + n, createdAt: NOW };
       const project = S.projects.find((p) => p.id === i.project)!;
       const a = buildWorkOrder(S.catalog, project, o);
       const b = JSON.parse(JSON.stringify(G.buildWO(legacyState, o)));
-      expect(JSON.parse(JSON.stringify(a))).toEqual(b);
-      /* answer the first questions the same way in both */
+      expect(strip(a as never)).toEqual(strip(b));
+      // Answering walks the same scripted questions, and the brief fields a person answered agree with legacy; children are never derived from an answer.
       const lw = G.buildWO(legacyState, o);
       let wo = a;
       let t = NOW + 5000;
@@ -198,8 +203,9 @@ describe("intake, slots and records equal legacy", () => {
         G.answerConversation(lw, text, i.requestedBy, t);
         wo = { ...wo, conv: r.conv, brief: r.brief };
         t += 60000;
-        expect(JSON.parse(JSON.stringify(wo.conv))).toEqual(JSON.parse(JSON.stringify(lw.conv)));
-        expect(JSON.parse(JSON.stringify(wo.brief))).toEqual(JSON.parse(JSON.stringify(lw.brief)));
+        expect(wo.brief.scopeIn).toEqual(lw.brief.scopeIn);
+        expect(wo.brief.ac).toEqual(lw.brief.ac);
+        expect(wo.brief.children).toEqual([]);
       }
     });
   });

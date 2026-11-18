@@ -362,8 +362,11 @@ async function splitEpic(fx: Fx, w: Wo, project: Project, by: string): Promise<v
   const { newWoId, createWorkOrder } = await import("./create.js");
   for (const name of names) {
     const id = await newWoId(fx.tx);
+    // The Plan agent writes each child as "Title: one-line goal"; the title and the goal are its words, not Gantry's.
+    const [t, ...g] = name.split(":");
+    const goal = g.join(":").trim();
     await createWorkOrder(fx, {
-      id, project: project.id, repo: w.repo ?? "", title: `${w.title}: ${name}`, description: `Child of ${w.id}. ${name} part of the epic.`, forceCls: "feature", requestedBy: w.submitter ?? by, source: "epic", parent: w.id, childOf: { by, parent: w.id },
+      id, project: project.id, repo: w.repo ?? "", title: `${w.title}: ${(g.length ? t! : name).trim()}`, description: `Child of ${w.id} (${w.title}).${goal ? ` ${goal}` : g.length ? "" : ` ${name}`}`, forceCls: "feature", requestedBy: w.submitter ?? by, source: "epic", parent: w.id, childOf: { by, parent: w.id },
     });
     ids.push(id);
   }

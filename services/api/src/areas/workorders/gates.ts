@@ -152,7 +152,7 @@ async function confirmBrief(fx: Fx, w: Wo, by: string): Promise<void> {
   await fx.tx.query(`insert into brief_versions (org_id, wo_id, version, body, class, route, confirmed_by, confirmed_at) values ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8)`, [fx.orgId, w.id, v, JSON.stringify(brief), w.cls, JSON.stringify(r), by, fx.now]);
   const names = r.map((s) => stationDef(fx.catalog, s)?.name ?? s).join(" → ");
   const who = (await fx.tx.query<{ name: string }>(`select name from people where org_id = $1 and id = $2`, [fx.orgId, by])).rows[0]?.name ?? by;
-  await appendMessage(fx, w.id, "ag-intake", `Brief confirmed by ${who}. Starting the route: ${names}.`);
+  await appendMessage(fx, w.id, "system", `Brief confirmed by ${who}. Starting the route: ${names}.`);
   await closeConversation(fx, w.id);
   closeEntry(w, fx, "passed");
   note(w, fx, by, "G0+G1 brief confirmed.");

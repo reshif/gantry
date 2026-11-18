@@ -72,7 +72,7 @@ export async function createWorkOrder(fx: Fx, i: CreateInput): Promise<Created> 
     built.conv.done = true;
     built.conv.qi = built.conv.questions.length;
     await fx.tx.query(`update conversations set status = 'closed', data = data || $3::jsonb, updated_at = now() where org_id = $1 and wo_id = $2 and kind = 'intake'`, [fx.orgId, i.id, JSON.stringify({ done: true, qi: built.conv.qi })]);
-    await fx.tx.query(`insert into messages (org_id, id, conversation_id, author, author_kind, body, data) values ($1,$2,$3,'ag-intake','agent',$4,$5::jsonb)`, [fx.orgId, `${i.id}:m99999`, `CONV-${i.id}`, `Created from epic ${i.childOf.parent}; brief inherited.`, JSON.stringify({ at: now + 3000 })]);
+    await fx.tx.query(`insert into messages (org_id, id, conversation_id, author, author_kind, body, data) values ($1,$2,$3,'system','system',$4,$5::jsonb)`, [fx.orgId, `${i.id}:m99999`, `CONV-${i.id}`, `Created from epic ${i.childOf.parent}; brief inherited.`, JSON.stringify({ at: now + 3000 })]);
     w.state = "waiting";
     const inst = await openInstance(fx.tx, fx.orgId, w, "G0G1", { station: "intake", flowVersion, now: fx.now });
     await closeInstance(fx, inst, "decision");

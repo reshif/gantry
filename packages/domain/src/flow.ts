@@ -221,15 +221,14 @@ export function convQuestions(wo: Pick<WorkOrder, "cls" | "title" | "repo"> & { 
   const repo = wo.repo;
   const qs: ConvQuestion[] = [];
   if (wo.cls === "spike") qs.push({ id: "question", field: "scope", text: "What question should the report answer?", chips: ["Is it feasible on our stack?", "What would it cost to run?", "Which option should we pick?"] });
-  else qs.push({ id: "scope", field: "scope", text: "I read this as: " + wo.title + ". What is in scope?", chips: ["Only " + repo, repo + " and its direct clients", "Suggest a scope for me"] });
+  else qs.push({ id: "scope", field: "scope", text: "What is in scope for \"" + wo.title + "\"?", chips: ["Only " + repo, repo + " and its direct clients", "Suggest a scope for me"] });
   qs.push({ id: "ac", field: "ac", text: "How will we know it is done?", chips: AC[wo.cls] ?? (AC.feature as string[]) });
   for (const m of wo.conv.misses) {
-    if (m.id === "rollback") qs.push({ id: "rollback", field: "rollback", text: "I could not find a rollback plan. How do we undo this if it goes wrong?", chips: ["Revert the PR", "Turn the feature flag off", "Needs a migration rollback"] });
+    if (m.id === "rollback") qs.push({ id: "rollback", field: "rollback", text: "No rollback plan was found in the request. How do we undo this if it goes wrong?", chips: ["Revert the PR", "Turn the feature flag off", "Needs a migration rollback"] });
     if (m.id === "version") qs.push({ id: "version", field: "version", text: "Which release should this land in?", chips: ["Next patch release", "Next minor release", "Internal only, no release"] });
     if (m.id === "testdata") qs.push({ id: "testdata", field: "testdata", text: "What test data can the agents use?", chips: ["Fixtures already in the repo", "Generate synthetic data", "I will attach a sample"] });
     if (m.id === "repro") qs.push({ id: "repro", field: "repro", text: "How do we reproduce it?", chips: ["Steps are in the linked issue", "Happens on every request with JPY", "I will describe them"] });
   }
-  if (wo.cls === "epic") qs.push({ id: "children", field: "children", text: "I propose splitting this into 3 child work orders: data model, API, and UI. Create them after Plan?", chips: ["Yes, create all 3", "Only data model and API", "Do not split"] });
   qs.push({ id: "extra", field: "extra", text: "Anything else the factory should know?", chips: ["No, that is everything"] });
   return qs;
 }
@@ -256,7 +255,8 @@ export function buildBrief(c: Catalog, project: Project | null | undefined, wo: 
     decisions: wo.conv.decisions.map((d) => d.text),
     estimate: (cls ? cls.est : "M") + (wo.cls === "epic" ? " (split)" : ""),
     route: rt,
-    children: wo.cls === "epic" && a.children && !/do not/i.test(a.children) ? (/only/i.test(a.children) ? ["Data model", "API"] : ["Data model", "API", "UI"]) : [],
+    // Children are authored by the Plan agent (or proposed by the Intake agent / edited by a person), never derived from a scripted answer.
+    children: [],
   };
   if (a.rollback) b.risks.push("Rollback: " + a.rollback);
   return b;
@@ -272,12 +272,13 @@ export function startConversation(
   const misses = intakeMisses(wo);
   const cls = c.classes.find((x) => x.id === wo.cls);
   const conv: Conversation = { messages: [], qi: 0, answers: {}, misses, decisions: [], awaiting: awaiting || "submitter", done: false, raised: [], questions: [] };
-  conv.messages.push({ from: "ag-classifier", at: wo.createdAt, text: "Classified as " + (cls ? cls.name : wo.cls) + " (confidence " + Math.round(wo.clsConfidence * 100) + "%). " + wo.clsRationale });
+  // Scripted notes are Gantry's, not an agent's: they are authored by "system" and marked scripted so the page can label them (and hide them when an agent talks).
+  conv.messages.push({ from: "system", at: wo.createdAt, text: "Rule-based first guess: " + (cls ? cls.name : wo.cls) + " (confidence " + Math.round(wo.clsConfidence * 100) + "%). " + wo.clsRationale, scripted: true });
   const qs = convQuestions({ cls: wo.cls, title: wo.title, repo: wo.repo, conv: { misses } });
   conv.questions = qs;
-  conv.messages.push({ from: "ag-intake", at: wo.createdAt + 1000, text: "Hi, I am the Intake Clerk. A few questions so the brief is complete." + (misses.length ? " I noticed: " + misses.map((m) => m.text.toLowerCase()).join("; ") + "." : "") });
+  conv.messages.push({ from: "system", at: wo.createdAt + 1000, text: "Scripted intake questions (no agent is reading this request)." + (misses.length ? " Gaps found by keyword checks: " + misses.map((m) => m.text.toLowerCase()).join("; ") + "." : ""), scripted: true });
   const q0 = qs[0] as ConvQuestion;
-  conv.messages.push({ from: "ag-intake", at: wo.createdAt + 2000, text: q0.text, qid: q0.id, chips: q0.chips });
+  conv.messages.push({ from: "system", at: wo.createdAt + 2000, text: q0.text, qid: q0.id, chips: q0.chips, scripted: true });
   return { conv, brief: buildBrief(c, project, { cls: wo.cls, title: wo.title, conv }) };
 }
 
@@ -317,10 +318,12 @@ export function answerConversation(
   conv.qi++;
   if (conv.qi < conv.questions.length) {
     const n = conv.questions[conv.qi] as ConvQuestion;
-    conv.messages.push({ from: "ag-intake", at: at + 600, text: n.text, qid: n.id, chips: n.chips });
+    conv.messages.push({ from: "system", at: at + 600, text: n.text, qid: n.id, chips: n.chips, scripted: true });
   } else {
     conv.done = true;
-    conv.messages.push({ from: "ag-intake", at: at + 600, text: "The brief is ready. Confirm it to pass G0+G1 and start the route, or decline it to the Declined bay." });
+    // The submitter has answered everything: the brief now waits for an approver, not for the submitter.
+    conv.awaiting = "approver";
+    conv.messages.push({ from: "system", at: at + 600, scripted: true, text: "The brief is ready. Confirm it to pass G0+G1 and start the route, or decline it to the Declined bay." });
   }
   return done({ next: !conv.done });
 }
@@ -348,20 +351,27 @@ export interface NewWorkOrderInput {
 /** Build a work order at Intake with its classification, gates and conversation (legacy G.buildWO, with the clock and id supplied). */
 export function buildWorkOrder(c: Catalog, project: Project, o: NewWorkOrderInput): WorkOrder {
   const cl = classify(c, o.title + " " + (o.description || ""), o.requestedCls, project);
-  const cls = o.forceCls || (o.requestedCls && cl.confidence < 0.8 ? o.requestedCls : cl.cls);
+  // A person's explicit class is theirs and is kept; the keyword heuristic is only a first guess for requests that name none (an agent or a person may reclassify at Intake).
+  const cls = o.forceCls || o.requestedCls || cl.cls;
+  const chosen = !o.forceCls && !!o.requestedCls;
+  const clsName = (id: string) => c.classes.find((x) => x.id === id)?.name ?? id;
   const classDef = classOf(c, project, cls);
   const created = o.createdAt;
   const gates: Record<string, GateInstance> = {};
   for (const g of routeGates(c, project, cls)) gates[g] = { status: "pending", approvals: [], rejections: [], checks: [] };
   const g0 = gates.G0G1;
   if (g0) g0.status = "waiting";
+  const clsConfidence = chosen ? 1 : cl.confidence;
+  const clsRationale = chosen
+    ? "Chosen by the submitter: " + clsName(cls) + "." + (cl.cls !== cls ? " A rule-based keyword match (no agent read the request) would have said " + clsName(cl.cls) + "; the choice stands unless a person changes it." : "")
+    : "Rule-based keyword match (no agent read the request). " + cl.rationale;
   const base = {
-    cls, title: o.title, description: o.description || "", repo: o.repo, createdAt: created, clsConfidence: cl.confidence, clsRationale: cl.rationale,
+    cls, title: o.title, description: o.description || "", repo: o.repo, createdAt: created, clsConfidence, clsRationale,
   };
   const { conv, brief } = startConversation(c, project, base, o.awaiting);
   return {
     id: o.id, project: o.project, repo: o.repo, title: o.title, description: o.description || "", attachments: o.attachments || [],
-    cls, clsConfidence: cl.confidence, clsRationale: cl.rationale, clsSuggested: cl.cls, clsOverridden: null, requestedCls: o.requestedCls || null,
+    cls, clsConfidence, clsRationale, clsSuggested: cl.cls, clsOverridden: null, requestedCls: o.requestedCls || null,
     priority: o.priority || classDef.priority, source: o.source || "console", requestedBy: o.requestedBy, createdAt: created,
     station: 0, state: "waiting", bay: null, bayReason: "", bayFrom: null, progress: 100, slot: null,
     history: [{ station: "intake", agent: "ag-intake", model: "claude-haiku-5-5", startedAt: created, endedAt: null, tokens: 4200, cost: 0.02, outcome: null, note: "" }],
