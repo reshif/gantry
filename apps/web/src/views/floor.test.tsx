@@ -31,27 +31,28 @@ describe("Floor: belt", () => {
     expect(await screen.findByRole("heading", { name: "Floor" })).toBeTruthy();
     for (const sid of ["intake", "research", "spec", "design", "plan", "build", "verify", "review", "close"]) expect(document.querySelector(`[data-station="${sid}"]`), sid).toBeTruthy();
     // gates are valves with the number waiting; G0+G1 has one waiting work order in the seed
-    expect(document.querySelector('[data-gate="G0G1"] .f-vn')?.textContent).toBe("1");
-    // the build station's tags carry the work orders in the coding slots
+    expect(document.querySelector('[data-gate="G0G1"] .fp-vn')?.textContent).toBe("1");
+    // the build station's balloons carry the work orders in the coding slots
     expect(document.querySelector('[data-station="build"] [data-wo="WO-2401"]')).toBeTruthy();
     expect(document.querySelector('[data-station="build"] [data-wo="WO-2402"]')).toBeTruthy();
-    // bays hold what left the belt
-    expect(document.querySelector('[data-bay="sechold"] .fl-bay-c')?.textContent).toBe("1");
+    // bays hold what left the belt, as trays under the station that parked them
+    expect(document.querySelector('[data-bay="sechold"] .fp-bay-c')?.textContent).toBe("1");
     expect(document.querySelector('[data-bay="person"] [data-wo="WO-2409"]')).toBeTruthy();
-    expect(document.getElementById("floor-out")?.textContent).toMatch(/Released/);
-    // figures
-    const figure = (label: string) => screen.getByText(label).closest(".fs")?.querySelector("b")?.textContent;
-    expect(figure("In flight")).toBe(String(live.length));
-    // the strip is exactly the prototype's five cells; slots and spend sit outside it
-    expect(document.querySelectorAll("#floor-kpis .fs")).toHaveLength(5);
-    expect(screen.getByText("on the line")).toBeTruthy();
-    expect(screen.getByText("blocked or failed")).toBeTruthy();
-    // no footer under the line; slots and spend ride on the In flight cell's tooltip
+    expect(document.getElementById("floor-out")?.textContent).toMatch(/RELEASED/);
+    // the ticker: on the line, bottleneck, oldest at the gate, released
+    const cells = Array.from(document.querySelectorAll("#floor-kpis .tk .k")).map((k) => k.textContent);
+    expect(cells).toHaveLength(4);
+    expect(cells[0]).toBe("ON THE LINE");
+    expect(cells[1]).toBe("BOTTLENECK");
+    expect(cells[2]).toMatch(/^OLDEST AT /);
+    expect(cells[3]).toBe("RELEASED");
+    expect(document.querySelector("#floor-kpis .tk .v")?.textContent).toMatch(new RegExp(`^${live.length}`));
+    // no footer under the line; slots and spend ride on the On the line cell's tooltip
     expect(document.getElementById("floor-facts")).toBeNull();
-    expect(screen.getByText("In flight").closest(".fs")?.getAttribute("title")).toMatch(/Coding slots 2\/2/);
-    // the primary action and the eyebrow follow the prototype
+    expect(document.querySelector("#floor-kpis .tk")?.getAttribute("title")).toMatch(/Coding slots 2\/2/);
+    // the primary action stays and the title block names the project
     expect(screen.getByRole("button", { name: /Submit work order/ })).toBeTruthy();
-    expect(document.querySelector("#floor-head")?.textContent).not.toMatch(/Payments Platform/);
+    expect(document.querySelector("#floor-head")?.textContent).toMatch(/flow v1/);
   });
 
   it("names each gate with its code, kind and what it waits for in the valve's label and tooltip", async () => {
@@ -59,9 +60,9 @@ describe("Floor: belt", () => {
     mount(<FloorView />);
     await screen.findByRole("heading", { name: "Floor" });
     const g1 = document.querySelector('[data-gate="G0G1"]') as HTMLElement;
-    expect(g1.getAttribute("aria-label")).toMatch(/G0\+G1 Brief confirmed/);
+    expect(g1.getAttribute("aria-label")).toMatch(/G0\+G1 · Brief confirmed/);
     expect(g1.querySelector("title")?.textContent).toMatch(/a person approves/);
-    expect(g1.querySelector(".f-vc")?.textContent).toBe("G0+G1");
+    expect(g1.textContent).toMatch(/G0\+G1/);
     const auto = document.querySelector('[data-gate="G4"]') as HTMLElement;
     expect(auto.querySelector("title")?.textContent).toMatch(/automatic check/);
   });
@@ -83,9 +84,11 @@ describe("Floor: belt", () => {
     mount(<FloorView />);
     await screen.findByRole("heading", { name: "Floor" });
     const idle = document.querySelector('[data-station="research"]') as HTMLElement;
-    expect(idle.textContent).toMatch(/idle · nothing queued/);
+    expect(idle.classList.contains("calm")).toBe(true);
+    expect(idle.textContent).toMatch(/IDLE/);
+    expect(idle.textContent).toMatch(/NO WAIT/);
     expect(idle.textContent).toMatch(/S1/);
-    expect(idle.textContent).toMatch(/WIP 0\//);
+    expect(idle.textContent).toMatch(/WIP0 \/ \d/);
     expect(document.querySelector('[data-station="design"] [data-wo]')).toBeTruthy();
   });
 
@@ -105,8 +108,8 @@ describe("Floor: belt", () => {
     fireEvent.click(document.getElementById("floor-routes-toggle") as HTMLElement);
     fireEvent.click(document.getElementById("floor-route-docs") as HTMLElement);
     expect(document.querySelector(".fl-belt")?.classList.contains("has-route")).toBe(true);
-    expect(document.querySelector('[data-station="research"]')?.classList.contains("f-bypass")).toBe(true);
-    expect(document.querySelector('[data-station="intake"]')?.classList.contains("f-bypass")).toBe(false);
+    expect(document.querySelector('[data-station="research"]')?.classList.contains("bypass")).toBe(true);
+    expect(document.querySelector('[data-station="intake"]')?.classList.contains("bypass")).toBe(false);
     expect(document.getElementById("floor-route-docs")?.getAttribute("aria-pressed")).toBe("true");
   });
 
@@ -266,8 +269,7 @@ describe("Floor: prototype drawers and links", () => {
     mount(<FloorView />);
     await screen.findAllByText("PAY");
     fireEvent.click(document.getElementById("floor-tok-WO-2398") as HTMLElement);
-    const btn = (await screen.findByRole("link", { name: "Conversation" })) as HTMLAnchorElement;
-    expect(btn.getAttribute("href")).toBe("#/p/payments/conversations/WO-2398");
+    expect(await screen.findByRole("button", { name: "Conversation for WO-2398" })).toBeTruthy();
     expect(document.getElementById("floor-wo-conv-why")).toBeNull();
     cleanup();
     // an open station question: the reason names the station
@@ -275,7 +277,7 @@ describe("Floor: prototype drawers and links", () => {
     mount(<FloorView />);
     await screen.findAllByText("PAY");
     fireEvent.click(document.getElementById("floor-tok-WO-2398") as HTMLElement);
-    await screen.findByRole("link", { name: "Conversation" });
+    await screen.findByRole("button", { name: "Conversation for WO-2398" });
     expect(document.getElementById("floor-wo-conv-why")?.textContent).toBe("Build is waiting for you");
     // parked with a person (bay tags do not open this drawer on the v3 line, so the reason is checked directly)
     expect(convWaiting({ ...base, bay: "person", bayReason: "needs the table name" } as never, DEFAULT_CATALOG)).toBe("needs the table name");
@@ -291,6 +293,7 @@ describe("Floor: prototype drawers and links", () => {
     expect(document.getElementById("floor-view-board")?.getAttribute("aria-pressed")).toBe("true");
     expect(document.getElementById("floor-line")).toBeNull();
     expect(screen.queryByRole("button", { name: "Replay" })).toBeNull();
+    expect(document.getElementById("floor-parts-toggle")).toBeNull();
     window.location.hash = "";
   });
 
@@ -321,18 +324,15 @@ describe("Floor: prototype drawers and links", () => {
     window.location.hash = "";
   });
 
-  it("keeps bay cards to the work order link and title, and routes by class sit in the legend", async () => {
+  it("draws the legend, keeps the routes toggle in the drawing's header and the live switch in the Floor header", async () => {
     mockApi();
     mount(<FloorView />);
     await screen.findAllByText("PAY");
-    const card = document.querySelector('[data-bay="person"] [data-wo="WO-2409"]') as HTMLElement;
-    expect(Array.from(card.children).map((c) => c.tagName)).toEqual(["A", "SPAN"]);
+    expect(document.querySelectorAll(".fp-li")).toHaveLength(7);
+    expect(document.querySelector("#floor-line #floor-routes-toggle")).toBeTruthy();
+    expect(document.querySelector("#floor-head #floor-mode-live")).toBeTruthy();
+    expect(document.querySelector(".fp-gate .hit")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Assign" })).toBeNull();
-    expect(document.querySelectorAll(".flegend .lg")).toHaveLength(6);
-    expect(document.querySelector(".flegend #floor-routes-toggle")).toBeNull();
-    expect(document.querySelector(".fl-modes #floor-routes-toggle")).toBeTruthy();
-    expect(document.querySelector(".fl-modes #floor-mode-live")).toBeTruthy();
-    expect(document.querySelector(".f-valve .f-hit")).toBeTruthy();
   });
 
   it("opens the gate drawer with Kind, After station, Checks and a Waiting now list", async () => {
@@ -346,14 +346,20 @@ describe("Floor: prototype drawers and links", () => {
     expect(document.querySelector("#floor-gate-kv dd .chip")?.textContent).toBe("human");
   });
 
-  it("opens Released with a Work orders footer link and bay ids link to the record", async () => {
+  it("opens Released with a Work orders footer link, a bay tray as the bay drawer and a bay balloon as the work order drawer", async () => {
     mockApi();
     mount(<FloorView />);
     await screen.findAllByText("PAY");
-    expect(document.querySelector('[data-bay="person"] [data-wo="WO-2409"] a.pri')?.getAttribute("href")).toMatch(/record/);
     fireEvent.click(document.getElementById("floor-out") as HTMLElement);
     await screen.findByText(/OUT · TERMINUS/);
     expect(document.getElementById("floor-drawer-wos")?.textContent).toBe("Work orders");
+    cleanup();
+    mockApi();
+    mount(<FloorView />);
+    await screen.findAllByText("PAY");
+    fireEvent.click(document.getElementById("floor-bay-spec-person") as HTMLElement);
+    await screen.findByText(/^S\d · SIDE BAY$/);
+    await waitFor(() => expect(document.querySelector("#floor-bay-list [data-wo]")?.getAttribute("data-wo")).toBe("WO-2409"));
   });
 });
 
@@ -375,5 +381,121 @@ describe("Request changes at a gate (floor drawer)", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Request changes" }));
     await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/reject")).toHaveLength(1));
     expect(bodyOf(calls, "POST", "/api/v1/gate-instances/WO-2408%3AG3d%3A1/reject")[0]?.body).toMatchObject({ reason: "Name the migration rollback" });
+  });
+});
+
+describe("Floor: precision sheet", () => {
+  const only = (ids: string[]) => () => ({ body: floorRead({ workOrders: WOS.filter((w) => ids.includes(w.id)), gates: [] }) });
+
+  it("hides the Parts list until its button is pressed, keeps it in the URL with its sort, and gives the drawing the full width meanwhile", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    expect(document.getElementById("floor-parts")).toBeNull();
+    expect(document.querySelector(".fp-main")?.classList.contains("has-parts")).toBe(false);
+    const btn = screen.getByRole("button", { name: /^Parts list \(\d+\)$/ });
+    expect(btn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(btn);
+    expect(document.getElementById("floor-parts")).toBeTruthy();
+    expect(window.location.search).toMatch(/parts=open/);
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector(".fp-main")?.classList.contains("has-parts")).toBe(true);
+    // grouped by what each part needs, a part per work order
+    expect(document.querySelector("#floor-parts .fp-gh")?.textContent).toMatch(/NEEDS YOU · AT G/);
+    expect(document.querySelectorAll("#floor-parts .fp-pr").length).toBeGreaterThan(10);
+    fireEvent.click(document.getElementById("floor-parts-sort-wait") as HTMLElement);
+    expect(window.location.search).toMatch(/psort=wait/);
+    expect(document.querySelector("#floor-parts .fp-gh")).toBeNull();
+    fireEvent.click(document.getElementById("floor-parts-close") as HTMLElement);
+    expect(document.getElementById("floor-parts")).toBeNull();
+    expect(window.location.search).not.toMatch(/parts=/);
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("opens the Parts list from the address, and a part opens the same work order drawer a balloon does", async () => {
+    mockApi();
+    window.history.replaceState(null, "", "/?parts=open&psort=rev");
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    expect(document.getElementById("floor-parts")).toBeTruthy();
+    expect(document.getElementById("floor-parts-sort-rev")?.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(document.getElementById("floor-part-WO-2398") as HTMLElement);
+    expect(await screen.findByRole("button", { name: "Record for WO-2398" })).toBeTruthy();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("marks the bottleneck: the station over its limit is flagged on the drawing and named in the ticker", async () => {
+    const tight = { ...PAYMENTS, version: 1, flow: { ...PAYMENTS.flow, stations: { ...PAYMENTS.flow.stations, build: { ...PAYMENTS.flow.stations.build, wip: 1 } } } };
+    mockApi({ "GET /api/v1/projects": () => ({ body: [tight] }), "GET /api/v1/projects/payments": () => ({ body: tight }), "GET /api/v1/projects/payments/floor": () => ({ body: { ...floorRead(), project: tight } }) });
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    const build = document.querySelector('[data-station="build"]') as HTMLElement;
+    expect(build.classList.contains("over")).toBe(true);
+    expect(build.querySelector(".fp-flag")?.textContent).toMatch(/BOTTLENECK 200%/);
+    expect(document.querySelector('[data-station="verify"]')?.classList.contains("over")).toBe(false);
+    const cell = document.querySelectorAll("#floor-kpis .tk")[1] as HTMLElement;
+    expect(cell.classList.contains("bott")).toBe(true);
+    expect(cell.textContent).toMatch(/S5 2\/1\+1 over/);
+  });
+
+  it("says plainly when nothing is over a limit", async () => {
+    mockApi({ "GET /api/v1/projects/payments/floor": only(["WO-2398"]) });
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    expect(document.querySelector(".fp-flag.r, .fp-flag rect.r")).toBeNull();
+    expect(document.querySelectorAll("#floor-kpis .tk")[1]?.textContent).toMatch(/none/);
+  });
+
+  it("lists what waits on a person, oldest first, and each Open button goes to the right place", async () => {
+    mockApi({ "GET /api/v1/projects/payments/floor": only(["WO-2398", "WO-2409"]) });
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    expect(document.getElementById("floor-need-n")?.textContent).toBe("2");
+    const cards = Array.from(document.querySelectorAll("#floor-need .fp-ncard")) as HTMLElement[];
+    expect(cards.map((c) => c.getAttribute("data-k"))).toEqual(expect.arrayContaining(["gate:G0G1", expect.stringMatching(/^bay:spec:person$/)]));
+    // a gate with people waiting opens the gate drawer
+    fireEvent.click(within(document.querySelector('[data-k="gate:G0G1"]') as HTMLElement).getByRole("button"));
+    expect(await screen.findByText("Waiting now")).toBeTruthy();
+    cleanup();
+    mockApi({ "GET /api/v1/projects/payments/floor": only(["WO-2398", "WO-2409"]) });
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    // a bay holding one work order opens that work order
+    fireEvent.click(within(document.querySelector('[data-k="bay:spec:person"]') as HTMLElement).getByRole("button"));
+    expect(await screen.findByRole("button", { name: "Record for WO-2409" })).toBeTruthy();
+  });
+
+  it("dims what does not need a person in Focus on me, from the URL", async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByRole("heading", { name: "Floor" });
+    const btn = screen.getByRole("button", { name: "Focus on me" });
+    expect(document.querySelector(".fp-main")?.classList.contains("is-focus")).toBe(false);
+    fireEvent.click(btn);
+    expect(document.querySelector(".fp-main")?.classList.contains("is-focus")).toBe(true);
+    expect(window.location.search).toMatch(/focus=1/);
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("is a stacked station list at phone width, with the same stations, gates, bays and balloons and no drawing sheet", async () => {
+    const was = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      mockApi();
+      mount(<FloorView />);
+      await screen.findByRole("heading", { name: "Floor" });
+      expect(document.querySelector("svg.fp-dw")).toBeNull();
+      expect(document.querySelector(".fp-stack")).toBeTruthy();
+      for (const sid of ["intake", "build", "review", "close"]) expect(document.querySelector(`.fp-stack [data-station="${sid}"]`), sid).toBeTruthy();
+      expect(document.querySelector('.fp-stack [data-gate="G0G1"]')?.textContent).toMatch(/G0\+G1/);
+      expect(document.querySelector('.fp-stack [data-bay="person"] [data-wo="WO-2409"]')).toBeTruthy();
+      expect(document.getElementById("floor-out")).toBeTruthy();
+      // a balloon chip opens the same drawer
+      fireEvent.click(document.querySelector('.fp-stack [data-wo="WO-2398"]') as HTMLElement);
+      expect(await screen.findByRole("button", { name: "Record for WO-2398" })).toBeTruthy();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: was });
+    }
   });
 });
