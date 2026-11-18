@@ -90,7 +90,7 @@ describe("Audit", () => {
     expect(await screen.findByText("policy.edit.denied")).toBeTruthy();
     // the stat row is gone: counts live on the view tabs, and an always-present banner says whether the chain was checked
     expect(document.getElementById("aud-stats")).toBeNull();
-    expect(document.getElementById("aud-view-denied")?.textContent).toContain("1");
+    expect(document.getElementById("aud-view-denied")).toBeNull();
     expect(document.getElementById("aud-verified")?.className).toContain("banner");
     expect([...document.querySelectorAll("#aud-ledger th")].map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["#", "When", "Actor", "Action", "Target", "Project", "Category", "Outcome"]);
     expect(document.querySelector("#aud-ledger .pager")?.textContent).toContain("1–3 of 3");
@@ -117,17 +117,16 @@ describe("Audit", () => {
     expect(window.location.search).toContain("q=slack");
   });
 
-  it("has Export CSV and Verify chain in the header, a Clear button and More filters for the extra selects", async () => {
+  it("has only Export CSV in the header, the verify result in the banner, no view tabs and no More filters", async () => {
     setup(SAM, { "GET /api/v1/audit": () => ({ body: page([row(1)]) }) });
     mount(<AuditView />);
     await screen.findByText("role.add");
     expect(document.getElementById("aud-export")?.textContent).toContain("Export CSV");
-    expect(document.getElementById("aud-verify")).toBeTruthy();
-    expect(document.getElementById("aud-project")).toBeNull();
-    fireEvent.click(document.getElementById("aud-more")!);
-    expect(document.getElementById("aud-project")).toBeTruthy();
-    expect(document.getElementById("aud-via")).toBeTruthy();
-    expect(document.getElementById("aud-topic")).toBeTruthy();
+    expect(document.querySelector(".page-head #aud-verify, .page-acts #aud-verify")).toBeNull();
+    expect(document.getElementById("aud-verified")?.querySelector("#aud-verify")).toBeTruthy();
+    expect(document.getElementById("aud-verified-dismiss")).toBeNull();
+    expect(document.querySelector("[role=tab]")).toBeNull();
+    expect(document.getElementById("aud-more")).toBeNull();
     fireEvent.change(document.getElementById("aud-cat")!, { target: { value: "config" } });
     await waitFor(() => expect(window.location.search).toContain("cat=config"));
     fireEvent.click(document.getElementById("aud-clear")!);
@@ -146,7 +145,7 @@ describe("Audit", () => {
     expect(document.getElementById("aud-ledger-more")).toBeNull();
   });
 
-  it("opens the detail drawer with the field diff, chain digests and history", async () => {
+  it("opens the detail drawer with the prototype's nine fields only", async () => {
     setup(SAM, {
       "GET /api/v1/audit": () => ({ body: page([row(2, { before: '{"a":1}', after: '{"a":2}', category: "config", action: "project.config" })]) }),
       "GET /api/v1/audit/2": () => ({
@@ -161,13 +160,11 @@ describe("Audit", () => {
     const drawer = await waitFor(() => { const d = document.querySelector(".aud-drawer"); if (!d || !d.textContent?.includes("Previous")) throw new Error("not yet"); return d as HTMLElement; });
     expect(document.querySelector(".drawer-head .kicker")?.textContent).toBe("Audit entry #2");
     expect(document.querySelector(".drawer-title")?.textContent).toBe("project.config");
-    expect([...drawer.querySelectorAll(".aud-kv dt")].slice(0, 9).map((d) => d.textContent)).toEqual(["When", "Actor", "Target", "Project", "Category", "Outcome", "Via", "Hash", "Previous"]);
-    expect(within(drawer).getByText("1 of 1 fields changed")).toBeTruthy();
-    expect(within(drawer).getByText("203.0.113.5")).toBeTruthy();
-    expect(within(drawer).getByText("req-9")).toBeTruthy();
+    expect([...drawer.querySelectorAll(".aud-kv dt")].map((d) => d.textContent)).toEqual(["When", "Actor", "Target", "Project", "Category", "Outcome", "Via", "Hash", "Previous"]);
     expect(drawer.querySelector(".digest")?.textContent).toBe("sha256:" + "2".padStart(64, "a"));
-    expect(within(drawer).getByText("role.edit")).toBeTruthy();
-    expect(within(drawer).getByText("Open Access")).toBeTruthy();
+    expect([...drawer.querySelectorAll(".aud-kv dt")]).toHaveLength(9);
+    expect(drawer.textContent).not.toContain("Before and after");
+    expect(within(drawer).queryByText("Open Access")).toBeNull();
   });
 
   it("tells a person without audit.view that they see their own projects only, and hides verify", async () => {

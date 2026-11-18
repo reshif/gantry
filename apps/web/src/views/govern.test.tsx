@@ -331,20 +331,17 @@ describe("Security", () => {
   it("toggles a setting with PATCH {path, value} and the settings version", async () => {
     const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: 8 } }) });
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByLabelText("Allow GitHub sign-in", { selector: "input" }).catch(() => document.getElementById("sec-gh") as HTMLElement));
+    fireEvent.click(await byId("sec-sso-enforced"));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
     const c = calls.find((x) => x.method === "PATCH")!;
-    expect(c.body).toEqual({ path: "githubLogin", value: false });
+    expect(c.body).toEqual({ path: "sso.enforced", value: true });
     expect(c.headers["if-match"]).toBe("7");
   });
 
-  it("keeps the last allowed domain and the one you signed in with", async () => {
+  it("keeps the only range covering your address", async () => {
     setup();
     mount(<SecurityView />);
     fireEvent.click(await screen.findByRole("tab", { name: /Network/ }));
-    const rm = await byId("sec-dom-rm-acme_dev");
-    expect(rm.getAttribute("aria-disabled")).toBe("true");
-    expect(rm.getAttribute("data-reason")).toContain("lock you out");
     // this browser (10.4.0.12) is covered only by 10.0.0.0/8
     const ip = await byId("sec-ip-rm-10_0_0_0_8");
     expect(ip.getAttribute("data-reason")).toContain("only range covering your address 10.4.0.12");
@@ -369,14 +366,13 @@ describe("Security", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/sessions/s2")).toBe(true));
   });
 
-  it("shows the sign-in history with failures", async () => {
+  it("shows the sign-in history with failures under the sessions table", async () => {
     setup();
     mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /History/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Sessions/ }));
     expect(await screen.findByText("domain not allowed")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Succeeded"));
     expect(screen.queryByText("domain not allowed")).toBeNull();
-    expect(within(document.querySelector("tbody")!).getAllByRole("row")).toHaveLength(1);
   });
 
   it("is read-only with the reason when security.manage is denied", async () => {
@@ -384,7 +380,7 @@ describe("Security", () => {
     mount(<SecurityView />);
     expect(await screen.findByText(/Read-only for you: security settings/)).toBeTruthy();
     await waitFor(() => expect(document.getElementById("sec-sso-domain")).toBeTruthy());
-    await waitFor(() => expect(document.getElementById("sec-sso-edit")?.getAttribute("aria-disabled")).toBe("true"));
+    await waitFor(() => expect(document.getElementById("sec-sso-enforced")?.getAttribute("aria-disabled")).toBe("true"));
     expect((document.getElementById("sec-idle") as HTMLInputElement).disabled).toBe(true);
   });
 });

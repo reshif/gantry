@@ -68,17 +68,26 @@ describe("System health view", () => {
     expect(document.getElementById("sys-stale")?.textContent).toContain("over 26 hours old");
     expect(document.getElementById("sys-backup")?.textContent).toContain("Stale");
     expect(document.getElementById("sys-drill")?.textContent).toContain("Not run yet");
-    // the prototype's two cards, and the buttons the server has no endpoint for are present but locked
+    // the prototype's two cards; the buttons the server has no endpoint for work as buttons and say so
     expect([...document.querySelectorAll(".card-h h2")].map((h) => h.textContent)).toEqual(["Backups", "Restore drill"]);
-    expect((await byId("sys-backup-now")).getAttribute("aria-disabled")).toBe("true");
-    expect((await byId("sys-drill-run")).getAttribute("aria-disabled")).toBe("true");
+    expect((await byId("sys-backup-now")).getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(await byId("sys-backup-now"));
+    await waitFor(() => expect(document.body.textContent).toContain("Starting a backup is not available yet"));
+    expect((await byId("sys-drill-run")).getAttribute("aria-disabled")).not.toBe("true");
+    fireEvent.click(await byId("sys-drill-run"));
+    await waitFor(() => expect(document.body.textContent).toContain("Starting a restore drill is not available yet"));
+    expect(document.getElementById("sys-refresh")).toBeNull();
     fireEvent.click(await byId("sys-tab-outbox"));
     expect(document.querySelector("tr[data-key='ob-1']")?.textContent).toContain("HTTP 500 from slack");
     expect([...document.querySelectorAll("#sys-dead th")].map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["ID", "Topic", "Error", "Attempts", ""]);
-    expect((await byId("sys-discard-ob-1")).getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(await byId("sys-discard-ob-1"));
+    await waitFor(() => expect(document.body.textContent).toContain("Discard ob-1?"));
+    expect(document.body.textContent).toContain("The message is dropped and recorded in the audit ledger.");
+    fireEvent.click(await byId("sys-discard-ok"));
+    await waitFor(() => expect(document.body.textContent).toContain("Discarding a dead letter is not available yet"));
     fireEvent.click(await byId("sys-tab-stuck"));
     expect(document.querySelector("[data-key='j1']")?.textContent).toContain("Lease expired");
-    expect((await byId("sys-nudge-j1")).getAttribute("aria-disabled")).toBe("true");
+    expect((await byId("sys-nudge-j1")).getAttribute("aria-disabled")).not.toBe("true");
     expect(window.location.search).toBe("?tab=stuck");
     expect(document.body.textContent).toContain("Services healthy2/4");
     expect(document.body.textContent).toContain("Stuck work orders1");
