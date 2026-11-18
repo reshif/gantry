@@ -2,7 +2,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api, get, getText } from "../client";
 import { qk } from "../keys";
-import type { Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
+import type { PromptCall, PromptTrace, Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
 
 /* ---------- home, projects, configuration ---------- */
 
@@ -88,3 +88,12 @@ export const useWorkOrdersAcross = (projectIds: readonly string[], o: { cap: num
     enabled: o.enabled && projectIds.length > 0,
     placeholderData: keepPreviousData,
   });
+
+/* ---------- prompt records (what a model was given) ---------- */
+
+/** The recorded model calls of a work order (GET prompt-calls?wo=). The server answers only what this person may read. */
+export const usePromptCalls = (wo: string | null | undefined) =>
+  useQuery({ queryKey: qk.promptCalls(wo ?? ""), queryFn: async () => (await get<{ ok: boolean; calls: PromptCall[] }>(api("prompt-calls"), { wo })).calls, enabled: !!wo });
+/** One stored trace (GET prompt-traces/{hash}): the request, the answer and the prompt manifest. Read only once a person opens a call. */
+export const usePromptTrace = (ref: string | null | undefined) =>
+  useQuery({ queryKey: qk.promptTrace(ref ?? ""), queryFn: async () => (await get<{ ok: boolean; trace: PromptTrace }>(api(`prompt-traces/${encodeURIComponent(ref ?? "")}`))).trace, enabled: !!ref });

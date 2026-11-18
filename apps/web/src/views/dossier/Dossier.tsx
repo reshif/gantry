@@ -1,7 +1,7 @@
 /**
- * One work order on one page, as the prototype's record: the header (where it is, what it is doing, what you may do), then seven tabs:
+ * One work order on one page, as the prototype's record: the header (where it is, what it is doing, what you may do), then eight tabs:
  * Overview, Journey (the timeline, with the written record and its replay below), Gates, Attempts and runs, Conversation (the agent
- * session with its composer and side threads), Cost and Events. The route is `#record/<WO>` or `#record/<WO>/<tab>`.
+ * session with its composer and side threads), Cost, Prompts (what each model call was given) and Events. The route is `#record/<WO>` or `#record/<WO>/<tab>`.
  */
 import { useCallback } from "react";
 import { formatHash, parseHash } from "../../lib/router";
@@ -16,6 +16,7 @@ import { DossierHead, reviewGate } from "./Head";
 import { Overview } from "./Overview";
 import { AttemptsTab, ConversationTab, CostTab, EventsTab, GatesTab, JourneyTimeline } from "./tabs";
 import { NotFound, statusOf } from "./kit";
+import { PromptsTab } from "./Prompts";
 import { ReviewDialog } from "./ReviewDialog";
 
 export const DOSSIER_TABS = [
@@ -25,10 +26,11 @@ export const DOSSIER_TABS = [
   { id: "attempts", label: "Attempts and runs" },
   { id: "conversation", label: "Conversation" },
   { id: "costs", label: "Cost" },
+  { id: "prompts", label: "Prompts" },
   { id: "events", label: "Events" },
 ] as const;
 export type DossierTab = (typeof DOSSIER_TABS)[number]["id"];
-/** Addresses from before the seven tabs: Document is now part of Journey, Activity is the Conversation. */
+/** Addresses from before the eight tabs: Document is now part of Journey, Activity is the Conversation. */
 export const tabFromParam = (raw: string): DossierTab => (raw === "document" ? "journey" : raw === "activity" ? "conversation" : (DOSSIER_TABS.find((t) => t.id === raw)?.id ?? "overview"));
 
 export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
@@ -69,6 +71,7 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
         : tab === "attempts" ? <AttemptsTab wo={wo} cat={cat} rec={rec} />
         : tab === "conversation" ? <ConversationTab wo={wo} session={session} loading={sess.isLoading} />
         : tab === "costs" ? <CostTab wo={wo} cat={cat} project={project} />
+        : tab === "prompts" ? <PromptsTab wo={wo.id} />
         : <EventsTab rec={rec} wo={wo} cat={cat} />}
       </div>
     </div>
