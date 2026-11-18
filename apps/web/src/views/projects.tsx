@@ -151,7 +151,7 @@ export default function ProjectsView() {
         actions={
           <>
             {filtered ? <Btn small kind="ghost" id="prj-clear" label="Clear" onClick={clear} /> : null}
-            <Segmented name="prj-layout" label="Layout" value={view === "cards" ? "cards" : "table"} onChange={(v) => setParams({ view: v === "table" ? null : v })} items={[{ id: "table", label: "Table" }, { id: "cards", label: "Cards" }]} />
+            <Segmented name="prj-layout" label="Layout" value={view} onChange={(v) => setParams({ view: v === "table" ? null : v })} items={[{ id: "table", label: "Table" }, { id: "cards", label: "Cards" }, { id: "templates", label: "Templates" }]} />
           </>
         }
       >

@@ -7,7 +7,7 @@ import { useUI } from "../../ui/overlay-context";
 import { CrDrawer, Kv } from "../connect/kit";
 import { Health, authLabel, dec } from "./kit";
 
-export function ServerDrawer({ id, close }: { id: string; close: () => void }) {
+export function ServerDrawer({ id, close, onScope }: { id: string; close: () => void; onScope?: () => void }) {
   const ui = useUI();
   const srv = (useMcpServers().data ?? []).find((m) => m.id === id);
   const perm = dec(useCan("mcp.edit"));
@@ -19,6 +19,7 @@ export function ServerDrawer({ id, close }: { id: string; close: () => void }) {
       foot={(
         <>
           <Btn label="Refresh definitions" id="mcp-d-refresh" guard={perm} onClick={() => { ui.toast(`Refreshing ${srv.name}…`, "info"); void ops.rediscoverMCP(srv.id, v).then((r) => ui.toast(r.msg, r.ok ? "ok" : "error")); }} />
+          {onScope ? <Btn label="Scope and access" id="mcp-d-scope" onClick={onScope} /> : null}
           <Btn label="Done" kind="primary" id="mcp-d-done" onClick={close} />
         </>
       )}

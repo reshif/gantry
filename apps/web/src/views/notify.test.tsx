@@ -345,6 +345,18 @@ describe("Notifications", () => {
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/deliveries/DLV-9/retry" && c.method === "POST")).toBe(true));
   });
 
+  it("routes, card templates and repo overrides are tabs reached by clicking", async () => {
+    setup();
+    mount(<NotificationsView />);
+    fireEvent.click(await byId("nt-tab-routes"));
+    await byId("nt-table");
+    fireEvent.click(await byId("nt-tab-templates"));
+    await byId("nt-ct-open-gate");
+    fireEvent.click(await byId("nt-tab-overrides"));
+    expect((await screen.findAllByText("acme/payments-api")).length).toBeGreaterThan(0);
+    expect(window.location.search).toContain("tab=overrides");
+  });
+
   it("repo overrides list what the repo adds and remove one with the repo's version", async () => {
     const calls = setup({ "PATCH /api/v1/repos/payments-api/config": () => ({ body: { ok: true, msg: "Saved." } }) });
     mount(<NotificationsView />);
