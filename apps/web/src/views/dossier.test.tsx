@@ -134,6 +134,8 @@ describe("Work order page", () => {
     await waitFor(() => expect(window.location.hash).toContain(`${W.id}%2Fgates`));
     expect(await screen.findByRole("heading", { name: "Gates" })).toBeTruthy();
     for (const c of ["Gate", "Mode", "Status", "Decided by", "When"]) expect(screen.getAllByText(c).length).toBeGreaterThan(0);
+    // stacked small-screen cards say "By", as the prototype does
+    expect(document.querySelector('#dz-gates-table td[data-l="By"]')).toBeTruthy();
   });
 
   it("shows the Journey timeline, the attempts table, the cost by station and the events", async () => {

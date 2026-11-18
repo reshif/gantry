@@ -74,7 +74,7 @@ export function GatesTab({ wo, cat, project, rec, review }: { wo: TWo; cat: Cata
     { key: "gate", label: "Gate", render: (r) => <><b className="mono">{cat.gates.find((g) => g.id === r.id)?.label ?? r.id}</b>{` ${r.name}`}</> },
     { key: "mode", label: "Mode", render: (r) => cap(r.mode) },
     { key: "status", label: "Status", render: (r) => (r.status === "waiting" ? <Chip tone="warn">Waiting</Chip> : r.status === "passed" ? <Chip tone="ok">Approved</Chip> : <Chip tone="idle">Not reached</Chip>) },
-    { key: "by", label: "Decided by", render: (r) => (r.by ? <Who id={r.by} /> : <span className="dim">{"—"}</span>) },
+    { key: "by", label: "Decided by", cardLabel: "By", render: (r) => (r.by ? <Who id={r.by} /> : <span className="dim">{"—"}</span>) },
     { key: "when", label: "When", render: (r) => <span className="mono dim">{r.at ? when(r.at) : "—"}</span> },
   ];
   return (

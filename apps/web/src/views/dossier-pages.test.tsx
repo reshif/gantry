@@ -58,6 +58,15 @@ describe("Traveler, Dossier and Changes are routes of their own", () => {
   });
 
 
+  it("the record status card sits 20px under the header, as in the prototype (no extra gap)", async () => {
+    const fs = await import("node:fs");
+    const css = fs.readFileSync(`${process.cwd()}/src/styles/views/dossier.css`, "utf8");
+    expect(css).toMatch(/\.dz-top \{[^}]*gap: 0;/);
+    const head = fs.readFileSync(`${process.cwd()}/src/views/dossier/Head.tsx`, "utf8");
+    expect(head).not.toMatch(/wo-strip" style=\{\{ marginBottom/);
+    expect(fs.readFileSync(`${process.cwd()}/src/views/dossier/Pack.tsx`, "utf8")).toMatch(/"approved" : "latest"/);
+  });
+
   it("Export PDF downloads the record bundle and toasts (it does not open the print dialog)", async () => {
     const calls = mockApi({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/record/export`]: () => ({ body: { manifest: { id: W.id, version: 1, algorithm: "sha256", files: [] }, files: {} } }) });
     const print = vi.fn();

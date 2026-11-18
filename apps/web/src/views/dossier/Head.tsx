@@ -89,7 +89,7 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
         </div>
       </header>
       {why?.why ? <p className="small muted trv-why" id="trv-approve-why" role="note">{why.why}</p> : null}
-      <section className="card wo-strip" style={{ marginBottom: 4 }}>
+      <section className="card wo-strip">
         <div className="card-b row spread">
           <div className="row dz-chips">
             <span className={`chip ${tone}`} role="status">{chipText}</span>
