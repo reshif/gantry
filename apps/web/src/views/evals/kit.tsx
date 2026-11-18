@@ -7,7 +7,7 @@ import { DAY, fmt, type Agent, type EvalRun, type Suite } from "@gantry/domain";
 import { useAgents, useAllSuiteRuns, useEvalsFactory, useScorecards, useSkills, useSuites, useVendors } from "../../api/queries";
 import type { AgentRow, AgentVersionRow } from "../agents/kit";
 import { Icon } from "../../ui/Icon";
-import { navigate } from "../../lib/router";
+import { navigateTab } from "../tabparam";
 
 export type EvalsTab = "cards" | "suites" | "factory";
 /** `tab` is what another screen asked for (focus); the screen turns it into the URL (`#evals/suites`) once. `detail` opens the suite drawer on arrival. */
@@ -37,7 +37,7 @@ export function evalsFocus(o: { agent?: string; suite?: string; version?: string
 /** Open a suite (and its agent) on the Suites tab. */
 export function evalsGoSuite(suite: string | null | undefined, agent?: string): void {
   evalsFocus({ ...(agent ? { agent } : {}), ...(suite ? { suite } : {}) });
-  navigate("evals", "suites");
+  navigateTab("evals", "suites");
 }
 
 export type RunRow = EvalRun;

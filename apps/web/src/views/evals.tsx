@@ -6,8 +6,7 @@
  */
 import { fmt } from "@gantry/domain";
 import { useEffect, useMemo } from "react";
-import { navigate } from "../lib/router";
-import { useTabParam } from "./tabparam";
+import { navigateTab, useTabParam, useScope } from "./tabparam";
 import { usePrefs } from "../lib/prefs";
 import { Empty, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
 import { Async } from "../ui/async";
@@ -48,10 +47,11 @@ const TABS = ["cards", "suites", "factory"] as const;
 
 export default function EvalsView() {
   useEvalsUi();
+  const scope = useScope();
   const [tab, setTab] = useTabParam("evals", TABS);
   // another screen (an agent's Evals button) asked for a tab: put it in the URL once
   useEffect(() => {
-    if (evalsUi.detail && window.location.hash.replace(/^#\/?/, "") === "evals" && evalsUi.tab !== "cards") navigate("evals", evalsUi.tab);
+    if (evalsUi.detail && window.location.hash.replace(/^#\/?/, "") === "evals" && evalsUi.tab !== "cards") navigateTab("evals", evalsUi.tab);
   }, []);
   const d = useEvalsData();
   usePrefs();
@@ -70,7 +70,7 @@ export default function EvalsView() {
   const avg = (k: "taskSuccess" | "firstPass" | "rework"): string => { const v = cards.map((c) => c[k]).filter((x): x is number => typeof x === "number"); return v.length ? fmt.pct(v.reduce((x, y) => x + y, 0) / v.length) : "–"; };
   return (
     <div className="view view-evals">
-      <ViewHead title="Evals" kicker="All lines" sub="Golden-set suites decide whether an agent version is allowed to serve." />
+      <ViewHead title="Evals" kicker={scope.kicker} sub="Golden-set suites decide whether an agent version is allowed to serve." />
       <StatRow id="ev-stats">
         <Stat label="Task success" value={avg("taskSuccess")} sub="7-day, all agents" tone="done" />
         <Stat label="First pass" value={avg("firstPass")} sub="no rework" tone="done" />
@@ -86,7 +86,7 @@ export default function EvalsView() {
             <ul className="plain-list">
               {regs.map((r, i) => (
                 <li key={`${r.run.id}`}>
-                  <button type="button" className="linkish" id={`ev-reg-${i}`} onClick={() => { evalsUi.suite = r.suite.id; evalsUi.run = r.run.id; evalsUi.a = r.run.id; evalsUi.b = r.base.id; evalsUi.detail = true; evalsUi.tab = "suites"; navigate("evals", "suites"); }}>
+                  <button type="button" className="linkish" id={`ev-reg-${i}`} onClick={() => { evalsUi.suite = r.suite.id; evalsUi.run = r.run.id; evalsUi.a = r.run.id; evalsUi.b = r.base.id; evalsUi.detail = true; evalsUi.tab = "suites"; navigateTab("evals", "suites"); }}>
                     {`${r.suite.id}: ${r.agentName} ${r.run.version} on ${r.run.model || "stub"} scored ${fmt.pct(r.run.score)} vs ${fmt.pct(r.base.score)} for the floor version (${r.delta >= 0 ? "+" : ""}${fmt.pct(r.delta)}). Compare`}
                   </button>
                   <LinkedOutcomes agentId={r.agentId} idp={`ev-reg-${i}`} />

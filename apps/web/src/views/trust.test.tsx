@@ -232,7 +232,22 @@ describe("Trust screen: ladder", () => {
     mount();
     expect((await byId("tr-tab-ladder")).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(await byId("tr-tab-proposals"));
-    expect(window.location.hash).toBe("#trust/proposals");
+    expect(window.location.hash).toBe("#/trust?tab=proposals");
+  });
+  it("follows the project switcher: the eyebrow shows the project key and the ladder lists only that project's cells", async () => {
+    const me = { ...ME, projects: [{ id: "payments", name: "Payments", key: "PAY" }, { id: "risk", name: "Risk", key: "RSK" }] };
+    setup({ "GET /api/v1/me": () => ({ body: me }) });
+    updatePrefs({ project: "risk" });
+    mount();
+    await waitFor(() => expect(document.querySelector(".view-trust .eyebrow")!.textContent).toContain("RSK"));
+    expect(document.querySelector(".view-trust .eyebrow")!.textContent).not.toContain("All lines");
+    expect(document.getElementById("tr-row-ag-spec-feature-payments")).toBeNull();
+    cleanup();
+    updatePrefs({ project: "payments" });
+    mount();
+    await byId("tr-row-ag-spec-feature-payments");
+    expect(document.querySelector(".view-trust .eyebrow")!.textContent).toContain("PAY");
+    updatePrefs({ project: null });
   });
   it("opens at the cell another screen asks for", async () => {
     updatePrefs({ trustFocus: { cell: DESIGN.id } } as never);

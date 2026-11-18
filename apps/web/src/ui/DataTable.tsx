@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, sortHint, noSortSelect }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, sortHint, noSortSelect, paged }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -59,15 +59,19 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   sortHint?: boolean;
   /** Leave out the "Sort by" menu shown on narrow screens (the prototype's card tables have none). */
   noSortSelect?: boolean;
+  /** With pageSize: the prototype's "1–12 of 13  Prev  Page 1 / 2  Next" footer instead of "Show more". */
+  paged?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
   const [shown, setShown] = useState(pageSize ?? 0);
+  const [page, setPage] = useState(0);
   // a new page size or a different row count (a filter changed) starts the list over at the first page
   const [seen, setSeen] = useState(`${pageSize ?? 0}:${rows.length}`);
   if (seen !== `${pageSize ?? 0}:${rows.length}`) {
     setSeen(`${pageSize ?? 0}:${rows.length}`);
     setShown(pageSize ?? 0);
+    setPage(0);
   }
   const [own1, setOwn1] = useState<string>("");
   const [overflow, setOverflow] = useState(false);
@@ -104,7 +108,9 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
   if (cur && col) list.sort((a, b) => { const x = val(col, a); const y = val(col, b); return (x > y ? 1 : x < y ? -1 : 0) * cur.dir; });
-  const visible = shown ? list.slice(0, shown) : list;
+  const pages = paged && pageSize ? Math.max(1, Math.ceil(list.length / pageSize)) : 1;
+  const pg = Math.min(page, pages - 1);
+  const visible = paged && pageSize ? list.slice(pg * pageSize, pg * pageSize + pageSize) : shown ? list.slice(0, shown) : list;
   const pick = (key: string, dir?: 1 | -1): void => {
     const active = cur?.key === key;
     const next: SortState = { key, dir: dir ?? (active ? (cur!.dir === 1 ? -1 : 1) : 1) };
@@ -115,7 +121,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const ownedKeys = new Set(own1 ? own1.split("\u0000") : []);
   const sortable = columns.filter((c) => c.sort);
   const regionProps = overflow ? { role: "region", tabIndex: 0, "aria-label": caption ?? "Table" } : {};
-  const clientMore = shown && rows.length > shown;
+  const clientMore = !paged && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
       {sortable.length && !noSortSelect ? (
@@ -178,6 +184,16 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
           </tbody>
         </table>
       </div>
+      {paged && pageSize && pages > 1 ? (
+        <div className="tfoot dtable-pager">
+          <span className="dtable-count" role="status">{`${pg * pageSize + 1}–${pg * pageSize + visible.length} of ${list.length}`}</span>
+          <div className="row">
+            <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-prev`} disabled={pg === 0} onClick={() => setPage(pg - 1)}>Prev</button>
+            <span>{`Page ${pg + 1} / ${pages}`}</span>
+            <button type="button" className="btn sm btn-sm" id={`${id ?? "dt"}-next`} disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next</button>
+          </div>
+        </div>
+      ) : null}
       {clientMore || hasMore ? (
         <div className="tfoot dtable-more">
           <span className="dtable-count" role="status">{total ? `Showing ${visible.length} of ${total}` : `Showing ${visible.length}${clientMore ? ` of ${rows.length}` : ""}`}</span>

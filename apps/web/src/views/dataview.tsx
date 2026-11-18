@@ -56,7 +56,7 @@ export function DataView<R>({ id, noun, rows, text, filters = [], columns, rowKe
           ))}
         </FilterBar>
       ) : null}
-      <DataTable sortHint noSortSelect id={`${id}-table`} caption={caption ?? noun} columns={columns} rows={list} rowKey={rowKey} {...(rowId ? { rowId } : {})} {...(onRow ? { onRow } : {})} {...(pageSize ? { pageSize } : {})}
+      <DataTable sortHint noSortSelect id={`${id}-table`} caption={caption ?? noun} columns={columns} rows={list} rowKey={rowKey} {...(rowId ? { rowId } : {})} {...(onRow ? { onRow } : {})} {...(pageSize ? { pageSize, paged: true } : {})}
         empty={rows.length && active
           ? { title: "Nothing matches these filters", text: "Loosen the search or clear the filters.", action: <Btn label="Clear filters" id={`${id}-clear-empty`} onClick={clear} /> }
           : (empty ?? { title: "Nothing here yet", text: "Items will appear here when they exist." })} />

@@ -138,7 +138,7 @@ describe("Learning screen (legacy learning.js on the real API)", () => {
     mount();
     expect((await byId("ln-tab-findings")).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(await byId("ln-tab-signals"));
-    expect(window.location.hash).toBe("#learning/signals");
+    expect(window.location.hash).toBe("#/learning?tab=signals");
   });
 
   it("locks Accept for the drafter while a second person exists, and says why", async () => {

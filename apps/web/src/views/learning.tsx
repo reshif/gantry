@@ -10,7 +10,7 @@ import { useCan } from "../api/can";
 import { ops } from "../api/ops";
 import { useLearningFindings, useLearningProposals, useLearningSettings } from "../api/queries";
 import { Btn, LockNote, Stat, StatRow, Tabs, ViewHead } from "../ui/primitives";
-import { useTabParam } from "./tabparam";
+import { useScope, useTabParam } from "./tabparam";
 import { Async, qState } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
@@ -24,6 +24,7 @@ export { learningFocus } from "./learning/focus";
 
 export default function LearningView() {
   const ui = useUI();
+  const scope = useScope();
   const fq = useLearningFindings();
   const pq = useLearningProposals();
   const findings = fq.data ?? [];
@@ -64,12 +65,12 @@ export default function LearningView() {
   };
 
   const body = tab === "findings"
-    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
+    ? <Async query={fq} what="learning findings" id="ln-findings">{() => <FindingsTab findings={scope.id ? findings.filter((f) => !f.project || f.project === scope.id) : findings} proposals={proposals} hi={hiFinding} onFocusProposal={focusProposal} onDrafted={focusProposal} proposalsOn={on} />}</Async>
     : tab === "signals" ? <Async query={fq} what="learning signals" id="ln-signals">{() => <SignalsTab findings={findings} />}</Async>
     : <Async query={pq} what="learning proposals" id="ln-proposals">{() => <ProposalsTab proposals={proposals} hi={hi} onFocusFinding={focusFinding} />}</Async>;
   return (
     <div className="view view-learning">
-      <ViewHead title="Learning" kicker="All lines" sub="The factory reads its own rejections and overrides, then proposes how to improve. People decide." />
+      <ViewHead title="Learning" kicker={scope.kicker} sub="The factory reads its own rejections and overrides, then proposes how to improve. People decide." />
       <StatRow id="ln-stats">
         <Stat label="Open findings" value={qState(fq, () => String(openFindings))} tone="wait" />
         <Stat label="To review" value={qState(pq, () => String(open))} sub="proposals" tone="info" />

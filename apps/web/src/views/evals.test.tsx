@@ -144,10 +144,10 @@ describe("Evals screen: scorecards", () => {
     mount();
     expect((await byId("ev-tab-cards")).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(await byId("ev-tab-suites"));
-    expect(window.location.hash).toBe("#evals/suites");
+    expect(window.location.hash).toBe("#/evals?tab=suites");
     await byId("ev-su-SUITE-BUILD");
     fireEvent.click(await byId("ev-tab-factory"));
-    expect(window.location.hash).toBe("#evals/factory");
+    expect(window.location.hash).toBe("#/evals?tab=factory");
   });
   it("shows the headline numbers: suites, runs, regressions, eligible candidates", async () => {
     setup();
@@ -367,29 +367,18 @@ describe("Evals screen: suites and runs", () => {
 });
 
 describe("Evals screen: factory-wide", () => {
-  it("shows the matrix, the project heat grid, per-class figures with counts, onboarding with counts and the skill coverage", async () => {
+  it("shows only the prototype's four factory panels (trend, gate rejections, heat map, confusion), none of the extra sections", async () => {
     setup();
     mount();
     fireEvent.click(await byId("ev-tab-factory"));
-    const mx = await byId("ev-mx-ag-build");
-    expect(mx.textContent).toContain("90%");
-    expect(document.getElementById("ev-mx-ag-review")!.textContent).toContain("n=2");
+    await byId("ev-heat");
     const heat = document.getElementById("ev-heat")!;
     expect(heat.textContent).toContain("payments");
     expect(heat.textContent).toContain("60");
     expect(heat.textContent).toContain("—");
-    expect(document.body.textContent).toContain("Task success, 8 weeks");
-    expect(document.body.textContent).toContain("Gate rejection reasons");
-    expect(document.body.textContent).toContain("Agent × project heat map");
-    expect(document.body.textContent).toContain("Classifier confusion");
-    expect(document.querySelector(".ev-pc")!.textContent).toContain("n=8");
-    expect(document.querySelector(".ev-pc")!.textContent).toContain("insufficient data");
-    expect(document.querySelector(".ev-onb")!.textContent).toContain("2 of 3 repos reached Ready");
-    expect(document.querySelector(".ev-onb")!.textContent).toContain("No CI");
-    expect(document.getElementById("ev-sk-sk-a")!.closest("tr")!.textContent).toContain("75%");
-    expect(document.body.textContent).toContain("No classified requests yet");
-    fireEvent.click(mx);
-    await waitFor(() => expect(window.location.hash).toBe("#evals/cards"));
+    for (const t of ["Task success, 8 weeks", "Gate rejection reasons", "Agent × project heat map", "Classifier confusion"]) expect(document.body.textContent).toContain(t);
+    for (const t of ["More factory detail", "Agents × metrics", "Per-class performance", "Per-skill eval coverage", "Human override rate"]) expect(document.body.textContent).not.toContain(t);
+    expect(window.location.hash).toBe("#/evals?tab=factory");
   });
 });
 

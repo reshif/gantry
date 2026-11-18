@@ -156,3 +156,19 @@ describe("Field wiring edge cases", () => {
     expect((input.getAttribute("aria-describedby") ?? "").split(" ").length).toBe(2);
   });
 });
+
+describe("DataTable paged footer (prototype pager)", () => {
+  it("shows 1-N of M with Prev, Page x / y and Next, not Show more", () => {
+    const cols = [{ key: "id", label: "Id" }];
+    const many = Array.from({ length: 13 }, (_, i) => ({ id: `r${i}` }));
+    const { container } = render(<DataTable columns={cols} rows={many} rowKey={(r) => r.id} pageSize={12} paged />);
+    const foot = container.querySelector(".tfoot")!;
+    expect(foot.textContent).toContain("1–12 of 13");
+    expect(foot.textContent).toContain("Page 1 / 2");
+    expect(screen.queryByText(/Show \d+ more/)).toBeNull();
+    expect((screen.getByRole("button", { name: "Prev" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(container.querySelector(".tfoot")!.textContent).toContain("13–13 of 13");
+    expect(container.querySelectorAll("tbody tr").length).toBe(1);
+  });
+});
