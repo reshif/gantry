@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import { useCan } from "../../api/can";
+import { navigate } from "../../lib/router";
 import { reclassifyFromPage, stopFromPage } from "../traveler/Actions";
 import { usePeople } from "../../api/queries";
 import { Dialog } from "../../ui/Overlay";
@@ -101,8 +102,9 @@ export function StopDialog({ wo, onClose }: { wo: TWo; onClose: () => void }) {
       if (isStepUp(r)) { setErr(""); setStep(r); } else setErr(r.msg);
       return;
     }
-    ui.toast(`${wo.id} stopped`, "warn");
+    ui.toast(`${wo.id} stopped`, "error");
     close();
+    navigate("work-orders", null, wo.project); // the prototype leaves a stopped work order's page for the list
   };
   return (
     <Dialog

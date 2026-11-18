@@ -4,7 +4,8 @@
  * session with its composer and side threads), Cost and Events. The route is `#record/<WO>` or `#record/<WO>/<tab>`.
  */
 import { useCallback } from "react";
-import { navigate } from "../../lib/router";
+import { formatHash, parseHash } from "../../lib/router";
+import { setRouteState } from "../../lib/queryState";
 import { Btn, Tabs } from "../../ui/primitives";
 import { Loading } from "../../ui/async";
 import { useWoSession } from "../conversations/session-api";
@@ -35,7 +36,15 @@ export function Dossier({ id, tab }: { id: string; tab: DossierTab }) {
   const d = useRecordData(id);
   const sess = useWoSession(id);
   const session = sess.data;
-  const setTab = useCallback((t: DossierTab) => navigate("record", t === "overview" ? id : `${id}/${t}`), [id]);
+  // the tab is URL state, as the prototype's ?tab=: `#/p/payments/record/WO-1004?tab=gates` (an older `record/WO-1004/gates` address still opens its tab)
+  const setTab = useCallback((t: DossierTab) => {
+    try {
+      const u = new URL(window.location.href);
+      u.hash = formatHash("record", id, parseHash(window.location.hash).project);
+      if (u.href !== window.location.href) window.history.replaceState(window.history.state, "", u.href);
+    } catch { /* no history access */ }
+    setRouteState({ tab: t === "overview" ? null : t });
+  }, [id]);
   if (d.loading) return <div className="view rec-view"><Loading id="rec-loading" label="the record" /></div>;
   const status = statusOf(d.error);
   if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {

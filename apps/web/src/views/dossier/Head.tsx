@@ -121,7 +121,6 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
           <div className="grow"><b>Stopped</b>{` ${wo.stop.reason}${heldByKill ? " It is held in place and resumes on restore." : ""}`}</div>
         </div>
       ) : null}
-      {wo.blockReason ? <div className="banner bad"><Icon name="alert" /><div className="grow"><b>Blocked</b>{` ${wo.blockReason}`}</div></div> : null}
       {wo.failReason ? <div className="banner bad"><Icon name="alert" /><div className="grow"><b>Failed</b>{` ${wo.failReason}`}</div></div> : null}
     </div>
   );

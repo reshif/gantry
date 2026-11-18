@@ -34,7 +34,7 @@ export function JourneyTimeline({ wo, cat, project }: { wo: TWo; cat: Catalog; p
           const h = visits[visits.length - 1];
           const skipped = !visits.length && !wo.route.includes(s.id);
           const cur = idx === wo.station && wo.state !== "done";
-          const tone = skipped ? "" : cur ? (wo.state === "waiting" ? "warn" : "info") : "ok";
+          const tone = skipped ? "" : cur ? "info" : "ok"; // the dot is blue for the current station even at a gate (the chip says Gate)
           const dur = visits.reduce((t, v) => t + Math.max(0, (v.endedAt ?? now) - v.startedAt), 0);
           const who = actor(h?.agent ?? s.agent).name.replace(" (agent)", "");
           return (
