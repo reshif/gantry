@@ -7,8 +7,8 @@
 
 /* ---------- the line panel ---------- */
 .fl-belt { min-width: 0; overflow: hidden; }
-.fl-tools { display: grid; gap: var(--s2); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
-.fl-tools .filterbar .filterbar-end { margin-left: auto; }
+.fl-belt .fl-tools { display: grid; gap: var(--s2); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+.fl-belt .fl-tools .filterbar .filterbar-end { margin-left: auto; }
 .fl-legend { display: flex; gap: var(--s4); flex-wrap: wrap; align-items: center; font-size: var(--t-sm); color: var(--muted); }
 .fl-leg { display: inline-flex; align-items: center; gap: 6px; }
 .fl-leg-d { width: 9px; height: 9px; transform: rotate(45deg); border: 1.5px solid var(--faint); background: var(--surface); }
@@ -387,8 +387,15 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 /* Floor header at phone width: Pause belt and Halt line share one row, the rest sit on a second row (fidelity: prototype is two equal buttons). */
 @media (max-width: 720px) {
   .view-floor-page .ph .acts { display: grid; grid-template-columns: 1fr 1fr; }
-  .view-floor-page .fl-extra > .btn { flex: 1 1 140px; }
+  .view-floor-page .fl-ctl { grid-column: 1 / -1; flex-wrap: nowrap; gap: var(--s2); }
+  .view-floor-page .fl-ctl { align-items: center; }
+  .view-floor-page .fl-ctl > * { flex: 0 1 auto; min-width: 0; }
+  .view-floor-page .fl-ctl .btn { flex: 1 1 auto; justify-content: center; white-space: nowrap; padding-inline: var(--s2); }
+  .view-floor-page .fl-ctl .btn .icon, .view-floor-page .fl-ctl .btn svg { display: none; }
 }
 .view-floor-page .ph .sub .vtitle-badge { margin-left: 0; }
 .drawer .card .li.click { cursor: pointer; }
 .view-floor-page .fl-extra { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: flex-end; margin: calc(-1 * var(--s2)) 0 var(--s3); }
+
+.view-floor-page .fl-ctl { display: contents; }
+@media (max-width: 720px) { .view-floor-page .fl-ctl { display: flex; } }

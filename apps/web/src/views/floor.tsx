@@ -116,7 +116,7 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
         <>
           <Btn label={paused ? "Resume belt" : "Pause belt"} icon={paused ? "play" : "pause"} id="floor-pause" aria-pressed={paused} onClick={onPause} />
           <Btn label="Halt line" kind="danger" icon="halt" id="floor-halt" aria="Emergency stop: halt the line" guard={lockIf(factoryKilled || p.killed ? { allowed: false, reason: "The line is already stopped. Use Start restore.", needs: "" } : dKill.pending ? null : dKill)} onClick={() => stop.emergency("project", p.id)} />
-          {lineControl}
+          <div className="fl-ctl">{lineControl}</div>
         </>
       }
     >

@@ -279,6 +279,11 @@ describe("Floor: fidelity round 2", () => {
     expect(document.querySelector(".ph .acts #floor-line")).toBeTruthy();
     expect(document.querySelector(".ph .acts #floor-new-wo")).toBeTruthy();
     expect(document.querySelector(".ph .acts input[name=floor-mode]")).toBeTruthy();
+    // the three extras share one group, so at phone width they take one row under Pause belt and Halt line
+    const grp = document.querySelector(".ph .acts > .fl-ctl");
+    expect(grp?.querySelector("#floor-line")).toBeTruthy();
+    expect(grp?.querySelector("#floor-new-wo")).toBeTruthy();
+    expect(grp?.querySelector("input[name=floor-mode]")).toBeTruthy();
   });
 
   it("names each gate header by its belt label, never the raw catalogue id", async () => {
