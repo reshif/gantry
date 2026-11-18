@@ -15,6 +15,7 @@ import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
 import { useInstallOverrideReason } from "../ui/override";
 import { makeStopActions } from "./stopActions";
+import { isTypingTarget, toggleNavRail, useNavRail } from "./navRail";
 import { Nav, useRouteAccess, useRouteCtx } from "./Nav";
 import { PaletteDialog } from "./Palette";
 import { ReadOnlyBanner, StopBanner, ViewAsBanner } from "./StopBanner";
@@ -116,11 +117,13 @@ export function Shell({ me }: { me: Me }) {
         e.preventDefault();
         openPalette();
       } else if (e.key === "Escape" && navOpen) setNavOpen(false);
+      else if (e.key === "[" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.defaultPrevented && !isTypingTarget(e.target)) toggleNavRail();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [openPalette, navOpen]);
 
+  const rail = useNavRail();
   const toggleNav = () => {
     setNavOpen((o) => !o);
     // opening moves focus into the drawer, onto its first link
@@ -132,7 +135,7 @@ export function Shell({ me }: { me: Me }) {
   return (
     <>
     <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>Skip to content</a>
-    <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
+    <div id="app" className={`app${navOpen ? " nav-open" : ""}${rail ? " rail" : ""}`}>
       <AppErrorBoundary level="chrome">
         <Nav me={me} current={unknown ? "" : denied ? denied.id : routeId} project={scoped ? project : null} open={navOpen} onNavigate={() => setNavOpen(false)} />
       </AppErrorBoundary>

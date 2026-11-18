@@ -23,7 +23,8 @@ export interface Prefs {
   floorView: string;
   boardSwim: string;
   navCollapsed: Record<string, boolean>;
-  navRail: boolean;
+  /** Icon rail: true/false when the person chose, null to follow the width (rail at medium widths). */
+  navRail: boolean | null;
   palettePinned: string[];
   paletteRecent: string[];
   portfolio?: unknown;
@@ -50,7 +51,7 @@ export function defaultPrefs(): Prefs {
     floorView: "belt",
     boardSwim: "none",
     navCollapsed: {},
-    navRail: false,
+    navRail: null,
     palettePinned: [],
     paletteRecent: [],
     openConversation: null,
