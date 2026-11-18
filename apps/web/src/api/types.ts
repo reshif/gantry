@@ -33,7 +33,7 @@ export interface DemoAccount {
 
 /** Public configuration the sign-in screen needs before anyone is signed in. */
 export interface PublicConfig {
-  /** True when GANTRY_DEV_DEMO_ACCOUNTS is on: the seeded Keycloak users may be listed. */
+  /** True when the demo organisation is seeded (GANTRY_DEV_SEED) on a local stack: the seeded Keycloak users may be listed. */
   demoAccounts: boolean;
   /** Optional server-supplied list. When absent and demoAccounts is on, the client uses DEMO_ACCOUNTS. */
   demoAccountList?: DemoAccount[];

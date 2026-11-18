@@ -1,5 +1,5 @@
 /**
- * The demo sign-in list (development only, GANTRY_DEV_DEMO_ACCOUNTS). The accounts are the users of the local identity provider
+ * The demo sign-in list (development only: shown when GANTRY_DEV_SEED=true on a local stack). The accounts are the users of the local identity provider
  * (deploy/keycloak/realm-gantry.json); what each can do is NOT a fixed description but computed from the org's real role grants.
  *
  * Rule, per demo user:

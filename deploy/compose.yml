@@ -99,14 +99,16 @@ services:
       GANTRY_EGRESS_PROXY: http://gantry-edge:8444
       # Off by default: when true, the sign-in page lists every person's name, email and roles. Local development only (refused unless the public URL is localhost).
       GANTRY_AUDIT_ANCHOR_FILE: /anchors/audit-anchors.jsonl
-      GANTRY_DEV_DEMO_ACCOUNTS: ${GANTRY_DEV_DEMO_ACCOUNTS:-false}
       # Factory Admins must sign in with a second factor (OTP at the identity provider, checked by the API from acr/amr). The seeded demo
       # users are password-only, so this development stack waives it by default. Local development only: the API refuses to start with
       # it on when the public URL is not localhost. compose.prod.yml forces it off. Set it to false here to try the real flow.
       GANTRY_DEV_ADMIN_MFA_OPTIONAL: ${GANTRY_DEV_ADMIN_MFA_OPTIONAL:-true}
-      # Off by default: the org starts empty and the first sign-in with GANTRY_BOOTSTRAP_ADMIN_EMAIL becomes Factory Admin.
+      # Off by default: the org starts empty. The first Factory Admin is the identity-provider user GANTRY_BOOTSTRAP_ADMIN_USERNAME, created by the
+      # API with the initial password the owner wrote to the bootstrap_admin_password secret (temporary; the first sign-in changes it and sets up TOTP).
       # GANTRY_DEV_SEED=true loads the legacy demo data (people, projects, repos, policies) once, for development and demos only.
       GANTRY_DEV_SEED: ${GANTRY_DEV_SEED:-false}
+      GANTRY_BOOTSTRAP_ADMIN_USERNAME: ${GANTRY_BOOTSTRAP_ADMIN_USERNAME:-}
+      # Deprecated alternative: the first verified sign-in with this email becomes Factory Admin. Prefer the username above.
       GANTRY_BOOTSTRAP_ADMIN_EMAIL: ${GANTRY_BOOTSTRAP_ADMIN_EMAIL:-}
       GANTRY_ORG_NAME: ${GANTRY_ORG_NAME:-Gantry}
       # Alias of a GitHub identity provider configured in Keycloak; empty = GitHub sign-in is refused with a clear message.
@@ -119,7 +121,7 @@ services:
       - backupstatus:/backups:ro
       # Signed checkpoints of the audit chain head, on a volume the database never sees (GANTRY_AUDIT_ANCHOR_FILE).
       - auditanchors:/anchors
-    secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret]
+    secrets: [db_password, session_key, data_key, edge_token, github_token, minio_root_password, oidc_client_secret, bootstrap_admin_password, keycloak_admin_password]
     depends_on:
       gantry-migrate: { condition: service_completed_successfully }
       volume-init: { condition: service_completed_successfully }
@@ -356,11 +358,17 @@ services:
       - |
         export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/keycloak_admin_password)"
         export GANTRY_OIDC_CLIENT_SECRET="$$(cat /run/secrets/oidc_client_secret)"
+        # Demo users (asha, daniel, ...; password gantry-dev) exist only on a seeded stack (GANTRY_DEV_SEED=true).
+        # Without the seed the realm is imported with no users; the first Factory Admin comes from GANTRY_BOOTSTRAP_ADMIN_USERNAME.
+        mkdir -p /opt/keycloak/data/import
+        if [ "$${GANTRY_DEV_SEED:-false}" = "true" ]; then src=realm-gantry.json; else src=realm-gantry.empty.json; fi
+        cp "/opt/keycloak/realms/$$src" /opt/keycloak/data/import/realm-gantry.json
         exec /opt/keycloak/bin/kc.sh "$$@"
       - kc
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      GANTRY_DEV_SEED: ${GANTRY_DEV_SEED:-false}
       KC_HTTP_ENABLED: "true"
       KC_HTTP_PORT: "8081"
       KC_HTTP_RELATIVE_PATH: /idp
@@ -374,9 +382,10 @@ services:
     volumes:
       # The dev H2 database lives under data/. Persisting it keeps user ids (the OIDC `sub` Gantry links people to)
       # stable across container recreation. --import-realm skips a realm that already exists, so edits to
-      # realm-gantry.json only apply after `docker volume rm gantry_kcdata`.
+      # realm-gantry.json (or realm-gantry.empty.json, the same realm without users) only apply after `docker volume rm gantry_kcdata`.
       - kcdata:/opt/keycloak/data
-      - ./keycloak/realm-gantry.json:/opt/keycloak/data/import/realm-gantry.json:ro
+      - ./keycloak/realm-gantry.json:/opt/keycloak/realms/realm-gantry.json:ro
+      - ./keycloak/realm-gantry.empty.json:/opt/keycloak/realms/realm-gantry.empty.json:ro
     healthcheck:
       test:
         - CMD-SHELL
@@ -571,6 +580,8 @@ secrets:
   minio_root_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/minio_root_password" }
   keycloak_admin_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/keycloak_admin_password" }
   oidc_client_secret: { file: "${GANTRY_SECRETS_DIR:-./secrets}/oidc_client_secret" }
+  # Written by the owner, never generated: the initial password of the first Factory Admin (empty file = not used).
+  bootstrap_admin_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/bootstrap_admin_password" }
   backup_remote: { file: "${GANTRY_SECRETS_DIR:-./secrets}/backup_remote" }
   # Production profile (deploy/compose.prod.yml).
   keycloak_db_password: { file: "${GANTRY_SECRETS_DIR:-./secrets}/keycloak_db_password" }

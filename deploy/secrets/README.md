@@ -17,7 +17,8 @@ Permissions: the directory is `0700`. Files are `0644` by default because compos
 | `github_app.pem` | GitHub App private key. **Placeholder until you replace it** | gantry-github |
 | `github_app.json` | GitHub App id, installation id, webhook secret. **Placeholder until you fill it in** | gantry-github |
 | `minio_root_password` | MinIO root password (user `gantry`) | minio, gantry-api, gantry-worker, gantry-edge |
-| `keycloak_admin_password` | Keycloak bootstrap admin (user `admin`) | keycloak |
+| `keycloak_admin_password` | Keycloak bootstrap admin (user `admin`) | keycloak, gantry-api (to create the bootstrap admin user) |
+| `bootstrap_admin_password` | **You write it.** Initial password of the first Factory Admin (`GANTRY_BOOTSTRAP_ADMIN_USERNAME`); at least 12 characters, not a default. `generate.sh` only creates it empty; empty turns the username bootstrap off | gantry-api |
 | `oidc_client_secret` | Secret of the `gantry-web` OIDC client | keycloak (realm import), gantry-api |
 
 Whoever can read this directory can read every secret (spec 5.5). The values never go in environment variables or images.

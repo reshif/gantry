@@ -107,6 +107,7 @@ It opens a transaction, runs `can()` (a denial is audited in its own transaction
 | `github_app.pem`, `github_app.json` | github |
 | `minio_root_password` | minio, api, worker, edge |
 | `keycloak_admin_password`, `oidc_client_secret` | keycloak; api |
+| `bootstrap_admin_password` | api (written by the owner, never generated; the first Factory Admin's initial password, with `GANTRY_BOOTSTRAP_ADMIN_USERNAME`) |
 
 ## Ports and hostnames (compose service names)
 
@@ -127,7 +128,7 @@ Caddy routes: `/api/*`, `/auth/*`, `/hooks/*` → api; `/idp/*` → keycloak; `/
 
 ## Environment variables (non-secret config only)
 
-`GANTRY_ORG_ID`, `GANTRY_PUBLIC_URL` (`https://localhost`), `DATABASE_HOST`, `DATABASE_NAME`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `S3_ENDPOINT`, `S3_BUCKET`, `EDGE_URL`, `GITHUB_BROKER_URL`, `LAUNCHER_URL`, `SMTP_HOST`, `SMTP_PORT`, `GANTRY_DEV_DEMO_ACCOUNTS` (`true` shows the seeded Keycloak users on the sign-in screen).
+`GANTRY_ORG_ID`, `GANTRY_PUBLIC_URL` (`https://localhost`), `DATABASE_HOST`, `DATABASE_NAME`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `S3_ENDPOINT`, `S3_BUCKET`, `EDGE_URL`, `GITHUB_BROKER_URL`, `LAUNCHER_URL`, `SMTP_HOST`, `SMTP_PORT`, `GANTRY_DEV_SEED` (`true` loads the demo organisation and, on localhost, lists its users on the sign-in screen).
 
 ## Verification
 

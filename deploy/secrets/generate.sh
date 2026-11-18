@@ -57,6 +57,10 @@ for f in smtp_password backup_remote; do
   if [ ! -e "$dir/$f" ]; then : >"$dir/$f"; chmod "$mode" "$dir/$f"; made+=("$f (empty)"); fi
 done
 
+# bootstrap_admin_password is the owner's to write: the initial password of the first Factory Admin (GANTRY_BOOTSTRAP_ADMIN_USERNAME).
+# It is never generated here. Only an empty file is created so compose can mount it; empty means the username bootstrap is off.
+if [ ! -e "$dir/bootstrap_admin_password" ]; then : >"$dir/bootstrap_admin_password"; chmod "$mode" "$dir/bootstrap_admin_password"; made+=("bootstrap_admin_password (empty: you write it)"); fi
+
 if [ "${#made[@]}" -gt 0 ]; then echo "created: ${made[*]}"; fi
 if [ "${#kept[@]}" -gt 0 ]; then echo "kept existing: ${kept[*]}"; fi
 echo "secrets directory: $dir"

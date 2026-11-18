@@ -39,10 +39,12 @@ local development stack, see [README.md](README.md).
    ```
 
    Then fill in the files that start empty or as placeholders: `github_app.pem` and `github_app.json` (the GitHub App),
-   `vendor_keys.json` (model vendors), and `smtp_password` if your relay needs a login.
+   `vendor_keys.json` (model vendors), and `smtp_password` if your relay needs a login. Also write
+   `bootstrap_admin_password` yourself: the initial password of the first Factory Admin (at least 12 characters, not a
+   default such as `admin` or `password`). `generate.sh` never generates it and leaves it as an empty file.
 
 2. **Settings.** Copy `deploy/prod.env.example` to `deploy/prod.env` (git ignores it) and fill it in. The ones you must
-   set: `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_SMTP_HOST`, `GANTRY_SMTP_FROM_ADDRESS`, `GANTRY_BOOTSTRAP_ADMIN_EMAIL`,
+   set: `GANTRY_HOSTNAME`, `GANTRY_TLS`, `GANTRY_SMTP_HOST`, `GANTRY_SMTP_FROM_ADDRESS`, `GANTRY_BOOTSTRAP_ADMIN_USERNAME`,
    `GANTRY_IMAGE_PREFIX`, `GANTRY_VERSION`, `DOCKER_GID`. Compose refuses to start and names the setting if one is missing.
 
 3. **Check the images.** Every release image is signed by this repository's CI. Check them before you run them
@@ -70,9 +72,15 @@ The production realm has no accounts. Create people in Keycloak, or connect Keyc
   password in the `keycloak_admin_password` secret file.
 - **Your identity provider.** In the console: realm `gantry` > Identity providers (OIDC or SAML) or User federation (LDAP
   or Active Directory).
-- **The first Factory Admin.** Create (or federate) the person whose email is `GANTRY_BOOTSTRAP_ADMIN_EMAIL`. The first
-  time they sign in, they become Factory Admin of an empty organisation and see "Set up the factory". Everyone after
-  them gets access only when a Factory Admin invites them or grants them a role.
+- **The first Factory Admin.** Set `GANTRY_BOOTSTRAP_ADMIN_USERNAME` and write the initial password to the
+  `bootstrap_admin_password` secret file. While the organisation has no Factory Admin, the API creates that user in the
+  `gantry` realm with the password marked temporary and the required actions `UPDATE_PASSWORD` and `CONFIGURE_TOTP`
+  (it needs the `keycloak_admin_password` secret, mounted into the API). The first sign-in by that user changes the
+  password, sets up an authenticator app, and makes them Factory Admin of an empty organisation ("Set up the factory").
+  Everyone after them gets access only when a Factory Admin invites them or grants them a role. A weak or missing
+  password (under 12 characters or a default) is refused with a reason in the API log and no user is created. Once any
+  Factory Admin exists, changing or removing the secret does nothing. After the first sign-in, delete the secret file's
+  content. `GANTRY_BOOTSTRAP_ADMIN_EMAIL` still works but is deprecated.
 
 ### Second sign-in factor for Factory Admins
 
@@ -86,7 +94,7 @@ authenticator app. Other people are not asked for a code.
 - **What Keycloak does.** The realm's `gantry-browser` flow is a step-up flow: level 1 is the password; level 2 is a TOTP code.
   Gantry asks for level 2 (`acr_values=2`) when an admin follows the setup screen and on step-up by a session that has it.
   A person with no authenticator is shown a QR code to scan the first time (required action `CONFIGURE_TOTP`).
-- **First admin.** The `GANTRY_BOOTSTRAP_ADMIN_EMAIL` person is refused on a password-only first sign-in and becomes
+- **First admin.** The bootstrap user (`GANTRY_BOOTSTRAP_ADMIN_USERNAME`) is refused on a password-only first sign-in and becomes
   Factory Admin only after signing in with a code. They see the setup screen, press "Set up and sign in", scan the QR code and continue.
 - **GitHub sign-in** cannot show a second factor to Gantry: admins use single sign-on.
 - **Lost device.** Gantry cannot reset it; reset the person's OTP credential in the Keycloak admin console
