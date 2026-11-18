@@ -266,8 +266,9 @@ describe("Floor: prototype drawers and links", () => {
     mount(<FloorView />);
     await screen.findAllByText("PAY");
     fireEvent.click(document.getElementById("floor-tok-WO-2398") as HTMLElement);
-    const btn = (await screen.findByRole("link", { name: "Conversation" })) as HTMLAnchorElement;
-    expect(btn.getAttribute("href")).toBe("#/p/payments/conversations/WO-2398");
+    const btn = (await screen.findByRole("button", { name: "Conversation for WO-2398" })) as HTMLButtonElement;
+    fireEvent.click(btn);
+    expect(window.location.hash).toBe("#/p/payments/conversations/WO-2398");
     expect(document.getElementById("floor-wo-conv-why")).toBeNull();
     cleanup();
     // an open station question: the reason names the station
@@ -275,7 +276,7 @@ describe("Floor: prototype drawers and links", () => {
     mount(<FloorView />);
     await screen.findAllByText("PAY");
     fireEvent.click(document.getElementById("floor-tok-WO-2398") as HTMLElement);
-    await screen.findByRole("link", { name: "Conversation" });
+    await screen.findByRole("button", { name: "Conversation for WO-2398" });
     expect(document.getElementById("floor-wo-conv-why")?.textContent).toBe("Build is waiting for you");
     // parked with a person (bay tags do not open this drawer on the v3 line, so the reason is checked directly)
     expect(convWaiting({ ...base, bay: "person", bayReason: "needs the table name" } as never, DEFAULT_CATALOG)).toBe("needs the table name");

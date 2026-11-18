@@ -55,13 +55,14 @@ describe("Models screen (Blueprint layout)", () => {
     expect(document.querySelector(".md-incident")).toBeNull();
   });
 
-  it("vendor cards: health chip (offline for a disconnected vendor), LATENCY and SPEND MTD with cents, switch rows with the context hint", async () => {
+  it("vendor cards: health chip (offline for a disconnected vendor), spend with cents, models enabled, last check, and a switch per model row with the context", async () => {
     mount("#models");
     const card = await byId("vendor-anthropic");
     expect(card.querySelector(".vendor-head .chip")!.textContent).toBe("healthy");
-    expect([...card.querySelectorAll("dl.kv")[0]!.querySelectorAll("dt")].map((t) => t.textContent)).toEqual(["Latency", "Spend MTD"]);
-    expect(card.textContent).toContain("$4,182.40 / $9,000");
-    expect(card.textContent).toContain("500k ctx · $5/$25 per M");
+    expect([...card.querySelectorAll("dl.kv dt")].map((t) => t.textContent)).toEqual(["Spend this month", "Models", "Last check"]);
+    expect(card.textContent).toContain("$4,182.40 of $9,000");
+    expect(card.textContent).toContain("2 of 2 enabled");
+    expect(document.getElementById("md-table-anthropic")!.textContent).toContain("500k");
     expect((await byId("vendor-local")).querySelector(".vendor-head .chip")!.textContent).toBe("offline");
   });
 
@@ -97,13 +98,13 @@ describe("Models screen (Blueprint layout)", () => {
 
   it("matches the prototype's header and vendor cards: Add vendor in the header, static 'all connected', no Manage rows, no dashed Local card, any model switch is usable", async () => {
     mount("#models");
-    const card = await byId("vendor-anthropic");
+    await byId("vendor-anthropic");
     expect(document.getElementById("md-add-vendor")).not.toBeNull();
-    expect(document.getElementById("md-stats")!.textContent).toContain("all connected");
+    expect(document.getElementById("md-stats")!.textContent).toContain("1 connected");
     expect(document.body.textContent).not.toContain("not connected");
     expect(document.querySelector(".md-manage")).toBeNull();
     expect((await byId("vendor-local")).className).not.toContain("is-off");
-    const sw = card.querySelector("#mt-claude-opus-5-5")!;
+    const sw = document.getElementById("mt-claude-opus-5-5")!;
     expect(sw.getAttribute("aria-disabled")).not.toBe("true");
   });
 

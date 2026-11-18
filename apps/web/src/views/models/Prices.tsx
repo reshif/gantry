@@ -68,7 +68,7 @@ const nowLocal = (): string => {
 };
 
 /** Multi-model publish: edit any number of prices; everything changed goes out as one price version with one note. */
-function PublishPricesDialog({ vendors, close }: { vendors: Vendor[]; close: () => void }) {
+export function PublishPricesDialog({ vendors, close }: { vendors: Vendor[]; close: () => void }) {
   const ui = useUI();
   const perm = dec(useCan("model.edit"));
   const q = usePrices();

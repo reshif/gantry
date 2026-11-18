@@ -18,7 +18,10 @@ import { useCatalog } from "./projects/kit";
 import { ModelPrices, PriceVersions, ProjectBudgets, VendorBudgets } from "./models/Prices";
 import { AddVendorDialog } from "./models/Templates";
 import { RoutingPanel } from "./models/Routing";
-import { VendorPanel } from "./models/Vendor";
+import { AddVendorCard, VendorCard, discoverModels } from "./models/Vendor";
+import { ModelTable } from "./models/ModelTable";
+import { setRouteQuery } from "../lib/routeQuery";
+import { useHash } from "../lib/router";
 import { dec, usd } from "./models/kit";
 
 
@@ -38,6 +41,7 @@ export default function ModelsView() {
   const enabledN = vendors.reduce((t, v) => t + v.models.filter((m) => m.enabled).length, 0);
   const defaultModel = vendors.flatMap((v) => v.models.map((m) => ({ m, v }))).find((x) => x.m.id === rq.data?.defaultModel);
 
+  const { q: query } = useHash();
   const [tab, setTab] = useRouteTab(["vendors", "routing", "prices"], "vendors");
 
   return (
@@ -50,7 +54,7 @@ export default function ModelsView() {
       />
       <StatRow id="md-stats">
         <Stat label="Models" value={qState(vq, () => String(allN))} sub={`${enabledN} enabled`} tone="info" />
-        <Stat label="Vendors" value={qState(vq, () => String(vendors.length))} sub="all connected" />
+        <Stat label="Vendors" value={qState(vq, () => String(vendors.length))} sub={`${vendors.filter((v) => v.connected).length} connected`} />
         <Stat label="Spend MTD" value={qState(vq, () => usd(mtd))} sub={bud ? `of ${usd(bud)}` : "month to date"} />
         <Stat label="Default" value={qState(rq, (r) => defaultModel?.m.name ?? r.defaultModel ?? "–")} sub="unless overridden" />
       </StatRow>
@@ -59,8 +63,12 @@ export default function ModelsView() {
         {() => (
           <Async query={rq} what="model routing" id="models-routing">
             {(r) => tab === "vendors" ? (
+              <div className="stack md-stack">
               <div className="card-grid vendor-grid">
-                {vendors.map((v) => <VendorPanel key={v.id} v={v} vendors={vendors} routing={r} agents={agents} />)}
+                {vendors.map((v) => <VendorCard key={v.id} v={v} vendors={vendors} routing={r} agents={agents} selected={query.vendor === v.id} onSelect={() => setRouteQuery("vendor", query.vendor === v.id ? null : v.id)} onDiscover={(x) => void discoverModels(ui, x)} />)}
+                <AddVendorCard onAdded={(id) => { setTab("vendors"); setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView?.({ block: "center" }), 150); }} />
+              </div>
+              <ModelTable vendors={vendors} agents={agents} routing={r} />
               </div>
             ) : tab === "routing" ? (
               <RoutingPanel routing={r} vendors={vendors} cat={cat} />

@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DEFAULT_CATALOG, type ApproverRule } from "@gantry/domain";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
 import { bindQueryClient } from "../api/keys";
@@ -527,19 +529,95 @@ describe("Project config", () => {
     expect(document.getElementById("pcf-ov-save")!.textContent).toBe("Save");
   });
 
-  it("Flow: Stations (WIP and switch) and Gates (mode and switch) as rows; WIP and gate mode save with toasts", async () => {
-    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok() });
+  it("Flow: two panels of compact rows (Stations, Gates), gates in flow order with an S1 → S2 hint; every control labelled", async () => {
+    withPayments({});
+    tab("flow");
+    mount(<ProjectConfigView />);
+    await byId("pcf-wip-spec");
+    expect(Array.from(document.querySelectorAll("#flw .flw-cols > section > h2, #flw .panel-title")).map((h) => h.textContent)).toEqual(["Stations", "Gates"]);
+    expect(Array.from(document.querySelectorAll("#flw .flw-list:not(.flw-gates) > li")).slice(0, 3).map((li) => li.id)).toEqual(["flw-st-intake", "flw-st-research", "flw-st-spec"]);
+    expect(Array.from(document.querySelectorAll("#flw .flw-gates > li")).slice(0, 3).map((li) => li.id)).toEqual(["flw-g-G0G1", "flw-g-G1f", "flw-g-G2"]);
+    expect(document.querySelector("#flw-g-G2 .flw-hint")!.textContent).toBe("S2 → S3");
+    expect(document.querySelector("#flw-st-intake")!.textContent).toMatch(/Always on/);
+    expect(document.querySelector("#flw-st-intake input[role=switch]")).toBeNull();
+    expect(document.querySelectorAll("#flw .flw-cols .panel").length).toBe(2); // no card grid
+    for (const el of Array.from(document.querySelectorAll("#flw input, #flw select"))) {
+      expect(el.getAttribute("aria-label") || document.querySelector(`label[for="${el.id}"]`), el.id).toBeTruthy();
+    }
+    expect(screen.getByLabelText("Spec WIP limit")).toBeTruthy();
+    expect(screen.getByLabelText("Research station on")).toBeTruthy();
+    expect(screen.getByLabelText("Spec approved on")).toBeTruthy();
+    // a row opens in place, and that is in the URL
+    expect(document.querySelector("#flw-st-spec")!.textContent).not.toMatch(/Routes:/);
+    fireEvent.click(await byId("flw-x-s-spec"));
+    expect(document.querySelector("#flw-st-spec")!.textContent).toMatch(/Routes:/);
+    expect(window.location.search).toMatch(/open=s%3Aspec|open=s:spec/);
+  });
+
+  it("Flow: hovering a station lights the gates on either side of it, and a gate lights its two stations", async () => {
+    withPayments({});
+    tab("flow");
+    mount(<ProjectConfigView />);
+    await byId("pcf-wip-spec");
+    fireEvent.mouseEnter(document.getElementById("flw-st-spec")!);
+    expect(Array.from(document.querySelectorAll("#flw .is-link")).map((e) => e.id)).toEqual(["flw-g-G1f", "flw-g-G2"]);
+    fireEvent.mouseLeave(document.getElementById("flw-st-spec")!);
+    expect(document.querySelector("#flw .is-link")).toBeNull();
+    fireEvent.focus(document.getElementById("pcf-gmode-G2")!);
+    expect(Array.from(document.querySelectorAll("#flw .is-link")).map((e) => e.id)).toEqual(["flw-st-spec", "flw-st-design"]);
+  });
+
+  it("Flow: the mode select offers plain labels, and Off is the On switch (the gate's enabled flag)", async () => {
+    withPayments({});
+    tab("flow");
+    mount(<ProjectConfigView />);
+    const sel = (await byId("pcf-gmode-G1f")) as HTMLSelectElement;
+    const byLabel = Object.fromEntries(Array.from(sel.options).map((o) => [o.textContent, o.value]));
+    expect(byLabel).toMatchObject({ "Person approves": "human", "Automatic check": "auto", "Mixed": "mixed" });
+    expect(byLabel).not.toHaveProperty("Off");
+    expect((screen.getByLabelText("Feasibility on") as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(await byId("flw-x-g-G1f"));
+    expect(sel.closest("li")!.textContent).toMatch(/Passes by itself/);
+  });
+
+  it("Flow line: edits are a draft, Review lists before and after, Save sends the same requests with If-Match", async () => {
+    const calls = withPayments({ "PATCH /api/v1/projects/payments/config": () => ok({ version: 8 }) });
     tab("flow");
     mount(<ProjectConfigView />);
     const wip = (await byId("pcf-wip-spec")) as HTMLInputElement;
-    expect(Array.from(document.querySelectorAll(".panel-title")).map((h) => h.textContent)).toEqual(["Stations", "Gates"]);
+    const before = wip.value;
     fireEvent.change(wip, { target: { value: "9" } });
-    fireEvent.blur(wip);
-    await waitFor(() => expect(calls.some((c) => (c.body as { path?: string })?.path === "flow.stations.spec.wip")).toBe(true));
-    expect(await screen.findByText("Spec WIP 9")).toBeTruthy();
     fireEvent.change(await byId("pcf-gmode-G1f"), { target: { value: "human" } });
-    expect(await screen.findByText("G1f → human")).toBeTruthy();
-    expect(document.getElementById("pcf-more")).toBeNull(); // no "Also:" row under the two panels
+    expect(document.getElementById("flw-count")!.textContent).toMatch(/2 unsaved changes/);
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false); // nothing is written until Save
+    fireEvent.click(await byId("flw-review"));
+    const list = (await byId("flw-changes")).textContent ?? "";
+    expect(list).toContain(`S2 Spec WIP limit: ${before} → 9`);
+    expect(list).toMatch(/G1f Feasibility: .* → Person approves/);
+    fireEvent.click(await byId("flw-save"));
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH").length).toBeGreaterThanOrEqual(2));
+    const patches = calls.filter((c) => c.method === "PATCH");
+    expect(patches[0]!.body).toEqual({ path: "flow.stations.spec.wip", value: 9 });
+    expect(patches[0]!.headers["if-match"]).toBe("7");
+    expect(patches.some((c) => (c.body as { gate?: string }).gate === "G1f")).toBe(true);
+    expect(patches[1]!.headers["if-match"]).toBe("8"); // the version chained from the first save
+  });
+
+  it("Flow line: a gate whose approver rule cannot be satisfied shows the warning", async () => {
+    const rule = { roles: ["nobody_holds_this"], people: [], required: 2, sod: true, conditions: [], escalateH: 0, fallback: null };
+    const bad = { ...PAYMENTS, approvers: { ...PAYMENTS.approvers, G2: rule } };
+    withPayments({ "GET /api/v1/projects": () => ({ body: [bad, RISK] }) });
+    tab("flow");
+    mount(<ProjectConfigView />);
+    expect((await byId("flw-warn-G2")).textContent).toMatch(/cannot pass as configured/);
+  });
+
+  it("Flow: at narrow widths the two panels stack and rows wrap (CSS), and the card grid is gone", () => {
+    // jsdom has no layout: check the stylesheet carries the rules so a regression is caught.
+    const css = readFileSync(join(__dirname, "../styles/views/project-config.css"), "utf8");
+    expect(css).toMatch(/@media \(max-width: 1100px\)\s*{\s*\.flw-cols\s*{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    expect(css).toMatch(/@media \(max-width: 640px\)\s*{[^}]*\.flw-line/);
+    expect(css).not.toMatch(/flw-card/);
   });
 
   it("Approvers: an overview table with Edit; Edit opens a dialog that saves the rule with If-Match", async () => {
@@ -664,8 +742,8 @@ describe("Project config", () => {
     withPayments({ "GET /api/v1/projects": () => ({ body: [withGc, RISK] }), "GET /api/v1/catalog": () => ({ body: { ...CAT, gates: [...CAT.gates, { id: "GC", label: "GC", name: "Compliance sign-off", kind: "human", checks: [] }] } }) });
     tab("flow");
     mount(<ProjectConfigView />);
-    expect(await byId("pcf-gate-GC")).toBeTruthy();
+    expect(((await byId("pcf-gate-GC")) as HTMLInputElement).checked).toBe(false);
+    expect((document.getElementById("pcf-gmode-GC") as HTMLSelectElement).disabled).toBe(true);
     expect(screen.getByText("Compliance sign-off")).toBeTruthy();
-    expect((document.getElementById("pcf-gate-GC") as HTMLInputElement).checked).toBe(false);
   });
 });

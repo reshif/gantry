@@ -1,59 +1,84 @@
-/** One vendor card (legacy vendorPanel): health and latency and spend from real calls, residency, models with their toggles, and the actions. */
+/** Vendor summary cards (Models, Blueprint): one compact card per vendor, a "+ Add vendor" card at the end. The vendor's models live in the table below. */
 import { useState } from "react";
-import { fmt, type Agent, type Model, type Routing, type Vendor } from "@gantry/domain";
-import { ops } from "../../api/ops";
+import type { Agent, Model, Routing, Vendor } from "@gantry/domain";
+import { discoverVendorModels } from "./commands";
 import { useCan } from "../../api/can";
-import { Btn, Chip, Toggle } from "../../ui/primitives";
+import { Btn, Chip } from "../../ui/primitives";
 import { AddModelDialog, ConnectDialog, DisconnectDialog, RemoveModelDialog } from "./Dialogs";
+import { AddVendorDialog } from "./Templates";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
-import { dec, hasEndpoint, usd } from "./kit";
+import { dec, usd } from "./kit";
 
-export function VendorPanel({ v, vendors, routing, agents }: { v: Vendor; vendors: Vendor[]; routing: Routing; agents: Agent[] }) {
+/** The product line only when it says something the name does not. */
+export const productLine = (v: Vendor): string => {
+  const p = (v.product || (v.custom ? "Custom vendor" : "")).trim();
+  return p && p.toLowerCase() !== v.name.trim().toLowerCase() ? p : "";
+};
+
+/** One line of where data goes. */
+export const residencyLine = (v: Vendor): string => {
+  const base = v.residency || (v.endpoint ? `Data goes to ${v.endpoint.replace(/^https?:[/][/]/, "").replace(/[/].*$/, "")}${v.region ? ` in ${v.region}` : ""}.` : "No residency information.");
+  return base + (v.retention && v.retention !== "standard" ? ` Retention: ${v.retention}.` : "");
+};
+
+export function VendorCard({ v, vendors, routing, agents, selected, onSelect, onDiscover }: { v: Vendor; vendors: Vendor[]; routing: Routing; agents: Agent[]; selected: boolean; onSelect: () => void; onDiscover: (v: Vendor) => void }) {
   const ui = useUI();
   const perm = dec(useCan("model.edit"));
-  const endpointVendor = hasEndpoint(v);
-
-  const healthTone = !v.connected ? "warn" : v.health === "healthy" ? "ok" : "warn";
-  const spendRatio = v.budget ? (v.mtd || 0) / v.budget : 0;
+  const hasBudget = (v.budget || 0) > 0;
+  const ratio = hasBudget ? (v.mtd || 0) / v.budget : 0;
+  const enabled = v.models.filter((m) => m.enabled).length;
+  const product = productLine(v);
+  const tone = !v.connected || v.health !== "healthy" ? "warn" : "ok";
+  const menu = (el: HTMLElement) => ui.menu(el, v.name, [
+    { label: v.connected ? "Update key" : "Connect", icon: "key", guard: perm, onClick: () => ui.open((close) => <ConnectDialog v={v} close={close} />) },
+    { label: "Add model", icon: "plus", guard: perm, onClick: () => ui.open((close) => <AddModelDialog v={v} vendors={vendors} close={close} />) },
+    { label: "Discover models", icon: "search", guard: perm, onClick: () => onDiscover(v) },
+    ...(v.models.length ? [{ label: "Remove model", guard: perm, onClick: () => ui.open((close: () => void) => <RemoveModelPick v={v} close={close} />) }] : []),
+    ...(v.connected ? [{ sep: true }, { label: "Disconnect", kind: "danger", guard: perm, onClick: () => ui.open((close: () => void) => <DisconnectDialog v={v} routing={routing} agents={agents} close={close} />) }] : []),
+  ]);
   return (
-    <section className="card vendor" aria-label={v.name} id={`vendor-${v.id}`}>
-      <div className="row vendor-head">
-        <h3 className="vendor-name">{v.name}</h3>
-        <span className="spacer" />
-        <Chip text={v.connected ? v.health : "offline"} cls={healthTone} />
+    <section className={`card vendor md-vcard${selected ? " is-selected" : ""}`} aria-label={v.name} id={`vendor-${v.id}`}>
+      <div className="row vendor-head md-vhead">
+        <Btn kind="ghost" cls="md-vpick" id={`vendor-pick-${v.id}`} aria-pressed={selected} aria={`${selected ? "Showing" : "Show"} ${v.name} models`} onClick={onSelect}>
+          <span className="vendor-name">{v.name}</span>
+          {product ? <span className="small muted">{product}</span> : null}
+        </Btn>
+        <Chip text={v.connected ? v.health : "offline"} cls={tone} />
+        <Btn small kind="ghost" icon="down" id={`vendor-menu-${v.id}`} aria={`Actions for ${v.name}`} aria-haspopup="menu" onClick={(e) => menu(e.currentTarget)} />
       </div>
-      <div className="small muted">{[v.product || (v.custom ? "Custom vendor" : "Vendor"), (endpointVendor ? (v.region || "on-prem") : v.region) || ""].filter(Boolean).join(" · ")}</div>
       <dl className="kv tb-vendor md-kv">
-        <dt>Latency</dt><dd>{`${v.connected ? v.latency || 0 : 0} ms`}</dd>
-        <dt>Spend MTD</dt><dd>{`${usd(v.mtd || 0)} / ${usd(v.budget || 0)}`}</dd>
+        <dt>{hasBudget ? "Spend this month" : "Spend"}</dt>
+        <dd>{hasBudget ? `${usd(v.mtd || 0)} of ${usd(v.budget)}` : <>{usd(v.mtd || 0)} <span className="muted">· No budget set</span></>}</dd>
+        <dt>Models</dt><dd>{`${enabled} of ${v.models.length} enabled`}</dd>
+        <dt>Last check</dt><dd>{v.connected && v.latency ? `${v.latency} ms` : "No calls yet"}</dd>
       </dl>
-      <div className={`meter${spendRatio > 0.8 ? " warn" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, spendRatio) * 100)} aria-label={`${v.name} spend vs budget`}><i style={{ width: `${Math.min(1, spendRatio) * 100}%` }} /></div>
-      <div className="small muted residency">{v.residency || (v.endpoint ? `Data goes to ${v.endpoint.replace(/^https?:[/][/]/, "").replace(/[/].*$/, "")}${v.region ? ` in ${v.region}` : ""}.` : "No residency information.")}{v.retention && v.retention !== "standard" ? ` Data retention: ${v.retention}.` : ""}</div>
-      <div className="md-models">
-        {v.models.map((m) => {
-          // The server refuses a switch-off that would strand a default, a fallback or an agent, and says why in the toast.
-          const lock = !perm.allowed ? perm : null;
-          return (
-            <label key={m.id} className="check md-model" htmlFor={`mt-${m.id}`} style={{ justifyContent: "space-between", padding: "6px 0", borderBottom: "1px dotted var(--line)" }}>
-              <span title={m.id}>{m.name}<span className="sub muted small" style={{ display: "block" }}>{`${fmt.k(m.context || 0)} ctx · $${m.inPrice}/$${m.outPrice} per M`}</span></span>
-              <Toggle id={`mt-${m.id}`} checked={m.enabled} label={m.name} decision={lock} onChange={(on) => void (async () => { const r = await ops.setModelEnabled(m.id, on); ui.toast(r.ok ? `${m.name} ${on ? "enabled" : "disabled"}` : r.msg, r.ok ? "ok" : "error"); })()} />
-            </label>
-          );
-        })}
-      </div>
-      <div className="row md-actions" style={{ flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-        <Btn small label={v.connected ? "Update key" : "Connect"} kind={v.connected ? undefined : "primary"} id={`vendor-connect-${v.id}`} guard={perm} onClick={() => ui.open((close) => <ConnectDialog v={v} close={close} />)} />
-        <Btn small label="Add model" icon="plus" id={`vendor-addmodel-${v.id}`} guard={perm} onClick={() => ui.open((close) => <AddModelDialog v={v} vendors={vendors} close={close} />)} />
-        {v.models.length ? <Btn small kind="ghost" label="Remove model" id={`vendor-rmmodel-${v.id}`} guard={perm} onClick={() => ui.open((close) => <RemoveModelPick v={v} close={close} />)} /> : null}
-        {v.connected ? <Btn small kind="ghost" label="Disconnect" id={`vendor-disc-${v.id}`} guard={perm} onClick={() => ui.open((close) => <DisconnectDialog v={v} routing={routing} agents={agents} close={close} />)} /> : null}
-      </div>
+      {hasBudget ? <div className={`meter${ratio > 0.8 ? " warn" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, ratio) * 100)} aria-label={`${v.name} spend vs budget`}><i style={{ width: `${Math.min(1, ratio) * 100}%` }} /></div> : null}
+      <div className="small muted residency md-resid" title={residencyLine(v)}>{residencyLine(v)}</div>
+      {!v.connected ? <div className="md-vfoot"><Btn small kind="primary" label="Connect" id={`vendor-connect-${v.id}`} guard={perm} onClick={() => ui.open((close) => <ConnectDialog v={v} close={close} />)} /></div> : null}
     </section>
   );
 }
 
+export function AddVendorCard({ onAdded }: { onAdded: (id: string) => void }) {
+  const ui = useUI();
+  const perm = dec(useCan("model.edit"));
+  return (
+    <section className="card vendor md-vcard md-vadd" aria-label="Add vendor">
+      <Btn kind="ghost" icon="plus" label="Add vendor" id="md-add-vendor-card" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={onAdded} />)} />
+      <span className="small muted">Pick a template or connect one by hand.</span>
+    </section>
+  );
+}
+
+/** What a vendor's discover call says, as one toast. */
+export async function discoverModels(ui: { toast: (t: string, k?: "ok" | "error") => void }, v: Vendor): Promise<void> {
+  const r = await discoverVendorModels(v.id);
+  ui.toast(r.ok ? r.msg || `Models listed for ${v.name}.` : r.msg, r.ok ? "ok" : "error");
+}
+
 /** Remove model needs a model: with one model it goes straight to the confirmation, with several a small picker comes first. */
-function RemoveModelPick({ v, close }: { v: Vendor; close: () => void }) {
+export function RemoveModelPick({ v, close }: { v: Vendor; close: () => void }) {
   const [picked, setPicked] = useState<Model | null>(v.models.length === 1 ? v.models[0]! : null);
   if (picked) return <RemoveModelDialog v={v} m={picked} close={close} />;
   return (
