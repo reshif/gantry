@@ -70,7 +70,7 @@ export function GeneralTab({ p, s, set, people, tools }: TabProps) {
   return (
     <div className="grid g-main2">
       <div className="stack">
-        <Card title="General" acts={<><span className="hint">Changes save when you leave a field</span>{tools ? <Btn small kind="ghost" id="pcf-tools" label="Project tools" onClick={(e) => tools(e.currentTarget as HTMLElement)} /> : null}</>}>
+        <Card title="General" acts={<span className="hint">Changes save when you leave a field</span>}>
           <div className="stack">
             <Field label="Name" htmlFor="pcf-name">
               <Input id="pcf-name" value={name} disabled={!d.allowed} onChange={(e) => set({ text: { ...s.text, name: e.target.value } })} onBlur={() => { if (name.trim() !== p.name) notStored("name"); clear("name"); }} />
@@ -85,6 +85,7 @@ export function GeneralTab({ p, s, set, people, tools }: TabProps) {
               <Toggle id="pcf-regulated" checked={!!p.regulated} decision={d} label="Regulated project" onChange={() => notStored("regulated status")} />
               <span>Regulated project (caps autonomy at L2, adds security gate)</span>
             </div>
+            {tools ? <div className="row" style={{ justifyContent: "flex-end" }}><Btn small kind="ghost" id="pcf-tools" label="Project tools" onClick={(e) => tools(e.currentTarget as HTMLElement)} /></div> : null}
           </div>
         </Card>
       </div>
@@ -388,9 +389,9 @@ export function DangerCard({ p }: TabProps) {
     ["Halt line", "Stops new work entering stations. In-flight runs finish.", <Btn key="h" kind="danger" id="pcf-halt" guard={halt} label={halted ? "Resume line" : "Halt line"} onClick={() => (halted ? void stop?.resume(p.id) : ui.open((close) => <HaltLine p={p} close={close} />))} />],
     ["Emergency stop", "Stops all agents on this project immediately.", <Btn key="k" kind="danger" id={killed ? "pcf-restore" : "pcf-kill"} guard={killed ? rd : kd} label={killed ? "Restore project" : "Emergency stop…"} onClick={() => (killed ? stop?.restore("project", p.id) : ui.open((close) => <EmergencyStop p={p} close={close} />))} />],
     ["Archive project", "Hides the project. History is kept for audit.", <Btn key="a" kind="danger" id="pcf-archive" guard={ad} label="Archive…" onClick={() => ui.typedConfirm({
-      title: `Archive ${p.name}?`, sub: "It disappears from lists. History stays for audit. You can restore it from the audit ledger.", phrase: p.name, okLabel: "Archive", kind: "danger", guard: ad,
-      body: <p className="small muted">Type the project name ({p.name}) to confirm.</p>,
-      onOk: async (text) => { const r = await ops.archiveProject(p.id, text, { ifMatch: p.version }); res(r, "Archived"); if (r.ok) navigate("projects"); return r.ok ? undefined : { ok: false, msg: r.msg }; },
+      title: `Archive ${p.name}?`, sub: "It disappears from lists. History stays for audit. You can restore it from the audit ledger.", phrase: p.key, okLabel: "Archive", kind: "danger", guard: ad,
+      body: <p className="small muted">Type the project key ({p.key}) to confirm.</p>,
+      onOk: async () => { const r = await ops.archiveProject(p.id, p.name, { ifMatch: p.version }); res(r, "Archived"); if (r.ok) navigate("projects"); return r.ok ? undefined : { ok: false, msg: r.msg }; },
     })} />],
   ];
   return (
@@ -470,7 +471,7 @@ function HaltLine({ p, close }: { p: PcProps["p"]; close: () => void }) {
   const d = useCan("line.halt", { project: p.id });
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
-  const min = p.regulated ? 20 : 4;
+  const min = p.regulated ? 20 : 5;
   return (
     <Dialog
       title={`Halt ${p.name}`}

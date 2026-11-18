@@ -111,7 +111,12 @@ export default function ProjectConfigView() {
   } as Record<string, React.ReactNode>)[tab];
   const stop = makeStopActions(ui, me);
   const by = p.halted ? actor(p.halted.by).name : "";
-  const switchTo = (id: string) => { if (id !== p.id) window.location.hash = hashFor("project-config", id, id); };
+  // the prototype keeps the tab when the project changes; the router clears route-state keys on every hash change, so put it back right after
+  const switchTo = (id: string) => {
+    if (id === p.id) return;
+    if (tab !== "general") window.addEventListener("hashchange", () => setParams({ tab }), { once: true });
+    window.location.hash = hashFor("project-config", id, id);
+  };
 
   return (
     <Page

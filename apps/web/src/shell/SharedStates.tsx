@@ -9,7 +9,7 @@ import { CrEmpty, CrIcon, Page } from "../ui/cr";
 import { hashQuery } from "../lib/router";
 import { useAccessMatrix, useMe } from "../api/queries";
 
-export const SHARED_STATES = ["loading", "empty", "error", "forbidden", "conflict"] as const;
+export const SHARED_STATES = ["loading", "empty", "error", "forbidden", "conflict", "notfound"] as const;
 export type SharedStateKind = (typeof SHARED_STATES)[number];
 
 /** The `state` carried by the URL, when it names one of the shared states. */
@@ -82,8 +82,10 @@ function ForbiddenCard() {
   );
 }
 
-export function SharedState({ kind }: { kind: SharedStateKind }) {
+export function SharedState({ kind, name = "" }: { kind: SharedStateKind; name?: string }) {
   switch (kind) {
+    case "notfound":
+      return <div className="card"><CrEmpty icon="search" title={`There is no “${name}” page`} text="The link may be old, or the page was renamed." action={<a className="btn primary" href="#home">Go Home</a>} /></div>;
     case "loading":
       return <Loading />;
     case "empty":
@@ -118,7 +120,7 @@ export function protoEyebrow(routeId: string, group: string): string {
 
 /** A route's page frame with one shared state inside it (prototype `G.pageShell`). */
 export function SharedStatePage({ kind, eyebrow, title, sub }: { kind: SharedStateKind; eyebrow: string; title: string; sub?: string }) {
-  return <Page eyebrow={eyebrow} title={title} sub={sub}><SharedState kind={kind} /></Page>;
+  return <Page eyebrow={eyebrow} title={title} sub={sub}><SharedState kind={kind} name={title} /></Page>;
 }
 
 export function NotFoundPage({ name }: { name: string }) {

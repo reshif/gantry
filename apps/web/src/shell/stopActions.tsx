@@ -19,7 +19,7 @@ export function makeStopActions(ui: UIApi, _me: Me): StopActions {
   const done = (r: { ok: boolean; msg: string }) => ui.toast(r.msg, r.ok ? "ok" : "error");
   return {
     halt: (projectId) => void ui.open((close) => <HaltDialog scope="project" id={projectId} projectId={projectId} onClose={close} />),
-    resume: async (projectId) => done(await ops.resumeProject(projectId)),
+    resume: async (projectId) => { const r = await ops.resumeProject(projectId); done(r.ok ? { ok: true, msg: "Line resumed" } : r); },
     haltRepo: (repoId, projectId) => void ui.open((close) => <HaltDialog scope="repo" id={repoId} projectId={projectId} onClose={close} />),
     resumeRepo: async (repoId) => done(await ops.resumeRepo(repoId)),
     emergency: (scope, id) => void ui.open((close) => <EmergencyStopDialog scope={scope} id={id} onClose={close} />),

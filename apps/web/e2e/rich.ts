@@ -262,7 +262,10 @@ export function richOverrides(): Record<string, Handler> {
   }
   /* ---- end ops1 ---- */
   ov["activity"] = (r) => fulfillJson(r, events());
-  ov["stops/impact"] = (r) => fulfillJson(r, { projects: PROJECTS.length, workOrders: 52, running: 31, slots: 4, prs: 3 });
+  // the server counts per scope: a project's stop covers only that project's belt (35 on Payments), the factory's covers all of it
+  ov["stops/impact"] = (r) => (new URL(r.request().url()).searchParams.get("scope") === "project"
+    ? fulfillJson(r, { projects: 1, workOrders: 35, running: 21, slots: 3, prs: 2 })
+    : fulfillJson(r, { projects: PROJECTS.length, workOrders: 52, running: 31, slots: 4, prs: 3 }));
   ov["agents"] = (r) => fulfillJson(r, agents());
   ov["home"] = (r) =>
     fulfillJson(r, {

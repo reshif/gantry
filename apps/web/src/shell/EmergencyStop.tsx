@@ -39,7 +39,7 @@ export function EmergencyStopDialog({ scope, id, onClose }: { scope: "factory" |
     if (busy) return;
     const next: typeof err = {};
     if (!reason.trim()) next.reason = "Reason is required.";
-    else if (reason.trim().length < 10) next.reason = "Give a reason of at least 10 characters.";
+    else if (reason.trim().length < 10) next.reason = "Reason needs at least 10 characters.";
     if (!confirm.trim()) next.confirm = "Type STOP to confirm is required.";
     else if (!/^STOP$/.test(confirm)) next.confirm = "Type STOP in capitals.";
     setErr(next);

@@ -268,7 +268,7 @@ function TypedView({ o, onClose }: { o: Parameters<UIApi["typedConfirm"]>[0]; on
           guard: o.guard,
           onClick: () => {
             if (text !== o.phrase) {
-              setErr(`Type ${o.phrase} exactly.`);
+              setErr(`Type ${o.phrase}.`);
               return;
             }
             void run(() => o.onOk(text));
@@ -322,7 +322,7 @@ export function OverlayProvider({ children }: { children: ReactNode }) {
     later(() => {
       setToasts((l) => l.map((t) => (t.id === id ? { ...t, out: true } : t)));
       later(() => setToasts((l) => l.filter((t) => t.id !== id)), 300);
-    }, action ? 10_000 : 4600);
+    }, action ? 10_000 : 4900);
   }, []);
 
   const closePopover = useCallback(() => {
