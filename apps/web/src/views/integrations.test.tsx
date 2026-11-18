@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
@@ -90,7 +90,6 @@ describe("Integrations screen", () => {
     expect(table.textContent).toContain("payments");
     expect(table.textContent).not.toContain("Payments Platform");
     expect(document.getElementById("int-attn")).toBeNull(); // the prototype has no attention disclosure under the table
-    expect(document.getElementById("int-view-catalogue")).toBeNull(); // the catalogue opens from the Add dialog, not from the filter bar
     expect(text()).toContain("Healthy1");
     expect(text()).not.toContain("enabled and reachable");
     expect(document.getElementById("int-stats")?.textContent).toMatch(/Connected3.*Healthy1.*Degraded0.*Failing1/);
@@ -104,6 +103,18 @@ describe("Integrations screen", () => {
     await waitFor(() => expect(text()).toContain("Linear"));
     expect(text()).toContain("Slack");
     expect(text()).toContain("GitHub");
+  });
+
+  it("the Catalogue and Custom types views are reached by clicking the view switch", async () => {
+    setup();
+    mount();
+    await byId("int-table");
+    fireEvent.click(screen.getByLabelText("Catalogue"));
+    await waitFor(() => expect(text()).toContain("Linear"));
+    fireEvent.click(screen.getByLabelText("Custom types"));
+    await waitFor(() => expect(window.location.search).toContain("view=custom"));
+    fireEvent.click(screen.getByLabelText("Connected"));
+    await byId("int-table");
   });
 
   it("says nothing is connected when there are no connections, and still offers to add one", async () => {

@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { IntegrationInstance } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { ops } from "../api/ops";
-import { Btn, FilterBar, SearchBox, Select, type Decision } from "../ui/primitives";
+import { Btn, FilterBar, SearchBox, Segmented, Select, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
 import { DataTable } from "../ui/DataTable";
 import { Page, Stats } from "../ui/cr";
@@ -117,9 +117,7 @@ export default function IntegrationsView() {
         { l: "Degraded", v: qState(d.instsQ, () => stat(count("degraded"))), tone: "warn" },
         { l: "Failing", v: qState(d.instsQ, () => stat(count("failing"))), tone: "bad" },
       ]} />
-      {view !== "connected" ? (
-        <div className="row" style={{ marginBottom: 12 }}><Btn label="Back to connected" small kind="ghost" icon="arrow-left" id="int-view-back" onClick={() => url.set({ view: "connected" })} /><span className="dim">{view === "catalogue" ? "Connector catalogue" : "Custom integration types"}</span></div>
-      ) : null}
+      <div style={{ marginBottom: 12 }}><Segmented name="int-view" label="View" value={view} onChange={(v) => url.set({ view: v })} items={[{ id: "connected", label: "Connected" }, { id: "catalogue", label: "Catalogue" }, { id: "custom", label: "Custom types" }]} /></div>
       {view === "catalogue" ? (
         <Async query={d.typesQ} what="the integration catalogue" id="int-cat">{() => <CatalogueTab nav={{ q: cq, setQ: setCq, cat: ccat, setCat: setCcat, status: cst, setStatus: setCst }} openType={openType} onAdd={addDialog} goBuild={() => url.set({ view: "custom" })} />}</Async>
       ) : view === "custom" ? (

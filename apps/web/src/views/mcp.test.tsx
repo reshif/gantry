@@ -139,11 +139,28 @@ describe("MCP servers screen", () => {
     await waitFor(() => expect(document.getElementById("mcp-row-mcp-docs-1a2b")).toBeTruthy());
   });
 
-  it("the registry has no extra Usage log button, shows the sensitivity as a plain lower-case chip, and the drawer has only the prototype's foot (Refresh definitions, Done)", async () => {
+  it("Scope and access is reached from the Manage tools drawer, and the Usage log by the view switch", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
+    fireEvent.click(await byId("mcp-d-scope"));
+    await waitFor(() => { if (!document.querySelector(".dlg")) throw new Error("no dialog"); });
+    expect(window.location.search).toContain("view=scope");
+    cleanup();
+    window.history.replaceState(null, "", "/");
+    mount();
+    await byId("mcp-registry");
+    fireEvent.click(screen.getByLabelText("Usage log"));
+    await waitFor(() => expect(window.location.search).toContain("view=usage"));
+    expect(document.body.textContent).toContain("Usage log:");
+    fireEvent.click(screen.getByLabelText("Registry"));
+    await byId("mcp-registry");
+  });
+
+  it("the registry shows the sensitivity as a plain lower-case chip, and the drawer has only the prototype's foot (Refresh definitions, Done)", async () => {
     setup();
     mount();
     const row = await byId("mcp-row-mcp-docs-1a2b");
-    expect(document.getElementById("mcp-view-usage")).toBeNull();
     const chip = within(row).getByText("internal");
     expect(chip.className).toContain("plain");
     fireEvent.click(await byId("mcp-open-mcp-docs-1a2b"));
@@ -151,7 +168,7 @@ describe("MCP servers screen", () => {
     expect(document.getElementById("mcp-d-more")).toBeNull();
     expect(document.getElementById("mcp-d-usage")).toBeNull();
     expect(document.querySelector("details")).toBeNull();
-    expect(document.querySelector(".drawer-f")!.textContent).toBe("Refresh definitionsDone");
+    expect(document.querySelector(".drawer-f")!.textContent).toBe("Refresh definitionsScope and accessDone");
   });
 
   it("Manage tools opens a drawer: eyebrow MCP SERVER, URL/Auth/Health, a Tools card with switches and Refresh definitions in the foot", async () => {

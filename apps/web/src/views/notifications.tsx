@@ -1,6 +1,6 @@
 /**
  * Notifications (spec 8.8, 12.2), the Control Room screen: tabs Matrix (who hears about what: event by channel switches), Deliveries and
- * Channels (`?tab=`). The route editor, card templates and repo overrides stay one step away, listed under the channels (`?tab=routes|templates|overrides`). Kill and restore cannot be switched off. Destinations are connections from Integrations.
+ * Channels (`?tab=`). Routes, card templates and repo overrides are tabs too (`?tab=routes|templates|overrides`). Kill and restore cannot be switched off. Destinations are connections from Integrations.
  */
 import { useCan } from "../api/can";
 import { useDeliveries } from "../api/queries";
@@ -50,18 +50,16 @@ export default function NotificationsView() {
       </Page>
     );
   }
-  const more = (MORE as readonly string[]).includes(tab);
   return (
     <Page {...head} cls="nt-view">
-      {more ? (
-        <div className="row" style={{ marginBottom: 12 }}><Btn label="Back to matrix" small kind="ghost" icon="arrow-left" id="nt-back" onClick={() => url.clear()} /><span className="dim">{MORE_LABEL[tab as (typeof MORE)[number]]} on {p.name}</span></div>
-      ) : (
-        <Tabs idPrefix="nt-tab" active={tab} onChange={(t) => url.set({ tab: t, q: "", st: "all", sort: "", dir: "", page: "0" })} items={[
-          { id: "matrix", label: "Matrix" },
-          { id: "deliveries", label: "Deliveries", ...(failed ? { count: failed } : {}) },
-          { id: "channels", label: "Channels" },
-        ]} />
-      )}
+      <Tabs idPrefix="nt-tab" active={tab} onChange={(t) => url.set({ tab: t, q: "", st: "all", sort: "", dir: "", page: "0" })} items={[
+        { id: "matrix", label: "Matrix" },
+        { id: "deliveries", label: "Deliveries", ...(failed ? { count: failed } : {}) },
+        { id: "channels", label: "Channels" },
+        { id: "routes", label: MORE_LABEL.routes },
+        { id: "templates", label: MORE_LABEL.templates },
+        { id: "overrides", label: MORE_LABEL.overrides },
+      ]} />
       <div id="nt-tab-panel" role="tabpanel" aria-labelledby={`nt-tab-${tab}`}>
         {tab === "deliveries" ? <DeliveriesTab p={p} url={url} />
           : tab === "channels" ? <ChannelsTab p={p} nt={nt} perm={perm} />

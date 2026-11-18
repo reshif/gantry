@@ -3,7 +3,7 @@
  * Triggers and Quick start (`?tab=`), search, sortable tables with paging in the URL, and a trigger drawer (not in the URL, like the prototype). Quick start shows the
  * curl for submitting a work order. The endpoint reference, playground, request log and limits are no longer linked (deep link `?tab=docs&sec=`).
  */
-import { Btn, Tabs } from "../ui/primitives";
+import { Btn, Segmented, Tabs } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Card, Page } from "../ui/cr";
 import { useUI } from "../ui/overlay-context";
@@ -33,7 +33,7 @@ export default function ApiView() {
   const trGuard = useCanAny("triggers.edit", d.vis);
 
   const openTrigger = (id: string): void => {
-    ui.drawer.open(`api-tr:${id}`, (close) => <TriggerDrawer id={id} close={close} />);
+    ui.drawer.open(`api-tr:${id}`, (close) => <TriggerDrawer id={id} close={close} onEdit={() => { close(); url.set({ tab: "triggers", edit: id }); }} />);
   };
   if (!d.me) return null;
 
@@ -62,7 +62,7 @@ export default function ApiView() {
                 : <Async query={d.cfgQ} what="the API limits" id="api-limits">{() => <LimitsTab d={d} />}</Async>}
             </>
           ) : (
-            <Card title="Submit a work order from code">
+            <Card title="Submit a work order from code" acts={<Segmented name="api-sec" label="Reference" value="" onChange={(v) => url.set({ sec: v })} items={SECTIONS.map((x) => ({ id: x.id, label: x.label[0]!.toUpperCase() + x.label.slice(1) }))} />}>
               <pre className="code" id="api-quickstart" style={{ fontSize: 12 }}>{QUICKSTART}</pre>
               <p className="muted" style={{ marginTop: 12 }}>Keys are scoped to one project and a list of actions. The secret is shown once when created.</p>
             </Card>

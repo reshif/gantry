@@ -7,7 +7,7 @@
 import type { McpServer } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useAgents, useMcpCalls, useMcpServers, useProjects } from "../api/queries";
-import { Btn, FilterBar, SearchBox } from "../ui/primitives";
+import { Btn, FilterBar, Segmented, SearchBox } from "../ui/primitives";
 import { Async } from "../ui/async";
 import { Page, CrIcon } from "../ui/cr";
 import { useActors } from "../ui/actors";
@@ -34,7 +34,7 @@ export default function McpView() {
   const view = oneOf(url.v.view, ["registry", "usage", "scope"] as const, "registry");
 
   const openServer = (id: string): void => {
-    ui.drawer.open(`mcp:${id}`, (close) => <ServerDrawer id={id} close={close} />);
+    ui.drawer.open(`mcp:${id}`, (close) => <ServerDrawer id={id} close={close} onScope={() => { close(); url.set({ view: "scope", server: id }); }} />);
   };
 
   const needle = url.v.q.trim().toLowerCase();
@@ -104,10 +104,11 @@ export default function McpView() {
       eyebrow="Connect" title="MCP servers" sub="Tool servers agents can call. Write tools need a gate; changed definitions need re-approval." cls="mcp-view"
       acts={<Btn label="Register server" kind="primary" icon="plus" id="mcp-add" guard={perm} onClick={() => ui.open((close) => <AddMcp close={close} />)} />}
     >
+      <Segmented name="mcp-view" label="View" value={view === "usage" ? "usage" : "registry"} onChange={(v) => url.set({ view: v, server: "" })} items={[{ id: "registry", label: "Registry" }, { id: "usage", label: "Usage log" }]} />
       {view === "scope" && url.v.server ? <ScopeDialog id={url.v.server} close={() => url.set({ view: "registry", server: "" })} /> : null}
       {view === "usage" ? (
         <>
-          <div className="row" style={{ marginBottom: 12 }}><Btn label="Back to servers" small kind="ghost" icon="arrow-left" id="mcp-view-back" onClick={() => url.set({ view: "registry" })} /><span className="dim">Usage log: {calls.length} calls</span></div>
+          <div className="row" style={{ margin: "12px 0" }}><span className="dim">Usage log: {calls.length} calls</span></div>
           <Async query={callsQ} what="the MCP usage log" id="mcp-usage">{() => <UsageTab calls={calls} servers={servers} agents={agents} projects={projects} actorName={(id) => actor(id).name} />}</Async>
         </>
       ) : registry}

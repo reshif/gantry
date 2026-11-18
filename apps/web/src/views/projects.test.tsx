@@ -153,7 +153,7 @@ describe("Projects: portfolio", () => {
 });
 
 describe("Projects: prototype parity", () => {
-  it("keeps search, filters and layout in the URL, shows Repos, offers Clear, and has no Archived option or Templates switch", async () => {
+  it("keeps search, filters and layout in the URL, shows Repos, offers Clear, and and has no Archived option", async () => {
     window.history.replaceState(null, "", "/?q=risk&view=table");
     setup();
     mount(<ProjectsView />);
@@ -162,7 +162,6 @@ describe("Projects: prototype parity", () => {
     expect(Array.from(document.querySelectorAll("table thead th")).map((t) => t.textContent?.replace(/[\s↑↓↕]+$/, ""))).toContain("Repos");
     expect(document.querySelector(".filterbar-count")?.textContent).toBe("1 of 2");
     expect(Array.from(document.querySelectorAll("#prj-st option")).map((o) => o.textContent)).toEqual(["Status: all", "Running", "Halted"]);
-    expect(screen.queryByLabelText("Templates")).toBeNull();
     fireEvent.click(await byId("prj-clear"));
     await screen.findByText("Payments Platform");
     expect(window.location.search).not.toContain("q=");
@@ -201,6 +200,15 @@ describe("Projects: prototype parity", () => {
 const openFullWizard = async () => { act(() => writeParams({ view: "templates" })); fireEvent.click(await byId("prj-tpl-wizard")); };
 
 describe("Projects: templates and wizard", () => {
+  it("the template library is reached by clicking Templates in the layout switch", async () => {
+    setup();
+    mount(<ProjectsView />);
+    await screen.findByText("Payments Platform");
+    fireEvent.click(screen.getByLabelText("Templates"));
+    expect(await byId("prj-tpl-wizard")).toBeTruthy();
+    expect(window.location.search).toContain("view=templates");
+  });
+
   it("lists templates; built-in ones are read-only, a custom one opens the editor", async () => {
     const calls = setup({ "PATCH /api/v1/templates/tpl-mine": () => ok({ version: 5 }) });
     mount(<ProjectsView />);

@@ -81,6 +81,7 @@ const goto = (q: string) => { window.history.replaceState(null, "", `/?${q}`); w
 const openTr = async (id: string) => { await byId(`api-tr-open-${id}`); goto(`tab=triggers&edit=${id}`); await byId("api-tr-sim"); };
 /** Quick start, then one of the sections linked under the curl (ref, play, log, limits). */
 const docs = async (sec: string) => { await tab("docs"); goto(`tab=docs&sec=${sec}`); };
+const text = () => document.body.textContent ?? "";
 const tab = async (name: string) => fireEvent.click(await byId(`api-tab-${name}`));
 beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -94,20 +95,47 @@ describe("API & triggers: quick start", () => {
     expect(pre.textContent).toContain('-H "Idempotency-Key: $(uuidgen)"');
     expect(document.getElementById("api-quickstart-copy")).toBeNull();
     expect(document.querySelector("details")).toBeNull();
-    for (const s of ["ref", "play", "log", "limits"]) expect(document.getElementById(`api-sec-${s}`)).toBeNull();
     expect(document.querySelector(".card a")).toBeNull();
     goto("tab=docs&sec=ref");
     expect(await screen.findByText("/api/v1/work-orders/{id}/messages")).toBeTruthy();
   });
 
-  it("the trigger drawer is the prototype's (no disclosure); its foot has no extra buttons (the rule editor is a deep link)", async () => {
+  it("the reference, playground, request log and limits are reached by clicking the switch on Quick start", async () => {
+    setup();
+    mount();
+    await tab("docs");
+    await byId("api-quickstart");
+    fireEvent.click(screen.getByLabelText("Endpoint reference"));
+    expect(await screen.findByText("/api/v1/work-orders/{id}/messages")).toBeTruthy();
+    fireEvent.click(await byId("api-sec-back"));
+    fireEvent.click(await screen.findByLabelText("Playground"));
+    await waitFor(() => expect(window.location.search).toContain("sec=play"));
+    fireEvent.click(await byId("api-sec-back"));
+    fireEvent.click(await screen.findByLabelText("Request log"));
+    await waitFor(() => expect(text()).toContain("/api/v1/work-orders/WO-1"));
+    fireEvent.click(await byId("api-sec-back"));
+    fireEvent.click(await screen.findByLabelText("Limits"));
+    await waitFor(() => expect(window.location.search).toContain("sec=limits"));
+  });
+
+  it("clicking a trigger opens its drawer, and Edit rules there opens the rule editor with Simulate", async () => {
+    setup();
+    mount();
+    await tab("triggers");
+    fireEvent.click(await byId("api-tr-open-TR-1"));
+    fireEvent.click(await byId("api-tr-edit"));
+    await byId("api-tr-sim");
+    expect(window.location.search).toContain("edit=TR-1");
+  });
+
+  it("the trigger drawer is the prototype's (no disclosure); it has one foot button, Edit rules", async () => {
     setup();
     mount();
     await tab("triggers");
     fireEvent.click(await byId("api-tr-open-TR-1"));
     await byId("api-tr-open-TR-1");
     expect(document.querySelector("details")).toBeNull();
-    expect(document.querySelector(".drawer-f")).toBeNull();
+    expect(document.querySelector(".drawer-f")!.textContent).toBe("Edit rules");
     expect(document.getElementById("api-tr-more")).toBeNull();
     expect(window.location.search).not.toContain("open=");
   });

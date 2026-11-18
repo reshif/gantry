@@ -380,7 +380,7 @@ export function TriggerEditor({ id, close }: { id: string; close: () => void }) 
 }
 
 /** The trigger drawer (prototype anatomy: Source, Project, Who may fire, Reply, Dedupe, Recent runs). */
-export function TriggerDrawer({ id, close }: { id: string; close: () => void }) {
+export function TriggerDrawer({ id, close, onEdit }: { id: string; close: () => void; onEdit?: () => void }) {
   const d = useApiDataLive();
   const t = d.triggers.find((x) => x.id === id);
   if (!t) return null;
@@ -389,6 +389,7 @@ export function TriggerDrawer({ id, close }: { id: string; close: () => void }) 
   return (
     <CrDrawer
       eyebrow={`Trigger ${t.id}`} title={t.name} close={close}
+      foot={onEdit ? <><Btn label="Edit rules" kind="primary" icon="edit" id="api-tr-edit" onClick={onEdit} /></> : undefined}
     >
       <Kv rows={[
         ["Source", <span key="s" className="tag">{trigTag(t, d)}</span>],
