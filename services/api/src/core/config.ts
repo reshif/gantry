@@ -65,7 +65,8 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
       mfaAcrValues: (env.OIDC_MFA_ACR_VALUES ?? "2,3,mfa").split(",").map((x) => x.trim()).filter(Boolean),
     },
     devSeed: env.GANTRY_DEV_SEED === "true",
-    demoAccounts: demoAccountsAllowed(env.GANTRY_DEV_DEMO_ACCOUNTS === "true", publicUrl),
+    // The demo sign-in list follows the seed: only a stack loaded with the seeded demo organisation lists its demo users (owner, 2026-11-18).
+    demoAccounts: demoAccountsAllowed(env.GANTRY_DEV_SEED === "true", publicUrl),
     adminMfaOptional: adminMfaOptionalAllowed(env.GANTRY_DEV_ADMIN_MFA_OPTIONAL === "true", publicUrl),
     bootstrapAdminEmail: env.GANTRY_BOOTSTRAP_ADMIN_EMAIL ? env.GANTRY_BOOTSTRAP_ADMIN_EMAIL.trim().toLowerCase() : null,
     trustProxy: trustProxyFrom(env.GANTRY_TRUST_PROXY),
@@ -78,19 +79,19 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
 }
 
 /**
- * The demo sign-in list publishes every person's name, email and roles to anyone who reaches the sign-in page. It is a local
- * development aid only: refused (the service does not start) when the public URL is not this machine, so it cannot ship by accident.
+ * The demo sign-in list publishes every person's name, email and roles to anyone who reaches the sign-in page. It is shown only when the
+ * seeded demo organisation is loaded (GANTRY_DEV_SEED=true) AND the public URL is this machine; seeding a non-local stack never lists them.
+ * (The separate GANTRY_DEV_DEMO_ACCOUNTS switch was removed on 2026-11-18; it is ignored if still set.)
  */
-export function demoAccountsAllowed(on: boolean, publicUrl: string): boolean {
-  if (!on) return false;
+export function demoAccountsAllowed(seeded: boolean, publicUrl: string): boolean {
+  if (!seeded) return false;
   const host = (() => { try { return new URL(publicUrl).hostname; } catch { return ""; } })();
-  if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost")) return true;
-  throw new Error(`GANTRY_DEV_DEMO_ACCOUNTS=true is for local development only; GANTRY_PUBLIC_URL (${publicUrl}) is not localhost. Unset it.`);
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost");
 }
 
 /**
  * GANTRY_DEV_ADMIN_MFA_OPTIONAL=true waives the second sign-in factor Factory Admins otherwise need, so the seeded demo admin (asha,
- * password only) can work on a local stack. Same pattern as GANTRY_DEV_DEMO_ACCOUNTS: the service refuses to start when the public URL is not this machine.
+ * password only) can work on a local stack. The service refuses to start when the public URL is not this machine.
  */
 export function adminMfaOptionalAllowed(on: boolean, publicUrl: string): boolean {
   if (!on) return false;

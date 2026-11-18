@@ -1,5 +1,5 @@
 /**
- * Demo accounts for the sign-in screen. Shown only when the API says demoAccounts is on (GANTRY_DEV_DEMO_ACCOUNTS, backed by the
+ * Demo accounts for the sign-in screen. Shown only when the API says demoAccounts is on (GANTRY_DEV_SEED on a local stack, backed by the
  * local identity provider's users). The server sends `config.demoAccountList`, built from the live org: each account's roles are what
  * that person actually holds (own grants and team grants), or "No roles yet".
  *

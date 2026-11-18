@@ -93,17 +93,23 @@ d("publicConfig demo list", () => {
   });
 });
 
-describe("the demo sign-in list is an explicit, dev-only switch (GANTRY_DEV_DEMO_ACCOUNTS)", () => {
-  it("is off unless the flag is exactly true, on any URL (so a production container never publishes it by default)", () => {
+describe("the demo sign-in list follows the seed (GANTRY_DEV_SEED) and only on this machine", () => {
+  it("is off when the demo organisation is not seeded, on any URL", () => {
     expect(demoAccountsAllowed(false, "https://localhost")).toBe(false);
     expect(demoAccountsAllowed(false, "https://gantry.example.com")).toBe(false);
   });
-  it("is allowed for local development on localhost", () => {
+  it("is on for a seeded local stack", () => {
     expect(demoAccountsAllowed(true, "https://localhost")).toBe(true);
     expect(demoAccountsAllowed(true, "http://127.0.0.1:8000")).toBe(true);
   });
-  it("refuses to start when switched on for a public URL", () => {
-    expect(() => demoAccountsAllowed(true, "https://gantry.example.com")).toThrow(/local development only/);
+  it("is off for a seeded stack on a public URL (seeding still works, the list is never published)", () => {
+    expect(demoAccountsAllowed(true, "https://gantry.example.com")).toBe(false);
+  });
+  it("the removed GANTRY_DEV_DEMO_ACCOUNTS switch is no longer read by the config", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/core/config.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/env\.GANTRY_DEV_DEMO_ACCOUNTS/);
+    expect(src).toMatch(/demoAccountsAllowed\(env\.GANTRY_DEV_SEED === "true"/);
   });
 });
 
