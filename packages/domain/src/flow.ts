@@ -420,6 +420,8 @@ export interface GateProgress {
   /** Every approval so far came from the requester (I4: never the sole approver). */
   onlyRequester: boolean;
   passes: boolean;
+  /** Separation of duties is on and the author had voted: that vote is on record but does not count ("1 of 2 (the author's vote does not count)"). */
+  authorExcluded: boolean;
 }
 
 /** N of M: approvals so far against the rule, unmet conditions, and I4. G0+G1 is the submitter's own confirmation, so I4 does not apply to it. */
@@ -427,13 +429,17 @@ export function gateProgress(project: Project, wo: Pick<WorkOrder, "cls" | "risk
   const rule = project.approvers[gateId] ?? { ...NO_RULE };
   const st = wo.gates[gateId] ?? { approvals: [] };
   const conds = conditionsFor(project, wo, gateId);
-  const unmet = conds.filter((cd) => !st.approvals.some((a) => {
+  // Separation of duties is judged when votes are counted, not only when one is cast: a vote the author made while it was off stays on record and stops counting once it is on.
+  const sodNow = gateId !== "G0G1" && !!rule.sod;
+  const counted = sodNow ? st.approvals.filter((a) => a.by !== wo.requestedBy) : st.approvals;
+  const authorExcluded = counted.length !== st.approvals.length;
+  const unmet = conds.filter((cd) => !counted.some((a) => {
     const pp = people.find((x) => x.id === a.by);
     return !!pp && satisfies(pp, project, cd.needs);
   }));
   const need = requiredFor(rule, wo.cls);
-  const onlyRequester = gateId !== "G0G1" && st.approvals.length > 0 && st.approvals.every((a) => a.by === wo.requestedBy);
-  return { have: st.approvals.length, need, unmet, conds, onlyRequester, passes: st.approvals.length >= need && !unmet.length && !onlyRequester };
+  const onlyRequester = gateId !== "G0G1" && counted.length > 0 && counted.every((a) => a.by === wo.requestedBy);
+  return { have: counted.length, need, unmet, conds, onlyRequester, passes: counted.length >= need && !unmet.length && !onlyRequester, authorExcluded };
 }
 
 function deny(reason: string, needs?: string, rule?: string): Decision {
@@ -480,7 +486,7 @@ export function gateDecision(state: FlowState, personId: string | null | undefin
   if (rule.sod && wo.requestedBy === personId) return deny("Separation of duties on " + g.label + ": the author of " + wo.id + " cannot approve it.", "Someone other than the author", "APR-" + gateId);
   const byRole = rule.roles.some((r) => roles.includes(r));
   const byName = rule.people.includes(personId as string);
-  const delegateFor = state.people.find((x) => x.away && x.away.delegate === personId && x.away.to > now && (rule.people.includes(x.id) || rule.roles.some((r) => rolesIn(x, project.id).includes(r))));
+  const delegateFor = state.people.find((x) => x.away && x.away.delegate === personId && x.away.from <= now && x.away.to > now && (rule.people.includes(x.id) || rule.roles.some((r) => rolesIn(x, project.id).includes(r))));
   const conds = conditionsFor(project, wo, gateId);
   const byCond = conds.find((cd) => satisfies(person, project, cd.needs));
   if (!byRole && !byName && !delegateFor && !byCond) {

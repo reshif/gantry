@@ -247,4 +247,22 @@ d("lifecycle gaps", () => {
     expect(await interrupt()).toMatchObject({ applied: true, next: "research" });
     expect(await w.get(id)).toMatchObject({ state: "running" });
   });
+
+  it("item 11: an author's vote cast while separation of duties was off stops counting when it is turned on", async () => {
+    const rule = (sod: boolean) => ({ roles: ["reviewer", "approver", "line_lead", "release_manager", "project_admin"], people: [], required: 2, sod, conditions: [], escalateH: 0, fallback: null });
+    const setRule = async (value: object) => expect((await w.call("p-daniel", "PUT", "/api/v1/projects/payments/approvers/G2", { value })).status).toBe(200);
+    await setRule(rule(false));
+    const id = (await w.submit("p-meera", { title: "SoD turned on mid-way" })).body.id as string;
+    await w.answerAll(id, "p-meera");
+    expect((await w.confirm(id, "p-meera")).status).toBe(200);
+    await w.walk(id, (x) => x.state === "waiting" && x.allowed.approve?.gate === "G2");
+    const vote = async (who: string) => w.call(who, "POST", await w.gateUrl(id, "G2"), {});
+    expect((await vote("p-meera")).body).toMatchObject({ passed: false, have: 1, need: 2 }); // the author, SoD off
+    await setRule(rule(true));
+    const second = await vote("p-priya");
+    expect(second.body).toMatchObject({ passed: false, have: 1, need: 2, authorExcluded: true });
+    expect(String(second.body.msg)).toMatch(/1 of 2 \(the author's vote does not count\)/);
+    expect((await w.get(id)).state).toBe("waiting");
+    expect((await vote("p-kenji")).body).toMatchObject({ passed: true, have: 2, need: 2 });
+  });
 });

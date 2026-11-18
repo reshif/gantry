@@ -118,10 +118,11 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   }
   if (!passes) {
     const unmet = prog.unmet.length ? `; still needs: ${prog.unmet.map((c) => c.text).join("; ")}` : prog.onlyRequester ? "; the requester cannot be the only approver" : "";
-    note(w, fx, by, `${g.label} approval ${prog.have} of ${need}.`);
-    ev(fx, w, "gate.vote", { gate: gateId, by, text: `${prog.have} of ${need}`, instance: inst.id }, { category: "approvals" });
+    const excl = prog.authorExcluded ? " (the author's vote does not count)" : "";
+    note(w, fx, by, `${g.label} approval ${prog.have} of ${need}${excl}.`);
+    ev(fx, w, "gate.vote", { gate: gateId, by, text: `${prog.have} of ${need}${excl}`, instance: inst.id }, { category: "approvals" });
     await saveWo(fx.tx, fx.orgId, w);
-    return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${unmet}).`, w.project, { passed: false, have: prog.have, need, instance: inst.id, version: w.version });
+    return done(fx, `${g.label} approval recorded (${prog.have} of ${need}${excl}${unmet}).`, w.project, { passed: false, have: prog.have, need, authorExcluded: prog.authorExcluded, instance: inst.id, version: w.version });
   }
   await recordDecision(fx, w, inst, gateId, "approved", voter, { approvals: prog.have, override, ...(override ? { reason: overrideReason!.trim() } : {}) });
   await closeInstance(fx, inst.id, "decision");
