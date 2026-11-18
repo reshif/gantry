@@ -93,17 +93,19 @@ export function IconBtn({ icon, label, className = "", onClick, ...rest }: { ico
 /* ---------- form controls ---------- */
 
 /** Switch (checkbox with role=switch). A forbidden decision locks it and shows the reason on click. */
-export function Toggle({ id, checked, onChange, decision, label }: { id: string; checked: boolean; onChange?: (v: boolean) => void; decision?: Decision | null; label?: string }) {
+export function Toggle({ id, checked, onChange, decision, label, variant, disabled }: { id: string; /** A hard-disabled control (prototype: locked checkbox, dashed grey). */ disabled?: boolean; checked: boolean; onChange?: (v: boolean) => void; decision?: Decision | null; label?: string; /** "check" draws the prototype's square matrix checkbox instead of the switch. */ variant?: "check" }) {
   const g = guardProps(decision);
+  const box = variant === "check";
   return (
-    <span className={`switch${g.locked ? " is-locked" : ""}`}>
+    <span className={`${box ? "checkbox" : "switch"}${g.locked ? " is-locked" : ""}`}>
       <input
         aria-description={g["data-reason"]}
         type="checkbox"
-        role="switch"
+        role={box ? undefined : "switch"}
         id={id}
-        className={`sw switch-input${g.locked ? " is-locked" : ""}`}
+        className={`${box ? "mx" : "sw switch-input"}${g.locked ? " is-locked" : ""}`}
         checked={checked}
+        disabled={disabled}
         aria-label={label}
         aria-disabled={g["aria-disabled"]}
         data-reason={g["data-reason"]}
@@ -461,10 +463,10 @@ export function FilterBar({ children, count, actions, label = "Filters" }: { chi
 }
 
 /** A search box for a FilterBar: icon inside, labelled for screen readers. */
-export function SearchBox({ id, value, onChange, placeholder = "Search", label }: { id?: string; value: string; onChange: (v: string) => void; placeholder?: string; label?: string }) {
+export function SearchBox({ id, value, onChange, placeholder = "Search", label, caption }: { id?: string; value: string; onChange: (v: string) => void; placeholder?: string; label?: string; /** The small caps label above the box (default "Search"). */ caption?: string }) {
   return (
     <label className="q searchbox">
-      <span>Search</span>
+      <span>{caption ?? "Search"}</span>
       <input id={id} className="input" type="search" value={value} placeholder={placeholder} aria-label={label ?? placeholder} onChange={(e) => onChange(e.target.value)} />
     </label>
   );
@@ -486,10 +488,10 @@ export function Panel({ title, children, cls = "", tools, flush, id }: { title?:
 }
 
 /** Horizontal meter (value vs budget). */
-export function Meter({ value, max, label, warnAt = 0.85 }: { value: number; max: number; label?: string; warnAt?: number }) {
+export function Meter({ value, max, label, warnAt = 0.85, plain }: { value: number; max: number; label?: string; warnAt?: number; /** Never turns warn or bad: a count against a scale, not a budget. */ plain?: boolean }) {
   const pct = max ? Math.min(1, value / max) : 0;
   return (
-    <div className={`meter${pct >= 1 ? " bad" : pct >= warnAt ? " warn" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.round(value)} aria-label={label || "Usage"}>
+    <div className={`meter${plain ? "" : pct >= 1 ? " bad" : pct >= warnAt ? " warn" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.round(value)} aria-label={label || "Usage"}>
       <i style={{ width: `${(pct * 100).toFixed(1)}%` }} />
     </div>
   );

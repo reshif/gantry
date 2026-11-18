@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { Project, Role, Team } from "@gantry/domain";
 import { ops } from "../../api/ops";
+import { getPrefs } from "../../lib/prefs";
 import { useUI } from "../../ui/overlay-context";
 import { Field, LockNote, Select, type Decision } from "../../ui/primitives";
-import { useOutcome } from "../govern/data";
+import { minLen, required, useFieldErrors } from "../govern/validate";
 
 /** The invite form (legacy G.inviteDialog). Sends POST /invites; the email goes out through the outbox. */
 export function InviteForm({ perm, teams, projects, roles, domains, preset, close, onDone, registerSubmit }: {
@@ -14,37 +15,43 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   domains: string[];
   preset: { team?: string; project?: string };
   close: () => void;
-  onDone: (personId: string) => void;
+  onDone: (personId: string, email: string) => void;
   registerSubmit: (fn: () => void) => void;
 }) {
-  const outcome = useOutcome();
+  const ui = useUI();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [picked, setPicked] = useState<string[]>(preset.team ? [preset.team] : []);
-  const factoryRoles = roles.filter((r) => r.level === "factory");
-  const projectRoles = roles.filter((r) => r.level !== "factory");
-  const [fRole, setFRole] = useState("");
-  const [proj, setProj] = useState(preset.project ?? "");
-  const [pRole, setPRole] = useState("engineer");
+  const [title, setTitle] = useState("");
+  const [role, setRole] = useState(roles.find((r) => r.id === "engineer")?.id ?? roles[0]?.id ?? "");
+  const [team, setTeam] = useState(preset.team ?? teams.find((t) => t.name.toLowerCase() === "platform")?.id ?? teams[0]?.id ?? "");
+  // The prototype asks only for a role and a team. A project role needs a project: the one open in the top bar (or the first live one).
+  const live = projects.filter((p) => p.status !== "archived");
+  const proj = preset.project ?? live.find((p) => p.id === getPrefs().project)?.id ?? live[0]?.id ?? "";
   const [reason, setReason] = useState("");
   const [err, setErr] = useState("");
+  const fe = useFieldErrors();
+  const isFactory = roles.find((r) => r.id === role)?.level === "factory";
 
   registerSubmit(() => {
     void (async () => {
       const e = email.trim().toLowerCase();
+      setErr("");
+      const emailMsg = required("Work email", e) || (/^\S+@\S+\.\S+$/.test(e) ? "" : "Enter a valid email address.");
+      if (!fe.run([["ppl-inv-name", required("Full name", name) || minLen("Full name", name, 3)], ["ppl-inv-email", emailMsg]])) return;
       const dom = e.split("@")[1];
       if (dom && domains.length && !domains.includes(dom)) return setErr(`${dom} is not an allowed domain. Add it in Security first.`);
-      const rs: Array<{ role: string; scope: string }> = [];
-      if (fRole) rs.push({ role: fRole, scope: "factory" });
-      if (fRole && reason.trim().length < 10) return setErr("Give a reason of at least 10 characters for the factory role.");
-      if (proj) rs.push({ role: pRole, scope: proj });
-      const r = await ops.invite({ name, email: e, teams: picked, roles: rs, ...(fRole ? { reason: reason.trim() } : {}) });
-      outcome(r);
+      if (isFactory && reason.trim().length < 10) return setErr("Give a reason of at least 10 characters for the factory role.");
+      if (!isFactory && !proj) return setErr("Pick the project this role applies to.");
+      const rs = role ? [{ role, scope: isFactory ? "factory" : proj }] : [];
+      const r = await ops.invite({ name: name.trim(), email: e, ...(title.trim() ? { title: title.trim() } : {}), teams: team ? [team] : [], roles: rs, ...(isFactory ? { reason: reason.trim() } : {}) });
       if (!r.ok) {
-        setErr(r.msg);
+        const msg = r.status === 409 ? "That email already has an account" : r.msg;
+        ui.toast(msg, "error");
+        setErr(msg);
         return;
       }
-      onDone((r as unknown as { person: { id: string } }).person.id);
+      ui.toast(`Invite sent to ${e}`, "ok");
+      onDone((r as unknown as { person?: { id: string } }).person?.id ?? "", e);
       close();
     })();
   });
@@ -52,38 +59,23 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   return (
     <div className="form-grid">
       <LockNote decision={perm} what="Inviting people" />
-      <div className="form-row">
-        <Field label="Name" htmlFor="ppl-inv-name">
-          <input id="ppl-inv-name" className="input" autoComplete="off" placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Work email" htmlFor="ppl-inv-email" hint={domains.length ? `Must use an allowed domain: ${domains.join(", ")}` : undefined}>
-          <input id="ppl-inv-email" className="input" type="email" autoComplete="off" placeholder={`name@${domains[0] ?? "acme.dev"}`} value={email} onChange={(e) => setEmail(e.target.value)} />
-        </Field>
-      </div>
-      <div className="field">
-        <div className="field-label">Teams</div>
-        <div className="check-grid">
-          {teams.map((t) => (
-            <label key={t.id} className="check" htmlFor={`ppl-inv-t-${t.id}`}>
-              <input type="checkbox" id={`ppl-inv-t-${t.id}`} value={t.id} checked={picked.includes(t.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, t.id] : picked.filter((x) => x !== t.id))} />
-              {t.name}
-            </label>
-          ))}
-        </div>
-      </div>
-      <div className="form-row">
-        <Field label="Factory role" htmlFor="ppl-inv-frole" hint="Factory roles apply in every project.">
-          <Select id="ppl-inv-frole" value={fRole} onChange={setFRole} options={[{ value: "", label: "None" }, ...factoryRoles.map((r) => ({ value: r.id, label: r.name }))]} />
-        </Field>
-        <Field label="First project" htmlFor="ppl-inv-proj">
-          <Select id="ppl-inv-proj" value={proj} onChange={setProj} options={[{ value: "", label: "No project yet" }, ...projects.filter((p) => p.status !== "archived").map((p) => ({ value: p.id, label: p.name }))]} />
-        </Field>
-        <Field label="Role in that project" htmlFor="ppl-inv-prole">
-          <Select id="ppl-inv-prole" value={pRole} onChange={setPRole} options={projectRoles.map((r) => ({ value: r.id, label: r.name + (r.custom ? " (custom)" : "") }))} />
-        </Field>
-      </div>
-      {fRole ? (
-        <Field label="Reason for the factory role" htmlFor="ppl-inv-reason" hint="Recorded in the audit trail. Factory roles need a fresh sign-in.">
+      <Field label="Full name (required)" htmlFor="ppl-inv-name" error={fe.errors["ppl-inv-name"]}>
+        <input id="ppl-inv-name" className="input" aria-required="true" autoComplete="off" value={name} onChange={(e) => { setName(e.target.value); fe.clear("ppl-inv-name"); }} />
+      </Field>
+      <Field label="Work email (required)" htmlFor="ppl-inv-email" error={fe.errors["ppl-inv-email"]}>
+        <input id="ppl-inv-email" className="input" type="email" aria-required="true" autoComplete="off" value={email} onChange={(e) => { setEmail(e.target.value); fe.clear("ppl-inv-email"); }} />
+      </Field>
+      <Field label="Title" htmlFor="ppl-inv-title">
+        <input id="ppl-inv-title" className="input" autoComplete="off" value={title} onChange={(e) => setTitle(e.target.value)} />
+      </Field>
+      <Field label="Role" htmlFor="ppl-inv-role">
+        <Select id="ppl-inv-role" value={role} onChange={setRole} options={roles.map((r) => ({ value: r.id, label: r.name }))} />
+      </Field>
+      <Field label="Team" htmlFor="ppl-inv-team">
+        <Select id="ppl-inv-team" value={team} onChange={setTeam} options={teams.map((t) => ({ value: t.id, label: t.name }))} />
+      </Field>
+      {isFactory ? (
+        <Field label="Reason" htmlFor="ppl-inv-reason">
           <input id="ppl-inv-reason" className="input" autoComplete="off" placeholder="Why this person needs it" value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
       ) : null}
@@ -92,15 +84,14 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
   );
 }
 
-export function useInviteDialog(args: { perm: Decision; teams: Team[]; projects: Project[]; roles: Role[]; domains: string[]; onDone: (id: string) => void }) {
+export function useInviteDialog(args: { perm: Decision; teams: Team[]; projects: Project[]; roles: Role[]; domains: string[]; onDone: (id: string, email: string) => void }) {
   const ui = useUI();
   return (preset: { team?: string; project?: string } = {}) => {
     let submit: () => void = () => undefined;
     ui.dialog({
-      title: "Invite a person", kicker: "People", wide: true,
-      sub: "They get an email with a sign-in link. Until they accept, the policy engine grants them nothing.",
+      title: "Invite a person",
       body: (close) => <InviteForm {...args} preset={preset} close={close} registerSubmit={(fn) => (submit = fn)} />,
-      actions: [{ label: "Cancel" }, { label: "Send invite", kind: "primary", icon: "send", submit: true, id: "ppl-inv-submit", guard: args.perm, onClick: () => submit() }],
+      actions: [{ label: "Cancel" }, { label: "Send invite", kind: "primary", submit: true, id: "ppl-inv-submit", guard: args.perm, onClick: () => submit() }],
     });
   };
 }

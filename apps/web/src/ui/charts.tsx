@@ -169,15 +169,24 @@ export function BarChart(o: BarChartProps) {
 }
 
 /** Horizontal bar list as the prototype's barChart draws it: a right-aligned label, a bar scaled to the largest value, the value. */
-export function BarList({ items, label, labelWidth = 150 }: { items: Array<{ label: string; value: number; tone?: "warn" }>; label: string; labelWidth?: number }) {
+export function BarList({ items, label, labelWidth = 150, valueAtEnd }: { items: Array<{ label: string; value: number; tone?: "warn" }>; label: string; labelWidth?: number; /** Prototype style: the value sits right after the end of its bar instead of at the far right. */ valueAtEnd?: boolean }) {
   const max = Math.max(1, ...items.map((i) => i.value));
   return (
     <ul className="barlist" aria-label={label} style={{ ["--lw" as string]: `${labelWidth}px` }}>
       {items.map((i) => (
         <li key={i.label} className={i.tone ? `is-${i.tone}` : undefined}>
           <span className="barlist-l mono" title={i.label}>{i.label}</span>
-          <span className="barlist-t"><span className="barlist-b" style={{ width: `${Math.max(i.value ? 1 : 0, (i.value / max) * 100)}%` }} /></span>
-          <span className="barlist-v mono">{i.value}</span>
+          {valueAtEnd ? (
+            <span className="barlist-t" style={{ position: "relative", overflow: "visible", background: "none" }}>
+              <span className="barlist-b" style={{ display: "block", width: `${Math.max(i.value ? 1 : 0, (i.value / (max * 1.12)) * 100)}%` }} />
+              <span className="barlist-v mono" style={{ position: "absolute", top: 0, left: `${(i.value / (max * 1.12)) * 100}%`, paddingLeft: 6, width: "auto" }}>{i.value}</span>
+            </span>
+          ) : (
+            <>
+              <span className="barlist-t"><span className="barlist-b" style={{ width: `${Math.max(i.value ? 1 : 0, (i.value / max) * 100)}%` }} /></span>
+              <span className="barlist-v mono">{i.value}</span>
+            </>
+          )}
         </li>
       ))}
     </ul>

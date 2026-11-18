@@ -32,7 +32,7 @@ export const Bar = ({ v, max, cls = "" }: { v: number; max: number; cls?: string
 /* ---------- deep links ---------- */
 export const goConfig = (project: string): void => { setProject(project); navigate("project-config"); };
 export const goTrust = (project?: string | null): void => { if (project) setProject(project); navigate("trust"); };
-export const goPerson = (pid: string): void => navigate("people", pid);
+export const goPerson = (pid: string): void => navigate("person", pid);
 
 /** Who may set a delegate: the person themselves, a people manager, or an approver-rule editor of some project they see (legacy delegateGuard). */
 export function useDelegateGuard(pid: string): Decision {

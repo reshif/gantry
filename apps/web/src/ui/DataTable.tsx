@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto, range, linkRows, sortHint, sortSelect = true, noSortSelect, paged }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, empty, hasMore, onLoadMore, loadingMore, total, pager, glyphs, mobileSort = true, proto, range, linkRows, sortHint, sortSelect = true, noSortSelect, paged, blueprintSort }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -78,6 +78,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   noSortSelect?: boolean;
   /** With pageSize: the prototype's "1–12 of 13  Prev  Page 1 / 2  Next" footer instead of "Show more". */
   paged?: boolean;
+  /** Prototype sort hints: a dim "↕" on sortable headers, "▲" / "▼" on the active one, and no "Sort by" select above the cards. */
+  blueprintSort?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
   const [own, setOwn] = useState<SortState | null | undefined>(undefined);
@@ -146,7 +148,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const clientMore = !proto && !pager && !paged && shown && rows.length > shown;
   return (
     <div className="dtable-wrap" id={id}>
-      {sortable.length && mobileSort && sortSelect && !noSortSelect && !proto ? (
+      {sortable.length && mobileSort && sortSelect && !noSortSelect && !proto && !blueprintSort ? (
         <label className="dtable-sortsel">
           <span>Sort by</span>
           <select className="input" value={cur?.key ?? ""} onChange={(e) => (e.target.value ? pick(e.target.value, cur?.key === e.target.value ? cur.dir : 1) : setOwn(null))}>
@@ -171,7 +173,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                         </button>
                       ) : (
                         <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                          {c.label}<span className="th-arrow" aria-hidden="true">{glyphs === "blueprint" ? (active ? (cur!.dir > 0 ? " ▲" : " ▼") : <span className="sorthint"> ↕</span>) : active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                          {c.label}<span className="th-arrow" aria-hidden="true">{glyphs === "blueprint" || blueprintSort ? (active ? (cur!.dir > 0 ? " ▲" : " ▼") : <span className="sorthint"> ↕</span>) : active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
                         </button>
                       )
                     ) : c.label}

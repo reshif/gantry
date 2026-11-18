@@ -1,28 +1,27 @@
 /**
- * Access (spec 8.9, 14.4). Port of legacy/js/views/access.js: the policy simulator (server-side, same can() as enforcement),
- * scoped policies, freezes, the roles x actions matrix and roles.
+ * Access (prototype "access"): four stats and five tabs: Role matrix, Roles, Policies, Freezes, Access check. Tab, filters and the
+ * check's person / action / project live in the URL. Role, policy and freeze administration sits in each panel's header and row menu.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ops } from "../api/ops";
+import { useMemo, useState } from "react";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { useCan } from "../api/can";
 import { useAccessMatrix, useFreezes, useMe, usePeople, usePolicies, useProjects } from "../api/queries";
 import { Btn, Empty, LockNote, Panel, Stat, StatRow, Tabs, ViewHead, type Decision } from "../ui/primitives";
 import { Async, qState } from "../ui/async";
-import type { UseQueryResult } from "@tanstack/react-query";
-import { Icon } from "../ui/Icon";
-import { useOutcome, useAllRepos } from "./govern/data";
+import { useAllRepos } from "./govern/data";
+import { Pager, setQS, useQS } from "./govern/kit";
 import { FreezeList, useFreezeDialog } from "./access/Freezes";
 import { MatrixTable } from "./access/Matrix";
-import { PolicyCards, usePolicyDialog } from "./access/Policies";
+import { PolicyTable, usePolicyDialog } from "./access/Policies";
 import { RolesList, useRoleDialogs } from "./access/Roles";
-import { Simulator, nowIst, presets, simTime, type Evaluated, type Sim } from "./access/Simulator";
-import type { Project, SimulationResult } from "@gantry/domain";
+import { Simulator, nowIst, type Sim } from "./access/Simulator";
+import type { Project } from "@gantry/domain";
 
 const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }): Decision => ({ allowed: d.allowed, reason: d.reason, needs: d.needs });
+const TABS = ["matrix", "roles", "policies", "freezes", "check"];
 
 export default function AccessView() {
   const me = useMe();
-  const outcome = useOutcome();
   const mQ = useAccessMatrix();
   const m = mQ.data;
   const peopleData = usePeople().data;
@@ -42,69 +41,13 @@ export default function AccessView() {
   const actions = useMemo(() => m?.actions ?? [], [m]);
   const matrix = m?.matrix ?? {};
 
-  const [tab, setTab] = useState("matrix");
-  const [sim, setSim] = useState<Sim | null>(null);
-  const [evaluated, setEvaluated] = useState<Evaluated | null>(null);
-  const [hl, setHl] = useState<string | null>(null);
+  const [tabV] = useQS("acc.tab", "matrix");
+  const tab = TABS.includes(tabV) ? tabV : "matrix";
+  const setTab = (t: string) => setQS({ "acc.tab": t === "matrix" ? "" : t });
   const [newRole, setNewRole] = useState<string | null>(null);
-  const [fromPeople, setFromPeople] = useState<string | null>(null);
-
-  // Legacy opened on Kenji releasing payments-api; use it when the seeded org is there, otherwise ask about the viewer.
-  const defaults = useCallback((): Sim => {
-    const seeded = people.some((p) => p.id === "p-kenji") && projects.some((p) => p.id === "payments") && repos.some((r) => r.id === "payments-api");
-    return seeded
-      ? { person: "p-kenji", action: "release", project: "payments", repo: "payments-api", ...nowIst() }
-      : { person: me?.person.id ?? people[0]?.id ?? "", action: "release", project: projects[0]?.id ?? "", repo: "", ...nowIst() };
-  }, [me, people, projects, repos]);
-  const cur = sim ?? defaults();
-
-  const evaluate = useCallback(
-    async (s: Sim, jump = true) => {
-      if (!s.date || !s.time) return void outcome({ ok: false, msg: "Pick a date and time.", status: 422 });
-      const act = actions.find((a) => a.id === s.action);
-      const t = simTime(s);
-      const r = await ops.simulateAccess({ person: s.person, action: s.action, ...(act?.scope === "factory" ? {} : { project: s.project, ...(s.repo ? { repo: s.repo } : {}) }), time: t });
-      if (!r.ok) return void outcome(r);
-      const result = r as unknown as SimulationResult;
-      setEvaluated({ sim: s, t, result });
-      const rule = result.decision.rule as { kind: string; id: string; freeze?: string };
-      setHl(rule.kind === "matrix" ? "MATRIX" : rule.id);
-      if (jump) setTab(rule.freeze ? "freezes" : rule.kind === "policy" ? "policies" : "matrix");
-    },
-    [actions, outcome],
-  );
-
-  // The People screen hands a question over through session storage.
-  const picked = useRef(false);
-  useEffect(() => {
-    if (picked.current || !actions.length || !me) return;
-    picked.current = true;
-    try {
-      const raw = sessionStorage.getItem("gantry.accessSim");
-      if (!raw) return;
-      sessionStorage.removeItem("gantry.accessSim");
-      const q = JSON.parse(raw) as Partial<Sim>;
-      const s = { ...defaults(), ...q, repo: q.repo ?? "" };
-      setSim(s);
-      setFromPeople(s.person);
-      void evaluate(s);
-    } catch {
-      /* no handover */
-    }
-  }, [actions.length, me, defaults, evaluate]);
-
-  // The answer follows the configuration: a matrix, policy, freeze or people change re-asks the engine.
-  const sig = `${m?.version}|${policies.map((p) => `${p.id}:${(p as { version?: number }).version}:${p.enabled}`).join(",")}|${freezes.map((f) => `${f.id}:${f.to}`).join(",")}|${people.length}`;
-  const lastSig = useRef(sig);
-  useEffect(() => {
-    if (lastSig.current === sig) return;
-    lastSig.current = sig;
-    if (evaluated) void evaluate(evaluated.sim, false);
-  }, [sig, evaluated, evaluate]);
 
   const openPolicy = usePolicyDialog({ perm, roles, actions, projects, policies, matrix });
-  const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
-  const openFreeze = useFreezeDialog(perm, repos, projectName);
+  const openFreeze = useFreezeDialog(perm);
   const { openRole, removeRole } = useRoleDialogs({
     perm: rperm, roles, matrix, actions, people,
     onCreated: (id) => {
@@ -114,83 +57,47 @@ export default function AccessView() {
   });
 
   if (!me) return null;
-  if (!view.allowed) return <div className="view view-access"><ViewHead title="Access" sub="" /><Empty id="access-no-access" title="No access to the access policy" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin to give you a role that can see policy.`} /></div>;
+  if (!view.allowed) return <div className="view view-access"><ViewHead title="Access" kicker="All lines" sub="" /><Empty id="access-no-access" icon="lock" title="No access to this sheet" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin to give you a role that can see policy.`} /></div>;
   const now = Date.now();
-  const activeFz = freezes.filter((f) => now >= f.from && now < f.to).length;
-  const custom = roles.filter((r) => r.custom).length;
-  const tools =
-    tab === "check" ? null
-    : tab === "freezes" ? <Btn label="Schedule freeze" small icon="clock" id="acc-add-freeze" guard={perm} onClick={openFreeze} />
-    : tab === "policies" ? <Btn label="Add policy" small icon="plus" id="acc-add-policy" guard={perm} onClick={() => openPolicy(null)} />
-    : <Btn label="Add role" small icon="plus" id="acc-add-role" guard={rperm} onClick={() => openRole(null)} />;
+  const liveFz = freezes.filter((f) => f.to > now).length;
 
   const showRights = (id: string) => {
     setTab("matrix");
     setNewRole(id);
     setTimeout(() => document.getElementById(`acc-mx-col-${id}`)?.scrollIntoView({ block: "nearest", inline: "center" }), 80);
   };
-
-  const fromName = fromPeople ? people.find((p) => p.id === fromPeople)?.name ?? fromPeople : null;
-  const matrixTab = tab === "matrix";
+  const simDefaults = (): Sim => ({ person: people.some((p) => p.id === "p-meera") ? "p-meera" : me.person.id, action: actions.some((a) => a.id === "wo.submit") ? "wo.submit" : actions[0]?.id ?? "", project: projects.some((p) => p.id === "payments") ? "payments" : projects[0]?.id ?? "", repo: "", ...nowIst() });
 
   return (
     <div className="view view-access">
-      <ViewHead
-        title="Access"
-        sub="Roles, the action matrix, conditional policies and freezes."
-      />
+      <ViewHead title="Access" kicker="All lines" sub="Roles, the action matrix, conditional policies and freezes." />
       <LockNote decision={perm} what="The role matrix, policies and freezes" />
-      {fromName ? (
-        <div className="callout acc-from" id="acc-from-people" role="status">
-          <Icon name="info" />
-          <div><strong>Opened from People</strong><span>{` The simulator is asking the same question as the cell you picked for ${fromName}.`}</span></div>
-          <Btn label="Dismiss" small id="acc-from-dismiss" onClick={() => setFromPeople(null)} />
-        </div>
-      ) : null}
       <StatRow id="acc-stats">
-        <Stat label="Roles" value={qState(mQ, () => String(roles.length))} sub={custom ? `${custom} custom` : undefined} />
-        <Stat label="Actions" value={qState(mQ, () => String(actions.length))} />
-        <Stat label="Policies on" value={qState(policiesQ, () => String(policies.filter((p) => p.enabled).length))} sub={policiesQ.data ? `of ${policies.length}` : undefined} />
-        <Stat label="Freezes active" value={qState(freezesQ, () => String(activeFz))} tone={activeFz ? "block" : undefined} />
+        <Stat label="Roles" value={qState(mQ, () => String(roles.length))} tone="info" />
+        <Stat label="Actions" value={qState(mQ, () => String(actions.length))} sub="governed" />
+        <Stat label="Policies" value={qState(policiesQ, () => String(policies.filter((p) => p.enabled).length))} sub={policiesQ.data ? `of ${policies.length} on` : undefined} />
+        <Stat label="Freezes" value={qState(freezesQ, () => String(liveFz))} sub="active or upcoming" tone="wait" />
       </StatRow>
-      <div className="acc-tabbar">
-        <Tabs
-          idPrefix="acc-tab"
-          active={tab}
-          onChange={setTab}
-          items={[{ id: "matrix", label: "Role matrix" }, { id: "roles", label: "Roles", count: roles.length }, { id: "policies", label: "Policies", count: policies.length }, { id: "freezes", label: "Freezes", count: freezes.length }, { id: "check", label: "Access check" }]}
-        />
-        <div className="acc-tab-tools">{tools}</div>
-      </div>
+      <Tabs
+        idPrefix="acc-tab"
+        active={tab}
+        onChange={setTab}
+        items={[{ id: "matrix", label: "Role matrix" }, { id: "roles", label: "Roles", count: roles.length }, { id: "policies", label: "Policies", count: policies.length }, { id: "freezes", label: "Freezes", count: freezes.length }, { id: "check", label: "Access check" }]}
+      />
       <div className="acc-body" id="acc-tab-panel" role="tabpanel">
         <Async query={(tab === "freezes" ? freezesQ : tab === "policies" ? policiesQ : mQ) as UseQueryResult<unknown>} what={tab === "freezes" ? "freezes" : tab === "policies" ? "policies" : "the access matrix"} id="acc">{() => (
-        tab === "check" ? (
-          <>
-      {mQ.isError && !m ? (
-        <section className="panel" aria-label="Policy simulator"><div className="panel-body"><Async query={mQ} what="the access matrix" id="acc-matrix">{() => null}</Async></div></section>
-      ) : (
-        <Simulator
-          people={people} projects={projects} repos={repos} actions={actions} sim={cur} setSim={setSim} evaluated={evaluated}
-          onEvaluate={(s) => void evaluate(s, false)} onShowRule={setTab} presetsList={presets(people, projects, repos)}
-        />
-      )}
-          </>
-        ) :
-        matrixTab ? <Panel title="What each role may do" flush cls="acc-rules"><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} hl={hl} evaluated={evaluated} people={people} newRole={newRole} /></Panel>
-        : tab === "freezes" ? <FreezeList freezes={freezes} repos={repos} hlFreeze={evaluated && (evaluated.result.decision.rule as { freeze?: string }).freeze ? (evaluated.result.decision.rule as { freeze?: string }).freeze! : null} />
-        : tab === "roles" ? <Panel flush cls="acc-rules"><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /></Panel>
-        : (
-          <PolicyCards
-            policies={policies} hl={hl} people={people} onEdit={openPolicy}
-            onSimulate={(p, who) => {
-              const proj = p.where.projects?.[0] ?? projects[0]?.id ?? "";
-              const s: Sim = { person: who?.id ?? me.person.id, action: p.actions[0] ?? "release", project: proj, repo: "", ...nowIst() };
-              setSim(s);
-              setTab("check");
-              void evaluate(s, false);
-            }}
-          />
-        )
+          tab === "check" ? <Simulator people={people} projects={projects} actions={actions} matrix={matrix} defaults={simDefaults()} />
+          : tab === "matrix" ? <Panel title="What each role may do" flush><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} newRole={newRole} /></Panel>
+          : tab === "roles" ? <Panel title="Roles" flush><><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /><Pager id="acc-roles-pager" page={0} total={roles.length} onPage={() => undefined} /></></Panel>
+          : tab === "freezes" ? <Panel title="Change freezes" flush tools={<Btn label="New freeze" small kind="primary" icon="plus" id="acc-add-freeze" guard={perm} onClick={openFreeze} />}><FreezeList freezes={freezes} repos={repos} /></Panel>
+          : (
+            <Panel title="Conditional policies" flush>
+              <PolicyTable
+                policies={policies} people={people} onEdit={openPolicy}
+                onSimulate={(p, who) => setQS({ "acc.tab": "check", "acc.person": who?.id ?? me.person.id, "acc.action": p.actions[0] ?? "", "acc.project": p.where.projects?.[0] ?? projects[0]?.id ?? "" })}
+              />
+            </Panel>
+          )
         )}</Async>
       </div>
     </div>

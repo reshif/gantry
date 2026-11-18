@@ -313,9 +313,15 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
         runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
       };
     }
+    /* ---- gov1 fixtures (People, Workload, Access): the seed catalogue carries the Compliance sign-off gate that the Workload queue chart lists ---- */
+    if (path === "catalog") return seed.catalog;
+    /* ---- end gov1 fixtures ---- */
     if (path === "workload") {
       const people = (seed.people as Array<{ id: string; name: string; status: string; oncall?: boolean; teams?: string[] }>).filter((x) => x.status === "active");
-      const rows = people.map((x, i) => ({ person: x.id, name: x.name, team: x.teams?.[0] ?? null, glass: 0, perDay: (4 + i) / 7, waitN: 6, waiting: i % 3, approvals: 4 + i, answered: i % 4, medianResponseMin: 12 + i, afterHours: i % 2, n: 6, sole: i % 5 === 0 ? 1 : 0, minutes: 30 + i * 5, away: null, oncall: !!x.oncall, waitingGates: [], recent: [] }));
+      // actions logged: the entries each person made in the work orders' logs (the prototype counts the same)
+      const logged: Record<string, number> = {};
+      for (const w of seed.work_orders as Array<{ log?: Array<{ who?: string }> }>) for (const l of w.log ?? []) if (l.who) logged[l.who] = (logged[l.who] ?? 0) + 1;
+      const rows = people.map((x, i) => ({ person: x.id, name: x.name, team: x.teams?.[0] ?? null, glass: 0, perDay: (4 + i) / 7, waitN: 6, waiting: i % 3, approvals: logged[x.id] ?? 0, answered: 0, medianResponseMin: 12 + i, afterHours: i % 2, n: 6, sole: i % 5 === 0 ? 1 : 0, minutes: 30 + i * 5, away: null, oncall: !!x.oncall, waitingGates: [], recent: [] }));
       return { at: seed.NOW, days: 7, scope: "all", minN: 5, projects: [{ id: "payments", name: "Payments Platform" }], factoryWide: true, ids: people.map((x) => x.id), totals: { gatesWaiting: waiting.length, soleGates: 1, noneGates: 0, timedN: 12, medianWaitMin: 42, acts: 64, afterHours: 9, minutes: 520 }, rows, teams: [], byCls: [], byProject: [], bottlenecks: waiting.map((w) => { const g = gateInfo(w)!; return { gate: g.id, project: w.project, decisions: 0, medianWaitMin: null, open: 1, oldestMin: Math.round((NOW - g.since) / 60000), station: null, minEligible: 2 }; }), needsPerson: [], suggestions: [] };
     }
     const eff = /^people\/([^/]+)\/effective-permissions$/.exec(path);
