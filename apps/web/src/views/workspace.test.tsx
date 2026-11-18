@@ -11,7 +11,7 @@ import { mentionChoices, mentionOf, takeAsk } from "./workspace/mention";
 
 beforeEach(() => {
   resetApp();
-  updatePrefs({ project: "payments" });
+  updatePrefs({ scopeAll: false, project: "payments" });
 });
 afterEach(() => {
   cleanup();

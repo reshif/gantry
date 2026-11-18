@@ -134,8 +134,8 @@ describe("signed in", () => {
     await waitFor(() => expect(within(nav).getByTitle("3 waiting for you").textContent).toBe("3"));
     expect(nav.querySelectorAll(".badge")).toHaveLength(1);
     expect(Array.from(nav.querySelectorAll(".navlink span:not(.badge)")).map((e) => e.textContent).slice(0, 7)).toEqual(["Home", "Inbox", "Floor", "Work orders", "Agents at work", "Conversations", "Console"]);
-    expect(document.title).toBe("Floor · Payments Platform · Gantry Control Room");
-    expect(window.location.hash).toBe("#/p/payments/floor");
+    expect(document.title).toBe("Floor · All projects · Gantry Control Room");
+    expect(window.location.hash).toBe("#/p/all/floor");
     expect(document.querySelector("#app.app > .top")).toBeTruthy();
     expect(document.querySelector("#app.app > footer.sbar #clock")?.textContent).toMatch(/^\d\d:\d\d:\d\d UTC$/);
     expect(document.querySelector("#app.app > footer.sbar")?.textContent).toContain("WORKERS");
@@ -264,6 +264,51 @@ describe("signed in", () => {
     expect(await screen.findByText("Showing All projects")).toBeTruthy();
     expect(getPrefs().scopeAll).toBe(true);
     expect(document.querySelector("#project-switcher")?.textContent).toContain("All projects");
+  });
+
+  it("All projects in the switcher keeps the page and puts the scope in the URL (#/p/all/...), which survives a reload", async () => {
+    sessionStorage.clear();
+    homeApi();
+    updatePrefs({ scopeAll: false, project: "payments" });
+    window.location.hash = "#/p/payments/work-orders";
+    const view = render(<App />);
+    await screen.findByRole("navigation", { name: "Main" });
+    fireEvent.click(document.querySelector("#project-switcher") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /All projects/ }));
+    await waitFor(() => expect(window.location.hash).toBe("#/p/all/work-orders"));
+    expect(getPrefs().scopeAll).toBe(true);
+    expect(document.querySelector("#project-switcher")?.textContent).toContain("All projects");
+    // a reload: a fresh app on the same URL, with the stored choice gone
+    view.unmount();
+    updatePrefs({ scopeAll: false, project: "risk" });
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Main" });
+    await waitFor(() => expect(document.querySelector("#project-switcher")?.textContent).toContain("All projects"));
+    expect(window.location.hash).toBe("#/p/all/work-orders");
+    expect(getPrefs().scopeAll).toBe(true);
+  });
+
+  it("a page about one project, opened under All projects, asks which project instead of using a default", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#/p/all/project-config";
+    render(<App />);
+    expect(await screen.findByText("Pick a project for Project config")).toBeTruthy();
+    expect(document.querySelector("#pick-project-risk")?.getAttribute("href")).toBe("#/p/risk/project-config");
+    fireEvent.click(document.querySelector("#pick-project-risk") as HTMLElement);
+    expect(getPrefs()).toMatchObject({ scopeAll: false, project: "risk" });
+    await waitFor(() => expect(window.location.hash).toBe("#/p/risk/project-config"));
+  });
+
+  it("the rail links project pages over All projects while that scope is chosen", async () => {
+    sessionStorage.clear();
+    homeApi();
+    window.location.hash = "#home";
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    act(() => { updatePrefs({ scopeAll: true, project: "risk" }); });
+    await waitFor(() => expect((within(nav).getByText("Floor").closest("a") as HTMLAnchorElement).getAttribute("href")).toBe("#/p/all/floor"));
+    expect((within(nav).getByText("Work orders").closest("a") as HTMLAnchorElement).getAttribute("href")).toBe("#/p/all/work-orders");
   });
 
   it("shows a clear no-access page for a project the person cannot see", async () => {

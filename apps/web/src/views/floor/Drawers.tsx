@@ -11,11 +11,12 @@ import { openApproval } from "./Approval";
 import { Dr, TokenDrawer } from "./TokenDrawer";
 import { setProject } from "../../lib/prefs";
 import { beltGateLabels, tokenState } from "./conveyor";
-import { FloorCtx, isLive, since, stationIdx, useFloorCtx, useFloorValue } from "./kit";
+import { FloorCtx, isLive, projectOf, since, stationIdx, useFloorCtx, useScopedFloorState } from "./kit";
+import { ALL_PROJECTS } from "../../lib/routes";
 
 /** Provides the live floor to a drawer, which renders outside the floor view. */
-export function DrawerRoot({ projectId, children }: { projectId: string; children: ReactNode }) {
-  const value = useFloorValue(projectId, null);
+export function DrawerRoot({ projectId, projectIds, children }: { projectId?: string; projectIds?: string[]; children: ReactNode }) {
+  const { value } = useScopedFloorState(projectIds ? { all: true, projectIds } : { all: false, projectId: projectId ?? null }, null);
   if (!value) return <div className="drawer-inner"><p className="muted small">Loading…</p></div>;
   return <FloorCtx.Provider value={value}>{children}</FloorCtx.Provider>;
 }
@@ -41,7 +42,7 @@ export function GateDrawer({ gid, close }: { gid: string; close: () => void }) {
       title={g.name}
       close={close}
       label="Close gate details"
-      foot={<Btn label="Configure gates" id="floor-gate-config" onClick={() => { close(); navigate("project-config", null, p.id); }} />}
+      foot={<Btn label="Configure gates" id="floor-gate-config" onClick={() => { close(); navigate("project-config", null, ctx.all ? ALL_PROJECTS : p.id); }} />}
     >
       {off ? (
         <div className="callout">
@@ -65,7 +66,7 @@ export function GateDrawer({ gid, close }: { gid: string; close: () => void }) {
                     <span className="t1">{w.title}</span>
                     <span className="t2 mono">{`${w.id} · waiting ${fmt.dur(Math.max(0, ctx.now - since(w)))}`}</span>
                   </div>
-                  {open && kind !== "auto" ? <Btn label="Review" small kind="primary" id={`floor-greview-${w.id}`} onClick={() => openApproval(ui, p.id, w.id, gid, label, g.name)} /> : null}
+                  {open && kind !== "auto" ? <Btn label="Review" small kind="primary" id={`floor-greview-${w.id}`} onClick={() => openApproval(ui, projectOf(ctx, w).id, w.id, gid, label, g.name)} /> : null}
                 </div>
               );
             })
@@ -116,7 +117,7 @@ export function StationDrawer({ sid, close }: { sid: string; close: () => void }
   const i = stationIdx(ctx.cat, sid);
   const ag = agents?.find((a) => a.id === st.agent);
   const here = ctx.wos.filter((w) => w.station === i && isLive(w) && !w.bay);
-  const model = p.regulated && sid !== "intake" ? "bedrock-claude-sonnet-5-5" : (ag?.overrides?.[p.id]?.model ?? ag?.model ?? "none");
+  const model = ctx.all ? (ag?.model ?? "none") : p.regulated && sid !== "intake" ? "bedrock-claude-sonnet-5-5" : (ag?.overrides?.[p.id]?.model ?? ag?.model ?? "none");
   const slotsN = sid === "build" ? Math.max(1, p.flow.slots) : Math.max(1, conf?.wip ?? 1);
   const act = here.filter((w) => tokenState(ctx, w) !== "queued").length;
   return (
@@ -157,27 +158,27 @@ export function StationDrawer({ sid, close }: { sid: string; close: () => void }
 }
 
 /** Keeps the two drawers hopping between each other without a stale closure. */
-export function useDrawers(projectId: string | null) {
+export function useDrawers(projectId: string | null, projectIds?: string[]) {
   const ui = useUI();
   const [, force] = useState(0);
   void force;
   const api = {
     station: (sid: string): void => {
-      if (!projectId) return;
+      if (!projectId && !projectIds) return;
       ui.drawer.open(`station:${sid}`, (close) => (
-        <DrawerRoot projectId={projectId}>
+        <DrawerRoot {...(projectIds ? { projectIds } : { projectId: projectId! })}>
           <StationDrawer sid={sid} close={close} />
         </DrawerRoot>
       ));
     },
     token: (woId: string): void => {
-      if (!projectId) return;
-      ui.drawer.open(`token:${woId}`, (close) => <TokenDrawer projectId={projectId} woId={woId} close={close} />);
+      if (!projectId && !projectIds) return;
+      ui.drawer.open(`token:${woId}`, (close) => <TokenDrawer {...(projectIds ? { projectIds } : { projectId: projectId! })} woId={woId} close={close} />);
     },
     gate: (gid: string): void => {
-      if (!projectId) return;
+      if (!projectId && !projectIds) return;
       ui.drawer.open(`gate:${gid}`, (close) => (
-        <DrawerRoot projectId={projectId}>
+        <DrawerRoot {...(projectIds ? { projectIds } : { projectId: projectId! })}>
           <GateDrawer gid={gid} close={close} />
         </DrawerRoot>
       ));

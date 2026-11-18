@@ -7,7 +7,7 @@ import { useActors } from "../../ui/actors";
 import { updatePrefs, usePrefs } from "../../lib/prefs";
 import { useOpenTraveler } from "../../shell/useTraveler";
 import { ClassChip, classOf } from "../projects/kit";
-import { assigneeOf, gateText, isLive, repoName, since, stationIdx, useFloorCtx, type FWo } from "./kit";
+import { assigneeOf, gateText, isLive, projectOf, repoName, since, stationIdx, useFloorCtx, type FWo } from "./kit";
 import { useMoves, checkMove } from "./moves";
 
 /* ---------- filters ---------- */
@@ -136,7 +136,7 @@ function Card({ w, onGrip }: { w: FWo; onGrip: (e: RPointerEvent<HTMLElement>, w
         {w.title}
       </button>
       <div className="fl-card-meta">
-        <ClassChip cls={classOf(ctx.cat, ctx.project, w.cls)} small />
+        <ClassChip cls={classOf(ctx.cat, projectOf(ctx, w), w.cls)} small />
         <span className="mono fl-card-repo">{repoName(ctx.repos, w.repo)}</span>
       </div>
       <div className="fl-card-foot">

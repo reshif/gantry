@@ -18,7 +18,7 @@ import { useCommand } from "../../ui/async";
 import { useUI } from "../../ui/overlay-context";
 import { registerCommand } from "../../lib/commands";
 import { navigate } from "../../lib/router";
-import { setProject, usePrefs } from "../../lib/prefs";
+import { getPrefs, setProject, usePrefs } from "../../lib/prefs";
 import { useCatalog } from "../projects/kit";
 import { ClassificationCard } from "./intake";
 
@@ -265,6 +265,14 @@ export function NewWorkOrderDialog({ preset, onClose, variant = "dialog", aside 
 }
 
 /** Opens the Console screen, where work orders are submitted (the Control Room prototype's "New work order" destination everywhere). */
+/** The project chosen for a new work order while the scope is All: the Console asks which project, this carries an answer already given (the Floor's menu). Read once. */
+let pendingProject: string | null = null;
+export const takePendingProject = (): string | null => {
+  const p = pendingProject;
+  pendingProject = null;
+  return p;
+};
+
 export function useNewWorkOrder(): (preset?: NewWoPreset) => void {
   const ui = useUI();
   const me = useMe();
@@ -273,7 +281,11 @@ export function useNewWorkOrder(): (preset?: NewWoPreset) => void {
       ui.toast("You have no projects to submit work to.", "warn");
       return;
     }
-    if (preset.project) setProject(preset.project);
+    if (preset.project) {
+      pendingProject = preset.project;
+      // Under All projects the pick stays this one work order's; only a narrowed scope remembers the project.
+      if (!getPrefs().scopeAll) setProject(preset.project);
+    }
     navigate("console");
   };
 }

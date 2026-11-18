@@ -194,7 +194,7 @@ describe("Agents screen", () => {
     await waitFor(() => expect(window.location.search).toContain("tab=guardrails"));
     expect(document.getElementById("ag-maxdiff")).toBeTruthy();
     fireEvent.click(await byId("ag-talk"));
-    expect(window.location.hash).toMatch(/^#(\/p\/payments\/)?conversations$/);
+    expect(window.location.hash).toMatch(/^#(\/p\/(payments|all)\/)?conversations$/);
     window.location.hash = "#agents/ag-build";
     fireEvent.click(await byId("ag-back-link"));
     expect(window.location.hash).toBe("#agents");

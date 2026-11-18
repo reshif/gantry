@@ -13,8 +13,8 @@ import { bayDef, classesOf, flowOf, fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { api, get } from "../api/client";
 import { useParkMany } from "../api/bulk";
-import { useMe, useProject } from "../api/queries";
-import { FloorCtx, useFloorCtx, useFloorState, useProjectRepos, type FloorCtxValue } from "./floor/kit";
+import { useMe, useProject, useProjects, useWorkOrdersAcross } from "../api/queries";
+import { FloorCtx, mergeProjects, useFloorCtx, useProjectRepos, useScopedFloorState, type FloorCtxValue } from "./floor/kit";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { Board } from "./floor/Board";
 import type { Page, WorkOrder } from "../api/types";
@@ -24,8 +24,7 @@ import { DataTable, type Col } from "../ui/SortTable";
 import { CrIcon, Page as CrPage } from "../ui/cr";
 import { Icon } from "../ui/Icon";
 import { navigate } from "../lib/router";
-import { pickProject } from "../lib/routes";
-import { usePrefs } from "../lib/prefs";
+import { useScope } from "../lib/scope";
 import { classOf, useCatalog } from "./projects/kit";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 import { useUrlState } from "./work-orders/url-state";
@@ -43,9 +42,9 @@ const CAP = 1000;
 const cap = (v: string): string => v.charAt(0).toUpperCase() + v.slice(1);
 
 /** The board is the floor's board; it needs the floor read, which this wrapper loads and hands down. */
-function BoardMode({ projectId }: { projectId: string }) {
+function BoardMode({ projectId, projectIds }: { projectId: string | null; projectIds: string[] | null }) {
   const base = useReplayBase(projectId);
-  const { value, error } = useFloorState(projectId, base);
+  const { value, error } = useScopedFloorState(projectIds ? { all: true, projectIds } : { all: false, projectId }, base);
   if (!value) {
     const f = error ? failureOf(error) : null;
     return !f ? <Loading id="wo-board-loading" label="the board" /> : f.hidden ? <NotVisible id="wo-board-hidden" what="this board" reason={f.msg} /> : <LoadFailed id="wo-board-error" what="the board" msg={f.msg} onRetry={() => window.location.reload()} />;
@@ -58,14 +57,14 @@ function BoardMode({ projectId }: { projectId: string }) {
 }
 
 /** The board with its Live / Replay switch; a replay shows the board as it was and locks moves. */
-function BoardBody({ projectId }: { projectId: string }) {
+function BoardBody({ projectId }: { projectId: string | null }) {
   const ctx = useFloorCtx();
   const rp = ctx.replay;
-  const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId, rp, "wo-board-mode-live");
+  const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId ?? "", rp, "wo-board-mode-live");
   return (
     <div className="wo-board">
       <div className="wo-board-bar">
-        <Segmented name="wo-board-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={rp ? "replay" : "live"} onChange={(v) => (v === "replay" ? enter() : exit())} />
+        {ctx.all ? null : <Segmented name="wo-board-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={rp ? "replay" : "live"} onChange={(v) => (v === "replay" ? enter() : exit())} />}
       </div>
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
       <Board />
@@ -75,7 +74,7 @@ function BoardBody({ projectId }: { projectId: string }) {
 
 function WorkOrdersView() {
   const me = useMe();
-  const prefs = usePrefs();
+  const scope = useScope();
   const cat = useCatalog();
   const newWo = useNewWorkOrder();
   const ui = useUI();
@@ -84,9 +83,13 @@ function WorkOrdersView() {
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
   // The prototype list is a table only: the board stays reachable from a link (`?mode=board`) but has no toggle on the page.
   const mode: "table" | "board" = u.mode === "board" ? "board" : "table";
-  const projectId = me ? pickProject(me, prefs.project) : null;
+  const projectId = scope.projectId;
+  const projectIds = useMemo(() => scope.projects.map((p) => p.id), [scope.projects]);
+  const allProjectsQ = useProjects();
   const projectQ = useProject(projectId);
-  const project = projectQ.data ?? null;
+  // Under All the page is over the merged line of the visible projects; a row keeps its own project's classes.
+  const inScope = useMemo(() => (allProjectsQ.data ?? []).filter((p) => projectIds.includes(p.id)), [allProjectsQ.data, projectIds]);
+  const project = scope.all ? (cat && inScope.length ? mergeProjects(cat, inScope) : null) : (projectQ.data ?? null);
   const repos = useProjectRepos(projectId);
   const submit = useCan("wo.submit", projectId ? { project: projectId } : {});
 
@@ -94,20 +97,22 @@ function WorkOrdersView() {
   const sort = { k: u.sort, dir: (u.dir === "asc" ? 1 : -1) as 1 | -1 };
   const stateFilter = tab === "gate" ? "gate" : tab === "blocked" ? "blocked" : u.st || "all";
   const f = { q: u.q, cls: u.cls || "all", where: u.station || "all", prio: u.pri || "all", state: stateFilter };
-  const list = useInfiniteQuery({
+  const listOne = useInfiniteQuery({
     queryKey: qk.woTable(projectId, {}),
     queryFn: ({ pageParam }) => get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(projectId ?? "")}/work-orders`), { sort: "id", dir: "desc", limit: SNAPSHOT, cursor: pageParam || undefined }),
     initialPageParam: "",
     getNextPageParam: (last) => last.next || undefined,
-    enabled: !!projectId && mode === "table",
+    enabled: !!projectId && !scope.all && mode === "table",
     placeholderData: keepPreviousData,
   });
-  const loaded = useMemo(() => list.data?.pages.flatMap((p) => p.items) ?? [], [list.data]);
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = list;
+  const listAll = useWorkOrdersAcross(projectIds, { cap: CAP, pageSize: SNAPSHOT, enabled: scope.all && mode === "table" });
+  const list: Pick<typeof listOne, "data" | "error" | "isPending" | "isError" | "refetch"> | typeof listAll = scope.all ? listAll : listOne;
+  const loaded = useMemo(() => (scope.all ? (listAll.data?.items ?? []) : (listOne.data?.pages.flatMap((p) => p.items) ?? [])), [scope.all, listAll.data, listOne.data]);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = listOne;
   useEffect(() => {
-    if (hasNextPage && !isFetchingNextPage && loaded.length < CAP) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, loaded.length, fetchNextPage]);
-  const cut = !!hasNextPage && loaded.length >= CAP;
+    if (!scope.all && hasNextPage && !isFetchingNextPage && loaded.length < CAP) void fetchNextPage();
+  }, [scope.all, hasNextPage, isFetchingNextPage, loaded.length, fetchNextPage]);
+  const cut = scope.all ? (listAll.data?.cut.length ?? 0) > 0 : !!hasNextPage && loaded.length >= CAP;
   const needle = f.q.trim().toLowerCase();
   const rows = useMemo(
     () =>
@@ -124,19 +129,20 @@ function WorkOrdersView() {
   );
 
   if (!me || !cat) return null;
-  if (!projectId || !project) {
+  if (!scope.projects.length || !project) {
     return (
       <div className="view">
-        {projectId ? <Async query={projectQ} what="this project" id="wo-project">{() => null}</Async> : <Empty title="No project" text="You do not have a project to show." />}
+        {scope.all || projectId ? <Async<unknown> query={scope.all ? allProjectsQ : projectQ} what={scope.all ? "your projects" : "this project"} id="wo-project">{() => null}</Async> : <Empty title="No project" text="You do not have a project to show." />}
       </div>
     );
   }
+  const projectFor = (id: string) => inScope.find((p) => p.id === id) ?? project;
   const fl = flowOf(cat, project);
   const projectKey = (id: string): string => me.projects.find((p) => p.id === id)?.key ?? id;
   const filtered = !!(needle || f.cls !== "all" || f.where !== "all" || f.prio !== "all" || u.st || tab !== "all");
   const clearAll = () => { setU({ q: "", st: "", cls: "", pri: "", station: "", view: "", page: "" }); };
   const change = (patch: Partial<Record<(typeof URL_KEYS)[number], string>>) => { setSel(new Set()); setU({ ...patch, page: "" }); };
-  const block = projectSubmitBlock(me, project, repos);
+  const block = scope.all ? null : projectSubmitBlock(me, project, repos);
   const stationName = (w: WorkOrder): string => cat.stations[w.station]?.name ?? "?";
   const whereCell = (w: WorkOrder) => {
     if (w.bay) {
@@ -176,12 +182,12 @@ function WorkOrdersView() {
       label: "Class",
       sort: (w) => w.cls,
       render: (w) => {
-        const c = classOf(cat, project, w.cls);
+        const c = classOf(cat, projectFor(w.project), w.cls);
         return (
           <span className="wo-cls">
             <span className="tag">{c.custom ? c.name : cap(w.cls)}</span>
             {w.clsOverridden ? (
-              <span className="wo-ovr" title={`Class overridden from ${classOf(cat, project, w.clsOverridden.from).name}`}>
+              <span className="wo-ovr" title={`Class overridden from ${classOf(cat, projectFor(w.project), w.clsOverridden.from).name}`}>
                 <Icon name="swap" />
               </span>
             ) : null}
@@ -194,7 +200,7 @@ function WorkOrdersView() {
     { key: "state", label: "State", sort: (w) => stateOf(w), render: (w) => <WoStateChip w={w} gates={cat.gates} /> },
     { key: "age", label: "Age", align: "end", sort: (w) => -w.createdAt, render: (w) => <span className="mono">{fmt.dur(Date.now() - w.createdAt)}</span> },
   ];
-  const cutNote = `Only the latest ${CAP} work orders are read for this view, so the project has more. Narrow it with the search or a filter.`;
+  const cutNote = `Only the latest ${CAP} work orders are read for this view, so ${scope.all ? "a project has" : "the project has"} more. Narrow it with the search or a filter.`;
   const exportCsv = () => {
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const csv = ["id,title,project,class,priority,state", ...rows.map((w) => [w.id, esc(w.title), w.project, w.cls, w.priority, stateOf(w)].join(","))].join("\n");
@@ -251,7 +257,11 @@ function WorkOrdersView() {
       acts={
         <>
           <Btn id="wo-export" onClick={exportCsv} disabled={mode !== "table" || !rows.length}><CrIcon name="dl" /><span>Export CSV</span></Btn>
-          <Btn label="New work order" kind="primary" icon="plus" id="wo-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWo({ project: project.id })} />
+          {scope.all ? (
+            <Btn label="New work order" kind="primary" icon="plus" id="wo-new" aria="New work order: choose the project first" onClick={(e) => ui.menu(e.currentTarget, "New work order in which project?", scope.projects.filter((p) => p.status !== "archived").map((p) => ({ label: p.name, icon: "projects", hint: p.key, onClick: () => newWo({ project: p.id }) })))} />
+          ) : (
+            <Btn label="New work order" kind="primary" icon="plus" id="wo-new" guard={submit.pending ? null : submit} disabledReason={submit.allowed ? block : null} onClick={() => newWo({ project: project.id })} />
+          )}
         </>
       }
     >
@@ -274,7 +284,7 @@ function WorkOrdersView() {
         </FilterBar>
       ) : null}
       {mode === "board" ? (
-        <BoardMode projectId={projectId} />
+        <BoardMode projectId={projectId} projectIds={scope.all ? projectIds : null} />
       ) : (
         <>
           {sel.size ? (
@@ -285,11 +295,11 @@ function WorkOrdersView() {
               <Btn label="Clear" small kind="ghost" id="wo-bulk-clear" onClick={() => setSel(new Set())} />
             </div>
           ) : null}
-          <Async query={list} what="work orders" id="wo-list">{() => rows.length ? (
+          <Async<unknown> query={list} what="work orders" id="wo-list">{() => rows.length ? (
             <div className="wo-table" id="wo-table-wrap">
               <DataTable
                 id="wo-table"
-                caption={`Work orders in ${project.name}`}
+                caption={`Work orders in ${scope.all ? "all projects" : project.name}`}
                 columns={cols}
                 rows={rows}
                 rowKey={(w) => w.id}

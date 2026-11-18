@@ -8,7 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { CARD_ACTIONS, CARD_DEFAULTS, CARD_TEMPLATES, NOTIFY_EVENTS, fmt, type CardTemplate, type IntegrationInstance, type NotificationRoute, type Project } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCardTemplates, useIntegrations, useIntegrationTypes, useMe, useProjects, useRoutes } from "../../api/queries";
-import { usePrefs } from "../../lib/prefs";
+import { setProject, updatePrefs } from "../../lib/prefs";
+import { useScope } from "../../lib/scope";
 import { Btn, useCopy } from "../../ui/primitives";
 import { Icon, Logo } from "../../ui/Icon";
 import type { TypeRow } from "../integrations/kit";
@@ -50,14 +51,15 @@ export function defaultTarget(type: string, p: Pick<Project, "key">, inst: Integ
 /** Everything the screen needs about the current project. */
 export function useNtData() {
   const me = useMe();
-  const prefs = usePrefs();
   const projectsQ = useProjects();
   const projects = projectsQ.data ?? [];
   const types = (useIntegrationTypes().data ?? []) as TypeRow[];
   const insts = useIntegrations().data ?? [];
   const customCards = useCardTemplates().data ?? [];
   const visible = me ? projects.filter((p) => me.projects.some((x) => x.id === p.id)) : projects;
-  const project = visible.find((p) => p.id === prefs.project) ?? visible[0] ?? null;
+  // Routes belong to one project: under All projects there is none until one is picked (the page asks), never the last one.
+  const scope = useScope();
+  const project = scope.all ? null : (visible.find((p) => p.id === scope.projectId) ?? null);
   const routesQ = useRoutes(project?.id);
   const versions = new Map((routesQ.data ?? []).map((r) => [r.id, r.version]));
   const typeOf = (typeId: string): TypeRow => types.find((t) => t.id === typeId) ?? ({ id: typeId, name: typeId, category: "custom", icon: "plug", fields: [], events: [], actions: [] } as unknown as TypeRow);
@@ -90,7 +92,8 @@ export function useNtData() {
     for (const p of projects) for (const r of p.notifications ?? []) if (r.template === id) out.push(`${p.key} ${r.id}`);
     return out;
   };
-  return { me, project, visible, projects, projectsQ, types, insts, destInsts, instOf, typeOf, tplInfo, tplOptions, customCards, routesUsingTpl, versions, routes: project?.notifications ?? [] };
+  const pick = (id: string): void => { setProject(id); updatePrefs({ scopeAll: false }); };
+  return { me, project, scopeAll: scope.all, pick, visible, projects, projectsQ, types, insts, destInsts, instOf, typeOf, tplInfo, tplOptions, customCards, routesUsingTpl, versions, routes: project?.notifications ?? [] };
 }
 
 export function targetError(d: Dest, ctx: { project: Project; instOf: (d: Dest) => IntegrationInstance | null; typeOf: (id: string) => TypeRow }): string | null {

@@ -29,7 +29,7 @@ const REAL_PORT = Number(process.env.FID_REAL_PORT || 9510);
 const NOW = Date.parse("2026-01-15T10:00:00Z");
 
 /** prototype route -> real hash (the same table, in prose, is apps/web/fidelity/MAP.md) */
-const P = "/#/p/payments";
+const P = `/#/p/${process.env.FID_SCOPE || "payments"}`; // FID_SCOPE=all compares the prototype (All projects by default) with the real All projects scope
 export const ROUTE_MAP = {
   home: "/#home", inbox: "/#inbox", workspace: "/#workspace", console: "/#console", conversations: `${P}/conversations`, projects: "/#projects",
   floor: `${P}/floor`, "work-orders": `${P}/work-orders`, record: `${P}/record/WO-1004`, traveler: `${P}/traveler/WO-1004`, dossier: `${P}/dossier/WO-1004`, changes: `${P}/changes/WO-1004`,

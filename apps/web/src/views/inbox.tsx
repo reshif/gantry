@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import { fmt } from "@gantry/domain";
 import { ops } from "../api/ops";
 import { useHome, useProjects } from "../api/queries";
+import { useScope } from "../lib/scope";
 import { useTravelerWo, dec } from "./traveler/model";
 import { Btn, Chip, FilterBar, SearchBox, Select, Tabs, Status, Who, type Decision } from "../ui/primitives";
 import { useActors } from "../ui/actors";
@@ -17,7 +18,7 @@ import { Card, CrEmpty, ListItem, Page } from "../ui/cr";
 import { Async, useCommand } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { navigate, hashFor } from "../lib/router";
-import { setProject, usePrefs } from "../lib/prefs";
+import { setProject } from "../lib/prefs";
 import { setRouteState, useClearRouteStateOnLeave, useRouteState } from "../lib/queryState";
 import { useDecided } from "../lib/decided";
 import { useOpenTraveler } from "../shell/useTraveler";
@@ -114,10 +115,10 @@ export default function InboxView() {
   const projList = useMemo(() => (Array.isArray(projData) ? projData : []) as PView[], [projData]);
   const names = useMemo(() => new Map(projList.map((p) => [p.id, p.name] as [string, string])), [projList]);
   const keys = useMemo(() => new Map(projList.map((p) => [p.id, p.key] as [string, string])), [projList]);
-  const prefs = usePrefs();
+  const scope = useScope();
   const allItems = useItems(home, names);
-  // The switcher's project scope (prototype: Home, Inbox and Agents at work follow it); "All projects" shows everything.
-  const items = useMemo(() => (prefs.scopeAll || !prefs.project ? allItems : allItems.filter((i) => i.project === prefs.project)), [allItems, prefs.scopeAll, prefs.project]);
+  // factory-wide by the caller's rights; All shows every visible project, a picked project narrows
+  const items = useMemo(() => (scope.all ? allItems : allItems.filter((i) => i.project === scope.projectId)), [allItems, scope.all, scope.projectId]);
   const decided = useDecided();
   const [tab, setTab] = useRouteState("tab", "approvals");
   const [search, setSearch] = useRouteState("q", "");

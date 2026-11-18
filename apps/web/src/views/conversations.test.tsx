@@ -10,7 +10,7 @@ import type { WoSession, WoSessionRow } from "./conversations/session-api";
 beforeEach(() => {
   resetApp();
   window.history.replaceState(null, "", "/");
-  updatePrefs({ project: "payments" });
+  updatePrefs({ scopeAll: false, project: "payments" });
 });
 afterEach(() => {
   cleanup();

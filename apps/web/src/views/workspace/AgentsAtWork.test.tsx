@@ -7,7 +7,7 @@ import { mockApi, mount, resetApp } from "../floor/testkit";
 beforeEach(() => {
   resetApp();
   window.history.replaceState(null, "", "/");
-  updatePrefs({ project: "payments" });
+  updatePrefs({ scopeAll: false, project: "payments" });
 });
 afterEach(() => {
   cleanup();

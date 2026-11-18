@@ -3,7 +3,8 @@ import { useRef, useState } from "react";
 import type { Me } from "../api/types";
 import { isProjectRoute } from "../lib/routes";
 import { navigate } from "../lib/router";
-import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
+import { ALL_PROJECTS, useScope } from "../lib/scope";
+import { setProject, updatePrefs } from "../lib/prefs";
 import { CrIcon, Lamp } from "../ui/cr";
 import { useUI } from "../ui/overlay-context";
 import { CrMenu, MenuRow } from "./CrMenu";
@@ -15,10 +16,8 @@ const keepRoute = (r: string): string => ((r === "record" || r === "changes" || 
 
 export function ProjectSwitcher({ me, project, current }: { me: Me; project: ProjectLite | null; current: string }) {
   const ui = useUI();
-  const prefs = usePrefs();
   const ref = useRef<HTMLButtonElement>(null);
-  const onProjectRoute = isProjectRoute(current);
-  const all = !onProjectRoute && prefs.scopeAll;
+  const all = useScope().all;
   const name = all || !project ? "All projects" : project.name;
   const open = () => {
     if (ref.current) ui.popover(ref.current, (close) => <SwitcherList me={me} currentId={all ? null : (project?.id ?? null)} route={current} close={close} />, undefined, { cls: "pop-cr", role: "menu", label: "Projects", width: 220, align: "left" });
@@ -46,8 +45,8 @@ function SwitcherList({ me, currentId, route, close }: { me: Me; currentId: stri
   const pickAll = () => {
     close();
     updatePrefs({ scopeAll: true });
-    // a project page needs a project: the portfolio is its "all projects" view
-    if (onProjectRoute) navigate("projects");
+    // a project page stays where it is, now over every project; a page about one project asks which (the shell shows the choice)
+    if (onProjectRoute) navigate(keepRoute(route), null, ALL_PROJECTS);
     ui.toast("Showing All projects", "info");
   };
   const pick = (p: ProjectLite) => {

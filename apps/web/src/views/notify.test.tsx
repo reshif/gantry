@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
 import { bindQueryClient } from "../api/keys";
 import { setCsrfToken } from "../api/client";
+import { updatePrefs } from "../lib/prefs";
 import { OverlayProvider } from "../ui/Overlay";
 import IntegrationsView from "./integrations";
 import NotificationsView from "./notifications";
@@ -80,7 +81,7 @@ function mount(node: React.ReactElement) {
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider>{node}</OverlayProvider></QueryClientProvider>);
 }
-beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; });
+beforeEach(() => { setCsrfToken("c"); canBatcher.clear(); window.location.hash = ""; updatePrefs({ scopeAll: false }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("Integrations", () => {

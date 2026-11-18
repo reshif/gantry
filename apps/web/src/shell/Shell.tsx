@@ -6,7 +6,7 @@ import type { Me } from "../api/types";
 import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
-import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
+import { ALL_PROJECTS, hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef, supportsAll } from "../lib/routes";
 import { formatHash, navigate, replaceHash, useHash } from "../lib/router";
 import { setProject, updatePrefs, usePrefs } from "../lib/prefs";
 import { useCrumbTailValue } from "../lib/crumb";
@@ -23,6 +23,27 @@ import { SHARED_STATES, SharedStatePage, protoEyebrow, type SharedStateKind } fr
 import { StopBanner } from "./StopBanner";
 import { TopBar } from "./TopBar";
 import { useRestoreTraveler } from "./useTraveler";
+
+/** A page about exactly one project, reached while the scope is All projects: the projects to choose from, never a hidden default. */
+function PickProject({ me, routeId, param, title }: { me: Me; routeId: string; param: string | null; title: string }) {
+  return (
+    <div className="view">
+      <Empty
+        id="pick-project"
+        icon="projects"
+        title={`Pick a project for ${title}`}
+        text={`${title} is about one project at a time. You are looking at All projects, so choose which one.`}
+        action={
+          <div className="row" style={{ flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+            {me.projects.map((p) => (
+              <a key={p.id} className="btn" id={`pick-project-${p.id}`} href={formatHash(routeId, param, p.id)} onClick={() => { setProject(p.id); updatePrefs({ scopeAll: false }); }}>{p.name}</a>
+            ))}
+          </div>
+        }
+      />
+    </div>
+  );
+}
 
 export function Shell({ me }: { me: Me }) {
   const ui = useUI();
@@ -51,27 +72,36 @@ export function Shell({ me }: { me: Me }) {
   const denied = permDenied ?? resolved.denied;
   const def = routeDef(routeId);
   const scoped = isProjectRoute(routeId);
-  const urlProject = scoped ? (loc.project ?? landing?.project ?? pickProject(me, prefs.project)) : null;
-  const project = me.projects.find((p) => p.id === urlProject) ?? null;
-  const projectId = scoped ? (project?.id ?? null) : (pickProject(me, prefs.project) ?? null);
-  const noProjectAccess = scoped && !!loc.project && !project;
+  // `#/p/all/...` is the All projects scope; a bare legacy hash takes the scope the person chose (All by default), never a hidden last project.
+  const bare = scoped && !loc.project && !landing?.project;
+  const urlProject = scoped ? (loc.project ?? landing?.project ?? (prefs.scopeAll ? ALL_PROJECTS : pickProject(me, prefs.project))) : null;
+  const allScope = scoped && urlProject === ALL_PROJECTS;
+  const project = allScope ? null : (me.projects.find((p) => p.id === urlProject) ?? null);
+  const projectId = scoped ? (project?.id ?? null) : (prefs.scopeAll ? null : (pickProject(me, prefs.project) ?? null));
+  const noProjectAccess = scoped && !!loc.project && !allScope && !project;
+  // a page about exactly one project, opened under All: ask which (the page lists the projects) instead of acting on a default
+  const needsProject = allScope && !supportsAll(routeId);
 
   // redirect (replace, no dead back step) to the canonical form of the URL
   useLayoutEffect(() => {
-    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id) + (loc.query ? `?${loc.query}` : ""));
+    if (bare && (project || allScope)) replaceHash(formatHash(routeId, loc.param, allScope ? ALL_PROJECTS : project!.id) + (loc.query ? `?${loc.query}` : ""));
     else if (loc.id === "" && landing) replaceHash(formatHash(landing.id, null, landing.project));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scoped, loc.project, loc.param, loc.id, project?.id, routeId]);
+  }, [scoped, loc.project, loc.param, loc.id, project?.id, routeId, allScope]);
 
   // the URL wins: entering a project makes it the remembered one (views read it through prefs)
   const [synced, setSynced] = useState<string | null>(null);
   useLayoutEffect(() => {
-    if (scoped && loc.project && project) {
+    if (scoped && loc.project && allScope) {
+      if (!prefs.scopeAll) updatePrefs({ scopeAll: true });
+      setSynced(ALL_PROJECTS);
+    } else if (scoped && loc.project && project) {
       if (prefs.project !== project.id || !prefs.recentProjects.includes(project.id)) setProject(project.id);
+      if (prefs.scopeAll) updatePrefs({ scopeAll: false });
       setSynced(project.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scoped, loc.project, project?.id]);
+  }, [scoped, loc.project, project?.id, allScope]);
 
 
   // new route: top of the page, focus moves to the main region
@@ -84,8 +114,8 @@ export function Shell({ me }: { me: Me }) {
   }, [routeId, loc.param]);
 
   useEffect(() => {
-    document.title = `${notFound ? "Page not found" : (denied?.title ?? def?.title ?? "Home")}${scoped && project ? ` · ${project.name}` : ""} · Gantry Control Room`;
-  }, [def, denied, scoped, project, notFound]);
+    document.title = `${notFound ? "Page not found" : (denied?.title ?? def?.title ?? "Home")}${scoped && project ? ` · ${project.name}` : allScope ? " · All projects" : ""} · Gantry Control Room`;
+  }, [def, denied, scoped, project, notFound, allScope]);
 
   const openPalette = useCallback(() => {
     if (document.getElementById("palette-list")) return; // toggle-guarded: Ctrl+K while the palette is open does not stack a second one
@@ -126,8 +156,8 @@ export function Shell({ me }: { me: Me }) {
   const baseCrumb = scoped ? [def?.title ?? ""] : [...(shown && !["Overview"].includes(shown.group) ? [shown.group] : []), shown?.title ?? "Home"];
   // a detail page ends the trail with its record; "Agents › Agents › Builder" reads as a stutter, so the title that repeats its group is dropped
   const crumb = crumbTail && loc.param ? [...(baseCrumb.length > 1 && baseCrumb[0] === baseCrumb[baseCrumb.length - 1] ? baseCrumb.slice(0, -1) : baseCrumb), crumbTail] : baseCrumb;
-  const switcherProject = scoped ? project : (me.projects.find((p) => p.id === prefs.project) ?? null);
-  const ready = !scoped || (!!project && synced === project.id);
+  const switcherProject = scoped ? project : (prefs.scopeAll ? null : (me.projects.find((p) => p.id === prefs.project) ?? null));
+  const ready = !scoped || ((allScope ? ALL_PROJECTS : project?.id) === synced && (allScope || !!project));
   const killed = !!me.factory.killed;
   return (
     <div id="app" className={`app${navOpen ? " nav-open" : ""}`}>
@@ -157,6 +187,8 @@ export function Shell({ me }: { me: Me }) {
             <div className="view">
               <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
             </div>
+          ) : needsProject ? (
+            <PickProject me={me} routeId={routeId} param={loc.param} title={def?.title ?? ""} />
           ) : ready && (SHARED_STATES as readonly string[]).includes(loc.state ?? "") ? (
             <SharedStatePage kind={loc.state as SharedStateKind} eyebrow={protoEyebrow(routeId, def?.group ?? "")} title={def?.title ?? ""} />
           ) : ready ? (

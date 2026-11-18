@@ -7,13 +7,10 @@ const NOW = 1_000_000_000_000;
 const order = DEFAULT_CATALOG.stations.map((s) => s.id);
 const wo = (id: string, station: string, state: string, extra: Partial<FWo> = {}): FWo =>
   ({ id, title: id, cls: "feature", priority: "P1", station: order.indexOf(station), state, bay: null, createdAt: NOW - 1e6, doneAt: null, history: [{ station, agent: "a", startedAt: NOW - 3_600_000, endedAt: null }], gates: {}, ...extra }) as unknown as FWo;
-const ctx = (wos: FWo[]): FloorCtxValue =>
-  ({
-    cat: DEFAULT_CATALOG,
-    project: { id: "p", flow: { order, slots: 2, gates: Object.fromEntries(DEFAULT_CATALOG.gates.map((g) => [g.id, { enabled: true, mode: g.kind }])), stations: {}, classes: DEFAULT_CATALOG.classes, bays: [] }, approvers: {} },
-    floor: { gates: [] },
-    wos, repos: [], replay: null, now: NOW,
-  }) as unknown as FloorCtxValue;
+const ctx = (wos: FWo[]): FloorCtxValue => {
+  const project = { id: "p", flow: { order, slots: 2, gates: Object.fromEntries(DEFAULT_CATALOG.gates.map((g) => [g.id, { enabled: true, mode: g.kind }])), stations: {}, classes: DEFAULT_CATALOG.classes, bays: [] }, approvers: {} };
+  return { cat: DEFAULT_CATALOG, project, projects: [project], floor: { gates: [] }, wos, repos: [], replay: null, now: NOW } as unknown as FloorCtxValue;
+};
 const agent = (id: string) => id;
 
 describe("buildBelt", () => {

@@ -92,7 +92,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
   try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
   reloadPrefs();
-  updatePrefs({ project: "payments" });
+  updatePrefs({ scopeAll: false, project: "payments" });
 });
 afterEach(() => {
   cleanup();

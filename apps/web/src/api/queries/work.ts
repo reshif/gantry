@@ -1,5 +1,5 @@
 /** Typed reads for this slice of /api/v1. Keys come from ../keys (`qk`). */
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api, get, getText } from "../client";
 import { qk } from "../keys";
 import type { Conversation, EventEntry, FloorData, HomeData, KillImpact, Page, Project, RecordBundle, Repo, SavedView, Template, WorkOrder, OrgGuidelines } from "../types";
@@ -59,3 +59,32 @@ export const useKillImpact = (scope: string, id: string | null, enabled = true) 
 export const useRepos = (projectId: string | null | undefined) =>
   useQuery({ queryKey: qk.repos(projectId ?? ""), queryFn: () => get<Repo[]>(api(`projects/${encodeURIComponent(projectId ?? "")}/repos`)), enabled: !!projectId });
 export const useGuidelines = () => useQuery({ queryKey: qk.guidelines(), queryFn: () => get<OrgGuidelines>(api("guidelines")) });
+
+/**
+ * The work orders of several projects as one list (the All projects scope): each project's own list read, page by page up to `cap` per project,
+ * newest first. `cut` names the projects whose list was longer than `cap`, so a screen can say the list is cut short. Each read is the same
+ * per-project read, so what a person may not see is never in it.
+ */
+export const useWorkOrdersAcross = (projectIds: readonly string[], o: { cap: number; pageSize: number; enabled: boolean }) =>
+  useQuery({
+    queryKey: qk.woTable(`all:${projectIds.join(",")}`, { cap: o.cap }),
+    queryFn: async () => {
+      const items: WorkOrder[] = [];
+      const cut: string[] = [];
+      for (const id of projectIds) {
+        let cursor = "";
+        let n = 0;
+        for (;;) {
+          const pg = await get<Page<WorkOrder>>(api(`projects/${encodeURIComponent(id)}/work-orders`), { sort: "id", dir: "desc", limit: o.pageSize, cursor: cursor || undefined });
+          items.push(...pg.items);
+          n += pg.items.length;
+          if (!pg.next) break;
+          if (n >= o.cap) { cut.push(id); break; }
+          cursor = pg.next;
+        }
+      }
+      return { items, cut };
+    },
+    enabled: o.enabled && projectIds.length > 0,
+    placeholderData: keepPreviousData,
+  });

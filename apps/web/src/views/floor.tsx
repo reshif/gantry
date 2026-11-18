@@ -5,7 +5,7 @@
  * Live / Replay switch. Replay rebuilds the floor from the event log at a chosen past time (read-only). All data comes from
  * GET /projects/{id}/floor; every control is a command through the API.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { HOUR, fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
@@ -20,11 +20,11 @@ import { useFloorFilter } from "./floor/urlState";
 import { openApproval } from "./floor/Approval";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
-import { pickProject } from "../lib/routes";
-import { usePrefs } from "../lib/prefs";
+import { useScope } from "../lib/scope";
+import type { Project } from "@gantry/domain";
 import { makeStopActions } from "../shell/stopActions";
 import { useDrawers } from "./floor/Drawers";
-import { FloorCtx, since, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
+import { FloorCtx, projectOf, since, useFloorCtx, useScopedFloorState, type FloorCtxValue } from "./floor/kit";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
 
@@ -61,7 +61,57 @@ function Kpis({ open, ticker }: { open: ReturnType<typeof buildBelt>["open"]; ti
   );
 }
 
-function Header({ replaying, onReplay, paused, onPause, children }: { replaying: boolean; onReplay: (on: boolean) => void; paused: boolean; onPause: () => void; children: (extra: ReactNode) => ReactNode }) {
+/** The Floor header over All projects. Halt line and New work order ask which project; line control and replay are about one project and say so. */
+function AllHeader({ paused, onPause, children }: { paused: boolean; onPause: () => void; children: (extra: ReactNode) => ReactNode }) {
+  const ctx = useFloorCtx();
+  const ui = useUI();
+  const me = useMe();
+  const newWo = useNewWorkOrder();
+  if (!me) return null;
+  const stop = makeStopActions(ui, me);
+  const factoryKilled = !!me.factory.killed;
+  const choose = (anchor: HTMLElement, title: string, pick: (p: Project) => void) =>
+    ui.menu(anchor, title, ctx.projects.map((p) => ({ label: p.name, icon: p.killed ? "st-kill" : "projects", hint: p.killed ? "killed" : p.halted ? "halted" : p.key, onClick: () => pick(p) })));
+  const lineControl = (
+    <>
+      <Btn small label="Line control" icon="halt" id="floor-line" aria="Line control: halt or resume a project or a repo, kill or restore a project" guard={{ allowed: false, reason: "Pick a project first. Line control acts on one project's line.", needs: "" }} onClick={() => undefined} />
+      <Btn small label="New work order" kind="primary" icon="plus" id="floor-new-wo" aria="New work order: choose the project first" onClick={(e) => choose(e.currentTarget, "New work order in which project?", (p) => newWo({ project: p.id }))} />
+    </>
+  );
+  return (
+    <Page
+      eyebrow="Operate"
+      title="Floor"
+      sub="The production line, left to right. Work orders ride the belt; gates are checkpoints where a person decides."
+      cls="view-floor-page"
+      id="floor-head"
+      acts={
+        <>
+          <Btn label={paused ? "Resume belt" : "Pause belt"} icon={paused ? "play" : "pause"} id="floor-pause" aria-pressed={paused} onClick={onPause} />
+          <Btn label="Halt line" kind="danger" icon="halt" id="floor-halt" aria="Emergency stop: choose which project's line to halt" guard={factoryKilled ? { allowed: false, reason: "The factory is already stopped. Restore it from Home.", needs: "" } : null} onClick={(e) => choose(e.currentTarget, "Halt which project's line?", (p) => stop.emergency("project", p.id))} />
+          {lineControl}
+        </>
+      }
+    >
+      {factoryKilled ? (
+        <div className="banner bad" role="alert" id="floor-kill-banner">
+          <Icon name="stop" />
+          <div className="grow"><b>Factory stopped.</b>{` ${me.factory.killed?.reason ?? ""} Restore needs two Factory Admins.`}</div>
+        </div>
+      ) : null}
+      {children(lineControl)}
+    </Page>
+  );
+}
+
+type HeaderProps = { replaying: boolean; onReplay: (on: boolean) => void; paused: boolean; onPause: () => void; children: (extra: ReactNode) => ReactNode };
+
+function Header(props: HeaderProps) {
+  const ctx = useFloorCtx();
+  return ctx.all ? <AllHeader paused={props.paused} onPause={props.onPause}>{props.children}</AllHeader> : <ProjectHeader {...props} />;
+}
+
+function ProjectHeader({ replaying, onReplay, paused, onPause, children }: { replaying: boolean; onReplay: (on: boolean) => void; paused: boolean; onPause: () => void; children: (extra: ReactNode) => ReactNode }) {
   const ctx = useFloorCtx();
   const ui = useUI();
   const me = useMe();
@@ -132,13 +182,14 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
   );
 }
 
-function FloorBody({ projectId }: { projectId: string }) {
+function FloorBody({ projectId }: { projectId: string | null }) {
   const ctx = useFloorCtx();
-  const drawers = useDrawers(projectId);
+  const projectIds = ctx.all ? ctx.projects.map((p) => p.id) : undefined;
+  const drawers = useDrawers(projectId, projectIds);
   const actors = useActors();
-  const activity = useActivity(projectId);
+  const activity = useActivity(projectId ?? undefined);
   const rp = ctx.replay;
-  const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId, rp, "floor-mode-live");
+  const { playing, setPlaying, enter, exit } = useReplayPlayer(projectId ?? "", rp, "floor-mode-live");
   const [paused, setPaused] = useState(false);
   const { filter, set: setFilter, clear: clearFilter } = useFloorFilter();
   const ui = useUI();
@@ -191,7 +242,7 @@ function FloorBody({ projectId }: { projectId: string }) {
                 const g = gateOf(w.id);
                 return (
                   <ListItem key={w.id} tone="warn" title={`${g ? (gateLabels.get(g.gate) ?? g.gate) : ""} · ${w.title}`} sub={`${w.id} · waiting ${fmt.dur(Math.max(0, ctx.now - since(w)))}`}>
-                    {g ? <Btn label="Review" small kind="primary" id={`floor-review-${w.id}`} onClick={() => { const gd = ctx.cat.gates.find((x) => x.id === g.gate); openApproval(ui, projectId, w.id, g.gate, gateLabels.get(g.gate) ?? gd?.label ?? g.gate, gd?.name ?? ""); }} /> : null}
+                    {g ? <Btn label="Review" small kind="primary" id={`floor-review-${w.id}`} onClick={() => { const gd = ctx.cat.gates.find((x) => x.id === g.gate); openApproval(ui, projectOf(ctx, w).id, w.id, g.gate, gateLabels.get(g.gate) ?? gd?.label ?? g.gate, gd?.name ?? ""); }} /> : null}
                   </ListItem>
                 );
               })
@@ -214,15 +265,16 @@ function FloorBody({ projectId }: { projectId: string }) {
 
 export default function FloorView() {
   const me = useMe();
-  const prefs = usePrefs();
-  const projectId = me ? pickProject(me, prefs.project) : null;
+  const scope = useScope();
+  const projectId = scope.projectId;
+  const projectIds = useMemo(() => scope.projects.map((p) => p.id), [scope.projects]);
   const rpBase = useReplayBase(projectId);
-  const { value, error } = useFloorState(projectId, rpBase);
+  const { value, error } = useScopedFloorState(scope.all ? { all: true, projectIds } : { all: false, projectId }, rpBase);
   if (!me) return null;
-  if (!projectId) {
+  if (!scope.projects.length) {
     return (
       <div className="view">
-        <Empty title="No project selected" text="Pick a project in the top bar to see its floor." />
+        <Empty title="No project selected" text="Pick a project in the top bar to see its floor, or you have no visible project yet." />
       </div>
     );
   }

@@ -1,7 +1,7 @@
 /** The Floor's conveyor, as data: the real floor read (stations, gates, work orders) mapped onto the Control Room belt. Pure, so it can be tested. */
 import { DAY, fmt, gateForWO } from "@gantry/domain";
 import type { BeltStation, BeltTok, TokState } from "../../ui/cr";
-import { gateOfStation, gateStateOf, isLive, since, stationIdx, type FWo, type FloorCtxValue } from "./kit";
+import { gateOfStation, gateStateOf, isLive, projectOf, since, stationIdx, type FWo, type FloorCtxValue } from "./kit";
 
 export interface BeltFilter { q: string; cls: string; pri: string; st: string }
 export const NO_FILTER: BeltFilter = { q: "", cls: "all", pri: "all", st: "all" };
@@ -13,7 +13,7 @@ const ORDER: Record<TokState, number> = { running: 0, blocked: 1, gate: 2, queue
 export function tokenState(ctx: FloorCtxValue, w: FWo): TokState {
   if (w.bay) return "gate";
   if (w.state === "running") return "running";
-  if (w.state === "waiting") return gateForWO(ctx.cat, ctx.project, w) ? "gate" : "queued";
+  if (w.state === "waiting") return gateForWO(ctx.cat, projectOf(ctx, w), w) ? "gate" : "queued";
   return "blocked";
 }
 

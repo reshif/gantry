@@ -6,7 +6,7 @@ import { mockApi, mount, resetApp } from "./floor/testkit";
 
 beforeEach(() => {
   resetApp();
-  updatePrefs({ project: "payments" });
+  updatePrefs({ scopeAll: false, project: "payments" });
 });
 afterEach(() => {
   cleanup();
