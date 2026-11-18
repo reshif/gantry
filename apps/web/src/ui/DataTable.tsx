@@ -65,7 +65,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   /** Total on the server, for the "Showing x of y" line. */
   total?: number;
   /** Numbered paging (prototype footer "1–15 of 77", Prev / Next, "Page 1 / 6"); `page` is 0-based and is the caller's (a URL) state. Replaces "Show more". Optional, additive. */
-  pager?: boolean | { page: number; size: number; onPage: (page: number) => void };
+  pager?: boolean | "pages" | { page: number; size: number; onPage: (page: number) => void };
   /** "blueprint": sort arrows ▲ / ▼ and a quiet ↕ hint on sortable headers that are not sorted. Optional, additive. */
   glyphs?: "blueprint";
   /** The "Sort by" select shown above the stacked cards on a phone (default on); the prototype's list has none. */
@@ -93,6 +93,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
     setShown(pageSize ?? 0);
     setPage(0);
   }
+  const [page, setPage] = useState(0);
   const [own1, setOwn1] = useState<string>("");
   const [overflow, setOverflow] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -128,7 +129,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   const list = rows.slice();
   const col = cur ? columns.find((c) => c.key === cur.key) : undefined;
   if (cur && col) list.sort((a, b) => { const x = val(col, a); const y = val(col, b); return (x > y ? 1 : x < y ? -1 : 0) * cur.dir; });
-  const boolPager = pager === true || !!paged;
+  const boolPager = pager === true || pager === "pages" || !!paged;
   const size = typeof pager === "object" ? pager.size : boolPager ? (pageSize || list.length) : proto && pageSize ? pageSize : 0;
   const pages = size ? Math.max(1, Math.ceil(list.length / size)) : 1;
   const pageAt = size ? Math.min(Math.max(typeof pager === "object" ? pager.page : page, 0), pages - 1) : 0;

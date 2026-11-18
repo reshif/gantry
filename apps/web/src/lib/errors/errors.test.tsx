@@ -66,11 +66,18 @@ describe("AppErrorBoundary", () => {
     const { rerender } = render(view());
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/Error id/);
-    expect(document.activeElement?.tagName).toBe("H2");
+    expect(document.activeElement?.tagName).toBe("H1");
     boom = false;
     rerender(view());
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(screen.getByText("fine")).toBeTruthy();
+  });
+  it("the route fallback is the prototype crash sheet: Something went wrong, This sheet failed to draw, Retry and Home", () => {
+    render(<AppErrorBoundary level="route"><Bomb boom /></AppErrorBoundary>);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Something went wrong");
+    expect(screen.getByText("This sheet failed to draw")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Home" }).getAttribute("href")).toBe("#home");
   });
   it("clears itself when the route key changes", () => {
     const { rerender } = render(
