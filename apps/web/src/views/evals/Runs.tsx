@@ -1,8 +1,8 @@
-/** Runs tab (prototype): every suite run in one table, newest first, searchable. A run id opens that run in its suite's detail. */
-import { fmt } from "@gantry/domain";
+/** Runs tab (prototype): every suite run in one table, newest first, searchable. Plain rows: a run is read in its suite's detail (open the suite from the Suites tab). */
+import { agoShort } from "../conversations/ago";
 import { Avatar, Btn, Empty, FilterBar, SearchBox } from "../../ui/primitives";
 import { DataTable, type SortCol } from "../../ui/DataTable";
-import { agentOf, evalsUi, ScoreMeter, type EvalsData, type RunRow } from "./kit";
+import { agentOf, ScoreMeter, type EvalsData, type RunRow } from "./kit";
 
 type Url = { tab: string; q: string; sort: string; dir: string; suite: string; run: string };
 
@@ -11,11 +11,11 @@ export function RunsTab({ d, url, setUrl }: { d: EvalsData; url: Url; setUrl: (p
   const nameOf = (r: RunRow): string => agentOf(d, r.agent)?.name ?? r.agent;
   const rows = d.runs.filter((r) => !term || `${r.id} ${r.suite} ${nameOf(r)} ${r.agent}`.toLowerCase().includes(term));
   const cols: SortCol<RunRow>[] = [
-    { key: "id", label: "Run", sort: (r) => r.id, render: (r) => <a className="mono rl" href="#evals" id={`ev-runs-open-${r.id}`} aria-label={`Open run ${r.id} in suite ${r.suite}`} onClick={(e) => { e.preventDefault(); evalsUi.a = evalsUi.b = null; setUrl({ tab: "suites", q: "", sort: "", dir: "", suite: r.suite, run: r.id }); }}>{r.id}</a> },
+    { key: "id", label: "Run", sort: (r) => r.id, render: (r) => <span className="mono rl" id={`ev-runs-open-${r.id}`}>{r.id}</span> },
     { key: "suite", label: "Suite", sort: (r) => r.suite, render: (r) => <span className="mono">{r.suite}</span> },
     { key: "agent", label: "Agent", sort: (r) => nameOf(r).toLowerCase(), render: (r) => <span className="who"><Avatar id={r.agent} size="sm" /><span>{nameOf(r)}</span></span> },
     { key: "version", label: "Version", sort: (r) => r.version, render: (r) => <span className="mono">{r.version}</span> },
-    { key: "at", label: "When", sort: (r) => r.at, render: (r) => <span className="mono dim">{fmt.ago(r.at, Date.now())}</span> },
+    { key: "at", label: "When", sort: (r) => r.at, render: (r) => <span className="mono dim">{agoShort(r.at)}</span> },
     { key: "score", label: "Score", sort: (r) => r.score, render: (r) => r.status === "completed" ? <ScoreMeter score={r.score} gate={0.85} label={`${r.id} score`} /> : <span className="dim mono">{r.status}</span> },
   ];
   const sort = { key: url.sort || "at", dir: (url.sort ? (url.dir === "desc" ? -1 : 1) : -1) as 1 | -1 };

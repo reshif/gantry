@@ -3,7 +3,7 @@ import type { LearningFinding, LearningProposal } from "@gantry/domain";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../../api/can";
 import { ops } from "../../api/ops";
-import { useLearningFindings, useLearningSettings, useSkills } from "../../api/queries";
+import { useLearningFindings, useLearningSettings } from "../../api/queries";
 import { useMe } from "../../api/queries";
 import { Avatar, Btn, Chip } from "../../ui/primitives";
 import { Card } from "../../ui/cr";
@@ -11,9 +11,8 @@ import { useLn } from "./kit";
 import { Icon } from "../../ui/Icon";
 import { useActors } from "../../ui/actors";
 import { useUI } from "../../ui/overlay-context";
-import { navigate } from "../../lib/router";
 import { dec } from "../mcp/kit";
-import { AcceptDialog, VerifyDialog } from "./Dialogs";
+import { VerifyDialog } from "./Dialogs";
 import { KINDS, STATUS, useChangeLines } from "./kit";
 
 const scopeOf = (lp: LearningProposal): { project: string } | undefined => {
@@ -44,18 +43,16 @@ function ProposalCard({ lp, hi }: { lp: LearningProposal; hi: boolean }) {
   const me = useMe();
   const findings = useLearningFindings().data ?? [];
   const settings = useLearningSettings().data;
-  const skills = useSkills().data ?? [];
   const f: LearningFinding | undefined = findings.find((x) => x.id === lp.finding);
   const perm = dec(useCan("learning.apply", scopeOf(lp) ?? {}));
   const off = settings && !settings.proposalsOn ? "Learning proposals are switched off. Turn them on first." : null;
   const mine = lp.owner === me?.person.id && (settings?.otherDeciders ?? 0) > 0 ? "You drafted this proposal, so someone else decides it where a second person can." : null;
   const last = lp.history[lp.history.length - 1];
-  const sk = lp.kind === "skill" ? skills.find((s) => s.id === (lp.change as { skill?: string }).skill) : undefined;
   const due = verifyDue(lp);
   const early = lp.status === "accepted" && due && Date.now() < due ? `The window runs until ${fmt.istDate(due)}. It can be verified then.` : null;
   const act = [] as React.ReactNode[];
   if (lp.status === "proposed") {
-    act.push(<Btn key="a" label="Accept change" kind="ok" icon="check" id={`ln-accept-${lp.id}`} guard={perm} disabledReason={off ?? mine} onClick={() => ui.open((close) => <AcceptDialog lp={lp} close={close} />)} />);
+    act.push(<Btn key="a" label="Accept change" kind="ok" id={`ln-accept-${lp.id}`} guard={perm} disabledReason={off ?? mine} onClick={() => { void ops.acceptLearning(lp.id).then((r) => ui.toast(r.ok ? (r.msg || "Accepted. A new agent version will run evals first.") : r.msg, r.ok ? "ok" : "error")); }} />);
     act.push(<Btn key="d" label="Decline" kind="danger" id={`ln-decline-${lp.id}`} guard={perm} disabledReason={off} onClick={() => ui.reasonDialog({
       title: `Decline ${lp.id}`, kicker: `Learning · ${KINDS[lp.kind]?.name ?? lp.kind}`, sub: `${lp.title}. Nothing changes; the finding stays open.`, label: "Reason (required)", ok: "Decline", kind: "danger", min: 4, guard: perm,
       onOk: async (t) => { const r = await ops.declineLearning(lp.id, t); if (r.ok) ui.toast(r.msg, "ok"); return r; },
@@ -68,9 +65,6 @@ function ProposalCard({ lp, hi }: { lp: LearningProposal; hi: boolean }) {
       onOk: async (t) => { const r = await ops.rollbackLearning(lp.id, t); ui.toast(r.msg, r.ok ? "ok" : "error"); return r; },
     })} />);
   }
-  if (lp.kind === "skill" && lp.status !== "proposed" && lp.status !== "declined" && sk) {
-    act.push(<a key="s" href="#skills" className="btn btn-sm btn-ghost" id={`ln-open-skill-${lp.id}`} onClick={(e) => { e.preventDefault(); navigate("skills"); }}><Icon name="skill" /><span>{`Open ${sk.name} v${sk.version}`}</span></a>);
-  }
   const lines = useChangeLines(lp);
   return (
     <div id={`ln-prop-${lp.id}`} className={hi ? "is-hi" : ""}>
@@ -78,8 +72,8 @@ function ProposalCard({ lp, hi }: { lp: LearningProposal; hi: boolean }) {
         <div className="stack">
           <div className="row">
             {f?.agent ? <AgentWho id={f.agent} /> : null}
-            <Chip text={STATUS[lp.status] ?? lp.status} cls={lp.status === "proposed" ? "warn" : lp.status === "declined" || lp.status === "rolled_back" ? "idle" : "ok"} />
-            <Chip text="eval lift not available" cls="plain idle" />
+            <Chip text={STATUS[lp.status] ?? lp.status} cls={lp.status === "proposed" ? "agent" : lp.status === "declined" || lp.status === "rolled_back" ? "idle" : "ok"} />
+            <Chip text="eval n/a" cls="plain idle" />
           </div>
           <pre className="code diff" style={{ padding: 8 }}>{lines.map((l, i) => <div key={i} className={l[0] === "+" ? "add" : "del"}>{l}</div>)}</pre>
           {act.length || last ? (

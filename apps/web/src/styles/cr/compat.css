@@ -91,3 +91,18 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 .ds-theme .meter i { display: block; height: 100%; border-radius: 3px; }
 /* ds round 3: the sample table stays a real table at phone width, as in the prototype */
 @media (max-width:720px){.ds-theme .tw.cards{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);overflow:auto}.ds-theme .tw.cards table{display:table;width:100%}.ds-theme .tw.cards tbody{display:table-row-group}.ds-theme .tw.cards thead{display:table-header-group}.ds-theme .tw.cards tr{display:table-row;background:none;border:0;margin:0;padding:0}.ds-theme .tw.cards td{display:table-cell;width:auto;border-bottom:1px solid var(--line);padding:0 12px;text-align:left}.ds-theme .tw.cards td.r{text-align:right}.ds-theme .tw.cards td::before{display:none}.ds-theme .tw.cards td:first-child{border-bottom:1px solid var(--line);margin:0;padding-bottom:0}}
+
+/* Evals, Trust and Learning tables at phone width: the prototype's stacked cards (.tw.cards): 4px cell rows, label left and value right, the first cell as a ruled title, an unlabelled action cell on the left */
+@media (max-width:640px){
+  .view-evals .dtable.t tr,.view-trust .dtable.t tr,.view-learning .dtable.t tr{padding:var(--s2) var(--s3);box-shadow:none}
+  .view-evals .dtable.t td,.view-trust .dtable.t td,.view-learning .dtable.t td{height:auto;min-height:28px;padding:4px 0;display:flex;gap:var(--s3);justify-content:space-between;align-items:center;text-align:right}
+  .view-evals .dtable.t td::before,.view-trust .dtable.t td::before,.view-learning .dtable.t td::before{font:600 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);text-align:left;flex:none}
+  .view-evals .dtable.t td:first-child,.view-trust .dtable.t td:first-child,.view-learning .dtable.t td:first-child{font-size:14px;justify-content:flex-start;text-align:left;padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:4px;flex-wrap:wrap}
+  .view-evals .dtable.t td:first-child::before,.view-trust .dtable.t td:first-child::before,.view-learning .dtable.t td:first-child::before,
+  .view-evals .dtable.t td[data-label=""]::before,.view-learning .dtable.t td[data-label=""]::before{display:none}
+  .view-evals .dtable.t td[data-label=""],.view-learning .dtable.t td[data-label=""]{justify-content:flex-start}
+  .view-evals .dtable.t td .ell,.view-learning .dtable.t td .ell{white-space:normal}
+  .view-evals .filterbar-count,.view-learning .filterbar-count{text-align:left;margin-left:0}
+  .view-evals .filterbar .meta,.view-learning .filterbar .meta{width:100%}
+  .view-evals .filterbar .meta,.view-learning .filterbar .meta{justify-content:flex-start}
+}

@@ -95,6 +95,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Trust screen: prototype matrix", () => {
+  it("has a text-only legend, no link anywhere in the matrix card, and no row of dashes for an agent without cells", async () => {
+    setup();
+    at("");
+    mount();
+    const m = await byId("tr-agent-matrix");
+    const card = m.parentElement!;
+    expect(card.querySelector("#tr-demos-link")).toBeNull();
+    expect(card.textContent).toContain("L4 runs unattended, audited");
+    for (const tr of m.querySelectorAll("tbody tr")) expect(tr.querySelector("button.lvl")).not.toBeNull();
+    expect(m.querySelectorAll("a")).toHaveLength(0);
+  });
+});
+
 describe("Trust screen: ladder", () => {
   beforeEach(() => at("?tab=ladder"));
   it("shows the header numbers, including that levels above L1 are off", async () => {
@@ -358,7 +372,7 @@ describe("Trust screen: matrix", () => {
     Object.assign(trustUi, { tab: "matrix" });
     mount();
     const m = await byId("tr-agent-matrix");
-    const link = m.querySelector("a.lvl") as HTMLElement;
+    const link = m.querySelector("button.lvl") as HTMLElement;
     expect(link.textContent).toMatch(/^L\d$/);
     fireEvent.click(link);
     await waitFor(() => expect(document.querySelector("[role=dialog], .dlg")!.textContent).toContain("Propose a change"));
@@ -370,7 +384,7 @@ describe("Trust screen: matrix", () => {
     Object.assign(trustUi, { tab: "matrix" });
     mount();
     const m = await byId("tr-agent-matrix");
-    fireEvent.click(m.querySelector("a.lvl") as HTMLElement);
+    fireEvent.click(m.querySelector("button.lvl") as HTMLElement);
     const dlg = await waitFor(() => { const e = document.querySelector("[role=dialog], .dlg"); if (!e) throw new Error("no dialog"); return e; });
     expect(dlg.querySelector("#tr-mx-ladder")).toBeNull();
     expect(document.querySelector(".view-trust.view")).toBeNull();
@@ -379,7 +393,18 @@ describe("Trust screen: matrix", () => {
     mount();
     fireEvent.click(await byId("tr-tab-ceilings"));
     await byId("tr-switch");
-    expect(document.querySelectorAll(".tr-ceil .setrow")).toHaveLength(document.querySelectorAll(".tr-ceil [id^='tr-ceil-on-']").length);
-    expect(document.querySelector(".tr-ceil #tr-switch")).toBeNull();
+    // the runtime switch is the last row of the same card: exactly the ceilings plus that one row, none outside it
+    expect(document.querySelectorAll(".tr-ceil .setrow")).toHaveLength(document.querySelectorAll(".tr-ceil [id^='tr-ceil-on-']").length + 1);
+    expect(document.querySelector(".tr-ceil #tr-switch")).not.toBeNull();
+    expect(document.querySelectorAll(".setrow")).toHaveLength(document.querySelectorAll(".tr-ceil .setrow").length);
+  });
+});
+
+describe("Trust screen: failed read", () => {
+  it("shows a failed read as an error, not an empty matrix", async () => {
+    setup({ "GET /api/v1/trust/cells": () => ({ status: 500, body: { ok: false, msg: "boom" } }) });
+    at("");
+    mount();
+    await waitFor(() => expect(document.querySelector("[id$='-error']")).not.toBeNull());
   });
 });

@@ -11,7 +11,6 @@ import { Textarea } from "../../ui/Textarea";
 import { Card, CrIcon } from "../../ui/cr";
 import { Field, Select, Table } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
-import { setUrlParams } from "../urlState";
 import { code, type CellOut } from "./kit";
 
 interface Target { agent: { id: string; name: string }; project: Project; cells: CellOut[]; switchOn: boolean }
@@ -89,18 +88,20 @@ function useProposeDialog() {
   };
 }
 
-export function MatrixTab({ cells, projects, agents, switchOn, demotions = 0 }: { cells: CellOut[]; projects: Project[]; agents: Array<{ id: string; name: string }>; switchOn: boolean; demotions?: number }) {
+export function MatrixTab({ cells, projects, agents, switchOn }: { cells: CellOut[]; projects: Project[]; agents: Array<{ id: string; name: string }>; switchOn: boolean }) {
   const open = useProposeDialog();
   const grant = useCan("trust.grant");
   const withCells = projects.filter((p) => cells.some((c) => c.project === p.id));
   const cols = (withCells.length ? withCells : projects).slice(0, 4);
+  // an agent with no cell on any shown project has nothing to propose a change to: no row of dashes
+  const rowsOf = agents.filter((a) => cols.some((p) => cells.some((c) => c.agent === a.id && c.project === p.id)));
   return (
     <Card title="Autonomy by agent and project" hint="Click a cell to propose a change">
       <div className="matrix" id="tr-agent-matrix" style={{ overflow: "auto", maxWidth: "100%" }}>
         <Table>
           <thead><tr><th scope="col" style={{ fontFamily: "var(--mono, monospace)", fontSize: 11, fontWeight: 500, letterSpacing: ".04em", textTransform: "none" }}>Agent</th>{cols.map((p) => <th key={p.id} scope="col" style={{ textAlign: "center", fontFamily: "var(--mono, monospace)", fontSize: 11, fontWeight: 500, letterSpacing: ".04em", textTransform: "none" }}>{p.name}</th>)}</tr></thead>
           <tbody>
-            {agents.map((a) => (
+            {(rowsOf.length ? rowsOf : agents).map((a) => (
               <tr key={a.id}>
                 <td><b>{a.name}</b></td>
                 {cols.map((p) => {
@@ -109,8 +110,8 @@ export function MatrixTab({ cells, projects, agents, switchOn, demotions = 0 }: 
                   const l = levelOf(mine);
                   return (
                     <td key={p.id} style={{ textAlign: "center" }}>
-                      <a className="lvl" href="#trust" style={{ "--l": l } as CSSProperties} id={`tr-mx-${a.id}-${p.id}`} aria-label={`${a.name} on ${p.name}: level ${l}`}
-                        onClick={(e) => { e.preventDefault(); open({ agent: a, project: p, cells: mine, switchOn }, grant.allowed); }}>{`L${l}`}</a>
+                      <button type="button" className="lvl" style={{ "--l": l } as CSSProperties} id={`tr-mx-${a.id}-${p.id}`} aria-label={`${a.name} on ${p.name}: level ${l}`}
+                        onClick={() => open({ agent: a, project: p, cells: mine, switchOn }, grant.allowed)}>{`L${l}`}</button>
                     </td>
                   );
                 })}
@@ -122,7 +123,6 @@ export function MatrixTab({ cells, projects, agents, switchOn, demotions = 0 }: 
       <style>{".mx-swipe{display:none;font:500 11px var(--mono);color:var(--text-3);padding:6px 2px 0}@media (max-width:760px){.mx-swipe{display:block}}"}</style>
       <div className="mx-swipe">Swipe sideways for more {"\u2192"}</div>
       <div className="row dim mono" style={{ marginTop: 12, fontSize: 11 }}><span>L0 every output reviewed</span><span>{"·"}</span><span>L2 sample reviewed</span><span>{"·"}</span><span>L4 runs unattended, audited</span>
-        {demotions ? <><span>{"·"}</span><a href="#trust" id="tr-demos-link" onClick={(e) => { e.preventDefault(); setUrlParams({ tab: "demotions" }); }}>{`${demotions} demotion${demotions === 1 ? "" : "s"} in 7 days`}</a></> : null}
       </div>
     </Card>
   );

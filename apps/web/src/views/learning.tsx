@@ -78,13 +78,9 @@ export default function LearningView() {
           ]} />
         </div>
         <Tabs idPrefix="ln-tab" items={[{ id: "findings", label: "Findings" }, { id: "proposals", label: "Proposals", count: open }]} active={tab} onChange={(t) => { setTab(t); setHi(null); setHiFinding(null); }} />
-        <div id="ln-tab-panel" role="tabpanel" className="ln-panel">{body}</div>
-        {tab === "proposals" && settings ? (
-          <div className={`banner${on ? "" : " warn"}`} id="ln-switch-row">
-            <div className="grow">{on ? "Learning proposals are on. A person can draft them from findings and a second person accepts." : "Learning proposals are off. Turn them on to let a person draft proposals from findings."}</div>
-            <Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" small id="ln-switch" guard={perm} onClick={() => flip(!on)} />
-          </div>
-        ) : null}
+        <div id="ln-tab-panel" role="tabpanel" className="ln-panel">{body}
+          {tab === "proposals" && settings ? <div className="row" style={{ justifyContent: "flex-end", marginTop: 12 }}><Btn label={on ? "Turn off proposals" : "Turn on proposals"} kind="ghost" small id="ln-switch" guard={perm} onClick={() => flip(!on)} /></div> : null}
+        </div>
       </Page>
     </div>
   );
