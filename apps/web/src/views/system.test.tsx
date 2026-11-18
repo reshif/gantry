@@ -60,14 +60,18 @@ describe("System health view", () => {
     mount();
     await byId("sys-stale");
     expect(document.getElementById("sys-stale")?.textContent).toContain("over 26 hours old");
-    expect(document.querySelector("[data-service='launcher']")?.textContent).toContain("Down");
-    expect(document.querySelector("[data-service='github']")?.textContent).toContain("Degraded");
-    expect(document.querySelector("[data-service='api']")?.textContent).toContain("Up");
-    expect(document.getElementById("sys-backup")?.textContent).toContain("Stale");
-    expect(document.getElementById("sys-drill")?.textContent).toContain("Not run yet");
-    expect(document.querySelector("tr[data-key='ob-1']")?.textContent).toContain("HTTP 500 from slack");
-    expect(document.querySelector("tr[data-key='j1']")?.textContent).toContain("Lease expired");
+    expect(document.querySelector("[data-service='launcher']")?.textContent).toContain("offline");
+    expect(document.querySelector("[data-service='github']")?.textContent).toContain("degraded");
+    expect(document.querySelector("[data-service='api']")?.textContent).toContain("healthy");
+    expect(document.getElementById("sys-backup")?.textContent).toContain("stale");
+    expect(document.getElementById("sys-drill")?.textContent).toContain("No restore drill yet");
+    expect(document.querySelector("li[data-key='ob-1']")?.textContent).toContain("HTTP 500 from slack");
+    expect(document.querySelector("li[data-key='j1']")?.textContent).toContain("Lease expired");
     expect(document.body.textContent).toContain("Services2/4healthy");
+    expect(Array.from(document.querySelectorAll("#sys-stats ~ * .panel-title, .view-system .panel-title")).map((x) => x.textContent)).toEqual(["Services", "Worker heartbeat, last 20 minutes", "Backups", "Outbox dead letters", "Stuck jobs"]);
+    expect(document.getElementById("sys-heartbeat-note")?.textContent).toContain("not available");
+    expect(document.getElementById("sys-discard-ob-1")?.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById("sys-requeue-j1")?.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("shows no stale warning for a current backup and says nothing is stuck or dead", async () => {
@@ -76,6 +80,14 @@ describe("System health view", () => {
     await byId("sys-dead-empty");
     await byId("sys-stuck-empty");
     expect(document.getElementById("sys-stale")).toBeNull();
+  });
+
+  it("Refresh re-reads the health and toasts Checked all services", async () => {
+    const calls = setup();
+    mount();
+    fireEvent.click(await byId("sys-refresh"));
+    await waitFor(() => expect(document.getElementById("toasts")?.textContent).toContain("Checked all services"));
+    expect(calls.filter((c) => c.path === "/api/v1/system/health").length).toBeGreaterThan(1);
   });
 
   it("retries one dead letter with a POST", async () => {

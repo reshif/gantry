@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
 import type { AuditEntry } from "@gantry/domain";
 import { api, get } from "../../api/client";
 import { qk } from "../../api/keys";
@@ -85,4 +85,19 @@ export function useAuditFeed(f: Filters) {
     queryFn: ({ pageParam }) => get<AuditPage>(api("audit"), { ...p, limit: PAGE, ...(pageParam ? { cursor: pageParam } : {}) }),
     getNextPageParam: (last) => last.next ?? undefined,
   });
+}
+
+/**
+ * The four ledger tiles: the whole ledger, not the filtered list (the prototype counts every entry). Entries and the by-category counts come
+ * from one unfiltered read; Failures (outcome other than ok) is the sum of the totals of each other outcome the ledger has, since the server
+ * summary only counts denials.
+ */
+export function useAuditStats(): { entries: number; access: number; agents: number; failures: number; cats: string[]; actors: Array<{ id: string; name: string }> } | undefined | "error" {
+  const base = useQuery({ queryKey: qk.audit({ stats: true }), queryFn: () => get<AuditPage>(api("audit"), { limit: 1 }) });
+  const bad = (base.data?.summary.facets.outcomes ?? []).filter((o) => o !== "ok");
+  const counts = useQueries({ queries: bad.map((o) => ({ queryKey: qk.audit({ stats: true, outcome: o }), queryFn: () => get<AuditPage>(api("audit"), { limit: 1, outcome: o }) })) });
+  if (base.isError) return "error";
+  if (!base.data || counts.some((c) => c.isPending)) return undefined;
+  const sum = base.data.summary;
+  return { entries: sum.entries, access: sum.categories.access ?? 0, agents: sum.categories.agents ?? 0, failures: counts.reduce((n, c) => n + (c.data?.total ?? 0), 0), cats: Object.keys(sum.categories), actors: sum.facets.actors };
 }

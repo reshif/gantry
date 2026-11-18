@@ -66,6 +66,7 @@ beforeEach(() => {
   setCsrfToken("c");
   canBatcher.clear();
   window.location.hash = "";
+  window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
   cleanup();
@@ -77,49 +78,110 @@ describe("Security screen", () => {
     setup();
     mount();
     expect(((await byId("sec-sso-domain")) as HTMLInputElement).value).toBe("acme.dev");
-    expect(((await byId("sec-sso-entity")) as HTMLInputElement).value).toBe("https://acme.okta.com/metadata");
     expect((await byId("sec-sso-enforced") as HTMLInputElement).checked).toBe(true);
     expect((await byId("sec-gh") as HTMLInputElement).checked).toBe(false);
-    expect(((await byId("sec-idle")) as HTMLSelectElement).value).toBe("30");
+    expect(((await byId("sec-idle")) as HTMLInputElement).value).toBe("30");
     await waitFor(() => expect(text()).toContain("SSOEnforcedOkta"));
     expect(text()).toContain("30 min idle");
-    expect(text()).toContain("Failed sign-ins1last 24 h");
+    expect(text()).toContain("Failed sign-ins1recent");
     expect(document.querySelector(".lock-note")).toBeNull();
     expect(locked(await byId("sec-sso-domain"))).toBe(false);
   });
 
-  it("says plainly that MFA is not enforced instead of advertising a policy", async () => {
+  it("shows the MFA policy as recorded, with the methods, and keeps the not-enforced note as a tooltip", async () => {
     setup();
     mount();
-    expect((await byId("sec-mfa-notice")).textContent).toContain("Not enforced");
-    await waitFor(() => expect(text()).toContain("MFANot enforcedrecorded only"));
-    expect(text()).not.toContain("MFAAdmins");
+    await waitFor(() => expect(text()).toContain("MFAadminstotp"));
+    expect(((await byId("sec-mfa-policy")) as HTMLSelectElement).title).toContain("Recorded only");
   });
 
-  it("lists domains, ranges and research hosts on the network tab, and the active sessions and history tabs", async () => {
+  it("has the three prototype tabs, in the URL, and no Network, History or Emergency stop tabs", async () => {
     setup();
     mount();
-    fireEvent.click(await byId("sec-tab-network"));
+    await byId("sec-sso-domain");
+    expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(["Authentication", "Sessions2", "Sign-in log2"]);
+    fireEvent.click(await byId("sec-tab-sessions"));
+    expect(window.location.search).toContain("tab=sessions");
+    await byId("sec-ses-rv-s2");
+  });
+
+  it("stacks section 1 Sign-in policy and section 2 Restore needs two people, with the network and stop sections below", async () => {
+    setup({ "GET /api/v1/stops": () => ({ body: { items: [] } }) });
+    mount();
+    await byId("sec-policy");
+    expect(Array.from(document.querySelectorAll("#sec-tab-panel .panel-title")).map((t) => t.textContent).slice(0, 2)).toEqual(["Sign-in policy", "Restore needs two people"]);
     await byId("sec-dom-form");
     expect(text()).toContain("partner.example");
-    expect(text()).toContain("10.0.0.0/8");
-    expect(text()).toContain("inside 10.0.0.0/8");
     expect(text()).toContain("docs.example.com");
+    await byId("sec-stop-kill");
+    expect(((await byId("sec-ip")) as HTMLTextAreaElement).value).toBe("10.0.0.0/8");
+  });
+
+  it("saves the whole policy form with one Save, each changed setting as its own versioned PATCH", async () => {
+    let v = 3;
+    const calls = setup({ "PATCH /api/v1/security": () => ({ body: { ok: true, msg: "Saved.", version: ++v } }) });
+    mount();
+    fireEvent.change(await byId("sec-hours"), { target: { value: "8" } });
+    fireEvent.change(await byId("sec-mfa-policy"), { target: { value: "all" } });
+    fireEvent.click(await byId("sec-save"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(2));
+    expect(writes(calls).map((c) => [c.body.path, c.body.value])).toEqual([["mfa.policy", "all"], ["sessionHours", 8]]);
+    expect(writes(calls).map((c) => c.ifMatch)).toEqual(["3", "4"]);
+  });
+
+  it("refuses an invalid form with the prototype messages and writes nothing", async () => {
+    const calls = setup();
+    mount();
+    fireEvent.change(await byId("sec-sso-domain"), { target: { value: "nodot" } });
+    fireEvent.change(await byId("sec-hours"), { target: { value: "0" } });
+    fireEvent.change(await byId("sec-idle"), { target: { value: "2" } });
+    fireEvent.change(await byId("sec-ip"), { target: { value: "not-a-cidr" } });
+    fireEvent.click(await byId("sec-save"));
+    await waitFor(() => expect(text()).toContain("Enter a domain like acme.dev."));
+    expect(text()).toContain("Session length (hours) must be at least 1.");
+    expect(text()).toContain("Idle timeout (minutes) must be at least 5.");
+    expect(text()).toContain("Each line must be a CIDR such as 10.0.0.0/8.");
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("lists sessions with Person, Device, Method, Started, Last seen, a red revoked chip, search and a confirmation before Revoke", async () => {
+    const calls = setup({ "DELETE /api/v1/sessions/s2": () => ({ body: { ok: true, msg: "Revoked." } }) });
+    mount();
     fireEvent.click(await byId("sec-tab-sessions"));
     await byId("sec-ses-rv-s2");
-    expect(document.getElementById("sec-ses-rv-s3")).toBeNull();
-    fireEvent.click(document.querySelector("input[name=sec-ses-show][value=all]") as HTMLElement);
-    expect(locked(await byId("sec-ses-rv-s3"))).toBe(true);
-    fireEvent.click(await byId("sec-tab-history"));
+    expect(Array.from(document.querySelectorAll("#sec-ses-table th")).map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["Person", "Device", "Method", "Started", "Last seen", ""]);
+    expect(document.querySelector("#sec-ses-table .chip.bad")?.textContent).toBe("revoked");
+    expect(text()).toContain("3 sessions");
+    fireEvent.change(document.querySelector("#sec-ses-q") as HTMLElement, { target: { value: "zzz" } });
+    await waitFor(() => expect(text()).toContain("0 of 3 sessions"));
+    await byId("sec-ses-clear");
+    fireEvent.click(await byId("sec-ses-clear"));
+    fireEvent.click(await byId("sec-ses-rv-s2"));
+    expect(writes(calls)).toHaveLength(0);
+    await waitFor(() => expect(text()).toContain("Revoke this session?"));
+    expect(text()).toContain("is signed out on Chrome.");
+    fireEvent.click(await byId("sec-ses-ok"));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+  });
+
+  it("filters the sign-in log by outcome and search, with Account first after When, and reads Reason", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("sec-tab-signins"));
     await waitFor(() => expect(text()).toContain("mallory@evil.test"));
+    expect(Array.from(document.querySelectorAll("#sec-hist-table th")).map((t) => t.textContent?.replace(/[↑↓]/g, ""))).toEqual(["When", "Account", "Method", "Device", "Outcome", "Reason"]);
     expect(text()).toContain("Domain not allowed");
+    fireEvent.change(await byId("sec-hist-f-outcome"), { target: { value: "success" } });
+    await waitFor(() => expect(text()).not.toContain("mallory@evil.test"));
+    expect(text()).toContain("1 of 2 sign-ins");
+    expect(window.location.search).toContain("go=success");
   });
 
   it("shows an empty sign-in history as zero rows rather than a blank panel", async () => {
     setup({ "GET /api/v1/signins": () => ({ body: [] }) });
     mount();
-    fireEvent.click(await byId("sec-tab-history"));
-    await waitFor(() => expect(text()).toContain("0 sign-ins · 0 failures in the last 24 h"));
+    fireEvent.click(await byId("sec-tab-signins"));
+    await waitFor(() => expect(text()).toContain("Nothing here yet"));
     expect(document.getElementById("sec-history-error")).toBeNull();
   });
 
@@ -139,8 +201,11 @@ describe("Security screen", () => {
   it("says the settings are not visible when the viewer holds neither security.manage nor policy.view", async () => {
     const calls = setup({}, ["security.manage", "policy.view"]);
     mount();
-    const hidden = await byId("sec-hidden");
-    expect(hidden.textContent).toContain("Not visible to you");
+    const hidden = await byId("sec-no-access");
+    expect(hidden.textContent).toContain("No access to this sheet");
+    expect(hidden.textContent).toContain("Back to Home");
+    fireEvent.click(await byId("sec-home"));
+    expect(window.location.hash).toBe("#home");
     expect(calls.some((c) => c.path === "/api/v1/security")).toBe(false);
   });
 
@@ -157,18 +222,17 @@ describe("Security screen", () => {
   it("is read-only with the reason for someone who may only view: every control locked, no writes", async () => {
     const calls = setup({}, ["security.manage"]);
     mount();
-    const save = await byId("sec-sso-save");
+    const save = await byId("sec-save");
     await waitFor(() => expect(document.querySelector(".sec-lock .lock-note")).toBeTruthy());
     expect(document.querySelector(".lock-note")?.textContent).toContain("Read-only for you");
     expect(locked(save)).toBe(true);
-    for (const id of ["sec-sso-provider", "sec-sso-domain", "sec-sso-entity", "sec-sso-enforced", "sec-gh", "sec-hours", "sec-idle", "sec-two", "sec-kill-stepup"]) {
+    for (const id of ["sec-sso-provider", "sec-sso-domain", "sec-sso-enforced", "sec-gh", "sec-hours", "sec-idle", "sec-ip", "sec-two", "sec-kill-stepup"]) {
       expect(locked(await byId(id))).toBe(true);
     }
     fireEvent.click(await byId("sec-sso-enforced"));
     fireEvent.click(save);
-    fireEvent.click(await byId("sec-tab-network"));
     await byId("sec-dom-add");
-    for (const id of ["sec-dom-new", "sec-dom-add", "sec-dom-rm-partner_example", "sec-ip-new", "sec-ip-add", "sec-rh-add", "sec-rh-rm-docs_example_com", "sec-chatcap-save"]) {
+    for (const id of ["sec-dom-new", "sec-dom-add", "sec-dom-rm-partner_example", "sec-rh-add", "sec-rh-rm-docs_example_com", "sec-chatcap-save"]) {
       expect(locked(await byId(id))).toBe(true);
     }
     expect(writes(calls)).toHaveLength(0);
@@ -180,7 +244,6 @@ describe("Security screen", () => {
     fireEvent.click(await byId("sec-gh"));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ method: "PATCH", path: "/api/v1/security", body: { path: "githubLogin", value: true } });
-    fireEvent.click(await byId("sec-tab-network"));
     const own = await byId("sec-dom-rm-acme_dev");
     expect(locked(own)).toBe(true);
     expect(own.getAttribute("data-reason")).toMatch(/lock you out/);
@@ -199,7 +262,7 @@ describe("Security screen", () => {
     setup({ "GET /api/v1/signins": () => ({ status: 500, body: { ok: false, msg: "History is unavailable." } }) });
     mount();
     await byId("sec-sso-domain");
-    fireEvent.click(await byId("sec-tab-history"));
+    fireEvent.click(await byId("sec-tab-signins"));
     const err = await byId("sec-history-error");
     expect(err.textContent).toContain("History is unavailable.");
   });
@@ -207,7 +270,6 @@ describe("Security screen", () => {
   it("keeps the domain the viewer signed in with locked even for a manager, with the reason", async () => {
     const calls = setup();
     mount();
-    fireEvent.click(await byId("sec-tab-network"));
     const own = await byId("sec-dom-rm-acme_dev");
     expect(locked(own)).toBe(true);
     expect(own.getAttribute("data-reason")).toMatch(/lock you out/);
@@ -216,11 +278,10 @@ describe("Security screen", () => {
   });
 });
 
-describe("Security screen: emergency stop tab", () => {
+describe("Security screen: emergency stop section", () => {
   it("offers the factory kill with who may do it, lists the stops in force, and warns when a restore could not be approved", async () => {
     setup({ "GET /api/v1/people": () => ({ body: [PEOPLE[0]] }), "GET /api/v1/stops": () => ({ body: { items: [{ id: "project:payments", row: "r1", scope: "project", mode: "halt", reason: "Flaky tests", inFlight: null, by: "p-asha", at: NOW - 60000, version: 1, fencing: 1 }] } }) });
     mount();
-    fireEvent.click(await byId("sec-tab-stop"));
     expect(locked(await byId("sec-stop-kill"))).toBe(false);
     expect((await byId("sec-stop-warn")).textContent).toContain("a restore could not be approved");
     await waitFor(() => expect(document.getElementById("sec-stops-table")?.textContent).toContain("Flaky tests"));
@@ -230,7 +291,6 @@ describe("Security screen: emergency stop tab", () => {
   it("locks the kill with the server's reason when kill.factory is denied", async () => {
     setup({ "GET /api/v1/stops": () => ({ body: { items: [] } }) }, ["kill.factory"]);
     mount();
-    fireEvent.click(await byId("sec-tab-stop"));
     const kill = await byId("sec-stop-kill");
     await waitFor(() => expect(locked(kill)).toBe(true));
     expect(kill.getAttribute("data-reason")).toContain("No role holds kill.factory");
