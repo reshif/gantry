@@ -15,6 +15,9 @@ describe("hash parsing", () => {
     expect(parseHash("#home")).toEqual({ id: "home", param: null, project: null });
     expect(parseHash("#record/WO-1042")).toEqual({ id: "record", param: "WO-1042", project: null });
     expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null });
+    // a prototype deep link keeps its query in the hash: the route is what precedes it
+    expect(parseHash("#/security?tab=sessions")).toEqual({ id: "security", param: null, project: null });
+    expect(ROUTES.find((r) => r.id === "audit")?.title).toBe("Audit ledger");
     expect(parseHash("")).toEqual({ id: "", param: null, project: null });
     expect(parseHash("#record/a%2Fb")).toEqual({ id: "record", param: "a/b", project: null });
   });

@@ -173,4 +173,18 @@ describe("Audit", () => {
     fireEvent.click(document.getElementById("aud-verify")!);
     expect(await screen.findByText("Chain intact: 12 entries verified.")).toBeTruthy();
   });
+
+  it("writes the ledger time in UTC and opens the drawer without crashing when the detail has no time", async () => {
+    const at = Date.UTC(2025, 10, 14, 13, 34);
+    setup(SAM, {
+      "GET /api/v1/audit": () => ({ body: page([row(2, { at, action: "project.config" })]) }),
+      "GET /api/v1/audit/2": () => ({ body: { id: 2, seq: 2, actor: "p-asha", actorName: "Asha Raman", action: "project.config", outcome: "ok", category: "config", via: "web", project: null, entity: null } }),
+    });
+    mount(<AuditView />);
+    await screen.findByText("project.config");
+    expect(document.querySelector("#aud-table tbody tr td .mono")?.textContent).toBe("14 Nov 13:34");
+    fireEvent.click(document.getElementById("aud-row-2")!);
+    await waitFor(() => { if (!document.querySelector("#layer-drawer aside")?.textContent?.includes("Digest")) throw new Error("not yet"); });
+    expect(document.body.textContent).not.toContain("Gantry hit a problem");
+  });
 });

@@ -1,9 +1,8 @@
 /** Security, Sign-in log tab (prototype "Recent sign-ins"): search email and device, Outcome and Method selects, sortable When, 12 per page. */
 import type { SignIn } from "@gantry/domain";
-import { fmt } from "@gantry/domain";
 import { DataTable, type Col } from "../../ui/DataTable";
 import { Btn, Chip, Panel } from "../../ui/primitives";
-import { ListBar } from "../govern/listkit";
+import { ListBar, agoShort } from "../govern/listkit";
 import { useQueryParam } from "../floor/urlState";
 
 export function SignInsTab({ signins }: { signins: SignIn[] }) {
@@ -19,7 +18,7 @@ export function SignInsTab({ signins }: { signins: SignIn[] }) {
   const methods = ["sso", "demo", "password", ...signins.map((s) => s.method)].filter((m, i, a) => a.indexOf(m) === i);
   const clear = () => { setQ(null); setO(null); setM(null); };
   const cols: Col<SignIn>[] = [
-    { key: "at", label: "When", sort: (s) => s.at, render: (s) => fmt.ago(s.at, now) },
+    { key: "at", label: "When", sort: (s) => s.at, render: (s) => agoShort(s.at, now) },
     { key: "e", label: "Account", render: (s) => s.email },
     { key: "m", label: "Method", render: (s) => s.method },
     { key: "d", label: "Device", render: (s) => s.device },

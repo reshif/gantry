@@ -296,4 +296,33 @@ describe("Security screen: emergency stop section", () => {
     expect(kill.getAttribute("data-reason")).toContain("No role holds kill.factory");
     await waitFor(() => expect(text()).toContain("Nothing is stopped right now."));
   });
+
+  it("says why a read-only role cannot save when Save settings is clicked, and marks required fields '(required)'", async () => {
+    setup({}, ["security.manage"]);
+    mount();
+    const save = await byId("sec-save");
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    expect(document.querySelector("label[for=sec-sso-domain]")?.textContent).toBe("Email domain (required)");
+    expect(document.querySelector("label[for=sec-sso-domain] .field-req")).toBeNull();
+    fireEvent.click(save);
+    await waitFor(() => expect(document.body.textContent).toContain("Your role is read-only for this action."));
+  });
+
+  it("opens the Sessions tab from the prototype deep link #/security?tab=sessions", async () => {
+    window.history.replaceState(null, "", "/#/security?tab=sessions");
+    setup();
+    mount();
+    await byId("sec-ses-table");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("writes Sessions Started and Last seen with one unit, like the prototype", async () => {
+    window.history.replaceState(null, "", "/?tab=sessions");
+    setup();
+    mount();
+    const t = await byId("sec-ses-table");
+    expect(t.textContent).toContain("1h ago");
+    expect(t.textContent).not.toMatch(/\dh \d+m ago/);
+    window.history.replaceState(null, "", "/");
+  });
 });

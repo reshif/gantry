@@ -27,7 +27,8 @@ const dec = (v: string): string => {
 };
 
 export function parseHash(hash: string): RouteLocation {
-  const raw = hash.replace(/^#\/?/, "");
+  // a prototype deep link keeps its query inside the hash (`#/security?tab=sessions`): the route is what comes before the `?`
+  const raw = hash.replace(/^#\/?/, "").replace(/\?.*$/, "");
   let [head = "", ...rest] = raw.split("/");
   let project: string | null = null;
   if (head === "p" && rest.length >= 2 && rest[0]) {

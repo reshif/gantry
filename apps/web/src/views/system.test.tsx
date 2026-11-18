@@ -111,4 +111,19 @@ describe("System health view", () => {
     mount();
     await waitFor(() => expect(document.getElementById("sys-hidden")?.textContent).toContain("Not visible to you"));
   });
+
+  it("links each stuck job to its work order record, with title and reason, and shows the recovery time in minutes", async () => {
+    setup({ health: { ...HEALTH, drill: { status: "ok", at: new Date(NOW).toISOString(), ageHours: 216, set: "bk", seconds: 840, failedChecks: 0, detail: "" }, outbox: { ...HEALTH.outbox, dead: [{ ...HEALTH.outbox.dead[0], workOrder: "WO-2404" }] }, jobs: { ...HEALTH.jobs, stuck: [{ ...HEALTH.jobs.stuck[0], workOrder: { id: "WO-2406", title: "Refund flow", project: "payments", reason: "Waiting on review" } }] } } });
+    mount();
+    const link = await byId("sys-wo-WO-2406");
+    expect(link.tagName).toBe("A");
+    expect(link.getAttribute("href")).toBe("#/p/payments/record/WO-2406");
+    expect(link.className).toContain("mono");
+    const row = document.querySelector("li[data-key='j1']")!;
+    expect(row.textContent).toContain("Refund flow");
+    expect(row.textContent).toContain("Waiting on review");
+    expect(document.getElementById("sys-drill")?.textContent).toContain("recovery time 14 min");
+    expect(document.querySelector("li[data-key='ob-1']")?.textContent).toContain("WO-2404 · HTTP 500 from slack · 8 attempts");
+    expect(document.querySelector(".sys-counts")).toBeNull();
+  });
 });

@@ -144,7 +144,7 @@ describe("signed in", () => {
     const nav = await screen.findByRole("navigation", { name: "Main" });
     expect(within(nav).queryByText("Security")).toBeNull();
     expect(within(nav).queryByText("Agents")).toBeNull();
-    expect(await screen.findByText("Security isn't available to your roles")).toBeTruthy();
+    expect(await screen.findByText("No access to this sheet")).toBeTruthy();
     expect(window.location.hash).toBe("#security");
     expect(within(nav).getByText("Home").closest("a")?.getAttribute("aria-current")).toBeNull();
   });

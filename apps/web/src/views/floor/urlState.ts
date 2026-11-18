@@ -3,7 +3,11 @@ import { useCallback, useState } from "react";
 
 const read = (name: string): string | null => {
   try {
-    return new URLSearchParams(window.location.search).get(name);
+    const fromSearch = new URLSearchParams(window.location.search).get(name);
+    if (fromSearch !== null) return fromSearch;
+    // a prototype deep link carries its state inside the hash: `#/security?tab=sessions`
+    const at = window.location.hash.indexOf("?");
+    return at < 0 ? null : new URLSearchParams(window.location.hash.slice(at + 1)).get(name);
   } catch {
     return null;
   }

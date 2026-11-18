@@ -4,6 +4,7 @@
  * (audited). What the server cannot supply is shown as such: heartbeat history, backup size, discarding a dead letter, requeueing a stuck job.
  */
 import { fmt } from "@gantry/domain";
+import { hashFor } from "../../lib/router";
 import { useCan } from "../../api/can";
 import { Btn, Chip, Empty, Panel, Stat, StatRow, ViewHead } from "../../ui/primitives";
 import { Async, qState, useCommand } from "../../ui/async";
@@ -29,6 +30,8 @@ const NA = "not available";
 const ageText = (h: number | null): string => (h === null ? "–" : h < 1 ? "<1h ago" : h < 48 ? `${Math.round(h)}h ago` : `${Math.floor(h / 24)}d ago`);
 const ageShort = (sec: number): string => (sec < 45 ? "just now" : `${fmt.dur(sec * 1000)} ago`);
 const STALE_HOURS = 26;
+/** "14 min", the prototype's recovery time; seconds only when under a minute. */
+const recovery = (sec: number): string => (sec < 60 ? `${sec} s` : `${Math.round(sec / 60)} min`);
 
 function ServiceRow({ s }: { s: ServiceHealth }) {
   const t = SERVICE[s.status];
@@ -41,15 +44,20 @@ function ServiceRow({ s }: { s: ServiceHealth }) {
   );
 }
 
-/** The newest beat is all the server reports: the chart is drawn empty and says so. */
+/** The newest beat is all the server reports: only that bar is drawn as a beat (green when fresh, red when late), the other nineteen stay empty and the caption says so. */
 function HeartbeatPanel({ h }: { h: SystemHealth }) {
   const beat = h.services.find((s) => s.heartbeatAgeSeconds != null);
+  const age = beat?.heartbeatAgeSeconds ?? null;
+  const fresh = age !== null && age <= 60;
   return (
     <Panel title="Worker heartbeat, last 20 minutes" id="sys-heartbeat">
-      <svg className="chart" viewBox="0 0 400 50" width="100%" role="img" aria-label="Heartbeat history is not available">
-        {Array.from({ length: 20 }, (_, i) => <rect key={i} x={i * 20 + 2} y={30} width={15} height={10} fill="var(--line)" />)}
+      <svg className="chart" viewBox="0 0 400 50" width="100%" role="img" aria-label={age === null ? "Heartbeat history is not available" : `Heartbeat: the latest beat was ${ageShort(age)}`}>
+        {Array.from({ length: 20 }, (_, i) => {
+          const latest = i === 19 && age !== null;
+          return <rect key={i} x={i * 20 + 2} y={latest && !fresh ? 30 : 10} width={15} height={latest && !fresh ? 10 : 30} fill={latest ? (fresh ? "var(--ok)" : "var(--bad)") : "var(--line)"} />;
+        })}
       </svg>
-      <div className="small muted" id="sys-heartbeat-note">{beat?.heartbeatAgeSeconds != null ? `Beat history ${NA}: the server reports only the latest beat, ${ageShort(beat.heartbeatAgeSeconds)}.` : `Beat history ${NA}: no worker has reported a heartbeat.`}</div>
+      <div className="small muted" id="sys-heartbeat-note">{age !== null ? `Beat history ${NA}: the server reports only the latest beat, ${ageShort(age)}.` : `Beat history ${NA}: no worker has reported a heartbeat.`}</div>
     </Panel>
   );
 }
@@ -69,7 +77,7 @@ function BackupPanel({ b, d }: { b: BackupStatus; d: DrillStatus }) {
       </ul>
       <div id="sys-drill" className={`callout ${d.status === "ok" ? "ok" : d.status === "failed" ? "bad" : ""}`} style={{ margin: 12 }}>
         <b>{d.status === "ok" ? "Restore drill passed" : d.status === "failed" ? "Restore drill failed" : "No restore drill yet"}</b>
-        {d.at ? `Last drill ${ageText(d.ageHours)}${d.seconds !== null ? `, recovery time ${d.seconds} s` : ""}.${d.status === "failed" ? ` ${d.failedChecks} check${d.failedChecks === 1 ? "" : "s"} failed. ${d.detail}` : ""}` : d.detail}
+        {d.at ? `Last drill ${ageText(d.ageHours)}${d.seconds !== null ? `, recovery time ${recovery(d.seconds)}` : ""}.${d.status === "failed" ? ` ${d.failedChecks} check${d.failedChecks === 1 ? "" : "s"} failed. ${d.detail}` : ""}` : d.detail}
       </div>
     </Panel>
   );
@@ -83,7 +91,7 @@ function DeadRow({ r, canRetry }: { r: DeadLetter; canRetry: ReturnType<typeof d
       <span className="mono">{r.id}</span>
       <div className="grow">
         <b title={r.scope === "project" ? "Belongs to a project's notifications" : undefined}>{r.destination}</b>
-        <div className="small muted" title={r.lastError ?? undefined}>{`${r.lastError ?? "No error recorded."} · ${r.attempts} attempts`}</div>
+        <div className="small muted" title={r.lastError ?? undefined}>{[r.workOrder, r.lastError ?? "No error recorded.", `${r.attempts} attempts`].filter(Boolean).join(" · ")}</div>
       </div>
       <Btn small label="Retry" id={`sys-retry-${r.id}`} guard={canRetry.allowed ? null : canRetry} disabledReason={retry.wait("Retrying…")} onClick={() => void retry.run()} />
       <Btn small kind="danger" label="Discard" id={`sys-discard-${r.id}`} guard={canRetry.allowed ? discard : canRetry} />
@@ -93,8 +101,6 @@ function DeadRow({ r, canRetry }: { r: DeadLetter; canRetry: ReturnType<typeof d
 
 function OutboxPanel({ h }: { h: SystemHealth }) {
   const canRetry = dec(useCan("integration.edit"));
-  const c = h.outbox.counts;
-  const oldest = h.outbox.oldestPendingSeconds;
   return (
     <Panel title="Outbox dead letters" flush id="sys-outbox">
       {h.outbox.dead.length === 0 ? (
@@ -102,9 +108,6 @@ function OutboxPanel({ h }: { h: SystemHealth }) {
       ) : (
         <ul className="list" aria-label="Dead letters">{h.outbox.dead.map((r) => <DeadRow key={r.id} r={r} canRetry={canRetry} />)}</ul>
       )}
-      <p className="small muted sys-counts" aria-label="Outbox counts" style={{ padding: "8px 14px" }}>
-        {`Pending ${fmt.num(c.pending)} · Sending ${fmt.num(c.sending)} · Delivered ${fmt.num(c.delivered)} · Dead ${fmt.num(c.dead)} · Oldest pending ${oldest === null ? "–" : fmt.dur(oldest * 1000)}`}
-      </p>
     </Panel>
   );
 }
@@ -120,10 +123,10 @@ function JobsPanel({ h }: { h: SystemHealth }) {
         <ul className="list" aria-label="Stuck jobs">
           {h.jobs.stuck.map((j: StuckJob) => (
             <li key={j.id} data-key={j.id}>
-              <span className="mono">{j.kind}</span>
+              {j.workOrder ? <a className="pri mono" href={hashFor("record", j.workOrder.id, j.workOrder.project)} id={`sys-wo-${j.workOrder.id}`}>{j.workOrder.id}</a> : <span className="mono">{j.id}</span>}
               <div className="grow">
-                <div className="trunc">{j.queue}</div>
-                <div className="small muted">{j.reason === "lease_expired" ? "Lease expired" : `Running over ${h.jobs.runningLongMinutes / 60} hours with little progress`}</div>
+                <div className="trunc">{j.workOrder?.title ?? `${j.kind} on ${j.queue}`}</div>
+                <div className="small muted">{j.workOrder?.reason ?? (j.reason === "lease_expired" ? "Lease expired" : `Running over ${h.jobs.runningLongMinutes / 60} hours with little progress`)}</div>
               </div>
               <Btn small label="Requeue" id={`sys-requeue-${j.id}`} guard={canEdit.allowed ? requeue : canEdit} />
             </li>

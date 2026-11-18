@@ -5,6 +5,7 @@
  */
 import { useRef, useState, type FormEvent } from "react";
 import type { SecuritySettings } from "@gantry/domain";
+import { useUI } from "../../ui/overlay-context";
 import { setSecurity } from "./commands";
 import { Btn, Field, Panel, Select, Toggle, focusFirstInvalid, type Decision } from "../../ui/primitives";
 import { nextVersion, useOutcome, versionOf } from "../govern/data";
@@ -19,6 +20,7 @@ const lines = (t: string): string[] => t.split("\n").map((x) => x.trim()).filter
 
 export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: SecuritySettings; thisIp: string }) {
   const outcome = useOutcome();
+  const ui = useUI();
   const set = useSet(sec);
   const form = useRef<HTMLFormElement>(null);
   const base: Vals = { provider: sec.sso.provider, domain: sec.sso.domain, enforced: sec.sso.enforced, mfa: sec.mfa.policy, hours: String(sec.sessionHours), idle: String(sec.idleMin), ip: sec.ipAllow.join("\n") };
@@ -48,11 +50,15 @@ export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: Secur
 
   const save = async (ev: FormEvent) => {
     ev.preventDefault();
-    if (!perm.allowed) return;
     const e = validate();
     setErr(e);
     if (Object.keys(e).length) {
       setTimeout(() => form.current && focusFirstInvalid(form.current), 0);
+      return;
+    }
+    // the prototype validates first, then says why a read-only role cannot save
+    if (!perm.allowed) {
+      ui.toast("Your role is read-only for this action.", "error");
       return;
     }
     setBusy(true);
@@ -88,21 +94,21 @@ export function PolicyPanels({ perm, sec, thisIp }: { perm: Decision; sec: Secur
           <div className="cols">
             <div>
               <Field label="SSO provider" htmlFor="sec-sso-provider"><Select id="sec-sso-provider" options={PROVIDERS.includes(cur.provider) ? PROVIDERS : [cur.provider, ...PROVIDERS]} value={cur.provider} disabled={!perm.allowed} onChange={(v) => upd({ provider: v })} /></Field>
-              <Field label="Email domain" required htmlFor="sec-sso-domain" error={err.domain}><input id="sec-sso-domain" className="input" value={cur.domain} disabled={!perm.allowed} autoComplete="off" onChange={(e) => upd({ domain: e.target.value })} /></Field>
+              <Field label={<>Email domain <span className="muted">(required)</span></>} htmlFor="sec-sso-domain" error={err.domain}><input id="sec-sso-domain" aria-required="true" className="input" value={cur.domain} disabled={!perm.allowed} autoComplete="off" onChange={(e) => upd({ domain: e.target.value })} /></Field>
               <div className="row" style={{ flexWrap: "nowrap" }}>
                 <Toggle id="sec-sso-enforced" checked={cur.enforced} decision={perm} onChange={(v) => upd({ enforced: v })} />
-                <label htmlFor="sec-sso-enforced" title="Email and password sign-in is refused.">Require SSO for everyone</label>
+                <label htmlFor="sec-sso-enforced" className="strong" title="Email and password sign-in is refused.">Require SSO for everyone</label>
               </div>
             </div>
             <div>
               <Field label="MFA policy" htmlFor="sec-mfa-policy"><Select id="sec-mfa-policy" title="Recorded only: Gantry does not check it at sign-in, so enforce it in your identity provider." options={MFA} value={cur.mfa} disabled={!perm.allowed} onChange={(v) => upd({ mfa: v })} /></Field>
-              <Field label="Session length (hours)" required htmlFor="sec-hours" error={err.hours}><input id="sec-hours" className="input" type="number" min={1} value={cur.hours} disabled={!perm.allowed} onChange={(e) => upd({ hours: e.target.value })} /></Field>
-              <Field label="Idle timeout (minutes)" required htmlFor="sec-idle" error={err.idle}><input id="sec-idle" className="input" type="number" min={5} value={cur.idle} disabled={!perm.allowed} onChange={(e) => upd({ idle: e.target.value })} /></Field>
+              <Field label={<>Session length (hours) <span className="muted">(required)</span></>} htmlFor="sec-hours" error={err.hours}><input id="sec-hours" aria-required="true" className="input" type="number" min={1} value={cur.hours} disabled={!perm.allowed} onChange={(e) => upd({ hours: e.target.value })} /></Field>
+              <Field label={<>Idle timeout (minutes) <span className="muted">(required)</span></>} htmlFor="sec-idle" error={err.idle}><input id="sec-idle" aria-required="true" className="input" type="number" min={5} value={cur.idle} disabled={!perm.allowed} onChange={(e) => upd({ idle: e.target.value })} /></Field>
             </div>
           </div>
           <Field label="IP allow list" htmlFor="sec-ip" hint="One CIDR per line. Empty means anywhere." error={err.ip}><textarea id="sec-ip" className="input mono" rows={3} value={cur.ip} disabled={!perm.allowed} onChange={(e) => upd({ ip: e.target.value })} /></Field>
           <div className="row">
-            <Btn label="Save settings" kind="primary" type="submit" id="sec-save" guard={!perm.allowed ? perm : null} disabledReason={busy ? "Saving…" : undefined} />
+            <Btn label="Save settings" kind="primary" type="submit" id="sec-save" aria-disabled={!perm.allowed ? "true" : undefined} title={!perm.allowed ? "Your role is read-only for this action." : undefined} disabledReason={busy ? "Saving…" : undefined} />
             {dirty ? <Btn label="Discard" kind="ghost" id="sec-discard" onClick={() => { setD(null); setErr({}); }} /> : null}
           </div>
         </form>

@@ -568,6 +568,7 @@ textarea.input{height:auto;min-height:84px;padding:8px 10px}
 .fbar .field{display:flex;flex-direction:column;gap:3px;min-width:0}
 .fbar .field>.field-label{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
 .fbar .field select{width:100%}
+.fbar .field{margin-bottom:0}
 .btn.danger,.btn.btn-danger{background:var(--surface);color:var(--bad);border-color:var(--bad)}.btn.danger:hover,.btn.btn-danger:hover{background:var(--bad-bg);filter:none;opacity:1}
 .row.nowrap{flex-wrap:nowrap}.ppl-find{margin-bottom:12px;max-width:420px}
 .view-workload,.view-workload .panel{min-width:0}.view-workload .wl-main .panel-body{overflow-x:auto}

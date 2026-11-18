@@ -7,9 +7,9 @@ import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
-import { formatHash, replaceHash, useHash } from "../lib/router";
+import { formatHash, navigate, replaceHash, useHash } from "../lib/router";
 import { setProject, usePrefs } from "../lib/prefs";
-import { Empty } from "../ui/primitives";
+import { Btn, Empty, ViewHead } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
 import { useInstallStepUp, useResumeStepUp } from "../ui/stepup";
 import { useInstallOverrideReason } from "../ui/override";
@@ -127,7 +127,8 @@ export function Shell({ me }: { me: Me }) {
           ) : denied ? (
             // a page outside the person's roles: say so where they asked for it (the URL stays, so it works once access is granted)
             <div className="view">
-              <Empty id="route-denied" icon="lock" title={`${denied.title} isn't available to your roles`} text="Your roles don't include this page. A Factory Admin can grant a role that does; until then it stays hidden from your menu." action={<p><a href="#home" className="linkish" id="route-denied-home">Go to Home</a></p>} />
+              <ViewHead title={denied.title} kicker="All lines" />
+              <Empty id="route-denied" icon="lock" title="No access to this sheet" text={`Your role cannot open ${denied.title}. Ask a factory admin for the ${denied.perm ?? "required"} permission.`} action={<Btn label="Back to Home" id="route-denied-home" onClick={() => navigate("home")} />} />
             </div>
           ) : ready ? (
             <Suspense fallback={<RouteSkeleton />}>{View ? <View /> : null}</Suspense>

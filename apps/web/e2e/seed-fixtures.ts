@@ -221,6 +221,14 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
       const limit = Number(qp.get("limit") ?? 0) || shown.length;
       return { items: shown.slice(0, limit), next: null, total: shown.length, summary: { entries: items.length, denied: items.filter((e) => e.outcome === "denied").length, changes: items.filter((e) => e.category === "config").length, head: items[0]?.digest ?? "", categories: cats, topics: {}, facets: { outcomes: Object.keys(count("outcome")), channels: ["web", "api"], actors: Object.keys(count("actor")).map((id) => ({ id, name: ppl.get(id) ?? id })) } } };
     }
+    // gov2 fixtures: one ledger entry, in the server's detail shape (before/after as JSON text, the chain digests, the entity)
+    const auditOne = /^audit\/(\d+)$/.exec(path);
+    if (auditOne) {
+      const e = (seed.audit as Seed[]).find((x) => String(x.id) === auditOne[1]);
+      if (!e) return undefined;
+      const ppl = new Map((seed.people as Array<{ id: string; name: string }>).map((x) => [x.id, x.name]));
+      return { ...e, seq: e.id, actorKind: String(e.actor).startsWith("p-") ? "human" : "system", actorName: ppl.get(e.actor) ?? e.actor, channel: e.via ?? "web", digest: `d${String(e.id).padStart(8, "0")}ffff`, prev: `d${String(Number(e.id) - 1).padStart(8, "0")}ffff`, rule: null, onBehalfOf: null, topic: null, workOrder: null, session: null, request: { id: null, command: null, idempotencyKey: null }, sourceIp: null, diff: null, history: [], before: e.before == null ? null : JSON.stringify(e.before), after: e.after == null ? null : JSON.stringify(e.after) };
+    }
     if (path === "signins") return seed.signins;
     if (path === "sessions") return seed.sessions;
     if (path === "policies") return seed.policies;
@@ -261,10 +269,10 @@ export function seedResolver(seed: Seed): (method: string, path: string, url: UR
         backup: { status: "ok", at, ageHours: 6, set: "bk-0412", detail: "verified" },
         drill: { status: "ok", at, ageHours: 9 * 24, set: "bk-0410", seconds: 840, failedChecks: 0, detail: "restore drill passed" },
         outbox: { counts: { pending: 1, sending: 0, delivered: 220, dead: 2 }, oldestPendingSeconds: 30, dead: [
-          { id: "ob-81", destination: "slack.card", scope: "project", attempts: 5, maxAttempts: 5, lastError: "503 from slack.com", createdAt: at, failedAt: at },
-          { id: "ob-77", destination: "webhook.release", scope: "project", attempts: 5, maxAttempts: 5, lastError: "timeout after 10 s", createdAt: at, failedAt: at },
+          { id: "ob-81", destination: "slack.card", workOrder: "WO-2404", scope: "project", attempts: 5, maxAttempts: 5, lastError: "503 from slack.com", createdAt: at, failedAt: at },
+          { id: "ob-77", destination: "webhook.release", workOrder: "WO-2405", scope: "project", attempts: 5, maxAttempts: 5, lastError: "timeout after 10 s", createdAt: at, failedAt: at },
         ] },
-        jobs: { counts: { queued: 2, running: 3, done: 480, dead: 0 }, stuck: stuckWos.map((w) => ({ id: `j-${w.id}`, queue: w.id, kind: "flow.advance", attempts: 1, maxAttempts: 5, owner: null, startedAt: null, leaseUntil: null, reason: w.state === "blocked" ? "lease_expired" : "running_long", lastError: null })), runningLongMinutes: 180, dead: [], deadWindowHours: 24 },
+        jobs: { counts: { queued: 2, running: 3, done: 480, dead: 0 }, stuck: stuckWos.map((w) => ({ id: `j-${w.id}`, queue: w.id, kind: "flow.advance", attempts: 1, maxAttempts: 5, owner: null, startedAt: null, leaseUntil: null, reason: w.state === "blocked" ? "lease_expired" : "running_long", lastError: null, workOrder: { id: w.id, title: w.title, project: w.project, reason: w.blockReason ?? null } })), runningLongMinutes: 180, dead: [], deadWindowHours: 24 },
         runStarts: { windowMinutes: 60, failed: 0, reasons: [] },
       };
     }

@@ -89,7 +89,7 @@ export function AuditDrawer({ seq, projectName, close }: { seq: number; projectN
       <div className="body">
         <div className="stack">
           <dl className="kv">
-            <dt>Target</dt><dd>{e.target}</dd>
+            <dt>Target</dt><dd>{e.target ?? "\u2014"}</dd>
             <dt>Category</dt><dd><Chip text={e.category} cls="plain" /></dd>
             <dt>Where</dt><dd>{e.project ? projectName(e.project) : "factory"}</dd>
             <dt>Via</dt><dd>{e.via}</dd>
@@ -104,9 +104,9 @@ export function AuditDrawer({ seq, projectName, close }: { seq: number; projectN
           ) : null}
           {e.entity ? <div className="row"><EntityLink e={e} close={close} /></div> : null}
           <dl className="kv" aria-label="Chain">
-            <dt>Digest</dt><dd className="mono small">{e.digest}</dd>
-            <dt>Previous</dt><dd className="mono small">{e.prev}</dd>
-            <dt>Time</dt><dd className="mono small">{`${fmt.iso(e.at)} IST`}</dd>
+            <dt>Digest</dt><dd className="mono small">{e.digest ?? "\u2014"}</dd>
+            <dt>Previous</dt><dd className="mono small">{e.prev ?? "\u2014"}</dd>
+            <dt>Time</dt><dd className="mono small">{Number.isFinite(e.at) ? `${fmt.iso(e.at)} UTC` : "\u2014"}</dd>
           </dl>
         </div>
       </div>

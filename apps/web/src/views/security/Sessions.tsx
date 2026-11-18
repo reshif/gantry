@@ -1,13 +1,12 @@
 /** Security, Sessions tab (prototype "Active sessions"): search by person or device, sortable columns, Revoke with a confirmation. */
 import type { SecuritySettings, Session } from "@gantry/domain";
-import { fmt } from "@gantry/domain";
 import { revokeSession } from "./commands";
 import { useActors } from "../../ui/actors";
 import { DataTable, type Col } from "../../ui/DataTable";
 import { Btn, Chip, Panel, type Decision } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { lockd, useOutcome } from "../govern/data";
-import { ListBar } from "../govern/listkit";
+import { ListBar, agoShort } from "../govern/listkit";
 import { useQueryParam } from "../floor/urlState";
 
 export function SessionsTab({ perm, sessions, currentId, viewerId }: { perm: Decision; sessions: Session[]; sec: SecuritySettings; currentId: string; viewerId: string }) {
@@ -40,8 +39,8 @@ export function SessionsTab({ perm, sessions, currentId, viewerId }: { perm: Dec
     { key: "p", label: "Person", sort: (s) => name(s.person).toLowerCase(), render: (s) => <span className="who">{name(s.person)}</span> },
     { key: "d", label: "Device", render: (s) => s.device },
     { key: "m", label: "Method", render: (s) => <Chip text={s.method} cls="plain" /> },
-    { key: "s", label: "Started", sort: (s) => s.started, render: (s) => fmt.ago(s.started, now) },
-    { key: "l", label: "Last seen", render: (s) => fmt.ago(s.lastSeen, now) },
+    { key: "s", label: "Started", sort: (s) => s.started, render: (s) => agoShort(s.started, now) },
+    { key: "l", label: "Last seen", render: (s) => agoShort(s.lastSeen, now) },
     { key: "x", label: "", align: "end", render: (s) => {
       if (s.revoked) return <Chip text="revoked" cls="bad" />;
       const own = s.person === viewerId;
