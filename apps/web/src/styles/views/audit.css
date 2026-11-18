@@ -17,7 +17,6 @@
 .aud-chk { font-size: var(--t-sm); }
 .aud-verified { align-items: center; }
 .aud-verified > div { flex: 1; min-width: 0; }
-.callout-ok { border-color: var(--done); background: var(--done-soft); }
 .view-audit .outcome { border: 0; padding: 1px 8px; border-radius: 5px; font-family: var(--f-body); font-size: var(--t-sm); background: var(--sunk); color: var(--ink-2); }
 .view-audit .o-ok { background: var(--done-soft); color: var(--done); }
 .view-audit .o-denied, .view-audit .o-blocked { background: var(--block-soft); color: var(--block); }

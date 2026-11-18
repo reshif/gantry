@@ -1,96 +1,40 @@
 /* People & teams and the person page. Tokens only. Shared look (panels, chips, tables) lives in foundation.css. */
 
 /* shared two-up row used by the person page (and Access / Security panels that sit side by side) */
-.gv-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); }
-.gv-two.gv-top { align-items: start; }
-.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-.linkbtn:hover { color: var(--ink); }
 
 /* organisation card */
-.ppl-org-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex-wrap: wrap; }
-.ppl-org-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r2); background: var(--sunk); flex: none; }
-.ppl-org-mark svg { width: 22px; height: 22px; }
-.ppl-org-name { display: grid; min-width: 0; flex: 1 1 200px; }
-.ppl-org-head .searchbox { flex: 0 1 320px; min-width: 200px; margin-left: auto; }
-.ppl-org-head .searchbox .input { width: 100%; }
 
 /* team cards */
 .ppl-teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); align-items: start; }
-.ppl-team .panel-body { display: grid; gap: 10px; }
-.ppl-team .panel-title { display: flex; align-items: baseline; gap: 8px; }
-.ppl-count { font-size: var(--t-sm); font-weight: 400; color: var(--faint); font-family: var(--f-mono); }
 .ppl-team-desc { margin: 0; }
 .team-lines { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0; }
-.ppl-owns { margin-left: 8px; }
 .team-roles { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0; }
 .members { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; }
 .members > li + li { border-top: 1px solid var(--line); }
 .member { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; padding: 8px 12px; border: 0; background: transparent; border-radius: 0; color: inherit; text-decoration: none; }
 .member:hover { background: var(--sunk); }
 .member:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.member-main { display: grid; min-width: 0; }
-.member-main .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ppl-name { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; font-weight: 600; }
-.ppl-flags { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
-.ppl-flags .chip { margin-right: 0; }
-.ppl-flags .ic, .ppl-badges .ic { width: 11px; height: 11px; }
 .team-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* person page */
 .person-back { align-self: flex-start; }
 .person-stack { min-width: 0; }
 .person-top { display: flex; gap: 16px; align-items: flex-start; padding: 16px; flex-wrap: wrap; }
-.ppl-who { min-width: 0; flex: 1 1 260px; display: grid; gap: 2px; }
-.ppl-who .ad-meta { overflow-wrap: anywhere; color: var(--muted); font-size: var(--t-md); }
 .person-kicker { font-size: var(--t-sm); color: var(--muted); }
 .person-name { margin: 0; }
-.ppl-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .person-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 16px 16px; }
 .person-actions .btn { flex: none; }
 .person-anchor { display: block; scroll-margin-top: 72px; }
-.ppl-hint { margin: 0 0 10px; }
-.ppl-hint-pad { padding: 12px 16px 0; }
 .ppl-held { display: grid; gap: 12px; }
 .ppl-held .kicker { display: block; margin-bottom: 4px; }
-.ppl-held-list { display: flex; gap: 4px; flex-wrap: wrap; list-style: none; margin: 4px 0 0; padding: 0; }
-.ppl-frole-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.ppl-frole-row select { max-width: 100%; }
-.ppl-why { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: var(--t-sm); }
-.ppl-why .ic { width: 13px; height: 13px; flex: none; }
-
-.ppl-roles th[scope="row"] { white-space: nowrap; }
-.ppl-pname { display: block; font-weight: 600; font-size: var(--t-sm); }
-.ppl-rcol { text-align: center !important; font-size: 10px !important; white-space: normal !important; min-width: 62px; line-height: 1.2; }
-.ppl-rcell { text-align: center !important; }
-.ppl-rcell.is-on { background: var(--accent-soft); }
-.ppl-roles tr.is-member th[scope="row"] { box-shadow: inset 3px 0 0 var(--accent); }
-
-.ppl-grp th { background: var(--sunk); font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
-.ppl-stop th[scope="row"] { color: var(--block); }
-.ppl-aid { display: block; font-size: 10px; }
-.eff-cell { position: relative; cursor: pointer; }
-.eff-cell.is-policy { background: var(--wait-soft); color: var(--wait); }
-.eff-pol { display: block; font-size: 9px; line-height: 1; }
-.eff-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.eff-cell.is-sel { box-shadow: inset 0 0 0 2px var(--ink); }
-.eff-src { font-size: 9px; color: var(--accent); margin-left: 2px; }
-.caps-grid li[tabindex]:focus-visible { outline: 2px solid var(--accent); }
-.ppl-cell { margin: var(--s3) 0 0; }
-.ppl-cell p { margin: 0; }
-.ppl-cell > .row { flex-wrap: wrap; align-items: flex-start; }
-.ppl-cell-hint { margin: var(--s3) 0 0; }
-.person-head .ad-meta { margin-top: 2px; }
-.ppl-via { display: block; color: var(--accent); }
 
 .person-stack .panel-tools { display: flex; flex-direction: row; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .person-stack .panel-tools select { max-width: 200px; }
 
 @media (max-width: 1100px) { .ppl-teams { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 860px) { .gv-two { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) {
   .person-actions .btn { flex: 1 1 auto; }
   .person-stack .panel-tools select { max-width: 100%; }
-  .ppl-org-head .searchbox { flex-basis: 100%; margin-left: 0; }
 }
 
 /* Team roles and inherited roles. */
@@ -99,14 +43,9 @@
 .chip-x { background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--muted); font: inherit; line-height: 1; }
 .chip-x:hover, .chip-x:focus-visible { color: var(--ink); }
 .chip-x[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
-.ppl-custom { display: block; font-size: 9px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
-.ppl-rcol.is-custom { background: var(--accent-soft); }
 
 /* Deactivated people and the deactivate dialog */
 .chip-muted { border-color: var(--line); color: var(--muted); white-space: nowrap; }
-.member.is-off .ppl-name, .member.is-off .member-main > .muted { opacity: 0.6; }
-.ppl-off-sec { display: grid; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-.ppl-off-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .ppl-off-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .ppl-off-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px 12px; align-items: baseline; }
 .ppl-off-what { min-width: 0; overflow-wrap: anywhere; }
@@ -133,7 +72,6 @@
 .acct-linklist li { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .acct-linklist li .btn { margin-left: auto; }
 @media (max-width: 560px) { .acct-kv > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
-.person-stack .caps-grid { grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr)); }
 .person-stack .caps li > span { min-width: 0; overflow-wrap: anywhere; }
 
 /* Blueprint filter bars: the sheet's fields sit on one baseline (a Field's form margin does not apply inside the bar). */

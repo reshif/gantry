@@ -4,14 +4,6 @@
 
 .nt-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); align-items: start; }
 .nt-routes { display: grid; gap: var(--s4); }
-.nt-table td { vertical-align: top; }
-.nt-table tr.nt-off td:not(:first-child) { color: var(--muted); }
-.nt-table tr.nt-off .nt-ev { text-decoration-style: dotted; color: var(--muted); }
-.nt-ev { font-weight: 600; color: var(--ink); text-decoration: none; }
-.nt-ev:hover { color: var(--accent); }
-.nt-dests { list-style: none; display: grid; gap: 2px; }
-.nt-dests li { display: flex; align-items: center; gap: 5px; font-size: var(--t-sm); white-space: nowrap; }
-.nt-dests .ic { width: 13px; height: 13px; color: var(--muted); }
 .nt-dirty { margin-left: var(--s2); vertical-align: middle; }
 
 .nt-fs { border: 0; border-top: 1px solid var(--line); padding: var(--s3) 0 0; margin: 0; display: grid; gap: var(--s2); min-width: 0; }
@@ -142,17 +134,9 @@
 }
 
 /* round three: instance-aware destinations, card templates */
-.nt-dest-inst { color: var(--ink-2); }
-.nt-dest-bad { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--block); }
-.nt-dests li { flex-wrap: wrap; white-space: normal; }
-.nt-ct-ops { display: inline-flex; gap: var(--s1); flex-wrap: wrap; justify-content: flex-end; }
-.nt-ev.is-sel { color: var(--accent); }
-.nt-ct-preview .nt-stage { padding: var(--s4); }
 @media (max-width: 640px) {
   .nt-destrow { grid-template-columns: minmax(0, 1fr) auto; }
   .nt-destrow > select, .nt-destrow > input { grid-column: 1 / -1; }
 }
-.nt-switch { margin: 10px 0 0; }
 /* The routes table scrolls inside its panel instead of clipping at phone width. */
 .nt-split > *, .nt-routes { min-width: 0; }
-.nt-table { min-width: 560px; }

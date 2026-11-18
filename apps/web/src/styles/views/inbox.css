@@ -30,4 +30,3 @@
   .inb-filters, .inb-filters .seg { max-width: 100%; }
   .inb-filters .seg { overflow-x: auto; }
 }
-.pop-foot { padding: var(--s2) var(--s3); border-top: 1px solid var(--line); display: flex; justify-content: flex-end; }

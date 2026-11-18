@@ -203,7 +203,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                       <td key={c.key} data-label={c.label} data-l={c.label} className={`${c.align === "end" ? "is-end r" : ""}${i === 0 ? " pri-cell" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined}>
                         {i === 0 && action ? <span className="cell-content" id={first ? lid : undefined}>{content}</span> : content}
                         {first ? (
-                          rowHref ? <a className="row-link" href={rowHref(r)} aria-labelledby={rowLabel ? undefined : lid} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} />
+                          rowHref ? <a className="row-link" href={rowHref(r)} aria-labelledby={rowLabel ? undefined : lid} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})}>{rowLabel ? <span className="sr-only">{rowLabel(r)}</span> : null}</a>
                           : <button type="button" className="row-link" aria-labelledby={rowLabel ? undefined : lid} {...(rowLabel ? { "aria-label": rowLabel(r) } : {})} onClick={() => onRow?.(r)} />
                         ) : null}
                       </td>

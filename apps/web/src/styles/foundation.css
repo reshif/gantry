@@ -17,7 +17,6 @@ a { color: var(--accent); }
 /* ---------- icons and logo ---------- */
 .ic { vertical-align: -3px; }
 .logo { width: 24px; height: 24px; padding: 3px; border-radius: var(--r1); background: var(--ink); color: var(--bg); }
-.auth-logo .logo { width: 34px; height: 34px; padding: 4px; }
 
 /* ---------- shell: top bar ---------- */
 kbd { font-size: var(--t-xs); border: 1px solid var(--line); border-bottom-width: 1px; border-radius: 4px; padding: 0 4px; background: transparent; color: var(--faint); }
@@ -32,11 +31,10 @@ kbd { font-size: var(--t-xs); border: 1px solid var(--line); border-bottom-width
 .view { padding: var(--s5) var(--s5) 48px; gap: 20px; max-width: 1280px; }
 .view.view-wide { max-width: none; }
 /* header stats: one row of equal tiles under the title (see Stat in ui/primitives) */
-.titleblock { gap: var(--s3); border: 0; background: none; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.titleblock { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .titleblock > div { border: 1px solid var(--line); border-right: 1px solid var(--line); border-radius: var(--r2); background: var(--surface); box-shadow: var(--shadow-1); padding: 14px 16px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.titleblock > div:last-child { border-right: 1px solid var(--line); }
-.titleblock dt { font-family: var(--f-body); font-size: var(--t-sm); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--faint); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.titleblock dd { margin: 0; font-family: var(--f-body); font-weight: 600; font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titleblock dt { font-family: var(--f-body); font-size: var(--t-sm); font-weight: 400; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.titleblock dd { margin: 0; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* the older floor stat strip follows the same tile look */
 
 /* ---------- cards and sections ---------- */
@@ -57,7 +55,6 @@ kbd { font-size: var(--t-xs); border: 1px solid var(--line); border-bottom-width
 .input { height: var(--control-h); border: 1px solid var(--line-strong); border-radius: var(--r1); background: var(--surface); padding: 0 10px; }
 textarea.input { padding: 7px 10px; }
 .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
-.input[aria-invalid="true"] { border-color: var(--block); }
 .field-hint { color: var(--faint); }
 
 /* ---------- segmented control ---------- */
@@ -69,10 +66,8 @@ textarea.input { padding: 7px 10px; }
 
 /* ---------- chips and one status look ---------- */
 .tag { border-color: var(--line); border-radius: 4px; color: var(--muted); font-family: var(--f-mono); }
-.health, .hk-health { border-radius: 5px; padding: 1px 7px 1px 5px; }
 .state-running { color: var(--run); background: var(--run-soft); }
 .state-parked { color: var(--muted); background: var(--panel); }
-.hk-killed { color: #fff; background: var(--block); }
 .outcome { border-radius: 4px; }
 .cls { border-radius: 5px; background: var(--surface); }
 .bay-chip { border-radius: 5px; }
@@ -89,12 +84,10 @@ textarea.input { padding: 7px 10px; }
 /* ---------- empty, loading, error, denied ---------- */
 .empty-title { color: var(--ink); font-weight: 600; }
 /* a page that is not open to this person: a quiet dashed card, left aligned */
-.async-bar { background: linear-gradient(90deg, var(--panel), var(--line), var(--panel)); background-size: 200% 100%; border-radius: 6px; }
 
 /* ---------- overlays: dialog, drawer, popover, menu, toast, tooltip ---------- */
 .dlg-palette { border-radius: var(--r3); }
 .pop-head { padding: 10px 14px; }
-.pal-kind { font-family: var(--f-body); font-size: var(--t-xs); letter-spacing: 0.06em; color: var(--faint); }
 .toast-ok > .ic, .toast-error > .ic, .toast-warn > .ic { color: inherit; }
 .toast-error { background: var(--block); color: #fff; }
 .toast-warn { background: var(--wait); color: var(--surface); }
@@ -137,9 +130,6 @@ a.step:hover, button.step:hover { background: var(--panel); }
 .prail-gt.is-warn { background: var(--wait); } .prail-gt.is-todo { background: var(--line-strong); }
 
 /* ---------- sign-in ---------- */
-.auth-brand { border-right: 1px solid var(--line); background-color: var(--surface); }
-.auth-title { font-family: var(--f-body); font-size: 44px; line-height: 1.05; font-weight: 700; letter-spacing: -0.03em; }
-.auth-belt li { font-family: var(--f-body); font-size: var(--t-base); border-radius: 0; background: var(--panel); border-color: var(--line); }
 .auth-h { font-family: var(--f-body); font-size: var(--t-xl); font-weight: 600; }
 .idp { border-top: 1px solid var(--line-strong); border-radius: var(--r2); }
 .demo-acc { border-radius: var(--r1); }
@@ -152,6 +142,4 @@ a.step:hover, button.step:hover { background: var(--panel); }
 }
 @media (max-width: 560px) {
   .view { padding-inline: var(--s4); }
-  .titleblock dd { font-size: 20px; }
-  .titleblock > div { padding: 10px 12px; }
 }

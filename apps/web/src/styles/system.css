@@ -4,31 +4,27 @@
 /* ---------- one status look (docs/ui/design-system.md §2) ----------
    Every status — work-order state, integration/model/MCP health, project health, status chips —
    is a glyph + word on a soft tone, sentence case, same size and shape. */
-.health, .hk-health {
-  display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 5px; border: 0; border-radius: 5px;
+.health, .hk-health { padding: 1px 7px 1px 5px; border: 0; border-radius: 5px;
   font-family: var(--f-body); font-size: var(--t-sm); font-weight: 500; line-height: 1.35; text-transform: none; letter-spacing: 0;
   white-space: nowrap; color: var(--ink-2); background: var(--sunk);
 }
 .health .ic, .hk-health .ic { width: 14px; height: 14px; }
-.health-shape { width: 7px; height: 7px; flex: none; }
 .h-healthy, .hk-ok, .tone-done { color: var(--done); background: var(--done-soft); }
 .h-degraded, .tone-wait { color: var(--wait); background: var(--wait-soft); }
 .h-failing, .hk-attention, .tone-block { color: var(--block); background: var(--block-soft); }
 .hk-halted { color: var(--block); background: var(--block-soft); box-shadow: inset 0 0 0 1px var(--block); }
-.hk-killed { color: var(--surface); background: var(--kill); }
 .hk-new, .hk-onboarding, .tone-accent { color: var(--accent); background: var(--accent-soft); }
 .h-offline, .hk-archived, .tone-neutral { color: var(--muted); background: var(--sunk); }
 .tone-run { color: var(--run); background: var(--run-soft); }
 .tone-fail { color: var(--fail); background: var(--fail-soft); }
 /* status chips used as statuses: same tones, no border box */
-.chip-ok, .chip-warn, .chip-block, .chip-accent { border-color: transparent; border-radius: 5px; }
+.chip-ok, .chip-warn, .chip-block, .chip-accent { border-color: transparent; }
 
 /* ---------- filters: one compact row ----------
    Filters are a toolbar, not a form. Each filter is one 32px box that reads "Label  value", so a row of them stays
    one line high, needs no label row above it, and looks the same on every page. */
 .filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
 .filters .field-label { padding: 0 2px 0 10px; font-family: var(--f-body); font-size: var(--t-sm); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); white-space: nowrap; cursor: pointer; }
-.filters .field-check { height: 32px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--t-sm); }
 
 /* a status next to a page title sits on the title's middle line */
 
@@ -40,11 +36,9 @@
 
 /* ---------- shared data states (ui/async.tsx) ---------- */
 .async-loading { display: grid; gap: 10px; padding: var(--s4) 0; min-height: 96px; align-content: start; }
-.async-bar { display: block; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--sunk) 0%, var(--line) 50%, var(--sunk) 100%); background-size: 200% 100%; animation: async-shimmer 1.4s linear infinite; }
-@keyframes async-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.async-bar { display: block; height: 12px; background-size: 200% 100%; }
 @media (prefers-reduced-motion: reduce) { .async-bar { animation: none; } }
 .empty-state .empty-icon { color: var(--faint); }
-.empty-state .empty-icon .ic, .empty-state .empty-icon svg { width: 22px; height: 22px; }
 .async-stat .ic, .async-stat svg { width: 14px; height: 14px; vertical-align: -2px; }
 
 /* ---------- production pass: targets, focus, motion (tokens.css) ---------- */
@@ -58,9 +52,8 @@ input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; margin:
   .icon-btn:not(.icon-btn-sm) { min-width: var(--target-coarse); }
 }
 /* focus is always visible and survives forced-colors: ring from the token, plus a real (transparent) outline */
-:focus-visible { outline-offset: 2px; }
 @media (forced-colors: active) { :focus-visible { outline: 2px solid Highlight; } }
-@media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; } }
+@media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms;} }
 
 /* ---------- Field: description, error ---------- */
 .field-error { color: var(--block); font-size: var(--t-sm); font-weight: 500; }

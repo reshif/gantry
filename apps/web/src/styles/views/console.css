@@ -16,29 +16,13 @@
 .ccard .perm.pos { color: var(--done); }
 .ccard .perm.neg { color: var(--block); }
 .con-cf-fields { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--line); background: var(--surface); }
-.con-impact { margin: 0; background: var(--surface); }
-.con-impact dd { font-size: 22px; }
 .con-pstat { font-size: var(--t-xs); text-transform: uppercase; color: var(--muted); }
 .con-killed td { background: var(--kill-soft); }
-
-.con-cls { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line); background: var(--surface); }
-.con-cls-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.con-cls p { margin: 0; }
-.con-route { list-style: none; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; font-size: var(--t-xs); }
-.con-route li { display: inline-flex; gap: 4px; align-items: center; padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: 2px; background: var(--surface); }
-.con-route li.is-on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink); }
-.con-route li.is-skip { border-style: dashed; color: var(--faint); }
-.con-route li .mono { font-size: 10px; color: var(--muted); }
-.con-route li.con-gate { border: 0; background: none; padding: 0 2px; gap: 3px; }
-.con-dia { width: 8px; height: 8px; transform: rotate(45deg); border: 1.5px solid var(--gate); background: var(--gate-soft); display: inline-block; }
 
 .con-stage { display: inline-flex; gap: 4px; align-items: center; font-size: var(--t-sm); white-space: nowrap; }
 .con-stage .ic { width: 12px; height: 12px; }
 .con-stage.is-ready { color: var(--done); font-weight: 600; }
 .con-stage.is-bad { color: var(--block); font-weight: 600; }
-.con-steps { display: inline-flex; gap: 2px; }
-.con-step { width: 10px; height: 6px; border: 1px solid var(--line-strong); background: var(--surface); }
-.con-step.is-done { background: var(--run); border-color: var(--run); }
 
 .con-trig { list-style: none; display: grid; gap: 4px; }
 .con-trig li { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto auto auto; gap: 8px; align-items: center; font-size: var(--t-sm); padding: 3px 0; border-bottom: 1px dotted var(--line); }
@@ -64,16 +48,16 @@
 }
 
 /* round three: Claude mode, streaming, entity chips */
-.con-mode-line { display: flex; gap: 6px 10px; align-items: center; flex-wrap: wrap; color: var(--muted); margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--sunk); border-radius: var(--r1) var(--r1) 0 0; }
+.con-mode-line { display: flex; gap: 6px 10px; flex-wrap: wrap; color: var(--muted); margin: 0; border-bottom: 1px solid var(--line); }
 .con-mode-line a { color: var(--accent); }
 .con-model { display: inline-flex; align-items: center; gap: 6px; }
 .con-model select { min-width: 200px; max-width: 280px; font-family: var(--f-mono); font-size: var(--t-xs); }
-.con-mode-line .ic { width: 12px; height: 12px; flex: none; position: relative; top: 2px; }
+.con-mode-line .ic { width: 12px; height: 12px; flex: none; position: relative; }
 .con-mode-line a { white-space: nowrap; }
 .view-console .msg-text { white-space: pre-wrap; }
 .view-console .msg-text.is-thinking { color: var(--muted); font-style: italic; }
 .msg-meta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 2px; }
-.msg-mode { font-family: var(--f-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding: 0 5px; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--muted); }
+.msg-mode { border: 1px solid var(--line-strong); color: var(--muted); }
 .msg-mode.is-claude { border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft); }
 .msg-mode.is-pending { border-style: dashed; color: var(--accent); }
 .msg-mode.is-local { border-style: dashed; }
@@ -83,11 +67,6 @@
 .con-list { list-style: none; display: grid; gap: 4px; margin: 0; padding: 0; }
 .con-list li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: var(--t-sm); padding: 3px 0; border-bottom: 1px dotted var(--line); }
 .con-ev { font-family: var(--f-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); }
-.con-ev-kill { color: var(--kill); font-weight: 600; }
-.con-ev-halt { color: var(--block); }
-.con-ev-release { color: var(--done); }
-.con-sole { display: inline-flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
-.view-console .vtitle-badge .ask-badge { vertical-align: middle; }
 .ccard .explain { margin-top: 0; }
 .view-console .msg-factory { width: 100%; }
 .view-console .ccard { max-width: 100%; }
@@ -106,25 +85,10 @@
 
 /* Chat list (left column) */
 .con-chats { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-.con-chats-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
 .con-chats-q { height: 32px; }
-.con-chats-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
-.con-chats-list li { position: relative; display: flex; align-items: stretch; border-radius: var(--r1); }
-.con-chats-list li:hover, .con-chats-list li.is-current { background: var(--sunk); }
-.con-chats-list li.is-current { box-shadow: inset 3px 0 0 var(--accent); }
-.con-chat { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 7px 4px 7px 10px; background: none; border: 0; text-align: left; color: var(--ink); cursor: pointer; }
-.con-chat:disabled { cursor: not-allowed; opacity: .6; }
-.con-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.con-chat-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.con-chat-more { align-self: center; margin-right: 4px; opacity: 0; }
-.con-chats-list li:hover .con-chat-more, .con-chats-list li.is-current .con-chat-more, .con-chat-more:focus-visible { opacity: 1; }
-.con-chats-empty { margin: 0; }
 @media (max-width: 1360px) and (min-width: 1101px) {
   .view-console .console-grid { grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: max(460px, calc(100dvh - var(--topbar-h, 52px) - 210px)) auto; height: auto; }
   .view-console .console-grid > .ctx { grid-column: 1 / -1; height: auto; }
-}
-@media (max-width: 1100px) {
-  .con-chats-list { max-height: 180px; }
 }
 
 /* Console, redesign look: quiet status line, answer bubbles, composer, compact side panels. */
@@ -143,7 +107,6 @@
 .composer-foot { align-items: center; }
 .composer-foot .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .sugg { border-radius: 3px; background: var(--surface); border-color: var(--line); font-size: var(--t-xs); }
-.try-lbl { margin-right: 2px; }
 .view-console .ctx .panel-title, .ws-chat .ctx .panel-title { font-size: var(--t-md); }
 .ctx .panel-head { min-height: 40px; padding: 10px 14px; }
 .ctx .panel-body { padding: 12px 14px; }
@@ -156,9 +119,6 @@
 
 /* header chip beside the title, toolbar above the thread, permission codes in the capability list */
 .vtitle-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.con-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-.con-bar-title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 160px; }
-.con-bar-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ctx .caps .cap-code { grid-column: 2; font-size: var(--t-xs); color: var(--faint); background: none; padding: 0; margin-top: -2px; }
 .ctx .caps li.no .cap-code { color: var(--muted); }
 .con-audit-link { margin-top: 8px; }
@@ -203,3 +163,5 @@
   .con2.list-open .con2-list { display: flex; position: absolute; inset: 0; z-index: 6; }
   .con2-head .input { max-width: 150px; }
 }
+/* An empty chat centres its prompt in the message area instead of hugging the top. */
+.con2-log:has(#con-empty) { display: grid; align-content: center; justify-items: stretch; }

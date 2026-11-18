@@ -9,6 +9,7 @@ import { useEffect, useMemo } from "react";
 import { useMe, useProject } from "../api/queries";
 import { hashFor, hashPath, navigate, replaceHash, useHash } from "../lib/router";
 import { pickProject } from "../lib/routes";
+import { drawingNo } from "../lib/sheets";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Btn, Empty } from "../ui/primitives";
 import { Async } from "../ui/async";
@@ -57,6 +58,7 @@ export default function ConversationsView() {
   return (
     <div className="view conv-view" data-open={hash.param ? "chat" : "list"}>
       <header className="cv-top">
+        <span className="cv-sheet mono" title="Drawing number">{drawingNo("conversations")}</span>
         <h1 className="cv-h1" title="The dialogue between people and the agents at each station.">Conversations</h1>
         {project?.key ? <span className="mono muted small">{project.key}</span> : null}
         <span className="grow" />

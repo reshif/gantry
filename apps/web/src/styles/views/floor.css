@@ -1,20 +1,10 @@
 /* Floor view: the line (stations across, work orders down), shipped, bays, board and list, replay. Tokens only. */
 
 .view-floor > * { min-width: 0; }
-.fl-live-note { margin: 0 0 var(--s4); }
 #floor-kpis { margin-bottom: var(--s3); }
-.vtitle-badge { display: inline-flex; align-items: center; margin-left: var(--s3); vertical-align: middle; font-size: var(--t-md); font-weight: 500; letter-spacing: 0; }
 
 /* ---------- the line panel ---------- */
 .fl-belt { min-width: 0; overflow: hidden; }
-.fl-tools { display: grid; gap: var(--s2); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
-.fl-tools .filterbar .filterbar-end { margin-left: auto; }
-.fl-legend { display: flex; gap: var(--s4); flex-wrap: wrap; align-items: center; font-size: var(--t-sm); color: var(--muted); }
-.fl-leg { display: inline-flex; align-items: center; gap: 6px; }
-.fl-leg-d { width: 9px; height: 9px; transform: rotate(45deg); border: 1.5px solid var(--faint); background: var(--surface); }
-.fl-leg.gate-waiting .fl-leg-d { border-color: var(--accent); background: var(--accent-soft); }
-.fl-leg.gate-failing .fl-leg-d { border-color: var(--fail); background: var(--fail-soft); }
-.fl-leg.gate-off .fl-leg-d { border-style: dashed; border-color: var(--line-strong); }
 
 .fl-routes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .fl-routes-l { font-family: var(--f-mono); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); margin-right: 4px; }
@@ -25,122 +15,29 @@
 .fl-route:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /* ---------- the grid: one label column, one column per station ---------- */
-.fl-grid-wrap { overflow-x: auto; }
-.fl-grid { --label: 232px; min-width: calc(var(--label) + var(--n) * 88px); }
-.fl-st-head, .fl-row-open, .fl-dia, .fl-gate .gate { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
-.fl-head, .fl-row { display: grid; grid-template-columns: var(--label) repeat(var(--n), minmax(80px, 1fr)); }
-.fl-head { background: var(--panel); border-bottom: 1px solid var(--line); align-items: stretch; }
-.fl-head-lbl { padding: var(--s3) var(--s4); align-self: end; font-family: var(--f-mono); font-size: var(--t-xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
-.fl-st-col { display: grid; gap: 3px; align-content: start; justify-items: center; padding: var(--s3) 4px var(--s2); min-width: 0; text-align: center; }
-.fl-st-head { display: inline-flex; gap: 5px; align-items: baseline; font-size: var(--t-md); font-weight: 600; color: var(--ink); border-radius: var(--r1); padding: 1px 4px; max-width: 100%; min-width: 0; }
-.fl-st-head:hover { background: var(--surface); }
 .fl-st-no { color: var(--faint); font-weight: 400; font-size: var(--t-xs); }
-.fl-st-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-wip { font-size: var(--t-xs); color: var(--muted); padding: 0 6px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); white-space: nowrap; }
 .fl-wip.is-over { color: var(--block); border-color: var(--block); background: var(--block-soft); }
-.fl-agent { font-size: var(--t-xs); color: var(--faint); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fl-idle, .fl-off { font-size: var(--t-xs); }
-.fl-st-col.is-idle .fl-st-head, .fl-st-col.is-off .fl-st-head { color: var(--muted); font-weight: 500; }
-.fl-st-col.is-bypassed { opacity: 0.45; }
-.fl-slots { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; align-items: center; margin: 0; padding: 0; }
-.fl-slot { display: inline-flex; align-items: center; gap: 4px; }
-.fl-slot-dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--faint); background: transparent; }
-.fl-slot.is-busy .fl-slot-dot { background: var(--run); border-color: var(--run); }
-.fl-slot-v { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.fl-slot-sum { font-size: var(--t-xs); }
 
 /* the gate under a station: a diamond with its state, the short name beside it, the full text for assistive tech */
-.fl-gate { display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; margin-top: var(--s1); min-width: 0; position: relative; }
-.fl-gate .gate { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; padding: 2px 4px; border-radius: var(--r1); background: transparent; }
-.fl-gate .gate:hover { background: var(--surface); }
-.fl-gate .gate-shape { width: 20px; height: 20px; flex: none; }
-.fl-gate .gate-shape > .gate-count { display: block; line-height: 1; font-size: 10px; font-variant-numeric: tabular-nums; }
-.fl-gate .gate-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.fl-gate .gate:focus-visible { outline: none; box-shadow: var(--focus); }
-.fl-gate-short { font-size: var(--t-xs); color: var(--ink-2); max-width: 6.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fl-gate-cap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.fl-gate.is-offroute { opacity: 0.25; }
-.has-route .fl-gate:not(.is-offroute) .gate-shape { box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* ---------- rows ---------- */
-.fl-sec-h { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) var(--s4); background: var(--panel); border-bottom: 1px solid var(--line); }
-.fl-sec-t { font-weight: 600; font-size: var(--t-md); }
-.fl-rows { list-style: none; margin: 0; padding: 0; }
-.fl-row { border-bottom: 1px solid var(--line); align-items: center; }
-.fl-row:hover { background: var(--panel); }
-.fl-row-main { display: grid; gap: 3px; padding: var(--s3) var(--s4); min-width: 0; }
-.fl-row-open { display: flex; gap: var(--s2); align-items: baseline; text-align: left; min-width: 0; border-radius: var(--r1); }
-.fl-row-open:focus-visible { outline: none; box-shadow: var(--focus); }
-.fl-row-id { font-size: var(--t-md); white-space: nowrap; }
-.fl-row-title { font-size: var(--t-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.fl-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: var(--t-xs); }
-.fl-row-note { color: var(--muted); }
-.fl-row-note.is-wait { color: var(--wait); font-weight: 600; }
-.fl-row-note.is-fail { color: var(--fail); font-weight: 600; }
-.fl-row-note.is-block, .fl-row-note.is-kill { color: var(--block); font-weight: 600; }
-.fl-row-where { display: none; }
-.fl-row.is-killed .fl-row-title, .fl-row.is-killed .fl-row-id { text-decoration: line-through; color: var(--muted); }
-.fl-row.is-halted { box-shadow: inset 3px 0 0 var(--block); }
-.fl-cells { display: contents; }
-.fl-cell { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 52px; padding: 0 4px; font-size: var(--t-xs); text-align: center; }
-.fl-cell-g { color: var(--faint); }
-.fl-cell-t { font-size: var(--t-xs); }
-.fl-cell-now { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; font-weight: 600; color: var(--run); max-width: 100%; }
-.fl-cell-now > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.fl-cell-now .ic { width: 14px; height: 14px; }
-.fl-cell-now.is-waiting { color: var(--wait); }
-.fl-cell-now.is-failed { color: var(--fail); }
-.fl-cell-now.is-blocked, .fl-cell-now.is-killed { color: var(--block); }
-.fl-cell-now.is-park { color: var(--muted); }
 /* the gate diamond sits on the right edge of its station's cell */
-.fl-dia { position: absolute; right: -7px; top: 50%; margin-top: -7px; width: 14px; height: 14px; transform: rotate(45deg); border: 1.5px solid var(--line-strong); background: var(--surface); display: inline-flex; align-items: center; justify-content: center; z-index: 1; padding: 0; }
-.fl-dia > span { transform: rotate(-45deg); font-size: 8px; line-height: 1; color: var(--faint); }
-.fl-dia-ok { border-color: var(--faint); background: var(--panel); }
-.fl-dia-wait { border-color: var(--accent); background: var(--accent-soft); }
-.fl-dia-fail { border-color: var(--fail); background: var(--fail-soft); }
-.fl-dia-fail > span { color: var(--fail); font-weight: 700; }
-.fl-dia:focus-visible { outline: none; box-shadow: var(--focus); }
-.fl-quiet { padding: var(--s4); margin: 0; }
-.fl-foot { margin: 0; padding: var(--s3) var(--s4); border-top: 1px solid var(--line); }
-.fl-belt.is-killed .fl-row { opacity: 0.7; }
 
 /* narrow: no matrix. Each work order is a card that says where it is; the stations become a short list above. */
-@media (max-width: 760px) {
-  .fl-grid { min-width: 0; }
-  .fl-head { display: block; }
-  .fl-head-lbl { display: none; }
-  .fl-st-col { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; text-align: left; gap: 4px 8px; padding: var(--s2) var(--s4); border-bottom: 1px solid var(--line); }
-  .fl-st-col .fl-agent { margin-left: auto; }
-  .fl-gate { margin-top: 0; }
-  .fl-row { display: block; }
-  .fl-cells { display: none; }
-  .fl-row-where { display: block; }
-}
 
 /* ---------- bays (off the line, under it) ---------- */
 .fl-bays { min-width: 0; }
-.fl-bays-h { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 6px; }
-.fl-bays-t { font-weight: 600; font-size: var(--t-md); }
-.fl-bays-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
 .fl-bay { min-width: 0; }
-.fl-bay-wo { display: grid; gap: 4px; }
-.fl-bay-acts { gap: 6px; }
 .fl-bay-h { display: flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 600; }
 .fl-bay-h .ic { width: 14px; height: 14px; color: var(--muted); }
 .fl-bay-c { margin-left: auto; font-size: var(--t-xs); background: var(--sunk); padding: 0 5px; border-radius: 2px; }
-.fl-bay-toks { display: grid; gap: 4px; }
 .fl-bay-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- shipped strip ---------- */
-.fl-ship { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); align-items: center; padding: var(--s3) var(--s4); background: var(--panel); border-top: 1px solid var(--line); }
-.fl-ship-h { display: flex; align-items: baseline; gap: var(--s2); }
-.fl-ship-h .ic { width: 14px; height: 14px; color: var(--done); align-self: center; }
-.fl-ship-t { font-weight: 600; font-size: var(--t-md); }
-.fl-ship-toks { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
-.fl-ship-toks .tok { width: auto; min-width: 128px; }
 
 /* ---------- board ---------- */
-.fl-boardwrap, .fl-listwrap { display: grid; gap: var(--s3); min-width: 0; }
+.fl-boardwrap { display: grid; gap: var(--s3); min-width: 0; }
 .fl-board-tools { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* the board scrolls sideways; a fade and a named button on each cut-off edge say which stations are out of view */
 .fl-board-frame { position: relative; min-width: 0; }
@@ -181,20 +78,12 @@
 .fl-col.is-over.is-ok .fl-col-why { color: var(--done); font-weight: 600; }
 
 .fl-card { display: grid; gap: 4px; padding: 6px 7px 6px 8px; background: var(--surface); border: 1px solid var(--line-strong); border-left: 4px solid var(--run); border-radius: 2px; box-shadow: var(--shadow-1); touch-action: none; cursor: grab; min-width: 0; }
-.fl-card-waiting { border-left-color: var(--wait); background: var(--wait-soft); }
-.fl-card-blocked { border-left-color: var(--block); background: var(--block-soft); }
-.fl-card-failed { border-left: 5px double var(--fail); background: var(--fail-soft); }
-.fl-card-parked { border-left-color: var(--line-strong); border-left-style: dashed; background: var(--panel); }
-.fl-card-killed { border-left: 6px solid var(--kill); background: var(--kill-soft); border-style: dashed; border-left-style: solid; cursor: default; }
-.fl-card-killed .fl-card-id, .fl-card-killed .fl-card-title { text-decoration: line-through; }
 .fl-card.is-held { background-image: repeating-linear-gradient(-45deg, var(--kill-soft) 0 5px, transparent 5px 10px); }
 .fl-card.is-dragging { opacity: 0.35; }
 .fl-card-top { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .fl-grip { color: var(--faint); display: inline-flex; cursor: grab; }
 .fl-grip .ic { width: 14px; height: 14px; }
 .fl-card-glyph { width: 14px; height: 14px; }
-.fl-card-running .fl-card-glyph { color: var(--run); } .fl-card-waiting .fl-card-glyph { color: var(--wait); } .fl-card-blocked .fl-card-glyph { color: var(--block); }
-.fl-card-failed .fl-card-glyph { color: var(--fail); } .fl-card-killed .fl-card-glyph { color: var(--kill); } .fl-card-parked .fl-card-glyph { color: var(--ink-2); }
 .fl-card-id { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
 .fl-card-top .cls { min-width: 0; }
 .fl-prio { margin-right: 0; }
@@ -207,31 +96,12 @@
 .fl-card-foot { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; font-size: 10.5px; }
 .fl-card-agent { display: inline-flex; align-items: center; gap: 4px; }
 .fl-gt { font-size: 10.5px; font-weight: 600; color: var(--muted); }
-.fl-gt-wait { color: var(--wait); } .fl-gt-fail { color: var(--fail); } .fl-gt-block { color: var(--block); } .fl-gt-kill { color: var(--kill); } .fl-gt-park { color: var(--ink-2); }
 .fl-ghost { position: fixed; top: 0; left: 0; z-index: 1000; pointer-events: none; box-shadow: var(--shadow-2); opacity: 0.92; cursor: grabbing; }
 body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select: none; }
 
 /* ---------- list ---------- */
-.fl-table td { vertical-align: middle; }
-.fl-td-title { min-width: 220px; max-width: 360px; }
-.fl-tr-killed td { background: var(--kill-soft); }
-.fl-tr-killed .fl-td-title { text-decoration: line-through; }
-.fl-tr-done td { color: var(--muted); }
 
 /* ---------- drawers (station, gate) ---------- */
-.fl-dgate { width: 14px; height: 14px; transform: rotate(45deg); border: 2px solid var(--gate); background: var(--gate-soft); margin: 0 4px; }
-.fl-rule { display: grid; gap: 4px; }
-.fl-rule .ic { width: 12px; height: 12px; vertical-align: -2px; }
-.fl-gate-list { list-style: none; display: grid; gap: 10px; }
-.fl-gate-list li { display: grid; gap: 4px; padding-bottom: 8px; border-bottom: 1px dotted var(--line); }
-.fl-gate-acts { display: flex; gap: 6px; flex-wrap: wrap; }
-.fl-tokgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
-
-@media (prefers-reduced-motion: reduce) {
-  .fl-rollers { animation: none; }
-  .fl-st { transition: none; }
-}
-.fl-table td:first-child, .fl-table td:nth-child(4), .fl-table td:nth-child(7) { white-space: nowrap; }
 /* custom stations (round three): rows take their column template from the flow definition */
 
 /* ---------- round three: replay ---------- */
@@ -276,124 +146,30 @@ body.fl-dragging, body.fl-dragging * { cursor: grabbing !important; user-select:
 .fl-rp-list li { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 .fl-rp-list li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .fl-rp-list .fl-mk-key { align-self: center; }
-.fl-rp-chip { display: inline-flex; align-items: center; gap: 4px; border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; vertical-align: middle; }
-.fl-rp-chip .ic { width: 13px; height: 13px; }
 .fl-belt.is-replay { border-top: 4px double var(--accent); }
-.fl-belt.is-replay .fl-stamp { color: var(--accent); }
-.fl-belt.is-replay .fl-rollers { animation: none; }
-.fl-belt.is-replay.is-killed .fl-stamp { color: var(--surface); }
-.is-replaying .fl-board-scroll, .is-replaying .fl-listwrap .table-scroll { outline: 2px dashed var(--accent-line); outline-offset: 2px; }
+.is-replaying .fl-board-scroll { outline: 2px dashed var(--accent-line); outline-offset: 2px; }
 @media (max-width: 760px) { .fl-rp-foot { grid-template-columns: 1fr; } .fl-rp-stamp { font-size: 17px; } }
 
 /* ---------- round three: trust on the floor ---------- */
-.fl-gate-tr { display: inline-flex; align-items: center; gap: 2px; margin-top: 1px; padding: 0 3px; border-radius: 2px; font-size: 9px; font-weight: 600; }
-.fl-gate-tr .ic { width: 10px; height: 10px; }
-.fl-gate-tr.is-trust { color: var(--done); border: 1px solid var(--done); background: var(--done-soft); }
-.fl-gate-tr.is-human { color: var(--ink-2); border: 1px dashed var(--line-strong); }
-.fl-gate-tr.is-sampled { color: var(--wait); border: 1px dotted var(--wait); }
-.fl-gate.is-trusted .gate-shape { outline: 1.5px dashed var(--done); outline-offset: 3px; }
-.fl-trust { display: grid; gap: 6px; }
-.fl-trust-t td, .fl-trust-t th { white-space: nowrap; }
-.fl-lv { display: inline-flex; align-items: baseline; gap: 3px; font-size: var(--t-xs); }
-.fl-lv .mono { font-weight: 700; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: 2px; background: var(--sunk); }
-.fl-lv-2 .mono { border-color: var(--run); } .fl-lv-3 .mono, .fl-lv-4 .mono { border-color: var(--done); background: var(--done-soft); color: var(--done); }
-.fl-lv-0 .mono { border-style: dashed; color: var(--muted); }
-.fl-auto-yes { color: var(--done); font-weight: 600; }
-.fl-why-trust { display: flex; gap: 4px; align-items: flex-start; color: var(--ink-2); }
-.fl-why-trust .ic { width: 12px; height: 12px; margin-top: 2px; flex: none; color: var(--muted); }
-.fl-trust-tag { display: inline-flex; align-items: center; gap: 3px; font-size: var(--t-xs); font-weight: 600; color: var(--done); }
-.fl-trust-tag .ic { width: 12px; height: 12px; }
 .fl-route.is-custom { border-style: dashed; }
 .fl-rp-list .linkish { white-space: nowrap; }
 
 /* ---------- the line: top to bottom, never wrapping (docs/ui/design-system.md §1) ----------
    A spine runs down the left. Stations hang off it as rows; gates sit on it as diamonds with their
    full name, state and who must act on one readable line. */
-.fl-line { --spine: 28px; list-style: none; margin: 0; padding: 14px 16px 16px; display: grid; position: relative; }
-.fl-line::before { content: ""; position: absolute; left: calc(16px + var(--spine)); top: 26px; bottom: 34px; width: 2px; margin-left: -1px; background: var(--line-strong); }
-.fl-belt.is-live .fl-line::before { background: repeating-linear-gradient(to bottom, var(--line-strong) 0 6px, transparent 6px 10px); }
-.fl-line-item { position: relative; padding-left: calc(var(--spine) * 2); min-width: 0; }
-.fl-line-item:not(.fl-line-gate):not(.fl-line-link)::before { content: ""; position: absolute; left: calc(var(--spine) - 5px); top: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ink-2); z-index: 1; }
-.fl-line-link { height: 10px; }
-.fl-line-gate { padding-left: 0; }
-
-.fl-gate { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; min-width: 0; min-height: 44px; padding: 4px 0; }
-.fl-gate-clear { min-height: 34px; padding: 2px 0; }
-.fl-gate-off { min-height: 22px; padding: 0; }
-.fl-gate-off .gate-shape { width: 12px; height: 12px; box-shadow: 0 0 0 3px var(--panel); }
-.fl-gate-off .gate-shape > .gate-count { display: none; }
-.fl-gate-off .fl-gate-cap { font-size: var(--t-xs); flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
-.fl-gate-rail { display: none; }
-.fl-gate .gate { width: calc(var(--spine) * 2); flex: none; display: flex; justify-content: center; background: none; padding: 0; position: relative; z-index: 1; }
-.fl-gate .gate-label { display: none; }
-.fl-gate .gate-shape { width: 22px; height: 22px; box-shadow: 0 0 0 4px var(--panel); }
-.fl-gate-cap { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: var(--t-sm); line-height: 1.3; color: var(--ink-2); background: none; padding: 0; white-space: normal; min-width: 0; }
-.fl-gate-name { font-weight: 600; color: var(--ink); max-width: none; overflow: visible; }
-.fl-gate-state { color: var(--muted); }
-.fl-gate-need { color: var(--muted); }
-.fl-gate-need::before, .fl-gate-state::before { content: "·"; margin-right: 10px; color: var(--faint); }
-.fl-gate-waiting .fl-gate-state { color: var(--wait); font-weight: 600; }
-.fl-gate-failing .fl-gate-state { color: var(--fail); font-weight: 600; }
-.fl-gate-off .fl-gate-cap { color: var(--faint); }
-.fl-gate-off .fl-gate-name { color: var(--muted); font-weight: 500; }
-.fl-gate-tr { display: inline-flex; align-items: center; gap: 3px; font-size: var(--t-xs); color: var(--muted); }
 
 /* station row: name block on the left, its work orders flowing to the right */
-.fl-st { --head-w: 260px; display: grid; grid-template-columns: var(--head-w) minmax(0, 1fr); grid-template-areas: "head toks" "staff toks" "extra toks"; align-items: start; gap: 2px 16px; padding: 8px 12px; border: 1px solid var(--line); border-top: 1px solid var(--line); border-left: 3px solid var(--ink-2); border-radius: var(--r1); box-shadow: none; }
-.fl-st-head { grid-area: head; display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) 3.25rem; grid-template-areas: "no name wip"; align-items: baseline; gap: 0 8px; padding: 0; margin: 0; border: 0; cursor: pointer; text-align: left; }
-.fl-st-name { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fl-st-head .fl-wip { justify-self: end; text-align: right; min-width: 2.5rem; }
-.fl-staff { grid-area: staff; font-size: var(--t-xs); }
-.fl-st > .fl-off, .fl-st > .fl-slots { grid-area: extra; margin-top: 4px; }
-.fl-toks { grid-area: toks; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 320px)); gap: 8px; align-content: start; min-height: 32px; }
-.fl-toks .tok { width: 100%; min-width: 0; }
-.fl-toks > .btn, .fl-toks > .fl-idle { grid-column: 1 / -1; justify-self: start; }
-.fl-idle { text-align: left; padding: 6px 0; border: 0; }
-.fl-st:has(.fl-idle) { border-left-color: var(--line-strong); background: color-mix(in srgb, var(--surface) 70%, transparent); }
-.fl-st.is-over { border-left-color: var(--block); }
 /* idle (and off) station: one slim row, name block on the left and the agent on the right, no token area.
    Same left edge, border and name column as the full card so the spine, wip counters and gate captions stay aligned. */
-.fl-st.is-idle { grid-template-areas: "head staff"; align-items: center; padding: 5px 12px; min-height: 36px; }
-.fl-st.is-idle .fl-st-head { align-items: center; }
-.fl-st.is-idle:not(.is-over) { border-left-color: var(--line-strong); }
-.fl-st.is-idle .fl-st-name { font-weight: 500; color: var(--ink-2); font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
-.fl-st.is-idle .fl-staff { flex-wrap: nowrap; min-width: 0; overflow: hidden; }
-.fl-st.is-idle .fl-glyph { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.fl-st.is-idle .fl-glyph:nth-child(n+2), .fl-st.is-idle > .fl-off { display: none; }
-.fl-st.is-idle.is-bypassed .fl-staff { display: none; }
-.fl-st.is-idle.is-bypassed .fl-bypass { grid-area: staff; }
-.fl-st.is-bypassed { outline: none; background: transparent; border-style: dashed; border-left-width: 3px; }
-.fl-st.is-bypassed .fl-bypass { position: static; grid-area: toks; align-self: center; font-size: var(--t-sm); color: var(--accent); font-weight: 600; }
-.fl-st.is-bypassed .fl-toks { display: none; }
-.fl-ship { margin-top: 4px; }
-.fl-ship-t { letter-spacing: 0.02em; }
-
-@container (max-width: 760px) {
-  .fl-line { --spine: 18px; padding: 10px 8px 12px; }
-  .fl-line::before { left: calc(8px + var(--spine)); }
-  .fl-st { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "staff" "extra" "toks"; }
-  .fl-st { --head-w: auto; }
-  .fl-st.is-idle { grid-template-columns: minmax(0, 1fr) 7rem; grid-template-areas: "head staff"; gap: 2px 10px; }
-  .fl-st.is-idle .fl-st-head { min-width: 0; }
-  .fl-st.is-idle .fl-staff { justify-content: flex-end; }
-  .fl-toks .tok { width: 100%; }
-  .fl-ship-toks { flex: 1 1 100%; display: grid; }
-  .fl-ship-toks .tok { width: 100%; min-width: 0; }
-}
 
 @media (max-width: 560px) { .vhead-actions .seg { align-self: flex-start; width: auto; } }
 .f-bypass{opacity:.35}
-.floorpg .fl-live-note{display:none}
-.fl-facts{display:flex;flex-wrap:wrap;gap:4px 28px;margin:-6px 0 14px;align-items:baseline}
-.fl-facts b{color:var(--ink);font-size:14px}.fl-facts b.warn{color:var(--warn)}
-.floorpg .vhead .vtitle-badge{margin-left:10px}
 .f-valve.off{opacity:.45}.f-valve.off circle{stroke-dasharray:3 2}
 
 /* ---------- drawers (prototype frame) ---------- */
 .fl-drawer-body { display: grid; gap: 12px; align-content: start; min-width: 0; }
 .fl-bordered { border: 1px solid var(--line); }
 .fl-drawer-foot { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--surface2, var(--panel)); }
-.fl-bay-why { overflow-wrap: anywhere; }
 
 /* Floor round 3: drawer typography as the prototype's .drw (mono eyebrow, 18px title, hairline rule) */
 .fl-drawer .drawer-head { border-bottom: 1px solid var(--line); }

@@ -29,9 +29,6 @@
 .osx-composer { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; padding: 10px 14px; border-top: 1px solid var(--line-strong); }
 .osx-composer textarea { flex: 1; min-width: 200px; }
 .osx-reason { flex-basis: 100%; margin: 0; }
-.osx-findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.osx-findings li { display: flex; gap: 8px; }
-.osx-findings .is-gap .osx-f-ic { color: var(--block, inherit); }
 .osx-side { border: 1px solid var(--line-strong); background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .osx-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .osx-steps li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--t-sm); }
@@ -41,8 +38,6 @@
 .osx-dot .ic { width: 10px; height: 10px; }
 .is-done .osx-dot { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .is-current .osx-dot { border-color: var(--ink); background: var(--accent-soft, var(--sunk)); }
-.osx-next { border: 1px solid var(--line-strong); background: var(--sunk); padding: 8px 10px; }
-.osx-next p { margin: 2px 0 0; }
 .osx-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; }
 .osx-facts dt { color: var(--muted); }
 .osx-facts dd { margin: 0; overflow-wrap: anywhere; }

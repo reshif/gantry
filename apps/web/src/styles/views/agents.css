@@ -13,7 +13,6 @@
 
 .ag-title { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ag-panel { margin-top: 12px; }
-.agent-detail .ad-meta { font-size: var(--t-sm); color: var(--ink-2); overflow-wrap: anywhere; }
 .agent-detail > .tabs { overflow-x: auto; }
 @media (max-width: 720px) { .agent-detail > .tabs { flex-wrap: wrap; overflow-x: visible; -webkit-mask-image: none; mask-image: none; } .agent-detail > .tabs .tab { padding: 6px 9px; } }
 .cfg .ag-wide { grid-column: 1 / -1; }
@@ -90,9 +89,7 @@
 @media (max-width: 760px) {
   .cfg { grid-template-columns: minmax(0, 1fr); }
   .ag-newver { grid-template-columns: minmax(0, 1fr); }
-  .agent-detail .savebar { flex-wrap: wrap; }
 }
-.agent-detail .savebar:not(.is-dirty) { position: static; }
 .ag-ov .tag { margin-left: 6px; }
 
 /* trust by class (round three) */
@@ -118,6 +115,5 @@
 
 /* a detail page is never wider than the screen: the tab bar scrolls inside it, long lines wrap */
 .view-agents, .agent-detail, .ag-panel, .ag-body { min-width: 0; max-width: 100%; }
-.agent-detail .ad-meta { white-space: normal; overflow-wrap: anywhere; }
 .agent-detail .vhead-actions { flex-wrap: wrap; }
 .ag-panel > .tabs { overflow-x: auto; }

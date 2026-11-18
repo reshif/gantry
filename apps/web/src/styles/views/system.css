@@ -1,64 +1,7 @@
 /* System health view styles (#system). Tokens only. */
 .view-system { min-width: 0; }
-.sys-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); align-items: stretch; min-width: 0; }
 .sys-outbox, .sys-jobs { grid-column: 1 / -1; }
 /* The panel body already pads; the blocks inside stack with one gap. */
-.sys-grid .panel-body { display: grid; gap: var(--s3); align-content: start; }
-
-.sys-list { list-style: none; margin: 0; padding: 0; display: grid; }
-.sys-row { display: grid; grid-template-columns: 130px 92px minmax(0, 1fr) 56px; gap: var(--s3); align-items: center; padding: var(--s2) 0; border-bottom: 1px dotted var(--line); min-width: 0; }
-.sys-row:last-child { border-bottom: 0; }
-.sys-name { font-weight: 600; white-space: nowrap; }
-.sys-detail { min-width: 0; overflow-wrap: anywhere; }
-.sys-ms { text-align: right; white-space: nowrap; }
-
-.sys-warn { margin: 0; padding: var(--s2) var(--s3); border: 1px solid var(--wait); background: var(--wait-soft); color: var(--ink); border-radius: var(--r1); font-size: var(--t-sm); }
-.sys-facts { margin: 0; display: grid; gap: var(--s3); }
-.sys-fact { display: grid; gap: var(--s1); justify-items: start; min-width: 0; }
-.sys-fact dt { font-family: var(--f-mono); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-.sys-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-
-.sys-counts { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); border: 1px solid var(--line-strong); background: var(--surface); }
-.sys-counts li { display: grid; gap: 2px; padding: var(--s2) var(--s3); border-right: 1px solid var(--line); min-width: 0; }
-.sys-counts li:last-child { border-right: 0; }
-.sys-count-k { font-family: var(--f-mono); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); white-space: nowrap; }
-.sys-count-v { font-size: var(--t-xl); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sys-counts li.is-bad .sys-count-v { color: var(--fail); }
-.sys-note { margin: 0; }
-.sys-table th, .sys-table td { vertical-align: middle; }
-.sys-err { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sys-dest { white-space: nowrap; }
-.sys-act { text-align: right; width: 1%; white-space: nowrap; }
-
-@media (max-width: 900px) {
-  .sys-grid { grid-template-columns: minmax(0, 1fr); }
-}
 @media (max-width: 600px) {
-  .sys-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
-  .sys-detail { grid-column: 1 / -1; grid-row: 2; }
-  .sys-ms { display: none; }
-  .sys-counts { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-columns: auto; }
-  .sys-counts li { border-bottom: 1px solid var(--line); }
-  .sys-counts li:nth-child(2n) { border-right: 0; }
-  .sys-counts li:last-child { border-bottom: 0; }
-  .sys-counts li:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .sys-counts li:nth-last-child(2):nth-child(odd) { border-bottom: 0; }
   /* Tables become one stacked card per row, so nothing is cut off at phone width. */
-  .sys-table thead { display: none; }
-  .sys-table, .sys-table tbody { display: block; }
-  .sys-table tr { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: var(--s3); row-gap: var(--s1); align-items: center; padding: var(--s2) 0; border-bottom: 1px solid var(--line); }
-  .sys-table tr:last-child { border-bottom: 0; }
-  .sys-table td { padding: 0; border: 0; min-width: 0; }
-  .sys-err { max-width: none; white-space: normal; overflow-wrap: anywhere; }
-  .sys-act { width: auto; }
-  .sys-dead .c-dest { grid-column: 1 / 3; grid-row: 1; font-weight: 600; }
-  .sys-dead .c-act { grid-column: 3; grid-row: 1 / 3; }
-  .sys-dead .c-tries { grid-column: 1; grid-row: 2; }
-  .sys-dead .c-when { grid-column: 2; grid-row: 2; }
-  .sys-dead .c-err { grid-column: 1 / -1; grid-row: 3; }
-  .sys-stuck .c-job { grid-column: 1 / 3; grid-row: 1; font-weight: 600; }
-  .sys-stuck .c-why { grid-column: 3; grid-row: 1; }
-  .sys-stuck .c-queue { grid-column: 1; grid-row: 2; }
-  .sys-stuck .c-when { grid-column: 2; grid-row: 2; }
-  .sys-stuck .c-tries { grid-column: 3; grid-row: 2; }
 }

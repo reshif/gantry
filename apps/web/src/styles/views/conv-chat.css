@@ -124,3 +124,5 @@
 }
 .cv-row-why .trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 767px) { .cv-row-why { flex-direction: column; align-items: flex-start; gap: 4px; } .cv-row-why .trunc { max-width: 100%; } }
+.cv-sheet { white-space: nowrap; font-size: 11px; letter-spacing: .08em; color: var(--ink3); }
+.cv-top { flex-wrap: wrap; border-bottom: 3px double var(--line-strong); padding-bottom: 6px; }
