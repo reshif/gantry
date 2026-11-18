@@ -57,10 +57,12 @@ export default function ModelsView() {
   };
   const scrollTo = (id: string) => setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
 
+  const openAddVendor = (): void => { ui.open((close) => <AddVendorDialog close={close} onAdded={(id) => { navigate("models", "vendors"); scrollTo(id); }} />); };
+
   return (
     <Page eyebrow="Workforce" title="Models" cls="view-models"
         sub="Which models agents may use, what they cost and where they are used."
-        acts={tab === "models" ? <Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} /> : <>
+        acts={tab === "models" ? <><Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} /><Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={openAddVendor} /></> : <>
           <Btn label="All models" id="md-back" onClick={() => navigate("models")} />
           {tab === "vendors" ? <Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} /> : null}
         </>}>
@@ -76,7 +78,7 @@ export default function ModelsView() {
           <Btn label="Vendors" kind="ghost" small id="md-go-vendors" onClick={() => navigate("models", "vendors")} />
           <Btn label="Routing" kind="ghost" small id="md-go-routing" onClick={() => navigate("models", "routing")} />
           <Btn label="Prices" kind="ghost" small id="md-go-prices" onClick={() => navigate("models", "prices")} />
-          <Btn label="Add vendor" kind="ghost" small icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={(id) => { navigate("models", "vendors"); scrollTo(id); }} />)} />
+          <Btn label="Add vendor" kind="ghost" small icon="plus" id="md-add-vendor-link" guard={perm} onClick={openAddVendor} />
         </div>
       ) : null}
       <Async query={vq} what="model vendors" id="models">

@@ -10,6 +10,16 @@
  */
 import { useCallback, useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { Icon } from "./Icon";
+import { usePrefs } from "../lib/prefs";
+
+/** The theme the page is showing. A dialog states it on its own wrapper, so the theme tokens apply inside it whatever element it is mounted under. */
+function useResolvedTheme(): "light" | "dark" {
+  const { theme } = usePrefs();
+  if (theme === "light" || theme === "dark") return theme;
+  const attr = typeof document !== "undefined" ? document.documentElement.getAttribute("data-theme") : null;
+  if (attr === "light" || attr === "dark") return attr;
+  return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
 
 const FOCUSABLE = 'a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex="-1"])';
 const EXEMPT = "[data-inert-exempt]";
@@ -171,6 +181,7 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, bare, onClose, onS
     if (!dirty || window.confirm("Discard what you typed?")) onClose();
   }, [dirty, onClose]);
   useModalLayer({ ref: panel, requestClose });
+  const theme = useResolvedTheme();
   const scrim = useScrimClose(requestClose);
   const inner = (
     <>
@@ -179,7 +190,7 @@ export function Modal({ title, kicker, sub, wide, cls, dirty, bare, onClose, onS
     </>
   );
   return (
-    <div className="dlg-wrap">
+    <div className="dlg-wrap" data-theme={theme}>
       <div className="scrim" {...scrim} />
       <div ref={panel} className={`dlg${wide ? " dlg-wide lg" : ""}${cls ? ` ${cls}` : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="dlg-head dlg-h">

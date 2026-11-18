@@ -487,6 +487,41 @@ describe("permissions", () => {
   });
 });
 
+describe("Add vendor entry and picker", () => {
+  it("opens the picker with every template from the API, marks local models, and still reaches the by-hand form", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("md-add-vendor"));
+    for (const t of TEMPLATES) await byId(`vt-pick-${t.id}`);
+    expect(document.getElementById("vt-pick-bedrock")!.textContent).toContain("AWS access key");
+    expect(document.getElementById("vt-pick-openai-compatible")!.textContent).toMatch(/Local or self-hosted models \(Ollama, vLLM\)/);
+    expect(document.getElementById("vt-pick-anthropic")!.querySelector("[data-testid=vt-local]")).toBeNull();
+    expect(document.getElementById("va-name")).toBeNull();
+    fireEvent.click(await byId("va-manual"));
+    await byId("va-name");
+  });
+  it("choosing a template opens its connect form", async () => {
+    setup();
+    mount();
+    fireEvent.click(await byId("md-add-vendor"));
+    fireEvent.click(await byId("vt-pick-openai-compatible"));
+    await byId("vt-submit");
+    expect(document.querySelector("[role=dialog]")!.textContent).toContain("Connect OpenAI-compatible endpoint");
+  });
+  it("the dialog carries the page's theme, dark and light", async () => {
+    for (const theme of ["dark", "light"]) {
+      document.documentElement.setAttribute("data-theme", theme);
+      setup();
+      mount();
+      fireEvent.click(await byId("md-add-vendor"));
+      await byId("vt-pick-anthropic");
+      expect(document.querySelector(".dlg-wrap")!.getAttribute("data-theme")).toBe(theme);
+      cleanup();
+    }
+    document.documentElement.removeAttribute("data-theme");
+  });
+});
+
 describe("vendor templates and model discovery", () => {
   it("picks Bedrock, shows only its fields, connects, then lists the discovered models with switches", async () => {
     const calls = setup({
@@ -604,12 +639,13 @@ describe("models screen has no tab strip (prototype)", () => {
 
 describe("work1 residual round 2: models", () => {
   beforeEach(() => { window.location.hash = "#models"; });
-  it("the header carries Discover models alone; Vendors, Routing, Prices and Add vendor sit in a quiet row below the tiles", async () => {
+  it("the header carries Discover models and a primary Add vendor; Vendors, Routing, Prices and Add vendor sit in a quiet row below the tiles", async () => {
     setup();
     mount();
     await byId("mc-table");
     const head = document.querySelector(".ph")!;
-    expect([...head.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Discover models"]);
+    expect([...head.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Discover models", "Add vendor"]);
+    expect(head.querySelector("#md-add-vendor")!.className).toContain("primary");
     const manage = await byId("md-manage");
     expect([...manage.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Vendors", "Routing", "Prices", "Add vendor"]);
   });

@@ -75,3 +75,7 @@
 .md-vb-meter { min-width: 140px; }
 #pv-form .md-price-form { margin-top: 12px; }
 @media (max-width: 560px) { .md-price-in { max-width: 84px; } #pv-edit td:first-child { min-width: 150px; } }
+
+/* Vendor picker: what each vendor needs, and the local-models hint. */
+.vt-needs-k { text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--t-xs, 11px); margin-right: 4px; }
+.vt-local { margin-top: 2px; color: var(--accent); font-weight: 500; }

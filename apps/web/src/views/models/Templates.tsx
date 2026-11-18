@@ -26,6 +26,10 @@ export function AddVendorDialog({ close, onAdded }: { close: () => void; onAdded
   return <Picker close={close} pick={(t) => setStep({ kind: "form", t })} manual={() => setStep({ kind: "manual" })} />;
 }
 
+/** Product copy, not agent voice: the server's tagline for the generic endpoint does not say "local", so the card carries a small hint. */
+const mentionsLocal = (t: VendorTemplate): boolean => /\b(local|self-hosted)\b/i.test(t.tagline);
+export const localHint = (t: VendorTemplate): string => (t.id === "openai-compatible" && !mentionsLocal(t) ? "Local or self-hosted models (Ollama, vLLM)" : "");
+
 function Picker({ close, pick, manual }: { close: () => void; pick: (t: VendorTemplate) => void; manual: () => void }) {
   const perm = dec(useCan("model.edit"));
   const q = useVendorTemplates();
@@ -42,7 +46,8 @@ function Picker({ close, pick, manual }: { close: () => void; pick: (t: VendorTe
               <button key={t.id} type="button" role="listitem" id={`vt-pick-${t.id}`} className="vt-card" disabled={!perm.allowed} onClick={() => pick(t)}>
                 <span className="vt-name">{t.name}</span>
                 <span className="small muted">{t.tagline}</span>
-                <span className="small muted">{t.auth}</span>
+                <span className="vt-needs small muted"><span className="vt-needs-k">Needs</span> {t.auth}</span>
+                {localHint(t) ? <span className="vt-local small" data-testid="vt-local">{localHint(t)}</span> : null}
               </button>
             ))}
           </div>
