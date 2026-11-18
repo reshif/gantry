@@ -22,6 +22,16 @@ const toTok = (ctx: FloorCtxValue, w: FWo, f: BeltFilter): BeltTok => {
   return { id: w.id, title: w.title, state: tokenState(ctx, w), pri: w.priority, cls: CLS_SHORT[w.cls] ?? w.cls.slice(0, 5).toUpperCase(), age: fmt.dur(Math.max(0, ctx.now - since(w))), hit: !!f.q && hit, dim: !!f.q && !hit };
 };
 
+/** The belt numbers its gates in the order they stand on this project's line (G1 to Gn), so a combined or suffixed catalogue id never shows twice. The real id stays in the tooltip and the drawers. */
+export function beltGateLabels(ctx: FloorCtxValue): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const sid of ctx.project.flow.order.filter((id) => ctx.cat.stations.some((s) => s.id === id))) {
+    const g = gateOfStation(ctx.cat, ctx.project, sid);
+    if (g) out.set(g.id, `G${out.size + 1}`);
+  }
+  return out;
+}
+
 export function liveOnBelt(ctx: FloorCtxValue, f: BeltFilter = NO_FILTER): FWo[] {
   return ctx.wos.filter((w) => isLive(w) && w.bay !== "declined" && (f.cls === "all" || w.cls === f.cls) && (f.pri === "all" || w.priority === f.pri) && (f.st === "all" || tokenState(ctx, w) === f.st));
 }
@@ -29,6 +39,7 @@ export function liveOnBelt(ctx: FloorCtxValue, f: BeltFilter = NO_FILTER): FWo[]
 export function buildBelt(ctx: FloorCtxValue, agentName: (id: string) => string, f: BeltFilter = NO_FILTER): { stations: BeltStation[]; released: number; open: FWo[] } {
   const open = liveOnBelt(ctx, f);
   const order = ctx.project.flow.order.filter((id) => ctx.cat.stations.some((s) => s.id === id));
+  const labels = beltGateLabels(ctx);
   const stations = order.map((sid, i): BeltStation => {
     const st = ctx.cat.stations.find((s) => s.id === sid)!;
     const idx = stationIdx(ctx.cat, sid);
@@ -39,7 +50,7 @@ export function buildBelt(ctx: FloorCtxValue, agentName: (id: string) => string,
     const lane = active.slice(0, slots);
     const queue = active.slice(slots).concat(here.filter((t) => t.state === "queued")).sort((a, b) => a.age.localeCompare(b.age));
     const g = gateOfStation(ctx.cat, ctx.project, sid);
-    return { id: sid, name: st.name, agent: agentName(st.agent), slots, lane, queue, gateAfter: g ? { id: g.id, name: g.name, waiting: gateStateOf(ctx, g.id).waiting } : null, hasNext: i < order.length - 1 };
+    return { id: sid, name: st.name, agent: agentName(st.agent), slots, lane, queue, gateAfter: g ? { label: labels.get(g.id), id: g.id, name: g.name, waiting: gateStateOf(ctx, g.id).waiting } : null, hasNext: i < order.length - 1 };
   });
   const released = ctx.wos.filter((w) => w.state === "done" && (w.doneAt ?? 0) > ctx.now - DAY).length;
   return { stations, released, open };

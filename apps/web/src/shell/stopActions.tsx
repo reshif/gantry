@@ -2,6 +2,7 @@
 import { ops } from "../api/ops";
 import type { Me } from "../api/types";
 import type { UIApi } from "../ui/overlay-context";
+import { EmergencyStopDialog } from "./EmergencyStop";
 import { HaltDialog, KillDialog, RestoreDialog } from "./StopDialogs";
 
 export interface StopActions {
@@ -9,6 +10,7 @@ export interface StopActions {
   resume(projectId: string): Promise<void>;
   haltRepo(repoId: string, projectId: string): void;
   resumeRepo(repoId: string): Promise<void>;
+  emergency(scope: "factory" | "project", id: string | null): void;
   kill(scope: "factory" | "project" | "workorder", id: string | null): void;
   restore(scope: "factory" | "project" | "workorder", id: string | null): void;
 }
@@ -20,6 +22,7 @@ export function makeStopActions(ui: UIApi, _me: Me): StopActions {
     resume: async (projectId) => done(await ops.resumeProject(projectId)),
     haltRepo: (repoId, projectId) => void ui.open((close) => <HaltDialog scope="repo" id={repoId} projectId={projectId} onClose={close} />),
     resumeRepo: async (repoId) => done(await ops.resumeRepo(repoId)),
+    emergency: (scope, id) => void ui.open((close) => <EmergencyStopDialog scope={scope} id={id} onClose={close} />),
     kill: (scope, id) => void ui.open((close) => <KillDialog scope={scope} id={id} onClose={close} />),
     restore: (scope, id) => void ui.open((close) => <RestoreDialog scope={scope} id={id} onClose={close} />),
   };

@@ -167,7 +167,7 @@ export function MiniBeltCr({ stations }: { stations: MiniStation[] }) {
 export type TokState = "running" | "queued" | "gate" | "blocked";
 export interface BeltTok { id: string; title: string; state: TokState; pri: string; cls: string; age: string; hit?: boolean; dim?: boolean }
 export interface BeltStation { id: string; name: string; agent: string; slots: number; lane: BeltTok[]; queue: BeltTok[]; gateAfter: BeltGate | null; hasNext: boolean }
-export interface BeltGate { id: string; name: string; waiting: number }
+export interface BeltGate { label?: string; id: string; name: string; waiting: number }
 
 const woShort = (id: string) => id.replace(/^WO-?/i, "");
 const STATE_CLS: Record<TokState, string> = { running: "run", queued: "que", gate: "is-gate", blocked: "blk" };
@@ -236,7 +236,7 @@ export function Conveyor({ stations, released, paused, onToken, onStation, onGat
                 {gw ? (
                   <div className={`gate ${gw.waiting ? "wait" : "clear"}`}>
                     <button type="button" className="gh" onClick={() => onGate(gw.id)} aria-label={`Gate ${gw.id} ${gw.name}, ${gw.waiting ? `${gw.waiting} waiting for a person` : "clear"}`} title={`${gw.id} · ${gw.name} · ${gw.waiting ? `${gw.waiting} waiting` : "clear"}`}>
-                      <span className={`lamp ${gw.waiting ? "warn pulse" : "ok"}`} /><b>{gw.id.match(/^G\d+/)?.[0] ?? gw.id}</b><span className="gname">{gw.name}</span><span className="gn">{gw.waiting || ""}</span>
+                      <span className={`lamp ${gw.waiting ? "warn pulse" : "ok"}`} /><b>{gw.label ?? gw.id.match(/^G\d+/)?.[0] ?? gw.id}</b><span className="gname">{gw.name}</span><span className="gn">{gw.waiting || ""}</span>
                     </button>
                     <div className="gp" aria-hidden="true" />
                     <div className="gb" aria-hidden="true"><span className="arm" /></div>
@@ -288,7 +288,7 @@ export function FloorKpis({ items }: { items: Array<{ l: string; v: ReactNode; t
 
 export interface FloorFilterDef { key: string; label: string; options: Array<[string, string]> }
 
-export function FloorTools({ q, onQ, filters, values, onFilter, onClear, open, onToggle }: { q: string; onQ: (v: string) => void; filters: FloorFilterDef[]; values: Record<string, string>; onFilter: (k: string, v: string) => void; onClear: () => void; open: boolean; onToggle: () => void }) {
+export function FloorTools({ q, onQ, filters, values, onFilter, onClear, open, onToggle, extra }: { extra?: ReactNode; q: string; onQ: (v: string) => void; filters: FloorFilterDef[]; values: Record<string, string>; onFilter: (k: string, v: string) => void; onClear: () => void; open: boolean; onToggle: () => void }) {
   const nf = filters.filter((f) => values[f.key] && values[f.key] !== "all").length;
   return (
     <div className="fl-tools">
@@ -306,6 +306,7 @@ export function FloorTools({ q, onQ, filters, values, onFilter, onClear, open, o
         ))}
         {q || nf ? <button type="button" className="btn ghost" onClick={onClear}>Clear</button> : null}
       </div>
+      {extra ? <div className="fl-extra" style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{extra}</div> : null}
     </div>
   );
 }

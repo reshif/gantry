@@ -27,7 +27,7 @@ describe("Floor: belt", () => {
   it("draws the Control Room conveyor: a station per step, bays, gates between, IN and OUT caps", async () => {
     mockApi();
     mount(<FloorView />);
-    expect(await screen.findByText(/Payments Platform/)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Line control/ })).toBeTruthy();
     for (const sid of ["intake", "research", "spec", "design", "plan", "build", "verify", "review", "close"]) expect(document.querySelector(`.belt .stn[data-s="${sid}"]`), sid).toBeTruthy();
     expect(document.querySelector(".belt .cap.cin")).toBeTruthy();
     expect(document.querySelector(".belt .cap.cout")).toBeTruthy();
@@ -41,7 +41,7 @@ describe("Floor: belt", () => {
   it("narrows the belt with the search box and dims what does not match", async () => {
     mockApi();
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     fireEvent.change(screen.getByLabelText("Find a work order"), { target: { value: "WO-2401" } });
     await waitFor(() => expect(document.querySelectorAll(".belt .tok.hit, .belt .qc.hit").length).toBe(1));
     expect(document.querySelectorAll(".belt .tok.dim, .belt .qc.dim").length).toBeGreaterThan(0);
@@ -123,7 +123,7 @@ describe("Floor: replay", () => {
       }),
     });
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     fireEvent.click(document.querySelector("label[for=floor-mode-replay]") as HTMLElement);
     const bar = await screen.findByRole("region", { name: "Replay controls" });
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/projects/payments/floor" && c.query.has("at"))).toBe(true));
@@ -148,7 +148,7 @@ describe("Floor: andon and kill", () => {
       "DELETE /api/v1/stops/project%3Apayments": () => ({ body: { ok: true, msg: "Payments Platform resumed." } }),
     });
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     fireEvent.click(document.getElementById("floor-line") as HTMLElement);
     fireEvent.click(await screen.findByRole("menuitem", { name: /Halt Payments Platform/ }));
     fireEvent.change(await screen.findByLabelText("Reason"), { target: { value: "Duplicate refunds seen" } });
@@ -160,7 +160,7 @@ describe("Floor: andon and kill", () => {
   it("locks Kill project in the Line control menu for someone without the right, with the reason", async () => {
     mockApi({}, { denied: ["kill.project"] });
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     await waitFor(() => expect(document.getElementById("floor-line")).toBeTruthy());
     fireEvent.click(document.getElementById("floor-line") as HTMLElement);
     const kill = await screen.findByRole("menuitem", { name: /Kill Payments Platform/ });
@@ -171,7 +171,7 @@ describe("Floor: andon and kill", () => {
   it("locks Halt in the Line control menu for someone who may not halt, with the reason", async () => {
     mockApi({}, { denied: ["line.halt"] });
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     await waitFor(() => expect(document.getElementById("floor-line")).toBeTruthy());
     fireEvent.click(document.getElementById("floor-line") as HTMLElement);
     const halt = await screen.findByRole("menuitem", { name: /Halt Payments Platform/ });
@@ -185,7 +185,7 @@ describe("Floor: fidelity round 1", () => {
   it("has the prototype header: eyebrow Operate, plain Floor title, Pause belt and Halt line first", async () => {
     mockApi();
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     expect(document.querySelector(".ph .eyebrow")?.textContent).toBe("Operate");
     expect(document.querySelector(".ph h1")?.textContent).toBe("Floor");
     const labels = [...document.querySelectorAll(".ph .acts .btn")].map((b) => b.textContent);
@@ -196,7 +196,7 @@ describe("Floor: fidelity round 1", () => {
   it("keeps the filters in the URL and clears them", async () => {
     mockApi();
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     fireEvent.change(screen.getByLabelText("Find a work order"), { target: { value: "WO-2401" } });
     await waitFor(() => expect(window.location.search).toContain("q=WO-2401"));
     fireEvent.change(screen.getByLabelText("Class"), { target: { value: "bug" } });
@@ -208,7 +208,7 @@ describe("Floor: fidelity round 1", () => {
   it("opens the token drawer in the prototype layout with Traveler and Open record", async () => {
     mockApi();
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     fireEvent.click(document.querySelector(".belt .tok") as HTMLElement);
     expect(await screen.findByText("Open record")).toBeTruthy();
     expect(screen.getByText("Traveler")).toBeTruthy();
@@ -222,24 +222,26 @@ describe("Floor: fidelity round 1", () => {
       "GET /api/v1/work-orders/WO-2404/gates/G5/approvers": () => ({ body: { gate: "G5", label: "G5", eligible: [], overrides: [], satisfiable: true, warning: "", viewerCanOverride: false, can: { editRule: false, editWhy: "", grantRole: false, grantWhy: "" }, progress: { have: 0, need: 1, approvals: [], unmet: [] }, rule: { text: "One approval", conditions: [], base: 1 } } }),
     });
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     await screen.findByText("Waiting at gates");
     await waitFor(() => expect(document.querySelectorAll('#floor-gates [id^="floor-review-"]').length).toBe(1));
     expect(document.querySelectorAll('#floor-gates .li').length).toBe(1);
     fireEvent.click(document.querySelector('#floor-review-WO-2404') as HTMLElement);
-    expect(await screen.findByText("Approval")).toBeTruthy();
+    expect(await screen.findByText("Evidence")).toBeTruthy();
+    for (const n of ["Cancel", "Request changes", "Reject", "Approve"]) expect(screen.getByRole("button", { name: new RegExp(`^${n}`) }), n).toBeTruthy();
+    expect(screen.getByLabelText("Comment")).toBeTruthy();
   });
 
   it("opens the gate and station drawers with the prototype key facts and footer links", async () => {
     mockApi();
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     fireEvent.click(document.querySelector(".belt .gate .gh") as HTMLElement);
     expect(await screen.findByText("Configure gates")).toBeTruthy();
     expect(screen.getByText("After station")).toBeTruthy();
     cleanup();
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     fireEvent.click(document.querySelector(".belt .stn-h") as HTMLElement);
     expect(await screen.findByText("Work here")).toBeTruthy();
     expect(screen.getByText("Capacity")).toBeTruthy();
@@ -251,8 +253,71 @@ describe("Floor: kill banner", () => {
   it("shows the Factory stopped banner with Start restore when the factory is killed", async () => {
     mockApi({}, { me: { factory: { killed: { reason: "Bad deploy", by: "p-asha", at: 1, mode: "hold" } } } });
     mount(<FloorView />);
-    await screen.findByText(/Payments Platform/);
+    await screen.findByRole("button", { name: /Line control/ });
     expect(await screen.findByText("Start restore")).toBeTruthy();
     expect(document.querySelector("#floor-kill-banner")?.getAttribute("role")).toBe("alert");
+  });
+});
+
+describe("Floor: fidelity round 2", () => {
+  const ready = async () => {
+    mockApi();
+    mount(<FloorView />);
+    await screen.findByRole("button", { name: /Line control/ });
+  };
+
+  it("has no extra header row: the line controls sit in the tools row", async () => {
+    await ready();
+    expect(document.getElementById("floor-extra")).toBeNull();
+    expect(document.querySelector(".ph")?.textContent).not.toMatch(/Running|live/);
+    expect(document.querySelector(".fl-tools #floor-line")).toBeTruthy();
+    expect(document.querySelector(".fl-tools #floor-new-wo")).toBeTruthy();
+    expect(document.querySelectorAll(".ph .acts .btn").length).toBe(2);
+  });
+
+  it("numbers the belt's gates G1, G2, ... in line order, never repeating a label", async () => {
+    await ready();
+    const labels = [...document.querySelectorAll(".belt .gate .gh b")].map((b) => b.textContent);
+    expect(labels.length).toBeGreaterThan(1);
+    expect(labels).toEqual(labels.map((_, i) => `G${i + 1}`));
+  });
+
+  it("Halt line opens the Emergency stop dialog: reason of 10 characters and the word STOP", async () => {
+    const calls = mockApi({ "POST /api/v1/stops": () => ({ body: { ok: true, msg: "Payments Platform killed." } }) });
+    mount(<FloorView />);
+    await screen.findByRole("button", { name: /Line control/ });
+    fireEvent.click(document.getElementById("floor-halt") as HTMLElement);
+    expect(await screen.findByText(/Emergency stop: Payments Platform/)).toBeTruthy();
+    expect(screen.getByText("Type STOP to confirm")).toBeTruthy();
+    expect(screen.queryByText(/hold|Hold in place/i)).toBeNull();
+    const ok = await screen.findByRole("button", { name: "Stop now" });
+    fireEvent.change(document.querySelector("#emergency-stop textarea") as HTMLElement, { target: { value: "Duplicate refunds seen" } });
+    fireEvent.change(document.querySelector("#emergency-stop input") as HTMLElement, { target: { value: "stop" } });
+    fireEvent.click(ok);
+    expect(await screen.findByText("Type STOP in capitals.")).toBeTruthy();
+    expect(bodyOf(calls, "POST", "/api/v1/stops")).toHaveLength(0);
+    fireEvent.change(document.querySelector("#emergency-stop input") as HTMLElement, { target: { value: "STOP" } });
+    fireEvent.click(ok);
+    await waitFor(() => expect(bodyOf(calls, "POST", "/api/v1/stops")).toHaveLength(1));
+    expect(bodyOf(calls, "POST", "/api/v1/stops")[0]?.body).toMatchObject({ scope: "project", id: "payments", mode: "kill", reason: "Duplicate refunds seen" });
+  });
+
+  it("opens the station drawer from the header and from +N more without crashing, with an agent link and work rows", async () => {
+    await ready();
+    fireEvent.click(document.querySelector(".belt .stn-h") as HTMLElement);
+    expect(await screen.findByText("Work here")).toBeTruthy();
+    expect(document.querySelector(".drawer dl.kv a")?.getAttribute("href")).toMatch(/agents\//);
+    expect(document.querySelector(".drawer .li.click")).toBeTruthy();
+  });
+
+  it("the gate drawer is the prototype's: Mode, After station, Waiting, one list, only Configure gates in the footer", async () => {
+    await ready();
+    fireEvent.click(document.querySelector(".belt .gate .gh") as HTMLElement);
+    await screen.findByText("After station");
+    expect(screen.getByText("Mode")).toBeTruthy();
+    expect(screen.getByText("Waiting")).toBeTruthy();
+    expect([...document.querySelectorAll(".drawer-f .btn")].map((b) => b.textContent)).toEqual(["Configure gates"]);
+    expect(screen.queryByText("Recent decisions")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Approve|^Reject/ })).toBeNull();
   });
 });

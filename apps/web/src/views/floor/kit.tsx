@@ -215,7 +215,7 @@ export const markCls = (e: EventEntry): string => (e.type === "gate.decision" ? 
 
 /** MCP servers a station of a project may use (legacy mcpFor): listed for the station and the project, and attached to the project. */
 export function mcpFor(p: Project, sid: string, servers: McpServer[] | undefined): McpServer[] {
-  return (servers ?? []).filter((m) => (m.stations === "all" || m.stations.includes(sid)) && (m.projects === "all" || m.projects.includes(p.id)) && (p.mcp ?? []).includes(m.id));
+  return (servers ?? []).filter((m) => (m.stations === "all" || (Array.isArray(m.stations) && m.stations.includes(sid))) && (m.projects === "all" || (Array.isArray(m.projects) && m.projects.includes(p.id))) && (p.mcp ?? []).includes(m.id));
 }
 
 /** The floor of a project as a context value: live, or at the replay time. Null while it loads. */

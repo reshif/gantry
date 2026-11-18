@@ -10,12 +10,12 @@ import { HOUR, fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
 import { Icon } from "../ui/Icon";
-import { Btn, Empty, Segmented, Status, type Decision, type Tone } from "../ui/primitives";
+import { Btn, Empty, Segmented, type Decision } from "../ui/primitives";
 import { Card, Conveyor, CrEmpty, FloorKpis, FloorTools, ListItem, LoadBar, Page, Ticker } from "../ui/cr";
 import { useActors } from "../ui/actors";
 import { useActivity } from "../api/queries";
 import { eventRows, eventText } from "../lib/eventText";
-import { buildBelt } from "./floor/conveyor";
+import { beltGateLabels, buildBelt } from "./floor/conveyor";
 import { useFloorFilter } from "./floor/urlState";
 import { openApproval } from "./floor/Approval";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
@@ -23,7 +23,6 @@ import { useUI } from "../ui/overlay-context";
 import { pickProject } from "../lib/routes";
 import { usePrefs } from "../lib/prefs";
 import { makeStopActions } from "../shell/stopActions";
-import { useBeltStatus } from "./floor/Belt";
 import { useDrawers } from "./floor/Drawers";
 import { FloorCtx, since, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
@@ -62,14 +61,11 @@ function Kpis({ open, ticker }: { open: ReturnType<typeof buildBelt>["open"]; ti
   );
 }
 
-const statusTone = (cls: string): Tone => (cls.includes("is-killed") ? "block" : cls.includes("is-halted") || cls.includes("is-partial") ? "wait" : cls.includes("is-replay") ? "accent" : "done");
-
-function Header({ replaying, onReplay, paused, onPause, children }: { replaying: boolean; onReplay: (on: boolean) => void; paused: boolean; onPause: () => void; children: ReactNode }) {
+function Header({ replaying, onReplay, paused, onPause, children }: { replaying: boolean; onReplay: (on: boolean) => void; paused: boolean; onPause: () => void; children: (extra: ReactNode) => ReactNode }) {
   const ctx = useFloorCtx();
   const ui = useUI();
   const me = useMe();
-  const status = useBeltStatus();
-  const p = ctx.project;
+    const p = ctx.project;
   const newWo = useNewWorkOrder();
   const dSubmit = useCan("wo.submit", { project: p.id });
   const dHalt = useCan("line.halt", { project: p.id });
@@ -101,32 +97,28 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
       killItem,
     ]);
   };
+  const lineControl = (
+    <>
+      <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
+      <Btn label={p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Line control"} icon="halt" id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" />
+      <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
+    </>
+  );
   const killed = factoryKilled ? me.factory.killed : p.killed;
   return (
     <Page
       eyebrow="Operate"
       title="Floor"
-      sub={
-        <>
-          The production line, left to right. Work orders ride the belt; gates are checkpoints where a person decides.{" "}
-          <span className="vtitle-badge"><Status tone={statusTone(status.cls)} icon={status.icon} id="floor-status">{status.label}</Status></span>
-          <span className="dim mono" style={{ marginLeft: 8, fontSize: 12 }}>{p.name}</span>
-        </>
-      }
+      sub="The production line, left to right. Work orders ride the belt; gates are checkpoints where a person decides."
       cls="view-floor-page"
       id="floor-head"
       acts={
         <>
           <Btn label={paused ? "Resume belt" : "Pause belt"} icon={paused ? "play" : "pause"} id="floor-pause" aria-pressed={paused} onClick={onPause} />
-          <Btn label="Halt line" kind="danger" icon="halt" id="floor-halt" aria="Emergency stop: halt the line" guard={lockIf(factoryKilled || p.killed ? { allowed: false, reason: "The line is already stopped. Use Start restore.", needs: "" } : dKill.pending ? null : dKill)} onClick={() => stop.kill("project", p.id)} />
+          <Btn label="Halt line" kind="danger" icon="halt" id="floor-halt" aria="Emergency stop: halt the line" guard={lockIf(factoryKilled || p.killed ? { allowed: false, reason: "The line is already stopped. Use Start restore.", needs: "" } : dKill.pending ? null : dKill)} onClick={() => stop.emergency("project", p.id)} />
         </>
       }
     >
-      <div className="row fl-extra" id="floor-extra">
-          <Btn label="New work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
-          <Btn label={p.killed ? "Line control: killed" : p.halted ? "Line control: halted" : "Line control"} icon="halt" id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" />
-          <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
-      </div>
       {killed ? (
         <div className="banner bad" role="alert" id="floor-kill-banner">
           <Icon name="stop" />
@@ -134,7 +126,7 @@ function Header({ replaying, onReplay, paused, onPause, children }: { replaying:
           <Btn label="Start restore" small id="floor-start-restore" guard={dRestoreAny.pending ? null : dRestoreAny} onClick={() => stop.restore(factoryKilled ? "factory" : "project", factoryKilled ? null : p.id)} />
         </div>
       ) : null}
-      {children}
+      {children(lineControl)}
     </Page>
   );
 }
@@ -167,10 +159,12 @@ function FloorBody({ projectId }: { projectId: string }) {
     .slice(0, 5);
   const scale = Math.max(1, ...load.map((x) => x.s.slots + x.wait));
   const priorities = [...new Set(["P1", "P2", "P3", ...ctx.wos.map((w) => w.priority)])].sort();
+  const gateLabels = beltGateLabels(ctx);
   const gateOf = (woId: string) => ctx.floor.gates.find((g) => g.wo === woId);
 
   return (
     <Header replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} paused={paused} onPause={() => setPaused((v) => !v)}>
+      {(lineControl) => (<>
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
       <Kpis open={open} ticker={ticker} />
       <FloorTools
@@ -186,6 +180,7 @@ function FloorBody({ projectId }: { projectId: string }) {
         onClear={clearFilter}
         open={filtersOpen}
         onToggle={() => setFiltersOpen((o) => !o)}
+        extra={lineControl}
       />
       <Conveyor stations={stations} released={released} paused={paused} onToken={drawers.token} onStation={drawers.station} onGate={drawers.gate} onPile={drawers.station} />
       <div className="grid g2" style={{ marginTop: 16, alignItems: "start" }}>
@@ -195,8 +190,8 @@ function FloorBody({ projectId }: { projectId: string }) {
               gates.slice(0, 5).map((w) => {
                 const g = gateOf(w.id);
                 return (
-                  <ListItem key={w.id} tone="warn" title={`${g?.gate ?? ""} · ${w.title}`} sub={`${w.id} · waiting ${fmt.dur(Math.max(0, ctx.now - since(w)))}`}>
-                    {g ? <Btn label="Review" small kind="primary" id={`floor-review-${w.id}`} onClick={() => { const gd = ctx.cat.gates.find((x) => x.id === g.gate); openApproval(ui, projectId, w.id, g.gate, gd?.label ?? g.gate, gd?.name ?? ""); }} /> : null}
+                  <ListItem key={w.id} tone="warn" title={`${g ? (gateLabels.get(g.gate) ?? g.gate) : ""} · ${w.title}`} sub={`${w.id} · waiting ${fmt.dur(Math.max(0, ctx.now - since(w)))}`}>
+                    {g ? <Btn label="Review" small kind="primary" id={`floor-review-${w.id}`} onClick={() => { const gd = ctx.cat.gates.find((x) => x.id === g.gate); openApproval(ui, projectId, w.id, g.gate, gateLabels.get(g.gate) ?? gd?.label ?? g.gate, gd?.name ?? ""); }} /> : null}
                   </ListItem>
                 );
               })
@@ -212,6 +207,7 @@ function FloorBody({ projectId }: { projectId: string }) {
           </div>
         </Card>
       </div>
+      </>)}
     </Header>
   );
 }
