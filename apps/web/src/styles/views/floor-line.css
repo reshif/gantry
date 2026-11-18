@@ -1,13 +1,15 @@
 /* Floor, precision-instrument sheet. Token names follow the precision theme spec (PRECISION-THEME.md); the few tokens the theme adds
    carry a fallback until tokens.css defines them. Mock "--line" (outline) is --line2 here, mock "--line2" (hairline) is --line. */
 .floorpg {
-  --fp-st: var(--station, var(--surface2));
-  --fp-sthd: var(--station-head, var(--sunk));
-  --fp-hatch: var(--hatch, color-mix(in srgb, var(--bad) 55%, transparent));
-  --fp-split: var(--split, #7a6bc8);
-  --fp-splitf: var(--split-soft, color-mix(in srgb, var(--split, #7a6bc8) 14%, transparent));
-  --fp-onwarn: var(--on-warn, #1c1200);
-  --fp-warns: var(--warn-solid, #f4b429);
+  /* Local stand-ins for the theme's new tokens (--station, --station-head, --hatch, --split, --split-soft, --on-warn, --warn-solid);
+     point them at the real tokens once tokens.css defines them. */
+  --fp-st: var(--surface2);
+  --fp-sthd: var(--sunk);
+  --fp-hatch: color-mix(in srgb, var(--bad) 55%, transparent);
+  --fp-split: #8d7ce0;
+  --fp-splitf: color-mix(in srgb, #8d7ce0 16%, transparent);
+  --fp-onwarn: #1c1200;
+  --fp-warns: #f4b429;
   --fp-out: var(--line2);
   --fp-hair: var(--line);
   --fp-bomw: 404px;
