@@ -209,7 +209,7 @@
 .dot-status.s-degraded::before { background: var(--wait); border-radius: 0; transform: rotate(45deg); }
 
 /* ================= MODELS ================= */
-.vendor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); }
+.vendor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--s4); }
 .vendor { display: flex; flex-direction: column; }
 .vendor.is-off { border-style: dashed; }
 .vendor-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--line); gap: 10px; }
