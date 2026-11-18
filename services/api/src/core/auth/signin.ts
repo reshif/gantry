@@ -135,6 +135,9 @@ export async function signIn(g: Gantry, claims: IdClaims, r: SignInRequest): Pro
       const has = await tx.query(`select 1 from role_assignments where org_id = $1 and role_id = 'factory_admin' and scope_type = 'factory' and revoked_at is null limit 1`, [orgId]);
       if (!has.rowCount) {
         await tx.query(`insert into role_assignments (org_id, id, person_id, role_id, scope_type, granted_by) values ($1,$2,$3,'factory_admin','factory','system')`, [orgId, `ra-boot-${person.id}`, person.id]);
+        // The first admin joins the team created with the organisation, so a fresh install's only person is not team-less.
+        // Only at the grant: a later sign-in never re-adds an admin who has left the team.
+        await tx.query(`insert into team_members (org_id, team_id, person_id) select $1, id, $2 from teams where org_id = $1 and id = 'default' on conflict do nothing`, [orgId, person.id]);
         await appendEvent(tx, {
           orgId, type: "people.role_granted", category: "access", actor: "system", channel: "system", subject: { type: "person", id: person.id }, after: { role: "factory_admin", scope: "factory", reason: bootUser ? "bootstrap admin (username)" : "bootstrap admin" }, sourceIp: r.ip || null, requestId: r.requestId,
         });

@@ -166,6 +166,9 @@ d("the first sign-in by the bootstrap user becomes Factory Admin", () => {
     expect(rows).toHaveLength(1);
     const ev = (await t.db.admin.query(`select after from events where type = 'people.role_granted' and subject->>'id' = $1`, [rows[0].person_id])).rows;
     expect(ev.map((e) => e.after.reason)).toContain("bootstrap admin (username)");
+    // and joins the Default team created with the organisation
+    const teams = (await t.db.admin.query(`select team_id from team_members where person_id = $1`, [rows[0].person_id])).rows;
+    expect(teams.map((r) => r.team_id)).toEqual(["default"]);
     // the next sign-in still works with no email, and a later different sub is never granted anything
     expect((await signIn({ ...owner, acr: "2" })).cookies.find((c) => c.name === "__Host-gantry_session")).toBeTruthy();
     await signIn({ sub: "late-sub", preferred_username: "owner", name: "Late", auth_time: now(), acr: "2", email: "late@x.example", email_verified: true });
