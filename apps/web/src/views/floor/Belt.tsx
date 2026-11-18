@@ -4,13 +4,10 @@
  */
 import { useState } from "react";
 import { flowOf, fmt, route as routeOf } from "@gantry/domain";
-import { ops } from "../../api/ops";
-import { useUI } from "../../ui/overlay-context";
 import { hashFor } from "../../lib/router";
 import { Btn, Panel } from "../../ui/primitives";
 import { useMe } from "../../api/queries";
 import { updatePrefs, usePrefs } from "../../lib/prefs";
-import { useOpenTraveler } from "../../shell/useTraveler";
 import { ClassChip, classOf } from "../projects/kit";
 import { FloorCtx, bayName, gateHaveNeed, openEntry, since, useFloorCtx } from "./kit";
 import { Schematic } from "./Schematic";
@@ -67,11 +64,9 @@ function RoutePill({ id, hover, onHover }: { id: string; hover: string | null; o
   );
 }
 
-export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) => void; onGate: (gid: string) => void; onOut: () => void }) {
+export function Belt({ onStation, onGate, onOut, onWo }: { onStation: (sid: string) => void; onGate: (gid: string) => void; onOut: () => void; onWo: (id: string) => void }) {
   const ctx = useFloorCtx();
   const prefs = usePrefs();
-  const open = useOpenTraveler();
-  const ui = useUI();
   const [hover, setHover] = useState<string | null>(null);
   const [routes, setRoutes] = useState(false);
   const [density, setDensity] = useQueryParam("density");
@@ -82,7 +77,6 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
   const detail = density === "detail";
   const tools = (
     <>
-      <Btn label="Routes by class" icon="branch" small kind="ghost" id="floor-routes-toggle" aria-expanded={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
       <div className="seg" role="group" aria-label="Density">
         {([["fit", "Fit", "Compact tags so the whole line fits one screen"], ["detail", "Detail", "One tag per row with title and state"]] as const).map(([v, l, t]) => (
           <Btn key={v} label={l} title={t} aria-pressed={(detail ? "detail" : "fit") === v} onClick={() => setDensity(v === "fit" ? null : v)} />
@@ -103,7 +97,7 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
               ))}
             </div>
           ) : null}
-          <Schematic detail={detail} route={route} onStation={onStation} onGate={onGate} onWo={open} onOut={onOut} />
+          <Schematic detail={detail} route={route} onStation={onStation} onGate={onGate} onWo={onWo} onOut={onOut} />
           <div className="flegend" aria-label="Legend">
             <span className="lg"><i className="run" />Running</span>
             <span className="lg"><i className="wait" />At a gate (person approves)</span>
@@ -111,6 +105,7 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
             <span className="lg"><i className="valve" />Valve: solid = person, dashed = automatic check</span>
             <span className="lg"><i className="hop" />Hopper = work in progress against the limit, red when over</span>
             <span className="lg"><i className="rw" />Rework return line</span>
+            <Btn label="Routes by class" icon="branch" small kind="ghost" id="floor-routes-toggle" aria-expanded={routes} aria-controls="floor-routes" onClick={() => setRoutes(!routes)} />
           </div>
         </div>
       </Panel>
@@ -127,18 +122,9 @@ export function Belt({ onStation, onGate, onOut }: { onStation: (sid: string) =>
                 </div>
                 <div className="small muted">{b.desc}</div>
                 {list.map((w) => (
-                  <div key={w.id} className="fl-bay-wo" data-wo={w.id}>
-                    <div className="row small">
-                      <a className="pri mono" id={`floor-bay-${w.id}`} href={hashFor("record", w.id, p.id)}>{w.id}</a>
-                      <span className="trunc grow">{w.title}</span>
-                    </div>
-                    {(b.id === "person" || b.id === "sechold") && (w.bayReason || w.failReason) ? <div className="small muted fl-bay-why">{w.bayReason || w.failReason}</div> : null}
-                    {b.id === "person" ? (
-                      <div className="row small fl-bay-acts">
-                        {w.state === "failed" ? <Btn label="Retry" small icon="refresh" id={`floor-bay-retry-${w.id}`} disabledReason={ctx.replay ? "Replay is showing the past. Go back to live to act." : null} onClick={async () => { const r = await ops.retry(w.id); ui.toast(r.msg, r.ok ? "ok" : "error"); }} /> : null}
-                        <Btn label="Assign" small id={`floor-bay-assign-${w.id}`} disabledReason={ctx.replay ? "Replay is showing the past. Go back to live to act." : null} onClick={() => open(w.id)} />
-                      </div>
-                    ) : null}
+                  <div key={w.id} className="row small" data-wo={w.id}>
+                    <a className="pri mono" id={`floor-bay-${w.id}`} href={hashFor("record", w.id, p.id)}>{w.id}</a>
+                    <span className="trunc grow">{w.title}</span>
                   </div>
                 ))}
               </div>

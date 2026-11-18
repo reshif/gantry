@@ -9,7 +9,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useMe } from "../api/queries";
-import { Btn, Empty, Panel, Segmented, StateChip, ViewHead, type Decision } from "../ui/primitives";
+import { Btn, Empty, Panel, ViewHead, type Decision } from "../ui/primitives";
 import { Loading, LoadFailed, NotVisible, failureOf } from "../ui/async";
 import { useUI } from "../ui/overlay-context";
 import { pickProject } from "../lib/routes";
@@ -18,7 +18,7 @@ import { usePrefs } from "../lib/prefs";
 import { makeStopActions } from "../shell/stopActions";
 import { Belt } from "./floor/Belt";
 import { useDrawers } from "./floor/Drawers";
-import { FloorCtx, waitingGateId, isLive, since, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
+import { FloorCtx, WoChip, isLive, since, stationIdx, useFloorCtx, useFloorState, type FloorCtxValue } from "./floor/kit";
 import { useQueryParam } from "./floor/urlState";
 import { ReplayBar, useReplayBase, useReplayPlayer } from "./floor/Replay";
 import { projectSubmitBlock, useNewWorkOrder } from "./work-orders/New";
@@ -42,8 +42,9 @@ function Kpis() {
   const parked = live.filter((w) => w.bay).length;
   const released = wos.filter((w) => w.state === "done" && !w.split);
   const oldest = waiting.length ? fmt.dur(waiting.reduce((m, w) => Math.max(m, ctx.now - since(w)), 0)) : "";
+  const facts = useFacts();
   const items: Array<{ k: string; v: string; sub: ReactNode; tone?: string; title?: string }> = [
-    { k: "In flight", v: String(live.length), sub: "on the line", tone: "info" },
+    { k: "In flight", v: String(live.length), sub: "on the line", tone: "info", title: facts },
     { k: "At gates", v: String(waiting.length), sub: "people to approve", tone: "warn", ...(oldest ? { title: `Oldest has waited ${oldest}` } : {}) },
     { k: "Stuck", v: String(stuck), sub: "blocked or failed", tone: "bad" },
     { k: "Parked", v: String(parked), sub: "in side bays" },
@@ -62,19 +63,13 @@ function Kpis() {
   );
 }
 
-/** Coding slots and month-to-date spend: kept from the platform (budget and spend are always visible), set small under the line, outside the five-cell strip. */
-function Facts() {
+/** Coding slots and month-to-date spend (kept from the platform): they ride as the tooltip of the In flight figure, so the strip stays the prototype's five cells. */
+function useFacts(): string {
   const ctx = useFloorCtx();
   const { project: p, wos } = ctx;
   const slots = ctx.replay ? wos.filter((w) => !w.bay && w.state === "running" && ctx.cat.stations[w.station]?.id === "build").slice(0, p.flow.slots).length : ctx.floor.slots.used;
   const spendPct = p.budget.monthly ? p.budget.mtd / p.budget.monthly : 0;
-  const alert = spendPct >= p.budget.alertAt;
-  return (
-    <p className="small muted fl-facts" id="floor-facts">
-      <span className="stat-tile"><span className="micro">Coding slots</span> <b className="mono stat-val">{`${slots}/${p.flow.slots}`}</b> {slots >= p.flow.slots ? "all busy" : `${p.flow.slots - slots} free`}</span>
-      <span className="stat-tile"><span className="micro">Spend, month to date</span> <b className={`mono stat-val${alert ? " warn" : ""}`}>{fmt.money0(p.budget.mtd)}</b> {ctx.replay ? "Live figure, not replayed." : <>{`${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)}. `}<a href="#project-config">Set in Project settings</a></>}</span>
-    </p>
-  );
+  return `Coding slots ${slots}/${p.flow.slots} · Spend, month to date ${fmt.money0(p.budget.mtd)} (${fmt.pct(spendPct)} of ${fmt.money0(p.budget.monthly)})${ctx.replay ? ", live figure" : ""}`;
 }
 
 function Header({ replaying, onReplay, view, onView }: { replaying: boolean; onReplay: (on: boolean) => void; view: string; onView: (v: string | null) => void }) {
@@ -99,7 +94,13 @@ function Header({ replaying, onReplay, view, onView }: { replaying: boolean; onR
     : { label: `Kill ${p.name}`, icon: "st-kill", hint: "stop now", guard: factoryKilled ? { allowed: false, reason: "The whole factory is killed; restore it from Home.", needs: "" } : dKill.pending ? null : dKill, onClick: () => stop.kill("project", p.id) };
   // One menu for everything that stops or restarts the line. Each item is locked, with the server's reason, for people who may not use it.
   const lineMenu = (anchor: HTMLElement) => {
+    if (replaying) {
+      ui.menu(anchor, `Line control · ${p.name}`, [{ label: "Back to live", icon: "play", hint: "leave replay", onClick: () => onReplay(false) }]);
+      return;
+    }
     ui.menu(anchor, `Line control · ${p.name}`, [
+      replaying ? { label: "Back to live", icon: "play", hint: "leave replay", onClick: () => onReplay(false) } : { label: "Replay the past", icon: "replay", hint: "read-only", onClick: () => onReplay(true) },
+      { sep: true },
       p.halted
         ? { label: `Resume ${p.name}`, icon: "play", hint: "whole project", guard: dResume.pending ? null : dResume, onClick: () => void stop.resume(p.id) }
         : { label: `Halt ${p.name}`, icon: "halt", hint: "whole project", guard: dHalt.pending ? null : dHalt, onClick: () => stop.halt(p.id) },
@@ -121,9 +122,12 @@ function Header({ replaying, onReplay, view, onView }: { replaying: boolean; onR
         sub="Every work order on the production line, station by station. Click a station, a valve or a tag."
         actions={
           <>
-            <Segmented name="floor-view" label="Belt or board" items={[{ id: "belt", label: "Belt" }, { id: "board", label: "Board" }]} value={view} onChange={(v) => onView(v === "board" ? "board" : null)} />
-            <Segmented name="floor-mode" label="Live or replay" items={[{ id: "live", label: "Live" }, { id: "replay", label: "Replay" }]} value={replaying ? "replay" : "live"} onChange={(v) => onReplay(v === "replay")} />
-            <Btn label={stateLabel} icon={p.killed ? "st-kill" : "halt"} id="floor-line" aria="Line control: halt or resume the project or a repo, kill or restore the project" guard={lockIf(null)} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" {...(p.halted || p.killed ? { kind: "danger" as const } : {})} />
+            <div className="seg" role="group" aria-label="View">
+              {(["belt", "board"] as const).map((v) => (
+                <Btn key={v} label={v === "belt" ? "Belt" : "Board"} id={`floor-view-${v}`} aria-pressed={view === v} onClick={() => onView(v === "board" ? "board" : null)} />
+              ))}
+            </div>
+            <Btn icon={p.killed ? "st-kill" : "halt"} title={stateLabel} id="floor-line" aria={`${stateLabel}: halt or resume the project or a repo, kill or restore the project`} onClick={(e) => lineMenu(e.currentTarget)} aria-haspopup="menu" {...(p.halted || p.killed ? { kind: "danger" as const } : {})} />
             <Btn label="Submit work order" kind="primary" icon="plus" id="floor-new-wo" guard={newGuard} onClick={() => newWo({ project: p.id })} />
           </>
         }
@@ -134,7 +138,6 @@ function Header({ replaying, onReplay, view, onView }: { replaying: boolean; onR
 
 function BoardPanel() {
   const ctx = useFloorCtx();
-  const gateOf = (w: (typeof ctx.wos)[number]): string | null => waitingGateId(ctx, w);
   const line = ctx.project.flow.order.map((id) => ctx.cat.stations.find((s) => s.id === id)).filter((s): s is NonNullable<typeof s> => !!s && !!ctx.project.flow.stations[s.id]?.enabled);
   return (
     <Panel title="Board" flush>
@@ -147,7 +150,7 @@ function BoardPanel() {
               <div className="cards">
                 {list.length ? list.map((w) => (
                   <a key={w.id} className="card" data-wo={w.id} id={`floor-tok-${w.id}`} href={hashFor("record", w.id, ctx.project.id)}>
-                    <div className="row"><span className="mono small">{w.id}</span><span className="spacer" />{gateOf(w) && w.state === "waiting" ? <span className="chip warn state state-waiting"><span>{`At ${gateOf(w)}`}</span></span> : <StateChip state={w.state} />}</div>
+                    <div className="row"><span className="mono small">{w.id}</span><span className="spacer" /><WoChip w={w} /></div>
                     <div>{w.title}</div>
                     <div className="small muted">{`${ctx.project.name} · ${w.priority}`}</div>
                   </a>
@@ -175,9 +178,8 @@ function FloorBody({ projectId }: { projectId: string }) {
       <Header replaying={!!rp} onReplay={(on) => (on ? enter() : exit())} view={view} onView={setView} />
       <Kpis />
       {rp ? <ReplayBar rp={rp} playing={playing} setPlaying={setPlaying} onExit={exit} /> : null}
-      {view === "board" ? <BoardPanel /> : <Belt onStation={drawers.station} onGate={drawers.gate} onOut={drawers.out} />}
-      <Facts />
-    </>
+      {view === "board" ? <BoardPanel /> : <Belt onStation={drawers.station} onGate={drawers.gate} onOut={drawers.out} onWo={drawers.wo} />}
+          </>
   );
 }
 

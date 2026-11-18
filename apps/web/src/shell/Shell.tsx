@@ -7,7 +7,7 @@ import { useCanSession } from "../api/can";
 import { VIEWS } from "../views";
 import { useRegisterNewWorkOrder } from "../views/work-orders/New";
 import { hasNoAccess, isProjectRoute, landingFor, pickProject, resolveRoute, routeDef } from "../lib/routes";
-import { formatHash, replaceHash, useHash } from "../lib/router";
+import { formatHash, hashQuery, replaceHash, useHash } from "../lib/router";
 import { setProject, usePrefs } from "../lib/prefs";
 import { Empty } from "../ui/primitives";
 import { useUI } from "../ui/overlay-context";
@@ -52,7 +52,7 @@ export function Shell({ me }: { me: Me }) {
 
   // redirect (replace, no dead back step) to the canonical form of the URL
   useLayoutEffect(() => {
-    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id));
+    if (scoped && !loc.project && project) replaceHash(formatHash(routeId, loc.param, project.id) + hashQuery(window.location.hash));
     else if (loc.id === "" && landing) replaceHash(formatHash(landing.id, null, landing.project));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoped, loc.project, loc.param, loc.id, project?.id, routeId]);

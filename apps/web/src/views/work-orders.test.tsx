@@ -136,22 +136,25 @@ describe("New work order", () => {
     await screen.findByRole("button", { name: /Submit work order/ });
     // the same command the palette runs; the page button itself is locked when submitting is blocked
     act(() => void runCommand("newWorkOrder"));
-    await screen.findByLabelText("Title");
+    await screen.findByLabelText(/^Title/);
     return calls;
   }
 
   it("submits once with an Idempotency-Key even when the button is clicked twice, then shows the classification and route", async () => {
     const calls = await open({ "POST /api/v1/projects/payments/work-orders": submitOk });
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
-    fireEvent.change(screen.getByLabelText("What should change and why"), { target: { value: "Refund crashes on a zero amount. Steps to reproduce: post zero." } });
-    expect(await screen.findByText("Classifier preview:")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: "Fix refund crash" } });
+    fireEvent.change(screen.getByLabelText(/^What should change and why/), { target: { value: "Refund crashes on a zero amount. Steps to reproduce: post zero." } });
+    // the prototype's five fields, in its order and with its defaults (no repo, attachment, source or classifier extras)
+    expect(Array.from(document.querySelectorAll(".form-grid label")).map((l) => l.textContent)).toEqual(["Title *", "What should change and why *", "Project", "Class", "Priority"]);
+    expect((document.getElementById("nwo-cls") as HTMLSelectElement).value).toBe("feature");
+    expect((document.getElementById("nwo-prio") as HTMLSelectElement).value).toBe("P2");
     const submit = document.getElementById("nwo-submit") as HTMLElement;
     fireEvent.click(submit);
     fireEvent.click(submit);
     await waitFor(() => expect(calls.filter((c) => c.method === "POST" && c.path === "/api/v1/projects/payments/work-orders")).toHaveLength(1));
     const post = calls.find((c) => c.method === "POST" && c.path === "/api/v1/projects/payments/work-orders") as Call;
     expect(post.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
-    expect(post.body).toMatchObject({ repo: "payments-api", title: "Fix refund crash", source: "web" });
+    expect(post.body).toMatchObject({ repo: "payments-api", title: "Fix refund crash", source: "web", priority: "P2", requestedCls: "feature" });
     // like the prototype: a toast and the new record opens
     expect(await screen.findByText("WO-3000 submitted to Intake")).toBeTruthy();
     expect(window.location.hash).toContain("WO-3000");
@@ -159,17 +162,17 @@ describe("New work order", () => {
 
   it("shows the server's refusal inline and keeps the dialog open", async () => {
     await open({ "POST /api/v1/projects/payments/work-orders": () => ({ status: 409, body: { ok: false, msg: "Payments Platform is halted (andon): duplicate refunds." } }) });
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
+    fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: "Fix refund crash" } });
     fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
     expect(await screen.findByText(/is halted \(andon\)/)).toBeTruthy();
-    expect(screen.getByLabelText("Title")).toBeTruthy();
+    expect(screen.getByLabelText(/^Title/)).toBeTruthy();
   });
 
   it("clears the inline title error as soon as a title is typed", async () => {
     await open();
     fireEvent.click(document.getElementById("nwo-submit") as HTMLElement);
     expect(await screen.findByText("Give the work order a title.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
+    fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: "Fix refund crash" } });
     await waitFor(() => expect(screen.queryByText("Give the work order a title.")).toBeNull());
   });
 
@@ -178,7 +181,7 @@ describe("New work order", () => {
     const submit = document.getElementById("nwo-submit") as HTMLElement;
     expect(submit.getAttribute("aria-disabled")).toBe("true");
     expect(submit.getAttribute("data-reason")).toMatch(/The factory is killed: Runaway spend/);
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Fix refund crash" } });
+    fireEvent.change(screen.getByLabelText(/^Title/), { target: { value: "Fix refund crash" } });
     fireEvent.click(submit);
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/projects/payments/work-orders")).toBe(false);
   });
@@ -198,7 +201,7 @@ describe("New work order", () => {
     await waitFor(() => expect(btn.getAttribute("aria-disabled")).toBe("true"));
     expect(btn.getAttribute("data-reason")).toMatch(/No role holds it/);
     fireEvent.click(btn);
-    expect(screen.queryByLabelText("Title")).toBeNull();
+    expect(screen.queryByLabelText(/^Title/)).toBeNull();
   });
 
   it("refuses for a person who may not submit, with their reason", async () => {

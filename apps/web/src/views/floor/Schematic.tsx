@@ -219,7 +219,7 @@ export function Schematic({ detail, route, onStation, onGate, onWo, onOut }: { d
     const tgw = detail ? bw - 16 : (bw - 16 - (tcols - 1) * 4) / tcols;
     blocks.push(
       <g key={s.id} className={bypassed ? "f-bypass" : undefined} data-station={s.id}>
-        <g role="button" tabIndex={0} id={`floor-st-${s.id}`} aria-label={`${s.no} ${s.name}: ${list.length} in progress, limit ${lim}${over ? ", over limit" : ""}, agent ${ag?.name ?? "none"}. Open station details`} style={{ cursor: "pointer" }} onClick={open} onKeyDown={keyOnEnter(open)}>
+        <g role="button" tabIndex={0} id={`floor-st-${s.id}`} aria-label={`${s.name}: ${list.length} work order${list.length === 1 ? "" : "s"}, limit ${lim}${over ? ", over limit" : ""}, agent ${ag?.name ?? "none"}`} style={{ cursor: "pointer" }} onClick={open} onKeyDown={keyOnEnter(open)}>
           <title>{`${s.name} · ${s.purpose}`}</title>
           <rect x={q.x} y={q.y} width={bw} height={BH} className={`f-block${bad ? " jam" : over ? " over" : ""}`} />
           <rect x={q.x} y={q.y} width={bw} height={28} className="f-head" />

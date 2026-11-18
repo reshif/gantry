@@ -260,3 +260,14 @@ export function waitingGateId(ctx: FloorCtxValue, w: FWo): string | null {
   const hit = Object.entries(w.gates ?? {}).find(([, g]) => g.status === "waiting");
   return hit ? hit[0] : (gateForWO(ctx.cat, ctx.project, w)?.id ?? null);
 }
+
+const WO_TONE: Record<string, string> = { running: "info", waiting: "warn", parked: "plain", blocked: "bad", failed: "bad", done: "ok", killed: "bad" };
+
+/** The prototype's work-order state chip: "At G2" while waiting at a gate, "Parked · bay", else the state word. A plain `.chip` (no `.state` block). */
+export function WoChip({ w }: { w: FWo }) {
+  const ctx = useFloorCtx();
+  const g = waitingGateId(ctx, w);
+  if (w.state === "waiting" && g) return <span className="chip warn">{`At ${g}`}</span>;
+  if (w.state === "parked") return <span className="chip plain">{`Parked · ${ctx.cat.bays.find((b) => b.id === w.bay)?.name ?? "bay"}`}</span>;
+  return <span className={`chip ${WO_TONE[w.state] ?? "plain"}`}>{w.state}</span>;
+}

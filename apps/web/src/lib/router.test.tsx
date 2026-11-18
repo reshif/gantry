@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { formatHash, parseHash, useHash, navigate, navigateProject } from "./router";
+import { formatHash, hashQuery, parseHash, useHash, navigate, navigateProject } from "./router";
 import { updatePrefs } from "./prefs";
 import { resolveRoute, canSeeRoute, pickProject, ROUTES } from "./routes";
 import type { Me } from "../api/types";
@@ -17,6 +17,12 @@ describe("hash parsing", () => {
     expect(parseHash("#/floor")).toEqual({ id: "floor", param: null, project: null });
     expect(parseHash("")).toEqual({ id: "", param: null, project: null });
     expect(parseHash("#record/a%2Fb")).toEqual({ id: "record", param: "a/b", project: null });
+  });
+  it("ignores a query on the hash: #/p/x/floor?view=board is the floor route", () => {
+    expect(parseHash("#/p/payments/floor?view=board")).toEqual({ id: "floor", param: null, project: "payments" });
+    expect(parseHash("#/floor?density=detail")).toEqual({ id: "floor", param: null, project: null });
+    expect(hashQuery("#/floor?density=detail")).toBe("?density=detail");
+    expect(hashQuery("#/floor")).toBe("");
   });
   it("parses and formats project routes", () => {
     expect(parseHash("#/p/payments/floor")).toEqual({ id: "floor", param: null, project: "payments" });
