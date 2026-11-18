@@ -94,4 +94,27 @@ d("work order spending cap (owner decision 3)", () => {
     expect(await stops(woId)).toHaveLength(1);
     expect(await breach(runId)).toBeNull();
   });
+
+  const resume = (who: string, woId: string, reason?: string) => w.call(who, "DELETE", `/api/v1/stops/${encodeURIComponent(`workorder:${woId}`)}`, reason ? { reason } : undefined);
+
+  it("S-12: resuming a budget halt while still over budget is refused; a Factory Admin can resume it with a reason, audited", async () => {
+    const { woId } = await breached(0.01);
+    const [halt] = await stops(woId);
+    const refused = await resume("p-meera", woId, "Try again");
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    expect(refused.body.msg).toMatch(/still over budget, raise the cap first/);
+    expect((await stops(woId))[0].lifted_at).toBeNull();
+    // A Factory Admin needs a reason to override.
+    const noReason = await resume("p-asha", woId);
+    expect(noReason.status).toBe(409);
+    expect(noReason.body.msg).toMatch(/reason of at least 5 characters/);
+    const ok = await resume("p-asha", woId, "Owner approved finishing this order");
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect((await stops(woId))[0].lifted_at).not.toBeNull();
+    const ev = (await w.events("resume")).find((e) => e.after?.stop === halt.id)!;
+    expect(ev.after).toMatchObject({ override: true, text: "Owner approved finishing this order", overBudget: expect.stringMatching(/work order's cap/) });
+    // Raising the cap is still the normal way: it lifts without any override.
+    const again = await breached(0.01);
+    expect((await put(ADMIN, again.woId, { usd: 5 })).body.resumed).toBe(true);
+  });
 });
