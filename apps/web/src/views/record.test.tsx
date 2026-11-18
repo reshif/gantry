@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
+import { updatePrefs } from "../lib/prefs";
 import { WOS, mockApi, mount, resetApp } from "./floor/testkit";
 import { posts, readsFor, recordOf, travelerOf, waitingWo } from "./traveler/testkit";
 
@@ -59,7 +60,8 @@ describe("Work order record", () => {
     const write = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText: write }, configurable: true });
     const calls = await showRecord({ [`GET /api/v1/work-orders/${W.id}/record.md`]: () => ({ body: "# WO\n\nline two" }) });
-    fireEvent.click(document.getElementById("rec-copy") as HTMLElement);
+    fireEvent.click(document.getElementById("dz-more") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy as Markdown" }));
     await waitFor(() => expect(calls.some((c) => c.path === `/api/v1/work-orders/${W.id}/record.md`)).toBe(true));
     await waitFor(() => expect(write).toHaveBeenCalled());
     expect(await screen.findByText(new RegExp(`Copied ${W.id} as Markdown`))).toBeTruthy();
@@ -69,7 +71,8 @@ describe("Work order record", () => {
     URL.createObjectURL = vi.fn(() => "blob:x");
     URL.revokeObjectURL = vi.fn();
     const calls = await showRecord({ [`GET /api/v1/work-orders/${W.id}/record/export`]: () => ({ body: { manifest: { id: W.id, version: 7, algorithm: "sha256", files: [{ name: "record.json", sha256: "ab", bytes: 3 }] }, files: {} } }) });
-    fireEvent.click(document.getElementById("rec-export") as HTMLElement);
+    fireEvent.click(document.getElementById("dz-more") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export record" }));
     await waitFor(() => expect(calls.some((c) => c.path.endsWith("/record/export"))).toBe(true));
     expect(await screen.findByText(/Exported .*1 parts, each with its sha256 hash/)).toBeTruthy();
   });
@@ -93,6 +96,7 @@ describe("Work order record", () => {
 
   it("shows the picker when no record is selected and a notice when the record is not visible", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: WOS.slice(0, 2), next: null, total: 2 } }) });
+    updatePrefs({ record: null });
     window.location.hash = "#record";
     mount(<RecordView />);
     expect(await screen.findByText("Work order records", {}, { timeout: 4000 })).toBeTruthy();
@@ -101,6 +105,8 @@ describe("Work order record", () => {
     mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: [], next: null, total: 0 } }) });
     window.location.hash = `#record/${W.id}/document`;
     mount(<RecordView />);
-    expect(await screen.findByText(/was not found, or it belongs to a project outside your access/, {}, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Not found" }, { timeout: 4000 })).toBeTruthy();
+    expect(screen.getByText(`No work order ${W.id}`)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to work orders" })).toBeTruthy();
   });
 });

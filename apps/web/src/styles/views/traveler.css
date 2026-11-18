@@ -105,3 +105,5 @@
 .trv-drawer .tb-drawer .v, .trv-drawer .titleblock dd { font-size: 14px; line-height: 20px; white-space: normal; overflow-wrap: anywhere; }
 .trv-sheet { max-width: none; padding: var(--s4); }
 @media print { .drawer-head, .drawer-s, .tabs-w, .trv-sheet .btn { display: none !important; } }
+
+@media print { .trv-page .ph .acts { display: none !important; } }

@@ -3,7 +3,7 @@
  * "decision" is a can() result: { allowed, reason, needs }. A forbidden control stays visible and
  * focusable, carries aria-disabled and data-reason, and shows the reason in the tooltip.
  */
-import { Children, cloneElement, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Children, cloneElement, forwardRef, isValidElement, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import { WO_STATES } from "@gantry/domain";
 import { Icon } from "./Icon";
 import { tip } from "./Tip";
@@ -412,6 +412,10 @@ export function Meter({ value, max, label, warnAt = 0.85 }: { value: number; max
     </div>
   );
 }
+
+/** A multi-line text input in the standard field look. Additive primitive: views use it with Field instead of a raw <textarea>. */
+export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(({ className = "", ...rest }, ref) => <textarea ref={ref} className={`input ${className}`.trim()} {...rest} />);
+Textarea.displayName = "Textarea";
 
 /** Table in the standard scroll wrapper. */
 export function Table({ compact, children, className = "" }: { compact?: boolean; children: ReactNode; className?: string }) {

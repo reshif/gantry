@@ -71,7 +71,7 @@ export function Nav({ me, current, project, onNavigate }: { me: Me; current: str
             <div className="navgrp">{g.name}</div>
             {items.map((it) => {
               const bd = badges[it.id];
-              const active = current === it.id || (it.id === "work-orders" && (current === "record" || current === "changes")) || (it.id === "people" && current === "person");
+              const active = current === it.id || (it.id === "work-orders" && (current === "record" || current === "changes" || current === "traveler" || current === "dossier")) || (it.id === "people" && current === "person");
               const off = !!it.project && !shown;
               return (
                 <a

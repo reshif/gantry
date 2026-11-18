@@ -38,7 +38,7 @@ export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () =>
   const submit = async () => {
     if (busy) return;
     if (!pick) {
-      setErr(`${wo.id} is at the first station on its route.`);
+      setErr("Already at the first station.");
       return;
     }
     setBusy(true);
@@ -48,14 +48,14 @@ export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () =>
       setErr(r.msg);
       return;
     }
-    ui.toast(r.msg, "ok");
+    ui.toast("Sent back", "warn");
     onClose();
   };
   return (
     <Dialog
-      title={`Send ${wo.id} back`}
+      title={`Send ${wo.id} back${pick ? ` to ${stName(cat, pick)}` : ""}?`}
       kicker="Rework"
-      sub="The station's agent picks it up again with your note. Gates after that station reset and need approving again."
+      sub="The previous agent re-runs with your note."
       onClose={onClose}
       body={
         <div className="form-grid">
@@ -168,6 +168,10 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
       setErr(chosen.why ?? "That bay is not available.");
       return;
     }
+    if (reason.trim().length < 5) {
+      setErr("Give a reason of at least 5 characters.");
+      return;
+    }
     setBusy(true);
     const r = await ops.park(wo.id, sel, reason, undefined, { ifMatch: wo.version });
     setBusy(false);
@@ -175,14 +179,14 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
       setErr(r.msg);
       return;
     }
-    ui.toast(r.msg, "ok");
+    ui.toast(`Parked ${wo.id}`, "warn");
     onClose();
   };
   return (
     <Dialog
-      title={`Move ${wo.id} to a bay`}
+      title={`Park ${wo.id}`}
       kicker="Off the main belt"
-      sub={`Work in a bay stops. It returns to ${stName(cat, cat.stations[wo.station]?.id)} when someone releases it.`}
+      sub={`It stops moving until someone resumes it. It returns to ${stName(cat, cat.stations[wo.station]?.id)} when released.`}
       onClose={onClose}
       body={
         <div className="form-grid">
@@ -190,13 +194,13 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
           <Field label="Bay" htmlFor="park-bay" hint={chosen?.disabled ? chosen.why : "Declined needs Decline rights. Queue is only for work about to build."}>
             <Select id="park-bay" options={opts} value={sel} onChange={setBay} />
           </Field>
-          <Field label="Reason" htmlFor="park-reason">
+          <Field label="Reason" htmlFor="park-reason" hint="At least 5 characters.">
             <textarea id="park-reason" className="input" rows={3} placeholder="Why does it leave the belt?" value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
           <Err text={err} />
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: "Move to bay", kind: "primary", icon: "st-park", submit: true, id: "park-submit", guard: d, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: "Park", kind: "primary", icon: "pause", submit: true, id: "park-submit", guard: d, onClick: () => void submit() }]}
     />
   );
 }

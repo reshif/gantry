@@ -33,8 +33,8 @@ export function woReadOverrides(wos: Loose[], projectId: string): Record<string,
       id: w.id, version: 7, project: projectId, repo: w.repo, title: w.title, state: w.state,
       request: { text: w.description || w.title, by: w.requestedBy, via: w.source, at: w.createdAt, attachments: [] },
       classification: { predicted: w.cls, final: w.cls, confidence: 0.94, rationale: "The request adds new behaviour to an existing endpoint.", requested: null, overridden: null },
-      route: rt, flowVersion: 3, clarification: [], briefVersions: [], brief: BRIEF, criteria: CRITERIA, journey: history,
-      gates: [], sendbacks: [], bayStays: [], attempts: history.map((h, i) => ({ id: `at-${i}`, station: h.station, visit: 1, fencing: 1, state: h.endedAt ? "done" : "running", outcome: h.outcome, startedAt: new Date(h.startedAt).toISOString(), endedAt: h.endedAt ? new Date(h.endedAt).toISOString() : null, agent: h.agent })), results: [], runs: [],
+      route: rt, flowVersion: 3, clarification: [], briefVersions: WO_BRIEF_VERSIONS(w), brief: BRIEF, criteria: CRITERIA, journey: history,
+      gates: woGateInstances(w), sendbacks: [], bayStays: [], attempts: history.map((h, i) => ({ id: `at-${i}`, station: h.station, visit: 1, fencing: 1, state: h.endedAt ? "done" : "running", outcome: h.outcome, startedAt: new Date(h.startedAt).toISOString(), endedAt: h.endedAt ? new Date(h.endedAt).toISOString() : null, agent: h.agent })), results: [], runs: [],
       code: { pullRequests: [{ number: 300, state: "open", draft: false, headSha: "a1b2c3d", title: w.title, url: null, mergedAt: null }], commits: [{ sha: "a1b2c3d", message: "Add sliding window limiter", author: "agent", at: new Date(NOW - 60 * MIN).toISOString() }], files: [{ path: "src/limiter/window.ts", status: "added", plus: 84, minus: 6, preview: [{ t: " ", s: "@@ -1,12 +1,30 @@" }, { t: " ", s: "import { Clock } from \"../clock\";" }, { t: "+", s: "export interface WindowOpts { limit: number; windowMs: number }" }, { t: "+", s: "export class SlidingWindow {" }, { t: "+", s: "  private hits: number[] = [];" }, { t: "+", s: "  allow(): boolean {" }, { t: "+", s: "    const now = this.clock.now();" }, { t: "+", s: "    return this.hits.length < this.o.limit;" }, { t: "+", s: "  }" }, { t: "+", s: "}" }, { t: "-", s: "const LIMIT = 100;" }] }, { path: "src/routes/payout.ts", status: "modified", plus: 31, minus: 9 }, { path: "test/limiter.test.ts", status: "added", plus: 97, minus: 0 }, { path: "config/limits.yaml", status: "modified", plus: 6, minus: 2 }], diff: { plus: 212, minus: 31, files: 4 }, tests: { passed: 54, failed: 0, added: 6 } },
       outcomes: [], totals: { tokens: 545000, cost: 1.16 },
       completeness: { sections: { summary: true, request: true, clarification: true, agreement: true, stations: true, changes: true, verification: true, merge: false, approvals: false, after: false, timeline: true }, done: 7, total: 11 },
@@ -47,8 +47,50 @@ export function woReadOverrides(wos: Loose[], projectId: string): Record<string,
     for (const g of Object.keys(w.gates ?? {})) {
       ov[`work-orders/${w.id}/gates/${g}/approvers`] = (r) => fulfillJson(r, { gate: g, label: g, name: "Review and merge", rule: { text: "Needs 1 approval from Tech Lead or Project Admin \u00b7 the author can't approve", required: 1, sod: true, roles: [], people: [], conditions: [] }, progress: { have: 0, need: 1, approvals: [], unmet: [], onlyRequester: false }, eligible: [{ id: "p-lead", name: "Meera Iyer", why: "Tech Lead", away: false, oncall: true }], overrides: [], satisfiable: true, warning: null, viewerCanOverride: false, can: { editRule: true, editWhy: "", grantRole: true, grantWhy: "" } });
     }
-    ov[`work-orders/${w.id}/session`] = (r) => fulfillJson(r, { ok: false, msg: "No conversation yet" }, 404);
+    ov[`work-orders/${w.id}/session`] = (r) => fulfillJson(r, woSession(w, full, gate));
   }
   ov["work-order-sessions"] = (r) => fulfillJson(r, { items: [] });
   return ov;
+}
+
+/* ---- fidelity round 1, group wo: gate instances with decisions and checks, two brief versions and a conversation for the work order screens ---- */
+const WO_DECIDERS = ["p-lead", "p-admin", "p-priya", "p-asha"];
+function woGateInstances(w: Loose): Loose[] {
+  const idx = (gate: string) => DEFAULT_CATALOG.stations.findIndex((x) => x.id === DEFAULT_CATALOG.gates.find((g) => g.id === gate)?.after);
+  return DEFAULT_CATALOG.gates
+    .filter((g) => w.gates?.[g.id]?.status === "waiting" || idx(g.id) < w.station)
+    .map((g, i) => {
+      const gate = g.id;
+      const passed = w.gates?.[gate]?.status !== "waiting";
+      const at = new Date(w.createdAt + (i + 1) * 70 * MIN).toISOString();
+      return {
+        id: `${w.id}:${gate}:1`, gate, station: null, status: passed ? "closed" : "waiting", closedReason: passed ? "decision" : null, headSha: null, openedAt: at, closedAt: passed ? at : null,
+        pinned: { flowVersion: 3, ruleVersion: 2, policyVersion: 5 },
+        basis: { checks: [{ name: "lint", ok: true }, { name: "typecheck", ok: true }, { name: gate === "G5" ? "unit tests (48)" : "brief complete", ok: true }] },
+        votes: passed ? [{ by: WO_DECIDERS[i % 4]!, vote: "approve", comment: "", at, via: "web", role: null }] : [],
+        decision: passed ? { decision: "approve", decided_by: WO_DECIDERS[i % 4]!, rule: null, trust_level: null, detail: { mode: "human" }, at } : null,
+      };
+    });
+}
+const WO_BRIEF_VERSIONS = (w: Loose): Loose[] => [
+  { v: 2, at: w.createdAt + 30 * MIN, by: w.requestedBy, note: "First draft", brief: { ...BRIEF, goal: "Rate limits apply per account.", scopeIn: ["Per-account sliding window limiter"], ac: BRIEF.ac.slice(0, 2), decisions: [] } },
+  { v: 3, at: w.createdAt + 50 * MIN, by: w.requestedBy, note: "Per merchant, with rollback", brief: BRIEF },
+];
+function woSession(w: Loose, full: Loose, gate: string | undefined): Loose {
+  const g = gate ? DEFAULT_CATALOG.gates.find((x) => x.id === gate) : undefined;
+  const st = DEFAULT_CATALOG.stations[w.station] ?? DEFAULT_CATALOG.stations[0]!;
+  return {
+    woId: w.id, project: w.project, repo: w.repo,
+    wo: { id: w.id, title: w.title, description: w.description ?? "", cls: w.cls, clsName: "Feature", confidence: 0.94, rationale: "", priority: w.priority, station: st.id, stationName: st.name, state: w.state, bay: null, gate: g ? { id: g.id, label: g.label, name: g.name } : null, requestedBy: w.requestedBy, closed: false },
+    messages: [
+      { id: "m1", role: "assistant", author: st.agent, text: `I reviewed the change for ${w.id}. The limiter tests pass; two naming nits remain.`, at: NOW - 3 * 60 * MIN, data: { mode: "agent", model: "claude-sonnet", agent: st.agent } },
+      { id: "m2", role: "user", author: w.requestedBy, text: "Thanks. Is the default still 60 per minute?", at: NOW - 2 * 60 * MIN, data: {} },
+      { id: "m3", role: "assistant", author: st.agent, text: "Yes, the default is 60 per minute per merchant and it is configurable.", at: NOW - 100 * MIN, data: { mode: "agent", model: "claude-sonnet", agent: st.agent } },
+    ],
+    agent: { mode: "agent", name: st.name === "Review and merge" ? "Reviewer" : `${st.name} agent`, id: st.agent, model: "claude-sonnet", vendor: "anthropic", version: 4, station: st.id },
+    budget: { spentUsd: 1.16, limitUsd: 20 }, costUsd: 1.16,
+    can: { talk: true, talkWhy: "", confirm: true, confirmWhy: "" }, steps: [], next: { actor: gate ? "approver" : "agent", text: gate ? `Findings are ready for the ${gate} approver.` : "Working." },
+    waiting: null, dialogue: { questions: [], assumptions: [], objections: [], askedMe: false }, swarm: null, documents: [], research: { plan: null, allowList: [], canDecide: false, canApproveUnlisted: false }, sources: [], pending: [],
+    brief: BRIEF, briefConfirmed: true, briefOpen: false, ruleQuestion: null, ruleReady: false, busy: false, version: full.version,
+  };
 }

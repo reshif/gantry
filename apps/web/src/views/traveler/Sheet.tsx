@@ -1,5 +1,5 @@
 /** The printable routing sheet, laid out like the prototype's Traveler page: title block with barcode, the facts, and a stamp for every station. */
-import { fmt, gateAfter, type Catalog, type Project } from "@gantry/domain";
+import { WO_STATES, fmt, gateAfter, type Catalog, type Project } from "@gantry/domain";
 import { Btn } from "../../ui/primitives";
 import { Icon } from "../../ui/Icon";
 import { DataTable, type Col } from "../../ui/DataTable";
@@ -9,7 +9,8 @@ import { stName, type TWo } from "./model";
 
 type Row = { key: string; station: string; agent: string; at: number | null; dur: number; state: "passed" | "now" | "skipped"; gate: string | null };
 
-export function Sheet({ wo, cat, project }: { wo: TWo; cat: Catalog; project: Project }) {
+/** `page`: the sheet sits in the Traveler page, whose header has Print (no print row below the sheet). */
+export function Sheet({ wo, cat, project, page }: { wo: TWo; cat: Catalog; project: Project; page?: boolean }) {
   const actor = useActors();
   const h = [...wo.id].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7);
   const bars = Array.from({ length: 46 }, (_, i) => ({ x: i * 5, w: 1 + ((h >> (i % 20)) & 3) }));
@@ -44,15 +45,17 @@ export function Sheet({ wo, cat, project }: { wo: TWo; cat: Catalog; project: Pr
         <dt>Project</dt><dd>{project.name}</dd>
         <dt>Class</dt><dd>{`${classOf(cat, project, wo.cls).name} · ${wo.priority}`}</dd>
         <dt>Requested</dt><dd>{`${actor(wo.requestedBy).name} · ${fmt.stamp(wo.createdAt)}`}</dd>
-        <dt>Status</dt><dd>{wo.state}</dd>
+        <dt>Status</dt><dd><span className={`chip ${({ running: "info", waiting: "warn", blocked: "bad", failed: "bad", done: "ok", killed: "bad" } as Record<string, string>)[wo.state] ?? "idle"}`}>{(WO_STATES as Record<string, { label: string }>)[wo.state]?.label ?? wo.state}</span></dd>
       </dl>
       <hr />
       <div className="label" style={{ marginBottom: 8 }}>Station stamps</div>
       <DataTable id="trv-stamps" caption={`Station stamps of ${wo.id}`} columns={cols} rows={rows} rowKey={(r) => r.key} />
-      <div className="row" style={{ marginTop: 16 }}>
-        <Btn label="Print" kind="primary" icon="dl" id="trv-print" onClick={() => window.print()} />
-        <span className="muted small"><Icon name="page" /> The printable record that follows the work order down the line.</span>
-      </div>
+      {page ? null : (
+        <div className="row" style={{ marginTop: 16 }}>
+          <Btn label="Print" kind="primary" icon="page" id="trv-print" onClick={() => window.print()} />
+          <span className="muted small"><Icon name="page" /> The printable record that follows the work order down the line.</span>
+        </div>
+      )}
     </div>
   );
 }

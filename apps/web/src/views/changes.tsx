@@ -6,6 +6,10 @@ import { useMemo } from "react";
 import { navigate, useHash } from "../lib/router";
 import { Btn } from "../ui/primitives";
 import { Page, Card } from "../ui/cr";
+import { useUI } from "../ui/overlay-context";
+import { ReviewDialog } from "./dossier/ReviewDialog";
+import { reviewGate } from "./dossier/Head";
+import { NotFound, statusOf } from "./dossier/kit";
 import { Loading } from "../ui/async";
 import { Picker } from "./record/Picker";
 import { Changes } from "./record/sections2";
@@ -17,7 +21,26 @@ const split = (p: string): { name: string; dir: string } => {
   return { name: p.slice(i + 1), dir: i < 0 ? "" : p.slice(0, i) };
 };
 
+/** Real line numbers from the hunk headers ("@@ -40,9 +40,22 @@"): the new file's number for added and unchanged lines, the old file's for removed ones. */
+export function numbered(lines: Array<{ t: string; s: string }>): Array<{ n: number | null; hunk: boolean }> {
+  let o = 0;
+  let nn = 0;
+  return lines.map((l) => {
+    const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(l.s);
+    if (m) {
+      o = Number(m[1]);
+      nn = Number(m[2]);
+      return { n: null, hunk: true };
+    }
+    if (l.t === "+") return { n: nn++, hunk: false };
+    if (l.t === "-") return { n: o++, hunk: false };
+    o++;
+    return { n: nn++, hunk: false };
+  });
+}
+
 export default function ChangesView() {
+  const ui = useUI();
   const hash = useHash();
   const [rawId = "", rawFile = ""] = (hash.param || "").split("/");
   const id = rawId.toUpperCase();
@@ -35,13 +58,17 @@ export default function ChangesView() {
   if (!id) return <Picker />;
   if (d.loading) return <div className="view rec-view"><Loading id="chg-loading" label="the changes" /></div>;
   if (d.error || !d.wo || !d.rec || !d.project || !d.cat) {
-    const status = (d.error as { status?: number } | null)?.status;
-    return <Picker note={status === 403 || status === 404 ? `${id} was not found, or it belongs to a project outside your access. Pick a work order you can see.` : `Could not load the changes of ${id}.`} />;
+    const status = statusOf(d.error);
+    return status === 403 || status === 404 ? <NotFound id={id} /> : <Picker note={`Could not load the changes of ${id}.`} />;
   }
   const { wo, rec, project, cat } = d;
   const pr = rec.code.pullRequests[0];
   const cur = files[Number(rawFile)] ?? files[0];
-  const ap = wo.allowed.approve;
+  const rg = reviewGate(wo, cat);
+  const noLineComments = () => ui.toast("Line comments are not available yet: the server has no code review comments.", "info");
+  const nums = numbered(cur?.preview ?? []);
+  const gi = rg ? wo.gateProgress[rg.g.id] : undefined;
+  const tests = rec.code.tests;
   return (
     <Page
       eyebrow={`Work order \u00b7 ${wo.id}`}
@@ -50,7 +77,7 @@ export default function ChangesView() {
       acts={
         <>
           <Btn label="Back to record" id="chg-back" onClick={() => navigate("record", wo.id, wo.project)} />
-          {ap ? <Btn label={`Review ${ap.gate}`} kind="ok" id="chg-review" onClick={() => navigate("record", wo.id, wo.project)} /> : null}
+          {rg ? <Btn label={`Review ${rg.g.label}`} kind="ok" id="chg-review" guard={rg.ap} onClick={() => void ui.open((close) => <ReviewDialog wo={wo} gate={rg.g} rec={rec} onClose={close} />)} /> : null}
         </>
       }
     >
@@ -74,12 +101,12 @@ export default function ChangesView() {
             </div>
           </Card>
           <div className="stack" style={{ minWidth: 0 }}>
-            <Card title={<span className="mono" style={{ fontSize: 13 }}>{cur?.path}</span>} acts={<span className="dim">{cur?.preview?.length ? "Diff preview" : "No preview stored"}</span>} flush>
+            <Card title={<span className="mono" style={{ fontSize: 13 }}>{cur?.path}</span>} acts={<span className="dim">{cur?.preview?.length ? "Line comments are not available yet" : "No preview stored"}</span>} flush>
               {cur?.preview?.length ? (
                 <div className="diff" style={{ border: 0, borderRadius: 0 }}>
                   {cur.preview.map((l, i) => (
                     <div key={i} className={`ln ${l.t === "+" ? "add" : l.t === "-" ? "del" : l.s.startsWith("@@") ? "hh" : ""}`}>
-                      <span>{l.s.startsWith("@@") ? "" : i}</span>
+                      <span>{nums[i]?.hunk ? "" : <Btn label={String(nums[i]?.n)} cls="ln-num" aria={`Comment on line ${nums[i]?.n}`} onClick={noLineComments} />}</span>
                       <span />
                       <span>{l.s.startsWith("@@") ? l.s : `${l.t} ${l.s}`}</span>
                     </div>
@@ -87,6 +114,15 @@ export default function ChangesView() {
                 </div>
               ) : <Empty icon="page" title="No diff preview" text="The patch is stored by content hash; open the full review below." />}
             </Card>
+            <Card title="Review summary">
+          <dl className="kv" style={{ margin: 0 }}>
+            <dt>Pull request</dt><dd>{pr ? `#${pr.number} ${pr.state}${pr.draft ? " (draft)" : ""}` : "not yet"}</dd>
+            <dt>Files</dt><dd>{`${files.length} changed, +${sum(files, "plus")} \u2212${sum(files, "minus")}`}</dd>
+            <dt>Tests</dt><dd>{tests.passed + tests.failed + tests.added ? `${tests.passed} passed, ${tests.failed} failed, ${tests.added} added` : "not available"}</dd>
+            <dt>Sensitive paths</dt><dd>{files.some((f) => f.protected) ? `${files.filter((f) => f.protected).length} touched` : "none touched"}</dd>
+            <dt>Review gate</dt><dd>{rg ? `${rg.g.label} ${rg.g.name}: ${gi ? `${gi.have} of ${gi.need} approvals` : "waiting"}` : "no gate waiting"}</dd>
+          </dl>
+        </Card>
           </div>
         </div>
       ) : null}

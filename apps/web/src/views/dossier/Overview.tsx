@@ -1,11 +1,11 @@
 /** The Overview tab of a work order page, laid out like the prototype's record: the brief with its acceptance criteria and the classification on the left, the facts and the SLA on the right. */
 import { fmt, type Catalog, type Project } from "@gantry/domain";
-import { Meter, Who } from "../../ui/primitives";
+import { Btn, Meter } from "../../ui/primitives";
 import { Card } from "../../ui/cr";
 import { useActors } from "../../ui/actors";
 import { classOf } from "../projects/kit";
 import { useRepoName } from "../traveler/repo";
-import { bayLabel, stName, stNo, type TWo } from "../traveler/model";
+import { no, type TWo } from "../traveler/model";
 import type { WoSession } from "../conversations/session-api";
 import type { RecordData } from "../record/data";
 import { critStatus, srcName } from "../record/data";
@@ -18,7 +18,6 @@ export function Overview({ wo, rec, cat, project, session }: { wo: TWo; rec: Rec
   const tot = wo.history.reduce((t, e) => ({ tokens: t.tokens + e.tokens, cost: t.cost + e.cost }), { tokens: 0, cost: 0 });
   const cls = classOf(cat, project, wo.cls);
   const st = cat.stations[wo.state === "done" ? cat.stations.length - 1 : wo.station];
-  const where = wo.state === "done" ? "Shipped" : wo.bay ? bayLabel(cat, wo.bay) : `${stNo(cat, st?.id)} ${stName(cat, st?.id)}`.trim();
   const next = session?.next.text ?? (wo.allowed.approve ? `A person at ${wo.allowed.approve.gate}` : st ? `${actor(st.agent).name.replace(" (agent)", "")}` : "");
   const crit = rec.criteria ?? [];
   const slaTotal = wo.slaDue ? wo.slaDue - wo.createdAt : 0;
@@ -27,7 +26,7 @@ export function Overview({ wo, rec, cat, project, session }: { wo: TWo; rec: Rec
   return (
     <div className="grid g-main dz-overview" id="dz-overview">
       <div className="stack">
-        <Card title="Brief" hint={wo.brief.goal || undefined}>
+        <Card title="Brief" hint={wo.brief.goal || undefined} acts={<Btn label="Edit" small icon="tag" id="dz-edit" guard={no("The server cannot edit a work order's title or description yet.")} onClick={() => undefined} />}>
           <p style={{ marginBottom: 12 }}>{wo.description || wo.title}</p>
           <div className="label" style={{ marginBottom: 8 }}>Acceptance criteria</div>
           {crit.length ? (
@@ -65,9 +64,7 @@ export function Overview({ wo, rec, cat, project, session }: { wo: TWo; rec: Rec
           <dl className="kv" style={{ margin: 0 }}>
             <dt>Project</dt><dd>{project.name}</dd>
             <dt>Repository</dt><dd><span className="m">{repo}</span></dd>
-            <dt>Where</dt><dd>{where}</dd>
             <dt>Next actor</dt><dd>{next}</dd>
-            <dt>Requested by</dt><dd><Who id={wo.requestedBy} /></dd>
             <dt>Attempts</dt><dd>{rec.attempts.length || wo.history.length}</dd>
             <dt>Tokens</dt><dd>{fmt.k(tot.tokens)}</dd>
             <dt>Cost</dt><dd>{fmt.money(tot.cost)}</dd>
