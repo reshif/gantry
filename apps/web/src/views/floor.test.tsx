@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { updatePrefs } from "../lib/prefs";
+import { DEFAULT_CATALOG } from "@gantry/domain";
 import FloorView from "./floor";
+import { convWaiting } from "./floor/Drawers";
 import { NOW, PAYMENTS, WOS, floorRead, mockApi, mount, resetApp, type Call } from "./floor/testkit";
 
 beforeEach(() => {
@@ -253,6 +255,30 @@ describe("Floor: prototype drawers and links", () => {
     fireEvent.click(document.getElementById("floor-wo-traveler") as HTMLElement);
     expect(await screen.findByRole("tab", { name: "Journey" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Documents" })).toBeTruthy();
+  });
+
+  it("opens the work order's conversation from the token drawer, and says why when a station question waits for a person", async () => {
+    const withConv = (over: Record<string, unknown>) => () => ({ body: floorRead({ workOrders: WOS.map((w) => (w.id === "WO-2398" ? { ...w, ...over } : w)) }) });
+    const base = WOS.find((w) => w.id === "WO-2398")!;
+    // nothing waits: the button is there, no reason
+    mockApi();
+    mount(<FloorView />);
+    await screen.findAllByText("PAY");
+    fireEvent.click(document.getElementById("floor-tok-WO-2398") as HTMLElement);
+    const btn = (await screen.findByRole("link", { name: "Conversation" })) as HTMLAnchorElement;
+    expect(btn.getAttribute("href")).toBe("#/p/payments/conversations/WO-2398");
+    expect(document.getElementById("floor-wo-conv-why")).toBeNull();
+    cleanup();
+    // an open station question: the reason names the station
+    mockApi({ "GET /api/v1/projects/payments/floor": withConv({ conv: { ...base.conv, raised: [{ station: "build", text: "Which table?", at: NOW, answered: false }] } }) });
+    mount(<FloorView />);
+    await screen.findAllByText("PAY");
+    fireEvent.click(document.getElementById("floor-tok-WO-2398") as HTMLElement);
+    await screen.findByRole("link", { name: "Conversation" });
+    expect(document.getElementById("floor-wo-conv-why")?.textContent).toBe("Build is waiting for you");
+    // parked with a person (bay tags do not open this drawer on the v3 line, so the reason is checked directly)
+    expect(convWaiting({ ...base, bay: "person", bayReason: "needs the table name" } as never, DEFAULT_CATALOG)).toBe("needs the table name");
+    expect(convWaiting({ ...base, bay: null } as never, DEFAULT_CATALOG)).toBeNull();
   });
 
   it("keeps the header to Belt/Board, Line control and Submit, and reads ?view=board from the hash", async () => {
