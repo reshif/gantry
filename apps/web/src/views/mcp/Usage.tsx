@@ -1,7 +1,7 @@
 /** The usage log (prototype "Recent tool calls"): every MCP call with its server, tool, agent, project, outcome and latency (spec 12.4). */
 import type { McpServer, McpUsage, Project } from "@gantry/domain";
 import { Panel } from "../../ui/primitives";
-import { ListView, ago, healthTone } from "../connect/kit";
+import { ListView, ago } from "../connect/kit";
 
 const OUTCOMES = ["ok", "gated", "denied", "error", "allowed"];
 
@@ -21,7 +21,7 @@ export function UsageTab({ calls, servers, projects, actorName }: { calls: McpUs
           { key: "tool", label: "Tool", render: (u) => <span className="mono">{u.tool}</span> },
           { key: "agent", label: "Agent", render: (u) => (u.agent ? actorName(u.agent).replace(" (agent)", "") : "unknown") },
           { key: "project", label: "Project", render: (u) => projects.find((p) => p.id === u.project)?.name ?? u.project ?? "\u2014" },
-          { key: "outcome", label: "Outcome", render: (u) => <span className={`chip ${healthTone(u.outcome === "ok" ? "ok" : u.outcome === "gated" || u.outcome === "allowed" ? "warn" : "bad")}`} title={u.reason || undefined}>{u.outcome}</span> },
+          { key: "outcome", label: "Outcome", render: (u) => <span className={`chip ${u.outcome === "ok" ? "ok" : u.outcome === "gated" || u.outcome === "allowed" ? "warn" : "bad"}`} title={u.reason || undefined}>{u.outcome}</span> },
           { key: "ms", label: "Latency", align: "end", sort: (u) => u.ms, render: (u) => <span className="num">{u.ms} ms</span> },
         ]}
       />

@@ -125,7 +125,7 @@ describe("MCP servers screen", () => {
     const row = await byId("mcp-row-mcp-docs-1a2b");
     expect(row.textContent).toContain("https://mcp.example.net/mcp");
     expect(row.textContent).toContain("2/3");
-    expect(row.textContent).toContain("gated");
+    expect(Array.from(row.querySelectorAll(".chip.ok")).map((c) => c.textContent)).toContain("gated"); // the Writes column is gated or open, from the server's write gate
     expect(row.textContent).toContain("internal");
     expect((await byId("mcp-row-mcp-chg-0001")).textContent).toContain("disabled");
     expect((await byId("mcp-open-mcp-docs-1a2b")).getAttribute("href")).toBe("#mcp/mcp-docs-1a2b");
@@ -170,12 +170,17 @@ describe("MCP servers screen", () => {
     const calls = setup({ "PATCH /api/v1/mcp/servers/mcp-docs-1a2b": () => ok({ server: DOCS }) });
     openSrv("mcp-docs-1a2b", "tools");
     mount();
+    await byId("mcp-tool-0");
+    expect(document.querySelector("#mcp-tools select")).toBeNull(); // the Tools tab is switches and Read only / Writes data
+    fireEvent.click(await byId("mcp-dtab-scope"));
+    fireEvent.click(await byId("mcp-sc-edit"));
     const sel = (await byId("mcp-tool-class-2")) as HTMLSelectElement;
     expect(sel.value).toBe("read");
     expect(sel.closest(".switch-row")!.textContent).toContain("server suggests write");
     fireEvent.change(sel, { target: { value: "write" } });
     await waitFor(() => expect(patches(calls)).toHaveLength(1));
     expect(patches(calls)[0]).toMatchObject({ path: "/api/v1/mcp/servers/mcp-docs-1a2b", body: { tools: [{ name: "list_pages", write: true }] }, headers: { "if-match": "4" } });
+    fireEvent.click(await byId("mcp-dtab-tools"));
     fireEvent.click(await byId("mcp-tool-1"));
     await waitFor(() => expect(patches(calls)).toHaveLength(2));
     expect(patches(calls)[1]!.body).toEqual({ tools: [{ name: "update_page", allowed: true }] });
@@ -206,22 +211,20 @@ describe("MCP servers screen", () => {
     expect(await screen.findByText("Scope saved for Docs wiki.")).toBeTruthy();
   });
 
-  it("access check: asks the API with the chosen agent, project, repo, station, class and tool and shows its decision and rule", async () => {
+  it("access check: only the form until Check access is pressed, then asks the API with the chosen agent and tool and shows the decision", async () => {
     let q: URLSearchParams | null = null;
     const calls = setup({ "GET /api/v1/mcp/access-check": (url) => { q = new URL(url, "http://x").searchParams; return { body: { allowed: false, reason: "Not available at 06 Verify.", rule: "station scope" } }; } });
     openSrv("mcp-docs-1a2b", "check");
     mount();
     const res = await byId("mcp-chk-result");
+    expect(res.textContent).toBe("");
+    expect(document.getElementById("mcp-chk-more")).toBeNull();
+    expect(calls.filter((c) => c.path === "/api/v1/mcp/access-check")).toHaveLength(0);
+    fireEvent.click(await byId("mcp-chk-run"));
     await waitFor(() => expect(res.textContent).toContain("Denied"));
     expect(res.textContent).toContain("Not available at 06 Verify.");
-    expect(res.textContent).toContain("station scope");
     expect(res.querySelector(".callout.bad")).toBeTruthy();
     expect(Object.fromEntries(q!.entries())).toMatchObject({ server: "mcp-docs-1a2b", tool: "search", agent: "ag-build", project: "payments" });
-    fireEvent.change(await byId("mcp-chk-agent"), { target: { value: "ag-review" } });
-    fireEvent.click(await byId("mcp-chk-more"));
-    fireEvent.change(await byId("mcp-chk-repo"), { target: { value: "payments-api" } });
-    await waitFor(() => expect(Object.fromEntries(q!.entries())).toMatchObject({ agent: "ag-review", repo: "payments-api" }));
-    expect(calls.filter((c) => c.path === "/api/v1/mcp/access-check").length).toBeGreaterThan(1);
   });
 
   it("a locked caller sees every control disabled with the reason, and nothing is sent", async () => {
@@ -275,49 +278,34 @@ describe("MCP servers screen", () => {
     expect(calls.find((c) => c.path.endsWith("/discover"))!.headers["if-match"]).toBe("4");
   });
 
-  it("Add: discovery lists the server's real tools (write ones start denied, class is the admin's to set), and Add posts the choices with an idempotency key", async () => {
+  it("Add is the prototype's Name, URL, Transport form (plus sensitivity); Register discovers the tools, asks for auth only when discovery fails, and posts the discovered tools", async () => {
     let disc: any = null;
+    let n = 0;
     const calls = setup({
-      "POST /api/v1/mcp/discover": (_u, init) => { disc = JSON.parse(String(init!.body)); return ok({ msg: "Found 2 tools. Write tools start denied.", tools: [{ name: "get_issue", write: false, allowed: true, hint: "read" }, { name: "create_issue", write: true, allowed: false, hint: "write" }], protocolRevision: "2025-06-18" }); },
+      "POST /api/v1/mcp/discover": (_u, init) => { disc = JSON.parse(String(init!.body)); n += 1; return n === 1 ? ok({ msg: "Could not list tools: the server answered 401.", tools: [] }) : ok({ msg: "Found 2 tools. Write tools start denied.", tools: [{ name: "get_issue", write: false, allowed: true, hint: "read" }, { name: "create_issue", write: true, allowed: false, hint: "write" }], protocolRevision: "2025-06-18" }); },
       "POST /api/v1/mcp/servers": () => ok({ msg: "Tracker added. Scope it to projects, repos and agents before use.", server: { ...DOCS, id: "mcp-tracker-ffff", name: "Tracker" } }),
     });
     mount();
     fireEvent.click(await byId("mcp-add"));
+    expect(document.getElementById("mcp-add-auth")).toBeNull();
+    expect(document.getElementById("mcp-add-discover")).toBeNull();
+    fireEvent.click(await byId("mcp-add-go"));
+    expect(await screen.findByText("Name is required.")).toBeTruthy();
+    expect(screen.getByText("URL is required.")).toBeTruthy(); // both at once
     fireEvent.change(await byId("mcp-add-name"), { target: { value: "Tracker" } });
     fireEvent.change(await byId("mcp-add-url"), { target: { value: "https://tracker.example.net/mcp" } });
-    // add before discovery
     fireEvent.click(await byId("mcp-add-go"));
-    expect((await byId("mcp-add-err")).textContent).toMatch(/enter the secret/i);
+    await waitFor(() => expect(document.getElementById("mcp-add-err")!.textContent).toMatch(/401/));
+    fireEvent.change(await byId("mcp-add-secret"), { target: { value: "tok" } });
+    fireEvent.change(await byId("mcp-add-auth"), { target: { value: "bearer" } });
     fireEvent.change(await byId("mcp-add-secret"), { target: { value: "tok-123456" } });
     fireEvent.click(await byId("mcp-add-go"));
-    await waitFor(() => expect(document.getElementById("mcp-add-err")!.textContent).toBe("Discover tools before adding the server."));
-    fireEvent.click(await byId("mcp-add-discover"));
-    await byId("mcp-add-tool-1");
-    expect(disc).toEqual({ name: "Tracker", transport: "http", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456" });
-    expect((document.getElementById("mcp-add-tool-0") as HTMLInputElement).checked).toBe(true);
-    expect((document.getElementById("mcp-add-tool-1") as HTMLInputElement).checked).toBe(false);
-    expect((document.getElementById("mcp-add-class-1") as HTMLSelectElement).value).toBe("write");
-    // the admin sets create_issue to read despite the server's hint, and allows it
-    fireEvent.change(document.getElementById("mcp-add-class-1")!, { target: { value: "read" } });
-    expect(document.getElementById("mcp-add-class-1")!.closest("li")!.textContent).toContain("server suggests write");
-    fireEvent.click(document.getElementById("mcp-add-tool-1")!);
-    fireEvent.click(await byId("mcp-add-go"));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/mcp/servers")).toBe(true));
+    expect(disc).toEqual({ name: "Tracker", transport: "http", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456" });
     const add = calls.find((c) => c.method === "POST" && c.path === "/api/v1/mcp/servers")!;
-    expect(add.body).toMatchObject({ name: "Tracker", transport: "http", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456", sensitivity: "internal", tools: [{ name: "get_issue", write: false, allowed: true }, { name: "create_issue", write: false, allowed: true }] });
+    expect(add.body).toMatchObject({ name: "Tracker", transport: "http", url: "https://tracker.example.net/mcp", authMode: "bearer", secret: "tok-123456", sensitivity: "internal", tools: [{ name: "get_issue", write: false, allowed: true }, { name: "create_issue", write: true, allowed: false }] });
     expect(add.headers["idempotency-key"]).toBeTruthy();
     expect(await screen.findByText("Server registered")).toBeTruthy();
-  });
-
-  it("Add: a discovery failure shows the reason, and changing the address drops the discovered list", async () => {
-    setup({ "POST /api/v1/mcp/discover": () => ok({ msg: "Could not list tools: Could not reach the server: connect ECONNREFUSED", tools: [] }) });
-    mount();
-    fireEvent.click(await byId("mcp-add"));
-    fireEvent.change(await byId("mcp-add-name"), { target: { value: "Tracker" } });
-    fireEvent.change(await byId("mcp-add-url"), { target: { value: "https://tracker.example.net/mcp" } });
-    fireEvent.click(await byId("mcp-add-discover"));
-    expect(await screen.findByText(/ECONNREFUSED/)).toBeTruthy();
-    expect(document.getElementById("mcp-add-tool-0")).toBeNull();
   });
 
   it("Remove: names the agents and projects that lose it, then DELETEs with the version", async () => {
@@ -344,6 +332,10 @@ describe("MCP servers screen", () => {
     const rows = () => document.querySelectorAll("#mcpu tbody tr");
     await waitFor(() => expect(rows()).toHaveLength(3));
     expect(panel.textContent).toContain("mcp-gone");
+    // outcome tones follow the prototype: ok green, gated amber, anything else red
+    const chip = (w: string) => Array.from(panel.querySelectorAll(".chip")).find((c) => c.textContent === w)!;
+    expect(chip("ok").className).toContain("ok");
+    expect(chip("denied").className).toContain("bad");
     expect(panel.textContent).toContain("ago");
     expect(panel.textContent).toContain("Latency");
     expect(document.getElementById("mcpu-table-sort-at") ?? panel.querySelector("th button")).toBeTruthy();

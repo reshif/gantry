@@ -35,7 +35,7 @@ export default function NotificationsView() {
   }
   return (
     <div className="view cx nt-view">
-      <ViewHead title="Notifications" kicker={p.key} sub={`Routes, cards and the delivery log for ${p.name}.`} />
+      <ViewHead title="Notifications" kicker="All lines" sub={`Routes, cards and the delivery log for ${p.name}.`} />
       <StatRow id="nt-stats">
         <Stat label="Routes" value={String(p.notifications.length)} sub={`${p.notifications.filter((r) => r.enabled).length} on`} tone="info" />
         <Stat label="Delivered" value={qState(logQ, () => String(delivered))} sub="last 24 h" tone="done" />

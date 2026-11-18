@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { Btn, Field, LockNote, Panel } from "../../ui/primitives";
+import { Btn, Field, LockNote, Panel, Toggle } from "../../ui/primitives";
 import { useUI } from "../../ui/overlay-context";
 import { dec, type ApiData } from "./kit";
 import type { ApiConfig } from "@gantry/domain";
@@ -39,7 +39,17 @@ export function LimitsForm({ cfg }: { cfg: ApiConfig }) {
         {num("api-lim-rate", "rateLimit", "Requests per minute")}
         {num("api-lim-burst", "burst", "Burst")}
         {num("api-lim-idem", "idempotencyHours", "Idempotency window (hours)")}
-        <dl className="kv"><dt>Webhook signing</dt><dd>{cfg.webhookSigning}</dd></dl>
+        <dl className="kv">
+          <dt>Webhook signing</dt><dd>{cfg.webhookSigning}</dd>
+          <dt>Triggers</dt>
+          <dd>
+            <label className="row small" htmlFor="api-tr-master-sw">
+              <span>All triggers on for the organisation</span>
+              <Toggle id="api-tr-master-sw" label="Triggers enabled for the organisation" checked={cfg.triggersEnabled === true} decision={perm}
+                onChange={(v) => void ops.setApiConfig({ rateLimit: cfg.rateLimit, burst: cfg.burst, idempotencyHours: cfg.idempotencyHours, webhookSigning: cfg.webhookSigning, triggersEnabled: v }, cfg.version !== undefined ? { ifMatch: cfg.version } : undefined).then((r) => ui.toast(r.ok ? (v ? "Triggers on" : "Triggers off") : r.msg, r.ok ? "ok" : "error"))} />
+            </label>
+          </dd>
+        </dl>
         <div><Btn label="Save limits" kind="primary" type="submit" id="api-lim-save" guard={perm} /></div>
       </form>
     </Panel>

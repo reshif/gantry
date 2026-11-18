@@ -77,7 +77,7 @@ export function CatalogueTab({ onRemove, onAdd, goBuild }: { onRemove: (id: stri
             <div><b>{t.name}</b><span className="sub">{catName(t.category)} · {t.auth} auth</span></div>
           ) },
           { key: "d", label: "Direction", render: (t) => <div className="row">{t.source ? <span className="chip info">source</span> : null}{t.destination ? <span className="chip plain">destination</span> : null}{t.custom ? <span className="chip plain">custom</span> : null}</div> },
-          { key: "c", label: "Connected", align: "end", sort: (t) => d.insts.filter((i) => i.type === t.id).length, render: (t) => d.insts.filter((i) => i.type === t.id).length || "\u2014" },
+          { key: "c", label: "Connected", align: "end", render: (t) => d.insts.filter((i) => i.type === t.id).length || "\u2014" },
           { key: "a", label: "", align: "end", render: (t) => (
             <span className="row">
               {t.custom ? <Btn small kind="ghost" cls="icon" icon="trash" aria={`Remove ${t.name} from the catalogue`} id={`int-cat-rm-${t.id}`} guard={perm} onClick={() => onRemove(t.id)} /> : null}

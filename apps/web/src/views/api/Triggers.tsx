@@ -357,28 +357,13 @@ function TriggerDrawer({ id, close }: { id: string; close: () => void }) {
   );
 }
 
-/** The organisation's master switch for triggers (off in a new install, spec 15.3): a small switch in the panel's tools, where the prototype's panel has none to spare. */
-function MasterSwitch({ d }: { d: ApiData }) {
-  const ui = useUI();
-  const perm = dec(useCan("integration.edit"));
-  const cfg = d.cfg;
-  if (!cfg) return null;
-  return (
-    <label className="row small" htmlFor="api-tr-master-sw">
-      <span>All triggers</span>
-      <Toggle id="api-tr-master-sw" label="Triggers enabled for the organisation" checked={cfg.triggersEnabled === true} decision={perm}
-        onChange={(v) => void ops.setApiConfig({ rateLimit: cfg.rateLimit, burst: cfg.burst, idempotencyHours: cfg.idempotencyHours, webhookSigning: cfg.webhookSigning, triggersEnabled: v }, cfg.version !== undefined ? { ifMatch: cfg.version } : undefined).then((r) => ui.toast(r.ok ? (v ? "Triggers on" : "Triggers off") : r.msg, r.ok ? "ok" : "error"))} />
-    </label>
-  );
-}
-
 export function TriggersTab({ d }: { d: ApiData }) {
   const ui = useUI();
   const guard = useCanAny("triggers.edit", d.vis);
   const open = (id: string): void => ui.drawer.open(`trigger:${id}`, (close) => <TriggerDrawer id={id} close={close} />);
   const last = (t: Trigger): TriggerRun | undefined => t.runs[t.runs.length - 1];
   return (
-    <Panel title="Triggers" flush id="api-triggers-panel" tools={<><MasterSwitch d={d} /><Btn label="New trigger" small kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={open} />)} /></>}>
+    <Panel title="Triggers" flush id="api-triggers-panel" tools={<Btn label="New trigger" small kind="primary" icon="plus" id="api-tr-new" guard={guard} onClick={() => ui.open((c) => <NewTrigger d={d} close={c} onCreated={open} />)} />}>
       <ListView<Trigger>
         id="trig" noun="trigger" rows={d.triggers} rowKey={(t) => t.id} rowId={(t) => `api-tr-row-${t.id}`} onRow={(t) => open(t.id)} rowLabel={(t) => `Open trigger ${t.name}`}
         text={(t) => `${t.name} ${t.type}`}

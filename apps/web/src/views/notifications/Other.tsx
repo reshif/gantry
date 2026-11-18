@@ -18,7 +18,7 @@ const dec = (d: { allowed: boolean; reason: string; needs?: string | undefined }
 
 /* ---------- repo overrides ---------- */
 
-/** The prototype's one list: each repo override as a link to the repo's dossier, where it goes, and whether it is added to the routes or replaces them. */
+/** The prototype's one list: each repo override as a link to the repo (its onboarding page, the repo dossier of this app), where it goes, and whether it is added to the routes or replaces them. */
 export function OverridesTab({ p, nt }: { p: Project; nt: Nt }) {
   const repos = useProjectRepos(p.id);
   const rows = repos.flatMap((r) => (r.notifyOverrides ?? []).map((x, i) => ({ repo: r, o: x, i })));
@@ -28,7 +28,7 @@ export function OverridesTab({ p, nt }: { p: Project; nt: Nt }) {
         <ul className="list">
           {rows.map((x) => (
             <li key={`${x.repo.id}-${x.i}`}>
-              <a className="pri" href={hashFor("dossier", x.repo.id, p.id)}>{x.repo.name}</a>
+              <a className="pri" href={hashFor("onboarding", x.repo.id, p.id)}>{x.repo.name}</a>
               <div className="grow small muted">{x.o.event} → {(x.o.dest ?? []).map((dd) => `${nt.instOf(dd)?.type ?? dd.channel} ${dd.target}`).join(", ")}</div>
               <span className="chip info">{x.o.mode === "instead" ? "instead" : "also"}</span>
             </li>
@@ -77,7 +77,7 @@ export function DeliveriesTab({ p, nt }: { p: Project; nt: Nt }) {
               { key: "status", label: "Status", render: (d) => (
                 <span className={`chip ${tone(d.status)}`} title={d.status !== "delivered" && (d.error || d.attempts) ? `${d.attempts ? `${d.attempts} ${d.attempts === 1 ? "try" : "tries"}` : ""}${d.error ? ` \u00b7 ${d.error}` : ""}` : undefined}>{d.status}</span>
               ) },
-              { key: "a", label: "", align: "end", render: (d) => (d.status !== "delivered" ? <Btn label="Retry" small id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : null) },
+              { key: "a", label: "", align: "end", render: (d) => (d.status !== "delivered" ? <Btn label="Retry" small id={`nt-retry-${d.id}`} guard={perm} onClick={() => void retry(d)} /> : <span className="muted">{"\u2014"}</span>) },
             ]}
           />
         </Panel>
@@ -95,7 +95,10 @@ const PREVIEW_KINDS: Array<[string, string]> = [["gate", "Gate card"], ["questio
 function CardPreview({ p, kind, title }: { p: Project; kind: string; title: string }) {
   const q = usePreview(p.id, { event: KIND_EVENT[kind] ?? kind, template: kind, fields: { ...ALL_FIELDS } });
   const s = q.data?.sample;
-  const target = (p.notifications.find((r) => r.template === kind) ?? p.notifications[0])?.dest[0]?.target;
+  // the cards are drawn as a Slack message (the prototype's preview): the project's first Slack destination, then any destination
+  const dests = p.notifications.flatMap((r) => r.dest);
+  const target = (dests.find((d) => d.channel === "slack") ?? dests[0])?.target;
+  const acts = (q.data?.actions ?? []).filter((a) => a !== "reject");
   return (
     <Panel title={title} id={`nt-card-${kind}`}>
       {s ? (
@@ -103,7 +106,7 @@ function CardPreview({ p, kind, title }: { p: Project; kind: string; title: stri
           {target ? <div className="micro">{target}</div> : null}
           <b>{s.head}</b>
           <div className="small muted">{s.project.name} · {s.prio} · {s.clsName}</div>
-          <div className="row">{(q.data?.actions ?? []).map((a, i) => <span key={a} className={`chip ${i === 0 ? "ok" : "info"}`}>{ACTION_LABEL[a] ?? a}</span>)}</div>
+          <div className="row">{acts.map((a, i) => <span key={a} className={`chip ${i === 0 ? "ok" : "info"}`}>{a === "open" ? "Open" : ACTION_LABEL[a] ?? a}</span>)}</div>
         </div>
       ) : <p className="muted small">{q.isError ? "The preview could not be drawn." : "Drawing the preview…"}</p>}
     </Panel>

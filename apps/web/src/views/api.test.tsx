@@ -117,14 +117,14 @@ describe("API & triggers: keys", () => {
     fireEvent.click(await byId("api-key-go"));
     expect((await screen.findByText("Name is required.")).getAttribute("role")).toBe("alert");
     fireEvent.change(await byId("api-key-name"), { target: { value: "ServiceNow bridge" } });
-    fireEvent.click(await byId("api-key-act-triggers-run"));
-    fireEvent.click(await byId("api-key-act-wo-read")); // off again
-    fireEvent.change(await byId("api-key-expires"), { target: { value: "30" } });
+    expect(document.getElementById("api-key-expires")).toBeNull(); // the prototype dialog has Name, Project and Permissions only
+    expect(document.querySelector('[id^="api-key-act-"]')).toBeNull();
+    fireEvent.change(await byId("api-key-perm"), { target: { value: "all" } });
     fireEvent.click(await byId("api-key-go"));
     const input = (await byId("api-secret-value")) as HTMLInputElement;
     expect(input.value).toBe(SECRET);
     const post = calls.find((c) => c.method === "POST" && c.path === "/api/v1/api-keys")!;
-    expect(post.body).toEqual({ name: "ServiceNow bridge", project: "payments", actions: ["wo.submit", "triggers.run"], expiresInDays: 30 });
+    expect(post.body).toEqual({ name: "ServiceNow bridge", project: "payments", actions: ["wo.submit", "wo.read", "wo.answer", "triggers.run"], expiresInDays: 90 });
     expect(post.headers["idempotency-key"]).toBeTruthy();
     const done = await byId("api-secret-done");
     expect(done.textContent).toBe("Close");
@@ -159,6 +159,8 @@ describe("API & triggers: reference, playground, log, limits", () => {
     expect((await screen.findAllByText("/api/v1/projects/{project}/work-orders")).length).toBe(1);
     expect((await byId("api-ref-endpoints")).textContent).toContain("Purpose");
     expect((await byId("api-ref-example")).textContent).toContain("curl -X POST");
+    expect((await byId("api-ref-example")).textContent).toContain("Add refund idempotency");
+    expect(document.querySelectorAll("#api-ref-table tbody tr")).toHaveLength(4);
     expect(document.querySelectorAll(".api-ep").length).toBe(0);
     expect(document.getElementById("api-pg-send")).toBeNull();
     expect(document.querySelectorAll("#api-tab-panel .panel").length).toBe(2);
@@ -231,11 +233,14 @@ describe("API & triggers: triggers", () => {
     expect(p.headers["if-match"]).toBe("2");
   });
 
-  it("the organisation's master switch for triggers sits in the Triggers panel and saves with the version", async () => {
+  it("the Triggers panel header has only New trigger; the organisation's master switch is on the Limits tab and saves with the version", async () => {
     const calls = setup({ "PATCH /api/v1/api-config": () => ({ body: { ok: true, msg: "API settings saved.", version: 4 } }) });
     mount();
     await tab("triggers");
     expect(document.querySelector("#api-triggers-panel .linkish")).toBeNull(); // trigger names are plain
+    expect(document.getElementById("api-tr-master-sw")).toBeNull();
+    expect(document.querySelectorAll("#api-triggers-panel .panel-tools button").length).toBe(1);
+    await tab("limits");
     fireEvent.click(await byId("api-tr-master-sw"));
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && c.path === "/api/v1/api-config")).toBe(true));
     expect(calls.find((c) => c.method === "PATCH")!.body).toMatchObject({ triggersEnabled: true });

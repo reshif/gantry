@@ -69,7 +69,7 @@ export default function McpView() {
               { key: "h", label: "Health", sort: (m) => stateOf(m), render: (m) => <span className={`chip ${healthTone(stateOf(m))}`}>{stateOf(m)}</span> },
               { key: "s", label: "Sensitivity", render: (m) => m.sensitivity },
               { key: "t", label: "Tools", align: "end", sort: (m) => m.tools.length, render: (m) => `${m.tools.filter((t) => t.allowed).length}/${m.tools.length}` },
-              { key: "w", label: "Writes", render: (m) => (m.tools.some((t) => t.write) ? <span className="chip ok">gated</span> : <span className="chip plain">read only</span>) },
+              { key: "w", label: "Writes", render: (m) => (m.writeGate ? <span className="chip ok">gated</span> : <span className="chip warn">open</span>) },
               { key: "a", label: "Agents", align: "end", render: (m) => (m.agents === "all" ? "all" : m.agents.length) },
             ]}
           />

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { flowOf, classesOf, type Agent, type Catalog, type McpServer, type McpUsage, type Project, type Repo } from "@gantry/domain";
 import { ops } from "../../api/ops";
 import { useCan } from "../../api/can";
-import { useMcpAccessCheck } from "../../api/queries";
+import { useMcpAccessCheck, type McpAccessDecision } from "../../api/queries";
 import { Btn, Empty, Field, LockNote, Panel, Select, Tabs, ViewHead, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
@@ -61,7 +61,7 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
 
   // ---- access check
   const [chk, setChk] = useState({ agent: "", project: "", repo: "", station: "", cls: "", tool: "" });
-  const [more, setMore] = useState(false);
+  const [ran, setRan] = useState<McpAccessDecision | "error" | null>(null);
   const agent = chk.agent && agents.some((a) => a.id === chk.agent) ? chk.agent : (srv && srv.agents !== "all" ? srv.agents[0] : undefined) ?? agents[0]?.id ?? "";
   const projectId = chk.project && projects.some((p) => p.id === chk.project) ? chk.project : projects.find((p) => p.id === "payments")?.id ?? projects[0]?.id ?? "";
   const chkP = projects.find((p) => p.id === projectId);
@@ -72,8 +72,9 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
   const repoChoices = repos.filter((r) => r.project === projectId);
   const repo = repoChoices.some((r) => r.id === chk.repo) ? chk.repo : "";
   const cls = chkClasses.some((x) => x.id === chk.cls) ? chk.cls : "";
-  const access = useMcpAccessCheck({ server: srv?.id ?? "", tool, agent, project: projectId, ...(repo ? { repo } : {}), station, ...(cls ? { cls } : {}) }, !!(srv && tool && agent && projectId && station));
-  const dc = access.data;
+  const access = useMcpAccessCheck({ server: srv?.id ?? "", tool, agent, project: projectId, ...(repo ? { repo } : {}), station, ...(cls ? { cls } : {}) }, false);
+  const agentName = actorName(agent).replace(" (agent)", "");
+  const run = async (): Promise<void> => { const r = await access.refetch(); setRan(r.data ?? "error"); };
 
   if (!srv || !d || !base) {
     return (
@@ -133,44 +134,16 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
 
   const st = srv.enabled === false ? "disabled" : srv.health;
   const tabs = [{ id: "overview", label: "Overview" }, { id: "tools", label: "Tools", count: srv.tools.length }, { id: "scope", label: "Scope" }, { id: "check", label: "Access check" }, { id: "calls", label: "Recent calls" }];
-  const verdict = dc ? (dc.allowed ? (dc.gated ? { t: "Allowed, with approval", tone: "warn" } : { t: "Allowed", tone: "ok" }) : { t: "Denied", tone: "bad" }) : null;
+  const verdict = ran && ran !== "error" ? (ran.allowed ? (ran.gated ? { t: "Allowed, with approval", tone: "warn" } : { t: "Allowed", tone: "ok" }) : { t: "Denied", tone: "bad" }) : null;
 
-  return (
-    <div className="view cx mcp-view mcp-detail">
-      <ViewHead crumbs={[{ label: "MCP servers", href: hashFor("mcp") }, { label: srv.name }]} title={srv.name} sub={srv.url} />
-      <Tabs idPrefix="mcp-dtab" items={tabs} active={tab} onChange={setTab} />
-      <div id="mcp-dtab-panel" role="tabpanel" aria-labelledby={`mcp-dtab-${tab}`} className="stack">
-        {tab === "tools" ? (
-          <Panel title="Tools" id="mcp-tools">
-            <LockNote decision={perm} what="MCP tool settings" />
-            {srv.tools.length ? srv.tools.map((t, i) => {
-              const n = mine.filter((u) => u.tool === t.name).length;
-              return (
-                <SwitchRow key={t.name} id={`mcp-tool-${i}`} label={t.name} hint={`${t.write ? "Writes data" : "Read only"}${n ? ` \u00b7 ${n} ${n === 1 ? "call" : "calls"}` : ""}${t.hint && (t.hint === "write") !== t.write ? ` \u00b7 server suggests ${t.hint}` : ""}`}
-                  checked={t.allowed} decision={perm}
-                  extra={<>
-                    {t.changed ? <span className="chip bad" title="The server reports a different definition than the one approved">changed</span> : null}
-                    <select id={`mcp-tool-class-${i}`} className="input mcp-class" aria-label={`Class of ${t.name}`} value={t.write ? "write" : "read"} disabled={ro}
-                      onChange={(e) => void ops.updateMCP(srv.id, { tools: [{ name: t.name, write: e.target.value === "write" }] }, v).then((r) => show(r, `${t.name} is now a ${e.target.value} tool.`))}>
-                      <option value="read">read</option>
-                      <option value="write">write</option>
-                    </select>
-                  </>}
-                  onChange={(on) => void ops.updateMCP(srv.id, { tools: [{ name: t.name, allowed: on }] }, v).then((r) => show(r, `${t.name}${on ? " allowed" : " blocked"}`))} />
-              );
-            }) : <Empty title="No tools discovered" text="Check the server again to list its tools." />}
-          </Panel>
-        ) : tab === "scope" ? (
-          <Panel title="Who may use it" id="mcp-scope" tools={<Btn label={editing ? "Close editor" : "Edit scope"} small id="mcp-sc-edit" guard={perm} onClick={() => setEditing(!editing)} />}>
-            <dl className="kv">
-              <dt>Projects</dt><dd>{names(srv.projects, "All projects", (id) => projects.find((p) => p.id === id)?.name ?? id)}</dd>
-              <dt>Repos</dt><dd>{names(srv.repos, "All repos", (id) => repos.find((r) => r.id === id)?.name ?? id)}</dd>
-              <dt>Stations</dt><dd>{names(srv.stations, "All stations", (id) => id)}</dd>
-              <dt>Work classes</dt><dd>{names(srv.classes ?? "all", "All classes", (id) => id)}</dd>
-              <dt>Agents</dt><dd>{srv.agents === "all" ? "All agents" : srv.agents.length ? <div className="row">{srv.agents.map((a) => <a key={a} id={`mcp-agent-${a}`} href={hashFor("agents", a)}>{actorName(a).replace(" (agent)", "")}</a>)}</div> : "\u2014"}</dd>
-            </dl>
-            {editing ? (
-              <div className="form-grid">
+  const editDialog = editing ? (
+    <Dialog title={`Edit ${srv.name}`} kicker="MCP registry" wide onClose={() => { setEditing(false); setDraft(null); }} actions={[
+      ...(dirty ? [{ label: "Revert", id: "mcp-sc-revert", onClick: () => setDraft(null) }] : []),
+      { label: "Done" },
+      { label: "Save scope", kind: "primary" as const, id: "mcp-sc-save", guard: perm.allowed && !dirty ? { allowed: false, reason: "No changes to save." } : perm, onClick: () => void saveScope() },
+    ]} body={(
+      <div className="form-grid">
+
                 <fieldset className="mcp-scope" id="mcp-settings">
                   <legend className="field-label">Server settings</legend>
                   <Field label="Sensitivity" htmlFor="mcp-sens"><Select id="mcp-sens" options={SENS} value={srv.sensitivity} disabled={ro} onChange={(x) => void ops.updateMCP(srv.id, { sensitivity: x }, v).then((r) => show(r, `${srv.name} is now ${x}.`))} /></Field>
@@ -183,46 +156,71 @@ export function Detail({ srv, cat, projects, agents, repos, calls, actorName }: 
                     <Btn label="Remove server" kind="danger" icon="x" id="mcp-remove" guard={perm} onClick={remove} />
                   </div>
                 </fieldset>
+                {srv.tools.length ? (
+                  <fieldset className="mcp-scope" id="mcp-tool-classes">
+                    <legend className="field-label">Tool classes</legend>
+                    {srv.tools.map((t, i) => (
+                      <label key={t.name} className="check switch-row" htmlFor={`mcp-tool-class-${i}`}>
+                        <span className="mono small">{t.name}{t.hint && (t.hint === "write") !== t.write ? <span className="muted"> (server suggests {t.hint})</span> : null}</span>
+                        <select id={`mcp-tool-class-${i}`} className="input mcp-class" aria-label={`Class of ${t.name}`} value={t.write ? "write" : "read"} disabled={ro}
+                          onChange={(e) => void ops.updateMCP(srv.id, { tools: [{ name: t.name, write: e.target.value === "write" }] }, v).then((r) => show(r, `${t.name} is now a ${e.target.value} tool.`))}>
+                          <option value="read">read</option>
+                          <option value="write">write</option>
+                        </select>
+                      </label>
+                    ))}
+                  </fieldset>
+                ) : null}
                 <p className="muted small">An agent may call this server only where every scope matches. Projects must also enable it in Project config.</p>
                 <ScopeGroup k="projects" label="Projects" items={live.map((p) => ({ id: p.id, label: p.name }))} d={d} ro={ro} allowAll set={setDraft} />
                 <ScopeGroup k="repos" label="Repos" items={scopeRepos.map((r) => ({ id: r.id, label: r.name, mono: true }))} d={d} ro={ro} allowAll set={setDraft} />
                 <ScopeGroup k="agents" label="Agents" items={agents.map((a) => ({ id: a.id, label: a.name }))} d={d} ro={ro} allowAll={false} set={setDraft} />
                 <ScopeGroup k="stations" label="Stations (from the flows of the projects in scope)" items={cat ? stationsFor(cat, inScope) : []} d={d} ro={ro} allowAll={false} set={setDraft} />
                 <ScopeGroup k="classes" label="Work classes" items={cat ? classesFor(cat, inScope) : []} d={d} ro={ro} allowAll set={setDraft} />
-                <div className="form-actions">
-                  {dirty ? <Btn label="Revert" id="mcp-sc-revert" onClick={() => setDraft(null)} /> : null}
-                  <Btn label="Save scope" kind="primary" id="mcp-sc-save" guard={perm.allowed && !dirty ? { allowed: false, reason: "No changes to save." } : perm} onClick={() => void saveScope()} />
-                </div>
-              </div>
-            ) : null}
+      </div>
+    )} />
+  ) : null;
+
+  return (
+    <div className="view cx mcp-view mcp-detail">
+      <ViewHead crumbs={[{ label: "MCP servers", href: hashFor("mcp") }, { label: srv.name }]} title={srv.name} sub={srv.url} />
+      {editDialog}
+      <Tabs idPrefix="mcp-dtab" items={tabs} active={tab} onChange={setTab} />
+      <div id="mcp-dtab-panel" role="tabpanel" aria-labelledby={`mcp-dtab-${tab}`} className="stack">
+        {tab === "tools" ? (
+          <Panel title="Tools" id="mcp-tools">
+            <LockNote decision={perm} what="MCP tool settings" />
+            {srv.tools.length ? srv.tools.map((t, i) => (
+              <SwitchRow key={t.name} id={`mcp-tool-${i}`} label={t.name} hint={t.write ? "Writes data" : "Read only"}
+                checked={t.allowed} decision={perm}
+                extra={t.changed ? <span className="chip bad" title="The server reports a different definition than the one approved">changed</span> : null}
+                onChange={(on) => void ops.updateMCP(srv.id, { tools: [{ name: t.name, allowed: on }] }, v).then((r) => show(r, `${t.name}${on ? " allowed" : " blocked"}`))} />
+            )) : <Empty title="No tools discovered" text="Check the server again to list its tools." />}
+          </Panel>
+        ) : tab === "scope" ? (
+          <Panel title="Who may use it" id="mcp-scope" tools={<Btn label="Edit scope" small id="mcp-sc-edit" guard={perm} onClick={() => setEditing(true)} />}>
+            <dl className="kv">
+              <dt>Projects</dt><dd>{names(srv.projects, "All projects", (id) => projects.find((p) => p.id === id)?.name ?? id)}</dd>
+              <dt>Repos</dt><dd>{names(srv.repos, "All repos", (id) => repos.find((r) => r.id === id)?.name ?? id)}</dd>
+              <dt>Stations</dt><dd>{names(srv.stations, "All stations", (id) => id)}</dd>
+              <dt>Agents</dt><dd>{srv.agents === "all" ? "All agents" : srv.agents.length ? <div className="row">{srv.agents.map((a) => <a key={a} id={`mcp-agent-${a}`} href={hashFor("agents", a)}>{actorName(a).replace(" (agent)", "")}</a>)}</div> : "\u2014"}</dd>
+            </dl>
           </Panel>
         ) : tab === "check" ? (
           <Panel title="Would this call be allowed?" id="mcp-check">
             <div className="form-grid">
               <div className="cols">
-                <Field label="Agent" htmlFor="mcp-chk-agent"><Select id="mcp-chk-agent" options={agents.map((a) => ({ value: a.id, label: a.name }))} value={agent} onChange={(x) => setChk({ ...chk, agent: x })} /></Field>
-                <Field label="Tool" htmlFor="mcp-chk-tool"><Select id="mcp-chk-tool" options={srv.tools.map((t) => ({ value: t.name, label: t.name + (t.write ? " (write)" : "") }))} value={tool} onChange={(x) => setChk({ ...chk, tool: x })} /></Field>
+                <Field label="Agent" htmlFor="mcp-chk-agent"><Select id="mcp-chk-agent" options={agents.map((a) => ({ value: a.id, label: a.name }))} value={agent} onChange={(x) => { setChk({ ...chk, agent: x }); setRan(null); }} /></Field>
+                <Field label="Tool" htmlFor="mcp-chk-tool"><Select id="mcp-chk-tool" options={srv.tools.map((t) => ({ value: t.name, label: t.name }))} value={tool} onChange={(x) => { setChk({ ...chk, tool: x }); setRan(null); }} /></Field>
               </div>
-              {more ? (
-                <div className="cols">
-                  <Field label="Project" htmlFor="mcp-chk-project"><Select id="mcp-chk-project" options={projects.map((p) => ({ value: p.id, label: p.name }))} value={projectId} onChange={(x) => setChk({ ...chk, project: x, repo: "" })} /></Field>
-                  <Field label="Repo" htmlFor="mcp-chk-repo"><Select id="mcp-chk-repo" options={[{ value: "", label: "Any repo" }, ...repoChoices.map((r) => ({ value: r.id, label: r.name }))]} value={repo} onChange={(x) => setChk({ ...chk, repo: x })} /></Field>
-                  <Field label="Station" htmlFor="mcp-chk-station"><Select id="mcp-chk-station" options={chkStations.map((s) => ({ value: s.id, label: `${s.no} ${s.name}` }))} value={station} onChange={(x) => setChk({ ...chk, station: x })} /></Field>
-                  <Field label="Class" htmlFor="mcp-chk-cls"><Select id="mcp-chk-cls" options={[{ value: "", label: "Any class" }, ...chkClasses.map((x) => ({ value: x.id, label: x.name }))]} value={cls} onChange={(x) => setChk({ ...chk, cls: x })} /></Field>
-                </div>
-              ) : null}
-              <div className="row">
-                <Btn label="Check access" kind="primary" id="mcp-chk-run" onClick={() => void access.refetch()} />
-                <Btn label={more ? "Fewer options" : "More"} kind="ghost" id="mcp-chk-more" onClick={() => setMore(!more)} />
-              </div>
+              <div className="row"><Btn label="Check access" kind="primary" id="mcp-chk-run" onClick={() => void run()} /></div>
               <div role="status" aria-live="polite" id="mcp-chk-result">
-                {dc && verdict ? (
-                  <div className={`callout ${verdict.tone}`}>
+                {ran === "error" ? <div className="muted">The check could not run.</div> : ran && verdict ? (
+                  <div className={`callout ${verdict.tone}`} title={`Deciding rule ${ran.rule}`}>
                     <b>{verdict.t}</b>
-                    {dc.reason}
-                    <span className="small muted" style={{ display: "block" }}>Deciding rule <span className="mono">{dc.rule}</span></span>
+                    {ran.allowed ? `${agentName} may call ${tool}${ran.gated ? "; the write waits at a gate." : "."}` : ran.reason}
                   </div>
-                ) : <div className="muted">{access.isError ? "The check could not run." : "Checking…"}</div>}
+                ) : null}
               </div>
             </div>
           </Panel>

@@ -70,7 +70,9 @@ export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
     const res = await ops.saveRoute(p.id, r.id, { enabled: v }, nt.versions.get(r.id) !== undefined ? { ifMatch: nt.versions.get(r.id)! } : undefined);
     ui.toast(res.ok ? (v ? "Route enabled" : "Route paused") : res.msg, res.ok ? "ok" : "error");
   };
-  const locked = (r: Route): Decision | null => (!perm.allowed ? perm : r.event === "kill" || r.event === "restore" ? { allowed: false, reason: "Kill and restore notifications cannot be switched off or removed." } : null);
+  const locked = (_r: Route): Decision | null => (!perm.allowed ? perm : null);
+  const MANDATORY = "Kill and restore notifications cannot be switched off or removed.";
+  const mandatoryRoute = (r: Route): boolean => r.event === "kill" || r.event === "restore";
   const remove = (r: Route): void => {
     ui.dialog({
       title: "Remove this route?", kicker: p.name, body: <p>People will stop hearing about {r.event}.</p>,
@@ -83,7 +85,6 @@ export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
   };
   const condText = (r: Route): string => {
     const c: string[] = [...r.cond.classes, ...r.cond.priority];
-    if (r.cond.hours === "business") c.push("business hours");
     return c.length ? c.join(", ") : "Always";
   };
   return (
@@ -105,9 +106,9 @@ export function RoutesTab({ p, nt, perm }: { p: Project; nt: Nt; perm: Decision 
               </div>
             ) },
             { key: "c", label: "Condition", render: condText },
-            { key: "on", label: "On", render: (r) => <Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={locked(r)} label="Enabled" onChange={(v) => void toggleRoute(r, v)} /> },
+            { key: "on", label: "On", render: (r) => <Toggle id={`nt-en-${r.id}`} checked={r.enabled} decision={locked(r)} label="Enabled" onChange={(v) => { if (mandatoryRoute(r)) ui.toast(MANDATORY, "warn"); else void toggleRoute(r, v); }} /> },
             { key: "x", label: "", align: "end", render: (r) => (
-              <Btn small kind="ghost" cls="icon" icon="trash" aria="Remove route" id={`nt-rm-${r.id}`} guard={locked(r)} onClick={() => remove(r)} />
+              <Btn small kind="ghost" cls="icon" icon="trash" aria="Remove route" id={`nt-rm-${r.id}`} guard={locked(r)} onClick={() => { if (mandatoryRoute(r)) ui.toast(MANDATORY, "warn"); else remove(r); }} />
             ) },
           ]}
         />

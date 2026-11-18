@@ -12,10 +12,16 @@ import { useUI } from "../../ui/overlay-context";
 import { useActors } from "../../ui/actors";
 import { usePrefs } from "../../lib/prefs";
 import { useOutcome } from "../govern/data";
-import { KEY_ACTIONS, dec, useCanAny, type ApiData } from "./kit";
+import { dec, useCanAny, type ApiData } from "./kit";
 import type { ApiKey } from "@gantry/domain";
 
-const EXPIRY = [{ value: "30", label: "30 days" }, { value: "90", label: "90 days (default)" }, { value: "180", label: "180 days" }, { value: "365", label: "1 year" }];
+/** The prototype's Permissions select: submit and read, or read only (the two further scopes the API knows are the last two choices). */
+const PERMS = [
+  { value: "submit", label: "Submit and read work orders", actions: ["wo.submit", "wo.read"] },
+  { value: "read", label: "Read only", actions: ["wo.read"] },
+  { value: "answer", label: "Submit, read and answer intake questions", actions: ["wo.submit", "wo.read", "wo.answer"] },
+  { value: "all", label: "Submit, read, answer and fire triggers", actions: ["wo.submit", "wo.read", "wo.answer", "triggers.run"] },
+];
 
 export function SecretDialog({ k, secret, project, close }: { k: ApiKey; secret: string; project: string; close: () => void }) {
   const copy = useCopy();
@@ -46,14 +52,13 @@ export function CreateKey({ d, close, onCreated }: { d: ApiData; close: () => vo
   const prefs = usePrefs();
   const [name, setName] = useState("");
   const [project, setProject] = useState(() => (prefs.project && d.visIds.includes(prefs.project) ? prefs.project : d.vis[0]?.id ?? ""));
-  const [actions, setActions] = useState<string[]>(["wo.submit", "wo.read"]);
-  const [days, setDays] = useState("90");
+  const [perm, setPerm] = useState("submit");
+  const actions = PERMS.find((x) => x.value === perm)?.actions ?? ["wo.submit", "wo.read"];
   const [err, setErr] = useState("");
-  const perm = dec(useCan("api.keys", { project }));
+  const guard = dec(useCan("api.keys", { project }));
   const submit = async () => {
     if (name.trim().length < 3) { setErr(name.trim() ? "Name needs at least 3 characters." : "Name is required."); return; }
-    if (!actions.length) { setErr("Pick at least one scope."); return; }
-    const r = await ops.createKey({ name: name.trim(), project, actions, expiresInDays: Number(days) });
+    const r = await ops.createKey({ name: name.trim(), project, actions, expiresInDays: 90 });
     if (!r.ok) { setErr(r.msg); out(r); return; }
     close();
     const key = (r as unknown as { key: ApiKey; secret: string }).key;
@@ -66,34 +71,20 @@ export function CreateKey({ d, close, onCreated }: { d: ApiData; close: () => vo
       title="Create API key" kicker="API & triggers" onClose={close}
       body={(
         <div className="form-grid">
-          <LockNote decision={perm} what={`API keys on ${d.pname(project)}`} />
+          <LockNote decision={guard} what={`API keys on ${d.pname(project)}`} />
           <Field label="Name" htmlFor="api-key-name" hint={`What will use it, e.g. "Jira bridge".`}>
             <input id="api-key-name" className="input" placeholder="Jira bridge" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="Project" htmlFor="api-key-project" hint="A key works on one project only.">
             <Select id="api-key-project" options={d.vis.map((p) => ({ value: p.id, label: p.name }))} value={project} onChange={setProject} />
           </Field>
-          <fieldset className="api-fs">
-            <legend className="field-label">Permissions</legend>
-            <div className="check-grid">
-              {KEY_ACTIONS.map(([id, label]) => {
-                const cid = `api-key-act-${id.replace(".", "-")}`;
-                return (
-                  <label key={id} className="check" htmlFor={cid}>
-                    <input type="checkbox" id={cid} checked={actions.includes(id)} onChange={(e) => setActions((a) => (e.target.checked ? [...a.filter((x) => x !== id), id] : a.filter((x) => x !== id)))} />
-                    <span>{label} <span className="mono small muted">{id}</span></span>
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
-          <Field label="Expires" htmlFor="api-key-expires" hint="Keys stop working on their own. Rotate before then.">
-            <Select id="api-key-expires" options={EXPIRY} value={days} onChange={setDays} />
+          <Field label="Permissions" htmlFor="api-key-perm" hint="The key is valid for 90 days, then it stops on its own.">
+            <Select id="api-key-perm" options={PERMS} value={perm} onChange={setPerm} />
           </Field>
           <div className="form-err" role="alert">{err}</div>
         </div>
       )}
-      actions={[{ label: "Cancel" }, { label: "Create key", kind: "primary", submit: true, id: "api-key-go", guard: perm, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: "Create key", kind: "primary", submit: true, id: "api-key-go", guard, onClick: () => void submit() }]}
     />
   );
 }
@@ -132,17 +123,16 @@ export function KeysTab({ d, onCreated }: { d: ApiData; onCreated: (k: ApiKey) =
           { key: "n", label: "Name", sort: (k) => k.name.toLowerCase(), render: (k) => <div><b>{k.name}</b><span className="sub mono" title={`by ${who(k.by).name}`}>gk_••••{k.id}</span></div> },
           { key: "p", label: "Project", render: (k) => d.pname(k.project) },
           { key: "a", label: "Allowed", render: (k) => <div className="row">{k.actions.map((a) => <span key={a} className="chip plain">{a}</span>)}</div> },
-          { key: "u", label: "Last used", sort: (k) => k.lastUsed ?? 0, render: (k) => (k.lastUsed ? ago(k.lastUsed) : "never") },
+          { key: "u", label: "Last used", render: (k) => (k.lastUsed ? ago(k.lastUsed) : "never") },
           { key: "s", label: "State", render: (k) => (
             <div>
               <span className={`chip ${k.revoked || k.expired ? "bad" : "ok"}`}>{k.revoked ? "revoked" : k.expired ? "expired" : "active"}</span>
               {!k.revoked && k.expires ? <span className="sub">{k.expired ? "expired " : "expires "}{fmt.istDate(k.expires)}</span> : null}
             </div>
           ) },
-          { key: "x", label: "", align: "end", render: (k) => (k.revoked ? null : <RevokeBtn k={k} />) },
+          { key: "x", label: "", align: "end", render: (k) => (k.revoked ? <span className="muted">{"\u2014"}</span> : <RevokeBtn k={k} />) },
         ]}
       />
-      <div className="tfoot">Keys are service accounts scoped to one project. The full key is shown once at creation, and every key expires.</div>
     </Panel>
   );
 }

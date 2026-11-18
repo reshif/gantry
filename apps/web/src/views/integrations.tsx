@@ -55,7 +55,7 @@ export default function IntegrationsView() {
     ));
   };
   const addDialog = (typeId: string | null): void => {
-    ui.open((close) => <AddIntegration typeId={typeId} types={d.types} insts={d.insts} live={d.live} projects={d.projects} close={close} onAdded={(id) => { setTab("connected"); openInstance(id); }} />);
+    ui.open((close) => <AddIntegration typeId={typeId} types={d.types} insts={d.insts} close={close} onAdded={(id) => { setTab("connected"); openInstance(id); }} />);
   };
   const removeType = (id: string): void => {
     const t = d.types.find((x) => x.id === id);
