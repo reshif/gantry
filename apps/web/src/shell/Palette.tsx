@@ -1,4 +1,5 @@
 /** Command palette (legacy openPalette): views, projects, work orders, repos, agents and actions; pins and recents. */
+import { toggleNavRail } from "./navRail";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAgents, useMe, useReposAcross, useWorkOrdersAcross } from "../api/queries";
 import { useCanMany } from "../api/can";
@@ -61,6 +62,7 @@ export function usePaletteItems(projectId: string | null): Item[] {
     if (canAgents) for (const a of agents ?? []) items.push({ key: `agent:${a.id}`, group: "Agents", icon: "agent", label: a.name, hint: a.station || "agent", run: () => { navigate("agents", a.id); } });
     for (const r of repos) items.push({ key: `repo:${r.id}`, group: "Repos", icon: "branch", label: r.name, hint: r.lang, run: () => { setProject(r.projectId); navigateProject(r.projectId, "dossier", r.id); } });
     if (hasCommand("newWorkOrder")) items.push({ group: "Actions", icon: "plus", label: "Submit a work order", hint: "", guard: guard(3), run: () => void runCommand("newWorkOrder") });
+    items.push({ key: "toggle-nav", group: "Actions", icon: "menu", label: "Collapse or expand the navigation", hint: "[", run: () => toggleNavRail() });
     items.push({ key: "toggle-theme", group: "Actions", icon: "moon", label: "Toggle theme", hint: "", run: () => { const dark = document.documentElement.dataset.theme === "dark" || (prefs.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches); applyTheme(dark ? "light" : "dark"); } });
     if (cp) {
       items.push({ group: "Actions", icon: "pause", label: `${cp.halted ? "Resume " : "Halt "}${cp.name}`, hint: "andon", guard: guard(0), run: () => (cp.halted ? void stop.resume(cp.id) : stop.halt(cp.id)) });

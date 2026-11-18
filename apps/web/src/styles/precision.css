@@ -144,3 +144,43 @@ input:focus,select:focus,textarea:focus,.input:focus-visible { outline: 2px soli
 
 /* Native selects: the same outlined, mono-label look as the other controls, with a drawn chevron that follows the ink colour. */
 select.input { appearance: none; padding-right: 28px; background-image: linear-gradient(45deg, transparent 50%, var(--ink2) 50%), linear-gradient(135deg, var(--ink2) 50%, transparent 50%); background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+
+/* ---------- nav: foldable sections and the icon rail ---------- */
+.side { overflow: visible; }
+.nav { overflow-y: auto; overflow-x: hidden; min-height: 0; }
+.brand { min-height: 60px; flex: none; }
+.brand-mark { flex: none; display: inline-flex; padding: 0; margin: 0; background: none; border: 1px solid transparent; border-radius: var(--r); color: inherit; cursor: pointer; text-decoration: none; }
+.brand-mark svg { display: block; }
+button.brand-mark:hover { border-color: var(--accent); background: var(--accent-soft); }
+.brand-name { color: inherit; text-decoration: none; min-width: 0; white-space: nowrap; }
+.nav h3 { margin: 0; }
+.nav .sec-h { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 24px; cursor: pointer; border-radius: var(--r); }
+.nav .sec-h > span:first-child { flex: 1; }
+.nav .sec-h:hover { color: var(--ink); }
+.nav .sec-h:focus-visible, .brand-mark:focus-visible, .nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav .sec-h svg { width: 12px; height: 12px; transition: transform var(--dur-base, .2s); transform: rotate(90deg); }
+.sec.folded .sec-h svg { transform: none; }
+.nav .sec-n { font: 600 10px var(--mono); color: var(--ink3); border: 1px solid var(--line2); padding: 0 5px; border-radius: 9px; }
+.nav .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rail-notch { display: none; }
+.rail-fly { position: fixed; transform: translateY(-50%); z-index: var(--z-tooltip, 400); display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: var(--surface); color: var(--ink); border: 1px solid var(--accent); border-radius: var(--r); box-shadow: 3px 3px 0 var(--plate, transparent); white-space: nowrap; pointer-events: none; font-size: 13px; }
+.rail-fly::before { content: ""; position: absolute; left: -11px; top: 50%; width: 10px; border-top: 1px solid var(--accent); }
+.rail-fly span { font: 600 11px var(--mono); color: var(--ink2); }
+.rail-fly kbd { font: 600 10px var(--mono); color: var(--ink2); border: 1px solid var(--line2); border-radius: 3px; padding: 0 5px; }
+@media (min-width: 1025px) {
+  .app { grid-template-columns: var(--side-w, 236px) minmax(0, 1fr); transition: grid-template-columns .22s cubic-bezier(.3, .7, .2, 1); }
+  .app.rail { --side-w: 56px; }
+  .rail-notch { display: flex; align-items: center; justify-content: center; position: absolute; top: 15px; right: -15px; width: 15px; height: 34px; padding: 0; z-index: 3; background: var(--surface); color: var(--ink3); border: 1px solid var(--line2); border-left: 0; border-radius: 0 var(--r) var(--r) 0; cursor: pointer; }
+  .rail-notch svg { width: 12px; height: 12px; }
+  .rail-notch:hover, .side:hover .rail-notch { color: var(--accent); border-color: var(--accent); }
+  .side.rail .brand { padding: 14px 0; justify-content: center; }
+  .side.rail .brand-name { display: none; }
+  .side.rail .nav { padding: 4px 8px 16px; }
+  .side.rail .nav h3 { margin: 10px 2px 4px; padding: 6px 0 0; border-top: 1px dashed var(--line2); text-align: center; }
+  .side.rail .nav .sec:first-child h3 { margin-top: 2px; border-top: 0; }
+  .side.rail .sec-tag { font: 600 9px var(--mono); letter-spacing: .06em; color: var(--ink3); }
+  .side.rail .nav a { position: relative; justify-content: center; padding: 0; min-height: 36px; margin-bottom: 2px; }
+  .side.rail .nav a svg { width: 18px; height: 18px; }
+  .side.rail .nav a .lbl { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .side.rail .nav a .cnt { position: absolute; top: 3px; right: 4px; margin: 0; min-width: 0; width: 9px; height: 9px; padding: 0; font-size: 0; border-radius: 50%; border: 1.5px solid var(--surface); box-sizing: content-box; }
+}
