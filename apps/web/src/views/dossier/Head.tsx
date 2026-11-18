@@ -56,7 +56,7 @@ export function DossierHead({ wo, cat, project, session, rec }: { wo: TWo; cat: 
   const parkSpec = by("park") ?? by("unpark");
   // the prototype's five entries and one divider; reassigning an agent, reclassifying and the line controls stay in the traveler drawer
   const menu = (anchor: HTMLElement) => {
-    ui.menu(anchor, "Actions", [
+    ui.menu(anchor, null, [
       { label: "Edit title and priority", icon: "edit", onClick: () => void ui.open((close) => <EditDialog wo={wo} cat={cat} project={project} onClose={close} />) },
       { label: "Reassign", icon: "people", onClick: () => void ui.open((close) => <OwnerDialog wo={wo} onClose={close} />) },
       { label: "Park", icon: "pause", guard: parkSpec?.guard, onClick: () => (wo.bay ? parkSpec?.onClick() : void ui.open((close) => <ParkDialog woId={wo.id} simple onClose={close} />)) },

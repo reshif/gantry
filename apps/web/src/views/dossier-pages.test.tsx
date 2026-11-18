@@ -57,6 +57,25 @@ describe("Traveler, Dossier and Changes are routes of their own", () => {
     await waitFor(() => expect(window.location.hash).toContain(`record/${W.id}`));
   });
 
+
+  it("Export PDF downloads the record bundle and toasts (it does not open the print dialog)", async () => {
+    const calls = mockApi({ ...readsFor(W), [`GET /api/v1/work-orders/${W.id}/record/export`]: () => ({ body: { manifest: { id: W.id, version: 1, algorithm: "sha256", files: [] }, files: {} } }) });
+    const print = vi.fn();
+    vi.stubGlobal("print", print);
+    window.location.hash = `#dossier/${W.id}`;
+    mount(<DossierPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Export PDF" }, { timeout: 4000 }));
+    await waitFor(() => expect(JSON.stringify(calls)).toContain("record/export"));
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it("the Actions menu has no heading row and a modal sits above its own scrim", async () => {
+    const css = (await import("node:fs")).readFileSync(`${process.cwd()}/src/styles/cr/app.css`, "utf8");
+    expect(css).toMatch(/\.dlg-wrap>\.dlg\{[^}]*z-index:1/);
+    const src = (await import("node:fs")).readFileSync(`${process.cwd()}/src/views/dossier/Head.tsx`, "utf8");
+    expect(src).toContain("ui.menu(anchor, null, [");
+  });
+
   it("shows Not found with Back to work orders on the traveler, dossier and changes pages", async () => {
     const gone = { [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }) };
     for (const [hash, View] of [[`#traveler/${W.id}`, TravelerPage], [`#dossier/${W.id}`, DossierPage], [`#changes/${W.id}`, ChangesView]] as const) {

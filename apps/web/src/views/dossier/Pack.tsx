@@ -12,6 +12,7 @@ import { Async, Loading } from "../../ui/async";
 import { useActors } from "../../ui/actors";
 import { navigate, useHash } from "../../lib/router";
 import { Picker } from "../record/Picker";
+import { useExportRecord } from "../record/Lifecycle";
 import { briefDiff, critStatus, useRecordData, type RecordData } from "../record/data";
 import type { TWo } from "../traveler/model";
 import { NotFound, splitParam, statusOf, when } from "./kit";
@@ -128,6 +129,7 @@ export default function PackView() {
   const hash = useHash();
   const { id, sub } = splitParam(hash.param);
   const tab: PackTab = TABS.find((t) => t.id === sub)?.id ?? "summary";
+  const exportRecord = useExportRecord();
   const d = useRecordData(id || null);
   if (!id) return <Picker />;
   if (d.loading) return <div className="page"><Loading id="pack-loading" label="the dossier" /></div>;
@@ -146,7 +148,7 @@ export default function PackView() {
       acts={
         <>
           <Btn label="Back to record" id="pack-back" onClick={() => navigate("record", wo.id, wo.project)} />
-          <Btn label="Export PDF" icon="dl" id="pack-export" onClick={() => window.print()} />
+          <Btn label="Export PDF" icon="dl" id="pack-export" onClick={() => void exportRecord(wo.id)} />
         </>
       }
     >

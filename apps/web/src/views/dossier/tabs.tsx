@@ -199,7 +199,7 @@ export function EventsTab({ rec, wo, cat }: { rec: RecordData; wo: TWo; cat: Cat
   const all = [...rec.events].map(toRecEvent).sort((a, b) => b.at - a.at);
   const events = all.slice(0, 10);
   return (
-    <Card title="Events" id="dz-events" {...(all.length > 10 ? { hint: `Latest 10 of ${all.length}` } : {})}>
+    <Card title="Events" id="dz-events">
       {events.length ? (
         <div className="tl">
           {events.map((e) => (
