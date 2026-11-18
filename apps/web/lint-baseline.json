@@ -97,7 +97,6 @@
       "ui": 2
     },
     "literal-query-key": {
-      "views/conversations": 1,
       "views/documents": 6,
       "views/notifications": 1,
       "views/people": 3,
@@ -150,7 +149,7 @@
       "views/api": 20,
       "views/audit": 2,
       "views/console": 6,
-      "views/conversations": 5,
+      "views/conversations": 3,
       "views/documents": 8,
       "views/evals": 7,
       "views/floor": 1,
@@ -197,7 +196,7 @@
     "role-literal": {
       "views/access": 1,
       "views/console": 17,
-      "views/conversations": 10,
+      "views/conversations": 3,
       "views/govern": 2,
       "views/home": 1,
       "views/learning": 6,
