@@ -8,9 +8,9 @@ import { Field, Select, type Decision } from "../../ui/primitives";
 import { Dialog } from "../../ui/Overlay";
 import { useUI } from "../../ui/overlay-context";
 import { navigate } from "../../lib/router";
-import { useModels, useStations, type AgentRow } from "./kit";
+import { rerender, ui as agentsUi, useModels, useStations, type AgentRow } from "./kit";
 
-export function NewAgentDialog({ perm, close }: { agents?: AgentRow[]; perm: Decision; close: () => void }) {
+export function NewAgentDialog({ agents, perm, close }: { agents?: AgentRow[]; perm: Decision; close: () => void }) {
   const ui = useUI();
   const m = useModels();
   const st = useStations();
@@ -30,7 +30,8 @@ export function NewAgentDialog({ perm, close }: { agents?: AgentRow[]; perm: Dec
       ui.toast(`Created ${n}`, "ok");
       const created = (r as unknown as { agent?: AgentRow }).agent;
       done();
-      if (created) navigate("agents", created.id);
+      if (created?.id) navigate("agents", created.id);
+      else { agentsUi.opening = { name: n, known: (agents ?? []).map((x) => x.id) }; rerender(); }
     });
   };
   return (

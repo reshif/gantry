@@ -6,7 +6,7 @@ import { ExtLink, safeExternalUrl } from "./ExtLink";
 import { Modal } from "./Modal";
 import { Field, focusFirstInvalid } from "./primitives";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("DataTable clickable rows", () => {
   const rows = [{ id: "a", name: "Alpha" }, { id: "b", name: "Beta" }];
@@ -119,16 +119,18 @@ describe("Modal", () => {
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     unmount();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(<Harness dirty />);
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByText("Discard your unsaved changes?")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(confirm).toHaveBeenCalledWith("Discard what you typed?");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("a click on the scrim does not discard dirty input", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
     const { container } = render(<Harness dirty />);
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     const scrim = container.querySelector(".scrim")!;

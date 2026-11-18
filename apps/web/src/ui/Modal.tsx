@@ -8,9 +8,8 @@
  *  - focus moves in on mount (no timer) and returns to the opener on close
  *  - Escape and scrim clicks ask `requestClose`, which a dirty form can turn into a "discard changes?" step
  */
-import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { Icon } from "./Icon";
-import { Btn } from "./primitives";
 
 const FOCUSABLE = 'a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex="-1"])';
 const EXEMPT = "[data-inert-exempt]";
@@ -163,47 +162,15 @@ export interface ModalProps {
 export function Modal({ title, kicker, sub, wide, cls, dirty, onClose, onSubmit, children, footer }: ModalProps) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = `dlg-title-${useId().replace(/:/g, "")}`;
-  const [asking, setAsking] = useState(false);
-  const askingRef = useRef(false);
-  askingRef.current = asking;
-  const keepBtn = useRef<HTMLDivElement>(null);
-  const beforeAsk = useRef<HTMLElement | null>(null);
-  /** Back to editing: focus returns to the control that had it (else the first field), never the page behind. */
-  const keepEditing = useCallback(() => {
-    setAsking(false);
-    const t = beforeAsk.current;
-    beforeAsk.current = null;
-    setTimeout(() => {
-      const p = panel.current;
-      if (!p) return;
-      if (t && p.contains(t)) t.focus();
-      else p.querySelector<HTMLElement>("input:not([type=hidden]),select,textarea")?.focus();
-    }, 0);
-  }, []);
+  /** A dirty form asks with the browser's own confirm, in the prototype's words, before anything typed is thrown away. */
   const requestClose = useCallback(() => {
-    // Escape while the discard question is open answers it with "keep editing"
-    if (askingRef.current) keepEditing();
-    else if (dirty) {
-      beforeAsk.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setAsking(true);
-    } else onClose();
-  }, [dirty, onClose, keepEditing]);
-  // the question is an alertdialog: move focus into it so it is announced and reachable
-  useLayoutEffect(() => {
-    if (asking) keepBtn.current?.querySelector<HTMLElement>("button")?.focus();
-  }, [asking]);
+    if (!dirty || window.confirm("Discard what you typed?")) onClose();
+  }, [dirty, onClose]);
   useModalLayer({ ref: panel, requestClose });
   const scrim = useScrimClose(requestClose);
   const inner = (
     <>
       <div className="dlg-body dlg-b">{children}</div>
-      {asking ? (
-        <div ref={keepBtn} className="dlg-discard" role="alertdialog" aria-labelledby={`discard-${titleId}`}>
-          <span id={`discard-${titleId}`}>Discard your unsaved changes?</span>
-          <Btn label="Keep editing" kind="ghost" small onClick={keepEditing} />
-          <Btn label="Discard" kind="danger" small onClick={onClose} />
-        </div>
-      ) : null}
       {footer ? <div className="dlg-foot dlg-f">{typeof footer === "function" ? footer(requestClose) : footer}</div> : null}
     </>
   );

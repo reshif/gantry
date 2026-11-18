@@ -601,3 +601,30 @@ describe("models screen has no tab strip (prototype)", () => {
     await byId("md-add-vendor");
   });
 });
+
+describe("work1 residual round 2: models", () => {
+  beforeEach(() => { window.location.hash = "#models"; });
+  it("the header carries Discover models alone; Vendors, Routing, Prices and Add vendor sit in a quiet row below the tiles", async () => {
+    setup();
+    mount();
+    await byId("mc-table");
+    const head = document.querySelector(".ph")!;
+    expect([...head.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Discover models"]);
+    const manage = await byId("md-manage");
+    expect([...manage.querySelectorAll("button")].map((b) => b.textContent!.trim())).toEqual(["Vendors", "Routing", "Prices", "Add vendor"]);
+  });
+  it("lists tiers frontier, standard, fast in the filter and in the add-model dialog", async () => {
+    setup();
+    mount();
+    await byId("mc-table");
+    const opts = [...(document.getElementById("mc-tier") as HTMLSelectElement).options].map((o) => o.value).filter(Boolean);
+    expect(opts.slice(0, 3)).toEqual(["frontier", "standard", "fast"]);
+  });
+  it("Discover models toasts a sentence even when the server sends no message", async () => {
+    setup({ "POST /api/v1/vendors/anthropic/discover": () => ({ body: { ok: true } }) });
+    mount();
+    await byId("mc-table");
+    fireEvent.click(await byId("md-discover"));
+    await waitFor(() => expect(document.body.textContent).toContain("Checked Anthropic."));
+  });
+});

@@ -69,7 +69,7 @@ export function nextVersion(a: AgentRow): string {
 
 /* ---------- screen state, kept across tabs and screens like legacy `ui` ---------- */
 
-export const ui = { sel: null as string | null, want: "", ctxProject: null as string | null, ctxRepo: null as string | null, newVer: "", newNote: "" };
+export const ui = { sel: null as string | null, want: "", ctxProject: null as string | null, ctxRepo: null as string | null, newVer: "", newNote: "", /** An agent just created: open its page once the list shows it (the server did not name it in its reply). */ opening: null as { name: string; known: string[] } | null };
 let tick = 0;
 const listeners = new Set<() => void>();
 export const rerender = (): void => {

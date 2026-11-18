@@ -53,21 +53,14 @@ export default function ModelsView() {
   const discover = (): void => {
     const targets = vendors.filter((v) => v.connected && (v.template || v.custom || v.id === "anthropic"));
     if (!targets.length) { ui.toast("No connected vendor can list its models.", "warn"); return; }
-    void (async () => { for (const v of targets) { const r = await discoverCmd.run(v.id); if (r) ui.toast(r.msg, r.ok ? "ok" : "error"); } })();
+    void (async () => { for (const v of targets) { const r = await discoverCmd.run(v.id); if (r) ui.toast(r.msg || (r.ok ? `Checked ${v.name}.` : `Could not check ${v.name}.`), r.ok ? "info" : "error"); } })();
   };
   const scrollTo = (id: string) => setTimeout(() => document.getElementById(`vendor-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
 
   return (
     <Page eyebrow="Workforce" title="Models" cls="view-models"
         sub="Which models agents may use, what they cost and where they are used."
-        acts={tab === "models" ? <>
-          {/* KEEP: vendors, routing and prices stay one click away from the catalog (owner, 2026-11-18) */}
-          <Btn label="Vendors" id="md-go-vendors" onClick={() => navigate("models", "vendors")} />
-          <Btn label="Routing" id="md-go-routing" onClick={() => navigate("models", "routing")} />
-          <Btn label="Prices" id="md-go-prices" onClick={() => navigate("models", "prices")} />
-          <Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} />
-          <Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={(id) => { navigate("models", "vendors"); scrollTo(id); }} />)} />
-        </> : <>
+        acts={tab === "models" ? <Btn label="Discover models" icon="refresh" id="md-discover" guard={perm} onClick={discover} /> : <>
           <Btn label="All models" id="md-back" onClick={() => navigate("models")} />
           {tab === "vendors" ? <Btn label="Add vendor" kind="primary" icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={scrollTo} />)} /> : null}
         </>}>
@@ -77,6 +70,15 @@ export default function ModelsView() {
         { l: "Spend, 30 days", v: qState(vq, () => fmt.money0(mtd)), tone: "agent" },
         { l: "Fallbacks fired", v: "\u2014", tone: "info" },
       ]} />
+      {tab === "models" ? (
+        <div className="row md-manage" id="md-manage">
+          {/* KEEP: vendors, routing and prices stay one click away from the catalog (owner, 2026-11-18), as quiet links, not header actions */}
+          <Btn label="Vendors" kind="ghost" small id="md-go-vendors" onClick={() => navigate("models", "vendors")} />
+          <Btn label="Routing" kind="ghost" small id="md-go-routing" onClick={() => navigate("models", "routing")} />
+          <Btn label="Prices" kind="ghost" small id="md-go-prices" onClick={() => navigate("models", "prices")} />
+          <Btn label="Add vendor" kind="ghost" small icon="plus" id="md-add-vendor" guard={perm} onClick={() => ui.open((close) => <AddVendorDialog close={close} onAdded={(id) => { navigate("models", "vendors"); scrollTo(id); }} />)} />
+        </div>
+      ) : null}
       <Async query={vq} what="model vendors" id="models">
         {() => (
           <Async query={rq} what="model routing" id="models-routing">

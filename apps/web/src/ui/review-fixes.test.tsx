@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DataTable } from "./DataTable";
 import { Modal } from "./Modal";
 import { OverlayProvider } from "./Overlay";
@@ -68,14 +68,15 @@ describe("Modal focus return with an autoFocus child", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it("moves focus into the discard question, and Escape there means keep editing", () => {
+  it("a declined discard confirm keeps the dialog and the field focus", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<Modal title="Edit" dirty onClose={() => {}}><input aria-label="F" /></Modal>);
-    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    const alert = screen.getByRole("alertdialog");
-    expect(alert.contains(document.activeElement)).toBe(true);
-    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    expect(screen.queryByRole("alertdialog")).toBeNull();
+    const f = document.activeElement;
+    fireEvent.keyDown(f!, { key: "Escape" });
+    expect(confirm).toHaveBeenCalledWith("Discard what you typed?");
     expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(document.activeElement).toBe(f);
+    confirm.mockRestore();
   });
 });
 
