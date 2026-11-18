@@ -73,4 +73,26 @@ d("lifecycle gaps", () => {
     expect((await w.call("p-meera", "POST", `/api/v1/work-orders/${id}/unpark`, { reason: "Redo the review on a new pull request" })).status).toBe(200);
     expect((await w.q(`select data->'merging' as m from work_orders where id = $1`, [id]))[0].m).toBeNull();
   });
+
+  it("gap 2: approving the merge gate with no open pull request on a GitHub repository is refused; the order keeps waiting at G5", async () => {
+    const id = await atG5("No pull request at G5");
+    await t.db.admin.query(`update repos set github_full_name = 'acme/payments-api' where org_id = $1 and id = 'payments-api'`, [t.orgId]);
+    try {
+      // The pull request was closed on GitHub before anyone decided.
+      await t.db.admin.query(`insert into pull_requests (org_id, id, repo_id, wo_id, number, title, state, head_sha) values ($1,'PR-G2','payments-api',$2,701,'x','closed','eeee1111ffff')`, [t.orgId, id]);
+      let refused: { status: number; body: Record<string, any> } | null = null;
+      for (const who of w.APPROVERS) {
+        const r = await w.call(who, "POST", await w.gateUrl(id, "G5"), {});
+        if (r.status === 409) { refused = r; break; }
+      }
+      expect(refused, "G5 was approved with nothing to merge").not.toBeNull();
+      expect(String(refused!.body.msg)).toMatch(/no open pull request/i);
+      const wo = await w.get(id);
+      expect(wo.state).toBe("waiting");
+      expect(wo.allowed.approve?.gate).toBe("G5");
+      expect((await w.q(`select count(*)::int n from gate_votes where gate_instance_id like $1`, [`${id}:G5:%`]))[0].n).toBe(0);
+    } finally {
+      await t.db.admin.query(`update repos set github_full_name = null where org_id = $1 and id = 'payments-api'`, [t.orgId]);
+    }
+  });
 });

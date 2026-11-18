@@ -2,7 +2,7 @@
 import { gateDef, gateProgress, gateDecision, route, stationDef, type Catalog } from "@gantry/domain";
 import type { Actor } from "../../core/command.js";
 import { invalid, refuse } from "../../core/errors.js";
-import { closeEntry, closeInstance, advance, bayOf, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
+import { closeEntry, closeInstance, advance, bayOf, pinned, enterStation, finish, note, openInstanceOf, recordDecision, ev, stationIdOf, cancelAttempts, type Fx } from "./engine.js";
 import { appendMessage, closeConversation } from "./conversation.js";
 import { recordBriefDocument } from "./station-docs.js";
 import { begin, done, flowFor, person, type CmdResult } from "./ctx.js";
@@ -90,6 +90,7 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   if (gateId === "G0G1" && !wo.conv.done) throw invalid("Answer the open intake questions first; the brief is not complete.");
   const d = gateDecision(st, by, wo, gateId, fx.now.getTime());
   if (!d.allowed) throw refuse("denied", d.reason, { rule: d.rule, ...(d.needs ? { needs: d.needs } : {}) });
+  if (gateId === "G5") await requireMergeablePr(fx, w);
   await insertVote(fx, w, inst.id, by, "approve", "", via ?? actor.channel);
   const after = await flowFor(fx, w);
   const project = after.st.projects.find((p) => p.id === w.project)!;
@@ -143,6 +144,24 @@ export async function approveInner(fx: Fx, actor: Actor, w: Wo, gateId: string, 
   await saveWo(fx.tx, fx.orgId, w);
   const here = bayOf(fx.catalog, w) ?? stationIdOf(fx.catalog, w);
   return done(fx, `${msg} ${w.id} is at ${fx.catalog.bays.find((b) => b.id === here)?.name ?? stationDef(fx.catalog, here)?.name ?? here}.`, w.project, { passed: true, have: prog.have, need, instance: inst.id, version: w.version });
+}
+
+/**
+ * G5 approves a pull request to merge. A class that changes code (its route has the Build station) on a repository with a GitHub identity needs an open pull
+ * request (or one already merged) when the gate is approved; otherwise the approval would send the work order on to Close without merging anything, which a person
+ * reading "approved" would take for a merge. The reason names the way forward. Classes whose route never builds (and repositories with no GitHub identity,
+ * which cannot hold a pull request) are not asked for one.
+ */
+async function requireMergeablePr(fx: Fx, w: Wo): Promise<void> {
+  const project = await pinned(fx, w);
+  if (!route(fx.catalog, project, w.cls).includes("build") || !w.repo) return;
+  const gh = (await fx.tx.query<{ full: string | null }>(`select github_full_name as full from repos where org_id = $1 and id = $2`, [fx.orgId, w.repo])).rows[0];
+  if (!gh?.full) return;
+  const prs = (await fx.tx.query<{ state: string }>(`select state from pull_requests where org_id = $1 and wo_id = $2`, [fx.orgId, w.id])).rows;
+  if (prs.some((p) => p.state === "open" || p.state === "merged")) return;
+  throw refuse("conflict", prs.length
+    ? `There is no open pull request to merge: ${prs.length === 1 ? "the pull request was" : "the pull requests were"} closed without merging. Send ${w.id} back to Build so the agent opens a new one, or reopen it on GitHub first.`
+    : `There is no open pull request to merge: Build never opened one. Send ${w.id} back to Build so the agent opens one.`, { needs: "open pull request" });
 }
 
 /** G0+G1 passed: the brief becomes version N, the conversation closes and the route starts. */
