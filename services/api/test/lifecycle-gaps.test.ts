@@ -222,4 +222,15 @@ d("lifecycle gaps", () => {
     expect(live.state).toBe("queued");
     expect((await dispatchable(live.id)).length, "the queued attempt has no dispatch job after resume").toBe(1);
   });
+
+  it("gap 7: no engine path sets the work-order state 'blocked' (it is reserved; see WoStateId)", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const walk = (dir: string): string[] => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : f.endsWith(".ts") ? [join(dir, f)] : []));
+    const roots = [join(__dirname, "../src"), join(__dirname, "../../worker/src")];
+    const sets = /\.state\s*=\s*["']blocked["']|set\b[^;`]*\bstate\s*=\s*'blocked'/;
+    const setters = roots.flatMap(walk).filter((f) => sets.test(readFileSync(f, "utf8")));
+    expect(setters).toEqual([]);
+    expect((await w.q(`select count(*)::int n from work_orders where state = 'blocked'`))[0].n).toBe(0);
+  });
 });
