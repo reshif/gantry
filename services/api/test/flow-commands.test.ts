@@ -127,7 +127,7 @@ d("work order commands: denied and stale for every one", () => {
     expect((await w.call("p-meera", "POST", `${base}/move`, { target: "research", reason: "Back from the board" })).status).toBe(200);
     // send-back: validations, then to Intake (the gate reopens, live attempts cancelled)
     await matrix(id, "POST", `${base}/send-back`, { toStation: "intake", note: "The brief was wrong" }, { stale: "p-meera" });
-    expect((await w.call("p-meera", "POST", `${base}/send-back`, { toStation: "research", note: "same station" })).status).toBe(422);
+    expect((await w.call("p-meera", "POST", `${base}/send-back`, { toStation: "research", note: "x" })).status).toBe(422);
     const sb = await w.call("p-meera", "POST", `${base}/send-back`, { toStation: "intake", note: "The brief was wrong" });
     expect(sb.status, JSON.stringify(sb.body)).toBe(200);
     const wo = await w.get(id);

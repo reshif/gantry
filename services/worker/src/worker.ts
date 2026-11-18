@@ -12,6 +12,7 @@ import { attemptDispatch } from "./handlers/dispatch.js";
 import { evalDispatch, trustEvaluate } from "./handlers/evals.js";
 import { learningRefresh } from "./handlers/learning.js";
 import { mergeRequest } from "./handlers/merge.js";
+import { prDescribe } from "./handlers/describe.js";
 import { chainVerify, flowTimer, githubEvent, githubReconcile, triggerEvaluate, triggerTick } from "./handlers/misc.js";
 import { onboardingAgentCollect, onboardingAssess, onboardingMerge, onboardingOpenPr, onboardingSync, onboardingVerify } from "./handlers/onboarding.js";
 import { reaperSweep } from "./handlers/reaper.js";
@@ -29,6 +30,7 @@ export const HANDLERS: Handlers = {
   "run.result": runResult,
   publish: publishJob,
   "merge.request": mergeRequest,
+  "pr.describe": prDescribe,
   "flow.timer": flowTimer,
   "stop.enforce": stopEnforce,
   "github.reconcile": githubReconcile,

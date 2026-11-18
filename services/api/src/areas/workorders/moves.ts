@@ -1,5 +1,5 @@
 /** Board and traveler moves: move (one step along the route), send back, park, unpark, reassign, retry and the record summary (spec 9.4, 9.6). */
-import { bayDef, can, gateForWO, moveCheck, nextStationId, route, stationDef, type MoveCheck } from "@gantry/domain";
+import { bayDef, can, gateForWO, moveCheck, nextStationId, route, stationDef, type MoveCheck, type Project } from "@gantry/domain";
 import type { Tx } from "@gantry/db";
 import type { Actor } from "../../core/command.js";
 import { conflict, invalid, refuse } from "../../core/errors.js";
@@ -58,18 +58,26 @@ async function sendBackInner(fx: Fx, actor: Actor, w: Wo, to: string, noteText: 
   if (bayOf(fx.catalog, w)) throw conflict(`${w.id} is parked in a bay; return it to the belt first.`);
   const r = route(fx.catalog, project, w.cls);
   const cur = stationIdOf(fx.catalog, w);
-  if (!r.includes(to) || r.indexOf(to) >= r.indexOf(cur)) throw invalid("Pick an earlier station on this work order's route.");
-  closeEntry(w, fx, "sent back", noteText);
-  w.data.sendbacks = [...(Array.isArray(w.data.sendbacks) ? (w.data.sendbacks as unknown[]) : []), { from: cur, to, note: noteText, at: fx.now.getTime(), by }];
-  await cancelAttempts(fx, w, "sent back");
+  // A person may send the work order back to the station it is at (a "redo"): the station runs again from a clean attempt, with the person's note.
+  if (!r.includes(to) || r.indexOf(to) > r.indexOf(cur)) throw invalid("Pick this station or an earlier one on this work order's route.");
+  if (to === cur && noteText.trim().length < 3) throw invalid("Say what the station should do differently (a note of at least 3 characters) when you send it back to the station it is at.");
+  await sendBackCore(fx, w, project, cur, to, noteText, by);
+  return done(fx, to === cur ? `${w.id} sent back to redo ${stationDef(fx.catalog, to)?.name ?? to}.` : `${w.id} sent back to ${stationDef(fx.catalog, to)?.name ?? to}.`, w.project, { version: w.version, redo: to === cur });
+}
+
+/** The send-back itself, shared by a person's send-back and the system's enforcement of a Review verdict (`by` is the person or "system"). Saves the work order. */
+export async function sendBackCore(fx: Fx, w: Wo, project: Project, cur: string, to: string, noteText: string, by: string, extra: Record<string, unknown> = {}): Promise<void> {
+  const redo = to === cur;
+  closeEntry(w, fx, redo ? "redo" : "sent back", noteText);
+  w.data.sendbacks = [...(Array.isArray(w.data.sendbacks) ? (w.data.sendbacks as unknown[]) : []), { from: cur, to, note: noteText, at: fx.now.getTime(), by, ...(redo ? { redo: true } : {}), ...extra }];
+  await cancelAttempts(fx, w, redo ? "redo" : "sent back");
   await closeOpenInstances(fx, w.id, "send_back");
   await resetGatesFrom(fx, w, project, to);
   await enterStation(fx, w, to, { project });
-  note(w, fx, by, `Sent back from ${stationDef(fx.catalog, cur)?.name ?? cur} to ${stationDef(fx.catalog, to)?.name ?? to}${noteText ? `: ${noteText}` : "."}`);
-  ev(fx, w, "wo.sendback", { text: noteText, from: cur, to, station: to });
+  note(w, fx, by, redo ? `Redo ${stationDef(fx.catalog, to)?.name ?? to}${noteText ? `: ${noteText}` : "."}` : `Sent back from ${stationDef(fx.catalog, cur)?.name ?? cur} to ${stationDef(fx.catalog, to)?.name ?? to}${noteText ? `: ${noteText}` : "."}`);
+  ev(fx, w, "wo.sendback", { text: noteText, from: cur, to, station: to, ...(redo ? { redo: true } : {}), ...(by === "system" ? { by: "system" } : {}) });
   await saveWo(fx.tx, fx.orgId, w);
   await dispatchQueued(fx, w.project);
-  return done(fx, `${w.id} sent back to ${stationDef(fx.catalog, to)?.name ?? to}.`, w.project, { version: w.version });
 }
 
 export async function park(tx: Tx, actor: Actor, woId: string, bay: string, reason: string): Promise<CmdResult> {

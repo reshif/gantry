@@ -486,7 +486,7 @@ export async function openGate(fx: Fx, w: Wo, gateId: string, o: { project?: Pro
       evidence = ci.evidence;
     }
   }
-  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0 || guardrailBreach, checks, evidence, required: requiredFor(project.approvers[gateId], w.cls) }, now: fx.now });
+  const instance = await openInstance(fx.tx, fx.orgId, w, gateId, { station: sid, flowVersion: w.flowVersion, headSha: o.headSha ?? null, basis: { riskTags: tags, forcedHuman: tags.length > 0 || guardrailBreach, checks, evidence, required: requiredFor(project.approvers[gateId], w.cls), ...(g.after === "review" && w.data.review ? { review: w.data.review } : {}) }, now: fx.now });
   if (kind === "auto" || kind === "mixed") {
     (w.data.gateChecks ??= {})[gateId] = checks;
     const failed = checks.some((c) => !c.ok && !c.warn);
