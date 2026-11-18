@@ -95,7 +95,7 @@ export function richGov1(ov: Record<string, Handler>, floorFor: (id: string) => 
   ov["teams"] = (r) => fulfillJson(r, TEAMS);
   ov["access/matrix"] = (r) => fulfillJson(r, { matrix: matrix(), roles: ROLES, actions: ACTIONS, version: 7 });
   ov["policies"] = (r) => fulfillJson(r, POLICIES);
-  ov["freezes"] = (r) => fulfillJson(r, []);
+  ov["freezes"] = (r) => fulfillJson(r, [{ id: "FRZ-01", name: "Year-end freeze", repos: "all", from: Date.parse("2026-12-20T00:00:00Z"), to: Date.parse("2027-01-05T23:00:00Z"), by: "p-admin", version: 1 }]);
   const names: Record<string, string> = { payments: "Payments Platform", storefront: "Storefront" };
   for (const [i, pe] of P.entries()) {
     ov[`people/${pe[0]}/effective-permissions`] = (r) => {

@@ -51,8 +51,9 @@ export function InviteForm({ perm, teams, projects, roles, domains, preset, clos
         return;
       }
       ui.toast(`Invited ${name.trim()}`, "ok");
-      onDone((r as unknown as { person: { id: string } }).person.id);
+      // Close first: a reply without the person (the list refetches anyway) must never leave the dialog open.
       close();
+      onDone((r as { person?: { id?: string } }).person?.id ?? "");
     })();
   });
 

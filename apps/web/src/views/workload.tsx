@@ -107,7 +107,8 @@ export default function WorkloadView() {
   if (!me) return null;
   const sub = "Where work and approvals pile up, for people and for agents."; // the detail view (suggestions, teams, minutes) stays reachable at ?wview=detail
   // until the snapshot arrives the page is its header and the shared loading, not-visible or failed state
-  if (!m) return <Page cls="view-workload" eyebrow="Govern" title="Workload" sub={sub}><Async query={wq} what="workload" id="wl">{() => null}</Async></Page>;
+  // People still loading is loading too: an empty matrix and "0 of 0" must never stand in for a read that has not finished.
+  if (!m || peopleQ.isPending) return <Page cls="view-workload" eyebrow="Govern" title="Workload" sub={sub}><Async query={(m ? peopleQ : wq) as typeof wq} what="workload" id="wl">{() => null}</Async></Page>;
 
   const setSort = (id: string, s: SortState): void => setSorts((x) => ({ ...x, [id]: s }));
   const openPerson = (pid: string): void => ui.drawer.open(`workload:${pid}`, (close) => <PersonDrawer pid={pid} m={m} close={close} />);

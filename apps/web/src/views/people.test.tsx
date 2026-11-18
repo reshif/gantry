@@ -221,6 +221,15 @@ describe("People & teams: deactivate", () => {
     expect(writes(calls)).toEqual([]);
   });
 
+  it("says 'Reason is required.' for an empty reason (gov1-056)", async () => {
+    const calls = setup(base());
+    mount("p-tomas");
+    await open();
+    fireEvent.click(await byId("ppl-off-submit"));
+    await waitFor(() => expect(document.getElementById("ppl-off-err")?.textContent).toBe("Reason is required."));
+    expect(writes(calls)).toEqual([]);
+  });
+
   it("shows the server's refusal and rule verbatim", async () => {
     setup({ ...base(), "POST /api/v1/people/p-tomas/deactivate": () => ({ status: 409, body: { ok: false, msg: "Tomás is the only approver for Payments.", rule: { kind: "invariant", id: "INV-14.4", name: "Last approver" } } }) });
     mount("p-tomas");
@@ -257,9 +266,10 @@ describe("People & teams: deactivate", () => {
     await waitFor(() => expect(dlg.textContent).toContain("1 will be reassigned"));
     typeReason("Left the company on Friday");
     fireEvent.click(await byId("ppl-off-submit"));
-    const done = await byId("ppl-off-done");
-    expect(done.textContent).toContain("They had no open work.");
-    expect(done.textContent).not.toContain("WO-9");
+    // Nothing left open: the toast is the whole result, no second dialog (gov1-056).
+    await waitFor(() => expect(document.getElementById("ppl-off")).toBeNull());
+    expect(document.getElementById("ppl-off-done")).toBeNull();
+    expect(document.getElementById("ppl-off-close")).toBeNull();
   });
 
   it("asks for a fresh sign-in through the step-up flow and retries with the same If-Match", async () => {
@@ -271,7 +281,7 @@ describe("People & teams: deactivate", () => {
     await open();
     typeReason("Left the company on Friday");
     fireEvent.click(await byId("ppl-off-submit"));
-    await byId("ppl-off-done");
+    await waitFor(() => expect(document.getElementById("ppl-off")).toBeNull());
     expect(asked).toHaveBeenCalledTimes(1);
     const sent = writes(calls).filter((c) => c.path.endsWith("/deactivate"));
     expect(sent.map((c) => c.ifMatch)).toEqual(["2", "2"]);

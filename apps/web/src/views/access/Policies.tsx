@@ -174,7 +174,7 @@ function whenText(p: Policy, freezes: Freeze[] = []): string {
   return p.oncallOnly && text !== "always" ? `${text}, on call` : text;
 }
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const shortDate = (ms: number): string => { const d = new Date(ms + 330 * 60000); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; };
+const shortDate = (ms: number): string => { const d = new Date(ms); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; };
 /** The projects a policy covers, by id, or "all". */
 const scopeText = (p: Policy): string => (p.where.freeze || !p.where.projects?.length ? "all" : p.where.projects.join(", "));
 
@@ -199,7 +199,7 @@ export function PolicyCards({ policies, hl, roles, onEdit, freezes = [] }: { pol
         { key: "roles", label: "Roles", render: (p) => roleText(p) },
         { key: "scope", label: "Scope", render: (p) => scopeText(p) },
         { key: "when", label: "When", render: (p) => <span className="mono" title={p.oncallOnly ? "Only while on call" : undefined}>{whenText(p, freezes)}</span> },
-        { key: "effect", label: "Effect", render: (p) => <span className={`chip ${p.effect === "deny" ? "bad" : "ok"}`}>{p.effect}</span> },
+        { key: "effect", label: "Effect", render: (p) => <span className={`chip plain ${p.effect === "deny" ? "bad" : "ok"}`}>{p.effect}</span> },
         { key: "on", label: "On", render: (p) => <Toggle id={`acc-pol-on-${p.id}`} checked={p.enabled} decision={perm} label={p.name} onChange={async (v) => void outcome(await ops.setPolicyEnabled(p.id, v, ifMatchOf(p)), `${v ? "Enabled" : "Disabled"} ${p.name}`)} /> },
         ...(anyCustom ? [{ key: "acts", label: "", align: "end" as const, render: (p: Policy) => ((p as Policy & { custom?: boolean }).custom ? <Btn label="Delete" small kind="ghost" id={`acc-pol-del-${p.id}`} guard={perm} onClick={async () => void outcome(await ops.deletePolicy(p.id, ifMatchOf(p)))} /> : null) }] : []),
       ]}

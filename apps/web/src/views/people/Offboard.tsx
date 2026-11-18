@@ -86,6 +86,7 @@ export function DeactivateForm({ p, projects, perm, onDone, registerSubmit }: {
   registerSubmit(() => {
     if (busy) return;
     const text = reason.trim();
+    if (!text) return setErr("Reason is required.");
     if (text.length < MIN_REASON) return setErr(`Give a reason of at least ${MIN_REASON} characters.`);
     setErr("");
     setRule("");
@@ -155,6 +156,8 @@ export function useOffboard(args: { perm: Decision; projects: Project[]; roleNam
         sub: "They are signed out everywhere and cannot sign in.",
         body: (close) => <DeactivateForm p={p} projects={args.projects} perm={guard} registerSubmit={(fn) => (submit = fn)} onDone={(r) => {
           close();
+          // The toast already said it; a result dialog appears only when the server lists open work left for someone to reassign.
+          if (!r.work?.length) return;
           ui.dialog({
             title: `${p.name} is deactivated`, kicker: "People", wide: true,
             body: (c) => <DeactivatedResult p={p} keep={r.keep} work={r.work} projects={args.projects} onGo={c} />,

@@ -94,3 +94,5 @@ table.t.dtable thead th .th-sort.is-active{color:var(--text)}
 /* gov1 residual: stat tiles are flat (prototype .stat has no shadow) and the search icon is centred on the input */
 .stats > .stat { box-shadow: none; }
 .searchbox.search > .ic { top: 50%; transform: translateY(-50%); }
+/* gov1 residual: at phone width a table inside a card is a list of flat rows as in the prototype (no raised card per row, 4px cell rhythm) */
+@media (max-width:720px){.card .tw.cards.dtable-scroll tbody tr{box-shadow:none;padding:var(--s2) var(--s3)}.card .tw.cards.dtable-scroll tbody td{padding:4px 0;height:auto;min-height:28px}.card .tw.cards.dtable-scroll tbody td:first-child{padding-bottom:6px}}

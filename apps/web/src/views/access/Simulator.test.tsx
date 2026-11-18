@@ -32,5 +32,9 @@ describe("Policies When (gov1-087)", () => {
     const whens = Array.from(container.querySelectorAll("td .mono")).map((e) => e.textContent);
     expect(whens).toContain("Dec 20 – Jan 5");
     expect(whens).toContain("always");
+    // The prototype's effect chips carry no dot (gov1-090).
+    const chips = Array.from(container.querySelectorAll(".chip.ok, .chip.bad"));
+    expect(chips.length).toBe(2);
+    expect(chips.every((c) => c.classList.contains("plain"))).toBe(true);
   });
 });
