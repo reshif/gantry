@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
 import ChangesView from "./changes";
 import { mockApi, mount, resetApp } from "./floor/testkit";
-import { deny, readsFor, recordOf, travelerOf, waitingWo } from "./traveler/testkit";
+import { readsFor, waitingWo } from "./traveler/testkit";
 
 beforeEach(() => resetApp());
 afterEach(() => {

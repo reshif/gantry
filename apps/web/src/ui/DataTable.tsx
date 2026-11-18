@@ -169,7 +169,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={{ ...(c.width ? { width: c.width } : {}), ...(c.align === "center" ? { textAlign: "center" as const } : {}) }} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : (neutralArrow || sortHints || sortGlyphs) ? <span className="th-arrow-idle">↕</span> : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : (neutralArrow || sortHints || sortGlyphs || idleGlyph || sortHint) ? <span className="th-arrow-idle">↕</span> : ""}</span>
                       </button>
                     ) : c.label}
                   </th>

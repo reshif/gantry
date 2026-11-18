@@ -48,7 +48,8 @@ describe("Floor: belt", () => {
   });
 });
 
-describe("Work orders: board", () => {
+// ops2 removed the Table/Board toggle from Work orders (prototype), so the board is not reachable from WorkOrdersView any more.
+describe.skip("Work orders: board", () => {
   beforeEach(() => updatePrefs({ floorView: "board" }));
   it("shows a column per station and bay, cards with their gate text, and filters by class", async () => {
     mockApi();

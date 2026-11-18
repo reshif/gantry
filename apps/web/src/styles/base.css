@@ -519,4 +519,4 @@ select.input { padding-right: 4px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* ds round 3: the command palette has no title bar or button footer, as in the prototype (the title stays as the accessible name) */
 .dlg-palette .dlg-head, .dlg-palette .dlg-foot:empty { display: none; }
-.pal-foot { padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-3, var(--text-3)); }
+.pal-foot { padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-3); }

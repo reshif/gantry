@@ -380,7 +380,7 @@ describe("People: round 3 fixes (gov1)", () => {
     await byId("ppl-table");
     expect(document.getElementById("ppl-teams-link")).toBeNull();
     expect(document.querySelector(".ph")?.textContent).not.toContain("Manage teams");
-    expect(Array.from(document.querySelectorAll("#ppl-table th .th-arrow")).map((a) => a.textContent)).toContain("⇅");
+    expect(Array.from(document.querySelectorAll("#ppl-table th .th-arrow")).map((a) => a.textContent)).toContain("↕");
     const mfa = document.querySelector("#ppl-row-p-asha td:nth-child(4)")!;
     fireEvent.click(mfa);
     expect(window.location.hash).toBe("#person/p-asha");

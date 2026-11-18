@@ -7,7 +7,6 @@ import { useMemo } from "react";
 import { fmt } from "@gantry/domain";
 import { useCan } from "../api/can";
 import { useActivity, useHome, useMe, useProjects } from "../api/queries";
-import { hasCommand, runCommand } from "../lib/commands";
 import { eventRows, eventText, hourly, eventTone } from "../lib/eventText";
 import { hashFor, navigate } from "../lib/router";
 import { setProject, usePrefs } from "../lib/prefs";

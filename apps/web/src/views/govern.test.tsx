@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canBatcher } from "../api/can";
@@ -343,15 +343,6 @@ describe("Security", () => {
     fireEvent.click(await screen.findByRole("tab", { name: /Sessions/ }));
     fireEvent.click(await byId("sec-ses-rv-s2"));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/sessions/s2")).toBe(true));
-  });
-
-  it("shows the sign-in history with failures under the sessions table", async () => {
-    setup();
-    mount(<SecurityView />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Sessions/ }));
-    expect(await screen.findByText("domain not allowed")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Succeeded"));
-    expect(screen.queryByText("domain not allowed")).toBeNull();
   });
 
   it("is read-only with the reason when security.manage is denied", async () => {

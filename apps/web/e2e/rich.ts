@@ -6,7 +6,7 @@
  */
 import { DEFAULT_CATALOG } from "@gantry/domain";
 import type { Page } from "@playwright/test";
-import { agentSkills, workforceOverrides } from "./rich-workforce";
+import { workforceOverrides } from "./rich-workforce";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
 import { woReadOverrides, type Ops1Approve } from "./rich-wo";
 import { richGroupE, routesE } from "./rich-e";

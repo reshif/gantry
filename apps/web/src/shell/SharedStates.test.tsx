@@ -28,7 +28,7 @@ describe("ds round 3", () => {
 
 describe("hash query and shared states", () => {
   it("keeps the route clean when the hash carries ?state=", () => {
-    expect(parseHash("#/p/payments/floor?state=loading")).toEqual({ id: "floor", param: null, project: "payments" });
+    expect(parseHash("#/p/payments/floor?state=loading")).toEqual({ id: "floor", param: null, project: "payments", query: "state=loading", state: "loading" });
     expect(hashQuery("#/p/payments/floor?state=empty", "").get("state")).toBe("empty");
     expect(sharedStateFromUrl("#floor?state=conflict", "")).toBe("conflict");
     expect(sharedStateFromUrl("#floor?state=nope", "")).toBeNull();

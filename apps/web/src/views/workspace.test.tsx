@@ -183,9 +183,9 @@ describe("@mention from a work order's thread", () => {
       "POST /api/v1/workspace/threads": () => ({ body: { ok: true, msg: "New thread with Researcher.", id: "ct-new", key: "ct-new", title: "Researcher about WO", visibility: "project" } }),
     });
     mount(<ConversationsView />);
-    const box = (await screen.findByRole("textbox", { name: /Message to Researcher/ }, { timeout: 4000 })) as HTMLTextAreaElement;
+    const box = (await screen.findByLabelText("Message", {}, { timeout: 4000 })) as HTMLTextAreaElement;
     // Read-only for this person, but an @mention still works: it opens a side thread, it does not post here.
-    expect(box.placeholder).toMatch(/Type @ to ask an agent/);
+    expect(box.placeholder).toMatch(/Read-only/);
     fireEvent.change(box, { target: { value: "@spe" } });
     expect(await screen.findByRole("listbox", { name: "Ask an agent in a side thread" })).toBeTruthy();
     fireEvent.change(box, { target: { value: "@Researcher why skip the API docs?" } });
