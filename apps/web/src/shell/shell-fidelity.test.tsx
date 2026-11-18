@@ -96,6 +96,27 @@ describe("shell fidelity", () => {
     expect(screen.getByRole("menuitem", { name: /Emergency stop/ })).toBeTruthy();
   });
 
+  it("My account reaches the Account page with its sections, even for a person who may view people", async () => {
+    api();
+    window.location.hash = "#/home";
+    render(<App />);
+    fireEvent.click(await screen.findByLabelText("Account menu for Asha Raman"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /My account/ }));
+    await waitFor(() => expect(window.location.hash).toBe("#account"));
+    expect(await screen.findByRole("tab", { name: "Sessions" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Preferences" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Linked accounts" })).toBeTruthy();
+  });
+
+  it("drops stale acc.* and ppl.* query keys when another screen opens", async () => {
+    api();
+    window.history.replaceState(null, "", "/?acc.tab=check&ppl.tab=teams");
+    window.location.hash = "#/home";
+    render(<App />);
+    await nav();
+    await waitFor(() => expect(window.location.search).toBe(""));
+  });
+
   it("opens the Notifications drawer from the bell, with its two footer actions", async () => {
     api({ approvals: [{ wo: "WO-2417", gate: "G3", gateLabel: "G3", title: "Refund keys", project: "payments" }], conversations: [] });
     render(<App />);
@@ -155,7 +176,7 @@ describe("shell fidelity", () => {
     expect(screen.getByText(/viewing as Approver/, { selector: ".micro" })).toBeTruthy();
     const items2 = screen.getAllByRole("menuitem");
     fireEvent.click(items2[0] as HTMLElement);
-    await waitFor(() => expect(window.location.hash).toBe("#person/p-x"));
+    await waitFor(() => expect(window.location.hash).toBe("#account"));
   });
 
   it("choosing a project in the switcher keeps the person on the sheet and only changes the scope", async () => {
