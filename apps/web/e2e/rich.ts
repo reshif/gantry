@@ -94,6 +94,10 @@ function project(p: (typeof PROJECTS)[number], i: number) {
   };
 }
 
+// --- ops2 fixtures: a few work orders are requested by the signed-in admin, so "Requested by me" has rows (prototype: 4). ---
+const OPS2_MINE = new Set([1038, 1060, 1065, 1076]);
+// --- end ops2 ---
+
 function wo(s: Spec, projectId: string) {
   const [num, title, cls, priority, sid, kind] = s;
   const station = STATION_IDS.indexOf(sid);
@@ -104,7 +108,7 @@ function wo(s: Spec, projectId: string) {
   const state = kind === "run" ? "running" : kind === "gate" ? "waiting" : kind === "queue" ? "waiting" : kind === "block" ? "blocked" : kind === "fail" ? "failed" : "waiting";
   return {
     id: `WO-${num}`, project: projectId, repo: ["payments-api", "payouts-worker", "ledger-core"][num % 3], title, description: title, attachments: [], cls, clsConfidence: 0.9, clsRationale: "", clsSuggested: cls, clsOverridden: null, requestedCls: null,
-    priority, source: "console", requestedBy: "p-lead", createdAt: NOW - age - 6 * HOUR, station, state, bay: null, bayReason: "", bayFrom: null, progress: kind === "run" ? 30 + (num % 60) : 0, slot: null,
+    priority, source: "console", requestedBy: OPS2_MINE.has(num) ? "p-admin" : "p-lead", createdAt: NOW - age - 6 * HOUR, station, state, bay: null, bayReason: "", bayFrom: null, progress: kind === "run" ? 30 + (num % 60) : 0, slot: null,
     history: [{ station: sid, agent: cat.stations[station]!.agent, model: "claude-sonnet", startedAt, endedAt: kind === "queue" || kind === "gate" ? startedAt + 5 * MIN : null, tokens: 120000, cost: 1.4, outcome: null, note: "" }],
     gates: waitingGate ? { [waitingGate]: { status: "waiting", approvals: [], rejections: [], checks: [], waitingSince: startedAt } } : {},
     log: [], diff: { files: 0, add: 0, del: 0 }, tests: { total: 0, passed: 0, failed: 0 }, pr: null, blockReason: kind === "block" ? "Waiting on an upstream schema change" : null, failReason: kind === "fail" ? "2 checks failed" : null,
@@ -240,7 +244,7 @@ export function richOverrides(): Record<string, Handler> {
     wo: { id: "WO-1006", title: "Retry limit scope", description: "", cls: "feature", clsName: "Feature", confidence: 0.9, rationale: "", priority: "P2", station: "spec", stationName: "Spec", state: "running", bay: null, gate: null, requestedBy: "p-lead", closed: false },
     messages: [
       { id: "m1", role: "assistant", author: "ag-spec", text: "I am writing the spec for the payout rate limit. Before I commit to a criterion: should the limit apply per merchant or per account?", at: NOW - 52 * MIN, data: { kind: "station", mode: "agent" } },
-      { id: "m2", role: "user", author: "p-lead", text: "Per merchant. Accounts are internal.", at: NOW - 47 * MIN, data: {} },
+      { id: "m2", role: "user", author: "p-meera", text: "Per merchant. Accounts are internal.", at: NOW - 47 * MIN, data: {} },
       { id: "m3", role: "assistant", author: "ag-spec", text: "Thanks. I will state it per merchant with a default of 60 requests a minute and note that it is configurable.", at: NOW - 46 * MIN, data: { kind: "station", mode: "agent" } },
     ],
     agent: { mode: "agent", name: "Spec Writer", id: "ag-spec", model: "claude-opus", vendor: "anthropic", version: 3, station: "spec" },

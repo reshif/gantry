@@ -124,3 +124,7 @@
   .conv-thread .nodesk-back { display: inline-flex; }
   .conv.has .conv-list { display: none; }
 }
+
+/* Conversations (prototype): agent avatars are tinted, thread header details button, message author is plain text */
+.conv .av.av-agent { background: color-mix(in srgb, var(--agent) 22%, var(--surface-2)); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+.conv-thread .card-h .conv-details { margin-left: auto; }

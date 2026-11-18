@@ -4,7 +4,7 @@
  * Older links that ask for a conversation through the `openConversation` preference land on the session too.
  */
 import { useEffect, useMemo } from "react";
-import { fmt } from "@gantry/domain";
+import { agoShort } from "./conversations/ago";
 import { useMe, useProject } from "../api/queries";
 import { pickProject } from "../lib/routes";
 import { navigate, useHash } from "../lib/router";
@@ -56,11 +56,11 @@ export default function ConversationsView() {
             <Async query={q} what="conversations" id="conv-list">{() => shown.length ? (
               <>
                 {shown.map((w) => (
-                  <a key={w.id} className="li click" id={`conv-item-${w.id}`} href={`#/p/${project.id}/conversations/${w.id}`} aria-label={`${w.id} ${w.title}`} style={{ color: "inherit", textDecoration: "none", ...(cur2 === w.id ? { background: "var(--surface-2)" } : {}) }}>
+                  <a key={w.id} className="li click" id={`conv-item-${w.id}`} href={`#/p/${project.id}/conversations/${w.id}`} aria-label={`${w.id} ${w.title}`} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); if (hash.param) navigate("conversations", null); setUrl({ c: w.id }); }} style={{ color: "inherit", textDecoration: "none", ...(cur2 === w.id ? { background: "var(--surface-2)" } : {}) }}>
                     <Avatar id={w.agent} />
                     <div className="main1">
                       <span className="t1">{w.title}</span>
-                      <span className="t2">{`${w.agentName ?? "Agent"} · ${w.id} · ${fmt.ago(w.latest?.at ?? w.createdAt, Date.now())}`}</span>
+                      <span className="t2">{`${w.agentName ?? "Agent"} · ${w.id} · ${agoShort(w.latest?.at ?? w.createdAt)}`}</span>
                     </div>
                     {w.unread ? <span className="badge hot" role="img" aria-label="Unread">1</span> : null}
                   </a>

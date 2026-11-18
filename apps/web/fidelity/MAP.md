@@ -13,7 +13,7 @@ Compare: `node apps/web/fidelity/compare.mjs <prototype-route> [...]` (`all` run
 | `home` | `#home` | `useHome`, `useProjects` (metrics), `useCatalog`, `useActivity`, `useActors`, `useCan`, `useOpenTraveler` | home sections (attention, waiting, motion, health), 8 projects with metrics, 40 events | no per-hour throughput (derived from `wo.enter` events), no median cycle time, no "oldest blocked"; spend is month to date, not today | built |
 | `inbox` | `#inbox` | `useHome`, approvals mutations | home approvals/conversations | prototype tabs (type chips) have no server-side type filter | todo |
 | `workspace` | `#workspace` | `useConversations`, `useWorkOrders` | conversations | prototype lists agent runs; backend has conversations and records | todo |
-| `console` | `#workspace` (Console lives there) | console commands | none | real console proposes actions through the API | todo |
+| `console` | `#console` | console commands | none | real console proposes actions through the API | todo |
 | `conversations` | `#/p/payments/conversations` | `useConversations` | conversations | none | todo |
 | `projects` | `#projects` | `useProjects` | 8 projects with metrics | none | todo |
 | drawers: notifications, user menu, theme menu, project switcher, palette, stop dialog | shell (`ui.menu`, `ui.popover`, `PaletteDialog`, `StopDialogs`) | as shell | none | persona switcher is demo-only | partly (top bar) |

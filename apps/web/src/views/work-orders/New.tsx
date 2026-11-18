@@ -148,7 +148,11 @@ export function NewWorkOrderDialog({ preset, onClose, variant = "dialog", aside 
     }
     onClose();
     const id = (r as unknown as { id?: string }).id;
-    if (id) ui.open((close) => <ClassificationCard woId={id} onClose={close} />);
+    if (id && variant === "page") {
+      // The Console screen goes to the new record, like the prototype.
+      ui.toast(`Submitted ${id}. It is in the Intake queue.`, "ok");
+      navigate("record", id, projectId);
+    } else if (id) ui.open((close) => <ClassificationCard woId={id} onClose={close} />);
     else ui.toast(r.msg, "ok");
   };
   const previewEl = (
@@ -204,7 +208,7 @@ export function NewWorkOrderDialog({ preset, onClose, variant = "dialog", aside 
             </Field>
             <Field label="Repository" htmlFor="nwo-repo">
               {repos.length ? (
-                <Select id="nwo-repo" options={repos.map((r) => ({ value: r.id, label: shortRepo(r.name) + (ready(r) ? "" : ` (not ready: ${STAGE_NAMES[r.onboarding.stage] ?? r.onboarding.stage})`) }))} value={repo} onChange={setRepoId} />
+                <Select id="nwo-repo" options={(repos.some(ready) ? repos.filter(ready) : repos).map((r) => ({ value: r.id, label: shortRepo(r.name) }))} value={repo} onChange={setRepoId} />
               ) : (
                 <p className="muted small" id="nwo-repo">{`No repos in ${project.name} yet.`}</p>
               )}
