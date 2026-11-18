@@ -81,3 +81,15 @@ export const nextVersion = (result: unknown, current: number): number => {
   return typeof v === "number" ? v : current + 1;
 };
 export const lockd = (reason: string, needs = "") => ({ allowed: false, reason, needs });
+
+/** When the server last saw this person sign in, if it reports it (the people read has no such field yet, so this is usually undefined). */
+export const lastSeenOf = (p: { id: string }): number | undefined => (p as { lastSeen?: number }).lastSeen;
+
+/** "12h ago", "2d ago", "5m ago": the short form the people screens use. */
+export function agoShort(t: number, now = Date.now()): string {
+  const m = Math.max(0, Math.round((now - t) / 60000));
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return h < 48 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
+}

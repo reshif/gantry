@@ -83,7 +83,8 @@ function setup(extra: Record<string, Handler> = {}, denied: string[] = []) {
 }
 
 const byId = (id: string) => waitFor(() => { const e = document.getElementById(id); if (!e) throw new Error(`no #${id}`); return e; });
-function mount() {
+function mount(detail = true) {
+  window.history.replaceState(null, "", detail ? "/?wview=detail" : "/");
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   bindQueryClient(qc);
   return render(<QueryClientProvider client={qc}><OverlayProvider><WorkloadView /></OverlayProvider></QueryClientProvider>);
@@ -266,12 +267,29 @@ describe("Workload screen (legacy workload.js on the real API)", () => {
 describe("Workload: Control room prototype layout (gov1)", () => {
   it("has the matrix and agent utilisation, person names link to the person page, no header actions", async () => {
     setup();
-    mount();
+    mount(false);
     await byId("wl-matrix");
     expect(document.getElementById("wl-agents-card")).not.toBeNull();
     await waitFor(() => expect(document.querySelector("#wl-matrix a")?.getAttribute("href")).toBe("#person/p-asha"));
     expect(document.body.textContent).toContain("Approvals waiting");
     expect(document.body.textContent).toContain("Agent utilisation");
     expect(document.getElementById("wl-q")).not.toBeNull();
+  });
+
+  it("the overview has no Project or Window filter, no suggestions and no detail tabs; one link opens the detail view and back", async () => {
+    setup();
+    mount(false);
+    await byId("wl-matrix");
+    expect(document.getElementById("wl-project")).toBeNull();
+    expect(document.getElementById("wl-days")).toBeNull();
+    expect(document.getElementById("wl-sugg-card")).toBeNull();
+    expect(document.getElementById("wl-tab-panel")).toBeNull();
+    expect(document.body.textContent).not.toContain("n=");
+    fireEvent.click(await byId("wl-view-link"));
+    await byId("wl-sugg-card");
+    expect(document.getElementById("wl-matrix")).toBeNull();
+    expect(document.getElementById("wl-project")).not.toBeNull();
+    fireEvent.click(await byId("wl-view-link"));
+    await byId("wl-matrix");
   });
 });

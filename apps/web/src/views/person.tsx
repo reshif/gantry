@@ -21,7 +21,7 @@ import { Async } from "../ui/async";
 import { Icon } from "../ui/Icon";
 import { useUI } from "../ui/overlay-context";
 import { useActors } from "../ui/actors";
-import { lockd, useOutcome, useTeams } from "./govern/data";
+import { agoShort, lastSeenOf, lockd, useOutcome, useTeams } from "./govern/data";
 import { HistoryList } from "./people/History";
 import { useOffboard } from "./people/Offboard";
 import type { EffectivePermissions } from "./people/types";
@@ -54,10 +54,7 @@ export default function PersonView() {
   }
   const admins = people.filter((x) => x.status === "active" && x.roles.some((g) => g.role === "factory_admin"));
   return (
-    <div className="view view-person">
-      <LockNote decision={perm} what="Roles, teams and access" />
-      <MemberDetail key={p.id} p={p} teams={teamsQ.data ?? []} projects={projects} roles={roles} perm={perm} admins={admins} viewerId={me.person.id} roleName={roleName} />
-    </div>
+    <MemberDetail key={p.id} p={p} teams={teamsQ.data ?? []} projects={projects} roles={roles} perm={perm} admins={admins} viewerId={me.person.id} roleName={roleName} />
   );
 }
 
@@ -209,7 +206,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
 
   return (
     <Page
-      cls="person-stack"
+      cls="view view-person"
       eyebrow="Govern · Person"
       title={p.name}
       sub={p.title || "No title yet"}
@@ -222,8 +219,10 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         </>
       )}
     >
+      <LockNote decision={perm} what="Roles, teams and access" />
+      <div className="person-stack">
       <div className="row ppl-badges" style={{ marginBottom: 16 }}>
-        <Avatar id={p.id} size="lg" />
+        <Avatar id={p.id} size="sm" />
         <span className={`chip ${p.status === "active" ? "ok" : p.status === "invited" ? "info" : "idle"}`}>{stateWord}</span>
         {primary ? <span className="chip info plain">{roleName(primary)}</span> : null}
         {p.oncall ? <span className="chip agent" data-tip="On call for at least one project, or a Factory Admin (always on call). Project admins set who is on call in Project config." tabIndex={0}>on call</span> : null}
@@ -234,15 +233,14 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
       <div className="grid g2">
         <Card title="Profile" id="ppl-profile-card" acts={<>
           {p.status === "invited" ? <Btn label="Mark invite accepted" small id="ppl-accept" guard={perm} onClick={async () => void outcome(await ops.acceptInvite(p.id))} /> : null}
-          <Btn label="Edit teams" small id="ppl-teams" guard={perm} onClick={openTeams} />
         </>}>
           <dl className="kv" id="ppl-profile" style={{ margin: 0 }}>
             <dt>Email</dt><dd className="mono">{p.email}</dd>
             <dt>Title</dt><dd>{p.title || "No title yet"}</dd>
-            <dt>Team</dt><dd>{teamNames}</dd>
+            <dt>Team</dt><dd>{teamNames}{" "}<Btn label="Change" small kind="ghost" id="ppl-teams" guard={perm} onClick={openTeams} /></dd>
             <dt>MFA</dt><dd>{p.mfa === undefined ? "–" : p.mfa ? "On" : "Off"}</dd>
             {/* The API does not report a last sign-in time: say so instead of inventing one. */}
-            <dt>Last seen</dt><dd>{NA}</dd>
+            <dt>Last seen</dt><dd>{lastSeenOf(p) ? agoShort(lastSeenOf(p)!) : NA}</dd>
           </dl>
         </Card>
         <Card title="Holds right now" id="ppl-holds-card">
@@ -338,6 +336,7 @@ function MemberDetail({ p, teams, projects, roles, perm, admins, viewerId, roleN
         <HistoryList id={p.id} limit={6} />
       </Card>
       ) : null}
+      </div>
     </Page>
   );
 }

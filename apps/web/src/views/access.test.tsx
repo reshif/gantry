@@ -68,3 +68,28 @@ describe("Access: Control room prototype layout (gov1)", () => {
     expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(["Matrix", "Policies", "Check access"]);
   });
 });
+
+describe("Access: round 2 fixes (gov1)", () => {
+  const MX = { matrix: { factory_admin: { "project.view": true }, viewer: { "project.view": true } }, roles: [{ id: "factory_admin", name: "Factory Admin", level: "factory" }, { id: "viewer", name: "Viewer", level: "project" }], actions: [{ id: "project.view", name: "View project", group: "Work", scope: "project" }, { id: "release", name: "Release", group: "Gates", scope: "project" }], version: 1 };
+  it("the matrix card has no header buttons; roles are managed from a text link in its hint", async () => {
+    setup(() => new Response(JSON.stringify(MX), { status: 200 }));
+    window.history.replaceState(null, "", "/");
+    mount();
+    await byId("acc-matrix-card");
+    expect(document.querySelector("#acc-matrix-card .card-h button")).toBeNull();
+    expect(document.getElementById("acc-open-roles")).not.toBeNull();
+    expect(document.getElementById("acc-add-role")).toBeNull();
+  });
+
+  it("Check access opens on the first person and first permission, with no hint paragraph", async () => {
+    setup(() => new Response(JSON.stringify(MX), { status: 200 }));
+    window.history.replaceState(null, "", "/?tab=check");
+    mount();
+    const person = (await byId("acc-sim-person")) as HTMLSelectElement;
+    expect(person.value).toBe("p-asha");
+    expect((document.getElementById("acc-sim-action") as HTMLSelectElement).value).toBe("project.view");
+    expect(document.querySelector("#acc-check-card .hint")).toBeNull();
+    window.history.replaceState(null, "", "/");
+  });
+});
+

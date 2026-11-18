@@ -1,4 +1,4 @@
-import { DAYS, fmt, istTime, istToday, type Person, type Project, type Repo, type SimulationResult, type Action } from "@gantry/domain";
+import { DAYS, fmt, istTime, istToday, type Person, type Project, type Role, type Repo, type SimulationResult, type Action } from "@gantry/domain";
 import { Btn, Field, Select } from "../../ui/primitives";
 import { Card } from "../../ui/cr";
 import { Icon } from "../../ui/Icon";
@@ -94,8 +94,8 @@ function WeekStrip({ r }: { r: Evaluated }) {
   );
 }
 
-export function Simulator({ people, projects, repos, actions, sim, setSim, evaluated, onEvaluate, onShowRule, presetsList }: {
-  people: Person[]; projects: Project[]; repos: Repo[]; actions: Action[]; sim: Sim; setSim: (s: Sim) => void; evaluated: Evaluated | null;
+export function Simulator({ roles, people, projects, repos, actions, sim, setSim, evaluated, onEvaluate, onShowRule, presetsList }: {
+  roles: Role[]; people: Person[]; projects: Project[]; repos: Repo[]; actions: Action[]; sim: Sim; setSim: (s: Sim) => void; evaluated: Evaluated | null;
   onEvaluate: (s: Sim) => void; onShowRule: (tab: string) => void; presetsList: Array<{ label: string; s: () => Sim }>;
 }) {
   const actors = useActors();
@@ -105,11 +105,9 @@ export function Simulator({ people, projects, repos, actions, sim, setSim, evalu
   const r = evaluated;
   const rd = r?.result.decision;
   const ract = r ? actions.find((a) => a.id === r.sim.action) : undefined;
-  const rp = r ? projects.find((p) => p.id === r.sim.project) : undefined;
-  const rr = r?.sim.repo ? repos.find((x) => x.id === r.sim.repo) : undefined;
   const rule = rd?.rule as { freeze?: string } | undefined;
   return (
-    <Card title="Check access" id="acc-check-card" hint="Could this person do this, there, then? The answer is asked again whenever the matrix, a policy, a freeze or the people change.">
+    <Card title="Check access" id="acc-check-card">
       <form
         className="grid g3 sim-form acc-sim-form"
         id="acc-sim-form"
@@ -147,7 +145,20 @@ export function Simulator({ people, projects, repos, actions, sim, setSim, evalu
             <div className={`banner ${rd.allowed ? "ok" : "bad"}`} id="acc-sim-result">
               <Icon name={rd.allowed ? "check" : "lock"} />
               <div className="grow">
-                <b>{rd.allowed ? "Allowed." : "Denied."}</b>{` ${actors(r.sim.person).name} · ${ract.name.toLowerCase()}${ract.scope === "project" ? ` · ${rp?.name ?? r.sim.project}${rr ? ` / ${rr.name}` : ""}` : " · factory-wide"} · ${fmt.stamp(r.t)}. ${rd.reason}`}
+                <b>{rd.allowed ? "Allowed." : "Denied."}</b>{" "}
+                {(() => {
+                  const who = people.find((x) => x.id === r.sim.person);
+                  const held = (who?.roles ?? []).filter((g) => g.scope === "factory" || ract.scope === "factory" || g.scope === r.sim.project).map((g) => roles.find((x) => x.id === g.role)?.name ?? g.role);
+                  const names = [...new Set(held)].join(", ");
+                  const byMatrix = rd.rule.kind === "matrix";
+                  return (
+                    <>
+                      {actors(r.sim.person).name}{names ? ` holds ${names}, which ${rd.allowed ? "includes" : "does not include"} ` : " holds no role here. "}
+                      {names ? <><span className="mono">{r.sim.action}</span>.</> : null}
+                      {byMatrix && names ? null : ` ${rd.reason}`}
+                    </>
+                  );
+                })()}
                 {rd.needs && !rd.allowed ? <span>{` To allow it: ${rd.needs}.`}</span> : null}
               </div>
             </div>

@@ -29,7 +29,7 @@ export interface SortState {
 
 const INTERACTIVE = "a[href],button,input,select,textarea,[role=button],[role=link]";
 
-export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, page: pageProp, onPage, selectable, empty, hasMore, onLoadMore, loadingMore, total }: {
+export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow, rowHref, rowLabel, sort, onSort, pageSize, pager, page: pageProp, onPage, sortHint, selectable, empty, hasMore, onLoadMore, loadingMore, total }: {
   id?: string;
   /** Names the table for screen readers and the scroll region. */
   caption?: string;
@@ -53,6 +53,8 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
   /** Optional controlled page (0-based) so a view can keep the page in the URL. With onPage. */
   page?: number;
   onPage?: (page: number) => void;
+  /** Show the dim two-way glyph on sortable headers that are not the active sort (prototype look). */
+  sortHint?: boolean;
   /** A leading checkbox column with select-all (selection is local to the table). */
   selectable?: boolean;
   empty?: { title: string; text?: string; action?: ReactNode };
@@ -154,7 +156,7 @@ export function DataTable<R>({ id, caption, columns, rows, rowKey, rowId, onRow,
                   <th key={c.key} scope="col" className={`${c.align === "end" ? "is-end r" : ""}${c.hideSmall ? " hide-sm" : ""}`.trim() || undefined} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (cur!.dir > 0 ? "ascending" : "descending") : undefined}>
                     {c.sort ? (
                       <button type="button" id={prefix ? prefix + c.key : undefined} className={`th-sort${active ? " is-active" : ""}`} onClick={() => pick(c.key)}>
-                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : ""}</span>
+                        {c.label}<span className="th-arrow" aria-hidden="true">{active ? (cur!.dir > 0 ? "↑" : "↓") : sortHint ? "⇅" : ""}</span>
                       </button>
                     ) : c.label}
                   </th>

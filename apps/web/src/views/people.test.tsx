@@ -365,3 +365,30 @@ describe("People: Control room prototype layout (gov1)", () => {
     expect(Array.from(document.querySelectorAll("[role=tab]")).map((t) => t.textContent)).toEqual(expect.arrayContaining(["Profile", "Access", "Activity"]));
   });
 });
+
+describe("People: round 2 fixes (gov1)", () => {
+  it("keeps Teams out of the filter row (a text link in the subtitle), shows sort glyphs and a relative Last seen when the server reports it", async () => {
+    setup({ "GET /api/v1/people": () => ({ body: [{ ...PEOPLE[0], lastSeen: Date.now() - 12 * 3600_000 }, PEOPLE[1]] }) });
+    mount();
+    await byId("ppl-table");
+    expect(document.querySelector(".filters #ppl-teams-link, .filter-bar #ppl-teams-link")).toBeNull();
+    expect(document.querySelector(".ph #ppl-teams-link")).not.toBeNull();
+    expect(document.querySelector("#ppl-table th .th-arrow")?.textContent).toBeTruthy();
+    expect(Array.from(document.querySelectorAll("#ppl-table th .th-arrow")).map((a) => a.textContent)).toContain("⇅");
+    await waitFor(() => expect(document.getElementById("ppl-table")?.textContent).toContain("12h ago"));
+    expect(document.getElementById("ppl-table")?.textContent).toContain("not available"); // no invented time for the other person
+    expect(document.getElementById("ppl-table")?.textContent).not.toContain("46h 00m");
+  });
+
+  it("the person profile has the prototype card rows and no Edit teams button in the card header; the page is not wrapped twice", async () => {
+    setup();
+    mount("p-tomas");
+    await byId("ppl-profile");
+    expect(document.getElementById("ppl-profile-card")?.querySelector(".card-h")?.textContent).not.toContain("Edit teams");
+    expect(Array.from(document.querySelectorAll("#ppl-profile dt")).map((d) => d.textContent)).toEqual(["Email", "Title", "Team", "MFA", "Last seen"]);
+    expect(document.querySelector(".view .view")).toBeNull();
+    expect(document.querySelector(".ppl-badges .av-lg, .ppl-badges [class*='lg']")).toBeNull();
+    expect(document.getElementById("ppl-teams")).not.toBeNull(); // team editing stays, inline in the Team row
+  });
+});
+

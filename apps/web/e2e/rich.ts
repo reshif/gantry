@@ -10,6 +10,7 @@ import { workforceOverrides } from "./rich-workforce";
 import { PERSONAS, fulfillJson, mockApi, type Handler } from "./fixtures";
 import { woReadOverrides } from "./rich-wo";
 import { richGroupE, routesE } from "./rich-e";
+import { richGov1 } from "./rich-gov1";
 
 export const NOW = Date.parse("2026-01-15T10:00:00Z");
 const MIN = 60_000;
@@ -251,6 +252,7 @@ export function richOverrides(): Record<string, Handler> {
   ov["people"] = (r) => fulfillJson(r, [person("p-admin", "Asha Raman", "Engineering Director", "factory_admin"), person("p-lead", "Meera Iyer", "Tech Lead", "tech_lead"), person("p-reader", "Rae Reader", "Auditor", "auditor")]);
   Object.assign(ov, workforceOverrides());
   Object.assign(ov, richGroupE());
+  richGov1(ov, floorFor as never); // gov1 (People, Workload, Access) fixtures, over the shared ones
   return ov;
 }
 

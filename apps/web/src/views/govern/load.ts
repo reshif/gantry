@@ -27,7 +27,7 @@ export function usePeopleLoad(projects: Project[]): PeopleLoad {
     queries: projects.map((pr) => ({
       queryKey: qk.workOrders(pr.id, { govern: "open" }),
       queryFn: async () => {
-        const r = await get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(pr.id)}/work-orders`), {});
+        const r = await get<WorkOrder[] | Page<WorkOrder>>(api(`projects/${encodeURIComponent(pr.id)}/work-orders`), { state: "open", limit: 100 });
         return Array.isArray(r) ? r : r.items;
       },
     })),

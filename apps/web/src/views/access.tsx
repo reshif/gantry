@@ -53,13 +53,8 @@ export default function AccessView() {
   const [newRole, setNewRole] = useState<string | null>(null);
   const [fromPeople, setFromPeople] = useState<string | null>(null);
 
-  // Legacy opened on Kenji releasing payments-api; use it when the seeded org is there, otherwise ask about the viewer.
-  const defaults = useCallback((): Sim => {
-    const seeded = people.some((p) => p.id === "p-kenji") && projects.some((p) => p.id === "payments") && repos.some((r) => r.id === "payments-api");
-    return seeded
-      ? { person: "p-kenji", action: "release", project: "payments", repo: "payments-api", ...nowIst() }
-      : { person: me?.person.id ?? people[0]?.id ?? "", action: "release", project: projects[0]?.id ?? "", repo: "", ...nowIst() };
-  }, [me, people, projects, repos]);
+  // Like the prototype: the first person and the first permission, on the first project.
+  const defaults = useCallback((): Sim => ({ person: people[0]?.id ?? me?.person.id ?? "", action: actions[0]?.id ?? "project.view", project: projects[0]?.id ?? "", repo: "", ...nowIst() }), [me, people, projects, actions]);
   const cur = sim ?? defaults();
 
   const evaluate = useCallback(
@@ -121,9 +116,10 @@ export default function AccessView() {
   if (!view.allowed) return <Page cls="view view-access" eyebrow="Govern" title="Access"><Empty id="access-no-access" title="No access to the access policy" text={`${view.reason} ${view.needs ? `${view.needs}. ` : ""}Ask a Factory Admin to give you a role that can see policy.`} /></Page>;
   const toolsFor = (t: string) =>
     t === "freezes" ? <Btn label="Schedule freeze" small icon="clock" id="acc-add-freeze" guard={perm} onClick={openFreeze} />
-    : t === "policies" ? <><Btn label="Freezes" small kind="ghost" id="acc-open-freezes" onClick={() => setTab("freezes")} /><Btn label="Add policy" small icon="plus" id="acc-add-policy" guard={perm} onClick={() => openPolicy(null)} /></>
+    : t === "policies" ? <Btn label="Add policy" small kind="primary" icon="plus" id="acc-add-policy" guard={perm} onClick={() => openPolicy(null)} />
     : t === "roles" ? <Btn label="Add role" small icon="plus" id="acc-add-role" guard={rperm} onClick={() => openRole(null)} />
-    : <><Btn label="Edit roles" small kind="ghost" id="acc-open-roles" onClick={() => setTab("roles")} /><Btn label="Add role" small icon="plus" id="acc-add-role" guard={rperm} onClick={() => openRole(null)} /></>;
+    : null;
+  const link = (id: string, label: string, to: string) => <a className="rl" href={`#${to}`} id={id} onClick={(e) => { e.preventDefault(); setTab(to); }}>{label}</a>;
 
   const showRights = (id: string) => {
     setTab("matrix");
@@ -156,26 +152,19 @@ export default function AccessView() {
         <section className="panel" aria-label="Policy simulator"><div className="panel-body"><Async query={mQ} what="the access matrix" id="acc-matrix">{() => null}</Async></div></section>
       ) : (
         <Simulator
-          people={people} projects={projects} repos={repos} actions={actions} sim={cur} setSim={setSim} evaluated={evaluated}
+          roles={roles} people={people} projects={projects} repos={repos} actions={actions} sim={cur} setSim={setSim} evaluated={evaluated}
           onEvaluate={(s) => void evaluate(s)} onShowRule={setTab} presetsList={presets(people, projects, repos)}
         />
       )
         ) : (
         <Async query={(tab === "freezes" ? freezesQ : tab === "policies" ? policiesQ : mQ) as UseQueryResult<unknown>} what={tab === "freezes" ? "freezes" : tab === "policies" ? "policies" : "the access matrix"} id="acc">{() => (
-        matrixTab ? <Card title="Role by permission" hint="Built-in roles are fixed. Custom roles are not enabled." flush id="acc-matrix-card" acts={toolsFor("matrix")}><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} hl={hl} evaluated={evaluated} people={people} newRole={newRole} /></Card>
+        matrixTab ? <Card title="Role by permission" hint={<>Built-in roles are fixed. Custom roles are not enabled. {link("acc-open-roles", "Manage roles", "roles")}</>} flush id="acc-matrix-card"><MatrixTable matrix={matrix} version={m?.version} roles={roles} actions={actions} hl={hl} evaluated={evaluated} people={people} newRole={newRole} /></Card>
         : tab === "freezes" ? <Card title="Freezes" flush id="acc-freezes-card" acts={<>{<Btn label="Policies" small kind="ghost" id="acc-back-policies" onClick={() => setTab("policies")} />}{toolsFor("freezes")}</>}><FreezeList freezes={freezes} repos={repos} hlFreeze={evaluated && (evaluated.result.decision.rule as { freeze?: string }).freeze ? (evaluated.result.decision.rule as { freeze?: string }).freeze! : null} /></Card>
         : tab === "roles" ? <Card title="Roles" flush id="acc-roles-card" acts={<><Btn label="Matrix" small kind="ghost" id="acc-back-matrix" onClick={() => setTab("matrix")} />{toolsFor("roles")}</>}><RolesList roles={roles} matrix={matrix} actions={actions} people={people} onRights={showRights} onEdit={openRole} onRemove={removeRole} /></Card>
         : (
-          <Card title="Policies" flush id="acc-policies-card" acts={toolsFor("policies")}>
+          <Card title="Policies" flush id="acc-policies-card" hint={link("acc-open-freezes", "Freezes", "freezes")} acts={toolsFor("policies")}>
           <PolicyCards
-            policies={policies} hl={hl} people={people} onEdit={openPolicy}
-            onSimulate={(p, who) => {
-              const proj = p.where.projects?.[0] ?? projects[0]?.id ?? "";
-              const s: Sim = { person: who?.id ?? me.person.id, action: p.actions[0] ?? "release", project: proj, repo: "", ...nowIst() };
-              setSim(s);
-              void evaluate(s);
-              window.scrollTo({ top: 0 });
-            }}
+            policies={policies} hl={hl} roles={roles} onEdit={openPolicy}
           />
           </Card>
         )
