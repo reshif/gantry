@@ -16,7 +16,8 @@ const Err = ({ text }: { text: string }) => (
   </div>
 );
 
-export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () => void }) {
+/** `simple`: the work order page's prototype dialog, a plain confirmation that goes back one station (the traveler drawer keeps the station picker and the note). */
+export function SendBackDialog({ woId, onClose, simple }: { woId: string; onClose: () => void; simple?: boolean }) {
   const ui = useUI();
   const cat = useCatalog();
   const wo = useTravelerWo(woId).data;
@@ -38,7 +39,7 @@ export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () =>
   const submit = async () => {
     if (busy) return;
     if (!pick) {
-      setErr(`${wo.id} is at the first station on its route.`);
+      setErr("Already at the first station.");
       return;
     }
     setBusy(true);
@@ -48,24 +49,24 @@ export function SendBackDialog({ woId, onClose }: { woId: string; onClose: () =>
       setErr(r.msg);
       return;
     }
-    ui.toast(r.msg, "ok");
+    ui.toast("Sent back", "warn");
     onClose();
   };
   return (
     <Dialog
-      title={`Send ${wo.id} back`}
-      kicker="Rework"
-      sub="The station's agent picks it up again with your note. Gates after that station reset and need approving again."
+      title={`Send ${wo.id} back${pick ? ` to ${stName(cat, pick)}` : ""}?`}
+      {...(simple ? {} : { kicker: "Rework" })}
+      sub="The previous agent re-runs with your note."
       onClose={onClose}
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Sending work back" />
-          <Field label="Back to station" htmlFor="sb-to" hint={`Only earlier stations on the ${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} route.`}>
+          {simple ? null : <><Field label="Back to station" htmlFor="sb-to" hint={`Only earlier stations on the ${cat.classes.find((c) => c.id === wo.cls)?.name ?? wo.cls} route.`}>
             <Select id="sb-to" options={opts} value={pick} onChange={setTo} />
           </Field>
           <Field label="Note for the agent" htmlFor="sb-note">
             <textarea id="sb-note" className="input" rows={3} placeholder="What needs to change?" value={note} onChange={(e) => setNote(e.target.value)} />
-          </Field>
+          </Field></>}
           <Err text={err} />
         </div>
       }
@@ -144,7 +145,8 @@ export function ReassignDialog({ woId, onClose }: { woId: string; onClose: () =>
   );
 }
 
-export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => void }) {
+/** `simple`: the work order page's prototype dialog, one required reason; the bay is the first one this person may use. The traveler drawer keeps the bay picker. */
+export function ParkDialog({ woId, onClose, simple }: { woId: string; onClose: () => void; simple?: boolean }) {
   const ui = useUI();
   const cat = useCatalog();
   const wo = useTravelerWo(woId).data;
@@ -158,7 +160,7 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
     const m = wo.allowed.moves[b.id]!;
     return { value: b.id, label: `${b.name}${m.allowed ? "" : " (not available)"}`, disabled: !m.allowed, why: m.reason };
   });
-  const first = opts.find((o) => !o.disabled);
+  const first = (simple ? opts.find((o) => !o.disabled && o.value === "hold") : undefined) ?? opts.find((o) => !o.disabled);
   const sel = bay ?? first?.value ?? opts[0]?.value ?? "";
   const chosen = opts.find((o) => o.value === sel);
   const d: TDecision = first ? (wo.stop ? no(`${wo.stop.reason || "Stopped"}`) : dec(wo, "park")) : no(opts[0]?.why ?? "No bay is available for this work order.");
@@ -168,6 +170,10 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
       setErr(chosen.why ?? "That bay is not available.");
       return;
     }
+    if (reason.trim().length < 5) {
+      setErr("Give a reason of at least 5 characters.");
+      return;
+    }
     setBusy(true);
     const r = await ops.park(wo.id, sel, reason, undefined, { ifMatch: wo.version });
     setBusy(false);
@@ -175,28 +181,28 @@ export function ParkDialog({ woId, onClose }: { woId: string; onClose: () => voi
       setErr(r.msg);
       return;
     }
-    ui.toast(r.msg, "ok");
+    ui.toast(`Parked ${wo.id}`, "warn");
     onClose();
   };
   return (
     <Dialog
-      title={`Move ${wo.id} to a bay`}
-      kicker="Off the main belt"
-      sub={`Work in a bay stops. It returns to ${stName(cat, cat.stations[wo.station]?.id)} when someone releases it.`}
+      title={`Park ${wo.id}`}
+      {...(simple ? {} : { kicker: "Off the main belt" })}
+      sub={simple ? "It stops moving until someone resumes it." : `It stops moving until someone resumes it. It returns to ${stName(cat, cat.stations[wo.station]?.id)} when released.`}
       onClose={onClose}
       body={
         <div className="form-grid">
           <LockNote decision={d} what="Moving work to a bay" />
-          <Field label="Bay" htmlFor="park-bay" hint={chosen?.disabled ? chosen.why : "Declined needs Decline rights. Queue is only for work about to build."}>
+          {simple ? null : <Field label="Bay" htmlFor="park-bay" hint={chosen?.disabled ? chosen.why : "Declined needs Decline rights. Queue is only for work about to build."}>
             <Select id="park-bay" options={opts} value={sel} onChange={setBay} />
-          </Field>
-          <Field label="Reason" htmlFor="park-reason">
-            <textarea id="park-reason" className="input" rows={3} placeholder="Why does it leave the belt?" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>}
+          <Field label="Reason" htmlFor="park-reason" {...(simple ? { required: true } : { hint: "At least 5 characters." })}>
+            <textarea id="park-reason" className="input" rows={3} {...(simple ? {} : { placeholder: "Why does it leave the belt?" })} value={reason} onChange={(e) => setReason(e.target.value)} />
           </Field>
           <Err text={err} />
         </div>
       }
-      actions={[{ label: "Cancel" }, { label: "Move to bay", kind: "primary", icon: "st-park", submit: true, id: "park-submit", guard: d, onClick: () => void submit() }]}
+      actions={[{ label: "Cancel" }, { label: "Park", kind: "primary", icon: "pause", submit: true, id: "park-submit", guard: d, onClick: () => void submit() }]}
     />
   );
 }

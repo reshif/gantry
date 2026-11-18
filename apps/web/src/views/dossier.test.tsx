@@ -12,7 +12,7 @@ afterEach(() => {
 });
 const W = waitingWo;
 
-async function show(extra: Parameters<typeof mockApi>[0] = {}, hash = `#record/${W.id}/document`) {
+async function show(extra: Parameters<typeof mockApi>[0] = {}, hash = `#record/${W.id}/journey`) {
   const calls = mockApi({ ...readsFor(W), ...extra });
   window.location.hash = hash;
   mount(<RecordView />);
@@ -21,35 +21,93 @@ async function show(extra: Parameters<typeof mockApi>[0] = {}, hash = `#record/$
 }
 
 describe("Work order page", () => {
-  it("puts the title, route and actions in the header and the document and activity in tabs", async () => {
-    await show();
+  it("puts the title, route and actions in the header and the seven prototype tabs under it", async () => {
+    await show({}, `#record/${W.id}/journey`);
     expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
     expect(screen.getByRole("list", { name: new RegExp(`Route of ${W.id}`) })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Document" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected")).toBe("false");
-    // the prototype's header: Traveler, Dossier and Changes are pages, Review opens the gate dialog, Actions is a menu
-    expect(document.getElementById("rec-traveler")!.getAttribute("href")).toMatch(new RegExp(`/traveler/${W.id}$`));
-    expect(document.getElementById("rec-dossier")!.getAttribute("href")).toMatch(new RegExp(`/dossier/${W.id}$`));
-    expect(document.getElementById("rec-changes")!.getAttribute("href")).toMatch(new RegExp(`/changes/${W.id}$`));
-    expect(document.getElementById("trv-open-conversation")).toBeNull();
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Overview", "Journey", "Gates", "Attempts and runs", "Conversation", "Cost", "Events"]);
+    expect(screen.getByRole("tab", { name: "Journey" }).getAttribute("aria-selected")).toBe("true");
     expect(document.getElementById("dz-more")).toBeTruthy();
+    // the conversation is a tab, not a header button
+    expect(document.getElementById("trv-open-conversation")).toBeNull();
   });
 
-  it("has the prototype's tabs in its order, with Document kept after them", async () => {
+  it("lists the header actions in the prototype's order and sends Traveler, Dossier and Changes to their pages", async () => {
     await show({}, `#record/${W.id}`);
-    expect(screen.getAllByRole("tab").map((t) => t.textContent!.trim())).toEqual(["Overview", "Journey", "Gates", "Attempts and runs", "Conversation", "Cost", "Events", "Document"]);
-    fireEvent.click(screen.getByRole("tab", { name: "Gates" }));
-    await waitFor(() => expect(window.location.hash).toContain("%2Fgates"));
-    await waitFor(() => expect(document.getElementById("dz-gates")).toBeTruthy());
+    const labels = [...document.querySelectorAll('[role="toolbar"] button')].map((b) => b.textContent?.trim());
+    expect(labels.slice(0, 3)).toEqual(["Traveler", "Dossier", "Changes"]);
+    expect(labels[labels.length - 1]).toBe("Actions");
+    expect(labels.some((l) => /^Review /.test(l ?? ""))).toBe(true);
+    expect(labels).not.toContain("Open conversation");
+    expect(document.getElementById("rec-all")).toBeNull();
+    fireEvent.click(document.getElementById("rec-traveler") as HTMLElement);
+    await waitFor(() => expect(window.location.hash).toContain(`traveler/${W.id}`));
+    fireEvent.click(document.getElementById("rec-dossier") as HTMLElement);
+    await waitFor(() => expect(window.location.hash).toContain(`dossier/${W.id}`));
+    fireEvent.click(document.getElementById("rec-changes") as HTMLElement);
+    await waitFor(() => expect(window.location.hash).toContain(`changes/${W.id}`));
   });
 
-  it("opens a review dialog from the Review button with Cancel, Reject and Approve", async () => {
-    await show();
-    const btn = document.getElementById("dz-review");
-    if (!btn) return; // the fixture work order has no gate waiting for this viewer
-    fireEvent.click(btn);
-    const dlg = await screen.findByRole("dialog");
-    for (const l of ["Cancel", "Reject", "Approve"]) expect(dlg.textContent).toContain(l);
+  it("has the prototype's Actions menu: edit, reassign, park, send back, a divider and stop", async () => {
+    await show({}, `#record/${W.id}`);
+    fireEvent.click(document.getElementById("dz-more") as HTMLElement);
+    const items = (await screen.findAllByRole("menuitem")).map((i) => (i.textContent ?? "").replace(/locked$/, "").trim());
+    expect(items).toEqual(["Edit title and priority", "Reassign", "Park", "Send back a station", "Stop this work order\u2026"]);
+    expect(document.querySelectorAll('[role="menu"] hr, [role="menu"] [role="separator"]').length).toBe(1);
+    expect(document.getElementById("dz-more")?.getAttribute("aria-haspopup")).toBe("menu");
+  });
+
+  it("opens the prototype's dialogs from the Actions menu: Edit, Reassign, Park (one reason), Send back and Stop", async () => {
+    await show({}, `#record/${W.id}`);
+    const open = async (item: string) => {
+      fireEvent.click(document.getElementById("dz-more") as HTMLElement);
+      fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(`^${item}`) }));
+    };
+    await open("Edit title and priority");
+    expect(await screen.findByRole("dialog", { name: `Edit ${W.id}` })).toBeTruthy();
+    for (const l of ["Title", "Priority", "Class"]) expect(screen.getAllByText(l).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open("Reassign");
+    expect(await screen.findByRole("dialog", { name: `Reassign ${W.id}` })).toBeTruthy();
+    expect(screen.getByText("New owner")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open("Park");
+    expect(await screen.findByRole("dialog", { name: `Park ${W.id}` })).toBeTruthy();
+    expect(screen.getByText("It stops moving until someone resumes it.")).toBeTruthy();
+    expect(screen.queryByText("Bay")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open("Send back a station");
+    expect(await screen.findByRole("dialog", { name: /^Send WO-.* back to / })).toBeTruthy();
+    expect(screen.getByText("The previous agent re-runs with your note.")).toBeTruthy();
+    expect(screen.queryByText("Back to station")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open("Stop this work order");
+    expect(await screen.findByRole("dialog", { name: `Stop ${W.id}?` })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop work order" })).toBeTruthy();
+  });
+
+  it("opens the Edit dialog from the Brief card's Edit button", async () => {
+    await show({}, `#record/${W.id}`);
+    expect(screen.getByText("Click the description to edit it")).toBeTruthy();
+    fireEvent.click(document.getElementById("dz-edit") as HTMLElement);
+    expect(await screen.findByRole("dialog", { name: `Edit ${W.id}` })).toBeTruthy();
+  });
+
+  it("makes the description editable in place", async () => {
+    await show({}, `#record/${W.id}`);
+    fireEvent.click(document.getElementById("dz-desc") as HTMLElement);
+    expect(await screen.findByLabelText("Edit description")).toBeTruthy();
+  });
+
+  it("opens the review dialog from Review and offers Request changes, Reject and Approve", async () => {
+    await show({}, `#record/${W.id}`);
+    fireEvent.click(document.getElementById("trv-approve") as HTMLElement);
+    expect(await screen.findByRole("button", { name: "Request changes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(screen.getByText("Evidence")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    expect(await screen.findByText(/Add a comment of at least 10 characters/)).toBeTruthy();
   });
 
   it("opens on the Overview tab: brief, classification, facts and SLA", async () => {
@@ -57,58 +115,79 @@ describe("Work order page", () => {
     expect(screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected")).toBe("true");
     expect(document.getElementById("dz-overview")).toBeTruthy();
     for (const t of ["Brief", "Classification", "Facts"]) expect(screen.getByRole("heading", { name: t })).toBeTruthy();
+    // Where and Requested by live in the header, not in Facts
+    expect(document.querySelector("#dz-overview dl")?.textContent).not.toMatch(/Requested by/);
   });
 
-  it("opens the Conversation tab from the address and from the tab", async () => {
+  it("keeps the old addresses working: activity opens Conversation, document opens Journey", async () => {
     await show({}, `#record/${W.id}/activity`);
     expect(screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected")).toBe("true");
     cleanup();
     resetApp();
-    await show();
-    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }));
-    await waitFor(() => expect(window.location.hash).toContain("%2Factivity"));
+    await show({}, `#record/${W.id}/document`);
+    expect(screen.getByRole("tab", { name: "Journey" }).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("keeps lock reasons in the Actions menu, not as a strip under the header", async () => {
-    const t = travelerOf(W, {}, { can: { classify: deny("Class can only change at Intake.", "Project Admin"), reassign: deny("Class can only change at Intake.", "Project Admin") } });
-    await show(readsFor(W, t, recordOf(W)));
-    expect(document.querySelectorAll(".dz-lockline").length).toBe(0);
-    expect(document.getElementById("dz-more")).toBeTruthy();
+  it("keeps the tab in the address", async () => {
+    await show({}, `#record/${W.id}`);
+    fireEvent.click(screen.getByRole("tab", { name: "Gates" }));
+    await waitFor(() => expect(window.location.hash).toContain(`${W.id}%2Fgates`));
+    expect(await screen.findByRole("heading", { name: "Gates" })).toBeTruthy();
+    for (const c of ["Gate", "Mode", "Status", "Decided by", "When"]) expect(screen.getAllByText(c).length).toBeGreaterThan(0);
   });
 
-  it("lists what waits on the viewer in the side column", async () => {
+  it("shows the Journey timeline, the attempts table, the cost by station and the events", async () => {
+    await show({}, `#record/${W.id}/journey`);
+    expect(screen.getByRole("heading", { name: "Journey" })).toBeTruthy();
+    expect(document.querySelector("#dz-journey .tl")).toBeTruthy();
+    cleanup();
+    resetApp();
+    await show({}, `#record/${W.id}/attempts`);
+    expect(await screen.findByRole("heading", { name: "Attempts and runs" })).toBeTruthy();
+    for (const c of ["Attempt", "Station", "Outcome", "Duration", "Tokens", "Model"]) expect(screen.getAllByText(c).length).toBeGreaterThan(0);
+    cleanup();
+    resetApp();
+    await show({}, `#record/${W.id}/costs`);
+    expect(await screen.findByRole("heading", { name: "Cost by station" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Tokens" })).toBeTruthy();
+    cleanup();
+    resetApp();
+    await show({}, `#record/${W.id}/events`);
+    expect(await screen.findByRole("heading", { name: "Events" })).toBeTruthy();
+  });
+
+  it("has no lock banners and no waiting-on-you control beside the tabs", async () => {
     await show();
-    expect(screen.getByText("Waiting on you")).toBeTruthy();
-    expect(screen.getByText("Outline")).toBeTruthy();
-    expect(document.getElementById("rec-copy")).toBeTruthy();
+    expect(document.querySelector(".dz-lockline")).toBeNull();
+    expect(screen.queryByText(/Waiting on you/)).toBeNull();
+  });
+
+  it("shows a Not found page with the way back when the work order is not visible", async () => {
+    mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ status: 403, body: { ok: false, msg: "No." } }) });
+    window.location.hash = `#record/${W.id}`;
+    mount(<RecordView />);
+    expect(await screen.findByRole("heading", { name: "Not found" }, { timeout: 4000 })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to work orders" }));
+    await waitFor(() => expect(window.location.hash).toContain("work-orders"));
   });
 });
 
 describe("Work order page: links, viewers and kills", () => {
-  it("scrolls to a section when the viewer is on the Activity tab, and stops retrying", async () => {
-    const scrolled = vi.fn();
-    Element.prototype.scrollIntoView = scrolled;
-    await show({}, `#record/${W.id}/activity`);
-    fireEvent.click(screen.getByRole("button", { name: "Read the brief" }));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "Document" }).getAttribute("aria-selected")).toBe("true"));
-    await waitFor(() => expect(document.getElementById("rec-sec-agreement")).toBeTruthy());
-    await waitFor(() => expect(scrolled).toHaveBeenCalled());
-    const n = scrolled.mock.calls.length;
-    await new Promise((r) => setTimeout(r, 500));
-    expect(scrolled.mock.calls.length).toBe(n);
+  it("shows the Journey as one card, without the written record below it", async () => {
+    await show({}, `#record/${W.id}/journey`);
+    expect(document.getElementById("dz-doc")).toBeNull();
+    expect(screen.queryByText("Completeness")).toBeNull();
   });
 
   it("degrades cleanly for a viewer without access to the conversation", async () => {
     await show({ [`GET /api/v1/work-orders/${W.id}/session`]: () => ({ status: 403, body: { ok: false, msg: "No access." } }) });
     expect(screen.getByRole("heading", { level: 1, name: W.title })).toBeTruthy();
-    expect(screen.getByText("Outline")).toBeTruthy();
     expect(document.getElementById("dz-head")?.textContent).not.toMatch(/is next/);
   });
 
-  it("keeps the traveler and the record picker reachable from the page", async () => {
+  it("keeps the traveler reachable from the page", async () => {
     await show();
     expect(document.getElementById("rec-traveler")).toBeTruthy();
-    expect(document.getElementById("rec-traveler")!.getAttribute("href")).toContain("/traveler/");
   });
 });
 

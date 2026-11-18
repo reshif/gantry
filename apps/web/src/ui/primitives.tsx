@@ -418,6 +418,10 @@ export function Meter({ value, max, label, warnAt = 0.85 }: { value: number; max
   );
 }
 
+/** A multi-line text input in the standard field look. Additive primitive: views use it with Field instead of a raw <textarea>. */
+export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(({ className = "", ...rest }, ref) => <textarea ref={ref} className={`input ${className}`.trim()} {...rest} />);
+Textarea.displayName = "Textarea";
+
 /** Table in the standard scroll wrapper. */
 export function Table({ compact, children, className = "" }: { compact?: boolean; children: ReactNode; className?: string }) {
   return (

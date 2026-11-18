@@ -23,6 +23,8 @@ export interface ActionSpec {
   onClick: () => void;
   group: "decide" | "main" | "move" | "inline" | "more";
   aria?: string;
+  /** The label in the work order page's Actions menu, when it differs from the button label of the traveler drawer. */
+  menuLabel?: string;
   /** Why the control is locked, shown beside it. */
   why?: string;
 }
@@ -127,19 +129,20 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
         }),
     });
   } else
-    out.push({ key: "park", label: "Move to bay", icon: "st-park", id: "trv-park", guard: closed ? no(closedWhy) : stop ? no(stopWhy) : dec(wo, "park"), group: "move", onClick: () => void ui.open((close) => <ParkDialog woId={wo.id} onClose={close} />) });
+    out.push({ key: "park", label: "Move to bay", menuLabel: "Park", icon: "pause", id: "trv-park", guard: closed ? no(closedWhy) : stop ? no(stopWhy) : dec(wo, "park"), group: "move", onClick: () => void ui.open((close) => <ParkDialog woId={wo.id} onClose={close} />) });
   const first = wo.route.indexOf(stationId) <= 0;
   out.push(
     {
       key: "sendback",
       label: "Send back",
+      menuLabel: "Send back a station",
       icon: "undo",
       id: "trv-sendback",
-      guard: closed ? no(closedWhy) : stop ? no(stopWhy) : wo.bay ? no(`Return it from ${bayLabel(cat, wo.bay)} first.`) : first ? no("Already at the first station on its route.") : dec(wo, "sendback"),
+      guard: closed ? no(closedWhy) : stop ? no(stopWhy) : wo.bay ? no(`Return it from ${bayLabel(cat, wo.bay)} first.`) : first ? no("Already at the first station.") : dec(wo, "sendback"),
       group: "move",
       onClick: () => void ui.open((close) => <SendBackDialog woId={wo.id} onClose={close} />),
     },
-    { key: "reassign", label: "Reassign agent", icon: "swap", id: "trv-reassign", guard: closed ? no(closedWhy) : wo.bay ? no("Nobody staffs work in a bay.") : dec(wo, "reassign"), group: "inline", onClick: () => void ui.open((close) => <ReassignDialog woId={wo.id} onClose={close} />) },
+    { key: "reassign", label: "Reassign agent", menuLabel: "Reassign agent", icon: "swap", id: "trv-reassign", guard: closed ? no(closedWhy) : wo.bay ? no("Nobody staffs work in a bay.") : dec(wo, "reassign"), group: "inline", onClick: () => void ui.open((close) => <ReassignDialog woId={wo.id} onClose={close} />) },
     {
       key: "reclass",
       label: "Reclassify",
@@ -159,7 +162,7 @@ export function useActionSpecs(wo: TWo): ActionSpec[] | null {
   out.push(
     wo.state === "killed"
       ? { key: "kill", label: `Restore ${wo.id}`, icon: "power", id: "trv-restore", guard: stop && stop.scope !== "wo" && stop.scope !== "workorder" ? no(`${stopWhy} Restore the ${stop.scope} first.`) : restoreD.pending ? null : restoreD, group: "more", onClick: () => stops.restore("workorder", wo.id) }
-      : { key: "kill", label: "Kill work order", kind: "danger", icon: "st-kill", id: "trv-kill", guard: wo.state === "done" ? no(closedWhy) : killD.pending ? null : killD, group: "more", onClick: () => stops.kill("workorder", wo.id) },
+      : { key: "kill", label: "Kill work order", menuLabel: "Stop this work order\u2026", kind: "danger", icon: "st-kill", id: "trv-kill", guard: wo.state === "done" ? no(closedWhy) : killD.pending ? null : killD, group: "more", onClick: () => stops.kill("workorder", wo.id) },
   );
   void ok;
   return out;
@@ -184,3 +187,17 @@ export function Actions({ wo }: { wo: TWo }) {
     </div>
   );
 }
+
+/** The decisions the review dialog offers on the gate a work order waits at, pinned to the gate instance and the work order version. */
+export async function decideGate(wo: TWo, gateId: string, kind: "approve" | "changes" | "reject", note: string): Promise<{ ok: boolean; msg: string }> {
+  const ap = wo.allowed.approve;
+  const ifm = { ifMatch: wo.version };
+  const intake = gateId === "G0G1";
+  if (kind === "approve") return intake ? ops.confirmBrief(wo.id, undefined, ifm) : ops.approveGate(wo.id, gateId, ap?.instance, undefined, ifm);
+  const reason = kind === "changes" ? `Changes requested: ${note}` : note;
+  return intake ? ops.decline(wo.id, reason, undefined, ifm) : ops.rejectGate(wo.id, gateId, ap?.instance ?? "", reason, undefined, ifm);
+}
+
+/** The two writes the work order page's Edit and Stop dialogs make (kept here with the other work order commands). */
+export const reclassifyFromPage = (wo: TWo, cls: string) => ops.reclassify(wo.id, cls, "Changed from the work order page", { ifMatch: wo.version });
+export const stopFromPage = (woId: string, reason: string) => ops.kill("workorder", woId, { reason, mode: "hold", confirmText: null });

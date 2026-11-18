@@ -173,6 +173,8 @@ hr{border:0;border-top:1px solid var(--line);margin:var(--s3) 0}
 .divider{height:1px;background:var(--line)}
 /* overlays */
 .scrim{position:fixed;inset:0;background:var(--scrim);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:100;display:flex;align-items:center;justify-content:center;padding:var(--s4)}
+/* a modal sits above its own scrim (the scrim is a fixed sibling inside .dlg-wrap) */
+.dlg-wrap>.scrim{z-index:0;display:block;padding:0}.dlg-wrap>.dlg{position:relative;z-index:1}
 .dlg{background:var(--raised);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--shadow);width:min(520px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column}
 .dlg.lg{width:min(760px,100%)}.dlg.md{width:min(560px,100%)}
 .dlg-h{padding:var(--s4) var(--s5);border-bottom:1px solid var(--line)}.dlg-h h2{font:700 16px/24px var(--font)}.dlg-h p{color:var(--text-2);margin-top:2px}

@@ -1,19 +1,19 @@
 /**
- * Work order page (#record/WO-x, also #wo/WO-x): the whole life of one work order, in the Document and Activity tabs (views/dossier/).
+ * Work order page (#record/WO-x, also #wo/WO-x): the whole life of one work order, in seven tabs (views/dossier/).
  * With no work order selected it shows the record picker.
  */
 import { useEffect } from "react";
 import { useHash } from "../lib/router";
 import { updatePrefs, usePrefs } from "../lib/prefs";
 import { Picker } from "./record/Picker";
-import { Dossier, DOSSIER_TABS, type DossierTab } from "./dossier/Dossier";
+import { Dossier, tabFromParam } from "./dossier/Dossier";
 
 export default function RecordView() {
   const hash = useHash();
   const prefs = usePrefs();
   const [rawId = "", rawTab = ""] = (hash.param || "").split("/");
   const id = (rawId || prefs.record || "").toUpperCase() || null;
-  const tab: DossierTab = DOSSIER_TABS.find((t) => t.id === rawTab)?.id ?? "overview";
+  const tab = tabFromParam(rawTab);
   // the hash is the address; keep the legacy in-memory pref in step so other screens agree
   useEffect(() => {
     if (id && prefs.record !== id) updatePrefs({ record: id });

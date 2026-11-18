@@ -24,9 +24,10 @@ Compare: `node apps/web/fidelity/compare.mjs <prototype-route> [...]` (`all` run
 | `floor` (belt, KPIs, ticker, filters, gates card, tight card) | `#/p/payments/floor` | `useFloorState` (`/projects/{id}/floor`), `useCatalog`, `useActivity`, `useDrawers`, `useOpenTraveler`, `useCan` | floor with 34 live work orders at every station, 5 gates waiting, blocked and failed work, 4 shipped | capacity exists only as project flow `wip` per station (the belt uses it for bays; uncapped stations follow their work, max 4); no per-hour KPI (shows Shipped 24h); filters are local state, not in the URL | built |
 | floor drawers: token, station, gate, pile | `useDrawers().station/gate`, traveler drawer | as floor | as floor | none | wired, not restyled |
 | `work-orders` | `#/p/payments/work-orders` | `useWorkOrders` | work orders list | none | todo |
-| `record`, `dossier` | `#/p/payments/record/WO-1004` | `useRecord`, `useRecordMarkdown` | record for WO-1004 | dossier is a tab of the record | todo |
-| `traveler` | traveler drawer (`?traveler=WO-1004`) | `useWorkOrder` | work order | none | todo |
-| `changes` | `#/p/payments/changes/WO-1004` | `useChanges` | diff | none | todo |
+| `record` | `#/p/payments/record/WO-1004[/tab]` (tabs overview, journey, gates, attempts, conversation, costs, events) | `useRecordData`, `useWoSession` | record for WO-1004 | edit title, priority, owner and description have no endpoint; tokens are not split into input, output, cached; no request-changes decision (it rejects with a reason) | built |
+| `dossier` | `#/p/payments/dossier/WO-1004[/tab]` (summary, criteria, brief, checks, audit) | `useRecordData`, `useAudit` | record, audit | review findings and the plan are not recorded; export is the JSON record bundle, not PDF | built |
+| `traveler` | `#/p/payments/traveler/WO-1004` (the drawer `?traveler=` stays on the floor) | `useRecordData` | work order | none | built |
+| `changes` | `#/p/payments/changes/WO-1004[/file]` | `useChangesRead`, `useRecordData` | diff | line comments have no endpoint | built |
 
 ## Group C: onboarding and project config
 | Prototype | Real route | Hooks | Fixture data | Backend gaps | Status |

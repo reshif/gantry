@@ -80,6 +80,10 @@ export const ICON_PATHS = {
   record: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h7"/>',
   rail: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   replay: '<path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6"/><path d="M4 4v4.6h4.6"/><path d="M12 8v4l3 2"/>',
+  /* additive (work order group): the Control room glyphs the Actions menu and the Dossier use */
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/>',
+  stop: '<path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"/>',
+  dl: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

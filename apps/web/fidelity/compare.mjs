@@ -103,7 +103,10 @@ async function main() {
   };
 
   for (const route of routes) {
-    const real = realHash(route);
+    // "record/WO-1004~journey" is the prototype's ?tab=journey and the real app's /journey; "changes/WO-1004~f=1" is ?f=1 and /1
+    const [routeBase, sub] = route.split("~");
+    const subVal = sub ? sub.replace(/^[a-z]+=/, "") : "";
+    const real = realHash(routeBase) === null ? null : realHash(routeBase) + (sub ? `/${subVal}` : "");
     for (const [w, h] of SIZES) {
       for (const theme of THEMES) {
         const common = { viewport: { width: w, height: h }, colorScheme: theme, locale: "en-US", timezoneId: "UTC", hasTouch: w < 500 };
@@ -111,7 +114,7 @@ async function main() {
         const pc = await browser.newContext(common);
         await pc.addInitScript((t) => { try { localStorage.setItem("gcr.theme", JSON.stringify(t)); } catch { /* ignore */ } }, theme);
         const pp = await pc.newPage();
-        await pp.goto(`http://127.0.0.1:${PROTO_PORT}/index.html#/${route}`);
+        await pp.goto(`http://127.0.0.1:${PROTO_PORT}/index.html#/${routeBase}${sub ? (sub.includes("=") ? `?${sub}` : `?tab=${sub}`) : ""}`);
         await pp.waitForSelector("#main > *");
         const left = await shot(pp, w, h);
         await pc.close();
@@ -138,7 +141,7 @@ async function main() {
         const cp = await cc.newPage();
         await cp.setContent(`<body style="margin:0;background:#888;display:flex;gap:12px;align-items:flex-start"><img id="a" src="data:image/png;base64,${left.toString("base64")}"><img id="b" src="data:image/png;base64,${right.toString("base64")}"></body>`);
         await cp.waitForFunction(() => [...document.images].every((i) => i.complete));
-        const file = join(OUT, `${route.replace(/\//g, "_")}-${w}-${theme}.png`);
+        const file = join(OUT, `${route.replace(/[\/~=]/g, "_")}-${w}-${theme}.png`);
         await cp.screenshot({ path: file, fullPage: true });
         await cc.close();
         made.push(file);

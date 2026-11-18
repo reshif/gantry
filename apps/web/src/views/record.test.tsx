@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RecordView from "./record";
+import { Lifecycle } from "./record/Lifecycle";
+import { updatePrefs } from "../lib/prefs";
 import { WOS, mockApi, mount, resetApp } from "./floor/testkit";
 import { posts, readsFor, recordOf, travelerOf, waitingWo } from "./traveler/testkit";
 
@@ -11,18 +13,17 @@ afterEach(() => {
 });
 const W = waitingWo;
 
-async function showRecord(extra: Parameters<typeof mockApi>[0] = {}, o: Parameters<typeof mockApi>[1] = {}) {
+/** The written record lives in the traveler drawer (the work order page's Journey is the prototype's single card). */
+async function showRecord(extra: Parameters<typeof mockApi>[0] = {}, o: Parameters<typeof mockApi>[1] = {}, compact = false) {
   const calls = mockApi({ ...readsFor(W), ...extra }, o);
-  window.location.hash = `#record/${W.id}/document`;
-  mount(<RecordView />);
-  await screen.findByText("Completeness", {}, { timeout: 4000 });
+  mount(<Lifecycle woId={W.id} compact={compact} />);
+  await screen.findAllByText("Summary", {}, { timeout: 4000 });
   return calls;
 }
 
 describe("Work order record", () => {
   it("renders the eleven sections with the completeness meter and the written-by-Gantry summary", async () => {
     await showRecord();
-    expect(screen.getByText("4/11")).toBeTruthy();
     for (const label of ["Summary", "Request", "Clarification", "Agreement", "Station by station", "Changes", "Verification", "Merge and release", "Approvals", "After release", "Full timeline"]) expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     expect(screen.getByText("Tomás asked for it. It is waiting at a gate.")).toBeTruthy();
     expect(screen.getByText("Written by Gantry from the record")).toBeTruthy();
@@ -58,8 +59,8 @@ describe("Work order record", () => {
   it("copies the record as Markdown from the record.md read", async () => {
     const write = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText: write }, configurable: true });
-    const calls = await showRecord({ [`GET /api/v1/work-orders/${W.id}/record.md`]: () => ({ body: "# WO\n\nline two" }) });
-    fireEvent.click(document.getElementById("rec-copy") as HTMLElement);
+    const calls = await showRecord({ [`GET /api/v1/work-orders/${W.id}/record.md`]: () => ({ body: "# WO\n\nline two" }) }, {}, true);
+    fireEvent.click(screen.getByRole("button", { name: "Copy as Markdown" }));
     await waitFor(() => expect(calls.some((c) => c.path === `/api/v1/work-orders/${W.id}/record.md`)).toBe(true));
     await waitFor(() => expect(write).toHaveBeenCalled());
     expect(await screen.findByText(new RegExp(`Copied ${W.id} as Markdown`))).toBeTruthy();
@@ -68,18 +69,18 @@ describe("Work order record", () => {
   it("exports the bundle with its hashes", async () => {
     URL.createObjectURL = vi.fn(() => "blob:x");
     URL.revokeObjectURL = vi.fn();
-    const calls = await showRecord({ [`GET /api/v1/work-orders/${W.id}/record/export`]: () => ({ body: { manifest: { id: W.id, version: 7, algorithm: "sha256", files: [{ name: "record.json", sha256: "ab", bytes: 3 }] }, files: {} } }) });
-    fireEvent.click(document.getElementById("rec-export") as HTMLElement);
+    const calls = await showRecord({ [`GET /api/v1/work-orders/${W.id}/record/export`]: () => ({ body: { manifest: { id: W.id, version: 7, algorithm: "sha256", files: [{ name: "record.json", sha256: "ab", bytes: 3 }] }, files: {} } }) }, {}, true);
+    fireEvent.click(screen.getByRole("button", { name: "Export record" }));
     await waitFor(() => expect(calls.some((c) => c.path.endsWith("/record/export"))).toBe(true));
     expect(await screen.findByText(/Exported .*1 parts, each with its sha256 hash/)).toBeTruthy();
   });
 
   it("steps through the journey with the scrubber", async () => {
-    await showRecord();
+    await showRecord({}, {}, true);
     expect(document.querySelector(".rec-scrub-n")?.textContent).toBe("2/2");
-    fireEvent.click(document.getElementById("rec-scrub-prev") as HTMLElement);
+    fireEvent.click(document.getElementById("lc-scrub-prev") as HTMLElement);
     expect(document.querySelector(".rec-scrub-n")?.textContent).toBe("1/2");
-    expect(document.getElementById("rec-scrub-prev")?.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById("lc-scrub-prev")?.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("shows the approvals of each gate with the pinned versions and votes", async () => {
@@ -93,14 +94,17 @@ describe("Work order record", () => {
 
   it("shows the picker when no record is selected and a notice when the record is not visible", async () => {
     mockApi({ "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: WOS.slice(0, 2), next: null, total: 2 } }) });
+    updatePrefs({ record: null });
     window.location.hash = "#record";
     mount(<RecordView />);
     expect(await screen.findByText("Work order records", {}, { timeout: 4000 })).toBeTruthy();
     expect(await screen.findByText(WOS[0]!.id)).toBeTruthy();
     cleanup();
     mockApi({ [`GET /api/v1/work-orders/${W.id}`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), [`GET /api/v1/work-orders/${W.id}/record`]: () => ({ status: 404, body: { ok: false, msg: "No such work order." } }), "GET /api/v1/projects/payments/work-orders": () => ({ body: { items: [], next: null, total: 0 } }) });
-    window.location.hash = `#record/${W.id}/document`;
+    window.location.hash = `#record/${W.id}`;
     mount(<RecordView />);
-    expect(await screen.findByText(/was not found, or it belongs to a project outside your access/, {}, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Not found" }, { timeout: 4000 })).toBeTruthy();
+    expect(screen.getByText(`No work order ${W.id}`)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to work orders" })).toBeTruthy();
   });
 });

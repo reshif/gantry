@@ -11,7 +11,7 @@ import { CrMenu, MenuRow } from "./CrMenu";
 type ProjectLite = Me["projects"][number];
 
 /** Pages that keep their meaning in another project; the rest land on that project's Floor. */
-const keepRoute = (r: string): string => ((r === "record" || r === "changes") ? "work-orders" : r);
+const keepRoute = (r: string): string => ((r === "record" || r === "changes" || r === "traveler" || r === "dossier") ? "work-orders" : r === "conversations" ? "conversations" : r);
 
 export function ProjectSwitcher({ me, project, current }: { me: Me; project: ProjectLite | null; current: string }) {
   const ui = useUI();
