@@ -15,7 +15,7 @@ export interface WoMessage {
   at: number;
   data: {
     cards?: WoCard[]; drafts?: Record<string, unknown>; kind?: string; mode?: "agent" | "rule-based" | "legacy"; model?: string | null; agent?: string; version?: number; station?: string; tools?: string[];
-    mentions?: Array<{ id: string; name: string; access: boolean }>; costMicros?: number; usage?: unknown; stopped?: boolean; truncated?: boolean; followUp?: string; event?: string; chips?: string[];
+    scripted?: boolean; mentions?: Array<{ id: string; name: string; access: boolean }>; costMicros?: number; usage?: unknown; stopped?: boolean; truncated?: boolean; followUp?: string; event?: string; chips?: string[];
     /** What the turn was composed from: agent version, skill versions, instruction and prompt hashes, tuple. */
     context?: TurnContext;
   };
@@ -38,14 +38,15 @@ export async function listWoMessages(db: Queryable, orgId: string, woId: string,
 }
 
 /** The scripted questionnaire's messages, as session history (read only). Its questions and the answers to them show exactly as they were said. */
-export async function legacyMessages(db: Queryable, orgId: string, woId: string): Promise<WoMessage[]> {
+export async function legacyMessages(db: Queryable, orgId: string, woId: string, o: { withScripted?: boolean } = {}): Promise<WoMessage[]> {
   const { rows } = await db.query<{ id: string; author: string; author_kind: string; body: string; data: Record<string, unknown>; created_at: Date }>(
     `select id, author, author_kind, body, data, created_at from messages where org_id = $1 and conversation_id = $2 order by created_at, id`, [orgId, convIdOf(woId)],
   );
-  return rows.map((r) => ({
+  // When an agent talks, Gantry's scripted questions and notes stay out of its history and the page: they were never an agent's words.
+  return rows.filter((r) => o.withScripted !== false || r.data?.scripted !== true).map((r) => ({
     id: r.id, role: r.author_kind === "person" ? "user" : r.author_kind === "agent" ? "assistant" : "system", author: r.author, text: r.body,
     at: typeof r.data?.at === "number" ? (r.data.at as number) : r.created_at.getTime(),
-    data: { kind: "legacy", mode: "legacy", ...(Array.isArray(r.data?.chips) ? { chips: (r.data.chips as unknown[]).map(String) } : {}) },
+    data: { kind: "legacy", mode: "legacy", ...(r.data?.scripted === true ? { scripted: true } : {}), ...(Array.isArray(r.data?.chips) ? { chips: (r.data.chips as unknown[]).map(String) } : {}) },
   }));
 }
 

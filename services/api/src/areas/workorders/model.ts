@@ -259,7 +259,7 @@ export async function buildWorkOrders(db: Queryable, orgId: string, catalog: Cat
     const cr = convBy.get(w.id);
     const cd = obj(cr?.data);
     const conv: Conversation = {
-      messages: (msgBy.get(cr?.id ?? "") ?? []).map((m) => ({ from: m.author, at: num(m.data?.at, 0), text: m.body, ...(m.data?.qid ? { qid: String(m.data.qid) } : {}), ...(Array.isArray(m.data?.chips) ? { chips: m.data.chips as string[] } : {}) })),
+      messages: (msgBy.get(cr?.id ?? "") ?? []).map((m) => ({ from: m.author, at: num(m.data?.at, 0), text: m.body, ...(m.data?.qid ? { qid: String(m.data.qid) } : {}), ...(Array.isArray(m.data?.chips) ? { chips: m.data.chips as string[] } : {}), ...(m.data?.scripted === true ? { scripted: true } : {}) })),
       qi: num(cd.qi), answers: obj(cd.answers) as Record<string, string>, misses: Array.isArray(cd.misses) ? (cd.misses as Conversation["misses"]) : [], decisions: Array.isArray(cd.decisions) ? (cd.decisions as Conversation["decisions"]) : [],
       awaiting: typeof cd.awaiting === "string" ? cd.awaiting : "submitter", done: cd.done === true, raised: Array.isArray(cd.raised) ? (cd.raised as Conversation["raised"]) : [], questions: Array.isArray(cd.questions) ? (cd.questions as Conversation["questions"]) : [],
     };

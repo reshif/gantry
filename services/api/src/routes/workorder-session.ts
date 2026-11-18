@@ -14,7 +14,7 @@
  * With no usable model the scripted questionnaire answers instead, labelled "Rule-based (no agent)".
  */
 import { appendEvent, withTx, type Queryable } from "@gantry/db";
-import { can, SESSION_BUDGET_DEFAULT_USD, WO_AGENT_LABEL, classOf, route, stationDef, visibleProjects, type Catalog, type FlowState, type Project, type WoCard, type WorkOrder } from "@gantry/domain";
+import { can, SESSION_BUDGET_DEFAULT_USD, WO_AGENT_LABEL, classOf, classesOf, route, stationDef, visibleProjects, type Catalog, type FlowState, type Project, type WoCard, type WorkOrder } from "@gantry/domain";
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { runConversation, ModelUnavailable, readiness } from "../areas/console/model.js";
@@ -24,6 +24,7 @@ import { readRepoRow } from "../areas/onboarding/state.js";
 import { composeSessionContext, recordTurnTuple } from "../areas/session/context.js";
 import { agentBudgetUsd, historyFrom, openSse, stationAgentGate, turnCostMicros } from "../areas/session/core.js";
 import { postMessage, reclassify, decline } from "../areas/workorders/intake.js";
+import { applyAgentClass, claimClassifications, settleClassification } from "../areas/workorders/classify.js";
 import { loadFlow, readWoRow, stateWithPinned, woVersion } from "../areas/workorders/model.js";
 import { confirmAgentBrief } from "../areas/workorders/session/approve.js";
 import { addWoMessage, legacyMessages, listWoMessages, lockWoMessage, newWoMessageId, saveWoMessageData, supersedeWoPending, woSessionSpend, markWoSeen, type WoMessage } from "../areas/workorders/session/store.js";
@@ -52,7 +53,7 @@ export const NO_AGENT_WO_TEXT = "No agent is available to talk to right now, so 
 
 const active = new Set<string>();
 /** The runners of the running app (tests call them directly; the app runs them on a timer). */
-export const woSessionJobs = { followUps: async (): Promise<number> => 0, scan: async (): Promise<number> => 0, open: async (): Promise<number> => 0 };
+export const woSessionJobs = { classify: async (): Promise<number> => 0, followUps: async (): Promise<number> => 0, scan: async (): Promise<number> => 0, open: async (): Promise<number> => 0 };
 
 type Gate = Awaited<ReturnType<typeof stationAgentGate>>;
 interface Mode { mode: "agent"; pin: Extract<Gate, { usable: true }>["pin"]; vendor: string; model: string; budget: { spentUsd: number; limitUsd: number } }
@@ -252,7 +253,7 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
   async function agentTurn(o: { row: NonNullable<Awaited<ReturnType<typeof readWoRow>>>; who: { id: string; name: string }; canConfirm: boolean; ag: Mode & { agentId: string; agentName: string; station: string }; question: string; kind: "message" | "open" | "continue" | "followup"; send: (e: string, d: unknown) => void; signal: AbortSignal }): Promise<string> {
     const f = await flowOf(o.row);
     const ctx = ctxFor(o.row, await repoFullOf(o.row.repo), f, o.who, o.ag);
-    const prior = [...(await legacyMessages(g.pool, g.orgId, o.row.id)), ...(await listWoMessages(g.pool, g.orgId, o.row.id, 30))];
+    const prior = [...(await legacyMessages(g.pool, g.orgId, o.row.id, { withScripted: false })), ...(await listWoMessages(g.pool, g.orgId, o.row.id, 30))];
     const { hist, question } = historyFrom(prior.map((m) => ({ role: m.role, text: m.text })), o.kind, o.question, { take: 16 });
     const atIntake = ctx.briefOpen;
     const defs = woToolDefs().filter((t) => atIntake || !/^(propose_|ask_user)/.test(t.name));
@@ -321,11 +322,78 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     }
     return n;
   }
+  /** The Intake agent classifies new requests that named no class: one bounded model call with the work-order tools, which ends in `set_class`. */
+  async function classifyTurn(row: NonNullable<Awaited<ReturnType<typeof readWoRow>>>, ag: Mode & { agentId: string; agentName: string; station: string }): Promise<{ text: string; applied: Awaited<ReturnType<typeof applyAgentClass>> | null; reason: string }> {
+    const f = await flowOf(row);
+    const who = { id: "system", name: "Gantry" };
+    const ctx = ctxFor(row, await repoFullOf(row.repo), f, who, ag);
+    const classes = classesOf(f.catalog, f.project);
+    let chosen: { cls: string; confidence: number; rationale: string } | null = null;
+    const sc = await composeSessionContext(g.pool, {
+      orgId: g.orgId, surface: "intake", agentId: ag.agentId, agentVersion: ag.pin.version, model: ag.pin.model, projectId: row.project, repoId: row.repo,
+      facts: `You are ${ag.agentName}, the agent at the Intake station. A new request (${row.id}) arrived in project ${f.project.name} and no person named a class. Gantry's keyword match (${f.wo.cls}) is only a placeholder: it is not evidence.`,
+      rails: [
+        "Classify this one request. Read it with get_work_order, and read the repository when that helps (inspect_repository, then read_file for AGENTS.md, the README and the build files): the repository's own rules can change what kind of work this is. Then call set_class exactly once with a class id from get_work_order availableClasses, your own confidence between 0 and 1 and a rationale in your own plain words: what in the request and the repository made you choose it, and what else it could have been. Say nothing the tools did not show you. Ask no questions here; a conversation with the person follows. You change nothing else.",
+        UNTRUSTED_NOTE,
+      ].join("\n\n"),
+    });
+    if (!sc) throw new ModelUnavailable("no_agent_context", `${ag.agentName} has no live version to speak from.`);
+    await recordTurnTuple(g.pool, g.orgId, sc.turn).catch(() => { throw new ModelUnavailable("tuple_not_recorded", "The classification turn could not be recorded, so it was not run."); });
+    const readTools = woToolDefs().filter((t) => ["get_work_order", "inspect_repository", "read_file", "list_related_work"].includes(t.name));
+    const setClass = { name: "set_class", description: "Set the class of this request: your classification, with your own confidence and rationale. A person can still change it.", input_schema: { type: "object", properties: { cls: { type: "string", description: "A class id from get_work_order availableClasses." }, confidence: { type: "number", description: "Your confidence between 0 and 1." }, rationale: { type: "string" } }, required: ["cls", "confidence", "rationale"] } };
+    const r = await runConversation({
+      edgeToken: g.config.secrets.edgeToken, purpose: "console", pick: { model: ag.pin.model, project: row.project }, maxTokens: 2_000, maxSteps: 6, system: sc.system, history: [],
+      question: "(A new request needs a class. Read it and classify it with set_class.)", signal: AbortSignal.timeout(120_000), trace: { parts: sc.parts, surface: "workorder", actor: "system", project: row.project, woId: row.id },
+      toolset: { defs: [...readTools, setClass], execute: async (name, input) => {
+        if (name !== "set_class") return executeWoTool(ctx, name, input);
+        const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+        const cls = typeof i.cls === "string" ? i.cls.trim() : "";
+        const confidence = typeof i.confidence === "number" ? i.confidence : NaN;
+        const rationale = typeof i.rationale === "string" ? i.rationale.trim().slice(0, 600) : "";
+        if (!classes.some((c) => c.id === cls)) return { text: JSON.stringify({ error: "Unknown class. Use an id from get_work_order availableClasses." }), ok: false };
+        if (!(confidence >= 0 && confidence <= 1)) return { text: JSON.stringify({ error: "confidence must be a number between 0 and 1." }), ok: false };
+        if (rationale.length < 5) return { text: JSON.stringify({ error: "Give your rationale in a sentence." }), ok: false };
+        chosen = { cls, confidence, rationale };
+        return { text: JSON.stringify({ ok: true, note: "Recorded as your classification. You are done." }), ok: true };
+      } },
+      onText: () => undefined, onTool: () => undefined,
+    });
+    const model = r.model ?? ag.pin.model;
+    const micros = await turnCostMicros(g.pool, g.orgId, model, r.usage);
+    const picked = chosen as { cls: string; confidence: number; rationale: string } | null;
+    const applied = picked ? await applyAgentClass(g.pool, g.orgId, row.id, { ...picked, agent: { id: ag.agentId, name: ag.agentName, version: ag.pin.version, model } }) : null;
+    const name = picked ? classOf(f.catalog, f.project, picked.cls).name : "";
+    const text = picked ? `Class by ${ag.agentName}: ${name}, confidence ${Math.round(picked.confidence * 100)}%. ${picked.rationale}${applied && !applied.applied ? ` Not applied: ${applied.why}` : ""}` : `${ag.agentName} did not set a class.`;
+    await persist(row, "assistant", ag.agentId, text, { kind: "update", event: "agent.classified", mode: "agent", model, agent: ag.agentName, version: ag.pin.version, station: ag.station, context: sc.turn, cards: [], tools: ctx.used, usage: r.usage, costMicros: micros }, "system", { mode: "agent", model, agent: ag.agentId, kind: "classify", tuple: sc.turn.tupleId, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens, costMicros: micros });
+    return { text, applied, reason: picked ? "" : "The agent returned no class." };
+  }
+
+  /** The classification job: claims new requests that named no class and asks the Intake agent; the keyword match stays only where no model is usable (labelled so). */
+  async function runClassify(): Promise<number> {
+    let n = 0;
+    for (const id of await claimClassifications(g.pool, g.orgId)) {
+      try {
+        const row = await readWoRow(g.pool, g.orgId, id);
+        if (!row) continue;
+        const f = await flowOf(row);
+        const ag = await agentState(row, f.wo, f.catalog);
+        if (ag.mode !== "agent") { await settleClassification(g.pool, g.orgId, id, "rule", ag.reason); continue; }
+        const out = await classifyTurn(row, ag);
+        if (!out.applied) await settleClassification(g.pool, g.orgId, id, "rule", out.reason);
+        else if (out.applied.applied) n++;
+      } catch (e) {
+        app.log.error({ err: e }, "intake classification failed");
+        await settleClassification(g.pool, g.orgId, id, "failed", e instanceof ModelUnavailable ? e.message : "The classification call failed.").catch(() => undefined);
+      }
+    }
+    return n;
+  }
+  woSessionJobs.classify = runClassify;
   woSessionJobs.followUps = runFollowUps;
   woSessionJobs.scan = () => scanWoEvents(g.pool, g.orgId);
   woSessionJobs.open = () => openIntakeSessions(g.pool, g.orgId);
   if (process.env.NODE_ENV !== "test") {
-    const tick = (): void => void (async () => { await openIntakeSessions(g.pool, g.orgId); await scanWoEvents(g.pool, g.orgId); await runFollowUps(); })().catch((e) => app.log.error({ err: e }, "work-order session jobs"));
+    const tick = (): void => void (async () => { await runClassify(); await openIntakeSessions(g.pool, g.orgId); await scanWoEvents(g.pool, g.orgId); await runFollowUps(); })().catch((e) => app.log.error({ err: e }, "work-order session jobs"));
     const timer = setInterval(tick, 15_000);
     timer.unref();
     app.addHook("onClose", async () => clearInterval(timer));
@@ -362,8 +430,10 @@ export const workOrderSessionRoutes: FastifyPluginAsync = async (app) => {
     const planWaiting = planOf(row.data)?.status === "proposed" ? planOf(row.data) : null;
     const canDecidePlan = planWaiting ? (await decide(req, "gate.approve", scopeOf(row))).allowed : false;
     // The scripted questionnaire is history: shown until the session starts, never mixed into it afterwards.
-    const messages = mine.length ? mine : legacy;
-    const history = mine.length ? legacy.filter((m) => m.at < (mine[0]?.at ?? 0)) : [];
+    // With an agent talking, Gantry's scripted questions and notes are not shown at all (they were never an agent's words); in rule-based mode they are the conversation, labelled as such.
+    const legacyShown = ag.mode === "agent" ? legacy.filter((m) => !m.data.scripted) : legacy;
+    const messages = mine.length ? mine : legacyShown;
+    const history = mine.length ? legacyShown.filter((m) => m.at < (mine[0]?.at ?? 0)) : [];
     const cards = mine.flatMap((m) => (m.data.cards ?? []).map((cd) => ({ m, cd })));
     const pending = cards.filter((x): x is { m: WoMessage; cd: Extract<WoCard, { kind: "proposal" }> } => x.cd.kind === "proposal" && x.cd.status === "pending").map((x) => ({ mid: x.m.id, id: x.cd.id, what: x.cd.what, title: x.cd.title }));
     const lastM = mine.at(-1);

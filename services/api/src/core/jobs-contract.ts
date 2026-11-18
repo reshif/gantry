@@ -24,6 +24,8 @@ export const JOB_SCHEMAS = {
   publish: z.object({ attemptId: id, fencing }),
   /** 'flow' queue: ask gantry-github to merge a pull request at the approved head commit. */
   "merge.request": z.object({ woId: id, prNumber: z.number().int().positive(), headSha: z.string().min(7).max(64) }),
+  /** 'flow' queue: write the Review agent's pull request description to the work order's pull request (through gantry-github). Re-run on every Review attempt. */
+  "pr.describe": z.object({ woId: id, attemptId: id }),
   /** 'flow' queue: escalation, soak and lease-expiry timers. */
   "flow.timer": z.object({ kind: z.enum(["escalation", "soak", "lease_expiry"]), woId: id.optional(), gateInstanceId: id.optional() }),
   /** 'stop' queue: make a committed stop true in the world (interrupt/kill runs, cancel merges, fail the Gantry check). */
@@ -65,7 +67,7 @@ export type JobPayload<K extends JobKind> = z.infer<(typeof JOB_SCHEMAS)[K]>;
 export type JobPayloadInput<K extends JobKind> = z.input<(typeof JOB_SCHEMAS)[K]>;
 
 export const JOB_QUEUE: { [K in JobKind]: Queue } = {
-  "attempt.dispatch": "flow", "run.result": "flow", publish: "flow", "merge.request": "flow", "flow.timer": "flow",
+  "attempt.dispatch": "flow", "run.result": "flow", publish: "flow", "merge.request": "flow", "pr.describe": "flow", "flow.timer": "flow",
   "eval.dispatch": "flow", "trust.evaluate": "system", "learning.refresh": "system", "stop.enforce": "stop", "github.reconcile": "github", "github.event": "github", "trigger.evaluate": "github", "trigger.tick": "github", "chain.verify": "system", "reaper.sweep": "system",
   "onboarding.assess": "github", "onboarding.open_pr": "github", "onboarding.merge": "github", "onboarding.verify": "github", "onboarding.sync": "github", "onboarding.agent_collect": "github",
 };

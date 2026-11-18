@@ -62,7 +62,7 @@ export interface AssumptionRow {
 /** A station run's document: the next version of its name on this work order. */
 export async function recordDocument(
   tx: Tx,
-  d: { orgId: string; id: string; woId: string; attemptId: string | null; station: string | null; name: string; hash: string; mediaType: string; size: number; body: string; author: string | null; authorKind?: "agent" | "person" },
+  d: { orgId: string; id: string; woId: string; attemptId: string | null; station: string | null; name: string; hash: string; mediaType: string; size: number; body: string; author: string | null; authorKind?: "agent" | "person" | "system" },
 ): Promise<{ id: string; version: number }> {
   // One writer at a time per document name: the advisory lock makes "max + 1" safe without a sequence per document.
   await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`doc:${d.orgId}:${d.woId}:${d.name}`]);
@@ -103,7 +103,7 @@ export async function readDocument(db: Queryable, orgId: string, woId: string, i
 /** The latest version of each document, with its text, for the station handoff. Bodies are capped so a handoff stays a handoff. */
 export async function latestDocuments(db: Queryable, orgId: string, woId: string, o: { exceptAttempt?: string; perDoc?: number; total?: number } = {}): Promise<Array<{ name: string; station: string | null; version: number; markdown: string; truncated: boolean; editedByPerson?: boolean }>> {
   const { rows } = await db.query<{ doc: string; station: string | null; version: number; body: string | null; author_kind: string; accepted_by: string | null }>(
-    `select distinct on (doc) doc, station, version, body, author_kind from artefacts where org_id = $1 and wo_id = $2 and doc is not null and ($3::text is null or attempt_id is distinct from $3) order by doc, version desc`,
+    `select distinct on (doc) doc, station, version, body, author_kind from artefacts where org_id = $1 and wo_id = $2 and doc is not null and not (author_kind = 'system' and attempt_id is not null) and ($3::text is null or attempt_id is distinct from $3) order by doc, version desc`,
     [orgId, woId, o.exceptAttempt ?? null],
   );
   const perDoc = o.perDoc ?? 40_000;

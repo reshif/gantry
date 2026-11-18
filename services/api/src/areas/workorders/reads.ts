@@ -1,7 +1,7 @@
 /** Work-order reads (spec 8.4): the list, the traveler, conversations, the floor with replay, the record and its export, and the changes. All rows are mapped to the legacy shapes the web already reads. */
 import { createHash } from "node:crypto";
 import {
-  can, completeness, criteriaFor, effectiveStop, gateDecision, gateProgress, moveCheck, route, routeGates, stateAt, summaryText, woTotals,
+  can, completeness, criteriaFor, type Verification, effectiveStop, gateDecision, gateProgress, moveCheck, route, routeGates, stateAt, summaryText, woTotals,
   type Decision, type EventEntry, type FlowState, type MoveCheck, type Project, type WorkOrder,
 } from "@gantry/domain";
 import type { Queryable } from "@gantry/db";
@@ -203,7 +203,7 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
   const totals = woTotals(wo);
   const full = {
     ...wo,
-    criteria: criteriaFor(wo),
+    criteria: criteriaFor(wo, (wo as { verification?: Verification }).verification ?? null),
   } as WorkOrder;
   const summary = { generated: summaryText({ ...st, integrationTypes: [], integrationInstances: [] }, full), written: (row.data.recordSummary as { text: string; by: string; at: number } | undefined) ?? null };
   const record = {
@@ -212,7 +212,7 @@ export async function readRecord(db: Queryable, orgId: string, woId: string) {
     classification: { predicted: wo.clsSuggested, final: wo.cls, confidence: wo.clsConfidence, rationale: wo.clsRationale, requested: wo.requestedCls, overridden: wo.clsOverridden },
     route: route(st.catalog, project, wo.cls), flowVersion: row.flowVersion,
     clarification: wo.conv.messages, briefVersions: wo.briefVersions ?? [], brief: wo.brief, criteria: full.criteria,
-    journey: wo.history, gates, sendbacks: wo.sendbacks ?? [], bayStays: stays.map((s) => ({ bay: s.bay, reason: s.reason, by: s.entered_by, from: iso(s.entered_at), to: iso(s.left_at) })),
+    journey: wo.history, gates, review: row.data.review ?? null, sendbacks: wo.sendbacks ?? [], bayStays: stays.map((s) => ({ bay: s.bay, reason: s.reason, by: s.entered_by, from: iso(s.entered_at), to: iso(s.left_at) })),
     attempts: attempts.map((a) => ({ id: a.id, station: a.station, visit: a.visit, fencing: Number(a.fencing), state: a.state, outcome: a.outcome, startedAt: iso(a.started_at), endedAt: iso(a.ended_at), tuple: a.tuple_id, agent: a.data.agent ?? null })),
     results: results.map((r) => ({ id: r.id, attempt: r.attempt_id, station: r.station, outcome: r.outcome, summary: r.summary, at: iso(r.created_at), output: obj(r.body).output ?? null })),
     runs: runs.map((r) => ({ id: r.id, attempt: r.attempt_id, state: r.state, model: r.model_id, at: iso(r.created_at) })),

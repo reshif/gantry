@@ -6,7 +6,7 @@
 import type { Brief } from "./types.js";
 import { isBriefScaffold } from "./flow.js";
 
-/** The brief fields an agent authors. Route, children and the class stay Gantry's (the class changes only through a reclassify proposal). */
+/** The brief fields an agent authors. The route and the class stay Gantry's (the class changes only through a reclassify proposal). `children` (an epic's proposed split, one "Title: goal" each) is the agent's to propose and a person's to edit. */
 export interface BriefDraft {
   goal: string;
   scopeIn: string[];
@@ -16,6 +16,7 @@ export interface BriefDraft {
   open: string[];
   decisions: string[];
   estimate: string;
+  children?: string[];
 }
 
 export interface BriefChange { field: keyof BriefDraft; label: string; before: string[]; after: string[]; added: string[]; removed: string[]; /** Open questions the proposal answers (shown as resolved, not as removals). */ resolved?: string[] }
@@ -44,7 +45,7 @@ export type WoCard =
       reason?: string;
     };
 
-export const BRIEF_LABELS: Record<keyof BriefDraft, string> = { goal: "Goal", scopeIn: "In scope", scopeOut: "Out of scope", ac: "Acceptance criteria", risks: "Risks", open: "Open questions", decisions: "Decisions", estimate: "Estimate" };
+export const BRIEF_LABELS: Record<keyof BriefDraft, string> = { goal: "Goal", scopeIn: "In scope", scopeOut: "Out of scope", ac: "Acceptance criteria", risks: "Risks", open: "Open questions", decisions: "Decisions", estimate: "Estimate", children: "Child work orders" };
 
 const clip = (s: unknown, n: number): string => (typeof s === "string" ? s.trim().slice(0, n) : "");
 const list = (v: unknown, max: number, n = 300): string[] => (Array.isArray(v) ? v.map((x) => clip(x, n)).filter(Boolean).slice(0, max) : []);
@@ -55,6 +56,7 @@ export function resolveBriefDraft(raw: unknown): { ok: true; draft: BriefDraft }
   const draft: BriefDraft = {
     goal: clip(r.goal, 600), scopeIn: list(r.scopeIn, 12), scopeOut: list(r.scopeOut, 12), ac: list(r.ac, 12, 400), risks: list(r.risks, 8), open: list(r.open, 6), decisions: list(r.decisions, 8), estimate: clip(r.estimate, 80),
   };
+  if (Array.isArray(r.children)) draft.children = list(r.children, 12, 300);
   const reasons: string[] = [];
   if (draft.goal.length < 10) reasons.push("The goal needs at least a full sentence.");
   if (!draft.ac.length) reasons.push("Give at least one acceptance criterion a reviewer could check.");
@@ -71,6 +73,7 @@ const asList = (b: Partial<Brief> | null | undefined, f: keyof BriefDraft): stri
 /** Field by field: what the proposal adds and removes against the brief as it stands. Only fields that differ are listed. */
 export function briefDiff(current: Partial<Brief> | null | undefined, next: BriefDraft): BriefChange[] {
   return (Object.keys(BRIEF_LABELS) as Array<keyof BriefDraft>).flatMap((f) => {
+    if (f === "children" && !next.children) return [];
     const before = asList(current, f);
     const after = Array.isArray(next[f]) ? (next[f] as string[]) : next[f] ? [next[f] as string] : [];
     const added = after.filter((x) => !before.includes(x));
@@ -84,7 +87,7 @@ export function briefDiff(current: Partial<Brief> | null | undefined, next: Brie
 
 /** The fingerprint of the brief a proposal was drawn against: approval is refused when the brief moved since. */
 export function briefBase(b: Partial<Brief> | null | undefined): string {
-  const s = JSON.stringify([b?.goal ?? "", b?.scopeIn ?? [], b?.scopeOut ?? [], b?.ac ?? [], b?.risks ?? [], b?.open ?? [], b?.decisions ?? [], b?.estimate ?? ""]);
+  const s = JSON.stringify([b?.goal ?? "", b?.scopeIn ?? [], b?.scopeOut ?? [], b?.ac ?? [], b?.risks ?? [], b?.open ?? [], b?.decisions ?? [], b?.estimate ?? "", b?.children ?? []]);
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
   return (h >>> 0).toString(36);
@@ -92,7 +95,7 @@ export function briefBase(b: Partial<Brief> | null | undefined): string {
 
 /** Merges an approved draft over the brief; route and children stay as the flow computed them. */
 export const applyBriefDraft = (current: Partial<Brief> | null | undefined, d: BriefDraft): Brief => ({
-  route: [], children: [], ...(current ?? {}), goal: d.goal, scopeIn: d.scopeIn, scopeOut: d.scopeOut, ac: d.ac, risks: d.risks, open: d.open, decisions: d.decisions, estimate: d.estimate,
+  route: [], children: [], ...(current ?? {}), goal: d.goal, scopeIn: d.scopeIn, scopeOut: d.scopeOut, ac: d.ac, risks: d.risks, open: d.open, decisions: d.decisions, estimate: d.estimate, ...(d.children ? { children: d.children } : {}),
 }) as Brief;
 
 export const WO_AGENT_LABEL = "Rule-based (no agent)";

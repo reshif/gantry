@@ -145,6 +145,7 @@ describe("ops mapping", () => {
     expect(calls[1]?.url).toBe("/api/v1/stops/project%3Apayments");
   });
   it("builds sign-in URLs", () => {
+    window.location.hash = ""; // loginUrl reads the window hash by default; another test may have left one
     expect(loginUrl("sso")).toBe("/auth/login?method=sso");
     expect(loginUrl("github")).toBe("/auth/login?method=github");
     expect(loginUrl("sso", "asha@acme.dev")).toBe("/auth/login?login_hint=asha%40acme.dev");

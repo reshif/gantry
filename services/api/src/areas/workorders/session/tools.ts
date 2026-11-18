@@ -170,6 +170,7 @@ export const WO_TOOLS: WoTool[] = [
       properties: {
         goal: { type: "string" }, scopeIn: { type: "array", items: { type: "string" } }, scopeOut: { type: "array", items: { type: "string" } }, ac: { type: "array", items: { type: "string" }, description: "Acceptance criteria." },
         risks: { type: "array", items: { type: "string" } }, open: { type: "array", items: { type: "string" } }, decisions: { type: "array", items: { type: "string" } }, estimate: { type: "string" },
+        children: { type: "array", items: { type: "string" }, description: "Epic only: the child work orders you propose, one \"Title: one-line goal\" each, in landing order, drawn from this request and the repository. Omit for anything that is not an epic; a person can edit the list before confirming." },
         summary: { type: "string" }, classNote: { type: "string" },
       },
       required: ["goal", "scopeIn", "ac"],

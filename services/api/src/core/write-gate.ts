@@ -135,6 +135,7 @@ export const WRITE_GATES: Readonly<Record<string, WriteGate>> = {
   [`POST ${P}/work-orders/:id/questions/:qid/answer`]: OWN("wo.answer"), [`POST ${P}/work-orders/:id/assumptions/:aid`]: OWN("wo.answer"),
   [`POST ${P}/work-orders/:id/objections/:oid`]: A("gate.approve"), [`POST ${P}/work-orders/:id/scouts/:sid/stop`]: A("wo.park"), [`POST ${P}/work-orders/:id/research-plan`]: A("gate.approve"),
   [`POST ${P}/work-orders/:id/messages`]: { any: ["wo.answer", "wo.park"], own: "wo-requester", pick: (r) => (body(r).kind === "question" ? "wo.park" : "wo.answer") },
+  [`PATCH ${P}/work-orders/:id/brief`]: OWN("wo.answer"),
   [`POST ${P}/work-orders/:id/reclassify`]: A("wo.classify"), [`POST ${P}/work-orders/:id/confirm-brief`]: A("brief.confirm"), [`POST ${P}/work-orders/:id/decline`]: A("wo.decline"),
   [`POST ${P}/gate-instances/:id/approve`]: { any: GATE_ACTIONS, pick: (r, st) => actionForGate(st.catalog, parseGateId(param(r, "id")).gateId) },
   [`POST ${P}/gate-instances/:id/reject`]: { any: GATE_ACTIONS, pick: (r, st) => (parseGateId(param(r, "id")).gateId === "G0G1" ? "wo.decline" : actionForGate(st.catalog, parseGateId(param(r, "id")).gateId)) },
